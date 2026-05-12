@@ -1,0 +1,60 @@
+[package]
+name = "extractor"
+version = "0.1.0"
+edition = "2021"
+authors = ["MaNGOS Rust Port"]
+description = "Unified data extraction tool for World of Warcraft server data (DBC, Maps, VMaps, MMaps)"
+license = "GPL-2.0"
+
+[[bin]]
+name = "extractor"
+path = "src/main.rs"
+
+[dependencies]
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Command line parsing
+clap = { version = "4.4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi"] }
+
+# File I/O
+walkdir = "2.4"
+byteorder = "1.5"
+
+# Progress bars
+indicatif = "0.17"
+
+# Parallel processing
+rayon = "1.8"
+
+# 3D math for VMap extraction
+glam = { version = "0.29", features = ["bytemuck"] }
+
+# Ordered and concurrent collections for VMap
+indexmap = "2.1"
+dashmap = "5.5"
+
+# MPQ archive support
+wow-mpq = "0.3"
+
+# World of Warcraft file format parsers
+wow-m2 = "0.2"
+wow-wmo = "0.2"
+wow-wdt = "0.2"
+wow-adt = "0.2"
+
+# Navigation mesh generation (Recast/Detour)
+# Requires C++ compiler (CMake, gcc/g++ or MSVC) to build
+# recastnavigation-sys = { version = "1.0", features = ["recast", "detour", "detour_tile_cache"], optional = true }
+
+[features]
+default = []
+mmap-native = [] # Enable native Recast/Detour FFI (requires C++ toolchain)
+
+[dev-dependencies]
+tempfile = "3.8"

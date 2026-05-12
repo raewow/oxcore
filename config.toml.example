@@ -1,0 +1,69 @@
+# Example configuration file for rcore server
+# Copy this file to config.toml and modify as needed
+
+[auth]
+# Database connection URL (MySQL format)
+# Format: mysql://[user[:password]@]host[:port]/database
+login_database_url = "mysql://root@127.0.0.1:3306/auth"
+
+# Network settings
+realm_server_port = 3724
+bind_ip = "0.0.0.0"
+
+# Directories
+patches_dir = "./patches"
+logs_dir = ""  # Empty = current directory
+
+# Timing settings
+max_ping_time = 30
+min_realm_list_delay = 1
+realms_state_update_delay = 20
+max_session_duration = 300
+
+# Security settings
+geo_locking = false
+strict_version_check = true
+req_email_verification = false
+
+# Logging
+# Log levels: 0=Error, 1=Warning, 2=Info, 3=Debug, 4=Trace
+log_level = 3
+log_file = "auth.log"
+log_file_level = 0
+
+[auth.wrong_pass]
+max_count = 0
+ban_time = 600
+ban_type = 0
+
+[world]
+# Realm ID (1 = first realm, -1 = all realms)
+realm_id = 1
+
+# Database connection URLs (MySQL format)
+world_database_url = "mysql://root@127.0.0.1:3306/world"
+character_database_url = "mysql://root@127.0.0.1:3306/characters"
+login_database_url = "mysql://root@127.0.0.1:3306/auth"
+logs_database_url = "mysql://root@127.0.0.1:3306/logs"
+
+# Network settings
+world_server_port = 8085
+bind_ip = "0.0.0.0"
+
+# Directories
+data_dir = "./data"
+logs_dir = ""  # Empty = current directory
+
+# World Update Settings
+world_update_interval = 50  # milliseconds
+
+# Logging
+# Log levels: 0=Error, 1=Warning, 2=Info, 3=Debug, 4=Trace
+log_level = 2
+log_file = "world.log"
+log_file_level = 2
+
+# Performance
+max_players = 100
+player_limit = 0
+

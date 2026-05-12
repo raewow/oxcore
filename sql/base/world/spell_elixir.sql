@@ -1,0 +1,95 @@
+-- MySQL dump
+--
+-- Table structure for table `spell_elixir`
+-- Table data for table `spell_elixir`
+--
+
+DROP TABLE IF EXISTS `spell_elixir`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `spell_elixir` (
+  `entry` smallint unsigned NOT NULL DEFAULT '0' COMMENT 'SpellId of potion',
+  `mask` tinyint unsigned NOT NULL DEFAULT '0' COMMENT 'Mask 0x1 battle 0x2 guardian 0x3 flask 0x7 unstable flasks 0xB shattrath flasks',
+  `build_min` smallint unsigned NOT NULL DEFAULT '0' COMMENT 'Minimum game client build to load this entry',
+  `build_max` smallint unsigned NOT NULL DEFAULT '5875' COMMENT 'Maximum game client build to load this entry',
+  PRIMARY KEY (`entry`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb3 ROW_FORMAT=FIXED COMMENT='Spell System';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `spell_elixir`
+--
+
+LOCK TABLES `spell_elixir` WRITE;
+/*!40000 ALTER TABLE `spell_elixir` DISABLE KEYS */;
+INSERT INTO `spell_elixir` (`entry`, `mask`, `build_min`, `build_max`) VALUES
+(17624, 3, 0, 5875),
+(17626, 3, 0, 5875),
+(17627, 3, 0, 5875),
+(17629, 3, 0, 5875),
+(17628, 3, 0, 5875),
+(2367, 0, 0, 5875),
+(2374, 0, 0, 5875),
+(3160, 0, 0, 5875),
+(3164, 0, 0, 5875),
+(7844, 0, 0, 5875),
+(8212, 0, 0, 5875),
+(10667, 0, 0, 5875),
+(10669, 0, 0, 5875),
+(11328, 0, 0, 5875),
+(11334, 0, 0, 5875),
+(11390, 0, 0, 5875),
+(11405, 0, 0, 5875),
+(11406, 0, 0, 5875),
+(11474, 0, 0, 5875),
+(16322, 0, 0, 5875),
+(16323, 0, 0, 5875),
+(16329, 0, 0, 5875),
+(17038, 0, 0, 5875),
+(17537, 0, 0, 5875),
+(17538, 0, 0, 5875),
+(17539, 0, 0, 5875),
+(21920, 0, 0, 5875),
+(26276, 0, 5302, 5875),
+(673, 0, 0, 5875),
+(2378, 0, 0, 5875),
+(2380, 0, 0, 5875),
+(3166, 0, 0, 5875),
+(3219, 0, 0, 5875),
+(3220, 0, 0, 5875),
+(3222, 0, 0, 5875),
+(3223, 0, 0, 5875),
+(3593, 0, 0, 5875),
+(10668, 0, 0, 5875),
+(10692, 0, 0, 5875),
+(10693, 0, 0, 5875),
+(11319, 0, 0, 5875),
+(11348, 0, 0, 5875),
+(11349, 0, 0, 5875),
+(16321, 0, 0, 5875),
+(11364, 0, 0, 5875),
+(11371, 0, 0, 5875),
+(11396, 0, 0, 5875),
+(15231, 0, 0, 5875),
+(15233, 0, 0, 5875),
+(16325, 0, 0, 5875),
+(16326, 0, 0, 5875),
+(16327, 0, 0, 5875),
+(17535, 0, 0, 5875),
+(24361, 0, 4695, 5875),
+(24363, 0, 4695, 5875),
+(24382, 0, 4695, 5875),
+(24383, 0, 4695, 5875),
+(24417, 0, 4695, 5875),
+(27652, 0, 5302, 5875),
+(27653, 0, 5302, 5875);
+/*!40000 ALTER TABLE `spell_elixir` ENABLE KEYS */;
+UNLOCK TABLES;
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;

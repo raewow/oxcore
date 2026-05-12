@@ -1,0 +1,115 @@
+[package]
+name = "wow-server"
+version = "0.1.0"
+edition = "2021"
+authors = ["MaNGOS Rust Port"]
+description = "World of Warcraft server (realmd + worldserver) ported to Rust"
+
+[[bin]]
+name = "world"
+path = "src/bin/world.rs"
+
+[[bin]]
+name = "auth"
+path = "src/bin/auth.rs"
+
+[[bin]]
+name = "db"
+path = "src/db/main.rs"
+
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "io-util",
+    "time",
+    "sync",
+    "signal",
+    "fs",
+    "process"
+] }
+futures = "0.3"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "mysql", "chrono"] }
+
+# Cryptography
+sha1 = "0.10"
+md5 = "0.7"
+digest = "0.10"
+hmac = "0.12"
+sha2 = "0.10"
+base32 = "0.4"
+rand = "0.8"
+hex = "0.4"
+wow_srp = "0.7"
+
+# Configuration
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi", "registry"] }
+
+# Concurrency & Threading
+parking_lot = "0.12"
+rayon = "1.8"
+crossbeam = "0.8"
+dashmap = "5.5"
+arc-swap = "1.6"
+smallvec = "1.11"
+bitflags = "2.4"
+bitvec = "1.0"
+
+# Game Math & Utilities
+nalgebra = "0.32"
+byteorder = "1.5"
+bytes = "1.5"
+uuid = { version = "1.6", features = ["v4"] }
+
+# Error Handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Other Utilities
+chrono = "0.4"
+humantime = "2.1"
+serde_json = "1.0"
+num-bigint = "0.4"
+num-traits = "0.2"
+rustrict = "0.7.36"
+
+# Compression
+flate2 = "1.0"
+
+
+# Command line parsing
+clap = { version = "4.4", features = ["derive"] }
+
+
+# Pathfinding - Rust-native A* and pathfinding algorithms
+pathfinding = "4.6"
+
+# Lua scripting (vendored bundles Lua statically)
+mlua = { version = "0.10", features = ["lua54", "serialize", "send", "vendored"] }
+
+# Cron parsing
+cron = "0.12"
+async-trait = "0.1.89"
+
+[features]
+default = []
+# Note: Pathfinding uses Rust-native implementation with the 'pathfinding' crate
+# No C++ dependencies required - the system parses .mmtile files and uses
+# pure Rust pathfinding algorithms (A* via pathfinding crate v4.6)
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.13"
+
+[lints.rust]
+unused = "allow"

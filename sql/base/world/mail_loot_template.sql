@@ -1,0 +1,112 @@
+-- MySQL dump
+--
+-- Table structure for table `mail_loot_template`
+-- Table data for table `mail_loot_template`
+--
+
+DROP TABLE IF EXISTS `mail_loot_template`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `mail_loot_template` (
+  `entry` mediumint unsigned NOT NULL DEFAULT '0',
+  `item` mediumint unsigned NOT NULL DEFAULT '0',
+  `ChanceOrQuestChance` float NOT NULL DEFAULT '100',
+  `groupid` tinyint unsigned NOT NULL DEFAULT '0',
+  `mincountOrRef` mediumint NOT NULL DEFAULT '1',
+  `maxcount` tinyint unsigned NOT NULL DEFAULT '1',
+  `condition_id` mediumint unsigned NOT NULL DEFAULT '0',
+  `patch_min` tinyint unsigned NOT NULL DEFAULT '0' COMMENT 'Minimum content patch to load this entry',
+  `patch_max` tinyint unsigned NOT NULL DEFAULT '10' COMMENT 'Maximum content patch to load this entry',
+  PRIMARY KEY (`entry`,`item`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb3 ROW_FORMAT=FIXED COMMENT='Loot System';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `mail_loot_template`
+--
+
+LOCK TABLES `mail_loot_template` WRITE;
+/*!40000 ALTER TABLE `mail_loot_template` DISABLE KEYS */;
+INSERT INTO `mail_loot_template` (`entry`, `item`, `ChanceOrQuestChance`, `groupid`, `mincountOrRef`, `maxcount`, `condition_id`, `patch_min`, `patch_max`) VALUES
+(103, 11422, 100, 0, 1, 1, 0, 0, 10),
+(104, 11422, 100, 0, 1, 1, 0, 0, 10),
+(99, 11423, 100, 0, 1, 1, 0, 0, 10),
+(100, 11423, 100, 0, 1, 1, 0, 0, 10),
+(93, 20469, 100, 0, 1, 1, 0, 0, 10),
+(94, 20469, 100, 0, 1, 1, 0, 0, 10),
+(172, 23008, 100, 0, 1, 1, 0, 0, 10),
+(173, 23010, 100, 0, 1, 1, 0, 0, 10),
+(174, 23011, 100, 0, 1, 1, 0, 0, 10),
+(175, 23012, 100, 0, 1, 1, 0, 0, 10),
+(176, 23013, 100, 0, 1, 1, 0, 0, 10),
+(177, 23016, 100, 0, 1, 1, 0, 0, 10),
+(171, 22723, 100, 0, 1, 1, 0, 0, 10),
+(110, 20645, 100, 0, 1, 1, 0, 0, 10),
+(135, 21746, 100, 0, 1, 1, 0, 0, 10),
+(87, 6529, 100, 0, 1, 1, 0, 0, 10),
+(102, 17685, 100, 0, 1, 1, 0, 0, 10),
+(118, 17685, 100, 0, 1, 1, 0, 0, 10),
+(122, 21216, 100, 0, 1, 1, 0, 0, 10),
+(161, 21216, 100, 0, 1, 1, 0, 0, 10),
+(108, 17712, 100, 0, 1, 1, 0, 0, 10),
+(117, 17712, 100, 0, 1, 1, 0, 0, 10),
+(98, 13158, 100, 0, 1, 1, 0, 0, 10),
+(84, 21746, 100, 0, 1, 1, 0, 0, 10),
+(85, 21746, 100, 0, 1, 1, 0, 0, 10),
+(86, 21746, 100, 0, 1, 1, 0, 0, 10),
+(88, 21746, 100, 0, 1, 1, 0, 0, 10),
+(89, 21746, 100, 0, 1, 1, 0, 0, 10),
+(90, 21746, 100, 0, 1, 1, 0, 0, 10),
+(91, 21746, 100, 0, 1, 1, 0, 0, 10),
+(92, 21746, 100, 0, 1, 1, 0, 0, 10),
+(95, 21746, 100, 0, 1, 1, 0, 0, 10),
+(96, 21746, 100, 0, 1, 1, 0, 0, 10),
+(97, 21746, 100, 0, 1, 1, 0, 0, 10),
+(121, 21746, 100, 0, 1, 1, 0, 0, 10),
+(124, 21746, 100, 0, 1, 1, 0, 0, 10),
+(125, 21746, 100, 0, 1, 1, 0, 0, 10),
+(126, 21746, 100, 0, 1, 1, 0, 0, 10),
+(127, 21746, 100, 0, 1, 1, 0, 0, 10),
+(128, 21746, 100, 0, 1, 1, 0, 0, 10),
+(129, 21746, 100, 0, 1, 1, 0, 0, 10),
+(130, 21746, 100, 0, 1, 1, 0, 0, 10),
+(131, 21746, 100, 0, 1, 1, 0, 0, 10),
+(132, 21746, 100, 0, 1, 1, 0, 0, 10),
+(133, 21746, 100, 0, 1, 1, 0, 0, 10),
+(134, 21746, 100, 0, 1, 1, 0, 0, 10),
+(136, 21746, 100, 0, 1, 1, 0, 0, 10),
+(137, 21746, 100, 0, 1, 1, 0, 0, 10),
+(138, 21746, 100, 0, 1, 1, 0, 0, 10),
+(139, 21746, 100, 0, 1, 1, 0, 0, 10),
+(140, 21746, 100, 0, 1, 1, 0, 0, 10),
+(141, 21746, 100, 0, 1, 1, 0, 0, 10),
+(142, 21746, 100, 0, 1, 1, 0, 0, 10),
+(143, 21746, 100, 0, 1, 1, 0, 0, 10),
+(144, 21746, 100, 0, 1, 1, 0, 0, 10),
+(145, 21746, 100, 0, 1, 1, 0, 0, 10),
+(146, 21746, 100, 0, 1, 1, 0, 0, 10),
+(147, 21746, 100, 0, 1, 1, 0, 0, 10),
+(148, 21746, 100, 0, 1, 1, 0, 0, 10),
+(149, 21746, 100, 0, 1, 1, 0, 0, 10),
+(150, 21746, 100, 0, 1, 1, 0, 0, 10),
+(151, 21746, 100, 0, 1, 1, 0, 0, 10),
+(152, 21746, 100, 0, 1, 1, 0, 0, 10),
+(153, 21746, 100, 0, 1, 1, 0, 0, 10),
+(154, 21746, 100, 0, 1, 1, 0, 0, 10),
+(155, 21746, 100, 0, 1, 1, 0, 0, 10),
+(156, 21746, 100, 0, 1, 1, 0, 0, 10),
+(157, 21746, 100, 0, 1, 1, 0, 0, 10),
+(158, 21746, 100, 0, 1, 1, 0, 0, 10),
+(159, 21746, 100, 0, 1, 1, 0, 0, 10),
+(160, 21746, 100, 0, 1, 1, 0, 0, 10),
+(168, 21746, 100, 0, 1, 1, 0, 0, 10);
+/*!40000 ALTER TABLE `mail_loot_template` ENABLE KEYS */;
+UNLOCK TABLES;
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
