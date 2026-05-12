@@ -2,55 +2,20 @@
 
 A World of Warcraft (Vanilla 1.12.x) private server implementation written in Rust. 
 
-## Server Goals 
+## Server Goals + Milestones
 
-While the server is still in early development, the long term vision for this server is one that will work for vanilla, tbc and wrath client depending on configuration. The other main goal for this server is to work with both the older clients as well as the modern version. 
+Creating an emulator for world of warcraft is a massive task, our end goal is something on par to vmangos, however our focused current goal is to get the emulator working allowing players to play any class up to level 20 without major issues. 
 
-## Current Features
-- Auth Server
-- World Server
-  - Character Creation
-  - NPCS
-  - Combat
-  - Spell and Aura System
- - Map System
-  - Questing
-  - Items and Equipment
 
 ### Data Files
 
-The server requires extracted game data files from the WoW client. You must extract:
+The server requires extracted game data files from the WoW client. You can use vmangos versions of the following:
 
 1. **DBC Files** - Database Client files containing game definitions (spells, items, areas, etc.)
 2. **Map Files** - Terrain heightmaps and liquid data
 3. **VMap Files** - 3D collision geometry for buildings, objects, and line-of-sight calculations
 4. **MMap Files** - Navigation meshes for NPC pathfinding
 
-
-### Extracting Data Files
-
-The project includes a Rust-based extractor tool that can extract all required data from your WoW client installation.
-
-> Note: only the dbc extractor is working currently. However the plan is to include a universal extractor to extract all of the necessary files to run the server. In the meantime use another emulators map extraction tools.
-
-#### Using the Extractor Tool
-
-1. **Build the extractor**:
-```bash
-# Build or cargo run the extactor
-cd tools/extractor
-cargo build --release
-
-# Extract everything to ./output directory
-extractor all -i "C:\Games\WoWFolder" -o "./output"
-
-# Or extract to your server's data directory
-extractor all -i "C:\Games\WoWFolder" -o "C:\path\to\server\data"
-
-# Extract only DBC files
-extractor dbc -i "C:\Games\WoW\Data" -o "./output"
-
-```
 
 ## Database Setup
 
@@ -167,6 +132,32 @@ Or modify the `realmlist` table in your `auth` database to set the correct IP ad
 
 The server uses TOML configuration files. See `config.toml.example` for all available options.
 
+
+### Extracting Data Files
+
+The project includes a Rust-based extractor tool that can extract all required data from your WoW client installation.
+
+> Note: only the dbc extractor is working currently. However the plan is to include a universal extractor to extract all of the necessary files to run the server. In the meantime use another emulators map extraction tools.
+
+#### Using the Extractor Tool
+
+1. **Build the extractor**:
+```bash
+# Build or cargo run the extactor
+cd tools/extractor
+cargo build --release
+
+# Extract everything to ./output directory
+extractor all -i "C:\Games\WoWFolder" -o "./output"
+
+# Or extract to your server's data directory
+extractor all -i "C:\Games\WoWFolder" -o "C:\path\to\server\data"
+
+# Extract only DBC files
+extractor dbc -i "C:\Games\WoW\Data" -o "./output"
+
+```
+
 ## Credits & Acknowledgments
 
 A large portion of this project project has been directly ported from MaNGOS. The original MaNGOS project and its various forks have been instrumental in understanding WoW server architecture and implementing this Rust version. I want to make it super clear that this project would never have got anywhere without it, all of the contributers to that project over the years have made this possible.
@@ -174,4 +165,3 @@ A large portion of this project project has been directly ported from MaNGOS. Th
 ### License
 
 This project follows the GPL-2.0 license.
-
