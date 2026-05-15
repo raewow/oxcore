@@ -6,9 +6,9 @@ use anyhow::Result;
 use sqlx::Row;
 
 use crate::shared::common::AccountType;
+use crate::shared::protocol::ObjectGuid;
 use crate::shared::protocol::{Opcode, Position, WorldPacket};
 use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
-use crate::shared::protocol::ObjectGuid;
 
 /// Base movement speeds (from MaNGOS/Unit.cpp)
 const BASE_RUN_SPEED: f32 = 7.0;
@@ -98,13 +98,21 @@ pub fn speed_info() -> ChatCommandInfo {
 }
 
 /// Kill command - instantly kills the current target
-pub async fn cmd_kill(ctx: &ChatCommandContext<'_>, _args: &str) -> Result<String> {
+pub async fn cmd_kill(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {
     use crate::shared::protocol::ObjectGuid;
 
-    // 1. Get target from context
-    let target_guid = match ctx.target {
-        Some(guid) => guid,
-        None => return Ok("No target selected. Select a target first.".to_string()),
+    let args = args.trim();
+    let target_guid = if matches!(args.to_ascii_lowercase().as_str(), "self" | "me") {
+        ctx.player_guid
+    } else {
+        match ctx.target {
+            Some(guid) => guid,
+            None => {
+                return Ok(
+                    "No target selected. Select a target first, or use .kill self.".to_string(),
+                )
+            }
+        }
     };
 
     // 2. Validate target is a unit
@@ -112,23 +120,33 @@ pub async fn cmd_kill(ctx: &ChatCommandContext<'_>, _args: &str) -> Result<Strin
         return Ok("Target must be a unit (player or creature).".to_string());
     }
 
-    // 3. Prevent self-kill
-    if target_guid == ctx.player_guid {
-        return Ok("Cannot kill yourself with this command.".to_string());
-    }
-
-    // 4. Get target name before killing (for feedback)
+    // 3. Get target name before killing (for feedback)
     let target_name = get_target_name(ctx, target_guid);
 
-    // 5. Execute kill based on target type
+    // 4. Execute kill based on target type
     if target_guid.is_player() {
+        let is_self_kill = target_guid == ctx.player_guid;
+        let killer_guid = if target_guid == ctx.player_guid {
+            None
+        } else {
+            Some(ctx.player_guid)
+        };
+
         // Kill player via DeathSystem
         ctx.world.systems.death.on_killed(
             target_guid,
-            Some(ctx.player_guid), // killer
-            Some(5),                // spell_id (5 = GM instant kill)
+            killer_guid,
+            Some(5), // spell_id (5 = GM instant kill)
             ctx.world,
         )?;
+
+        if is_self_kill {
+            ctx.world
+                .systems
+                .death
+                .handle_release_spirit(ctx.player_guid, ctx.world)?;
+            return Ok("Killed yourself and released spirit.".to_string());
+        }
     } else {
         // Kill creature via CreatureManager
         let death_info = ctx.world.managers.creature_mgr.handle_death(
@@ -138,7 +156,11 @@ pub async fn cmd_kill(ctx: &ChatCommandContext<'_>, _args: &str) -> Result<Strin
 
         // Stop creature movement on death (vmangos: StopMoving in SetDeathState)
         if let Some(ref info) = death_info {
-            ctx.world.systems.creature_movement.send_stop_packet(info.guid, info.position, ctx.world);
+            ctx.world.systems.creature_movement.send_stop_packet(
+                info.guid,
+                info.position,
+                ctx.world,
+            );
         }
 
         // Send death VALUES update so the client sees the creature die
@@ -152,13 +174,17 @@ pub async fn cmd_kill(ctx: &ChatCommandContext<'_>, _args: &str) -> Result<Strin
 /// Send death VALUES update to nearby players so the client sees the creature die.
 /// Same as creature_combat.rs send_creature_killed_update but callable from GM commands.
 fn send_creature_killed_update(world: &crate::world::World, creature_guid: ObjectGuid) {
-    use crate::shared::messages::update::{SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock, ObjectType};
+    use crate::shared::messages::update::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
     use crate::shared::messages::ToWorldPacket;
     use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
-    use crate::world::game::common::update_fields::*;
     use crate::world::game::broadcast_mgr::broadcast_around_creature;
+    use crate::world::game::common::update_fields::*;
 
-    let Some((max_health, unit_flags)) = world.managers.creature_mgr
+    let Some((max_health, unit_flags)) = world
+        .managers
+        .creature_mgr
         .with_creature_mut(creature_guid, |c| (c.max_health, c.unit_flags))
     else {
         return;
@@ -176,7 +202,7 @@ fn send_creature_killed_update(world: &crate::world::World, creature_guid: Objec
             .set_field(UNIT_FIELD_FLAGS, cleared_flags)
             .set_field(UNIT_DYNAMIC_FLAGS, 0u32)
             .set_field(UNIT_FIELD_BYTES_1, 7u32) // Stand state Dead
-            .set_field(UNIT_NPC_FLAGS, 0u32)
+            .set_field(UNIT_NPC_FLAGS, 0u32),
     ));
 
     broadcast_around_creature(world, creature_guid, &update.to_world_packet());
@@ -184,8 +210,6 @@ fn send_creature_killed_update(world: &crate::world::World, creature_guid: Objec
 
 /// Helper to get target name for feedback
 fn get_target_name(ctx: &ChatCommandContext<'_>, guid: ObjectGuid) -> String {
-
-
     if guid.is_player() {
         ctx.world
             .managers
@@ -215,7 +239,7 @@ fn get_target_name(ctx: &ChatCommandContext<'_>, guid: ObjectGuid) -> String {
 pub fn kill_info() -> ChatCommandInfo {
     ChatCommandInfo {
         name: "kill",
-        help: "Instantly kills your current target",
+        help: "Instantly kills your current target. Usage: .kill [self]",
         min_security: AccountType::GameMaster,
     }
 }
