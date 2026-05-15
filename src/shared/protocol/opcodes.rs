@@ -327,14 +327,12 @@ impl Opcode {
     // Death & Resurrection
     // ============================================================================
 
-    pub const SMSG_DEATH_RELEASE_LOCATION: Opcode = Opcode(0x02E7); // 743
     pub const SMSG_DURABILITY_DAMAGE_DEATH: Opcode = Opcode(0x02BD); // 701
-    pub const SMSG_CORPSE_RECLAIM_DELAY: Opcode = Opcode(0x02E8); // 744
+    pub const SMSG_CORPSE_RECLAIM_DELAY: Opcode = Opcode(0x0269); // 617
     pub const CMSG_REPOP_REQUEST: Opcode = Opcode(0x015A); // 346
     pub const CMSG_RESURRECT_RESPONSE: Opcode = Opcode(0x015C); // 348
     pub const CMSG_RECLAIM_CORPSE: Opcode = Opcode(0x01D2); // 466
     pub const SMSG_RESURRECT_REQUEST: Opcode = Opcode(0x015B); // 347
-    pub const SMSG_PRE_RESURRECT: Opcode = Opcode(0x0310); // 784
     pub const SMSG_SPIRIT_HEALER_CONFIRM: Opcode = Opcode(0x0222); // 546
     pub const CMSG_SPIRIT_HEALER_ACTIVATE: Opcode = Opcode(0x021C); // 540
     pub const CMSG_SELF_RES: Opcode = Opcode(0x02B3); // 691

@@ -12,10 +12,9 @@
 use crate::shared::database::{CharacterRepository, Databases};
 use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
-use crate::world::World;
 use crate::world::core::session::WorldSession;
+use crate::world::World;
 use anyhow::Result;
-use bytes::Buf;
 use std::sync::Arc;
 use tracing::{debug, warn};
 
@@ -32,8 +31,11 @@ pub async fn handle_repop_request(
         Some(guid) => guid,
         None => return Ok(()),
     };
-    
-    world.systems.death.handle_release_spirit(player_guid, world)?;
+
+    world
+        .systems
+        .death
+        .handle_release_spirit(player_guid, world)?;
     Ok(())
 }
 
@@ -42,7 +44,7 @@ pub async fn handle_repop_request(
 /// Sent when the player clicks "Resurrect Now" near their corpse.
 ///
 /// Packet structure:
-///   corpse_guid: packed GUID
+///   corpse_guid: u64
 pub async fn handle_reclaim_corpse(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -52,16 +54,14 @@ pub async fn handle_reclaim_corpse(
         Some(guid) => guid,
         None => return Ok(()),
     };
-    
-    // Read corpse GUID (packed)
-    let _corpse_guid = if packet.data().remaining() >= 1 {
-        packet.read_packed_guid()
-    } else {
-        None
-    };
-    
+
+    let _corpse_guid = packet.read_guid_raw();
+
     // The corpse_guid is validated in the system
-    world.systems.death.handle_reclaim_corpse(player_guid, world)?;
+    world
+        .systems
+        .death
+        .handle_reclaim_corpse(player_guid, world)?;
     Ok(())
 }
 
@@ -70,7 +70,7 @@ pub async fn handle_reclaim_corpse(
 /// Sent when the player accepts or declines a resurrection offer.
 ///
 /// Packet structure:
-///   resurrector_guid: packed GUID
+///   resurrector_guid: u64
 ///   accept:           u8 (0 = decline, 1 = accept)
 pub async fn handle_resurrect_response(
     session: &WorldSession,
@@ -81,25 +81,18 @@ pub async fn handle_resurrect_response(
         Some(guid) => guid,
         None => return Ok(()),
     };
-    
-    // Read resurrector GUID (packed)
-    let resurrector_guid = if packet.data().remaining() >= 1 {
-        packet.read_packed_guid()
-    } else {
-        None
-    };
-    
+
+    let resurrector_guid = packet.read_guid_raw();
+
     let accept = packet.read_u8().unwrap_or(0) != 0;
-    
-    if let Some(resurrector) = resurrector_guid {
-        world.systems.death.handle_resurrect_response(
-            player_guid,
-            resurrector,
-            accept,
-            world,
-        )?;
+
+    if let Some(resurrector) = resurrector_guid.map(ObjectGuid::from_raw) {
+        world
+            .systems
+            .death
+            .handle_resurrect_response(player_guid, resurrector, accept, world)?;
     }
-    
+
     Ok(())
 }
 
@@ -108,7 +101,7 @@ pub async fn handle_resurrect_response(
 /// Sent when the player interacts with a spirit healer NPC.
 ///
 /// Packet structure:
-///   healer_guid: packed GUID
+///   healer_guid: u64
 pub async fn handle_spirit_healer_activate(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -118,15 +111,13 @@ pub async fn handle_spirit_healer_activate(
         Some(guid) => guid,
         None => return Ok(()),
     };
-    
-    // Read healer GUID (packed)
-    let _healer_guid = if packet.data().remaining() >= 1 {
-        packet.read_packed_guid()
-    } else {
-        None
-    };
-    
-    world.systems.death.handle_spirit_healer(player_guid, world)?;
+
+    let _healer_guid = packet.read_guid_raw();
+
+    world
+        .systems
+        .death
+        .handle_spirit_healer(player_guid, world)?;
     Ok(())
 }
 
@@ -149,9 +140,13 @@ pub async fn handle_self_res(
     };
 
     // Pull the stored self-res spell id (and validate state).
-    let stored = world.systems.player.manager().with_player(player_guid, |player| {
-        (player.self_res_spell, player.death.death_state)
-    });
+    let stored = world
+        .systems
+        .player
+        .manager()
+        .with_player(player_guid, |player| {
+            (player.self_res_spell, player.death.death_state)
+        });
     let (spell_id, death_state) = match stored {
         Some(pair) => pair,
         None => return Ok(()),
@@ -160,27 +155,46 @@ pub async fn handle_self_res(
     // Must be a ghost (DeathState::Dead) with a stored self-res spell.
     use crate::world::game::player::death::state::DeathState;
     if death_state != DeathState::Dead && death_state != DeathState::Corpse {
-        debug!("Player {:?} pressed self-res while not dead ({:?})", player_guid, death_state);
+        debug!(
+            "Player {:?} pressed self-res while not dead ({:?})",
+            player_guid, death_state
+        );
         return Ok(());
     }
     if spell_id == 0 {
-        debug!("Player {:?} pressed self-res but has no stored spell id", player_guid);
+        debug!(
+            "Player {:?} pressed self-res but has no stored spell id",
+            player_guid
+        );
         return Ok(());
     }
 
     // Clear the field so the button greys out immediately — prevents
     // spam-clicking or a second cast landing.
-    world.systems.player.manager().with_player_mut(player_guid, |player| {
-        player.self_res_spell = 0;
-    });
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            player.self_res_spell = 0;
+        });
 
     // Cast the self-res spell on self. The spell's effects (EFFECT_RESURRECT
     // or EFFECT_SELF_RESURRECT) handle the actual revive + health/mana restore.
-    debug!("Player {:?} self-resurrecting via spell {}", player_guid, spell_id);
+    debug!(
+        "Player {:?} self-resurrecting via spell {}",
+        player_guid, spell_id
+    );
     world
         .systems
         .spells
-        .cast_spell(player_guid, spell_id, Some(player_guid), /*is_triggered*/ true, world)
+        .cast_spell(
+            player_guid,
+            spell_id,
+            Some(player_guid),
+            /*is_triggered*/ true,
+            world,
+        )
         .await?;
 
     Ok(())
@@ -236,10 +250,7 @@ pub async fn handle_area_spirit_healer_queue(
 
     // Delegate to DeathSystem. The real BG wave system (Phase 8) will consume
     // this queue on its 30s timer. For now we just mark the player queued.
-    world
-        .systems
-        .death
-        .queue_for_spirit_healer(player_guid);
+    world.systems.death.queue_for_spirit_healer(player_guid);
     Ok(())
 }
 
@@ -262,15 +273,26 @@ pub async fn handle_setdeathbindpoint(
     };
 
     // Pull current position + zone + map from the live player.
-    let bind = world.systems.player.manager().with_player_mut(player_guid, |player| {
-        let pos = player.movement.position;
-        player.homebind_map = player.map_id;
-        player.homebind_zone = player.zone_id;
-        player.homebind_x = pos.x;
-        player.homebind_y = pos.y;
-        player.homebind_z = pos.z;
-        (player.guid.counter(), player.map_id, player.zone_id, pos.x, pos.y, pos.z)
-    });
+    let bind = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            let pos = player.movement.position;
+            player.homebind_map = player.map_id;
+            player.homebind_zone = player.zone_id;
+            player.homebind_x = pos.x;
+            player.homebind_y = pos.y;
+            player.homebind_z = pos.z;
+            (
+                player.guid.counter(),
+                player.map_id,
+                player.zone_id,
+                pos.x,
+                pos.y,
+                pos.z,
+            )
+        });
 
     let (char_guid, map, zone, x, y, z) = match bind {
         Some(v) => v,
@@ -286,7 +308,10 @@ pub async fn handle_setdeathbindpoint(
     // Send confirmation packet so client updates the hearthstone UI.
     send_bindpoint_update(session, map, zone, x, y, z)?;
 
-    debug!("Player {:?} bound home at map={} zone={}", player_guid, map, zone);
+    debug!(
+        "Player {:?} bound home at map={} zone={}",
+        player_guid, map, zone
+    );
     Ok(())
 }
 
@@ -306,15 +331,19 @@ pub async fn handle_getdeathbindzone(
         None => return Ok(()),
     };
 
-    let bind = world.systems.player.manager().with_player(player_guid, |player| {
-        (
-            player.homebind_map,
-            player.homebind_zone,
-            player.homebind_x,
-            player.homebind_y,
-            player.homebind_z,
-        )
-    });
+    let bind = world
+        .systems
+        .player
+        .manager()
+        .with_player(player_guid, |player| {
+            (
+                player.homebind_map,
+                player.homebind_zone,
+                player.homebind_x,
+                player.homebind_y,
+                player.homebind_z,
+            )
+        });
 
     if let Some((map, zone, x, y, z)) = bind {
         send_bindpoint_update(session, map, zone, x, y, z)?;

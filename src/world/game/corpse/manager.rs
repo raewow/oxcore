@@ -52,12 +52,16 @@ impl CorpseManager {
 
     /// Remove a corpse by GUID. Returns the removed corpse if present.
     pub fn remove(&self, guid: ObjectGuid) -> Option<Corpse> {
-        self.corpses.remove(&guid).map(|(_, lock)| lock.into_inner())
+        self.corpses
+            .remove(&guid)
+            .map(|(_, lock)| lock.into_inner())
     }
 
     /// Get a read-only snapshot of a corpse (clone).
     pub fn get(&self, guid: ObjectGuid) -> Option<Corpse> {
-        self.corpses.get(&guid).map(|entry| entry.value().read().clone())
+        self.corpses
+            .get(&guid)
+            .map(|entry| entry.value().read().clone())
     }
 
     /// Iterate all known corpses as (guid, cloned Corpse). Used by the corpse
@@ -75,11 +79,15 @@ impl CorpseManager {
     pub fn bump_counter(&self, counter: u32) {
         // fetch_update: ensure the stored value exceeds `counter`.
         let next = counter.saturating_add(1);
-        let _ = self.next_counter.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |current| if current < next { Some(next) } else { None },
-        );
+        let _ = self
+            .next_counter
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if current < next {
+                    Some(next)
+                } else {
+                    None
+                }
+            });
     }
 
     /// Return corpses whose type should change or be removed given the
@@ -125,7 +133,10 @@ impl CorpseManager {
 
     /// Flip an existing corpse to Bones. Returns the new corpse state or
     /// None if the GUID is unknown.
-    pub fn convert_to_bones(&self, guid: ObjectGuid) -> Option<crate::world::game::player::death::corpse::Corpse> {
+    pub fn convert_to_bones(
+        &self,
+        guid: ObjectGuid,
+    ) -> Option<crate::world::game::player::death::corpse::Corpse> {
         use crate::world::game::player::death::corpse::CorpseType;
         let entry = self.corpses.get(&guid)?;
         let mut c = entry.value().write();
@@ -154,7 +165,6 @@ pub enum CorpseExpiration {
 
 // Extra impl block re-opens for consistency with the previous block closing.
 impl CorpseManager {
-
     /// Build UPDATETYPE_CREATE_OBJECT block for a corpse. Returns None if the
     /// GUID is not known. Matches the packet layout GameObjects use.
     ///
@@ -170,7 +180,6 @@ impl CorpseManager {
     ///   CORPSE_FIELD_BYTES_2 (byte 0=race, 1=0, 2=gender, 3=facial_style)
     ///   CORPSE_FIELD_FLAGS
     ///   CORPSE_FIELD_DYNAMIC_FLAGS (0 — nothing lootable yet)
-    ///   CORPSE_FIELD_DEATH_TIME (unix seconds)
     pub fn build_create_msg(
         &self,
         guid: ObjectGuid,
@@ -188,39 +197,36 @@ impl CorpseManager {
 
         let display_id = corpse_display_id_for(corpse.race, corpse.gender);
 
-        // BYTES_1: skin | face | hair_style | hair_color
-        let bytes_1 = (corpse.skin as u32)
-            | ((corpse.face as u32) << 8)
-            | ((corpse.hair_style as u32) << 16)
-            | ((corpse.hair_color as u32) << 24);
-
-        // BYTES_2: race | 0 | gender | facial_style
-        // (Class slot is intentionally 0 in vmangos for corpses.)
-        let bytes_2 = (corpse.race as u32)
-            | (0u32 << 8)
+        let bytes_1 = ((corpse.race as u32) << 8)
             | ((corpse.gender as u32) << 16)
+            | ((corpse.skin as u32) << 24);
+        let bytes_2 = (corpse.face as u32)
+            | ((corpse.hair_style as u32) << 8)
+            | ((corpse.hair_color as u32) << 16)
             | ((corpse.facial_style as u32) << 24);
 
         let corpse_flags = corpse_flag_bits(&corpse);
 
-        let mut block = CreateObjectBlock::new(
-            corpse.guid,
-            ObjectTypeId::Corpse,
-            ObjectType::Corpse,
-        )
-        .with_position(corpse.position)
-        .add_flags(update_flags::UPDATEFLAG_ALL | update_flags::UPDATEFLAG_HAS_POSITION)
-        .set_guid_field(OBJECT_FIELD_GUID, corpse.guid)
-        .set_field(OBJECT_FIELD_TYPE, TYPEMASK_OBJECT_CORPSE)
-        .set_field(OBJECT_FIELD_ENTRY, 0)
-        .set_float_field(OBJECT_FIELD_SCALE_X, 1.0)
-        .set_guid_field(CORPSE_FIELD_OWNER, corpse.owner_guid)
-        .set_field(CORPSE_FIELD_DISPLAY_ID, display_id)
-        .set_field(CORPSE_FIELD_BYTES_1, bytes_1)
-        .set_field(CORPSE_FIELD_BYTES_2, bytes_2)
-        .set_field(CORPSE_FIELD_FLAGS, corpse_flags)
-        .set_field(CORPSE_FIELD_DYNAMIC_FLAGS, 0)
-        .set_field(CORPSE_FIELD_DEATH_TIME, corpse.created_time as u32);
+        let mut block =
+            CreateObjectBlock::new(corpse.guid, ObjectTypeId::Corpse, ObjectType::Corpse)
+                .with_position(corpse.position)
+                .add_flags(update_flags::UPDATEFLAG_ALL | update_flags::UPDATEFLAG_HAS_POSITION)
+                .set_guid_field(OBJECT_FIELD_GUID, corpse.guid)
+                .set_field(OBJECT_FIELD_TYPE, TYPEMASK_OBJECT_CORPSE)
+                .set_field(OBJECT_FIELD_ENTRY, 0)
+                .set_float_field(OBJECT_FIELD_SCALE_X, 1.0)
+                .set_guid_field(CORPSE_FIELD_OWNER, corpse.owner_guid)
+                .set_float_field(CORPSE_FIELD_FACING, corpse.position.o)
+                .set_float_field(CORPSE_FIELD_POS_X, corpse.position.x)
+                .set_float_field(CORPSE_FIELD_POS_Y, corpse.position.y)
+                .set_float_field(CORPSE_FIELD_POS_Z, corpse.position.z)
+                .set_field(CORPSE_FIELD_DISPLAY_ID, display_id)
+                .set_field(CORPSE_FIELD_BYTES_1, bytes_1)
+                .set_field(CORPSE_FIELD_BYTES_2, bytes_2)
+                .set_required(CORPSE_FIELD_GUILD, 0)
+                .set_field(CORPSE_FIELD_FLAGS, corpse_flags)
+                .set_field(CORPSE_FIELD_DYNAMIC_FLAGS, 0)
+                .set_required(CORPSE_FIELD_PAD, 0);
 
         // Equipment display IDs in 19 slots starting at CORPSE_FIELD_ITEM.
         for (i, display) in corpse.equipment.iter().enumerate() {
@@ -241,14 +247,62 @@ fn corpse_display_id_for(race: u8, gender: u8) -> u32 {
     // Gender: 0 = male, 1 = female.
     let male = gender == 0;
     match race {
-        1 => if male { 49 } else { 50 },        // Human
-        2 => if male { 51 } else { 52 },        // Orc
-        3 => if male { 53 } else { 54 },        // Dwarf
-        4 => if male { 55 } else { 56 },        // Night Elf
-        5 => if male { 57 } else { 58 },        // Undead
-        6 => if male { 59 } else { 60 },        // Tauren
-        7 => if male { 1563 } else { 1564 },    // Gnome
-        8 => if male { 1478 } else { 1479 },    // Troll
+        1 => {
+            if male {
+                49
+            } else {
+                50
+            }
+        } // Human
+        2 => {
+            if male {
+                51
+            } else {
+                52
+            }
+        } // Orc
+        3 => {
+            if male {
+                53
+            } else {
+                54
+            }
+        } // Dwarf
+        4 => {
+            if male {
+                55
+            } else {
+                56
+            }
+        } // Night Elf
+        5 => {
+            if male {
+                57
+            } else {
+                58
+            }
+        } // Undead
+        6 => {
+            if male {
+                59
+            } else {
+                60
+            }
+        } // Tauren
+        7 => {
+            if male {
+                1563
+            } else {
+                1564
+            }
+        } // Gnome
+        8 => {
+            if male {
+                1478
+            } else {
+                1479
+            }
+        } // Troll
         _ => 49, // Fallback: Human male corpse
     }
 }

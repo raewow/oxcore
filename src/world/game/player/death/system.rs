@@ -11,9 +11,7 @@ use super::graveyard::{self, GraveyardManager};
 use super::resurrect::{self, ResurrectionMethod};
 use super::sickness;
 use super::state::{DeathState, DeathSystemState};
-use crate::shared::messages::death::{
-    SmsgCorpseReclaimDelay, SmsgDeathReleaseLocation, SmsgPreResurrect, SmsgResurrectRequest,
-};
+use crate::shared::messages::death::{SmsgCorpseReclaimDelay, SmsgResurrectRequest};
 use crate::shared::messages::inventory::SmsgDurabilityDamageDeath;
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
@@ -55,7 +53,9 @@ pub fn is_player_in_battleground(world: &World, player_guid: ObjectGuid) -> bool
 const MOVEMENT_FLAG_WATERWALKING: u32 = 0x10000000;
 
 /// Bridge: Corpse struct → CorpseRow DB model.
-fn corpse_to_row(corpse: &Corpse) -> crate::shared::database::characters::models::corpse::CorpseRow {
+fn corpse_to_row(
+    corpse: &Corpse,
+) -> crate::shared::database::characters::models::corpse::CorpseRow {
     use crate::shared::database::characters::models::corpse::CorpseRow;
     CorpseRow {
         guid: corpse.guid.counter(),
@@ -101,7 +101,6 @@ impl DeathSystem {
 
     /// Initialize the death system
     pub async fn init(&self) -> Result<()> {
-
         Ok(())
     }
 
@@ -118,7 +117,6 @@ impl DeathSystem {
 
     /// Shutdown the death system
     pub async fn shutdown(&self) -> Result<()> {
-
         Ok(())
     }
 
@@ -136,24 +134,29 @@ impl DeathSystem {
         let is_pvp_death = killer_guid.map_or(false, |g| g.is_player());
 
         // Get player data before modifications
-        let player_data = world.systems.player.manager().with_player(player_guid, |player| {
-            (
-                player.race,
-                player.map_id,
-                player.movement.position,
-                player.stats.max_health,
-                player.power.max_mana(),
-                player.zone_id,
-            )
-        });
+        let player_data = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                (
+                    player.race,
+                    player.map_id,
+                    player.movement.position,
+                    player.stats.max_health,
+                    player.power.max_mana(),
+                    player.zone_id,
+                )
+            });
 
-        let (player_race, map_id, death_position, _max_health, _max_mana, zone_id) = match player_data {
-            Some(data) => data,
-            None => {
-                warn!("Player {:?} not found for death handling", player_guid);
-                return Ok(());
-            }
-        };
+        let (player_race, map_id, death_position, _max_health, _max_mana, zone_id) =
+            match player_data {
+                Some(data) => data,
+                None => {
+                    warn!("Player {:?} not found for death handling", player_guid);
+                    return Ok(());
+                }
+            };
 
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -161,49 +164,57 @@ impl DeathSystem {
             .as_secs();
 
         // Set death state and related fields
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            // 1. Set death state
-            player.death.death_state = DeathState::JustDied;
-            player.death.death_timer_ms = CORPSE_REPOP_TIME_MS;
-            player.death.is_pvp_death = is_pvp_death;
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                // 1. Set death state
+                player.death.death_state = DeathState::JustDied;
+                player.death.death_timer_ms = CORPSE_REPOP_TIME_MS;
+                player.death.is_pvp_death = is_pvp_death;
 
-            // Advance the death-streak window. If the previous window is
-            // still open we add another step to climb the ladder (up to the
-            // 120s cap); otherwise we start a fresh window.
-            let base = player.death.death_expire_time.max(now_secs);
-            player.death.death_expire_time = base + DEATH_EXPIRE_STEP_SECS;
+                // Advance the death-streak window. If the previous window is
+                // still open we add another step to climb the ladder (up to the
+                // 120s cap); otherwise we start a fresh window.
+                let base = player.death.death_expire_time.max(now_secs);
+                player.death.death_expire_time = base + DEATH_EXPIRE_STEP_SECS;
 
-            // 2. Set health to 0
-            player.stats.health = 0;
+                // 2. Set health to 0
+                player.stats.health = 0;
 
-            // 3. Set unit flags
-            player.unit_flags |= UNIT_FLAG_DISABLE_MOVE;
+                // 3. Set unit flags
+                player.unit_flags |= UNIT_FLAG_DISABLE_MOVE;
 
-            // 4. Clear combat state
-            player.combat.in_combat = false;
-            player.combat.attack_target = None;
-            player.combat.attackers.clear();
-            player.combat.is_auto_attacking = false;
+                // 4. Clear combat state
+                player.combat.in_combat = false;
+                player.combat.attack_target = None;
+                player.combat.attackers.clear();
+                player.combat.is_auto_attacking = false;
 
-            // 5. Clear combo points
-            player.combat.combo_points = 0;
-            player.combat.combo_target = None;
+                // 5. Clear combo points
+                player.combat.combo_points = 0;
+                player.combat.combo_target = None;
 
-            // 6. Clear any pending resurrection
-            player.death.resurrection_data = None;
+                // 6. Clear any pending resurrection
+                player.death.resurrection_data = None;
 
-            // 7. Record death position for corpse
-            player.death.corpse_position = Some(death_position);
-            player.death.corpse_map_id = Some(map_id);
+                // 7. Record death position for corpse
+                player.death.corpse_position = Some(death_position);
+                player.death.corpse_map_id = Some(map_id);
 
-            // 8. Remove all non-passive auras (buffs, debuffs — not talents)
-            let removed_auras = player.auras.container.remove_all_non_passive();
-            if !removed_auras.is_empty() {
-                player.auras.needs_client_update = true;
-                player.auras.needs_stat_recalc = true;
-                debug!("Removed {} auras on death for player {:?}", removed_auras.len(), player_guid);
-            }
-        });
+                // 8. Remove all non-passive auras (buffs, debuffs — not talents)
+                let removed_auras = player.auras.container.remove_all_non_passive();
+                if !removed_auras.is_empty() {
+                    player.auras.needs_client_update = true;
+                    player.auras.needs_stat_recalc = true;
+                    debug!(
+                        "Removed {} auras on death for player {:?}",
+                        removed_auras.len(),
+                        player_guid
+                    );
+                }
+            });
 
         // 9. Apply durability loss (10% on equipment, not in BG, not from PvP,
         //    not from spells flagged SPELL_ATTR_EX3_NO_DURABILITY_LOSS).
@@ -225,13 +236,25 @@ impl DeathSystem {
         //    field is non-zero. Consumed by `handle_self_res`.
         let self_res = self.select_resurrection_spell_id(player_guid, world);
         if self_res != 0 {
-            world.systems.player.manager().with_player_mut(player_guid, |player| {
-                player.self_res_spell = self_res;
-            });
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(player_guid, |player| {
+                    player.self_res_spell = self_res;
+                });
         }
 
         // 12. Send packets to the dead player
-        self.send_death_packets(player_guid, is_pvp_death, death_position, map_id, zone_id, player_race, world)?;
+        self.send_death_packets(
+            player_guid,
+            is_pvp_death,
+            death_position,
+            map_id,
+            zone_id,
+            player_race,
+            world,
+        )?;
 
         info!("Player {:?} killed by {:?}", player_guid, killer_guid);
 
@@ -251,9 +274,13 @@ impl DeathSystem {
         }
 
         // 11. Advance transitional state
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            player.death.death_state = DeathState::Corpse;
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                player.death.death_state = DeathState::Corpse;
+            });
 
         // 12. Broadcast the death update (health=0, flags) to nearby players
         self.broadcast_player_update(player_guid, world);
@@ -262,25 +289,28 @@ impl DeathSystem {
     }
 
     /// Handle CMSG_REPOP_REQUEST - player clicks "Release Spirit".
-    pub fn handle_release_spirit(
-        &self,
-        player_guid: ObjectGuid,
-        world: &World,
-    ) -> Result<()> {
+    pub fn handle_release_spirit(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         // Validate state — accept both Corpse and JustDied (the latter can happen
         // if the client sends CMSG_REPOP_REQUEST before the world tick advances
         // JustDied -> Corpse, mirroring the VMaNGOS HandleRepopRequestOpcode guard).
-        let death_state = world.systems.player.manager().with_player(player_guid, |player| {
-            player.death.death_state
-        }).unwrap_or(DeathState::Alive);
+        let death_state = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| player.death.death_state)
+            .unwrap_or(DeathState::Alive);
 
         match death_state {
             DeathState::Corpse => {} // normal path
             DeathState::JustDied => {
                 // Advance to Corpse so the rest of the function works correctly
-                world.systems.player.manager().with_player_mut(player_guid, |player| {
-                    player.death.death_state = DeathState::Corpse;
-                });
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(player_guid, |player| {
+                        player.death.death_state = DeathState::Corpse;
+                    });
             }
             _ => {
                 warn!("Player {:?} tried to release spirit but is not in Corpse/JustDied state ({:?})", player_guid, death_state);
@@ -293,33 +323,37 @@ impl DeathSystem {
         let in_bg = is_player_in_battleground(world, player_guid);
 
         // Get player data for ghost form and set ghost state
-        let player_data = world.systems.player.manager().with_player_mut(player_guid, |player| {
-            let pending_spells = ghost::build_player_repop(
-                player.race,
-                &mut player.stats.health,
-                &mut player.player_flags,
-                &mut player.death.death_state,
-            );
+        let player_data = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                let pending_spells = ghost::build_player_repop(
+                    player.race,
+                    &mut player.stats.health,
+                    &mut player.player_flags,
+                    &mut player.death.death_state,
+                );
 
-            // Clear the disable-move flag so the ghost can walk
-            player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
+                // Clear the disable-move flag so the ghost can walk
+                player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
 
-            // Apply ghost speed modifier (150% run speed in open world, 100% in BG).
-            let speed_mult = ghost::get_ghost_speed_multiplier(in_bg);
-            player.movement.run_speed = 7.0 * speed_mult;
+                // Apply ghost speed modifier (150% run speed in open world, 100% in BG).
+                let speed_mult = ghost::get_ghost_speed_multiplier(in_bg);
+                player.movement.run_speed = 7.0 * speed_mult;
 
-            // Enable water walking (ghosts walk on water)
-            player.movement.water_walking = true;
-            player.movement.movement_flags |= MOVEMENT_FLAG_WATERWALKING;
+                // Enable water walking (ghosts walk on water)
+                player.movement.water_walking = true;
+                player.movement.movement_flags |= MOVEMENT_FLAG_WATERWALKING;
 
-            (
-                player.race,
-                player.map_id,
-                player.movement.position,
-                player.zone_id,
-                pending_spells,
-            )
-        });
+                (
+                    player.race,
+                    player.map_id,
+                    player.movement.position,
+                    player.zone_id,
+                    pending_spells,
+                )
+            });
 
         let (_player_race, map_id, death_pos, zone_id, pending_spells) = match player_data {
             Some(data) => data,
@@ -347,35 +381,46 @@ impl DeathSystem {
         // Broadcast updated state (ghost flag, health=1) to nearby players
         self.broadcast_player_update(player_guid, world);
 
-        info!("Player {:?} released spirit, now ghost at graveyard", player_guid);
+        info!(
+            "Player {:?} released spirit, now ghost at graveyard",
+            player_guid
+        );
         Ok(())
     }
 
     /// Handle CMSG_RECLAIM_CORPSE - player clicks "Resurrect" near corpse.
-    pub fn handle_reclaim_corpse(
-        &self,
-        player_guid: ObjectGuid,
-        world: &World,
-    ) -> Result<()> {
+    pub fn handle_reclaim_corpse(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         // Validate state and proximity
-        let can_reclaim = world.systems.player.manager().with_player(player_guid, |player| {
-            if player.death.death_state != DeathState::Dead {
-                return false;
-            }
-            // Check proximity to corpse
-            if let Some(corpse_pos) = &player.death.corpse_position {
-                let pos = player.movement.position;
-                is_within_corpse_reclaim_range(
-                    pos.x, pos.y, pos.z,
-                    corpse_pos.x, corpse_pos.y, corpse_pos.z,
-                )
-            } else {
-                false
-            }
-        }).unwrap_or(false);
+        let can_reclaim = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                if player.death.death_state != DeathState::Dead {
+                    return false;
+                }
+                // Check proximity to corpse
+                if let Some(corpse_pos) = &player.death.corpse_position {
+                    let pos = player.movement.position;
+                    is_within_corpse_reclaim_range(
+                        pos.x,
+                        pos.y,
+                        pos.z,
+                        corpse_pos.x,
+                        corpse_pos.y,
+                        corpse_pos.z,
+                    )
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
 
         if !can_reclaim {
-            warn!("Player {:?} cannot reclaim corpse (wrong state or too far)", player_guid);
+            warn!(
+                "Player {:?} cannot reclaim corpse (wrong state or too far)",
+                player_guid
+            );
             return Ok(());
         }
 
@@ -395,17 +440,29 @@ impl DeathSystem {
         world: &World,
     ) -> Result<()> {
         if !accept {
-            world.systems.player.manager().with_player_mut(player_guid, |player| {
-                resurrect::decline_resurrection(&mut player.death);
-            });
-            debug!("Player {:?} declined resurrection from {:?}", player_guid, resurrector_guid);
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(player_guid, |player| {
+                    resurrect::decline_resurrection(&mut player.death);
+                });
+            debug!(
+                "Player {:?} declined resurrection from {:?}",
+                player_guid, resurrector_guid
+            );
             return Ok(());
         }
 
         // Validate the offer matches
-        let valid = world.systems.player.manager().with_player(player_guid, |player| {
-            resurrect::is_resurrection_requested_by(&player.death, resurrector_guid)
-        }).unwrap_or(false);
+        let valid = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                resurrect::is_resurrection_requested_by(&player.death, resurrector_guid)
+            })
+            .unwrap_or(false);
 
         if !valid {
             warn!(
@@ -426,18 +483,22 @@ impl DeathSystem {
     }
 
     /// Handle spirit healer activation
-    pub fn handle_spirit_healer(
-        &self,
-        player_guid: ObjectGuid,
-        world: &World,
-    ) -> Result<()> {
+    pub fn handle_spirit_healer(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         // Validate player is in ghost form
-        let is_ghost = world.systems.player.manager().with_player(player_guid, |player| {
-            player.death.death_state == DeathState::Dead
-        }).unwrap_or(false);
+        let is_ghost = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                player.death.death_state == DeathState::Dead
+            })
+            .unwrap_or(false);
 
         if !is_ghost {
-            warn!("Player {:?} tried to use spirit healer but is not a ghost", player_guid);
+            warn!(
+                "Player {:?} tried to use spirit healer but is not a ghost",
+                player_guid
+            );
             return Ok(());
         }
 
@@ -464,56 +525,66 @@ impl DeathSystem {
         mana: u32,
         world: &World,
     ) -> Result<()> {
-        world.systems.player.manager().with_player_mut(target_guid, |player| {
-            resurrect::offer_resurrection(
-                &mut player.death,
-                caster_guid,
-                location,
-                map_id,
-                instance_id,
-                health,
-                mana,
-            );
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                resurrect::offer_resurrection(
+                    &mut player.death,
+                    caster_guid,
+                    location,
+                    map_id,
+                    instance_id,
+                    health,
+                    mana,
+                );
+            });
 
         // Send SMSG_RESURRECT_REQUEST to the dead player
         let packet = SmsgResurrectRequest {
             caster_guid,
             caster_name: caster_name.to_string(),
-            is_pet: false,
+            causes_sickness: false,
+            use_corpse_timer: true,
         };
-        self.broadcast_mgr.send_to_player(target_guid, packet.to_world_packet());
+        self.broadcast_mgr
+            .send_to_player(target_guid, packet.to_world_packet());
 
-        debug!("Sent resurrection offer to player {:?} from {:?}", target_guid, caster_guid);
+        debug!(
+            "Sent resurrection offer to player {:?} from {:?}",
+            target_guid, caster_guid
+        );
         Ok(())
     }
 
     /// Called every world tick. Updates death timers and handles auto-release.
-    pub fn update(&self,
-        diff: Duration,
-        world: &World,
-    ) -> Result<()> {
+    pub fn update(&self, diff: Duration, world: &World) -> Result<()> {
         let diff_ms = diff.as_millis() as u32;
 
         // Collect players needing auto-release
         let mut auto_release = Vec::new();
 
-        world.systems.player.manager().for_each_player(|guid, player| {
-            match player.death.death_state {
-                DeathState::Corpse => {
-                    // Tick the death timer (corpse expiry)
-                    if tick_death_timer(&mut player.death, diff_ms) {
-                        // Timer expired: auto-release spirit
-                        auto_release.push(guid);
+        world
+            .systems
+            .player
+            .manager()
+            .for_each_player(|guid, player| {
+                match player.death.death_state {
+                    DeathState::Corpse => {
+                        // Tick the death timer (corpse expiry)
+                        if tick_death_timer(&mut player.death, diff_ms) {
+                            // Timer expired: auto-release spirit
+                            auto_release.push(guid);
+                        }
                     }
+                    DeathState::JustAlived => {
+                        // Transitional: advance to Alive on next tick
+                        player.death.death_state = DeathState::Alive;
+                    }
+                    _ => {}
                 }
-                DeathState::JustAlived => {
-                    // Transitional: advance to Alive on next tick
-                    player.death.death_state = DeathState::Alive;
-                }
-                _ => {}
-            }
-        });
+            });
 
         // Process auto-releases (outside the player lock)
         for guid in auto_release {
@@ -529,7 +600,12 @@ impl DeathSystem {
         for event in expired {
             use crate::world::game::corpse::manager::CorpseExpiration;
             match event {
-                CorpseExpiration::ConvertToBones { guid, map_id, position, .. } => {
+                CorpseExpiration::ConvertToBones {
+                    guid,
+                    map_id,
+                    position,
+                    ..
+                } => {
                     // Flip type to Bones in-memory.
                     world.managers.corpse_mgr.convert_to_bones(guid);
                     // Persist: update `corpse_type` to 0 (Bones).
@@ -557,7 +633,11 @@ impl DeathSystem {
                     // with BONES flag set).
                     let _ = (map_id, position);
                 }
-                CorpseExpiration::Remove { guid, map_id, position } => {
+                CorpseExpiration::Remove {
+                    guid,
+                    map_id,
+                    position,
+                } => {
                     self.despawn_corpse(guid, position, map_id, world);
                 }
             }
@@ -582,8 +662,12 @@ impl DeathSystem {
         let gy = {
             let mgr = self.graveyard_mgr.read().unwrap();
             mgr.get_closest_graveyard(
-                death_pos.x, death_pos.y, death_pos.z,
-                map_id, zone_id, zone_id, // area_id = zone_id as fallback
+                death_pos.x,
+                death_pos.y,
+                death_pos.z,
+                map_id,
+                zone_id,
+                zone_id, // area_id = zone_id as fallback
                 team,
             )
         };
@@ -596,14 +680,21 @@ impl DeathSystem {
                     player_guid, zone_id, map_id
                 );
                 // Fall back to homebind position
-                let homebind = world.systems.player.manager().with_player(player_guid, |p| {
-                    (p.homebind_map, Position {
-                        x: p.homebind_x,
-                        y: p.homebind_y,
-                        z: p.homebind_z,
-                        o: 0.0,
-                    })
-                });
+                let homebind = world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player(player_guid, |p| {
+                        (
+                            p.homebind_map,
+                            Position {
+                                x: p.homebind_x,
+                                y: p.homebind_y,
+                                z: p.homebind_z,
+                                o: 0.0,
+                            },
+                        )
+                    });
                 match homebind {
                     Some((hb_map, hb_pos)) => {
                         self.perform_ghost_teleport(player_guid, hb_map, hb_pos, world)?;
@@ -642,7 +733,10 @@ impl DeathSystem {
         let session = match world.session_mgr.get_session_by_player(player_guid) {
             Some(s) => s,
             None => {
-                warn!("No session found for player {:?} during ghost teleport", player_guid);
+                warn!(
+                    "No session found for player {:?} during ghost teleport",
+                    player_guid
+                );
                 return Ok(());
             }
         };
@@ -672,40 +766,12 @@ impl DeathSystem {
         &self,
         player_guid: ObjectGuid,
         is_pvp_death: bool,
-        death_position: Position,
-        map_id: u32,
-        zone_id: u32,
-        race: u8,
+        _death_position: Position,
+        _map_id: u32,
+        _zone_id: u32,
+        _race: u8,
         world: &World,
     ) -> Result<()> {
-        let team = graveyard::team_from_race(race);
-
-        // Find closest graveyard for the release location packet
-        let gy_pos = {
-            let mgr = self.graveyard_mgr.read().unwrap();
-            mgr.get_closest_graveyard(
-                death_position.x, death_position.y, death_position.z,
-                map_id, zone_id, zone_id,
-                team,
-            ).map(|gy| (gy.map_id, gy.position))
-        };
-
-        // SMSG_DEATH_RELEASE_LOC — tells client where graveyard is
-        if let Some((gy_map, gy_pos)) = gy_pos {
-            let release_loc = SmsgDeathReleaseLocation {
-                map_id: gy_map,
-                position: gy_pos,
-            };
-            self.broadcast_mgr.send_to_player(player_guid, release_loc.to_world_packet());
-        } else {
-            // No graveyard found — send death position as fallback
-            let release_loc = SmsgDeathReleaseLocation {
-                map_id,
-                position: death_position,
-            };
-            self.broadcast_mgr.send_to_player(player_guid, release_loc.to_world_packet());
-        }
-
         // SMSG_CORPSE_RECLAIM_DELAY — greys out "Resurrect" button.
         // Use the escalating-delay ladder based on the player's recent-death
         // window (vmangos behavior: 30s / 60s / 120s depending on how recently
@@ -724,7 +790,8 @@ impl DeathSystem {
         let reclaim_delay = SmsgCorpseReclaimDelay {
             delay_ms: delay_s * 1000,
         };
-        self.broadcast_mgr.send_to_player(player_guid, reclaim_delay.to_world_packet());
+        self.broadcast_mgr
+            .send_to_player(player_guid, reclaim_delay.to_world_packet());
 
         debug!(
             "Sent death packets to player {:?}, reclaim delay: {}s",
@@ -741,85 +808,98 @@ impl DeathSystem {
         method: ResurrectionMethod,
         world: &World,
     ) -> Result<()> {
-        // Send SmsgPreResurrect to clear the death screen
-        let pre_res = SmsgPreResurrect { player_guid };
-        self.broadcast_mgr.send_to_player(player_guid, pre_res.to_world_packet());
-
         // Get resurrection data
-        let res_data = world.systems.player.manager().with_player_mut(player_guid, |player| {
-            let max_health = player.stats.max_health;
-            let max_mana = player.power.max_mana();
-            let level = player.level;
-            let race = player.race;
+        let res_data = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                let max_health = player.stats.max_health;
+                let max_mana = player.power.max_mana();
+                let level = player.level;
+                let race = player.race;
 
-            let (health, mana, teleport_pos, teleport_map) = match method {
-                ResurrectionMethod::CorpseRun => {
-                    let (h, m) = resurrect::resurrect_at_corpse(
-                        &mut player.death,
-                        max_health,
-                        max_mana,
-                    );
-                    // Teleport to corpse position
-                    let pos = player.death.corpse_position.unwrap_or(player.movement.position);
-                    let map = player.death.corpse_map_id.unwrap_or(player.map_id);
-                    (h, m, Some(pos), Some(map))
-                }
-                ResurrectionMethod::SpiritHealer => {
-                    let (h, m) = resurrect::resurrect_at_spirit_healer(
-                        &mut player.death,
-                        max_health,
-                        max_mana,
-                    );
-                    // Stay at current position (graveyard)
-                    (h, m, None, None)
-                }
-                ResurrectionMethod::PlayerSpell => {
-                    if let Some((h, m, pos, map)) = resurrect::resurrect_from_spell(
-                        &mut player.death,
-                    ) {
+                let (health, mana, teleport_pos, teleport_map) = match method {
+                    ResurrectionMethod::CorpseRun => {
+                        let (h, m) =
+                            resurrect::resurrect_at_corpse(&mut player.death, max_health, max_mana);
+                        // Teleport to corpse position
+                        let pos = player
+                            .death
+                            .corpse_position
+                            .unwrap_or(player.movement.position);
+                        let map = player.death.corpse_map_id.unwrap_or(player.map_id);
                         (h, m, Some(pos), Some(map))
-                    } else {
+                    }
+                    ResurrectionMethod::SpiritHealer => {
+                        let (h, m) = resurrect::resurrect_at_spirit_healer(
+                            &mut player.death,
+                            max_health,
+                            max_mana,
+                        );
+                        // Stay at current position (graveyard)
+                        (h, m, None, None)
+                    }
+                    ResurrectionMethod::PlayerSpell => {
+                        if let Some((h, m, pos, map)) =
+                            resurrect::resurrect_from_spell(&mut player.death)
+                        {
+                            (h, m, Some(pos), Some(map))
+                        } else {
+                            (max_health / 2, max_mana / 2, None, None)
+                        }
+                    }
+                    _ => {
+                        // Other methods not yet implemented
                         (max_health / 2, max_mana / 2, None, None)
                     }
-                }
-                _ => {
-                    // Other methods not yet implemented
-                    (max_health / 2, max_mana / 2, None, None)
-                }
-            };
+                };
 
-            // Set health and mana
-            player.stats.health = health;
-            player.power.set_mana(mana);
+                // Set health and mana
+                player.stats.health = health;
+                player.power.set_mana(mana);
 
-            // Remove ghost form; collect spell IDs whose auras we need to drop.
-            let auras_to_remove = ghost::remove_ghost_form(player.race, &mut player.player_flags);
+                // Remove ghost form; collect spell IDs whose auras we need to drop.
+                let auras_to_remove =
+                    ghost::remove_ghost_form(player.race, &mut player.player_flags);
 
-            // Restore normal run speed
-            player.movement.run_speed = 7.0;
+                // Restore normal run speed
+                player.movement.run_speed = 7.0;
 
-            // Clear water walking
-            player.movement.water_walking = false;
-            player.movement.movement_flags &= !MOVEMENT_FLAG_WATERWALKING;
+                // Clear water walking
+                player.movement.water_walking = false;
+                player.movement.movement_flags &= !MOVEMENT_FLAG_WATERWALKING;
 
-            // Clear unit flags
-            player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
+                // Clear unit flags
+                player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
 
-            // Capture and clear corpse data — we remove the world-object
-            // *after* the lock is dropped to avoid re-entering the map's
-            // grid lock under a player write lock.
-            let corpse_info = match (player.death.corpse_guid, player.death.corpse_position, player.death.corpse_map_id) {
-                (Some(guid), Some(pos), Some(map)) => Some((guid, pos, map)),
-                _ => None,
-            };
-            player.death.corpse_position = None;
-            player.death.corpse_map_id = None;
-            player.death.corpse_guid = None;
+                // Capture and clear corpse data — we remove the world-object
+                // *after* the lock is dropped to avoid re-entering the map's
+                // grid lock under a player write lock.
+                let corpse_info = match (
+                    player.death.corpse_guid,
+                    player.death.corpse_position,
+                    player.death.corpse_map_id,
+                ) {
+                    (Some(guid), Some(pos), Some(map)) => Some((guid, pos, map)),
+                    _ => None,
+                };
+                player.death.corpse_position = None;
+                player.death.corpse_map_id = None;
+                player.death.corpse_guid = None;
 
-            (teleport_pos, teleport_map, level, race, auras_to_remove, corpse_info)
-        });
+                (
+                    teleport_pos,
+                    teleport_map,
+                    level,
+                    race,
+                    auras_to_remove,
+                    corpse_info,
+                )
+            });
 
-        let (teleport_pos, teleport_map, level, race, auras_to_remove, corpse_info) = match res_data {
+        let (teleport_pos, teleport_map, level, race, auras_to_remove, corpse_info) = match res_data
+        {
             Some(data) => data,
             None => {
                 warn!("Player {:?} not found for resurrection", player_guid);
@@ -884,51 +964,55 @@ impl DeathSystem {
         use crate::world::game::player::auras::aura::{Aura, AuraFlags};
         use crate::world::game::player::auras::effects;
 
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            let negative_flags = AuraFlags {
-                is_positive: false,
-                is_negative: true,
-                is_passive: false,
-                can_be_cancelled: false,
-                is_hidden: false,
-                is_permanent: false,
-            };
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                let negative_flags = AuraFlags {
+                    is_positive: false,
+                    is_negative: true,
+                    is_passive: false,
+                    can_be_cancelled: false,
+                    is_hidden: false,
+                    is_permanent: false,
+                };
 
-            // Effect 0: -75% all stats
-            let stat_aura = Aura::new(
-                spell_id,
-                player_guid,     // self-applied
-                0,               // effect_index
-                effects::AURA_MOD_TOTAL_STAT_PERCENTAGE,
-                -1,              // misc_value: -1 = all stats
-                -75,             // base_value: -75%
-                Some(duration_ms),
-                0,               // no periodic
-                1,               // max stacks
-                0,               // no charges
-                negative_flags,
-            );
+                // Effect 0: -75% all stats
+                let stat_aura = Aura::new(
+                    spell_id,
+                    player_guid, // self-applied
+                    0,           // effect_index
+                    effects::AURA_MOD_TOTAL_STAT_PERCENTAGE,
+                    -1,  // misc_value: -1 = all stats
+                    -75, // base_value: -75%
+                    Some(duration_ms),
+                    0, // no periodic
+                    1, // max stacks
+                    0, // no charges
+                    negative_flags,
+                );
 
-            // Effect 1: -75% damage done
-            let damage_aura = Aura::new(
-                spell_id,
-                player_guid,
-                1,               // effect_index
-                effects::AURA_MOD_DAMAGE_PERCENT_DONE,
-                127,             // misc_value: all school mask
-                -75,             // base_value: -75%
-                Some(duration_ms),
-                0,
-                1,
-                0,
-                negative_flags,
-            );
+                // Effect 1: -75% damage done
+                let damage_aura = Aura::new(
+                    spell_id,
+                    player_guid,
+                    1, // effect_index
+                    effects::AURA_MOD_DAMAGE_PERCENT_DONE,
+                    127, // misc_value: all school mask
+                    -75, // base_value: -75%
+                    Some(duration_ms),
+                    0,
+                    1,
+                    0,
+                    negative_flags,
+                );
 
-            player.auras.container.add_aura(stat_aura);
-            player.auras.container.add_aura(damage_aura);
-            player.auras.needs_client_update = true;
-            player.auras.needs_stat_recalc = true;
-        });
+                player.auras.container.add_aura(stat_aura);
+                player.auras.container.add_aura(damage_aura);
+                player.auras.needs_client_update = true;
+                player.auras.needs_stat_recalc = true;
+            });
     }
 
     /// Pick a self-resurrection spell id at death time, vmangos-style.
@@ -952,22 +1036,36 @@ impl DeathSystem {
         ];
 
         // Check soulstone auras first.
-        let soulstone = world.systems.player.manager().with_player(player_guid, |player| {
-            for (aura_spell, rez_spell) in SOULSTONE_MAP {
-                if player.auras.container.has_aura(*aura_spell) {
-                    return *rez_spell;
+        let soulstone = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                for (aura_spell, rez_spell) in SOULSTONE_MAP {
+                    if player.auras.container.has_aura(*aura_spell) {
+                        return *rez_spell;
+                    }
                 }
-            }
-            0u32
-        }).unwrap_or(0);
+                0u32
+            })
+            .unwrap_or(0);
         if soulstone != 0 {
             return soulstone;
         }
 
         // Twisting Nether (Warlock) — aura 23701 → rez 23700.
-        let twisting = world.systems.player.manager().with_player(player_guid, |player| {
-            if player.auras.container.has_aura(23701) { 23700 } else { 0 }
-        }).unwrap_or(0);
+        let twisting = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                if player.auras.container.has_aura(23701) {
+                    23700
+                } else {
+                    0
+                }
+            })
+            .unwrap_or(0);
         if twisting != 0 {
             return twisting;
         }
@@ -975,13 +1073,20 @@ impl DeathSystem {
         // Reincarnation (Shaman): requires spell 20608 learned, 21169 not on
         // cooldown. Item check (17030 Ankh) is simplified for now — the real
         // vmangos path consumes one Ankh from inventory on activation.
-        let has_reincarn = world.systems.player.manager().with_player(player_guid, |player| {
-            player.spells.learned_spells.contains(&20608)
-        }).unwrap_or(false);
+        let has_reincarn = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                player.spells.learned_spells.contains(&20608)
+            })
+            .unwrap_or(false);
         if has_reincarn {
             // 21169 is the rez spell id. If it's off cooldown, return it.
             if let Ok(false) = crate::world::game::player::spells::cooldowns::is_on_cooldown(
-                player_guid, 21169, world,
+                player_guid,
+                21169,
+                world,
             ) {
                 return 21169;
             }
@@ -997,21 +1102,36 @@ impl DeathSystem {
         use crate::world::game::player::death::corpse::create_corpse_from_player;
 
         // Pull appearance + equipment + position info.
-        let snapshot = world.systems.player.manager().with_player(player_guid, |player| {
-            (
-                player.race,
-                player.gender,
-                player.skin,
-                player.face,
-                player.hair_style,
-                player.hair_color,
-                player.facial_hair,
-                player.map_id,
-                player.instance_id,
-                player.movement.position,
-            )
-        });
-        let (race, gender, skin, face, hair_style, hair_color, facial_hair, map_id, instance_id, pos) = match snapshot {
+        let snapshot = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                (
+                    player.race,
+                    player.gender,
+                    player.skin,
+                    player.face,
+                    player.hair_style,
+                    player.hair_color,
+                    player.facial_hair,
+                    player.map_id,
+                    player.instance_id,
+                    player.movement.position,
+                )
+            });
+        let (
+            race,
+            gender,
+            skin,
+            face,
+            hair_style,
+            hair_color,
+            facial_hair,
+            map_id,
+            instance_id,
+            pos,
+        ) = match snapshot {
             Some(v) => v,
             None => return,
         };
@@ -1052,7 +1172,10 @@ impl DeathSystem {
 
         // Register with manager + map.
         world.managers.corpse_mgr.add(corpse.clone());
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
         map.add_corpse(corpse_guid, pos);
 
         // Persist to the `corpse` DB table so the corpse survives relog.
@@ -1068,9 +1191,13 @@ impl DeathSystem {
         });
 
         // Wire the GUID back onto the player so reclaim/resurrect can find it.
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            player.death.corpse_guid = Some(corpse_guid);
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                player.death.corpse_guid = Some(corpse_guid);
+            });
 
         debug!(
             "Spawned corpse {:?} for player {:?} on map {} at ({:.1},{:.1},{:.1})",
@@ -1149,7 +1276,10 @@ impl DeathSystem {
             };
 
             world.managers.corpse_mgr.add(corpse);
-            let map = world.managers.map_mgr.get_or_create_map(row.map, row.instance);
+            let map = world
+                .managers
+                .map_mgr
+                .get_or_create_map(row.map, row.instance);
             map.add_corpse(corpse_guid, pos);
         }
 
@@ -1169,44 +1299,52 @@ impl DeathSystem {
         use crate::world::game::player::auras::aura::{Aura, AuraFlags};
         use crate::world::game::player::auras::effects;
 
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            let flags = AuraFlags {
-                is_positive: true,
-                is_negative: false,
-                is_passive: true,
-                can_be_cancelled: false,
-                is_hidden: false,
-                is_permanent: true,
-            };
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                let flags = AuraFlags {
+                    is_positive: true,
+                    is_negative: false,
+                    is_passive: true,
+                    can_be_cancelled: false,
+                    is_hidden: false,
+                    is_permanent: true,
+                };
 
-            let aura = Aura::new(
-                spell_id,
-                player_guid, // self-applied
-                0,           // effect_index 0
-                effects::AURA_GHOST,
-                0,  // misc_value: unused for AURA_GHOST
-                0,  // base_value: unused
-                None, // permanent until removed
-                0,  // no periodic
-                1,  // max stacks
-                0,  // no charges
-                flags,
-            );
+                let aura = Aura::new(
+                    spell_id,
+                    player_guid, // self-applied
+                    0,           // effect_index 0
+                    effects::AURA_GHOST,
+                    0,    // misc_value: unused for AURA_GHOST
+                    0,    // base_value: unused
+                    None, // permanent until removed
+                    0,    // no periodic
+                    1,    // max stacks
+                    0,    // no charges
+                    flags,
+                );
 
-            player.auras.container.add_aura(aura);
-            player.auras.needs_client_update = true;
-        });
+                player.auras.container.add_aura(aura);
+                player.auras.needs_client_update = true;
+            });
     }
 
     /// Remove a ghost aura from the player's container. Mirrors
     /// `apply_ghost_aura` — used during resurrection to clear the ghost state.
     fn remove_ghost_aura(&self, player_guid: ObjectGuid, spell_id: u32, world: &World) {
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            let removed = player.auras.container.remove_aura(spell_id, 0);
-            if removed.is_some() {
-                player.auras.needs_client_update = true;
-            }
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                let removed = player.auras.container.remove_aura(spell_id, 0);
+                if removed.is_some() {
+                    player.auras.needs_client_update = true;
+                }
+            });
     }
 
     /// Send SMSG_MOVE_WATER_WALK / SMSG_MOVE_LAND_WALK to let the client
@@ -1312,9 +1450,13 @@ impl DeathSystem {
         // Mark the player's visibility as dirty + force_immediate so the
         // visibility system re-evaluates who can see this player and sends
         // updated create/destroy packets on the next tick.
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            player.visibility.dirty = true;
-            player.visibility.force_immediate = true;
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                player.visibility.dirty = true;
+                player.visibility.force_immediate = true;
+            });
     }
 }
