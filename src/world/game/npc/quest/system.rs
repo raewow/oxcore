@@ -8,33 +8,35 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
+use crate::shared::database::characters::models::quest::{QuestStatusRewardedRow, QuestStatusRow};
 use crate::shared::database::characters::repositories::QuestRepositoryTrait;
 use crate::shared::messages::gossip::SmsgGossipComplete;
-use crate::shared::database::characters::models::quest::{QuestStatusRewardedRow, QuestStatusRow};
 use crate::shared::messages::quest::{
     QuestListItem, RequestItemInfo, RewardItemInfo, SmsgQuestgiverOfferRewardV2,
     SmsgQuestgiverQuestComplete, SmsgQuestgiverQuestDetailsV2, SmsgQuestgiverQuestListV2,
-    SmsgQuestgiverRequestItemsV2, SmsgQuestgiverStatus, SmsgQuestlogFull,
-    SmsgQuestupdateAddItem, SmsgQuestupdateAddKill, SmsgQuestupdateComplete,
-    SmsgQuestupdateFailed, SmsgQuestupdateFailedtimer,
+    SmsgQuestgiverRequestItemsV2, SmsgQuestgiverStatus, SmsgQuestlogFull, SmsgQuestupdateAddItem,
+    SmsgQuestupdateAddKill, SmsgQuestupdateComplete, SmsgQuestupdateFailed,
+    SmsgQuestupdateFailedtimer,
 };
-use crate::shared::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
+use crate::shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
-use crate::world::game::common::update_fields::PLAYER_QUEST_LOG_1_1;
+use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerTrait};
+use crate::world::game::common::update_fields::PLAYER_QUEST_LOG_1_1;
 use crate::world::game::creature::CreatureManager;
-use crate::world::game::inventory::InventorySystem;
+use crate::world::game::inventory::{AddItemResult, GoldResult, InventorySystem};
 use crate::world::game::items::ItemManager;
 use crate::world::game::player::experience::ExperienceSystem;
-use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::game::player::PlayerManager;
 use crate::world::World;
 
 use super::manager::QuestManager;
 use super::types::{
-    DialogStatus, QuestProgress, QuestSpecialFlags, QuestStatus, QuestTemplate,
-    MAX_QUEST_LOG_SIZE, QUEST_OBJECTIVES_COUNT,
+    DialogStatus, QuestProgress, QuestSpecialFlags, QuestStatus, QuestTemplate, MAX_QUEST_LOG_SIZE,
+    QUEST_OBJECTIVES_COUNT,
 };
 
 /// Quest system - handles business logic and packet sending
@@ -159,12 +161,124 @@ impl QuestSystem {
         status
     }
 
+    fn quest_giver_relations(
+        &self,
+        quest_giver_guid: ObjectGuid,
+        world: &World,
+    ) -> Option<(u32, Vec<u32>, Vec<u32>)> {
+        if let Some(entry) = self
+            .creature_mgr
+            .get_creature(quest_giver_guid)
+            .map(|c| c.entry)
+        {
+            return Some((
+                entry,
+                self.manager.get_creature_quest_relations(entry),
+                self.manager.get_creature_involved_relations(entry),
+            ));
+        }
+
+        world
+            .managers
+            .gameobject_mgr
+            .get_gameobject(quest_giver_guid)
+            .map(|go| {
+                (
+                    go.entry,
+                    self.manager.get_go_quest_relations(go.entry),
+                    self.manager.get_go_involved_relations(go.entry),
+                )
+            })
+    }
+
+    fn quest_giver_can_start_or_finish(
+        &self,
+        quest_giver_guid: ObjectGuid,
+        quest_id: u32,
+        world: &World,
+    ) -> bool {
+        self.quest_giver_relations(quest_giver_guid, world)
+            .map(|(_, start_quests, finish_quests)| {
+                start_quests.contains(&quest_id) || finish_quests.contains(&quest_id)
+            })
+            .unwrap_or(false)
+    }
+
+    fn can_store_reward_items(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        reward_choice: u32,
+    ) -> Option<bool> {
+        let mut rewards = Vec::new();
+
+        let choice_count = quest.get_rew_choice_items_count() as u32;
+        if choice_count > 0 {
+            if reward_choice >= choice_count {
+                return None;
+            }
+            let idx = reward_choice as usize;
+            rewards.push((
+                quest.rew_choice_item_id[idx],
+                quest.rew_choice_item_count[idx],
+            ));
+        }
+
+        for i in 0..super::types::QUEST_REWARDS_COUNT {
+            rewards.push((quest.rew_item_id[i], quest.rew_item_count[i]));
+        }
+
+        let mut free_slots = self
+            .inventory
+            .cache()
+            .count_free_inventory_slots(player_guid);
+        for (item_id, count) in rewards {
+            if item_id == 0 || count == 0 {
+                continue;
+            }
+
+            let max_stack = self
+                .item_mgr
+                .get_template(item_id)
+                .map(|template| template.stackable.max(1))
+                .unwrap_or(1);
+            let existing_space = if max_stack > 1 {
+                self.inventory
+                    .find_items_by_entry(player_guid, item_id)
+                    .into_iter()
+                    .filter_map(|item_guid| {
+                        self.inventory
+                            .cache()
+                            .get_item(player_guid, item_guid)
+                            .map(|item| item.read().count)
+                    })
+                    .map(|carried| max_stack.saturating_sub(carried))
+                    .sum::<u32>()
+            } else {
+                0
+            };
+            let remaining = count.saturating_sub(existing_space);
+            let slots_needed = if remaining == 0 {
+                0
+            } else {
+                (remaining + max_stack - 1) / max_stack
+            };
+
+            if slots_needed > free_slots {
+                return Some(false);
+            }
+            free_slots -= slots_needed;
+        }
+
+        Some(true)
+    }
+
     /// Validate if player can take quest (12 validation checks)
     pub fn can_take_quest(
         &self,
         player_guid: ObjectGuid,
         quest: &QuestTemplate,
-        _world: &World,
+        world: &World,
     ) -> bool {
         let Some(player) = self.player_mgr.get_player(player_guid) else {
             return false;
@@ -172,6 +286,15 @@ impl QuestSystem {
 
         let active: HashSet<u32> = player.active_quests.iter().map(|q| q.quest_id).collect();
         let rewarded: HashSet<u32> = player.rewarded_quests.iter().copied().collect();
+
+        if !quest.is_active {
+            return false;
+        }
+
+        // Already active
+        if active.contains(&quest.id) {
+            return false;
+        }
 
         // 1. Already rewarded (non-repeatable)
         if rewarded.contains(&quest.id) && !quest.is_repeatable() {
@@ -205,7 +328,8 @@ impl QuestSystem {
         // 5. Skill requirement
         if quest.required_skill != 0 {
             let has_skill = player.skills.skills.iter().any(|(id, skill_data)| {
-                *id == quest.required_skill as u16 && (skill_data.current_value as u32) >= quest.required_skill_value
+                *id == quest.required_skill as u16
+                    && (skill_data.current_value as u32) >= quest.required_skill_value
             });
             if !has_skill {
                 return false;
@@ -242,16 +366,63 @@ impl QuestSystem {
             }
         }
 
+        // 8b. Do not offer an earlier chain step or breadcrumb once the next quest is active/rewarded.
+        if quest.next_quest_id > 0 {
+            let next_quest_id = quest.next_quest_id as u32;
+            if active.contains(&next_quest_id) || rewarded.contains(&next_quest_id) {
+                return false;
+            }
+        }
+        if quest.next_quest_in_chain > 0
+            && (active.contains(&quest.next_quest_in_chain)
+                || rewarded.contains(&quest.next_quest_in_chain))
+        {
+            return false;
+        }
+
+        for active_quest_id in &active {
+            if let Some(active_quest) = self.manager.get_quest_template(*active_quest_id) {
+                if active_quest.breadcrumb_for_quest_id == quest.id as i32 {
+                    return false;
+                }
+            }
+        }
+
         // 9. Reputation requirement (min)
-        // TODO: Implement reputation requirement check using ReputationSystem
-        // For now, skip this check as it requires looking up faction_id -> rep_list_id mapping
-        let _ = quest.required_min_rep_faction;
-        let _ = quest.required_min_rep_value;
+        if quest.required_min_rep_faction != 0 {
+            let base_rep = world
+                .dbc
+                .read()
+                .get_faction(quest.required_min_rep_faction)
+                .map(|entry| entry.get_base_reputation(player.race, player.class))
+                .unwrap_or(0);
+            let reputation = player
+                .reputation
+                .get_standing_by_faction_id(quest.required_min_rep_faction)
+                .map(|standing| standing.get_absolute_reputation(base_rep))
+                .unwrap_or(base_rep);
+            if reputation < quest.required_min_rep_value {
+                return false;
+            }
+        }
 
         // 10. Reputation requirement (max)
-        // TODO: Implement reputation requirement check using ReputationSystem
-        let _ = quest.required_max_rep_faction;
-        let _ = quest.required_max_rep_value;
+        if quest.required_max_rep_faction != 0 {
+            let base_rep = world
+                .dbc
+                .read()
+                .get_faction(quest.required_max_rep_faction)
+                .map(|entry| entry.get_base_reputation(player.race, player.class))
+                .unwrap_or(0);
+            let reputation = player
+                .reputation
+                .get_standing_by_faction_id(quest.required_max_rep_faction)
+                .map(|standing| standing.get_absolute_reputation(base_rep))
+                .unwrap_or(base_rep);
+            if reputation >= quest.required_max_rep_value {
+                return false;
+            }
+        }
 
         // 11. Timed quest check
         if quest.special_flags.contains(QuestSpecialFlags::TIMED) {
@@ -286,26 +457,131 @@ impl QuestSystem {
 
     /// Get quest status for player
     pub fn get_quest_status(&self, player_guid: ObjectGuid, quest_id: u32) -> QuestStatus {
-        self.player_mgr
-            .get_player(player_guid)
-            .map(|p| {
-                if let Some(progress) = p.active_quests.iter().find(|q| q.quest_id == quest_id) {
-                    if let Some(template) = self.manager.get_quest_template(quest_id) {
-                        if progress.is_complete(&template) {
-                            QuestStatus::Complete
-                        } else {
-                            QuestStatus::Incomplete
-                        }
-                    } else {
-                        QuestStatus::Incomplete
-                    }
-                } else if p.rewarded_quests.contains(&quest_id) {
+        let Some(template) = self.manager.get_quest_template(quest_id) else {
+            return QuestStatus::None;
+        };
+
+        let Some(active_complete) = self.player_mgr.with_player(player_guid, |p| {
+            p.active_quests
+                .iter()
+                .find(|q| q.quest_id == quest_id)
+                .map(|progress| progress.is_complete(&template))
+        }) else {
+            return QuestStatus::None;
+        };
+
+        match active_complete {
+            Some(true) => QuestStatus::Complete,
+            Some(false) => {
+                if self.sync_item_objectives_from_inventory(player_guid, &template) {
                     QuestStatus::Complete
                 } else {
-                    QuestStatus::None
+                    QuestStatus::Incomplete
                 }
+            }
+            None => QuestStatus::None,
+        }
+    }
+
+    fn inventory_satisfies_required_items(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+    ) -> bool {
+        for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
+            if quest.req_item_id[i] != 0 && quest.req_item_count[i] > 0 {
+                let carried = self
+                    .inventory
+                    .count_items(player_guid, quest.req_item_id[i]);
+                if carried < quest.req_item_count[i] {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    fn sync_item_objectives_from_inventory(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+    ) -> bool {
+        self.player_mgr
+            .with_player_mut(player_guid, |p| {
+                let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest.id)
+                else {
+                    return false;
+                };
+
+                let mut changed = false;
+                for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
+                    if quest.req_item_id[i] == 0 || quest.req_item_count[i] == 0 {
+                        continue;
+                    }
+
+                    let carried = self
+                        .inventory
+                        .count_items(player_guid, quest.req_item_id[i])
+                        .min(quest.req_item_count[i]);
+                    if carried > progress.item_count[i] {
+                        progress.item_count[i] = carried;
+                        changed = true;
+                    }
+                }
+
+                if changed {
+                    progress.mark_changed();
+                }
+
+                progress.is_complete(quest)
             })
-            .unwrap_or(QuestStatus::None)
+            .unwrap_or(false)
+    }
+
+    fn active_quest_is_complete_without_sync(
+        &self,
+        player_guid: ObjectGuid,
+        quest_id: u32,
+        quest: &QuestTemplate,
+    ) -> bool {
+        self.player_mgr
+            .with_player(player_guid, |p| {
+                p.active_quests
+                    .iter()
+                    .find(|q| q.quest_id == quest_id)
+                    .map(|progress| progress.is_complete(quest))
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)
+    }
+
+    fn active_quest_is_complete(
+        &self,
+        player_guid: ObjectGuid,
+        quest_id: u32,
+        quest: &QuestTemplate,
+    ) -> bool {
+        self.active_quest_is_complete_without_sync(player_guid, quest_id, quest)
+            || self.sync_item_objectives_from_inventory(player_guid, quest)
+    }
+
+    fn pack_quest_count_state(progress: &QuestProgress) -> u32 {
+        const QUEST_STATE_COMPLETE: u32 = 0x01;
+        const QUEST_STATE_FAIL: u32 = 0x02;
+
+        let mut packed = 0u32;
+        for i in 0..QUEST_OBJECTIVES_COUNT {
+            let count = progress.creature_or_go_count[i].min(63);
+            packed |= count << (i as u32 * 6);
+        }
+
+        let state = match progress.status {
+            QuestStatus::Complete => QUEST_STATE_COMPLETE,
+            QuestStatus::Failed => QUEST_STATE_FAIL,
+            _ => 0,
+        };
+        packed | (state << 24)
     }
 
     /// Send quest giver status packet
@@ -342,9 +618,7 @@ impl QuestSystem {
             status,
         };
 
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 
     /// Prepare quest menu items for gossip integration
@@ -356,6 +630,32 @@ impl QuestSystem {
     ) -> Vec<super::types::GossipQuestData> {
         let start_quests = self.manager.get_creature_quest_relations(entry);
         let finish_quests = self.manager.get_creature_involved_relations(entry);
+        self.prepare_quest_menu_from_relations(player_guid, start_quests, finish_quests, world)
+    }
+
+    pub fn prepare_gameobject_quest_menu(
+        &self,
+        player_guid: ObjectGuid,
+        entry: u32,
+        world: &World,
+    ) -> Vec<super::types::GossipQuestData> {
+        let start_quests = self.manager.get_go_quest_relations(entry);
+        let finish_quests = self.manager.get_go_involved_relations(entry);
+        self.prepare_quest_menu_from_relations(player_guid, start_quests, finish_quests, world)
+    }
+
+    fn prepare_quest_menu_from_relations(
+        &self,
+        player_guid: ObjectGuid,
+        start_quests: Vec<u32>,
+        finish_quests: Vec<u32>,
+        world: &World,
+    ) -> Vec<super::types::GossipQuestData> {
+        let rewarded_quests: HashSet<u32> = self
+            .player_mgr
+            .get_player(player_guid)
+            .map(|p| p.rewarded_quests.iter().copied().collect())
+            .unwrap_or_default();
 
         let mut quest_items = Vec::new();
         let mut seen = HashSet::new();
@@ -371,7 +671,7 @@ impl QuestSystem {
 
             let status = self.get_quest_status(player_guid, quest_id);
 
-            if status == QuestStatus::Complete {
+            if status == QuestStatus::Complete && !rewarded_quests.contains(&quest_id) {
                 // Yellow ? for complete (ready to turn in)
                 quest_items.push(super::types::GossipQuestData {
                     quest_id,
@@ -479,7 +779,7 @@ impl QuestSystem {
             title: &quest.title,
             details: &quest.details,
             objectives: &quest.objectives,
-            activate_accept: false,
+            activate_accept: true,
             quest_flags: crate::shared::messages::quest::QuestFlags(quest.quest_flags.bits()),
             reward_choices: &reward_choices,
             reward_items: &reward_items,
@@ -489,9 +789,7 @@ impl QuestSystem {
             details_emote_delay: quest.details_emote_delay,
         };
 
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
         Ok(())
     }
 
@@ -508,20 +806,27 @@ impl QuestSystem {
             return Ok(());
         };
 
-        // Validate that the NPC is a valid quest starter for this quest
-        let Some(entry) = self
+        // Validate that the quest giver is either a valid NPC starter or the
+        // quest-starting item in the player's inventory.
+        let creature_entry = self
             .creature_mgr
             .get_creature(quest_giver_guid)
-            .map(|c| c.entry)
-        else {
-            warn!("Quest giver {:?} not found", quest_giver_guid);
-            return Ok(());
-        };
+            .map(|c| c.entry);
+        let starts_from_object = self
+            .quest_giver_relations(quest_giver_guid, world)
+            .map(|(_, start_quests, _)| start_quests.contains(&quest_id))
+            .unwrap_or(false);
+        let starts_from_item = self
+            .inventory
+            .cache()
+            .get_item(player_guid, quest_giver_guid)
+            .and_then(|item| self.item_mgr.get_template(item.read().entry))
+            .map(|template| template.start_quest == quest_id)
+            .unwrap_or(false);
 
-        let start_quests = self.manager.get_creature_quest_relations(entry);
-        if !start_quests.contains(&quest_id) {
+        if !starts_from_object && !starts_from_item {
             warn!(
-                "Player {:?} tried to accept quest {} from NPC {:?} who is not a quest starter for this quest",
+                "Player {:?} tried to accept quest {} from invalid quest giver {:?}",
                 player_guid, quest_id, quest_giver_guid
             );
             return Ok(());
@@ -542,10 +847,22 @@ impl QuestSystem {
 
         if !can_add {
             let msg = SmsgQuestlogFull;
-            self.broadcast_mgr
-                .send_msg_to_player(player_guid, msg)
-                ;
+            self.broadcast_mgr.send_msg_to_player(player_guid, msg);
             return Ok(());
+        }
+
+        if quest.src_item_id != 0 && quest.src_item_count > 0 {
+            let result = self
+                .inventory
+                .add_item(player_guid, quest.src_item_id, quest.src_item_count)
+                .await;
+            if !matches!(result, AddItemResult::Success { .. }) {
+                warn!(
+                    "Player {:?} cannot accept quest {}: failed to add source item {} x{}: {:?}",
+                    player_guid, quest_id, quest.src_item_id, quest.src_item_count, result
+                );
+                return Ok(());
+            }
         }
 
         // Add quest to player and get the slot index
@@ -554,9 +871,39 @@ impl QuestSystem {
             p.active_quests.push(QuestProgress::new(quest_id));
             slot
         }) else {
-            warn!("Player {:?} not found when accepting quest {}", player_guid, quest_id);
+            warn!(
+                "Player {:?} not found when accepting quest {}",
+                player_guid, quest_id
+            );
             return Ok(());
         };
+
+        let accepted_row = QuestStatusRow {
+            guid: player_guid.counter(),
+            quest: quest_id,
+            status: QuestStatus::Incomplete as u8,
+            rewarded: false,
+            explored: false,
+            timer: 0,
+            mob_count1: 0,
+            mob_count2: 0,
+            mob_count3: 0,
+            mob_count4: 0,
+            item_count1: 0,
+            item_count2: 0,
+            item_count3: 0,
+            item_count4: 0,
+            reward_choice: 0,
+        };
+        let repository = Arc::clone(&self.repository);
+        tokio::spawn(async move {
+            if let Err(e) = repository.save_quest_status(&accepted_row).await {
+                warn!(
+                    "Failed to persist accepted quest {} for player {:?}: {}",
+                    quest_id, player_guid, e
+                );
+            }
+        });
 
         // Update PLAYER_QUEST_LOG_* update fields so the client shows the quest
         // Each quest slot uses 3 fields: QUEST_ID, COUNT_STATE, TIMER
@@ -567,7 +914,8 @@ impl QuestSystem {
 
         let slot_u32 = slot as u32;
         let quest_id_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_ID_OFFSET;
-        let count_state_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_COUNT_STATE_OFFSET;
+        let count_state_field =
+            PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_COUNT_STATE_OFFSET;
         let timer_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_TIME_OFFSET;
 
         // Convert world ObjectGuid to world::common ObjectGuid for the message
@@ -576,28 +924,58 @@ impl QuestSystem {
         let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
             ValuesUpdateBlock::new(world_guid, ObjectType::Player)
                 .set_field(quest_id_field, quest_id)
-                .set_field(count_state_field, 0)  // Initialize count/state to 0
-                .set_field(timer_field, 0),       // Set timer to 0
+                .set_field(count_state_field, 0) // Initialize count/state to 0
+                .set_field(timer_field, 0), // Set timer to 0
         ));
 
         self.broadcast_mgr
-            .send_msg_to_player(player_guid, values_update)
-            ;
+            .send_msg_to_player(player_guid, values_update);
+
+        if quest.src_spell != 0 {
+            if let Err(e) = world
+                .systems
+                .spells
+                .cast_spell(player_guid, quest.src_spell, Some(player_guid), true, world)
+                .await
+            {
+                warn!(
+                    "Failed to cast source spell {} for quest {} on {:?}: {}",
+                    quest.src_spell, quest_id, player_guid, e
+                );
+            }
+        }
+
+        if quest.is_auto_complete() || self.sync_item_objectives_from_inventory(player_guid, &quest)
+        {
+            self.player_mgr.with_player_mut(player_guid, |p| {
+                if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id)
+                {
+                    if progress.is_complete(&quest) || quest.is_auto_complete() {
+                        progress.status = QuestStatus::Complete;
+                        progress.mark_changed();
+                    }
+                }
+            });
+
+            let complete_msg = SmsgQuestupdateComplete { quest_id };
+            self.broadcast_mgr
+                .send_msg_to_player(player_guid, complete_msg);
+        }
 
         // Send gossip complete to close quest window
         let msg = SmsgGossipComplete;
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
         // Fire OnQuestAccept Lua callback if a gossip script is registered for this NPC
-        if let Some(script) = world.managers.lua_mgr.get_gossip_script(entry) {
-            let player_snap = build_player_snapshot(player_guid, world);
-            let actions = world.managers.lua_mgr.with_lua(|lua| {
-                script.on_quest_accept(lua, &player_snap, quest_giver_guid, quest_id)
-            });
-            if !actions.is_empty() {
-                execute_gossip_actions(actions, player_guid, quest_giver_guid, world).await?;
+        if let Some(entry) = creature_entry {
+            if let Some(script) = world.managers.lua_mgr.get_gossip_script(entry) {
+                let player_snap = build_player_snapshot(player_guid, world);
+                let actions = world.managers.lua_mgr.with_lua(|lua| {
+                    script.on_quest_accept(lua, &player_snap, quest_giver_guid, quest_id)
+                });
+                if !actions.is_empty() {
+                    execute_gossip_actions(actions, player_guid, quest_giver_guid, world).await?;
+                }
             }
         }
 
@@ -613,101 +991,114 @@ impl QuestSystem {
     /// Called when the Vanilla client sends CMSG_QUESTGIVER_COMPLETE_QUEST.
     /// This is sent when clicking any active/incomplete/complete quest in the quest list.
     /// - Incomplete quests: send SMSG_QUESTGIVER_REQUEST_ITEMS with completable=false
-    /// - Complete quests: send SMSG_QUESTGIVER_OFFER_REWARD
+    /// - Complete quests: send SMSG_QUESTGIVER_REQUEST_ITEMS with completable=true
     pub async fn handle_quest_complete(
         &self,
         player_guid: ObjectGuid,
         quest_giver_guid: ObjectGuid,
         quest_id: u32,
-        _world: &World,
+        world: &World,
     ) -> Result<()> {
         let Some(quest) = self.manager.get_quest_template(quest_id) else {
             warn!("Cannot complete quest {}: not found", quest_id);
             return Ok(());
         };
 
-        // Validate quest giver can complete this quest
-        let Some(entry) = self
-            .creature_mgr
-            .get_creature(quest_giver_guid)
-            .map(|c| c.entry)
-        else {
-            warn!("Quest giver {:?} not found", quest_giver_guid);
-            return Ok(());
-        };
-
-        // Validate that the NPC is involved in this quest - check both starter and ender relations
-        let finish_quests = self.manager.get_creature_involved_relations(entry);
-        let start_quests = self.manager.get_creature_quest_relations(entry);
-
-        if !finish_quests.contains(&quest_id) && !start_quests.contains(&quest_id) {
+        if !self.quest_giver_can_start_or_finish(quest_giver_guid, quest_id, world) {
             warn!(
-                "Player {:?} tried to complete quest {} from NPC {:?} who is not involved in this quest",
+                "Player {:?} tried to complete quest {} from quest giver {:?} who is not involved in this quest",
                 player_guid, quest_id, quest_giver_guid
             );
             return Ok(());
         }
 
         // Check quest completion status
-        let is_complete = self
-            .player_mgr
-            .get_player(player_guid)
-            .map(|p| {
-                if let Some(progress) = p.active_quests.iter().find(|q| q.quest_id == quest_id) {
-                    progress.is_complete(&quest)
-                } else {
-                    false
+        let is_complete = self.active_quest_is_complete(player_guid, quest_id, &quest);
+
+        self.send_request_items(
+            player_guid,
+            quest_giver_guid,
+            &quest,
+            is_complete || quest.is_auto_complete(),
+        );
+
+        Ok(())
+    }
+
+    fn send_request_items(
+        &self,
+        player_guid: ObjectGuid,
+        quest_giver_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        completable: bool,
+    ) {
+        let req_items: Vec<RequestItemInfo> = quest
+            .req_item_id
+            .iter()
+            .zip(quest.req_item_count.iter())
+            .filter(|(id, _)| **id != 0)
+            .map(|(id, count)| {
+                let display_id = self
+                    .item_mgr
+                    .get_template(*id)
+                    .map(|t| t.display_id)
+                    .unwrap_or(0);
+                RequestItemInfo {
+                    item_id: *id,
+                    count: *count,
+                    display_id,
                 }
             })
-            .unwrap_or(false);
+            .collect();
 
-        if !is_complete && !quest.is_auto_complete() {
-            // Quest not complete - send request items dialog showing what's still needed
-            let req_items: Vec<RequestItemInfo> = quest
-                .req_item_id
-                .iter()
-                .zip(quest.req_item_count.iter())
-                .filter(|(id, _)| **id != 0)
-                .map(|(id, count)| {
-                    let display_id = self
-                        .item_mgr
-                        .get_template(*id)
-                        .map(|t| t.display_id)
-                        .unwrap_or(0);
-                    RequestItemInfo {
-                        item_id: *id,
-                        count: *count,
-                        display_id,
-                    }
-                })
-                .collect();
+        let msg = SmsgQuestgiverRequestItemsV2 {
+            guid: quest_giver_guid,
+            quest_id: quest.id,
+            title: &quest.title,
+            request_items_text: &quest.request_items_text,
+            complete_emote: quest.complete_emote,
+            incomplete_emote: quest.incomplete_emote,
+            completable,
+            close_on_cancel: false,
+            req_money: if quest.rew_or_req_money < 0 {
+                (-quest.rew_or_req_money) as u32
+            } else {
+                0
+            },
+            req_items: &req_items,
+        };
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+    }
 
-            let msg = SmsgQuestgiverRequestItemsV2 {
-                guid: quest_giver_guid,
-                quest_id: quest.id,
-                title: &quest.title,
-                request_items_text: &quest.request_items_text,
-                complete_emote: quest.complete_emote,
-                incomplete_emote: quest.incomplete_emote,
-                completable: false,
-                close_on_cancel: false,
-                req_money: if quest.rew_or_req_money < 0 {
-                    (-quest.rew_or_req_money) as u32
-                } else {
-                    0
-                },
-                req_items: &req_items,
-            };
-            self.broadcast_mgr
-                .send_msg_to_player(player_guid, msg)
-                ;
+    pub fn handle_quest_reward_request(
+        &self,
+        player_guid: ObjectGuid,
+        quest_giver_guid: ObjectGuid,
+        quest_id: u32,
+        world: &World,
+    ) -> Result<()> {
+        let Some(quest) = self.manager.get_quest_template(quest_id) else {
+            return Ok(());
+        };
+
+        if !self.quest_giver_can_start_or_finish(quest_giver_guid, quest_id, world) {
+            warn!(
+                "Player {:?} tried to request reward for quest {} from invalid quest giver {:?}",
+                player_guid, quest_id, quest_giver_guid
+            );
             return Ok(());
         }
 
-        // Quest is complete (or auto-complete) - send offer reward dialog
-        self.send_offer_reward(player_guid, quest_giver_guid, &quest)
-            ;
+        let is_complete = self.active_quest_is_complete(player_guid, quest_id, &quest);
 
+        if !is_complete && !quest.is_auto_complete() {
+            return Ok(());
+        }
+        if !self.inventory_satisfies_required_items(player_guid, &quest) {
+            return Ok(());
+        }
+
+        self.send_offer_reward(player_guid, quest_giver_guid, &quest);
         Ok(())
     }
 
@@ -767,15 +1158,13 @@ impl QuestSystem {
             reward_choices: &reward_choices,
             reward_items: &reward_items,
             money_reward: quest.rew_or_req_money.max(0) as u32,
+            quest_flags: crate::shared::messages::quest::QuestFlags(quest.quest_flags.bits()),
             rew_spell: quest.rew_spell,
-            rew_spell_cast: quest.rew_spell_cast,
             offer_reward_emote: quest.offer_reward_emote,
             offer_reward_emote_delay: quest.offer_reward_emote_delay,
         };
 
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 
     /// Handle quest reward selection
@@ -791,21 +1180,79 @@ impl QuestSystem {
             return Ok(());
         };
 
-        // Validate quest is complete
-        let is_complete = self
+        if !self.quest_giver_can_start_or_finish(quest_giver_guid, quest_id, world) {
+            warn!(
+                "Player {:?} tried to reward quest {} from invalid quest giver {:?}",
+                player_guid, quest_id, quest_giver_guid
+            );
+            return Ok(());
+        }
+
+        if self
             .player_mgr
             .get_player(player_guid)
-            .map(|p| {
-                if let Some(progress) = p.active_quests.iter().find(|q| q.quest_id == quest_id) {
-                    progress.is_complete(&quest)
-                } else {
-                    false
-                }
-            })
-            .unwrap_or(false);
+            .map(|p| p.rewarded_quests.contains(&quest_id) && !quest.is_repeatable())
+            .unwrap_or(true)
+        {
+            return Ok(());
+        }
+
+        let Some(can_store_rewards) =
+            self.can_store_reward_items(player_guid, &quest, reward_choice)
+        else {
+            warn!(
+                "Player {:?} tried to reward quest {} with invalid reward choice {}",
+                player_guid, quest_id, reward_choice
+            );
+            return Ok(());
+        };
+
+        if !can_store_rewards {
+            warn!(
+                "Player {:?} cannot reward quest {}: not enough inventory space",
+                player_guid, quest_id
+            );
+            return Ok(());
+        }
+
+        if quest.rew_or_req_money < 0 {
+            let required_money = (-quest.rew_or_req_money) as u32;
+            if self.inventory.get_money(player_guid).unwrap_or(0) < required_money {
+                warn!(
+                    "Player {:?} cannot reward quest {}: missing required money {}",
+                    player_guid, quest_id, required_money
+                );
+                return Ok(());
+            }
+        }
+
+        // Validate quest is complete
+        let is_complete = self.active_quest_is_complete(player_guid, quest_id, &quest);
 
         if !is_complete && !quest.is_auto_complete() {
             return Ok(());
+        }
+
+        if !self.inventory_satisfies_required_items(player_guid, &quest) {
+            warn!(
+                "Player {:?} tried to reward quest {} without required items in inventory",
+                player_guid, quest_id
+            );
+            return Ok(());
+        }
+
+        if quest.rew_or_req_money < 0 {
+            let required_money = (-quest.rew_or_req_money) as u32;
+            if !matches!(
+                self.inventory.remove_gold(player_guid, required_money),
+                GoldResult::Success { .. }
+            ) {
+                warn!(
+                    "Player {:?} failed to pay {} copper for quest {}",
+                    player_guid, required_money, quest_id
+                );
+                return Ok(());
+            }
         }
 
         // Get player level for XP calculation
@@ -830,24 +1277,28 @@ impl QuestSystem {
                         break;
                     }
 
-                    // Remove items - the inventory system will handle counting
-                    let remove_result = self
+                    let available = self
                         .inventory
-                        .remove_item(player_guid, item_guid, remaining);
+                        .cache()
+                        .get_item(player_guid, item_guid)
+                        .map(|item| item.read().count)
+                        .unwrap_or(0);
+                    let remove_count = remaining.min(available);
+                    if remove_count == 0 {
+                        continue;
+                    }
+
+                    let remove_result =
+                        self.inventory
+                            .remove_item(player_guid, item_guid, remove_count);
                     match remove_result {
-                        crate::world::game::inventory::RemoveItemResult::ItemRemoved {
-                            ..
-                        } => {
-                            // Get the count that was removed by checking before removal
-                            remaining = 0;
+                        crate::world::game::inventory::RemoveItemResult::ItemRemoved { .. } => {
+                            remaining = remaining.saturating_sub(remove_count);
                         }
                         crate::world::game::inventory::RemoveItemResult::CountReduced {
-                            new_count,
                             ..
                         } => {
-                            // Partial removal - calculate how many were removed
-                            let removed = count - new_count;
-                            remaining = remaining.saturating_sub(removed);
+                            remaining = remaining.saturating_sub(remove_count);
                         }
                         crate::world::game::inventory::RemoveItemResult::InsufficientCount => {
                             // Not enough items, skip
@@ -893,8 +1344,7 @@ impl QuestSystem {
             use crate::shared::game::experience::XpSource;
             let _ = self
                 .experience
-                .add_xp(player_guid, xp_reward, XpSource::Quest, None, 0.0)
-                ;
+                .add_xp(player_guid, xp_reward, XpSource::Quest, None, 0.0);
         }
 
         // 3. Give money reward (if positive)
@@ -905,26 +1355,49 @@ impl QuestSystem {
 
         // 4. Give reward items (choice + fixed)
         // Give the chosen reward item
-        let choice_index = reward_choice as usize;
-        if choice_index > 0 && choice_index <= super::types::QUEST_REWARD_CHOICES_COUNT {
-            let idx = choice_index - 1; // Convert to 0-based
+        if quest.get_rew_choice_items_count() > 0 {
+            let idx = reward_choice as usize;
             if quest.rew_choice_item_id[idx] != 0 && quest.rew_choice_item_count[idx] > 0 {
-                self.inventory
+                let result = self
+                    .inventory
                     .add_item(
                         player_guid,
                         quest.rew_choice_item_id[idx],
                         quest.rew_choice_item_count[idx],
                     )
-                    ;
+                    .await;
+                if !matches!(result, AddItemResult::Success { .. }) {
+                    warn!(
+                        "Failed to add chosen reward item {} x{} for quest {} to {:?}: {:?}",
+                        quest.rew_choice_item_id[idx],
+                        quest.rew_choice_item_count[idx],
+                        quest_id,
+                        player_guid,
+                        result
+                    );
+                    return Ok(());
+                }
             }
         }
 
         // Give fixed reward items
         for i in 0..super::types::QUEST_REWARDS_COUNT {
             if quest.rew_item_id[i] != 0 && quest.rew_item_count[i] > 0 {
-                self.inventory
+                let result = self
+                    .inventory
                     .add_item(player_guid, quest.rew_item_id[i], quest.rew_item_count[i])
-                    ;
+                    .await;
+                if !matches!(result, AddItemResult::Success { .. }) {
+                    warn!(
+                        "Failed to add fixed reward item {} x{} for quest {} to {:?}: {:?}",
+                        quest.rew_item_id[i],
+                        quest.rew_item_count[i],
+                        quest_id,
+                        player_guid,
+                        result
+                    );
+                    return Ok(());
+                }
             }
         }
 
@@ -939,34 +1412,54 @@ impl QuestSystem {
                     rep_value,
                     world,
                 ) {
-                    warn!("[QUEST] Failed to grant rep for faction {} on quest {}: {}", faction_id, quest_id, e);
+                    warn!(
+                        "[QUEST] Failed to grant rep for faction {} on quest {}: {}",
+                        faction_id, quest_id, e
+                    );
                 }
             }
         }
 
-        // 6. Cast reward spell if any
-        // TODO: Implement spell casting when SpellSystem integration is available
-        // if quest.rew_spell > 0 {
-        //     world.systems.spell.cast_spell(player_guid, quest.rew_spell);
-        // }
-
         // Remove from active quests
+        let rewarded_choice_item_id = if quest.get_rew_choice_items_count() > 0 {
+            quest.rew_choice_item_id[reward_choice as usize]
+        } else {
+            0
+        };
         self.player_mgr.with_player_mut(player_guid, |p| {
+            if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id) {
+                progress.reward_choice = rewarded_choice_item_id;
+                progress.status = QuestStatus::Complete;
+                progress.rewarded = true;
+                progress.mark_changed();
+            }
             p.active_quests.retain(|q| q.quest_id != quest_id);
             p.rewarded_quests.insert(quest_id);
         });
 
+        let rewarded_row = QuestStatusRewardedRow {
+            guid: player_guid.counter(),
+            quest: quest_id,
+            reward_choice: rewarded_choice_item_id,
+        };
+        let repository = Arc::clone(&self.repository);
+        tokio::spawn(async move {
+            if let Err(e) = repository.save_rewarded_quest(&rewarded_row).await {
+                warn!(
+                    "Failed to persist rewarded quest {} for player {:?}: {}",
+                    quest_id, player_guid, e
+                );
+            }
+        });
+
         // Send completion packet
         let msg = SmsgQuestupdateComplete { quest_id };
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
         // Send gossip complete to close quest window
         let gossip_complete = SmsgGossipComplete;
         self.broadcast_mgr
-            .send_msg_to_player(player_guid, gossip_complete)
-            ;
+            .send_msg_to_player(player_guid, gossip_complete);
 
         // Send quest complete packet with XP info
         let complete_msg = SmsgQuestgiverQuestComplete {
@@ -974,8 +1467,9 @@ impl QuestSystem {
             xp: xp_reward,
         };
         self.broadcast_mgr
-            .send_msg_to_player(player_guid, complete_msg)
-            ;
+            .send_msg_to_player(player_guid, complete_msg);
+
+        self.send_quest_giver_status(player_guid, quest_giver_guid, world);
 
         info!(
             "Player {:?} completed quest {} with reward choice {} (XP: {}, Money: {})",
@@ -989,12 +1483,16 @@ impl QuestSystem {
         // Check for follow-up quest in chain
         if quest.next_quest_in_chain != 0 {
             let next_quest_id = quest.next_quest_in_chain;
-            
+
             // Get NPC entry to check if they can give the next quest
-            if let Some(entry) = self.creature_mgr.get_creature(quest_giver_guid).map(|c| c.entry) {
+            if let Some(entry) = self
+                .creature_mgr
+                .get_creature(quest_giver_guid)
+                .map(|c| c.entry)
+            {
                 // Check if this NPC can start the next quest
                 let start_quests = self.manager.get_creature_quest_relations(entry);
-                
+
                 if start_quests.contains(&next_quest_id) {
                     // Check if the player can take the next quest
                     if let Some(next_quest) = self.manager.get_quest_template(next_quest_id) {
@@ -1003,9 +1501,14 @@ impl QuestSystem {
                                 "Showing follow-up quest {} to player {:?} from NPC {:?}",
                                 next_quest_id, player_guid, quest_giver_guid
                             );
-                            
+
                             // Send the follow-up quest details
-                            self.send_quest_details(player_guid, quest_giver_guid, next_quest_id, world)?;
+                            self.send_quest_details(
+                                player_guid,
+                                quest_giver_guid,
+                                next_quest_id,
+                                world,
+                            )?;
                         } else {
                             info!(
                                 "Player {:?} cannot take follow-up quest {} (prerequisites not met)",
@@ -1023,7 +1526,11 @@ impl QuestSystem {
         }
 
         // Fire OnQuestRewarded Lua callback if a gossip script is registered for this NPC
-        let npc_entry = self.creature_mgr.get_creature(quest_giver_guid).map(|c| c.entry).unwrap_or(0);
+        let npc_entry = self
+            .creature_mgr
+            .get_creature(quest_giver_guid)
+            .map(|c| c.entry)
+            .unwrap_or(0);
         if npc_entry > 0 {
             if let Some(script) = world.managers.lua_mgr.get_gossip_script(npc_entry) {
                 let player_snap = build_player_snapshot(player_guid, world);
@@ -1037,7 +1544,9 @@ impl QuestSystem {
         }
 
         // Fire OnQuestRewarded Lua callback for GO quest givers
-        let go_entry = world.managers.gameobject_mgr
+        let go_entry = world
+            .managers
+            .gameobject_mgr
             .with_gameobject(quest_giver_guid, |go| go.entry)
             .unwrap_or(0);
         if go_entry > 0 {
@@ -1082,22 +1591,49 @@ impl QuestSystem {
             emote: 0,
             quests: &quests,
         };
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
+        Ok(())
+    }
+
+    pub fn send_gameobject_quest_list(
+        &self,
+        player_guid: ObjectGuid,
+        quest_giver_guid: ObjectGuid,
+        entry: u32,
+        world: &World,
+    ) -> Result<()> {
+        let quest_items = self.prepare_gameobject_quest_menu(player_guid, entry, world);
+
+        let quests: Vec<QuestListItem> = quest_items
+            .iter()
+            .map(|q| QuestListItem {
+                quest_id: q.quest_id,
+                icon: q.icon,
+                level: q.level,
+                title: q.title.clone(),
+            })
+            .collect();
+
+        let msg = SmsgQuestgiverQuestListV2 {
+            guid: quest_giver_guid,
+            title: "Quests",
+            emote_delay: 0,
+            emote: 0,
+            quests: &quests,
+        };
+
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
         Ok(())
     }
 
     /// Initialize the quest system
     pub async fn init(&self) -> Result<()> {
-
         Ok(())
     }
 
     /// Shutdown the quest system
     pub async fn shutdown(&self) -> Result<()> {
-
         Ok(())
     }
 
@@ -1113,10 +1649,36 @@ impl QuestSystem {
     ) {
         use super::types::QuestUpdateState;
 
+        let rewarded_set: std::collections::HashSet<u32> =
+            rewarded_rows.into_iter().map(|r| r.quest).collect();
+        let mut seen_active = HashSet::new();
+
         // Map DB rows → QuestProgress, then insert into player
         let mut active_quests: Vec<super::types::QuestProgress> = active_rows
             .into_iter()
-            .map(|row| {
+            .filter_map(|row| {
+                if row.rewarded || rewarded_set.contains(&row.quest) {
+                    debug!(
+                        "[QUEST] Skipping rewarded quest {} from active login restore for {:?}",
+                        row.quest, player_guid
+                    );
+                    return None;
+                }
+                if !seen_active.insert(row.quest) {
+                    warn!(
+                        "[QUEST] Skipping duplicate active quest {} during login restore for {:?}",
+                        row.quest, player_guid
+                    );
+                    return None;
+                }
+                if !self.manager.has_quest_template(row.quest) {
+                    warn!(
+                        "[QUEST] Skipping unknown active quest {} during login restore for {:?}",
+                        row.quest, player_guid
+                    );
+                    return None;
+                }
+
                 let status = match row.status {
                     0 => super::types::QuestStatus::None,
                     1 => super::types::QuestStatus::Complete,
@@ -1126,13 +1688,25 @@ impl QuestSystem {
                     5 => super::types::QuestStatus::Failed,
                     _ => super::types::QuestStatus::Incomplete,
                 };
-                super::types::QuestProgress {
+                if !matches!(
+                    status,
+                    super::types::QuestStatus::Incomplete
+                        | super::types::QuestStatus::Complete
+                        | super::types::QuestStatus::Failed
+                ) {
+                    debug!(
+                        "[QUEST] Skipping non-log quest {} with status {:?} during login restore for {:?}",
+                        row.quest, status, player_guid
+                    );
+                    return None;
+                }
+                Some(super::types::QuestProgress {
                     quest_id: row.quest,
                     status,
                     rewarded: row.rewarded,
                     explored: row.explored,
                     timer: row.timer,
-                    reward_choice: 0,
+                    reward_choice: row.reward_choice,
                     creature_or_go_count: [
                         row.mob_count1,
                         row.mob_count2,
@@ -1146,12 +1720,10 @@ impl QuestSystem {
                         row.item_count4,
                     ],
                     update_state: QuestUpdateState::Unchanged,
-                }
+                })
             })
+            .take(MAX_QUEST_LOG_SIZE)
             .collect();
-
-        let rewarded_set: std::collections::HashSet<u32> =
-            rewarded_rows.into_iter().map(|r| r.quest).collect();
 
         // Restore into player state
         self.player_mgr.with_player_mut(player_guid, |player| {
@@ -1233,24 +1805,29 @@ impl QuestSystem {
                     continue;
                 }
 
-                let update_result = self.player_mgr.with_player_mut(player_guid, |p| {
-                    if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id) {
-                        let current = progress.item_count[i];
-                        let required = quest.req_item_count[i];
+                let update_result = self
+                    .player_mgr
+                    .with_player_mut(player_guid, |p| {
+                        if let Some(progress) =
+                            p.active_quests.iter_mut().find(|q| q.quest_id == quest_id)
+                        {
+                            let current = progress.item_count[i];
+                            let required = quest.req_item_count[i];
 
-                        if current < required {
-                            let new_count = (current + count).min(required);
-                            progress.item_count[i] = new_count;
-                            progress.mark_changed();
-                            let is_complete = progress.is_complete(&quest);
-                            Some((new_count, required, is_complete))
+                            if current < required {
+                                let new_count = (current + count).min(required);
+                                progress.item_count[i] = new_count;
+                                progress.mark_changed();
+                                let is_complete = progress.is_complete(&quest);
+                                Some((new_count, required, is_complete))
+                            } else {
+                                None // Already at max
+                            }
                         } else {
-                            None // Already at max
+                            None
                         }
-                    } else {
-                        None
-                    }
-                }).flatten();
+                    })
+                    .flatten();
 
                 let Some((new_count, req_count, is_complete)) = update_result else {
                     continue;
@@ -1270,8 +1847,12 @@ impl QuestSystem {
 
                 if is_complete {
                     let complete_msg = SmsgQuestupdateComplete { quest_id };
-                    self.broadcast_mgr.send_msg_to_player(player_guid, complete_msg);
-                    info!("[QUEST] Quest {} complete for player {:?}", quest_id, player_guid);
+                    self.broadcast_mgr
+                        .send_msg_to_player(player_guid, complete_msg);
+                    info!(
+                        "[QUEST] Quest {} complete for player {:?}",
+                        quest_id, player_guid
+                    );
                 }
 
                 break; // Only one slot per quest per item
@@ -1286,11 +1867,8 @@ impl QuestSystem {
     pub fn update_quest_timers(&self, diff_ms: u32, world: &World) {
         use super::types::QuestSpecialFlags;
 
-        let online_players: Vec<ObjectGuid> = world
-            .session_mgr
-            .get_all_sessions()
-            .into_iter()
-            .collect();
+        let online_players: Vec<ObjectGuid> =
+            world.session_mgr.get_all_sessions().into_iter().collect();
 
         for player_guid in online_players {
             // Collect quests with active timers
@@ -1315,20 +1893,27 @@ impl QuestSystem {
                 let new_timer = timer.saturating_sub(diff_ms);
 
                 // Update timer and check for expiry
-                let expired = self.player_mgr.with_player_mut(player_guid, |p| {
-                    if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id) {
-                        progress.timer = new_timer;
-                        progress.mark_changed();
-                        new_timer == 0
-                    } else {
-                        false
-                    }
-                }).unwrap_or(false);
+                let expired = self
+                    .player_mgr
+                    .with_player_mut(player_guid, |p| {
+                        if let Some(progress) =
+                            p.active_quests.iter_mut().find(|q| q.quest_id == quest_id)
+                        {
+                            progress.timer = new_timer;
+                            progress.mark_changed();
+                            new_timer == 0
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
 
                 if expired {
                     // Mark quest as failed
                     self.player_mgr.with_player_mut(player_guid, |p| {
-                        if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id) {
+                        if let Some(progress) =
+                            p.active_quests.iter_mut().find(|q| q.quest_id == quest_id)
+                        {
                             progress.status = super::types::QuestStatus::Failed;
                             progress.mark_changed();
                         }
@@ -1339,9 +1924,13 @@ impl QuestSystem {
                     self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
                     let timer_msg = SmsgQuestupdateFailedtimer { quest_id };
-                    self.broadcast_mgr.send_msg_to_player(player_guid, timer_msg);
+                    self.broadcast_mgr
+                        .send_msg_to_player(player_guid, timer_msg);
 
-                    info!("[QUEST] Quest {} timed out for player {:?}", quest_id, player_guid);
+                    info!(
+                        "[QUEST] Quest {} timed out for player {:?}",
+                        quest_id, player_guid
+                    );
                 }
             }
         }
@@ -1377,10 +1966,16 @@ impl QuestSystem {
             .delete_quest_status(player_guid.counter(), quest_id)
             .await?;
 
-        // Remove from player's active quests
-        self.player_mgr.with_player_mut(player_guid, |p| {
-            p.active_quests.retain(|q| q.quest_id != quest_id);
-        });
+        let old_len = self
+            .player_mgr
+            .with_player_mut(player_guid, |p| {
+                let old_len = p.active_quests.len();
+                if slot < p.active_quests.len() {
+                    p.active_quests.remove(slot);
+                }
+                old_len
+            })
+            .unwrap_or(0);
 
         // Clear PLAYER_QUEST_LOG_* update fields so the client removes the quest from UI
         // Each quest slot uses 3 fields: QUEST_ID, COUNT_STATE, TIMER
@@ -1389,24 +1984,42 @@ impl QuestSystem {
         const QUEST_COUNT_STATE_OFFSET: u32 = 1;
         const QUEST_TIME_OFFSET: u32 = 2;
 
-        let slot_u32 = slot as u32;
-        let quest_id_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_ID_OFFSET;
-        let count_state_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_COUNT_STATE_OFFSET;
-        let timer_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_TIME_OFFSET;
-
         // Convert world ObjectGuid to world::common ObjectGuid for the message
         let world_guid = ObjectGuid::from_low(player_guid.counter());
 
-        let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
-            ValuesUpdateBlock::new(world_guid, ObjectType::Player)
-                .set_field(quest_id_field, 0)      // Clear quest ID
-                .set_field(count_state_field, 0)   // Clear count/state
-                .set_field(timer_field, 0),        // Clear timer
-        ));
+        let active_quests = self
+            .player_mgr
+            .get_player(player_guid)
+            .map(|p| p.active_quests.clone())
+            .unwrap_or_default();
+
+        let mut values = ValuesUpdateBlock::new(world_guid, ObjectType::Player);
+        for slot_idx in slot..old_len {
+            let slot_u32 = slot_idx as u32;
+            let quest_id_field =
+                PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_ID_OFFSET;
+            let count_state_field =
+                PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_COUNT_STATE_OFFSET;
+            let timer_field =
+                PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_TIME_OFFSET;
+
+            if let Some(progress) = active_quests.get(slot_idx) {
+                values = values
+                    .set_field(quest_id_field, progress.quest_id)
+                    .set_field(count_state_field, Self::pack_quest_count_state(progress))
+                    .set_field(timer_field, progress.timer);
+            } else {
+                values = values
+                    .set_field(quest_id_field, 0)
+                    .set_field(count_state_field, 0)
+                    .set_field(timer_field, 0);
+            }
+        }
+
+        let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values));
 
         self.broadcast_mgr
-            .send_msg_to_player(player_guid, values_update)
-            ;
+            .send_msg_to_player(player_guid, values_update);
 
         info!(
             "Player {:?} abandoned quest {} from slot {:?}",
@@ -1461,33 +2074,41 @@ impl QuestSystem {
                 }
 
                 // Found a matching objective — check and update count
-                let update_result = self.player_mgr.with_player_mut(player_guid, |p| {
-                    if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id) {
-                        let current = progress.creature_or_go_count[obj_idx];
-                        let required = quest.req_creature_or_go_count[obj_idx];
+                let update_result = self
+                    .player_mgr
+                    .with_player_mut(player_guid, |p| {
+                        if let Some(progress) =
+                            p.active_quests.iter_mut().find(|q| q.quest_id == quest_id)
+                        {
+                            let current = progress.creature_or_go_count[obj_idx];
+                            let required = quest.req_creature_or_go_count[obj_idx];
 
-                        if current < required {
-                            progress.creature_or_go_count[obj_idx] += 1;
-                            progress.mark_changed();
-                            let new_count = progress.creature_or_go_count[obj_idx];
+                            if current < required {
+                                progress.creature_or_go_count[obj_idx] += 1;
+                                progress.mark_changed();
+                                let new_count = progress.creature_or_go_count[obj_idx];
 
-                            // Collect all counts for quest log field update
-                            let all_counts = progress.creature_or_go_count;
-                            let is_complete = progress.is_complete(&quest);
+                                // Collect all counts for quest log field update
+                                let all_counts = progress.creature_or_go_count;
+                                let is_complete = progress.is_complete(&quest);
 
-                            // Find quest slot index
-                            let slot = p.active_quests.iter().position(|q| q.quest_id == quest_id);
+                                // Find quest slot index
+                                let slot =
+                                    p.active_quests.iter().position(|q| q.quest_id == quest_id);
 
-                            Some((new_count, required, all_counts, is_complete, slot))
+                                Some((new_count, required, all_counts, is_complete, slot))
+                            } else {
+                                None // Already at max
+                            }
                         } else {
-                            None // Already at max
+                            None
                         }
-                    } else {
-                        None
-                    }
-                }).flatten();
+                    })
+                    .flatten();
 
-                let Some((new_count, required_count, all_counts, is_complete, slot)) = update_result else {
+                let Some((new_count, required_count, all_counts, is_complete, slot)) =
+                    update_result
+                else {
                     break; // Quest not found or already at max
                 };
 
@@ -1518,8 +2139,9 @@ impl QuestSystem {
                     const MAX_QUEST_OFFSET: u32 = 3;
                     const QUEST_COUNT_STATE_OFFSET: u32 = 1;
 
-                    let count_state_field =
-                        PLAYER_QUEST_LOG_1_1 + (slot as u32) * MAX_QUEST_OFFSET + QUEST_COUNT_STATE_OFFSET;
+                    let count_state_field = PLAYER_QUEST_LOG_1_1
+                        + (slot as u32) * MAX_QUEST_OFFSET
+                        + QUEST_COUNT_STATE_OFFSET;
 
                     // Pack all 4 objective counters into 6-bit fields
                     let mut packed: u32 = 0;
@@ -1528,20 +2150,24 @@ impl QuestSystem {
                         packed |= count << (i as u32 * 6);
                     }
 
-                    let world_guid =
-                        ObjectGuid::from_low(player_guid.counter());
+                    let world_guid = ObjectGuid::from_low(player_guid.counter());
                     let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
                         ValuesUpdateBlock::new(world_guid, ObjectType::Player)
                             .set_field(count_state_field, packed),
                     ));
-                    self.broadcast_mgr.send_msg_to_player(player_guid, values_update);
+                    self.broadcast_mgr
+                        .send_msg_to_player(player_guid, values_update);
                 }
 
                 // If quest is now complete, notify client
                 if is_complete {
                     let complete_msg = SmsgQuestupdateComplete { quest_id };
-                    self.broadcast_mgr.send_msg_to_player(player_guid, complete_msg);
-                    info!("[QUEST] Quest {} is now complete for player {:?}", quest_id, player_guid);
+                    self.broadcast_mgr
+                        .send_msg_to_player(player_guid, complete_msg);
+                    info!(
+                        "[QUEST] Quest {} is now complete for player {:?}",
+                        quest_id, player_guid
+                    );
                 }
 
                 break; // Only update first matching objective per quest
@@ -1556,34 +2182,46 @@ impl QuestSystem {
     /// QuestStatus::Complete, and sends the completion packet.
     pub fn handle_area_event_complete(&self, player_guid: ObjectGuid, quest_id: u32) {
         let Some(quest) = self.manager.get_quest_template(quest_id) else {
-            tracing::debug!("[QUEST] handle_area_event_complete: quest {} not found", quest_id);
+            tracing::debug!(
+                "[QUEST] handle_area_event_complete: quest {} not found",
+                quest_id
+            );
             return;
         };
 
-        let marked = self.player_mgr.with_player_mut(player_guid, |p| {
-            let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id) else {
-                return false;
-            };
-            if progress.is_complete(&quest) {
-                return false; // Already complete
-            }
-            // Fill all creature/go objective counts to their required values
-            for i in 0..4 {
-                progress.creature_or_go_count[i] = quest.req_creature_or_go_count[i];
-            }
-            // Fill all item counts
-            for i in 0..4 {
-                progress.item_count[i] = quest.req_item_count[i];
-            }
-            progress.explored = true;
-            progress.mark_changed();
-            true
-        }).unwrap_or(false);
+        let marked = self
+            .player_mgr
+            .with_player_mut(player_guid, |p| {
+                let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id)
+                else {
+                    return false;
+                };
+                if progress.is_complete(&quest) {
+                    return false; // Already complete
+                }
+                // Fill all creature/go objective counts to their required values
+                for i in 0..4 {
+                    progress.creature_or_go_count[i] = quest.req_creature_or_go_count[i];
+                }
+                // Fill all item counts
+                for i in 0..4 {
+                    progress.item_count[i] = quest.req_item_count[i];
+                }
+                progress.explored = true;
+                progress.mark_changed();
+                true
+            })
+            .unwrap_or(false);
 
         if marked {
             let complete_msg = crate::shared::messages::quest::SmsgQuestupdateComplete { quest_id };
-            self.broadcast_mgr.send_msg_to_player(player_guid, complete_msg);
-            tracing::info!("[QUEST] Area event: quest {} marked complete for player {:?}", quest_id, player_guid);
+            self.broadcast_mgr
+                .send_msg_to_player(player_guid, complete_msg);
+            tracing::info!(
+                "[QUEST] Area event: quest {} marked complete for player {:?}",
+                quest_id,
+                player_guid
+            );
         }
     }
 
@@ -1592,19 +2230,23 @@ impl QuestSystem {
     /// Called during logout to persist quest progress.
     pub async fn save_player_quests(&self, player_guid: ObjectGuid) -> Result<()> {
         use crate::shared::database::characters::models::quest::{
-            QuestStatusRow, QuestStatusRewardedRow,
+            QuestStatusRewardedRow, QuestStatusRow,
         };
 
-        let player_opt = self.player_mgr.get_player(player_guid);
-        if player_opt.is_none() {
-            return Ok(());
-        }
-
-        let player = player_opt.unwrap();
         let guid = player_guid.counter();
+        let Some((active_quests, rewarded_quests)) =
+            self.player_mgr.with_player(player_guid, |p| {
+                (
+                    p.active_quests.clone(),
+                    p.rewarded_quests.iter().copied().collect::<Vec<_>>(),
+                )
+            })
+        else {
+            return Ok(());
+        };
 
         // Save active quests
-        for quest in &player.active_quests {
+        for quest in &active_quests {
             let status: u8 = match quest.status {
                 QuestStatus::None => 0,
                 QuestStatus::Complete => 1,
@@ -1629,34 +2271,28 @@ impl QuestSystem {
                 item_count2: quest.item_count[1],
                 item_count3: quest.item_count[2],
                 item_count4: quest.item_count[3],
+                reward_choice: quest.reward_choice,
             };
 
             self.repository.save_quest_status(&row).await?;
         }
 
         // Save rewarded quests
-        for &quest_id in &player.rewarded_quests {
+        for quest_id in &rewarded_quests {
             let row = QuestStatusRewardedRow {
                 guid,
-                quest: quest_id,
+                quest: *quest_id,
+                reward_choice: 0,
             };
 
             self.repository.save_rewarded_quest(&row).await?;
         }
 
-        drop(player);
-
         debug!(
             "Saved quest data for player {:?}: {} active, {} rewarded",
             player_guid,
-            self.player_mgr
-                .get_player(player_guid)
-                .map(|p| p.active_quests.len())
-                .unwrap_or(0),
-            self.player_mgr
-                .get_player(player_guid)
-                .map(|p| p.rewarded_quests.len())
-                .unwrap_or(0)
+            active_quests.len(),
+            rewarded_quests.len()
         );
 
         Ok(())
@@ -1668,10 +2304,29 @@ impl QuestSystem {
     pub async fn load_player_quests(&self, player_guid: ObjectGuid) -> Result<()> {
         let guid = player_guid.counter();
 
+        // Load rewarded quests first so active restore can filter stale rewarded rows.
+        let rewarded = self.repository.find_rewarded_quests(guid).await?;
+        let rewarded_set: HashSet<u32> = rewarded.iter().map(|row| row.quest).collect();
+
         // Load active quests
         let quest_statuses = self.repository.find_quest_statuses(guid).await?;
-
+        let mut seen_active = HashSet::new();
         for row in quest_statuses {
+            if row.rewarded || rewarded_set.contains(&row.quest) {
+                continue;
+            }
+            if !seen_active.insert(row.quest) || !self.manager.has_quest_template(row.quest) {
+                continue;
+            }
+            if self
+                .player_mgr
+                .get_player(player_guid)
+                .map(|p| p.active_quests.len() >= MAX_QUEST_LOG_SIZE)
+                .unwrap_or(true)
+            {
+                break;
+            }
+
             let status = match row.status {
                 0 => QuestStatus::None,
                 1 => QuestStatus::Complete,
@@ -1688,7 +2343,7 @@ impl QuestSystem {
                 rewarded: row.rewarded,
                 explored: row.explored,
                 timer: row.timer,
-                reward_choice: 0, // Not saved in DB, will be set when quest is completed
+                reward_choice: row.reward_choice,
                 creature_or_go_count: [
                     row.mob_count1,
                     row.mob_count2,
@@ -1708,9 +2363,6 @@ impl QuestSystem {
                 p.active_quests.push(progress);
             });
         }
-
-        // Load rewarded quests
-        let rewarded = self.repository.find_rewarded_quests(guid).await?;
 
         for row in rewarded {
             self.player_mgr.with_player_mut(player_guid, |p| {

@@ -8,34 +8,32 @@ use crate::shared::database::{CharacterRepository, Databases, ReputationReposito
 use crate::shared::messages::character::{
     SmsgLogoutCancelAck, SmsgLogoutComplete, SmsgLogoutResponse,
 };
-use crate::shared::messages::social::SmsgStandstateUpdate;
 use crate::shared::messages::create::SmsgOutOfRange;
 use crate::shared::messages::login::{
     CharacterEnumEntry, EquipmentSlot, SmsgBindPointUpdate, SmsgCharEnum, SmsgInitWorldStates,
-    SmsgInitializeFactionsEmpty, SmsgLoginSetTimeSpeed,
-    SmsgLoginVerifyWorld, SmsgSetRestStart,
+    SmsgInitializeFactionsEmpty, SmsgLoginSetTimeSpeed, SmsgLoginVerifyWorld, SmsgSetRestStart,
 };
 use crate::shared::messages::movement::{SmsgForceMoveRoot, SmsgForceMoveUnroot};
+use crate::shared::messages::social::SmsgStandstateUpdate;
 use crate::shared::messages::update::{
     CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
 };
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
+use crate::world::core::common::packet_compression::compress_update_packet_if_needed;
 use crate::world::core::common::position::Position as WorldPosition;
+use crate::world::core::session::{SessionState, WorldSession};
+use crate::world::game::common::object_type::update_flags;
+use crate::world::game::common::object_type::ObjectTypeId;
 use crate::world::game::common::update_fields::{
     OBJECT_FIELD_GUID, OBJECT_FIELD_SCALE_X, OBJECT_FIELD_TYPE, PLAYER_BYTES, PLAYER_BYTES_2,
     PLAYER_FIELD_COINAGE, PLAYER_FIELD_INV_SLOT_HEAD, PLAYER_FIELD_PACK_SLOT_1,
     PLAYER_FIELD_WATCHED_FACTION_INDEX, PLAYER_FLAGS, PLAYER_NEXT_LEVEL_XP, PLAYER_QUEST_LOG_1_1,
-    PLAYER_SKILL_INFO_1_1, PLAYER_XP, UNIT_FIELD_BYTES_0, UNIT_FIELD_BYTES_1,
-    UNIT_FIELD_DISPLAYID, UNIT_FIELD_FACTIONTEMPLATE, UNIT_FIELD_FLAGS, UNIT_FIELD_HEALTH,
-    UNIT_FIELD_LEVEL, UNIT_FIELD_MAXHEALTH, UNIT_FIELD_MAXPOWER1, UNIT_FIELD_NATIVEDISPLAYID,
-    UNIT_FIELD_POWER1,
+    PLAYER_SKILL_INFO_1_1, PLAYER_XP, UNIT_FIELD_BYTES_0, UNIT_FIELD_BYTES_1, UNIT_FIELD_DISPLAYID,
+    UNIT_FIELD_FACTIONTEMPLATE, UNIT_FIELD_FLAGS, UNIT_FIELD_HEALTH, UNIT_FIELD_LEVEL,
+    UNIT_FIELD_MAXHEALTH, UNIT_FIELD_MAXPOWER1, UNIT_FIELD_NATIVEDISPLAYID, UNIT_FIELD_POWER1,
 };
-use crate::world::game::common::object_type::update_flags;
-use crate::world::game::common::object_type::ObjectTypeId;
-use crate::world::core::common::packet_compression::compress_update_packet_if_needed;
-use crate::world::core::session::{SessionState, WorldSession};
 use crate::world::game::player::reputation::FactionEntry;
 use crate::world::game::player::{Player, PlayerBroadcaster};
 use crate::world::World;
@@ -176,7 +174,10 @@ pub async fn handle_player_login_with_guid(
         .find_by_guid(guid.counter())
         .await?
         .ok_or_else(|| anyhow!("Character {} not found", guid))?;
-    info!("[LOGIN TIMING] Character loaded: {}ms", login_start.elapsed().as_millis());
+    info!(
+        "[LOGIN TIMING] Character loaded: {}ms",
+        login_start.elapsed().as_millis()
+    );
     info!("[LOGIN] Character loaded: {}", character.name);
 
     // DIAGNOSTIC: Log position from database
@@ -265,12 +266,9 @@ pub async fn handle_player_login_with_guid(
     // dirty=true and force_immediate=true, which would cause the map loop to
     // send nearby object CREATE_OBJECT2 packets before the player's own
     // self-create arrives at the client, causing the camera to spin.
-    world
-        .managers
-        .player_mgr
-        .with_player_mut(guid, |player| {
-            player.visibility.update_in_progress = true;
-        });
+    world.managers.player_mgr.with_player_mut(guid, |player| {
+        player.visibility.update_in_progress = true;
+    });
     info!("[LOGIN] Player added to PlayerManager");
 
     // 4.5. Create and set PlayerBroadcaster
@@ -288,7 +286,10 @@ pub async fn handle_player_login_with_guid(
     // 5. Add player to map (for spatial organization and visibility)
     info!("[LOGIN] Adding player to map");
     if let Some(_player_ref) = world.managers.player_mgr.get_player(guid) {
-        let map = world.managers.map_mgr.get_or_create_map(_player_ref.map_id, _player_ref.instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(_player_ref.map_id, _player_ref.instance_id);
         map.add_player(
             guid,
             Position::new(
@@ -317,7 +318,10 @@ pub async fn handle_player_login_with_guid(
         character.instance,
         Arc::new(world.clone()),
     );
-    info!("[LOGIN TIMING] Grid loading triggered: {}ms", login_start.elapsed().as_millis());
+    info!(
+        "[LOGIN TIMING] Grid loading triggered: {}ms",
+        login_start.elapsed().as_millis()
+    );
     info!("[LOGIN] Async grid loading triggered (will complete in background)");
 
     // 6. Set player GUID in session (but don't set LoggedIn yet - that happens after visibility)
@@ -338,7 +342,10 @@ pub async fn handle_player_login_with_guid(
         .systems
         .on_player_login(guid, Some(initial_position), world)
         .await?;
-    info!("[LOGIN TIMING] Systems initialized: {}ms", login_start.elapsed().as_millis());
+    info!(
+        "[LOGIN TIMING] Systems initialized: {}ms",
+        login_start.elapsed().as_millis()
+    );
     info!(
         "[LOGIN] Systems initialized with initial position ({:.2}, {:.2}, {:.2})",
         character.position_x, character.position_y, character.position_z
@@ -359,8 +366,8 @@ pub async fn handle_player_login_with_guid(
                 player.player_flags |= PLAYER_FLAGS_GHOST_RAW;
                 player.movement.water_walking = true;
                 player.movement.run_speed = 7.0 * 1.5; // ghost speed
-                // Re-apply spell 8326 via the aura container so visibility
-                // rules pick it up on the next tick.
+                                                       // Re-apply spell 8326 via the aura container so visibility
+                                                       // rules pick it up on the next tick.
                 use crate::world::game::player::auras::aura::{Aura, AuraFlags};
                 use crate::world::game::player::auras::effects;
                 let flags = AuraFlags {
@@ -371,7 +378,19 @@ pub async fn handle_player_login_with_guid(
                     is_hidden: false,
                     is_permanent: true,
                 };
-                let aura = Aura::new(8326, guid, 0, effects::AURA_GHOST, 0, 0, None, 0, 1, 0, flags);
+                let aura = Aura::new(
+                    8326,
+                    guid,
+                    0,
+                    effects::AURA_GHOST,
+                    0,
+                    0,
+                    None,
+                    0,
+                    1,
+                    0,
+                    flags,
+                );
                 player.auras.container.add_aura(aura);
                 player.auras.needs_client_update = true;
             });
@@ -444,7 +463,10 @@ pub async fn handle_player_login_with_guid(
         };
 
         if is_capital {
-            info!("[LOGIN] Player logging in to capital city zone={}, setting rest state", character.zone);
+            info!(
+                "[LOGIN] Player logging in to capital city zone={}, setting rest state",
+                character.zone
+            );
             world.systems.environment.set_rest_type(
                 guid,
                 RestType::InCity,
@@ -467,36 +489,39 @@ pub async fn handle_player_login_with_guid(
                 let rep_repo = ReputationRepository::new(char_db.clone());
                 rep_repo.find_reputations(char_guid).await
             },
-
             // Skills from DB
             async {
                 let char_repo = CharacterRepository::new(char_db.clone());
                 char_repo.find_skills(char_guid).await
             },
-
             // Actions from DB
             async {
                 let char_repo = CharacterRepository::new(char_db.clone());
                 char_repo.find_actions(char_guid).await
             },
-
             // Quest statuses from DB
             async {
-                use crate::shared::database::characters::repositories::{QuestRepository, QuestRepositoryTrait};
+                use crate::shared::database::characters::repositories::{
+                    QuestRepository, QuestRepositoryTrait,
+                };
                 let quest_repo = QuestRepository::new(char_db.clone());
                 quest_repo.find_quest_statuses(char_guid).await
             },
-
             // Rewarded quests from DB
             async {
-                use crate::shared::database::characters::repositories::{QuestRepository, QuestRepositoryTrait};
+                use crate::shared::database::characters::repositories::{
+                    QuestRepository, QuestRepositoryTrait,
+                };
                 let quest_repo = QuestRepository::new(char_db.clone());
                 quest_repo.find_rewarded_quests(char_guid).await
             }
         )?
     };
 
-    info!("[LOGIN TIMING] Parallel data loaded (rep/skills/actions/quests): {}ms", login_start.elapsed().as_millis());
+    info!(
+        "[LOGIN TIMING] Parallel data loaded (rep/skills/actions/quests): {}ms",
+        login_start.elapsed().as_millis()
+    );
     info!(
         "[LOGIN] Loaded {} reputation, {} skill, {} action, {} quest, {} rewarded entries in parallel",
         reputation_rows.len(),
@@ -507,7 +532,10 @@ pub async fn handle_player_login_with_guid(
     );
 
     // Load quest state into player
-    world.systems.quest.load_from_db(guid, active_quests, rewarded_quests);
+    world
+        .systems
+        .quest
+        .load_from_db(guid, active_quests, rewarded_quests);
     info!("[LOGIN] Quest state loaded from database");
 
     // Initialize reputation system with cached DBC data
@@ -528,17 +556,25 @@ pub async fn handle_player_login_with_guid(
     // 7.05 Initialize skills from loaded data
     if skill_rows.is_empty() {
         info!("[LOGIN] No skills found, initializing default skills for class/race");
-        world.systems.player.manager().with_player_mut(guid, |player| {
-            crate::world::game::player::skills::initialize_default_skills(
-                &mut player.skills,
-                player.class,
-                player.race,
-                player.level,
-            );
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(guid, |player| {
+                crate::world::game::player::skills::initialize_default_skills(
+                    &mut player.skills,
+                    player.class,
+                    player.race,
+                    player.level,
+                );
+            });
     } else {
         // Load existing skills from database
-        world.systems.player.manager().with_player_mut(guid, |player| {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(guid, |player| {
                 for (position, row) in skill_rows.iter().enumerate() {
                     let skill_data = crate::world::game::player::skills::SkillData {
                         skill_id: row.skill as u16,
@@ -550,24 +586,23 @@ pub async fn handle_player_login_with_guid(
                     };
                     player.skills.skills.insert(row.skill as u16, skill_data);
                 }
-        });
+            });
     }
     info!("[LOGIN] Skills initialized");
 
     // 7.06 Initialize action buttons from loaded data
     if !action_rows.is_empty() {
-        world
-            .managers
-            .player_mgr
-            .with_player_mut(guid, |player| {
-                for row in &action_rows {
-                    info!("[LOGIN] Setting action button: slot={}, action={}, type={}", 
-                          row.button, row.action, row.r#type);
-                    player
-                        .settings
-                        .set_action_button(row.button, row.action, row.r#type);
-                }
-            });
+        world.managers.player_mgr.with_player_mut(guid, |player| {
+            for row in &action_rows {
+                info!(
+                    "[LOGIN] Setting action button: slot={}, action={}, type={}",
+                    row.button, row.action, row.r#type
+                );
+                player
+                    .settings
+                    .set_action_button(row.button, row.action, row.r#type);
+            }
+        });
         info!(
             "[LOGIN] Loaded {} action buttons from database",
             action_rows.len()
@@ -577,22 +612,19 @@ pub async fn handle_player_login_with_guid(
         use crate::shared::database::world::repositories::PlayerCreateInfoRepository;
         let create_repo = PlayerCreateInfoRepository::new(Arc::new(databases.world.clone()));
         match create_repo
-            .get_create_info_actions(character.race, character.class).await
-
+            .get_create_info_actions(character.race, character.class)
+            .await
         {
             Ok(default_actions) if !default_actions.is_empty() => {
-                world
-                    .managers
-                    .player_mgr
-                    .with_player_mut(guid, |player| {
-                        for action in &default_actions {
-                            player.settings.set_action_button(
-                                action.button as u8,
-                                action.action,
-                                action.action_type as u8,
-                            );
-                        }
-                    });
+                world.managers.player_mgr.with_player_mut(guid, |player| {
+                    for action in &default_actions {
+                        player.settings.set_action_button(
+                            action.button as u8,
+                            action.action,
+                            action.action_type as u8,
+                        );
+                    }
+                });
                 info!(
                     "[LOGIN] Loaded {} default action buttons from playercreateinfo_action",
                     default_actions.len()
@@ -625,7 +657,8 @@ pub async fn handle_player_login_with_guid(
                 async {
                     let create_repo = PlayerCreateInfoRepository::new(world_db);
                     create_repo
-                        .get_create_info_spells(race, class).await
+                        .get_create_info_spells(race, class)
+                        .await
                         .unwrap_or_else(|e| {
                             warn!("[LOGIN] Failed to load default spells: {}", e);
                             Vec::new()
@@ -633,35 +666,30 @@ pub async fn handle_player_login_with_guid(
                 },
                 async {
                     let char_repo = CharacterRepository::new(char_db);
-                    char_repo
-                        .find_spells(char_guid).await
-                        .unwrap_or_else(|e| {
-                            warn!("[LOGIN] Failed to load saved spells: {}", e);
-                            Vec::new()
-                        })
+                    char_repo.find_spells(char_guid).await.unwrap_or_else(|e| {
+                        warn!("[LOGIN] Failed to load saved spells: {}", e);
+                        Vec::new()
+                    })
                 }
             )
         };
 
-        world
-            .managers
-            .player_mgr
-            .with_player_mut(guid, |player| {
-                // Always learn Attack (spell 6603)
-                player.spells.learn_spell(ATTACK_SPELL_ID);
+        world.managers.player_mgr.with_player_mut(guid, |player| {
+            // Always learn Attack (spell 6603)
+            player.spells.learn_spell(ATTACK_SPELL_ID);
 
-                // Learn default spells for this race/class
-                for row in &default_spells {
+            // Learn default spells for this race/class
+            for row in &default_spells {
+                player.spells.learn_spell(row.spell);
+            }
+
+            // Learn saved spells from database
+            for row in &saved_spells {
+                if row.active != 0 && row.disabled == 0 {
                     player.spells.learn_spell(row.spell);
                 }
-
-                // Learn saved spells from database
-                for row in &saved_spells {
-                    if row.active != 0 && row.disabled == 0 {
-                        player.spells.learn_spell(row.spell);
-                    }
-                }
-            });
+            }
+        });
 
         info!(
             "[LOGIN] Loaded {} default + {} saved spells",
@@ -669,11 +697,6 @@ pub async fn handle_player_login_with_guid(
             saved_spells.len()
         );
     }
-
-    // 7.08 Load quest progress (active and rewarded quests)
-    info!("[LOGIN] Loading quest progress from database");
-    world.systems.quest.load_player_quests(guid).await?;
-    info!("[LOGIN] Quest progress loaded");
 
     // 7.1 Load inventory before sending any packets
     info!("[LOGIN] Loading inventory from database");
@@ -702,7 +725,9 @@ pub async fn handle_player_login_with_guid(
     // 7.5 Create player packet handler task
     use crate::world::core::network::player_handler::PlayerPacketHandler;
     // Get Arc<WorldSession> from session manager
-    let session_arc = world.session_mgr.get_session(session.id())
+    let session_arc = world
+        .session_mgr
+        .get_session(session.id())
         .ok_or_else(|| anyhow::anyhow!("Session not found in manager"))?;
     let handler = PlayerPacketHandler::spawn(
         guid,
@@ -785,9 +810,21 @@ pub async fn handle_player_login_with_guid(
         .managers
         .player_mgr
         .with_player(guid, |p| {
-            (p.homebind_map, p.homebind_zone, p.homebind_x, p.homebind_y, p.homebind_z)
+            (
+                p.homebind_map,
+                p.homebind_zone,
+                p.homebind_x,
+                p.homebind_y,
+                p.homebind_z,
+            )
         })
-        .unwrap_or((character.map, character.zone, character.position_x, character.position_y, character.position_z));
+        .unwrap_or((
+            character.map,
+            character.zone,
+            character.position_x,
+            character.position_y,
+            character.position_z,
+        ));
     let bind_point = SmsgBindPointUpdate {
         x: hb_x,
         y: hb_y,
@@ -831,21 +868,25 @@ pub async fn handle_player_login_with_guid(
         let mut spellbook: Vec<u32> = Vec::new();
         let mut cooldowns: Vec<InitialSpellCooldown> = Vec::new();
 
-        world.systems.player.manager().with_player_mut(guid, |player| {
-            spellbook = player.spells.spellbook.clone();
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(guid, |player| {
+                spellbook = player.spells.spellbook.clone();
 
-            for (&spell_id, &cd_end) in &player.spells.cooldowns {
-                if cd_end > now {
-                    cooldowns.push(InitialSpellCooldown {
-                        spell_id,
-                        item_id: 0,
-                        category: 0,
-                        spell_cooldown_ms: (cd_end - now) as u32,
-                        category_cooldown_ms: 0,
-                    });
+                for (&spell_id, &cd_end) in &player.spells.cooldowns {
+                    if cd_end > now {
+                        cooldowns.push(InitialSpellCooldown {
+                            spell_id,
+                            item_id: 0,
+                            category: 0,
+                            spell_cooldown_ms: (cd_end - now) as u32,
+                            category_cooldown_ms: 0,
+                        });
+                    }
                 }
-            }
-        });
+            });
 
         let msg = SmsgInitialSpells {
             cast_count: 0,
@@ -952,12 +993,9 @@ pub async fn handle_player_login_with_guid(
     // races in after this, its visibility packets queue AFTER our self-create.
     // This avoids DashMap contention that could block the handler and prevent
     // the socket write loop from flushing queued packets.
-    world
-        .managers
-        .player_mgr
-        .with_player_mut(guid, |player| {
-            player.visibility.update_in_progress = false;
-        });
+    world.managers.player_mgr.with_player_mut(guid, |player| {
+        player.visibility.update_in_progress = false;
+    });
 
     // 10/11. SMSG_UPDATE_OBJECT - send items first, then player (matches MaNGOS order)
 
@@ -1014,7 +1052,10 @@ pub async fn handle_player_login_with_guid(
         character.map
     );
 
-    info!("[LOGIN TIMING] Login complete: {}ms total", login_start.elapsed().as_millis());
+    info!(
+        "[LOGIN TIMING] Login complete: {}ms total",
+        login_start.elapsed().as_millis()
+    );
     info!("[LOGIN] Login sequence complete for player {:?}", guid);
 
     // Clear login guard so session can be reused if player logs out and back in
@@ -1123,7 +1164,7 @@ pub fn build_player_create_block_for_player(
     // Get health values from player stats (calculated by stats system)
     let current_health = player.stats.health;
     let max_health = player.stats.max_health;
-    
+
     tracing::info!(
         "[LOGIN] Player health: {}/{} (from stats system)",
         current_health,
@@ -1214,11 +1255,11 @@ pub fn build_player_create_block_for_player(
         if skill_data.state == crate::world::game::player::skills::SkillSaveState::Deleted {
             continue;
         }
-        
+
         let base_field = PLAYER_SKILL_INFO_1_1 + (skill_data.position as u32) * 3;
         let skill_index = ((skill_data.skill_id as u32) << 16) | (skill_data.step as u32);
         let skill_value = ((skill_data.current_value as u32) << 16) | (skill_data.max_value as u32);
-        
+
         create_block = create_block
             .set_field(base_field, skill_index)
             .set_field(base_field + 1, skill_value);
@@ -1226,12 +1267,17 @@ pub fn build_player_create_block_for_player(
 
         tracing::info!(
             "[LOGIN] Added skill {} at position {}: index=0x{:08X}, value=0x{:08X}",
-            skill_data.skill_id, skill_data.position, skill_index, skill_value
+            skill_data.skill_id,
+            skill_data.position,
+            skill_index,
+            skill_value
         );
     }
 
     // Quest log fields
     const MAX_QUEST_OFFSET: u32 = 3;
+    const QUEST_STATE_COMPLETE: u32 = 0x01;
+    const QUEST_STATE_FAIL: u32 = 0x02;
     for (slot, quest) in player.active_quests.iter().enumerate() {
         let slot_u32 = slot as u32;
         let quest_id_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET;
@@ -1244,6 +1290,12 @@ pub fn build_player_create_block_for_player(
             let count = (quest.creature_or_go_count[i] as u32).min(63);
             packed |= count << (i as u32 * 6);
         }
+        let state = match quest.status {
+            crate::world::game::npc::quest::types::QuestStatus::Complete => QUEST_STATE_COMPLETE,
+            crate::world::game::npc::quest::types::QuestStatus::Failed => QUEST_STATE_FAIL,
+            _ => 0,
+        };
+        packed |= state << 24;
 
         create_block = create_block
             .set_field(quest_id_field, quest.quest_id)
@@ -1252,7 +1304,10 @@ pub fn build_player_create_block_for_player(
 
         tracing::info!(
             "[LOGIN] Added quest log slot {}: quest_id={}, packed_counts=0x{:08X}, timer={}",
-            slot, quest.quest_id, packed, quest.timer
+            slot,
+            quest.quest_id,
+            packed,
+            quest.timer
         );
     }
 
@@ -1380,10 +1435,17 @@ pub async fn handle_logout_request(
     let logout_timer_secs = world.config.logout_timer;
 
     // Check if player is in a rested area (inn or capital city)
-    let in_rested_area = world.managers.player_mgr.with_player(player_guid, |player| {
-        use crate::world::game::player::environment::RestType;
-        matches!(player.environment.rest_type, RestType::InTavern | RestType::InCity)
-    }).unwrap_or(false);
+    let in_rested_area = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| {
+            use crate::world::game::player::environment::RestType;
+            matches!(
+                player.environment.rest_type,
+                RestType::InTavern | RestType::InCity
+            )
+        })
+        .unwrap_or(false);
 
     let instant_logout = logout_timer_secs == 0 || in_rested_area;
 
@@ -1432,21 +1494,27 @@ pub async fn handle_logout_request(
             const STAND_STATE_SIT: u8 = 1;
             const UNIT_FLAG_DISABLE_MOVE: u32 = 0x00000004;
 
-            world.managers.player_mgr.with_player_mut(player_guid, |player| {
-                player.stand_state = STAND_STATE_SIT;
-                player.unit_flags |= UNIT_FLAG_DISABLE_MOVE;
-                info!(
-                    "[LOGOUT] Set logout state for {}: stand_state={}, unit_flags=0x{:08X}",
-                    player_guid, player.stand_state, player.unit_flags
-                );
-            });
+            world
+                .managers
+                .player_mgr
+                .with_player_mut(player_guid, |player| {
+                    player.stand_state = STAND_STATE_SIT;
+                    player.unit_flags |= UNIT_FLAG_DISABLE_MOVE;
+                    info!(
+                        "[LOGOUT] Set logout state for {}: stand_state={}, unit_flags=0x{:08X}",
+                        player_guid, player.stand_state, player.unit_flags
+                    );
+                });
 
             // Send SMSG_STANDSTATE_UPDATE to show sit animation
             session.send_msg(SmsgStandstateUpdate {
                 stand_state: STAND_STATE_SIT,
             })?;
 
-            info!("[LOGOUT] Player {} rooted and sitting during logout countdown", player_guid);
+            info!(
+                "[LOGOUT] Player {} rooted and sitting during logout countdown",
+                player_guid
+            );
 
             // TODO: PLAYER STATE SYSTEM - Comprehensive player state tracking needed
             // =======================================================================
@@ -1591,17 +1659,23 @@ pub async fn handle_logout_cancel(
     const STAND_STATE_STAND: u8 = 0;
     const UNIT_FLAG_DISABLE_MOVE: u32 = 0x00000004;
 
-    world.managers.player_mgr.with_player_mut(player_guid, |player| {
-        player.stand_state = STAND_STATE_STAND;
-        player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
-    });
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            player.stand_state = STAND_STATE_STAND;
+            player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
+        });
 
     // Send SMSG_STANDSTATE_UPDATE to show stand animation
     session.send_msg(SmsgStandstateUpdate {
         stand_state: STAND_STATE_STAND,
     })?;
 
-    debug!("Player {} unrooted and standing after logout cancel", player_guid);
+    debug!(
+        "Player {} unrooted and standing after logout cancel",
+        player_guid
+    );
 
     Ok(())
 }
@@ -1630,23 +1704,28 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
 
     info!(
         "[LOGOUT_TIMER] Starting logout cleanup for player {} (session {})",
-        player_guid,
-        session_id
+        player_guid, session_id
     );
 
     // Clear logout state flags defensively (handles disconnect during logout)
     const STAND_STATE_STAND: u8 = 0;
     const UNIT_FLAG_DISABLE_MOVE: u32 = 0x00000004;
 
-    world.managers.player_mgr.with_player_mut(player_guid, |player| {
-        player.stand_state = STAND_STATE_STAND;
-        player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
-    });
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            player.stand_state = STAND_STATE_STAND;
+            player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
+        });
 
     // Remove player handler and movement buffer FIRST to stop processing new packets
     world.remove_player_handler(player_guid);
     world.remove_movement_buffer(player_guid);
-    tracing::info!("[LOGOUT] Removed packet handler and movement buffer for player {}", player_guid);
+    tracing::info!(
+        "[LOGOUT] Removed packet handler and movement buffer for player {}",
+        player_guid
+    );
 
     info!(
         "Performing logout cleanup for player {} (session {})",
@@ -1667,11 +1746,7 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
     info!("[LOGOUT] Saved all player data (position, XP, health, rest, spells, actions, reputation, skills) for {:?}", player_guid);
 
     // Save quest progress to database
-    world
-        .systems
-        .quest
-        .save_player_quests(player_guid)
-        .await?;
+    world.systems.quest.save_player_quests(player_guid).await?;
     info!("[LOGOUT] Saved quest progress for {:?}", player_guid);
 
     // Notify systems of logout (BEFORE removing from PlayerManager)
@@ -1679,7 +1754,10 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
 
     // Remove player from map (BEFORE removing from PlayerManager)
     if let Some(player) = world.managers.player_mgr.get_player(player_guid) {
-        let map = world.managers.map_mgr.get_or_create_map(player.map_id, player.instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(player.map_id, player.instance_id);
         map.remove_player(player_guid);
         info!(
             "[LOGOUT] Removed player {:?} from map {}",
@@ -1718,13 +1796,13 @@ pub async fn handle_char_create(
     world: &World,
 ) -> Result<()> {
     use crate::shared::database::world::repositories::PlayerCreateInfoRepository;
+    use crate::shared::game::chat::Team;
     use crate::shared::messages::character::SmsgCharCreate;
-    use crate::world::game::common::account_result::{char_create, char_name};
     use crate::world::config::get_config_mgr;
+    use crate::world::game::common::account_result::{char_create, char_name};
     use crate::world::game::player::name_validation::{
         normalize_character_name, validate_character_name, NameValidationResult,
     };
-    use crate::shared::game::chat::Team;
 
     // 1. Parse packet
     let name = packet
@@ -1780,20 +1858,18 @@ pub async fn handle_char_create(
             NameValidationResult::MixedLanguages => char_name::MIXED_LANGUAGES,
             _ => char_name::FAILURE,
         };
-        session
-            .send_msg(SmsgCharCreate {
-                result: result_code,
-            })?;
+        session.send_msg(SmsgCharCreate {
+            result: result_code,
+        })?;
         return Ok(());
     }
 
     // 3. Check name availability
     let char_repo = CharacterRepository::new(Arc::new(databases.character.clone()));
     if char_repo.exists_by_name(&normalized_name).await? {
-        session
-            .send_msg(SmsgCharCreate {
-                result: char_create::NAME_IN_USE,
-            })?;
+        session.send_msg(SmsgCharCreate {
+            result: char_create::NAME_IN_USE,
+        })?;
         return Ok(());
     }
 
@@ -1811,10 +1887,9 @@ pub async fn handle_char_create(
     // 5. Check character limit
     let existing_chars = char_repo.find_by_account(session.account_id()).await?;
     if existing_chars.len() >= characters_per_realm as usize {
-        session
-            .send_msg(SmsgCharCreate {
-                result: char_create::SERVER_LIMIT,
-            })?;
+        session.send_msg(SmsgCharCreate {
+            result: char_create::SERVER_LIMIT,
+        })?;
         return Ok(());
     }
 
@@ -1829,10 +1904,9 @@ pub async fn handle_char_create(
     };
 
     if disabled {
-        session
-            .send_msg(SmsgCharCreate {
-                result: char_create::DISABLED,
-            })?;
+        session.send_msg(SmsgCharCreate {
+            result: char_create::DISABLED,
+        })?;
         return Ok(());
     }
 
@@ -1840,10 +1914,9 @@ pub async fn handle_char_create(
     if is_pvp_realm && !allow_two_side_accounts && !existing_chars.is_empty() {
         let first_char_team = Team::from_race(existing_chars[0].race);
         if team != first_char_team && team != Team::None && first_char_team != Team::None {
-            session
-                .send_msg(SmsgCharCreate {
-                    result: char_create::PVP_TEAMS_VIOLATION,
-                })?;
+            session.send_msg(SmsgCharCreate {
+                result: char_create::PVP_TEAMS_VIOLATION,
+            })?;
             return Ok(());
         }
     }
@@ -1961,8 +2034,8 @@ pub async fn handle_char_create(
             &world.managers.item_mgr,
             guid,
             &starting_items,
-        ).await
-
+        )
+        .await
         {
             Ok(created_count) => {
                 debug!(
@@ -1991,10 +2064,18 @@ pub async fn handle_char_create(
     }
 
     // Create starting action buttons
-    info!("[CHAR_CREATE] Loading default action buttons for race={} class={}", race, class);
+    info!(
+        "[CHAR_CREATE] Loading default action buttons for race={} class={}",
+        race, class
+    );
     let starting_actions = match create_repo.get_create_info_actions(race, class).await {
         Ok(actions) => {
-            info!("[CHAR_CREATE] Found {} default action buttons for race {} class {}", actions.len(), race, class);
+            info!(
+                "[CHAR_CREATE] Found {} default action buttons for race {} class {}",
+                actions.len(),
+                race,
+                class
+            );
             actions
         }
         Err(e) => {
@@ -2003,16 +2084,24 @@ pub async fn handle_char_create(
         }
     };
     if !starting_actions.is_empty() {
-        info!("[CHAR_CREATE] Inserting {} action buttons for character {}", starting_actions.len(), guid);
+        info!(
+            "[CHAR_CREATE] Inserting {} action buttons for character {}",
+            starting_actions.len(),
+            guid
+        );
         match super::character_create_items::give_starting_actions(
             &databases.character,
             guid,
             &starting_actions,
-        ).await
-
+        )
+        .await
         {
             Ok(_) => {
-                info!("[CHAR_CREATE] Successfully created {} action buttons for character {}", starting_actions.len(), guid);
+                info!(
+                    "[CHAR_CREATE] Successfully created {} action buttons for character {}",
+                    starting_actions.len(),
+                    guid
+                );
             }
             Err(e) => {
                 warn!(
@@ -2022,13 +2111,15 @@ pub async fn handle_char_create(
             }
         }
     } else {
-        info!("[CHAR_CREATE] No default action buttons found for race {} class {}", race, class);
+        info!(
+            "[CHAR_CREATE] No default action buttons found for race {} class {}",
+            race, class
+        );
     }
 
-    session
-        .send_msg(SmsgCharCreate {
-            result: char_create::SUCCESS,
-        })?;
+    session.send_msg(SmsgCharCreate {
+        result: char_create::SUCCESS,
+    })?;
 
     Ok(())
 }
@@ -2062,10 +2153,9 @@ pub async fn handle_char_delete(
     match character {
         None => {
             warn!("Character {} not found", guid);
-            session
-                .send_msg(SmsgCharDelete {
-                    result: char_delete::FAILED,
-                })?;
+            session.send_msg(SmsgCharDelete {
+                result: char_delete::FAILED,
+            })?;
             return Ok(());
         }
         Some(char_data) if char_data.account != session.account_id() => {
@@ -2074,10 +2164,9 @@ pub async fn handle_char_delete(
                 guid,
                 session.account_id()
             );
-            session
-                .send_msg(SmsgCharDelete {
-                    result: char_delete::FAILED,
-                })?;
+            session.send_msg(SmsgCharDelete {
+                result: char_delete::FAILED,
+            })?;
             return Ok(());
         }
         Some(_) => {}
@@ -2088,10 +2177,9 @@ pub async fn handle_char_delete(
 
     debug!("Character {} deleted successfully", guid);
 
-    session
-        .send_msg(SmsgCharDelete {
-            result: char_delete::SUCCESS,
-        })?;
+    session.send_msg(SmsgCharDelete {
+        result: char_delete::SUCCESS,
+    })?;
 
     Ok(())
 }
@@ -2143,24 +2231,22 @@ pub async fn handle_char_rename(
             NameValidationResult::MixedLanguages => char_name::MIXED_LANGUAGES,
             _ => char_name::FAILURE,
         };
-        session
-            .send_msg(SmsgCharRename {
-                result: result_code,
-                guid: None,
-                new_name: None,
-            })?;
+        session.send_msg(SmsgCharRename {
+            result: result_code,
+            guid: None,
+            new_name: None,
+        })?;
         return Ok(());
     }
 
     // 3. Check name availability
     let char_repo = CharacterRepository::new(Arc::new(databases.character.clone()));
     if char_repo.exists_by_name(&normalized_name).await? {
-        session
-            .send_msg(SmsgCharRename {
-                result: char_name::FAILURE,
-                guid: None,
-                new_name: None,
-            })?;
+        session.send_msg(SmsgCharRename {
+            result: char_name::FAILURE,
+            guid: None,
+            new_name: None,
+        })?;
         return Ok(());
     }
 
@@ -2170,12 +2256,11 @@ pub async fn handle_char_rename(
     let char_data = match character {
         None => {
             warn!("Character {} not found", guid);
-            session
-                .send_msg(SmsgCharRename {
-                    result: response::FAILURE,
-                    guid: None,
-                    new_name: None,
-                })?;
+            session.send_msg(SmsgCharRename {
+                result: response::FAILURE,
+                guid: None,
+                new_name: None,
+            })?;
             return Ok(());
         }
         Some(char_data) if char_data.account != session.account_id() => {
@@ -2184,12 +2269,11 @@ pub async fn handle_char_rename(
                 guid,
                 session.account_id()
             );
-            session
-                .send_msg(SmsgCharRename {
-                    result: response::FAILURE,
-                    guid: None,
-                    new_name: None,
-                })?;
+            session.send_msg(SmsgCharRename {
+                result: response::FAILURE,
+                guid: None,
+                new_name: None,
+            })?;
             return Ok(());
         }
         Some(char_data) => char_data,
@@ -2198,12 +2282,11 @@ pub async fn handle_char_rename(
     // 5. Check rename flag
     if char_data.character_flags & CHARACTER_FLAG_RENAME == 0 {
         warn!("Character {} does not have RENAME flag", guid);
-        session
-            .send_msg(SmsgCharRename {
-                result: response::FAILURE,
-                guid: None,
-                new_name: None,
-            })?;
+        session.send_msg(SmsgCharRename {
+            result: response::FAILURE,
+            guid: None,
+            new_name: None,
+        })?;
         return Ok(());
     }
 
@@ -2211,12 +2294,11 @@ pub async fn handle_char_rename(
     let is_online = world.managers.player_mgr.get_player(guid).is_some();
     if is_online {
         warn!("Cannot rename character {} while logged in", guid);
-        session
-            .send_msg(SmsgCharRename {
-                result: response::FAILURE,
-                guid: None,
-                new_name: None,
-            })?;
+        session.send_msg(SmsgCharRename {
+            result: response::FAILURE,
+            guid: None,
+            new_name: None,
+        })?;
         return Ok(());
     }
 
@@ -2229,12 +2311,11 @@ pub async fn handle_char_rename(
 
     debug!("Character {} renamed to {}", guid, normalized_name);
 
-    session
-        .send_msg(SmsgCharRename {
-            result: response::SUCCESS,
-            guid: Some(guid.into()),
-            new_name: Some(normalized_name),
-        })?;
+    session.send_msg(SmsgCharRename {
+        result: response::SUCCESS,
+        guid: Some(guid.into()),
+        new_name: Some(normalized_name),
+    })?;
 
     Ok(())
 }
@@ -2254,7 +2335,10 @@ pub async fn handle_zoneupdate(
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
 
-    debug!("CMSG_ZONEUPDATE: player={:?}, zone_id={}", player_guid, zone_id);
+    debug!(
+        "CMSG_ZONEUPDATE: player={:?}, zone_id={}",
+        player_guid, zone_id
+    );
 
     // Update zone and read current rest state (single lock scope)
     let (changed, current_rest_type) = {
@@ -2266,7 +2350,10 @@ pub async fn handle_zoneupdate(
                     return Ok(());
                 }
                 player.zone_id = zone_id;
-                debug!("CMSG_ZONEUPDATE: Updated zone from {} to {}", old_zone, zone_id);
+                debug!(
+                    "CMSG_ZONEUPDATE: Updated zone from {} to {}",
+                    old_zone, zone_id
+                );
                 (true, player.environment.rest_type)
             }
             None => return Ok(()),
@@ -2285,14 +2372,21 @@ pub async fn handle_zoneupdate(
     let is_capital = {
         let dbc = world.dbc.read();
         if let Some(area) = dbc.get_area(zone_id) {
-            info!("ZONEUPDATE: area_id={}, flags=0x{:X}, parent_zone={}", zone_id, area.flags, area.zone);
+            info!(
+                "ZONEUPDATE: area_id={}, flags=0x{:X}, parent_zone={}",
+                zone_id, area.flags, area.zone
+            );
             if area.flags & AREA_FLAG_CAPITAL != 0 {
                 info!("ZONEUPDATE: is_capital=true (direct)");
                 true
             } else if area.zone != 0 {
-                let parent_capital = dbc.get_area(area.zone)
+                let parent_capital = dbc
+                    .get_area(area.zone)
                     .map(|parent| {
-                        info!("ZONEUPDATE: parent area_id={}, parent_flags=0x{:X}", area.zone, parent.flags);
+                        info!(
+                            "ZONEUPDATE: parent area_id={}, parent_flags=0x{:X}",
+                            area.zone, parent.flags
+                        );
                         parent.flags & AREA_FLAG_CAPITAL != 0
                     })
                     .unwrap_or(false);
@@ -2329,7 +2423,8 @@ pub async fn handle_zoneupdate(
     }
 
     // Send updated PLAYER_FLAGS to client
-    if is_capital || current_rest_type == crate::world::game::player::environment::RestType::InCity {
+    if is_capital || current_rest_type == crate::world::game::player::environment::RestType::InCity
+    {
         if let Some(new_flags) = player_mgr.with_player(player_guid, |p| p.player_flags) {
             use crate::shared::messages::update::{
                 ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,

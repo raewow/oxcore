@@ -39,7 +39,8 @@ impl QuestRepository {
         sqlx::query_as::<_, QuestStatusRow>(
             r#"SELECT guid, quest, status, rewarded, explored, timer,
                       mob_count1, mob_count2, mob_count3, mob_count4,
-                      item_count1, item_count2, item_count3, item_count4
+                      item_count1, item_count2, item_count3, item_count4,
+                      reward_choice
                FROM character_queststatus WHERE guid = ?"#,
         )
         .bind(guid)
@@ -52,7 +53,7 @@ impl QuestRepository {
     async fn find_rewarded_internal(&self, guid: u32) -> Result<Vec<QuestStatusRewardedRow>> {
         // Query from main table using rewarded flag (no separate table in this schema)
         sqlx::query_as::<_, QuestStatusRewardedRow>(
-            r#"SELECT guid, quest FROM character_queststatus WHERE guid = ? AND rewarded = 1"#,
+            r#"SELECT guid, quest, reward_choice FROM character_queststatus WHERE guid = ? AND rewarded = 1"#,
         )
         .bind(guid)
         .fetch_all(&*self.pool)
@@ -69,7 +70,8 @@ impl QuestRepository {
         sqlx::query_as::<_, QuestStatusRow>(
             r#"SELECT guid, quest, status, rewarded, explored, timer,
                       mob_count1, mob_count2, mob_count3, mob_count4,
-                      item_count1, item_count2, item_count3, item_count4
+                      item_count1, item_count2, item_count3, item_count4,
+                      reward_choice
                FROM character_queststatus WHERE guid = ? AND quest = ?"#,
         )
         .bind(guid)
@@ -82,7 +84,7 @@ impl QuestRepository {
     /// Internal method to check if quest is completed
     async fn check_completed_internal(&self, guid: u32, quest_id: u32) -> Result<bool> {
         let count: i64 = sqlx::query_scalar(
-            r#"SELECT COUNT(*) FROM character_queststatus_rewarded WHERE guid = ? AND quest = ?"#,
+            r#"SELECT COUNT(*) FROM character_queststatus WHERE guid = ? AND quest = ? AND rewarded = 1"#,
         )
         .bind(guid)
         .bind(quest_id)
@@ -99,8 +101,9 @@ impl QuestRepository {
             r#"REPLACE INTO character_queststatus
                (guid, quest, status, rewarded, explored, timer,
                 mob_count1, mob_count2, mob_count3, mob_count4,
-                item_count1, item_count2, item_count3, item_count4)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+                item_count1, item_count2, item_count3, item_count4,
+                reward_choice)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(quest_status.guid)
         .bind(quest_status.quest)
@@ -116,6 +119,7 @@ impl QuestRepository {
         .bind(quest_status.item_count2)
         .bind(quest_status.item_count3)
         .bind(quest_status.item_count4)
+        .bind(quest_status.reward_choice)
         .execute(&*self.pool)
         .await
         .context("Failed to save quest status")?;
@@ -133,14 +137,18 @@ impl QuestRepository {
                 mob_count1, mob_count2, mob_count3, mob_count4,
                 item_count1, item_count2, item_count3, item_count4,
                 reward_choice)
-               VALUES (?, ?, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-               ON DUPLICATE KEY UPDATE rewarded = 1"#
+               VALUES (?, ?, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?)
+               ON DUPLICATE KEY UPDATE
+                   status = 1,
+                   rewarded = 1,
+                   reward_choice = IF(VALUES(reward_choice) <> 0, VALUES(reward_choice), reward_choice)"#,
         )
-            .bind(quest_rewarded.guid)
-            .bind(quest_rewarded.quest)
-            .execute(&*self.pool)
-            .await
-            .context("Failed to save rewarded quest")?;
+        .bind(quest_rewarded.guid)
+        .bind(quest_rewarded.quest)
+        .bind(quest_rewarded.reward_choice)
+        .execute(&*self.pool)
+        .await
+        .context("Failed to save rewarded quest")?;
 
         Ok(())
     }

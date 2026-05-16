@@ -5,7 +5,6 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::shared::messages::quest::SmsgQuestlogFull;
 use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
@@ -37,8 +36,7 @@ pub async fn handle_questgiver_status_query(
     world
         .systems
         .quest
-        .send_quest_giver_status(player_guid, quest_giver_guid, world)
-        ;
+        .send_quest_giver_status(player_guid, quest_giver_guid, world);
 
     Ok(())
 }
@@ -76,7 +74,7 @@ pub async fn handle_questgiver_hello(
 
     // Check if NPC also has GOSSIP flag - if so, let gossip hello handle it
     let has_gossip_flag = (npc_flags & 0x00000001) != 0;
-    
+
     if has_gossip_flag {
         // NPC has both QUESTGIVER and GOSSIP flags - use gossip system
         // This prevents duplicate handling
@@ -86,7 +84,10 @@ pub async fn handle_questgiver_hello(
 
     // NPC is a pure quest giver (no GOSSIP flag) - handle directly
     // Prepare quest data
-    let quest_data = world.systems.quest.prepare_quest_menu(player_guid, entry, world);
+    let quest_data = world
+        .systems
+        .quest
+        .prepare_quest_menu(player_guid, entry, world);
 
     // Check if we should auto-display a single quest
     let quest_count = quest_data.len();
@@ -102,10 +103,7 @@ pub async fn handle_questgiver_hello(
 
             // Check quest status to determine which dialog to show
             use crate::world::game::npc::quest::types::QuestStatus;
-            let quest_status = world
-                .systems
-                .quest
-                .get_quest_status(player_guid, quest_id);
+            let quest_status = world.systems.quest.get_quest_status(player_guid, quest_id);
 
             match quest_status {
                 QuestStatus::Complete => {
@@ -121,17 +119,16 @@ pub async fn handle_questgiver_hello(
                         .await?;
                 }
                 QuestStatus::Incomplete => {
-                    // Quest is incomplete - close gossip (request items dialog not yet implemented)
+                    // Quest is incomplete - show request items/objectives dialog
                     info!(
                         "Quest {} is incomplete for player {:?}",
                         quest_id, player_guid
                     );
-                    use crate::shared::messages::gossip::SmsgGossipComplete;
                     world
-                        .managers
-                        .broadcast_mgr
-                        .send_msg_to_player(player_guid, SmsgGossipComplete)
-                        ;
+                        .systems
+                        .quest
+                        .handle_quest_complete(player_guid, quest_giver_guid, quest_id, world)
+                        .await?;
                 }
                 _ => {
                     // Quest is available or none - show quest details for accepting
@@ -139,10 +136,12 @@ pub async fn handle_questgiver_hello(
                         "Quest {} is available for player {:?}, showing details dialog",
                         quest_id, player_guid
                     );
-                    world
-                        .systems
-                        .quest
-                        .send_quest_details(player_guid, quest_giver_guid, quest_id, world)?;
+                    world.systems.quest.send_quest_details(
+                        player_guid,
+                        quest_giver_guid,
+                        quest_id,
+                        world,
+                    )?;
                 }
             }
             return Ok(());
@@ -186,10 +185,7 @@ pub async fn handle_questgiver_query_quest(
 
     // Check quest status to determine which dialog to show
     use crate::world::game::npc::quest::types::QuestStatus;
-    let quest_status = world
-        .systems
-        .quest
-        .get_quest_status(player_guid, quest_id);
+    let quest_status = world.systems.quest.get_quest_status(player_guid, quest_id);
 
     match quest_status {
         QuestStatus::Complete => {
@@ -205,18 +201,16 @@ pub async fn handle_questgiver_query_quest(
                 .await?;
         }
         QuestStatus::Incomplete => {
-            // Quest is incomplete - show request items dialog (not yet implemented)
-            // For now, just close the gossip
+            // Quest is incomplete - show request items/objectives dialog
             info!(
                 "Quest {} is incomplete for player {:?}",
                 quest_id, player_guid
             );
-            use crate::shared::messages::gossip::SmsgGossipComplete;
             world
-                .managers
-                .broadcast_mgr
-                .send_msg_to_player(player_guid, SmsgGossipComplete)
-                ;
+                .systems
+                .quest
+                .handle_quest_complete(player_guid, quest_giver_guid, quest_id, world)
+                .await?;
         }
         _ => {
             // Quest is available or none - show quest details for accepting
@@ -224,10 +218,12 @@ pub async fn handle_questgiver_query_quest(
                 "Quest {} is available for player {:?}, showing details dialog",
                 quest_id, player_guid
             );
-            world
-                .systems
-                .quest
-                .send_quest_details(player_guid, quest_giver_guid, quest_id, world)?;
+            world.systems.quest.send_quest_details(
+                player_guid,
+                quest_giver_guid,
+                quest_id,
+                world,
+            )?;
         }
     }
 
@@ -324,9 +320,9 @@ pub async fn handle_questgiver_cancel(
     // Send gossip complete to close the quest window
     use crate::shared::messages::gossip::SmsgGossipComplete;
     world
-        .managers.broadcast_mgr
-        .send_msg_to_player(player_guid, SmsgGossipComplete)
-        ;
+        .managers
+        .broadcast_mgr
+        .send_msg_to_player(player_guid, SmsgGossipComplete);
 
     Ok(())
 }
@@ -455,46 +451,26 @@ pub async fn handle_quest_confirm_accept(
     };
 
     // Check if player can take quest
-    if !world.systems.quest.can_take_quest(player_guid, &quest, world) {
+    if !world
+        .systems
+        .quest
+        .can_take_quest(player_guid, &quest, world)
+    {
         warn!("Player {:?} cannot accept quest {}", player_guid, quest_id);
         return Ok(());
     }
 
-    // Check quest log space
-    let can_add = world.managers.player_mgr.get_player(player_guid)
-        .map(|p| p.active_quests.len() < 20)
-        .unwrap_or(false);
-
-    if !can_add {
-        let msg = SmsgQuestlogFull;
-        world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
-        return Ok(());
-    }
-
-    // Add quest to player
-    world.managers.player_mgr.with_player_mut(player_guid, |p| {
-        p.active_quests.push(crate::world::game::npc::quest::QuestProgress::new(quest_id));
-    });
-
-    // Send confirmation packet
-    use crate::shared::messages::quest::SmsgQuestConfirmAccept;
-    let confirm_msg = SmsgQuestConfirmAccept {
-        quest_id,
-        title: quest.title.clone(),
-    };
-    world.managers.broadcast_mgr.send_msg_to_player(player_guid, confirm_msg);
-
-    info!(
-        "Player {:?} confirmed accepting quest {}",
-        player_guid, quest_id
+    warn!(
+        "CMSG_QUEST_CONFIRM_ACCEPT for quest {} from {:?} ignored: party quest sharing state is not implemented yet",
+        quest_id, player_guid
     );
     Ok(())
 }
 
 /// Handle CMSG_QUESTGIVER_REQUEST_REWARD (0x18D)
 ///
-/// Sent when player selects a reward and clicks "Complete".
-/// Packet format: GUID (packed), quest_id (u32), reward_index (u32)
+/// Sent after the request-items dialog, before the reward selection dialog.
+/// Packet format: GUID (packed), quest_id (u32)
 pub async fn handle_questgiver_request_reward(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -512,19 +488,19 @@ pub async fn handle_questgiver_request_reward(
         .read_u32()
         .ok_or_else(|| anyhow::anyhow!("Failed to read quest ID"))?;
 
-    let reward_choice = packet.read_u32().unwrap_or(0);
-
     info!(
-        "CMSG_QUESTGIVER_REQUEST_REWARD: player={:?}, npc={:?}, quest={}, reward={}",
-        player_guid, quest_giver_guid, quest_id, reward_choice
+        "CMSG_QUESTGIVER_REQUEST_REWARD: player={:?}, npc={:?}, quest={}",
+        player_guid, quest_giver_guid, quest_id
     );
 
-    // Delegate to quest system
-    world
-        .systems
-        .quest
-        .handle_quest_reward(player_guid, quest_giver_guid, quest_id, reward_choice, world)
-        .await?;
+    // Request-reward only opens the reward dialog. The final reward is handled
+    // by CMSG_QUESTGIVER_CHOOSE_REWARD.
+    world.systems.quest.handle_quest_reward_request(
+        player_guid,
+        quest_giver_guid,
+        quest_id,
+        world,
+    )?;
 
     Ok(())
 }
@@ -562,7 +538,13 @@ pub async fn handle_questgiver_choose_reward(
     world
         .systems
         .quest
-        .handle_quest_reward(player_guid, quest_giver_guid, quest_id, reward_choice, world)
+        .handle_quest_reward(
+            player_guid,
+            quest_giver_guid,
+            quest_id,
+            reward_choice,
+            world,
+        )
         .await?;
 
     Ok(())
