@@ -13,10 +13,17 @@ use super::sickness;
 use super::state::{DeathState, DeathSystemState};
 use crate::shared::messages::death::{SmsgCorpseReclaimDelay, SmsgResurrectRequest};
 use crate::shared::messages::inventory::SmsgDurabilityDamageDeath;
+use crate::shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::update_fields::{
+    PLAYER_FLAGS, UNIT_FIELD_BYTES_1, UNIT_FIELD_FLAGS, UNIT_FIELD_HEALTH, UNIT_FIELD_POWER1,
+};
 use crate::shared::protocol::ObjectGuid;
 use crate::shared::protocol::Position;
 use crate::shared::protocol::{Opcode, WorldPacket};
+use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::dbc::DbcManager;
 use crate::world::game::broadcast_mgr::BroadcastManagerTrait;
 use crate::world::World;
@@ -943,6 +950,10 @@ impl DeathSystem {
             }
         }
 
+        // Send values immediately so the owning client exits ghost/death UI as
+        // soon as the spirit-healer response is accepted.
+        self.send_player_death_state_update(player_guid, world);
+
         // Broadcast the resurrection update (health restored, ghost flag cleared)
         self.broadcast_player_update(player_guid, world);
 
@@ -1345,6 +1356,44 @@ impl DeathSystem {
                     player.auras.needs_client_update = true;
                 }
             });
+    }
+
+    fn send_player_death_state_update(&self, player_guid: ObjectGuid, world: &World) {
+        let values = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                (
+                    player.stats.health,
+                    player.power.current[0],
+                    player.unit_flags | 0x00000008_u32,
+                    player.stand_state,
+                    player.shapeshift_form,
+                    player.player_flags,
+                )
+            });
+
+        let Some((health, mana, unit_flags, stand_state, shapeshift_form, player_flags)) = values
+        else {
+            return;
+        };
+
+        let bytes_1 = u32::from_le_bytes([stand_state, 0, shapeshift_form, 0]);
+        let world_guid = WorldObjectGuid::from_raw(player_guid.raw());
+        let values_block = ValuesUpdateBlock::new(world_guid, ObjectType::Player)
+            .set_required(UNIT_FIELD_HEALTH, health)
+            .set_required(UNIT_FIELD_POWER1, mana)
+            .set_required(UNIT_FIELD_FLAGS, unit_flags)
+            .set_required(UNIT_FIELD_BYTES_1, bytes_1)
+            .set_required(PLAYER_FLAGS, player_flags);
+
+        let packet = SmsgUpdateObject::new()
+            .add_block(UpdateBlockData::Values(values_block))
+            .to_world_packet();
+
+        self.broadcast_mgr
+            .broadcast_nearby(player_guid, &packet, true);
     }
 
     /// Send SMSG_MOVE_WATER_WALK / SMSG_MOVE_LAND_WALK to let the client

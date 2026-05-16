@@ -88,6 +88,7 @@ mod tests {
             power_multiplier: 1.0,
             armor_multiplier: 1.0,
             damage_multiplier: 1.0,
+            rank: 0,
             damage_variance: 0.0,
             attack_time: 2000,
             gossip_menu_id: 0,

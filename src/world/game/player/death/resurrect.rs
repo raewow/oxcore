@@ -15,7 +15,7 @@ pub enum ResurrectionMethod {
     /// Result: 50% HP/mana, no sickness, no extra durability loss.
     CorpseRun,
     /// Player talked to the spirit healer NPC at the graveyard.
-    /// Result: Full HP/mana, resurrection sickness, +25% durability loss.
+    /// Result: 50% HP/mana, resurrection sickness, +25% durability loss.
     SpiritHealer,
     /// Another player cast a resurrection spell (Druid Rebirth, Priest
     /// Resurrection, Paladin Redemption, Shaman Ancestral Spirit).
@@ -78,8 +78,10 @@ pub fn resurrect_at_spirit_healer(
     state.corpse_guid = None;
     state.resurrection_data = None;
 
-    // Spirit healer gives full HP/mana (sickness debuff then reduces stats)
-    (max_health, max_mana)
+    let health = (max_health as f32 * 0.5) as u32;
+    let mana = (max_mana as f32 * 0.5) as u32;
+
+    (health.max(1), mana)
 }
 
 /// Execute a player-spell resurrection.
@@ -146,4 +148,24 @@ pub fn is_resurrection_requested_by(
         .resurrection_data
         .as_ref()
         .map_or(false, |data| data.resurrector_guid == resurrector_guid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spirit_healer_resurrects_with_half_health_and_mana() {
+        let mut state = DeathSystemState {
+            death_state: DeathState::Dead,
+            ..DeathSystemState::default()
+        };
+
+        let (health, mana) = resurrect_at_spirit_healer(&mut state, 1000, 800);
+
+        assert_eq!(health, 500);
+        assert_eq!(mana, 400);
+        assert_eq!(state.death_state, DeathState::JustAlived);
+        assert!(state.resurrection_data.is_none());
+    }
 }

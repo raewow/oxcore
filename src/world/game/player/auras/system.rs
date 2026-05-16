@@ -1666,6 +1666,7 @@ mod tests {
             damage_multiplier: 1.0,
             damage_variance: 0.1,
             attack_time: 2000,
+            rank: 0,
             gossip_menu_id: 0,
             vendor_id: 0,
             trainer_id: 0,
