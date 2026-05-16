@@ -1,8 +1,8 @@
 //! BSP (Binary Space Partition) tree for efficient spatial queries
 
-use crate::shared::protocol::Position;
 use super::file_loader::Triangle;
 use super::types::{AreaInfo, BoundingBox, LiquidLevel, ModelType};
+use crate::shared::protocol::Position;
 use std::sync::Arc;
 
 /// BSP tree node
@@ -212,9 +212,21 @@ impl BSPTree {
     ) -> bool {
         let dir = Position::new(end.x - start.x, end.y - start.y, end.z - start.z, 0.0);
         let inv_dir = Position::new(
-            if dir.x != 0.0 { 1.0 / dir.x } else { f32::INFINITY },
-            if dir.y != 0.0 { 1.0 / dir.y } else { f32::INFINITY },
-            if dir.z != 0.0 { 1.0 / dir.z } else { f32::INFINITY },
+            if dir.x != 0.0 {
+                1.0 / dir.x
+            } else {
+                f32::INFINITY
+            },
+            if dir.y != 0.0 {
+                1.0 / dir.y
+            } else {
+                f32::INFINITY
+            },
+            if dir.z != 0.0 {
+                1.0 / dir.z
+            } else {
+                f32::INFINITY
+            },
             0.0,
         );
 

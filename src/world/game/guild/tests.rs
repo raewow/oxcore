@@ -449,7 +449,10 @@ fn test_guild_name_length_validation() {
 
 #[test]
 fn test_rank_count_limit() {
-    assert!(GUILD_RANKS_MAX_COUNT >= 5, "Should support at least 5 default ranks");
+    assert!(
+        GUILD_RANKS_MAX_COUNT >= 5,
+        "Should support at least 5 default ranks"
+    );
     assert!(GUILD_RANKS_MAX_COUNT <= 10, "WoW 1.12 limit is 10 ranks");
 }
 
@@ -503,7 +506,8 @@ fn test_guild_data_member_operations() {
     };
 
     // Add member
-    data.members.insert(member_guid, create_test_member(member_guid, 3));
+    data.members
+        .insert(member_guid, create_test_member(member_guid, 3));
     assert_eq!(data.members.len(), 2);
 
     // Remove member
@@ -615,11 +619,11 @@ mod integration_tests {
     use super::super::system::GuildSystem;
     use super::*;
     use crate::shared::database::characters::guild_repository::MockGuildRepositoryTrait;
-    use crate::shared::protocol::WorldPacket;
     use crate::shared::protocol::Opcode;
-    use crate::world::game::player::PlayerManager;
+    use crate::shared::protocol::WorldPacket;
     use crate::world::game::broadcast_mgr::MockBroadcastManagerTrait;
     use crate::world::game::items::ItemManager;
+    use crate::world::game::player::PlayerManager;
     use mockall::predicate::*;
     use std::sync::Arc;
 
@@ -801,9 +805,7 @@ mod integration_tests {
         let mut mock_repo = MockGuildRepositoryTrait::new();
         let mut mock_broadcaster = MockBroadcastManagerTrait::new();
 
-        mock_repo
-            .expect_exists_by_name()
-            .returning(|_| Ok(false));
+        mock_repo.expect_exists_by_name().returning(|_| Ok(false));
 
         mock_repo.expect_create().returning(|_, _, _, _| Ok(()));
 
@@ -856,7 +858,11 @@ mod integration_tests {
         let system = create_test_system(mock_repo1, mock_broadcaster1);
 
         system
-            .create_guild_from_petition(test_player_guid(100), "Leader1".to_string(), "Guild1".to_string())
+            .create_guild_from_petition(
+                test_player_guid(100),
+                "Leader1".to_string(),
+                "Guild1".to_string(),
+            )
             .await
             .unwrap();
 
@@ -871,13 +877,9 @@ mod integration_tests {
         let mut mock_repo = MockGuildRepositoryTrait::new();
         let mut mock_broadcaster = MockBroadcastManagerTrait::new();
 
-        mock_repo
-            .expect_exists_by_name()
-            .returning(|_| Ok(false));
+        mock_repo.expect_exists_by_name().returning(|_| Ok(false));
 
-        mock_repo
-            .expect_create()
-            .returning(|_, _, _, _| Ok(()));
+        mock_repo.expect_create().returning(|_, _, _, _| Ok(()));
 
         // Verify SMSG_GUILD_COMMAND_RESULT packet sent (plus query response and roster)
         mock_broadcaster

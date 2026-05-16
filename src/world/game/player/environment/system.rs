@@ -191,10 +191,15 @@ impl EnvironmentSystem {
             .with_player(player_guid, |p| p.stats.health == 0)
             .unwrap_or(false);
         if now_dead {
-            if let Err(e) = world.systems.death.on_killed(player_guid, None, None, world) {
+            if let Err(e) = world
+                .systems
+                .death
+                .on_killed(player_guid, None, None, world)
+            {
                 tracing::warn!(
                     "environmental death handling failed for {:?}: {}",
-                    player_guid, e
+                    player_guid,
+                    e
                 );
             }
         }

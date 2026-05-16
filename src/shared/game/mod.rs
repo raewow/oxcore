@@ -22,10 +22,12 @@ pub use battleground::{
 };
 pub use chat::{ChatMsg, ChatTag, Language, Team};
 pub use duel::{DuelInfo, DuelRequest};
-pub use experience::{XpColor, XpSource, BASE_CREATURE_XP, BASE_XP, MAX_PLAYER_LEVEL, XP_SHARING_DISTANCE};
+pub use experience::{
+    XpColor, XpSource, BASE_CREATURE_XP, BASE_XP, MAX_PLAYER_LEVEL, XP_SHARING_DISTANCE,
+};
 pub use group::{
-    GroupUpdateFlags, GroupLootType, GroupMember, GroupType, InvitedBy, LootMethod,
-    LootThreshold, MemberStatus, SubGroup,
+    GroupLootType, GroupMember, GroupType, GroupUpdateFlags, InvitedBy, LootMethod, LootThreshold,
+    MemberStatus, SubGroup,
 };
 pub use guild::{
     GuildBankRights, GuildBankTab, GuildEvent, GuildId, GuildLogEntry, GuildMemberNote,
@@ -41,11 +43,11 @@ pub use mail::{
 pub use petition::{PetitionInfo, PetitionResult, PetitionSignature, PetitionType};
 pub use quest::{QuestFlags, QuestGiverStatus, QuestShareState, QuestStatus};
 pub use reputation::{
-    apply_level_reduction, apply_vendor_discount, vendor_discount_pct,
-    FactionFlags, FactionId, FactionState, ReputationRank, ReputationListID,
-    MAX_REPUTATION_LIST_SLOTS, REPUTATION_CAP, REPUTATION_BOTTOM, POINTS_IN_RANK,
-    FACTION_FLAG_VISIBLE, FACTION_FLAG_AT_WAR, FACTION_FLAG_HIDDEN,
-    FACTION_FLAG_INVISIBLE_FORCED, FACTION_FLAG_PEACE_FORCED, FACTION_FLAG_INACTIVE, FACTION_FLAG_RIVAL,
+    apply_level_reduction, apply_vendor_discount, vendor_discount_pct, FactionFlags, FactionId,
+    FactionState, ReputationListID, ReputationRank, FACTION_FLAG_AT_WAR, FACTION_FLAG_HIDDEN,
+    FACTION_FLAG_INACTIVE, FACTION_FLAG_INVISIBLE_FORCED, FACTION_FLAG_PEACE_FORCED,
+    FACTION_FLAG_RIVAL, FACTION_FLAG_VISIBLE, MAX_REPUTATION_LIST_SLOTS, POINTS_IN_RANK,
+    REPUTATION_BOTTOM, REPUTATION_CAP,
 };
 pub use social::{
     FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT,

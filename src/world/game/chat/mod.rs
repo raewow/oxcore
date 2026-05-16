@@ -15,7 +15,7 @@ pub mod validation;
 #[cfg(test)]
 mod tests;
 
+pub use crate::shared::game::chat::{ChatMsg, ChatNotify, ChatTag, Language, Team};
 pub use system::ChatSystem;
 pub use types::*;
 pub use validation::*;
-pub use crate::shared::game::chat::{ChatMsg, ChatTag, Language, Team, ChatNotify};

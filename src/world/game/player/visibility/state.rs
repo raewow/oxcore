@@ -52,7 +52,7 @@ impl VisibilityState {
             last_update_tick: 0,
             pending_appeared: Vec::new(),
             pending_disappeared: Vec::new(),
-            dirty: true, // Start dirty to force initial update
+            dirty: true,           // Start dirty to force initial update
             force_immediate: true, // Force immediate on creation (login)
             objects_created: HashSet::with_capacity(64),
             update_in_progress: false,

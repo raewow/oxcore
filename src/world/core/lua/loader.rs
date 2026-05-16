@@ -190,7 +190,9 @@ fn execute_script(lua: &Lua, sandbox: &Table, script: &LoadedScript) -> LuaResul
 /// Scripts are stored at the project root /scripts/ folder, not in data_dir.
 pub fn default_scripts_path(data_dir: &Path) -> PathBuf {
     // Canonicalize data_dir so relative paths like "data" resolve properly
-    let data_dir = data_dir.canonicalize().unwrap_or_else(|_| data_dir.to_path_buf());
+    let data_dir = data_dir
+        .canonicalize()
+        .unwrap_or_else(|_| data_dir.to_path_buf());
 
     // Go up from data_dir to find the project root, then use /scripts/
     // data_dir is typically "<project_root>/server/data", so we go up TWO levels

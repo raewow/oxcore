@@ -62,7 +62,13 @@ impl BaseStatsData {
                     let inte: u32 = row.get(6);
                     let spi: u32 = row.get(7);
 
-                    if race == 0 || race > 11 || class == 0 || class > 11 || level == 0 || level > 60 {
+                    if race == 0
+                        || race > 11
+                        || class == 0
+                        || class > 11
+                        || level == 0
+                        || level > 60
+                    {
                         continue;
                     }
 
@@ -77,10 +83,16 @@ impl BaseStatsData {
                         },
                     );
                 }
-                info!("Loaded {} player level stat entries", data.level_stats.len());
+                info!(
+                    "Loaded {} player level stat entries",
+                    data.level_stats.len()
+                );
             }
             Err(e) => {
-                warn!("Failed to load player_levelstats: {}. Stats will use fallback values.", e);
+                warn!(
+                    "Failed to load player_levelstats: {}. Stats will use fallback values.",
+                    e
+                );
             }
         }
 
@@ -115,7 +127,10 @@ impl BaseStatsData {
                 );
             }
             Err(e) => {
-                warn!("Failed to load player_classlevelstats: {}. Base HP/mana will use fallback.", e);
+                warn!(
+                    "Failed to load player_classlevelstats: {}. Base HP/mana will use fallback.",
+                    e
+                );
             }
         }
 

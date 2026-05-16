@@ -7,13 +7,13 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::shared::messages::channel::{*, ChannelMemberInfo};
+use crate::shared::game::chat::{ChatMsg, ChatTag, Language, Team};
+use crate::shared::messages::channel::{ChannelMemberInfo, *};
 use crate::shared::messages::chat::*;
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::{ObjectGuid, Position, WorldPacket};
-use crate::shared::game::chat::{ChatMsg, ChatTag, Language, Team};
-use crate::world::game::player::PlayerManager;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
+use crate::world::game::player::PlayerManager;
 use crate::world::game::BroadcastManager;
 
 use super::commands::{self, CommandRegistry};
@@ -88,7 +88,9 @@ impl ChatSystem {
         let now = Instant::now();
         let window = Duration::from_secs(self.flood_config.window_secs);
 
-        let mut flood_state = self.flood_tracker.entry(player_guid)
+        let mut flood_state = self
+            .flood_tracker
+            .entry(player_guid)
             .or_insert_with(FloodState::new);
 
         if let Some(mute_end) = flood_state.mute_end_time {
@@ -98,7 +100,9 @@ impl ChatSystem {
                 let msg = SmsgChatRestricted;
                 self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
-                return Err(ChatError::Muted { remaining_secs: remaining });
+                return Err(ChatError::Muted {
+                    remaining_secs: remaining,
+                });
             } else {
                 flood_state.mute_end_time = None;
             }
@@ -129,7 +133,7 @@ impl ChatSystem {
             );
 
             return Err(ChatError::Muted {
-                remaining_secs: self.flood_config.mute_duration_secs
+                remaining_secs: self.flood_config.mute_duration_secs,
             });
         }
 
@@ -172,30 +176,32 @@ impl ChatSystem {
 
         let team_channels = self.channels.entry(team).or_insert_with(DashMap::new);
 
-        let mut channel_data = team_channels.entry(channel_name.to_string()).or_insert_with(|| {
-            let id = if is_builtin {
-                match channel_name.to_lowercase().as_str() {
-                    "general" => ChannelId::General as u32,
-                    "trade" => ChannelId::Trade as u32,
-                    "localdefense" => ChannelId::LocalDefense as u32,
-                    "worlddefense" => ChannelId::WorldDefense as u32,
-                    "guildrecruitment" => ChannelId::GuildRecruitment as u32,
-                    "lookingforgroup" => ChannelId::LookingForGroup as u32,
-                    _ => self.next_channel_id.fetch_add(1, Ordering::SeqCst),
-                }
-            } else {
-                self.next_channel_id.fetch_add(1, Ordering::SeqCst)
-            };
+        let mut channel_data = team_channels
+            .entry(channel_name.to_string())
+            .or_insert_with(|| {
+                let id = if is_builtin {
+                    match channel_name.to_lowercase().as_str() {
+                        "general" => ChannelId::General as u32,
+                        "trade" => ChannelId::Trade as u32,
+                        "localdefense" => ChannelId::LocalDefense as u32,
+                        "worlddefense" => ChannelId::WorldDefense as u32,
+                        "guildrecruitment" => ChannelId::GuildRecruitment as u32,
+                        "lookingforgroup" => ChannelId::LookingForGroup as u32,
+                        _ => self.next_channel_id.fetch_add(1, Ordering::SeqCst),
+                    }
+                } else {
+                    self.next_channel_id.fetch_add(1, Ordering::SeqCst)
+                };
 
-            let mut channel = CachedChannel::new(id, channel_name.to_string(), team);
-            // Set password for custom channels if provided by the creator
-            if !is_builtin {
-                if let Some(pwd) = password {
-                    channel.password = pwd.to_string();
+                let mut channel = CachedChannel::new(id, channel_name.to_string(), team);
+                // Set password for custom channels if provided by the creator
+                if !is_builtin {
+                    if let Some(pwd) = password {
+                        channel.password = pwd.to_string();
+                    }
                 }
-            }
-            ChannelData::new(channel)
-        });
+                ChannelData::new(channel)
+            });
 
         if channel_data.banned.contains(&player_guid) {
             return Err(ChatError::BannedFromChannel);
@@ -231,7 +237,9 @@ impl ChatSystem {
 
         // Send player_joined notification to other members for custom channels only
         if is_custom {
-            let member_guids: Vec<ObjectGuid> = channel_data.members.keys()
+            let member_guids: Vec<ObjectGuid> = channel_data
+                .members
+                .keys()
                 .copied()
                 .filter(|&guid| guid != player_guid)
                 .collect();
@@ -239,7 +247,8 @@ impl ChatSystem {
             if !member_guids.is_empty() {
                 let notify = SmsgChannelNotify::player_joined(channel_name, player_guid);
                 let packet = notify.to_world_packet();
-                self.broadcast_mgr.broadcast_to_players(&member_guids, &packet);
+                self.broadcast_mgr
+                    .broadcast_to_players(&member_guids, &packet);
             }
         }
 
@@ -251,7 +260,8 @@ impl ChatSystem {
             .insert(channel_name.to_string());
 
         let notify = SmsgChannelNotify::you_joined(channel_name, channel_id);
-        self.broadcast_mgr.send_to_player(player_guid, notify.to_world_packet());
+        self.broadcast_mgr
+            .send_to_player(player_guid, notify.to_world_packet());
 
         Ok(())
     }
@@ -262,10 +272,10 @@ impl ChatSystem {
         channel_name: &str,
         team: Team,
     ) -> Result<(), ChatError> {
-        let team_channels = self.channels.get(&team)
-            .ok_or(ChatError::ChannelNotFound)?;
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
 
-        let mut channel_data = team_channels.get_mut(channel_name)
+        let mut channel_data = team_channels
+            .get_mut(channel_name)
             .ok_or(ChatError::ChannelNotFound)?;
 
         if !channel_data.members.contains_key(&player_guid) {
@@ -295,27 +305,25 @@ impl ChatSystem {
 
         // Send player_left notification to other members for custom channels only
         if is_custom {
-            let member_guids: Vec<ObjectGuid> = channel_data.members.keys()
-                .copied()
-                .collect();
+            let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
 
             if !member_guids.is_empty() {
                 let notify = SmsgChannelNotify::player_left(channel_name, player_guid);
                 let packet = notify.to_world_packet();
-                self.broadcast_mgr.broadcast_to_players(&member_guids, &packet);
+                self.broadcast_mgr
+                    .broadcast_to_players(&member_guids, &packet);
             }
         }
 
         // Notify all members of ownership change
         if let Some(owner_guid) = new_owner_guid {
-            let member_guids: Vec<ObjectGuid> = channel_data.members.keys()
-                .copied()
-                .collect();
+            let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
 
             if !member_guids.is_empty() {
                 let notify = SmsgChannelNotify::owner_changed(channel_name, owner_guid);
                 let packet = notify.to_world_packet();
-                self.broadcast_mgr.broadcast_to_players(&member_guids, &packet);
+                self.broadcast_mgr
+                    .broadcast_to_players(&member_guids, &packet);
             }
         }
 
@@ -334,7 +342,8 @@ impl ChatSystem {
         }
 
         let notify = SmsgChannelNotify::you_left(channel_name);
-        self.broadcast_mgr.send_to_player(player_guid, notify.to_world_packet());
+        self.broadcast_mgr
+            .send_to_player(player_guid, notify.to_world_packet());
 
         Ok(())
     }
@@ -362,14 +371,16 @@ impl ChatSystem {
         player_guid: ObjectGuid,
         is_moderator: bool,
     ) -> Result<(), ChatError> {
-        let team_channels = self.channels.get(&team)
-            .ok_or(ChatError::ChannelNotFound)?;
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
 
-        let mut channel_data = team_channels.get_mut(channel_name)
+        let mut channel_data = team_channels
+            .get_mut(channel_name)
             .ok_or(ChatError::ChannelNotFound)?;
 
         if let Some(member) = channel_data.members.get_mut(&player_guid) {
-            member.flags.set_flag(ChannelMemberFlags::MODERATOR, is_moderator);
+            member
+                .flags
+                .set_flag(ChannelMemberFlags::MODERATOR, is_moderator);
             Ok(())
         } else {
             Err(ChatError::NotInChannel)
@@ -383,10 +394,10 @@ impl ChatSystem {
         player_guid: ObjectGuid,
         is_muted: bool,
     ) -> Result<(), ChatError> {
-        let team_channels = self.channels.get(&team)
-            .ok_or(ChatError::ChannelNotFound)?;
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
 
-        let mut channel_data = team_channels.get_mut(channel_name)
+        let mut channel_data = team_channels
+            .get_mut(channel_name)
             .ok_or(ChatError::ChannelNotFound)?;
 
         if let Some(member) = channel_data.members.get_mut(&player_guid) {
@@ -403,10 +414,10 @@ impl ChatSystem {
         channel_name: &str,
         player_guid: ObjectGuid,
     ) -> Result<(), ChatError> {
-        let team_channels = self.channels.get(&team)
-            .ok_or(ChatError::ChannelNotFound)?;
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
 
-        let mut channel_data = team_channels.get_mut(channel_name)
+        let mut channel_data = team_channels
+            .get_mut(channel_name)
             .ok_or(ChatError::ChannelNotFound)?;
 
         channel_data.members.remove(&player_guid);
@@ -421,10 +432,10 @@ impl ChatSystem {
         channel_name: &str,
         player_guid: ObjectGuid,
     ) -> Result<bool, ChatError> {
-        let team_channels = self.channels.get(&team)
-            .ok_or(ChatError::ChannelNotFound)?;
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
 
-        let mut channel_data = team_channels.get_mut(channel_name)
+        let mut channel_data = team_channels
+            .get_mut(channel_name)
             .ok_or(ChatError::ChannelNotFound)?;
 
         Ok(channel_data.banned.remove(&player_guid))
@@ -447,13 +458,15 @@ impl ChatSystem {
             return Ok(()); // Silent fail, error already sent to client
         }
 
-        let team_channels = self.channels.get(&team)
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
+
+        let channel_data = team_channels
+            .get(channel_name)
             .ok_or(ChatError::ChannelNotFound)?;
 
-        let channel_data = team_channels.get(channel_name)
-            .ok_or(ChatError::ChannelNotFound)?;
-
-        let sender_member = channel_data.members.get(&sender_guid)
+        let sender_member = channel_data
+            .members
+            .get(&sender_guid)
             .ok_or(ChatError::NotInChannel)?;
 
         if sender_member.is_muted() {
@@ -463,15 +476,14 @@ impl ChatSystem {
         if channel_data.channel.moderate {
             if !sender_member.is_owner()
                 && !sender_member.is_moderator()
-                && !sender_member.flags.has_flag(ChannelMemberFlags::VOICED) {
+                && !sender_member.flags.has_flag(ChannelMemberFlags::VOICED)
+            {
                 return Err(ChatError::NoPermission);
             }
         }
 
         // Get all members (including sender for echo)
-        let member_guids: Vec<ObjectGuid> = channel_data.members.keys()
-            .copied()
-            .collect();
+        let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
 
         drop(channel_data);
 
@@ -488,10 +500,12 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }.to_world_packet();
+        }
+        .to_world_packet();
 
         // Broadcast to all channel members (including sender)
-        self.broadcast_mgr.broadcast_to_players(&member_guids, &packet);
+        self.broadcast_mgr
+            .broadcast_to_players(&member_guids, &packet);
 
         Ok(())
     }
@@ -502,10 +516,10 @@ impl ChatSystem {
         team: Team,
         channel_name: &str,
     ) -> Result<(), ChatError> {
-        let team_channels = self.channels.get(&team)
-            .ok_or(ChatError::ChannelNotFound)?;
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
 
-        let channel_data = team_channels.get(channel_name)
+        let channel_data = team_channels
+            .get(channel_name)
             .ok_or(ChatError::ChannelNotFound)?;
 
         // Check if player is in the channel
@@ -514,7 +528,9 @@ impl ChatSystem {
         }
 
         // Build member list
-        let members: Vec<ChannelMemberInfo> = channel_data.members.iter()
+        let members: Vec<ChannelMemberInfo> = channel_data
+            .members
+            .iter()
             .map(|(guid, member)| ChannelMemberInfo {
                 guid: *guid,
                 flags: member.flags.as_u8(),
@@ -536,7 +552,8 @@ impl ChatSystem {
             members: &members,
         };
 
-        self.broadcast_mgr.send_to_player(player_guid, packet.to_world_packet());
+        self.broadcast_mgr
+            .send_to_player(player_guid, packet.to_world_packet());
 
         Ok(())
     }
@@ -561,10 +578,9 @@ impl ChatSystem {
             Some(guid) => guid,
             None => {
                 // Target not found - send error notification to sender
-                let not_found_msg = SmsgChatPlayerNotFound {
-                    name: target_name,
-                };
-                self.broadcast_mgr.send_to_player(sender_guid, not_found_msg.to_world_packet());
+                let not_found_msg = SmsgChatPlayerNotFound { name: target_name };
+                self.broadcast_mgr
+                    .send_to_player(sender_guid, not_found_msg.to_world_packet());
                 return Ok(());
             }
         };
@@ -589,9 +605,11 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }.to_world_packet();
+        }
+        .to_world_packet();
 
-        self.broadcast_mgr.send_to_player(target_guid, whisper_packet);
+        self.broadcast_mgr
+            .send_to_player(target_guid, whisper_packet);
 
         // Send echo/confirmation to sender
         let inform_packet = SmsgMessageChat {
@@ -604,9 +622,11 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }.to_world_packet();
+        }
+        .to_world_packet();
 
-        self.broadcast_mgr.send_to_player(sender_guid, inform_packet);
+        self.broadcast_mgr
+            .send_to_player(sender_guid, inform_packet);
 
         Ok(())
     }
@@ -640,28 +660,33 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }.to_world_packet();
+        }
+        .to_world_packet();
 
         // Build cross-faction packet if cross-faction chat is disabled (racial language - gibberish)
         let cross_faction_packet = if !allow_cross_faction {
             let racial_lang = Language::for_faction(sender_team);
-            Some(SmsgMessageChat {
-                msgtype: ChatMsg::Say,
-                language: racial_lang,
-                sender_guid,
-                sender_name: Some(&sender_name),
-                target_guid: None,
-                channel_name: None,
-                player_rank: None,
-                message: &clean_message,
-                chat_tag: ChatTag::None,
-            }.to_world_packet())
+            Some(
+                SmsgMessageChat {
+                    msgtype: ChatMsg::Say,
+                    language: racial_lang,
+                    sender_guid,
+                    sender_name: Some(&sender_name),
+                    target_guid: None,
+                    channel_name: None,
+                    player_rank: None,
+                    message: &clean_message,
+                    chat_tag: ChatTag::None,
+                }
+                .to_world_packet(),
+            )
         } else {
             None
         };
 
         // Send to sender first (always same-faction)
-        self.broadcast_mgr.send_to_player(sender_guid, same_faction_packet.clone());
+        self.broadcast_mgr
+            .send_to_player(sender_guid, same_faction_packet.clone());
 
         // Broadcast to nearby players with distance filtering (25 yards) and faction-aware packets
         let broadcaster = self.player_mgr.get_broadcaster(sender_guid);
@@ -699,7 +724,8 @@ impl ChatSystem {
                                 continue; // Shouldn't happen, but skip if no packet available
                             };
 
-                            self.broadcast_mgr.send_to_player(listener_guid, packet.clone());
+                            self.broadcast_mgr
+                                .send_to_player(listener_guid, packet.clone());
                         }
                     }
                 }
@@ -738,28 +764,33 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }.to_world_packet();
+        }
+        .to_world_packet();
 
         // Build cross-faction packet if cross-faction chat is disabled (racial language - gibberish)
         let cross_faction_packet = if !allow_cross_faction {
             let racial_lang = Language::for_faction(sender_team);
-            Some(SmsgMessageChat {
-                msgtype: ChatMsg::Yell,
-                language: racial_lang,
-                sender_guid,
-                sender_name: Some(&sender_name),
-                target_guid: None,
-                channel_name: None,
-                player_rank: None,
-                message: &clean_message,
-                chat_tag: ChatTag::None,
-            }.to_world_packet())
+            Some(
+                SmsgMessageChat {
+                    msgtype: ChatMsg::Yell,
+                    language: racial_lang,
+                    sender_guid,
+                    sender_name: Some(&sender_name),
+                    target_guid: None,
+                    channel_name: None,
+                    player_rank: None,
+                    message: &clean_message,
+                    chat_tag: ChatTag::None,
+                }
+                .to_world_packet(),
+            )
         } else {
             None
         };
 
         // Send to sender first (always same-faction)
-        self.broadcast_mgr.send_to_player(sender_guid, same_faction_packet.clone());
+        self.broadcast_mgr
+            .send_to_player(sender_guid, same_faction_packet.clone());
 
         // Broadcast to nearby players with distance filtering (300 yards) and faction-aware packets
         let broadcaster = self.player_mgr.get_broadcaster(sender_guid);
@@ -797,7 +828,8 @@ impl ChatSystem {
                                 continue; // Shouldn't happen, but skip if no packet available
                             };
 
-                            self.broadcast_mgr.send_to_player(listener_guid, packet.clone());
+                            self.broadcast_mgr
+                                .send_to_player(listener_guid, packet.clone());
                         }
                     }
                 }
@@ -834,13 +866,16 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }.to_world_packet();
+        }
+        .to_world_packet();
 
         // Send to sender first
-        self.broadcast_mgr.send_to_player(sender_guid, packet.clone());
+        self.broadcast_mgr
+            .send_to_player(sender_guid, packet.clone());
 
         // Broadcast to nearby players (exclude sender)
-        self.broadcast_mgr.broadcast_nearby(sender_guid, &packet, false);
+        self.broadcast_mgr
+            .broadcast_nearby(sender_guid, &packet, false);
 
         Ok(())
     }
@@ -886,8 +921,7 @@ impl ChatSystem {
         for member in &group.members {
             if member.status.is_online() {
                 self.broadcast_mgr
-                    .send_to_player(member.guid, packet.clone())
-                    ;
+                    .send_to_player(member.guid, packet.clone());
             }
         }
 
@@ -943,8 +977,7 @@ impl ChatSystem {
         for member in &group.members {
             if member.status.is_online() {
                 self.broadcast_mgr
-                    .send_to_player(member.guid, packet.clone())
-                    ;
+                    .send_to_player(member.guid, packet.clone());
             }
         }
 
@@ -969,9 +1002,7 @@ impl ChatSystem {
         let guild_state = guild_system
             .get_player_guild(sender_guid)
             .ok_or(ChatError::NotInGuild)?;
-        let guild_id = guild_state
-            .guild_id
-            .ok_or(ChatError::NotInGuild)?;
+        let guild_id = guild_state.guild_id.ok_or(ChatError::NotInGuild)?;
 
         // Get guild data for member list
         let guild_data = guild_system
@@ -1020,9 +1051,7 @@ impl ChatSystem {
         let guild_state = guild_system
             .get_player_guild(sender_guid)
             .ok_or(ChatError::NotInGuild)?;
-        let guild_id = guild_state
-            .guild_id
-            .ok_or(ChatError::NotInGuild)?;
+        let guild_id = guild_state.guild_id.ok_or(ChatError::NotInGuild)?;
 
         // Officers are rank <= 1 (Guild Master = 0, Officer = 1)
         if guild_state.rank_id > 1 {
@@ -1062,7 +1091,8 @@ impl ChatSystem {
     // ========== HELPERS ==========
 
     fn get_player_name(&self, guid: ObjectGuid) -> String {
-        self.player_mgr.get_player(guid)
+        self.player_mgr
+            .get_player(guid)
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "Unknown".to_string())
     }
@@ -1079,27 +1109,28 @@ impl ChatSystem {
     }
 
     pub fn get_channel_members(&self, team: Team, channel_name: &str) -> Vec<ObjectGuid> {
-        self.channels.get(&team)
+        self.channels
+            .get(&team)
             .and_then(|tc| {
-                tc.get(channel_name).map(|channel_data| {
-                    channel_data.members.keys().copied().collect()
-                })
+                tc.get(channel_name)
+                    .map(|channel_data| channel_data.members.keys().copied().collect())
             })
             .unwrap_or_default()
     }
 
     pub fn is_in_channel(&self, player_guid: ObjectGuid, channel_name: &str, team: Team) -> bool {
-        self.channels.get(&team)
+        self.channels
+            .get(&team)
             .and_then(|tc| {
-                tc.get(channel_name).map(|channel_data| {
-                    channel_data.members.contains_key(&player_guid)
-                })
+                tc.get(channel_name)
+                    .map(|channel_data| channel_data.members.contains_key(&player_guid))
             })
             .unwrap_or(false)
     }
 
     pub fn get_player_channels(&self, player_guid: ObjectGuid) -> Vec<String> {
-        self.player_channels.get(&player_guid)
+        self.player_channels
+            .get(&player_guid)
             .map(|chans| chans.iter().cloned().collect())
             .unwrap_or_default()
     }
@@ -1121,7 +1152,11 @@ impl ChatSystem {
     }
 
     /// Get help text for commands
-    pub fn get_command_help(&self, command: Option<&str>, security: crate::shared::common::AccountType) -> String {
+    pub fn get_command_help(
+        &self,
+        command: Option<&str>,
+        security: crate::shared::common::AccountType,
+    ) -> String {
         self.command_registry.get_help(command, security)
     }
 
@@ -1150,7 +1185,10 @@ impl ChatSystem {
     #[cfg(test)]
     pub(crate) fn test_get_channels(&self, team: Team) -> Option<Vec<String>> {
         self.channels.get(&team).map(|team_channels| {
-            team_channels.iter().map(|entry| entry.key().clone()).collect()
+            team_channels
+                .iter()
+                .map(|entry| entry.key().clone())
+                .collect()
         })
     }
 

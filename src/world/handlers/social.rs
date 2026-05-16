@@ -3,10 +3,10 @@
 use anyhow::Result;
 use tracing::{debug, info};
 
-use crate::world::game::social::types::WhoRequest;
-use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::shared::game::chat::Team;
+use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::core::session::WorldSession;
+use crate::world::game::social::types::WhoRequest;
 use crate::world::World;
 
 pub async fn handle_add_friend(
@@ -60,10 +60,7 @@ pub async fn handle_del_friend(
     Ok(())
 }
 
-pub async fn handle_friend_list(
-    session: &WorldSession,
-    world: &World,
-) -> Result<()> {
+pub async fn handle_friend_list(session: &WorldSession, world: &World) -> Result<()> {
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
@@ -126,10 +123,7 @@ pub async fn handle_del_ignore(
     Ok(())
 }
 
-pub async fn handle_ignore_list(
-    session: &WorldSession,
-    world: &World,
-) -> Result<()> {
+pub async fn handle_ignore_list(session: &WorldSession, world: &World) -> Result<()> {
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;

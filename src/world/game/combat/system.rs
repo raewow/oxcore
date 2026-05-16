@@ -30,7 +30,6 @@ impl CombatSystem {
 
     /// Initialize the system
     pub async fn init(&self) -> Result<()> {
-
         Ok(())
     }
 
@@ -230,11 +229,7 @@ impl CombatSystem {
     }
 
     /// Broadcast attack result to nearby players
-    fn broadcast_attack_result(
-        &self,
-        attack: &PendingAttack,
-        result: &DamageResult,
-    ) -> Result<()> {
+    fn broadcast_attack_result(&self, attack: &PendingAttack, result: &DamageResult) -> Result<()> {
         // Build SMSG_ATTACKERSTATEUPDATE packet
         // This would use the messages system
         trace!(
@@ -374,7 +369,6 @@ struct DefenderData {
 impl CombatSystem {
     /// Shutdown the system
     pub async fn shutdown(&self) -> Result<()> {
-
         Ok(())
     }
 

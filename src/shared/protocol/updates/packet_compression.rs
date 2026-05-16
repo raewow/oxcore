@@ -1,5 +1,5 @@
 use crate::shared::protocol::opcodes::Opcode;
-use crate::shared::protocol::{WorldPacket, packet::WorldPacketGuidExt};
+use crate::shared::protocol::{packet::WorldPacketGuidExt, WorldPacket};
 use anyhow::Result;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;

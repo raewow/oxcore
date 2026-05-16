@@ -39,8 +39,7 @@ pub async fn handle_emote(
     world
         .managers
         .broadcast_mgr
-        .broadcast_nearby(player_guid, &emote_msg.to_world_packet(), true)
-        ;
+        .broadcast_nearby(player_guid, &emote_msg.to_world_packet(), true);
 
     Ok(())
 }

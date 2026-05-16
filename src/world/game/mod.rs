@@ -1,8 +1,8 @@
 pub mod area_trigger;
-pub mod common;
 pub mod broadcast_mgr;
 pub mod chat;
 pub mod combat;
+pub mod common;
 pub mod coordination;
 pub mod corpse;
 pub mod creature;

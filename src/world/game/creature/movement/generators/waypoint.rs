@@ -139,11 +139,17 @@ impl MovementGenerator for WaypointMovementGenerator {
     }
 
     fn finalize(&mut self, creature_guid: ObjectGuid) {
-        tracing::trace!("[MOVEMENT] Waypoint generator finalized for {:?}", creature_guid);
+        tracing::trace!(
+            "[MOVEMENT] Waypoint generator finalized for {:?}",
+            creature_guid
+        );
     }
 
     fn is_finished(&self) -> bool {
-        !self.repeating && self.current_index >= self.waypoints.len().saturating_sub(1) && !self.is_moving && !self.is_waiting
+        !self.repeating
+            && self.current_index >= self.waypoints.len().saturating_sub(1)
+            && !self.is_moving
+            && !self.is_waiting
     }
 
     fn reset(&mut self, _creature_guid: ObjectGuid) {

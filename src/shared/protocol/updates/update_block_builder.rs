@@ -46,14 +46,14 @@ use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 use tracing::{info, warn};
 
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::protocol::opcodes::Opcode;
-use crate::shared::protocol::{WorldPacket, packet::WorldPacketGuidExt};
-use crate::shared::protocol::position::Position;
 use super::movement_block::MovementSpeeds;
 use super::packet_compression::compress_update_packet_if_needed;
 use super::update_mask::UpdateMask;
 use super::update_types::{ObjectTypeId, ObjectUpdateType};
+use crate::shared::protocol::guid::ObjectGuid;
+use crate::shared::protocol::opcodes::Opcode;
+use crate::shared::protocol::position::Position;
+use crate::shared::protocol::{packet::WorldPacketGuidExt, WorldPacket};
 
 /// Update flags for object updates (from movement_block.rs)
 pub mod update_flags {

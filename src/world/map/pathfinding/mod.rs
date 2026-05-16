@@ -7,16 +7,16 @@
 //! - NavMesh: Rust-native A* pathfinding through polygon graph
 //! - VMapManager: Collision detection and line-of-sight
 
-pub mod types;
-pub mod navmesh;
-pub mod vmap;
-pub mod mmap_manager;
-pub mod pathfinder;
 pub mod game_pathfinder;
+pub mod mmap_manager;
+pub mod navmesh;
+pub mod pathfinder;
+pub mod types;
+pub mod vmap;
 
-pub use types::{PathResult, HeightResult, path_flags};
-pub use navmesh::NavMesh;
-pub use vmap::VMapManager;
-pub use mmap_manager::MMapManager;
-pub use pathfinder::PathFinder;
 pub use game_pathfinder::GamePathFinder;
+pub use mmap_manager::MMapManager;
+pub use navmesh::NavMesh;
+pub use pathfinder::PathFinder;
+pub use types::{path_flags, HeightResult, PathResult};
+pub use vmap::VMapManager;

@@ -35,19 +35,18 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
             .player
             .manager()
             .with_player(target_guid, |p| {
-                (
-                    p.homebind_map,
-                    p.homebind_x,
-                    p.homebind_y,
-                    p.homebind_z,
-                )
+                (p.homebind_map, p.homebind_x, p.homebind_y, p.homebind_z)
             });
 
         match homebind {
             Some((map, x, y, z)) => {
                 tracing::info!(
                     "Teleport to homebind: target={:?} map={} pos=({:.1}, {:.1}, {:.1})",
-                    target_guid, map, x, y, z
+                    target_guid,
+                    map,
+                    x,
+                    y,
+                    z
                 );
                 (map, Position::new(x, y, z, 0.0))
             }
@@ -56,15 +55,24 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
                 return Ok(EffectResult::empty());
             }
         }
-    } else if implicit_target_b == TARGET_LOCATION_DATABASE || implicit_target_b == TARGET_ENUM_UNITS_SCRIPT_AOE_AT_SRC_LOC {
+    } else if implicit_target_b == TARGET_LOCATION_DATABASE
+        || implicit_target_b == TARGET_ENUM_UNITS_SCRIPT_AOE_AT_SRC_LOC
+    {
         // Portal / teleport spell: coordinates from spell_target_position table
-        match world.managers.spell_mgr.get_spell_target_position(input.spell_id) {
+        match world
+            .managers
+            .spell_mgr
+            .get_spell_target_position(input.spell_id)
+        {
             Some(pos) => {
                 tracing::info!(
                     "Teleport to DB position: spell={} target={:?} map={} pos=({:.1}, {:.1}, {:.1})",
                     input.spell_id, target_guid, pos.map_id, pos.x, pos.y, pos.z
                 );
-                (pos.map_id, Position::new(pos.x, pos.y, pos.z, pos.orientation))
+                (
+                    pos.map_id,
+                    Position::new(pos.x, pos.y, pos.z, pos.orientation),
+                )
             }
             None => {
                 tracing::warn!(
@@ -77,7 +85,9 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
     } else {
         tracing::debug!(
             "Teleport units: target={:?} spell={} implicit_target_b={} (unhandled)",
-            target_guid, input.spell_id, implicit_target_b
+            target_guid,
+            input.spell_id,
+            implicit_target_b
         );
         return Ok(EffectResult::empty());
     };
@@ -111,7 +121,11 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
 
     tracing::info!(
         "Teleport initiated: target={:?} to map={} pos=({:.1}, {:.1}, {:.1})",
-        target_guid, dest_map, dest_pos.x, dest_pos.y, dest_pos.z
+        target_guid,
+        dest_map,
+        dest_pos.x,
+        dest_pos.y,
+        dest_pos.z
     );
 
     Ok(EffectResult::empty())
@@ -125,19 +139,29 @@ pub async fn effect_bind(input: &EffectInput, world: &World) -> Result<EffectRes
     let target_guid = input.target_guid.unwrap_or(input.caster_guid);
 
     // Get current position as bind location
-    let current_pos = world.systems.player.manager().with_player(target_guid, |player| {
-        player.movement.position.clone()
-    }).ok_or_else(|| anyhow::anyhow!("Player not found"))?;
+    let current_pos = world
+        .systems
+        .player
+        .manager()
+        .with_player(target_guid, |player| player.movement.position.clone())
+        .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
 
-    let zone_id = world.systems.player.manager().with_player(target_guid, |player| {
-        player.zone_id
-    }).unwrap_or(0);
+    let zone_id = world
+        .systems
+        .player
+        .manager()
+        .with_player(target_guid, |player| player.zone_id)
+        .unwrap_or(0);
 
     // TODO: Set home bind in player data
 
     tracing::debug!(
         "Bind: target={:?} to zone={} pos=({:.1}, {:.1}, {:.1})",
-        target_guid, zone_id, current_pos.x, current_pos.y, current_pos.z
+        target_guid,
+        zone_id,
+        current_pos.x,
+        current_pos.y,
+        current_pos.z
     );
 
     Ok(EffectResult::empty())
@@ -147,21 +171,28 @@ pub async fn effect_bind(input: &EffectInput, world: &World) -> Result<EffectRes
 ///
 /// Teleport target to caster and make them face the caster.
 /// Used for some special teleport effects.
-pub async fn effect_teleport_units_face_caster(input: &EffectInput, world: &World) -> Result<EffectResult> {
+pub async fn effect_teleport_units_face_caster(
+    input: &EffectInput,
+    world: &World,
+) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
 
-    let caster_pos = world.systems.player.manager().with_player(input.caster_guid, |player| {
-        player.movement.position.clone()
-    }).ok_or_else(|| anyhow::anyhow!("Caster not found"))?;
+    let caster_pos = world
+        .systems
+        .player
+        .manager()
+        .with_player(input.caster_guid, |player| player.movement.position.clone())
+        .ok_or_else(|| anyhow::anyhow!("Caster not found"))?;
 
     // TODO: Teleport target to caster's front and face caster
 
     tracing::debug!(
         "Teleport face caster: target={:?} to caster={:?}",
-        target_guid, input.caster_guid
+        target_guid,
+        input.caster_guid
     );
 
     Ok(EffectResult::empty())
@@ -176,10 +207,7 @@ pub async fn effect_stuck(input: &EffectInput, world: &World) -> Result<EffectRe
 
     // TODO: Get home bind location and teleport there
 
-    tracing::debug!(
-        "Stuck teleport: target={:?} to home bind",
-        target_guid
-    );
+    tracing::debug!("Stuck teleport: target={:?} to home bind", target_guid);
 
     Ok(EffectResult::empty())
 }
@@ -194,15 +222,19 @@ pub async fn effect_summon_player(input: &EffectInput, world: &World) -> Result<
         None => return Ok(EffectResult::empty()),
     };
 
-    let caster_pos = world.systems.player.manager().with_player(input.caster_guid, |player| {
-        player.movement.position.clone()
-    }).ok_or_else(|| anyhow::anyhow!("Caster not found"))?;
+    let caster_pos = world
+        .systems
+        .player
+        .manager()
+        .with_player(input.caster_guid, |player| player.movement.position.clone())
+        .ok_or_else(|| anyhow::anyhow!("Caster not found"))?;
 
     // TODO: Teleport target to caster
 
     tracing::debug!(
         "Summon player: target={:?} to caster={:?}",
-        target_guid, input.caster_guid
+        target_guid,
+        input.caster_guid
     );
 
     Ok(EffectResult::empty())
@@ -222,7 +254,8 @@ pub async fn effect_send_taxi(input: &EffectInput, world: &World) -> Result<Effe
 
     tracing::debug!(
         "Send taxi: target={:?} path_id={}",
-        target_guid, taxi_path_id
+        target_guid,
+        taxi_path_id
     );
 
     Ok(EffectResult::empty())
@@ -244,7 +277,8 @@ pub async fn effect_player_pull(input: &EffectInput, world: &World) -> Result<Ef
 
     tracing::debug!(
         "Player pull: target={:?} distance={:.1}",
-        target_guid, pull_distance
+        target_guid,
+        pull_distance
     );
 
     Ok(EffectResult::empty())

@@ -244,8 +244,8 @@ impl Creature {
             motion_master: MotionMaster::new(),
             move_spline: MoveSpline::default(),
             wander_distance: 0.0,
-            speed_walk: 1.0,        // Default rate, overridden by model_info
-            speed_run: 1.14286,     // Default rate (vmangos DEFAULT_NPC_RUN_SPEED_RATE)
+            speed_walk: 1.0,    // Default rate, overridden by model_info
+            speed_run: 1.14286, // Default rate (vmangos DEFAULT_NPC_RUN_SPEED_RATE)
         }
     }
 

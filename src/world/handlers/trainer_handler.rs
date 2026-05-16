@@ -4,7 +4,6 @@ use anyhow::Result;
 use tracing::{info, warn};
 
 use crate::shared::messages::spells::{SmsgPlaySpellVisual, SmsgSpellGo, SmsgSpellStart};
-use crate::world::game::broadcast_mgr::broadcast_around_creature;
 use crate::shared::messages::trainer::{
     SmsgTrainerBuyFailed, SmsgTrainerBuySucceeded, SmsgTrainerList, TrainerBuyError,
     TrainerSpellData,
@@ -12,6 +11,7 @@ use crate::shared::messages::trainer::{
 use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
+use crate::world::game::broadcast_mgr::broadcast_around_creature;
 use crate::world::game::npc::trainer::types::TrainerSpellState;
 use crate::world::World;
 
@@ -67,7 +67,12 @@ pub async fn send_trainer_list(
 
     // Get trainer spells
     let all_spells = world.systems.trainer_manager.get_trainer_spells(entry);
-    info!("send_trainer_list: entry={} trainer_type={} spells_in_db={}", entry, trainer_type, all_spells.len());
+    info!(
+        "send_trainer_list: entry={} trainer_type={} spells_in_db={}",
+        entry,
+        trainer_type,
+        all_spells.len()
+    );
     if all_spells.is_empty() {
         warn!("send_trainer_list: no spells for trainer entry {}", entry);
     }
@@ -140,10 +145,16 @@ pub async fn send_trainer_list(
             .collect()
     };
 
-    info!("send_trainer_list: sending {} spells to player {:?}", spell_data.len(), player_guid);
+    info!(
+        "send_trainer_list: sending {} spells to player {:?}",
+        spell_data.len(),
+        player_guid
+    );
     for sd in &spell_data {
-        info!("  spell_id={} state={} cost={} req_level={} req_skill={} req_skill_value={}",
-            sd.spell_id, sd.state, sd.cost, sd.req_level, sd.req_skill, sd.req_skill_value);
+        info!(
+            "  spell_id={} state={} cost={} req_level={} req_skill={} req_skill_value={}",
+            sd.spell_id, sd.state, sd.cost, sd.req_level, sd.req_skill, sd.req_skill_value
+        );
     }
 
     let msg = SmsgTrainerList {
@@ -157,7 +168,11 @@ pub async fn send_trainer_list(
     let raw = crate::shared::messages::ToWorldPacket::to_world_packet(&msg);
     let raw_bytes = raw.data();
     let preview_len = raw_bytes.len().min(80);
-    info!("send_trainer_list: SMSG_TRAINER_LIST size={} bytes preview: {:02X?}", raw_bytes.len(), &raw_bytes[..preview_len]);
+    info!(
+        "send_trainer_list: SMSG_TRAINER_LIST size={} bytes preview: {:02X?}",
+        raw_bytes.len(),
+        &raw_bytes[..preview_len]
+    );
 
     world
         .managers
@@ -203,7 +218,13 @@ pub async fn handle_trainer_buy_spell(
                 "CMSG_TRAINER_BUY_SPELL: trainer {:?} not found",
                 trainer_guid
             );
-            send_buy_failed(world, player_guid, trainer_guid, spell_id, TrainerBuyError::Unavailable);
+            send_buy_failed(
+                world,
+                player_guid,
+                trainer_guid,
+                spell_id,
+                TrainerBuyError::Unavailable,
+            );
             return Ok(());
         }
     };
@@ -217,7 +238,13 @@ pub async fn handle_trainer_buy_spell(
                 "CMSG_TRAINER_BUY_SPELL: spell {} not offered by trainer entry {}",
                 spell_id, entry
             );
-            send_buy_failed(world, player_guid, trainer_guid, spell_id, TrainerBuyError::Unavailable);
+            send_buy_failed(
+                world,
+                player_guid,
+                trainer_guid,
+                spell_id,
+                TrainerBuyError::Unavailable,
+            );
             return Ok(());
         }
     };
@@ -226,8 +253,17 @@ pub async fn handle_trainer_buy_spell(
     let trigger_spell_id = match world.managers.spell_mgr.get(spell_id) {
         Some(e) => e.effect_trigger_spell[0],
         None => {
-            warn!("CMSG_TRAINER_BUY_SPELL: teaching spell {} not in DBC", spell_id);
-            send_buy_failed(world, player_guid, trainer_guid, spell_id, TrainerBuyError::Unavailable);
+            warn!(
+                "CMSG_TRAINER_BUY_SPELL: teaching spell {} not in DBC",
+                spell_id
+            );
+            send_buy_failed(
+                world,
+                player_guid,
+                trainer_guid,
+                spell_id,
+                TrainerBuyError::Unavailable,
+            );
             return Ok(());
         }
     };
@@ -236,7 +272,10 @@ pub async fn handle_trainer_buy_spell(
     let effective_req_level = if trainer_spell.req_level > 0 {
         trainer_spell.req_level
     } else {
-        world.managers.spell_mgr.get(trigger_spell_id)
+        world
+            .managers
+            .spell_mgr
+            .get(trigger_spell_id)
             .map(|e| e.spell_level as u8)
             .unwrap_or(0)
     };
@@ -269,11 +308,14 @@ pub async fn handle_trainer_buy_spell(
 
     match validation_err {
         None => {
-            warn!(
-                "CMSG_TRAINER_BUY_SPELL: player {:?} not found",
-                player_guid
+            warn!("CMSG_TRAINER_BUY_SPELL: player {:?} not found", player_guid);
+            send_buy_failed(
+                world,
+                player_guid,
+                trainer_guid,
+                spell_id,
+                TrainerBuyError::Unavailable,
             );
-            send_buy_failed(world, player_guid, trainer_guid, spell_id, TrainerBuyError::Unavailable);
             return Ok(());
         }
         Some(Some(err)) => {
@@ -376,7 +418,11 @@ pub(crate) fn build_trainer_anim_packets(
     const VISUAL_SELF_CAST: u32 = 222;
 
     let caster_is_player = spell_visual == VISUAL_SELF_CAST;
-    let caster_guid = if caster_is_player { player_guid } else { trainer_guid };
+    let caster_guid = if caster_is_player {
+        player_guid
+    } else {
+        trainer_guid
+    };
 
     let spell_start = SmsgSpellStart {
         caster_guid,
@@ -407,7 +453,12 @@ pub(crate) fn build_trainer_anim_packets(
     }
     .to_world_packet();
 
-    TrainerAnimPackets { caster_is_player, spell_start, spell_go, spell_visual }
+    TrainerAnimPackets {
+        caster_is_player,
+        spell_start,
+        spell_go,
+        spell_visual,
+    }
 }
 
 /// Send SMSG_SPELL_START + SMSG_SPELL_GO + SMSG_PLAY_SPELL_VISUAL for the trainer teaching
@@ -424,9 +475,18 @@ fn send_trainer_spell_animation(
 
     if pkts.caster_is_player {
         // Player is caster — broadcast from player (include self so the player sees it too)
-        world.managers.broadcast_mgr.broadcast_nearby(player_guid, &pkts.spell_start, true);
-        world.managers.broadcast_mgr.broadcast_nearby(player_guid, &pkts.spell_go, true);
-        world.managers.broadcast_mgr.broadcast_nearby(player_guid, &pkts.spell_visual, true);
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_nearby(player_guid, &pkts.spell_start, true);
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_nearby(player_guid, &pkts.spell_go, true);
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_nearby(player_guid, &pkts.spell_visual, true);
     } else {
         // Trainer NPC is caster — broadcast from the creature's position
         broadcast_around_creature(world, trainer_guid, &pkts.spell_start);
@@ -476,7 +536,10 @@ mod tests {
     #[test]
     fn visual_222_selects_player_as_caster() {
         let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 9999, 222);
-        assert!(pkts.caster_is_player, "spell_visual 222 must set caster_is_player");
+        assert!(
+            pkts.caster_is_player,
+            "spell_visual 222 must set caster_is_player"
+        );
     }
 
     /// Any other spell_visual: trainer NPC is the caster.
@@ -484,7 +547,10 @@ mod tests {
     fn non_222_selects_trainer_as_caster() {
         for visual in [0u32, 1, 221, 223, 300, 9999] {
             let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 1, visual);
-            assert!(!pkts.caster_is_player, "visual {visual} must use trainer as caster");
+            assert!(
+                !pkts.caster_is_player,
+                "visual {visual} must use trainer as caster"
+            );
         }
     }
 
@@ -508,13 +574,28 @@ mod tests {
         use crate::shared::messages::spells::SmsgPlaySpellVisual;
         let guid = player_guid();
         let kit_id: u32 = 0xBEEF;
-        let pkt = SmsgPlaySpellVisual { caster_guid: guid, spell_visual_kit_id: kit_id }
-            .to_world_packet();
+        let pkt = SmsgPlaySpellVisual {
+            caster_guid: guid,
+            spell_visual_kit_id: kit_id,
+        }
+        .to_world_packet();
         let data = pkt.data();
 
-        assert_eq!(data.len(), 12, "SMSG_PLAY_SPELL_VISUAL must be exactly 12 bytes (8 GUID + 4 kit)");
-        assert_eq!(read_u64_le(data, 0), guid.raw(), "first 8 bytes must be raw GUID");
-        assert_eq!(read_u32_le(data, 8), kit_id, "bytes 8-11 must be SpellVisualKit ID");
+        assert_eq!(
+            data.len(),
+            12,
+            "SMSG_PLAY_SPELL_VISUAL must be exactly 12 bytes (8 GUID + 4 kit)"
+        );
+        assert_eq!(
+            read_u64_le(data, 0),
+            guid.raw(),
+            "first 8 bytes must be raw GUID"
+        );
+        assert_eq!(
+            read_u32_le(data, 8),
+            kit_id,
+            "bytes 8-11 must be SpellVisualKit ID"
+        );
     }
 
     // ── spell_visual packet caster fields ─────────────────────────────────────
@@ -524,8 +605,11 @@ mod tests {
     fn visual_pkt_caster_is_player_for_222() {
         let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 5, 222);
         let data = pkts.spell_visual.data();
-        assert_eq!(read_u64_le(data, 0), player_guid().raw(),
-            "SMSG_PLAY_SPELL_VISUAL caster must be player when spell_visual == 222");
+        assert_eq!(
+            read_u64_le(data, 0),
+            player_guid().raw(),
+            "SMSG_PLAY_SPELL_VISUAL caster must be player when spell_visual == 222"
+        );
     }
 
     /// When spell_visual != 222 the SMSG_PLAY_SPELL_VISUAL caster GUID is the trainer's GUID.
@@ -533,8 +617,11 @@ mod tests {
     fn visual_pkt_caster_is_trainer_for_other_visuals() {
         let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 5, 300);
         let data = pkts.spell_visual.data();
-        assert_eq!(read_u64_le(data, 0), trainer_guid().raw(),
-            "SMSG_PLAY_SPELL_VISUAL caster must be trainer when spell_visual != 222");
+        assert_eq!(
+            read_u64_le(data, 0),
+            trainer_guid().raw(),
+            "SMSG_PLAY_SPELL_VISUAL caster must be trainer when spell_visual != 222"
+        );
     }
 
     // ── SMSG_SPELL_START / SMSG_SPELL_GO caster fields ───────────────────────
@@ -545,8 +632,11 @@ mod tests {
         let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 100, 222);
         let data = pkts.spell_start.data();
         let (first_guid, _) = decode_packed_guid(data);
-        assert_eq!(first_guid, player_guid().raw(),
-            "SMSG_SPELL_START first packed GUID must be player when self-cast");
+        assert_eq!(
+            first_guid,
+            player_guid().raw(),
+            "SMSG_SPELL_START first packed GUID must be player when self-cast"
+        );
     }
 
     /// For spell_visual != 222 SMSG_SPELL_START opens with the trainer's packed GUID.
@@ -555,8 +645,11 @@ mod tests {
         let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 100, 0);
         let data = pkts.spell_start.data();
         let (first_guid, _) = decode_packed_guid(data);
-        assert_eq!(first_guid, trainer_guid().raw(),
-            "SMSG_SPELL_START first packed GUID must be trainer when NPC casts");
+        assert_eq!(
+            first_guid,
+            trainer_guid().raw(),
+            "SMSG_SPELL_START first packed GUID must be trainer when NPC casts"
+        );
     }
 
     /// SMSG_SPELL_GO hit list must contain exactly the player GUID.
@@ -571,9 +664,16 @@ mod tests {
         let base = n1 + n2 + 4 + 2; // after spell_id and cast_flags
 
         let hit_count = data[base];
-        assert_eq!(hit_count, 1, "SMSG_SPELL_GO hit count must be 1 (the player)");
+        assert_eq!(
+            hit_count, 1,
+            "SMSG_SPELL_GO hit count must be 1 (the player)"
+        );
 
         let hit_guid = read_u64_le(data, base + 1);
-        assert_eq!(hit_guid, player_guid().raw(), "hit list must contain the player's GUID");
+        assert_eq!(
+            hit_guid,
+            player_guid().raw(),
+            "hit list must contain the player's GUID"
+        );
     }
 }

@@ -42,7 +42,10 @@ async fn main() -> Result<()> {
     let config = Config::load(cli.config)?;
 
     match cli.command {
-        Command::Help => { commands::help::run(); return Ok(()); }
+        Command::Help => {
+            commands::help::run();
+            return Ok(());
+        }
         Command::Migrate => commands::migrate::run(&config).await?,
         Command::Status => commands::status::run(&config).await?,
         Command::New { db, name } => commands::new::run(&db, &name, &config.migrations_dir)?,

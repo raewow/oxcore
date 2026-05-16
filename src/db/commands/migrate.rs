@@ -82,11 +82,7 @@ pub fn collect_migrations(
             if id.chars().all(|c| c.is_ascii_digit()) {
                 // name = everything after "YYYYMMDDHHMMSS_<db>_", before ".sql"
                 let after_db = &fname[14 + 1 + db_name.len() + 1..fname.len() - 4];
-                result.push((
-                    id.to_string(),
-                    after_db.to_string(),
-                    entry.path(),
-                ));
+                result.push((id.to_string(), after_db.to_string(), entry.path()));
             }
         }
     }

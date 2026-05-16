@@ -10,9 +10,9 @@
 //! - [`SmsgSellItem`] - Sell item result
 
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::packet::WorldPacketGuidExt;
 use crate::shared::protocol::ObjectGuid;
 use crate::shared::protocol::{Opcode, WorldPacket};
-use crate::shared::protocol::packet::WorldPacketGuidExt;
 
 /// Vendor item data for SMSG_LIST_INVENTORY
 #[derive(Debug, Clone)]

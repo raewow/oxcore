@@ -52,13 +52,18 @@ pub async fn effect_create_item(input: &EffectInput, world: &World) -> Result<Ef
 
     let item_count = input.base_value.max(1) as u32;
 
-    let result = world.systems.inventory
+    let result = world
+        .systems
+        .inventory
         .add_item(input.caster_guid, item_entry, item_count)
         .await;
 
     tracing::debug!(
         "Create item: caster={:?} item={} count={} result={:?}",
-        input.caster_guid, item_entry, item_count, result
+        input.caster_guid,
+        item_entry,
+        item_count,
+        result
     );
 
     Ok(EffectResult::empty())
@@ -72,15 +77,17 @@ pub async fn effect_create_item(input: &EffectInput, world: &World) -> Result<Ef
 pub async fn effect_summon_change_item(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let source_item_entry = input.misc_value as u32;
     let target_item_entry = input.base_value as u32;
-    
+
     // TODO: Find and consume source item
     // Then create target item
-    
+
     tracing::debug!(
         "Item transform: {:?} {} -> {}",
-        input.caster_guid, source_item_entry, target_item_entry
+        input.caster_guid,
+        source_item_entry,
+        target_item_entry
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -91,16 +98,17 @@ pub async fn effect_summon_change_item(input: &EffectInput, world: &World) -> Re
 pub async fn effect_enchant_item_perm(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let enchantment_id = input.misc_value as u32;
     let target_guid = input.target_guid.unwrap_or(input.caster_guid);
-    
+
     // TODO: Get the item to enchant from spell target
     // For now, enchant main hand weapon
     // Need to get item GUID from equipment slot
-    
+
     tracing::debug!(
         "Permanent enchant: target={:?} enchant={}",
-        target_guid, enchantment_id
+        target_guid,
+        enchantment_id
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -113,15 +121,17 @@ pub async fn effect_enchant_item_tmp(input: &EffectInput, world: &World) -> Resu
     let enchantment_id = input.misc_value as u32;
     let duration_sec = input.base_value.max(0) as u32;
     let target_guid = input.target_guid.unwrap_or(input.caster_guid);
-    
+
     // TODO: Get the item to enchant from spell target
     // Apply temporary enchantment with duration
-    
+
     tracing::debug!(
         "Temporary enchant: target={:?} enchant={} duration={}s",
-        target_guid, enchantment_id, duration_sec
+        target_guid,
+        enchantment_id,
+        duration_sec
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -132,14 +142,15 @@ pub async fn effect_enchant_item_tmp(input: &EffectInput, world: &World) -> Resu
 pub async fn effect_enchant_held_item(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let enchantment_id = input.misc_value as u32;
     let target_guid = input.target_guid.unwrap_or(input.caster_guid);
-    
+
     // TODO: Get main hand item and apply enchantment
-    
+
     tracing::debug!(
         "Enchant held item: target={:?} enchant={}",
-        target_guid, enchantment_id
+        target_guid,
+        enchantment_id
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -152,16 +163,17 @@ pub async fn effect_disenchant(input: &EffectInput, world: &World) -> Result<Eff
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
-    
+
     // TODO: Get item info and check if disenchantable
     // Generate materials based on item level/quality
     // Consume item and give materials
-    
+
     tracing::debug!(
         "Disenchant: caster={:?} item={:?}",
-        input.caster_guid, target_guid
+        input.caster_guid,
+        target_guid
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -175,15 +187,17 @@ pub async fn effect_open_lock_item(input: &EffectInput, world: &World) -> Result
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
-    
+
     // TODO: Check if caster has the required key
     // Open the lock
-    
+
     tracing::debug!(
         "Open lock: caster={:?} target={:?} lock={}",
-        input.caster_guid, target_guid, lock_id
+        input.caster_guid,
+        target_guid,
+        lock_id
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -196,15 +210,17 @@ pub async fn effect_durability_damage(input: &EffectInput, world: &World) -> Res
     let slot = input.misc_value as u8;
     let damage = input.base_value.max(0) as u32;
     let target_guid = input.target_guid.unwrap_or(input.caster_guid);
-    
+
     // TODO: Get item at slot and damage durability
     // Use world.systems.inventory.update_durability
-    
+
     tracing::debug!(
         "Durability damage: target={:?} slot={} damage={}",
-        target_guid, slot, damage
+        target_guid,
+        slot,
+        damage
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -213,18 +229,23 @@ pub async fn effect_durability_damage(input: &EffectInput, world: &World) -> Res
 /// Damage an item's durability by percentage.
 /// misc_value = equipment slot
 /// base_value = percentage of max durability to damage (1-100)
-pub async fn effect_durability_damage_pct(input: &EffectInput, world: &World) -> Result<EffectResult> {
+pub async fn effect_durability_damage_pct(
+    input: &EffectInput,
+    world: &World,
+) -> Result<EffectResult> {
     let slot = input.misc_value as u8;
     let damage_pct = input.base_value.max(0).min(100) as u8;
     let target_guid = input.target_guid.unwrap_or(input.caster_guid);
-    
+
     // TODO: Get item at slot and damage durability by percentage
-    
+
     tracing::debug!(
         "Durability damage pct: target={:?} slot={} damage_pct={}%",
-        target_guid, slot, damage_pct
+        target_guid,
+        slot,
+        damage_pct
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -235,13 +256,15 @@ pub async fn effect_durability_damage_pct(input: &EffectInput, world: &World) ->
 pub async fn effect_feed_pet(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let food_item_entry = input.misc_value as u32;
     let happiness_gain = input.base_value.max(0) as u32;
-    
+
     // TODO: Consume food item from inventory
     // Increase pet happiness
-    
+
     tracing::debug!(
         "Feed pet: caster={:?} food={} happiness={}",
-        input.caster_guid, food_item_entry, happiness_gain
+        input.caster_guid,
+        food_item_entry,
+        happiness_gain
     );
 
     Ok(EffectResult::empty())
@@ -253,7 +276,11 @@ mod tests {
 
     /// Build a minimal SpellEntry suitable for tests.
     /// Only populates fields relevant to CREATE_ITEM; everything else is zeroed/defaulted.
-    fn make_spell_entry(id: u32, effect_item_type: [u64; 3], effect_base_points: [i32; 3]) -> SpellEntry {
+    fn make_spell_entry(
+        id: u32,
+        effect_item_type: [u64; 3],
+        effect_base_points: [i32; 3],
+    ) -> SpellEntry {
         SpellEntry {
             id,
             name: format!("TestSpell{}", id),
@@ -344,18 +371,24 @@ mod tests {
         let entry = make_spell_entry(587, [item_id, 0, 0], [4, 0, 0]); // base_points=4 (qty)
 
         // The item comes from effect_item_type, NOT base_value
-        assert_eq!(entry.effect_item_type[0], item_id,
-            "effect_item_type[0] should hold the item entry ID");
-        assert_ne!(entry.effect_base_points[0] as u64, item_id,
-            "base_value (effect_base_points) should NOT be confused for the item ID");
+        assert_eq!(
+            entry.effect_item_type[0], item_id,
+            "effect_item_type[0] should hold the item entry ID"
+        );
+        assert_ne!(
+            entry.effect_base_points[0] as u64, item_id,
+            "base_value (effect_base_points) should NOT be confused for the item ID"
+        );
     }
 
     /// Zero item type means no item to create — the handler should exit early.
     #[test]
     fn test_zero_item_type_is_no_op() {
         let entry = make_spell_entry(1, [0, 0, 0], [1, 0, 0]);
-        assert_eq!(entry.effect_item_type[0], 0,
-            "effect_item_type=0 should be treated as no-op by effect_create_item");
+        assert_eq!(
+            entry.effect_item_type[0], 0,
+            "effect_item_type=0 should be treated as no-op by effect_create_item"
+        );
     }
 
     /// Quantity comes from base_value (effect_base_points), clamped to at least 1.
@@ -370,6 +403,9 @@ mod tests {
     fn test_negative_base_points_clamp_to_one() {
         let entry = make_spell_entry(1, [9999, 0, 0], [-1, 0, 0]);
         let qty = entry.effect_base_points[0].max(1) as u32;
-        assert_eq!(qty, 1, "Negative base_points should be clamped to minimum 1 item");
+        assert_eq!(
+            qty, 1,
+            "Negative base_points should be clamped to minimum 1 item"
+        );
     }
 }

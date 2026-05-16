@@ -4,17 +4,19 @@
 //! Checks quest triggers, tavern rest, and teleport destinations.
 
 use anyhow::Result;
-use tracing::{debug, warn, info};
+use tracing::{debug, info, warn};
 
 use crate::shared::game::chat::{ChatMsg, ChatTag, Language};
 use crate::shared::messages::chat::SmsgMessageChat;
-use crate::shared::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
+use crate::shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
-use crate::world::game::common::update_fields::PLAYER_FLAGS;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
 use crate::world::game::area_trigger::{self, AreaTriggerEntry};
+use crate::world::game::common::update_fields::PLAYER_FLAGS;
 use crate::world::game::player::environment::RestType;
 use crate::world::World;
 
@@ -44,8 +46,10 @@ pub async fn handle_area_trigger(
     );
 
     // Get player info
-    let (player_map_id, player_x, player_y, player_z, player_level, is_alive) =
-        match world.managers.player_mgr.with_player(player_guid, |player| {
+    let (player_map_id, player_x, player_y, player_z, player_level, is_alive) = match world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| {
             (
                 player.map_id,
                 player.movement.position.x,
@@ -55,9 +59,9 @@ pub async fn handle_area_trigger(
                 player.is_alive(),
             )
         }) {
-            Some(info) => info,
-            None => return Ok(()),
-        };
+        Some(info) => info,
+        None => return Ok(()),
+    };
 
     let area_trigger_mgr = &world.managers.area_trigger_mgr;
 
@@ -97,11 +101,18 @@ pub async fn handle_area_trigger(
     // --- Lua area trigger script ---
     if let Some(script) = world.managers.lua_mgr.get_area_trigger_script(trigger_id) {
         let player_snap = build_player_snapshot(player_guid, world);
-        let actions = world.managers.lua_mgr.with_lua(|lua| {
-            script.on_area_trigger(lua, &player_snap)
-        });
+        let actions = world
+            .managers
+            .lua_mgr
+            .with_lua(|lua| script.on_area_trigger(lua, &player_snap));
         if !actions.is_empty() {
-            execute_gossip_actions(actions, player_guid, crate::shared::protocol::ObjectGuid::empty(), world).await?;
+            execute_gossip_actions(
+                actions,
+                player_guid,
+                crate::shared::protocol::ObjectGuid::empty(),
+                world,
+            )
+            .await?;
         }
         // Do not return — allow normal tavern/teleport logic to still run.
     }
@@ -197,10 +208,12 @@ pub async fn handle_area_trigger(
     // Check if destination is an instance map and get/create instance
     let dest_instance_id = {
         let dbc = world.dbc.read();
-        let is_instance_map = dbc.get_map(dest_map)
-            .map(|m| m.map_type == 1 || m.map_type == 2)  // 1=Instance, 2=Raid
+        let is_instance_map = dbc
+            .get_map(dest_map)
+            .map(|m| m.map_type == 1 || m.map_type == 2) // 1=Instance, 2=Raid
             .unwrap_or(false);
-        let is_raid = dbc.get_map(dest_map)
+        let is_raid = dbc
+            .get_map(dest_map)
             .map(|m| m.map_type == 2)
             .unwrap_or(false);
         drop(dbc);
@@ -210,13 +223,18 @@ pub async fn handle_area_trigger(
             // TODO: Get group_leader_guid from player's group when group system is ready
             let group_leader_guid = None;
 
-            match world.managers.instance_mgr.enter_instance(
-                &world.databases,
-                dest_map,
-                player_guid,
-                group_leader_guid,
-                is_raid,
-            ).await {
+            match world
+                .managers
+                .instance_mgr
+                .enter_instance(
+                    &world.databases,
+                    dest_map,
+                    player_guid,
+                    group_leader_guid,
+                    is_raid,
+                )
+                .await
+            {
                 Ok(instance_id) => {
                     debug!(
                         "Player {} entering instance {} (map {}, raid={})",
@@ -225,13 +243,17 @@ pub async fn handle_area_trigger(
                     instance_id
                 }
                 Err(e) => {
-                    tracing::error!("Failed to create/enter instance for map {}: {}", dest_map, e);
+                    tracing::error!(
+                        "Failed to create/enter instance for map {}: {}",
+                        dest_map,
+                        e
+                    );
                     // Fall back to continent instance (should not happen for instance maps)
                     0
                 }
             }
         } else {
-            0  // Continents use instance_id = 0
+            0 // Continents use instance_id = 0
         }
     };
 

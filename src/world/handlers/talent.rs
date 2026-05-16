@@ -24,11 +24,21 @@ pub async fn handle_learn_talent(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let player_guid = session.player_guid().ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
-    let talent_id = packet.read_u32().ok_or_else(|| anyhow::anyhow!("Failed to read talent_id"))?;
-    let _requested_rank = packet.read_u32().ok_or_else(|| anyhow::anyhow!("Failed to read requested_rank"))?; // Client sends 0-indexed rank
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
+    let talent_id = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read talent_id"))?;
+    let _requested_rank = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read requested_rank"))?; // Client sends 0-indexed rank
 
-    world.systems.talents.learn_talent(player_guid, talent_id, world).await?;
+    world
+        .systems
+        .talents
+        .learn_talent(player_guid, talent_id, world)
+        .await?;
 
     // Send talent list update to client
     // The client updates automatically from PLAYER_CHARACTER_POINTS1
@@ -50,10 +60,16 @@ pub async fn handle_unlearn_talents(
     _packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let player_guid = session.player_guid().ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
 
     let no_cost = false; // Normal player reset costs gold
-    world.systems.talents.reset_talents(player_guid, no_cost, world).await?;
+    world
+        .systems
+        .talents
+        .reset_talents(player_guid, no_cost, world)
+        .await?;
 
     Ok(())
 }

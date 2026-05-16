@@ -422,38 +422,39 @@ impl LuaCreatureSnapshot {
 
         // GetCreaturesByEntry helper
         let nearby_clone = self.nearby_creatures.clone();
-        let get_creatures_by_entry = lua.create_function(move |lua, args: mlua::Variadic<Value>| {
-            let entry: u32 = if args.len() >= 2 {
-                match &args[1] {
-                    Value::Integer(n) => *n as u32,
-                    Value::Number(n) => *n as u32,
-                    _ => return Ok(Value::Table(lua.create_table()?)),
-                }
-            } else if args.len() == 1 {
-                match &args[0] {
-                    Value::Integer(n) => *n as u32,
-                    Value::Number(n) => *n as u32,
-                    _ => return Ok(Value::Table(lua.create_table()?)),
-                }
-            } else {
-                return Ok(Value::Table(lua.create_table()?));
-            };
+        let get_creatures_by_entry =
+            lua.create_function(move |lua, args: mlua::Variadic<Value>| {
+                let entry: u32 = if args.len() >= 2 {
+                    match &args[1] {
+                        Value::Integer(n) => *n as u32,
+                        Value::Number(n) => *n as u32,
+                        _ => return Ok(Value::Table(lua.create_table()?)),
+                    }
+                } else if args.len() == 1 {
+                    match &args[0] {
+                        Value::Integer(n) => *n as u32,
+                        Value::Number(n) => *n as u32,
+                        _ => return Ok(Value::Table(lua.create_table()?)),
+                    }
+                } else {
+                    return Ok(Value::Table(lua.create_table()?));
+                };
 
-            let result = lua.create_table()?;
-            let mut idx = 1;
-            for nc in &nearby_clone {
-                if nc.entry == entry {
-                    let t = lua.create_table()?;
-                    t.set("guid", LuaGuid(nc.guid))?;
-                    t.set("entry", nc.entry)?;
-                    t.set("distance", nc.distance)?;
-                    t.set("is_alive", nc.is_alive)?;
-                    result.set(idx, t)?;
-                    idx += 1;
+                let result = lua.create_table()?;
+                let mut idx = 1;
+                for nc in &nearby_clone {
+                    if nc.entry == entry {
+                        let t = lua.create_table()?;
+                        t.set("guid", LuaGuid(nc.guid))?;
+                        t.set("entry", nc.entry)?;
+                        t.set("distance", nc.distance)?;
+                        t.set("is_alive", nc.is_alive)?;
+                        result.set(idx, t)?;
+                        idx += 1;
+                    }
                 }
-            }
-            Ok(Value::Table(result))
-        })?;
+                Ok(Value::Table(result))
+            })?;
         table.set("GetCreaturesByEntry", get_creatures_by_entry)?;
 
         // Instance data

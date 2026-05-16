@@ -148,12 +148,10 @@ impl GameObjectManager {
                 flags: row.flags,
                 size: row.size,
                 data: [
-                    row.data0, row.data1, row.data2, row.data3,
-                    row.data4, row.data5, row.data6, row.data7,
-                    row.data8, row.data9, row.data10, row.data11,
-                    row.data12, row.data13, row.data14, row.data15,
-                    row.data16, row.data17, row.data18, row.data19,
-                    row.data20, row.data21, row.data22, row.data23,
+                    row.data0, row.data1, row.data2, row.data3, row.data4, row.data5, row.data6,
+                    row.data7, row.data8, row.data9, row.data10, row.data11, row.data12,
+                    row.data13, row.data14, row.data15, row.data16, row.data17, row.data18,
+                    row.data19, row.data20, row.data21, row.data22, row.data23,
                 ],
             };
             self.templates.insert(template.entry, Arc::new(template));
@@ -263,7 +261,12 @@ impl GameObjectManager {
             spawn.position,
             spawn.map_id,
             &template,
-            [spawn.rotation0, spawn.rotation1, spawn.rotation2, spawn.rotation3],
+            [
+                spawn.rotation0,
+                spawn.rotation1,
+                spawn.rotation2,
+                spawn.rotation3,
+            ],
             spawn.state,
             spawn.animprogress,
         );
@@ -289,62 +292,53 @@ impl GameObjectManager {
         use crate::shared::messages::update::*;
         use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
         use crate::world::core::common::position::Position as WorldPosition;
-        use crate::world::game::common::update_fields::*;
         use crate::world::game::common::object_type::ObjectTypeId;
+        use crate::world::game::common::update_fields::*;
 
         let go = self.gameobjects.get(&guid)?;
 
         let world_guid = WorldObjectGuid::new_gameobject(go.entry, guid.counter());
-        let world_position = WorldPosition::new(
-            go.position.x,
-            go.position.y,
-            go.position.z,
-            go.position.o,
-        );
+        let world_position =
+            WorldPosition::new(go.position.x, go.position.y, go.position.z, go.position.o);
 
         // OBJECT_FIELD_TYPE: TYPEMASK_OBJECT | TYPEMASK_GAMEOBJECT = 0x01 | 0x20 = 0x21
         let type_mask: u32 = 0x21;
 
-        let block = CreateObjectBlock::new(
-            world_guid,
-            ObjectTypeId::GameObject,
-            ObjectType::GameObject,
-        )
-        .with_position(world_position)
-        .add_flags(
-            crate::world::game::common::object_type::update_flags::UPDATEFLAG_ALL,
-        )
-        // Object fields
-        .set_guid_field(OBJECT_FIELD_GUID, world_guid)
-        .set_field(OBJECT_FIELD_TYPE, type_mask)
-        .set_field(OBJECT_FIELD_ENTRY, go.entry)
-        .set_float_field(OBJECT_FIELD_SCALE_X, go.scale)
-        // GameObject fields
-        .set_field(GAMEOBJECT_DISPLAYID, go.display_id)
-        .set_field(GAMEOBJECT_FLAGS, go.flags)
-        // Rotation (4 floats starting at GAMEOBJECT_ROTATION)
-        .set_float_field(GAMEOBJECT_ROTATION, go.rotation[0])
-        .set_float_field(GAMEOBJECT_ROTATION + 1, go.rotation[1])
-        .set_float_field(GAMEOBJECT_ROTATION + 2, go.rotation[2])
-        .set_float_field(GAMEOBJECT_ROTATION + 3, go.rotation[3])
-        // State
-        .set_field(GAMEOBJECT_STATE, go.go_state as u32)
-        // Position in update fields (some clients read from here)
-        .set_float_field(GAMEOBJECT_POS_X, go.position.x)
-        .set_float_field(GAMEOBJECT_POS_Y, go.position.y)
-        .set_float_field(GAMEOBJECT_POS_Z, go.position.z)
-        .set_float_field(GAMEOBJECT_FACING, go.position.o)
-        // Dynamic flags
-        .set_field(GAMEOBJECT_DYN_FLAGS, 0)
-        // Faction
-        .set_field(GAMEOBJECT_FACTION, go.faction)
-        // Type
-        .set_field(GAMEOBJECT_TYPE_ID, go.go_type as u32)
-        // Level
-        .set_field(GAMEOBJECT_LEVEL, go.level)
-        // Art/animation
-        .set_field(GAMEOBJECT_ARTKIT, go.art_kit)
-        .set_field(GAMEOBJECT_ANIMPROGRESS, go.anim_progress);
+        let block =
+            CreateObjectBlock::new(world_guid, ObjectTypeId::GameObject, ObjectType::GameObject)
+                .with_position(world_position)
+                .add_flags(crate::world::game::common::object_type::update_flags::UPDATEFLAG_ALL)
+                // Object fields
+                .set_guid_field(OBJECT_FIELD_GUID, world_guid)
+                .set_field(OBJECT_FIELD_TYPE, type_mask)
+                .set_field(OBJECT_FIELD_ENTRY, go.entry)
+                .set_float_field(OBJECT_FIELD_SCALE_X, go.scale)
+                // GameObject fields
+                .set_field(GAMEOBJECT_DISPLAYID, go.display_id)
+                .set_field(GAMEOBJECT_FLAGS, go.flags)
+                // Rotation (4 floats starting at GAMEOBJECT_ROTATION)
+                .set_float_field(GAMEOBJECT_ROTATION, go.rotation[0])
+                .set_float_field(GAMEOBJECT_ROTATION + 1, go.rotation[1])
+                .set_float_field(GAMEOBJECT_ROTATION + 2, go.rotation[2])
+                .set_float_field(GAMEOBJECT_ROTATION + 3, go.rotation[3])
+                // State
+                .set_field(GAMEOBJECT_STATE, go.go_state as u32)
+                // Position in update fields (some clients read from here)
+                .set_float_field(GAMEOBJECT_POS_X, go.position.x)
+                .set_float_field(GAMEOBJECT_POS_Y, go.position.y)
+                .set_float_field(GAMEOBJECT_POS_Z, go.position.z)
+                .set_float_field(GAMEOBJECT_FACING, go.position.o)
+                // Dynamic flags
+                .set_field(GAMEOBJECT_DYN_FLAGS, 0)
+                // Faction
+                .set_field(GAMEOBJECT_FACTION, go.faction)
+                // Type
+                .set_field(GAMEOBJECT_TYPE_ID, go.go_type as u32)
+                // Level
+                .set_field(GAMEOBJECT_LEVEL, go.level)
+                // Art/animation
+                .set_field(GAMEOBJECT_ARTKIT, go.art_kit)
+                .set_field(GAMEOBJECT_ANIMPROGRESS, go.anim_progress);
 
         Some(SmsgUpdateObject::new().add_block(UpdateBlockData::CreateObject(block)))
     }
@@ -358,9 +352,8 @@ impl GameObjectManager {
 
         let template = self.templates.get(&entry)?;
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(
-            Opcode::SMSG_GAMEOBJECT_QUERY_RESPONSE,
-        );
+        let mut packet =
+            crate::shared::protocol::WorldPacket::new(Opcode::SMSG_GAMEOBJECT_QUERY_RESPONSE);
         packet.write_u32(entry);
         packet.write_u32(template.go_type);
         packet.write_u32(template.display_id);
@@ -393,13 +386,13 @@ impl GameObjectManager {
 
         const MAX_BLOCKS_PER_PACKET: usize = 50;
 
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
         let nearby = map.get_objects_in_range(position, map.visibility_distance());
 
-        let gameobjects: Vec<_> = nearby
-            .into_iter()
-            .filter(|g| g.is_game_object())
-            .collect();
+        let gameobjects: Vec<_> = nearby.into_iter().filter(|g| g.is_game_object()).collect();
 
         if gameobjects.is_empty() {
             return Ok(());

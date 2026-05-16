@@ -54,7 +54,9 @@ pub fn addxp_info() -> ChatCommandInfo {
 pub async fn cmd_addgold(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {
     let args = args.trim();
     if args.is_empty() {
-        return Ok("Usage: .addgold <amount> [g|s|c]  (e.g. .addgold 10g or .addgold 500)".to_string());
+        return Ok(
+            "Usage: .addgold <amount> [g|s|c]  (e.g. .addgold 10g or .addgold 500)".to_string(),
+        );
     }
 
     // Parse optional unit suffix: g = gold (10000c), s = silver (100c), c/none = copper
@@ -78,12 +80,20 @@ pub async fn cmd_addgold(ctx: &ChatCommandContext<'_>, args: &str) -> Result<Str
         None => return Ok("Amount too large.".to_string()),
     };
 
-    match ctx.world.systems.inventory.add_gold(ctx.player_guid, copper) {
+    match ctx
+        .world
+        .systems
+        .inventory
+        .add_gold(ctx.player_guid, copper)
+    {
         GoldResult::Success { new_balance } => {
             let g = new_balance / 10000;
             let s = (new_balance % 10000) / 100;
             let c = new_balance % 100;
-            Ok(format!("Added {} copper. Balance: {}g {}s {}c", copper, g, s, c))
+            Ok(format!(
+                "Added {} copper. Balance: {}g {}s {}c",
+                copper, g, s, c
+            ))
         }
         GoldResult::CapExceeded => Ok("Cannot add gold: would exceed the gold cap.".to_string()),
         GoldResult::PlayerNotLoaded => Ok("Player inventory not loaded.".to_string()),

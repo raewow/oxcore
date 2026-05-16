@@ -79,7 +79,9 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
         return Ok(());
     }
 
-    sqlx::query("SET FOREIGN_KEY_CHECKS = 0").execute(pool).await?;
+    sqlx::query("SET FOREIGN_KEY_CHECKS = 0")
+        .execute(pool)
+        .await?;
     sqlx::query("SET SQL_MODE = ''").execute(pool).await?;
 
     let mut files: Vec<_> = std::fs::read_dir(base_dir)?
@@ -98,7 +100,9 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
         }
     }
 
-    sqlx::query("SET FOREIGN_KEY_CHECKS = 1").execute(pool).await?;
+    sqlx::query("SET FOREIGN_KEY_CHECKS = 1")
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

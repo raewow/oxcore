@@ -11,10 +11,13 @@ pub mod respawn;
 pub mod spawn;
 
 pub use addon::{AddonManager, AddonSystem, CreatureAddon};
-pub use ai::{AIState, AIType, AIEvent, AIAction};
+pub use ai::{AIAction, AIEvent, AIState, AIType};
 pub use creature::Creature;
 pub use death::DeathState;
 pub use manager::{ClassLevelStats, CreatureManager, CreatureTemplate};
-pub use movement::{MotionMaster, MoveSpline, MovementSystem, MovementGeneratorType, MovementUpdate, WaypointManager};
+pub use movement::{
+    MotionMaster, MoveSpline, MovementGeneratorType, MovementSystem, MovementUpdate,
+    WaypointManager,
+};
 pub use respawn::RespawnSystem;
 pub use spawn::CreatureSpawnData;

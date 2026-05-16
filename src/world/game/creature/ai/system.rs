@@ -5,14 +5,16 @@
 //! 2. Runs pure decision functions (no locks)
 //! 3. Executes actions (deterministic lock ordering)
 
-use crate::shared::protocol::ObjectGuid;
-use crate::world::World;
-use crate::world::core::lua::bridge::{ai_input_to_lua_snapshot, invoke_callback, lua_actions_to_ai_actions, map_ai_event_to_callback};
-use crate::world::core::lua::scripts::CreatureScriptState;
 use super::decision::decide;
 use super::executor::execute_actions;
 use super::snapshot::{AIInput, CreatureSnapshot, TargetSnapshot, ThreatEntry};
 use super::types::{AIAction, AIEvent, AIState, AIType};
+use crate::shared::protocol::ObjectGuid;
+use crate::world::core::lua::bridge::{
+    ai_input_to_lua_snapshot, invoke_callback, lua_actions_to_ai_actions, map_ai_event_to_callback,
+};
+use crate::world::core::lua::scripts::CreatureScriptState;
+use crate::world::World;
 use dashmap::DashMap;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -105,9 +107,12 @@ fn update_single_creature(world: &World, creature_guid: ObjectGuid) {
 
     // 8. Update AI state data if provided
     if let Some(state_data) = result.updated_state_data {
-        world.managers.creature_mgr.with_creature_mut(creature_guid, |creature| {
-            creature.ai_state_data = state_data;
-        });
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(creature_guid, |creature| {
+                creature.ai_state_data = state_data;
+            });
     }
 }
 
@@ -183,7 +188,10 @@ fn update_lua_creature(world: &World, creature_guid: ObjectGuid, input: &AIInput
     if !input.events.is_empty() {
         tracing::info!(
             "[LuaAI] Creature {:?} (entry {}) processing {} events, ai_state={:?}",
-            creature_guid, entry, input.events.len(), input.snapshot.ai_state
+            creature_guid,
+            entry,
+            input.events.len(),
+            input.snapshot.ai_state
         );
     }
 
@@ -205,11 +213,11 @@ fn update_lua_creature(world: &World, creature_guid: ObjectGuid, input: &AIInput
         if let Some(callback) = map_ai_event_to_callback(event) {
             tracing::info!(
                 "[LuaAI] Creature {:?} (entry {}) invoking Lua callback for event",
-                creature_guid, entry
+                creature_guid,
+                entry
             );
-            let lua_actions = lua_mgr.with_lua(|lua| {
-                invoke_callback(&lua_ai, lua, &lua_snapshot, &callback)
-            });
+            let lua_actions =
+                lua_mgr.with_lua(|lua| invoke_callback(&lua_ai, lua, &lua_snapshot, &callback));
             tracing::info!(
                 "[LuaAI] Callback returned {} lua actions",
                 lua_actions.len()
@@ -224,9 +232,7 @@ fn update_lua_creature(world: &World, creature_guid: ObjectGuid, input: &AIInput
 
     // Always call OnUpdate when in combat or alive
     if input.snapshot.is_alive {
-        let lua_actions = lua_mgr.with_lua(|lua| {
-            lua_ai.on_update(lua, &lua_snapshot)
-        });
+        let lua_actions = lua_mgr.with_lua(|lua| lua_ai.on_update(lua, &lua_snapshot));
 
         if !lua_actions.is_empty() {
             let ai_actions = lua_actions_to_ai_actions(lua_actions, &mut state);
@@ -251,54 +257,58 @@ fn update_lua_creature(world: &World, creature_guid: ObjectGuid, input: &AIInput
 
 /// Capture read-only snapshot of creature state
 fn capture_snapshot(world: &World, guid: ObjectGuid) -> Option<CreatureSnapshot> {
-    world.managers.creature_mgr.with_creature_mut(guid, |creature| {
-        let health_pct = if creature.max_health > 0 {
-            creature.current_health as f32 / creature.max_health as f32
-        } else {
-            0.0
-        };
+    world
+        .managers
+        .creature_mgr
+        .with_creature_mut(guid, |creature| {
+            let health_pct = if creature.max_health > 0 {
+                creature.current_health as f32 / creature.max_health as f32
+            } else {
+                0.0
+            };
 
-        // Build threat list from ThreatManager (Phase 5)
-        let threat_list: Vec<ThreatEntry> = creature.threat_manager
-            .get_threat_list()
-            .into_iter()
-            .map(|(target, threat)| ThreatEntry { target, threat })
-            .collect();
+            // Build threat list from ThreatManager (Phase 5)
+            let threat_list: Vec<ThreatEntry> = creature
+                .threat_manager
+                .get_threat_list()
+                .into_iter()
+                .map(|(target, threat)| ThreatEntry { target, threat })
+                .collect();
 
-        // Determine AI type from creature template
-        // Use cached creature_type (no template lookup needed - eliminates nested lock)
-        let ai_type = AIType::from_creature_template(
-            creature.creature_type as u32,
-            0, // TODO: Get static_flags from template
-        );
+            // Determine AI type from creature template
+            // Use cached creature_type (no template lookup needed - eliminates nested lock)
+            let ai_type = AIType::from_creature_template(
+                creature.creature_type as u32,
+                0, // TODO: Get static_flags from template
+            );
 
-        CreatureSnapshot {
-            guid,
-            entry: creature.entry,
-            map_id: creature.map_id,
-            instance_id: 0, // TODO: get from instance system
-            position: creature.position,
-            home_position: creature.home_position,
-            ai_state: creature.ai_state,
-            ai_type,
-            current_target: creature.threat_manager.get_victim(),
-            threat_list,
-            health_pct,
-            current_health: creature.current_health,
-            max_health: creature.max_health,
-            in_combat: creature.combat.in_combat,
-            is_alive: creature.is_alive(),
-            attack_timer_ready: creature.is_attack_ready(),
-            ai_state_data: creature.ai_state_data.clone(),
-            combat_reach: creature.combat_reach,
-            spells: creature.spells,
-            current_mana: creature.current_mana,
-            max_mana: creature.max_mana,
-            level: creature.level,
-            unit_class: 0, // TODO: cache unit_class on Creature from template
-            auras: creature.auras.clone(),
-        }
-    })
+            CreatureSnapshot {
+                guid,
+                entry: creature.entry,
+                map_id: creature.map_id,
+                instance_id: 0, // TODO: get from instance system
+                position: creature.position,
+                home_position: creature.home_position,
+                ai_state: creature.ai_state,
+                ai_type,
+                current_target: creature.threat_manager.get_victim(),
+                threat_list,
+                health_pct,
+                current_health: creature.current_health,
+                max_health: creature.max_health,
+                in_combat: creature.combat.in_combat,
+                is_alive: creature.is_alive(),
+                attack_timer_ready: creature.is_attack_ready(),
+                ai_state_data: creature.ai_state_data.clone(),
+                combat_reach: creature.combat_reach,
+                spells: creature.spells,
+                current_mana: creature.current_mana,
+                max_mana: creature.max_mana,
+                level: creature.level,
+                unit_class: 0, // TODO: cache unit_class on Creature from template
+                auras: creature.auras.clone(),
+            }
+        })
 }
 
 /// Get snapshots of nearby potential targets
@@ -309,9 +319,15 @@ fn get_nearby_targets(world: &World, snapshot: &CreatureSnapshot) -> Vec<TargetS
     for entry in &snapshot.threat_list {
         // Try to get player position
         if let Some(pos) = world.managers.player_mgr.get_player_position(entry.target) {
-            let (is_alive, health_pct, has_mana) = world.managers.player_mgr
+            let (is_alive, health_pct, has_mana) = world
+                .managers
+                .player_mgr
                 .with_player(entry.target, |p| {
-                    let hp = if p.stats.max_health > 0 { p.stats.health as f32 / p.stats.max_health as f32 } else { 0.0 };
+                    let hp = if p.stats.max_health > 0 {
+                        p.stats.health as f32 / p.stats.max_health as f32
+                    } else {
+                        0.0
+                    };
                     let mana = p.stats.max_mana > 0;
                     (p.is_alive(), hp, mana)
                 })
@@ -339,11 +355,7 @@ pub fn queue_event(world: &World, creature_guid: ObjectGuid, event: AIEvent) {
 
 /// Process a specific AI event for a creature immediately
 /// Used when an event needs immediate processing (e.g., on damage)
-pub fn process_ai_event(
-    world: &World,
-    creature_guid: ObjectGuid,
-    event: AIEvent,
-) {
+pub fn process_ai_event(world: &World, creature_guid: ObjectGuid, event: AIEvent) {
     // Queue the event
     queue_event(world, creature_guid, event);
 

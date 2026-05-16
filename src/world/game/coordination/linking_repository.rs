@@ -1,5 +1,5 @@
-use sqlx::MySqlPool;
 use super::link_flags::LinkFlags;
+use sqlx::MySqlPool;
 
 /// Repository for loading creature linking data from database
 pub struct LinkingRepository {
@@ -14,7 +14,7 @@ impl LinkingRepository {
     /// Load all creature links from database
     pub async fn load_all_links(&self) -> anyhow::Result<Vec<CreatureLinkRow>> {
         let rows = sqlx::query_as::<_, LinkRow>(
-            "SELECT guid AS slave_guid, master_guid, flag FROM creature_linking"
+            "SELECT guid AS slave_guid, master_guid, flag FROM creature_linking",
         )
         .fetch_all(&self.pool)
         .await?;

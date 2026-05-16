@@ -51,7 +51,10 @@ impl PlayerPacketHandler {
         let metrics_clone = Arc::clone(&metrics);
 
         let handle = tokio::spawn(async move {
-            debug!("[HANDLER] Started packet handler for player {}", player_guid);
+            debug!(
+                "[HANDLER] Started packet handler for player {}",
+                player_guid
+            );
 
             // Process packets in FIFO order
             while let Some(player_packet) = packet_rx.recv().await {
@@ -60,7 +63,8 @@ impl PlayerPacketHandler {
 
                 // Track queue latency
                 let queue_time = start.duration_since(player_packet.received_at);
-                if queue_time.as_millis() > 3 {  // Lowered from 10ms to 3ms to catch sub-threshold delays
+                if queue_time.as_millis() > 3 {
+                    // Lowered from 10ms to 3ms to catch sub-threshold delays
                     warn!(
                         "[HANDLER] Packet {:?} queued for {}ms for player {}",
                         player_packet.packet.opcode(),
@@ -71,27 +75,23 @@ impl PlayerPacketHandler {
 
                 // Update max queue time metric
                 let queue_ms = queue_time.as_millis() as u64;
-                metrics_clone.max_queue_time_ms.fetch_max(queue_ms, Ordering::SeqCst);
+                metrics_clone
+                    .max_queue_time_ms
+                    .fetch_max(queue_ms, Ordering::SeqCst);
 
                 // Dispatch packet to handler
                 let mut packet = player_packet.packet;
                 let opcode = packet.opcode();
                 let handler_start = Instant::now();
-                if let Err(e) = dispatch_packet(
-                    &session,
-                    &mut packet,
-                    &databases,
-                    &world,
-                ).await {
+                if let Err(e) = dispatch_packet(&session, &mut packet, &databases, &world).await {
                     error!(
                         "[HANDLER] Error handling packet {:?} for player {}: {}",
-                        opcode,
-                        player_guid,
-                        e
+                        opcode, player_guid, e
                     );
                 }
                 let handler_ms = handler_start.elapsed().as_millis();
-                if handler_ms > 2 {  // Lowered from 5ms to 2ms to catch sub-threshold delays
+                if handler_ms > 2 {
+                    // Lowered from 5ms to 2ms to catch sub-threshold delays
                     warn!(
                         "[PERF] Handler {:?} took {}ms for player {}",
                         opcode, handler_ms, player_guid
@@ -103,15 +103,19 @@ impl PlayerPacketHandler {
                 if current_depth > 20 {
                     warn!(
                         "[HANDLER] Player {} has {} packets queued (high queue depth)",
-                        player_guid,
-                        current_depth
+                        player_guid, current_depth
                     );
                 }
 
-                metrics_clone.packets_processed.fetch_add(1, Ordering::SeqCst);
+                metrics_clone
+                    .packets_processed
+                    .fetch_add(1, Ordering::SeqCst);
             }
 
-            debug!("[HANDLER] Stopped packet handler for player {}", player_guid);
+            debug!(
+                "[HANDLER] Stopped packet handler for player {}",
+                player_guid
+            );
         });
 
         Self {

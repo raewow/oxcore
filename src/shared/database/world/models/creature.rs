@@ -28,9 +28,9 @@ pub struct CreatureTemplateRow {
     pub flags_extra: u32,
     pub creature_type: u8, // Maps to 'type' column - needed for critter detection
     pub gossip_menu_id: u32, // Default gossip menu ID
-    pub vendor_id: u32, // Maps to npc_vendor_template.entry for shared vendor item lists
-    pub trainer_id: u32, // Maps to npc_trainer_template.entry for shared trainer spell lists
-    pub trainer_type: u8, // 0=class, 1=mount, 2=tradeskill, 3=pet
+    pub vendor_id: u32,    // Maps to npc_vendor_template.entry for shared vendor item lists
+    pub trainer_id: u32,   // Maps to npc_trainer_template.entry for shared trainer spell lists
+    pub trainer_type: u8,  // 0=class, 1=mount, 2=tradeskill, 3=pet
     pub rank: u8,
     pub spell_id1: u32,
     pub spell_id2: u32,

@@ -1212,7 +1212,9 @@ mod integration_tests {
             let item = make_charged_item(item_id, player_guid, slot, [0; 5]);
             let item_guid = test_item_guid(item_id);
             system.cache().add_item(player_guid, item);
-            system.cache().set_item_at(player_guid, INVENTORY_SLOT_BAG_0, slot, Some(item_guid));
+            system
+                .cache()
+                .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, slot, Some(item_guid));
         }
 
         let mut blocks = Vec::new();
@@ -1239,13 +1241,17 @@ mod integration_tests {
         let item = make_charged_item(200, player_guid, 23, [0; 5]);
         let item_guid = test_item_guid(200);
         system.cache().add_item(player_guid, item);
-        system.cache().set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));
+        system
+            .cache()
+            .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));
 
         // One more item deeper in the bag
         let item2 = make_charged_item(201, player_guid, 30, [0; 5]);
         let item_guid2 = test_item_guid(201);
         system.cache().add_item(player_guid, item2);
-        system.cache().set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 30, Some(item_guid2));
+        system
+            .cache()
+            .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 30, Some(item_guid2));
 
         let mut blocks = Vec::new();
         let count = system.build_item_create_blocks(player_guid, &mut blocks);
@@ -1297,11 +1303,16 @@ mod integration_tests {
         // Item with spell_charges instance value also 0 (no charges ever set)
         let item = make_charged_item(10, player_guid, 23, [0; 5]);
         system.cache().add_item(player_guid, item);
-        system.cache().set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));
+        system
+            .cache()
+            .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));
 
         // Simulate handle_use_item guard: template_charges == 0 → skip
         let template_charges: i32 = 0;
-        assert_eq!(template_charges, 0, "hearthstone template_charges must be 0");
+        assert_eq!(
+            template_charges, 0,
+            "hearthstone template_charges must be 0"
+        );
         // The guard `if template_charges != 0` prevents consume_charge from running.
         // Mock expectations verified on drop (update_item_charges called 0 times).
     }
@@ -1335,7 +1346,9 @@ mod integration_tests {
         // Instance charge is 1 (one use left), template says expendable (< 0)
         let item = make_charged_item(20, player_guid, 23, [1, 0, 0, 0, 0]);
         system.cache().add_item(player_guid, item);
-        system.cache().set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));
+        system
+            .cache()
+            .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));
 
         let result = system.consume_charge(player_guid, item_guid, 0).await;
         let remaining = match result {
@@ -1343,14 +1356,20 @@ mod integration_tests {
             other => panic!("expected Success, got {:?}", other),
         };
 
-        assert_eq!(remaining, 0, "charge should reach 0 after consuming the last one");
+        assert_eq!(
+            remaining, 0,
+            "charge should reach 0 after consuming the last one"
+        );
 
         // Simulate the handle_use_item decision: template_charges < 0 && remaining == 0 → destroy
         let template_charges: i32 = -1; // expendable
         if remaining == 0 && template_charges < 0 {
             let remove_result = system.remove_item(player_guid, item_guid, 1);
             assert!(
-                matches!(remove_result, super::super::types::RemoveItemResult::ItemRemoved { .. }),
+                matches!(
+                    remove_result,
+                    super::super::types::RemoveItemResult::ItemRemoved { .. }
+                ),
                 "expendable item must be removed when charges reach 0"
             );
         } else {

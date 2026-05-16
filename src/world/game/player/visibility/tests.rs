@@ -121,7 +121,11 @@ fn assert_packet_not_sent(captured: &Arc<Mutex<Vec<CapturedPacket>>>, opcode: Op
 
 /// Count packets with specific opcode
 fn count_packets_with_opcode(captured: &Arc<Mutex<Vec<CapturedPacket>>>, opcode: Opcode) -> usize {
-    captured.lock().iter().filter(|p| p.opcode == opcode).count()
+    captured
+        .lock()
+        .iter()
+        .filter(|p| p.opcode == opcode)
+        .count()
 }
 
 /// Clear captured packets
@@ -593,10 +597,7 @@ async fn test_visibility_distance_boundary() {
     let dist_c_sq = dx_c * dx_c;
 
     // B should be at boundary (visible)
-    assert!(
-        dist_b_sq <= vis_dist_sq,
-        "B at boundary should be visible"
-    );
+    assert!(dist_b_sq <= vis_dist_sq, "B at boundary should be visible");
 
     // C should be outside (not visible)
     assert!(dist_c_sq > vis_dist_sq, "C outside should not be visible");
@@ -717,7 +718,9 @@ async fn test_pending_disappeared_queued() {
 
     // Verify
     let pending = player_mgr
-        .with_player_mut(guid_a, |player| player.visibility.pending_disappeared.clone())
+        .with_player_mut(guid_a, |player| {
+            player.visibility.pending_disappeared.clone()
+        })
         .unwrap();
 
     assert_eq!(pending.len(), 1);
@@ -754,7 +757,9 @@ async fn test_pending_cleared_after_flush() {
 
     // Verify cleared
     let has_pending = player_mgr
-        .with_player_mut(guid_a, |player| player.visibility.has_pending_notifications())
+        .with_player_mut(guid_a, |player| {
+            player.visibility.has_pending_notifications()
+        })
         .unwrap();
 
     assert!(!has_pending, "Pending should be cleared after flush");
@@ -809,7 +814,7 @@ async fn test_send_update_object_packet() {
     // Create a simple SMSG_UPDATE_OBJECT packet
     let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
     packet.write_u32(1); // block count
-    // ... block data would go here
+                         // ... block data would go here
 
     broadcaster.send_direct(packet);
 
@@ -827,7 +832,7 @@ async fn test_send_out_of_range_packet() {
     // Note: The actual opcode enum value depends on your Opcode definition
     let mut packet = WorldPacket::new(Opcode::SMSG_DESTROY_OBJECT); // Using similar opcode for test
     packet.write_u32(1); // count
-    // ... GUID data would go here
+                         // ... GUID data would go here
 
     broadcaster.send_direct(packet);
 
@@ -844,7 +849,7 @@ async fn test_batched_packets_to_viewer() {
     // Simulate batched CREATE_OBJECT2 - should be ONE packet with multiple blocks
     let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
     packet.write_u32(3); // 3 blocks in one packet
-    // ... block data for 3 players
+                         // ... block data for 3 players
 
     broadcaster_viewer.send_direct(packet);
 
@@ -871,7 +876,7 @@ async fn test_reverse_create_object_to_appeared_players() {
     // Build viewer's CREATE_OBJECT2 packet
     let mut viewer_packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
     viewer_packet.write_u32(1); // 1 block (viewer)
-    // ... viewer's data
+                                // ... viewer's data
 
     // Send to each appeared player
     broadcaster_1.send_direct(viewer_packet.clone());
@@ -910,7 +915,10 @@ async fn test_no_packets_when_no_pending() {
 
     // Verify empty
     let packets = captured.lock();
-    assert!(packets.is_empty(), "No packets should be sent when no pending");
+    assert!(
+        packets.is_empty(),
+        "No packets should be sent when no pending"
+    );
 }
 
 // ========== EDGE CASE TESTS ==========

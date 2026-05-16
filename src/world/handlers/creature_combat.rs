@@ -1,14 +1,19 @@
 //! Attack Handler - Player attacks on creatures
 
-use crate::shared::messages::combat::{SmsgAttackStart, SmsgAttackerStateUpdate, SmsgAttackStop};
-use crate::shared::messages::update::{SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock, ObjectType};
+use crate::shared::messages::combat::{SmsgAttackStart, SmsgAttackStop, SmsgAttackerStateUpdate};
+use crate::shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
-use crate::world::World;
-use crate::world::game::broadcast_mgr::broadcast_around_creature;
-use crate::world::game::creature::combat::{roll_melee_hit_outcome, calculate_melee_damage, MeleeHitOutcome, hit_outcome_to_hit_info, hit_outcome_to_victim_state, apply_hit_outcome};
-use crate::world::game::common::update_fields::*;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
+use crate::world::game::broadcast_mgr::broadcast_around_creature;
+use crate::world::game::common::update_fields::*;
+use crate::world::game::creature::combat::{
+    apply_hit_outcome, calculate_melee_damage, hit_outcome_to_hit_info,
+    hit_outcome_to_victim_state, roll_melee_hit_outcome, MeleeHitOutcome,
+};
+use crate::world::World;
 
 /// Handle player attack swing (CMSG_ATTACKSWING)
 /// Initializes auto-attack state and sends SMSG_ATTACKSTART.
@@ -30,17 +35,27 @@ pub async fn handle_attack_swing(
         tracing::info!("[COMBAT] CMSG_ATTACKSWING on dead target {:?} from {:?} — sending DEADTARGET + ATTACKSTOP", target_guid, attacker_guid);
         // Tell client the target is dead (stops client auto-attack loop)
         let dead_packet = crate::shared::protocol::WorldPacket::new(
-            crate::shared::protocol::Opcode::SMSG_ATTACKSWING_DEADTARGET
+            crate::shared::protocol::Opcode::SMSG_ATTACKSWING_DEADTARGET,
         );
-        world.managers.broadcast_mgr.send_to_player(attacker_guid, dead_packet);
+        world
+            .managers
+            .broadcast_mgr
+            .send_to_player(attacker_guid, dead_packet);
         send_attack_stop_to_player(world, attacker_guid, target_guid, true);
         // Also clear server-side auto-attack state
-        world.systems.combat.stop_attack(attacker_guid, &world.managers.player_mgr).await?;
+        world
+            .systems
+            .combat
+            .stop_attack(attacker_guid, &world.managers.player_mgr)
+            .await?;
         return Ok(());
     }
 
     // Diagnostic: check if creature is in player's objects_created
-    let in_objects_created = world.managers.player_mgr.has_object_created(attacker_guid, target_guid);
+    let in_objects_created = world
+        .managers
+        .player_mgr
+        .has_object_created(attacker_guid, target_guid);
     let creature_pos = world.managers.creature_mgr.get_position(target_guid);
     tracing::warn!(
         "[COMBAT] ATTACKSWING: player {:?} attacking creature {:?}, in_objects_created={}, creature_pos={:?}",
@@ -48,29 +63,27 @@ pub async fn handle_attack_swing(
     );
 
     // Start auto-attack via CombatSystem (sets is_auto_attacking, attack_target, timer=0)
-    world.systems.combat.start_attack(
-        attacker_guid,
-        target_guid,
-        &world.managers.player_mgr,
-    ).await?;
+    world
+        .systems
+        .combat
+        .start_attack(attacker_guid, target_guid, &world.managers.player_mgr)
+        .await?;
 
     // Enter combat state
-    world.systems.combat.enter_combat(
-        attacker_guid,
-        target_guid,
-        &world.managers.player_mgr,
-    );
+    world
+        .systems
+        .combat
+        .enter_combat(attacker_guid, target_guid, &world.managers.player_mgr);
 
     // Broadcast SMSG_ATTACKSTART to nearby players
     let packet = SmsgAttackStart {
         attacker_guid,
         target_guid,
     };
-    world.managers.broadcast_mgr.broadcast_nearby(
-        attacker_guid,
-        &packet.to_world_packet(),
-        true,
-    );
+    world
+        .managers
+        .broadcast_mgr
+        .broadcast_nearby(attacker_guid, &packet.to_world_packet(), true);
 
     Ok(())
 }
@@ -87,30 +100,43 @@ pub async fn execute_pending_attack_vs_creature(
     if !world.managers.creature_mgr.is_alive(target_guid) {
         // Send SMSG_ATTACKSWING_DEADTARGET to stop client auto-attack loop
         let dead_packet = crate::shared::protocol::WorldPacket::new(
-            crate::shared::protocol::Opcode::SMSG_ATTACKSWING_DEADTARGET
+            crate::shared::protocol::Opcode::SMSG_ATTACKSWING_DEADTARGET,
         );
-        world.managers.broadcast_mgr.send_to_player(attacker_guid, dead_packet);
+        world
+            .managers
+            .broadcast_mgr
+            .send_to_player(attacker_guid, dead_packet);
         send_attack_stop(world, attacker_guid, target_guid, true);
         return Ok(true);
     }
 
     // Get attacker weapon damage from combat state (with level-based fallback)
-    let (attacker_level, weapon_min, weapon_max) = world.managers.player_mgr
+    let (attacker_level, weapon_min, weapon_max) = world
+        .managers
+        .player_mgr
         .with_player_mut(attacker_guid, |player| {
             let base_min = player.combat.main_hand_min_dmg as u32;
             let base_max = player.combat.main_hand_max_dmg as u32;
             // Fallback to level-based defaults if weapon damage is trivially low
-            let min = if base_min <= 1 { 5 + (player.level as u32 * 2) } else { base_min };
-            let max = if base_max <= 2 { 10 + (player.level as u32 * 3) } else { base_max };
+            let min = if base_min <= 1 {
+                5 + (player.level as u32 * 2)
+            } else {
+                base_min
+            };
+            let max = if base_max <= 2 {
+                10 + (player.level as u32 * 3)
+            } else {
+                base_max
+            };
             (player.level, min, max)
         })
         .unwrap_or((1, 10, 20));
 
     // Get target armor and level
-    let (target_armor, target_level) = world.managers.creature_mgr
-        .with_creature_mut(target_guid, |creature| {
-            (creature.armor, creature.level)
-        })
+    let (target_armor, target_level) = world
+        .managers
+        .creature_mgr
+        .with_creature_mut(target_guid, |creature| (creature.armor, creature.level))
         .unwrap_or((0, 1));
 
     // Roll hit outcome (creatures don't parry or block player attacks)
@@ -128,13 +154,22 @@ pub async fn execute_pending_attack_vs_creature(
     // Apply damage
     let mut target_died = false;
     let health_before = world.managers.creature_mgr.get_health(target_guid);
-    if let Some((actual_damage, is_dead)) = world.managers.creature_mgr
-        .apply_damage(target_guid, damage, attacker_guid, timestamp)
+    if let Some((actual_damage, is_dead)) =
+        world
+            .managers
+            .creature_mgr
+            .apply_damage(target_guid, damage, attacker_guid, timestamp)
     {
         let health_after = world.managers.creature_mgr.get_health(target_guid);
         tracing::debug!(
             "[COMBAT] {:?} hit {:?}: damage={}, actual={}, is_dead={}, health {:?} -> {:?}",
-            attacker_guid, target_guid, damage, actual_damage, is_dead, health_before, health_after
+            attacker_guid,
+            target_guid,
+            damage,
+            actual_damage,
+            is_dead,
+            health_before,
+            health_after
         );
 
         // Trigger AI event
@@ -153,13 +188,22 @@ pub async fn execute_pending_attack_vs_creature(
 
         // Send damage packet
         send_attacker_state_update(
-            world, attacker_guid, target_guid, actual_damage, &hit_outcome, is_dead,
+            world,
+            attacker_guid,
+            target_guid,
+            actual_damage,
+            &hit_outcome,
+            is_dead,
         )?;
 
         // Send health or death update
         if is_dead {
             target_died = true;
-            tracing::info!("[COMBAT] Creature {:?} killed by {:?}, calling handle_death", target_guid, attacker_guid);
+            tracing::info!(
+                "[COMBAT] Creature {:?} killed by {:?}, calling handle_death",
+                target_guid,
+                attacker_guid
+            );
 
             // Death packet order: stop movement BEFORE death state change.
             // The 1.12.1 client cancels the active spline when it sees the dead
@@ -173,12 +217,18 @@ pub async fn execute_pending_attack_vs_creature(
             send_creature_attack_stop(world, target_guid, attacker_guid, true);
 
             // 2. Mark dead on server (snaps position to spline location, stops movement)
-            let death_info = world.managers.creature_mgr.handle_death(target_guid, Some(attacker_guid));
+            let death_info = world
+                .managers
+                .creature_mgr
+                .handle_death(target_guid, Some(attacker_guid));
 
             // 3. Send movement stop packet BEFORE death VALUES update
             // This tells the client to stop the spline at the death position
             if let Some(ref info) = death_info {
-                world.systems.creature_movement.send_stop_packet(info.guid, info.position, world);
+                world
+                    .systems
+                    .creature_movement
+                    .send_stop_packet(info.guid, info.position, world);
             }
 
             // 4. Death VALUES update (health=0, stand state Dead)
@@ -200,18 +250,23 @@ pub async fn execute_pending_attack_vs_creature(
 }
 
 /// Handle attack stop (CMSG_ATTACKSTOP)
-pub async fn handle_attack_stop(
-    world: &World,
-    attacker_guid: ObjectGuid,
-) -> anyhow::Result<()> {
+pub async fn handle_attack_stop(world: &World, attacker_guid: ObjectGuid) -> anyhow::Result<()> {
     // Get the current attack target from the player's combat state
-    if let Some(target_guid) = world.systems.combat.get_attack_target(attacker_guid, &world.managers.player_mgr) {
+    if let Some(target_guid) = world
+        .systems
+        .combat
+        .get_attack_target(attacker_guid, &world.managers.player_mgr)
+    {
         let target_dead = !world.managers.creature_mgr.is_alive(target_guid);
         send_attack_stop(world, attacker_guid, target_guid, target_dead);
     }
 
     // Stop the attack in the combat system
-    world.systems.combat.stop_attack(attacker_guid, &world.managers.player_mgr).await?;
+    world
+        .systems
+        .combat
+        .stop_attack(attacker_guid, &world.managers.player_mgr)
+        .await?;
 
     Ok(())
 }
@@ -257,12 +312,18 @@ fn send_attacker_state_update(
 /// Send health update for creature
 fn send_health_update(world: &World, creature_guid: ObjectGuid) -> anyhow::Result<()> {
     if let Some((current, max)) = world.managers.creature_mgr.get_health(creature_guid) {
-        tracing::debug!("[COMBAT] send_health_update {:?}: health={}/{}", creature_guid, current, max);
-        let world_guid = WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
+        tracing::debug!(
+            "[COMBAT] send_health_update {:?}: health={}/{}",
+            creature_guid,
+            current,
+            max
+        );
+        let world_guid =
+            WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
         let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
             ValuesUpdateBlock::new(world_guid, ObjectType::Unit)
                 .set_field(UNIT_FIELD_HEALTH, current)
-                .set_field(UNIT_FIELD_MAXHEALTH, max)
+                .set_field(UNIT_FIELD_MAXHEALTH, max),
         ));
         broadcast_around_creature(world, creature_guid, &update.to_world_packet());
     }
@@ -275,7 +336,9 @@ fn send_health_update(world: &World, creature_guid: ObjectGuid) -> anyhow::Resul
 /// NOTE: vmangos does NOT set UNIT_DYNFLAG_DEAD on real death (only feign death).
 /// UNIT_DYNFLAG_LOOTABLE is set separately after loot generation.
 fn send_creature_killed_update(world: &World, creature_guid: ObjectGuid) -> anyhow::Result<()> {
-    let (max_health, unit_flags) = world.managers.creature_mgr
+    let (max_health, unit_flags) = world
+        .managers
+        .creature_mgr
         .with_creature_mut(creature_guid, |c| (c.max_health, c.unit_flags))
         .unwrap_or((1, 0));
 
@@ -296,7 +359,7 @@ fn send_creature_killed_update(world: &World, creature_guid: ObjectGuid) -> anyh
             .set_field(UNIT_FIELD_FLAGS, cleared_flags) // Clear IN_COMBAT
             .set_field(UNIT_DYNAMIC_FLAGS, 0u32) // Clear dynamic flags (no DYNFLAG_DEAD — that's feign death only)
             .set_field(UNIT_FIELD_BYTES_1, 7u32) // Stand state Dead = 7 (UNIT_STAND_STATE_DEAD)
-            .set_field(UNIT_NPC_FLAGS, 0u32) // Clear NPC interaction flags
+            .set_field(UNIT_NPC_FLAGS, 0u32), // Clear NPC interaction flags
     ));
     broadcast_around_creature(world, creature_guid, &update.to_world_packet());
     Ok(())
@@ -320,18 +383,31 @@ fn send_attack_stop(world: &World, attacker: ObjectGuid, target: ObjectGuid, _ta
 
 /// Send SMSG_ATTACKSTOP directly to the attacker player only (not broadcast).
 /// Used in HandleAttackSwingOpcode for dead targets — matches vmangos SendAttackStop().
-fn send_attack_stop_to_player(world: &World, attacker: ObjectGuid, target: ObjectGuid, _target_dead: bool) {
+fn send_attack_stop_to_player(
+    world: &World,
+    attacker: ObjectGuid,
+    target: ObjectGuid,
+    _target_dead: bool,
+) {
     let packet = SmsgAttackStop {
         attacker_guid: attacker,
         target_guid: target,
         unk: 0,
     };
 
-    world.managers.broadcast_mgr.send_to_player(attacker, packet.to_world_packet());
+    world
+        .managers
+        .broadcast_mgr
+        .send_to_player(attacker, packet.to_world_packet());
 }
 
 /// Send attack stop from a creature (uses creature position for broadcast)
-fn send_creature_attack_stop(world: &World, creature_guid: ObjectGuid, target: ObjectGuid, _target_dead: bool) {
+fn send_creature_attack_stop(
+    world: &World,
+    creature_guid: ObjectGuid,
+    target: ObjectGuid,
+    _target_dead: bool,
+) {
     let packet = SmsgAttackStop {
         attacker_guid: creature_guid,
         target_guid: target,

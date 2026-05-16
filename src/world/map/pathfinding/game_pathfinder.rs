@@ -3,9 +3,9 @@
 //! Wraps the low-level MMap PathFinder with a simpler API for use by
 //! movement generators (chase, random, waypoint, etc.)
 
-use crate::shared::protocol::Position;
 use super::pathfinder::PathFinder as MMapPathFinder;
 use super::types::PathResult;
+use crate::shared::protocol::Position;
 use std::sync::Arc;
 
 /// Game-level PathFinder (wraps low-level MMap PathFinder)
@@ -29,12 +29,7 @@ impl GamePathFinder {
     }
 
     /// Calculate path (delegates to MMap PathFinder)
-    pub fn calculate_path(
-        &self,
-        map_id: u32,
-        start: Position,
-        end: Position,
-    ) -> PathResult {
+    pub fn calculate_path(&self, map_id: u32, start: Position, end: Position) -> PathResult {
         if let Some(ref pathfinder) = self.mmap_pathfinder {
             pathfinder.calculate_path(map_id, start, end)
         } else {

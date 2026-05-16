@@ -75,15 +75,12 @@ impl QuestTemplateRepository {
                 continue;
             }
             last_entry = Some(row.entry);
-            
+
             let template = Self::row_to_template(row);
             manager.add_quest_template(template);
         }
 
-        tracing::info!(
-            "Loaded {} quest templates",
-            manager.quest_template_count()
-        );
+        tracing::info!("Loaded {} quest templates", manager.quest_template_count());
 
         Ok(())
     }
@@ -274,7 +271,7 @@ impl QuestTemplateRepository {
         world_db: &MySqlPool,
     ) -> Result<()> {
         let rows = sqlx::query_as::<_, CreatureQuestRelationRow>(
-            "SELECT id, quest FROM creature_questrelation"
+            "SELECT id, quest FROM creature_questrelation",
         )
         .fetch_all(world_db)
         .await
@@ -298,7 +295,7 @@ impl QuestTemplateRepository {
         world_db: &MySqlPool,
     ) -> Result<()> {
         let rows = sqlx::query_as::<_, CreatureInvolvedRelationRow>(
-            "SELECT id, quest FROM creature_involvedrelation"
+            "SELECT id, quest FROM creature_involvedrelation",
         )
         .fetch_all(world_db)
         .await
@@ -319,7 +316,7 @@ impl QuestTemplateRepository {
     /// Load GameObject quest starters from gameobject_questrelation table
     async fn load_go_quest_relations(manager: &QuestManager, world_db: &MySqlPool) -> Result<()> {
         let rows = sqlx::query_as::<_, GameObjectQuestRelationRow>(
-            "SELECT id, quest FROM gameobject_questrelation"
+            "SELECT id, quest FROM gameobject_questrelation",
         )
         .fetch_all(world_db)
         .await
@@ -338,7 +335,7 @@ impl QuestTemplateRepository {
         world_db: &MySqlPool,
     ) -> Result<()> {
         let rows = sqlx::query_as::<_, GameObjectInvolvedRelationRow>(
-            "SELECT id, quest FROM gameobject_involvedrelation"
+            "SELECT id, quest FROM gameobject_involvedrelation",
         )
         .fetch_all(world_db)
         .await

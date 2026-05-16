@@ -38,7 +38,11 @@ pub async fn handle_set_selection(
     if target.is_empty() {
         world.systems.player.manager().clear_selection(player_guid);
     } else {
-        world.systems.player.manager().set_selection(player_guid, target);
+        world
+            .systems
+            .player
+            .manager()
+            .set_selection(player_guid, target);
     }
 
     Ok(())

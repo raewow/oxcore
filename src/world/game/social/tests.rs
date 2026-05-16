@@ -3,11 +3,14 @@
 use super::*;
 use crate::shared::database::characters::models::social::CharacterSocialRow;
 use crate::shared::database::characters::repositories::SocialRepositoryTrait;
-use crate::shared::game::social::{FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT, SOCIALMGR_IGNORE_LIMIT};
+use crate::shared::game::social::{
+    FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT,
+    SOCIALMGR_IGNORE_LIMIT,
+};
 use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
+use crate::world::core::session::SessionManager;
 use crate::world::game::broadcast_mgr::BroadcastManager;
 use crate::world::game::player::PlayerManager;
-use crate::world::core::session::SessionManager;
 use mockall::mock;
 use mockall::predicate::*;
 use std::sync::Arc;
@@ -40,7 +43,12 @@ fn test_player_guid(low: u32) -> ObjectGuid {
 }
 
 /// Helper to create a test SocialSystem with mock repository
-fn create_test_system() -> (SocialSystem, Arc<MockSocialRepository>, Arc<BroadcastManager>, Arc<PlayerManager>) {
+fn create_test_system() -> (
+    SocialSystem,
+    Arc<MockSocialRepository>,
+    Arc<BroadcastManager>,
+    Arc<PlayerManager>,
+) {
     let mock_repo = Arc::new(MockSocialRepository::new());
     let session_mgr = Arc::new(SessionManager::new());
     let player_mgr = Arc::new(PlayerManager::new());
@@ -54,7 +62,12 @@ async fn create_initialized_system(
     player_guid: ObjectGuid,
     friends: Vec<u32>,
     ignores: Vec<u32>,
-) -> (SocialSystem, Arc<MockSocialRepository>, Arc<BroadcastManager>, Arc<PlayerManager>) {
+) -> (
+    SocialSystem,
+    Arc<MockSocialRepository>,
+    Arc<BroadcastManager>,
+    Arc<PlayerManager>,
+) {
     let (system, mut mock_repo, broadcast_mgr, player_mgr) = create_test_system();
 
     // Setup mock to return social data
@@ -123,16 +136,25 @@ async fn test_load_player_social_with_friends_and_ignores() {
     let broadcast_mgr = Arc::new(BroadcastManager::new(session_mgr, player_mgr.clone()));
 
     // Set up mock expectations BEFORE creating system
-    mock_repo
-        .expect_find_by_guid()
-        .with(eq(1))
-        .returning(|_| {
-            Ok(vec![
-                CharacterSocialRow { guid: 1, friend: 2, flags: SocialFlag::Friend as u8 },
-                CharacterSocialRow { guid: 1, friend: 3, flags: SocialFlag::Friend as u8 },
-                CharacterSocialRow { guid: 1, friend: 4, flags: SocialFlag::Ignored as u8 },
-            ])
-        });
+    mock_repo.expect_find_by_guid().with(eq(1)).returning(|_| {
+        Ok(vec![
+            CharacterSocialRow {
+                guid: 1,
+                friend: 2,
+                flags: SocialFlag::Friend as u8,
+            },
+            CharacterSocialRow {
+                guid: 1,
+                friend: 3,
+                flags: SocialFlag::Friend as u8,
+            },
+            CharacterSocialRow {
+                guid: 1,
+                friend: 4,
+                flags: SocialFlag::Ignored as u8,
+            },
+        ])
+    });
 
     let system = SocialSystem::new(Arc::new(mock_repo), broadcast_mgr, player_mgr);
     let player = test_player_guid(1);
@@ -193,7 +215,9 @@ async fn test_add_friend_success_offline() {
 
     system.load_player_social(player).await.unwrap();
 
-    let result = system.add_friend(player, friend, "Friend".to_string(), false).await;
+    let result = system
+        .add_friend(player, friend, "Friend".to_string(), false)
+        .await;
     assert!(result.is_ok());
 
     // Verify friend was added
@@ -220,7 +244,9 @@ async fn test_add_friend_success_online() {
 
     system.set_social_state(player, SocialState::new());
 
-    let result = system.add_friend(player, friend, "Friend".to_string(), true).await;
+    let result = system
+        .add_friend(player, friend, "Friend".to_string(), true)
+        .await;
     assert!(result.is_ok());
 
     assert_eq!(system.get_friend_count(player), 1);
@@ -235,7 +261,9 @@ async fn test_add_friend_cannot_add_self() {
     system.set_social_state(player, SocialState::new());
 
     // Try to add self - should send error packet and return Ok
-    let result = system.add_friend(player, player, "Self".to_string(), false).await;
+    let result = system
+        .add_friend(player, player, "Self".to_string(), false)
+        .await;
     assert!(result.is_ok());
 
     // Should not be added
@@ -250,11 +278,15 @@ async fn test_add_friend_already_friends() {
 
     // Pre-add friend
     let mut social_state = SocialState::new();
-    social_state.friends.insert(friend, FriendEntry::new(friend, SocialFlag::Friend as u8));
+    social_state
+        .friends
+        .insert(friend, FriendEntry::new(friend, SocialFlag::Friend as u8));
     system.set_social_state(player, social_state);
 
     // Try to add again - should send error packet
-    let result = system.add_friend(player, friend, "Friend".to_string(), false).await;
+    let result = system
+        .add_friend(player, friend, "Friend".to_string(), false)
+        .await;
     assert!(result.is_ok());
 
     // Count should still be 1
@@ -270,13 +302,18 @@ async fn test_add_friend_list_full() {
     let mut social_state = SocialState::new();
     for i in 0..SOCIALMGR_FRIEND_LIMIT {
         let friend_guid = test_player_guid(100 + i as u32);
-        social_state.friends.insert(friend_guid, FriendEntry::new(friend_guid, SocialFlag::Friend as u8));
+        social_state.friends.insert(
+            friend_guid,
+            FriendEntry::new(friend_guid, SocialFlag::Friend as u8),
+        );
     }
     system.set_social_state(player, social_state);
 
     // Try to add one more - should fail
     let new_friend = test_player_guid(500);
-    let result = system.add_friend(player, new_friend, "Extra".to_string(), false).await;
+    let result = system
+        .add_friend(player, new_friend, "Extra".to_string(), false)
+        .await;
     assert!(result.is_ok());
 
     // Count should still be at limit
@@ -301,7 +338,9 @@ async fn test_add_friend_by_name_not_found() {
 
     system.set_social_state(player, SocialState::new());
 
-    let result = system.add_friend_by_name(player, "NonExistent".to_string()).await;
+    let result = system
+        .add_friend_by_name(player, "NonExistent".to_string())
+        .await;
     assert!(result.is_ok());
 
     // Should not be added
@@ -329,7 +368,9 @@ async fn test_remove_friend_success() {
 
     // Pre-add friend
     let mut social_state = SocialState::new();
-    social_state.friends.insert(friend, FriendEntry::new(friend, SocialFlag::Friend as u8));
+    social_state
+        .friends
+        .insert(friend, FriendEntry::new(friend, SocialFlag::Friend as u8));
     system.set_social_state(player, social_state);
 
     let result = system.remove_friend(player, friend).await;
@@ -376,7 +417,9 @@ async fn test_add_ignore_success() {
 
     system.set_social_state(player, SocialState::new());
 
-    let result = system.add_ignore(player, ignored, "Ignored".to_string()).await;
+    let result = system
+        .add_ignore(player, ignored, "Ignored".to_string())
+        .await;
     assert!(result.is_ok());
 
     // Verify ignore was added
@@ -407,11 +450,16 @@ async fn test_add_ignore_already_ignored() {
 
     // Pre-add ignore
     let mut social_state = SocialState::new();
-    social_state.ignores.insert(ignored, IgnoreEntry::new(ignored, SocialFlag::Ignored as u8));
+    social_state.ignores.insert(
+        ignored,
+        IgnoreEntry::new(ignored, SocialFlag::Ignored as u8),
+    );
     system.set_social_state(player, social_state);
 
     // Try to add again - should send error packet
-    let result = system.add_ignore(player, ignored, "Ignored".to_string()).await;
+    let result = system
+        .add_ignore(player, ignored, "Ignored".to_string())
+        .await;
     assert!(result.is_ok());
 
     // Count should still be 1
@@ -427,13 +475,18 @@ async fn test_add_ignore_list_full() {
     let mut social_state = SocialState::new();
     for i in 0..SOCIALMGR_IGNORE_LIMIT {
         let ignored_guid = test_player_guid(100 + i as u32);
-        social_state.ignores.insert(ignored_guid, IgnoreEntry::new(ignored_guid, SocialFlag::Ignored as u8));
+        social_state.ignores.insert(
+            ignored_guid,
+            IgnoreEntry::new(ignored_guid, SocialFlag::Ignored as u8),
+        );
     }
     system.set_social_state(player, social_state);
 
     // Try to add one more - should fail
     let new_ignored = test_player_guid(500);
-    let result = system.add_ignore(player, new_ignored, "Extra".to_string()).await;
+    let result = system
+        .add_ignore(player, new_ignored, "Extra".to_string())
+        .await;
     assert!(result.is_ok());
 
     // Count should still be at limit
@@ -461,7 +514,10 @@ async fn test_remove_ignore_success() {
 
     // Pre-add ignore
     let mut social_state = SocialState::new();
-    social_state.ignores.insert(ignored, IgnoreEntry::new(ignored, SocialFlag::Ignored as u8));
+    social_state.ignores.insert(
+        ignored,
+        IgnoreEntry::new(ignored, SocialFlag::Ignored as u8),
+    );
     system.set_social_state(player, social_state);
 
     let result = system.remove_ignore(player, ignored).await;
@@ -496,8 +552,14 @@ fn test_get_friend_list() {
 
     // Add friends
     let mut social_state = SocialState::new();
-    social_state.friends.insert(test_player_guid(2), FriendEntry::new(test_player_guid(2), SocialFlag::Friend as u8));
-    social_state.friends.insert(test_player_guid(3), FriendEntry::new(test_player_guid(3), SocialFlag::Friend as u8));
+    social_state.friends.insert(
+        test_player_guid(2),
+        FriendEntry::new(test_player_guid(2), SocialFlag::Friend as u8),
+    );
+    social_state.friends.insert(
+        test_player_guid(3),
+        FriendEntry::new(test_player_guid(3), SocialFlag::Friend as u8),
+    );
     system.set_social_state(player, social_state);
 
     let friends = system.get_friend_list(player);
@@ -513,8 +575,14 @@ fn test_get_ignore_list() {
 
     // Add ignores
     let mut social_state = SocialState::new();
-    social_state.ignores.insert(test_player_guid(4), IgnoreEntry::new(test_player_guid(4), SocialFlag::Ignored as u8));
-    social_state.ignores.insert(test_player_guid(5), IgnoreEntry::new(test_player_guid(5), SocialFlag::Ignored as u8));
+    social_state.ignores.insert(
+        test_player_guid(4),
+        IgnoreEntry::new(test_player_guid(4), SocialFlag::Ignored as u8),
+    );
+    social_state.ignores.insert(
+        test_player_guid(5),
+        IgnoreEntry::new(test_player_guid(5), SocialFlag::Ignored as u8),
+    );
     system.set_social_state(player, social_state);
 
     let ignores = system.get_ignore_list(player);
@@ -530,7 +598,9 @@ fn test_has_friend() {
     let friend = test_player_guid(2);
 
     let mut social_state = SocialState::new();
-    social_state.friends.insert(friend, FriendEntry::new(friend, SocialFlag::Friend as u8));
+    social_state
+        .friends
+        .insert(friend, FriendEntry::new(friend, SocialFlag::Friend as u8));
     system.set_social_state(player, social_state);
 
     assert!(system.has_friend(player, friend));
@@ -544,7 +614,10 @@ fn test_has_ignore() {
     let ignored = test_player_guid(2);
 
     let mut social_state = SocialState::new();
-    social_state.ignores.insert(ignored, IgnoreEntry::new(ignored, SocialFlag::Ignored as u8));
+    social_state.ignores.insert(
+        ignored,
+        IgnoreEntry::new(ignored, SocialFlag::Ignored as u8),
+    );
     system.set_social_state(player, social_state);
 
     assert!(system.has_ignore(player, ignored));
@@ -557,9 +630,18 @@ fn test_get_counts() {
     let player = test_player_guid(1);
 
     let mut social_state = SocialState::new();
-    social_state.friends.insert(test_player_guid(2), FriendEntry::new(test_player_guid(2), SocialFlag::Friend as u8));
-    social_state.friends.insert(test_player_guid(3), FriendEntry::new(test_player_guid(3), SocialFlag::Friend as u8));
-    social_state.ignores.insert(test_player_guid(4), IgnoreEntry::new(test_player_guid(4), SocialFlag::Ignored as u8));
+    social_state.friends.insert(
+        test_player_guid(2),
+        FriendEntry::new(test_player_guid(2), SocialFlag::Friend as u8),
+    );
+    social_state.friends.insert(
+        test_player_guid(3),
+        FriendEntry::new(test_player_guid(3), SocialFlag::Friend as u8),
+    );
+    social_state.ignores.insert(
+        test_player_guid(4),
+        IgnoreEntry::new(test_player_guid(4), SocialFlag::Ignored as u8),
+    );
     system.set_social_state(player, social_state);
 
     assert_eq!(system.get_friend_count(player), 2);
@@ -599,14 +681,19 @@ fn test_validate_whisper_blocked_by_ignore() {
 
     // Target has sender on ignore list
     let mut target_social = SocialState::new();
-    target_social.ignores.insert(sender, IgnoreEntry::new(sender, SocialFlag::Ignored as u8));
+    target_social
+        .ignores
+        .insert(sender, IgnoreEntry::new(sender, SocialFlag::Ignored as u8));
     system.set_social_state(target, target_social);
 
     system.set_social_state(sender, SocialState::new());
 
     let result = system.validate_whisper(sender, target);
     assert!(result.is_err(), "Whisper should be blocked");
-    assert!(matches!(result.unwrap_err(), WhisperBlockReason::TargetIgnoresSender));
+    assert!(matches!(
+        result.unwrap_err(),
+        WhisperBlockReason::TargetIgnoresSender
+    ));
 }
 
 #[test]
@@ -617,7 +704,10 @@ fn test_is_ignored_reverse_check() {
 
     // player1 ignores player2
     let mut social_state = SocialState::new();
-    social_state.ignores.insert(player2, IgnoreEntry::new(player2, SocialFlag::Ignored as u8));
+    social_state.ignores.insert(
+        player2,
+        IgnoreEntry::new(player2, SocialFlag::Ignored as u8),
+    );
     system.set_social_state(player1, social_state);
 
     // Check if player2 is ignored by player1

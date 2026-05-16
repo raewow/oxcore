@@ -24,13 +24,17 @@ pub async fn effect_heal(input: &EffectInput, world: &World) -> Result<EffectRes
     };
 
     // Get caster stats for healing power and crit
-    let caster_stats = world.systems.player.manager().with_player(input.caster_guid, |player| {
-        (
-            player.stats.healing_power,
-            player.stats.spell_crit_pct,
-            player.level,
-        )
-    });
+    let caster_stats = world
+        .systems
+        .player
+        .manager()
+        .with_player(input.caster_guid, |player| {
+            (
+                player.stats.healing_power,
+                player.stats.spell_crit_pct,
+                player.level,
+            )
+        });
 
     let caster_level = caster_stats.as_ref().map(|s| s.2).unwrap_or(1);
 
@@ -59,43 +63,68 @@ pub async fn effect_heal(input: &EffectInput, world: &World) -> Result<EffectRes
     let heal_amount = final_heal as u32;
 
     // Apply healing
-    let healed = world.systems.player.manager().with_player_mut(target_guid, |player| {
-        let max_heal = player.stats.max_health.saturating_sub(player.stats.health);
-        let actual_heal = heal_amount.min(max_heal);
-        player.stats.health += actual_heal;
+    let healed = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(target_guid, |player| {
+            let max_heal = player.stats.max_health.saturating_sub(player.stats.health);
+            let actual_heal = heal_amount.min(max_heal);
+            player.stats.health += actual_heal;
 
-        tracing::debug!(
-            "Spell heal: {} healed for {} (crit: {}), health: {} -> {}",
-            player.name, actual_heal, is_crit, player.stats.health - actual_heal, player.stats.health
-        );
+            tracing::debug!(
+                "Spell heal: {} healed for {} (crit: {}), health: {} -> {}",
+                player.name,
+                actual_heal,
+                is_crit,
+                player.stats.health - actual_heal,
+                player.stats.health
+            );
 
-        actual_heal
-    }).unwrap_or(0);
+            actual_heal
+        })
+        .unwrap_or(0);
 
     // Send SMSG_SPELLHEALLOG (P5)
     let overheal = heal_amount.saturating_sub(healed);
-    send_spell_heal_log(input.caster_guid, target_guid, input.spell_id, healed, overheal, is_crit, world);
+    send_spell_heal_log(
+        input.caster_guid,
+        target_guid,
+        input.spell_id,
+        healed,
+        overheal,
+        is_crit,
+        world,
+    );
 
     // Fire proc checks for healing
     if healed > 0 {
         use crate::world::game::player::auras::proc::proc_flags;
         // Caster: healed a target
-        let _ = world.systems.auras.check_procs(
-            input.caster_guid,
-            proc_flags::HEAL,
-            Some(input.spell_id),
-            healed,
-            world,
-        ).await;
-        // Target: received healing
-        if target_guid.is_player() {
-            let _ = world.systems.auras.check_procs(
-                target_guid,
-                proc_flags::HEAL_TAKEN,
+        let _ = world
+            .systems
+            .auras
+            .check_procs(
+                input.caster_guid,
+                proc_flags::HEAL,
                 Some(input.spell_id),
                 healed,
                 world,
-            ).await;
+            )
+            .await;
+        // Target: received healing
+        if target_guid.is_player() {
+            let _ = world
+                .systems
+                .auras
+                .check_procs(
+                    target_guid,
+                    proc_flags::HEAL_TAKEN,
+                    Some(input.spell_id),
+                    healed,
+                    world,
+                )
+                .await;
         }
     }
 
@@ -111,19 +140,26 @@ pub async fn effect_heal_max_health(input: &EffectInput, world: &World) -> Resul
         None => return Ok(EffectResult::empty()),
     };
 
-    let healed = world.systems.player.manager().with_player_mut(target_guid, |player| {
-        let current = player.stats.health;
-        let max = player.stats.max_health;
-        let heal_amount = max.saturating_sub(current);
-        player.stats.health = max;
+    let healed = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(target_guid, |player| {
+            let current = player.stats.health;
+            let max = player.stats.max_health;
+            let heal_amount = max.saturating_sub(current);
+            player.stats.health = max;
 
-        tracing::debug!(
-            "Lay on Hands: {} healed to full, health: {} -> {}",
-            player.name, current, max
-        );
+            tracing::debug!(
+                "Lay on Hands: {} healed to full, health: {} -> {}",
+                player.name,
+                current,
+                max
+            );
 
-        heal_amount
-    }).unwrap_or(0);
+            heal_amount
+        })
+        .unwrap_or(0);
 
     Ok(EffectResult::with_healing(healed))
 }
@@ -142,18 +178,26 @@ pub async fn effect_heal_mechanical(input: &EffectInput, world: &World) -> Resul
 
     // TODO: Check if target is mechanical creature type
 
-    let healed = world.systems.player.manager().with_player_mut(target_guid, |player| {
-        let max_heal = player.stats.max_health.saturating_sub(player.stats.health);
-        let actual_heal = base_heal.min(max_heal);
-        player.stats.health += actual_heal;
+    let healed = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(target_guid, |player| {
+            let max_heal = player.stats.max_health.saturating_sub(player.stats.health);
+            let actual_heal = base_heal.min(max_heal);
+            player.stats.health += actual_heal;
 
-        tracing::debug!(
-            "Mechanical heal: {} healed for {}, health: {} -> {}",
-            player.name, actual_heal, player.stats.health - actual_heal, player.stats.health
-        );
+            tracing::debug!(
+                "Mechanical heal: {} healed for {}, health: {} -> {}",
+                player.name,
+                actual_heal,
+                player.stats.health - actual_heal,
+                player.stats.health
+            );
 
-        actual_heal
-    }).unwrap_or(0);
+            actual_heal
+        })
+        .unwrap_or(0);
 
     Ok(EffectResult::with_healing(healed))
 }
@@ -169,28 +213,32 @@ pub async fn effect_spirit_heal(input: &EffectInput, world: &World) -> Result<Ef
     };
 
     // Check if target is a player and is dead
-    let can_resurrect = world.systems.player.manager().with_player(target_guid, |player| {
-        player.stats.health == 0
-    }).unwrap_or(false);
+    let can_resurrect = world
+        .systems
+        .player
+        .manager()
+        .with_player(target_guid, |player| player.stats.health == 0)
+        .unwrap_or(false);
 
     if !can_resurrect {
         return Ok(EffectResult::empty());
     }
 
     // Resurrect player at full health
-    world.systems.player.manager().with_player_mut(target_guid, |player| {
-        player.stats.health = player.stats.max_health;
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(target_guid, |player| {
+            player.stats.health = player.stats.max_health;
 
-        // TODO: Remove "Waiting to Resurrect" aura (spell 2584)
-        // TODO: Apply resurrection sickness
-        // TODO: Spawn corpse bones
-        // TODO: Auto-resummon pet
+            // TODO: Remove "Waiting to Resurrect" aura (spell 2584)
+            // TODO: Apply resurrection sickness
+            // TODO: Spawn corpse bones
+            // TODO: Auto-resummon pet
 
-        tracing::debug!(
-            "Spirit heal: {} resurrected at full health",
-            player.name
-        );
-    });
+            tracing::debug!("Spirit heal: {} resurrected at full health", player.name);
+        });
 
     Ok(EffectResult::with_healing(0))
 }
@@ -214,5 +262,8 @@ fn send_spell_heal_log(
     packet.write_u8(if is_crit { 1 } else { 0 });
     packet.write_u8(0); // unused
 
-    world.managers.broadcast_mgr.broadcast_nearby(caster_guid, &packet, true);
+    world
+        .managers
+        .broadcast_mgr
+        .broadcast_nearby(caster_guid, &packet, true);
 }

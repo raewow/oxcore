@@ -1,7 +1,7 @@
-use crate::shared::protocol::ObjectGuid;
-use crate::world::World;
 use super::dbc::TalentStore;
 use super::state::TalentState;
+use crate::shared::protocol::ObjectGuid;
+use crate::world::World;
 
 /// Apply the effects of a single talent rank.
 ///
@@ -70,17 +70,25 @@ pub async fn apply_talent_rank(
     if old_rank > 0 {
         if let Some(old_spell_id) = talent_info.spell_id_for_rank(old_rank) {
             // Remove the passive aura from old rank
-            world.systems.auras.remove_spell_auras(
-                player_guid,
-                old_spell_id,
-                world,
-            ).await?;
+            world
+                .systems
+                .auras
+                .remove_spell_auras(player_guid, old_spell_id, world)
+                .await?;
 
             // Remove any spell modifiers from old rank
-            if let Some(_) = world.systems.player.manager().with_player_mut(player_guid, |player| {
-                player.spells.spell_modifiers.retain(|m| m.source_spell_id != old_spell_id);
-                Some(())
-            }) {}
+            if let Some(_) = world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(player_guid, |player| {
+                    player
+                        .spells
+                        .spell_modifiers
+                        .retain(|m| m.source_spell_id != old_spell_id);
+                    Some(())
+                })
+            {}
         }
     }
 
@@ -91,11 +99,11 @@ pub async fn apply_talent_rank(
         //   - Passive auras -> AuraSystem.apply_aura()
         //   - Spell modifiers -> added to player.spell_modifiers
         //   - Learned spells -> added to player.known_spells
-        world.systems.spells.apply_talent_spell(
-            player_guid,
-            new_spell_id,
-            world,
-        ).await?;
+        world
+            .systems
+            .spells
+            .apply_talent_spell(player_guid, new_spell_id, world)
+            .await?;
     }
 
     Ok(())
@@ -135,28 +143,33 @@ pub async fn remove_all_talent_effects(
         // In practice, only the current rank's spell is active
         if let Some(spell_id) = talent_info.spell_id_for_rank(rank) {
             // Remove passive aura
-            world.systems.auras.remove_spell_auras(
-                player_guid,
-                spell_id,
-                world,
-            ).await?;
+            world
+                .systems
+                .auras
+                .remove_spell_auras(player_guid, spell_id, world)
+                .await?;
 
             // Remove learned spell (if this talent teaches a spell)
-            world.systems.spells.unlearn_talent_spell(
-                player_guid,
-                spell_id,
-                world,
-            ).await?;
+            world
+                .systems
+                .spells
+                .unlearn_talent_spell(player_guid, spell_id, world)
+                .await?;
         }
     }
 
     // Clear all spell modifiers originating from talent spells
-    if let Some(_) = world.systems.player.manager().with_player_mut(player_guid, |player| {
-        // Remove modifiers that came from talents (we'll need to track this)
-        // For now, we remove all modifiers - they'll be re-added on reapply
-        player.spells.spell_modifiers.clear();
-        Some(())
-    }) {}
+    if let Some(_) = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            // Remove modifiers that came from talents (we'll need to track this)
+            // For now, we remove all modifiers - they'll be re-added on reapply
+            player.spells.spell_modifiers.clear();
+            Some(())
+        })
+    {}
 
     Ok(())
 }
@@ -187,18 +200,20 @@ pub async fn reapply_all_talent_effects(
             None => {
                 tracing::warn!(
                     "Player {:?} has unknown talent {} rank {} - skipping",
-                    player_guid, talent_id, rank
+                    player_guid,
+                    talent_id,
+                    rank
                 );
                 continue;
             }
         };
 
         if let Some(spell_id) = talent_info.spell_id_for_rank(rank) {
-            world.systems.spells.apply_talent_spell(
-                player_guid,
-                spell_id,
-                world,
-            ).await?;
+            world
+                .systems
+                .spells
+                .apply_talent_spell(player_guid, spell_id, world)
+                .await?;
         }
     }
 

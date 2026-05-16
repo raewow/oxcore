@@ -10,7 +10,7 @@ use std::sync::Arc;
 /// LootSystem - handles all loot business logic and packet sending
 pub struct LootSystem {
     manager: Arc<LootManager>,
-    broadcast_mgr: Arc<dyn BroadcastManagerTrait>,  // OWNS broadcast_mgr
+    broadcast_mgr: Arc<dyn BroadcastManagerTrait>, // OWNS broadcast_mgr
     item_mgr: Arc<ItemManager>,
     player_mgr: Arc<PlayerManager>,
 }
@@ -18,13 +18,13 @@ pub struct LootSystem {
 impl LootSystem {
     pub fn new(
         manager: Arc<LootManager>,
-        broadcast_mgr: Arc<dyn BroadcastManagerTrait>,  // INJECTED
+        broadcast_mgr: Arc<dyn BroadcastManagerTrait>, // INJECTED
         item_mgr: Arc<ItemManager>,
         player_mgr: Arc<PlayerManager>,
     ) -> Self {
         Self {
             manager,
-            broadcast_mgr,  // STORED
+            broadcast_mgr, // STORED
             item_mgr,
             player_mgr,
         }
@@ -32,13 +32,11 @@ impl LootSystem {
 
     /// Initialize the loot system
     pub async fn init(&self) -> anyhow::Result<()> {
-
         Ok(())
     }
 
     /// Shutdown the loot system
     pub async fn shutdown(&self) -> anyhow::Result<()> {
-
         Ok(())
     }
 
@@ -49,13 +47,24 @@ impl LootSystem {
         target_guid: ObjectGuid,
         world: &World,
     ) -> anyhow::Result<()> {
-        tracing::info!("[LOOT] handle_loot_request: player={:?} target={:?}", player_guid, target_guid);
+        tracing::info!(
+            "[LOOT] handle_loot_request: player={:?} target={:?}",
+            player_guid,
+            target_guid
+        );
 
         // 1. Validate access
         if !self.can_loot(player_guid, target_guid, world) {
-            tracing::info!("[LOOT] can_loot failed for player={:?} target={:?}", player_guid, target_guid);
+            tracing::info!(
+                "[LOOT] can_loot failed for player={:?} target={:?}",
+                player_guid,
+                target_guid
+            );
             // Send release so the client cursor resets cleanly (mirrors vmangos SendLootRelease)
-            let msg = SmsgLootReleaseResponse { loot_guid: target_guid, unknown: 1 };
+            let msg = SmsgLootReleaseResponse {
+                loot_guid: target_guid,
+                unknown: 1,
+            };
             self.broadcast_mgr.send_msg_to_player(player_guid, msg);
             return Ok(());
         }
@@ -126,16 +135,19 @@ impl LootSystem {
         };
 
         // Add to player inventory
-        let result = world.systems.inventory.add_item(
-            player_guid,
-            item.item_id,
-            item.count,
-        ).await;
+        let result = world
+            .systems
+            .inventory
+            .add_item(player_guid, item.item_id, item.count)
+            .await;
 
         match result {
             AddItemResult::Success { .. } => {
                 // Notify quest system about item gain
-                world.systems.quest.handle_item_added(player_guid, item.item_id, item.count);
+                world
+                    .systems
+                    .quest
+                    .handle_item_added(player_guid, item.item_id, item.count);
 
                 // Send loot removed to player
                 let msg = SmsgLootRemoved { slot };
@@ -196,15 +208,14 @@ impl LootSystem {
 
     // Private methods
 
-    fn send_loot_window(&self,
-        player_guid: ObjectGuid,
-        target_guid: ObjectGuid,
-        world: &World,
-    ) {
+    fn send_loot_window(&self, player_guid: ObjectGuid, target_guid: ObjectGuid, world: &World) {
         let loot = self.manager.get_loot(target_guid);
 
         let Some(loot_ref) = loot else {
-            tracing::warn!("[LOOT] send_loot_window: no loot found for target={:?}", target_guid);
+            tracing::warn!(
+                "[LOOT] send_loot_window: no loot found for target={:?}",
+                target_guid
+            );
             return;
         };
 
@@ -217,7 +228,8 @@ impl LootSystem {
                 continue;
             }
 
-            let display_id = self.item_mgr
+            let display_id = self
+                .item_mgr
                 .get_template(item.item_id)
                 .map(|t| t.display_id)
                 .unwrap_or(0);
@@ -240,11 +252,16 @@ impl LootSystem {
             if item.is_looted {
                 continue;
             }
-            if !world.systems.quest.player_has_quest_for_item(player_guid, item.item_id) {
+            if !world
+                .systems
+                .quest
+                .player_has_quest_for_item(player_guid, item.item_id)
+            {
                 continue;
             }
 
-            let display_id = self.item_mgr
+            let display_id = self
+                .item_mgr
                 .get_template(item.item_id)
                 .map(|t| t.display_id)
                 .unwrap_or(0);
@@ -279,72 +296,96 @@ impl LootSystem {
         world: &World,
     ) -> anyhow::Result<()> {
         // Get creature info from the creature manager
-        let creature_info = world.managers.creature_mgr.with_creature_mut(target_guid, |creature| {
-            (creature.entry, creature.level, creature.loot_recipient)
-        });
+        let creature_info = world
+            .managers
+            .creature_mgr
+            .with_creature_mut(target_guid, |creature| {
+                (creature.entry, creature.level, creature.loot_recipient)
+            });
 
         let Some((entry, level, recipient)) = creature_info else {
             return Err(anyhow::anyhow!("Creature not found for loot generation"));
         };
 
         let allowed = recipient.map(|r| vec![r]).unwrap_or_default();
-        self.manager.generate_creature_loot(target_guid, entry, level, allowed);
+        self.manager
+            .generate_creature_loot(target_guid, entry, level, allowed);
 
         Ok(())
     }
 
-    fn check_and_clear_if_empty(
-        &self,
-        target_guid: ObjectGuid,
-        world: &World,
-    ) {
+    fn check_and_clear_if_empty(&self, target_guid: ObjectGuid, world: &World) {
         let is_empty = self.manager.is_loot_empty(target_guid);
 
         if is_empty {
             // Clear has_loot flag on creature
-            world.managers.creature_mgr.with_creature_mut(target_guid, |creature| {
-                creature.set_has_loot(false);
-            });
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(target_guid, |creature| {
+                    creature.set_has_loot(false);
+                });
 
             // Clear lootable flag on corpse
-            world.managers.creature_mgr.clear_lootable_flag(target_guid, world);
+            world
+                .managers
+                .creature_mgr
+                .clear_lootable_flag(target_guid, world);
 
             // Remove loot data
             self.manager.remove_loot(target_guid);
         }
     }
 
-    fn can_loot(
-        &self,
-        player_guid: ObjectGuid,
-        target_guid: ObjectGuid,
-        world: &World,
-    ) -> bool {
+    fn can_loot(&self, player_guid: ObjectGuid, target_guid: ObjectGuid, world: &World) -> bool {
         use crate::world::game::creature::DeathState;
 
         // Check if target is a lootable corpse
-        let result = world.managers.creature_mgr.with_creature_mut(target_guid, |creature| {
-            // Allow JustDied and Corpse states — vmangos checks !creature->IsAlive()
-            // Dead state means the corpse was already removed (respawning), don't allow
-            let is_corpse = matches!(creature.death_state, DeathState::JustDied | DeathState::Corpse);
-            let is_recipient = creature.loot_recipient.map(|r| r == player_guid).unwrap_or(true);
-            let has_loot = creature.has_loot;
-            if !is_corpse {
-                tracing::info!("[LOOT] can_loot: target={:?} not lootable (death_state={:?})", target_guid, creature.death_state);
-            }
-            if !is_recipient {
-                tracing::info!("[LOOT] can_loot: player={:?} is not loot recipient (recipient={:?})", player_guid, creature.loot_recipient);
-            }
-            if !has_loot {
-                tracing::info!("[LOOT] can_loot: target={:?} has no loot remaining", target_guid);
-            }
-            is_corpse && is_recipient && has_loot
-        });
+        let result = world
+            .managers
+            .creature_mgr
+            .with_creature_mut(target_guid, |creature| {
+                // Allow JustDied and Corpse states — vmangos checks !creature->IsAlive()
+                // Dead state means the corpse was already removed (respawning), don't allow
+                let is_corpse = matches!(
+                    creature.death_state,
+                    DeathState::JustDied | DeathState::Corpse
+                );
+                let is_recipient = creature
+                    .loot_recipient
+                    .map(|r| r == player_guid)
+                    .unwrap_or(true);
+                let has_loot = creature.has_loot;
+                if !is_corpse {
+                    tracing::info!(
+                        "[LOOT] can_loot: target={:?} not lootable (death_state={:?})",
+                        target_guid,
+                        creature.death_state
+                    );
+                }
+                if !is_recipient {
+                    tracing::info!(
+                        "[LOOT] can_loot: player={:?} is not loot recipient (recipient={:?})",
+                        player_guid,
+                        creature.loot_recipient
+                    );
+                }
+                if !has_loot {
+                    tracing::info!(
+                        "[LOOT] can_loot: target={:?} has no loot remaining",
+                        target_guid
+                    );
+                }
+                is_corpse && is_recipient && has_loot
+            });
 
         match result {
             Some(val) => val,
             None => {
-                tracing::info!("[LOOT] can_loot: creature not found for target={:?}", target_guid);
+                tracing::info!(
+                    "[LOOT] can_loot: creature not found for target={:?}",
+                    target_guid
+                );
                 false
             }
         }

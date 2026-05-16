@@ -102,7 +102,11 @@ fn assert_packet_not_sent(captured: &Arc<Mutex<Vec<CapturedPacket>>>, opcode: Op
 
 /// Get the count of packets with specific opcode
 fn count_packets_with_opcode(captured: &Arc<Mutex<Vec<CapturedPacket>>>, opcode: Opcode) -> usize {
-    captured.lock().iter().filter(|p| p.opcode == opcode).count()
+    captured
+        .lock()
+        .iter()
+        .filter(|p| p.opcode == opcode)
+        .count()
 }
 
 /// Create a test player and add to manager
@@ -118,8 +122,8 @@ fn create_test_player(
         guid,
         format!("TestPlayer{}", guid.counter()),
         map_id,
-        0, // instance_id (continent)
-        1, // zone_id
+        0,  // instance_id (continent)
+        1,  // zone_id
         60, // level
         1,  // race (human)
         1,  // class (warrior)
@@ -245,7 +249,10 @@ fn test_validate_movement_rejects_out_of_bounds_x() {
     let result = validator::validate_movement(player_guid, &movement_info, &old_pos);
     assert!(result.is_err(), "Out of bounds X should be rejected");
     assert!(
-        result.unwrap_err().to_string().contains("out of map bounds"),
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("out of map bounds"),
         "Error should mention map bounds"
     );
 }

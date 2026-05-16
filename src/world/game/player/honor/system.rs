@@ -43,8 +43,12 @@ impl HonorSystem {
         // Skip if attacker and victim share the same faction team.
         let (a_team, v_team) = {
             let mgr = world.systems.player.manager();
-            let a = mgr.with_player(attacker, |p| team_from_race(p.race)).unwrap_or(0);
-            let v = mgr.with_player(victim, |p| team_from_race(p.race)).unwrap_or(0);
+            let a = mgr
+                .with_player(attacker, |p| team_from_race(p.race))
+                .unwrap_or(0);
+            let v = mgr
+                .with_player(victim, |p| team_from_race(p.race))
+                .unwrap_or(0);
             (a, v)
         };
         if a_team == 0 || v_team == 0 || a_team == v_team {
@@ -149,14 +153,10 @@ impl HonorSystem {
             }
 
             // Update in-memory honor stats.
-            world
-                .systems
-                .player
-                .manager()
-                .with_player_mut(c.guid, |p| {
-                    p.combat.honor_last_week_cp += honor;
-                    p.combat.honor_last_week_hk += 1;
-                });
+            world.systems.player.manager().with_player_mut(c.guid, |p| {
+                p.combat.honor_last_week_cp += honor;
+                p.combat.honor_last_week_hk += 1;
+            });
 
             // Log to character_honor_cp (fire and forget).
             let row = HonorCPRow {
@@ -204,4 +204,3 @@ fn now_secs() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
-

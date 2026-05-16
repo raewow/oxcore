@@ -65,9 +65,7 @@ pub fn register_all_commands(registry: &mut CommandRegistry) {
     registry.register(gm::kill_info(), |ctx, args| {
         Box::pin(gm::cmd_kill(ctx, args))
     });
-    registry.register(gm::mod_info(), |ctx, args| {
-        Box::pin(gm::cmd_mod(ctx, args))
-    });
+    registry.register(gm::mod_info(), |ctx, args| Box::pin(gm::cmd_mod(ctx, args)));
     registry.register(gm::speed_info(), |ctx, args| {
         Box::pin(gm::cmd_speed(ctx, args))
     });

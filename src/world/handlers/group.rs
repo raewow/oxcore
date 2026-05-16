@@ -36,10 +36,10 @@ pub async fn handle_group_invite(
     match world
         .systems
         .group
-        .invite_player(player_guid, target_name.clone()).await
-
+        .invite_player(player_guid, target_name.clone())
+        .await
     {
-        Ok(()) => {},
+        Ok(()) => {}
         Err(e) => {
             // Send error message to player
             use crate::shared::messages::group::SmsgPartyCommandResult;
@@ -59,7 +59,10 @@ pub async fn handle_group_invite(
                 result: result_code,
             };
 
-            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            world
+                .managers
+                .broadcast_mgr
+                .send_msg_to_player(player_guid, msg);
             warn!("Group invite failed: {:?}", e);
         }
     }
@@ -197,11 +200,7 @@ pub async fn handle_group_raid_convert(session: &WorldSession, world: &World) ->
 
     info!("CMSG_GROUP_RAID_CONVERT: player={:?}", player_guid);
 
-    world
-        .systems
-        .group
-        .convert_to_raid(player_guid)
-        .await?;
+    world.systems.group.convert_to_raid(player_guid).await?;
 
     Ok(())
 }
@@ -348,10 +347,7 @@ pub async fn handle_raid_ready_check(
             .await?;
     } else {
         // Initiate ready check
-        debug!(
-            "MSG_RAID_READY_CHECK (initiate): player={:?}",
-            player_guid
-        );
+        debug!("MSG_RAID_READY_CHECK (initiate): player={:?}", player_guid);
 
         world
             .systems
@@ -393,10 +389,7 @@ pub async fn handle_raid_target_update(
             .await?;
     } else {
         // Request current icons (mode == 1)
-        debug!(
-            "MSG_RAID_TARGET_UPDATE (request): player={:?}",
-            player_guid
-        );
+        debug!("MSG_RAID_TARGET_UPDATE (request): player={:?}", player_guid);
 
         world.systems.group.send_target_icons(player_guid);
     }
@@ -407,20 +400,14 @@ pub async fn handle_raid_target_update(
 /// Handle CMSG_REQUEST_RAID_INFO - client requests raid lockout info
 /// Sent when player opens character screen or joins a raid group
 /// Packet format: empty
-pub async fn handle_request_raid_info(
-    session: &WorldSession,
-    _world: &World,
-) -> Result<()> {
+pub async fn handle_request_raid_info(session: &WorldSession, _world: &World) -> Result<()> {
     use crate::shared::protocol::Opcode;
 
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    debug!(
-        "CMSG_REQUEST_RAID_INFO: player={:?}",
-        player_guid
-    );
+    debug!("CMSG_REQUEST_RAID_INFO: player={:?}", player_guid);
 
     // Send empty raid instance info (no lockouts)
     // Packet format: u32 count, then for each: map_id (u32), reset_time (u32), instance_id (u32)
@@ -457,7 +444,8 @@ pub async fn handle_request_party_member_stats(
     // Check if target is in the same group and online
     let target_player = world.managers.player_mgr.get_player(target_guid);
 
-    let mut response = crate::shared::protocol::WorldPacket::new(Opcode::SMSG_PARTY_MEMBER_STATS_FULL);
+    let mut response =
+        crate::shared::protocol::WorldPacket::new(Opcode::SMSG_PARTY_MEMBER_STATS_FULL);
 
     // Write packed GUID (for 1.12.1)
     response.write_packed_guid_raw(target_guid.raw());
@@ -493,16 +481,16 @@ pub async fn handle_request_party_member_stats(
         // Vanilla class IDs: 1=Warrior, 2=Paladin, 3=Hunter, 4=Rogue, 5=Priest,
         //                    7=Shaman, 8=Mage, 9=Warlock, 11=Druid
         let power_type: u8 = match player.class {
-            1 => 1,  // Warrior - Rage
-            4 => 3,  // Rogue - Energy
-            _ => 0,  // Everyone else - Mana
+            1 => 1, // Warrior - Rage
+            4 => 3, // Rogue - Energy
+            _ => 0, // Everyone else - Mana
         };
         response.write_u8(power_type);
 
         // Use placeholder power values
         let (max_power, cur_power): (u16, u16) = match power_type {
-            1 => (100, 0),    // Rage: max 100, starts at 0
-            3 => (100, 100),  // Energy: max 100, full
+            1 => (100, 0),   // Rage: max 100, starts at 0
+            3 => (100, 100), // Energy: max 100, full
             _ => ((player.level as u16) * 50, (player.level as u16) * 50), // Mana: scales with level
         };
 

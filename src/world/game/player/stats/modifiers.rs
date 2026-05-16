@@ -219,8 +219,7 @@ impl UnitModifierGroup {
     /// Calculate total value using the modifier formula
     /// Formula: ((base_value * base_pct) + total_value) * total_pct
     pub fn calculate_total_value(&self, unit_mod: UnitMods, base_value: f32) -> f32 {
-        let base_val =
-            self.get_modifier_value(unit_mod, UnitModifierType::BaseValue) + base_value;
+        let base_val = self.get_modifier_value(unit_mod, UnitModifierType::BaseValue) + base_value;
         let base_pct = self.get_modifier_value(unit_mod, UnitModifierType::BasePct);
         let total_val = self.get_modifier_value(unit_mod, UnitModifierType::TotalValue);
         let total_pct = self.get_modifier_value(unit_mod, UnitModifierType::TotalPct);

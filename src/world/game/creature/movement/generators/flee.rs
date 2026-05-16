@@ -108,7 +108,10 @@ impl MovementGenerator for FleeMovementGenerator {
     }
 
     fn finalize(&mut self, creature_guid: ObjectGuid) {
-        tracing::trace!("[MOVEMENT] Flee generator finalized for {:?}", creature_guid);
+        tracing::trace!(
+            "[MOVEMENT] Flee generator finalized for {:?}",
+            creature_guid
+        );
     }
 
     fn is_finished(&self) -> bool {

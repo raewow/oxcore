@@ -10,14 +10,14 @@ use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::player::spells::cooldowns;
+use crate::world::game::player::spells::effects::EffectsDispatcher;
 use crate::world::game::player::spells::learning;
 use crate::world::game::player::spells::modifiers;
 use crate::world::game::player::spells::state::{
-    ActiveCast, CurrentSpellType, SpellCastError, SpellCastResult, SpellCastTargets, SpellEventQueue,
-    SpellEventType, SpellModOp, SpellModType, SpellState, SpellsState,
+    ActiveCast, CurrentSpellType, SpellCastError, SpellCastResult, SpellCastTargets,
+    SpellEventQueue, SpellEventType, SpellModOp, SpellModType, SpellState, SpellsState,
 };
 use crate::world::game::player::spells::validation;
-use crate::world::game::player::spells::effects::EffectsDispatcher;
 use crate::world::World;
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
@@ -76,8 +76,16 @@ impl SpellSystem {
         target_guid: Option<ObjectGuid>,
         is_triggered: bool,
         world: &'a World,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>> {
-        Box::pin(self.cast_spell_inner(caster_guid, spell_id, target_guid, is_triggered, None, world))
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
+    {
+        Box::pin(self.cast_spell_inner(
+            caster_guid,
+            spell_id,
+            target_guid,
+            is_triggered,
+            None,
+            world,
+        ))
     }
 
     pub fn cast_spell_from_item<'a>(
@@ -87,8 +95,16 @@ impl SpellSystem {
         target_guid: Option<ObjectGuid>,
         item_guid: ObjectGuid,
         world: &'a World,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>> {
-        Box::pin(self.cast_spell_inner(caster_guid, spell_id, target_guid, true, Some(item_guid), world))
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
+    {
+        Box::pin(self.cast_spell_inner(
+            caster_guid,
+            spell_id,
+            target_guid,
+            true,
+            Some(item_guid),
+            world,
+        ))
     }
 
     async fn cast_spell_inner(
@@ -101,13 +117,8 @@ impl SpellSystem {
         world: &World,
     ) -> Result<SpellCastResult> {
         // Step 1: Validate
-        let validate_result = validation::validate_cast(
-            caster_guid,
-            spell_id,
-            target_guid,
-            is_triggered,
-            world,
-        )?;
+        let validate_result =
+            validation::validate_cast(caster_guid, spell_id, target_guid, is_triggered, world)?;
 
         if validate_result != SpellCastError::None {
             // Send failure to client
@@ -126,7 +137,8 @@ impl SpellSystem {
 
         // For Generic casts, also cancel Channeled (MaNGOS behavior: new generic cancels channel)
         if slot == CurrentSpellType::Generic {
-            self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Channeled, world).await?;
+            self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Channeled, world)
+                .await?;
         }
 
         // Step 4: Consume resources (mana/rage/energy) and apply GCD
@@ -135,11 +147,15 @@ impl SpellSystem {
             self.apply_gcd(caster_guid, spell_id, world).await?;
 
             // Remove auras with CASTING interrupt flag
-            let _ = world.systems.auras.remove_auras_with_interrupt_flag(
-                caster_guid,
-                0x00400000, // AURA_INTERRUPT_FLAG_CAST (bit 22)
-                world,
-            ).await;
+            let _ = world
+                .systems
+                .auras
+                .remove_auras_with_interrupt_flag(
+                    caster_guid,
+                    0x00400000, // AURA_INTERRUPT_FLAG_CAST (bit 22)
+                    world,
+                )
+                .await;
         }
 
         // Check if this is a channeled spell
@@ -149,14 +165,43 @@ impl SpellSystem {
             // Channeled: execute first tick immediately, then channel ticks over time
             let channel_duration = self.get_channel_duration(spell_id, world);
             let tick_count = self.get_channel_tick_count(spell_id, world);
-            self.start_channel(caster_guid, spell_id, target_guid, channel_duration, tick_count, is_triggered, cast_item_guid, world).await?;
+            self.start_channel(
+                caster_guid,
+                spell_id,
+                target_guid,
+                channel_duration,
+                tick_count,
+                is_triggered,
+                cast_item_guid,
+                world,
+            )
+            .await?;
         } else if cast_time_ms == 0 {
             // Instant cast - execute immediately
-            self.execute_spell(caster_guid, spell_id, target_guid, is_triggered, world).await?;
-            self.finish_cast(caster_guid, spell_id, target_guid, is_triggered, cast_item_guid, world).await?;
+            self.execute_spell(caster_guid, spell_id, target_guid, is_triggered, world)
+                .await?;
+            self.finish_cast(
+                caster_guid,
+                spell_id,
+                target_guid,
+                is_triggered,
+                cast_item_guid,
+                world,
+            )
+            .await?;
         } else {
             // Cast time spell - create ActiveCast and broadcast SPELL_START
-            self.start_cast(caster_guid, spell_id, target_guid, cast_time_ms, is_triggered, slot, cast_item_guid, world).await?;
+            self.start_cast(
+                caster_guid,
+                spell_id,
+                target_guid,
+                cast_time_ms,
+                is_triggered,
+                slot,
+                cast_item_guid,
+                world,
+            )
+            .await?;
         }
 
         Ok(SpellCastResult::Success)
@@ -174,32 +219,46 @@ impl SpellSystem {
         cast_item_guid: Option<ObjectGuid>,
         world: &World,
     ) -> Result<()> {
-        world.systems.player.manager().with_player_mut(caster_guid, |player| {
-            let (x, y, z) = (player.movement.position.x, player.movement.position.y, player.movement.position.z);
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster_guid, |player| {
+                let (x, y, z) = (
+                    player.movement.position.x,
+                    player.movement.position.y,
+                    player.movement.position.z,
+                );
 
-            player.spells.set_current_spell(slot, ActiveCast::new(
-                spell_id,
-                target_guid,
-                cast_time_ms,
-                is_triggered,
-                slot,
-                x,
-                y,
-                z,
-            ));
-        });
+                player.spells.set_current_spell(
+                    slot,
+                    ActiveCast::new(
+                        spell_id,
+                        target_guid,
+                        cast_time_ms,
+                        is_triggered,
+                        slot,
+                        x,
+                        y,
+                        z,
+                    ),
+                );
+            });
 
         // Schedule CastFinish event
         let now = get_game_time_ms();
         if let Ok(mut queue) = self.event_queue.lock() {
-            queue.schedule(now + cast_time_ms as u64, SpellEventType::CastFinish {
-                caster_guid,
-                spell_id,
-                target_guid,
-                is_triggered,
-                slot,
-                cast_item_guid,
-            });
+            queue.schedule(
+                now + cast_time_ms as u64,
+                SpellEventType::CastFinish {
+                    caster_guid,
+                    spell_id,
+                    target_guid,
+                    is_triggered,
+                    slot,
+                    cast_item_guid,
+                },
+            );
         }
 
         // Broadcast SMSG_SPELL_START to nearby players
@@ -213,8 +272,7 @@ impl SpellSystem {
             cast_item_guid,
         };
         self.broadcast_mgr
-            .send_msg_to_player(caster_guid, msg.to_world_packet())
-            ;
+            .send_msg_to_player(caster_guid, msg.to_world_packet());
 
         Ok(())
     }
@@ -231,17 +289,30 @@ impl SpellSystem {
         cast_item_guid: Option<ObjectGuid>,
         world: &World,
     ) -> Result<()> {
-        world.systems.player.manager().with_player_mut(caster_guid, |player| {
-            let (x, y, z) = (player.movement.position.x, player.movement.position.y, player.movement.position.z);
-            player.spells.set_current_spell(CurrentSpellType::Channeled, ActiveCast::new_channel(
-                spell_id,
-                target_guid,
-                duration_ms,
-                tick_count,
-                is_triggered,
-                x, y, z,
-            ));
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster_guid, |player| {
+                let (x, y, z) = (
+                    player.movement.position.x,
+                    player.movement.position.y,
+                    player.movement.position.z,
+                );
+                player.spells.set_current_spell(
+                    CurrentSpellType::Channeled,
+                    ActiveCast::new_channel(
+                        spell_id,
+                        target_guid,
+                        duration_ms,
+                        tick_count,
+                        is_triggered,
+                        x,
+                        y,
+                        z,
+                    ),
+                );
+            });
 
         // Send SMSG_CHANNEL_START
         let mut packet = crate::shared::protocol::WorldPacket::new(
@@ -253,7 +324,11 @@ impl SpellSystem {
 
         // Schedule channel tick events and channel finish
         let now = get_game_time_ms();
-        let tick_interval = if tick_count > 0 { duration_ms / tick_count } else { duration_ms };
+        let tick_interval = if tick_count > 0 {
+            duration_ms / tick_count
+        } else {
+            duration_ms
+        };
         if let Ok(mut queue) = self.event_queue.lock() {
             for tick in 0..tick_count {
                 queue.schedule(
@@ -287,7 +362,8 @@ impl SpellSystem {
             target_guid,
             cast_item_guid,
         };
-        self.broadcast_mgr.send_msg_to_player(caster_guid, msg.to_world_packet());
+        self.broadcast_mgr
+            .send_msg_to_player(caster_guid, msg.to_world_packet());
 
         Ok(())
     }
@@ -384,63 +460,138 @@ impl SpellSystem {
         // Process each event
         for event in ready_events {
             match event.event_type {
-                SpellEventType::CastFinish { caster_guid, spell_id, target_guid, is_triggered, slot, cast_item_guid } => {
+                SpellEventType::CastFinish {
+                    caster_guid,
+                    spell_id,
+                    target_guid,
+                    is_triggered,
+                    slot,
+                    cast_item_guid,
+                } => {
                     // Verify the spell is still in the slot (wasn't cancelled)
-                    let still_active = world.systems.player.manager().with_player_mut(caster_guid, |player| {
-                        player.spells.get_current_spell(slot)
-                            .map_or(false, |cast| cast.spell_id == spell_id)
-                    }).unwrap_or(false);
+                    let still_active = world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(caster_guid, |player| {
+                            player
+                                .spells
+                                .get_current_spell(slot)
+                                .map_or(false, |cast| cast.spell_id == spell_id)
+                        })
+                        .unwrap_or(false);
 
                     if still_active {
                         // Clear the slot
-                        world.systems.player.manager().with_player_mut(caster_guid, |player| {
-                            player.spells.clear_current_spell(slot);
-                        });
+                        world
+                            .systems
+                            .player
+                            .manager()
+                            .with_player_mut(caster_guid, |player| {
+                                player.spells.clear_current_spell(slot);
+                            });
 
                         // Re-validate (MaNGOS CheckCast(false))
                         let revalidate = validation::validate_cast(
-                            caster_guid, spell_id, target_guid, true, world,
-                        ).unwrap_or(SpellCastError::InvalidTarget);
+                            caster_guid,
+                            spell_id,
+                            target_guid,
+                            true,
+                            world,
+                        )
+                        .unwrap_or(SpellCastError::InvalidTarget);
 
                         if revalidate != SpellCastError::None {
                             self.send_cast_failure(caster_guid, spell_id, revalidate)?;
                             continue;
                         }
 
-                        self.execute_spell(caster_guid, spell_id, target_guid, is_triggered, world).await?;
-                        self.finish_cast(caster_guid, spell_id, target_guid, is_triggered, cast_item_guid, world).await?;
+                        self.execute_spell(caster_guid, spell_id, target_guid, is_triggered, world)
+                            .await?;
+                        self.finish_cast(
+                            caster_guid,
+                            spell_id,
+                            target_guid,
+                            is_triggered,
+                            cast_item_guid,
+                            world,
+                        )
+                        .await?;
                     }
                 }
-                SpellEventType::ChannelTick { caster_guid, spell_id, target_guid, .. } => {
+                SpellEventType::ChannelTick {
+                    caster_guid,
+                    spell_id,
+                    target_guid,
+                    ..
+                } => {
                     // Verify channel is still active
-                    let still_active = world.systems.player.manager().with_player_mut(caster_guid, |player| {
-                        player.spells.get_current_spell(CurrentSpellType::Channeled)
-                            .map_or(false, |cast| cast.spell_id == spell_id)
-                    }).unwrap_or(false);
+                    let still_active = world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(caster_guid, |player| {
+                            player
+                                .spells
+                                .get_current_spell(CurrentSpellType::Channeled)
+                                .map_or(false, |cast| cast.spell_id == spell_id)
+                        })
+                        .unwrap_or(false);
 
                     if still_active {
-                        self.execute_channel_tick(caster_guid, spell_id, target_guid, world).await?;
+                        self.execute_channel_tick(caster_guid, spell_id, target_guid, world)
+                            .await?;
                     }
                 }
-                SpellEventType::ChannelFinish { caster_guid, spell_id, target_guid } => {
+                SpellEventType::ChannelFinish {
+                    caster_guid,
+                    spell_id,
+                    target_guid,
+                } => {
                     // Verify channel is still active
-                    let still_active = world.systems.player.manager().with_player_mut(caster_guid, |player| {
-                        player.spells.get_current_spell(CurrentSpellType::Channeled)
-                            .map_or(false, |cast| cast.spell_id == spell_id)
-                    }).unwrap_or(false);
+                    let still_active = world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(caster_guid, |player| {
+                            player
+                                .spells
+                                .get_current_spell(CurrentSpellType::Channeled)
+                                .map_or(false, |cast| cast.spell_id == spell_id)
+                        })
+                        .unwrap_or(false);
 
                     if still_active {
-                        world.systems.player.manager().with_player_mut(caster_guid, |player| {
-                            player.spells.clear_current_spell(CurrentSpellType::Channeled);
-                        });
-                        self.finish_cast(caster_guid, spell_id, target_guid, false, None, world).await?;
+                        world
+                            .systems
+                            .player
+                            .manager()
+                            .with_player_mut(caster_guid, |player| {
+                                player
+                                    .spells
+                                    .clear_current_spell(CurrentSpellType::Channeled);
+                            });
+                        self.finish_cast(caster_guid, spell_id, target_guid, false, None, world)
+                            .await?;
                     }
                 }
-                SpellEventType::DelayedEffect { caster_guid, spell_id, target_guid, is_triggered } => {
+                SpellEventType::DelayedEffect {
+                    caster_guid,
+                    spell_id,
+                    target_guid,
+                    is_triggered,
+                } => {
                     tracing::info!(
                         "[SPELL_PROJECTILE_HIT] spell={spell_id} caster={caster_guid:?} target={target_guid:?} — executing delayed damage"
                     );
-                    self.execute_spell_immediate(caster_guid, spell_id, target_guid, is_triggered, world).await?;
+                    self.execute_spell_immediate(
+                        caster_guid,
+                        spell_id,
+                        target_guid,
+                        is_triggered,
+                        world,
+                    )
+                    .await?;
                 }
             }
         }
@@ -464,17 +615,21 @@ impl SpellSystem {
 
         // Tick timers and collect ready effects
         let mut ready_effects: Vec<DelayedSpellEffect> = Vec::new();
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            let mut i = 0;
-            while i < player.spells.delayed_effects.len() {
-                if player.spells.delayed_effects[i].delivery_time_ms <= diff_ms {
-                    ready_effects.push(player.spells.delayed_effects.remove(i));
-                } else {
-                    player.spells.delayed_effects[i].delivery_time_ms -= diff_ms;
-                    i += 1;
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                let mut i = 0;
+                while i < player.spells.delayed_effects.len() {
+                    if player.spells.delayed_effects[i].delivery_time_ms <= diff_ms {
+                        ready_effects.push(player.spells.delayed_effects.remove(i));
+                    } else {
+                        player.spells.delayed_effects[i].delivery_time_ms -= diff_ms;
+                        i += 1;
+                    }
                 }
-            }
-        });
+            });
 
         // Execute ready effects
         for effect in ready_effects {
@@ -484,7 +639,8 @@ impl SpellSystem {
                 effect.target_guid,
                 effect.is_triggered,
                 world,
-            ).await?;
+            )
+            .await?;
         }
 
         Ok(())
@@ -507,52 +663,60 @@ impl SpellSystem {
         // Collect update results from all slots (snapshot pattern)
         let mut updates: Vec<CastUpdateInfo> = Vec::new();
 
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            for slot_idx in 0..crate::world::game::player::spells::state::NUM_CURRENT_SPELLS {
-                if let Some(ref mut active) = player.spells.current_spells[slot_idx] {
-                    if active.is_channeling {
-                        // Channel: tick the channel timer
-                        match active.tick_channel(diff_ms) {
-                            None => {
-                                // Channel complete
-                                updates.push(CastUpdateInfo::ChannelComplete {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                for slot_idx in 0..crate::world::game::player::spells::state::NUM_CURRENT_SPELLS {
+                    if let Some(ref mut active) = player.spells.current_spells[slot_idx] {
+                        if active.is_channeling {
+                            // Channel: tick the channel timer
+                            match active.tick_channel(diff_ms) {
+                                None => {
+                                    // Channel complete
+                                    updates.push(CastUpdateInfo::ChannelComplete {
+                                        spell_id: active.spell_id,
+                                        target_guid: active.target_guid,
+                                    });
+                                    player.spells.current_spells[slot_idx] = None;
+                                }
+                                Some(true) => {
+                                    // Channel tick fired
+                                    updates.push(CastUpdateInfo::ChannelTick {
+                                        spell_id: active.spell_id,
+                                        target_guid: active.target_guid,
+                                        ticks_remaining: active.channel_ticks_remaining,
+                                    });
+                                }
+                                Some(false) => {
+                                    // Just decrementing timer
+                                }
+                            }
+                        } else if active.state == SpellState::Preparing {
+                            // Non-channeled: decrement cast timer
+                            if active.tick(diff_ms) {
+                                // Cast complete
+                                updates.push(CastUpdateInfo::CastComplete {
                                     spell_id: active.spell_id,
                                     target_guid: active.target_guid,
+                                    is_triggered: active.is_triggered,
                                 });
                                 player.spells.current_spells[slot_idx] = None;
                             }
-                            Some(true) => {
-                                // Channel tick fired
-                                updates.push(CastUpdateInfo::ChannelTick {
-                                    spell_id: active.spell_id,
-                                    target_guid: active.target_guid,
-                                    ticks_remaining: active.channel_ticks_remaining,
-                                });
-                            }
-                            Some(false) => {
-                                // Just decrementing timer
-                            }
-                        }
-                    } else if active.state == SpellState::Preparing {
-                        // Non-channeled: decrement cast timer
-                        if active.tick(diff_ms) {
-                            // Cast complete
-                            updates.push(CastUpdateInfo::CastComplete {
-                                spell_id: active.spell_id,
-                                target_guid: active.target_guid,
-                                is_triggered: active.is_triggered,
-                            });
-                            player.spells.current_spells[slot_idx] = None;
                         }
                     }
                 }
-            }
-        });
+            });
 
         // Execute based on update results (outside player lock)
         for info in updates {
             match info {
-                CastUpdateInfo::CastComplete { spell_id, target_guid, is_triggered } => {
+                CastUpdateInfo::CastComplete {
+                    spell_id,
+                    target_guid,
+                    is_triggered,
+                } => {
                     // MaNGOS re-validates when cast timer expires (CheckCast(false)).
                     // Use is_triggered=true to skip GCD/cooldown/resource checks (already consumed).
                     // This re-check validates: target alive, caster alive, in range, not CC'd.
@@ -562,7 +726,8 @@ impl SpellSystem {
                         target_guid,
                         true, // skip GCD/cooldown/resource/already-casting checks
                         world,
-                    ).unwrap_or(SpellCastError::InvalidTarget);
+                    )
+                    .unwrap_or(SpellCastError::InvalidTarget);
 
                     if revalidate != SpellCastError::None {
                         // Cast failed on completion — send failure and skip execution
@@ -570,14 +735,32 @@ impl SpellSystem {
                         continue;
                     }
 
-                    self.execute_spell(player_guid, spell_id, target_guid, is_triggered, world).await?;
-                    self.finish_cast(player_guid, spell_id, target_guid, is_triggered, None, world).await?;
+                    self.execute_spell(player_guid, spell_id, target_guid, is_triggered, world)
+                        .await?;
+                    self.finish_cast(
+                        player_guid,
+                        spell_id,
+                        target_guid,
+                        is_triggered,
+                        None,
+                        world,
+                    )
+                    .await?;
                 }
-                CastUpdateInfo::ChannelTick { spell_id, target_guid, .. } => {
-                    self.execute_channel_tick(player_guid, spell_id, target_guid, world).await?;
+                CastUpdateInfo::ChannelTick {
+                    spell_id,
+                    target_guid,
+                    ..
+                } => {
+                    self.execute_channel_tick(player_guid, spell_id, target_guid, world)
+                        .await?;
                 }
-                CastUpdateInfo::ChannelComplete { spell_id, target_guid } => {
-                    self.finish_cast(player_guid, spell_id, target_guid, false, None, world).await?;
+                CastUpdateInfo::ChannelComplete {
+                    spell_id,
+                    target_guid,
+                } => {
+                    self.finish_cast(player_guid, spell_id, target_guid, false, None, world)
+                        .await?;
                 }
             }
         }
@@ -611,7 +794,8 @@ impl SpellSystem {
 
         if speed > 0.0 && target_guid.is_some() {
             // Calculate travel time based on distance
-            let travel_time_ms = self.calculate_travel_time(caster_guid, target_guid.unwrap(), speed, world);
+            let travel_time_ms =
+                self.calculate_travel_time(caster_guid, target_guid.unwrap(), speed, world);
             tracing::info!(
                 "[SPELL_PROJECTILE] spell={spell_id} speed={speed} travel_time={travel_time_ms}ms target={:?}",
                 target_guid
@@ -620,19 +804,23 @@ impl SpellSystem {
                 // Schedule delayed effect via event queue
                 let now = get_game_time_ms();
                 if let Ok(mut queue) = self.event_queue.lock() {
-                    queue.schedule(now + travel_time_ms as u64, SpellEventType::DelayedEffect {
-                        caster_guid,
-                        spell_id,
-                        target_guid,
-                        is_triggered,
-                    });
+                    queue.schedule(
+                        now + travel_time_ms as u64,
+                        SpellEventType::DelayedEffect {
+                            caster_guid,
+                            spell_id,
+                            target_guid,
+                            is_triggered,
+                        },
+                    );
                 }
                 return Ok(());
             }
         }
 
         // Immediate execution
-        self.execute_spell_immediate(caster_guid, spell_id, target_guid, is_triggered, world).await
+        self.execute_spell_immediate(caster_guid, spell_id, target_guid, is_triggered, world)
+            .await
     }
 
     /// Execute spell effects immediately (no travel time).
@@ -653,14 +841,16 @@ impl SpellSystem {
 
         let resolved = targets::resolve_spell_targets(spell_id, &cast_targets, caster_guid, world);
 
-        self.effects_dispatcher.dispatch_with_targets(
-            caster_guid,
-            spell_id,
-            target_guid,
-            is_triggered,
-            Some(&resolved),
-            world,
-        ).await?;
+        self.effects_dispatcher
+            .dispatch_with_targets(
+                caster_guid,
+                spell_id,
+                target_guid,
+                is_triggered,
+                Some(&resolved),
+                world,
+            )
+            .await?;
 
         Ok(())
     }
@@ -680,16 +870,22 @@ impl SpellSystem {
             .unwrap_or_default();
 
         let target_pos = if target_guid.is_player() {
-            world.managers.player_mgr.with_player(target_guid, |p| p.movement.position).unwrap_or_default()
+            world
+                .managers
+                .player_mgr
+                .with_player(target_guid, |p| p.movement.position)
+                .unwrap_or_default()
         } else if target_guid.is_creature() {
-            world.managers.creature_mgr.with_creature(target_guid, |c| {
-                crate::shared::protocol::Position {
+            world
+                .managers
+                .creature_mgr
+                .with_creature(target_guid, |c| crate::shared::protocol::Position {
                     x: c.position.x,
                     y: c.position.y,
                     z: c.position.z,
                     o: 0.0,
-                }
-            }).unwrap_or_default()
+                })
+                .unwrap_or_default()
         } else {
             return 0;
         };
@@ -716,7 +912,8 @@ impl SpellSystem {
         world: &World,
     ) -> Result<()> {
         // Channel ticks re-execute the spell effects
-        self.execute_spell(caster_guid, spell_id, target_guid, true, world).await
+        self.execute_spell(caster_guid, spell_id, target_guid, true, world)
+            .await
     }
 
     /// Finish a spell cast. Broadcasts SMSG_SPELL_GO, applies cooldown.
@@ -790,11 +987,16 @@ impl SpellSystem {
                 // Only reset for spells with cast time, not autorepeat or channeled
                 let has_cast_time = entry.casting_time_index > 0;
                 let is_autorepeat = (entry.attributes_ex2 & 0x00000020) != 0;
-                let is_channeled = (entry.attributes_ex & 0x04) != 0 || (entry.attributes_ex & 0x40) != 0;
+                let is_channeled =
+                    (entry.attributes_ex & 0x04) != 0 || (entry.attributes_ex & 0x40) != 0;
                 if has_cast_time && !is_autorepeat && !is_channeled {
-                    world.systems.player.manager().with_player_mut(caster_guid, |player| {
-                        player.combat.main_hand_timer = player.combat.main_hand_speed;
-                    });
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(caster_guid, |player| {
+                            player.combat.main_hand_timer = player.combat.main_hand_speed;
+                        });
                 }
             }
         }
@@ -808,15 +1010,14 @@ impl SpellSystem {
 
     /// Cancel the current cast (player-initiated, e.g., pressing Escape or moving).
     /// Cancels the Generic slot first, then Channeled if no generic cast active.
-    pub async fn cancel_cast(
-        &self,
-        caster_guid: ObjectGuid,
-        world: &World,
-    ) -> Result<()> {
+    pub async fn cancel_cast(&self, caster_guid: ObjectGuid, world: &World) -> Result<()> {
         // Try Generic first, then Channeled
-        let cancelled = self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Generic, world).await?;
+        let cancelled = self
+            .cancel_spell_in_slot(caster_guid, CurrentSpellType::Generic, world)
+            .await?;
         if !cancelled {
-            self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Channeled, world).await?;
+            self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Channeled, world)
+                .await?;
         }
         Ok(())
     }
@@ -828,9 +1029,14 @@ impl SpellSystem {
         spell_id: u32,
         world: &World,
     ) -> Result<()> {
-        let slot = world.systems.player.manager().with_player_mut(caster_guid, |player| {
-            player.spells.find_spell_slot(spell_id)
-        }).flatten();
+        let slot = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster_guid, |player| {
+                player.spells.find_spell_slot(spell_id)
+            })
+            .flatten();
 
         if let Some(slot) = slot {
             self.cancel_spell_in_slot(caster_guid, slot, world).await?;
@@ -845,9 +1051,17 @@ impl SpellSystem {
         slot: CurrentSpellType,
         world: &World,
     ) -> Result<bool> {
-        let cancelled_info: Option<(u32, bool)> = world.systems.player.manager().with_player_mut(caster_guid, |player| {
-            player.spells.clear_current_spell(slot).map(|active| (active.spell_id, active.is_channeling))
-        }).flatten();
+        let cancelled_info: Option<(u32, bool)> = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster_guid, |player| {
+                player
+                    .spells
+                    .clear_current_spell(slot)
+                    .map(|active| (active.spell_id, active.is_channeling))
+            })
+            .flatten();
 
         // Remove any pending events for this spell
         if let Some((spell_id, _)) = cancelled_info {
@@ -876,7 +1090,11 @@ impl SpellSystem {
                 self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
 
                 // Remove auras applied by this channeled spell on all targets
-                world.systems.auras.remove_spell_auras(caster_guid, spell_id, world).await?;
+                world
+                    .systems
+                    .auras
+                    .remove_spell_auras(caster_guid, spell_id, world)
+                    .await?;
             }
             return Ok(true);
         }
@@ -902,10 +1120,17 @@ impl SpellSystem {
             .manager()
             .with_player_mut(target_guid, |player| {
                 // Try generic slot first
-                let cast = player.spells.clear_current_spell(CurrentSpellType::Generic)
-                    .or_else(|| player.spells.clear_current_spell(CurrentSpellType::Channeled));
+                let cast = player
+                    .spells
+                    .clear_current_spell(CurrentSpellType::Generic)
+                    .or_else(|| {
+                        player
+                            .spells
+                            .clear_current_spell(CurrentSpellType::Channeled)
+                    });
                 cast.map(|active| (active.spell_id, active.spell_id))
-            }).flatten();
+            })
+            .flatten();
 
         if let Some((spell_id, interrupted_spell_id)) = interrupted_info {
             // Apply school lockout if specified
@@ -916,9 +1141,17 @@ impl SpellSystem {
                     if school > 0 {
                         // Don't lock Physical school
                         let now = get_game_time_ms();
-                        world.systems.player.manager().with_player_mut(target_guid, |player| {
-                            player.spells.apply_school_lockout(school, lockout_duration_ms, now);
-                        });
+                        world
+                            .systems
+                            .player
+                            .manager()
+                            .with_player_mut(target_guid, |player| {
+                                player.spells.apply_school_lockout(
+                                    school,
+                                    lockout_duration_ms,
+                                    now,
+                                );
+                            });
                     }
                 }
             }
@@ -930,12 +1163,13 @@ impl SpellSystem {
                 result: SpellCastError::Interrupted as u8,
             };
             self.broadcast_mgr
-                .send_msg_to_player(target_guid, msg.to_world_packet())
-                ;
+                .send_msg_to_player(target_guid, msg.to_world_packet());
 
             tracing::debug!(
                 "Cast interrupted: target={}, interrupter={}, spell={}",
-                target_guid, interrupter_guid, spell_id
+                target_guid,
+                interrupter_guid,
+                spell_id
             );
         }
 
@@ -948,11 +1182,7 @@ impl SpellSystem {
     /// - Non-channeled: +0.5s per hit, capped at +1.0s total pushback
     /// - Channeled: lose 25% of remaining channel time per hit
     /// - ResistPushback aura (e.g., Concentration Aura) reduces pushback %
-    pub fn apply_cast_pushback(
-        &self,
-        target_guid: ObjectGuid,
-        world: &World,
-    ) -> Result<u32> {
+    pub fn apply_cast_pushback(&self, target_guid: ObjectGuid, world: &World) -> Result<u32> {
         let mut pushback_applied = 0u32;
         let mut spell_id_for_reschedule: Option<u32> = None;
 
@@ -1028,7 +1258,11 @@ impl SpellSystem {
                 3 => crate::world::game::player::power::PowerType::Energy,
                 _ => crate::world::game::player::power::PowerType::Mana,
             };
-            let success = world.systems.power.consume_power(caster_guid, power_type, cost, world)?;
+            let success =
+                world
+                    .systems
+                    .power
+                    .consume_power(caster_guid, power_type, cost, world)?;
 
             if !success {
                 return Ok(false);
@@ -1076,7 +1310,9 @@ impl SpellSystem {
 
         // Get base cast time from SpellCastTimes.dbc
         let base_cast_time = if casting_time_index > 0 {
-            world.dbc.read()
+            world
+                .dbc
+                .read()
                 .get_spell_cast_time(casting_time_index)
                 .map(|ct| ct.cast_time.max(0) as u32)
                 .unwrap_or(0)
@@ -1101,12 +1337,7 @@ impl SpellSystem {
     // =========================================================================
 
     /// Apply Global Cooldown after casting.
-    async fn apply_gcd(
-        &self,
-        caster_guid: ObjectGuid,
-        spell_id: u32,
-        world: &World,
-    ) -> Result<()> {
+    async fn apply_gcd(&self, caster_guid: ObjectGuid, spell_id: u32, world: &World) -> Result<()> {
         // Get spell entry
         let spell_entry = match world.managers.spell_mgr.get(spell_id) {
             Some(entry) => entry,
@@ -1137,9 +1368,13 @@ impl SpellSystem {
         );
 
         let now = get_game_time_ms();
-        world.systems.player.manager().with_player_mut(caster_guid, |player| {
-            player.spells.apply_gcd(gcd_ms, now);
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster_guid, |player| {
+                player.spells.apply_gcd(gcd_ms, now);
+            });
 
         // Send GCD to client
         let msg = SmsgSpellCooldown {
@@ -1147,8 +1382,7 @@ impl SpellSystem {
             cooldowns: vec![(spell_id, gcd_ms)],
         };
         self.broadcast_mgr
-            .send_msg_to_player(caster_guid, msg.to_world_packet())
-            ;
+            .send_msg_to_player(caster_guid, msg.to_world_packet());
 
         Ok(())
     }
@@ -1178,11 +1412,7 @@ impl SpellSystem {
     }
 
     /// Send initial spellbook on login.
-    pub fn send_initial_spells(
-        &self,
-        player_guid: ObjectGuid,
-        world: &World,
-    ) -> Result<()> {
+    pub fn send_initial_spells(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         learning::send_initial_spells(player_guid, world, &self.broadcast_mgr)
     }
 
@@ -1201,11 +1431,7 @@ impl SpellSystem {
     // =========================================================================
 
     /// Called on login: load spells, send spellbook, send cooldowns.
-    pub async fn on_login(
-        &self,
-        player_guid: ObjectGuid,
-        world: &World,
-    ) -> Result<()> {
+    pub async fn on_login(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         // Load spells from database
         learning::load_from_db(player_guid, world)?;
 
@@ -1219,11 +1445,7 @@ impl SpellSystem {
     }
 
     /// Called on logout: save spells and cooldowns.
-    pub async fn on_logout(
-        &self,
-        player_guid: ObjectGuid,
-        world: &World,
-    ) -> Result<()> {
+    pub async fn on_logout(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         // Cancel any active cast
         self.cancel_cast(player_guid, world).await?;
 
@@ -1255,17 +1477,20 @@ impl SpellSystem {
     ) -> Result<()> {
         // TODO: Implement based on spell effects
         // For now, just learn the spell if it's not already known
-        let already_known = world.systems.player.manager().with_player(player_guid, |player| {
-            player.spells.knows_spell(spell_id)
-        }).unwrap_or(false);
-        
+        let already_known = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| player.spells.knows_spell(spell_id))
+            .unwrap_or(false);
+
         if !already_known {
             self.learn_spell(player_guid, spell_id, world).await?;
         }
-        
+
         // TODO: Apply passive aura if the spell has SPELL_AURA_PASSIVE
         // TODO: Add spell modifiers if the spell has SPELL_AURA_ADD_FLAT_MODIFIER
-        
+
         Ok(())
     }
 
@@ -1282,7 +1507,7 @@ impl SpellSystem {
         // In a full implementation, we'd track which spells came from talents
         // For now, we just unlearn it
         self.unlearn_spell(player_guid, spell_id, world).await?;
-        
+
         Ok(())
     }
 
@@ -1298,8 +1523,7 @@ impl SpellSystem {
     ) -> Result<()> {
         let error_code = validation::spell_cast_error_to_u8(error);
         let packet = SmsgCastResult::failure(spell_id, error_code);
-        self.broadcast_mgr
-            .send_msg_to_player(caster_guid, packet);
+        self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
 
         Ok(())
     }

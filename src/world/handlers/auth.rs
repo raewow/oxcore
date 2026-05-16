@@ -163,9 +163,7 @@ pub async fn handle_auth_session(
         );
 
         // Increment failed login counter
-        let _ = auth_repo
-            .increment_failed_logins_by_username(&account_name)
-            ;
+        let _ = auth_repo.increment_failed_logins_by_username(&account_name);
 
         return Ok(AuthResult::Error {
             error_code: AuthErrorCode::Failed as u8,
@@ -194,8 +192,8 @@ pub async fn handle_auth_session(
         account_info.id
     );
     if !session_mgr
-        .remove_session_for_account(account_info.id).await
-
+        .remove_session_for_account(account_info.id)
+        .await
     {
         // Existing session is still loading - reject new connection
         warn!(

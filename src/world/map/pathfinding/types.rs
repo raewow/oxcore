@@ -17,7 +17,10 @@ pub enum PathResult {
 
 impl PathResult {
     pub fn is_complete(&self) -> bool {
-        matches!(self, PathResult::Complete(_) | PathResult::StraightLine(_, _))
+        matches!(
+            self,
+            PathResult::Complete(_) | PathResult::StraightLine(_, _)
+        )
     }
 
     pub fn waypoints(&self) -> Vec<Position> {

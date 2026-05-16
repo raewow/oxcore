@@ -23,7 +23,9 @@ pub async fn handle_initiate_trade(
         }
     };
 
-    let target_guid = packet.read_guid().ok_or_else(|| anyhow::anyhow!("Failed to read target GUID"))?;
+    let target_guid = packet
+        .read_guid()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read target GUID"))?;
 
     debug!(
         "CMSG_INITIATE_TRADE: player={:?}, target={:?}",
@@ -33,8 +35,8 @@ pub async fn handle_initiate_trade(
     if let Err(e) = world
         .systems
         .trade
-        .initiate_trade(player_guid, target_guid).await
-
+        .initiate_trade(player_guid, target_guid)
+        .await
     {
         debug!("[TRADE] Initiate failed: {:?}", e);
         world.systems.trade.send_trade_error(player_guid, e);
@@ -89,8 +91,8 @@ pub async fn handle_set_trade_item(
     if let Err(e) = world
         .systems
         .trade
-        .set_trade_item(player_guid, trade_slot, bag, slot).await
-
+        .set_trade_item(player_guid, trade_slot, bag, slot)
+        .await
     {
         debug!("[TRADE] Set item failed: {:?}", e);
         world.systems.trade.send_trade_error(player_guid, e);
@@ -123,8 +125,8 @@ pub async fn handle_clear_trade_item(
     if let Err(e) = world
         .systems
         .trade
-        .clear_trade_item(player_guid, trade_slot).await
-
+        .clear_trade_item(player_guid, trade_slot)
+        .await
     {
         debug!("[TRADE] Clear item failed: {:?}", e);
         world.systems.trade.send_trade_error(player_guid, e);
@@ -149,14 +151,12 @@ pub async fn handle_set_trade_gold(
 
     let gold = packet.read_u32().unwrap_or(0);
 
-    debug!("CMSG_SET_TRADE_GOLD: player={:?}, gold={}", player_guid, gold);
+    debug!(
+        "CMSG_SET_TRADE_GOLD: player={:?}, gold={}",
+        player_guid, gold
+    );
 
-    if let Err(e) = world
-        .systems
-        .trade
-        .set_trade_gold(player_guid, gold).await
-
-    {
+    if let Err(e) = world.systems.trade.set_trade_gold(player_guid, gold).await {
         debug!("[TRADE] Set gold failed: {:?}", e);
         world.systems.trade.send_trade_error(player_guid, e);
     }
@@ -226,8 +226,8 @@ pub async fn handle_cancel_trade(session: &WorldSession, world: &World) -> Resul
     if let Err(e) = world
         .systems
         .trade
-        .cancel_trade(player_guid, TradeStatus::TradeCanceled).await
-
+        .cancel_trade(player_guid, TradeStatus::TradeCanceled)
+        .await
     {
         debug!("[TRADE] Cancel failed: {:?}", e);
     }
@@ -250,8 +250,8 @@ pub async fn handle_busy_trade(session: &WorldSession, world: &World) -> Result<
     if let Err(e) = world
         .systems
         .trade
-        .cancel_trade(player_guid, TradeStatus::Busy).await
-
+        .cancel_trade(player_guid, TradeStatus::Busy)
+        .await
     {
         debug!("[TRADE] Busy trade failed: {:?}", e);
     }
@@ -274,8 +274,8 @@ pub async fn handle_ignore_trade(session: &WorldSession, world: &World) -> Resul
     if let Err(e) = world
         .systems
         .trade
-        .cancel_trade(player_guid, TradeStatus::IgnoreYou).await
-
+        .cancel_trade(player_guid, TradeStatus::IgnoreYou)
+        .await
     {
         debug!("[TRADE] Ignore trade failed: {:?}", e);
     }

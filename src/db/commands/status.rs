@@ -1,8 +1,8 @@
 use anyhow::Result;
 
+use super::migrate::collect_migrations;
 use crate::config::Config;
 use crate::db;
-use super::migrate::collect_migrations;
 
 const DATABASES: &[(&str, fn(&Config) -> &str)] = &[
     ("world", |c| &c.world_url),

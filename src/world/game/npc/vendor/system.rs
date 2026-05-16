@@ -53,7 +53,6 @@ impl VendorSystem {
 
     /// Initialize the vendor system
     pub async fn init(&self) -> Result<()> {
-
         // Nothing to initialize yet
 
         Ok(())
@@ -150,9 +149,7 @@ impl VendorSystem {
             items: item_data,
         };
 
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
         info!(
             "Sent vendor list to player {:?} from vendor {:?} (entry {})",
@@ -190,7 +187,10 @@ impl VendorSystem {
         let template = match self.item_mgr.get_template(item_id) {
             Some(t) => t,
             None => {
-                warn!("Buy failed: item template {} not found in item_mgr", item_id);
+                warn!(
+                    "Buy failed: item template {} not found in item_mgr",
+                    item_id
+                );
                 self.send_buy_failed(player_guid, vendor_guid, item_id, BuyError::CantFind);
                 return Ok(());
             }
@@ -203,7 +203,9 @@ impl VendorSystem {
             None => {
                 warn!(
                     "Buy failed: item {} not in vendor entry {} item list ({} items: {:?})",
-                    item_id, entry, items.len(),
+                    item_id,
+                    entry,
+                    items.len(),
                     items.iter().map(|i| i.item_entry).collect::<Vec<_>>()
                 );
                 self.send_buy_failed(player_guid, vendor_guid, item_id, BuyError::CantFind);
@@ -217,10 +219,7 @@ impl VendorSystem {
         let total_price = unit_price.saturating_mul(count as u32);
 
         // Check player money (from inventory system, the authoritative source)
-        let player_money = self
-            .inventory
-            .get_money(player_guid)
-            .unwrap_or(0);
+        let player_money = self.inventory.get_money(player_guid).unwrap_or(0);
 
         if player_money < total_price {
             self.send_buy_failed(player_guid, vendor_guid, item_id, BuyError::NotEnoughMoney);
@@ -235,8 +234,7 @@ impl VendorSystem {
                 .unwrap_or(vendor_item.max_count as u32);
 
             if current_stock < count as u32 {
-                self.send_buy_failed(player_guid, vendor_guid, item_id, BuyError::ItemSoldOut)
-                    ;
+                self.send_buy_failed(player_guid, vendor_guid, item_id, BuyError::ItemSoldOut);
                 return Ok(());
             }
         }
@@ -282,9 +280,7 @@ impl VendorSystem {
                     remaining_stock,
                     count: count as u32,
                 };
-                self.broadcast_mgr
-                    .send_msg_to_player(player_guid, msg)
-                    ;
+                self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
                 info!(
                     "Player {:?} bought item {} x{} for {} copper",
@@ -293,8 +289,7 @@ impl VendorSystem {
             }
             _ => {
                 // Failed to add item (bag full, etc.)
-                self.send_buy_failed(player_guid, vendor_guid, item_id, BuyError::CantCarryMore)
-                    ;
+                self.send_buy_failed(player_guid, vendor_guid, item_id, BuyError::CantCarryMore);
             }
         }
 
@@ -330,9 +325,7 @@ impl VendorSystem {
                 item_guid,
                 result: SellResult::CantFindVendor,
             };
-            self.broadcast_mgr
-                .send_msg_to_player(player_guid, msg)
-                ;
+            self.broadcast_mgr.send_msg_to_player(player_guid, msg);
             return Ok(());
         }
 
@@ -343,9 +336,7 @@ impl VendorSystem {
                 item_guid,
                 result: SellResult::CantFindVendor,
             };
-            self.broadcast_mgr
-                .send_msg_to_player(player_guid, msg)
-                ;
+            self.broadcast_mgr.send_msg_to_player(player_guid, msg);
             return Ok(());
         }
 
@@ -356,9 +347,7 @@ impl VendorSystem {
                 item_guid,
                 result: SellResult::CantFindItem,
             };
-            self.broadcast_mgr
-                .send_msg_to_player(player_guid, msg)
-                ;
+            self.broadcast_mgr.send_msg_to_player(player_guid, msg);
             return Ok(());
         }
 
@@ -366,15 +355,16 @@ impl VendorSystem {
         let item = match self.inventory.cache().get_item(player_guid, item_guid) {
             Some(item) => item,
             None => {
-                warn!("Sell item failed: item {:?} not found in inventory", item_guid);
+                warn!(
+                    "Sell item failed: item {:?} not found in inventory",
+                    item_guid
+                );
                 let msg = SmsgSellItem {
                     vendor_guid,
                     item_guid,
                     result: SellResult::CantFindItem,
                 };
-                self.broadcast_mgr
-                    .send_msg_to_player(player_guid, msg)
-                    ;
+                self.broadcast_mgr.send_msg_to_player(player_guid, msg);
                 return Ok(());
             }
         };
@@ -395,9 +385,7 @@ impl VendorSystem {
                     item_guid,
                     result: SellResult::CantFindItem,
                 };
-                self.broadcast_mgr
-                    .send_msg_to_player(player_guid, msg)
-                    ;
+                self.broadcast_mgr.send_msg_to_player(player_guid, msg);
                 return Ok(());
             }
         };
@@ -410,9 +398,7 @@ impl VendorSystem {
                 item_guid,
                 result: SellResult::CantSellItem,
             };
-            self.broadcast_mgr
-                .send_msg_to_player(player_guid, msg)
-                ;
+            self.broadcast_mgr.send_msg_to_player(player_guid, msg);
             return Ok(());
         }
 
@@ -433,9 +419,7 @@ impl VendorSystem {
                     item_guid,
                     result: SellResult::Ok,
                 };
-                self.broadcast_mgr
-                    .send_msg_to_player(player_guid, msg)
-                    ;
+                self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
                 info!(
                     "Player {:?} sold item {} (x{}) to vendor {:?} for {} copper",
@@ -443,15 +427,16 @@ impl VendorSystem {
                 );
             }
             _ => {
-                warn!("Sell item failed: couldn't remove item {:?} from inventory", item_guid);
+                warn!(
+                    "Sell item failed: couldn't remove item {:?} from inventory",
+                    item_guid
+                );
                 let msg = SmsgSellItem {
                     vendor_guid,
                     item_guid,
                     result: SellResult::CantFindItem,
                 };
-                self.broadcast_mgr
-                    .send_msg_to_player(player_guid, msg)
-                    ;
+                self.broadcast_mgr.send_msg_to_player(player_guid, msg);
             }
         }
 
@@ -492,8 +477,6 @@ impl VendorSystem {
             item_id,
             error,
         };
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 }

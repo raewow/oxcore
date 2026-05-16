@@ -3,8 +3,8 @@
 //! Handles school damage, weapon damage, health leech, environmental damage, and normalized weapon damage.
 //! Formulas ported from old system (world/game/spell/effects/damage.rs).
 
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::game::player::spells::effects::{EffectInput, EffectResult};
 use crate::world::World;
 use anyhow::Result;
@@ -77,18 +77,18 @@ pub async fn effect_school_damage(input: &EffectInput, world: &World) -> Result<
     let school = input.spell_school;
 
     // Get caster stats
-    let caster_stats = world.systems.player.manager().with_player(input.caster_guid, |player| {
-        let sp = if (school as usize) < 7 {
-            player.stats.spell_power[school as usize]
-        } else {
-            0
-        };
-        (
-            sp,
-            player.stats.spell_crit_pct,
-            player.level,
-        )
-    });
+    let caster_stats = world
+        .systems
+        .player
+        .manager()
+        .with_player(input.caster_guid, |player| {
+            let sp = if (school as usize) < 7 {
+                player.stats.spell_power[school as usize]
+            } else {
+                0
+            };
+            (sp, player.stats.spell_crit_pct, player.level)
+        });
 
     // Step 1: Base damage with dice roll + level scaling
     let caster_level = caster_stats.as_ref().map(|s| s.2).unwrap_or(1);
@@ -129,7 +129,17 @@ pub async fn effect_school_damage(input: &EffectInput, world: &World) -> Result<
     let damage = damage_after_mitigation.max(0.0) as u32;
 
     // Apply damage
-    apply_damage(input.caster_guid, target_guid, damage, input.spell_id, is_crit, school, resisted, world).await?;
+    apply_damage(
+        input.caster_guid,
+        target_guid,
+        damage,
+        input.spell_id,
+        is_crit,
+        school,
+        resisted,
+        world,
+    )
+    .await?;
 
     Ok(EffectResult::with_damage(damage))
 }
@@ -153,47 +163,63 @@ pub async fn effect_weapon_damage(input: &EffectInput, world: &World) -> Result<
 ///
 /// Same as weapon damage but uses normalized weapon speed for AP scaling.
 /// Normalized speeds: Dagger=1.7s, Other 1H=2.4s, 2H=3.3s, Ranged=2.8s
-pub async fn effect_normalized_weapon_dmg(input: &EffectInput, world: &World) -> Result<EffectResult> {
+pub async fn effect_normalized_weapon_dmg(
+    input: &EffectInput,
+    world: &World,
+) -> Result<EffectResult> {
     effect_weapon_damage_internal(input, world, true).await
 }
 
 /// Internal weapon damage implementation shared by normal and normalized variants.
-async fn effect_weapon_damage_internal(input: &EffectInput, world: &World, normalized: bool) -> Result<EffectResult> {
+async fn effect_weapon_damage_internal(
+    input: &EffectInput,
+    world: &World,
+    normalized: bool,
+) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
 
-    let caster_level = world.systems.player.manager().with_player(input.caster_guid, |p| p.level).unwrap_or(1);
+    let caster_level = world
+        .systems
+        .player
+        .manager()
+        .with_player(input.caster_guid, |p| p.level)
+        .unwrap_or(1);
     let bonus_damage = input.calculate_base_value(caster_level).max(0) as f32;
 
     // Get caster weapon stats, AP, crit, and level
-    let caster_data = world.systems.player.manager().with_player(input.caster_guid, |player| {
-        // Determine normalized speed based on weapon type
-        // TODO: Read actual weapon subclass from equipment for proper categorization
-        // For now, use main hand speed to guess: <=1800ms = dagger, <=2900ms = 1H, else 2H
-        let normalized_speed_ms = if normalized {
-            if player.combat.main_hand_speed <= 1800 {
-                1700u32 // Dagger: 1.7s
-            } else if player.combat.main_hand_speed <= 2900 {
-                2400u32 // Other 1H: 2.4s
+    let caster_data = world
+        .systems
+        .player
+        .manager()
+        .with_player(input.caster_guid, |player| {
+            // Determine normalized speed based on weapon type
+            // TODO: Read actual weapon subclass from equipment for proper categorization
+            // For now, use main hand speed to guess: <=1800ms = dagger, <=2900ms = 1H, else 2H
+            let normalized_speed_ms = if normalized {
+                if player.combat.main_hand_speed <= 1800 {
+                    1700u32 // Dagger: 1.7s
+                } else if player.combat.main_hand_speed <= 2900 {
+                    2400u32 // Other 1H: 2.4s
+                } else {
+                    3300u32 // 2H: 3.3s
+                }
             } else {
-                3300u32 // 2H: 3.3s
-            }
-        } else {
-            player.combat.main_hand_speed
-        };
+                player.combat.main_hand_speed
+            };
 
-        (
-            player.combat.main_hand_min_dmg,
-            player.combat.main_hand_max_dmg,
-            player.combat.main_hand_speed,
-            normalized_speed_ms,
-            player.stats.melee_attack_power as f32,
-            player.stats.melee_crit_pct,
-            player.level,
-        )
-    });
+            (
+                player.combat.main_hand_min_dmg,
+                player.combat.main_hand_max_dmg,
+                player.combat.main_hand_speed,
+                normalized_speed_ms,
+                player.stats.melee_attack_power as f32,
+                player.stats.melee_crit_pct,
+                player.level,
+            )
+        });
 
     let mut total_damage = bonus_damage;
 
@@ -229,13 +255,22 @@ async fn effect_weapon_damage_internal(input: &EffectInput, world: &World, norma
     }
 
     // 4. Apply target armor reduction using actual caster level (supports creatures)
-    let (damage_after_armor, armor_resisted) = apply_target_mitigation(
-        target_guid, total_damage, 0, attacker_level, world,
-    );
+    let (damage_after_armor, armor_resisted) =
+        apply_target_mitigation(target_guid, total_damage, 0, attacker_level, world);
 
     let damage = damage_after_armor as u32;
 
-    apply_damage(input.caster_guid, target_guid, damage, input.spell_id, is_crit, 0, armor_resisted, world).await?;
+    apply_damage(
+        input.caster_guid,
+        target_guid,
+        damage,
+        input.spell_id,
+        is_crit,
+        0,
+        armor_resisted,
+        world,
+    )
+    .await?;
 
     Ok(EffectResult::with_damage(damage))
 }
@@ -254,14 +289,18 @@ pub async fn effect_health_leech(input: &EffectInput, world: &World) -> Result<E
     let school = input.spell_school;
 
     // Get caster stats for spell power scaling
-    let caster_stats = world.systems.player.manager().with_player(input.caster_guid, |player| {
-        let sp = if (school as usize) < 7 {
-            player.stats.spell_power[school as usize]
-        } else {
-            0
-        };
-        (sp, player.level)
-    });
+    let caster_stats = world
+        .systems
+        .player
+        .manager()
+        .with_player(input.caster_guid, |player| {
+            let sp = if (school as usize) < 7 {
+                player.stats.spell_power[school as usize]
+            } else {
+                0
+            };
+            (sp, player.level)
+        });
 
     let caster_level = caster_stats.as_ref().map(|s| s.1).unwrap_or(1);
     let base_damage = input.calculate_base_value(caster_level).max(0) as f32;
@@ -283,7 +322,17 @@ pub async fn effect_health_leech(input: &EffectInput, world: &World) -> Result<E
     let damage = damage_after_resist.max(0.0) as u32;
 
     // Damage target
-    apply_damage(input.caster_guid, target_guid, damage, input.spell_id, false, school, 0, world).await?;
+    apply_damage(
+        input.caster_guid,
+        target_guid,
+        damage,
+        input.spell_id,
+        false,
+        school,
+        0,
+        world,
+    )
+    .await?;
 
     // Heal caster for the same amount
     heal_target(input.caster_guid, damage, world).await?;
@@ -299,27 +348,39 @@ pub async fn effect_health_leech(input: &EffectInput, world: &World) -> Result<E
 ///
 /// Deals a percentage of weapon damage.
 /// Used by abilities like Backstab (150%), Ambush (250%).
-pub async fn effect_weapon_percent_damage(input: &EffectInput, world: &World) -> Result<EffectResult> {
+pub async fn effect_weapon_percent_damage(
+    input: &EffectInput,
+    world: &World,
+) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
 
     // base_value contains the percentage (e.g., 150 = 150% weapon damage)
-    let caster_level = world.systems.player.manager().with_player(input.caster_guid, |p| p.level).unwrap_or(1);
+    let caster_level = world
+        .systems
+        .player
+        .manager()
+        .with_player(input.caster_guid, |p| p.level)
+        .unwrap_or(1);
     let percent = input.calculate_base_value(caster_level).max(0) as f32 / 100.0;
 
     // Get caster weapon stats and AP
-    let caster_data = world.systems.player.manager().with_player(input.caster_guid, |player| {
-        (
-            player.combat.main_hand_min_dmg,
-            player.combat.main_hand_max_dmg,
-            player.combat.main_hand_speed,
-            player.stats.melee_attack_power as f32,
-            player.stats.melee_crit_pct,
-            player.level,
-        )
-    });
+    let caster_data = world
+        .systems
+        .player
+        .manager()
+        .with_player(input.caster_guid, |player| {
+            (
+                player.combat.main_hand_min_dmg,
+                player.combat.main_hand_max_dmg,
+                player.combat.main_hand_speed,
+                player.stats.melee_attack_power as f32,
+                player.stats.melee_crit_pct,
+                player.level,
+            )
+        });
 
     let mut total_damage = 0.0f32;
     let mut is_crit = false;
@@ -350,13 +411,22 @@ pub async fn effect_weapon_percent_damage(input: &EffectInput, world: &World) ->
     }
 
     // Apply armor reduction (supports creatures)
-    let (damage_after_armor, armor_resisted) = apply_target_mitigation(
-        target_guid, total_damage, 0, attacker_level, world,
-    );
+    let (damage_after_armor, armor_resisted) =
+        apply_target_mitigation(target_guid, total_damage, 0, attacker_level, world);
 
     let damage = damage_after_armor as u32;
 
-    apply_damage(input.caster_guid, target_guid, damage, input.spell_id, is_crit, 0, armor_resisted, world).await?;
+    apply_damage(
+        input.caster_guid,
+        target_guid,
+        damage,
+        input.spell_id,
+        is_crit,
+        0,
+        armor_resisted,
+        world,
+    )
+    .await?;
 
     Ok(EffectResult::with_damage(damage))
 }
@@ -366,7 +436,10 @@ pub async fn effect_weapon_percent_damage(input: &EffectInput, world: &World) ->
 /// Damage from environmental sources (fire, lava, drowning, falling).
 /// Bypasses armor but affected by resistance.
 /// No threat generation.
-pub async fn effect_environmental_damage(input: &EffectInput, world: &World) -> Result<EffectResult> {
+pub async fn effect_environmental_damage(
+    input: &EffectInput,
+    world: &World,
+) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
@@ -377,16 +450,24 @@ pub async fn effect_environmental_damage(input: &EffectInput, world: &World) -> 
         .unwrap_or(EnvironmentalDamageType::Fire);
 
     // Apply environmental damage
-    world.systems.player.manager().with_player_mut(target_guid, |player| {
-        let current_health = player.stats.health;
-        let new_health = current_health.saturating_sub(damage);
-        player.stats.health = new_health;
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(target_guid, |player| {
+            let current_health = player.stats.health;
+            let new_health = current_health.saturating_sub(damage);
+            player.stats.health = new_health;
 
-        tracing::debug!(
-            "Environmental damage: {} took {} {:?} damage, health: {} -> {}",
-            player.name, damage, damage_type, current_health, new_health
-        );
-    });
+            tracing::debug!(
+                "Environmental damage: {} took {} {:?} damage, health: {} -> {}",
+                player.name,
+                damage,
+                damage_type,
+                current_health,
+                new_health
+            );
+        });
 
     Ok(EffectResult::with_damage(damage))
 }
@@ -403,20 +484,29 @@ fn apply_target_mitigation(
 ) -> (f32, u32) {
     // Get target's armor and resistance values
     let (armor, resistance) = if target_guid.is_player() {
-        world.systems.player.manager().with_player(target_guid, |player| {
-            let resist = if school != 0 && (school as usize) < 7 {
-                player.stats.resistances[school as usize]
-            } else {
-                0
-            };
-            (player.stats.armor, resist)
-        }).unwrap_or((0, 0))
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                let resist = if school != 0 && (school as usize) < 7 {
+                    player.stats.resistances[school as usize]
+                } else {
+                    0
+                };
+                (player.stats.armor, resist)
+            })
+            .unwrap_or((0, 0))
     } else if target_guid.is_creature() {
-        world.managers.creature_mgr.with_creature(target_guid, |creature| {
-            // Creatures have armor but no per-school resistance fields yet
-            // TODO: Add per-school resistances to Creature struct from template
-            (creature.armor, 0u32)
-        }).unwrap_or((0, 0))
+        world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |creature| {
+                // Creatures have armor but no per-school resistance fields yet
+                // TODO: Add per-school resistances to Creature struct from template
+                (creature.armor, 0u32)
+            })
+            .unwrap_or((0, 0))
     } else {
         (0, 0)
     };
@@ -455,26 +545,46 @@ async fn apply_damage(
         // --- Player target ---
 
         // Process absorb shields before applying damage
-        let (damage_after_absorb, absorbed) = world.systems.auras
+        let (damage_after_absorb, absorbed) = world
+            .systems
+            .auras
             .absorb_damage(target_guid, damage, school, world)
             .await?;
 
-        let died = world.systems.player.manager().with_player_mut(target_guid, |player| {
-            let current_health = player.stats.health;
-            let new_health = current_health.saturating_sub(damage_after_absorb);
-            player.stats.health = new_health;
-            player.stats.dirty = true;
+        let died = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                let current_health = player.stats.health;
+                let new_health = current_health.saturating_sub(damage_after_absorb);
+                player.stats.health = new_health;
+                player.stats.dirty = true;
 
-            tracing::debug!(
-                "Spell damage: {} took {} damage (absorbed={}), health: {} -> {}",
-                player.name, damage_after_absorb, absorbed, current_health, new_health
-            );
+                tracing::debug!(
+                    "Spell damage: {} took {} damage (absorbed={}), health: {} -> {}",
+                    player.name,
+                    damage_after_absorb,
+                    absorbed,
+                    current_health,
+                    new_health
+                );
 
-            new_health == 0 && current_health > 0
-        }).unwrap_or(false);
+                new_health == 0 && current_health > 0
+            })
+            .unwrap_or(false);
 
         // Send SMSG_SPELLNONMELEEDAMAGELOG (report original damage for combat log, absorbed shown separately)
-        send_spell_damage_log(caster_guid, target_guid, spell_id, damage_after_absorb, school, resisted, is_crit, world);
+        send_spell_damage_log(
+            caster_guid,
+            target_guid,
+            spell_id,
+            damage_after_absorb,
+            school,
+            resisted,
+            is_crit,
+            world,
+        );
 
         // Cast pushback: if target is casting, push back their cast bar
         // Pushback triggers even if damage was fully absorbed (MaNGOS behavior)
@@ -484,11 +594,15 @@ async fn apply_damage(
 
         // Interrupt auras with DAMAGE flag on target (triggers even if absorbed)
         if damage > 0 {
-            let _ = world.systems.auras.remove_auras_with_interrupt_flag(
-                target_guid,
-                0x00000002, // AURA_INTERRUPT_FLAG_DAMAGE (bit 1)
-                world,
-            ).await;
+            let _ = world
+                .systems
+                .auras
+                .remove_auras_with_interrupt_flag(
+                    target_guid,
+                    0x00000002, // AURA_INTERRUPT_FLAG_DAMAGE (bit 1)
+                    world,
+                )
+                .await;
         }
 
         // Fire proc checks: caster dealt spell damage, target took spell damage
@@ -496,28 +610,41 @@ async fn apply_damage(
         if damage > 0 {
             use crate::world::game::player::auras::proc::proc_flags;
             // Caster: spell hit dealt
-            let _ = world.systems.auras.check_procs(
-                caster_guid,
-                proc_flags::SPELL_HIT | proc_flags::DAMAGE_DEALT,
-                Some(spell_id),
-                damage_after_absorb,
-                world,
-            ).await;
-            // Target: spell hit taken (only if target is a player)
-            if target_guid.is_player() {
-                let _ = world.systems.auras.check_procs(
-                    target_guid,
-                    proc_flags::SPELL_HIT_TAKEN | proc_flags::DAMAGE_TAKEN,
+            let _ = world
+                .systems
+                .auras
+                .check_procs(
+                    caster_guid,
+                    proc_flags::SPELL_HIT | proc_flags::DAMAGE_DEALT,
                     Some(spell_id),
                     damage_after_absorb,
                     world,
-                ).await;
+                )
+                .await;
+            // Target: spell hit taken (only if target is a player)
+            if target_guid.is_player() {
+                let _ = world
+                    .systems
+                    .auras
+                    .check_procs(
+                        target_guid,
+                        proc_flags::SPELL_HIT_TAKEN | proc_flags::DAMAGE_TAKEN,
+                        Some(spell_id),
+                        damage_after_absorb,
+                        world,
+                    )
+                    .await;
             }
         }
 
         // P6: Death handling
         if died {
-            if let Err(e) = world.systems.death.on_killed(target_guid, Some(caster_guid), Some(spell_id), world) {
+            if let Err(e) =
+                world
+                    .systems
+                    .death
+                    .on_killed(target_guid, Some(caster_guid), Some(spell_id), world)
+            {
                 tracing::error!("Failed to handle player death: {}", e);
             }
         }
@@ -528,32 +655,51 @@ async fn apply_damage(
             .unwrap_or_default()
             .as_secs();
 
-        let result = world.managers.creature_mgr.apply_damage(
-            target_guid,
-            damage,
-            caster_guid,
-            timestamp,
-        );
+        let result =
+            world
+                .managers
+                .creature_mgr
+                .apply_damage(target_guid, damage, caster_guid, timestamp);
 
         if let Some((actual_damage, is_dead)) = result {
             tracing::info!(
                 "[SPELL_DAMAGE] creature {:?} took {} damage from spell {} (caster {:?}), dead={}",
-                target_guid, actual_damage, spell_id, caster_guid, is_dead
+                target_guid,
+                actual_damage,
+                spell_id,
+                caster_guid,
+                is_dead
             );
 
             // Send SMSG_SPELLNONMELEEDAMAGELOG (works for creature targets too)
-            send_spell_damage_log(caster_guid, target_guid, spell_id, damage, school, resisted, is_crit, world);
+            send_spell_damage_log(
+                caster_guid,
+                target_guid,
+                spell_id,
+                damage,
+                school,
+                resisted,
+                is_crit,
+                world,
+            );
 
             // Send creature health/death update to nearby players (SMSG_UPDATE_OBJECT)
             // Without this, the client never sees the health bar change or death animation
             if is_dead {
                 // Mark dead on server first (snaps position to spline location)
-                let death_info = world.managers.creature_mgr.handle_death(target_guid, Some(caster_guid));
+                let death_info = world
+                    .managers
+                    .creature_mgr
+                    .handle_death(target_guid, Some(caster_guid));
 
                 // Send stop packet BEFORE death VALUES update so client stops
                 // the spline at the correct position before processing death state
                 if let Some(ref info) = death_info {
-                    world.systems.creature_movement.send_stop_packet(info.guid, info.position, world);
+                    world.systems.creature_movement.send_stop_packet(
+                        info.guid,
+                        info.position,
+                        world,
+                    );
                 }
 
                 // Now send death VALUES update (health=0, stand state Dead)
@@ -567,7 +713,12 @@ async fn apply_damage(
                     },
                 );
 
-                tracing::info!("Creature {:?} killed by spell {} from {:?}", target_guid, spell_id, caster_guid);
+                tracing::info!(
+                    "Creature {:?} killed by spell {} from {:?}",
+                    target_guid,
+                    spell_id,
+                    caster_guid
+                );
             } else if actual_damage > 0 {
                 send_creature_health_update(target_guid, world);
 
@@ -584,7 +735,11 @@ async fn apply_damage(
                 );
             }
         } else {
-            tracing::warn!("[SPELL_DAMAGE] creature {:?} not found for spell {}", target_guid, spell_id);
+            tracing::warn!(
+                "[SPELL_DAMAGE] creature {:?} not found for spell {}",
+                target_guid,
+                spell_id
+            );
         }
     }
 
@@ -622,27 +777,33 @@ fn send_spell_damage_log(
     packet.write_u32(hit_info);
     packet.write_u8(0); // debug info flag
 
-    world.managers.broadcast_mgr.broadcast_nearby(caster_guid, &packet, true);
+    world
+        .managers
+        .broadcast_mgr
+        .broadcast_nearby(caster_guid, &packet, true);
 }
 
 /// Heal a target (player only for now).
-async fn heal_target(
-    target_guid: ObjectGuid,
-    healing: u32,
-    world: &World,
-) -> Result<()> {
+async fn heal_target(target_guid: ObjectGuid, healing: u32, world: &World) -> Result<()> {
     if target_guid.is_player() {
-        world.systems.player.manager().with_player_mut(target_guid, |player| {
-            let max_heal = player.stats.max_health.saturating_sub(player.stats.health);
-            let actual_heal = healing.min(max_heal);
-            player.stats.health += actual_heal;
-            player.stats.dirty = true;
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                let max_heal = player.stats.max_health.saturating_sub(player.stats.health);
+                let actual_heal = healing.min(max_heal);
+                player.stats.health += actual_heal;
+                player.stats.dirty = true;
 
-            tracing::debug!(
-                "Spell heal: {} healed for {}, health: {} -> {}",
-                player.name, actual_heal, player.stats.health - actual_heal, player.stats.health
-            );
-        });
+                tracing::debug!(
+                    "Spell heal: {} healed for {}, health: {} -> {}",
+                    player.name,
+                    actual_heal,
+                    player.stats.health - actual_heal,
+                    player.stats.health
+                );
+            });
     }
 
     Ok(())
@@ -651,17 +812,20 @@ async fn heal_target(
 /// Send creature health update to nearby players via SMSG_UPDATE_OBJECT.
 /// Mirrors the send_health_update() in creature_combat handler.
 fn send_creature_health_update(creature_guid: ObjectGuid, world: &World) {
-    use crate::world::game::common::update_fields::{UNIT_FIELD_HEALTH, UNIT_FIELD_MAXHEALTH};
+    use crate::shared::messages::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
     use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
-    use crate::shared::messages::{SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock, ObjectType};
     use crate::world::game::broadcast_mgr::broadcast_around_creature;
+    use crate::world::game::common::update_fields::{UNIT_FIELD_HEALTH, UNIT_FIELD_MAXHEALTH};
 
     if let Some((current, max)) = world.managers.creature_mgr.get_health(creature_guid) {
-        let world_guid = WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
+        let world_guid =
+            WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
         let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
             ValuesUpdateBlock::new(world_guid, ObjectType::Unit)
                 .set_field(UNIT_FIELD_HEALTH, current)
-                .set_field(UNIT_FIELD_MAXHEALTH, max)
+                .set_field(UNIT_FIELD_MAXHEALTH, max),
         ));
         broadcast_around_creature(world, creature_guid, &update.to_world_packet());
     }
@@ -670,12 +834,16 @@ fn send_creature_health_update(creature_guid: ObjectGuid, world: &World) {
 /// Send creature death update to nearby players via SMSG_UPDATE_OBJECT.
 /// Mirrors send_creature_killed_update() in creature_combat handler.
 fn send_creature_killed_update(caster_guid: ObjectGuid, creature_guid: ObjectGuid, world: &World) {
-    use crate::world::game::common::update_fields::*;
+    use crate::shared::messages::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
     use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
-    use crate::shared::messages::{SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock, ObjectType};
     use crate::world::game::broadcast_mgr::broadcast_around_creature;
+    use crate::world::game::common::update_fields::*;
 
-    let (max_health, unit_flags) = world.managers.creature_mgr
+    let (max_health, unit_flags) = world
+        .managers
+        .creature_mgr
         .with_creature_mut(creature_guid, |c| (c.max_health, c.unit_flags))
         .unwrap_or((1, 0));
 
@@ -690,9 +858,12 @@ fn send_creature_killed_update(caster_guid: ObjectGuid, creature_guid: ObjectGui
             .set_field(UNIT_FIELD_HEALTH, 0u32)
             .set_field(UNIT_FIELD_MAXHEALTH, max_health)
             .set_field(UNIT_FIELD_FLAGS, cleared_flags)
-            .set_field(UNIT_DYNAMIC_FLAGS, crate::world::game::creature::death::UNIT_DYNFLAG_DEAD)
+            .set_field(
+                UNIT_DYNAMIC_FLAGS,
+                crate::world::game::creature::death::UNIT_DYNFLAG_DEAD,
+            )
             .set_field(UNIT_FIELD_BYTES_1, 7u32) // Stand state Dead
-            .set_field(UNIT_NPC_FLAGS, 0u32)
+            .set_field(UNIT_NPC_FLAGS, 0u32),
     ));
     broadcast_around_creature(world, creature_guid, &update.to_world_packet());
 
@@ -702,5 +873,9 @@ fn send_creature_killed_update(caster_guid: ObjectGuid, creature_guid: ObjectGui
         target_guid: creature_guid,
         unk: 1, // target is dead
     };
-    world.managers.broadcast_mgr.broadcast_nearby(caster_guid, &stop_packet.to_world_packet(), true);
+    world.managers.broadcast_mgr.broadcast_nearby(
+        caster_guid,
+        &stop_packet.to_world_packet(),
+        true,
+    );
 }

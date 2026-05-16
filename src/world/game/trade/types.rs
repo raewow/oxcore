@@ -5,8 +5,8 @@ use std::time::Instant;
 
 // Re-export constants from shared
 pub use crate::shared::game::trade::{
-    TRADE_DISTANCE_METERS, TRADE_DISTANCE_YARDS, TRADE_SCAM_PREVENTION_DELAY_MS,
-    TRADE_SLOT_COUNT, TRADE_SLOT_INVALID, TRADE_SLOT_NONTRADED, TRADE_SLOT_TRADED_COUNT,
+    TRADE_DISTANCE_METERS, TRADE_DISTANCE_YARDS, TRADE_SCAM_PREVENTION_DELAY_MS, TRADE_SLOT_COUNT,
+    TRADE_SLOT_INVALID, TRADE_SLOT_NONTRADED, TRADE_SLOT_TRADED_COUNT,
 };
 
 // Re-export TradeStatus from shared so all crate code uses the same type

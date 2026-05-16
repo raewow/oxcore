@@ -100,19 +100,37 @@ mod tests {
     #[test]
     fn test_within_range_xy() {
         // 4 yards away, flat ground — well within default 5yd reach
-        assert!(is_within_melee_range(&pos(0.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, &pos(4.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, false));
+        assert!(is_within_melee_range(
+            &pos(0.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            &pos(4.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            false
+        ));
     }
 
     #[test]
     fn test_within_range_xy_boundary() {
         // Exactly at the reach boundary (5.0)
-        assert!(is_within_melee_range(&pos(0.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, &pos(5.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, false));
+        assert!(is_within_melee_range(
+            &pos(0.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            &pos(5.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            false
+        ));
     }
 
     #[test]
     fn test_outside_range_xy() {
         // 6 yards away — beyond the 5.0 minimum reach
-        assert!(!is_within_melee_range(&pos(0.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, &pos(6.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, false));
+        assert!(!is_within_melee_range(
+            &pos(0.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            &pos(6.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            false
+        ));
     }
 
     // --- is_within_melee_range: Z-axis (Fix D) ---
@@ -120,19 +138,37 @@ mod tests {
     #[test]
     fn test_within_range_z_ok() {
         // XY = 0, Z diff = 4.9 < MELEE_Z_LIMIT(5.0) → in range
-        assert!(is_within_melee_range(&pos(0.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, &pos(0.0, 0.0, 4.9), DEFAULT_COMBAT_REACH, false));
+        assert!(is_within_melee_range(
+            &pos(0.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            &pos(0.0, 0.0, 4.9),
+            DEFAULT_COMBAT_REACH,
+            false
+        ));
     }
 
     #[test]
     fn test_outside_range_z_too_high() {
         // XY = 0 (would be in XY range), but Z diff = 5.1 > MELEE_Z_LIMIT → out of range
-        assert!(!is_within_melee_range(&pos(0.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, &pos(0.0, 0.0, 5.1), DEFAULT_COMBAT_REACH, false));
+        assert!(!is_within_melee_range(
+            &pos(0.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            &pos(0.0, 0.0, 5.1),
+            DEFAULT_COMBAT_REACH,
+            false
+        ));
     }
 
     #[test]
     fn test_z_check_uses_absolute_diff() {
         // Attacker above target — same limit applies
-        assert!(!is_within_melee_range(&pos(0.0, 0.0, 5.1), DEFAULT_COMBAT_REACH, &pos(0.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, false));
+        assert!(!is_within_melee_range(
+            &pos(0.0, 0.0, 5.1),
+            DEFAULT_COMBAT_REACH,
+            &pos(0.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            false
+        ));
     }
 
     // --- is_within_melee_range: leeway ---
@@ -140,8 +176,20 @@ mod tests {
     #[test]
     fn test_leeway_extends_reach_when_both_moving() {
         // 7 yards: beyond static reach (5.0) but within leeway reach (7.66)
-        assert!(!is_within_melee_range(&pos(0.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, &pos(7.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, false));
-        assert!(is_within_melee_range(&pos(0.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, &pos(7.0, 0.0, 0.0), DEFAULT_COMBAT_REACH, true));
+        assert!(!is_within_melee_range(
+            &pos(0.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            &pos(7.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            false
+        ));
+        assert!(is_within_melee_range(
+            &pos(0.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            &pos(7.0, 0.0, 0.0),
+            DEFAULT_COMBAT_REACH,
+            true
+        ));
     }
 
     // --- distance_2d ignores Z ---

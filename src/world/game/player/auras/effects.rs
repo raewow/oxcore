@@ -44,7 +44,7 @@ pub const AURA_MOD_RANGED_HASTE: u32 = 140; // Ranged haste
 // These auras restore a percentage of max health/mana per tick.
 
 pub const AURA_OBS_MOD_HEALTH: u32 = 20; // Food: % max health per tick
-pub const AURA_OBS_MOD_MANA: u32 = 21;   // Drink: % max mana per tick
+pub const AURA_OBS_MOD_MANA: u32 = 21; // Drink: % max mana per tick
 
 // --- Periodic Effects ---
 // These auras tick damage/healing/energize every N seconds.

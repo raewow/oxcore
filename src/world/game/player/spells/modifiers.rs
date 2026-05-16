@@ -32,17 +32,21 @@ pub fn add_spell_modifier(
     source_aura_slot: Option<u8>,
     world: &World,
 ) -> Result<()> {
-    world.systems.player.manager().with_player_mut(player_guid, |player| {
-        player.spells.spell_modifiers.push(SpellMod {
-            op,
-            mod_type,
-            value,
-            spell_family_mask,
-            spell_family_name,
-            source_spell_id,
-            source_aura_slot,
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            player.spells.spell_modifiers.push(SpellMod {
+                op,
+                mod_type,
+                value,
+                spell_family_mask,
+                spell_family_name,
+                source_spell_id,
+                source_aura_slot,
+            });
         });
-    });
 
     Ok(())
 }
@@ -55,11 +59,16 @@ pub fn remove_spell_modifier(
     source_spell_id: u32,
     world: &World,
 ) -> Result<()> {
-    world.systems.player.manager().with_player_mut(player_guid, |player| {
-        player.spells
-            .spell_modifiers
-            .retain(|m| m.source_spell_id != source_spell_id);
-    });
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            player
+                .spells
+                .spell_modifiers
+                .retain(|m| m.source_spell_id != source_spell_id);
+        });
 
     Ok(())
 }
@@ -140,22 +149,26 @@ pub fn calculate_modified_cast_time(
     let mut modified = base_cast_time_ms as i32;
 
     // Apply cast time modifiers from talents/auras (SpellModOp::CastTime)
-    world.systems.player.manager().with_player_mut(player_guid, |player| {
-        for spell_mod in &player.spells.spell_modifiers {
-            if spell_mod.op == SpellModOp::CastTime {
-                // TODO: Check spell_family_mask matches
-                match spell_mod.mod_type {
-                    SpellModType::Flat => {
-                        modified += spell_mod.value;
-                    }
-                    SpellModType::Pct => {
-                        modified = (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0))
-                            as i32;
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            for spell_mod in &player.spells.spell_modifiers {
+                if spell_mod.op == SpellModOp::CastTime {
+                    // TODO: Check spell_family_mask matches
+                    match spell_mod.mod_type {
+                        SpellModType::Flat => {
+                            modified += spell_mod.value;
+                        }
+                        SpellModType::Pct => {
+                            modified =
+                                (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0)) as i32;
+                        }
                     }
                 }
             }
-        }
-    });
+        });
 
     modified.max(0) as u32
 }
@@ -172,22 +185,26 @@ pub fn calculate_modified_power_cost(
     let mut modified = base_cost as i32;
 
     // Apply cost modifiers from talents/auras (SpellModOp::Cost)
-    world.systems.player.manager().with_player_mut(player_guid, |player| {
-        for spell_mod in &player.spells.spell_modifiers {
-            if spell_mod.op == SpellModOp::Cost {
-                // TODO: Check spell_family_mask matches
-                match spell_mod.mod_type {
-                    SpellModType::Flat => {
-                        modified += spell_mod.value;
-                    }
-                    SpellModType::Pct => {
-                        modified = (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0))
-                            as i32;
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            for spell_mod in &player.spells.spell_modifiers {
+                if spell_mod.op == SpellModOp::Cost {
+                    // TODO: Check spell_family_mask matches
+                    match spell_mod.mod_type {
+                        SpellModType::Flat => {
+                            modified += spell_mod.value;
+                        }
+                        SpellModType::Pct => {
+                            modified =
+                                (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0)) as i32;
+                        }
                     }
                 }
             }
-        }
-    });
+        });
 
     modified.max(0) as u32
 }
@@ -204,22 +221,26 @@ pub fn calculate_modified_cooldown(
     let mut modified = base_cooldown_ms as i32;
 
     // Apply cooldown modifiers from talents/auras (SpellModOp::Cooldown)
-    world.systems.player.manager().with_player_mut(player_guid, |player| {
-        for spell_mod in &player.spells.spell_modifiers {
-            if spell_mod.op == SpellModOp::Cooldown {
-                // TODO: Check spell_family_mask matches
-                match spell_mod.mod_type {
-                    SpellModType::Flat => {
-                        modified += spell_mod.value;
-                    }
-                    SpellModType::Pct => {
-                        modified = (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0))
-                            as i32;
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            for spell_mod in &player.spells.spell_modifiers {
+                if spell_mod.op == SpellModOp::Cooldown {
+                    // TODO: Check spell_family_mask matches
+                    match spell_mod.mod_type {
+                        SpellModType::Flat => {
+                            modified += spell_mod.value;
+                        }
+                        SpellModType::Pct => {
+                            modified =
+                                (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0)) as i32;
+                        }
                     }
                 }
             }
-        }
-    });
+        });
 
     modified.max(0) as u32
 }
@@ -236,25 +257,29 @@ pub fn calculate_modified_gcd(
     let mut modified = base_gcd_ms as i32;
 
     // Apply GCD modifiers from talents/auras (SpellModOp::GlobalCooldown)
-    world.systems.player.manager().with_player_mut(player_guid, |player| {
-        for spell_mod in &player.spells.spell_modifiers {
-            if spell_mod.op == SpellModOp::GlobalCooldown {
-                // TODO: Check spell_family_mask matches
-                match spell_mod.mod_type {
-                    SpellModType::Flat => {
-                        modified += spell_mod.value;
-                    }
-                    SpellModType::Pct => {
-                        modified = (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0))
-                            as i32;
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            for spell_mod in &player.spells.spell_modifiers {
+                if spell_mod.op == SpellModOp::GlobalCooldown {
+                    // TODO: Check spell_family_mask matches
+                    match spell_mod.mod_type {
+                        SpellModType::Flat => {
+                            modified += spell_mod.value;
+                        }
+                        SpellModType::Pct => {
+                            modified =
+                                (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0)) as i32;
+                        }
                     }
                 }
             }
-        }
 
-        // Minimum GCD is 1000ms (Vanilla cap)
-        modified = modified.max(1000);
-    });
+            // Minimum GCD is 1000ms (Vanilla cap)
+            modified = modified.max(1000);
+        });
 
     modified.max(0) as u32
 }

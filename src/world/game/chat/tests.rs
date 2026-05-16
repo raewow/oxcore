@@ -1,13 +1,13 @@
 //! Tests for the Chat System (world)
 
 use super::*;
-use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
-use crate::shared::game::chat::{ChatMsg, ChatTag, Language, Team};
 use crate::shared::database::characters::models::social::CharacterSocialRow;
 use crate::shared::database::characters::repositories::SocialRepositoryTrait;
+use crate::shared::game::chat::{ChatMsg, ChatTag, Language, Team};
+use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
+use crate::world::core::session::SessionManager;
 use crate::world::game::broadcast_mgr::BroadcastManager;
 use crate::world::game::player::PlayerManager;
-use crate::world::core::session::SessionManager;
 use mockall::mock;
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,13 +40,22 @@ fn test_player_guid(low: u32) -> ObjectGuid {
 }
 
 /// Helper to create a test ChatSystem with default config
-fn create_test_system() -> (ChatSystem, Arc<BroadcastManager>, Arc<PlayerManager>, crate::world::game::social::SocialSystem) {
+fn create_test_system() -> (
+    ChatSystem,
+    Arc<BroadcastManager>,
+    Arc<PlayerManager>,
+    crate::world::game::social::SocialSystem,
+) {
     let mock_repo = Arc::new(MockSocialRepository::new());
     let session_mgr = Arc::new(SessionManager::new());
     let player_mgr = Arc::new(PlayerManager::new());
     let broadcast_mgr = Arc::new(BroadcastManager::new(session_mgr, player_mgr.clone()));
     let system = ChatSystem::new(broadcast_mgr.clone(), player_mgr.clone());
-    let social_system = crate::world::game::social::SocialSystem::new(mock_repo, broadcast_mgr.clone(), player_mgr.clone());
+    let social_system = crate::world::game::social::SocialSystem::new(
+        mock_repo,
+        broadcast_mgr.clone(),
+        player_mgr.clone(),
+    );
     (system, broadcast_mgr, player_mgr, social_system)
 }
 
@@ -55,7 +64,12 @@ fn create_test_system_with_flood_config(
     max_messages: u32,
     window_secs: u64,
     mute_duration_secs: u64,
-) -> (ChatSystem, Arc<BroadcastManager>, Arc<PlayerManager>, crate::world::game::social::SocialSystem) {
+) -> (
+    ChatSystem,
+    Arc<BroadcastManager>,
+    Arc<PlayerManager>,
+    crate::world::game::social::SocialSystem,
+) {
     let mock_repo = Arc::new(MockSocialRepository::new());
     let session_mgr = Arc::new(SessionManager::new());
     let player_mgr = Arc::new(PlayerManager::new());
@@ -66,7 +80,11 @@ fn create_test_system_with_flood_config(
         mute_duration_secs,
     };
     let system = ChatSystem::with_flood_config(broadcast_mgr.clone(), player_mgr.clone(), config);
-    let social_system = crate::world::game::social::SocialSystem::new(mock_repo, broadcast_mgr.clone(), player_mgr.clone());
+    let social_system = crate::world::game::social::SocialSystem::new(
+        mock_repo,
+        broadcast_mgr.clone(),
+        player_mgr.clone(),
+    );
     (system, broadcast_mgr, player_mgr, social_system)
 }
 
@@ -137,7 +155,10 @@ async fn test_flood_protection_clears_old_messages() {
 
     // Should be able to send again
     let result = system.check_flood_protection(player);
-    assert!(result.is_ok(), "Old messages should be cleared after window");
+    assert!(
+        result.is_ok(),
+        "Old messages should be cleared after window"
+    );
 }
 
 #[tokio::test]
@@ -225,7 +246,9 @@ async fn test_join_channel_success() {
     let (system, _, _, _) = create_test_system();
     let player = test_player_guid(1);
 
-    let result = system.join_channel(player, "General", None, Team::Alliance).await;
+    let result = system
+        .join_channel(player, "General", None, Team::Alliance)
+        .await;
     assert!(result.is_ok(), "Should successfully join channel");
 
     // Verify player is in channel
@@ -243,19 +266,27 @@ async fn test_join_channel_with_password() {
     let player2 = test_player_guid(2);
 
     // Create a custom channel with password
-    let result = system.join_channel(player1, "PrivateChannel", Some("secret"), Team::Alliance).await;
+    let result = system
+        .join_channel(player1, "PrivateChannel", Some("secret"), Team::Alliance)
+        .await;
     assert!(result.is_ok());
 
     // Try to join without password - should fail
-    let result = system.join_channel(player2, "PrivateChannel", None, Team::Alliance).await;
+    let result = system
+        .join_channel(player2, "PrivateChannel", None, Team::Alliance)
+        .await;
     assert!(matches!(result, Err(ChatError::WrongPassword)));
 
     // Try to join with wrong password
-    let result = system.join_channel(player2, "PrivateChannel", Some("wrong"), Team::Alliance).await;
+    let result = system
+        .join_channel(player2, "PrivateChannel", Some("wrong"), Team::Alliance)
+        .await;
     assert!(matches!(result, Err(ChatError::WrongPassword)));
 
     // Join with correct password
-    let result = system.join_channel(player2, "PrivateChannel", Some("secret"), Team::Alliance).await;
+    let result = system
+        .join_channel(player2, "PrivateChannel", Some("secret"), Team::Alliance)
+        .await;
     assert!(result.is_ok());
 }
 
@@ -265,10 +296,15 @@ async fn test_join_channel_already_member() {
     let player = test_player_guid(1);
 
     // Join once - should succeed
-    system.join_channel(player, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Try to join again - idempotent, returns Ok
-    let result = system.join_channel(player, "General", None, Team::Alliance).await;
+    let result = system
+        .join_channel(player, "General", None, Team::Alliance)
+        .await;
     assert!(result.is_ok());
 }
 
@@ -280,12 +316,16 @@ async fn test_join_channel_max_limit() {
     // Join 20 channels (MAX_CHANNELS_PER_PLAYER)
     for i in 0..20 {
         let channel_name = format!("Channel{}", i);
-        let result = system.join_channel(player, &channel_name, None, Team::Alliance).await;
+        let result = system
+            .join_channel(player, &channel_name, None, Team::Alliance)
+            .await;
         assert!(result.is_ok(), "Should join channel {}", i);
     }
 
     // Try to join 21st channel - should fail
-    let result = system.join_channel(player, "ExtraChannel", None, Team::Alliance).await;
+    let result = system
+        .join_channel(player, "ExtraChannel", None, Team::Alliance)
+        .await;
     assert!(matches!(result, Err(ChatError::MaxChannelsReached)));
 }
 
@@ -295,8 +335,13 @@ async fn test_leave_channel_success() {
     let player = test_player_guid(1);
 
     // Join and then leave
-    system.join_channel(player, "General", None, Team::Alliance).await.unwrap();
-    let result = system.leave_channel(player, "General", Team::Alliance).await;
+    system
+        .join_channel(player, "General", None, Team::Alliance)
+        .await
+        .unwrap();
+    let result = system
+        .leave_channel(player, "General", Team::Alliance)
+        .await;
     assert!(result.is_ok());
 
     // Verify player is no longer in channel
@@ -314,10 +359,15 @@ async fn test_leave_channel_not_member() {
     let other_player = test_player_guid(2);
 
     // Create channel by having another player join
-    system.join_channel(other_player, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(other_player, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Try to leave without being a member
-    let result = system.leave_channel(player, "General", Team::Alliance).await;
+    let result = system
+        .leave_channel(player, "General", Team::Alliance)
+        .await;
     assert!(matches!(result, Err(ChatError::NotInChannel)));
 }
 
@@ -327,9 +377,18 @@ async fn test_leave_all_channels() {
     let player = test_player_guid(1);
 
     // Join multiple channels
-    system.join_channel(player, "General", None, Team::Alliance).await.unwrap();
-    system.join_channel(player, "Trade", None, Team::Alliance).await.unwrap();
-    system.join_channel(player, "Custom", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player, "General", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(player, "Trade", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(player, "Custom", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify joined
     assert_eq!(system.get_player_channels(player).len(), 3);
@@ -350,8 +409,14 @@ async fn test_set_moderator() {
     let member = test_player_guid(2);
 
     // Setup: owner creates and joins channel
-    system.join_channel(owner, "TestChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(member, "TestChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(owner, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(member, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Owner sets member as moderator
     let result = system.set_moderator(Team::Alliance, "TestChannel", member, true);
@@ -367,9 +432,18 @@ async fn test_set_moderator_no_permission() {
     let member = test_player_guid(2);
     let other = test_player_guid(3);
 
-    system.join_channel(owner, "TestChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(member, "TestChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(other, "TestChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(owner, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(member, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(other, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Non-owner/non-moderator tries to set moderator - should fail
     // Note: This would require passing caller_guid to set_moderator method
@@ -381,8 +455,14 @@ async fn test_ban_from_channel() {
     let owner = test_player_guid(1);
     let member = test_player_guid(2);
 
-    system.join_channel(owner, "TestChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(member, "TestChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(owner, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(member, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Ban member
     let result = system.ban_from_channel(Team::Alliance, "TestChannel", member);
@@ -392,7 +472,9 @@ async fn test_ban_from_channel() {
     assert!(!system.is_in_channel(member, "TestChannel", Team::Alliance));
 
     // Try to rejoin - should fail
-    let result = system.join_channel(member, "TestChannel", None, Team::Alliance).await;
+    let result = system
+        .join_channel(member, "TestChannel", None, Team::Alliance)
+        .await;
     assert!(matches!(result, Err(ChatError::BannedFromChannel)));
 }
 
@@ -402,17 +484,27 @@ async fn test_unban_from_channel() {
     let owner = test_player_guid(1);
     let member = test_player_guid(2);
 
-    system.join_channel(owner, "TestChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(member, "TestChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(owner, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(member, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Ban and then unban
-    system.ban_from_channel(Team::Alliance, "TestChannel", member).unwrap();
+    system
+        .ban_from_channel(Team::Alliance, "TestChannel", member)
+        .unwrap();
     let result = system.unban_from_channel(Team::Alliance, "TestChannel", member);
     assert!(result.is_ok());
     assert!(result.unwrap(), "Should return true when unbanned");
 
     // Should be able to rejoin
-    let result = system.join_channel(member, "TestChannel", None, Team::Alliance).await;
+    let result = system
+        .join_channel(member, "TestChannel", None, Team::Alliance)
+        .await;
     assert!(result.is_ok());
 }
 
@@ -422,20 +514,23 @@ async fn test_set_muted_in_channel() {
     let owner = test_player_guid(1);
     let member = test_player_guid(2);
 
-    system.join_channel(owner, "TestChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(member, "TestChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(owner, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(member, "TestChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Mute member
     let result = system.set_muted(Team::Alliance, "TestChannel", member, true);
     assert!(result.is_ok());
 
     // Trying to send message should fail
-    let result = system.send_channel_message(
-        member,
-        "TestChannel",
-        "Hello",
-        Team::Alliance,
-    ).await;
+    let result = system
+        .send_channel_message(member, "TestChannel", "Hello", Team::Alliance)
+        .await;
     assert!(matches!(result, Err(ChatError::MutedInChannel)));
 }
 
@@ -446,14 +541,14 @@ async fn test_send_channel_message_success() {
     let (system, _, _, _) = create_test_system();
     let player = test_player_guid(1);
 
-    system.join_channel(player, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
-    let result = system.send_channel_message(
-        player,
-        "General",
-        "Hello, everyone!",
-        Team::Alliance,
-    ).await;
+    let result = system
+        .send_channel_message(player, "General", "Hello, everyone!", Team::Alliance)
+        .await;
     assert!(result.is_ok());
 }
 
@@ -464,15 +559,15 @@ async fn test_send_channel_message_not_member() {
     let other_player = test_player_guid(2);
 
     // Create channel by having another player join
-    system.join_channel(other_player, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(other_player, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Try to send without joining
-    let result = system.send_channel_message(
-        player,
-        "General",
-        "Hello",
-        Team::Alliance,
-    ).await;
+    let result = system
+        .send_channel_message(player, "General", "Hello", Team::Alliance)
+        .await;
     assert!(matches!(result, Err(ChatError::NotInChannel)));
 }
 
@@ -481,14 +576,14 @@ async fn test_send_channel_message_empty() {
     let (system, _, _, _) = create_test_system();
     let player = test_player_guid(1);
 
-    system.join_channel(player, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
-    let result = system.send_channel_message(
-        player,
-        "General",
-        "",
-        Team::Alliance,
-    ).await;
+    let result = system
+        .send_channel_message(player, "General", "", Team::Alliance)
+        .await;
     assert!(matches!(result, Err(ChatError::EmptyMessage)));
 }
 
@@ -497,15 +592,15 @@ async fn test_send_channel_message_too_long() {
     let (system, _, _, _) = create_test_system();
     let player = test_player_guid(1);
 
-    system.join_channel(player, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
     let long_message = "a".repeat(256);
-    let result = system.send_channel_message(
-        player,
-        "General",
-        &long_message,
-        Team::Alliance,
-    ).await;
+    let result = system
+        .send_channel_message(player, "General", &long_message, Team::Alliance)
+        .await;
     assert!(matches!(result, Err(ChatError::MessageTooLong)));
 }
 
@@ -517,12 +612,16 @@ async fn test_send_whisper_validates_message() {
     let sender = test_player_guid(1);
 
     // Empty message
-    let result = system.send_whisper(sender, "Target", "", &social_system).await;
+    let result = system
+        .send_whisper(sender, "Target", "", &social_system)
+        .await;
     assert!(matches!(result, Err(ChatError::EmptyMessage)));
 
     // Too long
     let long_msg = "a".repeat(256);
-    let result = system.send_whisper(sender, "Target", &long_msg, &social_system).await;
+    let result = system
+        .send_whisper(sender, "Target", &long_msg, &social_system)
+        .await;
     assert!(matches!(result, Err(ChatError::MessageTooLong)));
 }
 
@@ -535,8 +634,14 @@ async fn test_channel_faction_separation() {
     let horde_player = test_player_guid(2);
 
     // Both join "General" but for different teams
-    system.join_channel(alliance_player, "General", None, Team::Alliance).await.unwrap();
-    system.join_channel(horde_player, "General", None, Team::Horde).await.unwrap();
+    system
+        .join_channel(alliance_player, "General", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(horde_player, "General", None, Team::Horde)
+        .await
+        .unwrap();
 
     // Verify Alliance player is in Alliance General
     assert!(system.is_in_channel(alliance_player, "General", Team::Alliance));
@@ -601,7 +706,10 @@ async fn test_system_on_player_logout() {
 
     // Login and join channel
     system.on_player_login(player).unwrap();
-    system.join_channel(player, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Logout
     system.on_player_logout(player).unwrap();
@@ -666,7 +774,10 @@ async fn test_join_custom_channel_members_updated() {
     let player2 = test_player_guid(2);
 
     // Player1 joins custom channel (becomes owner)
-    system.join_channel(player1, "CustomChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player1, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify player1 is in channel
     assert!(system.is_in_channel(player1, "CustomChannel", Team::Alliance));
@@ -675,7 +786,10 @@ async fn test_join_custom_channel_members_updated() {
     assert!(members.contains(&player1));
 
     // Player2 joins - should be added to channel
-    system.join_channel(player2, "CustomChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player2, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify both players are in channel
     assert!(system.is_in_channel(player2, "CustomChannel", Team::Alliance));
@@ -694,13 +808,19 @@ async fn test_join_default_channel_members_updated() {
     let player2 = test_player_guid(2);
 
     // Player1 joins General (default channel)
-    system.join_channel(player1, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player1, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify player1 is in channel
     assert!(system.is_in_channel(player1, "General", Team::Alliance));
 
     // Player2 joins - should be added to channel
-    system.join_channel(player2, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player2, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify both players are in channel
     assert!(system.is_in_channel(player2, "General", Team::Alliance));
@@ -717,15 +837,24 @@ async fn test_leave_custom_channel_members_updated() {
     let player2 = test_player_guid(2);
 
     // Both players join custom channel
-    system.join_channel(player1, "CustomChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(player2, "CustomChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player1, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(player2, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify both are in channel
     let members = system.get_channel_members(Team::Alliance, "CustomChannel");
     assert_eq!(members.len(), 2);
 
     // Player2 leaves
-    system.leave_channel(player2, "CustomChannel", Team::Alliance).await.unwrap();
+    system
+        .leave_channel(player2, "CustomChannel", Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify only player1 remains
     assert!(!system.is_in_channel(player2, "CustomChannel", Team::Alliance));
@@ -743,11 +872,20 @@ async fn test_leave_default_channel_members_updated() {
     let player2 = test_player_guid(2);
 
     // Both players join General (default channel)
-    system.join_channel(player1, "General", None, Team::Alliance).await.unwrap();
-    system.join_channel(player2, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player1, "General", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(player2, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Player2 leaves
-    system.leave_channel(player2, "General", Team::Alliance).await.unwrap();
+    system
+        .leave_channel(player2, "General", Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify only player1 remains
     assert!(!system.is_in_channel(player2, "General", Team::Alliance));
@@ -764,16 +902,28 @@ async fn test_owner_leaves_custom_channel_transfers_ownership() {
     let member2 = test_player_guid(3);
 
     // Owner creates and joins custom channel
-    system.join_channel(owner, "CustomChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(member1, "CustomChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(member2, "CustomChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(owner, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(member1, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(member2, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify all three are members
     let members = system.get_channel_members(Team::Alliance, "CustomChannel");
     assert_eq!(members.len(), 3);
 
     // Owner leaves - ownership should transfer to member1 (first remaining member)
-    system.leave_channel(owner, "CustomChannel", Team::Alliance).await.unwrap();
+    system
+        .leave_channel(owner, "CustomChannel", Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify owner is gone and only member1 and member2 remain
     assert!(!system.is_in_channel(owner, "CustomChannel", Team::Alliance));
@@ -792,11 +942,20 @@ async fn test_default_channel_has_no_owner() {
     let player2 = test_player_guid(2);
 
     // Players join General (default channel)
-    system.join_channel(player1, "General", None, Team::Alliance).await.unwrap();
-    system.join_channel(player2, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player1, "General", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(player2, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Player1 leaves - no ownership transfer for default channels
-    system.leave_channel(player1, "General", Team::Alliance).await.unwrap();
+    system
+        .leave_channel(player1, "General", Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify player2 remains
     assert!(!system.is_in_channel(player1, "General", Team::Alliance));
@@ -809,13 +968,19 @@ async fn test_last_member_leaves_custom_channel_removes_channel() {
     let player1 = test_player_guid(1);
 
     // Player creates and joins custom channel
-    system.join_channel(player1, "CustomChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player1, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify player is in channel
     assert!(system.is_in_channel(player1, "CustomChannel", Team::Alliance));
 
     // Player leaves - channel should be removed
-    system.leave_channel(player1, "CustomChannel", Team::Alliance).await.unwrap();
+    system
+        .leave_channel(player1, "CustomChannel", Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify channel is removed (empty)
     let members = system.get_channel_members(Team::Alliance, "CustomChannel");
@@ -830,17 +995,26 @@ async fn test_multiple_members_join_custom_channel() {
     let player3 = test_player_guid(3);
 
     // Player1 joins (becomes owner)
-    system.join_channel(player1, "CustomChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player1, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
     let members = system.get_channel_members(Team::Alliance, "CustomChannel");
     assert_eq!(members.len(), 1);
 
     // Player2 joins
-    system.join_channel(player2, "CustomChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player2, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
     let members = system.get_channel_members(Team::Alliance, "CustomChannel");
     assert_eq!(members.len(), 2);
 
     // Player3 joins
-    system.join_channel(player3, "CustomChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player3, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
     let members = system.get_channel_members(Team::Alliance, "CustomChannel");
     assert_eq!(members.len(), 3);
     assert!(members.contains(&player1));
@@ -867,8 +1041,14 @@ async fn test_all_default_channels_work() {
 
     // Test that all default channels can be joined
     for channel in &default_channels {
-        system.join_channel(player1, channel, None, Team::Alliance).await.unwrap();
-        system.join_channel(player2, channel, None, Team::Alliance).await.unwrap();
+        system
+            .join_channel(player1, channel, None, Team::Alliance)
+            .await
+            .unwrap();
+        system
+            .join_channel(player2, channel, None, Team::Alliance)
+            .await
+            .unwrap();
 
         // Verify both are members
         assert!(system.is_in_channel(player1, channel, Team::Alliance));
@@ -884,12 +1064,24 @@ async fn test_ownership_transfer_chain() {
     let player3 = test_player_guid(3); // Will become final owner
 
     // All three join
-    system.join_channel(player1, "CustomChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(player2, "CustomChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(player3, "CustomChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player1, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(player2, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(player3, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Player1 (owner) leaves - player2 becomes owner
-    system.leave_channel(player1, "CustomChannel", Team::Alliance).await.unwrap();
+    system
+        .leave_channel(player1, "CustomChannel", Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify player2 and player3 remain
     let members = system.get_channel_members(Team::Alliance, "CustomChannel");
@@ -898,7 +1090,10 @@ async fn test_ownership_transfer_chain() {
     assert!(members.contains(&player3));
 
     // Player2 (new owner) leaves - player3 becomes owner
-    system.leave_channel(player2, "CustomChannel", Team::Alliance).await.unwrap();
+    system
+        .leave_channel(player2, "CustomChannel", Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify only player3 remains
     let members = system.get_channel_members(Team::Alliance, "CustomChannel");
@@ -915,12 +1110,24 @@ async fn test_mixed_custom_and_default_channels() {
     let player2 = test_player_guid(2);
 
     // Both join General (default)
-    system.join_channel(player1, "General", None, Team::Alliance).await.unwrap();
-    system.join_channel(player2, "General", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player1, "General", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(player2, "General", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Both join CustomChannel
-    system.join_channel(player1, "CustomChannel", None, Team::Alliance).await.unwrap();
-    system.join_channel(player2, "CustomChannel", None, Team::Alliance).await.unwrap();
+    system
+        .join_channel(player1, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
+    system
+        .join_channel(player2, "CustomChannel", None, Team::Alliance)
+        .await
+        .unwrap();
 
     // Verify both are in both channels
     assert!(system.is_in_channel(player1, "General", Team::Alliance));

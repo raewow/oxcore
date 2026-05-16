@@ -72,7 +72,10 @@ impl RespawnSystem {
         );
 
         // Re-register with grid
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
         map.add_creature(guid, position);
 
         // Send CREATE_OBJECT to nearby players
@@ -90,7 +93,10 @@ impl RespawnSystem {
         position: Position,
         world: &World,
     ) {
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
         let visibility_distance = map.visibility_distance();
 
         // Get nearby players
@@ -105,7 +111,10 @@ impl RespawnSystem {
         }
 
         // Build create message using CreatureManager
-        let Some(create_msg) = world.managers.creature_mgr.build_create_msg(creature_guid, world)
+        let Some(create_msg) = world
+            .managers
+            .creature_mgr
+            .build_create_msg(creature_guid, world)
         else {
             return;
         };
@@ -113,8 +122,7 @@ impl RespawnSystem {
         // Send to each nearby player via broadcast_mgr
         for player_guid in nearby_players {
             self.broadcast_mgr
-                .send_msg_to_player(player_guid, create_msg.clone())
-                ;
+                .send_msg_to_player(player_guid, create_msg.clone());
         }
     }
 }

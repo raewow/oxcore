@@ -38,8 +38,8 @@ pub async fn handle_worldport_ack(
     let pending = session.get_pending_teleport();
     info!("[WORLDPORT-ACK] Pending teleport: {:?}", pending);
 
-    let (dest_map, dest_instance_id, dest_pos) = pending
-        .ok_or_else(|| anyhow!("No pending teleport"))?;
+    let (dest_map, dest_instance_id, dest_pos) =
+        pending.ok_or_else(|| anyhow!("No pending teleport"))?;
 
     info!(
         "[WORLDPORT-ACK] Destination: map={} instance={} pos=({},{},{},{})",
@@ -63,7 +63,10 @@ pub async fn handle_worldport_ack(
     );
 
     // Remove from old map
-    info!("[WORLDPORT-ACK] Removing player from old map {} instance {}...", old_map_id, old_instance_id);
+    info!(
+        "[WORLDPORT-ACK] Removing player from old map {} instance {}...",
+        old_map_id, old_instance_id
+    );
     let old_map = world
         .managers
         .map_mgr
@@ -73,15 +76,21 @@ pub async fn handle_worldport_ack(
 
     // Update player state
     info!("[WORLDPORT-ACK] Updating player state (map, instance, position)...");
-    world.managers.player_mgr.with_player_mut(player_guid, |player| {
-        player.map_id = dest_map;
-        player.instance_id = dest_instance_id;
-        player.movement.position = dest_pos;
-    });
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            player.map_id = dest_map;
+            player.instance_id = dest_instance_id;
+            player.movement.position = dest_pos;
+        });
     info!("[WORLDPORT-ACK] ✓ Player state updated");
 
     // Add to new map
-    info!("[WORLDPORT-ACK] Adding player to new map {} instance {}...", dest_map, dest_instance_id);
+    info!(
+        "[WORLDPORT-ACK] Adding player to new map {} instance {}...",
+        dest_map, dest_instance_id
+    );
     let new_map = world
         .managers
         .map_mgr
@@ -90,7 +99,9 @@ pub async fn handle_worldport_ack(
     info!("[WORLDPORT-ACK] ✓ Player added to new map");
 
     // Send initialization packets (critical for client to exit loading screen)
-    use crate::shared::messages::login::{SmsgBindPointUpdate, SmsgInitWorldStates, SmsgSetRestStart};
+    use crate::shared::messages::login::{
+        SmsgBindPointUpdate, SmsgInitWorldStates, SmsgSetRestStart,
+    };
 
     info!("[WORLDPORT-ACK] Sending initialization packets...");
 
@@ -104,7 +115,13 @@ pub async fn handle_worldport_ack(
         .managers
         .player_mgr
         .with_player(player_guid, |p| {
-            (p.homebind_x, p.homebind_y, p.homebind_z, p.homebind_map, p.homebind_zone)
+            (
+                p.homebind_x,
+                p.homebind_y,
+                p.homebind_z,
+                p.homebind_map,
+                p.homebind_zone,
+            )
         })
         .unwrap_or((dest_pos.x, dest_pos.y, dest_pos.z, dest_map, 0));
 
@@ -141,7 +158,10 @@ pub async fn handle_worldport_ack(
     };
 
     let mut item_blocks = Vec::new();
-    world.systems.inventory.build_item_create_blocks(player_guid, &mut item_blocks);
+    world
+        .systems
+        .inventory
+        .build_item_create_blocks(player_guid, &mut item_blocks);
 
     let mut update_object = SmsgUpdateObject::new();
     for block in item_blocks {
@@ -176,12 +196,15 @@ pub async fn handle_worldport_ack(
     // visible_objects holds the old map's set — if we don't clear it, the delta
     // calculation sees all new-map creatures as "already known" and sends nothing.
     // objects_created holds the dedup guard — stale entries would block CREATE_OBJECT2.
-    world.managers.player_mgr.with_player_mut(player_guid, |player| {
-        player.visibility.visible_objects.clear();
-        player.visibility.objects_created.clear();
-        player.visibility.pending_appeared.clear();
-        player.visibility.pending_disappeared.clear();
-    });
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            player.visibility.visible_objects.clear();
+            player.visibility.objects_created.clear();
+            player.visibility.pending_appeared.clear();
+            player.visibility.pending_disappeared.clear();
+        });
     info!("[WORLDPORT-ACK] ✓ Cleared stale visibility state for new map");
 
     info!("[WORLDPORT-ACK] Marking player for force immediate visibility update...");
@@ -193,15 +216,18 @@ pub async fn handle_worldport_ack(
     info!("[WORLDPORT-ACK] ✓ Marked for immediate update");
 
     info!("[WORLDPORT-ACK] Calling update_player...");
-    let updated = world
-        .systems
-        .player
-        .visibility()
-        .update_player(player_guid, current_tick, world)?;
+    let updated =
+        world
+            .systems
+            .player
+            .visibility()
+            .update_player(player_guid, current_tick, world)?;
     info!("[WORLDPORT-ACK] update_player returned: {}", updated);
 
     if updated {
-        info!("[WORLDPORT-ACK] Flushing visibility notifications (sending CREATE_OBJECT2 packets)...");
+        info!(
+            "[WORLDPORT-ACK] Flushing visibility notifications (sending CREATE_OBJECT2 packets)..."
+        );
         world
             .systems
             .player
@@ -238,14 +264,21 @@ pub async fn handle_movement(
     const UNIT_FLAG_DISABLE_MOVE: u32 = 0x00000004;
     const STAND_STATE_STAND: u8 = 0;
 
-    let (is_rooted, unit_flags) = world.managers.player_mgr.with_player(player_guid, |player| {
-        let rooted = (player.unit_flags & UNIT_FLAG_DISABLE_MOVE) != 0;
-        (rooted, player.unit_flags)
-    }).unwrap_or((false, 0));
+    let (is_rooted, unit_flags) = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| {
+            let rooted = (player.unit_flags & UNIT_FLAG_DISABLE_MOVE) != 0;
+            (rooted, player.unit_flags)
+        })
+        .unwrap_or((false, 0));
 
     trace!(
         "[MOVEMENT] handle_movement for {}: opcode={:?}, is_rooted={}, unit_flags=0x{:08X}",
-        player_guid, opcode, is_rooted, unit_flags
+        player_guid,
+        opcode,
+        is_rooted,
+        unit_flags
     );
 
     if is_rooted {
@@ -264,12 +297,17 @@ pub async fn handle_movement(
         let world_guid = WorldObjectGuid::from_low(player_guid.counter());
         session.send_msg(SmsgForceMoveUnroot { guid: world_guid })?;
 
-        world.managers.player_mgr.with_player_mut(player_guid, |player| {
-            player.stand_state = STAND_STATE_STAND;
-            player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.stand_state = STAND_STATE_STAND;
+                player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
+            });
 
-        session.send_msg(SmsgStandstateUpdate { stand_state: STAND_STATE_STAND })?;
+        session.send_msg(SmsgStandstateUpdate {
+            stand_state: STAND_STATE_STAND,
+        })?;
     }
 
     // Continue with normal movement processing
@@ -278,13 +316,17 @@ pub async fn handle_movement(
 
     debug!(
         "[MOVE-IN] opcode={:?} guid={:?} orient={:.4} time={} flags=0x{:08X}",
-        opcode, player_guid, movement_info.position.o, movement_info.time, movement_info.flags.value()
+        opcode,
+        player_guid,
+        movement_info.position.o,
+        movement_info.time,
+        movement_info.flags.value()
     );
 
     world
         .systems
         .player
         .movement()
-        .handle_move(player_guid, opcode, movement_info, world).await
-
+        .handle_move(player_guid, opcode, movement_info, world)
+        .await
 }

@@ -4,7 +4,7 @@
 //! heartbeat packets are replaced by newer ones while preserving critical state
 //! changes. This reduces network bandwidth and client CPU usage.
 
-use crate::shared::protocol::{Opcode, ObjectGuid, WorldPacket};
+use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 

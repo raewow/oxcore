@@ -41,7 +41,7 @@ impl WaypointRepository {
         let rows = sqlx::query_as::<_, WaypointRow>(
             r#"SELECT id, point, position_x, position_y, position_z, orientation, waittime
                FROM creature_movement
-               ORDER BY id, point"#
+               ORDER BY id, point"#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -54,7 +54,7 @@ impl WaypointRepository {
         let rows = sqlx::query_as::<_, WaypointRow>(
             r#"SELECT entry as id, point, position_x, position_y, position_z, orientation, waittime
                FROM creature_movement_template
-               ORDER BY entry, point"#
+               ORDER BY entry, point"#,
         )
         .fetch_all(&self.pool)
         .await?;

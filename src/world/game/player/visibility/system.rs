@@ -12,8 +12,8 @@ use crate::shared::messages::create::SmsgOutOfRange;
 use crate::shared::messages::update::{SmsgUpdateObject, UpdateBlockData};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::{ObjectGuid, Position, WorldPacket};
-use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::core::common::compress_update_packet_if_needed;
+use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::map::grid_coords::CellPair;
 use crate::world::World;
 

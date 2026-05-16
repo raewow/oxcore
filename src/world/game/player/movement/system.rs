@@ -65,7 +65,10 @@ impl MovementSystem {
         // 6. Relocate player in map (grid tracking)
         let new_pos = movement_info.position;
 
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
         map.relocate_player(player_guid, old_pos, new_pos);
 
         // 7. Check for cell crossing and mark dirty for visibility update
@@ -80,9 +83,9 @@ impl MovementSystem {
         // 7.5. Check if movement should interrupt auras (food/drink)
         // Only check if player actually moved (not just turned)
         if (old_pos.x - new_pos.x).abs() > 0.01
-           || (old_pos.y - new_pos.y).abs() > 0.01
-           || (old_pos.z - new_pos.z).abs() > 0.01 {
-
+            || (old_pos.y - new_pos.y).abs() > 0.01
+            || (old_pos.z - new_pos.z).abs() > 0.01
+        {
             // Remove auras with MOVING or STANDING_CANCELS interrupt flags
             world.systems.auras.remove_auras_with_interrupt_flag(
                 player_guid,
@@ -93,11 +96,20 @@ impl MovementSystem {
 
             // 7.6. Cancel active cast-time spell on movement
             // In vanilla WoW, moving during a cast-time spell cancels the cast.
-            let has_active_cast = world.systems.player.manager().with_player(player_guid, |player| {
-                // Check Generic slot for a cast-time spell in progress
-                player.spells.get_current_spell(crate::world::game::player::spells::state::CurrentSpellType::Generic)
-                    .map_or(false, |cast| cast.original_cast_time_ms > 0)
-            }).unwrap_or(false);
+            let has_active_cast = world
+                .systems
+                .player
+                .manager()
+                .with_player(player_guid, |player| {
+                    // Check Generic slot for a cast-time spell in progress
+                    player
+                        .spells
+                        .get_current_spell(
+                            crate::world::game::player::spells::state::CurrentSpellType::Generic,
+                        )
+                        .map_or(false, |cast| cast.original_cast_time_ms > 0)
+                })
+                .unwrap_or(false);
             if has_active_cast {
                 let _ = world.systems.spells.cancel_cast(player_guid, world).await;
             }
@@ -148,7 +160,10 @@ impl MovementSystem {
             .ok_or_else(|| anyhow!("Player not found"))??;
 
         let new_pos = movement_info.position;
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
         map.relocate_player(player_guid, old_pos, new_pos);
 
         world
@@ -163,7 +178,12 @@ impl MovementSystem {
     }
 
     /// Periodic update for server-forced movement (future)
-    pub fn update_player(&self, _player_guid: ObjectGuid, _diff: Duration, _world: &World) -> Result<()> {
+    pub fn update_player(
+        &self,
+        _player_guid: ObjectGuid,
+        _diff: Duration,
+        _world: &World,
+    ) -> Result<()> {
         // Future: handle knockbacks, scripted movement, etc.
         Ok(())
     }
@@ -218,14 +238,16 @@ impl MovementSystem {
         // Broadcast to nearby players (exclude self)
         tracing::debug!(
             "[MOVE-BROADCAST] opcode={:?} guid={:?} orient={:.4} time={} pkt_len={}",
-            opcode, player_guid, broadcast_movement_info.position.o,
-            broadcast_movement_info.time, packet.size()
+            opcode,
+            player_guid,
+            broadcast_movement_info.position.o,
+            broadcast_movement_info.time,
+            packet.size()
         );
         world
             .managers
             .broadcast_mgr
-            .broadcast_nearby_exclude_self(player_guid, &packet)
-            ;
+            .broadcast_nearby_exclude_self(player_guid, &packet);
 
         Ok(())
     }
@@ -245,21 +267,17 @@ impl Default for MovementSystem {
 ///
 /// City rest (`RestType::InCity`) is zone-based, not trigger-based, so it is not
 /// checked here.
-fn check_rest_area_exit(
-    player_guid: ObjectGuid,
-    map_id: u32,
-    pos: Position,
-    world: &World,
-) {
+fn check_rest_area_exit(player_guid: ObjectGuid, map_id: u32, pos: Position, world: &World) {
     use crate::world::game::player::environment::RestType;
 
     // Fast path: read rest state without write lock
-    let (rest_type, inn_trigger_id) = match world.managers.player_mgr.with_player(player_guid, |p| {
-        (p.environment.rest_type, p.environment.inn_trigger_id)
-    }) {
-        Some(v) => v,
-        None => return,
-    };
+    let (rest_type, inn_trigger_id) =
+        match world.managers.player_mgr.with_player(player_guid, |p| {
+            (p.environment.rest_type, p.environment.inn_trigger_id)
+        }) {
+            Some(v) => v,
+            None => return,
+        };
 
     if rest_type != RestType::InTavern || inn_trigger_id == 0 {
         return;
@@ -286,12 +304,11 @@ fn check_rest_area_exit(
 
     // Player left the inn — clear rest state
     let player_mgr = &world.managers.player_mgr;
-    world.systems.environment.set_rest_type(
-        player_guid,
-        RestType::No,
-        0,
-        player_mgr,
-    ).ok(); // best-effort
+    world
+        .systems
+        .environment
+        .set_rest_type(player_guid, RestType::No, 0, player_mgr)
+        .ok(); // best-effort
 
     // Send updated PLAYER_FLAGS to the client
     if let Some(new_flags) = player_mgr.with_player(player_guid, |p| p.player_flags) {
@@ -315,6 +332,7 @@ fn check_rest_area_exit(
 
     tracing::debug!(
         "Player {} left tavern rest area (trigger {}), cleared rest state",
-        player_guid, inn_trigger_id
+        player_guid,
+        inn_trigger_id
     );
 }

@@ -19,18 +19,10 @@ pub async fn dispatch_periodic_tick(
     broadcast_mgr: &Arc<BroadcastManager>,
 ) -> Result<()> {
     match snapshot.aura_type {
-        AURA_OBS_MOD_HEALTH => {
-            handle_obs_mod_health(target_guid, snapshot, world, broadcast_mgr)
-        }
-        AURA_OBS_MOD_MANA => {
-            handle_obs_mod_mana(target_guid, snapshot, world)
-        }
-        AURA_PERIODIC_DAMAGE => {
-            handle_periodic_damage(target_guid, snapshot, world, broadcast_mgr)
-        }
-        AURA_PERIODIC_HEAL => {
-            handle_periodic_heal(target_guid, snapshot, world, broadcast_mgr)
-        }
+        AURA_OBS_MOD_HEALTH => handle_obs_mod_health(target_guid, snapshot, world, broadcast_mgr),
+        AURA_OBS_MOD_MANA => handle_obs_mod_mana(target_guid, snapshot, world),
+        AURA_PERIODIC_DAMAGE => handle_periodic_damage(target_guid, snapshot, world, broadcast_mgr),
+        AURA_PERIODIC_HEAL => handle_periodic_heal(target_guid, snapshot, world, broadcast_mgr),
         AURA_PERIODIC_ENERGIZE => handle_periodic_energize(target_guid, snapshot, world),
         AURA_PERIODIC_LEECH => handle_periodic_leech(target_guid, snapshot, world),
         AURA_PERIODIC_MANA_LEECH => handle_periodic_mana_leech(target_guid, snapshot, world).await,
@@ -68,23 +60,35 @@ fn handle_periodic_damage(
 
     // Apply damage to target (player or creature)
     if target_guid.is_player() {
-        let died = world.systems.player.manager().with_player_mut(target_guid, |player| {
-            let current_health = player.stats.health;
-            let new_health = current_health.saturating_sub(damage);
-            player.stats.health = new_health;
-            player.stats.dirty = true;
+        let died = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                let current_health = player.stats.health;
+                let new_health = current_health.saturating_sub(damage);
+                player.stats.health = new_health;
+                player.stats.dirty = true;
 
-            tracing::debug!(
-                "Periodic damage: {} took {} damage from spell {}, health: {} -> {}",
-                player.name, damage, snapshot.spell_id, current_health, new_health
-            );
+                tracing::debug!(
+                    "Periodic damage: {} took {} damage from spell {}, health: {} -> {}",
+                    player.name,
+                    damage,
+                    snapshot.spell_id,
+                    current_health,
+                    new_health
+                );
 
-            new_health == 0 && current_health > 0
-        }).unwrap_or(false);
+                new_health == 0 && current_health > 0
+            })
+            .unwrap_or(false);
 
         if died {
             if let Err(e) = world.systems.death.on_killed(
-                target_guid, Some(snapshot.caster_guid), Some(snapshot.spell_id), world,
+                target_guid,
+                Some(snapshot.caster_guid),
+                Some(snapshot.spell_id),
+                world,
             ) {
                 tracing::error!("Failed to handle player death from DoT: {}", e);
             }
@@ -96,12 +100,19 @@ fn handle_periodic_damage(
             .as_secs();
 
         let result = world.managers.creature_mgr.apply_damage(
-            target_guid, damage, snapshot.caster_guid, timestamp,
+            target_guid,
+            damage,
+            snapshot.caster_guid,
+            timestamp,
         );
 
         if let Some((_actual_damage, is_dead)) = result {
             if is_dead {
-                tracing::info!("Creature {:?} killed by periodic spell {}", target_guid, snapshot.spell_id);
+                tracing::info!(
+                    "Creature {:?} killed by periodic spell {}",
+                    target_guid,
+                    snapshot.spell_id
+                );
             }
         }
     }
@@ -115,9 +126,7 @@ fn handle_periodic_damage(
         damage,
         school: 0, // TODO: Get from spell data
     };
-    broadcast_mgr
-        .broadcast_nearby(target_guid, &msg.to_world_packet(), true)
-        ;
+    broadcast_mgr.broadcast_nearby(target_guid, &msg.to_world_packet(), true);
 
     Ok(())
 }
@@ -156,9 +165,7 @@ fn handle_periodic_heal(
         damage: heal_amount, // "damage" field used for healing amount too
         school: 0,
     };
-    broadcast_mgr
-        .broadcast_nearby(target_guid, &msg.to_world_packet(), true)
-        ;
+    broadcast_mgr.broadcast_nearby(target_guid, &msg.to_world_packet(), true);
 
     Ok(())
 }
@@ -202,17 +209,25 @@ fn handle_periodic_leech(
 
     // Damage target (player or creature)
     if target_guid.is_player() {
-        let died = world.systems.player.manager().with_player_mut(target_guid, |player| {
-            let current = player.stats.health;
-            let new_health = current.saturating_sub(leech_amount);
-            player.stats.health = new_health;
-            player.stats.dirty = true;
-            new_health == 0 && current > 0
-        }).unwrap_or(false);
+        let died = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                let current = player.stats.health;
+                let new_health = current.saturating_sub(leech_amount);
+                player.stats.health = new_health;
+                player.stats.dirty = true;
+                new_health == 0 && current > 0
+            })
+            .unwrap_or(false);
 
         if died {
             let _ = world.systems.death.on_killed(
-                target_guid, Some(snapshot.caster_guid), Some(snapshot.spell_id), world,
+                target_guid,
+                Some(snapshot.caster_guid),
+                Some(snapshot.spell_id),
+                world,
             );
         }
     } else if target_guid.is_creature() {
@@ -221,7 +236,10 @@ fn handle_periodic_leech(
             .unwrap_or_default()
             .as_secs();
         let result = world.managers.creature_mgr.apply_damage(
-            target_guid, leech_amount, snapshot.caster_guid, timestamp,
+            target_guid,
+            leech_amount,
+            snapshot.caster_guid,
+            timestamp,
         );
         // If creature died from the damage, it will be processed by the
         // main loop's process_deaths() which picks up JustDied creatures.
@@ -379,13 +397,22 @@ async fn handle_periodic_damage_percent(
 
     // Calculate damage from target's max health
     let damage: u32 = if target_guid.is_player() {
-        world.systems.player.manager().with_player(target_guid, |player| {
-            (player.stats.max_health as f32 * pct) as u32
-        }).unwrap_or(0)
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                (player.stats.max_health as f32 * pct) as u32
+            })
+            .unwrap_or(0)
     } else if target_guid.is_creature() {
-        world.managers.creature_mgr.with_creature(target_guid, |creature| {
-            (creature.max_health as f32 * pct) as u32
-        }).unwrap_or(0)
+        world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |creature| {
+                (creature.max_health as f32 * pct) as u32
+            })
+            .unwrap_or(0)
     } else {
         0
     };
@@ -393,17 +420,25 @@ async fn handle_periodic_damage_percent(
     if damage > 0 {
         // Apply the damage
         if target_guid.is_player() {
-            let died = world.systems.player.manager().with_player_mut(target_guid, |player| {
-                let current = player.stats.health;
-                let new_health = current.saturating_sub(damage);
-                player.stats.health = new_health;
-                player.stats.dirty = true;
-                new_health == 0 && current > 0
-            }).unwrap_or(false);
+            let died = world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(target_guid, |player| {
+                    let current = player.stats.health;
+                    let new_health = current.saturating_sub(damage);
+                    player.stats.health = new_health;
+                    player.stats.dirty = true;
+                    new_health == 0 && current > 0
+                })
+                .unwrap_or(false);
 
             if died {
                 let _ = world.systems.death.on_killed(
-                    target_guid, Some(snapshot.caster_guid), Some(snapshot.spell_id), world,
+                    target_guid,
+                    Some(snapshot.caster_guid),
+                    Some(snapshot.spell_id),
+                    world,
                 );
             }
         } else if target_guid.is_creature() {
@@ -412,11 +447,18 @@ async fn handle_periodic_damage_percent(
                 .unwrap_or_default()
                 .as_secs();
             let result = world.managers.creature_mgr.apply_damage(
-                target_guid, damage, snapshot.caster_guid, timestamp,
+                target_guid,
+                damage,
+                snapshot.caster_guid,
+                timestamp,
             );
             if let Some((_actual, is_dead)) = result {
                 if is_dead {
-                    tracing::info!("Creature {:?} killed by periodic damage percent spell {}", target_guid, snapshot.spell_id);
+                    tracing::info!(
+                        "Creature {:?} killed by periodic damage percent spell {}",
+                        target_guid,
+                        snapshot.spell_id
+                    );
                 }
             }
         }

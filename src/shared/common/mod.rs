@@ -12,8 +12,5 @@ static SERVER_START: OnceLock<Instant> = OnceLock::new();
 /// NOT unix epoch milliseconds. This keeps CREATE_OBJECT timestamps in a range the
 /// client can work with relative to the game_time it received at SMSG_LOGIN_SETTIMESPEED.
 pub fn server_mstime() -> u32 {
-    SERVER_START
-        .get_or_init(Instant::now)
-        .elapsed()
-        .as_millis() as u32
+    SERVER_START.get_or_init(Instant::now).elapsed().as_millis() as u32
 }

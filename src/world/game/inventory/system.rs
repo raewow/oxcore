@@ -21,14 +21,14 @@ use crate::shared::messages::inventory_update::{
 use crate::shared::messages::login::EquipmentSlot;
 use crate::shared::messages::player::SmsgPlayerMoneyUpdate;
 use crate::shared::messages::update::{CreateObjectBlock, SmsgUpdateObject, UpdateBlockData};
-use crate::shared::protocol::{HighGuid, ObjectGuid};
 use crate::shared::protocol::Opcode;
 use crate::shared::protocol::WorldPacket;
+use crate::shared::protocol::{HighGuid, ObjectGuid};
 use crate::world::core::common::packet::WorldPacketGuidExt;
+use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::inventory::inventory_types::{
     EquipmentSlot as EquipmentSlotEnum, INVENTORY_SLOT_BAG_0,
 };
-use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::ItemManager;
 use tracing::{info, warn};
 
@@ -88,15 +88,13 @@ impl InventorySystem {
     ) {
         self.broadcast_mgr.send_msg_to_player(
             player_guid,
-            crate::shared::messages::SmsgInventoryChangeFailure::with_items(error, src_item, dst_item),
+            crate::shared::messages::SmsgInventoryChangeFailure::with_items(
+                error, src_item, dst_item,
+            ),
         );
     }
 
-    fn send_inventory_error_with_level(
-        &self,
-        player_guid: ObjectGuid,
-        required_level: u32,
-    ) {
+    fn send_inventory_error_with_level(&self, player_guid: ObjectGuid, required_level: u32) {
         self.broadcast_mgr.send_msg_to_player(
             player_guid,
             crate::shared::messages::SmsgInventoryChangeFailure::with_level_requirement(
@@ -180,7 +178,10 @@ impl InventorySystem {
 
         tracing::debug!(
             "[VISIBLE_ITEM_UPDATE] Player={:?} slot={} item_guid={:?} item_entry={}",
-            player_guid, slot, item_guid, item_entry
+            player_guid,
+            slot,
+            item_guid,
+            item_entry
         );
 
         let msg = SmsgVisibleItemUpdate::new(player_guid, slot, item_entry);
@@ -202,8 +203,7 @@ impl InventorySystem {
         let item_read = item.read();
         let update_block = item_read.to_create_block();
 
-        let msg = SmsgUpdateObject::new()
-            .add_block(UpdateBlockData::CreateObject2(update_block));
+        let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::CreateObject2(update_block));
 
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
@@ -243,7 +243,8 @@ impl InventorySystem {
         let item_map: std::collections::HashMap<u32, &ItemInstanceRow> =
             items.iter().map(|i| (i.guid, i)).collect();
 
-        let mut bag_guids: std::collections::HashMap<u8, ObjectGuid> = std::collections::HashMap::new();
+        let mut bag_guids: std::collections::HashMap<u8, ObjectGuid> =
+            std::collections::HashMap::new();
 
         for slot in &slots {
             let item_guid_low = slot.item_guid;
@@ -589,7 +590,8 @@ impl InventorySystem {
                 random_property_id: 0,
                 count: stack_count,
             };
-            self.broadcast_mgr.send_msg_to_player(player_guid, push_result);
+            self.broadcast_mgr
+                .send_msg_to_player(player_guid, push_result);
         }
 
         AddItemResult::Success {
@@ -631,9 +633,12 @@ impl InventorySystem {
 
         if new_count == 0 {
             // Queue DB op (deferred)
-            self.cache.push_pending_op(player_guid, super::cache::PendingInventoryOp::DeleteItem {
-                item_guid: item_guid.low(),
-            });
+            self.cache.push_pending_op(
+                player_guid,
+                super::cache::PendingInventoryOp::DeleteItem {
+                    item_guid: item_guid.low(),
+                },
+            );
 
             self.cache
                 .set_item_at(player_guid, item_bag, item_slot, None);
@@ -642,8 +647,12 @@ impl InventorySystem {
             self.send_slot_update(player_guid, item_bag, item_slot, None);
 
             // Destroy item object on client
-            let destroy_msg = SmsgDestroyItem { item_guid, count: 0 };
-            self.broadcast_mgr.send_msg_to_player(player_guid, destroy_msg);
+            let destroy_msg = SmsgDestroyItem {
+                item_guid,
+                count: 0,
+            };
+            self.broadcast_mgr
+                .send_msg_to_player(player_guid, destroy_msg);
 
             if self.cache.is_equipment_slot(player_guid, item_slot) {
                 self.send_visible_item_update(player_guid, item_slot, None);
@@ -652,10 +661,13 @@ impl InventorySystem {
             RemoveItemResult::ItemRemoved { item_guid }
         } else {
             // Reduce count - queue DB op (deferred)
-            self.cache.push_pending_op(player_guid, super::cache::PendingInventoryOp::UpdateCount {
-                item_guid: item_guid.low(),
-                count: new_count,
-            });
+            self.cache.push_pending_op(
+                player_guid,
+                super::cache::PendingInventoryOp::UpdateCount {
+                    item_guid: item_guid.low(),
+                    count: new_count,
+                },
+            );
 
             // Update cache
             self.cache
@@ -676,12 +688,22 @@ impl InventorySystem {
         dst_bag: u8,
         dst_slot: u8,
     ) -> MoveItemResult {
-        tracing::debug!("[INVENTORY] move_item: player={:?} from bag={} slot={} to bag={} slot={}", player_guid, src_bag, src_slot, dst_bag, dst_slot);
+        tracing::debug!(
+            "[INVENTORY] move_item: player={:?} from bag={} slot={} to bag={} slot={}",
+            player_guid,
+            src_bag,
+            src_slot,
+            dst_bag,
+            dst_slot
+        );
 
         // === VALIDATION PHASE ===
 
         if !self.cache.has_player_inventory(player_guid) {
-            tracing::error!("[INVENTORY] move_item FAILED: player not loaded {:?}", player_guid);
+            tracing::error!(
+                "[INVENTORY] move_item FAILED: player not loaded {:?}",
+                player_guid
+            );
             return MoveItemResult::PlayerNotLoaded;
         }
 
@@ -692,8 +714,15 @@ impl InventorySystem {
         let src_item_guid = match self.cache.get_item_at(player_guid, src_bag, src_slot) {
             Some(g) => g,
             None => {
-                tracing::warn!("[INVENTORY] move_item FAILED: item not found at src bag={} slot={}", src_bag, src_slot);
-                self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND);
+                tracing::warn!(
+                    "[INVENTORY] move_item FAILED: item not found at src bag={} slot={}",
+                    src_bag,
+                    src_slot
+                );
+                self.send_inventory_error(
+                    player_guid,
+                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                );
                 return MoveItemResult::InvalidSource;
             }
         };
@@ -721,84 +750,125 @@ impl InventorySystem {
                                         let dst_count = dst_item.count;
                                         let available_space = max_stack.saturating_sub(dst_count);
 
-                                    // Release read locks before proceeding
-                                    drop(src_item);
-                                    drop(dst_item);
+                                        // Release read locks before proceeding
+                                        drop(src_item);
+                                        drop(dst_item);
 
-                                    if available_space == 0 {
-                                        self.send_inventory_error_with_items(
-                                            player_guid,
-                                            crate::shared::messages::EQUIP_ERR_ITEM_CANT_STACK,
-                                            Some(src_item_guid),
-                                            Some(dst_guid),
-                                        );
-                                        return MoveItemResult::InvalidDestination;
-                                    }
+                                        if available_space == 0 {
+                                            self.send_inventory_error_with_items(
+                                                player_guid,
+                                                crate::shared::messages::EQUIP_ERR_ITEM_CANT_STACK,
+                                                Some(src_item_guid),
+                                                Some(dst_guid),
+                                            );
+                                            return MoveItemResult::InvalidDestination;
+                                        }
 
-                                    let items_to_move = src_count.min(available_space);
-                                    let new_src_count = src_count - items_to_move;
-                                    let new_dst_count = dst_count + items_to_move;
+                                        let items_to_move = src_count.min(available_space);
+                                        let new_src_count = src_count - items_to_move;
+                                        let new_dst_count = dst_count + items_to_move;
 
-                                    if new_src_count == 0 {
-                                        // Moving all items - delete source, update destination
-                                        // Queue DB ops (deferred)
-                                        self.cache.push_pending_op(player_guid, super::cache::PendingInventoryOp::DeleteItem {
-                                            item_guid: src_item_guid.low(),
-                                        });
-                                        self.cache.push_pending_op(player_guid, super::cache::PendingInventoryOp::UpdateCount {
-                                            item_guid: dst_guid.low(),
-                                            count: new_dst_count,
-                                        });
+                                        if new_src_count == 0 {
+                                            // Moving all items - delete source, update destination
+                                            // Queue DB ops (deferred)
+                                            self.cache.push_pending_op(
+                                                player_guid,
+                                                super::cache::PendingInventoryOp::DeleteItem {
+                                                    item_guid: src_item_guid.low(),
+                                                },
+                                            );
+                                            self.cache.push_pending_op(
+                                                player_guid,
+                                                super::cache::PendingInventoryOp::UpdateCount {
+                                                    item_guid: dst_guid.low(),
+                                                    count: new_dst_count,
+                                                },
+                                            );
 
-                                        // Update cache
-                                        self.cache.remove_item(player_guid, src_item_guid);
-                                        self.cache.set_item_at(player_guid, src_bag, src_slot, None);
-                                        self.cache.update_item_count(player_guid, dst_guid, new_dst_count);
+                                            // Update cache
+                                            self.cache.remove_item(player_guid, src_item_guid);
+                                            self.cache.set_item_at(
+                                                player_guid,
+                                                src_bag,
+                                                src_slot,
+                                                None,
+                                            );
+                                            self.cache.update_item_count(
+                                                player_guid,
+                                                dst_guid,
+                                                new_dst_count,
+                                            );
 
-                                        // Send updates
-                                        self.send_slot_update(player_guid, src_bag, src_slot, None);
-                                        self.send_item_update(player_guid, dst_guid);
+                                            // Send updates
+                                            self.send_slot_update(
+                                                player_guid,
+                                                src_bag,
+                                                src_slot,
+                                                None,
+                                            );
+                                            self.send_item_update(player_guid, dst_guid);
 
-                                        return MoveItemResult::Merged { source_removed: true };
-                                    } else {
-                                        // Moving partial stack - update both counts
-                                        self.cache.push_pending_op(player_guid, super::cache::PendingInventoryOp::UpdateCount {
-                                            item_guid: src_item_guid.low(),
-                                            count: new_src_count,
-                                        });
-                                        self.cache.push_pending_op(player_guid, super::cache::PendingInventoryOp::UpdateCount {
-                                            item_guid: dst_guid.low(),
-                                            count: new_dst_count,
-                                        });
+                                            return MoveItemResult::Merged {
+                                                source_removed: true,
+                                            };
+                                        } else {
+                                            // Moving partial stack - update both counts
+                                            self.cache.push_pending_op(
+                                                player_guid,
+                                                super::cache::PendingInventoryOp::UpdateCount {
+                                                    item_guid: src_item_guid.low(),
+                                                    count: new_src_count,
+                                                },
+                                            );
+                                            self.cache.push_pending_op(
+                                                player_guid,
+                                                super::cache::PendingInventoryOp::UpdateCount {
+                                                    item_guid: dst_guid.low(),
+                                                    count: new_dst_count,
+                                                },
+                                            );
 
-                                        // Update cache
-                                        self.cache.update_item_count(player_guid, src_item_guid, new_src_count);
-                                        self.cache.update_item_count(player_guid, dst_guid, new_dst_count);
+                                            // Update cache
+                                            self.cache.update_item_count(
+                                                player_guid,
+                                                src_item_guid,
+                                                new_src_count,
+                                            );
+                                            self.cache.update_item_count(
+                                                player_guid,
+                                                dst_guid,
+                                                new_dst_count,
+                                            );
 
-                                        // Send updates
-                                        self.send_item_update(player_guid, src_item_guid);
-                                        self.send_item_update(player_guid, dst_guid);
+                                            // Send updates
+                                            self.send_item_update(player_guid, src_item_guid);
+                                            self.send_item_update(player_guid, dst_guid);
 
-                                        return MoveItemResult::Merged { source_removed: false };
+                                            return MoveItemResult::Merged {
+                                                source_removed: false,
+                                            };
+                                        }
                                     }
                                 }
                             }
-                        }
                         }
                     }
                 }
 
                 // No stacking possible, proceed with swap logic
                 // Queue DB op (deferred)
-                self.cache.push_pending_op(player_guid, super::cache::PendingInventoryOp::SwapItems {
-                    player_guid: player_guid.low(),
-                    item1_guid: src_item_guid.low(),
-                    bag1: dst_bag,
-                    slot1: dst_slot,
-                    item2_guid: Some(dst_guid.low()),
-                    bag2: src_bag,
-                    slot2: src_slot,
-                });
+                self.cache.push_pending_op(
+                    player_guid,
+                    super::cache::PendingInventoryOp::SwapItems {
+                        player_guid: player_guid.low(),
+                        item1_guid: src_item_guid.low(),
+                        bag1: dst_bag,
+                        slot1: dst_slot,
+                        item2_guid: Some(dst_guid.low()),
+                        bag2: src_bag,
+                        slot2: src_slot,
+                    },
+                );
 
                 // Update cache
                 self.cache
@@ -829,12 +899,15 @@ impl InventorySystem {
             None => {
                 // Destination is empty - simple move
                 // Queue DB op (deferred)
-                self.cache.push_pending_op(player_guid, super::cache::PendingInventoryOp::MoveItem {
-                    player_guid: player_guid.low(),
-                    item_guid: src_item_guid.low(),
-                    bag: dst_bag,
-                    slot: dst_slot,
-                });
+                self.cache.push_pending_op(
+                    player_guid,
+                    super::cache::PendingInventoryOp::MoveItem {
+                        player_guid: player_guid.low(),
+                        item_guid: src_item_guid.low(),
+                        bag: dst_bag,
+                        slot: dst_slot,
+                    },
+                );
 
                 // Update cache
                 self.cache.set_item_at(player_guid, src_bag, src_slot, None);
@@ -858,33 +931,49 @@ impl InventorySystem {
     }
 
     pub fn add_gold(&self, player_guid: ObjectGuid, amount: u32) -> GoldResult {
-        tracing::debug!("[INVENTORY] add_gold: player={:?} amount={}", player_guid, amount);
+        tracing::debug!(
+            "[INVENTORY] add_gold: player={:?} amount={}",
+            player_guid,
+            amount
+        );
 
         if !self.cache.has_player_inventory(player_guid) {
-            tracing::error!("[INVENTORY] add_gold FAILED: player not loaded {:?}", player_guid);
+            tracing::error!(
+                "[INVENTORY] add_gold FAILED: player not loaded {:?}",
+                player_guid
+            );
             return GoldResult::PlayerNotLoaded;
         }
 
         let current = match self.cache.get_money(player_guid) {
             Some(m) => m,
             None => {
-                tracing::error!("[INVENTORY] add_gold FAILED: no money in cache for {:?}", player_guid);
+                tracing::error!(
+                    "[INVENTORY] add_gold FAILED: no money in cache for {:?}",
+                    player_guid
+                );
                 return GoldResult::PlayerNotLoaded;
             }
         };
 
         if current > MAX_MONEY - amount {
-            tracing::error!("[INVENTORY] add_gold FAILED: cap exceeded for {:?}", player_guid);
+            tracing::error!(
+                "[INVENTORY] add_gold FAILED: cap exceeded for {:?}",
+                player_guid
+            );
             return GoldResult::CapExceeded;
         }
 
         let new_balance = current + amount;
 
         // Queue DB op (deferred)
-        self.cache.push_pending_op(player_guid, super::cache::PendingInventoryOp::UpdateMoney {
-            player_guid: player_guid.low(),
-            amount: new_balance,
-        });
+        self.cache.push_pending_op(
+            player_guid,
+            super::cache::PendingInventoryOp::UpdateMoney {
+                player_guid: player_guid.low(),
+                amount: new_balance,
+            },
+        );
 
         self.cache.set_money(player_guid, new_balance);
         self.send_money_update(player_guid, new_balance);
@@ -893,33 +982,51 @@ impl InventorySystem {
     }
 
     pub fn remove_gold(&self, player_guid: ObjectGuid, amount: u32) -> GoldResult {
-        tracing::debug!("[INVENTORY] remove_gold: player={:?} amount={}", player_guid, amount);
+        tracing::debug!(
+            "[INVENTORY] remove_gold: player={:?} amount={}",
+            player_guid,
+            amount
+        );
 
         if !self.cache.has_player_inventory(player_guid) {
-            tracing::error!("[INVENTORY] remove_gold FAILED: player not loaded {:?}", player_guid);
+            tracing::error!(
+                "[INVENTORY] remove_gold FAILED: player not loaded {:?}",
+                player_guid
+            );
             return GoldResult::PlayerNotLoaded;
         }
 
         let current = match self.cache.get_money(player_guid) {
             Some(m) => m,
             None => {
-                tracing::error!("[INVENTORY] remove_gold FAILED: no money in cache for {:?}", player_guid);
+                tracing::error!(
+                    "[INVENTORY] remove_gold FAILED: no money in cache for {:?}",
+                    player_guid
+                );
                 return GoldResult::PlayerNotLoaded;
             }
         };
 
         if current < amount {
-            tracing::error!("[INVENTORY] remove_gold FAILED: insufficient funds for {:?} (has {} needs {})", player_guid, current, amount);
+            tracing::error!(
+                "[INVENTORY] remove_gold FAILED: insufficient funds for {:?} (has {} needs {})",
+                player_guid,
+                current,
+                amount
+            );
             return GoldResult::InsufficientFunds;
         }
 
         let new_balance = current - amount;
 
         // Queue DB op (deferred)
-        self.cache.push_pending_op(player_guid, super::cache::PendingInventoryOp::UpdateMoney {
-            player_guid: player_guid.low(),
-            amount: new_balance,
-        });
+        self.cache.push_pending_op(
+            player_guid,
+            super::cache::PendingInventoryOp::UpdateMoney {
+                player_guid: player_guid.low(),
+                amount: new_balance,
+            },
+        );
 
         self.cache.set_money(player_guid, new_balance);
         self.send_money_update(player_guid, new_balance);
@@ -1002,15 +1109,25 @@ impl InventorySystem {
 
         // 4. Update database: Change owner and slot
         // MaNGOS-style: Keep the same GUID, just update owner and position
-        if let Err(e) = self.repository.update_item_owner(item_guid.low(), to_player.low()).await {
+        if let Err(e) = self
+            .repository
+            .update_item_owner(item_guid.low(), to_player.low())
+            .await
+        {
             tracing::error!("[TRANSFER] Failed to update item owner: {}", e);
             return TransferItemResult::DatabaseError(e.to_string());
         }
 
-        if let Err(e) = self.repository.move_item(to_player.low(), item_guid.low(), target_bag, target_slot).await {
+        if let Err(e) = self
+            .repository
+            .move_item(to_player.low(), item_guid.low(), target_bag, target_slot)
+            .await
+        {
             tracing::error!("[TRANSFER] Failed to move item to target slot: {}", e);
             // Attempt rollback
-            let _ = self.repository.update_item_owner(item_guid.low(), from_player.low());
+            let _ = self
+                .repository
+                .update_item_owner(item_guid.low(), from_player.low());
             return TransferItemResult::DatabaseError(e.to_string());
         }
 
@@ -1030,9 +1147,10 @@ impl InventorySystem {
             item.bag = target_bag;
             item.slot = target_slot;
         }
-        
+
         self.cache.add_item(to_player, item_arc.clone());
-        self.cache.set_item_at(to_player, target_bag, target_slot, Some(item_guid));
+        self.cache
+            .set_item_at(to_player, target_bag, target_slot, Some(item_guid));
 
         // 8. Send CREATE_OBJECT2 packet to target player (they may have seen this GUID before
         // if the trade was cancelled and retried, so use CreateObject2 for safety)
@@ -1042,12 +1160,13 @@ impl InventorySystem {
         };
         let update_packet = SmsgUpdateObject {
             has_transport: false,
-            blocks: vec![crate::shared::messages::update::UpdateBlockData::CreateObject2(create_block)],
+            blocks: vec![
+                crate::shared::messages::update::UpdateBlockData::CreateObject2(create_block),
+            ],
         };
 
         self.broadcast_mgr
-            .send_msg_to_player(to_player, update_packet)
-            ;
+            .send_msg_to_player(to_player, update_packet);
 
         // 9. Send inventory slot update packet to target
         let slot_update = SmsgInventorySlotUpdate {
@@ -1058,8 +1177,7 @@ impl InventorySystem {
         };
 
         self.broadcast_mgr
-            .send_msg_to_player(to_player, slot_update)
-            ;
+            .send_msg_to_player(to_player, slot_update);
 
         tracing::debug!(
             "[TRANSFER] Successfully transferred item {:?} from {:?} to {:?} (bag={}, slot={}, same GUID)",
@@ -1088,13 +1206,23 @@ impl InventorySystem {
         dst_slot: u8,
         count: u32,
     ) -> SplitItemResult {
-        tracing::debug!("[INVENTORY] split_item: player={:?} from bag={} slot={} to bag={} slot={} count={}", 
-            player_guid, src_bag, src_slot, dst_bag, dst_slot, count);
+        tracing::debug!(
+            "[INVENTORY] split_item: player={:?} from bag={} slot={} to bag={} slot={} count={}",
+            player_guid,
+            src_bag,
+            src_slot,
+            dst_bag,
+            dst_slot,
+            count
+        );
 
         // === VALIDATION PHASE - Check all preconditions before making any changes ===
 
         if !self.cache.has_player_inventory(player_guid) {
-            tracing::error!("[INVENTORY] split_item FAILED: player not loaded {:?}", player_guid);
+            tracing::error!(
+                "[INVENTORY] split_item FAILED: player not loaded {:?}",
+                player_guid
+            );
             return SplitItemResult::PlayerNotLoaded;
         }
 
@@ -1107,15 +1235,25 @@ impl InventorySystem {
         // Check for zero count (invalid)
         if count == 0 {
             tracing::warn!("[INVENTORY] split_item FAILED: count is zero");
-            self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_COULDNT_SPLIT_ITEMS);
+            self.send_inventory_error(
+                player_guid,
+                crate::shared::messages::EQUIP_ERR_COULDNT_SPLIT_ITEMS,
+            );
             return SplitItemResult::InvalidCount;
         }
 
         let src_item_guid = match self.cache.get_item_at(player_guid, src_bag, src_slot) {
             Some(g) => g,
             None => {
-                tracing::warn!("[INVENTORY] split_item FAILED: item not found at src bag={} slot={}", src_bag, src_slot);
-                self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND);
+                tracing::warn!(
+                    "[INVENTORY] split_item FAILED: item not found at src bag={} slot={}",
+                    src_bag,
+                    src_slot
+                );
+                self.send_inventory_error(
+                    player_guid,
+                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                );
                 return SplitItemResult::SourceNotFound;
             }
         };
@@ -1123,8 +1261,14 @@ impl InventorySystem {
         let src_item = match self.cache.get_item(player_guid, src_item_guid) {
             Some(i) => i,
             None => {
-                tracing::warn!("[INVENTORY] split_item FAILED: item object not found for {:?}", src_item_guid);
-                self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND);
+                tracing::warn!(
+                    "[INVENTORY] split_item FAILED: item object not found for {:?}",
+                    src_item_guid
+                );
+                self.send_inventory_error(
+                    player_guid,
+                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                );
                 return SplitItemResult::SourceNotFound;
             }
         };
@@ -1142,7 +1286,11 @@ impl InventorySystem {
 
         // Validate count - cannot split all items (must leave at least 1)
         if count >= src_info.count {
-            tracing::warn!("[INVENTORY] split_item FAILED: count {} >= src_count {}", count, src_info.count);
+            tracing::warn!(
+                "[INVENTORY] split_item FAILED: count {} >= src_count {}",
+                count,
+                src_info.count
+            );
             self.send_inventory_error_with_items(
                 player_guid,
                 crate::shared::messages::EQUIP_ERR_TRIED_TO_SPLIT_MORE_THAN_COUNT,
@@ -1156,8 +1304,14 @@ impl InventorySystem {
         let max_stack = match self.item_mgr.get_template(src_info.entry_id) {
             Some(t) => t.stackable,
             None => {
-                tracing::error!("[INVENTORY] split_item FAILED: template not found for item {}", src_info.entry_id);
-                self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND);
+                tracing::error!(
+                    "[INVENTORY] split_item FAILED: template not found for item {}",
+                    src_info.entry_id
+                );
+                self.send_inventory_error(
+                    player_guid,
+                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                );
                 return SplitItemResult::InvalidCount;
             }
         };
@@ -1171,7 +1325,10 @@ impl InventorySystem {
             let dst_item = match self.cache.get_item(player_guid, dst_guid) {
                 Some(i) => i,
                 None => {
-                    tracing::error!("[INVENTORY] split_item FAILED: destination item {:?} not found in cache", dst_guid);
+                    tracing::error!(
+                        "[INVENTORY] split_item FAILED: destination item {:?} not found in cache",
+                        dst_guid
+                    );
                     self.send_inventory_error_with_items(
                         player_guid,
                         crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
@@ -1195,8 +1352,11 @@ impl InventorySystem {
 
             // Check if items are the same type
             if dst_info.entry_id != src_info.entry_id {
-                tracing::warn!("[INVENTORY] split_item FAILED: different item types - src={}, dst={}", 
-                    src_info.entry_id, dst_info.entry_id);
+                tracing::warn!(
+                    "[INVENTORY] split_item FAILED: different item types - src={}, dst={}",
+                    src_info.entry_id,
+                    dst_info.entry_id
+                );
                 self.send_inventory_error_with_items(
                     player_guid,
                     crate::shared::messages::EQUIP_ERR_ITEM_CANT_STACK,
@@ -1222,9 +1382,15 @@ impl InventorySystem {
             let new_src_count = src_info.count - count;
             let new_dst_count = dst_info.count + count;
 
-            tracing::debug!("[INVENTORY] split_item MERGE: src {:?} {}→{}, dst {:?} {}→{}",
-                src_item_guid, src_info.count, new_src_count,
-                dst_guid, dst_info.count, new_dst_count);
+            tracing::debug!(
+                "[INVENTORY] split_item MERGE: src {:?} {}→{}, dst {:?} {}→{}",
+                src_item_guid,
+                src_info.count,
+                new_src_count,
+                dst_guid,
+                dst_info.count,
+                new_dst_count
+            );
 
             // Update database first
             if let Err(e) = self
@@ -1270,8 +1436,14 @@ impl InventorySystem {
             let new_item_guid_raw = match self.repository.get_next_item_guid().await {
                 Ok(g) => g,
                 Err(e) => {
-                    tracing::error!("[INVENTORY] split_item FAILED: could not get next item GUID: {}", e);
-                    self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR);
+                    tracing::error!(
+                        "[INVENTORY] split_item FAILED: could not get next item GUID: {}",
+                        e
+                    );
+                    self.send_inventory_error(
+                        player_guid,
+                        crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                    );
                     return SplitItemResult::DatabaseError(e.to_string());
                 }
             };
@@ -1308,17 +1480,31 @@ impl InventorySystem {
                 .update_item_count(src_item_guid.low(), new_src_count)
                 .await
             {
-                tracing::error!("[INVENTORY] split_item FAILED: could not update source count: {}", e);
-                self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR);
+                tracing::error!(
+                    "[INVENTORY] split_item FAILED: could not update source count: {}",
+                    e
+                );
+                self.send_inventory_error(
+                    player_guid,
+                    crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                );
                 return SplitItemResult::DatabaseError(e.to_string());
             }
 
             // Create new item
             if let Err(e) = self.repository.create_item(&item_row, &slot_row).await {
-                tracing::error!("[INVENTORY] split_item FAILED: could not create new item: {}", e);
+                tracing::error!(
+                    "[INVENTORY] split_item FAILED: could not create new item: {}",
+                    e
+                );
                 // Attempt rollback - restore source count
-                let _ = self.repository.update_item_count(src_item_guid.low(), src_info.count);
-                self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR);
+                let _ = self
+                    .repository
+                    .update_item_count(src_item_guid.low(), src_info.count);
+                self.send_inventory_error(
+                    player_guid,
+                    crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                );
                 return SplitItemResult::DatabaseError(e.to_string());
             }
 
@@ -1355,11 +1541,15 @@ impl InventorySystem {
             // and the new item with its count
             self.send_item_update(player_guid, src_item_guid);
             self.send_item_update(player_guid, new_item_guid);
-            
+
             // Also send slot update for the destination to ensure proper slot assignment
             self.send_slot_update(player_guid, dst_bag, dst_slot, Some(new_item_guid));
 
-            tracing::debug!("[INVENTORY] split_item SUCCESS: created new item {:?} with count {}", new_item_guid, count);
+            tracing::debug!(
+                "[INVENTORY] split_item SUCCESS: created new item {:?} with count {}",
+                new_item_guid,
+                count
+            );
             SplitItemResult::Success {
                 source_guid: src_item_guid,
                 new_item_guid,
@@ -1653,12 +1843,8 @@ impl InventorySystem {
                 Some(slot) => slot,
                 None => {
                     let oldest_slot = Self::BUYBACK_START_SLOT;
-                    self.cache.set_item_at(
-                        player_guid,
-                        INVENTORY_SLOT_BAG_0,
-                        oldest_slot,
-                        None,
-                    );
+                    self.cache
+                        .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, oldest_slot, None);
                     oldest_slot
                 }
             }
@@ -1666,8 +1852,12 @@ impl InventorySystem {
 
         self.cache
             .set_item_at(player_guid, item_bag, item_slot, None);
-        self.cache
-            .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, buyback_slot, Some(item_guid));
+        self.cache.set_item_at(
+            player_guid,
+            INVENTORY_SLOT_BAG_0,
+            buyback_slot,
+            Some(item_guid),
+        );
 
         self.send_slot_update(player_guid, item_bag, item_slot, None);
         self.send_slot_update(
@@ -1698,11 +1888,14 @@ impl InventorySystem {
             return BuybackResult::SlotNotFound;
         }
 
-        let item_guid = match self.cache.get_item_at(player_guid, INVENTORY_SLOT_BAG_0, buyback_slot)
-        {
-            Some(g) => g,
-            None => return BuybackResult::SlotNotFound,
-        };
+        let item_guid =
+            match self
+                .cache
+                .get_item_at(player_guid, INVENTORY_SLOT_BAG_0, buyback_slot)
+            {
+                Some(g) => g,
+                None => return BuybackResult::SlotNotFound,
+            };
 
         let item = match self.cache.get_item(player_guid, item_guid) {
             Some(i) => i,
@@ -1716,14 +1909,10 @@ impl InventorySystem {
 
         self.cache
             .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, buyback_slot, None);
-        self.cache.set_item_at(player_guid, dst_bag, dst_slot, Some(item_guid));
+        self.cache
+            .set_item_at(player_guid, dst_bag, dst_slot, Some(item_guid));
 
-        self.send_slot_update(
-            player_guid,
-            INVENTORY_SLOT_BAG_0,
-            buyback_slot,
-            None,
-        );
+        self.send_slot_update(player_guid, INVENTORY_SLOT_BAG_0, buyback_slot, None);
         self.send_slot_update(player_guid, dst_bag, dst_slot, Some(item_guid));
 
         let item_read = item.read();
@@ -1749,7 +1938,10 @@ impl InventorySystem {
     ) -> EquipResult {
         tracing::debug!(
             "[EQUIP_ITEM] Player={:?} attempting to equip from bag={} slot={} to equip_slot={}",
-            player_guid, src_bag, src_slot, equip_slot
+            player_guid,
+            src_bag,
+            src_slot,
+            equip_slot
         );
 
         // === VALIDATION PHASE - Check all preconditions before making any changes ===
@@ -1763,9 +1955,13 @@ impl InventorySystem {
         if equip_slot >= EquipmentSlotEnum::END as u8 {
             tracing::warn!(
                 "[EQUIP_ITEM] FAILED: Invalid equip_slot={} (max={})",
-                equip_slot, EquipmentSlotEnum::END as u8
+                equip_slot,
+                EquipmentSlotEnum::END as u8
             );
-            self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_ITEM_DOESNT_GO_TO_SLOT);
+            self.send_inventory_error(
+                player_guid,
+                crate::shared::messages::EQUIP_ERR_ITEM_DOESNT_GO_TO_SLOT,
+            );
             return EquipResult::WrongSlot;
         }
 
@@ -1775,9 +1971,13 @@ impl InventorySystem {
             None => {
                 tracing::warn!(
                     "[EQUIP_ITEM] FAILED: No item at src bag={} slot={}",
-                    src_bag, src_slot
+                    src_bag,
+                    src_slot
                 );
-                self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND);
+                self.send_inventory_error(
+                    player_guid,
+                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                );
                 return EquipResult::ItemNotFound;
             }
         };
@@ -1790,14 +1990,19 @@ impl InventorySystem {
                     "[EQUIP_ITEM] FAILED: Item object not found for {:?}",
                     src_item_guid
                 );
-                self.send_inventory_error(player_guid, crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND);
+                self.send_inventory_error(
+                    player_guid,
+                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                );
                 return EquipResult::ItemNotFound;
             }
         };
 
         let (item_entry, item_name) = {
             let item_read = src_item.read();
-            let name = self.item_mgr.get_template(item_read.entry)
+            let name = self
+                .item_mgr
+                .get_template(item_read.entry)
                 .map(|t| t.name.clone())
                 .unwrap_or_else(|| "Unknown".to_string());
             (item_read.entry, name)
@@ -1805,7 +2010,11 @@ impl InventorySystem {
 
         tracing::debug!(
             "[EQUIP_ITEM] Equipping item_entry={} ({}) from bag={} slot={} to equip_slot={}",
-            item_entry, item_name, src_bag, src_slot, equip_slot
+            item_entry,
+            item_name,
+            src_bag,
+            src_slot,
+            equip_slot
         );
 
         // Check if there's an item already equipped in the target slot
@@ -1817,7 +2026,7 @@ impl InventorySystem {
 
         if let Some(existing_guid) = existing_item_guid {
             // There's already an item equipped - need to swap
-            
+
             // Find a free slot for the unequipped item
             let free_slot = match self.cache.find_free_inventory_slot(player_guid) {
                 Some((bag, slot)) => (bag, slot),
@@ -1875,7 +2084,10 @@ impl InventorySystem {
                 )
                 .await
             {
-                tracing::error!("[EQUIP_ITEM] FAILED: Database error moving unequipped item: {}", e);
+                tracing::error!(
+                    "[EQUIP_ITEM] FAILED: Database error moving unequipped item: {}",
+                    e
+                );
                 // Note: At this point, the swap already happened, so we have a partial state
                 // This is a serious error that requires manual intervention or rollback logic
                 self.send_inventory_error_with_items(
@@ -1912,7 +2124,8 @@ impl InventorySystem {
 
             tracing::debug!(
                 "[EQUIP_ITEM] SUCCESS: Swapped items, unequipped item moved to bag={} slot={}",
-                free_slot.0, free_slot.1
+                free_slot.0,
+                free_slot.1
             );
 
             EquipResult::Swapped {
@@ -1921,10 +2134,11 @@ impl InventorySystem {
             }
         } else {
             // No item equipped - simple equip
-            
+
             tracing::debug!(
                 "[EQUIP_ITEM] Simple equip: item {:?} to equip_slot={}",
-                src_item_guid, equip_slot
+                src_item_guid,
+                equip_slot
             );
 
             // Move item to equipment slot in database
@@ -2126,19 +2340,29 @@ impl InventorySystem {
     pub fn send_money_update(&self, player_guid: ObjectGuid, money: u32) {
         use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 
-        tracing::debug!("[INVENTORY] send_money_update: player={:?} money={}", player_guid, money);
-        
+        tracing::debug!(
+            "[INVENTORY] send_money_update: player={:?} money={}",
+            player_guid,
+            money
+        );
+
         // Use from_raw to preserve the full GUID (high + low parts)
         // This ensures the client receives the correct player GUID format
         let world_guid = WorldObjectGuid::from_raw(player_guid.raw());
-        tracing::debug!("[INVENTORY] send_money_update: converted world_guid={:?}", world_guid);
+        tracing::debug!(
+            "[INVENTORY] send_money_update: converted world_guid={:?}",
+            world_guid
+        );
 
         let money_msg = SmsgPlayerMoneyUpdate {
             guid: world_guid,
             money,
         };
 
-        tracing::debug!("[INVENTORY] send_money_update: sending packet to player {:?}", player_guid);
+        tracing::debug!(
+            "[INVENTORY] send_money_update: sending packet to player {:?}",
+            player_guid
+        );
         self.broadcast_mgr
             .send_msg_to_player(player_guid, money_msg);
         tracing::debug!("[INVENTORY] send_money_update: packet sent");
@@ -2148,10 +2372,10 @@ impl InventorySystem {
     /// Sets PLAYER_VISIBLE_ITEM_1_0 + slot*12 = item_entry for character model rendering
     /// Also sets UNIT_VIRTUAL_ITEM_SLOT_DISPLAY for weapon slots
     pub fn populate_visible_items(&self, player_guid: ObjectGuid, fields: &mut Vec<(u32, u32)>) {
+        use crate::world::core::common::HighGuid;
         use crate::world::game::common::update_fields::{
             visible_item_entry_field, UNIT_VIRTUAL_ITEM_SLOT_DISPLAY,
         };
-        use crate::world::core::common::HighGuid;
 
         const EQUIPMENT_SLOT_MAINHAND: u8 = 15;
         const EQUIPMENT_SLOT_OFFHAND: u8 = 16;
@@ -2264,12 +2488,20 @@ impl InventorySystem {
         for (player_guid, ops) in all_ops {
             total_ops += ops.len();
             if let Err(e) = self.flush_player_ops(player_guid, ops).await {
-                tracing::error!("[INVENTORY] Failed to flush ops for player {:?}: {}", player_guid, e);
+                tracing::error!(
+                    "[INVENTORY] Failed to flush ops for player {:?}: {}",
+                    player_guid,
+                    e
+                );
             }
         }
 
         if total_ops > 0 {
-            tracing::debug!("[INVENTORY] Flushed {} ops for {} players", total_ops, player_count);
+            tracing::debug!(
+                "[INVENTORY] Flushed {} ops for {} players",
+                total_ops,
+                player_count
+            );
         }
 
         Ok(())
@@ -2295,7 +2527,10 @@ impl InventorySystem {
 
         for op in ops {
             match op {
-                PendingInventoryOp::UpdateMoney { player_guid, amount } => {
+                PendingInventoryOp::UpdateMoney {
+                    player_guid,
+                    amount,
+                } => {
                     final_money = Some((player_guid, amount));
                 }
                 PendingInventoryOp::UpdateCount { item_guid, count } => {
@@ -2312,18 +2547,39 @@ impl InventorySystem {
                 PendingInventoryOp::CreateItem { item, slot } => {
                     creates.push((item, slot));
                 }
-                PendingInventoryOp::MoveItem { player_guid, item_guid, bag, slot } => {
+                PendingInventoryOp::MoveItem {
+                    player_guid,
+                    item_guid,
+                    bag,
+                    slot,
+                } => {
                     // Later move overrides earlier move for same item
                     moves.insert(item_guid, (player_guid, bag, slot));
                 }
-                PendingInventoryOp::SwapItems { player_guid, item1_guid, bag1, slot1, item2_guid, bag2, slot2 } => {
+                PendingInventoryOp::SwapItems {
+                    player_guid,
+                    item1_guid,
+                    bag1,
+                    slot1,
+                    item2_guid,
+                    bag2,
+                    slot2,
+                } => {
                     // Swaps are harder to collapse, just queue them
                     // But remove any pending moves for these items since the swap supersedes them
                     moves.remove(&item1_guid);
                     if let Some(g) = item2_guid {
                         moves.remove(&g);
                     }
-                    swaps.push((player_guid, item1_guid, bag1, slot1, item2_guid, bag2, slot2));
+                    swaps.push((
+                        player_guid,
+                        item1_guid,
+                        bag1,
+                        slot1,
+                        item2_guid,
+                        bag2,
+                        slot2,
+                    ));
                 }
             }
         }
@@ -2339,16 +2595,30 @@ impl InventorySystem {
 
         // 2. Swaps
         for (player_guid, item1_guid, bag1, slot1, item2_guid, bag2, slot2) in &swaps {
-            if let Err(e) = self.repository.swap_items(
-                *player_guid, *item1_guid, *bag1, *slot1, *item2_guid, *bag2, *slot2,
-            ).await {
+            if let Err(e) = self
+                .repository
+                .swap_items(
+                    *player_guid,
+                    *item1_guid,
+                    *bag1,
+                    *slot1,
+                    *item2_guid,
+                    *bag2,
+                    *slot2,
+                )
+                .await
+            {
                 tracing::error!("[FLUSH] Failed to swap items: {}", e);
             }
         }
 
         // 3. Moves
         for (item_guid, (player_guid, bag, slot)) in &moves {
-            if let Err(e) = self.repository.move_item(*player_guid, *item_guid, *bag, *slot).await {
+            if let Err(e) = self
+                .repository
+                .move_item(*player_guid, *item_guid, *bag, *slot)
+                .await
+            {
                 tracing::error!("[FLUSH] Failed to move item {}: {}", item_guid, e);
             }
         }
@@ -2370,8 +2640,16 @@ impl InventorySystem {
 
         // 6. Money update (just the final value)
         if let Some((player_guid, amount)) = final_money {
-            if let Err(e) = self.repository.update_player_money(player_guid, amount).await {
-                tracing::error!("[FLUSH] Failed to update money for player {}: {}", player_guid, e);
+            if let Err(e) = self
+                .repository
+                .update_player_money(player_guid, amount)
+                .await
+            {
+                tracing::error!(
+                    "[FLUSH] Failed to update money for player {}: {}",
+                    player_guid,
+                    e
+                );
             }
         }
 
@@ -2402,9 +2680,17 @@ impl InventorySystem {
     pub async fn on_player_logout(&self, guid: ObjectGuid) -> Result<()> {
         let ops = self.cache.take_pending_ops(guid);
         if !ops.is_empty() {
-            tracing::debug!("[INVENTORY] Flushing {} pending ops for player {:?} on logout", ops.len(), guid);
+            tracing::debug!(
+                "[INVENTORY] Flushing {} pending ops for player {:?} on logout",
+                ops.len(),
+                guid
+            );
             if let Err(e) = self.flush_player_ops(guid, ops).await {
-                tracing::error!("[INVENTORY] Failed to flush ops on logout for player {:?}: {}", guid, e);
+                tracing::error!(
+                    "[INVENTORY] Failed to flush ops on logout for player {:?}: {}",
+                    guid,
+                    e
+                );
             }
         }
         self.unload_player_inventory(guid);

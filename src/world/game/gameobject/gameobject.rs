@@ -89,7 +89,11 @@ impl GameObject {
             position,
             map_id,
             display_id: template.display_id,
-            scale: if template.size > 0.0 { template.size } else { 1.0 },
+            scale: if template.size > 0.0 {
+                template.size
+            } else {
+                1.0
+            },
             rotation,
             go_type: GameObjectType::from(template.go_type),
             flags: template.flags,

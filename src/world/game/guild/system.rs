@@ -14,8 +14,8 @@ use crate::shared::messages::guild::{
 };
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
-use crate::world::game::player::PlayerManager;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
+use crate::world::game::player::PlayerManager;
 use crate::world::game::ItemManager;
 
 use super::types::*;
@@ -65,7 +65,6 @@ impl GuildSystem {
         let next_id = max_id.unwrap_or(0) + 1;
         self.next_guild_id.store(next_id, Ordering::Relaxed);
 
-
         Ok(())
     }
 
@@ -89,11 +88,16 @@ impl GuildSystem {
 
     /// Get pending guild invite for a player
     pub fn get_pending_invite(&self, player_guid: ObjectGuid) -> Option<(ObjectGuid, u32, String)> {
-        self.pending_invites.get(&player_guid).map(|r| r.value().clone())
+        self.pending_invites
+            .get(&player_guid)
+            .map(|r| r.value().clone())
     }
 
     /// Remove and return pending guild invite for a player
-    pub fn remove_pending_invite(&self, player_guid: ObjectGuid) -> Option<(ObjectGuid, u32, String)> {
+    pub fn remove_pending_invite(
+        &self,
+        player_guid: ObjectGuid,
+    ) -> Option<(ObjectGuid, u32, String)> {
         self.pending_invites.remove(&player_guid).map(|(_, v)| v)
     }
 
@@ -173,9 +177,9 @@ impl GuildSystem {
             rank: 0,
             public_note: String::new(),
             officer_note: String::new(),
-            level: 1,   // TODO: Load from character data
-            class: 0,   // TODO: Load from character data
-            zone: 0, // TODO: Load from character data
+            level: 1,      // TODO: Load from character data
+            class: 0,      // TODO: Load from character data
+            zone: 0,       // TODO: Load from character data
             account_id: 0, // TODO: Load from character data
             logout_time: 0,
         };
@@ -190,11 +194,13 @@ impl GuildSystem {
             members: HashMap::new(),
             ranks: ranks.clone(),
         };
-        guild_data.members.insert(leader_guid, leader_member.clone());
+        guild_data
+            .members
+            .insert(leader_guid, leader_member.clone());
 
         // 9. Convert to database types
         use crate::shared::database::characters::models::guild::{
-            GuildRow, GuildMemberRow, GuildRankRow, GuildBankTabRow,
+            GuildBankTabRow, GuildMemberRow, GuildRankRow, GuildRow,
         };
 
         let guild_row = GuildRow {
@@ -281,13 +287,17 @@ impl GuildSystem {
         guild_name: String,
     ) -> Result<()> {
         // Get inviter's guild membership
-        let inviter_state = self.get_player_guild(inviter_guid)
+        let inviter_state = self
+            .get_player_guild(inviter_guid)
             .ok_or_else(|| anyhow!("Inviter not in guild"))?;
-        let guild_id = inviter_state.guild_id
+        let guild_id = inviter_state
+            .guild_id
             .ok_or_else(|| anyhow!("Inviter not in guild"))?;
 
         // Find invitee by name (online players only)
-        let invitee_guid = self.player_mgr.find_player_by_name(&invitee_name)
+        let invitee_guid = self
+            .player_mgr
+            .find_player_by_name(&invitee_name)
             .ok_or_else(|| anyhow!("Player '{}' not found or offline", invitee_name))?;
 
         // Check invitee not already in guild
@@ -296,21 +306,22 @@ impl GuildSystem {
         }
 
         // Get inviter name for the invite packet
-        let inviter_name = self.player_mgr.get_player_name(inviter_guid)
+        let inviter_name = self
+            .player_mgr
+            .get_player_name(inviter_guid)
             .unwrap_or_else(|| "Unknown".to_string());
 
         // Store pending invite
-        self.pending_invites.insert(
-            invitee_guid,
-            (inviter_guid, guild_id, guild_name.clone()),
-        );
+        self.pending_invites
+            .insert(invitee_guid, (inviter_guid, guild_id, guild_name.clone()));
 
         // Send invite packet to invitee
         let invite_packet = SmsgGuildInvite {
             inviter_name: &inviter_name,
             guild_name: &guild_name,
         };
-        self.broadcast_mgr.send_msg_to_player(invitee_guid, invite_packet);
+        self.broadcast_mgr
+            .send_msg_to_player(invitee_guid, invite_packet);
 
         tracing::info!(
             "Guild invite sent by {} to {} for guild '{}'",
@@ -330,7 +341,8 @@ impl GuildSystem {
         player_name: String,
     ) -> Result<()> {
         // Validate guild exists
-        let guild = self.get_guild(guild_id)
+        let guild = self
+            .get_guild(guild_id)
             .ok_or_else(|| anyhow!("Guild not found"))?;
 
         // Add to database (rank 5 is default lowest rank)
@@ -381,9 +393,11 @@ impl GuildSystem {
         target_name: String,
     ) -> Result<()> {
         // Get remover's guild and rank
-        let remover_state = self.get_player_guild(remover_guid)
+        let remover_state = self
+            .get_player_guild(remover_guid)
             .ok_or_else(|| anyhow!("Remover not in guild"))?;
-        let guild_id = remover_state.guild_id
+        let guild_id = remover_state
+            .guild_id
             .ok_or_else(|| anyhow!("Remover not in guild"))?;
 
         // Check permissions (rank 2 or higher = officer+)
@@ -392,7 +406,8 @@ impl GuildSystem {
         }
 
         // Get target's guild state
-        let target_state = self.get_player_guild(target_guid)
+        let target_state = self
+            .get_player_guild(target_guid)
             .ok_or_else(|| anyhow!("Target not in guild"))?;
 
         // Validate same guild
@@ -406,7 +421,9 @@ impl GuildSystem {
         }
 
         // Remove from database
-        self.repository.remove_member(guild_id, target_guid.counter()).await?;
+        self.repository
+            .remove_member(guild_id, target_guid.counter())
+            .await?;
 
         // Update cache
         self.members.remove(&target_guid);
@@ -426,7 +443,11 @@ impl GuildSystem {
             }
         }
 
-        tracing::info!("Player {} removed from guild by {:?}", target_name, remover_guid);
+        tracing::info!(
+            "Player {} removed from guild by {:?}",
+            target_name,
+            remover_guid
+        );
 
         Ok(())
     }
@@ -434,10 +455,10 @@ impl GuildSystem {
     /// Disband a guild (leader only)
     pub async fn disband_guild(&self, disbander_guid: ObjectGuid) -> Result<()> {
         // Get disbander's guild
-        let state = self.get_player_guild(disbander_guid)
+        let state = self
+            .get_player_guild(disbander_guid)
             .ok_or_else(|| anyhow!("Not in guild"))?;
-        let guild_id = state.guild_id
-            .ok_or_else(|| anyhow!("Not in guild"))?;
+        let guild_id = state.guild_id.ok_or_else(|| anyhow!("Not in guild"))?;
 
         // Verify is guild leader (rank 0)
         if state.rank_id != 0 {
@@ -445,7 +466,9 @@ impl GuildSystem {
         }
 
         // Get all member GUIDs for notifications
-        let member_guids: Vec<ObjectGuid> = self.members.iter()
+        let member_guids: Vec<ObjectGuid> = self
+            .members
+            .iter()
             .filter(|entry| entry.value().guild_id == Some(guild_id))
             .map(|entry| *entry.key())
             .collect();
@@ -465,7 +488,8 @@ impl GuildSystem {
             &[""],
         );
         for guid in member_guids {
-            self.broadcast_mgr.send_msg_to_player(guid, disband_event.clone());
+            self.broadcast_mgr
+                .send_msg_to_player(guid, disband_event.clone());
         }
 
         tracing::info!("Guild {} disbanded by {:?}", guild_id, disbander_guid);
@@ -493,9 +517,7 @@ impl GuildSystem {
     ) -> Result<()> {
         // Send decline notification
         // Use empty string since player_name needs to be 'static for send_msg_to_player
-        let msg = SmsgGuildDecline {
-            player_name: "",
-        };
+        let msg = SmsgGuildDecline { player_name: "" };
         self.broadcast_mgr.send_msg_to_player(inviter_guid, msg);
 
         tracing::debug!(
@@ -557,7 +579,11 @@ impl GuildSystem {
     }
 
     /// Send guild roster to a specific player
-    pub fn send_guild_roster_to_player(&self, player_guid: ObjectGuid, guild_id: u32) -> Result<()> {
+    pub fn send_guild_roster_to_player(
+        &self,
+        player_guid: ObjectGuid,
+        guild_id: u32,
+    ) -> Result<()> {
         let Some(guild_data) = self.guilds.get(&guild_id) else {
             return Ok(());
         };
@@ -576,7 +602,8 @@ impl GuildSystem {
 
         let packet = self.build_guild_roster_packet(&guild_data);
         for member_guid in guild_data.members.keys() {
-            self.broadcast_mgr.send_to_player(*member_guid, packet.clone());
+            self.broadcast_mgr
+                .send_to_player(*member_guid, packet.clone());
         }
 
         Ok(())
@@ -718,7 +745,6 @@ impl GuildSystem {
         Ok(())
     }
 
-
     /// Change guild leader
     pub async fn change_leader(
         &self,
@@ -781,13 +807,8 @@ impl GuildSystem {
         );
 
         // Send event
-        self.log_guild_event(
-            guild_id,
-            6,
-            new_leader_guid,
-            &new_leader_name,
-        )
-        .await?;
+        self.log_guild_event(guild_id, 6, new_leader_guid, &new_leader_name)
+            .await?;
 
         // Send roster
         self.send_guild_roster(guild_id)?;
@@ -1148,9 +1169,7 @@ impl GuildSystem {
 
     /// Check if guild name exists (for GM commands)
     pub fn has_guild_name(&self, name: &str) -> bool {
-        self.guilds
-            .iter()
-            .any(|entry| entry.info.name == name)
+        self.guilds.iter().any(|entry| entry.info.name == name)
     }
 
     /// Add member directly to guild (GM command - bypasses invite system)

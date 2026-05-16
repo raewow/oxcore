@@ -1,7 +1,7 @@
-mod types;
 mod manager;
 mod system;
+mod types;
 
-pub use types::{Loot, LootItem, LootTableEntry};
 pub use manager::LootManager;
 pub use system::LootSystem;
+pub use types::{Loot, LootItem, LootTableEntry};

@@ -294,35 +294,37 @@ impl TicketSystem {
         };
 
         self.broadcast_mgr
-            .send_msg_to_player(player_guid, SmsgGmTicketSystemStatus { status })
-            ;
+            .send_msg_to_player(player_guid, SmsgGmTicketSystemStatus { status });
     }
 
     pub fn send_create_response(&self, player_guid: ObjectGuid, result: GmTicketResponse) {
         use crate::shared::messages::ticket::SmsgGmTicketCreate;
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, SmsgGmTicketCreate {
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgGmTicketCreate {
                 result: result as u32,
-            })
-            ;
+            },
+        );
     }
 
     pub fn send_update_response(&self, player_guid: ObjectGuid, result: GmTicketResponse) {
         use crate::shared::messages::ticket::SmsgGmTicketUpdateText;
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, SmsgGmTicketUpdateText {
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgGmTicketUpdateText {
                 result: result as u32,
-            })
-            ;
+            },
+        );
     }
 
     pub fn send_delete_response(&self, player_guid: ObjectGuid, result: GmTicketResponse) {
         use crate::shared::messages::ticket::SmsgGmTicketDeleteTicket;
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, SmsgGmTicketDeleteTicket {
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgGmTicketDeleteTicket {
                 result: result as u32,
-            })
-            ;
+            },
+        );
     }
 
     // ========== Helper Methods ==========

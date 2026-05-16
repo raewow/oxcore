@@ -3,18 +3,20 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use crate::shared::messages::trade::{SmsgTradeStatusExtendedV2, SmsgTradeStatusV2, TradeSlotInfoV2};
+use crate::shared::messages::trade::{
+    SmsgTradeStatusExtendedV2, SmsgTradeStatusV2, TradeSlotInfoV2,
+};
 use crate::shared::protocol::{ObjectGuid, Position};
-use crate::world::game::trade::types::TradeStatus;
-use crate::world::game::player::PlayerManager;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::inventory::InventorySystem;
+use crate::world::game::player::PlayerManager;
+use crate::world::game::trade::types::TradeStatus;
 use crate::world::game::ItemManager;
 
 use super::cache::{ActiveTrade, TradeCache};
 use super::types::{
-    TradeData, TradeError, TradeState, BANK_SLOT_END, BANK_SLOT_START, MAX_MONEY,
-    TRADE_SLOT_COUNT, TRADE_SLOT_TRADED_COUNT,
+    TradeData, TradeError, TradeState, BANK_SLOT_END, BANK_SLOT_START, MAX_MONEY, TRADE_SLOT_COUNT,
+    TRADE_SLOT_TRADED_COUNT,
 };
 
 /// Trade System - manages player-to-player trading
@@ -556,20 +558,23 @@ impl TradeSystem {
         // Check item flags to ensure it can be traded
         if let Some(item) = self.inventory.cache().get_item(_player_guid, item_guid) {
             let item = item.read();
-            
+
             // Check if item is soulbound (BIND_ON_PICKUP)
-            if item.flags & 0x00000001 != 0 { // ITEM_FLAG_SOULBOUND
+            if item.flags & 0x00000001 != 0 {
+                // ITEM_FLAG_SOULBOUND
                 return Err(TradeError::ItemSoulbound);
             }
-            
+
             // Check if item is a quest item (ITEM_FLAG_QUEST)
-            if item.flags & 0x00000004 != 0 { // ITEM_FLAG_QUEST
+            if item.flags & 0x00000004 != 0 {
+                // ITEM_FLAG_QUEST
                 return Err(TradeError::ItemNotTradeable);
             }
-            
+
             // Check if item is conjured (ITEM_FLAG_CONJURED)
             // Conjured items disappear when logged out, so shouldn't be traded
-            if item.flags & 0x00000002 != 0 { // ITEM_FLAG_CONJURED
+            if item.flags & 0x00000002 != 0 {
+                // ITEM_FLAG_CONJURED
                 return Err(TradeError::ItemNotTradeable);
             }
         }
@@ -635,7 +640,12 @@ impl TradeSystem {
 
         // Execute gold transfer with proper error handling
         if initiator_gold > 0 {
-            tracing::info!("[TRADE] Transferring {} gold from {:?} to {:?}", initiator_gold, initiator_guid, target_guid);
+            tracing::info!(
+                "[TRADE] Transferring {} gold from {:?} to {:?}",
+                initiator_gold,
+                initiator_guid,
+                target_guid
+            );
             // Remove gold from initiator
             match self.inventory.remove_gold(initiator_guid, initiator_gold) {
                 crate::world::game::inventory::GoldResult::Success { .. } => {}
@@ -647,10 +657,7 @@ impl TradeSystem {
                     return Err(TradeError::GoldChangedDuringTrade);
                 }
                 crate::world::game::inventory::GoldResult::DatabaseError(e) => {
-                    tracing::error!(
-                        "[TRADE] DB error removing initiator gold: {}",
-                        e
-                    );
+                    tracing::error!("[TRADE] DB error removing initiator gold: {}", e);
                     return Err(TradeError::Internal(e));
                 }
                 _ => {
@@ -662,7 +669,12 @@ impl TradeSystem {
             // Add gold to target
             match self.inventory.add_gold(target_guid, initiator_gold) {
                 crate::world::game::inventory::GoldResult::Success { .. } => {
-                    tracing::info!("[TRADE] Successfully transferred {} gold from {:?} to {:?}", initiator_gold, initiator_guid, target_guid);
+                    tracing::info!(
+                        "[TRADE] Successfully transferred {} gold from {:?} to {:?}",
+                        initiator_gold,
+                        initiator_guid,
+                        target_guid
+                    );
                 }
                 crate::world::game::inventory::GoldResult::CapExceeded => {
                     tracing::error!(
@@ -674,10 +686,7 @@ impl TradeSystem {
                     return Err(TradeError::GoldCapExceeded);
                 }
                 crate::world::game::inventory::GoldResult::DatabaseError(e) => {
-                    tracing::error!(
-                        "[TRADE] DB error adding target gold: {}, rolling back",
-                        e
-                    );
+                    tracing::error!("[TRADE] DB error adding target gold: {}, rolling back", e);
                     // CRITICAL: Rollback - return gold to initiator
                     let _ = self.inventory.add_gold(initiator_guid, initiator_gold);
                     return Err(TradeError::Internal(e));
@@ -691,7 +700,12 @@ impl TradeSystem {
         }
 
         if target_gold > 0 {
-            tracing::info!("[TRADE] Transferring {} gold from {:?} to {:?}", target_gold, target_guid, initiator_guid);
+            tracing::info!(
+                "[TRADE] Transferring {} gold from {:?} to {:?}",
+                target_gold,
+                target_guid,
+                initiator_guid
+            );
             // Remove gold from target
             match self.inventory.remove_gold(target_guid, target_gold) {
                 crate::world::game::inventory::GoldResult::Success { .. } => {}
@@ -708,10 +722,7 @@ impl TradeSystem {
                     return Err(TradeError::GoldChangedDuringTrade);
                 }
                 crate::world::game::inventory::GoldResult::DatabaseError(e) => {
-                    tracing::error!(
-                        "[TRADE] DB error removing target gold: {}, rolling back",
-                        e
-                    );
+                    tracing::error!("[TRADE] DB error removing target gold: {}, rolling back", e);
                     // Rollback initiator's gold if it was transferred
                     if initiator_gold > 0 {
                         let _ = self.inventory.remove_gold(target_guid, initiator_gold);
@@ -771,15 +782,25 @@ impl TradeSystem {
         }
 
         // Execute item transfer - initiator's items to target
-        tracing::info!("[TRADE] Transferring {} items from {:?} to {:?}", initiator_items.len(), initiator_guid, target_guid);
+        tracing::info!(
+            "[TRADE] Transferring {} items from {:?} to {:?}",
+            initiator_items.len(),
+            initiator_guid,
+            target_guid
+        );
         let mut transferred_items: Vec<(ObjectGuid, ObjectGuid)> = Vec::new(); // (from_player, item_guid) pairs
-        
+
         for (_slot, item_guid) in &initiator_items {
-            tracing::info!("[TRADE] Transferring item {:?} from {:?} to {:?}", item_guid, initiator_guid, target_guid);
+            tracing::info!(
+                "[TRADE] Transferring item {:?} from {:?} to {:?}",
+                item_guid,
+                initiator_guid,
+                target_guid
+            );
             match self
                 .inventory
-                .transfer_item(initiator_guid, target_guid, *item_guid).await
-
+                .transfer_item(initiator_guid, target_guid, *item_guid)
+                .await
             {
                 crate::world::game::inventory::TransferItemResult::Success { .. } => {
                     tracing::info!(
@@ -796,7 +817,13 @@ impl TradeSystem {
                         transferred_items.len()
                     );
                     // CRITICAL: Rollback all already-transferred items
-                    self.rollback_trade(&transferred_items, initiator_gold, target_gold, initiator_guid, target_guid);
+                    self.rollback_trade(
+                        &transferred_items,
+                        initiator_gold,
+                        target_gold,
+                        initiator_guid,
+                        target_guid,
+                    );
                     return Err(TradeError::TargetInventoryFull);
                 }
                 crate::world::game::inventory::TransferItemResult::ItemNotFound => {
@@ -804,30 +831,58 @@ impl TradeSystem {
                         "[TRADE] Item {:?} disappeared during trade execution, rolling back",
                         item_guid
                     );
-                    self.rollback_trade(&transferred_items, initiator_gold, target_gold, initiator_guid, target_guid);
+                    self.rollback_trade(
+                        &transferred_items,
+                        initiator_gold,
+                        target_gold,
+                        initiator_guid,
+                        target_guid,
+                    );
                     return Err(TradeError::ItemDisappeared);
                 }
                 crate::world::game::inventory::TransferItemResult::DatabaseError(e) => {
                     tracing::error!("[TRADE] DB error transferring item: {}, rolling back", e);
-                    self.rollback_trade(&transferred_items, initiator_gold, target_gold, initiator_guid, target_guid);
+                    self.rollback_trade(
+                        &transferred_items,
+                        initiator_gold,
+                        target_gold,
+                        initiator_guid,
+                        target_guid,
+                    );
                     return Err(TradeError::Internal(e));
                 }
                 _ => {
                     tracing::error!("[TRADE] Failed to transfer item, rolling back");
-                    self.rollback_trade(&transferred_items, initiator_gold, target_gold, initiator_guid, target_guid);
+                    self.rollback_trade(
+                        &transferred_items,
+                        initiator_gold,
+                        target_gold,
+                        initiator_guid,
+                        target_guid,
+                    );
                     return Err(TradeError::Internal("Item transfer failed".into()));
                 }
             }
         }
 
         // Execute item transfer - target's items to initiator
-        tracing::info!("[TRADE] Transferring {} items from {:?} to {:?}", target_items.len(), target_guid, initiator_guid);
+        tracing::info!(
+            "[TRADE] Transferring {} items from {:?} to {:?}",
+            target_items.len(),
+            target_guid,
+            initiator_guid
+        );
         for (_slot, item_guid) in &target_items {
-            tracing::info!("[TRADE] Transferring item {:?} from {:?} to {:?}", item_guid, target_guid, initiator_guid);
+            tracing::info!(
+                "[TRADE] Transferring item {:?} from {:?} to {:?}",
+                item_guid,
+                target_guid,
+                initiator_guid
+            );
             match self
                 .inventory
-                .transfer_item(target_guid, initiator_guid, *item_guid).await
-
+                .transfer_item(target_guid, initiator_guid, *item_guid)
+                .await
             {
                 crate::world::game::inventory::TransferItemResult::Success { .. } => {
                     tracing::info!(
@@ -843,7 +898,13 @@ impl TradeSystem {
                         "[TRADE] Initiator inventory full during item transfer, rolling back {} transferred items",
                         transferred_items.len()
                     );
-                    self.rollback_trade(&transferred_items, initiator_gold, target_gold, initiator_guid, target_guid);
+                    self.rollback_trade(
+                        &transferred_items,
+                        initiator_gold,
+                        target_gold,
+                        initiator_guid,
+                        target_guid,
+                    );
                     return Err(TradeError::PlayerInventoryFull);
                 }
                 crate::world::game::inventory::TransferItemResult::ItemNotFound => {
@@ -851,17 +912,35 @@ impl TradeSystem {
                         "[TRADE] Item {:?} disappeared during trade execution, rolling back",
                         item_guid
                     );
-                    self.rollback_trade(&transferred_items, initiator_gold, target_gold, initiator_guid, target_guid);
+                    self.rollback_trade(
+                        &transferred_items,
+                        initiator_gold,
+                        target_gold,
+                        initiator_guid,
+                        target_guid,
+                    );
                     return Err(TradeError::ItemDisappeared);
                 }
                 crate::world::game::inventory::TransferItemResult::DatabaseError(e) => {
                     tracing::error!("[TRADE] DB error transferring item: {}, rolling back", e);
-                    self.rollback_trade(&transferred_items, initiator_gold, target_gold, initiator_guid, target_guid);
+                    self.rollback_trade(
+                        &transferred_items,
+                        initiator_gold,
+                        target_gold,
+                        initiator_guid,
+                        target_guid,
+                    );
                     return Err(TradeError::Internal(e));
                 }
                 _ => {
                     tracing::error!("[TRADE] Failed to transfer item, rolling back");
-                    self.rollback_trade(&transferred_items, initiator_gold, target_gold, initiator_guid, target_guid);
+                    self.rollback_trade(
+                        &transferred_items,
+                        initiator_gold,
+                        target_gold,
+                        initiator_guid,
+                        target_guid,
+                    );
                     return Err(TradeError::Internal("Item transfer failed".into()));
                 }
             }
@@ -917,7 +996,11 @@ impl TradeSystem {
         let initiator_receiving = target_items.len() as u32;
         let target_receiving = initiator_items.len() as u32;
 
-        if initiator_receiving > 0 && !self.inventory.has_free_slots(initiator_guid, initiator_receiving) {
+        if initiator_receiving > 0
+            && !self
+                .inventory
+                .has_free_slots(initiator_guid, initiator_receiving)
+        {
             return Err(TradeError::PlayerInventoryFull);
         }
         if target_receiving > 0 && !self.inventory.has_free_slots(target_guid, target_receiving) {
@@ -929,25 +1012,29 @@ impl TradeSystem {
         for (_, item_guid) in initiator_items {
             if let Some(item) = self.inventory.cache().get_item(initiator_guid, *item_guid) {
                 let item = item.read();
-                if item.flags & 0x00000001 != 0 { // ITEM_FLAG_SOULBOUND
+                if item.flags & 0x00000001 != 0 {
+                    // ITEM_FLAG_SOULBOUND
                     return Err(TradeError::ItemSoulbound);
                 }
-                if item.flags & 0x00000004 != 0 { // ITEM_FLAG_QUEST
+                if item.flags & 0x00000004 != 0 {
+                    // ITEM_FLAG_QUEST
                     return Err(TradeError::ItemNotTradeable);
                 }
             } else {
                 return Err(TradeError::ItemDisappeared);
             }
         }
-        
+
         // Check all items from target
         for (_, item_guid) in target_items {
             if let Some(item) = self.inventory.cache().get_item(target_guid, *item_guid) {
                 let item = item.read();
-                if item.flags & 0x00000001 != 0 { // ITEM_FLAG_SOULBOUND
+                if item.flags & 0x00000001 != 0 {
+                    // ITEM_FLAG_SOULBOUND
                     return Err(TradeError::ItemSoulbound);
                 }
-                if item.flags & 0x00000004 != 0 { // ITEM_FLAG_QUEST
+                if item.flags & 0x00000004 != 0 {
+                    // ITEM_FLAG_QUEST
                     return Err(TradeError::ItemNotTradeable);
                 }
             } else {
@@ -968,47 +1055,74 @@ impl TradeSystem {
         initiator_guid: ObjectGuid,
         target_guid: ObjectGuid,
     ) {
-        tracing::error!("[TRADE] Rolling back trade: {} items transferred back", transferred_items.len());
+        tracing::error!(
+            "[TRADE] Rolling back trade: {} items transferred back",
+            transferred_items.len()
+        );
 
         // Rollback gold transfers
         if initiator_gold > 0 {
-            tracing::info!("[TRADE] Rolling back {} gold from initiator transfer", initiator_gold);
+            tracing::info!(
+                "[TRADE] Rolling back {} gold from initiator transfer",
+                initiator_gold
+            );
             // Remove gold from target (who received it)
             match self.inventory.remove_gold(target_guid, initiator_gold) {
                 crate::world::game::inventory::GoldResult::Success { .. } => {
                     // Return gold to initiator
                     match self.inventory.add_gold(initiator_guid, initiator_gold) {
                         crate::world::game::inventory::GoldResult::Success { .. } => {
-                            tracing::info!("[TRADE] Successfully rolled back {} gold to initiator", initiator_gold);
+                            tracing::info!(
+                                "[TRADE] Successfully rolled back {} gold to initiator",
+                                initiator_gold
+                            );
                         }
                         _ => {
-                            tracing::error!("[TRADE] CRITICAL: Failed to return {} gold to initiator!", initiator_gold);
+                            tracing::error!(
+                                "[TRADE] CRITICAL: Failed to return {} gold to initiator!",
+                                initiator_gold
+                            );
                         }
                     }
                 }
                 _ => {
-                    tracing::error!("[TRADE] CRITICAL: Failed to remove {} gold from target for rollback!", initiator_gold);
+                    tracing::error!(
+                        "[TRADE] CRITICAL: Failed to remove {} gold from target for rollback!",
+                        initiator_gold
+                    );
                 }
             }
         }
 
         if target_gold > 0 {
-            tracing::info!("[TRADE] Rolling back {} gold from target transfer", target_gold);
+            tracing::info!(
+                "[TRADE] Rolling back {} gold from target transfer",
+                target_gold
+            );
             // Remove gold from initiator (who received it)
             match self.inventory.remove_gold(initiator_guid, target_gold) {
                 crate::world::game::inventory::GoldResult::Success { .. } => {
                     // Return gold to target
                     match self.inventory.add_gold(target_guid, target_gold) {
                         crate::world::game::inventory::GoldResult::Success { .. } => {
-                            tracing::info!("[TRADE] Successfully rolled back {} gold to target", target_gold);
+                            tracing::info!(
+                                "[TRADE] Successfully rolled back {} gold to target",
+                                target_gold
+                            );
                         }
                         _ => {
-                            tracing::error!("[TRADE] CRITICAL: Failed to return {} gold to target!", target_gold);
+                            tracing::error!(
+                                "[TRADE] CRITICAL: Failed to return {} gold to target!",
+                                target_gold
+                            );
                         }
                     }
                 }
                 _ => {
-                    tracing::error!("[TRADE] CRITICAL: Failed to remove {} gold from initiator for rollback!", target_gold);
+                    tracing::error!(
+                        "[TRADE] CRITICAL: Failed to remove {} gold from initiator for rollback!",
+                        target_gold
+                    );
                 }
             }
         }
@@ -1021,18 +1135,34 @@ impl TradeSystem {
                 initiator_guid
             };
 
-            tracing::info!("[TRADE] Rolling back item {:?} from {:?} back to {:?}", item_guid, to_player, from_player);
-            
-            match self.inventory.transfer_item(to_player, *from_player, *item_guid).await {
+            tracing::info!(
+                "[TRADE] Rolling back item {:?} from {:?} back to {:?}",
+                item_guid,
+                to_player,
+                from_player
+            );
+
+            match self
+                .inventory
+                .transfer_item(to_player, *from_player, *item_guid)
+                .await
+            {
                 crate::world::game::inventory::TransferItemResult::Success { .. } => {
                     tracing::info!("[TRADE] Successfully rolled back item {:?}", item_guid);
                 }
                 crate::world::game::inventory::TransferItemResult::TargetInventoryFull => {
                     // This shouldn't happen since we just removed the item from the source
-                    tracing::error!("[TRADE] CRITICAL: Target inventory full during rollback of item {:?}!", item_guid);
+                    tracing::error!(
+                        "[TRADE] CRITICAL: Target inventory full during rollback of item {:?}!",
+                        item_guid
+                    );
                 }
                 e => {
-                    tracing::error!("[TRADE] CRITICAL: Failed to rollback item {:?}: {:?}", item_guid, e);
+                    tracing::error!(
+                        "[TRADE] CRITICAL: Failed to rollback item {:?}: {:?}",
+                        item_guid,
+                        e
+                    );
                 }
             }
         }
@@ -1095,11 +1225,8 @@ impl TradeSystem {
                         .unwrap_or(item.entry); // Fallback to entry if template not found
 
                     // Get first enchantment (permanent enchant)
-                    let permanent_enchant = item
-                        .enchantments
-                        .first()
-                        .map(|(id, _, _)| *id)
-                        .unwrap_or(0);
+                    let permanent_enchant =
+                        item.enchantments.first().map(|(id, _, _)| *id).unwrap_or(0);
 
                     // Find first non-zero spell charge
                     let charges = item
@@ -1121,7 +1248,7 @@ impl TradeSystem {
                         charges,
                         suffix_factor: 0, // Suffix factor not implemented yet
                         random_property_id: item.random_property_id,
-                        lock_id: 0,      // Lock ID not used in vanilla
+                        lock_id: 0, // Lock ID not used in vanilla
                         max_durability: item.max_durability,
                         durability: item.durability,
                     });
@@ -1149,7 +1276,6 @@ impl TradeSystem {
 
 impl TradeSystem {
     pub async fn init(&self) -> Result<()> {
-
         Ok(())
     }
 
@@ -1188,4 +1314,3 @@ impl TradeSystem {
         Ok(())
     }
 }
-

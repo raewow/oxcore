@@ -2,7 +2,9 @@
 //!
 //! Handles spell learning, unlearning, auto-learning on level up, and spellbook management.
 
-use crate::shared::messages::spells::{InitialSpellCooldown, SmsgInitialSpells, SmsgLearnedSpell, SmsgRemovedSpell};
+use crate::shared::messages::spells::{
+    InitialSpellCooldown, SmsgInitialSpells, SmsgLearnedSpell, SmsgRemovedSpell,
+};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
@@ -35,19 +37,21 @@ pub async fn learn_spell(
 ) -> Result<bool> {
     let mut newly_learned = false;
 
-    world.systems.player.manager().with_player_mut(player_guid, |player| {
-        if player.spells.learn_spell(spell_id) {
-            newly_learned = true;
-            tracing::info!("Player {} learned spell {}", player.name, spell_id);
-        }
-    });
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            if player.spells.learn_spell(spell_id) {
+                newly_learned = true;
+                tracing::info!("Player {} learned spell {}", player.name, spell_id);
+            }
+        });
 
     if newly_learned {
         // Send SMSG_LEARNED_SPELL to client
         let msg = SmsgLearnedSpell { spell_id };
-        broadcast_mgr
-            .send_msg_to_player(player_guid, msg.to_world_packet())
-            ;
+        broadcast_mgr.send_msg_to_player(player_guid, msg.to_world_packet());
 
         // TODO: Check if this spell teaches a dependent spell (e.g., learning a rank teaches the rank)
         // Check SkillLineAbility.dbc for forward references
@@ -68,19 +72,24 @@ pub async fn unlearn_spell(
     world: &World,
     broadcast_mgr: &Arc<dyn BroadcastManagerTrait>,
 ) -> Result<()> {
-    let was_removed = world.systems.player.manager().with_player_mut(player_guid, |player| {
-        player.spells.unlearn_spell(spell_id)
-    }).unwrap_or(false);
+    let was_removed = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| player.spells.unlearn_spell(spell_id))
+        .unwrap_or(false);
 
     if was_removed {
         // Send SMSG_REMOVED_SPELL to client
         let msg = SmsgRemovedSpell { spell_id };
-        broadcast_mgr
-            .send_msg_to_player(player_guid, msg.to_world_packet())
-            ;
+        broadcast_mgr.send_msg_to_player(player_guid, msg.to_world_packet());
 
         // Remove any auras from this spell
-        world.systems.auras.remove_spell_auras(player_guid, spell_id, world).await?;
+        world
+            .systems
+            .auras
+            .remove_spell_auras(player_guid, spell_id, world)
+            .await?;
     }
 
     Ok(())
@@ -100,31 +109,33 @@ pub fn send_initial_spells(
     let mut spellbook: Vec<u32> = Vec::new();
     let mut cooldowns: Vec<InitialSpellCooldown> = Vec::new();
 
-    world.systems.player.manager().with_player_mut(player_guid, |player| {
-        spellbook = player.spells.spellbook.clone();
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            spellbook = player.spells.spellbook.clone();
 
-        // Collect active cooldowns for the initial spells packet
-        for (&spell_id, &cd_end) in &player.spells.cooldowns {
-            if cd_end > now {
-                cooldowns.push(InitialSpellCooldown {
-                    spell_id,
-                    item_id: 0, // TODO: Look up from DBC if spell is from item
-                    category: 0, // TODO: Look up from DBC
-                    spell_cooldown_ms: (cd_end - now) as u32,
-                    category_cooldown_ms: 0, // TODO: Look up from DBC
-                });
+            // Collect active cooldowns for the initial spells packet
+            for (&spell_id, &cd_end) in &player.spells.cooldowns {
+                if cd_end > now {
+                    cooldowns.push(InitialSpellCooldown {
+                        spell_id,
+                        item_id: 0,  // TODO: Look up from DBC if spell is from item
+                        category: 0, // TODO: Look up from DBC
+                        spell_cooldown_ms: (cd_end - now) as u32,
+                        category_cooldown_ms: 0, // TODO: Look up from DBC
+                    });
+                }
             }
-        }
-    });
+        });
 
     let msg = SmsgInitialSpells {
         cast_count: 0,
         spells: spellbook,
         cooldowns,
     };
-    broadcast_mgr
-        .send_msg_to_player(player_guid, msg.to_world_packet())
-        ;
+    broadcast_mgr.send_msg_to_player(player_guid, msg.to_world_packet());
 
     Ok(())
 }
@@ -161,10 +172,7 @@ pub async fn auto_learn_for_level(
 
 /// Load learned spells from database on login.
 #[allow(dead_code)]
-pub fn load_from_db(
-    _player_guid: ObjectGuid,
-    _world: &World,
-) -> Result<()> {
+pub fn load_from_db(_player_guid: ObjectGuid, _world: &World) -> Result<()> {
     // TODO: Query character_spells table
     // SELECT spell_id FROM character_spells WHERE guid = ?
     //
@@ -180,10 +188,7 @@ pub fn load_from_db(
 
 /// Save learned spells to database on logout.
 #[allow(dead_code)]
-pub fn save_to_db(
-    _player_guid: ObjectGuid,
-    _world: &World,
-) -> Result<()> {
+pub fn save_to_db(_player_guid: ObjectGuid, _world: &World) -> Result<()> {
     // TODO: Implement database persistence
     // Only save if needs_save is true
     // DELETE FROM character_spells WHERE guid = ?

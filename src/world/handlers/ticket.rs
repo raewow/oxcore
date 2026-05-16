@@ -68,15 +68,21 @@ pub async fn handle_gmticket_create(
     let result = world
         .systems
         .ticket
-        .create_ticket(player_guid, player_name, ticket_type, map_id, (x, y, z), message)
+        .create_ticket(
+            player_guid,
+            player_name,
+            ticket_type,
+            map_id,
+            (x, y, z),
+            message,
+        )
         .await?;
 
     // Send response
     world
         .systems
         .ticket
-        .send_create_response(player_guid, result)
-        ;
+        .send_create_response(player_guid, result);
     Ok(())
 }
 
@@ -105,8 +111,7 @@ pub async fn handle_gmticket_updatetext(
     world
         .systems
         .ticket
-        .send_update_response(player_guid, result)
-        ;
+        .send_update_response(player_guid, result);
     Ok(())
 }
 
@@ -127,8 +132,7 @@ pub async fn handle_gmticket_deleteticket(
     world
         .systems
         .ticket
-        .send_delete_response(player_guid, result)
-        ;
+        .send_delete_response(player_guid, result);
     Ok(())
 }
 

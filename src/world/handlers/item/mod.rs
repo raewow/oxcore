@@ -5,8 +5,8 @@ use crate::shared::messages::SmsgReadItemFailed;
 use crate::shared::messages::SmsgReadItemOk;
 use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
-use crate::world::World;
 use crate::world::game::inventory::types::EquipResult;
+use crate::world::World;
 
 pub async fn handle_use_item(
     session: &crate::world::core::session::WorldSession,
@@ -14,9 +14,15 @@ pub async fn handle_use_item(
     world: &World,
 ) -> Result<()> {
     // Read packet data
-    let bag = packet.read_u8().ok_or_else(|| anyhow!("Failed to read bag"))?;
-    let slot = packet.read_u8().ok_or_else(|| anyhow!("Failed to read slot"))?;
-    let spell_slot = packet.read_u8().ok_or_else(|| anyhow!("Failed to read spell slot"))?;
+    let bag = packet
+        .read_u8()
+        .ok_or_else(|| anyhow!("Failed to read bag"))?;
+    let slot = packet
+        .read_u8()
+        .ok_or_else(|| anyhow!("Failed to read slot"))?;
+    let spell_slot = packet
+        .read_u8()
+        .ok_or_else(|| anyhow!("Failed to read spell slot"))?;
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
@@ -42,13 +48,49 @@ pub async fn handle_use_item(
         .ok_or_else(|| anyhow!("Item not in cache"))?;
 
     // Get item template
-    let template = world.systems.item_mgr.get_template(item_entry)
+    let template = world
+        .systems
+        .item_mgr
+        .get_template(item_entry)
         .ok_or_else(|| anyhow!("Item template {} not found", item_entry))?;
 
     // Validate spell slot (0-4)
     if spell_slot >= 5 {
         warn!("Invalid spell slot {} for item {}", spell_slot, item_entry);
         return Ok(());
+    }
+
+    if template.start_quest != 0 {
+        let Some(start_quest) = world
+            .systems
+            .quest
+            .manager
+            .get_quest_template(template.start_quest)
+        else {
+            warn!(
+                "Item {} references missing start quest {}",
+                item_entry, template.start_quest
+            );
+            return Ok(());
+        };
+
+        if world
+            .systems
+            .quest
+            .can_take_quest(player_guid, &start_quest, world)
+        {
+            info!(
+                "CMSG_USE_ITEM: player {:?} using item {} to start quest {}",
+                player_guid, item_entry, template.start_quest
+            );
+            world.systems.quest.send_quest_details(
+                player_guid,
+                item_guid,
+                template.start_quest,
+                world,
+            )?;
+            return Ok(());
+        }
     }
 
     // Get spell ID from template
@@ -61,7 +103,10 @@ pub async fn handle_use_item(
     // Check spell trigger type (0 = On Use)
     let spell_trigger = template.spell_trigger[spell_slot as usize];
     if spell_trigger != 0 {
-        warn!("Item spell trigger {} not supported (only On Use=0)", spell_trigger);
+        warn!(
+            "Item spell trigger {} not supported (only On Use=0)",
+            spell_trigger
+        );
         return Ok(());
     }
 
@@ -73,13 +118,17 @@ pub async fn handle_use_item(
     // Cast the spell from the item. Passes item_guid so SMSG_SPELL_START and
     // SMSG_SPELL_GO write the item GUID as the first packed GUID (per MaNGOS
     // protocol), preventing the client from sending CMSG_DESTROYITEM.
-    world.systems.spells.cast_spell_from_item(
-        player_guid,
-        spell_id,
-        Some(player_guid), // Self-target
-        item_guid,
-        world,
-    ).await?;
+    world
+        .systems
+        .spells
+        .cast_spell_from_item(
+            player_guid,
+            spell_id,
+            Some(player_guid), // Self-target
+            item_guid,
+            world,
+        )
+        .await?;
 
     // Handle spell charges per MaNGOS TakeCastItem logic:
     // - spell_charges < 0: expendable (item destroyed when charges hit 0)
@@ -88,16 +137,29 @@ pub async fn handle_use_item(
     let template_charges = template.spell_charges[spell_slot as usize];
     info!(
         "CMSG_USE_ITEM: item {} spell_slot={} template_charges={} — charge path {}",
-        item_entry, spell_slot, template_charges,
-        if template_charges != 0 { "ACTIVE" } else { "skipped (0)" }
+        item_entry,
+        spell_slot,
+        template_charges,
+        if template_charges != 0 {
+            "ACTIVE"
+        } else {
+            "skipped (0)"
+        }
     );
     if template_charges != 0 {
         use crate::world::game::inventory::types::ChargeResult;
-        let result = world.systems.inventory.consume_charge(player_guid, item_guid, spell_slot).await;
+        let result = world
+            .systems
+            .inventory
+            .consume_charge(player_guid, item_guid, spell_slot)
+            .await;
         match result {
             ChargeResult::Success { remaining } if remaining == 0 && template_charges < 0 => {
                 // Expendable item (negative charges) exhausted — destroy it
-                let _ = world.systems.inventory.remove_item(player_guid, item_guid, 1);
+                let _ = world
+                    .systems
+                    .inventory
+                    .remove_item(player_guid, item_guid, 1);
             }
             ChargeResult::Success { .. } => {}
             ChargeResult::NoCharges => {
@@ -196,11 +258,11 @@ pub async fn handle_swap_item(
         return Ok(());
     }
 
-    let result = world
-        .systems
-        .inventory
-        .move_item(player_guid, src_bag, src_slot, dst_bag, dst_slot)
-        ;
+    let result =
+        world
+            .systems
+            .inventory
+            .move_item(player_guid, src_bag, src_slot, dst_bag, dst_slot);
 
     match result {
         crate::world::game::inventory::types::MoveItemResult::Moved => {
@@ -210,7 +272,10 @@ pub async fn handle_swap_item(
             tracing::debug!("[CMSG_SWAP_ITEM] Items swapped successfully");
         }
         crate::world::game::inventory::types::MoveItemResult::Merged { source_removed } => {
-            tracing::debug!("[CMSG_SWAP_ITEM] Items merged, source_removed={}", source_removed);
+            tracing::debug!(
+                "[CMSG_SWAP_ITEM] Items merged, source_removed={}",
+                source_removed
+            );
         }
         crate::world::game::inventory::types::MoveItemResult::InvalidSource => {
             tracing::warn!("[CMSG_SWAP_ITEM] Invalid source slot");
@@ -252,24 +317,20 @@ pub async fn handle_swap_inv_item(
     };
 
     const INVENTORY_SLOT_BAG_0: u8 = 255;
-    
+
     // Check if source and destination are the same
     if src_slot == dst_slot {
         tracing::debug!("[CMSG_SWAP_INV_ITEM] Ignoring swap of same slot");
         return Ok(());
     }
-    
-    let result = world
-        .systems
-        .inventory
-        .move_item(
-            player_guid,
-            INVENTORY_SLOT_BAG_0,
-            src_slot,
-            INVENTORY_SLOT_BAG_0,
-            dst_slot,
-        )
-        ;
+
+    let result = world.systems.inventory.move_item(
+        player_guid,
+        INVENTORY_SLOT_BAG_0,
+        src_slot,
+        INVENTORY_SLOT_BAG_0,
+        dst_slot,
+    );
 
     match result {
         crate::world::game::inventory::types::MoveItemResult::Moved => {
@@ -279,7 +340,10 @@ pub async fn handle_swap_inv_item(
             tracing::debug!("[CMSG_SWAP_INV_ITEM] Items swapped successfully");
         }
         crate::world::game::inventory::types::MoveItemResult::Merged { source_removed } => {
-            tracing::debug!("[CMSG_SWAP_INV_ITEM] Items merged, source_removed={}", source_removed);
+            tracing::debug!(
+                "[CMSG_SWAP_INV_ITEM] Items merged, source_removed={}",
+                source_removed
+            );
         }
         crate::world::game::inventory::types::MoveItemResult::InvalidSource => {
             tracing::warn!("[CMSG_SWAP_INV_ITEM] Invalid source slot");
@@ -339,25 +403,35 @@ pub async fn handle_split_item(
         return Ok(());
     }
 
-    let result = world
-        .systems
-        .inventory
-        .split_item(
-            player_guid,
-            src_bag,
-            src_slot,
-            dst_bag,
-            dst_slot,
-            count as u32,
-        )
-        ;
+    let result = world.systems.inventory.split_item(
+        player_guid,
+        src_bag,
+        src_slot,
+        dst_bag,
+        dst_slot,
+        count as u32,
+    );
 
     match result.await {
-        crate::world::game::inventory::types::SplitItemResult::Success { source_guid, new_item_guid } => {
-            tracing::debug!("[CMSG_SPLIT_ITEM] Item split successfully: {:?} -> {:?}", source_guid, new_item_guid);
+        crate::world::game::inventory::types::SplitItemResult::Success {
+            source_guid,
+            new_item_guid,
+        } => {
+            tracing::debug!(
+                "[CMSG_SPLIT_ITEM] Item split successfully: {:?} -> {:?}",
+                source_guid,
+                new_item_guid
+            );
         }
-        crate::world::game::inventory::types::SplitItemResult::MergedToExisting { source_guid, dest_guid } => {
-            tracing::debug!("[CMSG_SPLIT_ITEM] Items merged: {:?} into {:?}", source_guid, dest_guid);
+        crate::world::game::inventory::types::SplitItemResult::MergedToExisting {
+            source_guid,
+            dest_guid,
+        } => {
+            tracing::debug!(
+                "[CMSG_SPLIT_ITEM] Items merged: {:?} into {:?}",
+                source_guid,
+                dest_guid
+            );
         }
         crate::world::game::inventory::types::SplitItemResult::InvalidCount => {
             tracing::warn!("[CMSG_SPLIT_ITEM] Invalid count");
@@ -407,19 +481,25 @@ pub async fn handle_autoequip_item_slot(
     let (src_bag, src_slot) = find_item_location(player_guid, item_guid, &world.systems.inventory);
 
     if let (Some(src_bag), Some(src_slot)) = (src_bag, src_slot) {
-        let result = world
-            .systems
-            .inventory
-            .equip_item(player_guid, src_bag, src_slot, equip_slot, 1, 1, 1)
-            ;
+        let result =
+            world
+                .systems
+                .inventory
+                .equip_item(player_guid, src_bag, src_slot, equip_slot, 1, 1, 1);
 
         match result.await {
             crate::world::game::inventory::types::EquipResult::Equipped => {
                 tracing::debug!("[CMSG_AUTOEQUIP_ITEM_SLOT] Item equipped successfully");
             }
-            crate::world::game::inventory::types::EquipResult::Swapped { unequipped_to_bag, unequipped_to_slot } => {
-                tracing::debug!("[CMSG_AUTOEQUIP_ITEM_SLOT] Items swapped, unequipped to bag={} slot={}", 
-                    unequipped_to_bag, unequipped_to_slot);
+            crate::world::game::inventory::types::EquipResult::Swapped {
+                unequipped_to_bag,
+                unequipped_to_slot,
+            } => {
+                tracing::debug!(
+                    "[CMSG_AUTOEQUIP_ITEM_SLOT] Items swapped, unequipped to bag={} slot={}",
+                    unequipped_to_bag,
+                    unequipped_to_slot
+                );
             }
             crate::world::game::inventory::types::EquipResult::LevelTooLow => {
                 tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Level too low");
@@ -473,18 +553,28 @@ pub async fn handle_autoequip_item(
         None => return Ok(()),
     };
 
-    let src_item_guid = match world.systems.inventory.get_item_at(player_guid, src_bag, src_slot) {
+    let src_item_guid = match world
+        .systems
+        .inventory
+        .get_item_at(player_guid, src_bag, src_slot)
+    {
         Some(guid) => guid,
         None => {
             tracing::warn!(
                 "[CMSG_AUTOEQUIP_ITEM] Item not found at bag={} slot={}",
-                src_bag, src_slot
+                src_bag,
+                src_slot
             );
             return Ok(());
         }
     };
 
-    let src_item = match world.systems.inventory.cache().get_item(player_guid, src_item_guid) {
+    let src_item = match world
+        .systems
+        .inventory
+        .cache()
+        .get_item(player_guid, src_item_guid)
+    {
         Some(item) => item,
         None => {
             tracing::warn!(
@@ -513,16 +603,16 @@ pub async fn handle_autoequip_item(
 
     // Based on MaNGOS ItemPrototype::GetAllowedEquipSlots (Item.cpp)
     let equip_slot = match template.inventory_type {
-        1 => 0,  // INVTYPE_HEAD -> EQUIPMENT_SLOT_HEAD
-        2 => 1,  // INVTYPE_NECK -> EQUIPMENT_SLOT_NECK
-        3 => 2,  // INVTYPE_SHOULDERS -> EQUIPMENT_SLOT_SHOULDERS
-        4 => 3,  // INVTYPE_BODY -> EQUIPMENT_SLOT_BODY
-        5 => 4,  // INVTYPE_CHEST -> EQUIPMENT_SLOT_CHEST
-        6 => 4,  // INVTYPE_ROBE -> EQUIPMENT_SLOT_CHEST
-        7 => 5,  // INVTYPE_WAIST -> EQUIPMENT_SLOT_WAIST
-        8 => 6,  // INVTYPE_LEGS -> EQUIPMENT_SLOT_LEGS
-        9 => 7,  // INVTYPE_FEET -> EQUIPMENT_SLOT_FEET
-        10 => 8, // INVTYPE_WRISTS -> EQUIPMENT_SLOT_WRISTS
+        1 => 0,   // INVTYPE_HEAD -> EQUIPMENT_SLOT_HEAD
+        2 => 1,   // INVTYPE_NECK -> EQUIPMENT_SLOT_NECK
+        3 => 2,   // INVTYPE_SHOULDERS -> EQUIPMENT_SLOT_SHOULDERS
+        4 => 3,   // INVTYPE_BODY -> EQUIPMENT_SLOT_BODY
+        5 => 4,   // INVTYPE_CHEST -> EQUIPMENT_SLOT_CHEST
+        6 => 4,   // INVTYPE_ROBE -> EQUIPMENT_SLOT_CHEST
+        7 => 5,   // INVTYPE_WAIST -> EQUIPMENT_SLOT_WAIST
+        8 => 6,   // INVTYPE_LEGS -> EQUIPMENT_SLOT_LEGS
+        9 => 7,   // INVTYPE_FEET -> EQUIPMENT_SLOT_FEET
+        10 => 8,  // INVTYPE_WRISTS -> EQUIPMENT_SLOT_WRISTS
         11 => 10, // INVTYPE_FINGER -> EQUIPMENT_SLOT_FINGER1 (TODO: check if finger2 is empty)
         12 => 12, // INVTYPE_TRINKET -> EQUIPMENT_SLOT_TRINKET1 (TODO: check if trinket2 is empty)
         13 => 15, // INVTYPE_WEAPON -> EQUIPMENT_SLOT_MAINHAND
@@ -540,7 +630,8 @@ pub async fn handle_autoequip_item(
         _ => {
             tracing::warn!(
                 "[CMSG_AUTOEQUIP_ITEM] Item {} cannot be equipped (inventory_type={})",
-                entry_id, template.inventory_type
+                entry_id,
+                template.inventory_type
             );
             return Ok(());
         }
@@ -548,26 +639,36 @@ pub async fn handle_autoequip_item(
 
     tracing::info!(
         "[CMSG_AUTOEQUIP_ITEM] Item entry={} name='{}' inventory_type={} -> equip_slot={}",
-        entry_id, template.name, template.inventory_type, equip_slot
+        entry_id,
+        template.name,
+        template.inventory_type,
+        equip_slot
     );
 
-    let result = world
-        .systems
-        .inventory
-        .equip_item(player_guid, src_bag, src_slot, equip_slot, 1, 1, 1)
-        ;
+    let result =
+        world
+            .systems
+            .inventory
+            .equip_item(player_guid, src_bag, src_slot, equip_slot, 1, 1, 1);
 
     match result.await {
         crate::world::game::inventory::types::EquipResult::Equipped => {
             tracing::debug!(
                 "[CMSG_AUTOEQUIP_ITEM] Equipped item {:?} to slot {}",
-                src_item_guid, equip_slot
+                src_item_guid,
+                equip_slot
             );
         }
-        crate::world::game::inventory::types::EquipResult::Swapped { unequipped_to_bag, unequipped_to_slot } => {
+        crate::world::game::inventory::types::EquipResult::Swapped {
+            unequipped_to_bag,
+            unequipped_to_slot,
+        } => {
             tracing::debug!(
                 "[CMSG_AUTOEQUIP_ITEM] Swapped item {:?} to slot {}, unequipped to bag={} slot={}",
-                src_item_guid, equip_slot, unequipped_to_bag, unequipped_to_slot
+                src_item_guid,
+                equip_slot,
+                unequipped_to_bag,
+                unequipped_to_slot
             );
         }
         crate::world::game::inventory::types::EquipResult::LevelTooLow => {
@@ -666,8 +767,7 @@ pub async fn handle_autostore_bag_item(
     let _ = world
         .systems
         .inventory
-        .move_item(player_guid, src_bag, src_slot, dst_bag, 0)
-        ;
+        .move_item(player_guid, src_bag, src_slot, dst_bag, 0);
 
     Ok(())
 }
@@ -728,8 +828,7 @@ pub async fn handle_destroy_item(
         let _ = world
             .systems
             .inventory
-            .remove_item(player_guid, item_guid, destroy_count)
-            ;
+            .remove_item(player_guid, item_guid, destroy_count);
     }
 
     Ok(())

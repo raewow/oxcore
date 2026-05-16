@@ -110,9 +110,7 @@ pub fn apply_hit_outcome(base_damage: u32, outcome: &MeleeHitOutcome) -> u32 {
         MeleeHitOutcome::Block { blocked_amount } => base_damage.saturating_sub(*blocked_amount),
         MeleeHitOutcome::Hit => base_damage,
         MeleeHitOutcome::Crit => base_damage * 2,
-        MeleeHitOutcome::Glancing { reduction } => {
-            (base_damage as f32 * (1.0 - reduction)) as u32
-        }
+        MeleeHitOutcome::Glancing { reduction } => (base_damage as f32 * (1.0 - reduction)) as u32,
         MeleeHitOutcome::Crushing => (base_damage as f32 * 1.5) as u32,
     }
 }
@@ -174,8 +172,8 @@ pub fn hit_outcome_to_victim_state(outcome: &MeleeHitOutcome) -> u32 {
 
     match outcome {
         MeleeHitOutcome::Miss => VictimState::Intact as u32,
-        MeleeHitOutcome::Dodge => VictimState::Dodge as u32,   // 2
-        MeleeHitOutcome::Parry => VictimState::Parry as u32,   // 3
+        MeleeHitOutcome::Dodge => VictimState::Dodge as u32, // 2
+        MeleeHitOutcome::Parry => VictimState::Parry as u32, // 3
         MeleeHitOutcome::Block { .. } => VictimState::Block as u32, // 5
         MeleeHitOutcome::Hit => VictimState::Hit as u32,
         MeleeHitOutcome::Crit => VictimState::Hit as u32,

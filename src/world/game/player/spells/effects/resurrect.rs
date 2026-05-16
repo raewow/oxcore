@@ -20,15 +20,20 @@ pub async fn effect_resurrect(input: &EffectInput, world: &World) -> Result<Effe
     };
 
     // Only offer resurrection to dead players.
-    let is_dead = world.systems.player.manager().with_player(target_guid, |player| {
-        player.stats.health == 0
-            || matches!(
-                player.death.death_state,
-                crate::world::game::player::death::state::DeathState::Corpse
-                    | crate::world::game::player::death::state::DeathState::Dead
-                    | crate::world::game::player::death::state::DeathState::JustDied
-            )
-    }).unwrap_or(false);
+    let is_dead = world
+        .systems
+        .player
+        .manager()
+        .with_player(target_guid, |player| {
+            player.stats.health == 0
+                || matches!(
+                    player.death.death_state,
+                    crate::world::game::player::death::state::DeathState::Corpse
+                        | crate::world::game::player::death::state::DeathState::Dead
+                        | crate::world::game::player::death::state::DeathState::JustDied
+                )
+        })
+        .unwrap_or(false);
     if !is_dead {
         return Ok(EffectResult::empty());
     }
@@ -39,19 +44,33 @@ pub async fn effect_resurrect(input: &EffectInput, world: &World) -> Result<Effe
     let health_pct = input.base_value.max(1).min(100) as u32;
     let caster_guid = input.caster_guid;
 
-    let snapshot = world.systems.player.manager().with_player(caster_guid, |player| {
-        (player.name.clone(), player.map_id, player.instance_id, player.movement.position)
-    });
+    let snapshot = world
+        .systems
+        .player
+        .manager()
+        .with_player(caster_guid, |player| {
+            (
+                player.name.clone(),
+                player.map_id,
+                player.instance_id,
+                player.movement.position,
+            )
+        });
     let (caster_name, map_id, instance_id, location) = match snapshot {
         Some(v) => v,
         None => return Ok(EffectResult::empty()),
     };
 
-    let (target_health, target_mana) = world.systems.player.manager().with_player(target_guid, |player| {
-        let hp = (player.stats.max_health as u64 * health_pct as u64 / 100) as u32;
-        let mp = (player.power.max_mana() as u64 * health_pct as u64 / 100) as u32;
-        (hp.max(1), mp)
-    }).unwrap_or((1, 0));
+    let (target_health, target_mana) = world
+        .systems
+        .player
+        .manager()
+        .with_player(target_guid, |player| {
+            let hp = (player.stats.max_health as u64 * health_pct as u64 / 100) as u32;
+            let mp = (player.power.max_mana() as u64 * health_pct as u64 / 100) as u32;
+            (hp.max(1), mp)
+        })
+        .unwrap_or((1, 0));
 
     if let Err(e) = world.systems.death.offer_resurrection(
         target_guid,
@@ -75,29 +94,39 @@ pub async fn effect_resurrect(input: &EffectInput, world: &World) -> Result<Effe
 /// Self-resurrection (Soulstone, Reincarnation, etc.).
 pub async fn effect_self_resurrect(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = input.caster_guid;
-    
+
     // Check if caster is dead
-    let is_dead = world.systems.player.manager().with_player(target_guid, |player| {
-        player.stats.health == 0
-    }).unwrap_or(false);
-    
+    let is_dead = world
+        .systems
+        .player
+        .manager()
+        .with_player(target_guid, |player| player.stats.health == 0)
+        .unwrap_or(false);
+
     if !is_dead {
         return Ok(EffectResult::empty());
     }
-    
+
     // Resurrect at percentage of max health
     let health_pct = input.base_value.max(1).min(100) as u8;
-    
-    world.systems.player.manager().with_player_mut(target_guid, |player| {
-        let new_health = (player.stats.max_health as f32 * health_pct as f32 / 100.0) as u32;
-        player.stats.health = new_health.max(1);
-        
-        tracing::debug!(
-            "Self-resurrect: {} self-resurrected at {}% health ({}/{})",
-            player.name, health_pct, player.stats.health, player.stats.max_health
-        );
-    });
-    
+
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(target_guid, |player| {
+            let new_health = (player.stats.max_health as f32 * health_pct as f32 / 100.0) as u32;
+            player.stats.health = new_health.max(1);
+
+            tracing::debug!(
+                "Self-resurrect: {} self-resurrected at {}% health ({}/{})",
+                player.name,
+                health_pct,
+                player.stats.health,
+                player.stats.max_health
+            );
+        });
+
     Ok(EffectResult::empty())
 }
 

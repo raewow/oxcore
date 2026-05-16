@@ -97,15 +97,10 @@ impl LuaInstanceAI {
         go_entry: u32,
         go_guid: ObjectGuid,
     ) -> Vec<LuaAction> {
-        self.call_callback_with_extra(
-            lua,
-            "OnGameObjectCreate",
-            snapshot,
-            |_lua, table, input| {
-                let func: Function = table.get("OnGameObjectCreate")?;
-                func.call((table.clone(), input, go_entry, LuaGuid(go_guid)))
-            },
-        )
+        self.call_callback_with_extra(lua, "OnGameObjectCreate", snapshot, |_lua, table, input| {
+            let func: Function = table.get("OnGameObjectCreate")?;
+            func.call((table.clone(), input, go_entry, LuaGuid(go_guid)))
+        })
     }
 
     /// Call OnPlayerEnter callback.
@@ -279,7 +274,11 @@ impl InstanceScriptState {
     }
 
     /// Build an InstanceSnapshot from current state.
-    pub fn to_snapshot(&self, map_id: u32, instance_id: u32) -> super::super::snapshot::InstanceSnapshot {
+    pub fn to_snapshot(
+        &self,
+        map_id: u32,
+        instance_id: u32,
+    ) -> super::super::snapshot::InstanceSnapshot {
         super::super::snapshot::InstanceSnapshot {
             map_id,
             instance_id,

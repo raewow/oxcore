@@ -7,9 +7,8 @@ use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::game::player::spells::state::{
     SpellCastTargets, TARGET_FLAG_CORPSE, TARGET_FLAG_DEST_LOCATION, TARGET_FLAG_ITEM,
-    TARGET_FLAG_OBJECT, TARGET_FLAG_PVP_CORPSE, TARGET_FLAG_SELF,
-    TARGET_FLAG_SOURCE_LOCATION, TARGET_FLAG_STRING, TARGET_FLAG_TRADE_ITEM, TARGET_FLAG_UNIT,
-    TARGET_FLAG_UNK2,
+    TARGET_FLAG_OBJECT, TARGET_FLAG_PVP_CORPSE, TARGET_FLAG_SELF, TARGET_FLAG_SOURCE_LOCATION,
+    TARGET_FLAG_STRING, TARGET_FLAG_TRADE_ITEM, TARGET_FLAG_UNIT, TARGET_FLAG_UNK2,
 };
 use crate::world::World;
 use anyhow::Result;
@@ -32,7 +31,8 @@ fn parse_spell_cast_targets(
 ) -> Result<SpellCastTargets> {
     let target_flags = packet
         .read_u16()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read target_flags"))? as u32;
+        .ok_or_else(|| anyhow::anyhow!("Failed to read target_flags"))?
+        as u32;
 
     let mut targets = SpellCastTargets {
         target_flags,
@@ -100,7 +100,9 @@ pub async fn handle_cast_spell(
     world: &World,
 ) -> Result<()> {
     // Vanilla 1.12.x format: spell_id (u32), then SpellCastTargets
-    let spell_id = packet.read_u32().ok_or_else(|| anyhow::anyhow!("Failed to read spell_id"))?;
+    let spell_id = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read spell_id"))?;
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
@@ -113,13 +115,17 @@ pub async fn handle_cast_spell(
     // Extract unit target for the current pipeline (will pass full targets later)
     let target_guid = targets.unit_target();
 
-    world.systems.spells.cast_spell(
-        player_guid,
-        spell_id,
-        target_guid,
-        false, // not triggered
-        world,
-    ).await?;
+    world
+        .systems
+        .spells
+        .cast_spell(
+            player_guid,
+            spell_id,
+            target_guid,
+            false, // not triggered
+            world,
+        )
+        .await?;
 
     Ok(())
 }
@@ -142,7 +148,11 @@ pub async fn handle_cancel_cast(
     let spell_id = packet.read_u32().unwrap_or(0);
 
     if spell_id != 0 {
-        world.systems.spells.cancel_cast_by_spell_id(player_guid, spell_id, world).await?;
+        world
+            .systems
+            .spells
+            .cancel_cast_by_spell_id(player_guid, spell_id, world)
+            .await?;
     } else {
         world.systems.spells.cancel_cast(player_guid, world).await?;
     }
@@ -177,7 +187,9 @@ pub async fn handle_cancel_aura(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let spell_id = packet.read_u32().ok_or_else(|| anyhow::anyhow!("Failed to read spell_id"))?;
+    let spell_id = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read spell_id"))?;
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
@@ -193,7 +205,11 @@ pub async fn handle_cancel_aura(
         }
     }
 
-    world.systems.auras.cancel_aura(player_guid, spell_id, world).await?;
+    world
+        .systems
+        .auras
+        .cancel_aura(player_guid, spell_id, world)
+        .await?;
 
     Ok(())
 }

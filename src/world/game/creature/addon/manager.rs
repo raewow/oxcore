@@ -1,7 +1,7 @@
-use dashmap::DashMap;
-use std::sync::Arc;
 use super::addon::CreatureAddon;
 use super::repository::AddonData;
+use dashmap::DashMap;
+use std::sync::Arc;
 
 /// Manages creature addons - state only, no database
 pub struct AddonManager {

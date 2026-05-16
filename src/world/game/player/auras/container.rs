@@ -80,9 +80,8 @@ impl AuraContainer {
         if let Some(slot) = self.slot_map.remove(&key) {
             // Only fully free the slot if no other effects of the same spell still use it
             let spell_id = key.0;
-            let other_uses_slot = (0..3u8).any(|ei| {
-                ei != key.1 && self.slot_map.get(&(spell_id, ei)).copied() == Some(slot)
-            });
+            let other_uses_slot = (0..3u8)
+                .any(|ei| ei != key.1 && self.slot_map.get(&(spell_id, ei)).copied() == Some(slot));
             if !other_uses_slot {
                 self.reverse_slot_map.remove(&slot);
                 self.occupied_slots &= !(1u64 << slot);

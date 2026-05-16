@@ -8,12 +8,14 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tracing::info;
 
-use crate::shared::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
+use crate::shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
-use crate::world::game::common::update_fields::*;
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
+use crate::world::game::common::update_fields::*;
 use crate::world::game::player::PlayerManager;
 
 use super::base_stats::BaseStatsData;
@@ -126,16 +128,25 @@ impl StatsSystem {
 
             // 3. Health: base_health + stamina_bonus, modified by Health unit mods
             let stamina_bonus = derived::health_bonus_from_stamina(stamina);
-            let health_base_value =
-                player.stats.unit_mods.get_modifier_value(UnitMods::Health, UnitModifierType::BaseValue);
-            let health_base_pct =
-                player.stats.unit_mods.get_modifier_value(UnitMods::Health, UnitModifierType::BasePct);
-            let health_total_value =
-                player.stats.unit_mods.get_modifier_value(UnitMods::Health, UnitModifierType::TotalValue);
-            let health_total_pct =
-                player.stats.unit_mods.get_modifier_value(UnitMods::Health, UnitModifierType::TotalPct);
+            let health_base_value = player
+                .stats
+                .unit_mods
+                .get_modifier_value(UnitMods::Health, UnitModifierType::BaseValue);
+            let health_base_pct = player
+                .stats
+                .unit_mods
+                .get_modifier_value(UnitMods::Health, UnitModifierType::BasePct);
+            let health_total_value = player
+                .stats
+                .unit_mods
+                .get_modifier_value(UnitMods::Health, UnitModifierType::TotalValue);
+            let health_total_pct = player
+                .stats
+                .unit_mods
+                .get_modifier_value(UnitMods::Health, UnitModifierType::TotalPct);
 
-            let max_health = ((class_base.base_health as f32 + health_base_value) * health_base_pct
+            let max_health = ((class_base.base_health as f32 + health_base_value)
+                * health_base_pct
                 + health_total_value
                 + stamina_bonus)
                 * health_total_pct;
@@ -145,8 +156,7 @@ impl StatsSystem {
             // Preserve health ratio when max health changes
             if old_max_health > 0 && player.stats.health > 0 {
                 let ratio = player.stats.health as f32 / old_max_health as f32;
-                player.stats.health =
-                    (player.stats.max_health as f32 * ratio).max(1.0) as u32;
+                player.stats.health = (player.stats.max_health as f32 * ratio).max(1.0) as u32;
             }
             if player.stats.health > player.stats.max_health {
                 player.stats.health = player.stats.max_health;
@@ -157,14 +167,22 @@ impl StatsSystem {
             if power_type == 0 {
                 // Mana class
                 let int_bonus = derived::mana_bonus_from_intellect(intellect);
-                let mana_base_value =
-                    player.stats.unit_mods.get_modifier_value(UnitMods::Mana, UnitModifierType::BaseValue);
-                let mana_base_pct =
-                    player.stats.unit_mods.get_modifier_value(UnitMods::Mana, UnitModifierType::BasePct);
-                let mana_total_value =
-                    player.stats.unit_mods.get_modifier_value(UnitMods::Mana, UnitModifierType::TotalValue);
-                let mana_total_pct =
-                    player.stats.unit_mods.get_modifier_value(UnitMods::Mana, UnitModifierType::TotalPct);
+                let mana_base_value = player
+                    .stats
+                    .unit_mods
+                    .get_modifier_value(UnitMods::Mana, UnitModifierType::BaseValue);
+                let mana_base_pct = player
+                    .stats
+                    .unit_mods
+                    .get_modifier_value(UnitMods::Mana, UnitModifierType::BasePct);
+                let mana_total_value = player
+                    .stats
+                    .unit_mods
+                    .get_modifier_value(UnitMods::Mana, UnitModifierType::TotalValue);
+                let mana_total_pct = player
+                    .stats
+                    .unit_mods
+                    .get_modifier_value(UnitMods::Mana, UnitModifierType::TotalPct);
 
                 let max_mana = ((class_base.base_mana as f32 + mana_base_value) * mana_base_pct
                     + mana_total_value
@@ -206,10 +224,7 @@ impl StatsSystem {
             // 7. Resistances (schools 1-6)
             for school in 1..7u8 {
                 if let Some(unit_mod) = UnitMods::from_resistance(school) {
-                    let value = player
-                        .stats
-                        .unit_mods
-                        .calculate_total_value(unit_mod, 0.0);
+                    let value = player.stats.unit_mods.calculate_total_value(unit_mod, 0.0);
                     player.stats.resistances[school as usize] = value.max(0.0) as u32;
                 }
             }
@@ -223,7 +238,9 @@ impl StatsSystem {
                 for school in 0..7usize {
                     // AURA_MOD_DAMAGE_DONE uses misc_value as school bitmask (1 << school)
                     let school_mask = 1i32 << school;
-                    let from_auras: i32 = player.auras.container
+                    let from_auras: i32 = player
+                        .auras
+                        .container
                         .get_auras_by_type(AURA_MOD_DAMAGE_DONE)
                         .iter()
                         .filter(|a| (a.misc_value & school_mask) != 0)
@@ -232,7 +249,9 @@ impl StatsSystem {
                     player.stats.spell_power[school] = from_auras.max(0) as u32;
                 }
                 // Healing power: AURA_MOD_HEALING_DONE (misc_value irrelevant, always applies)
-                let healing_from_auras = player.auras.container
+                let healing_from_auras = player
+                    .auras
+                    .container
                     .get_total_aura_modifier(AURA_MOD_HEALING_DONE);
                 player.stats.healing_power = healing_from_auras.max(0) as u32;
             }
@@ -254,7 +273,8 @@ impl StatsSystem {
             let aura_spell_crit = player.auras.container.get_total_aura_modifier(
                 crate::world::game::player::auras::effects::AURA_MOD_SPELL_CRIT_CHANCE,
             ) as f32;
-            player.stats.spell_crit_pct = (base_spell_crit + int_spell_crit + aura_spell_crit).max(0.0);
+            player.stats.spell_crit_pct =
+                (base_spell_crit + int_spell_crit + aura_spell_crit).max(0.0);
 
             // 10. Dodge
             let agi_dodge = derived::dodge_from_agility(class, level, agility);
@@ -318,7 +338,18 @@ impl StatsSystem {
         });
 
         // Build stat delta for SMSG_LEVELUP_INFO
-        if let Some((old_str, old_agi, old_sta, old_int, old_spi, old_hp, old_mana, _old_level, _class)) = old_stats {
+        if let Some((
+            old_str,
+            old_agi,
+            old_sta,
+            old_int,
+            old_spi,
+            old_hp,
+            old_mana,
+            _old_level,
+            _class,
+        )) = old_stats
+        {
             let new_stats = self.player_mgr.with_player_mut(guid, |player| {
                 (
                     player.stats.strength,
@@ -331,7 +362,8 @@ impl StatsSystem {
                 )
             });
 
-            if let Some((new_str, new_agi, new_sta, new_int, new_spi, new_hp, new_mana)) = new_stats {
+            if let Some((new_str, new_agi, new_sta, new_int, new_spi, new_hp, new_mana)) = new_stats
+            {
                 // Store deltas for experience system to read
                 // The experience system sends SMSG_LEVELUP_INFO with these values
                 let _str_gain = new_str.saturating_sub(old_str);
@@ -420,12 +452,32 @@ impl StatsSystem {
         });
 
         let Some((
-            health, max_health, mana, max_mana,
-            str_val, agi, sta, int, spi,
-            melee_ap, ranged_ap, armor, resistances,
-            melee_crit, ranged_crit, dodge, parry, block,
-            min_dmg, max_dmg, min_oh_dmg, max_oh_dmg, min_rng_dmg, max_rng_dmg,
-        )) = stats else {
+            health,
+            max_health,
+            mana,
+            max_mana,
+            str_val,
+            agi,
+            sta,
+            int,
+            spi,
+            melee_ap,
+            ranged_ap,
+            armor,
+            resistances,
+            melee_crit,
+            ranged_crit,
+            dodge,
+            parry,
+            block,
+            min_dmg,
+            max_dmg,
+            min_oh_dmg,
+            max_oh_dmg,
+            min_rng_dmg,
+            max_rng_dmg,
+        )) = stats
+        else {
             return;
         };
 
@@ -467,8 +519,6 @@ impl StatsSystem {
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
         let packet = update_msg.to_world_packet();
 
-        self.broadcast_mgr
-            .broadcast_nearby(guid, &packet, true)
-            ;
+        self.broadcast_mgr.broadcast_nearby(guid, &packet, true);
     }
 }

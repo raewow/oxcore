@@ -9,10 +9,10 @@
 //! - setrank: Set player's guild rank
 //! - rename: Rename a guild
 
-use anyhow::{anyhow, Result};
 use crate::shared::common::AccountType;
-use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
 use crate::shared::protocol::ObjectGuid;
+use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
+use anyhow::{anyhow, Result};
 
 /// Guild command info
 pub fn guild_info() -> ChatCommandInfo {
@@ -253,7 +253,12 @@ async fn cmd_guild_addmember(ctx: &ChatCommandContext<'_>, args: &str) -> Result
     };
 
     // Find player
-    let player_guid = if let Some(guid) = ctx.world.managers.player_mgr.find_player_by_name(player_name) {
+    let player_guid = if let Some(guid) = ctx
+        .world
+        .managers
+        .player_mgr
+        .find_player_by_name(player_name)
+    {
         // Check if player is already in a guild
         if guild_system.is_in_guild(guid) {
             return Ok(format!("Player '{}' is already in a guild", player_name));
@@ -289,7 +294,12 @@ async fn cmd_guild_removemember(ctx: &ChatCommandContext<'_>, args: &str) -> Res
     let guild_system = &ctx.world.systems.guild;
 
     // Find player
-    let player_guid = if let Some(guid) = ctx.world.managers.player_mgr.find_player_by_name(player_name) {
+    let player_guid = if let Some(guid) = ctx
+        .world
+        .managers
+        .player_mgr
+        .find_player_by_name(player_name)
+    {
         guid
     } else {
         return Ok(format!("Player '{}' not found", player_name));
@@ -297,7 +307,9 @@ async fn cmd_guild_removemember(ctx: &ChatCommandContext<'_>, args: &str) -> Res
 
     // Check if player is in a guild
     let guild_id = if let Some(state) = guild_system.get_player_guild(player_guid) {
-        state.guild_id.ok_or_else(|| anyhow!("Player not in a guild"))?
+        state
+            .guild_id
+            .ok_or_else(|| anyhow!("Player not in a guild"))?
     } else {
         return Ok(format!("Player '{}' is not in a guild", player_name));
     };
@@ -338,7 +350,12 @@ async fn cmd_guild_setrank(ctx: &ChatCommandContext<'_>, args: &str) -> Result<S
     let guild_system = &ctx.world.systems.guild;
 
     // Find player
-    let player_guid = if let Some(guid) = ctx.world.managers.player_mgr.find_player_by_name(player_name) {
+    let player_guid = if let Some(guid) = ctx
+        .world
+        .managers
+        .player_mgr
+        .find_player_by_name(player_name)
+    {
         guid
     } else {
         return Ok(format!("Player '{}' not found", player_name));

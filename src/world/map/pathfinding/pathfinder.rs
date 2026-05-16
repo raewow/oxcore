@@ -3,9 +3,9 @@
 //! Uses a 3-tier fallback: straight line -> NavMesh A* -> obstacle avoidance.
 //! This is the low-level MMap PathFinder that the game-level wrapper delegates to.
 
-use crate::shared::protocol::Position;
 use super::mmap_manager::MMapManager;
 use super::types::PathResult;
+use crate::shared::protocol::Position;
 use std::sync::Arc;
 
 /// MMap PathFinder - integrates NavMesh and VMap
@@ -24,12 +24,7 @@ impl PathFinder {
     /// 1. Try straight line (fastest) - checks LOS and height
     /// 2. Try NavMesh A* pathfinding
     /// 3. Fallback: multi-waypoint obstacle avoidance
-    pub fn calculate_path(
-        &self,
-        map_id: u32,
-        start: Position,
-        end: Position,
-    ) -> PathResult {
+    pub fn calculate_path(&self, map_id: u32, start: Position, end: Position) -> PathResult {
         // 1. Try straight line first (fastest)
         if self.is_clear_path(map_id, start, end) {
             return PathResult::StraightLine(start, end);
@@ -106,28 +101,30 @@ impl PathFinder {
 
         // Generate candidate waypoints in 8 directions around obstacle
         let offsets = [
-            (10.0, 0.0),     // East
-            (-10.0, 0.0),    // West
-            (0.0, 10.0),     // North
-            (0.0, -10.0),    // South
-            (7.0, 7.0),      // NE
-            (-7.0, 7.0),     // NW
-            (7.0, -7.0),     // SE
-            (-7.0, -7.0),    // SW
+            (10.0, 0.0),  // East
+            (-10.0, 0.0), // West
+            (0.0, 10.0),  // North
+            (0.0, -10.0), // South
+            (7.0, 7.0),   // NE
+            (-7.0, 7.0),  // NW
+            (7.0, -7.0),  // SE
+            (-7.0, -7.0), // SW
         ];
 
         for (ox, oy) in offsets {
             let waypoint = Position {
                 x: mid.x + ox,
                 y: mid.y + oy,
-                z: vmap.get_height(map_id, mid.x + ox, mid.y + oy, mid.z + 10.0)
+                z: vmap
+                    .get_height(map_id, mid.x + ox, mid.y + oy, mid.z + 10.0)
                     .unwrap_or(mid.z),
                 o: 0.0,
             };
 
             // Test if this waypoint creates valid 2-segment path
-            if self.is_clear_path(map_id, start, waypoint) &&
-               self.is_clear_path(map_id, waypoint, end) {
+            if self.is_clear_path(map_id, start, waypoint)
+                && self.is_clear_path(map_id, waypoint, end)
+            {
                 tracing::debug!(
                     "[PATHFIND] Found obstacle avoidance path via waypoint ({:.1}, {:.1})",
                     waypoint.x,
@@ -141,7 +138,10 @@ impl PathFinder {
         // No valid path found - return partial
         tracing::warn!(
             "[PATHFIND] No path found from ({:.1}, {:.1}) to ({:.1}, {:.1})",
-            start.x, start.y, end.x, end.y
+            start.x,
+            start.y,
+            end.x,
+            end.y
         );
 
         PathResult::Partial(vec![start])

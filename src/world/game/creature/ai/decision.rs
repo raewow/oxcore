@@ -158,7 +158,7 @@ pub fn basic_combat_behavior(input: &AIInput) -> Vec<AIAction> {
                         let melee_reach = melee_range::get_melee_reach(
                             input.snapshot.combat_reach,
                             melee_range::DEFAULT_COMBAT_REACH, // target (player) reach
-                            false, // no leeway for AI
+                            false,                             // no leeway for AI
                         );
                         let distance = input.snapshot.distance_to_2d(&target.position);
                         // Try to cast a spell first (if any are available and off cooldown)
@@ -447,7 +447,11 @@ mod tests {
         }
     }
 
-    fn make_input(snapshot: CreatureSnapshot, events: Vec<AIEvent>, nearby_targets: Vec<TargetSnapshot>) -> AIInput {
+    fn make_input(
+        snapshot: CreatureSnapshot,
+        events: Vec<AIEvent>,
+        nearby_targets: Vec<TargetSnapshot>,
+    ) -> AIInput {
         AIInput {
             snapshot,
             events,
@@ -486,9 +490,18 @@ mod tests {
 
         let actions = process_basic_event(&input, &event);
 
-        assert!(has_action(&actions, |a| matches!(a, AIAction::EnterCombat { .. })));
-        assert!(has_action(&actions, |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == target)));
-        assert!(has_action(&actions, |a| matches!(a, AIAction::AddThreat { .. })));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::EnterCombat { .. }
+        )));
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == target)
+        ));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::AddThreat { .. }
+        )));
     }
 
     #[test]
@@ -534,9 +547,18 @@ mod tests {
 
         let actions = process_basic_event(&input, &event);
 
-        assert!(has_action(&actions, |a| matches!(a, AIAction::EnterCombat { .. })));
-        assert!(has_action(&actions, |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == attacker)));
-        assert!(has_action(&actions, |a| matches!(a, AIAction::AddThreat { amount, .. } if *amount == 50.0)));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::EnterCombat { .. }
+        )));
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == attacker)
+        ));
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::AddThreat { amount, .. } if *amount == 50.0)
+        ));
     }
 
     #[test]
@@ -552,8 +574,14 @@ mod tests {
 
         let actions = process_basic_event(&input, &event);
 
-        assert!(!has_action(&actions, |a| matches!(a, AIAction::EnterCombat { .. })));
-        assert!(has_action(&actions, |a| matches!(a, AIAction::AddThreat { amount, .. } if *amount == 100.0)));
+        assert!(!has_action(&actions, |a| matches!(
+            a,
+            AIAction::EnterCombat { .. }
+        )));
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::AddThreat { amount, .. } if *amount == 100.0)
+        ));
     }
 
     #[test]
@@ -568,7 +596,10 @@ mod tests {
         };
 
         let actions = process_basic_event(&input, &event);
-        assert!(has_action(&actions, |a| matches!(a, AIAction::EnterCombat { .. })));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::EnterCombat { .. }
+        )));
     }
 
     #[test]
@@ -579,8 +610,14 @@ mod tests {
         let actions = process_basic_event(&input, &event);
 
         assert!(has_action(&actions, |a| matches!(a, AIAction::LeaveCombat)));
-        assert!(has_action(&actions, |a| matches!(a, AIAction::ClearThreatList)));
-        assert!(has_action(&actions, |a| matches!(a, AIAction::ClearAttackTarget)));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::ClearThreatList
+        )));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::ClearAttackTarget
+        )));
     }
 
     #[test]
@@ -589,12 +626,20 @@ mod tests {
         let mut snapshot = make_snapshot(AIState::Combat);
         snapshot.current_target = Some(victim);
         let input = make_input(snapshot, vec![], vec![]);
-        let event = AIEvent::TargetKilled { victim_guid: victim };
+        let event = AIEvent::TargetKilled {
+            victim_guid: victim,
+        };
 
         let actions = process_basic_event(&input, &event);
 
-        assert!(has_action(&actions, |a| matches!(a, AIAction::ClearAttackTarget)));
-        assert!(has_action(&actions, |a| matches!(a, AIAction::ModifyThreat { target_guid, .. } if *target_guid == victim)));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::ClearAttackTarget
+        )));
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::ModifyThreat { target_guid, .. } if *target_guid == victim)
+        ));
     }
 
     // ========== basic_combat_behavior tests ==========
@@ -604,11 +649,17 @@ mod tests {
         let mut snapshot = make_snapshot(AIState::Combat);
         // Place creature far from home
         snapshot.position = Position::new(200.0, 200.0, 0.0, 0.0);
-        snapshot.threat_list.push(ThreatEntry { target: player_guid(10), threat: 10.0 });
+        snapshot.threat_list.push(ThreatEntry {
+            target: player_guid(10),
+            threat: 10.0,
+        });
         let input = make_input(snapshot, vec![], vec![]);
 
         let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(a, AIAction::EnterEvadeMode)));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::EnterEvadeMode
+        )));
     }
 
     #[test]
@@ -616,13 +667,19 @@ mod tests {
         let target = player_guid(10);
         let mut snapshot = make_snapshot(AIState::Combat);
         snapshot.current_target = Some(target);
-        snapshot.threat_list.push(ThreatEntry { target, threat: 10.0 });
+        snapshot.threat_list.push(ThreatEntry {
+            target,
+            threat: 10.0,
+        });
         // Target at same position (distance 0, within melee range)
         let target_snap = make_target(target, Position::new(100.0, 100.0, 0.0, 0.0), true);
         let input = make_input(snapshot, vec![], vec![target_snap]);
 
         let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(a, AIAction::FaceTarget { target_guid } if *target_guid == target)));
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::FaceTarget { target_guid } if *target_guid == target)
+        ));
     }
 
     #[test]
@@ -632,7 +689,10 @@ mod tests {
         let input = make_input(snapshot, vec![], vec![]);
 
         let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(a, AIAction::EnterEvadeMode)));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::EnterEvadeMode
+        )));
     }
 
     #[test]
@@ -640,12 +700,18 @@ mod tests {
         let target = player_guid(10);
         let mut snapshot = make_snapshot(AIState::Combat);
         snapshot.current_target = Some(target);
-        snapshot.threat_list.push(ThreatEntry { target, threat: 10.0 });
+        snapshot.threat_list.push(ThreatEntry {
+            target,
+            threat: 10.0,
+        });
         let target_snap = make_target(target, Position::new(100.0, 100.0, 0.0, 0.0), false); // dead
         let input = make_input(snapshot, vec![], vec![target_snap]);
 
         let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(a, AIAction::ClearAttackTarget)));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::ClearAttackTarget
+        )));
     }
 
     #[test]
@@ -654,7 +720,10 @@ mod tests {
         let input = make_input(snapshot, vec![], vec![]);
 
         let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(a, AIAction::ReturnToSpawn)));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::ReturnToSpawn
+        )));
     }
 
     #[test]
@@ -671,11 +740,17 @@ mod tests {
     fn test_idle_state_enters_combat_if_has_targets() {
         let target = player_guid(10);
         let mut snapshot = make_snapshot(AIState::Idle);
-        snapshot.threat_list.push(ThreatEntry { target, threat: 5.0 });
+        snapshot.threat_list.push(ThreatEntry {
+            target,
+            threat: 5.0,
+        });
         let input = make_input(snapshot, vec![], vec![]);
 
         let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(a, AIAction::EnterCombat { target_guid } if *target_guid == target)));
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::EnterCombat { target_guid } if *target_guid == target)
+        ));
     }
 
     #[test]
@@ -702,7 +777,13 @@ mod tests {
 
         let result = decide_basic(&input);
 
-        assert!(has_action(&result.actions, |a| matches!(a, AIAction::EnterCombat { .. })));
-        assert!(has_action(&result.actions, |a| matches!(a, AIAction::SetAttackTarget { .. })));
+        assert!(has_action(&result.actions, |a| matches!(
+            a,
+            AIAction::EnterCombat { .. }
+        )));
+        assert!(has_action(&result.actions, |a| matches!(
+            a,
+            AIAction::SetAttackTarget { .. }
+        )));
     }
 }

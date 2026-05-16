@@ -6,15 +6,22 @@ use std::sync::Arc;
 
 use crate::shared::database::characters::models::social::CharacterSocialRow;
 use crate::shared::database::characters::repositories::SocialRepositoryTrait;
-use crate::shared::game::social::{FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT, SOCIALMGR_IGNORE_LIMIT};
-use crate::shared::messages::social::{SmsgFriendList, SmsgFriendStatus, SmsgIgnoreList, SmsgWho, WhoPlayerInfo};
+use crate::shared::game::social::{
+    FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT,
+    SOCIALMGR_IGNORE_LIMIT,
+};
+use crate::shared::messages::social::{
+    SmsgFriendList, SmsgFriendStatus, SmsgIgnoreList, SmsgWho, WhoPlayerInfo,
+};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
-use crate::world::game::player::PlayerManager;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
+use crate::world::game::player::PlayerManager;
 use crate::world::game::BroadcastManager;
 
-use super::types::{FriendEntry, IgnoreEntry, SocialState, WhoRequest, WhisperBlockReason, WhisperValidationResult};
+use super::types::{
+    FriendEntry, IgnoreEntry, SocialState, WhisperBlockReason, WhisperValidationResult, WhoRequest,
+};
 
 /// Social System - manages friend lists, ignore lists, and social interactions
 pub struct SocialSystem {
@@ -50,7 +57,8 @@ impl SocialSystem {
         // Load from database
         let rows = self
             .repository
-            .find_by_guid(player_guid_low).await
+            .find_by_guid(player_guid_low)
+            .await
             .context("Failed to load social data")?;
 
         // Build social state
@@ -60,17 +68,15 @@ impl SocialSystem {
             let friend_guid = ObjectGuid::new_without_entry(HighGuid::Player, row.friend);
 
             if row.flags & SocialFlag::Friend as u8 != 0 {
-                social_state.friends.insert(
-                    friend_guid,
-                    FriendEntry::new(friend_guid, row.flags),
-                );
+                social_state
+                    .friends
+                    .insert(friend_guid, FriendEntry::new(friend_guid, row.flags));
             }
 
             if row.flags & SocialFlag::Ignored as u8 != 0 {
-                social_state.ignores.insert(
-                    friend_guid,
-                    IgnoreEntry::new(friend_guid, row.flags),
-                );
+                social_state
+                    .ignores
+                    .insert(friend_guid, IgnoreEntry::new(friend_guid, row.flags));
             }
         }
 
@@ -127,8 +133,8 @@ impl SocialSystem {
         };
 
         // Call internal add_friend with resolved GUID
-        self.add_friend(player_guid, friend_guid, friend_name, is_friend_online).await
-
+        self.add_friend(player_guid, friend_guid, friend_name, is_friend_online)
+            .await
     }
 
     /// Add a friend to the player's friend list
@@ -177,12 +183,15 @@ impl SocialSystem {
         // 4. Add to database
         let flags = SocialFlag::Friend as u8;
         self.repository
-            .add_or_update(player_guid.low(), friend_guid.low(), flags).await
+            .add_or_update(player_guid.low(), friend_guid.low(), flags)
+            .await
             .context("Failed to add friend to database")?;
 
         // 5. Update state
         if let Some(mut state) = self.state.get_mut(&player_guid) {
-            state.friends.insert(friend_guid, FriendEntry::new(friend_guid, flags));
+            state
+                .friends
+                .insert(friend_guid, FriendEntry::new(friend_guid, flags));
         }
 
         // 6. Send response to player
@@ -233,7 +242,9 @@ impl SocialSystem {
         friend_guid: ObjectGuid,
     ) -> Result<()> {
         // 1. Check if friend exists
-        let has_friend = self.state.get(&player_guid)
+        let has_friend = self
+            .state
+            .get(&player_guid)
             .map(|s| s.has_friend(friend_guid))
             .unwrap_or(false);
 
@@ -249,7 +260,8 @@ impl SocialSystem {
 
         // 2. Remove from database
         self.repository
-            .remove(player_guid.low(), friend_guid.low()).await
+            .remove(player_guid.low(), friend_guid.low())
+            .await
             .context("Failed to remove friend from database")?;
 
         // 3. Update state
@@ -355,7 +367,8 @@ impl SocialSystem {
         };
 
         // Call internal add_ignore with resolved GUID
-        self.add_ignore(player_guid, ignored_guid, ignored_name).await
+        self.add_ignore(player_guid, ignored_guid, ignored_name)
+            .await
     }
 
     /// Add a player to the ignore list
@@ -403,12 +416,15 @@ impl SocialSystem {
         // 4. Add to database
         let flags = SocialFlag::Ignored as u8;
         self.repository
-            .add_or_update(player_guid.low(), ignored_guid.low(), flags).await
+            .add_or_update(player_guid.low(), ignored_guid.low(), flags)
+            .await
             .context("Failed to add ignore to database")?;
 
         // 5. Update state
         if let Some(mut state) = self.state.get_mut(&player_guid) {
-            state.ignores.insert(ignored_guid, IgnoreEntry::new(ignored_guid, flags));
+            state
+                .ignores
+                .insert(ignored_guid, IgnoreEntry::new(ignored_guid, flags));
         }
 
         // 6. Send response to player
@@ -436,7 +452,9 @@ impl SocialSystem {
         ignored_guid: ObjectGuid,
     ) -> Result<()> {
         // 1. Check if ignore exists
-        let has_ignore = self.state.get(&player_guid)
+        let has_ignore = self
+            .state
+            .get(&player_guid)
             .map(|s| s.has_ignore(ignored_guid))
             .unwrap_or(false);
 
@@ -452,7 +470,8 @@ impl SocialSystem {
 
         // 2. Remove from database
         self.repository
-            .remove(player_guid.low(), ignored_guid.low()).await
+            .remove(player_guid.low(), ignored_guid.low())
+            .await
             .context("Failed to remove ignore from database")?;
 
         // 3. Update state
@@ -531,7 +550,11 @@ impl SocialSystem {
 
             // Player name filter
             if !request.player_name.is_empty()
-                && !player.name.to_lowercase().contains(&request.player_name.to_lowercase()) {
+                && !player
+                    .name
+                    .to_lowercase()
+                    .contains(&request.player_name.to_lowercase())
+            {
                 continue;
             }
 
@@ -539,7 +562,11 @@ impl SocialSystem {
             if !request.search_strings.is_empty() {
                 let mut matches = false;
                 for search_str in &request.search_strings {
-                    if player.name.to_lowercase().contains(&search_str.to_lowercase()) {
+                    if player
+                        .name
+                        .to_lowercase()
+                        .contains(&search_str.to_lowercase())
+                    {
                         matches = true;
                         break;
                     }
@@ -631,8 +658,7 @@ impl SocialSystem {
                 result
             );
             self.broadcast_mgr
-                .send_msg_to_player(*lister_guid, msg.clone())
-                ;
+                .send_msg_to_player(*lister_guid, msg.clone());
         }
     }
 
@@ -699,7 +725,6 @@ impl SocialSystem {
 
 impl SocialSystem {
     pub async fn init(&self) -> Result<()> {
-
         Ok(())
     }
 
@@ -740,20 +765,23 @@ impl SocialSystem {
             };
 
             // 3. Broadcast online status to all players who have this player friended
-            tracing::info!("[SOCIAL] Player {:?} logged in, broadcasting online status", guid);
-            system
-                .broadcast_friend_status(guid, FriendsResult::Online, friend_info)
-                ;
+            tracing::info!(
+                "[SOCIAL] Player {:?} logged in, broadcasting online status",
+                guid
+            );
+            system.broadcast_friend_status(guid, FriendsResult::Online, friend_info);
         });
         Ok(())
     }
 
     pub async fn on_player_logout(&self, guid: ObjectGuid) -> Result<()> {
-        tracing::info!("[SOCIAL] Player {:?} logging out, broadcasting offline status", guid);
+        tracing::info!(
+            "[SOCIAL] Player {:?} logging out, broadcasting offline status",
+            guid
+        );
 
         // Broadcast offline status BEFORE unloading (in case we need any data)
-        self.broadcast_friend_status(guid, FriendsResult::Offline, None)
-            ;
+        self.broadcast_friend_status(guid, FriendsResult::Offline, None);
 
         self.unload_player_social(guid);
 

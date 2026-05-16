@@ -33,7 +33,10 @@ pub async fn cmd_sendmail(ctx: &ChatCommandContext<'_>, args: &str) -> Result<St
 
     let player_name = parts[0].to_string();
     let subject = parts[1].trim_matches('"').to_string();
-    let body = parts.get(2).map(|s| s.trim_matches('"').to_string()).unwrap_or_default();
+    let body = parts
+        .get(2)
+        .map(|s| s.trim_matches('"').to_string())
+        .unwrap_or_default();
 
     // Validate subject length
     if subject.len() > 64 {
@@ -47,17 +50,21 @@ pub async fn cmd_sendmail(ctx: &ChatCommandContext<'_>, args: &str) -> Result<St
         player_mgr: Arc::clone(&ctx.world.managers.player_mgr),
         session_mgr: Arc::clone(&ctx.world.session_mgr),
     });
-    
+
     // Clone for the response message
     let player_name_resp = player_name.clone();
     let subject_resp = subject.clone();
-    
+
     // Spawn the mail sending as a background task so we don't block packet handling
     tokio::spawn(async move {
-        tracing::info!("[SENDMAIL] Background task started for '{}' - '{}'", player_name, subject);
-        
+        tracing::info!(
+            "[SENDMAIL] Background task started for '{}' - '{}'",
+            player_name,
+            subject
+        );
+
         let mail_repo = MailRepository::new(character_pool);
-        
+
         // Find recipient by name
         let receiver_guid = match mail_repo.find_player_guid_by_name(&player_name).await {
             Ok(Some(guid)) => guid,
@@ -66,12 +73,20 @@ pub async fn cmd_sendmail(ctx: &ChatCommandContext<'_>, args: &str) -> Result<St
                 return;
             }
             Err(e) => {
-                tracing::error!("[SENDMAIL] Database error looking up player '{}': {}", player_name, e);
+                tracing::error!(
+                    "[SENDMAIL] Database error looking up player '{}': {}",
+                    player_name,
+                    e
+                );
                 return;
             }
         };
-        
-        tracing::info!("[SENDMAIL] Found player '{}' with GUID {}", player_name, receiver_guid);
+
+        tracing::info!(
+            "[SENDMAIL] Found player '{}' with GUID {}",
+            player_name,
+            receiver_guid
+        );
 
         // Create item text for body if present
         let item_text_id = if !body.is_empty() {
@@ -119,14 +134,24 @@ pub async fn cmd_sendmail(ctx: &ChatCommandContext<'_>, args: &str) -> Result<St
         // Insert mail into database
         match mail_repo.create(&mail_row).await {
             Ok(mail_id) => {
-                tracing::info!("[SENDMAIL] Mail created with ID {} for '{}'", mail_id, player_name);
-                
+                tracing::info!(
+                    "[SENDMAIL] Mail created with ID {} for '{}'",
+                    mail_id,
+                    player_name
+                );
+
                 // Notify recipient if online
-                if let Some(receiver_guid_obj) = world.player_mgr.find_player_by_name(&player_name) {
+                if let Some(receiver_guid_obj) = world.player_mgr.find_player_by_name(&player_name)
+                {
                     let notification = SmsgReceivedMail {};
-                    if let Some(session) = world.session_mgr.get_session_by_player(receiver_guid_obj) {
+                    if let Some(session) =
+                        world.session_mgr.get_session_by_player(receiver_guid_obj)
+                    {
                         let _ = session.send_packet(notification.to_world_packet());
-                        tracing::info!("[SENDMAIL] Notification sent to online player '{}'", player_name);
+                        tracing::info!(
+                            "[SENDMAIL] Notification sent to online player '{}'",
+                            player_name
+                        );
                     }
                 }
             }
@@ -135,7 +160,7 @@ pub async fn cmd_sendmail(ctx: &ChatCommandContext<'_>, args: &str) -> Result<St
             }
         }
     });
-    
+
     // Return immediately so we don't block packet handling
     Ok(format!(
         "Sending mail to {} with subject '{}'... (check logs for result)",

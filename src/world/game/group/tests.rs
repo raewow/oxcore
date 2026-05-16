@@ -37,7 +37,9 @@ fn test_group_remove_member() {
     let mut group = GroupData::new(1, leader_guid, "TestLeader".to_string());
 
     let member2_guid = ObjectGuid::new_player(2);
-    group.add_member(member2_guid, "Member2".to_string()).unwrap();
+    group
+        .add_member(member2_guid, "Member2".to_string())
+        .unwrap();
 
     let removed = group.remove_member(member2_guid);
     assert!(removed.is_some());
@@ -81,7 +83,9 @@ fn test_group_set_leader() {
     let mut group = GroupData::new(1, leader_guid, "TestLeader".to_string());
 
     let member2_guid = ObjectGuid::new_player(2);
-    group.add_member(member2_guid, "Member2".to_string()).unwrap();
+    group
+        .add_member(member2_guid, "Member2".to_string())
+        .unwrap();
 
     let result = group.promote_new_leader(member2_guid);
     assert!(result.is_ok());
@@ -96,7 +100,9 @@ fn test_group_set_assistant() {
     let mut group = GroupData::new(1, leader_guid, "TestLeader".to_string());
 
     let member2_guid = ObjectGuid::new_player(2);
-    group.add_member(member2_guid, "Member2".to_string()).unwrap();
+    group
+        .add_member(member2_guid, "Member2".to_string())
+        .unwrap();
 
     // Raid-only feature
     group.convert_to_raid();
@@ -113,7 +119,9 @@ fn test_group_change_subgroup() {
     let mut group = GroupData::new(1, leader_guid, "TestLeader".to_string());
 
     let member2_guid = ObjectGuid::new_player(2);
-    group.add_member(member2_guid, "Member2".to_string()).unwrap();
+    group
+        .add_member(member2_guid, "Member2".to_string())
+        .unwrap();
 
     // Raid-only feature
     group.convert_to_raid();
@@ -130,8 +138,12 @@ fn test_group_swap_subgroups() {
 
     let member2_guid = ObjectGuid::new_player(2);
     let member3_guid = ObjectGuid::new_player(3);
-    group.add_member(member2_guid, "Member2".to_string()).unwrap();
-    group.add_member(member3_guid, "Member3".to_string()).unwrap();
+    group
+        .add_member(member2_guid, "Member2".to_string())
+        .unwrap();
+    group
+        .add_member(member3_guid, "Member3".to_string())
+        .unwrap();
 
     // Raid-only feature
     group.convert_to_raid();
@@ -192,11 +204,7 @@ fn test_loot_method_conversion() {
 
 #[test]
 fn test_group_invite() {
-    let invite = GroupInvite::new(
-        ObjectGuid::new_player(1),
-        "TestInviter".to_string(),
-        123,
-    );
+    let invite = GroupInvite::new(ObjectGuid::new_player(1), "TestInviter".to_string(), 123);
 
     assert_eq!(invite.inviter_guid, ObjectGuid::new_player(1));
     assert_eq!(invite.inviter_name, "TestInviter");
@@ -210,8 +218,12 @@ fn test_group_select_new_leader() {
 
     let member2_guid = ObjectGuid::new_player(2);
     let member3_guid = ObjectGuid::new_player(3);
-    group.add_member(member2_guid, "Member2".to_string()).unwrap();
-    group.add_member(member3_guid, "Member3".to_string()).unwrap();
+    group
+        .add_member(member2_guid, "Member2".to_string())
+        .unwrap();
+    group
+        .add_member(member3_guid, "Member3".to_string())
+        .unwrap();
 
     // Remove current leader
     group.remove_member(leader_guid);
@@ -228,7 +240,9 @@ fn test_group_get_member_by_name() {
     let mut group = GroupData::new(1, leader_guid, "TestLeader".to_string());
 
     let member2_guid = ObjectGuid::new_player(2);
-    group.add_member(member2_guid, "Member2".to_string()).unwrap();
+    group
+        .add_member(member2_guid, "Member2".to_string())
+        .unwrap();
 
     // Case-insensitive search
     let found = group.get_member_by_name("member2");
@@ -245,7 +259,9 @@ fn test_group_member_guids() {
     let mut group = GroupData::new(1, leader_guid, "TestLeader".to_string());
 
     let member2_guid = ObjectGuid::new_player(2);
-    group.add_member(member2_guid, "Member2".to_string()).unwrap();
+    group
+        .add_member(member2_guid, "Member2".to_string())
+        .unwrap();
 
     let guids = group.get_member_guids();
     assert_eq!(guids.len(), 2);
@@ -259,7 +275,9 @@ fn test_group_online_member_guids() {
     let mut group = GroupData::new(1, leader_guid, "TestLeader".to_string());
 
     let member2_guid = ObjectGuid::new_player(2);
-    group.add_member(member2_guid, "Member2".to_string()).unwrap();
+    group
+        .add_member(member2_guid, "Member2".to_string())
+        .unwrap();
 
     // Set member2 offline
     group.set_member_status(member2_guid, MemberStatus::offline());

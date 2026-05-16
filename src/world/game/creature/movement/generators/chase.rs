@@ -83,8 +83,8 @@ impl ChaseMovementGenerator {
         // Distance from target center to the contact point
         // MaNGOS: combatReach + targetCombatReach - targetBounding - ownerBounding - 1.0
         // Simplified: use combat reach sum minus some offset, min 0.5
-        let contact_dist = (self.creature_combat_reach + DEFAULT_TARGET_COMBAT_REACH - 1.0)
-            .max(0.5);
+        let contact_dist =
+            (self.creature_combat_reach + DEFAULT_TARGET_COMBAT_REACH - 1.0).max(0.5);
 
         Position {
             x: self.target_position.x + angle.cos() * contact_dist,

@@ -12,9 +12,9 @@
 //! - [`SmsgDuelWinner`] - Announce the duel winner
 
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::guid::ObjectGuid;
 use crate::shared::protocol::Opcode;
 use crate::shared::protocol::WorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
 
 /// SMSG_DUEL_REQUESTED - Notify players that a duel has been requested
 ///

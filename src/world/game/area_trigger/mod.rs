@@ -75,7 +75,6 @@ impl AreaTriggerManager {
     async fn load_templates(&self) -> Result<()> {
         use sqlx::Row;
 
-
         let query_str = r#"SELECT id, name, map_id, x, y, z, radius,
                            box_x, box_y, box_z, box_orientation
                            FROM areatrigger_template"#;
@@ -86,7 +85,10 @@ impl AreaTriggerManager {
         {
             Ok(rows) => rows,
             Err(e) => {
-                warn!("Failed to query areatrigger_template: {}. Area triggers will not work.", e);
+                warn!(
+                    "Failed to query areatrigger_template: {}. Area triggers will not work.",
+                    e
+                );
                 return Ok(());
             }
         };
@@ -132,7 +134,6 @@ impl AreaTriggerManager {
     async fn load_teleports(&self) -> Result<()> {
         use sqlx::Row;
 
-
         let query_str = r#"SELECT id, required_level, required_condition, message,
                            target_map, target_position_x, target_position_y,
                            target_position_z, target_orientation
@@ -144,7 +145,10 @@ impl AreaTriggerManager {
         {
             Ok(rows) => rows,
             Err(e) => {
-                warn!("Failed to query areatrigger_teleport: {}. Teleport triggers will not work.", e);
+                warn!(
+                    "Failed to query areatrigger_teleport: {}. Teleport triggers will not work.",
+                    e
+                );
                 return Ok(());
             }
         };
@@ -190,7 +194,6 @@ impl AreaTriggerManager {
     async fn load_taverns(&self) -> Result<()> {
         use sqlx::Row;
 
-
         let current_patch: u8 = 10; // WOW_PATCH_112
         let query_str = r#"SELECT id FROM areatrigger_tavern WHERE patch_min <= ?"#;
 
@@ -201,7 +204,10 @@ impl AreaTriggerManager {
         {
             Ok(rows) => rows,
             Err(e) => {
-                warn!("Failed to query areatrigger_tavern: {}. Tavern triggers will not work.", e);
+                warn!(
+                    "Failed to query areatrigger_tavern: {}. Tavern triggers will not work.",
+                    e
+                );
                 return Ok(());
             }
         };
@@ -222,7 +228,6 @@ impl AreaTriggerManager {
 
     async fn load_quest_triggers(&self) -> Result<()> {
         use sqlx::Row;
-
 
         let query_str = r#"SELECT id, quest FROM areatrigger_involvedrelation"#;
 

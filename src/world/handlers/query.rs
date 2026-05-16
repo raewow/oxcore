@@ -50,7 +50,10 @@ pub async fn handle_creature_query(
         session.send_msg(response)?;
     } else {
         // Send not-found response
-        tracing::warn!("CMSG_CREATURE_QUERY: template not found for entry={}", entry);
+        tracing::warn!(
+            "CMSG_CREATURE_QUERY: template not found for entry={}",
+            entry
+        );
         let response = SmsgCreatureQueryResponse::not_found(entry);
         session.send_msg(response)?;
     }
@@ -116,23 +119,43 @@ pub async fn handle_item_query(
             container_slots: template.container_slots as u32,
 
             // Stats (10 slots) - all zero for now
-            stat_type1: 0, stat_value1: 0,
-            stat_type2: 0, stat_value2: 0,
-            stat_type3: 0, stat_value3: 0,
-            stat_type4: 0, stat_value4: 0,
-            stat_type5: 0, stat_value5: 0,
-            stat_type6: 0, stat_value6: 0,
-            stat_type7: 0, stat_value7: 0,
-            stat_type8: 0, stat_value8: 0,
-            stat_type9: 0, stat_value9: 0,
-            stat_type10: 0, stat_value10: 0,
+            stat_type1: 0,
+            stat_value1: 0,
+            stat_type2: 0,
+            stat_value2: 0,
+            stat_type3: 0,
+            stat_value3: 0,
+            stat_type4: 0,
+            stat_value4: 0,
+            stat_type5: 0,
+            stat_value5: 0,
+            stat_type6: 0,
+            stat_value6: 0,
+            stat_type7: 0,
+            stat_value7: 0,
+            stat_type8: 0,
+            stat_value8: 0,
+            stat_type9: 0,
+            stat_value9: 0,
+            stat_type10: 0,
+            stat_value10: 0,
 
             // Damage (5 slots) - all zero
-            damage_min1: 0.0, damage_max1: 0.0, damage_type1: 0,
-            damage_min2: 0.0, damage_max2: 0.0, damage_type2: 0,
-            damage_min3: 0.0, damage_max3: 0.0, damage_type3: 0,
-            damage_min4: 0.0, damage_max4: 0.0, damage_type4: 0,
-            damage_min5: 0.0, damage_max5: 0.0, damage_type5: 0,
+            damage_min1: 0.0,
+            damage_max1: 0.0,
+            damage_type1: 0,
+            damage_min2: 0.0,
+            damage_max2: 0.0,
+            damage_type2: 0,
+            damage_min3: 0.0,
+            damage_max3: 0.0,
+            damage_type3: 0,
+            damage_min4: 0.0,
+            damage_max4: 0.0,
+            damage_type4: 0,
+            damage_min5: 0.0,
+            damage_max5: 0.0,
+            damage_type5: 0,
 
             // Resistances - all zero
             armor: 0,
@@ -144,11 +167,36 @@ pub async fn handle_item_query(
             arcane_res: 0,
 
             // Spells (5 slots) - all zero
-            spell_id1: 0, spell_trigger1: 0, spell_charges1: 0, spell_cooldown1: 0, spell_category1: 0, spell_category_cooldown1: 0,
-            spell_id2: 0, spell_trigger2: 0, spell_charges2: 0, spell_cooldown2: 0, spell_category2: 0, spell_category_cooldown2: 0,
-            spell_id3: 0, spell_trigger3: 0, spell_charges3: 0, spell_cooldown3: 0, spell_category3: 0, spell_category_cooldown3: 0,
-            spell_id4: 0, spell_trigger4: 0, spell_charges4: 0, spell_cooldown4: 0, spell_category4: 0, spell_category_cooldown4: 0,
-            spell_id5: 0, spell_trigger5: 0, spell_charges5: 0, spell_cooldown5: 0, spell_category5: 0, spell_category_cooldown5: 0,
+            spell_id1: 0,
+            spell_trigger1: 0,
+            spell_charges1: 0,
+            spell_cooldown1: 0,
+            spell_category1: 0,
+            spell_category_cooldown1: 0,
+            spell_id2: 0,
+            spell_trigger2: 0,
+            spell_charges2: 0,
+            spell_cooldown2: 0,
+            spell_category2: 0,
+            spell_category_cooldown2: 0,
+            spell_id3: 0,
+            spell_trigger3: 0,
+            spell_charges3: 0,
+            spell_cooldown3: 0,
+            spell_category3: 0,
+            spell_category_cooldown3: 0,
+            spell_id4: 0,
+            spell_trigger4: 0,
+            spell_charges4: 0,
+            spell_cooldown4: 0,
+            spell_category4: 0,
+            spell_category_cooldown4: 0,
+            spell_id5: 0,
+            spell_trigger5: 0,
+            spell_charges5: 0,
+            spell_cooldown5: 0,
+            spell_category5: 0,
+            spell_category_cooldown5: 0,
 
             // Misc fields
             bonding: 0,
@@ -156,7 +204,7 @@ pub async fn handle_item_query(
             page_text_id: 0,
             language_id: 0,
             page_material: 0,
-            start_quest: 0,
+            start_quest: template.start_quest,
             lock_id: 0,
             material: 0,
             sheath: 0,
@@ -192,7 +240,10 @@ pub async fn handle_item_query(
 
         session.send_packet(response.to_world_packet())?;
     } else {
-        tracing::warn!("Item template not found for entry={} - sending placeholder response", item_entry);
+        tracing::warn!(
+            "Item template not found for entry={} - sending placeholder response",
+            item_entry
+        );
 
         // Send minimal placeholder response to prevent client crash
         // The client expects a response for every query, even if the item doesn't exist
@@ -226,23 +277,43 @@ pub async fn handle_item_query(
             container_slots: 0,
 
             // Stats (10 slots) - all zero
-            stat_type1: 0, stat_value1: 0,
-            stat_type2: 0, stat_value2: 0,
-            stat_type3: 0, stat_value3: 0,
-            stat_type4: 0, stat_value4: 0,
-            stat_type5: 0, stat_value5: 0,
-            stat_type6: 0, stat_value6: 0,
-            stat_type7: 0, stat_value7: 0,
-            stat_type8: 0, stat_value8: 0,
-            stat_type9: 0, stat_value9: 0,
-            stat_type10: 0, stat_value10: 0,
+            stat_type1: 0,
+            stat_value1: 0,
+            stat_type2: 0,
+            stat_value2: 0,
+            stat_type3: 0,
+            stat_value3: 0,
+            stat_type4: 0,
+            stat_value4: 0,
+            stat_type5: 0,
+            stat_value5: 0,
+            stat_type6: 0,
+            stat_value6: 0,
+            stat_type7: 0,
+            stat_value7: 0,
+            stat_type8: 0,
+            stat_value8: 0,
+            stat_type9: 0,
+            stat_value9: 0,
+            stat_type10: 0,
+            stat_value10: 0,
 
             // Damage (5 slots) - all zero
-            damage_min1: 0.0, damage_max1: 0.0, damage_type1: 0,
-            damage_min2: 0.0, damage_max2: 0.0, damage_type2: 0,
-            damage_min3: 0.0, damage_max3: 0.0, damage_type3: 0,
-            damage_min4: 0.0, damage_max4: 0.0, damage_type4: 0,
-            damage_min5: 0.0, damage_max5: 0.0, damage_type5: 0,
+            damage_min1: 0.0,
+            damage_max1: 0.0,
+            damage_type1: 0,
+            damage_min2: 0.0,
+            damage_max2: 0.0,
+            damage_type2: 0,
+            damage_min3: 0.0,
+            damage_max3: 0.0,
+            damage_type3: 0,
+            damage_min4: 0.0,
+            damage_max4: 0.0,
+            damage_type4: 0,
+            damage_min5: 0.0,
+            damage_max5: 0.0,
+            damage_type5: 0,
 
             // Resistances - all zero
             armor: 0,
@@ -254,11 +325,36 @@ pub async fn handle_item_query(
             arcane_res: 0,
 
             // Spells (5 slots) - all zero
-            spell_id1: 0, spell_trigger1: 0, spell_charges1: 0, spell_cooldown1: 0, spell_category1: 0, spell_category_cooldown1: 0,
-            spell_id2: 0, spell_trigger2: 0, spell_charges2: 0, spell_cooldown2: 0, spell_category2: 0, spell_category_cooldown2: 0,
-            spell_id3: 0, spell_trigger3: 0, spell_charges3: 0, spell_cooldown3: 0, spell_category3: 0, spell_category_cooldown3: 0,
-            spell_id4: 0, spell_trigger4: 0, spell_charges4: 0, spell_cooldown4: 0, spell_category4: 0, spell_category_cooldown4: 0,
-            spell_id5: 0, spell_trigger5: 0, spell_charges5: 0, spell_cooldown5: 0, spell_category5: 0, spell_category_cooldown5: 0,
+            spell_id1: 0,
+            spell_trigger1: 0,
+            spell_charges1: 0,
+            spell_cooldown1: 0,
+            spell_category1: 0,
+            spell_category_cooldown1: 0,
+            spell_id2: 0,
+            spell_trigger2: 0,
+            spell_charges2: 0,
+            spell_cooldown2: 0,
+            spell_category2: 0,
+            spell_category_cooldown2: 0,
+            spell_id3: 0,
+            spell_trigger3: 0,
+            spell_charges3: 0,
+            spell_cooldown3: 0,
+            spell_category3: 0,
+            spell_category_cooldown3: 0,
+            spell_id4: 0,
+            spell_trigger4: 0,
+            spell_charges4: 0,
+            spell_cooldown4: 0,
+            spell_category4: 0,
+            spell_category_cooldown4: 0,
+            spell_id5: 0,
+            spell_trigger5: 0,
+            spell_charges5: 0,
+            spell_cooldown5: 0,
+            spell_category5: 0,
+            spell_category_cooldown5: 0,
 
             // Misc fields
             bonding: 0,
@@ -311,15 +407,20 @@ pub async fn handle_name_query(
     databases: &Databases,
     world: &World,
 ) -> Result<()> {
-    use crate::shared::protocol::ObjectGuid;
     use crate::shared::messages::query::SmsgNameQueryResponse;
+    use crate::shared::protocol::ObjectGuid;
 
     // Read GUID from packet (u64 little-endian)
-    let guid_raw = packet.read_u64()
+    let guid_raw = packet
+        .read_u64()
         .ok_or_else(|| anyhow::anyhow!("Failed to read GUID from CMSG_NAME_QUERY"))?;
     let guid = ObjectGuid::from_raw(guid_raw);
 
-    tracing::debug!("CMSG_NAME_QUERY: Received query for GUID {:?} (raw=0x{:016X})", guid, guid_raw);
+    tracing::debug!(
+        "CMSG_NAME_QUERY: Received query for GUID {:?} (raw=0x{:016X})",
+        guid,
+        guid_raw
+    );
 
     // 1. Handle creature/unit GUIDs (NPCs, pets, etc.)
     if guid.is_creature() || guid.is_pet() {
@@ -330,9 +431,9 @@ pub async fn handle_name_query(
             let response = SmsgNameQueryResponse::new(
                 guid,
                 &template.name,
-                0,  // race (creatures don't have player races)
-                0,  // gender (0 = male)
-                1,  // class (1 = warrior, default for creatures)
+                0, // race (creatures don't have player races)
+                0, // gender (0 = male)
+                1, // class (1 = warrior, default for creatures)
             );
 
             tracing::debug!(
@@ -416,19 +517,26 @@ pub async fn handle_gameobject_query(
     world: &World,
 ) -> Result<()> {
     // Read entry and GUID from packet (Vanilla 1.12.1 format)
-    let entry = packet
-        .read_u32()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read gameobject entry from CMSG_GAMEOBJECT_QUERY"))?;
-    let _guid = packet
-        .read_u64()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read gameobject GUID from CMSG_GAMEOBJECT_QUERY"))?;
+    let entry = packet.read_u32().ok_or_else(|| {
+        anyhow::anyhow!("Failed to read gameobject entry from CMSG_GAMEOBJECT_QUERY")
+    })?;
+    let _guid = packet.read_u64().ok_or_else(|| {
+        anyhow::anyhow!("Failed to read gameobject GUID from CMSG_GAMEOBJECT_QUERY")
+    })?;
 
     tracing::debug!("CMSG_GAMEOBJECT_QUERY: entry={}", entry);
 
-    if let Some(query_packet) = world.managers.gameobject_mgr.build_gameobject_query_packet(entry) {
+    if let Some(query_packet) = world
+        .managers
+        .gameobject_mgr
+        .build_gameobject_query_packet(entry)
+    {
         session.send_packet(query_packet)?;
     } else {
-        tracing::warn!("CMSG_GAMEOBJECT_QUERY: template not found for entry={}", entry);
+        tracing::warn!(
+            "CMSG_GAMEOBJECT_QUERY: template not found for entry={}",
+            entry
+        );
         // Send not-found response (entry | 0x80000000 signals "not found" to client)
         let mut response = crate::shared::protocol::WorldPacket::new(
             crate::shared::protocol::Opcode::SMSG_GAMEOBJECT_QUERY_RESPONSE,

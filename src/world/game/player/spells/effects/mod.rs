@@ -177,7 +177,15 @@ impl EffectsDispatcher {
         is_triggered: bool,
         world: &World,
     ) -> Result<Vec<EffectResult>> {
-        self.dispatch_with_targets(caster_guid, spell_id, target_guid, is_triggered, None, world).await
+        self.dispatch_with_targets(
+            caster_guid,
+            spell_id,
+            target_guid,
+            is_triggered,
+            None,
+            world,
+        )
+        .await
     }
 
     /// Dispatch with pre-resolved targets (used when target resolution already happened).
@@ -236,28 +244,32 @@ impl EffectsDispatcher {
                         hit::SpellHitOutcome::Miss => {
                             tracing::debug!(
                                 "[SPELL-HIT] spell {} MISSED target {:?}",
-                                spell_id, eff_target
+                                spell_id,
+                                eff_target
                             );
                             continue;
                         }
                         hit::SpellHitOutcome::Resist => {
                             tracing::debug!(
                                 "[SPELL-HIT] spell {} RESISTED by {:?}",
-                                spell_id, eff_target
+                                spell_id,
+                                eff_target
                             );
                             continue;
                         }
                         hit::SpellHitOutcome::Immune => {
                             tracing::debug!(
                                 "[SPELL-HIT] spell {} target {:?} IMMUNE",
-                                spell_id, eff_target
+                                spell_id,
+                                eff_target
                             );
                             continue;
                         }
                         hit::SpellHitOutcome::Reflect => {
                             tracing::debug!(
                                 "[SPELL-HIT] spell {} REFLECTED by {:?}",
-                                spell_id, eff_target
+                                spell_id,
+                                eff_target
                             );
                             // TODO: Apply effect to caster instead
                             continue;
@@ -266,7 +278,9 @@ impl EffectsDispatcher {
                             // Fire SpellHit AI event on the target creature (if it has a Lua AI script).
                             // Only fire on the first effect (index 0) to avoid duplicate callbacks.
                             if effect_index == 0 {
-                                let is_creature = world.managers.creature_mgr
+                                let is_creature = world
+                                    .managers
+                                    .creature_mgr
                                     .with_creature(*eff_target, |_| ())
                                     .is_some();
                                 if is_creature {
@@ -306,7 +320,10 @@ impl EffectsDispatcher {
                     Err(e) => {
                         tracing::error!(
                             "Effect {} failed for spell {} target {:?}: {}",
-                            effect_index, spell_id, eff_target, e
+                            effect_index,
+                            spell_id,
+                            eff_target,
+                            e
                         );
                         results.push(EffectResult::empty());
                     }
@@ -437,31 +454,31 @@ pub enum SpellEffectType {
     Pull = 70,
     // --- Missing effects added for MaNGOS parity ---
     // Summon effects
-    SummonType = 28,        // Generic summon dispatcher (pets, totems, guardians)
-    SummonPet = 56,         // Summon hunter/warlock pet
-    SummonDeadPet = 55,     // Revive Pet
-    TameCreature = 167,     // Hunter tame beast
+    SummonType = 28,    // Generic summon dispatcher (pets, totems, guardians)
+    SummonPet = 56,     // Summon hunter/warlock pet
+    SummonDeadPet = 55, // Revive Pet
+    TameCreature = 167, // Hunter tame beast
     // Healing/Power
-    HealPct = 136,          // Heal % of max health
-    EnergizePct = 137,      // Energize % of max power
+    HealPct = 136,     // Heal % of max health
+    EnergizePct = 137, // Energize % of max power
     // Trigger
     TriggerSpellWithValue = 109, // Trigger spell, passing base_value
     // Combat
-    Taunt = 87,             // Direct taunt effect
-    Charge2 = 96,           // Charge variant
+    Taunt = 87,   // Direct taunt effect
+    Charge2 = 96, // Charge variant
     // Quest
-    QuestStart = 134,       // Start a quest
-    QuestFail = 135,        // Fail a quest
+    QuestStart = 134,         // Start a quest
+    QuestFail = 135,          // Fail a quest
     KillCreditPersonal = 138, // Kill credit (personal)
-    KillCreditGroup = 139,  // Kill credit (group)
+    KillCreditGroup = 139,    // Kill credit (group)
     // Misc
-    PickPocket = 140,       // Rogue pick pocket
-    AddFarsight = 141,      // Far sight effect
+    PickPocket = 140,          // Rogue pick pocket
+    AddFarsight = 141,         // Far sight effect
     StealBeneficialBuff = 126, // Steal a buff (not used in vanilla, stub)
-    ForceCast = 133,        // Force target to cast
-    RemoveAura = 65,        // Remove an aura
+    ForceCast = 133,           // Force target to cast
+    RemoveAura = 65,           // Remove an aura
     // Stealth
-    Stealth = 48,           // Apply stealth effect (not aura)
+    Stealth = 48, // Apply stealth effect (not aura)
 }
 
 impl SpellEffectType {
@@ -722,7 +739,11 @@ pub async fn dispatch_effect(
         Charge2 => movement::effect_charge(input, world).await, // Same as Charge
         // --- Stub effects for MaNGOS parity ---
         SummonType | SummonPet | SummonDeadPet | TameCreature => {
-            tracing::debug!("[SPELL-EFFECT] Unimplemented summon effect {:?} for spell {}", effect_type, input.spell_id);
+            tracing::debug!(
+                "[SPELL-EFFECT] Unimplemented summon effect {:?} for spell {}",
+                effect_type,
+                input.spell_id
+            );
             Ok(EffectResult::empty())
         }
         HealPct => {
@@ -730,17 +751,28 @@ pub async fn dispatch_effect(
             Ok(EffectResult::empty())
         }
         EnergizePct => {
-            tracing::debug!("[SPELL-EFFECT] EnergizePct stub for spell {}", input.spell_id);
+            tracing::debug!(
+                "[SPELL-EFFECT] EnergizePct stub for spell {}",
+                input.spell_id
+            );
             Ok(EffectResult::empty())
         }
         TriggerSpellWithValue => misc::effect_trigger_spell(input, world).await, // Same as TriggerSpell for now
         Taunt => combat::effect_attack_me(input, world).await, // Taunt uses same logic as AttackMe
         QuestStart | QuestFail | KillCreditPersonal | KillCreditGroup => {
-            tracing::debug!("[SPELL-EFFECT] Unimplemented quest effect {:?} for spell {}", effect_type, input.spell_id);
+            tracing::debug!(
+                "[SPELL-EFFECT] Unimplemented quest effect {:?} for spell {}",
+                effect_type,
+                input.spell_id
+            );
             Ok(EffectResult::empty())
         }
         PickPocket | AddFarsight | StealBeneficialBuff | ForceCast | Stealth | RemoveAura => {
-            tracing::debug!("[SPELL-EFFECT] Unimplemented effect {:?} for spell {}", effect_type, input.spell_id);
+            tracing::debug!(
+                "[SPELL-EFFECT] Unimplemented effect {:?} for spell {}",
+                effect_type,
+                input.spell_id
+            );
             Ok(EffectResult::empty())
         }
     }

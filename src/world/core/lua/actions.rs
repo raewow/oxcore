@@ -3,8 +3,8 @@
 //! Actions are returned by Lua scripts and executed by the server.
 //! This provides a safe, pure-function interface between scripts and game state.
 
-use super::snapshot::LuaGuid;
 use super::super::common::ObjectGuid;
+use super::snapshot::LuaGuid;
 
 /// Target for spell casting.
 #[derive(Debug, Clone)]
@@ -603,7 +603,8 @@ impl LuaAction {
             // Gossip
             "GOSSIP_MENU" => Some(LuaAction::GossipMenu {
                 // Accept both "npc_text" (legacy) and "npc_text_id" (preferred).
-                npc_text_id: table.get("npc_text_id")
+                npc_text_id: table
+                    .get("npc_text_id")
                     .or_else(|_| table.get("npc_text"))
                     .ok()?,
             }),
@@ -667,11 +668,11 @@ impl LuaAction {
             "SET_COMBAT_WITH_ZONE" => Some(LuaAction::SetCombatWithZone),
             "SET_STAND_STATE" => {
                 let state: u8 = match table.get::<String>("state").as_deref() {
-                    Ok("STAND")   => 0,
-                    Ok("SIT")     => 1,
-                    Ok("SLEEP")   => 3,
-                    Ok("KNEEL")   => 4,
-                    Ok("DEAD")    => 7,
+                    Ok("STAND") => 0,
+                    Ok("SIT") => 1,
+                    Ok("SLEEP") => 3,
+                    Ok("KNEEL") => 4,
+                    Ok("DEAD") => 7,
                     Ok("SUBMERGED") => 5,
                     _ => table.get::<u8>("state").unwrap_or(0),
                 };

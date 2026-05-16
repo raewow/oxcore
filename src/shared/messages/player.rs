@@ -3,11 +3,11 @@
 //! Contains message types for player-specific packets like money updates.
 
 use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
 use crate::shared::protocol::guid::ObjectGuid;
 use crate::shared::protocol::packet::WorldPacketGuidExt;
 use crate::shared::protocol::update_fields::PLAYER_FIELD_COINAGE;
+use crate::shared::protocol::Opcode;
+use crate::shared::protocol::WorldPacket;
 
 /// SMSG_PLAYER_MONEY_UPDATE - Send player money update
 ///

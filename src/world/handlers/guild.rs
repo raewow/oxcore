@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use tracing::{debug, info};
 
 use crate::shared::messages::guild::SmsgGuildDecline;
-use crate::shared::protocol::{Opcode, ObjectGuid, WorldPacket};
+use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::session::WorldSession;
 use crate::world::World;
 
@@ -20,12 +20,12 @@ pub async fn handle_guild_query(
     let guild_id_low = packet.read_u32().unwrap_or(0);
     let guild_id = guild_id_low & 0x00FFFFFF; // Mask to 24 bits
 
-    debug!("CMSG_GUILD_QUERY: player={:?}, guild_id={}", player_guid, guild_id);
+    debug!(
+        "CMSG_GUILD_QUERY: player={:?}, guild_id={}",
+        player_guid, guild_id
+    );
 
-    world
-        .systems
-        .guild
-        .query_guild(player_guid, guild_id)?;
+    world.systems.guild.query_guild(player_guid, guild_id)?;
 
     Ok(())
 }
@@ -106,28 +106,36 @@ pub async fn handle_guild_invite(
     Ok(())
 }
 
-pub async fn handle_guild_accept(
-    session: &WorldSession,
-    world: &World,
-) -> Result<()> {
+pub async fn handle_guild_accept(session: &WorldSession, world: &World) -> Result<()> {
     let invitee_guid = session
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
 
     // Get pending invite
-    let (_inviter_guid, guild_id, guild_name) = world.systems.guild
+    let (_inviter_guid, guild_id, guild_name) = world
+        .systems
+        .guild
         .remove_pending_invite(invitee_guid)
         .ok_or_else(|| anyhow!("No pending guild invite"))?;
 
     // Get invitee name
-    let invitee_name = world.managers.player_mgr
+    let invitee_name = world
+        .managers
+        .player_mgr
         .get_player_name(invitee_guid)
         .ok_or_else(|| anyhow!("Player not found"))?;
 
-    debug!("CMSG_GUILD_ACCEPT: {} accepting invite to {}", invitee_name, guild_name);
+    debug!(
+        "CMSG_GUILD_ACCEPT: {} accepting invite to {}",
+        invitee_name, guild_name
+    );
 
     // Join the guild
-    world.systems.guild.join_guild(guild_id, invitee_guid, invitee_name).await?;
+    world
+        .systems
+        .guild
+        .join_guild(guild_id, invitee_guid, invitee_name)
+        .await?;
 
     Ok(())
 }
@@ -142,34 +150,31 @@ pub async fn handle_guild_decline(
         .ok_or_else(|| anyhow!("Not logged in"))?;
 
     // Get pending invite
-    let (inviter_guid, _guild_id, _guild_name) = match world.systems.guild
-        .remove_pending_invite(invitee_guid) {
-        Some(invite) => invite,
-        None => return Ok(()), // No invite, silently ignore
-    };
+    let (inviter_guid, _guild_id, _guild_name) =
+        match world.systems.guild.remove_pending_invite(invitee_guid) {
+            Some(invite) => invite,
+            None => return Ok(()), // No invite, silently ignore
+        };
 
     // Get invitee name
-    let invitee_name = world.managers.player_mgr
+    let invitee_name = world
+        .managers
+        .player_mgr
         .get_player_name(invitee_guid)
         .unwrap_or_else(|| "Unknown".to_string());
 
     debug!("CMSG_GUILD_DECLINE: {} declined invite", invitee_name);
 
     // Notify inviter (need to use an empty string since SmsgGuildDecline requires 'static lifetime)
-    world.managers.broadcast_mgr.send_msg_to_player(
-        inviter_guid,
-        SmsgGuildDecline {
-            player_name: "",
-        },
-    );
+    world
+        .managers
+        .broadcast_mgr
+        .send_msg_to_player(inviter_guid, SmsgGuildDecline { player_name: "" });
 
     Ok(())
 }
 
-pub async fn handle_guild_roster(
-    session: &WorldSession,
-    world: &World,
-) -> Result<()> {
+pub async fn handle_guild_roster(session: &WorldSession, world: &World) -> Result<()> {
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
@@ -183,16 +188,16 @@ pub async fn handle_guild_roster(
         .ok_or_else(|| anyhow!("Not in a guild"))?;
 
     if let Some(guild_id) = guild_state.guild_id {
-        world.systems.guild.send_guild_roster_to_player(player_guid, guild_id)?;
+        world
+            .systems
+            .guild
+            .send_guild_roster_to_player(player_guid, guild_id)?;
     }
 
     Ok(())
 }
 
-pub async fn handle_guild_leave(
-    session: &WorldSession,
-    world: &World,
-) -> Result<()> {
+pub async fn handle_guild_leave(session: &WorldSession, world: &World) -> Result<()> {
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
@@ -231,7 +236,10 @@ pub async fn handle_guild_remove(
     let target_name = packet.read_string().unwrap_or_default();
 
     // Find target
-    let target_guid = world.managers.player_mgr.find_player_by_name(&target_name)
+    let target_guid = world
+        .managers
+        .player_mgr
+        .find_player_by_name(&target_name)
         .ok_or_else(|| anyhow!("Player '{}' not found", target_name))?;
 
     info!(
@@ -240,7 +248,9 @@ pub async fn handle_guild_remove(
     );
 
     // Delegate to system
-    world.systems.guild
+    world
+        .systems
+        .guild
         .remove_member(remover_guid, target_guid, target_name)
         .await?;
 
@@ -297,10 +307,7 @@ pub async fn handle_guild_demote(
     Ok(())
 }
 
-pub async fn handle_guild_disband(
-    session: &WorldSession,
-    world: &World,
-) -> Result<()> {
+pub async fn handle_guild_disband(session: &WorldSession, world: &World) -> Result<()> {
     let leader_guid = session
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
@@ -313,10 +320,7 @@ pub async fn handle_guild_disband(
     Ok(())
 }
 
-pub async fn handle_guild_info(
-    session: &WorldSession,
-    world: &World,
-) -> Result<()> {
+pub async fn handle_guild_info(session: &WorldSession, world: &World) -> Result<()> {
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
@@ -332,10 +336,7 @@ pub async fn handle_guild_info(
         .ok_or_else(|| anyhow!("Not in a guild"))?;
 
     if let Some(guild_id) = guild_state.guild_id {
-        world
-            .systems
-            .guild
-            .query_guild(player_guid, guild_id)?;
+        world.systems.guild.query_guild(player_guid, guild_id)?;
     }
 
     Ok(())

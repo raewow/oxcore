@@ -10,11 +10,11 @@
 //! - [`SmsgTurnInPetitionResults`] - Result of turning in a completed charter
 //! - [`SmsgPetitionQueryResponse`] - Response to a petition query with charter details
 
+use crate::shared::game::petition::{PetitionResult, PetitionSignature};
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::guid::ObjectGuid;
 use crate::shared::protocol::Opcode;
 use crate::shared::protocol::WorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::game::petition::{PetitionResult, PetitionSignature};
 
 /// SMSG_PETITION_SHOWLIST - Show available guild charters for purchase from an NPC
 ///
@@ -162,8 +162,8 @@ impl ToWorldPacket for SmsgPetitionQueryResponse<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
     use crate::shared::game::petition::PetitionResult;
+    use crate::shared::protocol::Opcode;
 
     #[test]
     fn test_smsg_petition_showlist() {

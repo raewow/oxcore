@@ -11,7 +11,11 @@ use crate::world::game::chat::commands::context::{ChatCommandContext, ChatComman
 pub async fn cmd_help(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {
     let args = args.trim();
     let command = if args.is_empty() { None } else { Some(args) };
-    Ok(ctx.world.systems.chat.get_command_help(command, ctx.security))
+    Ok(ctx
+        .world
+        .systems
+        .chat
+        .get_command_help(command, ctx.security))
 }
 
 pub fn help_info() -> ChatCommandInfo {

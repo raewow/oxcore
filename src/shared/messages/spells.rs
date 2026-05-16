@@ -1,5 +1,5 @@
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::shared::protocol::packet::WorldPacketGuidExt;
+use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// SMSG_SPELL_START (opcode 0x0131)
 /// Broadcast when a spell cast begins (cast bar appears).
@@ -114,8 +114,8 @@ impl SmsgPlaySpellVisual {
 #[cfg(test)]
 mod spell_packet_tests {
     use super::*;
-    use bytes::Buf;
     use crate::shared::protocol::HighGuid;
+    use bytes::Buf;
 
     fn player_guid(id: u32) -> ObjectGuid {
         ObjectGuid::new_without_entry(HighGuid::Player, id)
@@ -168,7 +168,11 @@ mod spell_packet_tests {
         let mut data = pkt.data().clone();
 
         let first_guid = read_packed_guid(&mut data);
-        assert_eq!(first_guid, caster.raw(), "first GUID must be caster when no item");
+        assert_eq!(
+            first_guid,
+            caster.raw(),
+            "first GUID must be caster when no item"
+        );
 
         let _second_guid = read_packed_guid(&mut data);
         let _spell_id = {
@@ -177,7 +181,11 @@ mod spell_packet_tests {
             u32::from_le_bytes(bytes)
         };
         let flags = read_u16_le(&mut data);
-        assert_eq!(flags & 0x0040, 0, "CAST_FLAG_ITEM_CAST must NOT be set without an item");
+        assert_eq!(
+            flags & 0x0040,
+            0,
+            "CAST_FLAG_ITEM_CAST must NOT be set without an item"
+        );
     }
 
     /// When cast_item_guid is Some the packet opens with the item packed GUID
@@ -201,7 +209,11 @@ mod spell_packet_tests {
         let mut data = pkt.data().clone();
 
         let first_guid = read_packed_guid(&mut data);
-        assert_eq!(first_guid, item.raw(), "first GUID must be item GUID when cast from item");
+        assert_eq!(
+            first_guid,
+            item.raw(),
+            "first GUID must be item GUID when cast from item"
+        );
 
         let _second_guid = read_packed_guid(&mut data);
         let _spell_id = {
@@ -210,8 +222,16 @@ mod spell_packet_tests {
             u32::from_le_bytes(bytes)
         };
         let flags = read_u16_le(&mut data);
-        assert_ne!(flags & 0x0040, 0, "CAST_FLAG_ITEM_CAST (0x0040) must be set when cast from item");
-        assert_ne!(flags & 0x0002, 0, "original cast_flags bits must be preserved");
+        assert_ne!(
+            flags & 0x0040,
+            0,
+            "CAST_FLAG_ITEM_CAST (0x0040) must be set when cast from item"
+        );
+        assert_ne!(
+            flags & 0x0002,
+            0,
+            "original cast_flags bits must be preserved"
+        );
     }
 
     // ===== SMSG_SPELL_START tests =====
@@ -233,7 +253,11 @@ mod spell_packet_tests {
         let mut data = pkt.data().clone();
 
         let first_guid = read_packed_guid(&mut data);
-        assert_eq!(first_guid, caster.raw(), "first GUID must be caster when no item");
+        assert_eq!(
+            first_guid,
+            caster.raw(),
+            "first GUID must be caster when no item"
+        );
     }
 
     /// With an item, SMSG_SPELL_START opens with the item's packed GUID.
@@ -254,7 +278,11 @@ mod spell_packet_tests {
         let mut data = pkt.data().clone();
 
         let first_guid = read_packed_guid(&mut data);
-        assert_eq!(first_guid, item.raw(), "first GUID must be item GUID when cast from item");
+        assert_eq!(
+            first_guid,
+            item.raw(),
+            "first GUID must be item GUID when cast from item"
+        );
     }
 }
 
@@ -333,9 +361,13 @@ impl SmsgSpellCooldown {
             packet.write_u32(*spell_id);
             packet.write_u32(*cooldown_ms);
         }
-        tracing::info!("[SPELL_COOLDOWN] caster={:?} cooldowns={:?} packet_len={} bytes={:02X?}",
-            self.caster_guid, self.cooldowns,
-            packet.data().as_ref().len(), packet.data().as_ref());
+        tracing::info!(
+            "[SPELL_COOLDOWN] caster={:?} cooldowns={:?} packet_len={} bytes={:02X?}",
+            self.caster_guid,
+            self.cooldowns,
+            packet.data().as_ref().len(),
+            packet.data().as_ref()
+        );
         packet
     }
 }

@@ -431,10 +431,10 @@ pub struct SmsgQuestgiverOfferRewardV2<'a> {
     pub reward_items: &'a [RewardItemInfo],
     /// Money reward
     pub money_reward: u32,
+    /// Quest flags
+    pub quest_flags: QuestFlags,
     /// Reward spell
     pub rew_spell: u32,
-    /// Reward spell cast
-    pub rew_spell_cast: u32,
     /// Offer reward emotes
     pub offer_reward_emote: [u32; QUEST_EMOTE_COUNT],
     /// Offer reward emote delays
@@ -477,8 +477,8 @@ impl ToWorldPacket for SmsgQuestgiverOfferRewardV2<'_> {
 
         // Money reward
         packet.write_u32(self.money_reward);
+        packet.write_u32(self.quest_flags.0);
         packet.write_u32(self.rew_spell);
-        packet.write_u32(self.rew_spell_cast);
 
         packet
     }

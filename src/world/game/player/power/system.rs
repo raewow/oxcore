@@ -2,7 +2,9 @@
 //!
 //! Stateless system that operates on PowerState embedded in Player.
 
-use crate::shared::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
+use crate::shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::BroadcastManagerTrait;
@@ -77,7 +79,11 @@ impl PowerSystem {
             if new_value != old_value {
                 tracing::info!(
                     "[POWER] {:?} regen tick: {:?} {} -> {} (max={})",
-                    guid, power_type, old_value, new_value, player.power.max[idx]
+                    guid,
+                    power_type,
+                    old_value,
+                    new_value,
+                    player.power.max[idx]
                 );
                 power_updates.push((guid, power_type, new_value));
             }
@@ -95,7 +101,10 @@ impl PowerSystem {
     fn regen_tick(&self, guid: ObjectGuid, player: &mut Player, now: u64) {
         // Sum flat mana-per-tick from AURA_MOD_POWER_REGEN (85) auras (drinks, Blessing of Wisdom)
         // misc_value 0 = Mana. Value is flat mana restored per 2-second tick.
-        let drink_regen: f32 = player.auras.container.all_auras()
+        let drink_regen: f32 = player
+            .auras
+            .container
+            .all_auras()
             .filter(|a| a.aura_type == 85 && a.misc_value == 0)
             .map(|a| a.current_value() as f32)
             .sum();
@@ -297,9 +306,12 @@ impl PowerSystem {
         power_type: PowerType,
         world: &World,
     ) -> Result<()> {
-        let value = world.managers.player_mgr.with_player(player_guid, |player| {
-            player.power.current[power_type as usize]
-        });
+        let value = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| {
+                player.power.current[power_type as usize]
+            });
 
         if let Some(value) = value {
             self.broadcast_power_value(player_guid, power_type, value, world);
@@ -317,11 +329,12 @@ impl PowerSystem {
         _world: &World,
     ) {
         let field_offset = UNIT_FIELD_POWER1 + power_type as u32;
-        let block = ValuesUpdateBlock::new(player_guid, ObjectType::Player)
-            .set_field(field_offset, value);
+        let block =
+            ValuesUpdateBlock::new(player_guid, ObjectType::Player).set_field(field_offset, value);
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
         let packet = update_msg.to_world_packet();
-        self.broadcast_mgr.broadcast_nearby(player_guid, &packet, true);
+        self.broadcast_mgr
+            .broadcast_nearby(player_guid, &packet, true);
     }
 }
 

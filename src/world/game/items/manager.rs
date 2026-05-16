@@ -19,12 +19,13 @@ pub struct ItemTemplate {
     pub item_class: u32,
     pub item_subclass: u32,
     pub inventory_type: u8,
-    pub max_count: u32,      // Maximum copies player can have (0 = unlimited)
-    pub stackable: u32,      // Maximum stack size per slot
+    pub max_count: u32, // Maximum copies player can have (0 = unlimited)
+    pub stackable: u32, // Maximum stack size per slot
     pub max_durability: u32,
     pub buy_price: u32,
     pub sell_price: u32,
     pub container_slots: u8,
+    pub start_quest: u32,
     // Spell fields for item usage
     pub spell_id: [u32; 5],
     pub spell_trigger: [u32; 5],
@@ -107,7 +108,7 @@ impl ItemManager {
         let rows = sqlx::query(
             "SELECT entry, name, display_id, quality, item_level, required_level,
                       inventory_type, `class`, subclass, max_count, stackable, max_durability,
-                      buy_price, sell_price, container_slots,
+                     buy_price, sell_price, container_slots, start_quest,
                      spellid_1, spellid_2, spellid_3, spellid_4, spellid_5,
                      spelltrigger_1, spelltrigger_2, spelltrigger_3, spelltrigger_4, spelltrigger_5,
                      spellcharges_1, spellcharges_2, spellcharges_3, spellcharges_4, spellcharges_5,
@@ -140,6 +141,7 @@ impl ItemManager {
             let buy_price: u32 = row.try_get("buy_price")?;
             let sell_price: u32 = row.try_get("sell_price")?;
             let container_slots: u8 = row.try_get("container_slots")?;
+            let start_quest: u32 = row.try_get("start_quest")?;
 
             // Read spell data (default to 0 for all fields)
             let spell_id = [
@@ -218,6 +220,7 @@ impl ItemManager {
                 buy_price,
                 sell_price,
                 container_slots,
+                start_quest,
                 spell_id,
                 spell_trigger,
                 spell_charges,
@@ -292,7 +295,10 @@ impl ItemManager {
         let item_start = max_item_guid.map(|g| g + 1).unwrap_or(1);
         self.set_initial_guid(item_start);
 
-        tracing::debug!("Initialized item GUID generator - starting at {}", item_start);
+        tracing::debug!(
+            "Initialized item GUID generator - starting at {}",
+            item_start
+        );
 
         Ok(())
     }

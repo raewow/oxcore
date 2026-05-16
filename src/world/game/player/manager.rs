@@ -12,15 +12,15 @@ use crate::shared::messages::update::{
 };
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::{ObjectGuid, Position};
-use crate::world::game::common::unit_flags as unit_flags_mod;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::core::common::position::Position as WorldPosition;
-use crate::world::game::common::update_fields::*;
-use crate::world::game::common::player_constants::{get_faction_for_race, get_player_display_id};
-use crate::world::game::common::object_type::MovementSpeeds;
-use crate::world::game::common::object_type::update_flags;
-use crate::world::game::common::object_type::ObjectTypeId;
 use crate::world::core::common::ObjectGuidGenerator;
+use crate::world::game::common::object_type::update_flags;
+use crate::world::game::common::object_type::MovementSpeeds;
+use crate::world::game::common::object_type::ObjectTypeId;
+use crate::world::game::common::player_constants::{get_faction_for_race, get_player_display_id};
+use crate::world::game::common::unit_flags as unit_flags_mod;
+use crate::world::game::common::update_fields::*;
 use crate::world::World;
 
 /// Manages all online players
@@ -676,7 +676,9 @@ impl PlayerManager {
             .execute(character_db)
             .await?;
         for spell_id in spellbook {
-            char_repo.add_spell(player_guid.counter(), spell_id, 1, 0).await?;
+            char_repo
+                .add_spell(player_guid.counter(), spell_id, 1, 0)
+                .await?;
         }
 
         Ok(())
@@ -690,7 +692,9 @@ impl PlayerManager {
     ) -> anyhow::Result<()> {
         let buttons = self.collect_action_buttons_for_save(player_guid);
         let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
-        char_repo.save_actions(player_guid.counter(), &buttons).await?;
+        char_repo
+            .save_actions(player_guid.counter(), &buttons)
+            .await?;
         Ok(())
     }
 
@@ -728,7 +732,9 @@ impl PlayerManager {
     ) -> anyhow::Result<()> {
         let skills = self.collect_skills_for_save(player_guid);
         let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
-        char_repo.save_skills(player_guid.counter(), &skills).await?;
+        char_repo
+            .save_skills(player_guid.counter(), &skills)
+            .await?;
         Ok(())
     }
 
@@ -749,7 +755,16 @@ impl PlayerManager {
         character_db: &sqlx::MySqlPool,
     ) -> anyhow::Result<()> {
         // Save all player data in parallel for performance
-        let (pos_result, xp_result, health_result, rest_result, spells_result, actions_result, rep_result, skills_result) = tokio::join!(
+        let (
+            pos_result,
+            xp_result,
+            health_result,
+            rest_result,
+            spells_result,
+            actions_result,
+            rep_result,
+            skills_result,
+        ) = tokio::join!(
             self.save_position(player_guid, character_db),
             self.save_experience(player_guid, character_db),
             self.save_health_and_power(player_guid, character_db),
@@ -834,7 +849,17 @@ mod tests {
 
     fn make_manager_with_player(guid: ObjectGuid) -> PlayerManager {
         let mgr = PlayerManager::new();
-        let player = Player::new(guid, format!("Player{}", guid.counter()), 0, 0, 1, 1, 1, 1, 0);
+        let player = Player::new(
+            guid,
+            format!("Player{}", guid.counter()),
+            0,
+            0,
+            1,
+            1,
+            1,
+            1,
+            0,
+        );
         mgr.add_player(player, guid.counter());
         mgr
     }
@@ -856,9 +881,9 @@ mod tests {
         let mgr = make_manager_with_player(guid);
 
         mgr.with_player_mut(guid, |p| {
-            p.spells.learn_spell(133);   // Fireball
-            p.spells.learn_spell(2136);  // Fire Blast
-            p.spells.learn_spell(6603);  // Attack
+            p.spells.learn_spell(133); // Fireball
+            p.spells.learn_spell(2136); // Fire Blast
+            p.spells.learn_spell(6603); // Attack
         });
 
         let mut spells = mgr.collect_spells_for_save(guid);
@@ -890,9 +915,9 @@ mod tests {
         let mgr = make_manager_with_player(guid);
 
         mgr.with_player_mut(guid, |p| {
-            p.settings.set_action_button(0, 133, ACTION_BUTTON_SPELL);   // slot 0: Fireball
-            p.settings.set_action_button(1, 2136, ACTION_BUTTON_SPELL);  // slot 1: Fire Blast
-            p.settings.set_action_button(11, 5, ACTION_BUTTON_ITEM);     // slot 11: some item
+            p.settings.set_action_button(0, 133, ACTION_BUTTON_SPELL); // slot 0: Fireball
+            p.settings.set_action_button(1, 2136, ACTION_BUTTON_SPELL); // slot 1: Fire Blast
+            p.settings.set_action_button(11, 5, ACTION_BUTTON_ITEM); // slot 11: some item
         });
 
         let mut buttons = mgr.collect_action_buttons_for_save(guid);
@@ -945,9 +970,11 @@ mod tests {
 
         mgr.with_player_mut(guid, |p| {
             // Stormwind (faction 72, rep_list_id 0): friendly standing
-            p.reputation.insert_standing(FactionStanding::new(72, 0, 3000, 1));
+            p.reputation
+                .insert_standing(FactionStanding::new(72, 0, 3000, 1));
             // Orgrimmar (faction 76, rep_list_id 1): hostile standing
-            p.reputation.insert_standing(FactionStanding::new(76, 1, -6000, 0));
+            p.reputation
+                .insert_standing(FactionStanding::new(76, 1, -6000, 0));
         });
 
         let factions = mgr.collect_reputation_for_save(guid);
@@ -986,22 +1013,28 @@ mod tests {
         let mgr = make_manager_with_player(guid);
 
         mgr.with_player_mut(guid, |p| {
-            p.skills.skills.insert(43, SkillData {
-                skill_id: 43,           // Swords
-                current_value: 150,
-                max_value: 300,
-                step: 0,
-                position: 0,
-                state: SkillSaveState::New,
-            });
-            p.skills.skills.insert(95, SkillData {
-                skill_id: 95,           // Defense
-                current_value: 200,
-                max_value: 300,
-                step: 0,
-                position: 1,
-                state: SkillSaveState::Changed,
-            });
+            p.skills.skills.insert(
+                43,
+                SkillData {
+                    skill_id: 43, // Swords
+                    current_value: 150,
+                    max_value: 300,
+                    step: 0,
+                    position: 0,
+                    state: SkillSaveState::New,
+                },
+            );
+            p.skills.skills.insert(
+                95,
+                SkillData {
+                    skill_id: 95, // Defense
+                    current_value: 200,
+                    max_value: 300,
+                    step: 0,
+                    position: 1,
+                    state: SkillSaveState::Changed,
+                },
+            );
         });
 
         let mut skills = mgr.collect_skills_for_save(guid);
@@ -1018,22 +1051,28 @@ mod tests {
         let mgr = make_manager_with_player(guid);
 
         mgr.with_player_mut(guid, |p| {
-            p.skills.skills.insert(43, SkillData {
-                skill_id: 43,
-                current_value: 150,
-                max_value: 300,
-                step: 0,
-                position: 0,
-                state: SkillSaveState::Unchanged,
-            });
-            p.skills.skills.insert(95, SkillData {
-                skill_id: 95,
-                current_value: 200,
-                max_value: 300,
-                step: 0,
-                position: 1,
-                state: SkillSaveState::Deleted, // should be excluded
-            });
+            p.skills.skills.insert(
+                43,
+                SkillData {
+                    skill_id: 43,
+                    current_value: 150,
+                    max_value: 300,
+                    step: 0,
+                    position: 0,
+                    state: SkillSaveState::Unchanged,
+                },
+            );
+            p.skills.skills.insert(
+                95,
+                SkillData {
+                    skill_id: 95,
+                    current_value: 200,
+                    max_value: 300,
+                    step: 0,
+                    position: 1,
+                    state: SkillSaveState::Deleted, // should be excluded
+                },
+            );
         });
 
         let skills = mgr.collect_skills_for_save(guid);
@@ -1061,7 +1100,10 @@ mod tests {
         });
 
         let spells = mgr.collect_spells_for_save(guid);
-        assert!(spells.contains(&9875), "Newly learned spell must appear in save data");
+        assert!(
+            spells.contains(&9875),
+            "Newly learned spell must appear in save data"
+        );
     }
 
     #[test]
@@ -1076,7 +1118,10 @@ mod tests {
 
         let buttons = mgr.collect_action_buttons_for_save(guid);
         let slot5 = buttons.iter().find(|&&(slot, _, _)| slot == 5);
-        assert!(slot5.is_some(), "Changed action bar slot must appear in save data");
+        assert!(
+            slot5.is_some(),
+            "Changed action bar slot must appear in save data"
+        );
         assert_eq!(slot5.unwrap().1, 9875);
     }
 
@@ -1087,7 +1132,8 @@ mod tests {
 
         // Simulate gaining rep mid-session
         mgr.with_player_mut(guid, |p| {
-            p.reputation.insert_standing(FactionStanding::new(72, 0, 1500, 1));
+            p.reputation
+                .insert_standing(FactionStanding::new(72, 0, 1500, 1));
         });
 
         let factions = mgr.collect_reputation_for_save(guid);
@@ -1101,14 +1147,17 @@ mod tests {
         let mgr = make_manager_with_player(guid);
 
         mgr.with_player_mut(guid, |p| {
-            p.skills.skills.insert(43, SkillData {
-                skill_id: 43,
-                current_value: 151, // skilled up from 150
-                max_value: 300,
-                step: 0,
-                position: 0,
-                state: SkillSaveState::Changed,
-            });
+            p.skills.skills.insert(
+                43,
+                SkillData {
+                    skill_id: 43,
+                    current_value: 151, // skilled up from 150
+                    max_value: 300,
+                    step: 0,
+                    position: 0,
+                    state: SkillSaveState::Changed,
+                },
+            );
         });
 
         let skills = mgr.collect_skills_for_save(guid);

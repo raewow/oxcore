@@ -56,7 +56,7 @@ impl SpellManager {
             "SELECT CAST(id AS UNSIGNED) AS id, \
                     CAST(target_map AS UNSIGNED) AS target_map, \
                     target_position_x, target_position_y, target_position_z, target_orientation \
-             FROM spell_target_position"
+             FROM spell_target_position",
         )
         .fetch_all(world_db)
         .await?;
@@ -71,7 +71,16 @@ impl SpellManager {
             let z: f32 = row.try_get("target_position_z").unwrap_or(0.0);
             let orientation: f32 = row.try_get("target_orientation").unwrap_or(0.0);
 
-            self.target_positions.insert(id, SpellTargetPosition { map_id, x, y, z, orientation });
+            self.target_positions.insert(
+                id,
+                SpellTargetPosition {
+                    map_id,
+                    x,
+                    y,
+                    z,
+                    orientation,
+                },
+            );
         }
 
         info!("Loaded {} spell_target_position entries", count);

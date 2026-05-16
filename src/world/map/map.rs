@@ -90,7 +90,7 @@ impl Map {
 
     /// Update player position - handles grid changes
     pub fn relocate_player(&self, guid: ObjectGuid, old_pos: Position, new_pos: Position) {
-        use crate::world::map::grid_coords::{world_to_grid, world_to_cell};
+        use crate::world::map::grid_coords::{world_to_cell, world_to_grid};
 
         let old_grid = world_to_grid(old_pos.x, old_pos.y);
         let new_grid = world_to_grid(new_pos.x, new_pos.y);
@@ -120,7 +120,7 @@ impl Map {
 
     /// Update creature position - handles grid changes
     pub fn relocate_creature(&self, guid: ObjectGuid, old_pos: Position, new_pos: Position) {
-        use crate::world::map::grid_coords::{world_to_grid, world_to_cell};
+        use crate::world::map::grid_coords::{world_to_cell, world_to_grid};
 
         let old_grid = world_to_grid(old_pos.x, old_pos.y);
         let new_grid = world_to_grid(new_pos.x, new_pos.y);
@@ -214,8 +214,8 @@ impl Map {
 
     /// Activate grids around a position
     fn activate_grids_around_position(&self, pos: Position) {
-        use crate::world::map::grid_coords::{world_to_grid, GRID_SIZE};
         use crate::world::map::grid::MAX_GRIDS;
+        use crate::world::map::grid_coords::{world_to_grid, GRID_SIZE};
 
         let (center_gx, center_gy) = world_to_grid(pos.x, pos.y);
         let grid_range = (self.visibility_distance / GRID_SIZE).ceil() as i32 + 1;
@@ -277,7 +277,12 @@ impl Map {
     /// Get players within range with early-exit optimization
     /// Limits result to max_results to avoid full map scans
     /// Use this for broadcasts where you don't need ALL players, just nearby ones
-    pub fn get_players_in_range_limit(&self, center: Position, range: f32, max_results: usize) -> Vec<ObjectGuid> {
+    pub fn get_players_in_range_limit(
+        &self,
+        center: Position,
+        range: f32,
+        max_results: usize,
+    ) -> Vec<ObjectGuid> {
         let range_sq = range * range;
         let mut result = Vec::with_capacity(max_results.min(20));
 
@@ -298,7 +303,12 @@ impl Map {
     }
 
     /// Get all creatures within range and append to result vector
-    pub fn get_creatures_in_range(&self, center: Position, range_sq: f32, result: &mut Vec<ObjectGuid>) {
+    pub fn get_creatures_in_range(
+        &self,
+        center: Position,
+        range_sq: f32,
+        result: &mut Vec<ObjectGuid>,
+    ) {
         for entry in self.creatures.iter() {
             let pos = entry.value();
             let dx = pos.x - center.x;

@@ -28,7 +28,9 @@ pub struct TalentSystem {
 
 impl TalentSystem {
     pub fn new(store: Arc<TalentStore>) -> Self {
-        Self { store: RwLock::new(store) }
+        Self {
+            store: RwLock::new(store),
+        }
     }
 
     /// Reload the talent store from DBC data.
@@ -39,8 +41,9 @@ impl TalentSystem {
         let talent_count = store.talents.len();
         let tab_count = store.tabs.len();
         *self.store.write() = store;
-        tracing::info!("TalentSystem reloaded with {} talents and {} tabs", 
-            talent_count, 
+        tracing::info!(
+            "TalentSystem reloaded with {} talents and {} tabs",
+            talent_count,
             tab_count
         );
     }
@@ -74,26 +77,22 @@ impl TalentSystem {
             .systems
             .player
             .manager()
-            .with_player(player_guid, |player| {
-                (player.talents.clone(), player.class)
-            })
+            .with_player(player_guid, |player| (player.talents.clone(), player.class))
         else {
             return Ok(()); // Player not found
         };
 
         // 2. Pure validation (no locks)
         let store = self.store.read();
-        let result = validation::validate_learn_talent(
-            &state_snapshot,
-            talent_id,
-            class_id,
-            &store,
-        );
+        let result =
+            validation::validate_learn_talent(&state_snapshot, talent_id, class_id, &store);
 
         if result != TalentLearnResult::Ok {
             tracing::warn!(
                 "Player {:?} failed to learn talent {}: {:?}",
-                player_guid, talent_id, result
+                player_guid,
+                talent_id,
+                result
             );
             return Ok(()); // Silently reject (client should prevent this)
         }
@@ -109,22 +108,20 @@ impl TalentSystem {
         let new_rank = old_rank + 1;
 
         // 4. Update state (brief lock)
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            player.talents.talents.insert(talent_id, new_rank);
-            player.talents.used_talent_count += 1;
-            player.talents.free_talent_points -= 1;
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                player.talents.talents.insert(talent_id, new_rank);
+                player.talents.used_talent_count += 1;
+                player.talents.free_talent_points -= 1;
+            });
 
         // 5. Apply talent spell effects (may acquire other locks)
         let store = self.store.read();
-        effects::apply_talent_rank(
-            player_guid,
-            talent_id,
-            new_rank,
-            old_rank,
-            &store,
-            world,
-        ).await?;
+        effects::apply_talent_rank(player_guid, talent_id, new_rank, old_rank, &store, world)
+            .await?;
         drop(store);
 
         // 6. Update client (PLAYER_CHARACTER_POINTS1)
@@ -173,9 +170,7 @@ impl TalentSystem {
             .systems
             .player
             .manager()
-            .with_player(player_guid, |player| {
-                (player.talents.clone(), player.money)
-            })
+            .with_player(player_guid, |player| (player.talents.clone(), player.money))
         else {
             return Ok(false); // Player not found
         };
@@ -208,56 +203,64 @@ impl TalentSystem {
         if cost > 0 && money < cost {
             tracing::warn!(
                 "Player {:?} cannot afford talent reset: need {} copper, have {}",
-                player_guid, cost, money
+                player_guid,
+                cost,
+                money
             );
             return Ok(false);
         }
 
         // 5. Remove all talent effects (acquires locks)
         let store = self.store.read();
-        effects::remove_all_talent_effects(
-            player_guid,
-            &state_snapshot,
-            &store,
-            world,
-        ).await?;
+        effects::remove_all_talent_effects(player_guid, &state_snapshot, &store, world).await?;
         drop(store);
 
         // 6. Update state (brief lock)
-        let Some(level) = world.systems.player.manager().with_player_mut(player_guid, |player| {
-            // Clear talent data
-            player.talents.talents.clear();
-            player.talents.used_talent_count = 0;
+        let Some(level) = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                // Clear talent data
+                player.talents.talents.clear();
+                player.talents.used_talent_count = 0;
 
-            // Charge gold
-            if cost > 0 {
-                player.money -= cost;
-            }
+                // Charge gold
+                if cost > 0 {
+                    player.money -= cost;
+                }
 
-            // Update reset tracking (only for paid resets)
-            if !no_cost {
-                player.talents.reset_cost_multiplier += 1;
-                player.talents.last_reset_time = now;
-            }
+                // Update reset tracking (only for paid resets)
+                if !no_cost {
+                    player.talents.reset_cost_multiplier += 1;
+                    player.talents.last_reset_time = now;
+                }
 
-            player.level
-        }) else {
+                player.level
+            })
+        else {
             return Ok(false); // Player not found
         };
 
         // 7. Recalculate free points
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            points::update_free_talent_points(
-                &mut player.talents,
-                level,
-                1.0, // rate - TODO: load from config
-                false,
-            );
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                points::update_free_talent_points(
+                    &mut player.talents,
+                    level,
+                    1.0, // rate - TODO: load from config
+                    false,
+                );
+            });
 
         tracing::info!(
             "Player {:?} reset talents (cost: {} copper, no_cost: {})",
-            player_guid, cost, no_cost
+            player_guid,
+            cost,
+            no_cost
         );
 
         Ok(true)
@@ -272,17 +275,16 @@ impl TalentSystem {
     /// * `player_guid` - The player who leveled up
     /// * `new_level` - The level the player just reached
     /// * `world` - World reference
-    pub fn on_level_up(
-        &self,
-        player_guid: ObjectGuid,
-        new_level: u8,
-        world: &World,
-    ) -> Result<()> {
+    pub fn on_level_up(&self, player_guid: ObjectGuid, new_level: u8, world: &World) -> Result<()> {
         let rate = 1.0; // TODO: load from config
 
-        world.systems.player.manager().with_player_mut(player_guid, |player| {
-            points::on_level_up(&mut player.talents, new_level, rate);
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                points::on_level_up(&mut player.talents, new_level, rate);
+            });
 
         Ok(())
     }
@@ -297,29 +299,18 @@ impl TalentSystem {
     /// # Arguments
     /// * `player_guid` - The player logging in
     /// * `world` - World reference
-    pub async fn on_player_login(
-        &self,
-        player_guid: ObjectGuid,
-        world: &World,
-    ) -> Result<()> {
+    pub async fn on_player_login(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         let Some(state_snapshot) = world
             .systems
             .player
             .manager()
-            .with_player(player_guid, |player| {
-                player.talents.clone()
-            })
+            .with_player(player_guid, |player| player.talents.clone())
         else {
             return Ok(()); // Player not found
         };
 
         let store = self.store.read();
-        effects::reapply_all_talent_effects(
-            player_guid,
-            &state_snapshot,
-            &store,
-            world,
-        ).await?;
+        effects::reapply_all_talent_effects(player_guid, &state_snapshot, &store, world).await?;
         drop(store);
 
         tracing::debug!(

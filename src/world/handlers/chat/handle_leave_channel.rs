@@ -30,7 +30,8 @@ pub async fn handle_leave_channel(
     world
         .systems
         .chat
-        .leave_channel(player_guid, &channel_name, player_team).await?;
+        .leave_channel(player_guid, &channel_name, player_team)
+        .await?;
 
     Ok(())
 }

@@ -6,11 +6,11 @@
 use anyhow::Result;
 use tracing::debug;
 
+use crate::shared::protocol::WorldPacket;
+use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
-use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::World;
-use crate::shared::protocol::WorldPacket;
 
 /// Handle CMSG_GAMEOBJ_USE (0x00B1)
 ///
@@ -43,16 +43,33 @@ pub async fn handle_gameobj_use(
         .unwrap_or(0);
 
     if go_entry == 0 {
-        debug!("CMSG_GAMEOBJ_USE: GO {:?} not found or has no entry", go_guid);
+        debug!(
+            "CMSG_GAMEOBJ_USE: GO {:?} not found or has no entry",
+            go_guid
+        );
+        return Ok(());
+    }
+
+    let quest_items =
+        world
+            .systems
+            .quest
+            .prepare_gameobject_quest_menu(player_guid, go_entry, world);
+    if !quest_items.is_empty() {
+        world
+            .systems
+            .quest
+            .send_gameobject_quest_list(player_guid, go_guid, go_entry, world)?;
         return Ok(());
     }
 
     // Check for a Lua script handling OnGameObjectHello
     if let Some(script) = world.managers.lua_mgr.get_game_object_script(go_entry) {
         let player_snap = build_player_snapshot(player_guid, world);
-        let actions = world.managers.lua_mgr.with_lua(|lua| {
-            script.on_gameobject_hello(lua, &player_snap, go_guid)
-        });
+        let actions = world
+            .managers
+            .lua_mgr
+            .with_lua(|lua| script.on_gameobject_hello(lua, &player_snap, go_guid));
         if !actions.is_empty() {
             execute_gossip_actions(actions, player_guid, go_guid, world).await?;
         }
@@ -83,9 +100,10 @@ pub async fn handle_gameobj_open(
 
     if let Some(script) = world.managers.lua_mgr.get_game_object_script(go_entry) {
         let player_snap = build_player_snapshot(player_guid, world);
-        let actions = world.managers.lua_mgr.with_lua(|lua| {
-            script.on_gameobject_open(lua, &player_snap, go_guid)
-        });
+        let actions = world
+            .managers
+            .lua_mgr
+            .with_lua(|lua| script.on_gameobject_open(lua, &player_snap, go_guid));
         if !actions.is_empty() {
             execute_gossip_actions(actions, player_guid, go_guid, world).await?;
         }

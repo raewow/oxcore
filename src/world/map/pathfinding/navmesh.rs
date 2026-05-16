@@ -3,8 +3,8 @@
 //! Provides polygon-based pathfinding using the `pathfinding` crate.
 //! Parses Detour .mmtile format and uses A* through polygon neighbors.
 
-use crate::shared::protocol::Position;
 use super::types::PathResult;
+use crate::shared::protocol::Position;
 use std::collections::HashMap;
 
 const INVALID_POLY: u16 = 0xFFFF;
@@ -233,7 +233,11 @@ impl NavMesh {
     /// Get polygon center point
     fn get_poly_center(&self, poly_idx: usize) -> NavMeshVertex {
         let poly = &self.polygons[poly_idx];
-        let mut center = NavMeshVertex { x: 0.0, y: 0.0, z: 0.0 };
+        let mut center = NavMeshVertex {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
 
         if poly.vertex_indices.is_empty() {
             return center;

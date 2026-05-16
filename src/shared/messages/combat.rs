@@ -218,7 +218,10 @@ mod tests {
     #[test]
     fn test_outcome_to_hit_info() {
         let hit_info = outcome_to_hit_info(false, false, false, false, false, true, false);
-        assert_eq!(hit_info, HitInfo::AffectsVictim as u32 | HitInfo::CriticalHit as u32);
+        assert_eq!(
+            hit_info,
+            HitInfo::AffectsVictim as u32 | HitInfo::CriticalHit as u32
+        );
         // Normal hit should only have AFFECTS_VICTIM
         let normal = outcome_to_hit_info(false, false, false, false, false, false, false);
         assert_eq!(normal, HitInfo::AffectsVictim as u32);

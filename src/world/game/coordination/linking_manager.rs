@@ -1,7 +1,7 @@
+use super::link_flags::{LinkEvent, LinkFlags};
+use super::linking_repository::CreatureLinkRow;
 use crate::shared::protocol::ObjectGuid;
 use dashmap::DashMap;
-use super::link_flags::{LinkFlags, LinkEvent};
-use super::linking_repository::CreatureLinkRow;
 
 /// A link between two creatures
 #[derive(Debug, Clone)]
@@ -121,12 +121,8 @@ impl LinkingManager {
                     LinkEvent::Aggro { .. } | LinkEvent::EnterCombat { .. } => {
                         link.flags.contains(LinkFlags::AGGRO_ON_AGGRO)
                     }
-                    LinkEvent::Death => {
-                        link.flags.contains(LinkFlags::DIE_ON_MASTER_DEATH)
-                    }
-                    LinkEvent::Respawn => {
-                        link.flags.contains(LinkFlags::RESPAWN_ON_RESPAWN)
-                    }
+                    LinkEvent::Death => link.flags.contains(LinkFlags::DIE_ON_MASTER_DEATH),
+                    LinkEvent::Respawn => link.flags.contains(LinkFlags::RESPAWN_ON_RESPAWN),
                     LinkEvent::Evade | LinkEvent::LeaveCombat => {
                         link.flags.contains(LinkFlags::EVADE_ON_MASTER_EVADE)
                     }
@@ -157,9 +153,7 @@ impl LinkingManager {
                     LinkEvent::Aggro { .. } | LinkEvent::EnterCombat { .. } => {
                         link.flags.contains(LinkFlags::TO_AGGRO_ON_AGGRO)
                     }
-                    LinkEvent::Respawn => {
-                        link.flags.contains(LinkFlags::TO_RESPAWN_ON_RESPAWN)
-                    }
+                    LinkEvent::Respawn => link.flags.contains(LinkFlags::TO_RESPAWN_ON_RESPAWN),
                     _ => false,
                 };
 

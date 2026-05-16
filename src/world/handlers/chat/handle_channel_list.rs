@@ -31,7 +31,8 @@ pub async fn handle_channel_list(
     world
         .systems
         .chat
-        .send_channel_list(player_guid, player_team, &channel_name).await?;
+        .send_channel_list(player_guid, player_team, &channel_name)
+        .await?;
 
     Ok(())
 }

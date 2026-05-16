@@ -6,7 +6,6 @@
 //! - Learn spell
 //! - Trigger spell
 /// - Interrupt cast
-
 use super::{EffectInput, EffectResult};
 use crate::world::World;
 use anyhow::Result;
@@ -21,15 +20,21 @@ pub async fn effect_insta_kill(input: &EffectInput, world: &World) -> Result<Eff
     };
 
     // Set target health to 0
-    world.systems.player.manager().with_player_mut(target_guid, |player| {
-        let old_health = player.stats.health;
-        player.stats.health = 0;
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(target_guid, |player| {
+            let old_health = player.stats.health;
+            player.stats.health = 0;
 
-        tracing::debug!(
-            "Instakill: {} was killed by spell {}, health: {} -> 0",
-            player.name, input.spell_id, old_health
-        );
-    });
+            tracing::debug!(
+                "Instakill: {} was killed by spell {}, health: {} -> 0",
+                player.name,
+                input.spell_id,
+                old_health
+            );
+        });
 
     Ok(EffectResult::empty())
 }
@@ -40,14 +45,15 @@ pub async fn effect_insta_kill(input: &EffectInput, world: &World) -> Result<Eff
 /// misc_value = language ID
 pub async fn effect_language(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let language_id = input.misc_value as u32;
-    
+
     // TODO: Add language to player's known languages
-    
+
     tracing::debug!(
         "Learn language: caster={:?} language={}",
-        input.caster_guid, language_id
+        input.caster_guid,
+        language_id
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -57,12 +63,9 @@ pub async fn effect_language(input: &EffectInput, world: &World) -> Result<Effec
 pub async fn effect_spawn(input: &EffectInput, world: &World) -> Result<EffectResult> {
     // This is typically a visual effect only
     // Used for spawn-in animations
-    
-    tracing::debug!(
-        "Spawn effect: caster={:?}",
-        input.caster_guid
-    );
-    
+
+    tracing::debug!("Spawn effect: caster={:?}", input.caster_guid);
+
     Ok(EffectResult::empty())
 }
 
@@ -72,15 +75,11 @@ pub async fn effect_spawn(input: &EffectInput, world: &World) -> Result<EffectRe
 pub async fn effect_create_house(input: &EffectInput, world: &World) -> Result<EffectResult> {
     // This was a test effect for guild housing
     // Not used in production
-    
-    tracing::debug!(
-        "Create house (TEST): caster={:?}",
-        input.caster_guid
-    );
-    
+
+    tracing::debug!("Create house (TEST): caster={:?}", input.caster_guid);
+
     Ok(EffectResult::empty())
 }
-
 
 /// SPELL_EFFECT_LEARN_SPELL (36)
 ///
@@ -97,13 +96,18 @@ pub async fn effect_learn_spell(input: &EffectInput, world: &World) -> Result<Ef
     // TODO: Need access to broadcast_mgr here - for now just log it
     tracing::info!(
         "Learn spell effect: caster {} learning spell {}",
-        input.caster_guid, spell_to_learn
+        input.caster_guid,
+        spell_to_learn
     );
 
     // Mark spell as learned in player state
-    world.systems.player.manager().with_player_mut(input.caster_guid, |player| {
-        player.spells.learn_spell(spell_to_learn);
-    });
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(input.caster_guid, |player| {
+            player.spells.learn_spell(spell_to_learn);
+        });
 
     Ok(EffectResult::empty())
 }
@@ -134,17 +138,23 @@ pub async fn effect_trigger_spell(input: &EffectInput, world: &World) -> Result<
 
     tracing::debug!(
         "Trigger spell effect: caster {} triggering spell {} (from spell {})",
-        input.caster_guid, triggered_spell, input.spell_id
+        input.caster_guid,
+        triggered_spell,
+        input.spell_id
     );
 
     // Cast the triggered spell
-    world.systems.spells.cast_spell(
-        input.caster_guid,
-        triggered_spell,
-        input.target_guid,
-        true, // is_triggered
-        world,
-    ).await?;
+    world
+        .systems
+        .spells
+        .cast_spell(
+            input.caster_guid,
+            triggered_spell,
+            input.target_guid,
+            true, // is_triggered
+            world,
+        )
+        .await?;
 
     Ok(EffectResult::empty())
 }
@@ -166,7 +176,10 @@ pub async fn effect_interrupt_cast(input: &EffectInput, world: &World) -> Result
 
     tracing::debug!(
         "Interrupt cast effect: caster {} interrupting target {} (school: {}, duration: {}ms)",
-        input.caster_guid, target_guid, lockout_school, lockout_duration_ms
+        input.caster_guid,
+        target_guid,
+        lockout_school,
+        lockout_duration_ms
     );
 
     // TODO: Interrupt the target's cast via SpellSystem
@@ -185,9 +198,15 @@ pub async fn effect_interrupt_cast(input: &EffectInput, world: &World) -> Result
             .unwrap_or_default()
             .as_millis() as u64;
 
-        world.systems.player.manager().with_player_mut(target_guid, |player| {
-            player.spells.apply_school_lockout(lockout_school, lockout_duration_ms, now);
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player
+                    .spells
+                    .apply_school_lockout(lockout_school, lockout_duration_ms, now);
+            });
     }
 
     Ok(EffectResult::empty())

@@ -10,9 +10,9 @@
 //! - [`SmsgNpcTextUpdate`] - NPC text/greeting response
 
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::packet::WorldPacketGuidExt;
 use crate::shared::protocol::ObjectGuid;
 use crate::shared::protocol::{Opcode, WorldPacket};
-use crate::shared::protocol::packet::WorldPacketGuidExt;
 
 /// Gossip option data for SMSG_GOSSIP_MESSAGE
 #[derive(Debug, Clone)]
@@ -197,8 +197,16 @@ impl ToWorldPacket for SmsgNpcTextUpdate {
         // + emoteDelay2(u32) + emoteId2(u32) + emoteDelay3(u32) + emoteId3(u32)
         // Matches vmangos QueryHandler.cpp::HandleNpcTextQueryOpcode
         for opt in &self.options {
-            let male = if opt.male_text.is_empty() { &opt.female_text } else { &opt.male_text };
-            let female = if opt.female_text.is_empty() { &opt.male_text } else { &opt.female_text };
+            let male = if opt.male_text.is_empty() {
+                &opt.female_text
+            } else {
+                &opt.male_text
+            };
+            let female = if opt.female_text.is_empty() {
+                &opt.male_text
+            } else {
+                &opt.female_text
+            };
             packet.write_f32(opt.probability);
             packet.write_cstring(male);
             packet.write_cstring(female);
@@ -255,8 +263,11 @@ mod tests {
         let pkt = msg.to_world_packet();
         let data = pkt.data();
 
-        assert_eq!(read_u64_le(data, 0), 0xF130_0000_00C6_0001,
-            "GUID must be unpacked (fixed 8 bytes)");
+        assert_eq!(
+            read_u64_le(data, 0),
+            0xF130_0000_00C6_0001,
+            "GUID must be unpacked (fixed 8 bytes)"
+        );
     }
 
     #[test]
@@ -274,8 +285,10 @@ mod tests {
         let data = pkt.data();
 
         let after_guid = read_u32_le(data, 8);
-        assert_eq!(after_guid, 0x0000_1234,
-            "Bytes 8-11 must be text_id, not menu_id");
+        assert_eq!(
+            after_guid, 0x0000_1234,
+            "Bytes 8-11 must be text_id, not menu_id"
+        );
     }
 
     #[test]
@@ -299,15 +312,22 @@ mod tests {
         let data = pkt.data();
 
         let mut pos = 0;
-        assert_eq!(read_u64_le(data, pos), guid.raw()); pos += 8;
-        assert_eq!(read_u32_le(data, pos), 538); pos += 4;  // text_id
-        assert_eq!(read_u32_le(data, pos), 1); pos += 4;    // options count
-        assert_eq!(read_u32_le(data, pos), 0); pos += 4;    // option index
-        assert_eq!(data[pos], 3); pos += 1;                 // icon
-        assert_eq!(data[pos], 0); pos += 1;                 // coded = false
+        assert_eq!(read_u64_le(data, pos), guid.raw());
+        pos += 8;
+        assert_eq!(read_u32_le(data, pos), 538);
+        pos += 4; // text_id
+        assert_eq!(read_u32_le(data, pos), 1);
+        pos += 4; // options count
+        assert_eq!(read_u32_le(data, pos), 0);
+        pos += 4; // option index
+        assert_eq!(data[pos], 3);
+        pos += 1; // icon
+        assert_eq!(data[pos], 0);
+        pos += 1; // coded = false
         let (text, next) = read_cstring(data, pos);
-        assert_eq!(text, "Train"); pos = next;
-        assert_eq!(read_u32_le(data, pos), 0);              // quests count
+        assert_eq!(text, "Train");
+        pos = next;
+        assert_eq!(read_u32_le(data, pos), 0); // quests count
     }
 
     // ---- SMSG_NPC_TEXT_UPDATE ----
@@ -328,26 +348,39 @@ mod tests {
             emote_delays: [100, 200, 300],
             emote_ids: [1, 2, 3],
         };
-        let msg = SmsgNpcTextUpdate { text_id: 538, options };
+        let msg = SmsgNpcTextUpdate {
+            text_id: 538,
+            options,
+        };
         let pkt = msg.to_world_packet();
         let data = pkt.data();
 
         let mut pos = 0;
-        assert_eq!(read_u32_le(data, pos), 538); pos += 4; // text_id
+        assert_eq!(read_u32_le(data, pos), 538);
+        pos += 4; // text_id
 
         // option 0 fields
-        assert_eq!(read_f32_le(data, pos), 1.0); pos += 4;
-        let (male, next) = read_cstring(data, pos); pos = next;
+        assert_eq!(read_f32_le(data, pos), 1.0);
+        pos += 4;
+        let (male, next) = read_cstring(data, pos);
+        pos = next;
         assert_eq!(male, "Hello lad");
-        let (female, next) = read_cstring(data, pos); pos = next;
+        let (female, next) = read_cstring(data, pos);
+        pos = next;
         assert_eq!(female, "Hello lass");
-        assert_eq!(read_u32_le(data, pos), 7);   pos += 4; // languageId
-        assert_eq!(read_u32_le(data, pos), 100); pos += 4; // emoteDelay1
-        assert_eq!(read_u32_le(data, pos), 1);   pos += 4; // emoteId1
-        assert_eq!(read_u32_le(data, pos), 200); pos += 4; // emoteDelay2
-        assert_eq!(read_u32_le(data, pos), 2);   pos += 4; // emoteId2
-        assert_eq!(read_u32_le(data, pos), 300); pos += 4; // emoteDelay3
-        assert_eq!(read_u32_le(data, pos), 3);             // emoteId3
+        assert_eq!(read_u32_le(data, pos), 7);
+        pos += 4; // languageId
+        assert_eq!(read_u32_le(data, pos), 100);
+        pos += 4; // emoteDelay1
+        assert_eq!(read_u32_le(data, pos), 1);
+        pos += 4; // emoteId1
+        assert_eq!(read_u32_le(data, pos), 200);
+        pos += 4; // emoteDelay2
+        assert_eq!(read_u32_le(data, pos), 2);
+        pos += 4; // emoteId2
+        assert_eq!(read_u32_le(data, pos), 300);
+        pos += 4; // emoteDelay3
+        assert_eq!(read_u32_le(data, pos), 3); // emoteId3
     }
 
     #[test]
@@ -364,13 +397,18 @@ mod tests {
             emote_delays: [0; 3],
             emote_ids: [0; 3],
         };
-        let msg = SmsgNpcTextUpdate { text_id: 1, options };
+        let msg = SmsgNpcTextUpdate {
+            text_id: 1,
+            options,
+        };
         let pkt = msg.to_world_packet();
         let data = pkt.data();
 
         // text_id(4) + probability(4) = offset 8, then male slot cstring
         let (male_slot, _) = read_cstring(data, 4 + 4);
-        assert_eq!(male_slot, "Hi there",
-            "Empty male_text should fall back to female_text in the male slot");
+        assert_eq!(
+            male_slot, "Hi there",
+            "Empty male_text should fall back to female_text in the male slot"
+        );
     }
 }

@@ -96,7 +96,7 @@ impl ReputationRank {
     /// Get the minimum absolute reputation value for this rank
     pub fn to_value(self) -> i32 {
         match self {
-            ReputationRank::Hated => REPUTATION_BOTTOM,  // -42000
+            ReputationRank::Hated => REPUTATION_BOTTOM, // -42000
             ReputationRank::Hostile => -6000,
             ReputationRank::Unfriendly => -3000,
             ReputationRank::Neutral => 0,

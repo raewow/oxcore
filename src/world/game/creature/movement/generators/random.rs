@@ -100,7 +100,10 @@ impl MovementGenerator for RandomMovementGenerator {
     }
 
     fn finalize(&mut self, creature_guid: ObjectGuid) {
-        tracing::trace!("[MOVEMENT] Random generator finalized for {:?}", creature_guid);
+        tracing::trace!(
+            "[MOVEMENT] Random generator finalized for {:?}",
+            creature_guid
+        );
     }
 
     fn is_finished(&self) -> bool {

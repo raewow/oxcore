@@ -193,7 +193,11 @@ impl GraveyardManager {
                 skipped
             );
         }
-        info!("Loaded {} graveyard zone entries across {} zones", loaded, self.graveyards_by_zone.len());
+        info!(
+            "Loaded {} graveyard zone entries across {} zones",
+            loaded,
+            self.graveyards_by_zone.len()
+        );
         Ok(())
     }
 
@@ -210,8 +214,12 @@ impl GraveyardManager {
     ) -> Option<GraveyardData> {
         find_closest_graveyard(
             &self.graveyards_by_zone,
-            x, y, z,
-            map_id, zone_id, area_id,
+            x,
+            y,
+            z,
+            map_id,
+            zone_id,
+            area_id,
             team,
         )
     }

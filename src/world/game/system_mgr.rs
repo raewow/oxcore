@@ -17,9 +17,9 @@ use crate::world::game::creature::movement::MovementSystem;
 use crate::world::game::creature::respawn::RespawnSystem;
 use crate::world::game::creature::{AddonManager, AddonSystem, CreatureManager};
 use crate::world::game::group::GroupSystem;
-use crate::world::game::loot::{LootManager, LootSystem};
 use crate::world::game::guild::GuildSystem;
 use crate::world::game::inventory::InventorySystem;
+use crate::world::game::loot::{LootManager, LootSystem};
 use crate::world::game::npc::{
     GossipManager, GossipSystem, QuestManager, QuestSystem, TrainerManager, VendorManager,
     VendorSystem,
@@ -188,8 +188,9 @@ impl SystemManager {
 
         // Create quest manager and system
         let quest_manager = Arc::new(QuestManager::new(world_pool.clone()));
-        let quest_repo: Arc<dyn crate::shared::database::characters::repositories::QuestRepositoryTrait> =
-            Arc::new(QuestRepository::new(character_pool.clone()));
+        let quest_repo: Arc<
+            dyn crate::shared::database::characters::repositories::QuestRepositoryTrait,
+        > = Arc::new(QuestRepository::new(character_pool.clone()));
         let quest = Arc::new(QuestSystem::new(
             quest_manager.clone(),
             quest_repo,
@@ -224,7 +225,7 @@ impl SystemManager {
 
         // Create talent system with empty store (will be loaded from DBC later)
         let talents = Arc::new(TalentSystem::new(std::sync::Arc::new(
-            crate::world::game::player::talents::TalentStore::load(vec![], vec![])
+            crate::world::game::player::talents::TalentStore::load(vec![], vec![]),
         )));
 
         let death = Arc::new(DeathSystem::new(broadcast_mgr.clone()));
@@ -237,14 +238,10 @@ impl SystemManager {
         let ai_event_queue = Arc::new(AIEventQueue::new());
 
         // Create creature respawn system
-        let creature_respawn = Arc::new(RespawnSystem::new(
-            broadcast_mgr.clone(),
-        ));
+        let creature_respawn = Arc::new(RespawnSystem::new(broadcast_mgr.clone()));
 
         // Create creature movement system
-        let creature_movement = Arc::new(MovementSystem::new(
-            broadcast_mgr.clone(),
-        ));
+        let creature_movement = Arc::new(MovementSystem::new(broadcast_mgr.clone()));
 
         // Create loot manager and system
         let loot_manager = Arc::new(LootManager::new());
@@ -256,20 +253,11 @@ impl SystemManager {
         ));
 
         // Create coordination systems
-        let pool = Arc::new(PoolSystem::new(
-            pool_mgr,
-            broadcast_mgr.clone(),
-        ));
+        let pool = Arc::new(PoolSystem::new(pool_mgr, broadcast_mgr.clone()));
 
-        let linking = Arc::new(LinkingSystem::new(
-            linking_mgr,
-            broadcast_mgr.clone(),
-        ));
+        let linking = Arc::new(LinkingSystem::new(linking_mgr, broadcast_mgr.clone()));
 
-        let addon = Arc::new(AddonSystem::new(
-            addon_mgr,
-            broadcast_mgr.clone(),
-        ));
+        let addon = Arc::new(AddonSystem::new(addon_mgr, broadcast_mgr.clone()));
 
         Self {
             player: player_system,
@@ -459,11 +447,10 @@ impl SystemManager {
             .collect();
 
         // Collect talent tab entries from DBC
-        let talent_tab_entries: Vec<(u32, crate::world::dbc::structures::TalentTabEntry)> =
-            dbc_mgr
-                .get_all_talent_tabs()
-                .map(|(id, entry)| (*id, entry.clone()))
-                .collect();
+        let talent_tab_entries: Vec<(u32, crate::world::dbc::structures::TalentTabEntry)> = dbc_mgr
+            .get_all_talent_tabs()
+            .map(|(id, entry)| (*id, entry.clone()))
+            .collect();
 
         if talent_entries.is_empty() && talent_tab_entries.is_empty() {
             tracing::warn!("Talent DBC data is empty - talent system will not function correctly");

@@ -14,4 +14,4 @@ pub mod pathfinding;
 pub use grid_coords::{CellPair, GridPair};
 pub use manager::MapManager;
 pub use map::Map;
-pub use pathfinding::{PathResult, PathFinder, GamePathFinder, MMapManager, VMapManager};
+pub use pathfinding::{GamePathFinder, MMapManager, PathFinder, PathResult, VMapManager};

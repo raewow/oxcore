@@ -254,10 +254,7 @@ impl InventoryCache {
     }
 
     pub fn push_pending_op(&self, player_guid: ObjectGuid, op: PendingInventoryOp) {
-        self.pending_ops
-            .entry(player_guid)
-            .or_default()
-            .push(op);
+        self.pending_ops.entry(player_guid).or_default().push(op);
     }
 
     pub fn take_pending_ops(&self, player_guid: ObjectGuid) -> Vec<PendingInventoryOp> {

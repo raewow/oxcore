@@ -4,9 +4,9 @@
 //! hits a creature or game object target. Returns true if the script handled
 //! the effect (suppresses default behavior).
 
-use crate::shared::protocol::ObjectGuid;
 use super::super::actions::{parse_actions, LuaAction};
 use super::super::snapshot::LuaGuid;
+use crate::shared::protocol::ObjectGuid;
 use mlua::{Function, Lua, Table, Value};
 
 /// Lua effect dummy script handler.

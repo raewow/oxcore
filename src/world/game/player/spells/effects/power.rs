@@ -28,22 +28,25 @@ pub async fn effect_power_drain(input: &EffectInput, world: &World) -> Result<Ef
     };
 
     // Drain from target
-    let actual_drain = world.systems.player.manager().with_player_mut(target_guid, |player| {
-        let idx = power_type as usize;
-        let current = player.power.current[idx];
-        let drain = drain_amount.min(current);
-        player.power.current[idx] = current - drain;
-        drain
-    }).unwrap_or(0);
+    let actual_drain = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(target_guid, |player| {
+            let idx = power_type as usize;
+            let current = player.power.current[idx];
+            let drain = drain_amount.min(current);
+            player.power.current[idx] = current - drain;
+            drain
+        })
+        .unwrap_or(0);
 
     // Give to caster (if caster is not the same as target)
     if target_guid != input.caster_guid {
-        world.systems.power.restore_power(
-            input.caster_guid,
-            power_type,
-            actual_drain,
-            world,
-        )?;
+        world
+            .systems
+            .power
+            .restore_power(input.caster_guid, power_type, actual_drain, world)?;
     }
 
     Ok(EffectResult::empty())
@@ -69,12 +72,10 @@ pub async fn effect_energize(input: &EffectInput, world: &World) -> Result<Effec
         _ => PowerType::Mana,
     };
 
-    world.systems.power.restore_power(
-        target_guid,
-        power_type,
-        energize_amount,
-        world,
-    )?;
+    world
+        .systems
+        .power
+        .restore_power(target_guid, power_type, energize_amount, world)?;
 
     Ok(EffectResult::empty())
 }
@@ -101,30 +102,42 @@ pub async fn effect_power_burn(input: &EffectInput, world: &World) -> Result<Eff
     let damage_per_power = input.base_value.max(0) as u32;
 
     // Burn power from target
-    let power_burned = world.systems.player.manager().with_player_mut(target_guid, |player| {
-        let idx = power_type as usize;
-        let current = player.power.current[idx];
-        // Burn up to the current amount
-        let burned = current;
-        player.power.current[idx] = 0;
-        burned
-    }).unwrap_or(0);
+    let power_burned = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(target_guid, |player| {
+            let idx = power_type as usize;
+            let current = player.power.current[idx];
+            // Burn up to the current amount
+            let burned = current;
+            player.power.current[idx] = 0;
+            burned
+        })
+        .unwrap_or(0);
 
     // Deal damage based on power burned
     let damage = power_burned * damage_per_power;
 
     if damage > 0 {
         // Apply damage to target
-        world.systems.player.manager().with_player_mut(target_guid, |player| {
-            let current_health = player.stats.health;
-            let new_health = current_health.saturating_sub(damage);
-            player.stats.health = new_health;
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                let current_health = player.stats.health;
+                let new_health = current_health.saturating_sub(damage);
+                player.stats.health = new_health;
 
-            tracing::debug!(
-                "Power Burn: {} took {} damage, health: {} -> {}",
-                player.name, damage, current_health, new_health
-            );
-        });
+                tracing::debug!(
+                    "Power Burn: {} took {} damage, health: {} -> {}",
+                    player.name,
+                    damage,
+                    current_health,
+                    new_health
+                );
+            });
     }
 
     Ok(EffectResult::with_damage(damage))

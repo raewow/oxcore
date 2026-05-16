@@ -1,8 +1,8 @@
 //! VMap file loading (.vmtree, .vmtile, .vmo)
 //! Aligned with MaNGOS VMapManager2 and MapTree implementation
 
-use crate::shared::protocol::Position;
 use super::types::{BoundingBox, ModelInstance, ModelType};
+use crate::shared::protocol::Position;
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::fs::File;
@@ -299,7 +299,10 @@ impl VMapFileLoader {
 
         debug!(
             "Loaded VMap tile: {} ({}, {}) - {} models",
-            map_id, x, y, model_instances.len()
+            map_id,
+            x,
+            y,
+            model_instances.len()
         );
 
         Ok(Some(MapTileData {
@@ -344,10 +347,7 @@ impl VMapFileLoader {
         let mut chunk = [0u8; 4];
         file.read_exact(&mut chunk)?;
         if &chunk != b"WMOD" {
-            return Err(anyhow::anyhow!(
-                "Expected WMOD chunk in {}",
-                path.display()
-            ));
+            return Err(anyhow::anyhow!("Expected WMOD chunk in {}", path.display()));
         }
         let _chunk_size = file.read_u32::<LittleEndian>()?;
         let _root_wmo_id = file.read_u32::<LittleEndian>()?;
@@ -370,7 +370,7 @@ impl VMapFileLoader {
 
                 // Skip "GBIH" chunk (group-level BIH tree - not needed for BSP approach)
                 let _ = file.read_exact(&mut chunk); // "GBIH"
-                // We don't need to read the BIH data since we build our own BSP tree
+                                                     // We don't need to read the BIH data since we build our own BSP tree
             }
             _ => {
                 // No GMOD chunk - empty model
@@ -379,10 +379,14 @@ impl VMapFileLoader {
 
         debug!(
             "Loaded world model: {} ({} groups)",
-            model_name, groups.len()
+            model_name,
+            groups.len()
         );
 
-        Ok(WorldModelData { model_name: model_name.to_string(), groups })
+        Ok(WorldModelData {
+            model_name: model_name.to_string(),
+            groups,
+        })
     }
 
     /// Read a single group model from chunk-based .vmo format
@@ -410,7 +414,10 @@ impl VMapFileLoader {
         let mut chunk = [0u8; 4];
         file.read_exact(&mut chunk)?;
         if &chunk != b"VERT" {
-            return Err(anyhow::anyhow!("Expected VERT chunk, got {:?}", std::str::from_utf8(&chunk)));
+            return Err(anyhow::anyhow!(
+                "Expected VERT chunk, got {:?}",
+                std::str::from_utf8(&chunk)
+            ));
         }
         let _chunk_size = file.read_u32::<LittleEndian>()?;
         let vert_count = file.read_u32::<LittleEndian>()?;
@@ -435,7 +442,10 @@ impl VMapFileLoader {
         // Read "TRIM" chunk (triangle mesh)
         file.read_exact(&mut chunk)?;
         if &chunk != b"TRIM" {
-            return Err(anyhow::anyhow!("Expected TRIM chunk, got {:?}", std::str::from_utf8(&chunk)));
+            return Err(anyhow::anyhow!(
+                "Expected TRIM chunk, got {:?}",
+                std::str::from_utf8(&chunk)
+            ));
         }
         let _chunk_size = file.read_u32::<LittleEndian>()?;
         let tri_count = file.read_u32::<LittleEndian>()?;

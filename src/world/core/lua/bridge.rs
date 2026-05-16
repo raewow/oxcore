@@ -7,9 +7,7 @@ use super::actions::LuaAction;
 use super::scripts::CreatureScriptState;
 use super::snapshot::{LuaCreatureSnapshot, ThreatEntry as LuaThreatEntry};
 use crate::shared::protocol::{ObjectGuid, Position};
-use crate::world::game::creature::ai::{
-    AIAction, AIEvent, AIInput, CombatEndReason, MovementType,
-};
+use crate::world::game::creature::ai::{AIAction, AIEvent, AIInput, CombatEndReason, MovementType};
 use std::collections::HashMap;
 
 /// Convert AI system's input into a Lua creature snapshot.
@@ -77,8 +75,8 @@ pub fn ai_input_to_lua_snapshot(
         threat_list,
         auras: snap.auras.clone(),
         instance_data: HashMap::new(), // Populated by caller if instance has a script
-        nearby_creatures: Vec::new(), // Populated by caller from creature manager scan
-        events: Vec::new(), // Events are dispatched via callbacks, not the snapshot
+        nearby_creatures: Vec::new(),  // Populated by caller from creature manager scan
+        events: Vec::new(),            // Events are dispatched via callbacks, not the snapshot
         diff_ms: input.diff_ms,
         summoned_creatures: state.summoned_creatures.clone(),
     }
@@ -87,22 +85,53 @@ pub fn ai_input_to_lua_snapshot(
 /// Represents a Lua callback to invoke, derived from an AI event.
 pub enum LuaCallback {
     OnEnterCombat,
-    OnDeath { killer_guid: Option<ObjectGuid> },
-    OnKill { victim_guid: ObjectGuid },
-    OnSpellHit { spell_id: u32, caster_guid: ObjectGuid },
-    OnDamageTaken { attacker_guid: ObjectGuid, damage: u32, spell_id: Option<u32> },
+    OnDeath {
+        killer_guid: Option<ObjectGuid>,
+    },
+    OnKill {
+        victim_guid: ObjectGuid,
+    },
+    OnSpellHit {
+        spell_id: u32,
+        caster_guid: ObjectGuid,
+    },
+    OnDamageTaken {
+        attacker_guid: ObjectGuid,
+        damage: u32,
+        spell_id: Option<u32>,
+    },
     OnEvade,
     OnReset,
     OnSpawn,
     JustRespawned,
     JustReachedHome,
-    MovementInform { movement_type: u32, point_id: u32 },
-    JustSummoned { summoned_guid: ObjectGuid, entry: u32 },
-    SummonedCreatureJustDied { summoned_guid: ObjectGuid },
-    SummonedCreatureDespawn { summoned_guid: ObjectGuid },
-    MoveInLineOfSight { unit_guid: ObjectGuid, is_hostile: bool },
-    HealedBy { healer_guid: ObjectGuid, amount: u32, spell_id: Option<u32> },
-    SpellHitTarget { target_guid: ObjectGuid, spell_id: u32 },
+    MovementInform {
+        movement_type: u32,
+        point_id: u32,
+    },
+    JustSummoned {
+        summoned_guid: ObjectGuid,
+        entry: u32,
+    },
+    SummonedCreatureJustDied {
+        summoned_guid: ObjectGuid,
+    },
+    SummonedCreatureDespawn {
+        summoned_guid: ObjectGuid,
+    },
+    MoveInLineOfSight {
+        unit_guid: ObjectGuid,
+        is_hostile: bool,
+    },
+    HealedBy {
+        healer_guid: ObjectGuid,
+        amount: u32,
+        spell_id: Option<u32>,
+    },
+    SpellHitTarget {
+        target_guid: ObjectGuid,
+        spell_id: u32,
+    },
 }
 
 /// Map an AI event to a Lua callback.
@@ -115,17 +144,23 @@ pub fn map_ai_event_to_callback(event: &AIEvent) -> Option<LuaCallback> {
         AIEvent::TargetKilled { victim_guid } => Some(LuaCallback::OnKill {
             victim_guid: *victim_guid,
         }),
-        AIEvent::SpellHit { caster_guid, spell_id } => Some(LuaCallback::OnSpellHit {
+        AIEvent::SpellHit {
+            caster_guid,
+            spell_id,
+        } => Some(LuaCallback::OnSpellHit {
             spell_id: *spell_id,
             caster_guid: *caster_guid,
         }),
-        AIEvent::DamageTaken { attacker_guid, damage, spell_id, .. } => {
-            Some(LuaCallback::OnDamageTaken {
-                attacker_guid: *attacker_guid,
-                damage: *damage,
-                spell_id: *spell_id,
-            })
-        }
+        AIEvent::DamageTaken {
+            attacker_guid,
+            damage,
+            spell_id,
+            ..
+        } => Some(LuaCallback::OnDamageTaken {
+            attacker_guid: *attacker_guid,
+            damage: *damage,
+            spell_id: *spell_id,
+        }),
         AIEvent::CombatEnded { reason } => match reason {
             CombatEndReason::Evaded | CombatEndReason::TargetsOutOfRange => {
                 Some(LuaCallback::OnEvade)
@@ -139,7 +174,10 @@ pub fn map_ai_event_to_callback(event: &AIEvent) -> Option<LuaCallback> {
             movement_type: 0, // TODO: pass movement type when available
             point_id: *point_id,
         }),
-        AIEvent::SummonedCreature { summoned_guid, entry } => Some(LuaCallback::JustSummoned {
+        AIEvent::SummonedCreature {
+            summoned_guid,
+            entry,
+        } => Some(LuaCallback::JustSummoned {
             summoned_guid: *summoned_guid,
             entry: *entry,
         }),
@@ -153,25 +191,30 @@ pub fn map_ai_event_to_callback(event: &AIEvent) -> Option<LuaCallback> {
                 summoned_guid: *summoned_guid,
             })
         }
-        AIEvent::UnitInLineOfSight { unit_guid, is_hostile, .. } => {
-            Some(LuaCallback::MoveInLineOfSight {
-                unit_guid: *unit_guid,
-                is_hostile: *is_hostile,
-            })
-        }
-        AIEvent::HealingReceived { healer_guid, amount, spell_id } => {
-            Some(LuaCallback::HealedBy {
-                healer_guid: *healer_guid,
-                amount: *amount,
-                spell_id: *spell_id,
-            })
-        }
-        AIEvent::SpellHitTarget { target_guid, spell_id } => {
-            Some(LuaCallback::SpellHitTarget {
-                target_guid: *target_guid,
-                spell_id: *spell_id,
-            })
-        }
+        AIEvent::UnitInLineOfSight {
+            unit_guid,
+            is_hostile,
+            ..
+        } => Some(LuaCallback::MoveInLineOfSight {
+            unit_guid: *unit_guid,
+            is_hostile: *is_hostile,
+        }),
+        AIEvent::HealingReceived {
+            healer_guid,
+            amount,
+            spell_id,
+        } => Some(LuaCallback::HealedBy {
+            healer_guid: *healer_guid,
+            amount: *amount,
+            spell_id: *spell_id,
+        }),
+        AIEvent::SpellHitTarget {
+            target_guid,
+            spell_id,
+        } => Some(LuaCallback::SpellHitTarget {
+            target_guid: *target_guid,
+            spell_id: *spell_id,
+        }),
         // Events that don't have direct Lua callbacks
         AIEvent::DamageDealt { .. }
         | AIEvent::SpellInterrupted { .. }
@@ -193,38 +236,47 @@ pub fn invoke_callback(
         LuaCallback::OnEnterCombat => lua_ai.on_enter_combat(lua, snapshot),
         LuaCallback::OnDeath { killer_guid } => lua_ai.on_death(lua, snapshot, *killer_guid),
         LuaCallback::OnKill { victim_guid } => lua_ai.on_kill(lua, snapshot, *victim_guid),
-        LuaCallback::OnSpellHit { spell_id, caster_guid } => {
-            lua_ai.on_spell_hit(lua, snapshot, *spell_id, *caster_guid)
-        }
-        LuaCallback::OnDamageTaken { attacker_guid, damage, spell_id } => {
-            lua_ai.on_damage_taken(lua, snapshot, *attacker_guid, *damage, *spell_id)
-        }
+        LuaCallback::OnSpellHit {
+            spell_id,
+            caster_guid,
+        } => lua_ai.on_spell_hit(lua, snapshot, *spell_id, *caster_guid),
+        LuaCallback::OnDamageTaken {
+            attacker_guid,
+            damage,
+            spell_id,
+        } => lua_ai.on_damage_taken(lua, snapshot, *attacker_guid, *damage, *spell_id),
         LuaCallback::OnEvade => lua_ai.on_evade(lua, snapshot),
         LuaCallback::OnReset => lua_ai.on_reset(lua, snapshot),
         LuaCallback::OnSpawn => lua_ai.on_spawn(lua, snapshot),
         LuaCallback::JustRespawned => lua_ai.on_just_respawned(lua, snapshot),
         LuaCallback::JustReachedHome => lua_ai.on_just_reached_home(lua, snapshot),
-        LuaCallback::MovementInform { movement_type, point_id } => {
-            lua_ai.on_movement_inform(lua, snapshot, *movement_type, *point_id)
-        }
-        LuaCallback::JustSummoned { summoned_guid, entry } => {
-            lua_ai.on_just_summoned(lua, snapshot, *summoned_guid, *entry)
-        }
+        LuaCallback::MovementInform {
+            movement_type,
+            point_id,
+        } => lua_ai.on_movement_inform(lua, snapshot, *movement_type, *point_id),
+        LuaCallback::JustSummoned {
+            summoned_guid,
+            entry,
+        } => lua_ai.on_just_summoned(lua, snapshot, *summoned_guid, *entry),
         LuaCallback::SummonedCreatureJustDied { summoned_guid } => {
             lua_ai.on_summoned_creature_just_died(lua, snapshot, *summoned_guid)
         }
         LuaCallback::SummonedCreatureDespawn { summoned_guid } => {
             lua_ai.on_summoned_creature_despawn(lua, snapshot, *summoned_guid)
         }
-        LuaCallback::MoveInLineOfSight { unit_guid, is_hostile } => {
-            lua_ai.on_move_in_line_of_sight(lua, snapshot, *unit_guid, *is_hostile)
-        }
-        LuaCallback::HealedBy { healer_guid, amount, spell_id } => {
-            lua_ai.on_healed_by(lua, snapshot, *healer_guid, *amount, *spell_id)
-        }
-        LuaCallback::SpellHitTarget { target_guid, spell_id } => {
-            lua_ai.on_spell_hit_target(lua, snapshot, *target_guid, *spell_id)
-        }
+        LuaCallback::MoveInLineOfSight {
+            unit_guid,
+            is_hostile,
+        } => lua_ai.on_move_in_line_of_sight(lua, snapshot, *unit_guid, *is_hostile),
+        LuaCallback::HealedBy {
+            healer_guid,
+            amount,
+            spell_id,
+        } => lua_ai.on_healed_by(lua, snapshot, *healer_guid, *amount, *spell_id),
+        LuaCallback::SpellHitTarget {
+            target_guid,
+            spell_id,
+        } => lua_ai.on_spell_hit_target(lua, snapshot, *target_guid, *spell_id),
     }
 }
 
@@ -238,7 +290,10 @@ pub fn lua_actions_to_ai_actions(
     for action in actions {
         match action {
             // ==================== State-only actions (mutate state, no AIAction) ====================
-            LuaAction::SetTimer { timer_id, duration_ms } => {
+            LuaAction::SetTimer {
+                timer_id,
+                duration_ms,
+            } => {
                 state.set_timer(timer_id, duration_ms);
             }
             LuaAction::SetPhase { phase } => {
@@ -252,10 +307,17 @@ pub fn lua_actions_to_ai_actions(
             LuaAction::MoveTo { x, y, z, run } => {
                 ai_actions.push(AIAction::MoveTo {
                     position: Position { x, y, z, o: 0.0 },
-                    movement_type: if run { MovementType::Run } else { MovementType::Walk },
+                    movement_type: if run {
+                        MovementType::Run
+                    } else {
+                        MovementType::Walk
+                    },
                 });
             }
-            LuaAction::MoveToTarget { target, min_distance } => {
+            LuaAction::MoveToTarget {
+                target,
+                min_distance,
+            } => {
                 ai_actions.push(AIAction::MoveToTarget {
                     target_guid: target,
                     min_distance,
@@ -267,7 +329,11 @@ pub fn lua_actions_to_ai_actions(
             LuaAction::StopMovement => {
                 ai_actions.push(AIAction::StopMovement);
             }
-            LuaAction::FleeFrom { target, distance, duration_ms } => {
+            LuaAction::FleeFrom {
+                target,
+                distance,
+                duration_ms,
+            } => {
                 ai_actions.push(AIAction::FleeFrom {
                     flee_from_guid: target,
                     distance,
@@ -275,12 +341,20 @@ pub fn lua_actions_to_ai_actions(
                 });
             }
             LuaAction::FaceTarget { target } => {
-                ai_actions.push(AIAction::FaceTarget { target_guid: target });
+                ai_actions.push(AIAction::FaceTarget {
+                    target_guid: target,
+                });
             }
             LuaAction::RandomMovement { radius } => {
-                ai_actions.push(AIAction::RandomMovement { wander_distance: radius });
+                ai_actions.push(AIAction::RandomMovement {
+                    wander_distance: radius,
+                });
             }
-            LuaAction::CastSpell { spell_id, target, triggered } => {
+            LuaAction::CastSpell {
+                spell_id,
+                target,
+                triggered,
+            } => {
                 let target_guid = match target {
                     super::actions::SpellTarget::Self_ => None,
                     super::actions::SpellTarget::CurrentTarget => None, // Executor uses current target
@@ -296,7 +370,9 @@ pub fn lua_actions_to_ai_actions(
                 });
             }
             LuaAction::MeleeAttack { target } => {
-                ai_actions.push(AIAction::MeleeAttack { target_guid: target });
+                ai_actions.push(AIAction::MeleeAttack {
+                    target_guid: target,
+                });
             }
             LuaAction::SetAttackTarget { target } => {
                 if let Some(guid) = target {
@@ -306,7 +382,9 @@ pub fn lua_actions_to_ai_actions(
                 }
             }
             LuaAction::EnterCombat { target } => {
-                ai_actions.push(AIAction::EnterCombat { target_guid: target });
+                ai_actions.push(AIAction::EnterCombat {
+                    target_guid: target,
+                });
             }
             LuaAction::EnterEvadeMode => {
                 ai_actions.push(AIAction::EnterEvadeMode);
@@ -365,8 +443,14 @@ pub fn lua_actions_to_ai_actions(
             LuaAction::TextEmote { text } => {
                 ai_actions.push(AIAction::TextEmote { text });
             }
-            LuaAction::PlaySound { sound_id, zone_wide } => {
-                ai_actions.push(AIAction::PlaySound { sound_id, zone_wide });
+            LuaAction::PlaySound {
+                sound_id,
+                zone_wide,
+            } => {
+                ai_actions.push(AIAction::PlaySound {
+                    sound_id,
+                    zone_wide,
+                });
             }
 
             // ==================== Creature State ====================
@@ -396,7 +480,15 @@ pub fn lua_actions_to_ai_actions(
             }
 
             // ==================== Spawning ====================
-            LuaAction::SpawnCreature { entry, x, y, z, o, summon_type, duration_ms } => {
+            LuaAction::SpawnCreature {
+                entry,
+                x,
+                y,
+                z,
+                o,
+                summon_type,
+                duration_ms,
+            } => {
                 let st = match summon_type {
                     super::actions::SummonType::TimedDespawn => 0,
                     super::actions::SummonType::TimedDespawnOutOfCombat => 1,
@@ -418,15 +510,28 @@ pub fn lua_actions_to_ai_actions(
             LuaAction::DespawnCreaturesByEntry { entry } => {
                 ai_actions.push(AIAction::DespawnCreaturesByEntry { entry });
             }
-            LuaAction::SpawnGameObject { entry, x, y, z, o, duration_secs } => {
+            LuaAction::SpawnGameObject {
+                entry,
+                x,
+                y,
+                z,
+                o,
+                duration_secs,
+            } => {
                 ai_actions.push(AIAction::SpawnGameObject {
                     entry,
                     position: Position { x, y, z, o },
                     duration_secs,
                 });
             }
-            LuaAction::RespawnGameObject { guid, duration_secs } => {
-                ai_actions.push(AIAction::RespawnGameObject { guid, duration_secs });
+            LuaAction::RespawnGameObject {
+                guid,
+                duration_secs,
+            } => {
+                ai_actions.push(AIAction::RespawnGameObject {
+                    guid,
+                    duration_secs,
+                });
             }
 
             // ==================== Instance ====================
@@ -476,11 +581,22 @@ pub fn lua_actions_to_ai_actions(
             }
 
             // ==================== Phase 6: Path Movement ====================
-            LuaAction::MoveAlongPath { waypoints, run, repeating } => {
-                let positions: Vec<Position> = waypoints.iter().map(|&(x, y, z)| Position { x, y, z, o: 0.0 }).collect();
+            LuaAction::MoveAlongPath {
+                waypoints,
+                run,
+                repeating,
+            } => {
+                let positions: Vec<Position> = waypoints
+                    .iter()
+                    .map(|&(x, y, z)| Position { x, y, z, o: 0.0 })
+                    .collect();
                 ai_actions.push(AIAction::MoveAlongPath {
                     waypoints: positions,
-                    movement_type: if run { MovementType::Run } else { MovementType::Walk },
+                    movement_type: if run {
+                        MovementType::Run
+                    } else {
+                        MovementType::Walk
+                    },
                     repeating,
                 });
             }
@@ -530,14 +646,18 @@ mod tests {
 
     #[test]
     fn test_combat_started_maps_to_on_enter_combat() {
-        let event = AIEvent::CombatStarted { initial_aggressor: player_guid(1) };
+        let event = AIEvent::CombatStarted {
+            initial_aggressor: player_guid(1),
+        };
         let callback = map_ai_event_to_callback(&event);
         assert!(matches!(callback, Some(LuaCallback::OnEnterCombat)));
     }
 
     #[test]
     fn test_died_maps_to_on_death() {
-        let event = AIEvent::Died { killer_guid: Some(player_guid(1)) };
+        let event = AIEvent::Died {
+            killer_guid: Some(player_guid(1)),
+        };
         let callback = map_ai_event_to_callback(&event);
         assert!(matches!(callback, Some(LuaCallback::OnDeath { .. })));
     }
@@ -563,19 +683,26 @@ mod tests {
             is_player: true,
         };
         let callback = map_ai_event_to_callback(&event);
-        assert!(callback.is_none(), "UnitInRange should not have a Lua callback");
+        assert!(
+            callback.is_none(),
+            "UnitInRange should not have a Lua callback"
+        );
     }
 
     #[test]
     fn test_combat_ended_evade_maps_to_on_evade() {
-        let event = AIEvent::CombatEnded { reason: CombatEndReason::Evaded };
+        let event = AIEvent::CombatEnded {
+            reason: CombatEndReason::Evaded,
+        };
         let callback = map_ai_event_to_callback(&event);
         assert!(matches!(callback, Some(LuaCallback::OnEvade)));
     }
 
     #[test]
     fn test_combat_ended_targets_out_of_range_maps_to_on_evade() {
-        let event = AIEvent::CombatEnded { reason: CombatEndReason::TargetsOutOfRange };
+        let event = AIEvent::CombatEnded {
+            reason: CombatEndReason::TargetsOutOfRange,
+        };
         let callback = map_ai_event_to_callback(&event);
         assert!(matches!(callback, Some(LuaCallback::OnEvade)));
     }

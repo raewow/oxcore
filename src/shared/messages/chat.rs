@@ -12,10 +12,10 @@
 
 use crate::shared::game::chat::{ChatMsg, ChatTag, Language};
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::packet::WorldPacketGuidExt;
 use crate::shared::protocol::ObjectGuid;
 use crate::shared::protocol::Opcode;
 use crate::shared::protocol::WorldPacket;
-use crate::shared::protocol::packet::WorldPacketGuidExt;
 
 /// SMSG_MESSAGECHAT - Main chat message packet
 ///
@@ -479,7 +479,11 @@ mod tests {
         assert_eq!(data[0], 0x0B, "chat type should be MonsterSay (0x0B)");
 
         // Bytes 1-4: language = 0 (Universal, u32 LE)
-        assert_eq!(&data[1..5], &[0, 0, 0, 0], "language should be Universal (0)");
+        assert_eq!(
+            &data[1..5],
+            &[0, 0, 0, 0],
+            "language should be Universal (0)"
+        );
 
         // Bytes 5-12: sender GUID (u64 LE)
         let sender_raw = u64::from_le_bytes(data[5..13].try_into().unwrap());
@@ -577,7 +581,11 @@ mod tests {
         // [32]   0          (null terminator)
         // [33]   chat_tag   (1 byte) = 0
         // Total: 34 bytes
-        assert_eq!(data.len(), 34, "packet should be exactly 34 bytes (no extra flags field)");
+        assert_eq!(
+            data.len(),
+            34,
+            "packet should be exactly 34 bytes (no extra flags field)"
+        );
 
         // Verify name_len is at offset 13 (immediately after GUID), not offset 17
         let name_len = u32::from_le_bytes(data[13..17].try_into().unwrap());

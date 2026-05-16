@@ -200,8 +200,7 @@ async fn handle_command(
             world
                 .managers
                 .broadcast_mgr
-                .send_to_player(player_guid, packet.to_world_packet())
-                ;
+                .send_to_player(player_guid, packet.to_world_packet());
         }
         Ok(_) => {
             // Empty response - command handled but no feedback
@@ -223,8 +222,7 @@ async fn handle_command(
             world
                 .managers
                 .broadcast_mgr
-                .send_to_player(player_guid, packet.to_world_packet())
-                ;
+                .send_to_player(player_guid, packet.to_world_packet());
         }
     }
 

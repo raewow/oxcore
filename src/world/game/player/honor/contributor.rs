@@ -39,7 +39,9 @@ pub struct ContributorTracker {
 
 impl ContributorTracker {
     pub fn new() -> Self {
-        Self { entries: Vec::with_capacity(MAX_CONTRIBUTORS) }
+        Self {
+            entries: Vec::with_capacity(MAX_CONTRIBUTORS),
+        }
     }
 
     /// Record a damage hit from `attacker` at time `now`.

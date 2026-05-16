@@ -1,8 +1,8 @@
+use super::pool_repository::PoolData;
+use super::pool_types::{PoolMember, PoolMemberType, PoolState, PoolTemplate};
+use crate::shared::protocol::ObjectGuid;
 use dashmap::DashMap;
 use std::sync::Arc;
-use crate::shared::protocol::ObjectGuid;
-use super::pool_types::{PoolState, PoolTemplate, PoolMember, PoolMemberType};
-use super::pool_repository::PoolData;
 
 /// Manages all spawn pools - state only, no database
 pub struct PoolManager {
@@ -41,7 +41,8 @@ impl PoolManager {
                     description: member.description,
                 });
             }
-            self.creature_to_pool.insert(member.spawn_id, member.pool_id);
+            self.creature_to_pool
+                .insert(member.spawn_id, member.pool_id);
         }
 
         // Load nested pool members
@@ -54,7 +55,8 @@ impl PoolManager {
                     description: member.description,
                 });
             }
-            self.pool_to_parent.insert(member.child_pool_id, member.parent_pool_id);
+            self.pool_to_parent
+                .insert(member.child_pool_id, member.parent_pool_id);
         }
 
         tracing::info!("PoolManager loaded {} pools", self.pools.len());

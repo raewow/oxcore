@@ -36,10 +36,7 @@ impl PlayerBroadcaster {
     /// Rebuild the listener snapshot after modifications (called by add/remove/clear)
     fn rebuild_snapshot(&self) {
         let listeners = self.listeners.read();
-        let snapshot: Vec<_> = listeners
-            .iter()
-            .map(|(k, v)| (*k, Arc::clone(v)))
-            .collect();
+        let snapshot: Vec<_> = listeners.iter().map(|(k, v)| (*k, Arc::clone(v))).collect();
         self.listener_snapshot.store(Arc::new(snapshot));
     }
 
@@ -87,8 +84,7 @@ impl PlayerBroadcaster {
         if !was_present {
             debug!(
                 "Player {:?} added listener {:?}",
-                self.self_guid,
-                listener_guid
+                self.self_guid, listener_guid
             );
         }
     }
@@ -104,8 +100,7 @@ impl PlayerBroadcaster {
             self.rebuild_snapshot();
             debug!(
                 "Player {:?} removed listener {:?}",
-                self.self_guid,
-                listener_guid
+                self.self_guid, listener_guid
             );
         }
     }
@@ -144,10 +139,7 @@ impl PlayerBroadcaster {
             self.self_guid
         );
         if let Err(_) = self.packet_tx.send(packet) {
-            debug!(
-                "Skipping send to disconnected player {:?}",
-                self.self_guid
-            );
+            debug!("Skipping send to disconnected player {:?}", self.self_guid);
         }
     }
 

@@ -387,9 +387,16 @@ mod tests {
         combat.main_hand_speed = 2000;
         // Simulate start_attack()
         combat.start_attack(target);
-        assert_eq!(combat.main_hand_timer, 0, "timer should be 0 after start_attack");
+        assert_eq!(
+            combat.main_hand_timer, 0,
+            "timer should be 0 after start_attack"
+        );
 
         let attacks = update_auto_attack(guid, 1, &mut combat);
-        assert_eq!(attacks.len(), 1, "first swing must fire on the very next tick");
+        assert_eq!(
+            attacks.len(),
+            1,
+            "first swing must fire on the very next tick"
+        );
     }
 }

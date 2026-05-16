@@ -88,9 +88,17 @@ pub fn validate_cast(
             }
         }
         None => SpellData {
-            school: 0, power_type: 0, mana_cost: 0, range_index: 0,
-            max_range: 0.0, cast_time: 0, attributes_ex2: 0,
-            stances: 0, stances_not: 0, caster_aura_state: 0, target_aura_state: 0,
+            school: 0,
+            power_type: 0,
+            mana_cost: 0,
+            range_index: 0,
+            max_range: 0.0,
+            cast_time: 0,
+            attributes_ex2: 0,
+            stances: 0,
+            stances_not: 0,
+            caster_aura_state: 0,
+            target_aura_state: 0,
         },
     };
 
@@ -376,27 +384,27 @@ pub fn spell_cast_error_to_u8(error: SpellCastError) -> u8 {
     use SpellCastError::*;
     match error {
         None => 0,
-        CasterDead => 0x13,           // SPELL_FAILED_CASTER_DEAD
-        SpellNotKnown => 0x38,        // SPELL_FAILED_NOT_KNOWN
-        NotEnoughMana => 0x4D,        // SPELL_FAILED_NO_POWER (mana/rage/energy all use this)
-        NotEnoughRage => 0x4D,        // SPELL_FAILED_NO_POWER
-        NotEnoughEnergy => 0x4D,      // SPELL_FAILED_NO_POWER
-        SpellOnCooldown => 0x3C,      // SPELL_FAILED_NOT_READY
-        NotReady => 0x3C,             // SPELL_FAILED_NOT_READY (GCD)
-        InvalidTarget => 0x0A,        // SPELL_FAILED_BAD_TARGETS
-        TargetOutOfRange => 0x59,     // SPELL_FAILED_OUT_OF_RANGE
+        CasterDead => 0x13,             // SPELL_FAILED_CASTER_DEAD
+        SpellNotKnown => 0x38,          // SPELL_FAILED_NOT_KNOWN
+        NotEnoughMana => 0x4D,          // SPELL_FAILED_NO_POWER (mana/rage/energy all use this)
+        NotEnoughRage => 0x4D,          // SPELL_FAILED_NO_POWER
+        NotEnoughEnergy => 0x4D,        // SPELL_FAILED_NO_POWER
+        SpellOnCooldown => 0x3C,        // SPELL_FAILED_NOT_READY
+        NotReady => 0x3C,               // SPELL_FAILED_NOT_READY (GCD)
+        InvalidTarget => 0x0A,          // SPELL_FAILED_BAD_TARGETS
+        TargetOutOfRange => 0x59,       // SPELL_FAILED_OUT_OF_RANGE
         TargetNotInLineOfSight => 0x2A, // SPELL_FAILED_LINE_OF_SIGHT
-        NotWhileMoving => 0x2E,       // SPELL_FAILED_MOVING
-        Stunned => 0x64,              // SPELL_FAILED_STUNNED
-        Silenced => 0x60,             // SPELL_FAILED_SILENCED
-        Pacified => 0x5A,             // SPELL_FAILED_PACIFIED
-        Confused => 0x16,             // SPELL_FAILED_CONFUSED
-        Fleeing => 0x1E,              // SPELL_FAILED_FLEEING
-        SchoolLockout => 0x60,        // SPELL_FAILED_SILENCED (school lockout shows as silenced)
-        AlreadyCasting => 0x61,       // SPELL_FAILED_SPELL_IN_PROGRESS
-        Interrupted => 0x23,          // SPELL_FAILED_INTERRUPTED
-        WrongShapeshift => 0x56,      // SPELL_FAILED_ONLY_SHAPESHIFT
-        CasterAuraState => 0x12,      // SPELL_FAILED_CASTER_AURASTATE
-        TargetAuraState => 0x67,      // SPELL_FAILED_TARGET_AURASTATE
+        NotWhileMoving => 0x2E,         // SPELL_FAILED_MOVING
+        Stunned => 0x64,                // SPELL_FAILED_STUNNED
+        Silenced => 0x60,               // SPELL_FAILED_SILENCED
+        Pacified => 0x5A,               // SPELL_FAILED_PACIFIED
+        Confused => 0x16,               // SPELL_FAILED_CONFUSED
+        Fleeing => 0x1E,                // SPELL_FAILED_FLEEING
+        SchoolLockout => 0x60,          // SPELL_FAILED_SILENCED (school lockout shows as silenced)
+        AlreadyCasting => 0x61,         // SPELL_FAILED_SPELL_IN_PROGRESS
+        Interrupted => 0x23,            // SPELL_FAILED_INTERRUPTED
+        WrongShapeshift => 0x56,        // SPELL_FAILED_ONLY_SHAPESHIFT
+        CasterAuraState => 0x12,        // SPELL_FAILED_CASTER_AURASTATE
+        TargetAuraState => 0x67,        // SPELL_FAILED_TARGET_AURASTATE
     }
 }

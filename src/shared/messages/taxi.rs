@@ -9,11 +9,11 @@
 //! - [`SmsgNewTaxiPath`] - Notification of a new taxi path
 //! - [`SmsgActivateTaxiReply`] - Response to a taxi activation request
 
+use crate::shared::game::taxi::{TaxiMask, TAXI_MASK_SIZE};
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::guid::ObjectGuid;
 use crate::shared::protocol::Opcode;
 use crate::shared::protocol::WorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::game::taxi::{TaxiMask, TAXI_MASK_SIZE};
 
 /// SMSG_TAXINODE_STATUS - Status of a specific taxinode
 ///

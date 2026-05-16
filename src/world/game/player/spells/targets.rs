@@ -260,8 +260,7 @@ fn resolve_implicit_target(
         }
 
         // All hostile around caster
-        ImplicitTarget::AllHostileAroundCaster
-        | ImplicitTarget::TargetEnemyNear => {
+        ImplicitTarget::AllHostileAroundCaster | ImplicitTarget::TargetEnemyNear => {
             let center = get_unit_position(caster_guid, world);
             let nearby = get_units_in_range(caster_guid, center, radius, world);
             for guid in nearby {
@@ -281,8 +280,7 @@ fn resolve_implicit_target(
             // TODO: Add party members in range
         }
 
-        ImplicitTarget::AllFriendlyInArea
-        | ImplicitTarget::AllFriendlyAroundCaster => {
+        ImplicitTarget::AllFriendlyInArea | ImplicitTarget::AllFriendlyAroundCaster => {
             let center = get_unit_position(caster_guid, world);
             let nearby = get_units_in_range(caster_guid, center, radius, world);
             for guid in nearby {
@@ -308,8 +306,7 @@ fn resolve_implicit_target(
         }
 
         // Script/special targets
-        ImplicitTarget::ScriptTarget
-        | ImplicitTarget::DynaObjectCoord => {
+        ImplicitTarget::ScriptTarget | ImplicitTarget::DynaObjectCoord => {
             // Use destination position for dynamic object effects
             if let Some(guid) = cast_targets.unit_target() {
                 targets.push(guid);
@@ -321,8 +318,7 @@ fn resolve_implicit_target(
             targets.push(caster_guid);
         }
 
-        ImplicitTarget::AddExtraAttacks
-        | ImplicitTarget::NatureSummon => {
+        ImplicitTarget::AddExtraAttacks | ImplicitTarget::NatureSummon => {
             targets.push(caster_guid);
         }
 
@@ -394,7 +390,10 @@ fn get_units_in_range(
             .unwrap_or((0, 0))
     };
 
-    let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+    let map = world
+        .managers
+        .map_mgr
+        .get_or_create_map(map_id, instance_id);
     let mut result = map.get_players_in_range(center, range);
 
     // Also add creatures in range

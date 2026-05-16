@@ -12,14 +12,18 @@ use crate::shared::game::experience::{
     XpColor, XpSource, BASE_CREATURE_XP, BASE_XP, MAX_PLAYER_LEVEL,
 };
 use crate::shared::messages::experience::{SmsgLevelupInfo, SmsgLogXpGain};
-use crate::shared::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
+use crate::shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
-use crate::world::game::common::update_fields::{PLAYER_NEXT_LEVEL_XP, PLAYER_XP, UNIT_FIELD_LEVEL};
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
-use crate::world::game::player::PlayerManager;
+use crate::world::game::common::update_fields::{
+    PLAYER_NEXT_LEVEL_XP, PLAYER_XP, UNIT_FIELD_LEVEL,
+};
 use crate::world::game::player::stats::StatsSystem;
+use crate::world::game::player::PlayerManager;
 
 // ========== Standalone Calculation Functions ==========
 // These are pure functions for testing without system dependencies
@@ -156,7 +160,6 @@ impl ExperienceSystem {
 
     /// Initialize the experience system
     pub async fn init(&self) -> Result<()> {
-
         Ok(())
     }
 
@@ -253,9 +256,7 @@ impl ExperienceSystem {
             xp_type,
             group_bonus,
         };
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, xp_msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, xp_msg);
 
         // Send level up packet if needed
         if leveled_up {
@@ -288,8 +289,7 @@ impl ExperienceSystem {
 
         // Broadcast to self and nearby players (include_self = true)
         self.broadcast_mgr
-            .broadcast_nearby(player_guid, &packet, true)
-            ;
+            .broadcast_nearby(player_guid, &packet, true);
 
         // Log XP gain
         if leveled_up {
@@ -326,15 +326,14 @@ impl ExperienceSystem {
             .get_player(player_guid)
             .map(|p| (p.race, p.class));
 
-        let (hp_gain, mana_gain, stat_gains) = if let (Some((race, class)), Some(stats)) =
-            (player_info, self.stats.get())
-        {
-            stats.get_level_up_gains(race, class, old_level, new_level)
-        } else {
-            // Fallback if stats system not available
-            let level_diff = (new_level - old_level) as u32;
-            (level_diff * 10, level_diff * 5, [level_diff; 5])
-        };
+        let (hp_gain, mana_gain, stat_gains) =
+            if let (Some((race, class)), Some(stats)) = (player_info, self.stats.get()) {
+                stats.get_level_up_gains(race, class, old_level, new_level)
+            } else {
+                // Fallback if stats system not available
+                let level_diff = (new_level - old_level) as u32;
+                (level_diff * 10, level_diff * 5, [level_diff; 5])
+            };
 
         let msg = SmsgLevelupInfo {
             level: new_level as u32,
@@ -343,9 +342,7 @@ impl ExperienceSystem {
             stat_gains,
         };
 
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
         Ok(())
     }

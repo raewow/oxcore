@@ -5,6 +5,9 @@
 use crate::shared::messages::update::{CreateObjectBlock, ObjectType};
 use crate::shared::protocol::ObjectGuid;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
+use crate::world::game::common::object_type::update_flags;
+use crate::world::game::common::object_type::ObjectTypeId;
+use crate::world::game::common::object_type::{TYPEMASK_ITEM, TYPEMASK_OBJECT};
 use crate::world::game::common::update_fields::{
     ITEM_FIELD_CONTAINED, ITEM_FIELD_CREATOR, ITEM_FIELD_DURABILITY, ITEM_FIELD_DURATION,
     ITEM_FIELD_ENCHANTMENT, ITEM_FIELD_FLAGS, ITEM_FIELD_GIFTCREATOR, ITEM_FIELD_ITEM_TEXT_ID,
@@ -12,9 +15,6 @@ use crate::world::game::common::update_fields::{
     ITEM_FIELD_RANDOM_PROPERTIES_ID, ITEM_FIELD_SPELL_CHARGES, ITEM_FIELD_STACK_COUNT,
     OBJECT_FIELD_ENTRY, OBJECT_FIELD_GUID, OBJECT_FIELD_SCALE_X, OBJECT_FIELD_TYPE,
 };
-use crate::world::game::common::object_type::update_flags;
-use crate::world::game::common::object_type::ObjectTypeId;
-use crate::world::game::common::object_type::{TYPEMASK_ITEM, TYPEMASK_OBJECT};
 
 #[derive(Debug, Clone)]
 pub struct Item {

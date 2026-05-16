@@ -37,7 +37,8 @@ pub async fn handle_join_channel(
     world
         .systems
         .chat
-        .join_channel(player_guid, &channel_name, password_opt, player_team).await?;
+        .join_channel(player_guid, &channel_name, password_opt, player_team)
+        .await?;
 
     Ok(())
 }

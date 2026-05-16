@@ -9,8 +9,8 @@ use tracing::{debug, info, warn};
 
 use super::manager::GossipManager;
 use super::types::{gossip_option, GossipMenuItem, DEFAULT_GOSSIP_MESSAGE};
-use crate::shared::messages::{GossipOptionData, SmsgGossipComplete, SmsgGossipMessage};
 use crate::shared::messages::gossip::{NpcTextOption, SmsgNpcTextUpdate};
+use crate::shared::messages::{GossipOptionData, SmsgGossipComplete, SmsgGossipMessage};
 use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::world::game::creature::CreatureManager;
@@ -115,21 +115,30 @@ impl GossipSystem {
 
         info!(
             "Sending SMSG_GOSSIP_MESSAGE: npc={:?}, menu_id={}, text_id={}, options={}, quests={}",
-            npc_guid, menu_id, menu.text_id, msg.options.len(), msg.quests.len()
+            npc_guid,
+            menu_id,
+            menu.text_id,
+            msg.options.len(),
+            msg.quests.len()
         );
         for opt in &msg.options {
-            info!("  gossip opt: index={} icon={} coded={} text={:?}", opt.index, opt.icon, opt.coded, opt.text);
+            info!(
+                "  gossip opt: index={} icon={} coded={} text={:?}",
+                opt.index, opt.icon, opt.coded, opt.text
+            );
         }
 
         // Debug: dump raw packet bytes
         let raw_pkt = crate::shared::messages::ToWorldPacket::to_world_packet(&msg);
         let raw_bytes = raw_pkt.data();
         let preview = raw_bytes.len().min(80);
-        info!("SMSG_GOSSIP_MESSAGE raw ({} bytes): {:02X?}", raw_bytes.len(), &raw_bytes[..preview]);
+        info!(
+            "SMSG_GOSSIP_MESSAGE raw ({} bytes): {:02X?}",
+            raw_bytes.len(),
+            &raw_bytes[..preview]
+        );
 
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
         // Proactively send SMSG_NPC_TEXT_UPDATE so the client can display the greeting
         // text without waiting for a separate CMSG_NPC_TEXT_QUERY round-trip.
@@ -140,8 +149,14 @@ impl GossipSystem {
                 NpcTextOption {
                     probability: opt.probability,
                     broadcast_text_id: opt.broadcast_text_id,
-                    male_text: bct.as_ref().map(|b| b.male_text.clone()).unwrap_or_default(),
-                    female_text: bct.as_ref().map(|b| b.female_text.clone()).unwrap_or_default(),
+                    male_text: bct
+                        .as_ref()
+                        .map(|b| b.male_text.clone())
+                        .unwrap_or_default(),
+                    female_text: bct
+                        .as_ref()
+                        .map(|b| b.female_text.clone())
+                        .unwrap_or_default(),
                     language_id: bct.as_ref().map(|b| b.language_id).unwrap_or(0),
                     emote_delays: bct.as_ref().map(|b| b.emote_delays).unwrap_or([0; 3]),
                     emote_ids: bct.as_ref().map(|b| b.emote_ids).unwrap_or([0; 3]),
@@ -154,7 +169,8 @@ impl GossipSystem {
                 options: std::array::from_fn(|_| NpcTextOption::default()),
             }
         };
-        self.broadcast_mgr.send_msg_to_player(player_guid, npc_text_msg);
+        self.broadcast_mgr
+            .send_msg_to_player(player_guid, npc_text_msg);
 
         // Track the current gossip menu for this player
         if let Some(mut player) = self.player_mgr.get_player_mut(player_guid) {
@@ -222,7 +238,10 @@ impl GossipSystem {
             gossip_option::VENDOR | gossip_option::ARMORER => {
                 // Do NOT send SMSG_GOSSIP_COMPLETE — the vendor window replaces gossip.
                 // vmangos: SendListInventory() with no CloseGossip() before it.
-                info!("Vendor option selected for player {:?} from NPC {:?}", player_guid, npc_guid);
+                info!(
+                    "Vendor option selected for player {:?} from NPC {:?}",
+                    player_guid, npc_guid
+                );
             }
             gossip_option::TRAINER => {
                 // Do NOT send SMSG_GOSSIP_COMPLETE — the trainer window replaces gossip.
@@ -290,9 +309,8 @@ impl GossipSystem {
     /// Send gossip complete (close window)
     pub fn send_gossip_complete(&self, player_guid: ObjectGuid) {
         self.broadcast_mgr
-            .send_msg_to_player(player_guid, SmsgGossipComplete)
-            ;
-        
+            .send_msg_to_player(player_guid, SmsgGossipComplete);
+
         // Clear the current gossip menu for this player
         if let Some(mut player) = self.player_mgr.get_player_mut(player_guid) {
             player.current_gossip_menu_id = None;
@@ -397,13 +415,11 @@ impl GossipSystem {
 
     /// Initialize the gossip system
     pub async fn init(&self) -> Result<()> {
-
         Ok(())
     }
 
     /// Shutdown the gossip system
     pub async fn shutdown(&self) -> Result<()> {
-
         Ok(())
     }
 }

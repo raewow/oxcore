@@ -1,8 +1,8 @@
-use dashmap::DashMap;
-use std::sync::Arc;
-use crate::shared::protocol::ObjectGuid;
 use super::types::{Loot, LootItem, LootTableEntry};
+use crate::shared::protocol::ObjectGuid;
+use dashmap::DashMap;
 use rand::Rng;
+use std::sync::Arc;
 
 /// Manages loot tables and active loot instances
 pub struct LootManager {
@@ -32,9 +32,7 @@ impl LootManager {
     }
 
     /// Load loot tables from database
-    pub async fn load_loot_tables(&self,
-        world_db: &sqlx::MySqlPool,
-    ) -> anyhow::Result<()> {
+    pub async fn load_loot_tables(&self, world_db: &sqlx::MySqlPool) -> anyhow::Result<()> {
         let rows = sqlx::query_as::<_, LootTableRow>(
             r#"SELECT entry, item, ChanceOrQuestChance as chance,
                CAST(mincountOrRef AS SIGNED) as min_count, maxcount as max_count, groupid as group_id
@@ -148,14 +146,16 @@ impl LootManager {
     }
 
     /// Get loot for a source
-    pub fn get_loot(&self,
+    pub fn get_loot(
+        &self,
         source: ObjectGuid,
     ) -> Option<dashmap::mapref::one::Ref<'_, ObjectGuid, Loot>> {
         self.active_loot.get(&source)
     }
 
     /// Get mutable loot
-    pub fn get_loot_mut(&self,
+    pub fn get_loot_mut(
+        &self,
         source: ObjectGuid,
     ) -> Option<dashmap::mapref::one::RefMut<'_, ObjectGuid, Loot>> {
         self.active_loot.get_mut(&source)
@@ -228,7 +228,9 @@ impl LootManager {
     where
         F: FnOnce(&mut Loot) -> R,
     {
-        self.active_loot.get_mut(&source).map(|mut loot| f(&mut *loot))
+        self.active_loot
+            .get_mut(&source)
+            .map(|mut loot| f(&mut *loot))
     }
 }
 

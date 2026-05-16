@@ -6,9 +6,9 @@
 //! - [`SmsgTrainerBuyFailed`] - Spell purchase failure
 
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::packet::WorldPacketGuidExt;
 use crate::shared::protocol::ObjectGuid;
 use crate::shared::protocol::{Opcode, WorldPacket};
-use crate::shared::protocol::packet::WorldPacketGuidExt;
 
 /// Per-spell data for SMSG_TRAINER_LIST
 #[derive(Debug, Clone)]
@@ -169,8 +169,11 @@ mod tests {
         let pkt = msg.to_world_packet();
         let data = pkt.data();
 
-        assert_eq!(read_u64_le(data, 0), 0xF130_0000_00C6_0001,
-            "Trainer GUID must be unpacked (fixed 8 bytes)");
+        assert_eq!(
+            read_u64_le(data, 0),
+            0xF130_0000_00C6_0001,
+            "Trainer GUID must be unpacked (fixed 8 bytes)"
+        );
     }
 
     #[test]
@@ -190,22 +193,36 @@ mod tests {
 
         let mut pos = 0;
         // Header
-        assert_eq!(read_u64_le(data, pos), trainer_guid().raw()); pos += 8; // guid
-        assert_eq!(read_u32_le(data, pos), 0); pos += 4;  // trainer_type
-        assert_eq!(read_u32_le(data, pos), 1); pos += 4;  // spell count
+        assert_eq!(read_u64_le(data, pos), trainer_guid().raw());
+        pos += 8; // guid
+        assert_eq!(read_u32_le(data, pos), 0);
+        pos += 4; // trainer_type
+        assert_eq!(read_u32_le(data, pos), 1);
+        pos += 4; // spell count
 
         // Spell entry
-        assert_eq!(read_u32_le(data, pos), 1142); pos += 4; // spell_id
-        assert_eq!(data[pos], 0); pos += 1;                 // state (u8)
-        assert_eq!(read_u32_le(data, pos), 100); pos += 4;  // cost
-        assert_eq!(read_u32_le(data, pos), 0); pos += 4;    // primary_prof_first_rank_available
-        assert_eq!(read_u32_le(data, pos), 0); pos += 4;    // primary_prof_first_rank
-        assert_eq!(data[pos], 4); pos += 1;                 // req_level (u8)
-        assert_eq!(read_u32_le(data, pos), 0); pos += 4;    // req_skill
-        assert_eq!(read_u32_le(data, pos), 0); pos += 4;    // req_skill_value
-        assert_eq!(read_u32_le(data, pos), 0); pos += 4;    // req_spell_1
-        assert_eq!(read_u32_le(data, pos), 0); pos += 4;    // req_spell_2
-        assert_eq!(read_u32_le(data, pos), 0); pos += 4;    // unknown
+        assert_eq!(read_u32_le(data, pos), 1142);
+        pos += 4; // spell_id
+        assert_eq!(data[pos], 0);
+        pos += 1; // state (u8)
+        assert_eq!(read_u32_le(data, pos), 100);
+        pos += 4; // cost
+        assert_eq!(read_u32_le(data, pos), 0);
+        pos += 4; // primary_prof_first_rank_available
+        assert_eq!(read_u32_le(data, pos), 0);
+        pos += 4; // primary_prof_first_rank
+        assert_eq!(data[pos], 4);
+        pos += 1; // req_level (u8)
+        assert_eq!(read_u32_le(data, pos), 0);
+        pos += 4; // req_skill
+        assert_eq!(read_u32_le(data, pos), 0);
+        pos += 4; // req_skill_value
+        assert_eq!(read_u32_le(data, pos), 0);
+        pos += 4; // req_spell_1
+        assert_eq!(read_u32_le(data, pos), 0);
+        pos += 4; // req_spell_2
+        assert_eq!(read_u32_le(data, pos), 0);
+        pos += 4; // unknown
 
         // Greeting cstring
         let (greeting, _) = read_cstring(data, pos);
@@ -227,6 +244,10 @@ mod tests {
         let (greeting, end) = read_cstring(data, 16);
         assert_eq!(greeting, "Hello trainer");
         // Null byte must be present (read_cstring consumes it, so end == data.len())
-        assert_eq!(end, data.len(), "Greeting must be the last field, null-terminated");
+        assert_eq!(
+            end,
+            data.len(),
+            "Greeting must be the last field, null-terminated"
+        );
     }
 }

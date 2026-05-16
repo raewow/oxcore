@@ -72,7 +72,9 @@ pub fn dispatch_proc(
         }
         AURA_PROC_TRIGGER_DAMAGE => {
             handle_proc_trigger_damage(player_guid, candidate, damage, world, broadcast_mgr)?;
-            Ok(ProcResult { trigger_spell_id: None })
+            Ok(ProcResult {
+                trigger_spell_id: None,
+            })
         }
         AURA_DUMMY => {
             handle_dummy_proc(
@@ -83,7 +85,9 @@ pub fn dispatch_proc(
                 world,
                 broadcast_mgr,
             )?;
-            Ok(ProcResult { trigger_spell_id: None })
+            Ok(ProcResult {
+                trigger_spell_id: None,
+            })
         }
         _ => {
             tracing::debug!(
@@ -91,7 +95,9 @@ pub fn dispatch_proc(
                 candidate.aura_type,
                 candidate.spell_id
             );
-            Ok(ProcResult { trigger_spell_id: None })
+            Ok(ProcResult {
+                trigger_spell_id: None,
+            })
         }
     }
 }
@@ -115,7 +121,9 @@ fn handle_proc_trigger_spell(
             "Proc trigger spell has no trigger_spell_id: spell_id={}",
             candidate.spell_id,
         );
-        return Ok(ProcResult { trigger_spell_id: None });
+        return Ok(ProcResult {
+            trigger_spell_id: None,
+        });
     }
 
     // Verify the triggered spell exists
@@ -125,7 +133,9 @@ fn handle_proc_trigger_spell(
             trigger_spell_id,
             candidate.spell_id,
         );
-        return Ok(ProcResult { trigger_spell_id: None });
+        return Ok(ProcResult {
+            trigger_spell_id: None,
+        });
     }
 
     tracing::debug!(
@@ -136,7 +146,9 @@ fn handle_proc_trigger_spell(
     );
 
     // Return the triggered spell ID so check_procs can cast it asynchronously
-    Ok(ProcResult { trigger_spell_id: Some(trigger_spell_id) })
+    Ok(ProcResult {
+        trigger_spell_id: Some(trigger_spell_id),
+    })
 }
 
 /// Handle PROC_TRIGGER_DAMAGE: deal damage when the proc fires.

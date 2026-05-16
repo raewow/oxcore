@@ -54,11 +54,11 @@ pub async fn handle_text_emote(
     };
 
     // Broadcast to nearby players (including self)
-    world
-        .managers
-        .broadcast_mgr
-        .broadcast_nearby(player_guid, &text_emote_msg.to_world_packet(), true)
-        ;
+    world.managers.broadcast_mgr.broadcast_nearby(
+        player_guid,
+        &text_emote_msg.to_world_packet(),
+        true,
+    );
 
     Ok(())
 }

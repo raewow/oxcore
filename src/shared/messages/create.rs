@@ -36,12 +36,12 @@ use crate::shared::messages::update::{
     CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
 };
 use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::shared::protocol::guid::ObjectGuid;
 use crate::shared::protocol::position::Position;
 use crate::shared::protocol::updates::movement_block::MovementSpeeds;
 use crate::shared::protocol::updates::update_block_builder;
 use crate::shared::protocol::updates::update_types::ObjectTypeId;
+use crate::shared::protocol::{Opcode, WorldPacket};
 
 // Re-export convenience types from update module
 pub use crate::shared::messages::update::MovementBlockData;
@@ -99,7 +99,10 @@ impl SmsgCreateObject {
     }
 
     /// Create a creature spawn packet with position.
-    pub fn for_creature(guid: crate::shared::protocol::guid::ObjectGuid, position: Position) -> Self {
+    pub fn for_creature(
+        guid: crate::shared::protocol::guid::ObjectGuid,
+        position: Position,
+    ) -> Self {
         Self::new(guid, ObjectTypeId::Unit, ObjectType::Unit).with_position(position)
     }
 

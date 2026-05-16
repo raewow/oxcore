@@ -26,9 +26,9 @@ impl AttackOutcome {
         let affects = HitInfo::AffectsVictim as u32;
         match self {
             // No AFFECTS_VICTIM for miss/dodge/parry
-            AttackOutcome::Miss => HitInfo::Miss as u32,          // 0x10
-            AttackOutcome::Dodge => HitInfo::NormalSwing as u32,  // victim state handles
-            AttackOutcome::Parry => HitInfo::NormalSwing as u32,  // victim state handles
+            AttackOutcome::Miss => HitInfo::Miss as u32, // 0x10
+            AttackOutcome::Dodge => HitInfo::NormalSwing as u32, // victim state handles
+            AttackOutcome::Parry => HitInfo::NormalSwing as u32, // victim state handles
             // All damage-dealing outcomes include AFFECTS_VICTIM
             AttackOutcome::Glancing => affects | HitInfo::Glancing as u32,
             AttackOutcome::Block => affects,

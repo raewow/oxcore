@@ -108,7 +108,7 @@ pub struct QuestTemplateRow {
     pub complete_emote: u32,
     #[sqlx(rename = "RewRepSpilloverMask")]
     pub rew_rep_spillover_mask: u8,
-    
+
     // Objective text fields (1-4)
     #[sqlx(rename = "ObjectiveText1")]
     pub objective_text1: Option<String>,
@@ -118,7 +118,7 @@ pub struct QuestTemplateRow {
     pub objective_text3: Option<String>,
     #[sqlx(rename = "ObjectiveText4")]
     pub objective_text4: Option<String>,
-    
+
     // Required item fields (1-4)
     #[sqlx(rename = "ReqItemId1")]
     pub req_item_id1: Option<u32>,
@@ -136,7 +136,7 @@ pub struct QuestTemplateRow {
     pub req_item_count3: Option<u32>,
     #[sqlx(rename = "ReqItemCount4")]
     pub req_item_count4: Option<u32>,
-    
+
     // Required creature/GO fields (1-4)
     #[sqlx(rename = "ReqCreatureOrGOId1")]
     pub req_creature_or_go_id1: Option<i32>,
@@ -154,7 +154,7 @@ pub struct QuestTemplateRow {
     pub req_creature_or_go_count3: Option<u32>,
     #[sqlx(rename = "ReqCreatureOrGOCount4")]
     pub req_creature_or_go_count4: Option<u32>,
-    
+
     // Reward choice item fields (1-6)
     #[sqlx(rename = "RewChoiceItemId1")]
     pub rew_choice_item_id1: Option<u32>,
@@ -180,7 +180,7 @@ pub struct QuestTemplateRow {
     pub rew_choice_item_count5: Option<u32>,
     #[sqlx(rename = "RewChoiceItemCount6")]
     pub rew_choice_item_count6: Option<u32>,
-    
+
     // Fixed reward item fields (1-4)
     #[sqlx(rename = "RewItemId1")]
     pub rew_item_id1: Option<u32>,
@@ -198,7 +198,7 @@ pub struct QuestTemplateRow {
     pub rew_item_count3: Option<u32>,
     #[sqlx(rename = "RewItemCount4")]
     pub rew_item_count4: Option<u32>,
-    
+
     // Reputation reward fields (1-5)
     #[sqlx(rename = "RewRepFaction1")]
     pub rew_rep_faction1: Option<u32>,
@@ -220,7 +220,7 @@ pub struct QuestTemplateRow {
     pub rew_rep_value4: Option<i32>,
     #[sqlx(rename = "RewRepValue5")]
     pub rew_rep_value5: Option<i32>,
-    
+
     // Details emote fields (1-4)
     #[sqlx(rename = "DetailsEmote1")]
     pub details_emote1: Option<u32>,
@@ -238,7 +238,7 @@ pub struct QuestTemplateRow {
     pub details_emote_delay3: Option<u32>,
     #[sqlx(rename = "DetailsEmoteDelay4")]
     pub details_emote_delay4: Option<u32>,
-    
+
     // Offer reward emote fields (1-4)
     #[sqlx(rename = "OfferRewardEmote1")]
     pub offer_reward_emote1: Option<u32>,

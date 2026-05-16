@@ -59,13 +59,13 @@ impl From<u8> for QuestStatus {
 pub enum DialogStatus {
     #[default]
     None = 0,
-    Unavailable = 1,      // Gray !
-    Chat = 2,             // No icon
-    Incomplete = 3,       // Gray ?
-    RewardRep = 4,        // Yellow ? (repeatable)
-    Available = 5,        // Yellow !
-    RewardOld = 6,        // Not used
-    Reward2 = 7,          // Yellow ? (complete)
+    Unavailable = 1, // Gray !
+    Chat = 2,        // No icon
+    Incomplete = 3,  // Gray ?
+    RewardRep = 4,   // Yellow ? (repeatable)
+    Available = 5,   // Yellow !
+    RewardOld = 6,   // Not used
+    Reward2 = 7,     // Yellow ? (complete)
 }
 
 impl From<u8> for DialogStatus {
@@ -402,12 +402,7 @@ impl Default for QuestTemplate {
             offer_reward_text: String::new(),
             request_items_text: String::new(),
             end_text: String::new(),
-            objective_text: [
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-            ],
+            objective_text: [String::new(), String::new(), String::new(), String::new()],
             details_emote: [0; QUEST_EMOTE_COUNT],
             details_emote_delay: [0; QUEST_EMOTE_COUNT],
             incomplete_emote: 0,

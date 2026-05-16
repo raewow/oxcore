@@ -110,9 +110,7 @@ impl SettingsSystem {
             .unwrap_or([MsgActionButton::empty(); MAX_ACTION_BUTTONS]);
 
         let msg = SmsgActionButtons { buttons: &buttons };
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 
     // ---------------------------------------------------------------
@@ -180,9 +178,7 @@ impl SettingsSystem {
             data_type,
             data: decompressed,
         };
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, response)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, response);
 
         tracing::debug!(
             "Account data updated: player={}, type={:?}, timestamp={}",
@@ -222,9 +218,7 @@ impl SettingsSystem {
 
         use crate::shared::messages::settings::SmsgUpdateAccountData;
         let response = SmsgUpdateAccountData { data_type, data };
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, response)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, response);
 
         Ok(())
     }
@@ -248,9 +242,7 @@ impl SettingsSystem {
             .unwrap_or([0u32; NUM_ACCOUNT_DATA_TYPES]);
 
         let msg = SmsgAccountDataTimes::new(timestamps);
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 
     // ---------------------------------------------------------------
@@ -325,8 +317,6 @@ impl SettingsSystem {
             .unwrap_or([0xFFFFFFFF; super::state::TUTORIAL_FLAG_COUNT]);
 
         let msg = SmsgTutorialFlags { flags };
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 }

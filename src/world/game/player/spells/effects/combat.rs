@@ -12,14 +12,15 @@ use anyhow::Result;
 /// Used by Windfury and similar effects.
 pub async fn effect_add_extra_attacks(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let attack_count = input.base_value.max(1) as u32;
-    
+
     // TODO: Add extra attacks to caster's next swing
-    
+
     tracing::debug!(
         "Add extra attacks: caster={:?} count={}",
-        input.caster_guid, attack_count
+        input.caster_guid,
+        attack_count
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -58,18 +59,19 @@ pub async fn effect_block(_input: &EffectInput, _world: &World) -> Result<Effect
 /// Enable dual wielding for the player.
 pub async fn effect_dual_wield(input: &EffectInput, world: &World) -> Result<EffectResult> {
     // Enable dual wield skill
-    world.systems.player.manager().with_player_mut(input.caster_guid, |player| {
-        player.combat.can_dual_wield = true;
-        
-        // Learn dual wield spell (674)
-        player.spells.learn_spell(674);
-        
-        tracing::debug!(
-            "Dual wield enabled: caster={:?}",
-            input.caster_guid
-        );
-    });
-    
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(input.caster_guid, |player| {
+            player.combat.can_dual_wield = true;
+
+            // Learn dual wield spell (674)
+            player.spells.learn_spell(674);
+
+            tracing::debug!("Dual wield enabled: caster={:?}", input.caster_guid);
+        });
+
     Ok(EffectResult::empty())
 }
 
@@ -81,16 +83,18 @@ pub async fn effect_threat(input: &EffectInput, world: &World) -> Result<EffectR
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
-    
+
     let threat_amount = input.base_value;
-    
+
     // TODO: Modify threat on target
-    
+
     tracing::debug!(
         "Threat modify: caster={:?} target={:?} amount={}",
-        input.caster_guid, target_guid, threat_amount
+        input.caster_guid,
+        target_guid,
+        threat_amount
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -102,30 +106,39 @@ pub async fn effect_interrupt_cast(input: &EffectInput, world: &World) -> Result
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
-    
+
     // Get interrupt parameters
     let lockout_school = input.misc_value as u8;
     let lockout_duration_ms = input.base_value.max(0) as u32;
-    
+
     // TODO: Interrupt any active cast on target
     // Apply school lockout if specified
-    
+
     if lockout_duration_ms > 0 {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        
-        world.systems.player.manager().with_player_mut(target_guid, |player| {
-            player.spells.apply_school_lockout(lockout_school, lockout_duration_ms, now);
-        });
+
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player
+                    .spells
+                    .apply_school_lockout(lockout_school, lockout_duration_ms, now);
+            });
     }
-    
+
     tracing::debug!(
         "Interrupt cast: caster={:?} target={:?} school={} duration={}ms",
-        input.caster_guid, target_guid, lockout_school, lockout_duration_ms
+        input.caster_guid,
+        target_guid,
+        lockout_school,
+        lockout_duration_ms
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -136,12 +149,9 @@ pub async fn effect_interrupt_cast(input: &EffectInput, world: &World) -> Result
 pub async fn effect_distract(input: &EffectInput, world: &World) -> Result<EffectResult> {
     // TODO: Get distract location from spell target
     // Find all NPCs in radius and distract them
-    
-    tracing::debug!(
-        "Distract: caster={:?}",
-        input.caster_guid
-    );
-    
+
+    tracing::debug!("Distract: caster={:?}", input.caster_guid);
+
     Ok(EffectResult::empty())
 }
 
@@ -150,15 +160,12 @@ pub async fn effect_distract(input: &EffectInput, world: &World) -> Result<Effec
 /// Apply sanctuary effect (PvP protection).
 pub async fn effect_sanctuary(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = input.target_guid.unwrap_or(input.caster_guid);
-    
+
     // TODO: Apply sanctuary aura to target
     // This prevents PvP combat
-    
-    tracing::debug!(
-        "Sanctuary: target={:?}",
-        target_guid
-    );
-    
+
+    tracing::debug!("Sanctuary: target={:?}", target_guid);
+
     Ok(EffectResult::empty())
 }
 
@@ -170,20 +177,27 @@ pub async fn effect_add_combo_points(input: &EffectInput, world: &World) -> Resu
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
-    
+
     let combo_points = input.base_value.max(0) as u8;
-    
+
     // Add combo points
-    world.systems.player.manager().with_player_mut(input.caster_guid, |player| {
-        player.combat.combo_target = Some(target_guid);
-        player.combat.combo_points = (player.combat.combo_points + combo_points).min(5);
-        
-        tracing::debug!(
-            "Add combo points: caster={:?} target={:?} points={} (total: {})",
-            input.caster_guid, target_guid, combo_points, player.combat.combo_points
-        );
-    });
-    
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(input.caster_guid, |player| {
+            player.combat.combo_target = Some(target_guid);
+            player.combat.combo_points = (player.combat.combo_points + combo_points).min(5);
+
+            tracing::debug!(
+                "Add combo points: caster={:?} target={:?} points={} (total: {})",
+                input.caster_guid,
+                target_guid,
+                combo_points,
+                player.combat.combo_points
+            );
+        });
+
     Ok(EffectResult::empty())
 }
 
@@ -195,34 +209,40 @@ pub async fn effect_attack_me(input: &EffectInput, world: &World) -> Result<Effe
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
-    
+
     // TODO: Taunt the target to attack caster
-    
+
     tracing::debug!(
         "Taunt: caster={:?} target={:?}",
-        input.caster_guid, target_guid
+        input.caster_guid,
+        target_guid
     );
-    
+
     Ok(EffectResult::empty())
 }
 
 /// SPELL_EFFECT_MODIFY_THREAT_PERCENT (125)
 ///
 /// Modify threat by percentage.
-pub async fn effect_modify_threat_percent(input: &EffectInput, world: &World) -> Result<EffectResult> {
+pub async fn effect_modify_threat_percent(
+    input: &EffectInput,
+    world: &World,
+) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
-    
+
     let threat_percent = input.base_value;
-    
+
     // TODO: Modify threat by percent
-    
+
     tracing::debug!(
         "Modify threat percent: caster={:?} target={:?} percent={}%",
-        input.caster_guid, target_guid, threat_percent
+        input.caster_guid,
+        target_guid,
+        threat_percent
     );
-    
+
     Ok(EffectResult::empty())
 }

@@ -9,7 +9,9 @@ use tracing::debug;
 
 use super::actions::LuaAction;
 use super::snapshot::PlayerSnapshot;
-use crate::shared::messages::gossip::{GossipOptionData, GossipQuestData, SmsgGossipComplete, SmsgGossipMessage};
+use crate::shared::messages::gossip::{
+    GossipOptionData, GossipQuestData, SmsgGossipComplete, SmsgGossipMessage,
+};
 use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 use crate::world::World;
 
@@ -70,7 +72,12 @@ pub async fn execute_gossip_actions(
             LuaAction::GossipMenu { npc_text_id: id } => {
                 npc_text_id = id;
             }
-            LuaAction::GossipOption { id: _, icon, text, coded } => {
+            LuaAction::GossipOption {
+                id: _,
+                icon,
+                text,
+                coded,
+            } => {
                 gossip_options.push(GossipOptionData {
                     index: option_index,
                     icon,
@@ -99,31 +106,47 @@ pub async fn execute_gossip_actions(
                     options: std::mem::take(&mut gossip_options),
                     quests: std::mem::take(&mut gossip_quests),
                 };
-                world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+                world
+                    .managers
+                    .broadcast_mgr
+                    .send_msg_to_player(player_guid, msg);
                 npc_text_id = 0;
                 option_index = 0;
             }
             LuaAction::GossipClose => {
-                world.managers.broadcast_mgr.send_msg_to_player(player_guid, SmsgGossipComplete);
+                world
+                    .managers
+                    .broadcast_mgr
+                    .send_msg_to_player(player_guid, SmsgGossipComplete);
             }
 
             // ==================== NPC windows ====================
             LuaAction::SendVendor => {
-                world.systems.vendor.send_vendor_list(player_guid, npc_guid).await?;
+                world
+                    .systems
+                    .vendor
+                    .send_vendor_list(player_guid, npc_guid)
+                    .await?;
             }
             LuaAction::SendTrainer
             | LuaAction::SendBanker
             | LuaAction::SendAuctioneer
             | LuaAction::SendInnkeeper
             | LuaAction::SendTaxi => {
-                debug!("Gossip executor: NPC window action not yet implemented: {:?}", action);
+                debug!(
+                    "Gossip executor: NPC window action not yet implemented: {:?}",
+                    action
+                );
             }
 
             // ==================== Creature state ====================
             LuaAction::SetFaction { faction_id } => {
-                world.managers.creature_mgr.with_creature_mut(npc_guid, |c| {
-                    c.faction = faction_id;
-                });
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(npc_guid, |c| {
+                        c.faction = faction_id;
+                    });
             }
             LuaAction::Say { text } => {
                 send_creature_chat(world, npc_guid, 0x0B, &text); // CHAT_MSG_MONSTER_SAY
@@ -133,15 +156,26 @@ pub async fn execute_gossip_actions(
             }
             LuaAction::ScriptText { text_id } => {
                 // TODO: look up text from script_texts DB table
-                debug!("Gossip executor: ScriptText {} not yet implemented", text_id);
+                debug!(
+                    "Gossip executor: ScriptText {} not yet implemented",
+                    text_id
+                );
             }
             LuaAction::Emote { emote_id } => {
                 send_creature_emote(world, npc_guid, emote_id);
             }
 
             // ==================== Player rewards ====================
-            LuaAction::GiveItem { player, item_id, count } => {
-                world.systems.inventory.add_item(player, item_id, count).await;
+            LuaAction::GiveItem {
+                player,
+                item_id,
+                count,
+            } => {
+                world
+                    .systems
+                    .inventory
+                    .add_item(player, item_id, count)
+                    .await;
             }
             LuaAction::GiveGold { player, amount } => {
                 world.managers.player_mgr.with_player_mut(player, |p| {
@@ -153,40 +187,83 @@ pub async fn execute_gossip_actions(
                     p.money = p.money.saturating_sub(amount);
                 });
             }
-            LuaAction::AddReputation { player, faction_id, amount } => {
-                if let Err(e) = world.systems.reputation.modify_reputation(player, faction_id, amount, world) {
-                    debug!("Gossip executor: AddReputation faction={} amount={} failed: {}", faction_id, amount, e);
+            LuaAction::AddReputation {
+                player,
+                faction_id,
+                amount,
+            } => {
+                if let Err(e) = world
+                    .systems
+                    .reputation
+                    .modify_reputation(player, faction_id, amount, world)
+                {
+                    debug!(
+                        "Gossip executor: AddReputation faction={} amount={} failed: {}",
+                        faction_id, amount, e
+                    );
                 }
             }
             LuaAction::CompleteQuest { player, quest_id } => {
                 // If no player guid was specified in the script, default to the triggering player.
-                let target = if player.is_empty() { player_guid } else { player };
-                world.systems.quest.handle_area_event_complete(target, quest_id);
-                debug!("Gossip executor: CompleteQuest player={:?} quest={}", target, quest_id);
+                let target = if player.is_empty() {
+                    player_guid
+                } else {
+                    player
+                };
+                world
+                    .systems
+                    .quest
+                    .handle_area_event_complete(target, quest_id);
+                debug!(
+                    "Gossip executor: CompleteQuest player={:?} quest={}",
+                    target, quest_id
+                );
             }
 
             // ==================== Spawning ====================
-            LuaAction::SpawnCreature { entry, x, y, z, o, .. } => {
+            LuaAction::SpawnCreature {
+                entry, x, y, z, o, ..
+            } => {
                 // Dynamically summon a creature at the given coordinates.
                 // Uses a transient spawn_id (0) since this is a script-created summon.
-                let map_id = world.managers.player_mgr
+                let map_id = world
+                    .managers
+                    .player_mgr
                     .get_player(player_guid)
                     .map(|p| p.map_id)
                     .unwrap_or(0);
-                let instance_id = world.managers.player_mgr
+                let instance_id = world
+                    .managers
+                    .player_mgr
                     .get_player(player_guid)
                     .map(|p| p.instance_id)
                     .unwrap_or(0);
                 let spawn = crate::world::game::creature::spawn::CreatureSpawnData::new(
-                    0, entry, map_id, Position { x, y, z, o }, 0,
+                    0,
+                    entry,
+                    map_id,
+                    Position { x, y, z, o },
+                    0,
                 );
-                if world.managers.creature_mgr.spawn_creature(&spawn, instance_id).is_none() {
+                if world
+                    .managers
+                    .creature_mgr
+                    .spawn_creature(&spawn, instance_id)
+                    .is_none()
+                {
                     // Spawn failed (likely no template) — log and continue
-                    debug!("Gossip executor: SpawnCreature entry={} failed (template not found?)", entry);
+                    debug!(
+                        "Gossip executor: SpawnCreature entry={} failed (template not found?)",
+                        entry
+                    );
                 }
             }
 
-            LuaAction::SpawnCreatureAtPlayer { entry, summon_type: _, duration_ms: _ } => {
+            LuaAction::SpawnCreatureAtPlayer {
+                entry,
+                summon_type: _,
+                duration_ms: _,
+            } => {
                 // Spawn a creature at the player's current position.
                 // TODO: honour summon_type and duration_ms for timed/combat despawn.
                 if let Some(p) = world.managers.player_mgr.get_player(player_guid) {
@@ -197,17 +274,30 @@ pub async fn execute_gossip_actions(
                     let spawn = crate::world::game::creature::spawn::CreatureSpawnData::new(
                         0, entry, map_id, pos, 0,
                     );
-                    if world.managers.creature_mgr.spawn_creature(&spawn, instance_id).is_none() {
-                        debug!("Gossip executor: SpawnCreatureAtPlayer entry={} failed", entry);
+                    if world
+                        .managers
+                        .creature_mgr
+                        .spawn_creature(&spawn, instance_id)
+                        .is_none()
+                    {
+                        debug!(
+                            "Gossip executor: SpawnCreatureAtPlayer entry={} failed",
+                            entry
+                        );
                     }
                 }
             }
 
             // ==================== Quest credit ====================
-            LuaAction::KillCreditNearestCreature { creature_entry, search_radius } => {
+            LuaAction::KillCreditNearestCreature {
+                creature_entry,
+                search_radius,
+            } => {
                 // Find the nearest alive creature with the given entry within search_radius yards
                 // of the player, then award kill credit for it.
-                let player_info = world.managers.player_mgr
+                let player_info = world
+                    .managers
+                    .player_mgr
                     .get_player(player_guid)
                     .map(|p| (p.movement.position, p.map_id));
 
@@ -215,11 +305,14 @@ pub async fn execute_gossip_actions(
                     let radius_sq = search_radius * search_radius;
 
                     // Collect candidates into a vec to avoid holding DashMap refs
-                    let candidates: Vec<(ObjectGuid, u32, f32)> = world.managers.creature_mgr
+                    let candidates: Vec<(ObjectGuid, u32, f32)> = world
+                        .managers
+                        .creature_mgr
                         .iter_creatures()
                         .filter_map(|e| {
                             let c = e.value();
-                            if c.entry != creature_entry || c.map_id != player_map || !c.is_alive() {
+                            if c.entry != creature_entry || c.map_id != player_map || !c.is_alive()
+                            {
                                 return None;
                             }
                             let dx = c.position.x - pos.x;
@@ -234,7 +327,10 @@ pub async fn execute_gossip_actions(
                         })
                         .collect();
 
-                    if let Some((cg, ce, _)) = candidates.into_iter().min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal)) {
+                    if let Some((cg, ce, _)) = candidates
+                        .into_iter()
+                        .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+                    {
                         world.systems.quest.handle_kill_credit(player_guid, ce, cg);
                     } else {
                         debug!(
@@ -246,46 +342,77 @@ pub async fn execute_gossip_actions(
             }
 
             LuaAction::SetUnitFlag { flag } => {
-                world.managers.creature_mgr.with_creature_mut(npc_guid, |c| {
-                    c.unit_flags |= flag;
-                });
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(npc_guid, |c| {
+                        c.unit_flags |= flag;
+                    });
             }
             LuaAction::RemoveUnitFlag { flag } => {
-                world.managers.creature_mgr.with_creature_mut(npc_guid, |c| {
-                    c.unit_flags &= !flag;
-                });
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(npc_guid, |c| {
+                        c.unit_flags &= !flag;
+                    });
             }
 
-            LuaAction::CastSpellOnNearestCreature { creature_entry, spell_id, search_radius } => {
+            LuaAction::CastSpellOnNearestCreature {
+                creature_entry,
+                spell_id,
+                search_radius,
+            } => {
                 // Find the nearest alive creature with the given entry within search_radius
                 // yards of the NPC/GO, then have the NPC cast the spell on it.
                 // TODO: the "caster" here is npc_guid; if npc_guid is empty (e.g. area trigger
                 // context), the cast will silently fail inside execute_creature_spell_cast.
-                let npc_pos = world.managers.creature_mgr
+                let npc_pos = world
+                    .managers
+                    .creature_mgr
                     .with_creature(npc_guid, |c| c.position)
                     .or_else(|| {
                         // Fall back to player position for GO/area-trigger contexts.
-                        world.managers.player_mgr.get_player(player_guid).map(|p| p.movement.position)
+                        world
+                            .managers
+                            .player_mgr
+                            .get_player(player_guid)
+                            .map(|p| p.movement.position)
                     });
 
                 if let Some(origin) = npc_pos {
                     let radius_sq = search_radius * search_radius;
-                    let candidates: Vec<(ObjectGuid, f32)> = world.managers.creature_mgr
+                    let candidates: Vec<(ObjectGuid, f32)> = world
+                        .managers
+                        .creature_mgr
                         .iter_creatures()
                         .filter_map(|e| {
                             let c = e.value();
-                            if c.entry != creature_entry || !c.is_alive() { return None; }
+                            if c.entry != creature_entry || !c.is_alive() {
+                                return None;
+                            }
                             let dx = c.position.x - origin.x;
                             let dy = c.position.y - origin.y;
                             let dz = c.position.z - origin.z;
                             let dist_sq = dx * dx + dy * dy + dz * dz;
-                            if dist_sq <= radius_sq { Some((*e.key(), dist_sq)) } else { None }
+                            if dist_sq <= radius_sq {
+                                Some((*e.key(), dist_sq))
+                            } else {
+                                None
+                            }
                         })
                         .collect();
 
-                    if let Some((target_guid, _)) = candidates.into_iter().min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)) {
+                    if let Some((target_guid, _)) = candidates
+                        .into_iter()
+                        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                    {
                         crate::world::game::creature::ai::executor::execute_creature_spell_cast(
-                            world, npc_guid, spell_id, Some(target_guid), true,
+                            world,
+                            npc_guid,
+                            spell_id,
+                            Some(target_guid),
+                            true,
                         );
                     } else {
                         debug!(
@@ -298,7 +425,10 @@ pub async fn execute_gossip_actions(
 
             // ==================== Silently ignore actions not relevant to gossip ====================
             _ => {
-                debug!("Gossip executor: skipping action not applicable to gossip context: {:?}", action);
+                debug!(
+                    "Gossip executor: skipping action not applicable to gossip context: {:?}",
+                    action
+                );
             }
         }
     }
@@ -336,7 +466,8 @@ fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, t
         player_rank: None,
         message: text,
         chat_tag: ChatTag::None,
-    }.to_world_packet();
+    }
+    .to_world_packet();
 
     broadcast_around_creature(world, creature_guid, &packet);
 }

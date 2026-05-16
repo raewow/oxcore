@@ -16,24 +16,19 @@
 //! └─────────────────┘     └─────────────────┘     └─────────────────┘
 //! ```
 
-mod types;
-mod snapshot;
-mod decision;
-pub mod executor;
-mod system;
 mod aggro;
 mod aggro_scan;
+mod decision;
+pub mod executor;
+mod snapshot;
+mod system;
+mod types;
 
 // Public exports
-pub use types::{
-    AIState, AIType, AIEvent, AIAction, CombatEndReason,
-    MovementType, ReactState, AIStateData, AIEventQueue,
-};
-pub use snapshot::{
-    CreatureSnapshot, TargetSnapshot, ThreatEntry,
-    AIInput, AIDecisionResult,
-};
-pub use system::{
-    update_creature_ai, queue_event, process_ai_event,
-};
 pub use aggro_scan::scan_for_aggro;
+pub use snapshot::{AIDecisionResult, AIInput, CreatureSnapshot, TargetSnapshot, ThreatEntry};
+pub use system::{process_ai_event, queue_event, update_creature_ai};
+pub use types::{
+    AIAction, AIEvent, AIEventQueue, AIState, AIStateData, AIType, CombatEndReason, MovementType,
+    ReactState,
+};

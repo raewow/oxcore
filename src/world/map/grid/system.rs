@@ -76,8 +76,16 @@ impl GridSystem {
     }
 
     /// Process grid loading/unloading for a specific map
-    pub async fn process_map_grids(&self, map_id: u32, instance_id: u32, world: &World) -> anyhow::Result<()> {
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+    pub async fn process_map_grids(
+        &self,
+        map_id: u32,
+        instance_id: u32,
+        world: &World,
+    ) -> anyhow::Result<()> {
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
 
         // Process grid loading
         self.load_pending_grids(map_id, world, &map).await?;
@@ -165,8 +173,14 @@ impl GridSystem {
         );
 
         // Load VMap/MMap tiles for this grid (before spawning creatures so pathfinding is available)
-        world.managers.vmap_mgr.load_map(map_id, grid_x as i32, grid_y as i32);
-        world.managers.mmap_mgr.load_map_tile(map_id, grid_x as i32, grid_y as i32);
+        world
+            .managers
+            .vmap_mgr
+            .load_map(map_id, grid_x as i32, grid_y as i32);
+        world
+            .managers
+            .mmap_mgr
+            .load_map_tile(map_id, grid_x as i32, grid_y as i32);
 
         // Get spawns for this grid
         let spawns = world
@@ -184,7 +198,11 @@ impl GridSystem {
             }
 
             // Spawn the creature with the map's instance_id
-            if let Some(guid) = world.managers.creature_mgr.spawn_creature(&spawn, map.instance_id()) {
+            if let Some(guid) = world
+                .managers
+                .creature_mgr
+                .spawn_creature(&spawn, map.instance_id())
+            {
                 // Register with map and grid in a single lock acquisition
                 {
                     let grid_mgr = map.grid_manager();
@@ -300,7 +318,10 @@ impl GridSystem {
         }
 
         // Unload VMap/MMap tiles for this grid
-        world.managers.mmap_mgr.unload_tile(map_id, grid_x as i32, grid_y as i32);
+        world
+            .managers
+            .mmap_mgr
+            .unload_tile(map_id, grid_x as i32, grid_y as i32);
 
         if creature_count > 0 || go_count > 0 {
             tracing::info!(
@@ -327,7 +348,10 @@ impl GridSystem {
         instance_id: u32,
         world: &World,
     ) -> anyhow::Result<()> {
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
 
         // Get player position from map
         let position = map.get_player_position(player_guid).ok_or_else(|| {
@@ -378,7 +402,10 @@ impl GridSystem {
         instance_id: u32,
         world: Arc<World>,
     ) {
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
 
         // Get player position from map
         let position = match map.get_player_position(player_guid) {
@@ -442,7 +469,12 @@ impl GridSystem {
             let system = self.clone();
 
             let handle = tokio::spawn(async move {
-                tracing::debug!("[GRID] Async loading grid ({}, {}) on map {}", grid_x, grid_y, map_id);
+                tracing::debug!(
+                    "[GRID] Async loading grid ({}, {}) on map {}",
+                    grid_x,
+                    grid_y,
+                    map_id
+                );
 
                 if let Err(e) = system
                     .load_grid(map_id, grid_x, grid_y, &world_clone, &map_clone)
@@ -456,7 +488,12 @@ impl GridSystem {
                         e
                     );
                 } else {
-                    tracing::debug!("[GRID] Async load complete for grid ({}, {}) on map {}", grid_x, grid_y, map_id);
+                    tracing::debug!(
+                        "[GRID] Async load complete for grid ({}, {}) on map {}",
+                        grid_x,
+                        grid_y,
+                        map_id
+                    );
                 }
 
                 // Remove from loading set

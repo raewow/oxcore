@@ -57,10 +57,14 @@ pub async fn handle_gossip_hello(
     // and responds with CMSG_SPIRIT_HEALER_ACTIVATE on confirmation.
     const NPC_FLAG_SPIRITHEALER: u32 = 0x00000020;
     if (npc_flags & NPC_FLAG_SPIRITHEALER) != 0 {
-        let is_ghost = world.managers.player_mgr.with_player(player_guid, |player| {
-            use crate::world::game::player::death::DeathState;
-            player.death.death_state == DeathState::Dead
-        }).unwrap_or(false);
+        let is_ghost = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| {
+                use crate::world::game::player::death::DeathState;
+                player.death.death_state == DeathState::Dead
+            })
+            .unwrap_or(false);
 
         if is_ghost {
             info!(
@@ -78,9 +82,10 @@ pub async fn handle_gossip_hello(
     // Check for a Lua gossip script that handles OnGossipHello
     if let Some(script) = world.managers.lua_mgr.get_gossip_script(entry) {
         let player_snap = build_player_snapshot(player_guid, world);
-        let actions = world.managers.lua_mgr.with_lua(|lua| {
-            script.on_gossip_hello(lua, &player_snap, npc_guid)
-        });
+        let actions = world
+            .managers
+            .lua_mgr
+            .with_lua(|lua| script.on_gossip_hello(lua, &player_snap, npc_guid));
         if !actions.is_empty() {
             execute_gossip_actions(actions, player_guid, npc_guid, world).await?;
             return Ok(());
@@ -91,10 +96,16 @@ pub async fn handle_gossip_hello(
     let quest_data = if (npc_flags & 0x00000002) != 0 {
         // QUESTGIVER flag
         info!("NPC has QUESTGIVER flag, preparing quest menu");
-        let quests = world.systems.quest.prepare_quest_menu(player_guid, entry, world);
+        let quests = world
+            .systems
+            .quest
+            .prepare_quest_menu(player_guid, entry, world);
         info!("Prepared {} quests for menu", quests.len());
         for quest in &quests {
-            info!("  Quest {}: '{}' (icon={}, level={})", quest.quest_id, quest.title, quest.icon, quest.level);
+            info!(
+                "  Quest {}: '{}' (icon={}, level={})",
+                quest.quest_id, quest.title, quest.icon, quest.level
+            );
         }
         Some(quests)
     } else {
@@ -116,11 +127,8 @@ pub async fn handle_gossip_hello(
             if let Some(quest) = quests.first() {
                 let quest_id = quest.quest_id;
                 use crate::world::game::npc::quest::types::QuestStatus;
-                let quest_status = world
-                    .systems
-                    .quest
-                    .get_quest_status(player_guid, quest_id);
-                
+                let quest_status = world.systems.quest.get_quest_status(player_guid, quest_id);
+
                 // Auto-display if: no gossip flag (pickup) OR quest is complete (turn-in)
                 !has_gossip_flag || quest_status == QuestStatus::Complete
             } else {
@@ -145,10 +153,7 @@ pub async fn handle_gossip_hello(
 
                 // Check quest status to determine which dialog to show
                 use crate::world::game::npc::quest::types::QuestStatus;
-                let quest_status = world
-                    .systems
-                    .quest
-                    .get_quest_status(player_guid, quest_id);
+                let quest_status = world.systems.quest.get_quest_status(player_guid, quest_id);
 
                 match quest_status {
                     QuestStatus::Complete => {
@@ -164,17 +169,16 @@ pub async fn handle_gossip_hello(
                             .await?;
                     }
                     QuestStatus::Incomplete => {
-                        // Quest is incomplete - close gossip (request items dialog not yet implemented)
+                        // Quest is incomplete - show request items/objectives dialog
                         info!(
                             "Quest {} is incomplete for player {:?}",
                             quest_id, player_guid
                         );
-                        use crate::shared::messages::gossip::SmsgGossipComplete;
                         world
-                            .managers
-                            .broadcast_mgr
-                            .send_msg_to_player(player_guid, SmsgGossipComplete)
-                            ;
+                            .systems
+                            .quest
+                            .handle_quest_complete(player_guid, npc_guid, quest_id, world)
+                            .await?;
                     }
                     _ => {
                         // Quest is available or none - show quest details for accepting
@@ -182,10 +186,12 @@ pub async fn handle_gossip_hello(
                             "Quest {} is available for player {:?}, showing details dialog",
                             quest_id, player_guid
                         );
-                        world
-                            .systems
-                            .quest
-                            .send_quest_details(player_guid, npc_guid, quest_id, world)?;
+                        world.systems.quest.send_quest_details(
+                            player_guid,
+                            npc_guid,
+                            quest_id,
+                            world,
+                        )?;
                     }
                 }
                 return Ok(());
@@ -197,10 +203,7 @@ pub async fn handle_gossip_hello(
     // Conditions: NPC is a vendor, has no GOSSIP flag, and has no gossip menu defined
     if has_vendor_flag && !has_gossip_flag {
         // Check if vendor has a gossip menu defined
-        let has_gossip_menu = world
-            .systems
-            .gossip
-            .has_gossip_menu(entry);
+        let has_gossip_menu = world.systems.gossip.has_gossip_menu(entry);
 
         if !has_gossip_menu {
             // Open vendor window directly
@@ -208,7 +211,11 @@ pub async fn handle_gossip_hello(
                 "Opening vendor window directly for player {:?} from NPC {:?} (no gossip menu)",
                 player_guid, npc_guid
             );
-            world.systems.vendor.send_vendor_list(player_guid, npc_guid).await?;
+            world
+                .systems
+                .vendor
+                .send_vendor_list(player_guid, npc_guid)
+                .await?;
             return Ok(());
         }
     }
@@ -223,8 +230,11 @@ pub async fn handle_gossip_hello(
                 player_guid, npc_guid
             );
             crate::world::handlers::trainer_handler::send_trainer_list(
-                player_guid, npc_guid, world,
-            ).await?;
+                player_guid,
+                npc_guid,
+                world,
+            )
+            .await?;
             return Ok(());
         }
     }
@@ -320,10 +330,7 @@ pub async fn handle_gossip_select_option(
         .unwrap_or(0);
 
     // Get the selected option details before handling
-    let option_details = world
-        .systems
-        .gossip
-        .get_option_details(menu_id, option_id);
+    let option_details = world.systems.gossip.get_option_details(menu_id, option_id);
 
     // Delegate to gossip system
     world
@@ -338,15 +345,28 @@ pub async fn handle_gossip_select_option(
         match option.option_id {
             gossip_option::VENDOR | gossip_option::ARMORER => {
                 // Open vendor window
-                info!("Opening vendor window for player {:?} from NPC {:?}", player_guid, npc_guid);
-                world.systems.vendor.send_vendor_list(player_guid, npc_guid).await?;
+                info!(
+                    "Opening vendor window for player {:?} from NPC {:?}",
+                    player_guid, npc_guid
+                );
+                world
+                    .systems
+                    .vendor
+                    .send_vendor_list(player_guid, npc_guid)
+                    .await?;
             }
             gossip_option::TRAINER => {
                 // Open trainer window
-                info!("Opening trainer window for player {:?} from NPC {:?}", player_guid, npc_guid);
+                info!(
+                    "Opening trainer window for player {:?} from NPC {:?}",
+                    player_guid, npc_guid
+                );
                 crate::world::handlers::trainer_handler::send_trainer_list(
-                    player_guid, npc_guid, world,
-                ).await?;
+                    player_guid,
+                    npc_guid,
+                    world,
+                )
+                .await?;
             }
             _ => {
                 // Other options are handled by the gossip system
@@ -386,12 +406,21 @@ pub async fn handle_npc_text_query(
     // Look up NPC text from gossip manager
     let msg = if let Some(npc_text) = world.systems.gossip_manager.get_npc_text(text_id) {
         let options = npc_text.options.map(|opt| {
-            let bct = world.systems.gossip_manager.get_broadcast_text(opt.broadcast_text_id);
+            let bct = world
+                .systems
+                .gossip_manager
+                .get_broadcast_text(opt.broadcast_text_id);
             NpcTextOption {
                 probability: opt.probability,
                 broadcast_text_id: opt.broadcast_text_id,
-                male_text: bct.as_ref().map(|b| b.male_text.clone()).unwrap_or_default(),
-                female_text: bct.as_ref().map(|b| b.female_text.clone()).unwrap_or_default(),
+                male_text: bct
+                    .as_ref()
+                    .map(|b| b.male_text.clone())
+                    .unwrap_or_default(),
+                female_text: bct
+                    .as_ref()
+                    .map(|b| b.female_text.clone())
+                    .unwrap_or_default(),
                 language_id: bct.as_ref().map(|b| b.language_id).unwrap_or(0),
                 emote_delays: bct.as_ref().map(|b| b.emote_delays).unwrap_or([0; 3]),
                 emote_ids: bct.as_ref().map(|b| b.emote_ids).unwrap_or([0; 3]),
@@ -407,8 +436,7 @@ pub async fn handle_npc_text_query(
     world
         .managers
         .broadcast_mgr
-        .send_msg_to_player(player_guid, msg)
-        ;
+        .send_msg_to_player(player_guid, msg);
 
     Ok(())
 }

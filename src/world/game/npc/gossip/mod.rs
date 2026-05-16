@@ -4,9 +4,9 @@
 
 pub mod manager;
 pub mod system;
-pub mod types;
 #[cfg(test)]
 mod tests;
+pub mod types;
 
 pub use manager::GossipManager;
 pub use system::GossipSystem;

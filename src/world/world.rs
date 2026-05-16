@@ -8,6 +8,7 @@ use crate::shared::database::world::repositories::QuestTemplateRepository;
 use crate::shared::database::Databases;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::config::Config;
+use crate::world::core::lua::LuaScriptManager;
 use crate::world::core::session::SessionManager;
 use crate::world::dbc::DbcManager;
 use crate::world::game::area_trigger::AreaTriggerManager;
@@ -20,7 +21,6 @@ use crate::world::game::items::ItemManager;
 use crate::world::game::player::{PlayerManager, PlayerSystem};
 use crate::world::game::spell::SpellManager;
 use crate::world::game::SystemManager;
-use crate::world::core::lua::LuaScriptManager;
 use crate::world::map::manager::MapManager;
 use crate::world::map::pathfinding::vmap::{VMapConfig, VMapManager};
 use crate::world::map::pathfinding::{MMapManager, PathFinder};
@@ -65,14 +65,29 @@ pub struct World {
     pub command_registry: Arc<TokioRwLock<CommandRegistry<World>>>,
     background_tasks: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     /// Per-player packet handlers
-    pub player_handlers: Arc<dashmap::DashMap<ObjectGuid, crate::world::core::network::player_handler::PlayerPacketHandler>>,
+    pub player_handlers: Arc<
+        dashmap::DashMap<
+            ObjectGuid,
+            crate::world::core::network::player_handler::PlayerPacketHandler,
+        >,
+    >,
     /// Per-player movement buffers (socket writes, map update reads)
-    pub movement_buffers: Arc<dashmap::DashMap<ObjectGuid, Arc<crate::world::core::network::movement_buffer::MovementBuffer>>>,
+    pub movement_buffers: Arc<
+        dashmap::DashMap<
+            ObjectGuid,
+            Arc<crate::world::core::network::movement_buffer::MovementBuffer>,
+        >,
+    >,
     pub data_dir: PathBuf,
 }
 
 impl World {
-    pub fn new(databases: Arc<Databases>, config: Arc<Config>, update_interval_ms: u32, data_dir: std::path::PathBuf) -> Self {
+    pub fn new(
+        databases: Arc<Databases>,
+        config: Arc<Config>,
+        update_interval_ms: u32,
+        data_dir: std::path::PathBuf,
+    ) -> Self {
         let session_mgr = Arc::new(SessionManager::new());
         let player_mgr = Arc::new(PlayerManager::new());
         let player_system = Arc::new(PlayerSystem::new(Arc::clone(&player_mgr)));
@@ -223,13 +238,17 @@ impl World {
         // Load waypoint data
         use crate::world::game::creature::movement::waypoint_repository::WaypointRepository;
         let waypoint_repo = WaypointRepository::new(self.databases.world.clone());
-        let waypoint_data = waypoint_repo.load_all().await
+        let waypoint_data = waypoint_repo
+            .load_all()
+            .await
             .context("Failed to load waypoint data")?;
         self.managers.waypoint_mgr.load_from_data(waypoint_data);
 
         // Load loot tables
-        self.systems.loot_manager
-            .load_loot_tables(&self.databases.world).await
+        self.systems
+            .loot_manager
+            .load_loot_tables(&self.databases.world)
+            .await
             .context("Failed to load loot tables")?;
 
         // Load area trigger data
@@ -265,12 +284,16 @@ impl World {
                 }
             }
             Err(e) => {
-                tracing::warn!("Lua scripting initialization failed: {} (continuing without scripts)", e);
+                tracing::warn!(
+                    "Lua scripting initialization failed: {} (continuing without scripts)",
+                    e
+                );
             }
         }
 
         // Load quest data from world database
-        QuestTemplateRepository::load(&self.systems.quest_manager, &self.databases.world).await
+        QuestTemplateRepository::load(&self.systems.quest_manager, &self.databases.world)
+            .await
             .context("Failed to load quest data")?;
 
         // Initialize game systems
@@ -279,20 +302,24 @@ impl World {
         // Load graveyard data (needs both DBC and world DB)
         {
             let dbc = self.dbc.read();
-            self.systems.death.load_graveyards(
-                std::sync::Arc::new(self.databases.world.clone()),
-                &dbc,
-            ).await?;
+            self.systems
+                .death
+                .load_graveyards(std::sync::Arc::new(self.databases.world.clone()), &dbc)
+                .await?;
         }
 
         // Register vendor template IDs from creature templates
         // This must happen after both creature_mgr.load_templates() and vendor_manager.load()
         for entry in self.managers.creature_mgr.all_templates() {
             if entry.vendor_id > 0 {
-                self.systems.vendor_manager.register_creature_vendor_template(entry.entry, entry.vendor_id);
+                self.systems
+                    .vendor_manager
+                    .register_creature_vendor_template(entry.entry, entry.vendor_id);
             }
             if entry.trainer_id > 0 {
-                self.systems.trainer_manager.register_creature_trainer_template(entry.entry, entry.trainer_id);
+                self.systems
+                    .trainer_manager
+                    .register_creature_trainer_template(entry.entry, entry.trainer_id);
             }
         }
 
@@ -322,15 +349,27 @@ impl World {
         // Process grid loading/unloading for all active maps (continents and instances)
         // This handles lazy creature spawning based on player proximity
         for (map_id, instance_id) in self.managers.map_mgr.get_active_map_keys() {
-            if let Err(e) = self.systems.grid.process_map_grids(map_id, instance_id, self).await {
-                tracing::error!("Grid processing failed for map {}:{}: {}", map_id, instance_id, e);
+            if let Err(e) = self
+                .systems
+                .grid
+                .process_map_grids(map_id, instance_id, self)
+                .await
+            {
+                tracing::error!(
+                    "Grid processing failed for map {}:{}: {}",
+                    map_id,
+                    instance_id,
+                    e
+                );
             }
         }
 
         // Process creature movement FIRST so positions are current for combat
         // and AI range checks (matches vmangos: Unit::Update does spline/movement
         // before AI UpdateAI calls DoMeleeAttackIfReady)
-        self.systems.creature_movement.update_creatures(diff_ms, self)?;
+        self.systems
+            .creature_movement
+            .update_creatures(diff_ms, self)?;
 
         self.managers.map_mgr.update_all(diff, self).await?;
 
@@ -370,16 +409,19 @@ impl World {
         self.systems.quest.update_quest_timers(diff_ms, self);
 
         // Flush dirty inventory data to DB periodically (every 20 ticks = ~1 second at 50ms)
-        static INVENTORY_SAVE_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        static INVENTORY_SAVE_COUNTER: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(0);
         let save_count = INVENTORY_SAVE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if save_count % 20 == 0 {  // Reduced from 100 (5s) to 20 (1s) to reduce data loss window
+        if save_count % 20 == 0 {
+            // Reduced from 100 (5s) to 20 (1s) to reduce data loss window
             if let Err(e) = self.systems.inventory.flush_pending_ops().await {
                 tracing::error!("Failed to flush inventory ops: {}", e);
             }
         }
 
         // Aggro scanning (Phase 5) - every 4th tick for performance
-        static AGGRO_SCAN_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        static AGGRO_SCAN_COUNTER: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(0);
         let count = AGGRO_SCAN_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if count % 4 == 0 {
             crate::world::game::creature::ai::scan_for_aggro(self).await?;
@@ -389,9 +431,10 @@ impl World {
 
         if let Ok(_) = self
             .command_registry
-            .read().await
-            .process_commands(&self.console_rx, self).await
-
+            .read()
+            .await
+            .process_commands(&self.console_rx, self)
+            .await
         {
             // Console processed successfully
         }
@@ -441,7 +484,8 @@ impl World {
                 if let Err(e) =
                     sqlx::query("UPDATE `realmlist` SET `last_seen` = NOW() WHERE `id` = ?")
                         .bind(heartbeat_realm_id)
-                        .execute(&heartbeat_pool).await
+                        .execute(&heartbeat_pool)
+                        .await
                 {
                     tracing::error!("Failed to update realm heartbeat: {}", e);
                 }
@@ -499,7 +543,8 @@ impl World {
 
             #[cfg(not(unix))]
             {
-                tokio::signal::ctrl_c().await
+                tokio::signal::ctrl_c()
+                    .await
                     .expect("Failed to register Ctrl+C handler");
                 world_for_shutdown.stop();
             }
@@ -569,22 +614,34 @@ impl World {
     /// Remove player packet handler (called on logout/disconnect)
     pub fn remove_player_handler(&self, player_guid: ObjectGuid) {
         if let Some((_, _handler)) = self.player_handlers.remove(&player_guid) {
-            tracing::debug!("[HANDLER] Removed packet handler for player {}", player_guid);
+            tracing::debug!(
+                "[HANDLER] Removed packet handler for player {}",
+                player_guid
+            );
             // Handler task will shut down when channel closes (on drop)
         }
     }
 
     /// Create a movement buffer for a player (called during login)
-    pub fn create_movement_buffer(&self, player_guid: ObjectGuid) -> Arc<crate::world::core::network::movement_buffer::MovementBuffer> {
-        let buffer = Arc::new(crate::world::core::network::movement_buffer::MovementBuffer::new(player_guid));
-        self.movement_buffers.insert(player_guid, Arc::clone(&buffer));
+    pub fn create_movement_buffer(
+        &self,
+        player_guid: ObjectGuid,
+    ) -> Arc<crate::world::core::network::movement_buffer::MovementBuffer> {
+        let buffer = Arc::new(
+            crate::world::core::network::movement_buffer::MovementBuffer::new(player_guid),
+        );
+        self.movement_buffers
+            .insert(player_guid, Arc::clone(&buffer));
         buffer
     }
 
     /// Remove movement buffer for a player (called on logout/disconnect)
     pub fn remove_movement_buffer(&self, player_guid: ObjectGuid) {
         if self.movement_buffers.remove(&player_guid).is_some() {
-            tracing::trace!("[MOVEMENT] Removed movement buffer for player {}", player_guid);
+            tracing::trace!(
+                "[MOVEMENT] Removed movement buffer for player {}",
+                player_guid
+            );
         }
     }
 }

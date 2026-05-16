@@ -20,7 +20,8 @@ pub async fn effect_charge(input: &EffectInput, _world: &World) -> Result<Effect
 
     tracing::debug!(
         "Charge effect: caster {} charging to target {}",
-        input.caster_guid, target_guid
+        input.caster_guid,
+        target_guid
     );
 
     // TODO:
@@ -51,7 +52,8 @@ pub async fn effect_knock_back(input: &EffectInput, _world: &World) -> Result<Ef
 
     tracing::debug!(
         "Knockback effect: target {} knocked back by caster {}",
-        target_guid, input.caster_guid
+        target_guid,
+        input.caster_guid
     );
 
     // TODO:
@@ -69,10 +71,7 @@ pub async fn effect_leap(input: &EffectInput, _world: &World) -> Result<EffectRe
     // TODO: Implement leap movement
     // Similar to charge but with arc trajectory
 
-    tracing::debug!(
-        "Leap effect: caster {}",
-        input.caster_guid
-    );
+    tracing::debug!("Leap effect: caster {}", input.caster_guid);
 
     Ok(EffectResult::empty())
 }
@@ -91,7 +90,8 @@ pub async fn effect_pull(input: &EffectInput, _world: &World) -> Result<EffectRe
 
     tracing::debug!(
         "Pull effect: caster {} pulling target {}",
-        input.caster_guid, target_guid
+        input.caster_guid,
+        target_guid
     );
 
     Ok(EffectResult::empty())

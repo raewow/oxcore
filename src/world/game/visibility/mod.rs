@@ -91,12 +91,18 @@ impl VisibilitySystem {
 
         tracing::debug!(
             "[VISIBILITY] Starting visibility update for {:?} at ({:.2}, {:.2}, {:.2})",
-            guid, pos.x, pos.y, pos.z
+            guid,
+            pos.x,
+            pos.y,
+            pos.z
         );
 
         // 2. Get map and query nearby PLAYERS only
         // NOTE: Creatures are handled separately by CreatureManager.send_nearby_creatures()
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
         let all_nearby = map.get_objects_in_range(pos, map.visibility_distance());
 
         // Filter to players only (exclude self)
@@ -136,7 +142,11 @@ impl VisibilitySystem {
 
             for &target_guid in &appeared {
                 // Send CREATE_OBJECT2 to viewer (viewer sees target player)
-                if let Some(create_msg) = world.managers.player_mgr.build_create_msg(target_guid, world) {
+                if let Some(create_msg) = world
+                    .managers
+                    .player_mgr
+                    .build_create_msg(target_guid, world)
+                {
                     if let Some(ref viewer_bc) = viewer_broadcaster {
                         let packet = create_msg.to_world_packet();
                         let mut v2_packet = WorldPacket::new(packet.opcode());
@@ -146,8 +156,11 @@ impl VisibilitySystem {
                 }
 
                 // Send CREATE_OBJECT2 to target (target sees viewer) - bidirectional
-                if let Some(viewer_create_msg) = world.managers.player_mgr.build_create_msg(guid, world) {
-                    if let Some(target_bc) = world.managers.player_mgr.get_broadcaster(target_guid) {
+                if let Some(viewer_create_msg) =
+                    world.managers.player_mgr.build_create_msg(guid, world)
+                {
+                    if let Some(target_bc) = world.managers.player_mgr.get_broadcaster(target_guid)
+                    {
                         let packet = viewer_create_msg.to_world_packet();
                         let mut v2_packet = WorldPacket::new(packet.opcode());
                         v2_packet.write_bytes(packet.contents());
@@ -224,7 +237,6 @@ impl Default for VisibilitySystem {
 
 impl VisibilitySystem {
     pub async fn init(&self) -> Result<()> {
-
         Ok(())
     }
 
@@ -238,7 +250,11 @@ impl VisibilitySystem {
         Ok(())
     }
 
-    pub fn on_player_login(&self, guid: ObjectGuid, position: Option<crate::shared::protocol::Position>) -> Result<()> {
+    pub fn on_player_login(
+        &self,
+        guid: ObjectGuid,
+        position: Option<crate::shared::protocol::Position>,
+    ) -> Result<()> {
         // Create visibility tracking for this player
         self.visible_objects.insert(guid, HashSet::new());
 

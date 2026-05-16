@@ -6,7 +6,11 @@ const VALID_DBS: &[&str] = &["world", "auth", "characters", "logs"];
 
 pub fn run(db: &str, name: &str, migrations_dir: &Path) -> Result<()> {
     if !VALID_DBS.contains(&db) {
-        bail!("Unknown database '{}'. Valid options: {}", db, VALID_DBS.join(", "));
+        bail!(
+            "Unknown database '{}'. Valid options: {}",
+            db,
+            VALID_DBS.join(", ")
+        );
     }
 
     // Normalise name: lowercase, spaces → underscores

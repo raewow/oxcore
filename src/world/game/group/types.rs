@@ -320,7 +320,9 @@ impl GroupData {
     /// Get member by name (case-insensitive)
     pub fn get_member_by_name(&self, name: &str) -> Option<&GroupMember> {
         let name_lower = name.to_lowercase();
-        self.members.iter().find(|m| m.name.to_lowercase() == name_lower)
+        self.members
+            .iter()
+            .find(|m| m.name.to_lowercase() == name_lower)
     }
 
     /// Check if member is the leader
@@ -411,7 +413,11 @@ impl GroupData {
     }
 
     /// Change a member's subgroup
-    pub fn change_subgroup(&mut self, guid: ObjectGuid, new_subgroup: u8) -> Result<(), GroupError> {
+    pub fn change_subgroup(
+        &mut self,
+        guid: ObjectGuid,
+        new_subgroup: u8,
+    ) -> Result<(), GroupError> {
         if new_subgroup >= MAX_RAID_SUBGROUPS {
             return Err(GroupError::InvalidSubgroup);
         }
@@ -446,7 +452,11 @@ impl GroupData {
     }
 
     /// Swap two members' subgroups
-    pub fn swap_subgroups(&mut self, guid1: ObjectGuid, guid2: ObjectGuid) -> Result<(), GroupError> {
+    pub fn swap_subgroups(
+        &mut self,
+        guid1: ObjectGuid,
+        guid2: ObjectGuid,
+    ) -> Result<(), GroupError> {
         if !self.is_raid {
             return Err(GroupError::NotRaid);
         }
@@ -518,7 +528,11 @@ impl GroupData {
     }
 
     /// Set raid target icon
-    pub fn set_target_icon(&mut self, icon_id: u8, target_guid: ObjectGuid) -> Result<(), GroupError> {
+    pub fn set_target_icon(
+        &mut self,
+        icon_id: u8,
+        target_guid: ObjectGuid,
+    ) -> Result<(), GroupError> {
         if icon_id as usize >= TARGET_ICON_COUNT {
             return Err(GroupError::Internal("Invalid icon ID".into()));
         }

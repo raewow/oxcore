@@ -20,10 +20,7 @@ pub struct FriendEntry {
 
 impl FriendEntry {
     pub fn new(friend_guid: ObjectGuid, flags: u8) -> Self {
-        Self {
-            friend_guid,
-            flags,
-        }
+        Self { friend_guid, flags }
     }
 }
 

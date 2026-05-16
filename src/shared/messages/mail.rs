@@ -9,13 +9,13 @@
 //! - [`SmsgReceivedMail`] - Notification that mail was received
 //! - [`SmsgItemTextQueryResponse`] - Response to item text query
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
 use crate::shared::game::mail::{
     Mail, MailCheckMask, MailMessageType, MailResponseResult, MailResponseType, MailStationery,
 };
+use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::guid::ObjectGuid;
+use crate::shared::protocol::Opcode;
+use crate::shared::protocol::WorldPacket;
 
 /// SMSG_SEND_MAIL_RESULT - Result of sending mail
 ///
@@ -130,7 +130,7 @@ impl ToWorldPacket for SmsgMailListResult<'_> {
                 packet.write_u32(0); // enchant_id
                 packet.write_u32(0); // random_property_id
                 packet.write_u32(0); // suffix_factor
-                packet.write_u8(0);  // item_count (u8, not u32)
+                packet.write_u8(0); // item_count (u8, not u32)
                 packet.write_u32(0); // spell_charges
                 packet.write_u32(0); // max_durability
                 packet.write_u32(0); // durability
@@ -199,8 +199,8 @@ impl ToWorldPacket for SmsgItemTextQueryResponse<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
     use crate::shared::game::mail::{Mail, MailCheckMask, MailMessageType, MailState};
+    use crate::shared::protocol::Opcode;
 
     #[test]
     fn test_smsg_send_mail_result() {

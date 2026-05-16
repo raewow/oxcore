@@ -313,7 +313,8 @@ impl MotionMaster {
             MovementGeneratorType::Random => {
                 // Notify random generator it arrived
                 if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Random) {
-                    if let Some(random) = gen.as_any_mut().downcast_mut::<RandomMovementGenerator>() {
+                    if let Some(random) = gen.as_any_mut().downcast_mut::<RandomMovementGenerator>()
+                    {
                         random.on_arrival();
                     }
                 }
@@ -321,7 +322,9 @@ impl MotionMaster {
             MovementGeneratorType::Waypoint => {
                 // Notify waypoint generator it arrived at waypoint
                 if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Waypoint) {
-                    if let Some(waypoint) = gen.as_any_mut().downcast_mut::<WaypointMovementGenerator>() {
+                    if let Some(waypoint) =
+                        gen.as_any_mut().downcast_mut::<WaypointMovementGenerator>()
+                    {
                         waypoint.on_arrival();
                     }
                 }

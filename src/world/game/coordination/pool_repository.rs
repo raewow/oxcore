@@ -1,5 +1,5 @@
+use super::pool_types::{PoolMember, PoolMemberType, PoolTemplate};
 use sqlx::MySqlPool;
-use super::pool_types::{PoolTemplate, PoolMember, PoolMemberType};
 
 /// Repository for loading pool data from database
 pub struct PoolRepository {
@@ -34,7 +34,7 @@ impl PoolRepository {
     /// Load pool templates
     async fn load_templates(&self) -> anyhow::Result<Vec<PoolTemplate>> {
         let rows = sqlx::query_as::<_, PoolTemplateRow>(
-            "SELECT entry, max_limit, description FROM pool_template"
+            "SELECT entry, max_limit, description FROM pool_template",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -52,7 +52,7 @@ impl PoolRepository {
     /// Load creature members for all pools
     async fn load_creature_members(&self) -> anyhow::Result<Vec<PoolCreatureMember>> {
         let rows = sqlx::query_as::<_, PoolCreatureRow>(
-            "SELECT pool_entry, guid, chance, description FROM pool_creature"
+            "SELECT pool_entry, guid, chance, description FROM pool_creature",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -71,7 +71,7 @@ impl PoolRepository {
     /// Load nested pool members
     async fn load_pool_members(&self) -> anyhow::Result<Vec<PoolPoolMember>> {
         let rows = sqlx::query_as::<_, PoolPoolRow>(
-            "SELECT pool_id, mother_pool, chance, description FROM pool_pool"
+            "SELECT pool_id, mother_pool, chance, description FROM pool_pool",
         )
         .fetch_all(&self.pool)
         .await?;

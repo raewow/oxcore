@@ -241,8 +241,12 @@ mod cache_tests {
     #[test]
     fn test_trade_cache_clear() {
         let cache = TradeCache::new();
-        cache.create_trade(test_player_guid(1), test_player_guid(2)).unwrap();
-        cache.create_trade(test_player_guid(3), test_player_guid(4)).unwrap();
+        cache
+            .create_trade(test_player_guid(1), test_player_guid(2))
+            .unwrap();
+        cache
+            .create_trade(test_player_guid(3), test_player_guid(4))
+            .unwrap();
 
         assert_eq!(cache.trade_count(), 2);
 
@@ -253,8 +257,12 @@ mod cache_tests {
     #[test]
     fn test_trade_cache_get_all_trades() {
         let cache = TradeCache::new();
-        cache.create_trade(test_player_guid(1), test_player_guid(2)).unwrap();
-        cache.create_trade(test_player_guid(3), test_player_guid(4)).unwrap();
+        cache
+            .create_trade(test_player_guid(1), test_player_guid(2))
+            .unwrap();
+        cache
+            .create_trade(test_player_guid(3), test_player_guid(4))
+            .unwrap();
 
         let all_trades = cache.get_all_trades();
         assert_eq!(all_trades.len(), 2);
@@ -264,8 +272,8 @@ mod cache_tests {
 // ========== ACTIVE TRADE TESTS ==========
 
 mod active_trade_tests {
-    use super::*;
     use super::super::cache::ActiveTrade;
+    use super::*;
 
     #[test]
     fn test_active_trade_new() {

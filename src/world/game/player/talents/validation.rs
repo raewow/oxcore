@@ -163,38 +163,72 @@ mod tests {
 
         // Filler talents to allow reaching 30 points in tab for row 6 tests
         let filler1 = TalentInfo {
-            id: 110, tab_id: 161, row: 0, column: 2,
+            id: 110,
+            tab_id: 161,
+            row: 0,
+            column: 2,
             rank_spell_ids: [1, 2, 3, 4, 5],
-            prerequisite_talent_id: 0, prerequisite_rank: 0,
+            prerequisite_talent_id: 0,
+            prerequisite_rank: 0,
         };
         let filler2 = TalentInfo {
-            id: 111, tab_id: 161, row: 0, column: 3,
+            id: 111,
+            tab_id: 161,
+            row: 0,
+            column: 3,
             rank_spell_ids: [6, 7, 8, 9, 10],
-            prerequisite_talent_id: 0, prerequisite_rank: 0,
+            prerequisite_talent_id: 0,
+            prerequisite_rank: 0,
         };
         let filler3 = TalentInfo {
-            id: 112, tab_id: 161, row: 1, column: 1,
+            id: 112,
+            tab_id: 161,
+            row: 1,
+            column: 1,
             rank_spell_ids: [11, 12, 13, 14, 15],
-            prerequisite_talent_id: 0, prerequisite_rank: 0,
+            prerequisite_talent_id: 0,
+            prerequisite_rank: 0,
         };
         let filler4 = TalentInfo {
-            id: 113, tab_id: 161, row: 1, column: 2,
+            id: 113,
+            tab_id: 161,
+            row: 1,
+            column: 2,
             rank_spell_ids: [16, 17, 18, 19, 20],
-            prerequisite_talent_id: 0, prerequisite_rank: 0,
+            prerequisite_talent_id: 0,
+            prerequisite_rank: 0,
         };
         let filler5 = TalentInfo {
-            id: 114, tab_id: 161, row: 2, column: 0,
+            id: 114,
+            tab_id: 161,
+            row: 2,
+            column: 0,
             rank_spell_ids: [21, 22, 23, 24, 25],
-            prerequisite_talent_id: 0, prerequisite_rank: 0,
+            prerequisite_talent_id: 0,
+            prerequisite_rank: 0,
         };
         let filler6 = TalentInfo {
-            id: 115, tab_id: 161, row: 2, column: 1,
+            id: 115,
+            tab_id: 161,
+            row: 2,
+            column: 1,
             rank_spell_ids: [26, 27, 28, 29, 30],
-            prerequisite_talent_id: 0, prerequisite_rank: 0,
+            prerequisite_talent_id: 0,
+            prerequisite_rank: 0,
         };
 
         TalentStore::load(
-            vec![deflection, tactical_mastery, mortal_strike, filler1, filler2, filler3, filler4, filler5, filler6],
+            vec![
+                deflection,
+                tactical_mastery,
+                mortal_strike,
+                filler1,
+                filler2,
+                filler3,
+                filler4,
+                filler5,
+                filler6,
+            ],
             vec![tab],
         )
     }
@@ -253,7 +287,7 @@ mod tests {
         state.free_talent_points = 1;
         // Mortal Strike requires talent 100 (Deflection) at rank 5
         // Row 6 requires 30 points in tree; fill with filler talents + partial deflection
-        state.talents.insert(100, 3);  // Only rank 3, need 5 (prerequisite fails here)
+        state.talents.insert(100, 3); // Only rank 3, need 5 (prerequisite fails here)
         state.talents.insert(110, 5); // +5
         state.talents.insert(111, 5); // +5
         state.talents.insert(112, 5); // +5

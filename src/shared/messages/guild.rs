@@ -4,9 +4,9 @@
 //! These messages implement the `ToWorldPacket` trait for serialization.
 
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::guid::ObjectGuid;
 use crate::shared::protocol::Opcode;
 use crate::shared::protocol::WorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
 use crate::world::game::guild::types::{
     CachedGuild, GuildEmblem, GuildMember, GuildRank, GRF_ONLINE,
 };

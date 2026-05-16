@@ -7,10 +7,10 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::shared::protocol::Position;
-use super::navmesh::{NavMesh, parse_detour_tile};
+use super::navmesh::{parse_detour_tile, NavMesh};
 use super::types::PathResult;
 use super::vmap::VMapManager;
+use crate::shared::protocol::Position;
 use tracing::{debug, info, warn};
 
 /// MMap file magic and version (must match extractor output)
@@ -201,13 +201,7 @@ impl MMapManager {
     }
 
     /// Read and validate a .mmtile file, returning raw Detour tile data
-    fn read_mmtile(
-        &self,
-        path: &std::path::Path,
-        map_id: u32,
-        x: i32,
-        y: i32,
-    ) -> Option<Vec<u8>> {
+    fn read_mmtile(&self, path: &std::path::Path, map_id: u32, x: i32, y: i32) -> Option<Vec<u8>> {
         use byteorder::{LittleEndian, ReadBytesExt};
         use std::io::Read;
 
@@ -274,10 +268,7 @@ impl MMapManager {
                 // Note: Cannot efficiently remove individual tile polygons from merged navmesh.
                 // For tile unloading, we rebuild from remaining tiles.
                 self.rebuild_navmesh_from_tiles(mmap);
-                debug!(
-                    "MMAP: Unloaded tile {:03}{:02}{:02}.mmtile",
-                    map_id, y, x
-                );
+                debug!("MMAP: Unloaded tile {:03}{:02}{:02}.mmtile", map_id, y, x);
             }
         }
     }
@@ -304,12 +295,7 @@ impl MMapManager {
     }
 
     /// Calculate path using navmesh A* algorithm
-    pub fn calculate_path(
-        &self,
-        map_id: u32,
-        start: Position,
-        end: Position,
-    ) -> PathResult {
+    pub fn calculate_path(&self, map_id: u32, start: Position, end: Position) -> PathResult {
         let data = self.map_data.read();
         let Some(mmap) = data.get(&map_id) else {
             return PathResult::NoPath;

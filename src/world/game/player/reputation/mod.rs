@@ -31,11 +31,8 @@ pub mod state;
 pub mod system;
 
 pub use state::{
-    FactionEntry,
-    FactionStanding,
-    ReputationSpilloverTemplate,
+    rank_cap_to_reputation_rank, FactionEntry, FactionStanding, ReputationSpilloverTemplate,
     ReputationState,
-    rank_cap_to_reputation_rank,
 };
 
 pub use system::ReputationSystem;

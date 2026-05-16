@@ -78,10 +78,10 @@ impl DiminishingState {
         }
 
         let modifier = match self.groups.get(&group).map(|s| s.level).unwrap_or(0) {
-            0 => 1.0,   // First application: full duration
-            1 => 0.5,   // Second: half
-            2 => 0.25,  // Third: quarter
-            _ => 0.0,   // Fourth+: immune
+            0 => 1.0,  // First application: full duration
+            1 => 0.5,  // Second: half
+            2 => 0.25, // Third: quarter
+            _ => 0.0,  // Fourth+: immune
         };
 
         // Increment DR level
@@ -111,9 +111,8 @@ impl DiminishingState {
 
     /// Clear expired DR states (housekeeping, called periodically).
     pub fn clear_expired(&mut self, now_ms: u64) {
-        self.groups.retain(|_, state| {
-            now_ms < state.last_applied_ms + DR_RESET_TIME_MS
-        });
+        self.groups
+            .retain(|_, state| now_ms < state.last_applied_ms + DR_RESET_TIME_MS);
     }
 }
 

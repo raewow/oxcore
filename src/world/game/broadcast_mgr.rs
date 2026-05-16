@@ -50,11 +50,7 @@ impl BroadcastManager {
 
     /// Send message to specific player using struct-based API (preferred)
     /// Non-blocking - uses try_send() internally
-    pub fn send_msg_to_player<T: ToWorldPacket + Send>(
-        &self,
-        player_guid: ObjectGuid,
-        msg: T,
-    ) {
+    pub fn send_msg_to_player<T: ToWorldPacket + Send>(&self, player_guid: ObjectGuid, msg: T) {
         if let Some(broadcaster) = self.player_mgr.get_broadcaster(player_guid) {
             broadcaster.send_direct(msg.to_world_packet());
         }
@@ -65,10 +61,7 @@ impl BroadcastManager {
         if let Some(broadcaster) = self.player_mgr.get_broadcaster(player_guid) {
             broadcaster.send_direct(packet);
         } else {
-            tracing::debug!(
-                "No broadcaster found for player {:?}",
-                player_guid
-            );
+            tracing::debug!("No broadcaster found for player {:?}", player_guid);
         }
     }
 
@@ -146,11 +139,7 @@ impl BroadcastManager {
     }
 
     /// Broadcast to nearby players excluding self (convenience method for movement)
-    pub fn broadcast_nearby_exclude_self(
-        &self,
-        sender_guid: ObjectGuid,
-        packet: &WorldPacket,
-    ) {
+    pub fn broadcast_nearby_exclude_self(&self, sender_guid: ObjectGuid, packet: &WorldPacket) {
         self.broadcast_nearby(sender_guid, packet, false);
     }
 
@@ -236,10 +225,7 @@ impl BroadcastManagerTrait for BroadcastManager {
         if let Some(broadcaster) = self.player_mgr.get_broadcaster(player_guid) {
             broadcaster.send_direct(packet);
         } else {
-            tracing::debug!(
-                "No broadcaster found for player {:?}",
-                player_guid
-            );
+            tracing::debug!("No broadcaster found for player {:?}", player_guid);
         }
     }
 
@@ -265,27 +251,51 @@ pub fn broadcast_around_creature(
     creature_guid: ObjectGuid,
     packet: &WorldPacket,
 ) {
-    tracing::warn!("[BROADCAST-TRACE] broadcast_around_creature START for {:?}, opcode {:?}", creature_guid, packet.opcode());
+    tracing::warn!(
+        "[BROADCAST-TRACE] broadcast_around_creature START for {:?}, opcode {:?}",
+        creature_guid,
+        packet.opcode()
+    );
     let t_creature_lookup = std::time::Instant::now();
-    let creature_info = world.managers.creature_mgr
+    let creature_info = world
+        .managers
+        .creature_mgr
         .with_creature(creature_guid, |c| (c.position, c.map_id, c.instance_id));
-    tracing::warn!("[BROADCAST-TRACE] creature lookup took {}µs", t_creature_lookup.elapsed().as_micros());
+    tracing::warn!(
+        "[BROADCAST-TRACE] creature lookup took {}µs",
+        t_creature_lookup.elapsed().as_micros()
+    );
 
     if let Some((position, map_id, instance_id)) = creature_info {
-        tracing::warn!("[BROADCAST-TRACE] getting map for map_id {} instance_id {}", map_id, instance_id);
+        tracing::warn!(
+            "[BROADCAST-TRACE] getting map for map_id {} instance_id {}",
+            map_id,
+            instance_id
+        );
         let t_get_map = std::time::Instant::now();
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
-        tracing::warn!("[BROADCAST-TRACE] get_or_create_map took {}µs", t_get_map.elapsed().as_micros());
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
+        tracing::warn!(
+            "[BROADCAST-TRACE] get_or_create_map took {}µs",
+            t_get_map.elapsed().as_micros()
+        );
 
         // Use optimized early-exit query - limit to 50 players max to avoid full map scan
         // In combat scenarios, typically only 5-20 players are nearby, so this prevents
         // scanning 100+ players on populated maps
         tracing::warn!("[BROADCAST-TRACE] calling get_players_in_range_limit");
         let query_start = std::time::Instant::now();
-        let nearby_players = map.get_players_in_range_limit(position, map.visibility_distance(), 50);
+        let nearby_players =
+            map.get_players_in_range_limit(position, map.visibility_distance(), 50);
         let query_elapsed = query_start.elapsed();
         let nearby_count = nearby_players.len();
-        tracing::warn!("[BROADCAST-TRACE] get_players_in_range_limit found {} players in {}µs", nearby_count, query_elapsed.as_micros());
+        tracing::warn!(
+            "[BROADCAST-TRACE] get_players_in_range_limit found {} players in {}µs",
+            nearby_count,
+            query_elapsed.as_micros()
+        );
 
         // Log performance warning if spatial query is slow (should be <100µs)
         if query_elapsed.as_micros() > 100 {
@@ -310,10 +320,19 @@ pub fn broadcast_around_creature(
             query_elapsed.as_micros(),
             packet.opcode(),
         );
-        tracing::warn!("[BROADCAST-TRACE] calling broadcast_to_players with {} players", nearby_count);
+        tracing::warn!(
+            "[BROADCAST-TRACE] calling broadcast_to_players with {} players",
+            nearby_count
+        );
         let t_broadcast = std::time::Instant::now();
-        world.managers.broadcast_mgr.broadcast_to_players(&nearby_players, packet);
-        tracing::warn!("[BROADCAST-TRACE] broadcast_to_players took {}µs", t_broadcast.elapsed().as_micros());
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_to_players(&nearby_players, packet);
+        tracing::warn!(
+            "[BROADCAST-TRACE] broadcast_to_players took {}µs",
+            t_broadcast.elapsed().as_micros()
+        );
     } else {
         tracing::warn!(
             "[BROADCAST] creature {:?} not found in creature_mgr, skipping broadcast",

@@ -51,7 +51,6 @@ pub enum SpellState {
 #[derive(Debug, Clone)]
 pub struct SpellsState {
     // === Spellbook ===
-
     /// Set of all learned spell IDs (for O(1) knows-spell checks)
     pub learned_spells: HashSet<u32>,
 
@@ -59,14 +58,12 @@ pub struct SpellsState {
     pub spellbook: Vec<u32>,
 
     // === Active Casts ===
-
     /// Concurrent spell slots matching MaNGOS CURRENT_SPELL_TYPES.
     /// Multiple spells can be active simultaneously in different slots:
     /// [0] Melee (Heroic Strike), [1] Autorepeat (Auto-Shot), [2] Channeled (Mind Flay), [3] Generic (Fireball)
     pub current_spells: [Option<ActiveCast>; NUM_CURRENT_SPELLS],
 
     // === Cooldowns ===
-
     /// Per-spell cooldowns: spell_id -> cooldown_end_time_ms (game time)
     pub cooldowns: HashMap<u32, u64>,
 
@@ -79,27 +76,23 @@ pub struct SpellsState {
     pub gcd_end: u64,
 
     // === School Lockout ===
-
     /// Per-school lockout end times (from spell interrupt).
     /// When a spell is interrupted, that spell's school is locked for N seconds.
     /// Index: 0=Physical, 1=Holy, 2=Fire, 3=Nature, 4=Frost, 5=Shadow, 6=Arcane
     pub school_lockouts: [u64; NUM_SPELL_SCHOOLS],
 
     // === Spell Modifiers ===
-
     /// Active spell modifiers from talents and auras.
     /// These modify spell properties: damage, healing, cost, duration, crit, range, etc.
     /// Indexed by SpellModOp (the property being modified).
     pub spell_modifiers: Vec<SpellMod>,
 
     // === Delayed Effects (Projectile Travel) ===
-
     /// Pending spell effects waiting for projectile to arrive.
     /// Ticked every world update; effects execute when delivery_time_ms reaches 0.
     pub delayed_effects: Vec<DelayedSpellEffect>,
 
     // === Persistence ===
-
     /// Flag: spellbook has changed since last save
     pub needs_save: bool,
 }
@@ -164,7 +157,8 @@ impl SpellsState {
     /// Clear expired cooldowns (housekeeping)
     pub fn clear_expired_cooldowns(&mut self, now: u64) {
         self.cooldowns.retain(|_, &mut cd_end| cd_end > now);
-        self.category_cooldowns.retain(|_, &mut cd_end| cd_end > now);
+        self.category_cooldowns
+            .retain(|_, &mut cd_end| cd_end > now);
     }
 
     /// Learn a new spell
@@ -236,10 +230,7 @@ impl SpellsState {
 
     /// Get spell modifiers that apply to a specific operation
     pub fn get_modifiers_for_op(&self, op: SpellModOp) -> Vec<&SpellMod> {
-        self.spell_modifiers
-            .iter()
-            .filter(|m| m.op == op)
-            .collect()
+        self.spell_modifiers.iter().filter(|m| m.op == op).collect()
     }
 
     /// Get reference to the active cast in a specific slot.
@@ -828,15 +819,27 @@ impl SpellEventQueue {
     /// Remove all events for a specific caster + spell (on cancel/interrupt).
     pub fn cancel_events_for(&mut self, caster_guid: ObjectGuid, spell_id: u32) {
         for events in self.events.values_mut() {
-            events.retain(|e| {
-                match &e.event_type {
-                    SpellEventType::CastFinish { caster_guid: c, spell_id: s, .. }
-                    | SpellEventType::ChannelTick { caster_guid: c, spell_id: s, .. }
-                    | SpellEventType::ChannelFinish { caster_guid: c, spell_id: s, .. }
-                    | SpellEventType::DelayedEffect { caster_guid: c, spell_id: s, .. } => {
-                        !(*c == caster_guid && *s == spell_id)
-                    }
+            events.retain(|e| match &e.event_type {
+                SpellEventType::CastFinish {
+                    caster_guid: c,
+                    spell_id: s,
+                    ..
                 }
+                | SpellEventType::ChannelTick {
+                    caster_guid: c,
+                    spell_id: s,
+                    ..
+                }
+                | SpellEventType::ChannelFinish {
+                    caster_guid: c,
+                    spell_id: s,
+                    ..
+                }
+                | SpellEventType::DelayedEffect {
+                    caster_guid: c,
+                    spell_id: s,
+                    ..
+                } => !(*c == caster_guid && *s == spell_id),
             });
         }
         // Clean up empty entries

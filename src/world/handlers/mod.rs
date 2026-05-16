@@ -10,11 +10,11 @@
 pub mod area_trigger;
 pub mod auth;
 pub mod character;
-pub mod game_object_handler;
 pub mod character_create_items;
 pub mod chat;
 pub mod creature_combat;
 pub mod death;
+pub mod game_object_handler;
 pub mod gossip_handler;
 pub mod group;
 pub mod guild;
@@ -22,6 +22,7 @@ pub mod item;
 pub mod loot;
 pub mod mail;
 pub mod movement;
+pub mod player_handler;
 pub mod query;
 pub mod quest_handler;
 pub mod reputation;
@@ -32,7 +33,6 @@ pub mod talent;
 pub mod ticket;
 pub mod trade;
 pub mod trainer_handler;
-pub mod player_handler;
 pub mod vendor_handler;
 
 use anyhow::Result;
@@ -557,7 +557,8 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_ATTACKSWING => {
                     if let Some(target_guid) = packet.read_guid() {
                         if let Some(attacker_guid) = session.player_guid() {
-                            creature_combat::handle_attack_swing(world, attacker_guid, target_guid).await?;
+                            creature_combat::handle_attack_swing(world, attacker_guid, target_guid)
+                                .await?;
                         }
                     }
                 }
@@ -626,7 +627,7 @@ pub async fn dispatch_packet(
                     // No LFG system - send "not in queue"
                     let mut response = WorldPacket::new(Opcode::SMSG_MEETINGSTONE_SETQUEUE);
                     response.write_u32(0); // area_id
-                    response.write_u8(0);  // status = None
+                    response.write_u8(0); // status = None
                     session.send_packet(response)?;
                 }
 

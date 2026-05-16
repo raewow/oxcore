@@ -1,7 +1,7 @@
-use crate::shared::protocol::ObjectGuid;
-use crate::world::game::broadcast_mgr::{BroadcastManagerTrait, BroadcastManagerExt};
-use crate::world::World;
 use super::pool_manager::PoolManager;
+use crate::shared::protocol::ObjectGuid;
+use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
+use crate::world::World;
 use std::sync::Arc;
 
 /// PoolSystem - coordinates pool spawning and replacement
@@ -12,7 +12,10 @@ pub struct PoolSystem {
 
 impl PoolSystem {
     pub fn new(manager: Arc<PoolManager>, broadcast_mgr: Arc<dyn BroadcastManagerTrait>) -> Self {
-        Self { manager, broadcast_mgr }
+        Self {
+            manager,
+            broadcast_mgr,
+        }
     }
 
     /// Spawn a pool (select and spawn members up to limit)
@@ -31,7 +34,11 @@ impl PoolSystem {
             }
         }
 
-        tracing::debug!("[POOL] Spawned {} members for pool {}", spawned.len(), pool_id);
+        tracing::debug!(
+            "[POOL] Spawned {} members for pool {}",
+            spawned.len(),
+            pool_id
+        );
         Ok(spawned)
     }
 
@@ -46,7 +53,11 @@ impl PoolSystem {
 
         // Select replacement member
         if let Some(replacement_id) = self.manager.select_replacement(pool_id) {
-            if let Some(spawn_data) = world.managers.creature_mgr.get_spawn_data_by_id(replacement_id) {
+            if let Some(spawn_data) = world
+                .managers
+                .creature_mgr
+                .get_spawn_data_by_id(replacement_id)
+            {
                 // Pools are spawned on continents (instance_id = 0)
                 if let Some(new_guid) = world.managers.creature_mgr.spawn_creature(&spawn_data, 0) {
                     self.manager.mark_spawned(pool_id, new_guid, replacement_id);

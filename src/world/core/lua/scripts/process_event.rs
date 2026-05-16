@@ -3,9 +3,9 @@
 //! Handles OnProcessEventId — called when a game/script event fires
 //! (e.g. altar click awakens a boss, creature death triggers sequence).
 
-use crate::shared::protocol::ObjectGuid;
 use super::super::actions::{parse_actions, LuaAction};
 use super::super::snapshot::{LuaGuid, PlayerSnapshot};
+use crate::shared::protocol::ObjectGuid;
 use mlua::{Function, Lua, Table, Value};
 
 /// Lua process event script handler.

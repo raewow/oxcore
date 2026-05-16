@@ -299,7 +299,8 @@ impl WorldSocket {
                         return Ok(());
                     }
 
-                    let guid_raw = packet.read_u64()
+                    let guid_raw = packet
+                        .read_u64()
                         .ok_or_else(|| anyhow::anyhow!("Failed to read GUID for login"))?;
                     let session_clone = Arc::clone(&session);
                     let databases = Arc::clone(&self.databases);
@@ -312,7 +313,9 @@ impl WorldSocket {
                             guid_raw,
                             &databases,
                             &world,
-                        ).await {
+                        )
+                        .await
+                        {
                             error!("[LOGIN] Spawned login task failed: {}", e);
                             session_clone.clear_login_in_progress();
                         }
@@ -323,7 +326,11 @@ impl WorldSocket {
                 }
             }
             _ => {
-                debug!("Packet {:?} received in unexpected state {:?}", packet.opcode(), session.state());
+                debug!(
+                    "Packet {:?} received in unexpected state {:?}",
+                    packet.opcode(),
+                    session.state()
+                );
             }
         }
         Ok(())
@@ -343,8 +350,7 @@ impl WorldSocket {
         } else {
             warn!(
                 "No handler found for player {}, packet {:?} dropped",
-                player_guid,
-                opcode
+                player_guid, opcode
             );
         }
         Ok(())

@@ -121,8 +121,7 @@ pub async fn handle_get_mail_list(
         // Sender info depends on message type
         match msg_type {
             MailMessageType::Normal => {
-                let sender_guid =
-                    ObjectGuid::new_without_entry(HighGuid::Player, mail.sender_guid);
+                let sender_guid = ObjectGuid::new_without_entry(HighGuid::Player, mail.sender_guid);
                 response.write_u64(sender_guid.raw());
             }
             _ => {
@@ -149,7 +148,7 @@ pub async fn handle_get_mail_list(
         response.write_u32(0); // enchant_id
         response.write_u32(0); // random_property_id
         response.write_u32(0); // suffix_factor
-        response.write_u8(0);  // item_count (u8, not u32)
+        response.write_u8(0); // item_count (u8, not u32)
         response.write_u32(0); // spell_charges
         response.write_u32(0); // max_durability
         response.write_u32(0); // durability
@@ -217,7 +216,10 @@ pub async fn handle_item_text_query(
             String::new()
         }
         Err(e) => {
-            warn!("CMSG_ITEM_TEXT_QUERY: DB error for text {}: {}", item_text_id, e);
+            warn!(
+                "CMSG_ITEM_TEXT_QUERY: DB error for text {}: {}",
+                item_text_id, e
+            );
             String::new()
         }
     };
@@ -227,6 +229,10 @@ pub async fn handle_item_text_query(
     response.write_string(&text);
     session.send_packet(response)?;
 
-    debug!("CMSG_ITEM_TEXT_QUERY: Sent text {} ({} bytes)", item_text_id, text.len());
+    debug!(
+        "CMSG_ITEM_TEXT_QUERY: Sent text {} ({} bytes)",
+        item_text_id,
+        text.len()
+    );
     Ok(())
 }

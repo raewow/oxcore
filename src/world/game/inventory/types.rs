@@ -134,7 +134,9 @@ pub struct ItemTransferData {
 #[derive(Debug)]
 pub enum TransferItemResult {
     /// Success with new item GUID in target inventory
-    Success { new_item_guid: crate::shared::protocol::ObjectGuid },
+    Success {
+        new_item_guid: crate::shared::protocol::ObjectGuid,
+    },
     /// Item not found in source inventory
     ItemNotFound,
     /// Failed to remove item from source

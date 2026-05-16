@@ -25,9 +25,7 @@ pub struct ProficiencyMessage {
 
 impl SkillSystem {
     pub fn new(
-        broadcast_mgr: std::sync::Arc<
-            dyn crate::world::game::broadcast_mgr::BroadcastManagerTrait,
-        >,
+        broadcast_mgr: std::sync::Arc<dyn crate::world::game::broadcast_mgr::BroadcastManagerTrait>,
     ) -> Self {
         Self { broadcast_mgr }
     }

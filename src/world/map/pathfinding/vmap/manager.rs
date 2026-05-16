@@ -1,10 +1,12 @@
 //! VMapManager - manages VMap loading and spatial queries for world
 //! Simplified from the old world/ VMapManager (no instance_id, Position-based API)
 
-use crate::shared::protocol::Position;
 use super::bsp_tree::{BSPModelInstance, BSPTree};
 use super::file_loader::{MapTileData, VMapFileLoader};
-use super::types::{BoundingBox, LiquidLevel, VMapConfig, VMapLoadResult, VMAP_INVALID_HEIGHT_VALUE};
+use super::types::{
+    BoundingBox, LiquidLevel, VMapConfig, VMapLoadResult, VMAP_INVALID_HEIGHT_VALUE,
+};
+use crate::shared::protocol::Position;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -130,7 +132,10 @@ impl VMapManager {
         if let Some(map_tiles) = tiles.get(&map_id) {
             for (_tile_key, tile_data) in map_tiles.iter() {
                 for model_instance in &tile_data.model_instances {
-                    match self.file_loader.load_world_model(&model_instance.model_name) {
+                    match self
+                        .file_loader
+                        .load_world_model(&model_instance.model_name)
+                    {
                         Ok(world_model) => {
                             for group in &world_model.groups {
                                 let mut triangles = group.triangles.clone();
@@ -285,12 +290,7 @@ impl VMapManager {
 
     /// Check line of sight between two points.
     /// Returns true if there is a clear line of sight.
-    pub fn is_in_line_of_sight(
-        &self,
-        map_id: u32,
-        from: Position,
-        to: Position,
-    ) -> bool {
+    pub fn is_in_line_of_sight(&self, map_id: u32, from: Position, to: Position) -> bool {
         if !self.config.enable_los {
             return true;
         }

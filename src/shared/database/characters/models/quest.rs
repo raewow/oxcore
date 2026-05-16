@@ -16,10 +16,12 @@ pub struct QuestStatusRow {
     pub item_count2: u32,
     pub item_count3: u32,
     pub item_count4: u32,
+    pub reward_choice: u32,
 }
 
 #[derive(FromRow, Debug, Clone)]
 pub struct QuestStatusRewardedRow {
     pub guid: u32,
     pub quest: u32,
+    pub reward_choice: u32,
 }

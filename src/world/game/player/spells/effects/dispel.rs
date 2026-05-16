@@ -26,7 +26,10 @@ pub async fn effect_dispel(input: &EffectInput, _world: &World) -> Result<Effect
 
     tracing::debug!(
         "Dispel effect: caster {} dispelling target {} (type: {}, count: {})",
-        input.caster_guid, target_guid, _dispel_type, _dispel_count
+        input.caster_guid,
+        target_guid,
+        _dispel_type,
+        _dispel_count
     );
 
     // TODO:
@@ -56,7 +59,10 @@ pub async fn effect_dispel_mechanic(input: &EffectInput, world: &World) -> Resul
 
     tracing::debug!(
         "Dispel mechanic effect: caster {} dispelling target {} (mechanic: {}, count: {})",
-        input.caster_guid, target_guid, mechanic_type, dispel_count
+        input.caster_guid,
+        target_guid,
+        mechanic_type,
+        dispel_count
     );
 
     // TODO:

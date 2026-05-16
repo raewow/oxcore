@@ -1,15 +1,15 @@
 //! Movement generators module
 
-mod idle;
 mod chase;
+mod flee;
 mod home;
+mod idle;
 mod random;
 mod waypoint;
-mod flee;
 
-pub use idle::IdleMovementGenerator;
 pub use chase::ChaseMovementGenerator;
-pub use home::HomeMovementGenerator;
-pub use random::RandomMovementGenerator;
-pub use waypoint::{WaypointMovementGenerator, Waypoint};
 pub use flee::FleeMovementGenerator;
+pub use home::HomeMovementGenerator;
+pub use idle::IdleMovementGenerator;
+pub use random::RandomMovementGenerator;
+pub use waypoint::{Waypoint, WaypointMovementGenerator};

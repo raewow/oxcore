@@ -1,9 +1,9 @@
 //! Movement-related message structures
 
 use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 use crate::shared::protocol::guid::ObjectGuid as WorldObjectGuid;
 use crate::shared::protocol::packet::WorldPacketGuidExt;
+use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Generic movement broadcast message (MSG_MOVE_*)
 /// Used to broadcast movement to nearby players (Phase 5 - not yet implemented)
@@ -81,7 +81,7 @@ pub struct SmsgMonsterMove {
     pub spline_id: u32,
     pub move_type: u8, // 0 = normal, 1 = stop, 2 = facing spot, 3 = facing target, 4 = facing angle
     pub facing_target: Option<ObjectGuid>, // For move_type 3
-    pub facing_angle: Option<f32>,         // For move_type 4
+    pub facing_angle: Option<f32>, // For move_type 4
     pub spline_flags: u32,
     pub duration: u32,
     pub waypoints: Vec<Position>,
@@ -225,7 +225,7 @@ impl SmsgMonsterMove {
             guid,
             position,
             spline_id: rand::random(), // vmangos uses splineCounter++ (a new unique ID)
-            move_type: 1, // Stop
+            move_type: 1,              // Stop
             facing_target: None,
             facing_angle: None,
             spline_flags: super::movement::spline_flags::DONE,
@@ -293,11 +293,7 @@ impl ToWorldPacket for SmsgMonsterMove {
 
                 // Write all intermediate points (skip last which is the destination)
                 for wp in &self.waypoints[..self.waypoints.len() - 1] {
-                    packet.write_pack_xyz(
-                        middle_x - wp.x,
-                        middle_y - wp.y,
-                        middle_z - wp.z,
-                    );
+                    packet.write_pack_xyz(middle_x - wp.x, middle_y - wp.y, middle_z - wp.z);
                 }
             }
         }

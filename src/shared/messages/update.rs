@@ -26,8 +26,6 @@
 //! ```
 
 use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
 use crate::shared::protocol::guid::ObjectGuid;
 use crate::shared::protocol::position::Position;
 use crate::shared::protocol::updates::movement_block::MovementSpeeds;
@@ -35,6 +33,8 @@ use crate::shared::protocol::updates::update_block_builder::{
     min_mask_blocks, update_flags, UpdateBlockBuilder,
 };
 use crate::shared::protocol::updates::update_types::ObjectTypeId;
+use crate::shared::protocol::Opcode;
+use crate::shared::protocol::WorldPacket;
 
 // Re-export convenience types
 pub use crate::shared::protocol::updates::update_types::ObjectUpdateType;
@@ -587,7 +587,10 @@ mod tests {
             .with_flags(update_flags::UPDATEFLAG_LIVING)
             .with_movement(pos, 0, None)
             .set_field(2, 0x19);
-        assert_eq!(block.update_flags, update_flags::UPDATEFLAG_LIVING | update_flags::UPDATEFLAG_ALL);
+        assert_eq!(
+            block.update_flags,
+            update_flags::UPDATEFLAG_LIVING | update_flags::UPDATEFLAG_ALL
+        );
         assert!(block.movement.is_some());
     }
 

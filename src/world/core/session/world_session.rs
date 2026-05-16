@@ -126,7 +126,9 @@ impl WorldSession {
 
     /// Atomically try to mark login as in progress (prevents concurrent logins)
     pub fn try_start_login(&self) -> bool {
-        self.login_in_progress.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+        self.login_in_progress
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
     }
 
     /// Clear the login-in-progress flag
@@ -160,10 +162,7 @@ impl WorldSession {
         let had_timer = self.logout_timer.read().is_some();
         *self.logout_timer.write() = None;
         if had_timer {
-            tracing::debug!(
-                "[LOGOUT_TIMER] Timer cancelled for session {}",
-                self.id
-            );
+            tracing::debug!("[LOGOUT_TIMER] Timer cancelled for session {}", self.id);
         }
     }
 

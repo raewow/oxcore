@@ -8,7 +8,9 @@
 //! - Packets sent via BroadcastManager
 
 use crate::shared::messages::auras::SmsgUpdateAuraDuration;
-use crate::shared::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
+use crate::shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::game::broadcast_mgr::BroadcastManager;
@@ -66,17 +68,29 @@ impl AuraSystem {
     ) -> Result<Option<u8>> {
         // Creature targets: use simplified aura tracking + speed modifier
         if target_guid.is_creature() {
-            self.apply_creature_aura(target_guid, spell_id, aura_type, base_value, duration_ms, world);
+            self.apply_creature_aura(
+                target_guid,
+                spell_id,
+                aura_type,
+                base_value,
+                duration_ms,
+                world,
+            );
             return Ok(None);
         }
 
         // Apply diminishing returns to CC auras (PvP)
         let dr_duration_ms = if target_guid.is_player() && effects::is_cc_aura(aura_type) {
             // Look up the spell's mechanic for DR group determination
-            let mechanic = world.managers.spell_mgr.get(spell_id)
+            let mechanic = world
+                .managers
+                .spell_mgr
+                .get(spell_id)
                 .map(|e| e.mechanic)
                 .unwrap_or(0);
-            let dr_group = crate::world::game::player::spells::diminishing::get_dr_group_for_spell(mechanic, aura_type);
+            let dr_group = crate::world::game::player::spells::diminishing::get_dr_group_for_spell(
+                mechanic, aura_type,
+            );
 
             if dr_group != crate::world::game::player::spells::diminishing::DRGroup::None {
                 let now = std::time::SystemTime::now()
@@ -84,14 +98,21 @@ impl AuraSystem {
                     .unwrap_or_default()
                     .as_millis() as u64;
 
-                let modifier = world.systems.player.manager().with_player_mut(target_guid, |player| {
-                    player.combat.diminishing.apply_dr(dr_group, now)
-                }).unwrap_or(1.0);
+                let modifier = world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.combat.diminishing.apply_dr(dr_group, now)
+                    })
+                    .unwrap_or(1.0);
 
                 if modifier <= 0.0 {
                     tracing::debug!(
                         "[DR] Target {:?} immune to DR group {:?} for spell {}",
-                        target_guid, dr_group, spell_id,
+                        target_guid,
+                        dr_group,
+                        spell_id,
                     );
                     return Ok(None); // Target is immune — don't apply aura
                 }
@@ -147,7 +168,10 @@ impl AuraSystem {
 
         // Auto-sit if aura requires sitting (food/drink/sleep)
         if let Some(spell_entry) = world.managers.spell_mgr.get(spell_id) {
-            if (spell_entry.aura_interrupt_flags & super::interrupt::AuraInterruptFlags::STANDING_CANCELS.0) != 0 {
+            if (spell_entry.aura_interrupt_flags
+                & super::interrupt::AuraInterruptFlags::STANDING_CANCELS.0)
+                != 0
+            {
                 // Send SMSG_STANDSTATE_UPDATE packet to make player sit
                 self.send_stand_state_update(target_guid, 1, world);
             }
@@ -164,25 +188,38 @@ impl AuraSystem {
         // Apply spell modifier effects (talents: ADD_FLAT_MODIFIER / ADD_PCT_MODIFIER)
         if effects::is_spell_modifier_aura(aura_type_copy) {
             if let Some(_slot) = assigned_slot {
-                self.apply_spell_modifier(target_guid, spell_id, effect_index, aura_type_copy, misc_value, base_value, world)?;
+                self.apply_spell_modifier(
+                    target_guid,
+                    spell_id,
+                    effect_index,
+                    aura_type_copy,
+                    misc_value,
+                    base_value,
+                    world,
+                )?;
             }
         }
 
         // Apply CC unit flags (stun, root, silence, etc.)
         if let Some(flag) = effects::cc_aura_unit_flag(aura_type_copy) {
             if assigned_slot.is_some() {
-                world.systems.player.manager().with_player_mut(target_guid, |player| {
-                    player.unit_flags |= flag;
-                });
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.unit_flags |= flag;
+                    });
             }
         }
 
         // Apply movement speed modifier (snares, slows, speed boosts)
-        if matches!(aura_type_copy,
-            effects::AURA_MOD_INCREASE_SPEED |
-            effects::AURA_MOD_DECREASE_SPEED |
-            effects::AURA_MOD_INCREASE_MOUNTED_SPEED)
-        {
+        if matches!(
+            aura_type_copy,
+            effects::AURA_MOD_INCREASE_SPEED
+                | effects::AURA_MOD_DECREASE_SPEED
+                | effects::AURA_MOD_INCREASE_MOUNTED_SPEED
+        ) {
             if assigned_slot.is_some() {
                 self.apply_movement_speed(target_guid, world);
             }
@@ -233,7 +270,8 @@ impl AuraSystem {
         if let Some((aura, slot)) = removed_aura {
             // Remove stat modifier if applicable
             if effects::is_stat_modifier_aura(aura.aura_type) {
-                self.remove_aura_stat_modifier(target_guid, spell_id, effect_index, world).await?;
+                self.remove_aura_stat_modifier(target_guid, spell_id, effect_index, world)
+                    .await?;
             }
 
             // Remove spell modifier if applicable
@@ -244,23 +282,33 @@ impl AuraSystem {
             // Remove CC unit flags, but only if no other aura of same type remains
             if let Some(flag) = effects::cc_aura_unit_flag(aura.aura_type) {
                 let aura_type = aura.aura_type;
-                let has_other = world.systems.player.manager().with_player(target_guid, |player| {
-                    player.auras.container.get_auras_by_type(aura_type).len() > 0
-                }).unwrap_or(false);
+                let has_other = world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player(target_guid, |player| {
+                        player.auras.container.get_auras_by_type(aura_type).len() > 0
+                    })
+                    .unwrap_or(false);
 
                 if !has_other {
-                    world.systems.player.manager().with_player_mut(target_guid, |player| {
-                        player.unit_flags &= !flag;
-                    });
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.unit_flags &= !flag;
+                        });
                 }
             }
 
             // Recalculate movement speed when a speed modifier aura expires
-            if matches!(aura.aura_type,
-                effects::AURA_MOD_INCREASE_SPEED |
-                effects::AURA_MOD_DECREASE_SPEED |
-                effects::AURA_MOD_INCREASE_MOUNTED_SPEED)
-            {
+            if matches!(
+                aura.aura_type,
+                effects::AURA_MOD_INCREASE_SPEED
+                    | effects::AURA_MOD_DECREASE_SPEED
+                    | effects::AURA_MOD_INCREASE_MOUNTED_SPEED
+            ) {
                 self.apply_movement_speed(target_guid, world);
             }
 
@@ -270,7 +318,10 @@ impl AuraSystem {
             // If removed aura had STANDING_CANCELS flag (food/drink), stand player up
             // unless another food/drink aura is still active
             if let Some(spell_entry) = world.managers.spell_mgr.get(spell_id) {
-                if (spell_entry.aura_interrupt_flags & super::interrupt::AuraInterruptFlags::STANDING_CANCELS.0) != 0 {
+                if (spell_entry.aura_interrupt_flags
+                    & super::interrupt::AuraInterruptFlags::STANDING_CANCELS.0)
+                    != 0
+                {
                     let has_other_sit_aura = world
                         .systems
                         .player
@@ -278,7 +329,9 @@ impl AuraSystem {
                         .with_player(target_guid, |player| {
                             player.auras.container.all_auras().any(|a| {
                                 if let Some(entry) = world.managers.spell_mgr.get(a.spell_id) {
-                                    (entry.aura_interrupt_flags & super::interrupt::AuraInterruptFlags::STANDING_CANCELS.0) != 0
+                                    (entry.aura_interrupt_flags
+                                        & super::interrupt::AuraInterruptFlags::STANDING_CANCELS.0)
+                                        != 0
                                 } else {
                                     false
                                 }
@@ -334,7 +387,8 @@ impl AuraSystem {
                     aura.spell_id,
                     aura.effect_index,
                     world,
-                ).await?;
+                )
+                .await?;
             }
             if effects::is_spell_modifier_aura(aura.aura_type) {
                 self.remove_spell_modifier(target_guid, aura.spell_id, world)?;
@@ -415,7 +469,8 @@ impl AuraSystem {
 
         // Remove each aura
         for (spell_id, effect_index) in to_remove {
-            self.remove_aura(target_guid, spell_id, effect_index, world).await?;
+            self.remove_aura(target_guid, spell_id, effect_index, world)
+                .await?;
         }
 
         Ok(())
@@ -425,7 +480,10 @@ impl AuraSystem {
     fn send_stand_state_update(&self, player_guid: ObjectGuid, stand_state: u8, world: &World) {
         let mut packet = WorldPacket::new(Opcode::SMSG_STANDSTATE_UPDATE);
         packet.write_u8(stand_state);
-        world.managers.broadcast_mgr.send_msg_to_player(player_guid, packet);
+        world
+            .managers
+            .broadcast_mgr
+            .send_msg_to_player(player_guid, packet);
     }
 
     // =========================================================================
@@ -611,49 +669,57 @@ impl AuraSystem {
         let mut depleted_auras: Vec<(u32, u8)> = Vec::new();
 
         // Phase 1: Apply absorbs within the player lock
-        world.systems.player.manager().with_player_mut(target_guid, |player| {
-            for aura in player.auras.container.all_auras_mut() {
-                if damage == 0 {
-                    break;
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                for aura in player.auras.container.all_auras_mut() {
+                    if damage == 0 {
+                        break;
+                    }
+
+                    if aura.aura_type != effects::AURA_SCHOOL_ABSORB {
+                        continue;
+                    }
+
+                    // Check if absorb matches the damage school (misc_value is school mask)
+                    if aura.misc_value > 0 && (aura.misc_value as u32 & school_mask) == 0 {
+                        continue;
+                    }
+
+                    let absorb_remaining = aura.current_value() as u32;
+                    if absorb_remaining == 0 {
+                        continue;
+                    }
+
+                    let absorbed = damage.min(absorb_remaining);
+                    damage -= absorbed;
+                    total_absorbed += absorbed;
+
+                    // Reduce the absorb value
+                    let new_value = (absorb_remaining - absorbed) as i32;
+                    aura.current_values[aura.effect_index as usize] = new_value;
+
+                    if new_value == 0 {
+                        depleted_auras.push((aura.spell_id, aura.effect_index));
+                    }
                 }
-
-                if aura.aura_type != effects::AURA_SCHOOL_ABSORB {
-                    continue;
-                }
-
-                // Check if absorb matches the damage school (misc_value is school mask)
-                if aura.misc_value > 0 && (aura.misc_value as u32 & school_mask) == 0 {
-                    continue;
-                }
-
-                let absorb_remaining = aura.current_value() as u32;
-                if absorb_remaining == 0 {
-                    continue;
-                }
-
-                let absorbed = damage.min(absorb_remaining);
-                damage -= absorbed;
-                total_absorbed += absorbed;
-
-                // Reduce the absorb value
-                let new_value = (absorb_remaining - absorbed) as i32;
-                aura.current_values[aura.effect_index as usize] = new_value;
-
-                if new_value == 0 {
-                    depleted_auras.push((aura.spell_id, aura.effect_index));
-                }
-            }
-        });
+            });
 
         // Phase 2: Remove depleted absorb auras outside the lock
         for (spell_id, effect_index) in depleted_auras {
-            self.remove_aura(target_guid, spell_id, effect_index, world).await?;
+            self.remove_aura(target_guid, spell_id, effect_index, world)
+                .await?;
         }
 
         if total_absorbed > 0 {
             tracing::debug!(
                 "[AURA] Absorbed {} damage (school={}) on {:?}, {} remaining",
-                total_absorbed, school, target_guid, damage
+                total_absorbed,
+                school,
+                target_guid,
+                damage
             );
         }
 
@@ -693,7 +759,9 @@ impl AuraSystem {
             None => {
                 tracing::warn!(
                     "[AURA] Unknown SpellModOp {} from spell {} effect {}",
-                    misc_value, spell_id, effect_index
+                    misc_value,
+                    spell_id,
+                    effect_index
                 );
                 return Ok(());
             }
@@ -713,7 +781,10 @@ impl AuraSystem {
             .player
             .manager()
             .with_player(target_guid, |player| {
-                player.auras.container.get_aura(spell_id, effect_index)
+                player
+                    .auras
+                    .container
+                    .get_aura(spell_id, effect_index)
                     .and_then(|a| a.slot)
             })
             .flatten();
@@ -732,7 +803,12 @@ impl AuraSystem {
 
         tracing::debug!(
             "[AURA] Applied spell modifier: spell={} op={:?} type={:?} value={} family={}:{:#x}",
-            spell_id, op, mod_type, base_value, family_name, family_flags
+            spell_id,
+            op,
+            mod_type,
+            base_value,
+            family_name,
+            family_flags
         );
 
         Ok(())
@@ -876,7 +952,8 @@ impl AuraSystem {
 
                     // Check proc_flags from the aura's spell DBC entry match the combat event
                     let spell_entry = world.managers.spell_mgr.get(aura.spell_id);
-                    let (spell_proc_flags, spell_proc_chance, trigger_spell_id) = match spell_entry {
+                    let (spell_proc_flags, spell_proc_chance, trigger_spell_id) = match spell_entry
+                    {
                         Some(entry) => {
                             let trigger_id = entry.effect_trigger_spell[aura.effect_index as usize];
                             (entry.proc_flags, entry.proc_chance, trigger_id)
@@ -941,41 +1018,63 @@ impl AuraSystem {
 
         // Consume charges for procs that fired
         if !procable_auras.is_empty() {
-            world.systems.player.manager().with_player_mut(player_guid, |player| {
-                for candidate in &procable_auras {
-                    if candidate.charges > 0 {
-                        // Decrement charge on the aura
-                        if let Some(aura) = player.auras.container.get_aura_mut(candidate.spell_id, candidate.effect_index) {
-                            if aura.charges > 0 {
-                                aura.charges -= 1;
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(player_guid, |player| {
+                    for candidate in &procable_auras {
+                        if candidate.charges > 0 {
+                            // Decrement charge on the aura
+                            if let Some(aura) = player
+                                .auras
+                                .container
+                                .get_aura_mut(candidate.spell_id, candidate.effect_index)
+                            {
+                                if aura.charges > 0 {
+                                    aura.charges -= 1;
+                                }
                             }
                         }
                     }
-                }
-            });
+                });
 
             // Remove auras with 0 charges remaining
             for candidate in &procable_auras {
                 if candidate.charges == 1 {
                     // Was 1, now 0 after decrement — remove it
-                    let _ = self.remove_aura(player_guid, candidate.spell_id, candidate.effect_index, world).await;
+                    let _ = self
+                        .remove_aura(
+                            player_guid,
+                            candidate.spell_id,
+                            candidate.effect_index,
+                            world,
+                        )
+                        .await;
                 }
             }
         }
 
         // Cast triggered spells (must be done after proc processing to avoid re-entrancy)
         // Get the player's current target for offensive triggered spells
-        let attack_target = world.systems.player.manager().with_player(player_guid, |p| {
-            p.combat.attack_target
-        }).flatten();
+        let attack_target = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |p| p.combat.attack_target)
+            .flatten();
         for trigger_id in triggered_casts {
-            let _ = world.systems.spells.cast_spell(
-                player_guid,
-                trigger_id,
-                attack_target,
-                true, // is_triggered = true
-                world,
-            ).await;
+            let _ = world
+                .systems
+                .spells
+                .cast_spell(
+                    player_guid,
+                    trigger_id,
+                    attack_target,
+                    true, // is_triggered = true
+                    world,
+                )
+                .await;
         }
 
         Ok(())
@@ -992,12 +1091,7 @@ impl AuraSystem {
     /// - UNIT_FIELD_AURAFLAGS (6 u32s, 8 nibbles each = 48 slot flags)
     /// - UNIT_FIELD_AURALEVELS (12 u32s, 4 bytes each = 48 slot levels)
     /// - UNIT_FIELD_AURAAPPLICATIONS (12 u32s, 4 bytes each = 48 slot stacks)
-    fn send_aura_update(
-        &self,
-        target_guid: ObjectGuid,
-        slot: u8,
-        world: &World,
-    ) -> Result<()> {
+    fn send_aura_update(&self, target_guid: ObjectGuid, slot: u8, world: &World) -> Result<()> {
         if slot >= 48 {
             return Ok(()); // Only 48 visible aura slots
         }
@@ -1007,14 +1101,10 @@ impl AuraSystem {
             .player
             .manager()
             .with_player_mut(target_guid, |player| {
-                player
-                    .auras
-                    .container
-                    .get_aura_at_slot(slot)
-                    .map(|aura| {
-                        let flags = encode_aura_flags_vanilla(aura);
-                        (aura.spell_id, flags, player.level, aura.stack_count)
-                    })
+                player.auras.container.get_aura_at_slot(slot).map(|aura| {
+                    let flags = encode_aura_flags_vanilla(aura);
+                    (aura.spell_id, flags, player.level, aura.stack_count)
+                })
             })
             .flatten();
 
@@ -1046,7 +1136,11 @@ impl AuraSystem {
             .player
             .manager()
             .with_player(target_guid, |player| {
-                self.build_aura_levels_field(&player.auras.container, levels_index as u8, player.level)
+                self.build_aura_levels_field(
+                    &player.auras.container,
+                    levels_index as u8,
+                    player.level,
+                )
             })
             .unwrap_or(0);
         block = block.set_field(UNIT_FIELD_AURALEVELS + levels_index, levels_field_value);
@@ -1065,9 +1159,16 @@ impl AuraSystem {
 
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
         let packet = update_msg.to_world_packet();
-        tracing::info!("[AURA_UPDATE] slot={} spell={} target={:?} packet_len={} bytes={:02X?}",
-            slot, spell_id, target_guid, packet.data().len(), packet.data().as_ref());
-        self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+        tracing::info!(
+            "[AURA_UPDATE] slot={} spell={} target={:?} packet_len={} bytes={:02X?}",
+            slot,
+            spell_id,
+            target_guid,
+            packet.data().len(),
+            packet.data().as_ref()
+        );
+        self.broadcast_mgr
+            .broadcast_nearby(target_guid, &packet, true);
 
         Ok(())
     }
@@ -1095,13 +1196,7 @@ impl AuraSystem {
                     .auras
                     .container
                     .all_auras()
-                    .filter_map(|a| {
-                        if !a.flags.is_hidden {
-                            a.slot
-                        } else {
-                            None
-                        }
-                    })
+                    .filter_map(|a| if !a.flags.is_hidden { a.slot } else { None })
                     .filter(|&s| s < 48)
                     .collect()
             })
@@ -1155,12 +1250,18 @@ impl AuraSystem {
 
     /// Build the UNIT_FIELD_AURAFLAGS u32 for a group of 8 slots.
     /// Each slot gets a 4-bit nibble in the u32.
-    fn build_aura_flags_field(&self, container: &super::container::AuraContainer, group: u8) -> u32 {
+    fn build_aura_flags_field(
+        &self,
+        container: &super::container::AuraContainer,
+        group: u8,
+    ) -> u32 {
         let mut value = 0u32;
         let base_slot = group as u8 * 8;
         for i in 0..8u8 {
             let slot = base_slot + i;
-            if slot >= 48 { break; }
+            if slot >= 48 {
+                break;
+            }
             if let Some(aura) = container.get_aura_at_slot(slot) {
                 let flags = encode_aura_flags_vanilla(aura) as u32;
                 value |= flags << (i as u32 * 4);
@@ -1171,12 +1272,19 @@ impl AuraSystem {
 
     /// Build the UNIT_FIELD_AURALEVELS u32 for a group of 4 slots.
     /// Each slot gets 1 byte in the u32.
-    fn build_aura_levels_field(&self, container: &super::container::AuraContainer, group: u8, player_level: u8) -> u32 {
+    fn build_aura_levels_field(
+        &self,
+        container: &super::container::AuraContainer,
+        group: u8,
+        player_level: u8,
+    ) -> u32 {
         let mut value = 0u32;
         let base_slot = group as u8 * 4;
         for i in 0..4u8 {
             let slot = base_slot + i;
-            if slot >= 48 { break; }
+            if slot >= 48 {
+                break;
+            }
             if container.get_aura_at_slot(slot).is_some() {
                 value |= (player_level as u32) << (i as u32 * 8);
             }
@@ -1186,12 +1294,18 @@ impl AuraSystem {
 
     /// Build the UNIT_FIELD_AURAAPPLICATIONS u32 for a group of 4 slots.
     /// Each slot gets 1 byte: stack_count - 1 (0 = 1 stack).
-    fn build_aura_applications_field(&self, container: &super::container::AuraContainer, group: u8) -> u32 {
+    fn build_aura_applications_field(
+        &self,
+        container: &super::container::AuraContainer,
+        group: u8,
+    ) -> u32 {
         let mut value = 0u32;
         let base_slot = group as u8 * 4;
         for i in 0..4u8 {
             let slot = base_slot + i;
-            if slot >= 48 { break; }
+            if slot >= 48 {
+                break;
+            }
             if let Some(aura) = container.get_aura_at_slot(slot) {
                 // Applications field stores count - 1 (so 0 = 1 application)
                 let apps = aura.stack_count.saturating_sub(1);
@@ -1354,7 +1468,14 @@ impl AuraSystem {
         duration_ms: Option<u32>,
         world: &World,
     ) {
-        self.apply_creature_aura_with_mgr(creature_guid, spell_id, aura_type, base_value, duration_ms, &world.managers.creature_mgr);
+        self.apply_creature_aura_with_mgr(
+            creature_guid,
+            spell_id,
+            aura_type,
+            base_value,
+            duration_ms,
+            &world.managers.creature_mgr,
+        );
     }
 
     /// Core creature aura logic, taking CreatureManager directly for testability.
@@ -1376,24 +1497,31 @@ impl AuraSystem {
 
             // Apply movement speed modifier
             // base_value for MOD_DECREASE_SPEED is negative (e.g. -40 = 40% slow)
-            if aura_type == effects::AURA_MOD_DECREASE_SPEED || aura_type == effects::AURA_MOD_INCREASE_SPEED {
+            if aura_type == effects::AURA_MOD_DECREASE_SPEED
+                || aura_type == effects::AURA_MOD_INCREASE_SPEED
+            {
                 let new_rate = (1.0 + base_value as f32 / 100.0).max(0.1);
                 creature.speed_run = new_rate;
                 tracing::debug!(
                     "[AURA] Creature {:?} speed_run set to {} (base_value={})",
-                    creature_guid, new_rate, base_value
+                    creature_guid,
+                    new_rate,
+                    base_value
                 );
             }
         });
 
         // Broadcast SMSG_SPLINE_SET_RUN_SPEED to nearby players for creature speed change
-        if aura_type == effects::AURA_MOD_DECREASE_SPEED || aura_type == effects::AURA_MOD_INCREASE_SPEED {
+        if aura_type == effects::AURA_MOD_DECREASE_SPEED
+            || aura_type == effects::AURA_MOD_INCREASE_SPEED
+        {
             if let Some(new_rate) = creature_mgr.with_creature(creature_guid, |c| c.speed_run) {
                 let new_speed = new_rate * 7.0;
                 let mut packet = WorldPacket::new(Opcode::SMSG_SPLINE_SET_RUN_SPEED);
                 packet.write_packed_guid_raw(creature_guid.raw());
                 packet.write_f32(new_speed);
-                self.broadcast_mgr.broadcast_nearby(creature_guid, &packet, true);
+                self.broadcast_mgr
+                    .broadcast_nearby(creature_guid, &packet, true);
             }
         }
     }
@@ -1424,7 +1552,8 @@ impl AuraSystem {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPLINE_SET_RUN_SPEED);
         packet.write_packed_guid_raw(creature_guid.raw());
         packet.write_f32(1.14286 * 7.0);
-        self.broadcast_mgr.broadcast_nearby(creature_guid, &packet, true);
+        self.broadcast_mgr
+            .broadcast_nearby(creature_guid, &packet, true);
     }
 }
 
@@ -1586,11 +1715,22 @@ mod tests {
         let guid = add_test_creature(&creature_mgr, 100, 1);
 
         // Frostbolt rank 1: AURA_MOD_DECREASE_SPEED, base_value = -40 (40% slow)
-        system.apply_creature_aura_with_mgr(guid, 116, effects::AURA_MOD_DECREASE_SPEED, -40, Some(10_000), &creature_mgr);
+        system.apply_creature_aura_with_mgr(
+            guid,
+            116,
+            effects::AURA_MOD_DECREASE_SPEED,
+            -40,
+            Some(10_000),
+            &creature_mgr,
+        );
 
         let speed = creature_mgr.with_creature(guid, |c| c.speed_run).unwrap();
         // 1.0 + (-40 / 100.0) = 0.60
-        assert!((speed - 0.60).abs() < 0.001, "Expected speed_run ~0.60, got {}", speed);
+        assert!(
+            (speed - 0.60).abs() < 0.001,
+            "Expected speed_run ~0.60, got {}",
+            speed
+        );
     }
 
     #[tokio::test]
@@ -1598,12 +1738,22 @@ mod tests {
         let (system, creature_mgr) = make_aura_system();
         let guid = add_test_creature(&creature_mgr, 100, 2);
 
-        system.apply_creature_aura_with_mgr(guid, 116, effects::AURA_MOD_DECREASE_SPEED, -40, Some(10_000), &creature_mgr);
+        system.apply_creature_aura_with_mgr(
+            guid,
+            116,
+            effects::AURA_MOD_DECREASE_SPEED,
+            -40,
+            Some(10_000),
+            &creature_mgr,
+        );
 
         let has_aura = creature_mgr
             .with_creature(guid, |c| c.auras.iter().any(|(id, _, _)| *id == 116))
             .unwrap();
-        assert!(has_aura, "Spell 116 should be tracked in creature auras vec");
+        assert!(
+            has_aura,
+            "Spell 116 should be tracked in creature auras vec"
+        );
     }
 
     #[tokio::test]
@@ -1611,11 +1761,27 @@ mod tests {
         let (system, creature_mgr) = make_aura_system();
         let guid = add_test_creature(&creature_mgr, 100, 3);
 
-        system.apply_creature_aura_with_mgr(guid, 116, effects::AURA_MOD_DECREASE_SPEED, -40, Some(10_000), &creature_mgr);
-        system.apply_creature_aura_with_mgr(guid, 116, effects::AURA_MOD_DECREASE_SPEED, -40, Some(10_000), &creature_mgr);
+        system.apply_creature_aura_with_mgr(
+            guid,
+            116,
+            effects::AURA_MOD_DECREASE_SPEED,
+            -40,
+            Some(10_000),
+            &creature_mgr,
+        );
+        system.apply_creature_aura_with_mgr(
+            guid,
+            116,
+            effects::AURA_MOD_DECREASE_SPEED,
+            -40,
+            Some(10_000),
+            &creature_mgr,
+        );
 
         let count = creature_mgr
-            .with_creature(guid, |c| c.auras.iter().filter(|(id, _, _)| *id == 116).count())
+            .with_creature(guid, |c| {
+                c.auras.iter().filter(|(id, _, _)| *id == 116).count()
+            })
             .unwrap();
         assert_eq!(count, 1, "Same spell should not be added twice");
     }
@@ -1625,11 +1791,22 @@ mod tests {
         let (system, creature_mgr) = make_aura_system();
         let guid = add_test_creature(&creature_mgr, 100, 4);
 
-        system.apply_creature_aura_with_mgr(guid, 116, effects::AURA_MOD_DECREASE_SPEED, -40, Some(10_000), &creature_mgr);
+        system.apply_creature_aura_with_mgr(
+            guid,
+            116,
+            effects::AURA_MOD_DECREASE_SPEED,
+            -40,
+            Some(10_000),
+            &creature_mgr,
+        );
         system.remove_creature_aura_with_mgr(guid, 116, &creature_mgr);
 
         let speed = creature_mgr.with_creature(guid, |c| c.speed_run).unwrap();
-        assert!((speed - 1.14286).abs() < 0.001, "Speed should be restored to base (1.14286) after remove, got {}", speed);
+        assert!(
+            (speed - 1.14286).abs() < 0.001,
+            "Speed should be restored to base (1.14286) after remove, got {}",
+            speed
+        );
     }
 
     #[tokio::test]
@@ -1637,13 +1814,23 @@ mod tests {
         let (system, creature_mgr) = make_aura_system();
         let guid = add_test_creature(&creature_mgr, 100, 5);
 
-        system.apply_creature_aura_with_mgr(guid, 116, effects::AURA_MOD_DECREASE_SPEED, -40, Some(10_000), &creature_mgr);
+        system.apply_creature_aura_with_mgr(
+            guid,
+            116,
+            effects::AURA_MOD_DECREASE_SPEED,
+            -40,
+            Some(10_000),
+            &creature_mgr,
+        );
         system.remove_creature_aura_with_mgr(guid, 116, &creature_mgr);
 
         let has_aura = creature_mgr
             .with_creature(guid, |c| c.auras.iter().any(|(id, _, _)| *id == 116))
             .unwrap();
-        assert!(!has_aura, "Spell 116 should be removed from creature auras vec");
+        assert!(
+            !has_aura,
+            "Spell 116 should be removed from creature auras vec"
+        );
     }
 
     #[tokio::test]
@@ -1652,10 +1839,21 @@ mod tests {
         let guid = add_test_creature(&creature_mgr, 100, 6);
 
         // Sprint-style buff: +30% speed
-        system.apply_creature_aura_with_mgr(guid, 3, effects::AURA_MOD_INCREASE_SPEED, 30, None, &creature_mgr);
+        system.apply_creature_aura_with_mgr(
+            guid,
+            3,
+            effects::AURA_MOD_INCREASE_SPEED,
+            30,
+            None,
+            &creature_mgr,
+        );
 
         let speed = creature_mgr.with_creature(guid, |c| c.speed_run).unwrap();
-        assert!((speed - 1.30).abs() < 0.001, "Expected speed_run ~1.30, got {}", speed);
+        assert!(
+            (speed - 1.30).abs() < 0.001,
+            "Expected speed_run ~1.30, got {}",
+            speed
+        );
     }
 
     #[tokio::test]
@@ -1667,7 +1865,11 @@ mod tests {
         system.apply_creature_aura_with_mgr(guid, 999, 29, 100, None, &creature_mgr);
 
         let speed = creature_mgr.with_creature(guid, |c| c.speed_run).unwrap();
-        assert!((speed - 1.14286).abs() < 0.001, "Non-speed aura should not modify speed_run, got {}", speed);
+        assert!(
+            (speed - 1.14286).abs() < 0.001,
+            "Non-speed aura should not modify speed_run, got {}",
+            speed
+        );
     }
 
     #[tokio::test]
@@ -1676,9 +1878,20 @@ mod tests {
         let guid = add_test_creature(&creature_mgr, 100, 8);
 
         // -200% would produce negative speed — should clamp to 0.1
-        system.apply_creature_aura_with_mgr(guid, 1, effects::AURA_MOD_DECREASE_SPEED, -200, Some(5_000), &creature_mgr);
+        system.apply_creature_aura_with_mgr(
+            guid,
+            1,
+            effects::AURA_MOD_DECREASE_SPEED,
+            -200,
+            Some(5_000),
+            &creature_mgr,
+        );
 
         let speed = creature_mgr.with_creature(guid, |c| c.speed_run).unwrap();
-        assert!(speed >= 0.1, "Speed should not go below minimum 0.1, got {}", speed);
+        assert!(
+            speed >= 0.1,
+            "Speed should not go below minimum 0.1, got {}",
+            speed
+        );
     }
 }

@@ -45,8 +45,8 @@ pub struct CreatureTemplate {
     pub unit_flags: u32,    // COMPUTED from static_flags1 (client-visible flags)
     pub static_flags1: u32, // Server-side behavior flags from DB
     pub flags_extra: u32,   // From DB flags_extra column (CREATURE_FLAG_EXTRA_*)
-    pub creature_type: u8,    // Creature type (CRITTER=8, etc.) for special handling
-    pub unit_class: u8,       // Unit class (1=warrior, 2=paladin, 4=rogue, 8=mage)
+    pub creature_type: u8,  // Creature type (CRITTER=8, etc.) for special handling
+    pub unit_class: u8,     // Unit class (1=warrior, 2=paladin, 4=rogue, 8=mage)
     pub health_multiplier: f32,
     pub power_multiplier: f32,
     pub armor_multiplier: f32,
@@ -56,10 +56,10 @@ pub struct CreatureTemplate {
     /// Creature rank: 0=normal, 1=elite, 2=rareelite, 3=worldboss, 4=rare
     pub rank: u8,
     pub gossip_menu_id: u32, // Default gossip menu ID
-    pub vendor_id: u32, // Maps to npc_vendor_template.entry
-    pub trainer_id: u32, // Maps to npc_trainer_template.entry
-    pub trainer_type: u8, // 0=class, 1=mount, 2=tradeskill, 3=pet
-    pub spells: [u32; 4], // Spell IDs from creature_template spell1-4
+    pub vendor_id: u32,      // Maps to npc_vendor_template.entry
+    pub trainer_id: u32,     // Maps to npc_trainer_template.entry
+    pub trainer_type: u8,    // 0=class, 1=mount, 2=tradeskill, 3=pet
+    pub spells: [u32; 4],    // Spell IDs from creature_template spell1-4
 }
 
 /// Base stats from creature_classlevelstats table
@@ -205,12 +205,12 @@ impl CreatureManager {
         npc_flags: u32,
         flags_extra: u32,
     ) -> u32 {
-        use crate::world::game::common::unit_flags::{
-            IMMUNE_TO_NPC, IMMUNE_TO_PLAYER, NOT_SELECTABLE,
-        };
         use crate::world::game::common::creature_flags::{
             CREATURE_STATIC_FLAG_IMMUNE_TO_NPC, CREATURE_STATIC_FLAG_IMMUNE_TO_PC,
             CREATURE_STATIC_FLAG_UNINTERACTIBLE,
+        };
+        use crate::world::game::common::unit_flags::{
+            IMMUNE_TO_NPC, IMMUNE_TO_PLAYER, NOT_SELECTABLE,
         };
 
         let mut unit_flags = 0u32;
@@ -258,7 +258,10 @@ impl CreatureManager {
 
     /// Iterate over all loaded templates
     pub fn all_templates(&self) -> Vec<Arc<CreatureTemplate>> {
-        self.templates.iter().map(|r| Arc::clone(r.value())).collect()
+        self.templates
+            .iter()
+            .map(|r| Arc::clone(r.value()))
+            .collect()
     }
 
     /// Add a template
@@ -400,14 +403,32 @@ impl CreatureManager {
         match rows {
             Ok(rows) => {
                 for (display_id, bounding_radius, combat_reach, speed_walk, speed_run) in &rows {
-                    self.model_info.insert(*display_id, CreatureModelInfo {
-                        bounding_radius: if *bounding_radius > 0.0 { *bounding_radius } else { 0.5 },
-                        combat_reach: if *combat_reach > 0.0 { *combat_reach } else { 1.5 },
-                        speed_walk: if *speed_walk > 0.0 { *speed_walk } else { 1.0 },
-                        speed_run: if *speed_run > 0.0 { *speed_run } else { 1.14286 },
-                    });
+                    self.model_info.insert(
+                        *display_id,
+                        CreatureModelInfo {
+                            bounding_radius: if *bounding_radius > 0.0 {
+                                *bounding_radius
+                            } else {
+                                0.5
+                            },
+                            combat_reach: if *combat_reach > 0.0 {
+                                *combat_reach
+                            } else {
+                                1.5
+                            },
+                            speed_walk: if *speed_walk > 0.0 { *speed_walk } else { 1.0 },
+                            speed_run: if *speed_run > 0.0 {
+                                *speed_run
+                            } else {
+                                1.14286
+                            },
+                        },
+                    );
                 }
-                tracing::info!("Loaded {} creature model info entries", self.model_info.len());
+                tracing::info!(
+                    "Loaded {} creature model info entries",
+                    self.model_info.len()
+                );
             }
             Err(e) => {
                 tracing::warn!(
@@ -506,7 +527,11 @@ impl CreatureManager {
 
     /// Spawn a single creature from spawn data
     /// Returns the GUID of the spawned creature, or None if failed
-    pub fn spawn_creature(&self, spawn: &CreatureSpawnData, instance_id: u32) -> Option<ObjectGuid> {
+    pub fn spawn_creature(
+        &self,
+        spawn: &CreatureSpawnData,
+        instance_id: u32,
+    ) -> Option<ObjectGuid> {
         // spawn_id == 0 means a transient script-created summon — no dedup check.
         // For DB spawns (spawn_id > 0) skip if already spawned.
         if spawn.spawn_id != 0 && self.has_spawn(spawn.spawn_id) {
@@ -585,11 +610,9 @@ impl CreatureManager {
                             spawn.wander_distance,
                             walk_speed,
                         );
-                        creature.motion_master.add_generator(
-                            Box::new(gen),
-                            guid,
-                            spawn.position,
-                        );
+                        creature
+                            .motion_master
+                            .add_generator(Box::new(gen), guid, spawn.position);
                     }
                 }
                 2 => {
@@ -643,7 +666,8 @@ impl CreatureManager {
                     continue;
                 };
 
-                let class_stats = self.get_class_level_stats(template.unit_class, template.min_level);
+                let class_stats =
+                    self.get_class_level_stats(template.unit_class, template.min_level);
                 let counter = self.next_guid.fetch_add(1, Ordering::Relaxed);
                 let guid = ObjectGuid::new_creature(spawn.entry, counter as u32);
 
@@ -699,7 +723,10 @@ impl CreatureManager {
 
     /// Get creature combat reach (for melee range calculations)
     pub fn get_combat_reach(&self, guid: ObjectGuid) -> f32 {
-        self.creatures.get(&guid).map(|c| c.combat_reach).unwrap_or(1.5)
+        self.creatures
+            .get(&guid)
+            .map(|c| c.combat_reach)
+            .unwrap_or(1.5)
     }
 
     /// Get creature phase mask
@@ -747,10 +774,14 @@ impl CreatureManager {
             creature.combat.enter_combat(attacker, timestamp);
 
             // Add threat using ThreatManager (Phase 5)
-            creature.threat_manager.add_damage_threat(attacker, damage, 1.0);
+            creature
+                .threat_manager
+                .add_damage_threat(attacker, damage, 1.0);
 
             // Also update legacy combat threat for backward compatibility
-            creature.combat.add_threat(attacker, damage as f32, timestamp);
+            creature
+                .combat
+                .add_threat(attacker, damage as f32, timestamp);
 
             // Apply damage
             let actual_damage = creature.take_damage(damage);
@@ -762,30 +793,38 @@ impl CreatureManager {
 
     /// Get creature health info
     pub fn get_health(&self, guid: ObjectGuid) -> Option<(u32, u32)> {
-        self.creatures.get(&guid).map(|c| (c.current_health, c.max_health))
+        self.creatures
+            .get(&guid)
+            .map(|c| (c.current_health, c.max_health))
     }
 
     /// Check if creature is alive
     pub fn is_alive(&self, guid: ObjectGuid) -> bool {
-        self.creatures.get(&guid).map(|c| c.is_alive()).unwrap_or(false)
+        self.creatures
+            .get(&guid)
+            .map(|c| c.is_alive())
+            .unwrap_or(false)
     }
 
     /// Get creature's highest threat target (for AI - Phase 5: ThreatManager)
     pub fn get_highest_threat_target(&self, guid: ObjectGuid) -> Option<ObjectGuid> {
-        self.creatures.get(&guid)
+        self.creatures
+            .get(&guid)
             .and_then(|c| c.threat_manager.get_victim())
     }
 
     /// Get creature's threat list (for AI snapshot)
     pub fn get_threat_list(&self, guid: ObjectGuid) -> Vec<(ObjectGuid, f32)> {
-        self.creatures.get(&guid)
+        self.creatures
+            .get(&guid)
             .map(|c| c.threat_manager.get_threat_list())
             .unwrap_or_default()
     }
 
     /// Check if creature is in combat
     pub fn is_in_combat(&self, guid: ObjectGuid) -> bool {
-        self.creatures.get(&guid)
+        self.creatures
+            .get(&guid)
             .map(|c| c.combat.in_combat)
             .unwrap_or(false)
     }
@@ -802,11 +841,9 @@ impl CreatureManager {
         let map_id = creature.map_id;
 
         // Find spawn data
-        self.spawns_by_map.get(&map_id).and_then(|spawns| {
-            spawns.iter()
-                .find(|s| s.spawn_id == spawn_id)
-                .cloned()
-        })
+        self.spawns_by_map
+            .get(&map_id)
+            .and_then(|spawns| spawns.iter().find(|s| s.spawn_id == spawn_id).cloned())
     }
 
     /// Get spawn time for a creature from its spawn data (convenience method)
@@ -832,12 +869,12 @@ impl CreatureManager {
 
     /// Clear the lootable flag on a creature corpse
     pub fn clear_lootable_flag(&self, guid: ObjectGuid, world: &crate::world::World) {
-        use super::death::{UNIT_DYNFLAG_DEAD, UNIT_DYNFLAG_TAPPED_BY_PLAYER, UNIT_DYNFLAG_TAPPED};
+        use super::death::{UNIT_DYNFLAG_DEAD, UNIT_DYNFLAG_TAPPED, UNIT_DYNFLAG_TAPPED_BY_PLAYER};
 
         // Get creature's loot recipient to determine tapped flag
-        let has_loot_recipient = self.with_creature(guid, |c| {
-            c.loot_recipient.is_some()
-        }).unwrap_or(false);
+        let has_loot_recipient = self
+            .with_creature(guid, |c| c.loot_recipient.is_some())
+            .unwrap_or(false);
 
         // Calculate new flags: Keep DEAD and TAPPED flags, but remove LOOTABLE
         let new_flags = if has_loot_recipient {
@@ -846,7 +883,11 @@ impl CreatureManager {
             UNIT_DYNFLAG_DEAD | UNIT_DYNFLAG_TAPPED
         };
 
-        tracing::debug!("Clearing lootable flag for creature {:?}, new flags: 0x{:04X}", guid, new_flags);
+        tracing::debug!(
+            "Clearing lootable flag for creature {:?}, new flags: 0x{:04X}",
+            guid,
+            new_flags
+        );
 
         // Send update to clients
         super::death::send_dynamic_flags_update(world, guid, new_flags);
@@ -865,18 +906,24 @@ pub struct DeathInfo {
 impl CreatureManager {
     /// Process creature death
     /// Called when damage brings health to 0
-    pub fn handle_death(
-        &self,
-        guid: ObjectGuid,
-        killer: Option<ObjectGuid>,
-    ) -> Option<DeathInfo> {
-        tracing::info!("[CREATURE_MGR] handle_death ENTRY: guid={:?}, killer={:?}", guid, killer);
+    pub fn handle_death(&self, guid: ObjectGuid, killer: Option<ObjectGuid>) -> Option<DeathInfo> {
+        tracing::info!(
+            "[CREATURE_MGR] handle_death ENTRY: guid={:?}, killer={:?}",
+            guid,
+            killer
+        );
 
         self.creatures.get_mut(&guid).map(|mut creature| {
-            tracing::info!("[CREATURE_MGR] handle_death: calling creature.kill(), current death_state={:?}", creature.death_state);
+            tracing::info!(
+                "[CREATURE_MGR] handle_death: calling creature.kill(), current death_state={:?}",
+                creature.death_state
+            );
             creature.kill(killer);
-            tracing::info!("[CREATURE_MGR] handle_death: after kill(), death_state={:?}, loot_recipient={:?}",
-                creature.death_state, creature.loot_recipient);
+            tracing::info!(
+                "[CREATURE_MGR] handle_death: after kill(), death_state={:?}, loot_recipient={:?}",
+                creature.death_state,
+                creature.loot_recipient
+            );
 
             DeathInfo {
                 guid,
@@ -896,14 +943,18 @@ impl CreatureManager {
 
     /// Get all creatures in JustDied state (for death processing)
     pub fn get_just_died_creatures(&self) -> Vec<ObjectGuid> {
-        let result: Vec<ObjectGuid> = self.creatures
+        let result: Vec<ObjectGuid> = self
+            .creatures
             .iter()
             .filter(|e| e.death_state == DeathState::JustDied)
             .map(|e| *e.key())
             .collect();
 
         if !result.is_empty() {
-            tracing::info!("[CREATURE_MGR] get_just_died_creatures: found {} creatures", result.len());
+            tracing::info!(
+                "[CREATURE_MGR] get_just_died_creatures: found {} creatures",
+                result.len()
+            );
         }
 
         result
@@ -941,9 +992,9 @@ impl CreatureManager {
         use crate::shared::messages::update::*;
         use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
         use crate::world::core::common::position::Position as WorldPosition;
-        use crate::world::game::common::update_fields::*;
         use crate::world::game::common::object_type::MovementSpeeds;
         use crate::world::game::common::object_type::ObjectTypeId;
+        use crate::world::game::common::update_fields::*;
 
         let creature = self.creatures.get(&guid)?;
 
@@ -1101,7 +1152,7 @@ impl CreatureManager {
         &self,
         guid: ObjectGuid,
     ) -> Option<crate::shared::protocol::WorldPacket> {
-        use crate::shared::messages::movement::{SmsgMonsterMove, spline_flags};
+        use crate::shared::messages::movement::{spline_flags, SmsgMonsterMove};
         use crate::shared::messages::ToWorldPacket;
 
         let creature = self.creatures.get(&guid)?;
@@ -1154,7 +1205,10 @@ impl CreatureManager {
         const MAX_BLOCKS_PER_PACKET: usize = 50;
 
         // Get nearby objects from map grid
-        let map = world.managers.map_mgr.get_or_create_map(map_id, instance_id);
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
         let nearby = map.get_objects_in_range(position, map.visibility_distance());
 
         // Filter to creatures only (is_unit but not is_player)
@@ -1188,8 +1242,7 @@ impl CreatureManager {
                         world
                             .managers
                             .broadcast_mgr
-                            .send_to_player(player_guid, compressed)
-                            ;
+                            .send_to_player(player_guid, compressed);
                         total_sent += count;
                         current_msg = SmsgUpdateObject::new();
                         count = 0;
@@ -1207,8 +1260,7 @@ impl CreatureManager {
             world
                 .managers
                 .broadcast_mgr
-                .send_to_player(player_guid, compressed)
-                ;
+                .send_to_player(player_guid, compressed);
             total_sent += count;
         }
 
@@ -1239,8 +1291,7 @@ impl CreatureManager {
                 world
                     .managers
                     .broadcast_mgr
-                    .send_to_player(player_guid, query_packet)
-                    ;
+                    .send_to_player(player_guid, query_packet);
                 sent_entries.insert(entry);
             }
         }

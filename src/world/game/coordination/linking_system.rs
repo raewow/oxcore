@@ -1,9 +1,9 @@
-use crate::shared::protocol::ObjectGuid;
-use crate::world::game::broadcast_mgr::{BroadcastManagerTrait, BroadcastManagerExt};
-use crate::world::game::creature::death::DeathState;
-use crate::world::World;
 use super::link_flags::LinkEvent;
 use super::linking_manager::LinkingManager;
+use crate::shared::protocol::ObjectGuid;
+use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
+use crate::world::game::creature::death::DeathState;
+use crate::world::World;
 use std::sync::Arc;
 
 /// LinkingSystem - coordinates event propagation between linked creatures
@@ -13,8 +13,14 @@ pub struct LinkingSystem {
 }
 
 impl LinkingSystem {
-    pub fn new(manager: Arc<LinkingManager>, broadcast_mgr: Arc<dyn BroadcastManagerTrait>) -> Self {
-        Self { manager, broadcast_mgr }
+    pub fn new(
+        manager: Arc<LinkingManager>,
+        broadcast_mgr: Arc<dyn BroadcastManagerTrait>,
+    ) -> Self {
+        Self {
+            manager,
+            broadcast_mgr,
+        }
     }
 
     /// Process linking events for a creature
@@ -51,9 +57,12 @@ impl LinkingSystem {
             }
             LinkEvent::Death => {
                 // Kill the creature
-                world.managers.creature_mgr.with_creature_mut(guid, |creature| {
-                    creature.current_health = 0;
-                });
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(guid, |creature| {
+                        creature.current_health = 0;
+                    });
                 // TODO: Integrate with death system
                 tracing::debug!("[LINKING] Creature {:?} killed by master death", guid);
             }
@@ -64,11 +73,14 @@ impl LinkingSystem {
             }
             LinkEvent::Respawn => {
                 // Schedule immediate respawn
-                world.managers.creature_mgr.with_creature_mut(guid, |creature| {
-                    if creature.death_state == DeathState::Dead {
-                        creature.respawn_time = 0; // Immediate respawn
-                    }
-                });
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(guid, |creature| {
+                        if creature.death_state == DeathState::Dead {
+                            creature.respawn_time = 0; // Immediate respawn
+                        }
+                    });
                 tracing::debug!("[LINKING] Creature {:?} scheduled for respawn", guid);
             }
         }

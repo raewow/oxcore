@@ -67,7 +67,6 @@ impl GroupSystem {
         let next_id = max_id.unwrap_or(0) + 1;
         self.next_group_id.store(next_id, Ordering::Relaxed);
 
-
         Ok(())
     }
 
@@ -90,21 +89,21 @@ impl GroupSystem {
                 .filter(|m| {
                     // Check for ghost member (no character data)
                     if m.name.is_none() || m.name.as_ref().map(|n| n.is_empty()).unwrap_or(true) {
-            tracing::warn!(
-                "Removing ghost member {} from group {} (no character data)",
-                m.member_guid,
-                group_row.group_id
-            );
+                        tracing::warn!(
+                            "Removing ghost member {} from group {} (no character data)",
+                            m.member_guid,
+                            group_row.group_id
+                        );
                         invalid_guids.push(m.member_guid);
                         return false;
                     }
                     // Check for duplicate member
                     if !seen_guids.insert(m.member_guid) {
-                    tracing::warn!(
-                        "Removing duplicate member {} from group {}",
-                        m.member_guid,
-                        group_row.group_id
-                    );
+                        tracing::warn!(
+                            "Removing duplicate member {} from group {}",
+                            m.member_guid,
+                            group_row.group_id
+                        );
                         invalid_guids.push(m.member_guid);
                         return false;
                     }
@@ -119,12 +118,12 @@ impl GroupSystem {
                     .remove_member(group_row.group_id, invalid_guid)
                     .await
                 {
-                tracing::error!(
-                    "Failed to remove invalid member {} from group {}: {}",
-                    invalid_guid,
-                    group_row.group_id,
-                    e
-                );
+                    tracing::error!(
+                        "Failed to remove invalid member {} from group {}: {}",
+                        invalid_guid,
+                        group_row.group_id,
+                        e
+                    );
                 }
             }
 
@@ -344,11 +343,7 @@ impl GroupSystem {
         self.groups.insert(group_id, group);
         self.player_groups.insert(leader_guid, group_id);
 
-        tracing::info!(
-            "Created group {} with leader {:?}",
-            group_id,
-            leader_guid
-        );
+        tracing::info!("Created group {} with leader {:?}", group_id, leader_guid);
 
         Ok(group_id)
     }
@@ -376,8 +371,7 @@ impl GroupSystem {
         use crate::shared::messages::group::SmsgGroupDestroyed;
         for member in &group.members {
             self.broadcast_mgr
-                .send_msg_to_player(member.guid, SmsgGroupDestroyed)
-                ;
+                .send_msg_to_player(member.guid, SmsgGroupDestroyed);
 
             tracing::debug!("Sent GROUP_DESTROYED to {:?}", member.guid);
         }
@@ -451,15 +445,9 @@ impl GroupSystem {
         let msg = SmsgGroupInvite {
             inviter_name: &inviter_name,
         };
-        self.broadcast_mgr
-            .send_msg_to_player(target_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(target_guid, msg);
 
-        tracing::info!(
-            "{} invited {} to group",
-            inviter_name,
-            target_name
-        );
+        tracing::info!("{} invited {} to group", inviter_name, target_name);
 
         Ok(())
     }
@@ -518,8 +506,7 @@ impl GroupSystem {
                 result: ERR_PARTY_RESULT_OK, // Declined is not an error
             };
             self.broadcast_mgr
-                .send_msg_to_player(invite.inviter_guid, msg)
-                ;
+                .send_msg_to_player(invite.inviter_guid, msg);
 
             tracing::info!(
                 "{:?} declined invite from {:?}",
@@ -553,8 +540,7 @@ impl GroupSystem {
         // Send SMSG_GROUP_DESTROYED to leaving player
         use crate::shared::messages::group::SmsgGroupDestroyed;
         self.broadcast_mgr
-            .send_msg_to_player(player_guid, SmsgGroupDestroyed)
-            ;
+            .send_msg_to_player(player_guid, SmsgGroupDestroyed);
 
         Ok(())
     }
@@ -608,8 +594,7 @@ impl GroupSystem {
         // Send SMSG_GROUP_UNINVITE to kicked player
         use crate::shared::messages::group::SmsgGroupUninvite;
         self.broadcast_mgr
-            .send_msg_to_player(target_guid, SmsgGroupUninvite)
-            ;
+            .send_msg_to_player(target_guid, SmsgGroupUninvite);
 
         tracing::info!(
             "{:?} kicked {} from group {}",
@@ -755,11 +740,7 @@ impl GroupSystem {
 
         self.broadcast_group_list(group_id);
 
-        tracing::info!(
-            "Group {} leader changed to {:?}",
-            group_id,
-            new_leader_guid
-        );
+        tracing::info!("Group {} leader changed to {:?}", group_id, new_leader_guid);
 
         Ok(())
     }
@@ -931,8 +912,7 @@ impl GroupSystem {
             result: ERR_PARTY_RESULT_OK,
         };
         self.broadcast_mgr
-            .send_msg_to_player(player_guid, cmd_result)
-            ;
+            .send_msg_to_player(player_guid, cmd_result);
 
         // Update group
         {
@@ -1067,16 +1047,20 @@ impl GroupSystem {
         // Update database for both members
         if let Some(group) = self.get_group(group_id) {
             if let Some(m1) = group.get_member(guid1) {
-                let _ = self
-                    .repository
-                    .update_member(group_id, guid1.counter(), m1.assistant, subgroup2 as u16)
-                    ;
+                let _ = self.repository.update_member(
+                    group_id,
+                    guid1.counter(),
+                    m1.assistant,
+                    subgroup2 as u16,
+                );
             }
             if let Some(m2) = group.get_member(guid2) {
-                let _ = self
-                    .repository
-                    .update_member(group_id, guid2.counter(), m2.assistant, subgroup1 as u16)
-                    ;
+                let _ = self.repository.update_member(
+                    group_id,
+                    guid2.counter(),
+                    m2.assistant,
+                    subgroup1 as u16,
+                );
             }
         }
 
@@ -1186,8 +1170,7 @@ impl GroupSystem {
 
         for member in &group.members {
             self.broadcast_mgr
-                .send_msg_to_player(member.guid, msg.clone())
-                ;
+                .send_msg_to_player(member.guid, msg.clone());
         }
 
         Ok(())
@@ -1216,9 +1199,7 @@ impl GroupSystem {
             mode: 0, // set icons
             target_icons: group.target_icons,
         };
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, msg)
-            ;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 
     /// Initiate ready check (MSG_RAID_READY_CHECK)
@@ -1246,8 +1227,7 @@ impl GroupSystem {
 
             for member in &group.members {
                 self.broadcast_mgr
-                    .send_msg_to_player(member.guid, msg.clone())
-                    ;
+                    .send_msg_to_player(member.guid, msg.clone());
 
                 tracing::debug!("Sent READY_CHECK to {:?}", member.guid);
             }
@@ -1277,15 +1257,10 @@ impl GroupSystem {
 
         for member in &group.members {
             self.broadcast_mgr
-                .send_msg_to_player(member.guid, msg.clone())
-                ;
+                .send_msg_to_player(member.guid, msg.clone());
         }
 
-        tracing::debug!(
-            "{:?} responded to ready check: {}",
-            player_guid,
-            ready
-        );
+        tracing::debug!("{:?} responded to ready check: {}", player_guid, ready);
 
         Ok(())
     }
@@ -1309,9 +1284,7 @@ impl GroupSystem {
 
         for member in &group.members {
             if member.guid != player_guid {
-                self.broadcast_mgr
-                    .send_msg_to_player(member.guid, msg)
-                    ;
+                self.broadcast_mgr.send_msg_to_player(member.guid, msg);
 
                 tracing::debug!("Sent MINIMAP_PING to {:?}", member.guid);
             }
@@ -1350,9 +1323,7 @@ impl GroupSystem {
             };
 
             for member in &group.members {
-                self.broadcast_mgr
-                    .send_msg_to_player(member.guid, msg)
-                    ;
+                self.broadcast_mgr.send_msg_to_player(member.guid, msg);
 
                 tracing::debug!(
                     "Sent RANDOM_ROLL to {:?}: {} ({}-{})",
@@ -1364,13 +1335,7 @@ impl GroupSystem {
             }
         }
 
-        tracing::debug!(
-            "{:?} rolled {} ({}-{})",
-            player_guid,
-            roll,
-            min,
-            max
-        );
+        tracing::debug!("{:?} rolled {} ({}-{})", player_guid, roll, min, max);
 
         Ok(())
     }
@@ -1423,9 +1388,7 @@ impl GroupSystem {
                 group: &cached_group,
                 member_guid: member.guid,
             };
-            self.broadcast_mgr
-                .send_msg_to_player(member.guid, msg)
-                ;
+            self.broadcast_mgr.send_msg_to_player(member.guid, msg);
 
             tracing::debug!("Sent GROUP_LIST to {:?}", member.guid);
         }
@@ -1439,8 +1402,7 @@ impl GroupSystem {
         };
         for member in &group.members {
             self.broadcast_mgr
-                .send_msg_to_player(member.guid, raid_target_msg.clone())
-                ;
+                .send_msg_to_player(member.guid, raid_target_msg.clone());
         }
     }
 
@@ -1456,8 +1418,7 @@ impl GroupSystem {
 
         for member in &group.members {
             self.broadcast_mgr
-                .send_msg_to_player(member.guid, msg.clone())
-                ;
+                .send_msg_to_player(member.guid, msg.clone());
         }
     }
 

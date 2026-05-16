@@ -1,5 +1,5 @@
-use sqlx::MySqlPool;
 use super::addon::CreatureAddon;
+use sqlx::MySqlPool;
 
 /// Repository for loading creature addon data from database
 pub struct AddonRepository {
@@ -33,7 +33,7 @@ impl AddonRepository {
         let rows = sqlx::query_as::<_, AddonRow>(
             "SELECT guid, mount_display_id, stand_state, sheath_state, emote_state, \
              COALESCE(auras, '') AS auras \
-             FROM creature_addon"
+             FROM creature_addon",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -61,7 +61,7 @@ impl AddonRepository {
         let result = sqlx::query_as::<_, TemplateAddonRow>(
             "SELECT entry, mount_display_id, stand_state, sheath_state, emote_state, \
              COALESCE(auras, '') AS auras \
-             FROM creature_template_addon"
+             FROM creature_template_addon",
         )
         .fetch_all(&self.pool)
         .await;
@@ -83,7 +83,10 @@ impl AddonRepository {
                 })
                 .collect()),
             Err(e) => {
-                tracing::warn!("Could not load creature_template_addon (table may not exist): {}", e);
+                tracing::warn!(
+                    "Could not load creature_template_addon (table may not exist): {}",
+                    e
+                );
                 Ok(Vec::new())
             }
         }

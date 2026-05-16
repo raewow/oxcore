@@ -183,11 +183,7 @@ impl LuaCreatureAI {
     }
 
     /// Call JustRespawned callback.
-    pub fn on_just_respawned(
-        &self,
-        lua: &Lua,
-        snapshot: &LuaCreatureSnapshot,
-    ) -> Vec<LuaAction> {
+    pub fn on_just_respawned(&self, lua: &Lua, snapshot: &LuaCreatureSnapshot) -> Vec<LuaAction> {
         self.call_callback(lua, "JustRespawned", snapshot, |_lua, table, input| {
             let func: Function = table.get("JustRespawned")?;
             func.call((table.clone(), input))
@@ -202,15 +198,10 @@ impl LuaCreatureAI {
         unit_guid: ObjectGuid,
         is_hostile: bool,
     ) -> Vec<LuaAction> {
-        self.call_callback_with_extra(
-            lua,
-            "MoveInLineOfSight",
-            snapshot,
-            |_lua, table, input| {
-                let func: Function = table.get("MoveInLineOfSight")?;
-                func.call((table.clone(), input, LuaGuid(unit_guid), is_hostile))
-            },
-        )
+        self.call_callback_with_extra(lua, "MoveInLineOfSight", snapshot, |_lua, table, input| {
+            let func: Function = table.get("MoveInLineOfSight")?;
+            func.call((table.clone(), input, LuaGuid(unit_guid), is_hostile))
+        })
     }
 
     /// Call JustSummoned callback.

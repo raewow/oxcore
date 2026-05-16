@@ -53,7 +53,9 @@ pub async fn effect_dummy(input: &EffectInput, world: &World) -> Result<EffectRe
 
     tracing::debug!(
         "Dummy effect: spell={} caster={:?} target={:?} (no script handler)",
-        input.spell_id, input.caster_guid, input.target_guid
+        input.spell_id,
+        input.caster_guid,
+        input.target_guid
     );
 
     Ok(EffectResult::empty())
@@ -65,12 +67,13 @@ pub async fn effect_dummy(input: &EffectInput, world: &World) -> Result<EffectRe
 pub async fn effect_script_effect(input: &EffectInput, _world: &World) -> Result<EffectResult> {
     // Similar to dummy, but different routing
     // TODO: Implement script system routing
-    
+
     tracing::debug!(
         "Script effect: spell={} caster={:?}",
-        input.spell_id, input.caster_guid
+        input.spell_id,
+        input.caster_guid
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -83,7 +86,8 @@ pub async fn effect_send_event(input: &EffectInput, world: &World) -> Result<Eff
     if event_id > 0 {
         if let Some(script) = world.managers.lua_mgr.get_process_event_script(event_id) {
             // Build a minimal player snapshot for the caster
-            let player_snap = crate::world::core::lua::build_player_snapshot(input.caster_guid, world);
+            let player_snap =
+                crate::world::core::lua::build_player_snapshot(input.caster_guid, world);
             let actions = world.managers.lua_mgr.with_lua(|lua| {
                 script.on_process_event(lua, &player_snap, input.caster_guid, true)
             });
@@ -91,7 +95,9 @@ pub async fn effect_send_event(input: &EffectInput, world: &World) -> Result<Eff
                 crate::world::core::lua::execute_gossip_actions(
                     actions,
                     input.caster_guid,
-                    input.target_guid.unwrap_or_else(crate::shared::protocol::ObjectGuid::empty),
+                    input
+                        .target_guid
+                        .unwrap_or_else(crate::shared::protocol::ObjectGuid::empty),
                     world,
                 )
                 .await?;
@@ -101,7 +107,8 @@ pub async fn effect_send_event(input: &EffectInput, world: &World) -> Result<Eff
 
     tracing::debug!(
         "Send event: caster={:?} event={}",
-        input.caster_guid, event_id
+        input.caster_guid,
+        event_id
     );
 
     Ok(EffectResult::empty())
@@ -112,18 +119,19 @@ pub async fn effect_send_event(input: &EffectInput, world: &World) -> Result<Eff
 /// Triggers another spell.
 pub async fn effect_trigger_spell(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let triggered_spell_id = input.misc_value as u32;
-    
+
     if triggered_spell_id == 0 {
         return Ok(EffectResult::empty());
     }
-    
+
     // TODO: Trigger the spell via SpellSystem
-    
+
     tracing::debug!(
         "Trigger spell: caster={:?} triggered_spell={}",
-        input.caster_guid, triggered_spell_id
+        input.caster_guid,
+        triggered_spell_id
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -132,14 +140,15 @@ pub async fn effect_trigger_spell(input: &EffectInput, world: &World) -> Result<
 /// Triggers a missile (projectile) spell.
 pub async fn effect_trigger_missile(input: &EffectInput, _world: &World) -> Result<EffectResult> {
     let missile_spell_id = input.misc_value as u32;
-    
+
     // TODO: Create missile projectile
-    
+
     tracing::debug!(
         "Trigger missile: caster={:?} missile_spell={}",
-        input.caster_guid, missile_spell_id
+        input.caster_guid,
+        missile_spell_id
     );
-    
+
     Ok(EffectResult::empty())
 }
 
@@ -150,8 +159,9 @@ pub async fn effect_nostalrius(input: &EffectInput, _world: &World) -> Result<Ef
     // Server-specific custom effects
     tracing::debug!(
         "Nostalrius custom effect: spell {}, caster {}",
-        input.spell_id, input.caster_guid
+        input.spell_id,
+        input.caster_guid
     );
-    
+
     Ok(EffectResult::empty())
 }

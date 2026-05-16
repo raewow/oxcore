@@ -13,11 +13,11 @@ use tokio::sync::mpsc;
 
 use crate::shared::protocol::{HighGuid, ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::session::SessionManager;
+use crate::world::game::broadcast_mgr::BroadcastManager;
 use crate::world::game::creature::CreatureManager;
 use crate::world::game::npc::gossip::manager::GossipManager;
 use crate::world::game::npc::gossip::system::GossipSystem;
 use crate::world::game::npc::gossip::types::{gossip_option, GossipMenuItem};
-use crate::world::game::broadcast_mgr::BroadcastManager;
 use crate::world::game::player::broadcaster::PlayerBroadcaster;
 use crate::world::game::player::player::Player;
 use crate::world::game::player::PlayerManager;
@@ -75,7 +75,9 @@ fn player_guid() -> ObjectGuid {
 
 /// Build a GossipSystem with one menu item of the given option_id.
 /// Returns (system, player_guid, captured_packets).
-async fn setup_with_option(option_type: u32) -> (GossipSystem, ObjectGuid, Arc<Mutex<Vec<CapturedPacket>>>) {
+async fn setup_with_option(
+    option_type: u32,
+) -> (GossipSystem, ObjectGuid, Arc<Mutex<Vec<CapturedPacket>>>) {
     let guid = player_guid();
 
     // Player with broadcaster

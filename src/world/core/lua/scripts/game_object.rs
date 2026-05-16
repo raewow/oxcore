@@ -3,9 +3,9 @@
 //! Handles OnGameObjectHello (player right-clicks a GO) and
 //! OnGameObjectOpen (player opens/loots a GO).
 
-use crate::shared::protocol::ObjectGuid;
 use super::super::actions::{parse_actions, LuaAction};
 use super::super::snapshot::{LuaGuid, PlayerSnapshot};
+use crate::shared::protocol::ObjectGuid;
 use mlua::{Function, Lua, Table, Value};
 
 /// Lua game object script handler.
@@ -66,7 +66,8 @@ impl LuaGameObjectScript {
             Err(e) => {
                 tracing::error!(
                     "Failed to create player table for GO quest rewarded script {}: {}",
-                    self.go_entry, e
+                    self.go_entry,
+                    e
                 );
                 return Vec::new();
             }
@@ -82,7 +83,9 @@ impl LuaGameObjectScript {
             Err(e) => {
                 tracing::error!(
                     "Error in GO script {} OnQuestRewarded quest={}: {}",
-                    self.go_entry, quest_id, e
+                    self.go_entry,
+                    quest_id,
+                    e
                 );
                 Vec::new()
             }

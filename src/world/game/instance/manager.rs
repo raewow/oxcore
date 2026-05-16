@@ -1,8 +1,8 @@
 // Instance manager - handles all instance operations
 
 use super::types::{InstanceBinding, InstanceResetMethod, InstanceResetWarningType, InstanceState};
-use crate::shared::protocol::ObjectGuid;
 use crate::shared::database::Databases;
+use crate::shared::protocol::ObjectGuid;
 use anyhow::{Context, Result};
 use parking_lot::RwLock;
 use sqlx::Row;
@@ -44,9 +44,9 @@ impl InstanceMgr {
         let rows = sqlx::query(
             r#"SELECT CAST(map AS UNSIGNED), CAST(MAX(id) AS UNSIGNED) FROM instance GROUP BY map"#,
         )
-            .fetch_all(&databases.character)
-            .await
-            .context("Failed to query max instance IDs")?;
+        .fetch_all(&databases.character)
+        .await
+        .context("Failed to query max instance IDs")?;
 
         let mut next_ids = self.next_instance_ids.write();
         for row in rows {

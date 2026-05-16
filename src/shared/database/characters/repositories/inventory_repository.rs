@@ -425,9 +425,7 @@ impl InventoryRepository {
             .context("Failed to batch move item")?;
         }
 
-        tx.commit()
-            .await
-            .context("Failed to commit batch move")?;
+        tx.commit().await.context("Failed to commit batch move")?;
         Ok(())
     }
 

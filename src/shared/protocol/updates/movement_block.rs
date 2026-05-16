@@ -1,5 +1,5 @@
-use crate::shared::protocol::{WorldPacket, packet::WorldPacketGuidExt};
 use crate::shared::protocol::position::Position;
+use crate::shared::protocol::{packet::WorldPacketGuidExt, WorldPacket};
 use anyhow::Result;
 use tracing::{info, warn};
 

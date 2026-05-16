@@ -52,8 +52,8 @@ pub struct LootTableEntry {
     pub min_count: u32,
     pub max_count: u32,
     pub group_id: u8,
-    pub is_reference: bool,   // If true, item ID points to another loot template
-    pub is_quest_drop: bool,  // If true, only shown to players who have the quest
+    pub is_reference: bool, // If true, item ID points to another loot template
+    pub is_quest_drop: bool, // If true, only shown to players who have the quest
 }
 
 /// Loot group - one item selected from group
