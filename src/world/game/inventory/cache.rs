@@ -61,6 +61,16 @@ impl PlayerInventoryData {
         }
     }
 
+    fn resolve_bag_guid(&self, bag: u8) -> Option<ObjectGuid> {
+        if bag >= 19 && bag < 23 {
+            self.bag_guids[(bag - 19) as usize]
+        } else if bag >= 63 && bag < 69 {
+            self.bank_bag_guids[(bag - 63) as usize]
+        } else {
+            Some(ObjectGuid::new_without_entry(HighGuid::Item, bag as u32))
+        }
+    }
+
     pub fn get_item_at(&self, bag: u8, slot: u8) -> Option<ObjectGuid> {
         if bag == INVENTORY_SLOT_BAG_0 {
             if slot < EQUIPMENT_SLOT_COUNT as u8 {
@@ -81,8 +91,8 @@ impl PlayerInventoryData {
                 None
             }
         } else {
-            let bag_guid = ObjectGuid::new_without_entry(HighGuid::Item, bag as u32);
-            self.bags.get(&bag_guid).and_then(|bag| bag.get_slot(slot))
+            self.resolve_bag_guid(bag)
+                .and_then(|bag_guid| self.bags.get(&bag_guid).and_then(|bag| bag.get_slot(slot)))
         }
     }
 
@@ -113,7 +123,11 @@ impl PlayerInventoryData {
                 false
             }
         } else {
-            let bag_guid = ObjectGuid::new_without_entry(HighGuid::Item, bag as u32);
+            let bag_guid = match self.resolve_bag_guid(bag) {
+                Some(guid) => guid,
+                None => return false,
+            };
+
             if let Some(mut bag) = self.bags.get_mut(&bag_guid) {
                 bag.set_slot(slot, guid)
             } else {
@@ -128,6 +142,36 @@ impl PlayerInventoryData {
                 return Some((255, (23 + i) as u8));
             }
         }
+        None
+    }
+
+    pub fn find_free_bank_slot(&self) -> Option<(u8, u8)> {
+        for i in 0..BANK_ITEM_COUNT {
+            if self.bank_items[i].is_none() {
+                return Some((INVENTORY_SLOT_BAG_0, (39 + i) as u8));
+            }
+        }
+
+        for (idx, bag_guid) in self.bank_bag_guids.iter().enumerate() {
+            if let Some(bag_guid) = *bag_guid {
+                if let Some(bag) = self.bags.get(&bag_guid) {
+                    if let Some(slot) = bag.find_free_slot() {
+                        return Some(((63 + idx) as u8, slot));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn find_free_bank_bag_slot(&self) -> Option<(u8, u8)> {
+        for i in 0..BANK_BAG_COUNT {
+            if self.bank_bag_guids[i].is_none() {
+                return Some((INVENTORY_SLOT_BAG_0, (63 + i) as u8));
+            }
+        }
+
         None
     }
 
@@ -320,6 +364,18 @@ impl InventoryCache {
             .and_then(|inv| inv.find_free_inventory_slot())
     }
 
+    pub fn find_free_bank_slot(&self, player_guid: ObjectGuid) -> Option<(u8, u8)> {
+        self.player_inventories
+            .get(&player_guid)
+            .and_then(|inv| inv.find_free_bank_slot())
+    }
+
+    pub fn find_free_bank_bag_slot(&self, player_guid: ObjectGuid) -> Option<(u8, u8)> {
+        self.player_inventories
+            .get(&player_guid)
+            .and_then(|inv| inv.find_free_bank_bag_slot())
+    }
+
     pub fn count_free_inventory_slots(&self, player_guid: ObjectGuid) -> u32 {
         self.player_inventories
             .get(&player_guid)
@@ -417,6 +473,22 @@ impl InventoryCache {
         if let Some(mut inv) = self.player_inventories.get_mut(&player_guid) {
             if let Some(item) = inv.items.get_mut(&item_guid) {
                 item.write().count = new_count;
+            }
+        }
+    }
+
+    pub fn update_item_position(
+        &self,
+        player_guid: ObjectGuid,
+        item_guid: ObjectGuid,
+        bag: u8,
+        slot: u8,
+    ) {
+        if let Some(inv) = self.player_inventories.get(&player_guid) {
+            if let Some(item) = inv.items.get(&item_guid) {
+                let mut item = item.write();
+                item.bag = bag;
+                item.slot = slot;
             }
         }
     }

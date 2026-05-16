@@ -875,6 +875,10 @@ impl InventorySystem {
                     .set_item_at(player_guid, src_bag, src_slot, Some(dst_guid));
                 self.cache
                     .set_item_at(player_guid, dst_bag, dst_slot, Some(src_item_guid));
+                self.cache
+                    .update_item_position(player_guid, src_item_guid, dst_bag, dst_slot);
+                self.cache
+                    .update_item_position(player_guid, dst_guid, src_bag, src_slot);
 
                 // Send updates to client
                 self.send_slots_update(
@@ -887,10 +891,14 @@ impl InventorySystem {
                     Some(src_item_guid),
                 );
 
-                if self.cache.is_equipment_slot(player_guid, src_slot) {
+                if src_bag == INVENTORY_SLOT_BAG_0
+                    && self.cache.is_equipment_slot(player_guid, src_slot)
+                {
                     self.send_visible_item_update(player_guid, src_slot, Some(dst_guid));
                 }
-                if self.cache.is_equipment_slot(player_guid, dst_slot) {
+                if dst_bag == INVENTORY_SLOT_BAG_0
+                    && self.cache.is_equipment_slot(player_guid, dst_slot)
+                {
                     self.send_visible_item_update(player_guid, dst_slot, Some(src_item_guid));
                 }
 
@@ -913,15 +921,21 @@ impl InventorySystem {
                 self.cache.set_item_at(player_guid, src_bag, src_slot, None);
                 self.cache
                     .set_item_at(player_guid, dst_bag, dst_slot, Some(src_item_guid));
+                self.cache
+                    .update_item_position(player_guid, src_item_guid, dst_bag, dst_slot);
 
                 // Send updates to client
                 self.send_slot_update(player_guid, src_bag, src_slot, None);
                 self.send_slot_update(player_guid, dst_bag, dst_slot, Some(src_item_guid));
 
-                if self.cache.is_equipment_slot(player_guid, src_slot) {
+                if src_bag == INVENTORY_SLOT_BAG_0
+                    && self.cache.is_equipment_slot(player_guid, src_slot)
+                {
                     self.send_visible_item_update(player_guid, src_slot, None);
                 }
-                if self.cache.is_equipment_slot(player_guid, dst_slot) {
+                if dst_bag == INVENTORY_SLOT_BAG_0
+                    && self.cache.is_equipment_slot(player_guid, dst_slot)
+                {
                     self.send_visible_item_update(player_guid, dst_slot, Some(src_item_guid));
                 }
 
@@ -1036,6 +1050,78 @@ impl InventorySystem {
 
     pub fn get_item_at(&self, player_guid: ObjectGuid, bag: u8, slot: u8) -> Option<ObjectGuid> {
         self.cache.get_item_at(player_guid, bag, slot)
+    }
+
+    pub fn auto_bank_item(
+        &self,
+        player_guid: ObjectGuid,
+        src_bag: u8,
+        src_slot: u8,
+    ) -> MoveItemResult {
+        let item_guid = match self.cache.get_item_at(player_guid, src_bag, src_slot) {
+            Some(guid) => guid,
+            None => {
+                self.send_inventory_error(
+                    player_guid,
+                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                );
+                return MoveItemResult::InvalidSource;
+            }
+        };
+
+        let is_container = self
+            .cache
+            .get_item(player_guid, item_guid)
+            .and_then(|item| {
+                let entry = item.read().entry;
+                self.item_mgr.get_template(entry)
+            })
+            .map(|template| template.container_slots > 0)
+            .unwrap_or(false);
+
+        let destination = if is_container {
+            self.cache
+                .find_free_bank_bag_slot(player_guid)
+                .or_else(|| self.cache.find_free_bank_slot(player_guid))
+        } else {
+            self.cache.find_free_bank_slot(player_guid)
+        };
+
+        let (dst_bag, dst_slot) = match destination {
+            Some(slot) => slot,
+            None => {
+                self.send_inventory_error(
+                    player_guid,
+                    crate::shared::messages::EQUIP_ERR_BANK_FULL,
+                );
+                return MoveItemResult::InvalidDestination;
+            }
+        };
+
+        self.move_item(player_guid, src_bag, src_slot, dst_bag, dst_slot)
+    }
+
+    pub fn auto_store_bank_item(
+        &self,
+        player_guid: ObjectGuid,
+        src_bag: u8,
+        src_slot: u8,
+    ) -> MoveItemResult {
+        use crate::world::game::inventory::inventory_types::is_bank_pos;
+
+        if is_bank_pos(src_bag, src_slot) {
+            let (dst_bag, dst_slot) = match self.cache.find_free_inventory_slot(player_guid) {
+                Some(slot) => slot,
+                None => {
+                    self.send_inventory_error(player_guid, crate::shared::messages::ERR_INV_FULL);
+                    return MoveItemResult::InvalidDestination;
+                }
+            };
+
+            self.move_item(player_guid, src_bag, src_slot, dst_bag, dst_slot)
+        } else {
+            self.auto_bank_item(player_guid, src_bag, src_slot)
+        }
     }
 
     pub fn count_items(&self, player_guid: ObjectGuid, entry_id: u32) -> u32 {
@@ -2316,6 +2402,39 @@ impl InventorySystem {
             }
         }
 
+        // Bank item slots (39-62)
+        for slot in 39..63u8 {
+            if let Some(item_guid) = self.cache.get_item_at(player_guid, 255, slot) {
+                if let Some(item) = self.cache.get_item(player_guid, item_guid) {
+                    let item_read = item.read();
+                    blocks.push(item_read.to_create_block());
+                    count += 1;
+                }
+            }
+        }
+
+        // Bank bag slots (63-68) - send the bags themselves
+        for slot in 63..69u8 {
+            if let Some(bag_guid) = self.cache.get_item_at(player_guid, 255, slot) {
+                if let Some(bag) = self.cache.get_item(player_guid, bag_guid) {
+                    let bag_read = bag.read();
+                    blocks.push(bag_read.to_create_block());
+                    count += 1;
+
+                    for bag_slot in 0..36u8 {
+                        if let Some(item_guid) = self.cache.get_item_at(player_guid, slot, bag_slot)
+                        {
+                            if let Some(item) = self.cache.get_item(player_guid, item_guid) {
+                                let item_read = item.read();
+                                blocks.push(item_read.to_create_block());
+                                count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         count
     }
 
@@ -2442,9 +2561,11 @@ impl InventorySystem {
     ) {
         use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
         use crate::world::game::common::update_fields::{
-            PLAYER_FIELD_INV_SLOT_HEAD, PLAYER_FIELD_PACK_SLOT_1,
+            PLAYER_FIELD_BANKBAG_SLOT_1, PLAYER_FIELD_BANK_SLOT_1, PLAYER_FIELD_INV_SLOT_HEAD,
+            PLAYER_FIELD_PACK_SLOT_1,
         };
         use crate::world::game::inventory::inventory_types::{
+            BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BANK_SLOT_ITEM_END, BANK_SLOT_ITEM_START,
             INVENTORY_SLOT_ITEM_END, INVENTORY_SLOT_ITEM_START,
         };
 
@@ -2464,6 +2585,26 @@ impl InventorySystem {
             if let Some(item_guid) = self.cache.get_item_at(player_guid, 255, slot) {
                 let slot_offset = (slot - INVENTORY_SLOT_ITEM_START) as u32;
                 let field_index = PLAYER_FIELD_PACK_SLOT_1 + (slot_offset * 2);
+                let world_guid = WorldObjectGuid::from_raw(item_guid.raw());
+                guid_fields.push((field_index, world_guid));
+            }
+        }
+
+        // Bank item slots (39-62) -> PLAYER_FIELD_BANK_SLOT_1
+        for slot in BANK_SLOT_ITEM_START..BANK_SLOT_ITEM_END {
+            if let Some(item_guid) = self.cache.get_item_at(player_guid, 255, slot) {
+                let slot_offset = (slot - BANK_SLOT_ITEM_START) as u32;
+                let field_index = PLAYER_FIELD_BANK_SLOT_1 + (slot_offset * 2);
+                let world_guid = WorldObjectGuid::from_raw(item_guid.raw());
+                guid_fields.push((field_index, world_guid));
+            }
+        }
+
+        // Bank bag slots (63-68) -> PLAYER_FIELD_BANKBAG_SLOT_1
+        for slot in BANK_SLOT_BAG_START..BANK_SLOT_BAG_END {
+            if let Some(item_guid) = self.cache.get_item_at(player_guid, 255, slot) {
+                let slot_offset = (slot - BANK_SLOT_BAG_START) as u32;
+                let field_index = PLAYER_FIELD_BANKBAG_SLOT_1 + (slot_offset * 2);
                 let world_guid = WorldObjectGuid::from_raw(item_guid.raw());
                 guid_fields.push((field_index, world_guid));
             }

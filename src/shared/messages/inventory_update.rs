@@ -19,7 +19,8 @@
 
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::update_fields::{
-    PLAYER_FIELD_INV_SLOT_HEAD, PLAYER_FIELD_PACK_SLOT_1, PLAYER_VISIBLE_ITEM_1_0,
+    PLAYER_FIELD_BANKBAG_SLOT_1, PLAYER_FIELD_BANK_SLOT_1, PLAYER_FIELD_INV_SLOT_HEAD,
+    PLAYER_FIELD_PACK_SLOT_1, PLAYER_VISIBLE_ITEM_1_0,
 };
 use crate::shared::protocol::updates::update_mask::UpdateMask;
 use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
@@ -28,6 +29,10 @@ const MAX_VISIBLE_ITEM_OFFSET: u32 = 12;
 const EQUIPMENT_SLOT_COUNT: u8 = 19;
 const INVENTORY_SLOT_START: u8 = 23;
 const INVENTORY_SLOT_END: u8 = 39;
+const BANK_SLOT_START: u8 = 39;
+const BANK_SLOT_END: u8 = 63;
+const BANK_BAG_SLOT_START: u8 = 63;
+const BANK_BAG_SLOT_END: u8 = 69;
 
 #[derive(Debug, Clone)]
 pub struct SmsgInventorySlotUpdate {
@@ -100,6 +105,28 @@ impl ToWorldPacket for SmsgInventorySlotUpdate {
                     mask.set_field_required(field_low, 0);
                     mask.set_field_required(field_high, 0);
                 }
+            } else if self.slot >= BANK_SLOT_START && self.slot < BANK_SLOT_END {
+                let field_low =
+                    PLAYER_FIELD_BANK_SLOT_1 + ((self.slot - BANK_SLOT_START) as u32 * 2);
+                let field_high = field_low + 1;
+
+                if let Some(guid) = self.item_guid {
+                    mask.set_guid(field_low, guid.low(), guid.high_u32());
+                } else {
+                    mask.set_field_required(field_low, 0);
+                    mask.set_field_required(field_high, 0);
+                }
+            } else if self.slot >= BANK_BAG_SLOT_START && self.slot < BANK_BAG_SLOT_END {
+                let field_low =
+                    PLAYER_FIELD_BANKBAG_SLOT_1 + ((self.slot - BANK_BAG_SLOT_START) as u32 * 2);
+                let field_high = field_low + 1;
+
+                if let Some(guid) = self.item_guid {
+                    mask.set_guid(field_low, guid.low(), guid.high_u32());
+                } else {
+                    mask.set_field_required(field_low, 0);
+                    mask.set_field_required(field_high, 0);
+                }
             }
         }
 
@@ -157,6 +184,28 @@ impl ToWorldPacket for SmsgInventorySlotsUpdate {
                 } else if *slot >= INVENTORY_SLOT_START && *slot < INVENTORY_SLOT_END {
                     let field_low =
                         PLAYER_FIELD_PACK_SLOT_1 + ((*slot - INVENTORY_SLOT_START) as u32 * 2);
+                    let field_high = field_low + 1;
+
+                    if let Some(guid) = item_guid {
+                        mask.set_guid(field_low, guid.low(), guid.high_u32());
+                    } else {
+                        mask.set_field_required(field_low, 0);
+                        mask.set_field_required(field_high, 0);
+                    }
+                } else if *slot >= BANK_SLOT_START && *slot < BANK_SLOT_END {
+                    let field_low =
+                        PLAYER_FIELD_BANK_SLOT_1 + ((*slot - BANK_SLOT_START) as u32 * 2);
+                    let field_high = field_low + 1;
+
+                    if let Some(guid) = item_guid {
+                        mask.set_guid(field_low, guid.low(), guid.high_u32());
+                    } else {
+                        mask.set_field_required(field_low, 0);
+                        mask.set_field_required(field_high, 0);
+                    }
+                } else if *slot >= BANK_BAG_SLOT_START && *slot < BANK_BAG_SLOT_END {
+                    let field_low =
+                        PLAYER_FIELD_BANKBAG_SLOT_1 + ((*slot - BANK_BAG_SLOT_START) as u32 * 2);
                     let field_high = field_low + 1;
 
                     if let Some(guid) = item_guid {

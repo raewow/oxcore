@@ -856,21 +856,31 @@ pub async fn handle_set_ammo(
 pub async fn handle_autobank_item(
     session: &crate::world::core::session::WorldSession,
     packet: &mut WorldPacket,
-    _world: &World,
+    world: &World,
 ) -> Result<()> {
-    let _bag = packet
+    let bag = packet
         .read_u8()
         .ok_or_else(|| anyhow!("Failed to read bag"))?;
-    let _slot = packet
+    let slot = packet
         .read_u8()
         .ok_or_else(|| anyhow!("Failed to read slot"))?;
 
-    let _player_guid = match session.player_guid() {
+    let player_guid = match session.player_guid() {
         Some(guid) => guid,
         None => return Ok(()),
     };
 
-    warn!("CMSG_AUTOBANK_ITEM received but not implemented");
+    let result = world
+        .systems
+        .inventory
+        .auto_bank_item(player_guid, bag, slot);
+    tracing::debug!(
+        "CMSG_AUTOBANK_ITEM: player={:?} bag={} slot={} result={:?}",
+        player_guid,
+        bag,
+        slot,
+        result
+    );
 
     Ok(())
 }
@@ -878,21 +888,31 @@ pub async fn handle_autobank_item(
 pub async fn handle_autostore_bank_item(
     session: &crate::world::core::session::WorldSession,
     packet: &mut WorldPacket,
-    _world: &World,
+    world: &World,
 ) -> Result<()> {
-    let _bag = packet
+    let bag = packet
         .read_u8()
         .ok_or_else(|| anyhow!("Failed to read bag"))?;
-    let _slot = packet
+    let slot = packet
         .read_u8()
         .ok_or_else(|| anyhow!("Failed to read slot"))?;
 
-    let _player_guid = match session.player_guid() {
+    let player_guid = match session.player_guid() {
         Some(guid) => guid,
         None => return Ok(()),
     };
 
-    warn!("CMSG_AUTOSTORE_BANK_ITEM received but not implemented");
+    let result = world
+        .systems
+        .inventory
+        .auto_store_bank_item(player_guid, bag, slot);
+    tracing::debug!(
+        "CMSG_AUTOSTORE_BANK_ITEM: player={:?} bag={} slot={} result={:?}",
+        player_guid,
+        bag,
+        slot,
+        result
+    );
 
     Ok(())
 }
