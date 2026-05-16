@@ -414,6 +414,9 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_NPC_TEXT_QUERY => {
                     gossip_handler::handle_npc_text_query(session, packet, world).await?;
                 }
+                Opcode::CMSG_BANKER_ACTIVATE => {
+                    gossip_handler::handle_banker_activate(session, packet, world).await?;
+                }
 
                 // Player handlers
                 Opcode::CMSG_SET_SELECTION => {

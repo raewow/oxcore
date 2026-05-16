@@ -10,7 +10,9 @@ use tracing::{debug, info, warn};
 use super::manager::GossipManager;
 use super::types::{gossip_option, GossipMenuItem, DEFAULT_GOSSIP_MESSAGE};
 use crate::shared::messages::gossip::{NpcTextOption, SmsgNpcTextUpdate};
-use crate::shared::messages::{GossipOptionData, SmsgGossipComplete, SmsgGossipMessage};
+use crate::shared::messages::{
+    GossipOptionData, SmsgGossipComplete, SmsgGossipMessage, SmsgShowBank,
+};
 use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::world::game::creature::CreatureManager;
@@ -255,10 +257,19 @@ impl GossipSystem {
                 info!("Taxi option selected - would open taxi window");
             }
             gossip_option::BANKER => {
-                // Close gossip, open bank
-                self.send_gossip_complete(player_guid);
-                // TODO: Open bank window
-                info!("Banker option selected - would open bank window");
+                info!(
+                    "Banker option selected for player {:?} from NPC {:?}",
+                    player_guid, npc_guid
+                );
+                self.broadcast_mgr.send_msg_to_player(
+                    player_guid,
+                    SmsgShowBank {
+                        banker_guid: npc_guid,
+                    },
+                );
+                if let Some(mut player) = self.player_mgr.get_player_mut(player_guid) {
+                    player.current_gossip_menu_id = None;
+                }
             }
             gossip_option::AUCTIONEER => {
                 // Close gossip, open auction

@@ -3,13 +3,15 @@
 //! Slim handlers that parse packets and delegate to GossipSystem.
 
 use anyhow::Result;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+
+const NPC_FLAG_BANKER: u32 = 0x00000100;
 
 /// Handle CMSG_GOSSIP_HELLO (0x17B)
 ///
@@ -373,6 +375,47 @@ pub async fn handle_gossip_select_option(
             }
         }
     }
+
+    Ok(())
+}
+
+/// Handle CMSG_BANKER_ACTIVATE (0x1B5)
+///
+/// Sent when the client activates a banker directly.
+/// Packet format: GUID (unpacked)
+pub async fn handle_banker_activate(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+
+    let banker_guid = packet
+        .read_guid()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read banker GUID"))?;
+
+    let can_use_banker = world
+        .managers
+        .creature_mgr
+        .get_creature(banker_guid)
+        .map(|creature| (creature.npc_flags & NPC_FLAG_BANKER) != 0)
+        .unwrap_or(false);
+
+    if !can_use_banker {
+        warn!(
+            "CMSG_BANKER_ACTIVATE rejected: player={:?}, banker={:?}",
+            player_guid, banker_guid
+        );
+        return Ok(());
+    }
+
+    info!(
+        "CMSG_BANKER_ACTIVATE: player={:?}, banker={:?}",
+        player_guid, banker_guid
+    );
+    session.send_msg(crate::shared::messages::SmsgShowBank { banker_guid })?;
 
     Ok(())
 }

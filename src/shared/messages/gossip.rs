@@ -8,6 +8,7 @@
 //! - [`SmsgGossipComplete`] - Close gossip window
 //! - [`SmsgGossipPoi`] - Point of Interest map marker
 //! - [`SmsgNpcTextUpdate`] - NPC text/greeting response
+//! - [`SmsgShowBank`] - Open bank window
 
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::packet::WorldPacketGuidExt;
@@ -102,6 +103,23 @@ pub struct SmsgGossipComplete;
 impl ToWorldPacket for SmsgGossipComplete {
     fn to_world_packet(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_GOSSIP_COMPLETE)
+    }
+}
+
+/// SMSG_SHOW_BANK (0x1B8) - Open bank window
+///
+/// Sent when a player interacts with a banker.
+#[derive(Debug, Clone)]
+pub struct SmsgShowBank {
+    /// Banker NPC GUID
+    pub banker_guid: ObjectGuid,
+}
+
+impl ToWorldPacket for SmsgShowBank {
+    fn to_world_packet(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_SHOW_BANK);
+        packet.write_guid(self.banker_guid);
+        packet
     }
 }
 
@@ -328,6 +346,20 @@ mod tests {
         assert_eq!(text, "Train");
         pos = next;
         assert_eq!(read_u32_le(data, pos), 0); // quests count
+    }
+
+    // ---- SMSG_SHOW_BANK ----
+
+    #[test]
+    fn smsg_show_bank_writes_raw_banker_guid() {
+        let guid = ObjectGuid::from_raw(0xF130_0000_0998_0001);
+        let msg = SmsgShowBank { banker_guid: guid };
+        let pkt = msg.to_world_packet();
+        let data = pkt.data();
+
+        assert_eq!(pkt.opcode(), Opcode::SMSG_SHOW_BANK);
+        assert_eq!(data.len(), 8);
+        assert_eq!(read_u64_le(data, 0), guid.raw());
     }
 
     // ---- SMSG_NPC_TEXT_UPDATE ----

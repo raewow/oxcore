@@ -3,7 +3,8 @@
 //! Covers the critical invariant fixed in this session:
 //! - TRAINER and VENDOR gossip options must NOT send SMSG_GOSSIP_COMPLETE before
 //!   their respective windows are opened (vmangos never calls CloseGossip() first).
-//! - Other options (INNKEEPER, BANKER, etc.) must send SMSG_GOSSIP_COMPLETE.
+//! - BANKER must send SMSG_SHOW_BANK with the banker GUID.
+//! - Other options such as INNKEEPER must send SMSG_GOSSIP_COMPLETE.
 
 use std::sync::Arc;
 
@@ -27,6 +28,7 @@ use crate::world::game::player::PlayerManager;
 #[derive(Clone, Debug)]
 struct CapturedPacket {
     opcode: Opcode,
+    data: Vec<u8>,
 }
 
 fn create_broadcaster_with_capture(
@@ -40,6 +42,7 @@ fn create_broadcaster_with_capture(
         while let Some(packet) = rx.recv().await {
             captured_clone.lock().push(CapturedPacket {
                 opcode: packet.opcode(),
+                data: packet.data().to_vec(),
             });
         }
     });
@@ -65,6 +68,27 @@ fn assert_packet_not_sent(captured: &Arc<Mutex<Vec<CapturedPacket>>>, opcode: Op
         "Unexpected {:?} was sent",
         opcode
     );
+}
+
+fn assert_show_bank_sent(captured: &Arc<Mutex<Vec<CapturedPacket>>>, banker_guid: ObjectGuid) {
+    let packets = captured.lock();
+    let packet = packets
+        .iter()
+        .find(|p| p.opcode == Opcode::SMSG_SHOW_BANK)
+        .unwrap_or_else(|| {
+            panic!(
+                "Expected SMSG_SHOW_BANK but only got: {:?}",
+                packets.iter().map(|p| p.opcode).collect::<Vec<_>>()
+            )
+        });
+
+    assert_eq!(
+        packet.data.len(),
+        8,
+        "SMSG_SHOW_BANK must contain one raw GUID"
+    );
+    let raw = u64::from_le_bytes(packet.data[0..8].try_into().unwrap());
+    assert_eq!(raw, banker_guid.raw());
 }
 
 // ========== HELPERS ==========
@@ -181,9 +205,9 @@ async fn innkeeper_option_sends_gossip_complete() {
     assert_packet_sent(&captured, Opcode::SMSG_GOSSIP_COMPLETE);
 }
 
-/// BANKER option MUST send SMSG_GOSSIP_COMPLETE.
+/// BANKER option must open the bank window.
 #[tokio::test]
-async fn banker_option_sends_gossip_complete() {
+async fn banker_option_sends_show_bank() {
     let (system, guid, captured) = setup_with_option(gossip_option::BANKER).await;
     let npc_guid = ObjectGuid::from_raw(0xF130_0000_00C6_0001);
 
@@ -191,5 +215,6 @@ async fn banker_option_sends_gossip_complete() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
 
-    assert_packet_sent(&captured, Opcode::SMSG_GOSSIP_COMPLETE);
+    assert_packet_not_sent(&captured, Opcode::SMSG_GOSSIP_COMPLETE);
+    assert_show_bank_sent(&captured, npc_guid);
 }
