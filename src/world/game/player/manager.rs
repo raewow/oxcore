@@ -44,9 +44,10 @@ impl PlayerManager {
 
     /// Initialize GUID generator from database MAX query
     pub async fn init_guid_generator(&self, character_db: &sqlx::MySqlPool) -> anyhow::Result<()> {
-        let max_guid: Option<u32> = sqlx::query_scalar("SELECT MAX(guid) FROM characters")
-            .fetch_optional(character_db)
-            .await?;
+        let max_guid: Option<u32> =
+            sqlx::query_scalar::<_, Option<u32>>("SELECT MAX(guid) FROM characters")
+                .fetch_one(character_db)
+                .await?;
 
         let next_guid = max_guid.map(|g| g + 1).unwrap_or(1);
         *self.guid_generator.write() = ObjectGuidGenerator::new(next_guid);

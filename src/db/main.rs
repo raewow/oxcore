@@ -9,7 +9,11 @@ mod db;
 use config::Config;
 
 #[derive(Parser)]
-#[command(name = "db", about = "Database tool for rcore")]
+#[command(
+    name = "db",
+    about = "Database tool for rcore",
+    after_help = commands::help::AFTER_HELP
+)]
 struct Cli {
     /// Path to configuration file (default: config.toml)
     #[arg(short = 'c', long)]
@@ -32,8 +36,6 @@ enum Command {
         /// Migration name (snake_case description)
         name: String,
     },
-    /// Show usage and examples
-    Help,
 }
 
 #[tokio::main]
@@ -42,10 +44,6 @@ async fn main() -> Result<()> {
     let config = Config::load(cli.config)?;
 
     match cli.command {
-        Command::Help => {
-            commands::help::run();
-            return Ok(());
-        }
         Command::Migrate => commands::migrate::run(&config).await?,
         Command::Status => commands::status::run(&config).await?,
         Command::New { db, name } => commands::new::run(&db, &name, &config.migrations_dir)?,

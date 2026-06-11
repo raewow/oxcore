@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use sqlx::mysql::MySqlConnectOptions;
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::MySqlPool;
 
@@ -11,15 +10,103 @@ pub async fn connect(url: &str) -> Result<MySqlPool> {
         .with_context(|| format!("Failed to connect to {}", mask(url)))
 }
 
-/// Try to connect, returning None with a message if the DB doesn't exist yet.
+/// Try to connect, creating the database first if needed.
 pub async fn try_connect(url: &str) -> Option<MySqlPool> {
+    if let Err(e) = ensure_database(url).await {
+        print_connection_error(url, &e);
+        return None;
+    }
+
     match connect(url).await {
         Ok(pool) => Some(pool),
         Err(e) => {
-            println!("  Could not connect: {e}");
+            print_connection_error(url, &e);
             None
         }
     }
+}
+
+async fn ensure_database(url: &str) -> Result<()> {
+    let parts = parse_mysql_url(url).context("Invalid MySQL connection URL")?;
+
+    let pool = MySqlPoolOptions::new()
+        .max_connections(1)
+        .connect(&parts.server_url)
+        .await
+        .with_context(|| format!("Failed to connect to MySQL server at {}", mask(&parts.server_url)))?;
+
+    let db = parts.database.replace('`', "``");
+    let sql = format!(
+        "CREATE DATABASE IF NOT EXISTS `{db}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    sqlx::query(&sql)
+        .execute(&pool)
+        .await
+        .with_context(|| format!("Failed to create database '{}'", parts.database))?;
+
+    Ok(())
+}
+
+struct MysqlUrlParts {
+    server_url: String,
+    database: String,
+}
+
+fn parse_mysql_url(url: &str) -> Option<MysqlUrlParts> {
+    let rest = url.strip_prefix("mysql://")?;
+    let (user_pass, host_db) = rest.split_once('@')?;
+    let (host_port, database) = host_db.rsplit_once('/')?;
+    if database.is_empty() {
+        return None;
+    }
+
+    Some(MysqlUrlParts {
+        server_url: format!("mysql://{user_pass}@{host_port}"),
+        database: database.to_string(),
+    })
+}
+
+fn print_connection_error(url: &str, err: &anyhow::Error) {
+    println!("  Could not connect to {}", mask(url));
+    println!("  {}", lowest_error_message(err));
+
+    if let Some(host) = parse_mysql_host(url) {
+        if host == "mysql" {
+            println!();
+            println!("  The hostname 'mysql' only works inside the Docker/Podman network.");
+            println!("  This tool runs on your host, so use 127.0.0.1 instead:");
+            if let Some(example) = local_dev_url(url) {
+                println!("    {example}");
+            }
+            println!();
+            println!("  Start MySQL with: podman compose up -d");
+            println!("  Password is 'root' (see docker-compose.yml).");
+        }
+    }
+}
+
+fn lowest_error_message(err: &anyhow::Error) -> String {
+    err.chain()
+        .last()
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| err.to_string())
+}
+
+fn parse_mysql_host(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("mysql://")?;
+    let after_at = rest.split('@').nth(1)?;
+    after_at.split('/').next()?.split(':').next()
+}
+
+fn local_dev_url(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("mysql://")?;
+    let (user_pass, host_db) = rest.split_once('@')?;
+    let (host_port, db) = host_db.split_once('/')?;
+
+    let user = user_pass.split(':').next()?;
+    let port = host_port.split(':').nth(1).unwrap_or("3306");
+
+    Some(format!("mysql://{user}:root@127.0.0.1:{port}/{db}"))
 }
 
 pub async fn ensure_migrations_table(pool: &MySqlPool) -> Result<()> {

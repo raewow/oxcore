@@ -487,10 +487,11 @@ impl InventoryRepository {
 
     /// Get next available item GUID
     pub async fn get_next_item_guid(&self) -> Result<u32> {
-        let max_guid: Option<u32> = sqlx::query_scalar("SELECT MAX(guid) FROM item_instance")
-            .fetch_one(&*self.pool)
-            .await
-            .context("Failed to get max item GUID")?;
+        let max_guid: Option<u32> =
+            sqlx::query_scalar::<_, Option<u32>>("SELECT MAX(guid) FROM item_instance")
+                .fetch_one(&*self.pool)
+                .await
+                .context("Failed to get max item GUID")?;
 
         Ok(max_guid.unwrap_or(0) + 1)
     }

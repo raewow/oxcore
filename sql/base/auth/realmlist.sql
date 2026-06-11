@@ -23,6 +23,7 @@ CREATE TABLE `realmlist` (
   `gamebuild_max` int unsigned NOT NULL DEFAULT '0',
   `flag` tinyint unsigned NOT NULL DEFAULT '2',
   `realmbuilds` varchar(64) NOT NULL DEFAULT '',
+  `last_seen` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `idx_name` (`name`)
 ) ENGINE=MyISAM AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb3 ROW_FORMAT=DYNAMIC COMMENT='Realm System';

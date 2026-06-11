@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
 
 use wow_server::shared::config::{find_config_file, RootConfig};
@@ -18,7 +18,25 @@ pub struct Config {
 impl Config {
     pub fn load(config_path: Option<PathBuf>) -> Result<Self> {
         let path = config_path.unwrap_or_else(find_config_file);
-        let root = RootConfig::load(&path)?;
+
+        if !path.exists() {
+            bail!(
+                "Config file not found: {}\n\
+                 \n\
+                 Create one from the example:\n\
+                   cp config.toml.example config.toml\n\
+                 \n\
+                 When running this tool on your host (not inside Docker), database URLs\n\
+                 must use 127.0.0.1 instead of the 'mysql' service hostname:\n\
+                   mysql://root:root@127.0.0.1:3306/world\n\
+                 \n\
+                 Or pass a different file: cargo run --bin db -- -c /path/to/config.toml",
+                path.display()
+            );
+        }
+
+        let root = RootConfig::load(&path)
+            .with_context(|| format!("Failed to load config: {}", path.display()))?;
         let w = root.world;
 
         let sql_dir = find_sql_dir();

@@ -1,10 +1,13 @@
-# Example configuration file for rcore server
-# Copy this file to config.toml and modify as needed
+# oxcore server configuration
+# Copy this file to config.toml and modify as needed:
+#   cp config.toml.example config.toml
+#
+# Default URLs match docker-compose.yml (MySQL on localhost:3306, root password "root").
+# Start MySQL with: podman compose up -d
 
 [auth]
 # Database connection URL (MySQL format)
-# Format: mysql://[user[:password]@]host[:port]/database
-login_database_url = "mysql://root@127.0.0.1:3306/auth"
+login_database_url = "mysql://root:root@127.0.0.1:3306/auth"
 
 # Network settings
 realm_server_port = 3724
@@ -41,10 +44,10 @@ ban_type = 0
 realm_id = 1
 
 # Database connection URLs (MySQL format)
-world_database_url = "mysql://root@127.0.0.1:3306/world"
-character_database_url = "mysql://root@127.0.0.1:3306/characters"
-login_database_url = "mysql://root@127.0.0.1:3306/auth"
-logs_database_url = "mysql://root@127.0.0.1:3306/logs"
+world_database_url = "mysql://root:root@127.0.0.1:3306/world"
+character_database_url = "mysql://root:root@127.0.0.1:3306/characters"
+login_database_url = "mysql://root:root@127.0.0.1:3306/auth"
+logs_database_url = "mysql://root:root@127.0.0.1:3306/logs"
 
 # Network settings
 world_server_port = 8085
@@ -66,4 +69,3 @@ log_file_level = 2
 # Performance
 max_players = 100
 player_limit = 0
-

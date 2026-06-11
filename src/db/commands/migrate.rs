@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use crate::config::Config;
 use crate::db;
@@ -11,13 +11,17 @@ const DATABASES: &[(&str, fn(&Config) -> &str)] = &[
 ];
 
 pub async fn run(config: &Config) -> Result<()> {
+    let mut connected = 0;
+
     for (db_name, url_fn) in DATABASES {
         let url = url_fn(config);
         println!("[{db_name}]");
 
         let Some(pool) = db::try_connect(url).await else {
+            println!();
             continue;
         };
+        connected += 1;
 
         db::ensure_migrations_table(&pool).await?;
 
@@ -51,6 +55,10 @@ pub async fn run(config: &Config) -> Result<()> {
         }
 
         println!();
+    }
+
+    if connected == 0 {
+        bail!("No databases could be reached. Fix the URLs in config.toml and try again.");
     }
 
     Ok(())

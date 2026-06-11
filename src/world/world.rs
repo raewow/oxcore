@@ -205,7 +205,8 @@ impl World {
         self.managers
             .player_mgr
             .init_guid_generator(&self.databases.character)
-            .await?;
+            .await
+            .context("Failed to initialize player GUID generator")?;
 
         // Load item templates
         self.managers
