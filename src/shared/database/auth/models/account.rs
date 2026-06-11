@@ -1,4 +1,4 @@
-use sqlx::types::chrono::NaiveDateTime;
+use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::FromRow;
 
 /// Represents a row from the `account` table in auth database.
@@ -14,15 +14,15 @@ pub struct AccountRow {
     pub reg_mail: String,
     pub token_key: String,
     pub email: Option<String>,
-    pub joindate: NaiveDateTime,
+    pub joindate: DateTime<Utc>,
     pub last_ip: String,
     pub last_attempt_ip: String,
     pub last_local_ip: String,
     pub failed_logins: u32,
     pub locked: u8,
     pub lock_country: String,
-    pub last_login: NaiveDateTime,
-    pub last_pwd_reset: NaiveDateTime,
+    pub last_login: DateTime<Utc>,
+    pub last_pwd_reset: DateTime<Utc>,
     pub online: u8,
     pub expansion: u8,
     pub mutetime: i64,
@@ -39,10 +39,10 @@ pub struct AccountRow {
     pub flags: u32,
     pub security: Option<String>,
     pub pass_verif: Option<String>,
-    pub email_verif: u8,
+    pub email_verif: bool,
     pub email_check: Option<String>,
     pub nostalrius_token: Option<String>,
-    pub nostalrius_token_enabled: u8,
+    pub nostalrius_token_enabled: bool,
     pub nostalrius_email: Option<String>,
     pub nostalrius_reason: Option<String>,
     pub geolock_pin: Option<i32>,

@@ -106,6 +106,22 @@ target\release\auth.exe
 
 The auth server will start on port 3724 (default) and handle client authentication.
 
+Once the auth server is running, use the console prompt (`server>`) to create accounts and set GM levels:
+
+```text
+account create myuser mypassword
+account setgm myuser
+```
+
+`account setgm` defaults to the maximum GM level (7). You can set it explicitly when creating an account or afterwards:
+
+```text
+account create myuser mypassword 7
+account setgm myuser 7
+```
+
+Type `help` at the `server>` prompt for other console commands.
+
 ### Step 3: Start the World Server
 
 In a separate terminal:

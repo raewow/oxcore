@@ -1,7 +1,9 @@
 use super::super::models::account::*;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use sqlx::MySqlPool;
 use std::sync::Arc;
+use wow_srp::normalized_string::NormalizedString;
+use wow_srp::server::SrpVerifier;
 
 #[derive(Clone)]
 pub struct AccountRepository {
@@ -32,7 +34,7 @@ impl AccountRepository {
         .bind(username)
         .fetch_optional(&*self.pool)
         .await
-        .context("Failed to find account by username")
+        .map_err(|e| anyhow!("Failed to find account by username: {:#}", e))
     }
 
     /// Find account by ID
@@ -52,7 +54,7 @@ impl AccountRepository {
         .bind(id)
         .fetch_optional(&*self.pool)
         .await
-        .context("Failed to find account by ID")
+        .map_err(|e| anyhow!("Failed to find account by ID: {:#}", e))
     }
 
     /// Check if account is banned (active ban check)
@@ -139,6 +141,68 @@ impl AccountRepository {
     }
 
     // ========== COMMAND METHODS (Write Operations) ==========
+
+    /// Create a new account with SRP6 credentials.
+    pub async fn create_account(&self, username: &str, password: &str) -> Result<u32> {
+        let username_norm = NormalizedString::new(username)
+            .map_err(|e| anyhow!("Invalid username: {}", e))?;
+        let password_norm = NormalizedString::new(password)
+            .map_err(|e| anyhow!("Invalid password: {}", e))?;
+
+        let verifier = SrpVerifier::from_username_and_password(username_norm, password_norm);
+        let stored_username = verifier.username().to_string();
+
+        if self.find_by_username(&stored_username).await?.is_some() {
+            return Err(anyhow!("Account '{}' already exists", stored_username));
+        }
+        let salt_hex = hex::encode_upper(verifier.salt());
+        let v_hex = hex::encode_upper(verifier.password_verifier());
+
+        let result = sqlx::query(
+            "INSERT INTO `account` (`username`, `v`, `s`) VALUES (?, ?, ?)",
+        )
+        .bind(&stored_username)
+        .bind(&v_hex)
+        .bind(&salt_hex)
+        .execute(&*self.pool)
+        .await
+        .context("Failed to create account")?;
+
+        Ok(result.last_insert_id() as u32)
+    }
+
+    /// Set the gmlevel column on an account.
+    pub async fn set_gmlevel(&self, account_id: u32, gmlevel: u8) -> Result<()> {
+        sqlx::query("UPDATE `account` SET `gmlevel` = ? WHERE `id` = ?")
+            .bind(gmlevel)
+            .bind(account_id)
+            .execute(&*self.pool)
+            .await
+            .context("Failed to set account gmlevel")?;
+        Ok(())
+    }
+
+    /// Set per-realm GM access (-1 = all realms).
+    pub async fn upsert_account_access(
+        &self,
+        account_id: u32,
+        gmlevel: u8,
+        realm_id: i32,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"INSERT INTO `account_access` (`id`, `gmlevel`, `RealmID`)
+               VALUES (?, ?, ?)
+               ON DUPLICATE KEY UPDATE `gmlevel` = ?"#,
+        )
+        .bind(account_id)
+        .bind(gmlevel)
+        .bind(realm_id)
+        .bind(gmlevel)
+        .execute(&*self.pool)
+        .await
+        .context("Failed to set account access")?;
+        Ok(())
+    }
 
     /// Update session key after successful login
     pub async fn update_session_key(&self, account_id: u32, session_key: &str) -> Result<()> {

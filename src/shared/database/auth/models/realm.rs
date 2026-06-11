@@ -1,4 +1,4 @@
-use sqlx::types::chrono::NaiveDateTime;
+use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::FromRow;
 
 /// Represents a row from the `realmlist` table in the auth database.
@@ -23,7 +23,7 @@ pub struct RealmRow {
     pub gamebuild_max: u32,
     pub flag: u8,
     pub realmbuilds: String,
-    pub last_seen: Option<NaiveDateTime>,
+    pub last_seen: Option<DateTime<Utc>>,
 }
 
 /// Represents a row from the `realmcharacters` table in the auth database.

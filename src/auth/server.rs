@@ -1,21 +1,17 @@
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::auth::auth::AuthSocket;
-use crate::auth::config::Config;
-use crate::auth::database::Database;
-use crate::auth::metrics::Metrics;
+use crate::auth::context::AuthServer;
 use crate::auth::patch::PatchCache;
 use crate::auth::realm::{AllowedBuilds, RealmList};
 
-pub async fn start_server(
-    config: &Config,
-    database: Database,
-    shutdown: broadcast::Receiver<()>,
-) -> Result<()> {
+pub async fn start_server(server: Arc<AuthServer>, mut shutdown: tokio::sync::broadcast::Receiver<()>) -> Result<()> {
+    let config = &server.config;
+    let database = server.database.clone();
+
     let addr = format!("{}:{}", config.bind_ip, config.realm_server_port);
     let listener = TcpListener::bind(&addr)
         .await
@@ -23,7 +19,7 @@ pub async fn start_server(
 
     info!("auth server listening on {}", addr);
 
-    let metrics = Arc::new(Metrics::new());
+    let metrics = server.metrics.clone();
 
     let metrics_log = metrics.clone();
     let mut metrics_shutdown = shutdown.resubscribe();
@@ -107,9 +103,14 @@ pub async fn start_server(
     });
 
     let mut connection_tasks = Vec::new();
-    let mut shutdown_rx = shutdown;
+    let mut console_interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
 
     loop {
+        if !server.is_running() {
+            info!("Shutdown signal received, closing server...");
+            break;
+        }
+
         tokio::select! {
             result = listener.accept() => {
                 match result {
@@ -126,7 +127,7 @@ pub async fn start_server(
                         let builds = allowed_builds.clone();
                         let cfg = config.clone();
                         let metrics_clone = metrics.clone();
-                        let mut conn_shutdown = shutdown_rx.resubscribe();
+                        let mut conn_shutdown = shutdown.resubscribe();
 
                         let task = tokio::spawn(async move {
                             let socket = AuthSocket::new(
@@ -162,7 +163,11 @@ pub async fn start_server(
                 }
             }
 
-            _ = shutdown_rx.recv() => {
+            _ = console_interval.tick() => {
+                server.process_console_commands().await;
+            }
+
+            _ = shutdown.recv() => {
                 info!("Shutdown signal received, closing server...");
                 break;
             }

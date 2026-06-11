@@ -26,7 +26,7 @@ CREATE TABLE `realmlist` (
   `last_seen` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `idx_name` (`name`)
-) ENGINE=MyISAM AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb3 ROW_FORMAT=DYNAMIC COMMENT='Realm System';
+) ENGINE=MyISAM AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb3 ROW_FORMAT=DYNAMIC COMMENT='Realm System';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -36,8 +36,7 @@ CREATE TABLE `realmlist` (
 LOCK TABLES `realmlist` WRITE;
 /*!40000 ALTER TABLE `realmlist` DISABLE KEYS */;
 INSERT INTO `realmlist` (`id`, `name`, `address`, `localAddress`, `localSubnetMask`, `port`, `icon`, `realmflags`, `timezone`, `allowedSecurityLevel`, `population`, `gamebuild_min`, `gamebuild_max`, `flag`, `realmbuilds`) VALUES
-(1, 'Mangos', '127.0.0.1', '127.0.0.1', '255.255.255.0', 8086, 0, 0, 1, 0, 0.02, 0, 0, 2, '5875 6005 6141 '),
-(2, 'Rcore', '127.0.0.1', '127.0.0.1', '255.255.255.0', 8085, 0, 0, 0, 0, 0, 0, 0, 2, '5875 6005 6141');
+(1, 'oxcore', '127.0.0.1', '127.0.0.1', '255.255.255.0', 8085, 0, 0, 0, 0, 0, 0, 0, 2, '5875 6005 6141');
 /*!40000 ALTER TABLE `realmlist` ENABLE KEYS */;
 UNLOCK TABLES;
 

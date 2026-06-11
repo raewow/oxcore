@@ -26,6 +26,8 @@ pub struct Config {
     // Realm Settings
     #[serde(default = "default_realm_id")]
     pub realm_id: i32, // Realm ID (default: 1, -1 means all realms)
+    #[serde(default = "default_realm_name")]
+    pub realm_name: String,
 
     // Session Settings
     #[serde(default = "default_session_idle_timeout")]
@@ -218,6 +220,10 @@ fn default_realm_id() -> i32 {
     1
 }
 
+fn default_realm_name() -> String {
+    "oxcore".to_string()
+}
+
 fn default_logout_timer() -> u32 {
     20 // Blizzlike 20 seconds, set to 0 for instant logout
 }
@@ -375,6 +381,7 @@ impl Default for Config {
             data_dir: default_data_dir(),
             world_update_interval: default_world_update_interval(),
             realm_id: default_realm_id(),
+            realm_name: default_realm_name(),
             logout_timer: default_logout_timer(),
             session_idle_timeout: default_session_idle_timeout(),
             max_players: default_max_players(),

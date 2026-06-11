@@ -1,5 +1,5 @@
 use super::super::models::realm::*;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use sqlx::MySqlPool;
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ impl RealmRepository {
         )
         .fetch_all(&*self.pool)
         .await
-        .context("Failed to load active realms")
+        .map_err(|e| anyhow!("Failed to load active realms: {:#}", e))
     }
 
     /// Find all realms (including offline)

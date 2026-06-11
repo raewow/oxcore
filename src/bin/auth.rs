@@ -1,12 +1,15 @@
 use anyhow::Result;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{error, info};
 
-use wow_server::auth::config::Config;
+use wow_server::auth::context::AuthServer;
 use wow_server::auth::init::initialize_database;
 use wow_server::auth::logging;
+use wow_server::auth::metrics::Metrics;
 use wow_server::auth::server::start_server;
 use wow_server::shared::config::{find_config_file, RootConfig};
+use wow_server::shared::console::run_console_input;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -35,26 +38,32 @@ async fn main() -> Result<()> {
 
     logging::init(&config)?;
 
-    print_banner();
-
-    info!("auth server starting up...");
-    info!("Configuration loaded from: {}", config_path.display());
-
     let database = match initialize_database(&config).await {
         Ok(db) => db,
         Err(e) => {
+            logging::init_basic()?;
             error!("Failed to initialize database: {}", e);
             eprintln!("Error: Failed to connect to database: {}", e);
             std::process::exit(1);
         }
     };
 
-    info!("auth server initialized successfully");
-    info!("Bind IP: {}", config.bind_ip);
-    info!("Port: {}", config.realm_server_port);
-    info!("Patches directory: {}", config.patches_dir.display());
-
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+
+    let auth_server = Arc::new(AuthServer::new(
+        config.clone(),
+        database,
+        Arc::new(Metrics::new()),
+        shutdown_tx.clone(),
+    ));
+
+    let (console_tx, console_rx) = tokio::sync::mpsc::channel(100);
+    auth_server.set_console_receiver(console_rx).await;
+
+    let shutdown_rx_console = shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        run_console_input(console_tx, shutdown_rx_console).await;
+    });
 
     let shutdown_tx_clone = shutdown_tx.clone();
     tokio::spawn(async move {
@@ -95,7 +104,16 @@ async fn main() -> Result<()> {
         }
     });
 
-    if let Err(e) = start_server(&config, database, shutdown_rx).await {
+    print_banner();
+
+    info!("auth server starting up...");
+    info!("Configuration loaded from: {}", config_path.display());
+    info!("auth server initialized successfully");
+    info!("Bind IP: {}", config.bind_ip);
+    info!("Port: {}", config.realm_server_port);
+    info!("Patches directory: {}", config.patches_dir.display());
+
+    if let Err(e) = start_server(auth_server, shutdown_rx).await {
         error!("Server error: {}", e);
         return Err(e);
     }

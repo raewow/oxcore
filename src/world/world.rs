@@ -569,8 +569,9 @@ impl World {
         // TODO magic string and swap to repository - create some realm system in core to handle this and heartbeat
         let builds = "5875 6005 6141";
         match sqlx::query(
-            "UPDATE `realmlist` SET `realmflags` = `realmflags` & ~(2), `population` = 0, `realmbuilds` = ?, `last_seen` = NOW() WHERE `id` = ?"
+            "UPDATE `realmlist` SET `name` = ?, `realmflags` = `realmflags` & ~(2), `population` = 0, `realmbuilds` = ?, `last_seen` = NOW() WHERE `id` = ?"
         )
+        .bind(&config.realm_name)
         .bind(builds)
         .bind(self.get_realm_id())
         .execute(&self.databases.auth).await

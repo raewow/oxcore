@@ -90,6 +90,8 @@ async fn main() -> Result<()> {
     world_config.log_file = config.log_file.clone();
     world_config.logs_dir = config.logs_dir.clone();
     world_config.realm_heartbeat_interval = config.realm_heartbeat_interval;
+    world_config.realm_id = config.realm_id;
+    world_config.realm_name = config.realm_name.clone();
     let world_config_for_start = world_config.clone();
     let world_config = Arc::new(world_config);
     let world = Arc::new(World::new(

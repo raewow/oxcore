@@ -66,9 +66,7 @@ impl RealmList {
 
         for row in rows {
             let port: u16 = row.port.max(0) as u16;
-            let last_seen_utc = row
-                .last_seen
-                .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+            let last_seen_utc = row.last_seen;
 
             let valid_flags = row.realmflags & REALM_FLAG_VALID_MASK;
             let mut flag = if row.realmflags != valid_flags {

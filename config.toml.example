@@ -40,8 +40,9 @@ ban_time = 600
 ban_type = 0
 
 [world]
-# Realm ID (1 = first realm, -1 = all realms)
+# Realm ID — must match the `id` column in auth.realmlist for this world server
 realm_id = 1
+realm_name = "oxcore"
 
 # Database connection URLs (MySQL format)
 world_database_url = "mysql://root:root@127.0.0.1:3306/world"

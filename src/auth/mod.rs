@@ -1,6 +1,8 @@
 pub mod auth;
 pub mod common;
 pub mod config;
+pub mod console;
+pub mod context;
 pub mod database;
 pub mod init;
 pub mod logging;
