@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { MigrationTask, TaskStatus, TaskWithDetails } from "../../models/index.js";
+import * as claimRepo from "./behaviourClaim.js";
 
 export function upsertTask(
   db: Database.Database,
@@ -59,6 +60,19 @@ export function getTaskBySymbolId(
   return db
     .prepare("SELECT * FROM migration_task WHERE source_symbol_id = ?")
     .get(symbolId) as MigrationTask | undefined;
+}
+
+/** True when an extract job should process this task (not already documented). */
+export function taskNeedsExtract(db: Database.Database, taskId: number): boolean {
+  const task = getTaskById(db, taskId);
+  if (!task) return false;
+  if (task.status !== "discovered") return false;
+  if (claimRepo.countClaimsForSymbol(db, task.source_symbol_id) > 0) return false;
+  return true;
+}
+
+export function filterTaskIdsForExtract(db: Database.Database, taskIds: number[]): number[] {
+  return taskIds.filter((id) => taskNeedsExtract(db, id));
 }
 
 export function updateTaskStatus(db: Database.Database, id: number, status: TaskStatus): void {

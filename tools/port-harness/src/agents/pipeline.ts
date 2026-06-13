@@ -55,6 +55,14 @@ export async function runExtract(
     return { success: true, skipped: true };
   }
 
+  if (!force && claimRepo.countClaimsForSymbol(db, symbol.id) > 0) {
+    activity?.log(`Skipped ${symbolName} (already has behaviour claims)`);
+    if (task?.status === "discovered") {
+      taskRepo.upsertTask(db, symbol.id, { status: "documented" });
+    }
+    return { success: true, skipped: true };
+  }
+
   activity?.setCurrent(symbolName);
   activity?.log(`Extracting behaviour for ${symbolName}`);
   activity?.log("Waiting for Cursor agent…");
@@ -833,6 +841,10 @@ export async function runPipelineJob(
         case "extract": {
           if (!symbol) {
             activity.log(`No symbol for task ${taskId}, skipping`);
+            break;
+          }
+          if (!taskRepo.taskNeedsExtract(db, taskId)) {
+            activity.log(`Skipped ${label} (already extracted)`);
             break;
           }
           await runExtract(db, config, provider, symbol.name, undefined, false, activity);

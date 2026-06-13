@@ -1,0 +1,161 @@
+/// Row from auction JOIN item_instance for LoadAuctionItems.
+#[derive(FromRow, Debug, Clone)]
+pub struct AuctionItemLoadRow {
+    pub creator_guid: u32,
+    pub gift_creator_guid: u32,
+    pub count: u32,
+    pub duration: i32,
+    pub charges: Option<String>,
+    pub flags: u32,
+    pub enchantments: String,
+    pub random_property_id: i16,
+    pub durability: u16,
+    pub text: u32,
+    pub item_guid: u32,
+    pub item_id: u32,
+}
+
+// AuctionHouseManager field addition:
+// item_mgr: Arc<ItemManager>,
+
+// AuctionHouseManager::new parameter addition:
+// item_mgr: Arc<ItemManager>,
+
+pub async fn load_auction_items(&self) -> Result<()> {
+    let query_result = sqlx::query_as::<_, AuctionItemLoadRow>(
+        "SELECT `creator_guid`, `gift_creator_guid`, `count`, `duration`, `charges`, `flags`, `enchantments`, `random_property_id`, `durability`, `text`, `item_guid`, `item_instance`.`item_id` FROM `auction` JOIN `item_instance` ON `item_guid` = `guid`",
+    )
+    .fetch_all(&*self.character_db)
+    .await;
+
+    // TODO: C++ treats null QueryResult the same as empty table; query failures follow that path too.
+    let rows = match query_result {
+        Ok(rows) => rows,
+        Err(_) => {
+            let mut bar = BarGoLink::new(1);
+            bar.step();
+            info!("");
+            info!(">> Loaded 0 auction items");
+            return Ok(());
+        }
+    };
+
+    let mut bar = BarGoLink::new(rows.len() as u32);
+    let mut count: u32 = 0;
+
+    for row in rows {
+        bar.step();
+
+        let item_guid = row.item_guid;
+        let item_id = row.item_id;
+
+        let proto = self.item_mgr.get_template(item_id);
+
+        if proto.is_none() {
+            error!(
+                "AuctionHouseMgr::LoadAuctionItems: Unknown item (GUID: {} id: #{}) in auction, skipped.",
+                item_guid, item_id
+            );
+            continue;
+        }
+        let proto = proto.unwrap();
+
+        let Some(item) = Self::load_auction_item_from_row(item_guid, item_id, &row, &proto) else {
+            continue;
+        };
+
+        self.add_a_item(Arc::new(item));
+        count = count.saturating_add(1);
+    }
+
+    info!("");
+    info!(">> Loaded {} auction items", count);
+    Ok(())
+}
+
+fn add_a_item(&self, item: Arc<Item>) {
+    let guid_low = item.guid.low();
+    assert!(guid_low != 0);
+    assert!(
+        !self.auction_items.contains_key(&guid_low),
+        "duplicate auction item GUID {guid_low}"
+    );
+    self.auction_items.insert(guid_low, item);
+}
+
+fn load_auction_item_from_row(
+    item_guid: u32,
+    item_id: u32,
+    row: &AuctionItemLoadRow,
+    proto: &ItemTemplate,
+) -> Option<Item> {
+    let guid = ObjectGuid::new_without_entry(HighGuid::Item, item_guid);
+    let owner_guid = ObjectGuid::empty();
+
+    let enchantments = Self::parse_enchantments(&row.enchantments);
+    let creator_guid = if row.creator_guid != 0 {
+        Some(ObjectGuid::new_without_entry(
+            HighGuid::Player,
+            row.creator_guid,
+        ))
+    } else {
+        None
+    };
+    let gift_creator_guid = if row.gift_creator_guid != 0 {
+        Some(ObjectGuid::new_without_entry(
+            HighGuid::Player,
+            row.gift_creator_guid,
+        ))
+    } else {
+        None
+    };
+
+    // TODO: Exact Item::LoadFromDB validation/failure conditions are not yet ported.
+    let _ = row.text;
+    Some(Item::from_db_row(
+        guid,
+        item_id,
+        row.count,
+        owner_guid,
+        0,
+        0,
+        row.flags,
+        row.durability as u32,
+        proto.max_durability,
+        enchantments,
+        row.random_property_id as i32,
+        creator_guid,
+        gift_creator_guid,
+        row.duration as u32,
+        Self::parse_spell_charges(row.charges.as_deref()),
+    ))
+}
+
+fn parse_enchantments(enchantments_str: &str) -> Vec<(u32, u32, u32)> {
+    let values: Vec<u32> = enchantments_str
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    let mut enchantments = Vec::new();
+    for i in (0..values.len()).step_by(3) {
+        if i + 2 < values.len() {
+            enchantments.push((values[i], values[i + 1], values[i + 2]));
+        }
+    }
+    enchantments
+}
+
+fn parse_spell_charges(charges_str: Option<&str>) -> [i32; 5] {
+    let mut charges = [0i32; 5];
+    if let Some(s) = charges_str {
+        let values: Vec<i32> = s
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        for (i, value) in values.iter().enumerate().take(5) {
+            charges[i] = *value;
+        }
+    }
+    charges
+}

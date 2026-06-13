@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type Database from "better-sqlite3";
 import type { HarnessConfig } from "../../config.js";
 import * as flowRepo from "../../db/repositories/businessFlow.js";
+import * as flowProgressRepo from "../../db/repositories/flowProgress.js";
 import * as taskRepo from "../../db/repositories/migrationTask.js";
 import * as jobsRepo from "../../db/repositories/jobs.js";
 import {
@@ -59,7 +60,7 @@ export function createFlowsRoutes(
   const app = new Hono();
 
   app.get("/", (c) => {
-    const flows = flowRepo.listFlowsWithStats(db);
+    const flows = flowProgressRepo.listFlowsWithProgress(db);
     return c.json(flows);
   });
 
@@ -182,6 +183,34 @@ export function createFlowsRoutes(
       totalTasks: taskIds.length,
       batches: jobIds.length,
     });
+  });
+
+  app.post("/:id/done", async (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    const flow = flowRepo.getFlowById(db, id);
+    if (!flow) return c.json({ error: "Not found" }, 404);
+
+    const body = (await c.req.json<{ taskIds?: number[] }>().catch(() => ({}))) as {
+      taskIds?: number[];
+    };
+
+    const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000 });
+    const flowTasks = tasks.filter((t) => t.flow_id === id);
+
+    let taskIds = body.taskIds?.filter((taskId) => flowTasks.some((t) => t.id === taskId));
+    if (!taskIds?.length) {
+      taskIds = flowTasks
+        .filter((t) => t.status !== "done" && t.status !== "reviewed")
+        .map((t) => t.id);
+    }
+
+    if (!taskIds.length) {
+      return c.json({ error: "No symbols to mark done" }, 400);
+    }
+
+    taskRepo.bulkUpdateTasks(db, taskIds, { status: "done" });
+
+    return c.json({ ok: true, updated: taskIds.length });
   });
 
   return app;

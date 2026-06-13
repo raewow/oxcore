@@ -174,7 +174,15 @@ export function createJobsRoutes(
 
     const newJobId = jobsRepo.cloneJobRemaining(db, id);
     if (newJobId === null) {
-      return c.json({ error: "Nothing to continue — job finished or not resumable" }, 400);
+      return c.json(
+        {
+          error:
+            (job as { stage: string }).stage === "extract"
+              ? "Nothing to continue — remaining symbols are already extracted"
+              : "Nothing to continue — job finished or not resumable",
+        },
+        400,
+      );
     }
 
     jobQueue.enqueue(newJobId);

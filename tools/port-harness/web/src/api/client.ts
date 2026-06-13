@@ -36,6 +36,26 @@ export interface Stats {
   warnings: { blocked: number; missing_docs: number };
 }
 
+export interface FlowProgressSummary {
+  total: number;
+  audited: number;
+  complete: number;
+  partial: number;
+  missing: number;
+  incorrect: number;
+  reviewed: number;
+  passed: number;
+  planned: number;
+  ported: number;
+  needs_audit: number;
+  needs_plan: number;
+  needs_port: number;
+  needs_review: number;
+  done: number;
+  stage: "empty" | "audit" | "plan" | "port" | "review" | "done";
+  percent: number;
+}
+
 export interface FlowSummary {
   id: number;
   name: string;
@@ -43,6 +63,7 @@ export interface FlowSummary {
   source_file: string | null;
   risk_level: string;
   symbol_count: number;
+  progress: FlowProgressSummary;
 }
 
 export interface JobTarget {
@@ -228,6 +249,12 @@ export const api = {
       `/flows/${id}/port`,
       { method: "POST" },
     ),
+
+  markFlowDone: (id: number, taskIds?: number[]) =>
+    fetchJson<{ ok: boolean; updated: number }>(`/flows/${id}/done`, {
+      method: "POST",
+      body: JSON.stringify(taskIds?.length ? { taskIds } : {}),
+    }),
 
   getSymbolSource: (id: number) =>
     fetchJson<{ symbol: unknown; snippet: string; start_line: number; end_line: number }>(

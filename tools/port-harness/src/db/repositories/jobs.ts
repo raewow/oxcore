@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { JobStatus } from "../../models/index.js";
+import { filterTaskIdsForExtract } from "./migrationTask.js";
 
 const STAGE_LABELS: Record<string, string> = {
   extract: "Extract behaviour",
@@ -350,7 +351,7 @@ export function cloneJobRemaining(db: Database.Database, id: number): number | n
   if (!["failed", "cancelled"].includes(job.status)) return null;
   if (job.progress >= job.total) return null;
 
-  let remaining: number[] | Record<string, unknown>;
+  let remaining: number[];
   try {
     const parsed = JSON.parse(job.target_ids);
     if (job.stage === "assemble-flows" || job.stage === "discover") {
@@ -361,6 +362,11 @@ export function cloneJobRemaining(db: Database.Database, id: number): number | n
     if (!remaining.length) return null;
   } catch {
     return null;
+  }
+
+  if (job.stage === "extract") {
+    remaining = filterTaskIdsForExtract(db, remaining);
+    if (!remaining.length) return null;
   }
 
   return createJob(db, job.stage, remaining);

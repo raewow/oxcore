@@ -186,6 +186,7 @@ export function FlowDetail() {
 
   const invalidateFlow = () => {
     queryClient.invalidateQueries({ queryKey: ["flow", flowId] });
+    queryClient.invalidateQueries({ queryKey: ["flows"] });
     queryClient.invalidateQueries({ queryKey: ["jobs"] });
     queryClient.invalidateQueries({ queryKey: ["tasks"] });
   };
@@ -210,6 +211,11 @@ export function FlowDetail() {
     onSuccess: invalidateFlow,
   });
 
+  const markDoneMutation = useMutation({
+    mutationFn: (taskIds?: number[]) => api.markFlowDone(flowId, taskIds),
+    onSuccess: invalidateFlow,
+  });
+
   if (isLoading) return <div>Loading...</div>;
   if (!data) return <div>Flow not found</div>;
 
@@ -218,6 +224,9 @@ export function FlowDetail() {
   const needsPlan = flow.tasks.filter((t) => t.next_action === "plan").length;
   const needsAudit = flow.tasks.filter((t) => t.next_action === "audit").length;
   const needsPort = flow.tasks.filter((t) => t.next_action === "port").length;
+  const canMarkDone = flow.tasks.filter(
+    (t) => t.status !== "done" && t.status !== "reviewed",
+  ).length;
   const activeJobs = flow.pipeline_jobs.filter(
     (j) => j.status === "running" || j.status === "queued" || j.display_status === "pausing",
   );
@@ -275,6 +284,22 @@ export function FlowDetail() {
             }}
           >
             {portMutation.isPending ? "Queueing…" : `Port drafts (${needsPort})`}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={markDoneMutation.isPending || canMarkDone === 0}
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Mark ${canMarkDone} symbol(s) as done? Use this when you've finished the Rust implementation.`,
+                )
+              ) {
+                markDoneMutation.mutate(undefined);
+              }
+            }}
+          >
+            {markDoneMutation.isPending ? "Saving…" : `Mark done (${canMarkDone})`}
           </button>
           <Link to="/jobs" className="btn btn-secondary">
             Jobs
@@ -461,29 +486,38 @@ export function FlowDetail() {
                 </td>
                 <td style={{ fontSize: "0.85rem" }}>{NEXT_ACTION_LABELS[t.next_action]}</td>
                 <td onClick={(e) => e.stopPropagation()}>
-                  {t.next_action === "port" && (
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      disabled={portTaskMutation.isPending}
-                      onClick={() => {
-                        if (window.confirm(`Port ${t.symbol_name}?`)) {
-                          portTaskMutation.mutate(t.id);
-                        }
-                      }}
-                    >
-                      Port
-                    </button>
-                  )}
-                  {t.next_action === "plan" && (
-                    <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>use Plan changes</span>
-                  )}
-                  {t.next_action === "audit" && (
-                    <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>use Audit</span>
-                  )}
-                  {t.next_action === "done" && (
-                    <span style={{ color: "#86efac", fontSize: "0.8rem" }}>✓</span>
-                  )}
+                  <div className="flow-row-actions">
+                    {t.next_action === "port" && (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        disabled={portTaskMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Port ${t.symbol_name}?`)) {
+                            portTaskMutation.mutate(t.id);
+                          }
+                        }}
+                      >
+                        Port
+                      </button>
+                    )}
+                    {t.status !== "done" && t.status !== "reviewed" ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-secondary"
+                        disabled={markDoneMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Mark ${t.symbol_name} as done?`)) {
+                            markDoneMutation.mutate([t.id]);
+                          }
+                        }}
+                      >
+                        Done
+                      </button>
+                    ) : (
+                      <span style={{ color: "#86efac", fontSize: "0.8rem" }}>✓</span>
+                    )}
+                  </div>
                 </td>
                 <td style={{ fontSize: "0.8rem" }}>
                   {t.plan?.target_rust_file ?? t.audit?.rust_locations[0]?.file ?? t.target_rust_file ?? "—"}

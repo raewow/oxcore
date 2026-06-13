@@ -221,6 +221,81 @@ tr:hover td {
   transition: width 0.3s;
 }
 
+.flow-progress-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.flow-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.flow-progress-percent {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.flow-progress-bar-track {
+  width: 100%;
+  margin-top: 0;
+}
+
+.flow-progress-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.flow-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.flow-stage-badge {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.flow-stage-empty {
+  background: #374151;
+  color: #9ca3af;
+}
+
+.flow-stage-audit {
+  background: #451a03;
+  color: #fbbf24;
+}
+
+.flow-stage-plan {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
+.flow-stage-port {
+  background: #312e81;
+  color: #a5b4fc;
+}
+
+.flow-stage-review {
+  background: #14532d;
+  color: #86efac;
+}
+
+.flow-stage-done {
+  background: #14532d;
+  color: #4ade80;
+}
+
 .page-subtitle {
   color: #94a3b8;
   font-size: 0.9rem;
