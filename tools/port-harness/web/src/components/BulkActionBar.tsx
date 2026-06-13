@@ -29,6 +29,9 @@ export function BulkActionBar({ selectedCount, onSetStatus, onQueueJob, onClear 
       <button className="btn btn-secondary" onClick={() => onQueueJob("plan-rust")}>
         Queue Plan
       </button>
+      <button className="btn btn-secondary" onClick={() => onQueueJob("port")}>
+        Queue Port
+      </button>
       <button className="btn btn-secondary" onClick={() => onQueueJob("audit-rust")}>
         Queue Audit
       </button>

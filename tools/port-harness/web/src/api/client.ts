@@ -75,6 +75,67 @@ export interface PipelineJob {
   display_status?: string;
 }
 
+export interface FlowAuditSummary {
+  total: number;
+  audited: number;
+  complete: number;
+  partial: number;
+  missing: number;
+  incorrect: number;
+  reviewed: number;
+  passed: number;
+}
+
+export interface TaskAuditDetail {
+  task_id: number;
+  audited_at: string;
+  implementation_status: "complete" | "partial" | "missing" | "incorrect";
+  passed: boolean;
+  coverage: {
+    claims_covered: number;
+    claims_total: number;
+    branches_covered?: number;
+    branches_total?: number;
+  };
+  summary: string;
+  issues: { severity: string; message: string; claim_ref?: string }[];
+  rust_locations: { file: string; symbol: string }[];
+}
+
+export interface TaskPlanSummary {
+  target_rust_file: string;
+  rust_symbol_name: string;
+  structs: string[];
+  enums: string[];
+  notes: string;
+  planned_at: string | null;
+}
+
+export interface TaskPortDraft {
+  rust_code: string;
+  todos: string[];
+  ported_at: string | null;
+  file_path: string | null;
+}
+
+export interface FlowDetailResponse {
+  flow: {
+    name: string;
+    description: string | null;
+    expected_behaviour: string | null;
+  };
+  branches: { condition: string; behaviour: string; file: string; start_line: number }[];
+  mutations: { variable_or_field: string; mutation_description: string }[];
+  tasks: (TaskWithDetails & {
+    audit: TaskAuditDetail | null;
+    plan: TaskPlanSummary | null;
+    port_draft: TaskPortDraft | null;
+    next_action: "audit" | "plan" | "port" | "review" | "done";
+  })[];
+  audit_summary: FlowAuditSummary;
+  pipeline_jobs: PipelineJob[];
+}
+
 const BASE = "/api";
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -148,11 +209,23 @@ export const api = {
 
   getFlows: () => fetchJson<FlowSummary[]>("/flows"),
 
-  getFlow: (id: number) => fetchJson<unknown>(`/flows/${id}`),
+  getFlow: (id: number) => fetchJson<FlowDetailResponse>(`/flows/${id}`),
 
   auditFlow: (id: number) =>
     fetchJson<{ ok: boolean; jobIds: number[]; totalTasks: number; batches: number }>(
       `/flows/${id}/audit`,
+      { method: "POST" },
+    ),
+
+  planFlow: (id: number) =>
+    fetchJson<{ ok: boolean; jobIds: number[]; totalTasks: number; batches: number }>(
+      `/flows/${id}/plan`,
+      { method: "POST" },
+    ),
+
+  portFlow: (id: number) =>
+    fetchJson<{ ok: boolean; jobIds: number[]; totalTasks: number; batches: number }>(
+      `/flows/${id}/port`,
       { method: "POST" },
     ),
 

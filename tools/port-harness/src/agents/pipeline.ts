@@ -28,6 +28,7 @@ import { runCargoTest } from "../verify/cargoRunner.js";
 import { findRustImplementation } from "../verify/rustLookup.js";
 import { JobPausedError } from "../server/jobErrors.js";
 import type { JobActivity } from "../server/jobActivity.js";
+import { cleanPortRustCode } from "../verify/portOutput.js";
 import { runDiscover } from "./discover.js";
 
 export async function runExtract(
@@ -398,6 +399,18 @@ export async function runPlanRust(
       status: "rust_planned",
     });
 
+    exportPlanDoc(symbol.name, output);
+    jobsRepo.insertAgentRun(
+      db,
+      "plan-rust",
+      provider.name,
+      "model",
+      hashPrompt("", prompt),
+      JSON.stringify(output),
+      symbol.id,
+      taskId,
+    );
+
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -438,17 +451,30 @@ export async function runPort(
 
   try {
     const output = await provider.completeStructured(
-      "Port C++ to Rust preserving exact behaviour.",
+      "Port C++ to Rust preserving exact behaviour. Write clean idiomatic Rust without C++ trace comments.",
       prompt,
       PortOutputSchema,
     );
 
-    if (write && task.target_rust_file) {
-      const docsDir = resolve(config.rustRoot, "tools/port-harness/docs/ports");
+    output.rust_code = cleanPortRustCode(output.rust_code);
+
+    if (write) {
+      const docsDir = resolve(getPackageRoot(), "docs/ports");
       if (!existsSync(docsDir)) mkdirSync(docsDir, { recursive: true });
       const outFile = resolve(docsDir, `${symbol.name.replace(/::/g, "_")}.rs.txt`);
       writeFileSync(outFile, output.rust_code);
     }
+
+    jobsRepo.insertAgentRun(
+      db,
+      "port",
+      provider.name,
+      "model",
+      hashPrompt("", prompt),
+      JSON.stringify(output),
+      symbol.id,
+      taskId,
+    );
 
     taskRepo.updateTaskStatus(db, taskId, "rust_ported");
     return { success: true };
@@ -534,6 +560,34 @@ function buildFlowContext(
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function exportPlanDoc(
+  symbolName: string,
+  output: {
+    target_rust_file: string;
+    rust_symbol_name: string;
+    structs?: string[];
+    enums?: string[];
+    notes?: string;
+  },
+): void {
+  const docsDir = resolve(getPackageRoot(), "docs/plans");
+  if (!existsSync(docsDir)) mkdirSync(docsDir, { recursive: true });
+
+  const safeName = symbolName.replace(/::/g, "_");
+  const structs = (output.structs ?? []).map((s) => `- ${s}`).join("\n") || "—";
+  const enums = (output.enums ?? []).map((e) => `- ${e}`).join("\n") || "—";
+
+  writeFileSync(
+    resolve(docsDir, `${safeName}.md`),
+    `# Plan: ${symbolName}\n\n` +
+      `**Target file:** \`${output.target_rust_file}\`  \n` +
+      `**Rust symbol:** \`${output.rust_symbol_name}\`\n\n` +
+      `## Structs\n${structs}\n\n` +
+      `## Enums\n${enums}\n\n` +
+      `## Notes\n${output.notes ?? "—"}\n`,
+  );
 }
 
 function exportAuditDoc(

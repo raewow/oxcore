@@ -1,0 +1,264 @@
+//! Auction House Manager
+
+use anyhow::{Context, Result};
+use dashmap::DashMap;
+use parking_lot::RwLock;
+use sqlx::MySqlPool;
+use std::sync::Arc;
+use tracing::{error, info};
+
+use crate::shared::database::characters::models::auction::AuctionRow;
+use crate::shared::database::characters::repositories::auction_repository_trait::AuctionRepositoryTrait;
+use crate::shared::database::characters::repositories::CharacterRepository;
+use crate::shared::game::auction::AuctionEntry;
+use crate::shared::game::mail::MailCheckMask;
+use crate::shared::protocol::{HighGuid, ObjectGuid};
+use crate::world::dbc::structures::AuctionHouseEntry;
+use crate::world::dbc::DbcManager;
+use crate::world::game::items::Item;
+
+/// Goblin (neutral) auction house id used when sending cancel mail for invalid house_id rows.
+const GOBLIN_AUCTION_HOUSE_ID: u32 = 7;
+
+// TODO: Confirm exact C++ AUCTION_CANCELED constant value (MaNGOS mail subject suffix).
+const AUCTION_CANCELED: u32 = 1;
+
+/// In-memory auction house object (one per linked/cross-faction/unlinked partition).
+pub struct AuctionHouseObject {
+    auctions: DashMap<u32, AuctionEntry>,
+}
+
+impl AuctionHouseObject {
+    pub fn add_auction(&self, auction: AuctionEntry) {
+        self.auctions.insert(auction.id, auction);
+    }
+}
+
+/// Console progress bar matching C++ BarGoLink step semantics.
+struct BarGoLink {
+    total: u32,
+    current: u32,
+}
+
+impl BarGoLink {
+    fn new(total: u32) -> Self {
+        Self { total, current: 0 }
+    }
+
+    fn step(&mut self) {
+        self.current = self.current.saturating_add(1);
+        let _ = (self.current, self.total);
+    }
+}
+
+pub struct AuctionHouseManager {
+    character_db: Arc<MySqlPool>,
+    auction_repo: Arc<dyn AuctionRepositoryTrait>,
+    character_repo: Arc<CharacterRepository>,
+    dbc: Arc<RwLock<DbcManager>>,
+    /// Auction items cache (C++ mAitems).
+    auction_items: DashMap<u32, Arc<Item>>,
+    /// Per-house auction maps (C++ m_mAuctionHouses values).
+    auction_houses: DashMap<u32, Arc<AuctionHouseObject>>,
+}
+
+impl AuctionHouseManager {
+    pub fn new(
+        character_db: Arc<MySqlPool>,
+        auction_repo: Arc<dyn AuctionRepositoryTrait>,
+        character_repo: Arc<CharacterRepository>,
+        dbc: Arc<RwLock<DbcManager>>,
+    ) -> Self {
+        Self {
+            character_db,
+            auction_repo,
+            character_repo,
+            dbc,
+            auction_items: DashMap::new(),
+            auction_houses: DashMap::new(),
+        }
+    }
+
+    // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L398-L477
+    pub async fn load_auctions(&self) -> Result<()> {
+        // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L400
+        let query_result = sqlx::query_as::<_, AuctionRow>(
+            "SELECT `id`, `house_id`, `item_guid`, `item_id`, `seller_guid`, `buyout_price`, `expire_time`, `buyer_guid`, `last_bid`, `start_bid`, `deposit` FROM `auction`",
+        )
+        .fetch_all(&*self.character_db)
+        .await;
+
+        // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L401-L408
+        // TODO: C++ treats null QueryResult the same as empty table; query failures follow that path too.
+        let rows = match query_result {
+            Ok(rows) => rows,
+            Err(_) => {
+                let mut bar = BarGoLink::new(1);
+                bar.step();
+                info!("");
+                info!(">> Loaded 0 auctions. DB table `auction` is empty.");
+                return Ok(());
+            }
+        };
+
+        // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L410-L411
+        let mut bar = BarGoLink::new(rows.len() as u32);
+        let mut count: u32 = 0;
+
+        // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L413-L485
+        for row in rows {
+            // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L417
+            bar.step();
+
+            // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L418-L432
+            let house_id = row.house_id;
+            let item_guid_low = row.item_guid;
+            let seller_guid = ObjectGuid::from_low(row.seller_guid);
+            let bidder_guid = if row.buyer_guid == 0 {
+                ObjectGuid::empty()
+            } else {
+                ObjectGuid::from_low(row.buyer_guid)
+            };
+
+            let mut auction = AuctionEntry {
+                id: row.id,
+                house_id,
+                item_guid: ObjectGuid::new_without_entry(HighGuid::Item, item_guid_low),
+                item_template: row.item_id,
+                seller_guid,
+                seller_account: 0,
+                start_bid: row.start_bid as u32,
+                current_bid: row.last_bid as u32,
+                buyout_price: row.buyout_price as u32,
+                expire_time: row.expire_time as u64,
+                bidder_guid,
+                deposit: row.deposit as u32,
+                deposit_time: 0,
+                locked_ip_address: String::new(),
+            };
+
+            // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L434
+            auction.seller_account = self.get_player_account_id_by_guid(row.seller_guid).await;
+
+            // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L436-L438
+            // check if sold item exists for guid
+            // and item_template in fact (GetAItem will fail if problematic in result check in AuctionHouseMgr::LoadAuctionItems)
+            let p_item = self.get_a_item(item_guid_low);
+
+            // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L439-L445
+            if p_item.is_none() {
+                self.delete_auction_from_db(auction.id).await?;
+                error!(
+                    "Auction {} has not a existing item : {}, deleted",
+                    auction.id, item_guid_low
+                );
+                continue;
+            }
+            let p_item = p_item.unwrap();
+
+            // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L447
+            let auction_house_entry = self.get_auction_house_entry(house_id);
+
+            // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L449-L469
+            if auction_house_entry.is_none() {
+                // need for send mail, use goblin auctionhouse
+                let goblin_house = self.get_auction_house_entry(GOBLIN_AUCTION_HOUSE_ID);
+                auction.house_id = GOBLIN_AUCTION_HOUSE_ID;
+
+                // Attempt send item back to owner
+                // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L455
+                let subject = format!("{}:0:{}", auction.item_template, AUCTION_CANCELED);
+
+                // item will deleted or added to received mail list
+                // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L460
+                // TODO: fix body — C++ passes empty mail body string.
+                // TODO: Ownership/lifetime of pItem after MailDraft(...).AddItem(pItem) is not specified.
+                self.send_auction_mail_to_owner(
+                    &subject,
+                    "",
+                    &auction,
+                    &p_item,
+                    goblin_house,
+                    MailCheckMask::from(MailCheckMask::COPIED),
+                )
+                .await?;
+
+                self.remove_a_item(item_guid_low);
+                self.delete_auction_from_db(auction.id).await?;
+                continue;
+            }
+
+            let auction_house_entry = auction_house_entry.unwrap();
+            auction.house_id = auction_house_entry.house_id;
+
+            // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L471-L472
+            // TODO: GetAuctionsMap(...)->AddAuction ownership semantics not defined; C++ dereferences unchecked if map missing.
+            let auctions_map = self
+                .get_auctions_map(&auction_house_entry)
+                .expect("GetAuctionsMap returned null");
+            auctions_map.add_auction(auction);
+            count = count.saturating_add(1);
+        }
+
+        // PORT: src/game/AuctionHouse/AuctionHouseMgr.cpp:L476-L477
+        info!("");
+        info!(">> Loaded {} auctions", count);
+        Ok(())
+    }
+
+    /// C++ AuctionHouseMgr::GetAItem
+    fn get_a_item(&self, guid: u32) -> Option<Arc<Item>> {
+        self.auction_items.get(&guid).map(|entry| Arc::clone(entry.value()))
+    }
+
+    /// C++ AuctionHouseMgr::RemoveAItem
+    fn remove_a_item(&self, guid: u32) -> bool {
+        self.auction_items.remove(&guid).is_some()
+    }
+
+    /// C++ sObjectMgr.GetPlayerAccountIdByGUID
+    async fn get_player_account_id_by_guid(&self, guid: u32) -> u32 {
+        match self.character_repo.find_by_guid(guid).await {
+            Ok(Some(character)) => character.account,
+            _ => 0,
+        }
+    }
+
+    /// C++ sAuctionHouseStore.LookupEntry
+    fn get_auction_house_entry(&self, house_id: u32) -> Option<AuctionHouseEntry> {
+        self.dbc
+            .read()
+            .get_auction_house(house_id)
+            .cloned()
+    }
+
+    /// C++ AuctionHouseMgr::GetAuctionsMap
+    fn get_auctions_map(&self, house: &AuctionHouseEntry) -> Option<Arc<AuctionHouseObject>> {
+        self.auction_houses
+            .get(&house.house_id)
+            .map(|entry| Arc::clone(entry.value()))
+    }
+
+    /// C++ AuctionEntry::DeleteFromDB
+    async fn delete_auction_from_db(&self, auction_id: u32) -> Result<()> {
+        self.auction_repo
+            .delete_auction(auction_id)
+            .await
+            .context("Failed to delete auction from database")
+    }
+
+    /// C++ MailDraft(...).AddItem(pItem).SendMailTo(...)
+    async fn send_auction_mail_to_owner(
+        &self,
+        subject: &str,
+        body: &str,
+        auction: &AuctionEntry,
+        item: &Item,
+        _house_entry: Option<AuctionHouseEntry>,
+        _check_mask: MailCheckMask,
+    ) -> Result<()> {
+        let _ = (subject, body, auction, item);
+        // TODO: Implement MailDraft::SendMailTo semantics (partial failure behavior not defined in C++ LoadAuctions).
+        Ok(())
+    }
+}

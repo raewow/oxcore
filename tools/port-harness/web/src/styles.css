@@ -268,8 +268,192 @@ tr:hover td {
 }
 
 .status-failed {
-  background: #450a0a;
+  background: #7f1d1d;
   color: #fca5a5;
+}
+
+.audit-badge {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.audit-none {
+  background: #374151;
+  color: #9ca3af;
+}
+
+.audit-missing {
+  background: #7f1d1d;
+  color: #fecaca;
+}
+
+.audit-partial {
+  background: #78350f;
+  color: #fde68a;
+}
+
+.audit-complete {
+  background: #14532d;
+  color: #86efac;
+}
+
+.audit-incorrect {
+  background: #881337;
+  color: #fda4af;
+}
+
+.audit-passed {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
+.summary-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.summary-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  min-width: 100px;
+}
+
+.summary-label {
+  display: block;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-bottom: 0.25rem;
+}
+
+.summary-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.summary-missing {
+  color: #fca5a5;
+}
+
+.summary-partial {
+  color: #fde68a;
+}
+
+.summary-complete {
+  color: #86efac;
+}
+
+.next-steps-panel {
+  background: #172033;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.next-steps-panel h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.next-steps-panel ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #cbd5e1;
+  font-size: 0.9rem;
+}
+
+.next-steps-panel li {
+  margin-bottom: 0.35rem;
+}
+
+.audit-detail-cell {
+  background: #0f172a;
+  padding: 1rem !important;
+  font-size: 0.9rem;
+}
+
+.symbol-detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.symbol-detail-tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.symbol-detail-tab {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.symbol-detail-tab.active {
+  background: #334155;
+  color: #e2e8f0;
+  border-color: #475569;
+}
+
+.artifact-badge {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.artifact-planned {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
+.artifact-drafted {
+  background: #14532d;
+  color: #86efac;
+}
+
+.artifact-code {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem 1rem;
+  background: #020617;
+  border-radius: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre;
+  color: #cbd5e1;
+}
+
+.audit-issues {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.audit-issue-error {
+  color: #fca5a5;
+}
+
+.audit-issue-warning {
+  color: #fde68a;
+}
+
+.audit-issue-info {
+  color: #94a3b8;
 }
 
 .status-cancelled {
