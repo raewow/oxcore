@@ -1,9 +1,9 @@
 import type Database from "better-sqlite3";
 import { basename, resolve } from "node:path";
 import type { HarnessConfig } from "../config.js";
-import { normalizeRelPath, resolveSourceFilePath } from "../files/paths.js";
+import { normalizeRelPath } from "../files/paths.js";
+import { extractMethodsFromCpp } from "./cppMethods.js";
 import {
-  extractMethodsFromCpp,
   extractCallsFromRange,
   extractIncludes,
 } from "./parser.js";
@@ -19,11 +19,6 @@ export interface IndexResult {
   chunksCreated: number;
 }
 
-function inferClassName(fileName: string): string {
-  const base = fileName.replace(/\.(cpp|h)$/, "");
-  return base.charAt(0).toUpperCase() + base.slice(1);
-}
-
 async function indexCppFile(
   db: Database.Database,
   config: HarnessConfig,
@@ -35,13 +30,11 @@ async function indexCppFile(
   let chunksCreated = 0;
 
   const fullPath = resolve(config.referenceRoot, file);
-  const fileName = basename(fullPath);
   const relPath = normalizeRelPath(file);
-  const className = inferClassName(fileName);
 
   codeSymbolRepo.deleteSymbolsByFile(db, relPath);
 
-  const methods = extractMethodsFromCpp(fullPath, className, config.index.excludePatterns);
+  const methods = extractMethodsFromCpp(fullPath, config.index.excludePatterns);
 
   for (const method of methods) {
     const symbolId = codeSymbolRepo.upsertSymbol(db, {

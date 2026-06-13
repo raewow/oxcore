@@ -50,11 +50,15 @@ export function Discover() {
     },
   });
 
+  const [indexMessage, setIndexMessage] = useState<string | null>(null);
+
   const indexDirMutation = useMutation({
     mutationFn: () => api.indexDirectory("src/game"),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["files"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      setIndexMessage(`Index job #${data.jobId} queued for ${data.dir}. See Jobs tab.`);
     },
   });
 
@@ -65,9 +69,12 @@ export function Discover() {
       paths?: string[];
       taskIds?: number[];
     }) => api.discoverActions(args.id, { action: args.action, paths: args.paths, taskIds: args.taskIds }),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      if (data.jobId) {
+        setIndexMessage(`Index job #${data.jobId} queued. See Jobs tab.`);
+      }
     },
   });
 
@@ -120,10 +127,12 @@ export function Discover() {
           </button>
         </div>
 
-        {indexDirMutation.isSuccess && (
+        {indexMessage && (
           <div className="info-banner" style={{ marginTop: "-0.5rem" }}>
-            Indexed {indexDirMutation.data.filesIndexed} files (
-            {indexDirMutation.data.symbolsIndexed} symbols)
+            {indexMessage}
+            <button type="button" className="btn-link" onClick={() => setIndexMessage(null)}>
+              dismiss
+            </button>
           </div>
         )}
 

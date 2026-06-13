@@ -30,6 +30,7 @@ export interface HarnessConfig {
   jobs: {
     maxBatchSize: number;
     concurrency: number;
+    backgroundConcurrency: number;
   };
   /** Optional symbol→flow pre-mappings applied after index when set */
   flowMappings?: Record<string, FlowMapping>;
@@ -81,6 +82,7 @@ function defaultConfig(): HarnessConfig {
     jobs: {
       maxBatchSize: 10,
       concurrency: 2,
+      backgroundConcurrency: 2,
     },
   };
 }

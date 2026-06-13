@@ -20,6 +20,7 @@ export default {
   jobs: {
     maxBatchSize: 10,
     concurrency: 2,
+    backgroundConcurrency: 2,
   },
   // Optional: pre-seed symbol→flow mappings after index (domain-specific).
   // See src/domains/spells.example.ts for a full spell-system example.

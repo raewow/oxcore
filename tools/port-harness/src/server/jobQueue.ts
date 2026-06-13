@@ -5,6 +5,15 @@ import { getProviderFromConfig } from "../agents/provider.js";
 import { runPipelineJob } from "../agents/pipeline.js";
 import { createJobActivity } from "./jobActivity.js";
 import { JobPausedError } from "./jobErrors.js";
+import { runBackgroundJob } from "./backgroundJobs.js";
+import { queueKindForStage, type JobQueueKind } from "./jobStages.js";
+import type { JobActivity } from "./jobActivity.js";
+
+type JobRunner = (
+  jobId: number,
+  activity: JobActivity,
+  shouldPause: () => boolean,
+) => Promise<void>;
 
 export class JobQueue {
   private queue: number[] = [];
@@ -13,17 +22,12 @@ export class JobQueue {
 
   constructor(
     private db: Database.Database,
-    private config: HarnessConfig,
+    private concurrency: number,
+    private runJobImpl: JobRunner,
   ) {}
 
   getActiveJobIds(): ReadonlySet<number> {
     return this.activeJobIds;
-  }
-
-  /** @deprecated Use getActiveJobIds */
-  getActiveJobId(): number | null {
-    const first = this.activeJobIds.values().next();
-    return first.done ? null : first.value;
   }
 
   isProcessing(): boolean {
@@ -34,23 +38,15 @@ export class JobQueue {
     return this.pauseRequested.has(jobId);
   }
 
-  private get concurrency(): number {
-    return Math.max(1, this.config.jobs.concurrency);
-  }
-
-  start(): void {
-    jobsRepo.recoverStaleRunningJobs(this.db);
-    const queued = jobsRepo.getQueuedJobs(this.db) as { id: number }[];
-    for (const job of queued) {
-      this.enqueue(job.id);
-    }
-  }
-
   enqueue(jobId: number): void {
     if (!this.queue.includes(jobId)) {
       this.queue.push(jobId);
     }
     this.pump();
+  }
+
+  removeFromQueue(jobId: number): void {
+    this.queue = this.queue.filter((id) => id !== jobId);
   }
 
   requestPause(jobId: number): { ok: boolean; immediate?: boolean; pausing?: boolean; error?: string } {
@@ -61,7 +57,7 @@ export class JobQueue {
       if (!jobsRepo.pauseJob(this.db, jobId)) {
         return { ok: false, error: "Could not pause job" };
       }
-      this.queue = this.queue.filter((id) => id !== jobId);
+      this.removeFromQueue(jobId);
       return { ok: true, immediate: true };
     }
 
@@ -94,19 +90,7 @@ export class JobQueue {
 
     try {
       const activity = createJobActivity(this.db, jobId);
-      const provider = await getProviderFromConfig({
-        ...this.config.provider,
-        rustRoot: this.config.rustRoot,
-        onActivity: (msg) => activity.log(msg),
-      });
-      await runPipelineJob(
-        this.db,
-        this.config,
-        provider,
-        jobId,
-        activity,
-        () => this.pauseRequested.has(jobId),
-      );
+      await this.runJobImpl(jobId, activity, () => this.pauseRequested.has(jobId));
     } catch (err) {
       if (err instanceof JobPausedError) {
         this.pauseRequested.delete(jobId);
@@ -124,3 +108,88 @@ export class JobQueue {
     }
   }
 }
+
+export class JobQueues {
+  readonly agent: JobQueue;
+  readonly background: JobQueue;
+
+  constructor(
+    private db: Database.Database,
+    config: HarnessConfig,
+  ) {
+    this.agent = new JobQueue(
+      db,
+      Math.max(1, config.jobs.concurrency),
+      async (jobId, activity, shouldPause) => {
+        const provider = await getProviderFromConfig({
+          ...config.provider,
+          rustRoot: config.rustRoot,
+          onActivity: (msg) => activity.log(msg),
+        });
+        await runPipelineJob(db, config, provider, jobId, activity, shouldPause);
+      },
+    );
+
+    this.background = new JobQueue(
+      db,
+      Math.max(1, config.jobs.backgroundConcurrency),
+      (jobId, activity, shouldPause) =>
+        runBackgroundJob(db, config, jobId, activity, shouldPause, (id) =>
+          this.agent.enqueue(id),
+        ),
+    );
+  }
+
+  start(): void {
+    jobsRepo.recoverStaleRunningJobs(this.db);
+    const queued = jobsRepo.getQueuedJobs(this.db) as { id: number; stage: string }[];
+    for (const job of queued) {
+      this.enqueue(job.id);
+    }
+  }
+
+  enqueue(jobId: number): void {
+    const job = jobsRepo.getJobById(this.db, jobId) as { stage: string } | undefined;
+    if (!job) return;
+    this.queueForKind(queueKindForStage(job.stage)).enqueue(jobId);
+  }
+
+  getActiveJobIds(): ReadonlySet<number> {
+    return new Set([...this.agent.getActiveJobIds(), ...this.background.getActiveJobIds()]);
+  }
+
+  /** @deprecated Use getActiveJobIds */
+  getActiveJobId(): number | null {
+    const first = this.getActiveJobIds().values().next();
+    return first.done ? null : first.value;
+  }
+
+  isProcessing(): boolean {
+    return this.agent.isProcessing() || this.background.isProcessing();
+  }
+
+  isPauseRequested(jobId: number): boolean {
+    return this.agent.isPauseRequested(jobId) || this.background.isPauseRequested(jobId);
+  }
+
+  requestPause(jobId: number): { ok: boolean; immediate?: boolean; pausing?: boolean; error?: string } {
+    return this.queueForJob(jobId).requestPause(jobId);
+  }
+
+  resume(jobId: number): boolean {
+    return this.queueForJob(jobId).resume(jobId);
+  }
+
+  private queueForJob(jobId: number): JobQueue {
+    const job = jobsRepo.getJobById(this.db, jobId) as { stage: string } | undefined;
+    if (!job) return this.agent;
+    return this.queueForKind(queueKindForStage(job.stage));
+  }
+
+  private queueForKind(kind: JobQueueKind): JobQueue {
+    return kind === "agent" ? this.agent : this.background;
+  }
+}
+
+/** @deprecated Use JobQueues */
+export { JobQueues as JobQueueManager };

@@ -184,7 +184,7 @@ export const api = {
   },
 
   indexFile: (path: string) =>
-    fetchJson<{ ok: boolean; path: string; symbolsIndexed: number }>("/files/index", {
+    fetchJson<{ ok: boolean; jobId: number; path: string }>("/files/index", {
       method: "POST",
       body: JSON.stringify({ path }),
     }),
@@ -204,9 +204,8 @@ export const api = {
   runFilePipeline: (path: string) =>
     fetchJson<{
       ok: boolean;
-      extractJobIds: number[];
-      assembleJobId: number;
-      totalTasks: number;
+      jobId: number;
+      path: string;
     }>("/files/pipeline", { method: "POST", body: JSON.stringify({ path }) }),
 
   getTasks: (params: Record<string, string | undefined> = {}) => {
@@ -334,13 +333,13 @@ export const api = {
     investigationId: number,
     body: { action: "index" | "extract" | "verify"; paths?: string[]; taskIds?: number[] },
   ) =>
-    fetchJson<{ ok: boolean; jobIds?: number[]; results?: unknown[] }>(
+    fetchJson<{ ok: boolean; jobId?: number; jobIds?: number[]; pathCount?: number }>(
       `/discover/${investigationId}/actions`,
       { method: "POST", body: JSON.stringify(body) },
     ),
 
   indexDirectory: (dir = "src/game") =>
-    fetchJson<{ ok: boolean; dir: string; filesIndexed: number; symbolsIndexed: number }>(
+    fetchJson<{ ok: boolean; jobId: number; dir: string }>(
       "/discover/index-dir",
       { method: "POST", body: JSON.stringify({ dir }) },
     ),

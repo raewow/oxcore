@@ -1,7 +1,9 @@
-import Parser from "tree-sitter";
-import Cpp from "tree-sitter-cpp";
+import { createRequire } from "node:module";
 import { readFileSync, existsSync } from "node:fs";
 import { basename } from "node:path";
+import type Parser from "tree-sitter";
+
+const require = createRequire(import.meta.url);
 
 export interface ParsedSymbol {
   file: string;
@@ -20,8 +22,11 @@ let parser: Parser | null = null;
 
 function getParser(): Parser {
   if (!parser) {
-    parser = new Parser();
-    parser.setLanguage(Cpp);
+    const ParserCtor = require("tree-sitter") as { new (): Parser };
+    const Cpp = require("tree-sitter-cpp");
+    const instance = new ParserCtor();
+    instance.setLanguage(Cpp);
+    parser = instance;
   }
   return parser;
 }
@@ -266,85 +271,7 @@ export function extractIncludes(filePath: string): string[] {
   return includes;
 }
 
-export function extractMethodsFromCpp(
-  cppPath: string,
-  className: string,
-  excludePatterns: string[],
-): ParsedSymbol[] {
-  const source = readFileSync(cppPath, "utf-8");
-  const file = basename(cppPath);
-  const lines = source.split("\n");
-  const symbols: ParsedSymbol[] = [];
-  const seen = new Set<string>();
-
-  // Match: ReturnType ClassName::MethodName( or ClassName::MethodName(
-  const defPattern = new RegExp(
-    `(?:[\\w:<>,\\s\\*&]+\\s+)?${escapeRegex(className)}::(~?[A-Za-z_][\\w:]*)\\s*\\(`,
-  );
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    const match = line.match(defPattern);
-    if (!match) continue;
-
-    const methodName = match[1]!;
-    if (methodName.startsWith("Effect")) continue;
-
-    let excluded = false;
-    for (const pattern of excludePatterns) {
-      if (pattern.endsWith("*") && methodName.startsWith(pattern.slice(0, -1))) {
-        excluded = true;
-        break;
-      }
-      if (methodName === pattern) {
-        excluded = true;
-        break;
-      }
-    }
-    if (excluded) continue;
-
-    const fullName = `${className}::${methodName}`;
-    if (seen.has(fullName)) continue;
-    seen.add(fullName);
-
-    const endLine = findMethodEndLine(lines, i);
-    symbols.push({
-      file,
-      name: fullName,
-      kind: "method",
-      startLine: i + 1,
-      endLine,
-    });
-  }
-
-  return symbols;
-}
-
-function findMethodEndLine(lines: string[], startIdx: number): number {
-  let braceDepth = 0;
-  let foundOpen = false;
-
-  for (let i = startIdx; i < lines.length; i++) {
-    for (const ch of lines[i]!) {
-      if (ch === "{") {
-        braceDepth++;
-        foundOpen = true;
-      } else if (ch === "}") {
-        braceDepth--;
-      }
-    }
-    if (foundOpen && braceDepth === 0) return i + 1;
-    // Single-line or declaration-only (constructor init list ending with )
-    if (i === startIdx && lines[i]!.includes(")") && !lines[i]!.includes("{")) {
-      // Could be forward declaration - scan a few more lines
-      if (i + 1 < lines.length && !lines[i + 1]!.includes("{")) {
-        return i + 1;
-      }
-    }
-  }
-
-  return Math.min(startIdx + 100, lines.length);
-}
+export { extractMethodsFromCpp } from "./cppMethods.js";
 
 export function extractClassMethodsFromHeader(
   headerPath: string,

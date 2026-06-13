@@ -3,15 +3,15 @@ import type Database from "better-sqlite3";
 import type { HarnessConfig } from "../../config.js";
 import { buildSeedForQuery, runDiscover } from "../../agents/discover.js";
 import { getProviderFromConfig } from "../../agents/provider.js";
+import { scanReferenceCppInDir } from "../../files/scanner.js";
 import * as investigationRepo from "../../db/repositories/investigation.js";
 import * as jobsRepo from "../../db/repositories/jobs.js";
-import { indexFiles } from "../../index/indexer.js";
-import { JobQueue } from "../jobQueue.js";
+import type { JobQueues } from "../jobQueue.js";
 
 export function createDiscoverRoutes(
   db: Database.Database,
   config: HarnessConfig,
-  queue: JobQueue,
+  queues: JobQueues,
 ): Hono {
   const app = new Hono();
 
@@ -78,7 +78,7 @@ export function createDiscoverRoutes(
 
     const jobId = jobsRepo.createJob(db, "discover", { query, investigationId });
     investigationRepo.setInvestigationJobId(db, investigationId, jobId);
-    queue.enqueue(jobId);
+    queues.enqueue(jobId);
 
     return c.json({
       ok: true,
@@ -105,13 +105,15 @@ export function createDiscoverRoutes(
       const paths = body.paths ?? [];
       if (!paths.length) return c.json({ error: "paths required for index" }, 400);
 
-      const results = [];
-      for (const path of paths) {
-        if (!path.endsWith(".cpp")) continue;
-        const result = await indexFiles(db, config, [path]);
-        results.push({ path, ...result });
+      const cppPaths = paths.filter((path) => path.endsWith(".cpp"));
+      if (!cppPaths.length) {
+        return c.json({ error: "No .cpp paths to index" }, 400);
       }
-      return c.json({ ok: true, results });
+
+      const jobId = jobsRepo.createJob(db, "index", { paths: cppPaths }, cppPaths.length);
+      queues.enqueue(jobId);
+
+      return c.json({ ok: true, jobId, pathCount: cppPaths.length });
     }
 
     const taskIds = body.taskIds ?? [];
@@ -126,7 +128,7 @@ export function createDiscoverRoutes(
       taskIds,
       config.jobs.maxBatchSize,
     );
-    for (const jobId of jobIds) queue.enqueue(jobId);
+    for (const jobId of jobIds) queues.enqueue(jobId);
 
     return c.json({
       ok: true,
@@ -140,28 +142,15 @@ export function createDiscoverRoutes(
     const body = await c.req.json<{ dir?: string }>();
     const dir = body.dir ?? "src/game";
 
-    const { scanReferenceCppInDir } = await import("../../files/scanner.js");
     const files = scanReferenceCppInDir(config.referenceRoot, dir);
-
     if (!files.length) {
       return c.json({ error: `No .cpp files found under ${dir}` }, 400);
     }
 
-    let totalSymbols = 0;
-    const indexed: string[] = [];
-    for (const file of files) {
-      const result = await indexFiles(db, config, [file.path]);
-      totalSymbols += result.symbolsIndexed;
-      indexed.push(file.path);
-    }
+    const jobId = jobsRepo.createJob(db, "index-dir", { dir }, files.length);
+    queues.enqueue(jobId);
 
-    return c.json({
-      ok: true,
-      dir,
-      filesIndexed: indexed.length,
-      symbolsIndexed: totalSymbols,
-      files: indexed,
-    });
+    return c.json({ ok: true, jobId, dir, fileCount: files.length });
   });
 
   return app;

@@ -9,6 +9,9 @@ const STAGE_DESCRIPTIONS: Record<string, string> = {
   port: "Generates a Rust port draft for each symbol.",
   verify: "Reviews the port against documented behaviour claims.",
   "audit-rust": "Checks existing Rust in src/ against documented C++ behaviour.",
+  index: "Parses C++ source and extracts symbols (local, no AI).",
+  "index-dir": "Bulk-indexes all .cpp files under a directory (local, no AI).",
+  "file-pipeline": "Indexes a file then queues extract and assemble-flows agent jobs.",
 };
 
 function elapsedSince(iso: string): string {
@@ -60,10 +63,17 @@ function canRetry(job: PipelineJob): boolean {
 }
 
 function canContinue(job: PipelineJob): boolean {
+  const nonContinuable = new Set([
+    "assemble-flows",
+    "discover",
+    "index",
+    "index-dir",
+    "file-pipeline",
+  ]);
   return (
     ["failed", "cancelled"].includes(job.status) &&
     job.progress < job.total &&
-    job.stage !== "assemble-flows"
+    !nonContinuable.has(job.stage)
   );
 }
 

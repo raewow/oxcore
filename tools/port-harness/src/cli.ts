@@ -20,7 +20,7 @@ import { runDiscover, buildSeedForQuery } from "./agents/discover.js";
 import { scanReferenceCppInDir } from "./files/scanner.js";
 import { exportMarkdownReport, printStatus } from "./export/markdown.js";
 import { createApp } from "./server/app.js";
-import { JobQueue } from "./server/jobQueue.js";
+import { JobQueues } from "./server/jobQueue.js";
 import { migrateStoredFilePaths } from "./files/migratePaths.js";
 import {
   SPELL_FLOW_CATEGORIES_HINT,
@@ -114,8 +114,9 @@ program
       await import("./db/repositories/investigation.js")
     ).setInvestigationJobId(db, investigationId, jobId);
 
-    const queue = new JobQueue(db, config);
-    queue.start();
+    const queues = new JobQueues(db, config);
+    queues.start();
+    queues.enqueue(jobId);
     console.log(`Discovery queued: investigation #${investigationId}, job #${jobId}`);
     console.log(`DB seed hits: ${seed.hits.length}`);
   });
@@ -269,8 +270,6 @@ program
       console.log(`Migrated ${migrated} symbol file path(s) to full relative paths`);
     }
     const app = createApp(db, config);
-    const queue = new JobQueue(db, config);
-    queue.start();
 
     serve({ fetch: app.fetch, hostname: config.web.host, port: config.web.port }, () => {
       console.log(`API server running at http://${config.web.host}:${config.web.port}`);
@@ -283,9 +282,9 @@ program
   .action(async () => {
     const config = await loadConfig();
     const db = getDb(config.database);
-    const queue = new JobQueue(db, config);
-    queue.start();
-    console.log("Worker started. Press Ctrl+C to stop.");
+    const queues = new JobQueues(db, config);
+    queues.start();
+    console.log("Worker started (agent + background queues). Press Ctrl+C to stop.");
   });
 
 const pilot = program

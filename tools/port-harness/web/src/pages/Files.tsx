@@ -37,7 +37,7 @@ export function Files() {
     mutationFn: (path: string) => api.indexFile(path),
     onMutate: (path) => setBusyPath(path),
     onSuccess: (res) => {
-      setMessage(`Indexed ${res.path}: ${res.symbolsIndexed} symbols`);
+      setMessage(`Index job #${res.jobId} queued for ${res.path}. See Jobs tab.`);
       invalidate();
     },
     onError: (e: Error) => setMessage(e.message),
@@ -72,9 +72,7 @@ export function Files() {
     mutationFn: (path: string) => api.runFilePipeline(path),
     onMutate: (path) => setBusyPath(path),
     onSuccess: (res) => {
-      setMessage(
-        `Pipeline started: index + ${res.totalTasks} extract tasks + assemble flows. See Jobs.`,
-      );
+      setMessage(`Pipeline job #${res.jobId} queued (index + extract + flows). See Jobs tab.`);
       invalidate();
     },
     onError: (e: Error) => setMessage(e.message),

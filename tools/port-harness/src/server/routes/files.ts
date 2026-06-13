@@ -6,8 +6,7 @@ import { scanReferenceFiles } from "../../files/scanner.js";
 import { filePathMatches } from "../../files/paths.js";
 import * as fileStatsRepo from "../../db/repositories/fileStats.js";
 import * as jobsRepo from "../../db/repositories/jobs.js";
-import { indexFiles, applyFlowMappings } from "../../index/indexer.js";
-import { JobQueue } from "../jobQueue.js";
+import type { JobQueues } from "../jobQueue.js";
 
 export interface FileListEntry {
   path: string;
@@ -57,7 +56,7 @@ function buildFileList(db: Database.Database, config: HarnessConfig, q?: string)
 export function createFilesRoutes(
   db: Database.Database,
   config: HarnessConfig,
-  queue: JobQueue,
+  queues: JobQueues,
 ): Hono {
   const app = new Hono();
 
@@ -85,19 +84,10 @@ export function createFilesRoutes(
       return c.json({ error: "Only .cpp files can be indexed" }, 400);
     }
 
-    const result = await indexFiles(db, config, [body.path]);
-    const mappingsApplied =
-      config.flowMappings && Object.keys(config.flowMappings).length > 0
-        ? applyFlowMappings(db, config.flowMappings)
-        : 0;
+    const jobId = jobsRepo.createJob(db, "index", { path: body.path });
+    queues.enqueue(jobId);
 
-    return c.json({
-      ok: true,
-      path: body.path,
-      ...result,
-      mappingsApplied,
-      file: buildFileList(db, config).find((f) => f.path === body.path),
-    });
+    return c.json({ ok: true, jobId, path: body.path });
   });
 
   app.post("/document", async (c) => {
@@ -121,7 +111,7 @@ export function createFilesRoutes(
       taskIds,
       config.jobs.maxBatchSize,
     );
-    for (const id of jobIds) queue.enqueue(id);
+    for (const id of jobIds) queues.enqueue(id);
 
     return c.json({
       ok: true,
@@ -135,9 +125,8 @@ export function createFilesRoutes(
     const body = await c.req.json<{ path: string }>();
     if (!body.path) return c.json({ error: "path required" }, 400);
 
-    const name = basename(body.path);
     const jobId = jobsRepo.createJob(db, "assemble-flows", { file: body.path });
-    queue.enqueue(jobId);
+    queues.enqueue(jobId);
 
     return c.json({ ok: true, jobId });
   });
@@ -148,33 +137,10 @@ export function createFilesRoutes(
       return c.json({ error: "path must be a .cpp file" }, 400);
     }
 
-    const indexResult = await indexFiles(db, config, [body.path]);
-    const mappingsApplied =
-      config.flowMappings && Object.keys(config.flowMappings).length > 0
-        ? applyFlowMappings(db, config.flowMappings)
-        : 0;
+    const jobId = jobsRepo.createJob(db, "file-pipeline", { path: body.path });
+    queues.enqueue(jobId);
 
-    const name = basename(body.path);
-    const taskIds = fileStatsRepo.getTaskIdsForFile(db, name, "discovered");
-
-    const extractJobIds = taskIds.length
-      ? jobsRepo.createBatchedJobs(db, "extract", taskIds, config.jobs.maxBatchSize)
-      : [];
-
-    const assembleJobId = jobsRepo.createJob(db, "assemble-flows", { file: body.path });
-
-    for (const id of extractJobIds) queue.enqueue(id);
-    queue.enqueue(assembleJobId);
-
-    return c.json({
-      ok: true,
-      indexed: true,
-      mappingsApplied,
-      indexResult,
-      extractJobIds,
-      assembleJobId,
-      totalTasks: taskIds.length,
-    });
+    return c.json({ ok: true, jobId, path: body.path });
   });
 
   return app;

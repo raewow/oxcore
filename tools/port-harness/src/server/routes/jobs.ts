@@ -3,27 +3,32 @@ import type Database from "better-sqlite3";
 import type { HarnessConfig } from "../../config.js";
 import * as jobsRepo from "../../db/repositories/jobs.js";
 import * as taskRepo from "../../db/repositories/migrationTask.js";
-import { JobQueue } from "../jobQueue.js";
+import { JobQueues } from "../jobQueue.js";
 
-let queue: JobQueue | null = null;
+let queues: JobQueues | null = null;
 
-export function getJobQueue(db: Database.Database, config: HarnessConfig): JobQueue {
-  if (!queue) {
-    queue = new JobQueue(db, config);
-    queue.start();
+export function getJobQueues(db: Database.Database, config: HarnessConfig): JobQueues {
+  if (!queues) {
+    queues = new JobQueues(db, config);
+    queues.start();
   }
-  return queue;
+  return queues;
+}
+
+/** @deprecated Use getJobQueues */
+export function getJobQueue(db: Database.Database, config: HarnessConfig): JobQueues {
+  return getJobQueues(db, config);
 }
 
 export function createJobsRoutes(
   db: Database.Database,
   config: HarnessConfig,
-  jobQueue: JobQueue,
+  jobQueues: JobQueues,
 ): Hono {
   const app = new Hono();
 
   app.get("/", (c) => {
-    const activeJobIds = jobQueue.getActiveJobIds();
+    const activeJobIds = jobQueues.getActiveJobIds();
     jobsRepo.reconcileStaleRunningJobs(db, activeJobIds);
     const jobs = jobsRepo.enrichJobs(db, jobsRepo.listJobs(db) as never[], {
       targetLimit: 5,
@@ -38,11 +43,11 @@ export function createJobsRoutes(
           active_job_ids: activeIds,
           active_job_id: activeIds[0] ?? null,
           is_stale: isStale,
-          pause_requested: jobQueue.isPauseRequested(j.id),
+          pause_requested: jobQueues.isPauseRequested(j.id),
           display_status:
             isStale
               ? "stale"
-              : j.status === "running" && jobQueue.isPauseRequested(j.id)
+              : j.status === "running" && jobQueues.isPauseRequested(j.id)
                 ? "pausing"
                 : j.status,
         };
@@ -52,7 +57,7 @@ export function createJobsRoutes(
 
   app.get("/:id", (c) => {
     const id = parseInt(c.req.param("id"), 10);
-    const activeJobIds = jobQueue.getActiveJobIds();
+    const activeJobIds = jobQueues.getActiveJobIds();
     jobsRepo.reconcileStaleRunningJobs(db, activeJobIds);
     const job = jobsRepo.getJobById(db, id);
     if (!job) return c.json({ error: "Not found" }, 404);
@@ -60,7 +65,7 @@ export function createJobsRoutes(
     const activeIds = [...activeJobIds];
     const isActive = activeJobIds.has(enriched.id);
     const isStale = enriched.status === "running" && !isActive;
-    const pauseRequested = jobQueue.isPauseRequested(enriched.id);
+    const pauseRequested = jobQueues.isPauseRequested(enriched.id);
     return c.json({
       ...enriched,
       active_job_ids: activeIds,
@@ -105,7 +110,7 @@ export function createJobsRoutes(
     }
 
     const jobId = jobsRepo.createJob(db, body.stage, taskIds);
-    jobQueue.enqueue(jobId);
+    jobQueues.enqueue(jobId);
 
     return c.json({ jobId, total: taskIds.length });
   });
@@ -123,7 +128,7 @@ export function createJobsRoutes(
       return c.json({ error: "Could not retry job" }, 400);
     }
 
-    jobQueue.enqueue(id);
+    jobQueues.enqueue(id);
     return c.json({ ok: true, jobId: id });
   });
 
@@ -146,7 +151,7 @@ export function createJobsRoutes(
       return c.json({ error: "Not found" }, 404);
     }
 
-    const result = jobQueue.requestPause(id);
+    const result = jobQueues.requestPause(id);
     if (!result.ok) {
       return c.json({ error: result.error ?? "Could not pause job" }, 400);
     }
@@ -160,7 +165,7 @@ export function createJobsRoutes(
       return c.json({ error: "Not found" }, 404);
     }
 
-    if (!jobQueue.resume(id)) {
+    if (!jobQueues.resume(id)) {
       return c.json({ error: "Only paused jobs with remaining work can be resumed" }, 400);
     }
 
@@ -185,7 +190,7 @@ export function createJobsRoutes(
       );
     }
 
-    jobQueue.enqueue(newJobId);
+    jobQueues.enqueue(newJobId);
     return c.json({ ok: true, jobId: newJobId });
   });
 
@@ -221,4 +226,4 @@ export function createJobsRoutes(
   return app;
 }
 
-export { queue as jobQueueInstance };
+export { queues as jobQueuesInstance };

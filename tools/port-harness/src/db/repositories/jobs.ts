@@ -10,6 +10,9 @@ const STAGE_LABELS: Record<string, string> = {
   verify: "Verify",
   discover: "Discover",
   "audit-rust": "Audit Rust impl",
+  index: "Index file",
+  "index-dir": "Index directory",
+  "file-pipeline": "File pipeline",
 };
 
 export interface JobTarget {
@@ -73,6 +76,18 @@ export function enrichJob(
     if (job.stage === "assemble-flows" && parsed && typeof parsed === "object" && "file" in parsed) {
       const file = String((parsed as { file: string }).file);
       summary = `${stageLabel} · ${file}`;
+    } else if (job.stage === "file-pipeline" && parsed && typeof parsed === "object" && "path" in parsed) {
+      const file = String((parsed as { path: string }).path);
+      summary = `${stageLabel} · ${file}`;
+    } else if (job.stage === "index" && parsed && typeof parsed === "object") {
+      if ("path" in parsed) {
+        summary = `${stageLabel} · ${String((parsed as { path: string }).path)}`;
+      } else if ("paths" in parsed) {
+        const count = (parsed as { paths: string[] }).paths.length;
+        summary = `${stageLabel} · ${count} file${count === 1 ? "" : "s"}`;
+      }
+    } else if (job.stage === "index-dir" && parsed && typeof parsed === "object" && "dir" in parsed) {
+      summary = `${stageLabel} · ${String((parsed as { dir: string }).dir)}`;
     } else if (
       job.stage === "discover" &&
       parsed &&
@@ -354,7 +369,13 @@ export function cloneJobRemaining(db: Database.Database, id: number): number | n
   let remaining: number[];
   try {
     const parsed = JSON.parse(job.target_ids);
-    if (job.stage === "assemble-flows" || job.stage === "discover") {
+    if (
+      job.stage === "assemble-flows" ||
+      job.stage === "discover" ||
+      job.stage === "index" ||
+      job.stage === "index-dir" ||
+      job.stage === "file-pipeline"
+    ) {
       return null;
     }
     if (!Array.isArray(parsed)) return null;

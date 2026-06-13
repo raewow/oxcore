@@ -15,7 +15,7 @@ import {
   parsePlanRun,
   parsePortRun,
 } from "../../db/repositories/flowArtifacts.js";
-import type { JobQueue } from "../jobQueue.js";
+import type { JobQueues } from "../jobQueue.js";
 
 function getFlowJobsForTasks(
   db: Database.Database,
@@ -55,7 +55,7 @@ const FLOW_PIPELINE_STAGES = ["audit-rust", "plan-rust", "port"];
 export function createFlowsRoutes(
   db: Database.Database,
   config: HarnessConfig,
-  queue: JobQueue,
+  queues: JobQueues,
 ): Hono {
   const app = new Hono();
 
@@ -123,7 +123,7 @@ export function createFlowsRoutes(
     }
 
     const jobIds = jobsRepo.createBatchedJobs(db, "port", taskIds, config.jobs.maxBatchSize);
-    for (const jobId of jobIds) queue.enqueue(jobId);
+    for (const jobId of jobIds) queues.enqueue(jobId);
 
     return c.json({ ok: true, jobIds, totalTasks: taskIds.length, batches: jobIds.length });
   });
@@ -152,7 +152,7 @@ export function createFlowsRoutes(
     }
 
     const jobIds = jobsRepo.createBatchedJobs(db, "plan-rust", taskIds, config.jobs.maxBatchSize);
-    for (const jobId of jobIds) queue.enqueue(jobId);
+    for (const jobId of jobIds) queues.enqueue(jobId);
 
     return c.json({ ok: true, jobIds, totalTasks: taskIds.length, batches: jobIds.length });
   });
@@ -175,7 +175,7 @@ export function createFlowsRoutes(
       taskIds,
       config.jobs.maxBatchSize,
     );
-    for (const jobId of jobIds) queue.enqueue(jobId);
+    for (const jobId of jobIds) queues.enqueue(jobId);
 
     return c.json({
       ok: true,
