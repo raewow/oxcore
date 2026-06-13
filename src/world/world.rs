@@ -4,6 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::shared::console::{CommandRegistry, ConsoleCommand};
+use crate::shared::database::characters::repositories::{
+    AuctionRepository, AuctionRepositoryTrait, CharacterRepository,
+};
 use crate::shared::database::world::repositories::QuestTemplateRepository;
 use crate::shared::database::Databases;
 use crate::shared::protocol::ObjectGuid;
@@ -12,6 +15,7 @@ use crate::world::core::lua::LuaScriptManager;
 use crate::world::core::session::SessionManager;
 use crate::world::dbc::DbcManager;
 use crate::world::game::area_trigger::AreaTriggerManager;
+use crate::world::game::auction::AuctionHouseManager;
 use crate::world::game::broadcast_mgr::BroadcastManager;
 use crate::world::game::coordination::{LinkingManager, PoolManager};
 use crate::world::game::corpse::CorpseManager;
@@ -47,6 +51,7 @@ pub struct Managers {
     pub instance_mgr: Arc<crate::world::game::instance::InstanceMgr>,
     pub spell_mgr: Arc<SpellManager>,
     pub lua_mgr: Arc<LuaScriptManager>,
+    pub auction_mgr: Arc<AuctionHouseManager>,
 }
 
 pub struct World {
@@ -130,6 +135,16 @@ impl World {
 
         let character_pool = Arc::new(databases.character.clone());
         let world_pool = Arc::new(databases.world.clone());
+
+        let auction_repo: Arc<dyn AuctionRepositoryTrait> =
+            Arc::new(AuctionRepository::new(Arc::clone(&character_pool)));
+        let auction_mgr = Arc::new(AuctionHouseManager::new(
+            auction_repo,
+            Arc::new(CharacterRepository::new(Arc::clone(&character_pool))),
+            Arc::clone(&dbc),
+            Arc::clone(&item_mgr),
+        ));
+
         let systems = Arc::new(SystemManager::new(
             Arc::clone(&character_pool),
             Arc::clone(&world_pool),
@@ -166,6 +181,7 @@ impl World {
                 instance_mgr,
                 spell_mgr: Arc::new(SpellManager::new()),
                 lua_mgr,
+                auction_mgr,
             },
             systems,
             session_mgr,
@@ -219,6 +235,27 @@ impl World {
             .item_mgr
             .init_guid_generator(&self.databases.character)
             .await?;
+
+        // Load auction house maps and auction data (requires DBC + item templates)
+        let wow_patch = self.config.wow_patch.unwrap_or(112);
+        self.managers
+            .auction_mgr
+            .load_auction_houses(
+                self.config.allow_cross_faction_auction,
+                self.config.unlinked_auction_houses,
+                wow_patch,
+            )
+            .context("Failed to load auction house maps")?;
+        self.managers
+            .auction_mgr
+            .load_auction_items()
+            .await
+            .context("Failed to load auction items")?;
+        self.managers
+            .auction_mgr
+            .load_auctions()
+            .await
+            .context("Failed to load auctions")?;
 
         // Load creature templates and spawns
         self.managers.creature_mgr.load_templates().await?;
@@ -670,6 +707,7 @@ impl Clone for World {
                 instance_mgr: Arc::clone(&self.managers.instance_mgr),
                 spell_mgr: Arc::clone(&self.managers.spell_mgr),
                 lua_mgr: Arc::clone(&self.managers.lua_mgr),
+                auction_mgr: Arc::clone(&self.managers.auction_mgr),
             },
             systems: Arc::clone(&self.systems),
             session_mgr: Arc::clone(&self.session_mgr),

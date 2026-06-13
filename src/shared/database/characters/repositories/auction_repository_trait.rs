@@ -33,6 +33,12 @@ pub trait AuctionRepositoryTrait: Send + Sync {
         house_id: u32,
     ) -> Result<Vec<AuctionWithAccountRow>>;
 
+    /// Load all auction rows for world bootstrap (LoadAuctions).
+    async fn find_all_for_load(&self) -> Result<Vec<AuctionRow>>;
+
+    /// Load auction item rows joined with item_instance for bootstrap (LoadAuctionItems).
+    async fn find_all_items_for_load(&self) -> Result<Vec<AuctionItemLoadRow>>;
+
     // ========== COMMAND METHODS (Write Operations) ==========
 
     /// Create a new auction

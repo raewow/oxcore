@@ -1,4 +1,5 @@
 pub mod area_trigger;
+pub mod auction;
 pub mod broadcast_mgr;
 pub mod chat;
 pub mod combat;
@@ -23,6 +24,7 @@ pub mod trade;
 pub mod visibility;
 
 pub use broadcast_mgr::BroadcastManager;
+pub use auction::{AuctionHouseManager, AuctionHouseObject};
 pub use creature::CreatureManager;
 pub use gameobject::GameObjectManager;
 pub use items::ItemManager;

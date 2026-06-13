@@ -451,6 +451,11 @@ impl DbcManager {
         self.auction_house.lookup(house_id)
     }
 
+    /// Iterate all auction house DBC entries.
+    pub fn get_all_auction_houses(&self) -> impl Iterator<Item = (&u32, &AuctionHouseEntry)> {
+        self.auction_house.entries()
+    }
+
     /// Get bank bag slot price by ID
     pub fn get_bank_bag_price(&self, id: u32) -> Option<&BankBagSlotPricesEntry> {
         self.bank_bag_slot_prices.lookup(id)

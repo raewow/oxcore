@@ -100,6 +100,26 @@ impl AuctionRepositoryTrait for AuctionRepository {
         .context("Failed to fetch active auctions with account info")
     }
 
+    /// Load all auction rows for world bootstrap.
+    async fn find_all_for_load(&self) -> Result<Vec<AuctionRow>> {
+        sqlx::query_as::<_, AuctionRow>(
+            r#"SELECT id, house_id, item_guid, item_id, seller_guid, buyout_price, expire_time, buyer_guid, last_bid, start_bid, deposit FROM auction"#,
+        )
+        .fetch_all(&*self.pool)
+        .await
+        .context("Failed to fetch all auctions for load")
+    }
+
+    /// Load auction item rows joined with item_instance for bootstrap.
+    async fn find_all_items_for_load(&self) -> Result<Vec<AuctionItemLoadRow>> {
+        sqlx::query_as::<_, AuctionItemLoadRow>(
+            r#"SELECT creator_guid, gift_creator_guid, count, duration, charges, flags, enchantments, random_property_id, durability, text, item_guid, item_instance.item_id FROM auction JOIN item_instance ON item_guid = guid"#,
+        )
+        .fetch_all(&*self.pool)
+        .await
+        .context("Failed to fetch auction items for load")
+    }
+
     // ========== COMMAND METHODS (Write Operations) ==========
 
     /// Create a new auction.

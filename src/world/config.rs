@@ -87,6 +87,8 @@ pub struct Config {
     #[serde(default)]
     pub allow_cross_faction_auction: bool, // Merged AH (default: false)
     #[serde(default)]
+    pub unlinked_auction_houses: bool, // Separate AH per DBC entry (default: false)
+    #[serde(default)]
     pub allow_cross_faction_mail: bool, // Mail (default: false)
     #[serde(default)]
     pub allow_cross_faction_add_friend: bool, // Add friend (default: false)
@@ -404,6 +406,7 @@ impl Default for Config {
             allow_cross_faction_guild: false,
             allow_cross_faction_trade: false,
             allow_cross_faction_auction: false,
+            unlinked_auction_houses: false,
             allow_cross_faction_mail: false,
             allow_cross_faction_add_friend: false,
             chat_flood_protection_delay: default_chat_flood_protection_delay(),
