@@ -1,0 +1,47 @@
+{
+  "name": "port-harness",
+  "version": "0.1.0",
+  "description": "C++ to Rust migration agent harness for rcore",
+  "type": "module",
+  "bin": {
+    "port-harness": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc && npm run build:web",
+    "build:web": "vite build --config web/vite.config.ts",
+    "dev": "tsx src/cli.ts",
+    "dev:web": "concurrently \"tsx src/cli.ts serve\" \"vite --config web/vite.config.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@cursor/sdk": "^1.0.18",
+    "@hono/node-server": "^1.14.1",
+    "better-sqlite3": "^11.9.1",
+    "commander": "^13.1.0",
+    "hono": "^4.7.8",
+    "openai": "^4.96.0",
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-cpp": "^0.23.4",
+    "zod": "^3.24.3",
+    "zod-to-json-schema": "^3.24.5"
+  },
+  "devDependencies": {
+    "@tanstack/react-query": "^5.74.4",
+    "@tanstack/react-table": "^8.21.3",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.14.1",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^9.1.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.5.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.2",
+    "vitest": "^3.1.2"
+  }
+}

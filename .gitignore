@@ -16,3 +16,4 @@ log.txt
 *.log
 CLAUDE.md
 /reference/
+.cursor/

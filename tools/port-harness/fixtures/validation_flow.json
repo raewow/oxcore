@@ -1,0 +1,41 @@
+[
+  {
+    "name": "check_power_insufficient_mana",
+    "description": "Caster lacks sufficient power for spell cost",
+    "input": {
+      "spell_id": 133,
+      "caster_power": 10,
+      "required_power": 50,
+      "power_type": "mana"
+    },
+    "expected": {
+      "result": "SPELL_FAILED_NO_POWER"
+    },
+    "symbol": "Spell::CheckPower"
+  },
+  {
+    "name": "check_cast_on_cooldown",
+    "description": "Spell is on cooldown when cast attempted",
+    "input": {
+      "spell_id": 133,
+      "cooldown_remaining_ms": 5000
+    },
+    "expected": {
+      "result": "SPELL_FAILED_NOT_READY"
+    },
+    "symbol": "Spell::CheckCast"
+  },
+  {
+    "name": "calculate_power_cost_with_modifiers",
+    "description": "Power cost reduced by spell modifiers",
+    "input": {
+      "spell_id": 133,
+      "base_cost": 100,
+      "modifier_percent": -20
+    },
+    "expected": {
+      "power_cost": 80
+    },
+    "symbol": "Spell::CalculatePowerCost"
+  }
+]
