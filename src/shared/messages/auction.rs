@@ -214,6 +214,8 @@ impl ToWorldPacket for SmsgAuctionBidderNotification {
 /// SMSG_AUCTION_OWNER_NOTIFICATION - Notification to auction owner
 ///
 /// Sent to notify the auction owner that their item sold or expired.
+/// `bidder_guid` is `None` when the auction is sold (`sold=true` in C++), matching
+/// the C++ behavior where `bidderGuid` is only assigned in the `!sold` branch.
 #[derive(Debug, Clone)]
 pub struct SmsgAuctionOwnerNotification {
     /// Auction ID
@@ -222,8 +224,8 @@ pub struct SmsgAuctionOwnerNotification {
     pub bid: u32,
     /// Amount by which the auction was outbid
     pub auction_outbid: u32,
-    /// GUID of the bidder
-    pub bidder_guid: ObjectGuid,
+    /// GUID of the bidder (None when sold, matching C++ default-initialized field)
+    pub bidder_guid: Option<ObjectGuid>,
     /// Item template ID
     pub item_template: u32,
     /// Item random property ID
@@ -236,7 +238,7 @@ impl ToWorldPacket for SmsgAuctionOwnerNotification {
         packet.write_u32(self.auction_id);
         packet.write_u32(self.bid);
         packet.write_u32(self.auction_outbid);
-        packet.write_u64(self.bidder_guid.raw());
+        packet.write_u64(self.bidder_guid.map(|g| g.raw()).unwrap_or(0));
         packet.write_u32(self.item_template);
         packet.write_u32(self.item_random_property_id);
         packet
@@ -390,7 +392,21 @@ mod tests {
             auction_id: 123,
             bid: 1000,
             auction_outbid: 50,
-            bidder_guid: ObjectGuid::from_low(456),
+            bidder_guid: Some(ObjectGuid::from_low(456)),
+            item_template: 789,
+            item_random_property_id: 0,
+        };
+        let packet = msg.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_OWNER_NOTIFICATION);
+    }
+
+    #[test]
+    fn test_smsg_auction_owner_notification_sold_no_bidder() {
+        let msg = SmsgAuctionOwnerNotification {
+            auction_id: 123,
+            bid: 1000,
+            auction_outbid: 50,
+            bidder_guid: None,
             item_template: 789,
             item_random_property_id: 0,
         };
