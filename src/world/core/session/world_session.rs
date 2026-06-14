@@ -29,6 +29,8 @@ pub struct WorldSession {
     logout_timer: RwLock<Option<std::time::Instant>>,
     /// Guard against concurrent login attempts
     login_in_progress: AtomicBool,
+    /// Guard against concurrent auction-house list requests
+    auction_list_request_in_progress: AtomicBool,
     /// Pending area trigger teleport (dest_map, dest_instance_id, dest_pos)
     pending_teleport: Arc<RwLock<Option<(u32, u32, Position)>>>,
 }
@@ -52,6 +54,7 @@ impl WorldSession {
             player_guid: RwLock::new(None),
             logout_timer: RwLock::new(None),
             login_in_progress: AtomicBool::new(false),
+            auction_list_request_in_progress: AtomicBool::new(false),
             pending_teleport: Arc::new(RwLock::new(None)),
         }
     }
@@ -134,6 +137,22 @@ impl WorldSession {
     /// Clear the login-in-progress flag
     pub fn clear_login_in_progress(&self) {
         self.login_in_progress.store(false, Ordering::SeqCst);
+    }
+
+    /// Check whether an auction-house list request is already in flight.
+    pub fn received_ah_list_request(&self) -> bool {
+        self.auction_list_request_in_progress.load(Ordering::SeqCst)
+    }
+
+    /// Update the auction-house list in-flight gate.
+    pub fn set_received_ah_list_request(&self, value: bool) {
+        self.auction_list_request_in_progress
+            .store(value, Ordering::SeqCst);
+    }
+
+    /// Clear the auction-house list gate.
+    pub fn clear_received_ah_list_request(&self) {
+        self.set_received_ah_list_request(false);
     }
 
     /// Check if logged in

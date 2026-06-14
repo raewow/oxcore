@@ -1,0 +1,124 @@
+// src/world/handlers/auction.rs
+
+/// Handle CMSG_AUCTION_LIST_OWNER_ITEMS (0x0259)
+///
+/// Packet format (vanilla 1.12.1):
+/// - auctioneerGuid (packed u64)
+/// - listfrom     (u32) -- paging offset
+///
+/// Mirrors C++ `WorldSession::HandleAuctionListOwnerItems`.
+/// Rejects duplicate in-flight requests, validates the auction house,
+/// clears feign-death auras, then enqueues an async owner-query task.
+pub async fn handle_auction_list_owner_items(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    if session.received_ah_list_request() {
+        return Ok(());
+    }
+
+    let auctioneer_guid = packet
+        .read_guid()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
+    let listfrom = packet.read_u32().unwrap_or(0);
+
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let player = world
+        .managers
+        .player_mgr
+        .get_player(player_guid)
+        .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
+
+    let auction_house = match get_checked_auction_house_for_auctioneer(
+        &player,
+        auctioneer_guid,
+        &world.managers.auction_mgr,
+        None,
+    ) {
+        Some(house) => house,
+        None => return Ok(()),
+    };
+
+    let _ = world.managers.player_mgr.with_player_mut(player_guid, |player| {
+        let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+        if !removed.is_empty() {
+            player.auras.needs_client_update = true;
+            player.auras.needs_stat_recalc = true;
+        }
+    });
+
+    let Some(auction_house_map) = world
+        .managers
+        .auction_mgr
+        .get_auctions_map_by_house_id(auction_house.house_id)
+    else {
+        return Ok(());
+    };
+
+    let task = AuctionHouseClientQueryTask {
+        query_type: AuctionQueryType::ListOwner,
+        auction_house: auction_house_map,
+        account_id: session.account_id(),
+        listfrom,
+        outbidded_auction_ids: Vec::new(),
+    };
+
+    session.set_received_ah_list_request(true);
+
+    let world_clone = world.clone();
+    tokio::spawn(execute_auction_list_owner_items_task(
+        world_clone,
+        player_guid,
+        task,
+    ));
+
+    Ok(())
+}
+
+async fn execute_auction_list_owner_items_task(
+    world: World,
+    player_guid: crate::shared::protocol::ObjectGuid,
+    task: AuctionHouseClientQueryTask,
+) {
+    if task.query_type != AuctionQueryType::ListOwner {
+        tracing::warn!("Auction query task invoked with unexpected query type");
+        return;
+    }
+
+    tracing::debug!(
+        "Executing auction owner list query for account {}",
+        task.account_id
+    );
+
+    let Some(session) = world.session_mgr.get_session_by_player(player_guid) else {
+        return;
+    };
+
+    let mut auctions: Vec<AuctionEntry> = task
+        .auction_house
+        .auctions_snapshot()
+        .into_iter()
+        .filter(|auction| auction.seller_account == task.account_id)
+        .collect();
+    auctions.sort_by_key(|auction| auction.id);
+
+    let total_count = auctions.len() as u32;
+    let page: Vec<AuctionEntry> = auctions
+        .into_iter()
+        .skip(task.listfrom as usize)
+        .take(50)
+        .collect();
+    let refs: Vec<&AuctionEntry> = page.iter().collect();
+
+    if let Err(e) = session.send_msg(SmsgAuctionOwnerListResult {
+        auctions: &refs,
+        total_count,
+    }) {
+        tracing::error!("Failed to send auction owner list result: {}", e);
+    }
+
+    session.clear_received_ah_list_request();
+}

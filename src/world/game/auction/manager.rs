@@ -53,6 +53,10 @@ impl AuctionHouseObject {
     pub fn auction_count(&self) -> usize {
         self.auctions.len()
     }
+
+    pub fn auctions_snapshot(&self) -> Vec<AuctionEntry> {
+        self.auctions.iter().map(|entry| entry.value().clone()).collect()
+    }
 }
 
 struct BarGoLink {
@@ -381,6 +385,12 @@ impl AuctionHouseManager {
     fn get_auctions_map(&self, house: &AuctionHouseEntry) -> Option<Arc<AuctionHouseObject>> {
         self.auction_houses
             .get(&house.house_id)
+            .map(|entry| Arc::clone(entry.value()))
+    }
+
+    pub fn get_auctions_map_by_house_id(&self, house_id: u32) -> Option<Arc<AuctionHouseObject>> {
+        self.auction_houses
+            .get(&house_id)
             .map(|entry| Arc::clone(entry.value()))
     }
 
