@@ -21,6 +21,7 @@ export const flowMutationSchema = z.object({
 export const flowDraftSchema = z.object({
   name: z.string(),
   description: z.string(),
+  notes: z.string().optional(),
   entry_symbols: z.array(z.string()),
   expected_behaviour: z.string(),
   risk_level: riskLevelSchema,
@@ -38,6 +39,7 @@ export const flowUpdateSchema = z.object({
   flow: z.string(),
   name: z.string().optional(),
   description: z.string().optional(),
+  notes: z.string().optional(),
   entry_symbols: z.array(z.string()).optional(),
   expected_behaviour: z.string().optional(),
   risk_level: riskLevelSchema.optional(),

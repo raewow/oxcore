@@ -16,6 +16,7 @@ type FlowRecord = {
   id: number;
   name: string;
   description: string | null;
+  notes: string | null;
   source_file: string | null;
   risk_level: string;
   entry_symbol_ids: string | null;
@@ -41,6 +42,7 @@ export type FlowMutationInput = {
 export type FlowDraftInput = {
   name: string;
   description: string;
+  notes?: string;
   entry_symbols: string[];
   expected_behaviour: string;
   risk_level: RiskLevel;
@@ -184,11 +186,12 @@ function persistFlowDraft(
     }
 
     db.prepare(
-      `UPDATE business_flow SET name = ?, description = ?, entry_symbol_ids = ?,
+      `UPDATE business_flow SET name = ?, description = ?, notes = ?, entry_symbol_ids = ?,
        expected_behaviour = ?, risk_level = ?, source_file = ? WHERE id = ?`,
     ).run(
       flow.name,
       flow.description,
+      flow.notes ?? null,
       JSON.stringify(entryIds),
       flow.expected_behaviour,
       flow.risk_level,
@@ -200,6 +203,7 @@ function persistFlowDraft(
     flowId = flowRepo.upsertFlow(db, {
       name: flow.name,
       description: flow.description,
+      notes: flow.notes,
       entry_symbol_ids: entryIds,
       expected_behaviour: flow.expected_behaviour,
       risk_level: flow.risk_level,
@@ -268,6 +272,7 @@ export function updateFlow(db: Database.Database, ref: string, patch: FlowUpdate
   const merged: Omit<FlowDraftInput, "entry_symbols"> = {
     name: patch.name ?? existing.name,
     description: patch.description ?? existing.description ?? "",
+    notes: patch.notes ?? existing.notes ?? undefined,
     expected_behaviour: patch.expected_behaviour ?? existing.expected_behaviour ?? "",
     risk_level: patch.risk_level ?? (existing.risk_level as RiskLevel),
     source_file: patch.source_file ?? existing.source_file ?? undefined,

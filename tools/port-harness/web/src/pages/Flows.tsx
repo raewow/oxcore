@@ -99,6 +99,7 @@ export function Flows() {
               <th>Name</th>
               <th>Progress</th>
               <th>Description</th>
+              <th>Notes</th>
               <th>Source file</th>
               <th>Risk</th>
               <th>Symbols</th>
@@ -121,6 +122,9 @@ export function Flows() {
                 </td>
                 <td style={{ fontSize: "0.85rem", maxWidth: 280 }}>
                   {truncate(f.description)}
+                </td>
+                <td style={{ fontSize: "0.85rem", maxWidth: 320, whiteSpace: "pre-wrap" }}>
+                  {truncate(f.notes, 120) || "—"}
                 </td>
                 <td style={{ fontSize: "0.85rem" }}>{f.source_file ?? "—"}</td>
                 <td>

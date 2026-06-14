@@ -4,6 +4,7 @@ import type { RiskLevel } from "../../models/index.js";
 export interface InsertFlow {
   name: string;
   description: string;
+  notes?: string;
   entry_symbol_ids: number[];
   expected_behaviour: string;
   risk_level: RiskLevel;
@@ -19,10 +20,11 @@ export function upsertFlow(db: Database.Database, flow: InsertFlow): number {
 
   if (existing) {
     db.prepare(
-      `UPDATE business_flow SET description = ?, entry_symbol_ids = ?,
+      `UPDATE business_flow SET description = ?, notes = ?, entry_symbol_ids = ?,
        expected_behaviour = ?, risk_level = ?, source_file = ? WHERE id = ?`,
     ).run(
       flow.description,
+      flow.notes ?? null,
       entryIds,
       flow.expected_behaviour,
       flow.risk_level,
@@ -34,12 +36,13 @@ export function upsertFlow(db: Database.Database, flow: InsertFlow): number {
 
   const result = db
     .prepare(
-      `INSERT INTO business_flow (name, description, entry_symbol_ids, expected_behaviour, risk_level, source_file)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO business_flow (name, description, notes, entry_symbol_ids, expected_behaviour, risk_level, source_file)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       flow.name,
       flow.description,
+      flow.notes ?? null,
       entryIds,
       flow.expected_behaviour,
       flow.risk_level,

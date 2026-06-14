@@ -19,6 +19,7 @@ Keep each flow coherent and reviewable:
 - Use the exact entry symbols that start the flow; avoid inventing new symbol names.
 - Branches and mutations should be tied to line-cited evidence from the source file.
 - If a symbol belongs to more than one plausible flow, choose the best home and mention the ambiguity in the description.
+- Use `notes` to capture blockers, missing dependencies, or anything that prevents the flow from being finished yet.
 
 For each flow, identify entry symbols, branches with line citations, and state mutations.
 Respond with JSON matching this shape:
@@ -29,6 +30,7 @@ Respond with JSON matching this shape:
     {
       "name": "snake_case_flow_name",
       "description": "What the flow covers and why it matters",
+      "notes": "Optional blockers, dependencies, or follow-up work",
       "entry_symbols": ["Qualified::Symbol"],
       "expected_behaviour": "Short behavioural summary",
       "risk_level": "low|medium|high|critical",

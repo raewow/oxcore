@@ -477,6 +477,11 @@ export function FlowDetail() {
       <div className="page-header">
         <h2>{flow.flow.name}</h2>
         <p style={{ color: "#94a3b8" }}>{flow.flow.description}</p>
+        {flow.flow.notes && (
+          <p style={{ color: "#cbd5e1", whiteSpace: "pre-wrap", maxWidth: 900 }}>
+            {flow.flow.notes}
+          </p>
+        )}
         <div className="action-buttons" style={{ marginTop: "0.75rem" }}>
           <button
             type="button"

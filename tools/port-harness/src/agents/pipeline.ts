@@ -267,6 +267,7 @@ export async function runAssembleFlows(
       const flowId = flowRepo.upsertFlow(db, {
         name: flow.name,
         description: flow.description,
+        notes: flow.notes ?? undefined,
         entry_symbol_ids: entryIds,
         expected_behaviour: flow.expected_behaviour,
         risk_level: flow.risk_level,

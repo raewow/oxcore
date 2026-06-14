@@ -25,6 +25,7 @@ export interface FlowListEntry {
   id: number;
   name: string;
   description: string | null;
+  notes: string | null;
   source_file: string | null;
   risk_level: string;
   symbol_count: number;
@@ -183,8 +184,8 @@ function deriveFlowStage(
 export function listFlowsWithProgress(db: Database.Database): FlowListEntry[] {
   const flows = db
     .prepare(
-      `SELECT bf.id, bf.name, bf.description, bf.source_file, bf.risk_level,
-              COUNT(mt.id) AS symbol_count
+      `SELECT bf.id, bf.name, bf.description, bf.notes, bf.source_file, bf.risk_level,
+               COUNT(mt.id) AS symbol_count
        FROM business_flow bf
        LEFT JOIN migration_task mt ON mt.flow_id = bf.id
        GROUP BY bf.id
@@ -194,6 +195,7 @@ export function listFlowsWithProgress(db: Database.Database): FlowListEntry[] {
     id: number;
     name: string;
     description: string | null;
+    notes: string | null;
     source_file: string | null;
     risk_level: string;
     symbol_count: number;
@@ -225,6 +227,7 @@ export function listFlowsWithProgress(db: Database.Database): FlowListEntry[] {
       id: flow.id,
       name: flow.name,
       description: flow.description,
+      notes: flow.notes,
       source_file: flow.source_file,
       risk_level: flow.risk_level,
       symbol_count: flow.symbol_count,

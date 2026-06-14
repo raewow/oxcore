@@ -125,6 +125,7 @@ export const FlowOutputSchema = z.object({
     z.object({
       name: z.string(),
       description: z.string(),
+      notes: z.string().nullable().optional(),
       entry_symbols: z.array(z.string()),
       expected_behaviour: z.string(),
       risk_level: RiskLevel,

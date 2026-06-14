@@ -34,6 +34,7 @@ describe("flowTools", () => {
     const result = createFlow(db, {
       name: "flow_test",
       description: "test flow",
+      notes: "Needs target selection from another system.",
       entry_symbols: ["Flow::entry"],
       expected_behaviour: "does the thing",
       risk_level: "medium",
@@ -62,6 +63,7 @@ describe("flowTools", () => {
 
     const flow = resolveFlow(db, "flow_test");
     expect(flow?.name).toBe("flow_test");
+    expect(flow?.notes).toBe("Needs target selection from another system.");
     expect(JSON.parse(flow?.entry_symbol_ids ?? "[]")).toEqual([symId]);
 
     const task = taskRepo.getTaskBySymbolId(db, symId);
@@ -97,6 +99,7 @@ describe("flowTools", () => {
     const created = createFlow(db, {
       name: "flow_alpha",
       description: "alpha",
+      notes: "Blocked on config data.",
       entry_symbols: ["Flow::entryA"],
       expected_behaviour: "alpha behaviour",
       risk_level: "low",
@@ -118,6 +121,7 @@ describe("flowTools", () => {
     const updated = updateFlow(db, "flow_alpha", {
       name: "flow_beta",
       description: "beta",
+      notes: "Still blocked on config data, renamed after review.",
       entry_symbols: ["Flow::entryB"],
       expected_behaviour: "beta behaviour",
       risk_level: "high",
@@ -127,6 +131,7 @@ describe("flowTools", () => {
     expect(updated.ok).toBe(true);
     const after = resolveFlow(db, "flow_beta");
     expect(after?.id).toBe(before?.id);
+    expect(after?.notes).toBe("Still blocked on config data, renamed after review.");
     expect(resolveFlow(db, "flow_alpha")).toBeUndefined();
     expect(taskRepo.getTaskBySymbolId(db, symA)?.flow_id).toBeNull();
     expect(taskRepo.getTaskBySymbolId(db, symB)?.flow_id).toBe(after?.id);

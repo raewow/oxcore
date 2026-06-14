@@ -61,6 +61,7 @@ export interface FlowSummary {
   id: number;
   name: string;
   description: string | null;
+  notes: string | null;
   source_file: string | null;
   risk_level: string;
   symbol_count: number;
@@ -149,6 +150,7 @@ export interface FlowDetailResponse {
   flow: {
     name: string;
     description: string | null;
+    notes: string | null;
     expected_behaviour: string | null;
   };
   branches: { condition: string; behaviour: string; file: string; start_line: number }[];
