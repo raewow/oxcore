@@ -7,11 +7,13 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 use crate::shared::database::characters::models::auction::{AuctionItemLoadRow, AuctionRow};
+use crate::shared::database::characters::models::mail::MailRow;
 use crate::shared::database::characters::repositories::auction_repository_trait::AuctionRepositoryTrait;
+use crate::shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
 use crate::shared::database::characters::repositories::CharacterRepository;
 use crate::shared::game::auction::AuctionEntry;
 use crate::shared::game::chat::Team;
-use crate::shared::game::mail::MailCheckMask;
+use crate::shared::game::mail::{MailCheckMask, MailMessageType, MailStationery};
 use crate::shared::protocol::{HighGuid, ObjectGuid};
 use crate::world::dbc::structures::AuctionHouseEntry;
 use crate::world::dbc::DbcManager;
@@ -26,8 +28,11 @@ const GOBLIN_AUCTION_HOUSE_ID: u32 = 7;
 /// Patch version below which unlinked auction houses are allowed (1.9).
 const WOW_PATCH_109: u32 = 109;
 
-// TODO: Confirm exact C++ AUCTION_CANCELED constant value (MaNGOS mail subject suffix).
-const AUCTION_CANCELED: u32 = 1;
+/// Mail subject suffix constants (Mail.h AuctionAction enum).
+const AUCTION_SUCCESSFUL: u32 = 2;
+const AUCTION_CANCELED: u32 = 5;
+
+const MAIL_AUCTION_EXPIRE_SECS: i64 = 30 * 24 * 60 * 60;
 
 /// In-memory auction house object (one per linked/cross-faction/unlinked partition).
 pub struct AuctionHouseObject {
@@ -69,6 +74,7 @@ impl BarGoLink {
 pub struct AuctionHouseManager {
     auction_repo: Arc<dyn AuctionRepositoryTrait>,
     character_repo: Arc<CharacterRepository>,
+    mail_repo: Arc<dyn MailRepositoryTrait>,
     dbc: Arc<RwLock<DbcManager>>,
     item_mgr: Arc<ItemManager>,
     auction_items: DashMap<u32, Arc<Item>>,
@@ -79,12 +85,14 @@ impl AuctionHouseManager {
     pub fn new(
         auction_repo: Arc<dyn AuctionRepositoryTrait>,
         character_repo: Arc<CharacterRepository>,
+        mail_repo: Arc<dyn MailRepositoryTrait>,
         dbc: Arc<RwLock<DbcManager>>,
         item_mgr: Arc<ItemManager>,
     ) -> Self {
         Self {
             auction_repo,
             character_repo,
+            mail_repo,
             dbc,
             item_mgr,
             auction_items: DashMap::new(),
@@ -382,6 +390,87 @@ impl AuctionHouseManager {
             .delete_auction(auction_id)
             .await
             .context("Failed to delete auction from database")
+    }
+
+    /// Sends the "auction sold" mail to the seller with the profit (bid + deposit - cut).
+    ///
+    /// Mirrors C++ AuctionHouseMgr::SendAuctionSuccessfulMail. The online-owner
+    /// packet notification (SendAuctionOwnerNotification) is the caller's responsibility
+    /// because this manager has no session/broadcast access.
+    pub async fn send_auction_successful_mail(
+        &self,
+        auction: &AuctionEntry,
+        cut_percent: f32,
+        cut_rate: f32,
+    ) -> Result<()> {
+        let owner_guid_low = auction.seller_guid.low();
+        let owner_acc_id = self.get_player_account_id_by_guid(owner_guid_low).await;
+
+        // No known owner account — nothing to deliver to.
+        if owner_acc_id == 0 {
+            return Ok(());
+        }
+
+        let subject = format!("{}:0:{}", auction.item_template, AUCTION_SUCCESSFUL);
+
+        let auction_cut = auction.get_auction_cut(cut_percent, cut_rate);
+        // Body format matches C++: bidder as 16-wide right-aligned hex, then decimal fields.
+        let body = format!(
+            "{:>16x}:{}:{}:{}:{}",
+            auction.bidder_guid.low(),
+            auction.current_bid,
+            auction.buyout_price,
+            auction.deposit,
+            auction_cut,
+        );
+
+        tracing::debug!("AuctionSuccessful body string : {}", body);
+
+        // TODO: if owner is online, send SendAuctionOwnerNotification(auction, sold=true)
+        // via broadcast_mgr — needs caller to handle since manager has no session access.
+
+        // profit = bid + deposit - cut; wrapping matches C++ uint32 arithmetic.
+        let profit = auction
+            .current_bid
+            .wrapping_add(auction.deposit)
+            .wrapping_sub(auction_cut);
+
+        let item_text_id = match self.mail_repo.create_item_text(&body).await {
+            Ok(id) => id,
+            Err(e) => {
+                error!("SendAuctionSuccessfulMail: failed to create item text: {e}");
+                0
+            }
+        };
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let mail_row = MailRow {
+            id: 0,
+            message_type: MailMessageType::Auction as u8,
+            stationery: MailStationery::Auction as i8,
+            mail_template_id: 0,
+            sender_guid: auction.id,
+            receiver_guid: owner_guid_low,
+            subject: Some(subject),
+            item_text_id,
+            has_items: 0,
+            expire_time: now + MAIL_AUCTION_EXPIRE_SECS,
+            deliver_time: now,
+            money: profit,
+            cod: 0,
+            checked: MailCheckMask::COPIED,
+        };
+
+        // TODO need a mail system
+        if let Err(e) = self.mail_repo.create(&mail_row).await {
+            error!("SendAuctionSuccessfulMail: failed to create mail: {e}");
+        }
+
+        Ok(())
     }
 
     async fn send_auction_mail_to_owner(
