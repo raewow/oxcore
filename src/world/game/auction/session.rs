@@ -7,7 +7,9 @@
 use crate::shared::game::auction::{AuctionAction, AuctionEntry, AuctionError};
 use crate::shared::messages::auction::{SmsgAuctionCommandResult, SmsgAuctionOwnerNotification};
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::ObjectGuid;
 use crate::world::core::session::WorldSession;
+use crate::world::game::auction::AuctionHouseManager;
 use crate::world::game::inventory::inventory_types::InventoryResult;
 
 /// Send SMSG_AUCTION_COMMAND_RESULT to the client session.
@@ -74,4 +76,50 @@ pub fn send_auction_owner_notification(
     };
 
     session.send_msg(msg)
+}
+
+/// Validate auctioneer access and return the corresponding auction house entry.
+///
+/// Mirrors C++ `WorldSession::GetCheckedAuctionHouseForAuctioneer`.
+/// Returns `None` if the player is not allowed to use the auction (GM/self without permission,
+/// or NPC the player cannot interact with).
+///
+/// The `npc_interaction_validator` is called when the auctioneer GUID differs from the player
+/// GUID. It should return `Some(faction_template_id)` if the player can interact with the NPC,
+/// or `None` otherwise. When the auction system does not yet have NPC interaction validation,
+/// callers can pass `None` for the NPC path to always deny.
+pub fn get_checked_auction_house_for_auctioneer(
+    player: &crate::world::game::player::Player,
+    auctioneer_guid: ObjectGuid,
+    manager: &AuctionHouseManager,
+    npc_interaction_validator: Option<u32>, // faction template ID if valid, None if invalid
+) -> Option<crate::world::dbc::structures::AuctionHouseEntry> {
+    // GM/self path
+    if auctioneer_guid == player.guid {
+        if player.auction_access_mode == 0 {
+            // TODO: Check if player has "auction" command access (ChatHandler.FindCommand)
+            // C++ uses GetPlayer()->GetAuctionAccessMode() == 0 && !ChatHandler(...).FindCommand("auction")
+            // For now, default to denying when auction_access_mode == 0 and no command permission.
+            tracing::debug!(
+                "{} attempt open auction in cheating way.",
+                auctioneer_guid
+            );
+            return None;
+        }
+        return manager.get_auction_house_for_player(player.get_team(), player.auction_access_mode);
+    }
+
+    // NPC path
+    let faction_template_id = match npc_interaction_validator {
+        Some(id) => id,
+        None => {
+            tracing::debug!(
+                "Auctioneer {} accessed in cheating way.",
+                auctioneer_guid
+            );
+            return None;
+        }
+    };
+
+    manager.get_auction_house_for_npc(faction_template_id)
 }

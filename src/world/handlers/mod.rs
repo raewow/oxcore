@@ -9,6 +9,7 @@
 
 pub mod area_trigger;
 pub mod auth;
+pub mod auction;
 pub mod character;
 pub mod character_create_items;
 pub mod chat;
@@ -429,6 +430,11 @@ pub async fn dispatch_packet(
                 }
                 Opcode::CMSG_TRAINER_BUY_SPELL => {
                     trainer_handler::handle_trainer_buy_spell(session, packet, world).await?;
+                }
+
+                // Auction handlers
+                Opcode::CMSG_AUCTION_SELL_ITEM => {
+                    auction::handle_auction_sell_item(session, packet, world).await?;
                 }
 
                 // Vendor handlers

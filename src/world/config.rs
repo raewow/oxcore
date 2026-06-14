@@ -68,6 +68,8 @@ pub struct Config {
     pub is_pvp_realm: bool,
     #[serde(default)]
     pub allow_two_side_accounts: bool,
+    #[serde(default)]
+    pub gm_allow_trades: Option<bool>, // Allow GM characters to trade/auction (default: false)
 
     // Chat Settings
     #[serde(default = "default_allow_cross_faction_whispers")]
@@ -413,6 +415,7 @@ impl Default for Config {
             char_delete_min_level: None,
             is_pvp_realm: false,
             allow_two_side_accounts: false,
+            gm_allow_trades: None,
             allow_cross_faction_whispers: default_allow_cross_faction_whispers(),
             allow_cross_faction_chat: false,
             allow_cross_faction_channel: false,

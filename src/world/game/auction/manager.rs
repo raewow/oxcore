@@ -385,6 +385,67 @@ impl AuctionHouseManager {
             .map(|entry| Arc::clone(entry.value()))
     }
 
+    /// Maps a creature faction template ID to an auction house ID.
+    ///
+    /// Mirrors C++ `AuctionHouseMgr::GetAuctionHouseId` (AuctionHouseMgr.cpp:522-578).
+    pub fn get_auction_house_id_from_faction_template(faction_template_id: u32) -> u32 {
+        match faction_template_id {
+            11 | 12 => 1,   // Human
+            29 | 85 => 6,   // Orc
+            55 | 57 => 2,   // Dwarf
+            68 | 71 => 4,   // Undead
+            79 | 80 => 3,   // Night Elf
+            104 | 105 => 5, // Tauren
+            120 => 7,       // Booty Bay
+            474 => 7,       // Gadgetzan
+            534 => 2,       // Alliance Generic
+            855 => 7,       // Everlook
+            _ => {
+                // Fallback: use ourMask to determine alliance/horde/neutral
+                // FACTION_MASK_ALLIANCE = 2, FACTION_MASK_HORDE = 4
+                // Since we don't have the FactionTemplate entry here without the DBC,
+                // callers that need the exact fallback should use the DBC lookup.
+                7 // goblin (neutral) as default
+            }
+        }
+    }
+
+    /// Returns the auction house entry for a player, based on team and access mode.
+    ///
+    /// Mirrors C++ `AuctionHouseMgr::GetAuctionHouseEntry` player branch (lines 594-610).
+    pub fn get_auction_house_for_player(
+        &self,
+        team: crate::shared::game::chat::Team,
+        auction_access_mode: i8,
+    ) -> Option<AuctionHouseEntry> {
+        let house_id = if auction_access_mode > 0 {
+            7 // neutral
+        } else {
+            match team {
+                crate::shared::game::chat::Team::Alliance => {
+                    if auction_access_mode == 0 { 1 } else { 6 }
+                }
+                crate::shared::game::chat::Team::Horde => {
+                    if auction_access_mode == 0 { 6 } else { 1 }
+                }
+                _ => 7,
+            }
+        };
+        self.get_auction_house_entry(house_id)
+    }
+
+    /// Returns the auction house entry for an NPC, based on faction template.
+    ///
+    /// Mirrors C++ `AuctionHouseMgr::GetAuctionHouseEntry` creature branch (lines 586-592).
+    pub fn get_auction_house_for_npc(
+        &self,
+        faction_template_id: u32,
+    ) -> Option<AuctionHouseEntry> {
+        let house_id =
+            Self::get_auction_house_id_from_faction_template(faction_template_id);
+        self.get_auction_house_entry(house_id)
+    }
+
     /// Calculates auction deposit for a given item, time, and house entry.
     ///
     /// Mirrors C++ `AuctionHouseMgr::GetAuctionDeposit` (AuctionHouseMgr.cpp:98-110).

@@ -344,6 +344,33 @@ async fn load_auction_items_query_failure_treated_as_empty() {
     assert_eq!(mgr.item_count(), 0);
 }
 
+// ========== GET AUCTION HOUSE ID FROM FACTION TEMPLATE TESTS ==========
+
+#[test]
+fn get_auction_house_id_from_faction_template_known_values() {
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(11), 1);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(12), 1);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(29), 6);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(85), 6);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(55), 2);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(57), 2);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(68), 4);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(71), 4);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(79), 3);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(80), 3);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(104), 5);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(105), 5);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(120), 7);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(474), 7);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(534), 2);
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(855), 7);
+}
+
+#[test]
+fn get_auction_house_id_from_faction_template_unknown_defaults_to_neutral() {
+    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(9999), 7);
+}
+
 // ========== GET AUCTION DEPOSIT TESTS ==========
 
 #[tokio::test]
@@ -459,4 +486,103 @@ async fn get_auction_deposit_missing_template_returns_zero() {
     };
 
     assert_eq!(mgr.get_auction_deposit(&house, 7200, &item, 0, 1.0), 0);
+}
+
+// ========== GET CHECKED AUCTION HOUSE FOR AUCTIONEER TESTS ==========
+
+use crate::shared::game::chat::Team;
+use crate::world::game::auction::get_checked_auction_house_for_auctioneer;
+use crate::world::game::player::Player;
+
+fn test_player(human_guid: u32, race: u8) -> Player {
+    Player::new(
+        ObjectGuid::new_without_entry(crate::shared::protocol::HighGuid::Player, human_guid),
+        "Test".to_string(),
+        0,
+        0,
+        0,
+        1,
+        race,
+        1,
+        0,
+    )
+}
+
+#[tokio::test]
+async fn get_checked_auction_house_self_with_access_mode_returns_house() {
+    let dbc = dbc_with_houses(&[(1, 0), (6, 0), (7, 0)]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let mock_repo = MockAuctionRepositoryTrait::new();
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    let mut player = test_player(42, 1); // human = alliance
+    player.auction_access_mode = 1; // neutral
+
+    let house = get_checked_auction_house_for_auctioneer(
+        &player,
+        player.guid,
+        &mgr,
+        None,
+    );
+    assert!(house.is_some());
+    assert_eq!(house.unwrap().house_id, 7); // neutral
+}
+
+#[tokio::test]
+async fn get_checked_auction_house_self_without_access_mode_denies() {
+    let dbc = dbc_with_houses(&[(1, 0)]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let mock_repo = MockAuctionRepositoryTrait::new();
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    let player = test_player(42, 1); // human = alliance
+    // auction_access_mode defaults to 0
+
+    let house = get_checked_auction_house_for_auctioneer(
+        &player,
+        player.guid,
+        &mgr,
+        None,
+    );
+    assert!(house.is_none());
+}
+
+#[tokio::test]
+async fn get_checked_auction_house_npc_valid_returns_house() {
+    let dbc = dbc_with_houses(&[(1, 0)]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let mock_repo = MockAuctionRepositoryTrait::new();
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    let player = test_player(42, 1); // human = alliance
+    let npc_guid = ObjectGuid::new_without_entry(crate::shared::protocol::HighGuid::Unit, 999);
+
+    // faction template 11 = human = house 1
+    let house = get_checked_auction_house_for_auctioneer(
+        &player,
+        npc_guid,
+        &mgr,
+        Some(11),
+    );
+    assert!(house.is_some());
+    assert_eq!(house.unwrap().house_id, 1);
+}
+
+#[tokio::test]
+async fn get_checked_auction_house_npc_invalid_denies() {
+    let dbc = dbc_with_houses(&[(1, 0)]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let mock_repo = MockAuctionRepositoryTrait::new();
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    let player = test_player(42, 1);
+    let npc_guid = ObjectGuid::new_without_entry(crate::shared::protocol::HighGuid::Unit, 999);
+
+    let house = get_checked_auction_house_for_auctioneer(
+        &player,
+        npc_guid,
+        &mgr,
+        None,
+    );
+    assert!(house.is_none());
 }

@@ -112,6 +112,9 @@ pub struct Player {
     pub current_gossip_menu_id: Option<u32>,
     /// Currently selected unit/object (for targeting, gossip, vendors)
     pub selection: Option<ObjectGuid>,
+    /// Auction access mode: 0 = normal, 1 = neutral, -1 = enemy faction
+    /// (C++ Player::m_ExtraFlags PLAYER_EXTRA_AUCTION_NEUTRAL / PLAYER_EXTRA_AUCTION_ENEMY)
+    pub auction_access_mode: i8,
     /// Homebind map ID (hearthstone destination)
     pub homebind_map: u32,
     /// Homebind zone ID
@@ -187,6 +190,7 @@ impl Player {
             looting_target: None,
             current_gossip_menu_id: None,
             selection: None,
+            auction_access_mode: 0,
             homebind_map: map_id,
             homebind_zone: zone_id,
             homebind_x: 0.0,
@@ -233,5 +237,10 @@ impl Player {
     pub fn is_alive(&self) -> bool {
         use super::death::DeathState;
         matches!(self.death.death_state, DeathState::Alive)
+    }
+
+    /// Get the player's team (Alliance/Horde/None)
+    pub fn get_team(&self) -> crate::shared::game::chat::Team {
+        crate::shared::game::chat::Team::from_race(self.race)
     }
 }
