@@ -344,6 +344,32 @@ async fn load_auction_items_query_failure_treated_as_empty() {
     assert_eq!(mgr.item_count(), 0);
 }
 
+#[tokio::test]
+async fn add_a_item_allows_zero_guid_low() {
+    let dbc = dbc_with_houses(&[]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let mock_repo = MockAuctionRepositoryTrait::new();
+
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    mgr.insert_item_for_test(test_item(0, 25));
+
+    assert_eq!(mgr.item_count(), 1);
+}
+
+#[tokio::test]
+#[should_panic(expected = "duplicate auction item GUID 401")]
+async fn add_a_item_rejects_duplicate_guid_low() {
+    let dbc = dbc_with_houses(&[]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let mock_repo = MockAuctionRepositoryTrait::new();
+
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    mgr.insert_item_for_test(test_item(401, 25));
+    mgr.insert_item_for_test(test_item(401, 25));
+}
+
 // ========== GET AUCTION HOUSE ID FROM FACTION TEMPLATE TESTS ==========
 
 #[test]

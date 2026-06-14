@@ -308,7 +308,6 @@ impl AuctionHouseManager {
 
     fn add_a_item(&self, item: Arc<Item>) {
         let guid_low = item.guid.low();
-        assert!(guid_low != 0);
         assert!(
             !self.auction_items.contains_key(&guid_low),
             "duplicate auction item GUID {guid_low}"
