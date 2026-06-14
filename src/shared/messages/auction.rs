@@ -43,55 +43,97 @@ impl ToWorldPacket for MsgAuctionHello {
 ///
 /// Sent in response to auction actions like creating, bidding, or canceling.
 /// Mirrors C++ `WorldSession::SendAuctionCommandResult` wire format.
+///
+/// Each variant encodes the exact payload required by its branch, preventing
+/// silent omission of mandatory fields (e.g. `HigherBid` always requires
+/// bidder, bid, and outbid data).
 #[derive(Debug, Clone)]
-pub struct SmsgAuctionCommandResult {
-    /// Auction ID (0 when auc is null)
-    pub auction_id: u32,
-    /// Type of auction action performed
-    pub action: AuctionAction,
-    /// Result of the action
-    pub error: AuctionError,
-    /// Inventory error (serialized when error == AUCTION_ERR_INVENTORY)
-    pub inventory_error: Option<crate::world::game::inventory::inventory_types::InventoryResult>,
-    /// Bidder GUID (serialized when error == AUCTION_ERR_HIGHER_BID)
-    pub bidder_guid: Option<ObjectGuid>,
-    /// Current bid (serialized when error == AUCTION_ERR_HIGHER_BID)
-    pub bid: Option<u32>,
-    /// Outbid amount (serialized when error == AUCTION_OK + BidPlaced, or AUCTION_ERR_HIGHER_BID)
-    pub outbid: Option<u32>,
+pub enum SmsgAuctionCommandResult {
+    /// AUCTION_OK with no extra fields (Action != BidPlaced)
+    Ok {
+        auction_id: u32,
+        action: AuctionAction,
+    },
+    /// AUCTION_OK + BidPlaced: appends outbid amount
+    OkBidPlaced {
+        auction_id: u32,
+        outbid: u32,
+    },
+    /// AUCTION_ERR_INVENTORY: appends inventory error code
+    Inventory {
+        auction_id: u32,
+        action: AuctionAction,
+        inventory_error: crate::world::game::inventory::inventory_types::InventoryResult,
+    },
+    /// AUCTION_ERR_HIGHER_BID: appends bidder GUID, bid, and outbid
+    HigherBid {
+        auction_id: u32,
+        action: AuctionAction,
+        bidder_guid: ObjectGuid,
+        bid: u32,
+        outbid: u32,
+    },
+    /// All other errors: only base fields (auction_id, action, error)
+    Other {
+        auction_id: u32,
+        action: AuctionAction,
+        error: AuctionError,
+    },
+}
+
+impl SmsgAuctionCommandResult {
+    pub fn auction_id(&self) -> u32 {
+        match self {
+            Self::Ok { auction_id, .. }
+            | Self::OkBidPlaced { auction_id, .. }
+            | Self::Inventory { auction_id, .. }
+            | Self::HigherBid { auction_id, .. }
+            | Self::Other { auction_id, .. } => *auction_id,
+        }
+    }
+
+    pub fn action(&self) -> AuctionAction {
+        match self {
+            Self::Ok { action, .. }
+            | Self::Inventory { action, .. }
+            | Self::HigherBid { action, .. }
+            | Self::Other { action, .. } => *action,
+            Self::OkBidPlaced { .. } => AuctionAction::BidPlaced,
+        }
+    }
+
+    pub fn error(&self) -> AuctionError {
+        match self {
+            Self::Ok { .. } | Self::OkBidPlaced { .. } => AuctionError::Ok,
+            Self::Inventory { .. } => AuctionError::Inventory,
+            Self::HigherBid { .. } => AuctionError::HigherBid,
+            Self::Other { error, .. } => *error,
+        }
+    }
 }
 
 impl ToWorldPacket for SmsgAuctionCommandResult {
     fn to_world_packet(&self) -> WorldPacket {
-        let mut packet = WorldPacket::new(Opcode::SMSG_AUCTION_COMMAND_RESULT);
-        // Base fields always present (C++ lines 73-75)
-        packet.write_u32(self.auction_id);
-        packet.write_u32(self.action as u32);
-        packet.write_u32(self.error as u32);
+        let mut packet = WorldPacket::with_capacity(Opcode::SMSG_AUCTION_COMMAND_RESULT, 16);
+        packet.write_u32(self.auction_id());
+        packet.write_u32(self.action() as u32);
+        packet.write_u32(self.error() as u32);
 
-        match self.error {
-            AuctionError::Ok => {
-                if self.action == AuctionAction::BidPlaced {
-                    packet.write_u32(self.outbid.unwrap_or(0));
-                }
+        match self {
+            Self::OkBidPlaced { outbid, .. } => {
+                packet.write_u32(*outbid);
             }
-            AuctionError::Inventory => {
-                if let Some(inv) = self.inventory_error {
-                    packet.write_u32(inv as u32);
-                }
+            Self::Inventory { inventory_error, .. } => {
+                packet.write_u32(*inventory_error as u32);
             }
-            AuctionError::HigherBid => {
-                if let Some(guid) = self.bidder_guid {
-                    packet.write_u64(guid.raw());
-                }
-                if let Some(bid) = self.bid {
-                    packet.write_u32(bid);
-                }
-                if let Some(outbid) = self.outbid {
-                    packet.write_u32(outbid);
-                }
+            Self::HigherBid {
+                bidder_guid, bid, outbid, ..
+            } => {
+                packet.write_u64(bidder_guid.raw());
+                packet.write_u32(*bid);
+                packet.write_u32(*outbid);
             }
-            _ => {}
+            Self::Ok { .. } | Self::Other { .. } => {}
         }
 
         packet
@@ -315,63 +357,84 @@ mod tests {
     }
 
     #[test]
-    fn test_smsg_auction_command_result_ok_bid_placed() {
-        let msg = SmsgAuctionCommandResult {
+    fn test_smsg_auction_command_result_ok_no_extra() {
+        let msg = SmsgAuctionCommandResult::Ok {
             auction_id: 123,
-            action: AuctionAction::BidPlaced,
-            error: AuctionError::Ok,
-            inventory_error: None,
-            bidder_guid: None,
-            bid: None,
-            outbid: Some(100),
+            action: AuctionAction::Started,
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
+        assert_eq!(packet.data().len(), 12); // 3 * u32
+        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 123);
+        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), AuctionAction::Started as u32);
+        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), AuctionError::Ok as u32);
+    }
+
+    #[test]
+    fn test_smsg_auction_command_result_ok_bid_placed() {
+        let msg = SmsgAuctionCommandResult::OkBidPlaced {
+            auction_id: 123,
+            outbid: 100,
+        };
+        let packet = msg.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
+        assert_eq!(packet.data().len(), 16); // 4 * u32
+        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 123);
+        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), AuctionAction::BidPlaced as u32);
+        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), AuctionError::Ok as u32);
+        assert_eq!(u32::from_le_bytes(packet.data()[12..16].try_into().unwrap()), 100);
     }
 
     #[test]
     fn test_smsg_auction_command_result_inventory_error() {
-        let msg = SmsgAuctionCommandResult {
+        let msg = SmsgAuctionCommandResult::Inventory {
             auction_id: 0,
             action: AuctionAction::Started,
-            error: AuctionError::Inventory,
-            inventory_error: Some(crate::world::game::inventory::inventory_types::InventoryResult::BagFull),
-            bidder_guid: None,
-            bid: None,
-            outbid: None,
+            inventory_error: crate::world::game::inventory::inventory_types::InventoryResult::BagFull,
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
+        assert_eq!(packet.data().len(), 16); // 4 * u32
+        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 0);
+        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), AuctionAction::Started as u32);
+        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), AuctionError::Inventory as u32);
+        assert_eq!(u32::from_le_bytes(packet.data()[12..16].try_into().unwrap()), crate::world::game::inventory::inventory_types::InventoryResult::BagFull as u32);
     }
 
     #[test]
     fn test_smsg_auction_command_result_higher_bid() {
-        let msg = SmsgAuctionCommandResult {
+        let bidder_guid = ObjectGuid::from_low(789);
+        let msg = SmsgAuctionCommandResult::HigherBid {
             auction_id: 456,
             action: AuctionAction::BidPlaced,
-            error: AuctionError::HigherBid,
-            inventory_error: None,
-            bidder_guid: Some(ObjectGuid::from_low(789)),
-            bid: Some(1000),
-            outbid: Some(50),
+            bidder_guid,
+            bid: 1000,
+            outbid: 50,
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
+        assert_eq!(packet.data().len(), 28); // 3 * u32 + u64 + 2 * u32
+        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 456);
+        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), AuctionAction::BidPlaced as u32);
+        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), AuctionError::HigherBid as u32);
+        assert_eq!(u64::from_le_bytes(packet.data()[12..20].try_into().unwrap()), bidder_guid.raw());
+        assert_eq!(u32::from_le_bytes(packet.data()[20..24].try_into().unwrap()), 1000);
+        assert_eq!(u32::from_le_bytes(packet.data()[24..28].try_into().unwrap()), 50);
     }
 
     #[test]
-    fn test_smsg_auction_command_result_ok_no_extra() {
-        let msg = SmsgAuctionCommandResult {
-            auction_id: 123,
+    fn test_smsg_auction_command_result_other_error() {
+        let msg = SmsgAuctionCommandResult::Other {
+            auction_id: 0,
             action: AuctionAction::Started,
-            error: AuctionError::Ok,
-            inventory_error: None,
-            bidder_guid: None,
-            bid: None,
-            outbid: None,
+            error: AuctionError::NotEnoughMoney,
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
+        assert_eq!(packet.data().len(), 12); // 3 * u32
+        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 0);
+        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), AuctionAction::Started as u32);
+        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), AuctionError::NotEnoughMoney as u32);
     }
 
     #[test]

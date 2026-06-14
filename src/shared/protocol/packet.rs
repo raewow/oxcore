@@ -19,6 +19,13 @@ impl WorldPacket {
         }
     }
 
+    pub fn with_capacity(opcode: Opcode, capacity: usize) -> Self {
+        Self {
+            opcode,
+            data: BytesMut::with_capacity(capacity),
+        }
+    }
+
     pub fn from_data(opcode: Opcode, data: BytesMut) -> Self {
         Self { opcode, data }
     }

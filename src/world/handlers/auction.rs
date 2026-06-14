@@ -92,7 +92,7 @@ pub async fn handle_auction_sell_item(
             session,
             None,
             AuctionAction::Started,
-            AuctionError::HigherBid,
+            AuctionError::BidIncrement,
             None,
         )?;
         // TODO: ProcessAnticheatAction("GoldDupe", "bid > buyout", CHEAT_ACTION_LOG)

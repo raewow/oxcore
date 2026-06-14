@@ -18,6 +18,10 @@ use crate::world::game::inventory::inventory_types::InventoryResult;
 /// The `auction` parameter is `None` only when the auction pointer is null;
 /// callers must ensure `auction` is `Some` for `HigherBid` and `Ok+BidPlaced` branches,
 /// matching the C++ assumption that those branches unconditionally dereference `auc`.
+///
+/// Returns an error when the required auction data is missing for a branch that
+/// needs it (e.g. `HigherBid` without an `AuctionEntry`). This prevents the
+/// silent packet-truncation bug that the C++ code exhibits when `auc` is null.
 pub fn send_auction_command_result(
     session: &WorldSession,
     auction: Option<&AuctionEntry>,
@@ -27,23 +31,41 @@ pub fn send_auction_command_result(
 ) -> anyhow::Result<()> {
     let auction_id = auction.map(|a| a.id).unwrap_or(0);
 
-    let msg = SmsgAuctionCommandResult {
-        auction_id,
-        action,
-        error,
-        inventory_error,
-        bidder_guid: match error {
-            AuctionError::HigherBid => auction.map(|a| a.bidder_guid),
-            _ => None,
-        },
-        bid: match error {
-            AuctionError::HigherBid => auction.map(|a| a.current_bid),
-            _ => None,
-        },
-        outbid: match (error, action) {
-            (AuctionError::Ok, AuctionAction::BidPlaced) => auction.map(|a| a.get_outbid_amount()),
-            (AuctionError::HigherBid, _) => auction.map(|a| a.get_outbid_amount()),
-            _ => None,
+    let msg = match error {
+        AuctionError::Ok => {
+            if action == AuctionAction::BidPlaced {
+                let outbid = auction
+                    .map(|a| a.get_outbid_amount())
+                    .ok_or_else(|| anyhow::anyhow!("Ok+BidPlaced requires auction data"))?;
+                SmsgAuctionCommandResult::OkBidPlaced { auction_id, outbid }
+            } else {
+                SmsgAuctionCommandResult::Ok { auction_id, action }
+            }
+        }
+        AuctionError::Inventory => {
+            let inventory_error = inventory_error
+                .ok_or_else(|| anyhow::anyhow!("Inventory error requires inventory_error"))?;
+            SmsgAuctionCommandResult::Inventory {
+                auction_id,
+                action,
+                inventory_error,
+            }
+        }
+        AuctionError::HigherBid => {
+            let auction = auction
+                .ok_or_else(|| anyhow::anyhow!("HigherBid requires auction data"))?;
+            SmsgAuctionCommandResult::HigherBid {
+                auction_id,
+                action,
+                bidder_guid: auction.bidder_guid,
+                bid: auction.current_bid,
+                outbid: auction.get_outbid_amount(),
+            }
+        }
+        _ => SmsgAuctionCommandResult::Other {
+            auction_id,
+            action,
+            error,
         },
     };
 
