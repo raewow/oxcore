@@ -305,7 +305,15 @@ async fn load_auctions_invalid_house_deletes_and_removes_item() {
         .times(1)
         .returning(|_| Ok(()));
 
-    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+    // When no owner account is found, send_auction_mail_to_owner destroys the item via DB delete.
+    let mut item_repo = MockItemRepositoryTrait::new();
+    item_repo
+        .expect_delete()
+        .with(eq(300u32))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    let mgr = create_test_manager_with_mail(mock_repo, dbc, item_mgr, MockMailRepositoryTrait::new(), item_repo);
     mgr.load_auction_houses(false, false, 112).unwrap();
     mgr.insert_item_for_test(test_item(300, 25));
 

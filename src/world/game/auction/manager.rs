@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -61,6 +61,21 @@ impl AuctionHouseObject {
     pub fn auctions_snapshot(&self) -> Vec<AuctionEntry> {
         self.auctions.iter().map(|entry| entry.value().clone()).collect()
     }
+
+    pub fn get_auction(&self, id: u32) -> Option<AuctionEntry> {
+        self.auctions.get(&id).map(|e| e.value().clone())
+    }
+
+    pub fn remove_auction(&self, id: u32) -> bool {
+        self.auctions.remove(&id).is_some()
+    }
+
+    pub fn get_account_auction_count(&self, account_id: u32) -> usize {
+        self.auctions
+            .iter()
+            .filter(|e| e.value().seller_account == account_id)
+            .count()
+    }
 }
 
 struct BarGoLink {
@@ -89,6 +104,7 @@ pub struct AuctionHouseManager {
     auction_items: DashMap<u32, Arc<Item>>,
     auction_houses: DashMap<u32, Arc<AuctionHouseObject>>,
     allow_cross_faction_auction: AtomicBool,
+    next_auction_id: AtomicU32,
 }
 
 impl AuctionHouseManager {
@@ -110,6 +126,7 @@ impl AuctionHouseManager {
             auction_items: DashMap::new(),
             auction_houses: DashMap::new(),
             allow_cross_faction_auction: AtomicBool::new(false),
+            next_auction_id: AtomicU32::new(1),
         }
     }
 
@@ -228,10 +245,12 @@ impl AuctionHouseManager {
 
         let mut bar = BarGoLink::new(rows.len() as u32);
         let mut count: u32 = 0;
+        let mut max_auction_id: u32 = 0;
 
         for row in rows {
             bar.step();
 
+            max_auction_id = max_auction_id.max(row.id);
             let house_id = row.house_id;
             let item_guid_low = row.item_guid;
             let seller_guid = ObjectGuid::from_low(row.seller_guid);
@@ -311,18 +330,20 @@ impl AuctionHouseManager {
             count = count.saturating_add(1);
         }
 
+        self.seed_auction_id(max_auction_id);
+
         info!("");
         info!(">> Loaded {} auctions", count);
         Ok(())
     }
 
-    fn get_a_item(&self, guid: u32) -> Option<Arc<Item>> {
+    pub fn get_a_item(&self, guid: u32) -> Option<Arc<Item>> {
         self.auction_items
             .get(&guid)
             .map(|entry| Arc::clone(entry.value()))
     }
 
-    fn add_a_item(&self, item: Arc<Item>) {
+    pub fn add_a_item(&self, item: Arc<Item>) {
         let guid_low = item.guid.low();
         assert!(
             !self.auction_items.contains_key(&guid_low),
@@ -379,7 +400,7 @@ impl AuctionHouseManager {
         ))
     }
 
-    fn remove_a_item(&self, guid: u32) -> bool {
+    pub fn remove_a_item(&self, guid: u32) -> bool {
         self.auction_items.remove(&guid).is_some()
     }
 
@@ -527,11 +548,110 @@ impl AuctionHouseManager {
         (deposit * rate) as u32
     }
 
-    async fn delete_auction_from_db(&self, auction_id: u32) -> Result<()> {
+    pub async fn delete_auction_from_db(&self, auction_id: u32) -> Result<()> {
         self.auction_repo
             .delete_auction(auction_id)
             .await
             .context("Failed to delete auction from database")
+    }
+
+    pub fn seed_auction_id(&self, max_id: u32) {
+        self.next_auction_id.store(max_id + 1, Ordering::SeqCst);
+    }
+
+    pub fn generate_auction_id(&self) -> u32 {
+        self.next_auction_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    pub async fn save_auction_to_db(&self, auction: &AuctionEntry) -> Result<()> {
+        use crate::shared::database::characters::models::auction::AuctionRow;
+        let row = AuctionRow {
+            id: auction.id,
+            house_id: auction.house_id,
+            item_guid: auction.item_guid.low(),
+            item_id: auction.item_template,
+            seller_guid: auction.seller_guid.low(),
+            buyout_price: auction.buyout_price as i32,
+            expire_time: auction.expire_time as i64,
+            buyer_guid: auction.bidder_guid.low(),
+            last_bid: auction.current_bid as i32,
+            start_bid: auction.start_bid as i32,
+            deposit: auction.deposit as i32,
+        };
+        self.auction_repo
+            .create_auction(&row)
+            .await
+            .context("Failed to save auction to database")
+    }
+
+    /// Refunds the bidder's current bid by mail when an owner cancels a live auction.
+    ///
+    /// Mirrors C++ `WorldSession::SendAuctionCancelledToBidderMail`.
+    pub async fn send_auction_cancelled_to_bidder_mail(&self, auction: &AuctionEntry) -> Result<()> {
+        let bidder_guid_low = auction.bidder_guid.low();
+        if bidder_guid_low == 0 {
+            return Ok(());
+        }
+
+        let subject = format!("{}:0:{}", auction.item_template, AUCTION_CANCELED);
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let mail_row = MailRow {
+            id: 0,
+            message_type: MailMessageType::Auction as u8,
+            stationery: MailStationery::Auction as i8,
+            mail_template_id: 0,
+            sender_guid: auction.id,
+            receiver_guid: bidder_guid_low,
+            subject: Some(subject),
+            item_text_id: 0,
+            has_items: 0,
+            expire_time: now + MAIL_AUCTION_EXPIRE_SECS,
+            deliver_time: now,
+            money: auction.current_bid,
+            cod: 0,
+            checked: MailCheckMask::COPIED,
+        };
+
+        if let Err(e) = self.mail_repo.create(&mail_row).await {
+            error!("send_auction_cancelled_to_bidder_mail: failed to create mail: {e}");
+        }
+
+        Ok(())
+    }
+
+    /// Mails the auction item back to the owner when they cancel a live listing.
+    ///
+    /// Resolves the item from the item cache, mails it to the owner, then removes
+    /// it from the cache. Mirrors the owner-mail side of C++ `HandleAuctionRemoveItem`.
+    pub async fn send_auction_cancel_mail_to_owner(&self, auction: &AuctionEntry) -> Result<()> {
+        let item_guid_low = auction.item_guid.low();
+        let Some(pitem) = self.get_a_item(item_guid_low) else {
+            error!(
+                "send_auction_cancel_mail_to_owner: item {} not found in cache",
+                item_guid_low
+            );
+            return Ok(());
+        };
+
+        let subject = format!("{}:0:{}", auction.item_template, AUCTION_CANCELED);
+
+        self.send_auction_mail_to_owner(
+            &subject,
+            "",
+            auction,
+            &pitem,
+            None,
+            MailCheckMask::from(MailCheckMask::COPIED),
+        )
+        .await?;
+
+        self.remove_a_item(item_guid_low);
+        Ok(())
     }
 
     /// Sends the "auction sold" mail to the seller with the profit (bid + deposit - cut).
@@ -787,14 +907,60 @@ impl AuctionHouseManager {
     async fn send_auction_mail_to_owner(
         &self,
         subject: &str,
-        body: &str,
+        _body: &str,
         auction: &AuctionEntry,
         item: &Item,
         _house_entry: Option<AuctionHouseEntry>,
         _check_mask: MailCheckMask,
     ) -> Result<()> {
-        let _ = (subject, body, auction, item);
-        // TODO: Implement MailDraft::SendMailTo semantics (partial failure behavior not defined in C++ LoadAuctions).
+        let owner_guid_low = auction.seller_guid.low();
+        let owner_acc_id = self.get_player_account_id_by_guid(owner_guid_low).await;
+
+        if owner_acc_id == 0 {
+            if let Err(e) = self.item_repo.delete(item.guid.low()).await {
+                error!("send_auction_mail_to_owner: failed to delete item {}: {e}", item.guid.low());
+            }
+            return Ok(());
+        }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let mail_row = MailRow {
+            id: 0,
+            message_type: MailMessageType::Auction as u8,
+            stationery: MailStationery::Auction as i8,
+            mail_template_id: 0,
+            sender_guid: auction.id,
+            receiver_guid: owner_guid_low,
+            subject: Some(subject.to_string()),
+            item_text_id: 0,
+            has_items: 1,
+            expire_time: now + MAIL_AUCTION_EXPIRE_SECS,
+            deliver_time: now,
+            money: 0,
+            cod: 0,
+            checked: MailCheckMask::COPIED,
+        };
+
+        let mail_id = match self.mail_repo.create(&mail_row).await {
+            Ok(id) => id,
+            Err(e) => {
+                error!("send_auction_mail_to_owner: failed to create mail: {e}");
+                return Ok(());
+            }
+        };
+
+        if let Err(e) = self
+            .mail_repo
+            .add_item(mail_id, item.guid.low(), auction.item_template, owner_guid_low)
+            .await
+        {
+            error!("send_auction_mail_to_owner: failed to attach item to mail: {e}");
+        }
+
         Ok(())
     }
 

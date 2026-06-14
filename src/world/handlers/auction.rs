@@ -21,6 +21,7 @@ use crate::world::game::auction::{
     get_checked_auction_house_for_auctioneer, send_auction_command_result,
 };
 use crate::world::game::creature::CreatureManager;
+use crate::world::game::inventory::inventory_types::InventoryResult;
 use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
 use crate::world::game::player::PlayerManager;
 use crate::world::World;
@@ -292,14 +293,14 @@ pub async fn handle_auction_sell_item(
     // TODO: CONFIG_UINT32_ACCOUNT_CONCURRENT_AUCTION_LIMIT check
 
     // --- auctioneer validation ---
-    let auction_house = get_checked_auction_house_for_auctioneer(
+    let house_entry = get_checked_auction_house_for_auctioneer(
         &player,
         auctioneer_guid,
         &world.managers.auction_mgr,
         None, // NPC interaction not yet ported
     );
 
-    let auction_house = match auction_house {
+    let house_entry = match house_entry {
         Some(h) => h,
         None => {
             send_auction_command_result(
@@ -312,6 +313,15 @@ pub async fn handle_auction_sell_item(
             return Ok(());
         }
     };
+
+    // Drop read lock before acquiring write lock later (feign death removal).
+    drop(player);
+
+    // --- concurrent auction limit ---
+    // TODO: add Config::account_concurrent_auction_limit field (u32, default 0 = no limit).
+    // When non-zero: get_auctions_map_by_house_id(house_entry.house_id)
+    //   .get_account_auction_count(session.account_id()) >= limit
+    //   → send sysmessage + AUCTION_ERR_DATABASE, return.
 
     // --- duration validation ---
     let etime_secs = etime_minutes * 60;
@@ -326,50 +336,194 @@ pub async fn handle_auction_sell_item(
         return Ok(());
     }
 
-    // --- item validation (many checks are TODO stubs) ---
-    // TODO: itemGuid == 0 -> AUCTION_ERR_ITEM_NOT_FOUND
-    // TODO: GetAItem(item_guid_low) already in auction -> AUCTION_ERR_INVENTORY
-    // TODO: GetItemByGuid(itemGuid) == null -> AUCTION_ERR_INVENTORY
-    // TODO: IsBankPos -> AUCTION_ERR_INVENTORY
-    // TODO: CanBeTraded -> AUCTION_ERR_INVENTORY
-    // TODO: conjured / duration -> AUCTION_ERR_INVENTORY
+    // --- remove feign death ---
+    let _ = world.managers.player_mgr.with_player_mut(player_guid, |p| {
+        let removed = p.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+        if !removed.is_empty() {
+            p.auras.needs_client_update = true;
+            p.auras.needs_stat_recalc = true;
+        }
+    });
 
-    // --- deposit calculation ---
-    let min_deposit = world.config.auction_deposit_min;
-    let deposit_rate = world.config.rate_auction_deposit;
-    // TODO: we need the actual Item object to calculate deposit
-    // For now, stub with 0 deposit
-    let deposit = 0u32;
-
-    // --- money check ---
-    if player.money < deposit {
+    // --- item_guid must be non-zero ---
+    if item_guid.is_empty() {
         send_auction_command_result(
             session,
             None,
             AuctionAction::Started,
-            AuctionError::NotEnoughMoney,
+            AuctionError::ItemNotFound,
             None,
         )?;
         return Ok(());
     }
 
-    // TODO: remove feign death if active
-    // TODO: GM log trade
-    // TODO: deduct deposit
-    // TODO: create AuctionEntry
-    // TODO: add to auction house
-    // TODO: remove item from inventory
-    // TODO: persist to DB
+    // --- item must not already be in another auction ---
+    let item_guid_low = item_guid.low();
+    if world.managers.auction_mgr.get_a_item(item_guid_low).is_some() {
+        debug!(
+            "CMSG_AUCTION_SELL_ITEM: item {} already in auction, rejecting",
+            item_guid_low
+        );
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::Started,
+            AuctionError::Inventory,
+            Some(InventoryResult::ItemNotFound),
+        )?;
+        return Ok(());
+    }
 
-    // --- success ---
-    // TODO: send success response with actual auction
+    // --- remaining item validation is blocked on InventorySystem ---
+    // The following checks require the actual Item from the player's inventory cache,
+    // which is not yet accessible via world.managers (InventorySystem is not wired).
+    // Blocked steps:
+    //   - GetItemByGuid(item_guid) → null  → AUCTION_ERR_INVENTORY + EQUIP_ERR_ITEM_NOT_FOUND
+    //   - IsBankPos(item.bag, item.slot)   → AUCTION_ERR_INVENTORY + EQUIP_ERR_ITEM_NOT_FOUND
+    //   - !item.CanBeTraded()              → AUCTION_ERR_INVENTORY + EQUIP_ERR_ITEM_NOT_FOUND
+    //   - item.flags & ITEM_FLAG_CONJURED  → AUCTION_ERR_INVENTORY + EQUIP_ERR_ITEM_NOT_FOUND
+    //   - item.duration > 0               → AUCTION_ERR_INVENTORY + EQUIP_ERR_ITEM_NOT_FOUND
+    //   - GetAuctionDeposit(house, etime, item) → real deposit
+    //   - player.money < deposit           → AUCTION_ERR_NOT_ENOUGH_MONEY
+    //   - deduct deposit, create AuctionEntry, add to house + item cache
+    //   - remove item from inventory, persist item + auction to DB
+    //   - send AUCTION_STARTED + AUCTION_OK with real AuctionEntry
+
+    Ok(())
+}
+
+/// Handle CMSG_AUCTION_REMOVE_ITEM (0x0257)
+///
+/// Packet format (vanilla 1.12.1):
+/// - auctioneerGuid (packed u64)
+/// - auctionId     (u32)
+///
+/// Mirrors C++ `WorldSession::HandleAuctionRemoveItem`.
+pub async fn handle_auction_remove_item(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+
+    let auctioneer_guid = packet
+        .read_guid()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
+    let auction_id = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read auction ID"))?;
+
+    debug!(
+        "CMSG_AUCTION_REMOVE_ITEM: player={:?} auctioneer={:?} auction_id={}",
+        player_guid, auctioneer_guid, auction_id
+    );
+
+    let player = world
+        .managers
+        .player_mgr
+        .get_player(player_guid)
+        .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
+
+    let Some(house_entry) = get_checked_auction_house_for_auctioneer(
+        &player,
+        auctioneer_guid,
+        &world.managers.auction_mgr,
+        None,
+    ) else {
+        return Ok(());
+    };
+
+    drop(player);
+
+    // Remove feign death before any auction interaction.
+    let _ = world.managers.player_mgr.with_player_mut(player_guid, |player| {
+        let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+        if !removed.is_empty() {
+            player.auras.needs_client_update = true;
+            player.auras.needs_stat_recalc = true;
+        }
+    });
+
+    let Some(auction_house_map) = world
+        .managers
+        .auction_mgr
+        .get_auctions_map_by_house_id(house_entry.house_id)
+    else {
+        return Ok(());
+    };
+
+    let auction = auction_house_map.get_auction(auction_id);
+
+    // Ownership check: must exist and belong to this player.
+    let Some(auction) = auction.filter(|a| a.seller_guid == player_guid) else {
+        debug!(
+            "HandleAuctionRemoveItem: auction {} not found or ownership mismatch for player {:?}",
+            auction_id, player_guid
+        );
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::Removed,
+            AuctionError::DatabaseError,
+            None,
+        )?;
+        return Ok(());
+    };
+
+    // If there is an active bid, the owner must pay an auction cut and the bidder
+    // is refunded. If the owner cannot cover the cut, silently abort (matches C++).
+    if auction.has_bid() {
+        let cut = auction.get_auction_cut(house_entry.cut_percent as f32, 1.0);
+        let player_money = world
+            .managers
+            .player_mgr
+            .get_money(player_guid)
+            .unwrap_or(0);
+        if player_money < cut {
+            return Ok(());
+        }
+        world.managers.auction_mgr.send_auction_cancelled_to_bidder_mail(&auction).await?;
+        let _ = world.managers.player_mgr.with_player_mut(player_guid, |p| {
+            p.money = p.money.saturating_sub(cut);
+        });
+    }
+
+    // Item must exist in the auction manager cache.
+    let item_guid_low = auction.item_guid.low();
+    if world.managers.auction_mgr.get_a_item(item_guid_low).is_none() {
+        debug!(
+            "HandleAuctionRemoveItem: item {} not found for auction {}",
+            item_guid_low, auction_id
+        );
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::Removed,
+            AuctionError::Inventory,
+            Some(InventoryResult::ItemNotFound),
+        )?;
+        return Ok(());
+    }
+
+    // Mail item back to owner; also removes item from the auction item cache.
+    world.managers.auction_mgr.send_auction_cancel_mail_to_owner(&auction).await?;
+
     send_auction_command_result(
         session,
-        None,
-        AuctionAction::Started,
+        Some(&auction),
+        AuctionAction::Removed,
         AuctionError::Ok,
         None,
     )?;
+
+    // Persist: remove auction row from DB.
+    world.managers.auction_mgr.delete_auction_from_db(auction.id).await?;
+    // TODO: persist player gold deduction to DB (no character_repo.update_money yet)
+
+    // Remove auction from in-memory house map.
+    auction_house_map.remove_auction(auction_id);
 
     Ok(())
 }
