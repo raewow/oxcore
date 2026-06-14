@@ -20,6 +20,13 @@ These symbols/claims/flows matched the query in the migration database (may be i
 {fileStats}
 ```
 
+## Reference File Hits
+These `.cpp`/`.h` files matched the query by path or contents, including files that are not indexed yet:
+
+```json
+{referenceFileHits}
+```
+
 ## Repository Layout
 - Reference C++ source: `{referenceRoot}` (relative to repo root: `reference/core`)
 - Rust port target: `{rustRoot}` (repo `src/` tree)

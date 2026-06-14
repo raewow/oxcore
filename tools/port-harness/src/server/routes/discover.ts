@@ -53,7 +53,7 @@ export function createDiscoverRoutes(
     }
 
     const query = body.query.trim();
-    const seed = buildSeedForQuery(db, query);
+    const seed = buildSeedForQuery(db, query, config.referenceRoot);
     const investigationId = investigationRepo.createInvestigation(
       db,
       query,

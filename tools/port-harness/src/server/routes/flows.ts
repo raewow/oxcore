@@ -5,6 +5,9 @@ import * as flowRepo from "../../db/repositories/businessFlow.js";
 import * as flowProgressRepo from "../../db/repositories/flowProgress.js";
 import * as taskRepo from "../../db/repositories/migrationTask.js";
 import * as jobsRepo from "../../db/repositories/jobs.js";
+import * as claimRepo from "../../db/repositories/behaviourClaim.js";
+import { resolveSourceFilePath } from "../../files/paths.js";
+import { getSourceSnippet } from "../../index/parser.js";
 import {
   getLatestAuditsForTasks,
   summarizeFlowAudits,
@@ -14,6 +17,11 @@ import {
   getLatestAgentRunsForTasks,
   parsePlanRun,
   parsePortRun,
+  planDocRelPath,
+  readPlanDocFile,
+  portDraftRelPath,
+  auditDocRelPath,
+  readAuditDocFile,
 } from "../../db/repositories/flowArtifacts.js";
 import type { JobQueues } from "../jobQueue.js";
 
@@ -79,18 +87,45 @@ export function createFlowsRoutes(
     const portsByTask = getLatestAgentRunsForTasks(db, taskIds, "port");
     const statusByTask = new Map(flowTasks.map((t) => [t.id, t.status]));
 
-    const tasksWithAudits = flowTasks.map((t) => ({
-      ...t,
-      audit: auditsByTask.get(t.id) ?? null,
-      plan: parsePlanRun(plansByTask.get(t.id), {
+    const tasksWithAudits = flowTasks.map((t) => {
+      let sourceSnippet: { start_line: number; end_line: number; text: string } | null = null;
+      try {
+        const sourcePath = resolveSourceFilePath(config.referenceRoot, t.symbol_file, {
+          symbolName: t.symbol_name,
+        });
+        sourceSnippet = {
+          start_line: t.start_line,
+          end_line: t.end_line,
+          text: getSourceSnippet(sourcePath, t.start_line, t.end_line),
+        };
+      } catch {
+        sourceSnippet = null;
+      }
+
+      return {
+        ...t,
+        audit: auditsByTask.get(t.id) ?? null,
+        plan: parsePlanRun(plansByTask.get(t.id), {
         target_rust_file: t.target_rust_file,
         rust_symbol_name: t.rust_symbol_name,
         notes: t.notes,
         status: t.status,
-      }),
-      port_draft: parsePortRun(portsByTask.get(t.id), t.symbol_name),
-      next_action: recommendNextAction(auditsByTask.get(t.id), t.status),
-    }));
+        }),
+        port_draft: parsePortRun(portsByTask.get(t.id), t.symbol_name),
+        next_action: recommendNextAction(auditsByTask.get(t.id), t.status),
+        claims: claimRepo.getClaimsForSymbol(db, t.source_symbol_id),
+        dependencies: claimRepo.getDependenciesForSymbol(db, t.source_symbol_id),
+        source_snippet: sourceSnippet,
+        generated_docs: {
+          audit_path: auditDocRelPath(t.symbol_name),
+          audit_markdown: readAuditDocFile(t.symbol_name),
+          plan_path: planDocRelPath(t.symbol_name),
+          plan_markdown: readPlanDocFile(t.symbol_name),
+          port_path: portDraftRelPath(t.symbol_name),
+          port_code: parsePortRun(portsByTask.get(t.id), t.symbol_name)?.rust_code ?? null,
+        },
+      };
+    });
 
     return c.json({
       flow,

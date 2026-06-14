@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { WorkingFiles } from "../components/WorkingFiles";
 
 export function Dashboard() {
   const { data, isLoading } = useQuery({
@@ -27,6 +28,8 @@ export function Dashboard() {
           )}
         </div>
       )}
+
+      <WorkingFiles files={data.working_files ?? []} />
 
       <div className="stats-grid">
         {data.status_counts.map((s) => (

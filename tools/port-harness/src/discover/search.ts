@@ -1,5 +1,8 @@
 import type Database from "better-sqlite3";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { getCallGraphNeighbors } from "../db/repositories/codeSymbol.js";
+import { scanReferenceFiles } from "../files/scanner.js";
 
 const STOPWORDS = new Set([
   "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
@@ -29,6 +32,13 @@ export interface FilePortStats {
   total: number;
   documented: number;
   verified: number;
+}
+
+export interface ReferenceFileHit {
+  path: string;
+  kind: "cpp" | "h";
+  reason: string;
+  score: number;
 }
 
 export function tokenizeQuery(query: string): string[] {
@@ -318,6 +328,45 @@ export function searchHarness(
   return [...hits.values()]
     .sort((a, b) => b.score - a.score)
     .slice(0, limit + 20);
+}
+
+export function searchReferenceFiles(
+  referenceRoot: string,
+  query: string,
+  limit = 80,
+): ReferenceFileHit[] {
+  const keywords = tokenizeQuery(query);
+  if (!keywords.length) return [];
+
+  const hits: ReferenceFileHit[] = [];
+  for (const file of scanReferenceFiles(referenceRoot)) {
+    let score = scoreText(file.path, keywords, 4);
+    const reasons: string[] = [];
+    if (score > 0) reasons.push("path matches query");
+
+    try {
+      const fullPath = join(referenceRoot, ...file.path.split("/"));
+      const text = readFileSync(fullPath, "utf-8");
+      const contentScore = Math.min(scoreText(text.slice(0, 1_000_000), keywords, 1), 40);
+      if (contentScore > 0) {
+        score += contentScore;
+        reasons.push("contents mention query terms");
+      }
+    } catch {
+      // Ignore unreadable files; path hits are still useful.
+    }
+
+    if (score > 0) {
+      hits.push({
+        path: file.path,
+        kind: file.kind,
+        reason: reasons.join("; "),
+        score,
+      });
+    }
+  }
+
+  return hits.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
 export function getMatchedFileStats(

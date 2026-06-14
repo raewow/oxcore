@@ -146,7 +146,9 @@ export function Files() {
             {(data?.files ?? []).map((file) => (
               <tr key={file.path}>
                 <td>
-                  <code className="file-path">{file.path}</code>
+                  <Link to={`/files/detail?path=${encodeURIComponent(file.path)}`}>
+                    <code className="file-path">{file.path}</code>
+                  </Link>
                   {!file.indexed && file.kind === "cpp" && (
                     <span className="badge badge-discovered" style={{ marginLeft: 8 }}>
                       not indexed

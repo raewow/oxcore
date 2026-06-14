@@ -3,9 +3,18 @@ export default {
   rustRoot: "../..",
   database: "./port_harness.db",
   provider: {
-    name: "cursor" as const,
-    model: "composer-2.5",
-    apiKeyEnv: "CURSOR_API_KEY",
+    name: "codex" as const,
+    model: "gpt-5.4-mini",
+    codexBin: "C:\\Users\\krist\\AppData\\Local\\OpenAI\\Codex\\bin\\codex.exe",
+    codexPortSandbox: "workspace-write" as const,
+    // To use Cursor instead:
+    // name: "cursor" as const,
+    // model: "composer-2.5",
+    // apiKeyEnv: "CURSOR_API_KEY",
+    // To use opencode instead:
+    // name: "opencode" as const,
+    // model: "anthropic/claude-sonnet-4-6",
+    // apiKeyEnv is optional for opencode (auth is managed by the CLI)
   },
   index: {
     maxChunkLines: 150,

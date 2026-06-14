@@ -165,3 +165,17 @@ export function readPlanDocFile(symbolName: string): string | null {
     return null;
   }
 }
+
+export function auditDocRelPath(symbolName: string): string {
+  return `tools/port-harness/docs/audits/${symbolName.replace(/::/g, "_")}.md`;
+}
+
+export function readAuditDocFile(symbolName: string): string | null {
+  const path = join(getPackageRoot(), "docs/audits", `${symbolName.replace(/::/g, "_")}.md`);
+  if (!existsSync(path)) return null;
+  try {
+    return readFileSync(path, "utf-8");
+  } catch {
+    return null;
+  }
+}

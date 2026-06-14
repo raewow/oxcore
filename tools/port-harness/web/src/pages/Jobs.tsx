@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type PipelineJob } from "../api/client";
+import { WorkingFiles } from "../components/WorkingFiles";
 
 const STAGE_DESCRIPTIONS: Record<string, string> = {
   extract: "Documents C++ symbol behaviour via the Cursor agent (one symbol at a time).",
@@ -127,6 +129,12 @@ export function Jobs() {
     },
   });
 
+  const { data: stats } = useQuery({
+    queryKey: ["stats"],
+    queryFn: api.getStats,
+    refetchInterval: 5000,
+  });
+
   const { data: detail } = useQuery({
     queryKey: ["job", selectedId],
     queryFn: () => api.getJob(selectedId!),
@@ -248,6 +256,8 @@ export function Jobs() {
           (default: 2 Cursor agents — set <code>jobs.concurrency</code> in port-harness.config.ts).
         </p>
       </div>
+
+      <WorkingFiles files={stats?.working_files ?? []} />
 
       {actionError && (
         <div className="warning-banner" style={{ marginBottom: "1rem" }}>
@@ -514,8 +524,29 @@ export function Jobs() {
                 <tbody>
                   {selected.targets.map((t) => (
                     <tr key={t.taskId}>
-                      <td>{t.symbolName}</td>
-                      <td style={{ fontSize: "0.85rem" }}>{t.file || "—"}</td>
+                      <td>
+                        {t.symbolId ? (
+                          <Link to={`/symbols/${t.symbolId}`}>{t.symbolName}</Link>
+                        ) : (
+                          t.symbolName
+                        )}
+                        <div className="muted">
+                          task <Link to={`/tasks?q=${encodeURIComponent(t.symbolName)}`}>#{t.taskId}</Link>
+                          {t.flowId && t.flowName && (
+                            <>
+                              {" "}
+                              · <Link to={`/flows/${t.flowId}`}>{t.flowName}</Link>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ fontSize: "0.85rem" }}>
+                        {t.file ? (
+                          <Link to={`/files/detail?path=${encodeURIComponent(t.file)}`}>{t.file}</Link>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td>
                         <TargetState state={t.state} />
                       </td>

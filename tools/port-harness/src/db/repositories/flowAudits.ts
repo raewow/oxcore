@@ -13,6 +13,8 @@ export interface TaskAuditSummary {
   };
   summary: string;
   issues: { severity: string; message: string; claim_ref?: string }[];
+  missing_behaviours: string[];
+  planning_notes: string[];
   rust_locations: { file: string; symbol: string; start_line?: number; end_line?: number }[];
 }
 
@@ -60,6 +62,8 @@ export function getLatestAuditsForTasks(
         coverage: parsed.coverage,
         summary: parsed.summary,
         issues: parsed.issues ?? [],
+        missing_behaviours: parsed.missing_behaviours ?? [],
+        planning_notes: parsed.planning_notes ?? [],
         rust_locations: parsed.rust_locations ?? [],
       });
     } catch {

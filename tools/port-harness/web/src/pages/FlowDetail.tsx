@@ -1,8 +1,9 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type FlowDetailResponse } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
+import { SourceViewer } from "../components/SourceViewer";
 
 const NEXT_ACTION_LABELS: Record<string, string> = {
   audit: "Run audit",
@@ -21,6 +22,102 @@ function AuditStatusBadge({ status }: { status: string | null }) {
 
 function JobStatusBadge({ status }: { status: string }) {
   return <span className={`status-badge status-${status}`}>{status}</span>;
+}
+
+function JobOutputPanel({
+  jobId,
+  onSelectJob,
+}: {
+  jobId: number | null;
+  onSelectJob: (id: number) => void;
+}) {
+  const { data: job } = useQuery({
+    queryKey: ["job", jobId],
+    queryFn: () => api.getJob(jobId!),
+    enabled: jobId !== null,
+    refetchInterval: (query) => {
+      const j = query.state.data;
+      return j?.status === "running" || j?.status === "queued" || j?.display_status === "pausing"
+        ? 1000
+        : false;
+    },
+  });
+
+  if (!jobId) {
+    return (
+      <div className="job-detail flow-job-output">
+        <h3>Live job output</h3>
+        <p className="muted">Select a job below to see its targets and activity log.</p>
+      </div>
+    );
+  }
+
+  if (!job) {
+    return (
+      <div className="job-detail flow-job-output">
+        <h3>Live job output</h3>
+        <p className="muted">Loading job #{jobId}...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="job-detail flow-job-output">
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+        <h3>
+          Job #{job.id} — {job.summary}
+        </h3>
+        <Link to="/jobs" className="btn btn-secondary btn-sm">
+          Open Jobs
+        </Link>
+      </div>
+      <div className="flow-job-meta">
+        <span>{job.stage_label}</span>
+        <JobStatusBadge status={job.display_status ?? job.status} />
+        <span>
+          {job.progress}/{job.total}
+        </span>
+        {job.current_item && <span>{job.current_item}</span>}
+      </div>
+      {job.error && <p style={{ color: "#f87171", marginTop: "0.75rem" }}>{job.error}</p>}
+
+      {job.targets.length > 0 && (
+        <>
+          <h4 style={{ margin: "1rem 0 0.5rem", fontSize: "0.9rem" }}>Targets</h4>
+          <table>
+            <tbody>
+              {job.targets.map((target) => (
+                <tr key={target.taskId} onClick={() => onSelectJob(job.id)}>
+                  <td>
+                    {target.symbolId ? (
+                      <Link to={`/symbols/${target.symbolId}`}>{target.symbolName}</Link>
+                    ) : (
+                      target.symbolName
+                    )}
+                    <div className="muted">task #{target.taskId}</div>
+                  </td>
+                  <td>
+                    {target.file ? (
+                      <Link to={`/files/detail?path=${encodeURIComponent(target.file)}`}>{target.file}</Link>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td>{target.flowId ? <Link to={`/flows/${target.flowId}`}>{target.flowName}</Link> : "—"}</td>
+                  <td>
+                    <span className={`target-state target-${target.state}`}>{target.state}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      <h4 style={{ margin: "1rem 0 0.5rem", fontSize: "0.9rem" }}>Activity log</h4>
+      <pre className="job-log">{job.log?.trim() || "No activity yet."}</pre>
+    </div>
+  );
 }
 
 type DetailTab = "audit" | "plan" | "draft";
@@ -76,6 +173,26 @@ function SymbolDetailPanel({
                   <li key={i} className={`audit-issue-${issue.severity}`}>
                     [{issue.severity}] {issue.message}
                   </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {(task.audit.missing_behaviours ?? []).length > 0 && (
+            <>
+              <strong>Missing behaviours:</strong>
+              <ul className="audit-issues">
+                {(task.audit.missing_behaviours ?? []).map((behaviour, i) => (
+                  <li key={i}>{behaviour}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {(task.audit.planning_notes ?? []).length > 0 && (
+            <>
+              <strong>Planning notes:</strong>
+              <ul className="audit-issues">
+                {(task.audit.planning_notes ?? []).map((note, i) => (
+                  <li key={i}>{note}</li>
                 ))}
               </ul>
             </>
@@ -147,6 +264,87 @@ function SymbolDetailPanel({
           )}
         </div>
       )}
+
+      <div className="symbol-context-grid">
+        <section>
+          <h4>Source</h4>
+          <p className="muted">
+            {task.symbol_file}:{task.start_line}-{task.end_line}
+          </p>
+          {task.source_snippet ? (
+            <SourceViewer snippet={task.source_snippet.text} baseLine={task.source_snippet.start_line} />
+          ) : (
+            <p className="muted">Source snippet unavailable.</p>
+          )}
+        </section>
+
+        <section>
+          <h4>Behaviour claims</h4>
+          {task.claims.length ? (
+            <table>
+              <tbody>
+                {task.claims.map((claim, i) => (
+                  <tr key={claim.id ?? i}>
+                    <td>{claim.category}</td>
+                    <td>{claim.claim_text}</td>
+                    <td>
+                      {claim.file}:{claim.start_line}-{claim.end_line}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="muted">No claims documented yet.</p>
+          )}
+        </section>
+
+        <section>
+          <h4>Dependencies</h4>
+          {task.dependencies.length ? (
+            <table>
+              <tbody>
+                {task.dependencies.map((dep, i) => (
+                  <tr key={dep.id ?? i}>
+                    <td>{dep.type}</td>
+                    <td>{dep.description}</td>
+                    <td>{dep.file ? `${dep.file}${dep.start_line ? `:${dep.start_line}` : ""}` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="muted">No dependencies documented yet.</p>
+          )}
+        </section>
+
+        <section>
+          <h4>Generated files</h4>
+          <div className="artifact-paths">
+            <code>{task.generated_docs.audit_path}</code>
+            <code>{task.generated_docs.plan_path}</code>
+            <code>{task.generated_docs.port_path}</code>
+          </div>
+          {task.generated_docs.audit_markdown && (
+            <details>
+              <summary>Audit markdown</summary>
+              <pre className="artifact-code">{task.generated_docs.audit_markdown}</pre>
+            </details>
+          )}
+          {task.generated_docs.plan_markdown && (
+            <details>
+              <summary>Plan markdown</summary>
+              <pre className="artifact-code">{task.generated_docs.plan_markdown}</pre>
+            </details>
+          )}
+          {task.generated_docs.port_code && !task.port_draft && (
+            <details>
+              <summary>Port code</summary>
+              <pre className="artifact-code">{task.generated_docs.port_code}</pre>
+            </details>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -166,6 +364,7 @@ export function FlowDetail() {
   const flowId = parseInt(id ?? "0", 10);
   const queryClient = useQueryClient();
   const [expandedTaskId, setExpandedTaskId] = useState<number | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["flow", flowId],
@@ -215,6 +414,18 @@ export function FlowDetail() {
     mutationFn: (taskIds?: number[]) => api.markFlowDone(flowId, taskIds),
     onSuccess: invalidateFlow,
   });
+
+  useEffect(() => {
+    const jobs = data?.pipeline_jobs ?? [];
+    const active = jobs.find(
+      (j) => j.status === "running" || j.status === "queued" || j.display_status === "pausing",
+    );
+    if (active) {
+      setSelectedJobId((prev) => prev ?? active.id);
+    } else if (!selectedJobId && jobs[0]) {
+      setSelectedJobId(jobs[0].id);
+    }
+  }, [data?.pipeline_jobs, selectedJobId]);
 
   if (isLoading) return <div>Loading...</div>;
   if (!data) return <div>Flow not found</div>;
@@ -345,6 +556,8 @@ export function FlowDetail() {
         </div>
       )}
 
+      <JobOutputPanel jobId={selectedJobId} onSelectJob={setSelectedJobId} />
+
       <div className="next-steps-panel">
         <h3>What&apos;s next?</h3>
         <ol>
@@ -403,7 +616,12 @@ export function FlowDetail() {
             </thead>
             <tbody>
               {flow.pipeline_jobs.map((j) => (
-                <tr key={j.id}>
+                <tr
+                  key={j.id}
+                  className={selectedJobId === j.id ? "row-selected" : undefined}
+                  onClick={() => setSelectedJobId(j.id)}
+                  style={{ cursor: "pointer" }}
+                >
                   <td>
                     <Link to="/jobs">#{j.id}</Link>
                   </td>

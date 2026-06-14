@@ -225,6 +225,8 @@ export const AuditOutputSchema = z.object({
       claim_ref: z.string().optional(),
     }),
   ),
+  missing_behaviours: z.array(z.string()).optional(),
+  planning_notes: z.array(z.string()).optional(),
   summary: z.string(),
 });
 export type AuditOutput = z.infer<typeof AuditOutputSchema>;

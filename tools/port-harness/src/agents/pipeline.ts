@@ -21,6 +21,7 @@ import * as claimRepo from "../db/repositories/behaviourClaim.js";
 import * as taskRepo from "../db/repositories/migrationTask.js";
 import * as flowRepo from "../db/repositories/businessFlow.js";
 import * as jobsRepo from "../db/repositories/jobs.js";
+import { getLatestAuditsForTasks } from "../db/repositories/flowAudits.js";
 import { getSourceSnippet } from "../index/parser.js";
 import { validateClaims } from "../verify/citations.js";
 import { generateRustTestScaffold } from "../verify/rustTestScaffold.js";
@@ -30,6 +31,23 @@ import { JobPausedError } from "../server/jobErrors.js";
 import type { JobActivity } from "../server/jobActivity.js";
 import { cleanPortRustCode } from "../verify/portOutput.js";
 import { runDiscover } from "./discover.js";
+
+function formatAuditPlanningContext(
+  audit: ReturnType<typeof getLatestAuditsForTasks> extends Map<number, infer T> ? T : never,
+): string {
+  const issues = audit.issues.map((i) => `- [${i.severity}] ${i.message}`).join("\n");
+  const missing = audit.missing_behaviours.map((b) => `- ${b}`).join("\n");
+  const planning = audit.planning_notes.map((n) => `- ${n}`).join("\n");
+  return [
+    `Implementation status: ${audit.implementation_status}`,
+    `Passed: ${audit.passed}`,
+    `Coverage: ${audit.coverage.claims_covered}/${audit.coverage.claims_total} claims`,
+    `Summary: ${audit.summary}`,
+    issues ? `Issues:\n${issues}` : "",
+    missing ? `Missing behaviours:\n${missing}` : "",
+    planning ? `Planning notes:\n${planning}` : "",
+  ].filter(Boolean).join("\n\n");
+}
 
 export async function runExtract(
   db: Database.Database,
@@ -88,6 +106,7 @@ export async function runExtract(
       system,
       prompt,
       ExtractOutputSchema,
+      { stage: "extract" },
     );
 
     const validation = validateClaims(
@@ -112,6 +131,7 @@ export async function runExtract(
         system,
         retryPrompt,
         ExtractOutputSchema,
+        { stage: "extract" },
       );
       const retryValidation = validateClaims(
         retryOutput.claims.map((c) => ({
@@ -223,6 +243,7 @@ export async function runAssembleFlows(
       "You assemble C++ functions into business flows for migration tracking.",
       prompt,
       FlowOutputSchema,
+      { stage: "assemble-flows" },
     );
 
     let flowsCreated = 0;
@@ -326,6 +347,7 @@ export async function runFixtures(
       "Generate JSON test fixtures describing inputs/expected outcomes for a C++ port.",
       prompt,
       FixtureOutputSchema,
+      { stage: "fixtures" },
     );
 
     const fixturesDir = resolve(getPackageRoot(), "fixtures");
@@ -383,6 +405,7 @@ export async function runPlanRust(
     symbolName: symbol.name,
   });
   const snippet = getSourceSnippet(fullPath, symbol.start_line, symbol.end_line);
+  const latestAudit = getLatestAuditsForTasks(db, [taskId]).get(taskId);
 
   const prompt = fillPrompt(readPrompt("plan_rust"), {
     symbol: symbol.name,
@@ -391,6 +414,9 @@ export async function runPlanRust(
     endLine: String(symbol.end_line),
     claimsSummary: claims.map((c) => `- [${c.category}] ${c.claim_text}`).join("\n"),
     existingRustPath: task.target_rust_file ?? "unknown",
+    auditContext: latestAudit
+      ? formatAuditPlanningContext(latestAudit)
+      : "No audit has been run yet.",
   });
 
   try {
@@ -398,6 +424,7 @@ export async function runPlanRust(
       "Plan Rust mapping for C++ port. No code generation.",
       prompt,
       RustPlanOutputSchema,
+      { stage: "plan-rust" },
     );
 
     taskRepo.upsertTask(db, symbol.id, {
@@ -462,6 +489,7 @@ export async function runPort(
       "Port C++ to Rust preserving exact behaviour. Write clean idiomatic Rust without C++ trace comments.",
       prompt,
       PortOutputSchema,
+      { stage: "port" },
     );
 
     output.rust_code = cleanPortRustCode(output.rust_code);
@@ -527,6 +555,7 @@ export async function runVerify(
       "Verify Rust port against documented C++ behaviour.",
       prompt,
       VerifyOutputSchema,
+      { stage: "verify" },
     );
 
     if (output.passed) {
@@ -606,6 +635,8 @@ function exportAuditDoc(
     summary: string;
     coverage: { claims_covered: number; claims_total: number };
     issues: { severity: string; message: string }[];
+    missing_behaviours?: string[];
+    planning_notes?: string[];
     rust_locations: { file: string; symbol: string }[];
   },
 ): void {
@@ -614,6 +645,8 @@ function exportAuditDoc(
 
   const safeName = symbolName.replace(/::/g, "_");
   const issues = output.issues.map((i) => `- [${i.severity}] ${i.message}`).join("\n");
+  const missingBehaviours = (output.missing_behaviours ?? []).map((b) => `- ${b}`).join("\n");
+  const planningNotes = (output.planning_notes ?? []).map((n) => `- ${n}`).join("\n");
   const locations = output.rust_locations
     .map((l) => `- \`${l.symbol}\` in \`${l.file}\``)
     .join("\n");
@@ -626,7 +659,9 @@ function exportAuditDoc(
       `**Coverage:** ${output.coverage.claims_covered}/${output.coverage.claims_total} claims\n\n` +
       `## Summary\n${output.summary}\n\n` +
       `## Rust locations\n${locations || "(none)"}\n\n` +
-      `## Issues\n${issues || "(none)"}\n`,
+      `## Issues\n${issues || "(none)"}\n\n` +
+      `## Missing behaviours\n${missingBehaviours || "(none)"}\n\n` +
+      `## Planning notes\n${planningNotes || "(none)"}\n`,
   );
 }
 
@@ -675,15 +710,20 @@ export async function runAuditRust(
       "Audit whether documented C++ behaviour already exists in the Rust codebase.",
       prompt,
       AuditOutputSchema,
+      { stage: "audit-rust" },
     );
 
     const primary = output.rust_locations[0];
     const issueText = output.issues.map((i) => `- [${i.severity}] ${i.message}`).join("\n");
+    const missingText = (output.missing_behaviours ?? []).map((b) => `- ${b}`).join("\n");
+    const planningText = (output.planning_notes ?? []).map((n) => `- ${n}`).join("\n");
     const notes = [
       `[audit ${new Date().toISOString().slice(0, 10)}] ${output.implementation_status}`,
       output.summary,
       `Coverage: ${output.coverage.claims_covered}/${output.coverage.claims_total}`,
-      issueText,
+      issueText ? `Issues:\n${issueText}` : "",
+      missingText ? `Missing behaviours:\n${missingText}` : "",
+      planningText ? `Planning notes:\n${planningText}` : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -837,6 +877,7 @@ export async function runPipelineJob(
       activity.setCurrent(label);
       activity.log(`[${i + 1}/${targetIds.length}] ${label}`);
 
+      let result: { success: boolean; error?: string } = { success: true };
       switch (job.stage) {
         case "extract": {
           if (!symbol) {
@@ -847,21 +888,29 @@ export async function runPipelineJob(
             activity.log(`Skipped ${label} (already extracted)`);
             break;
           }
-          await runExtract(db, config, provider, symbol.name, undefined, false, activity);
+          result = await runExtract(db, config, provider, symbol.name, undefined, false, activity);
           break;
         }
         case "plan-rust":
-          await runPlanRust(db, config, provider, taskId);
+          result = await runPlanRust(db, config, provider, taskId);
           break;
         case "port":
-          await runPort(db, config, provider, taskId, true);
+          result = await runPort(db, config, provider, taskId, true);
           break;
         case "verify":
-          await runVerify(db, config, provider, taskId);
+          result = await runVerify(db, config, provider, taskId);
           break;
         case "audit-rust":
-          await runAuditRust(db, config, provider, taskId, activity);
+          result = await runAuditRust(db, config, provider, taskId, activity);
           break;
+      }
+
+      if (!result.success) {
+        const message = result.error ?? `${job.stage} failed for ${label}`;
+        activity.log(`Failed: ${message}`);
+        activity.setCurrent(null);
+        jobsRepo.finishJob(db, jobId, "failed", message);
+        return;
       }
 
       jobsRepo.updateJobProgress(db, jobId, i + 1);

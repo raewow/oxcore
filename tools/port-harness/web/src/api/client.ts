@@ -33,6 +33,7 @@ export interface Stats {
   status_counts: { status: string; count: number }[];
   file_progress: { file: string; total: number; documented: number }[];
   recent_jobs: PipelineJob[];
+  working_files: WorkingFile[];
   warnings: { blocked: number; missing_docs: number };
 }
 
@@ -68,8 +69,11 @@ export interface FlowSummary {
 
 export interface JobTarget {
   taskId: number;
+  symbolId: number | null;
   symbolName: string;
   file: string;
+  flowId: number | null;
+  flowName: string | null;
   state: "done" | "running" | "pending";
 }
 
@@ -120,6 +124,8 @@ export interface TaskAuditDetail {
   };
   summary: string;
   issues: { severity: string; message: string; claim_ref?: string }[];
+  missing_behaviours?: string[];
+  planning_notes?: string[];
   rust_locations: { file: string; symbol: string }[];
 }
 
@@ -152,9 +158,132 @@ export interface FlowDetailResponse {
     plan: TaskPlanSummary | null;
     port_draft: TaskPortDraft | null;
     next_action: "audit" | "plan" | "port" | "review" | "done";
+    claims: {
+      id?: number;
+      category: string;
+      claim_text: string;
+      file: string;
+      start_line: number;
+      end_line: number;
+      confidence: string;
+    }[];
+    dependencies: {
+      id?: number;
+      type: string;
+      description: string;
+      file: string | null;
+      start_line: number | null;
+    }[];
+    source_snippet: { start_line: number; end_line: number; text: string } | null;
+    generated_docs: {
+      audit_path: string;
+      audit_markdown: string | null;
+      plan_path: string;
+      plan_markdown: string | null;
+      port_path: string;
+      port_code: string | null;
+    };
   })[];
   audit_summary: FlowAuditSummary;
   pipeline_jobs: PipelineJob[];
+}
+
+export interface WorkingFile {
+  file: string;
+  job_ids: number[];
+  stages: string[];
+  current_items: string[];
+  running: number;
+  queued: number;
+  progress: number;
+  total: number;
+}
+
+export interface FileDependencyEdge {
+  file: string;
+  count: number;
+  examples: string[];
+}
+
+export interface FileDependencies {
+  file: string;
+  outbound: FileDependencyEdge[];
+  inbound: FileDependencyEdge[];
+}
+
+export interface CodeSymbol {
+  id: number;
+  file: string;
+  name: string;
+  kind: string;
+  start_line: number;
+  end_line: number;
+  parent_symbol_id: number | null;
+  summary: string | null;
+  created_at: string;
+}
+
+export interface FeatureSummary {
+  id: number;
+  name: string;
+  description: string | null;
+  file_count: number;
+  flow_count: number;
+  task_count: number;
+  pending_suggestions: number;
+  done: number;
+  blocked: number;
+  total_tasks: number;
+}
+
+export interface FeatureAssignment {
+  id: number;
+  feature_id: number;
+  target_type: "file" | "flow" | "task";
+  target_id: string;
+  created_at: string;
+}
+
+export interface FeatureSuggestion {
+  id: number;
+  feature_id: number;
+  target_type: "file" | "flow" | "task";
+  target_id: string;
+  reason: string;
+  confidence: "high" | "medium" | "low";
+  status: "pending" | "accepted" | "rejected";
+}
+
+export interface FileDetailResponse {
+  file: FileListEntry;
+  symbols: CodeSymbol[];
+  tasks: TaskWithDetails[];
+  flows: { id: number; name: string; risk_level: string | null }[];
+  jobs: PipelineJob[];
+  features: FeatureSummary[];
+  dependencies: FileDependencies;
+  source_preview: { start_line: number; text: string } | null;
+}
+
+export interface FeatureDetailResponse {
+  feature: { id: number; name: string; description: string | null };
+  assignments: FeatureAssignment[];
+  suggestions: FeatureSuggestion[];
+  stats: {
+    total: number;
+    done: number;
+    blocked: number;
+    by_status: { status: string; count: number }[];
+  };
+  files: string[];
+  file_status: FileListEntry[];
+  flows: { id: number; name: string; risk_level: string | null }[];
+  tasks: TaskWithDetails[];
+  jobs: PipelineJob[];
+  dependency_graph: {
+    nodes: { file: string; in_feature: boolean }[];
+    edges: { from: string; to: string; count: number }[];
+  };
 }
 
 const BASE = "/api";
@@ -207,6 +336,12 @@ export const api = {
       jobId: number;
       path: string;
     }>("/files/pipeline", { method: "POST", body: JSON.stringify({ path }) }),
+
+  getFileDetail: (path: string) =>
+    fetchJson<FileDetailResponse>(`/files/detail?${new URLSearchParams({ path })}`),
+
+  getFileDependencies: (path: string) =>
+    fetchJson<FileDependencies>(`/files/dependencies?${new URLSearchParams({ path })}`),
 
   getTasks: (params: Record<string, string | undefined> = {}) => {
     const qs = new URLSearchParams();
@@ -343,6 +478,46 @@ export const api = {
       "/discover/index-dir",
       { method: "POST", body: JSON.stringify({ dir }) },
     ),
+
+  getFeatures: () => fetchJson<FeatureSummary[]>("/features"),
+
+  createFeature: (name: string, description = "") =>
+    fetchJson<{ id: number }>("/features", {
+      method: "POST",
+      body: JSON.stringify({ name, description }),
+    }),
+
+  getFeature: (id: number) => fetchJson<FeatureDetailResponse>(`/features/${id}`),
+
+  assignFeature: (id: number, target_type: "file" | "flow" | "task", target_id: string) =>
+    fetchJson<{ ok: boolean }>(`/features/${id}/assignments`, {
+      method: "POST",
+      body: JSON.stringify({ target_type, target_id }),
+    }),
+
+  unassignFeature: (id: number, target_type: "file" | "flow" | "task", target_id: string) =>
+    fetchJson<{ ok: boolean }>(`/features/${id}/assignments`, {
+      method: "DELETE",
+      body: JSON.stringify({ target_type, target_id }),
+    }),
+
+  refreshFeatureSuggestions: (id: number) =>
+    fetchJson<{ inserted: number }>(`/features/${id}/suggestions/refresh`, { method: "POST" }),
+
+  acceptFeatureSuggestion: (suggestionId: number) =>
+    fetchJson<{ ok: boolean }>(`/features/suggestions/${suggestionId}/accept`, {
+      method: "POST",
+    }),
+
+  acceptAllFeatureSuggestions: (id: number) =>
+    fetchJson<{ ok: boolean; accepted: number }>(`/features/${id}/suggestions/accept-all`, {
+      method: "POST",
+    }),
+
+  rejectFeatureSuggestion: (suggestionId: number) =>
+    fetchJson<{ ok: boolean }>(`/features/suggestions/${suggestionId}/reject`, {
+      method: "POST",
+    }),
 };
 
 export interface DiscoverCandidate {

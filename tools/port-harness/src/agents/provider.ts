@@ -1,6 +1,12 @@
 import type { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createCursorProvider } from "./providers/cursor.js";
+import { createOpencodeProvider } from "./providers/opencode.js";
+import { createCodexProvider } from "./providers/codex.js";
+
+export interface AgentCallOptions {
+  stage?: string;
+}
 
 export interface AgentProvider {
   name: string;
@@ -8,6 +14,7 @@ export interface AgentProvider {
     system: string,
     user: string,
     schema: z.ZodType<T>,
+    options?: AgentCallOptions,
   ): Promise<T>;
 }
 
@@ -17,12 +24,14 @@ export function schemaToJsonSchema(schema: z.ZodType): Record<string, unknown> {
 
 export interface ProviderOptions {
   model: string;
-  apiKey: string;
+  apiKey?: string;
   baseUrl?: string;
   /** Repo root — used as Cursor local agent cwd */
   cwd?: string;
   /** Live activity lines for job UI / server console */
   onActivity?: (message: string) => void;
+  codexBin?: string;
+  codexPortSandbox?: "read-only" | "workspace-write" | "danger-full-access";
 }
 
 export async function createProvider(
@@ -36,16 +45,32 @@ export async function createProvider(
       }
       return createCursorProvider(
         options.model,
-        options.apiKey,
+        options.apiKey!,
         options.cwd,
         options.onActivity,
       );
     case "openai":
-      return await createOpenAIProvider(options.model, options.apiKey);
+      return await createOpenAIProvider(options.model, options.apiKey!);
     case "anthropic":
-      return await createAnthropicProvider(options.model, options.apiKey);
+      return await createAnthropicProvider(options.model, options.apiKey!);
     case "openai_compat":
-      return createOpenAICompatProvider(options.model, options.apiKey, options.baseUrl);
+      return createOpenAICompatProvider(options.model, options.apiKey!, options.baseUrl);
+    case "opencode":
+      if (!options.cwd) {
+        throw new Error("opencode provider requires cwd (repo root)");
+      }
+      return createOpencodeProvider(options.model, options.cwd, options.onActivity);
+    case "codex":
+      if (!options.cwd) {
+        throw new Error("codex provider requires cwd (repo root)");
+      }
+      return createCodexProvider({
+        model: options.model || "gpt-5.4-mini",
+        cwd: options.cwd,
+        codexBin: options.codexBin,
+        portSandbox: options.codexPortSandbox,
+        onActivity: options.onActivity,
+      });
     default:
       throw new Error(`Unknown provider: ${name}`);
   }
@@ -142,12 +167,14 @@ function createOpenAICompatProvider(
 export async function getProviderFromConfig(config: {
   name: string;
   model: string;
-  apiKeyEnv: string;
+  apiKeyEnv?: string;
   rustRoot?: string;
   onActivity?: (message: string) => void;
+  codexBin?: string;
+  codexPortSandbox?: "read-only" | "workspace-write" | "danger-full-access";
 }): Promise<AgentProvider> {
-  const apiKey = process.env[config.apiKeyEnv];
-  if (!apiKey) {
+  const apiKey = config.apiKeyEnv ? process.env[config.apiKeyEnv] : undefined;
+  if (config.apiKeyEnv && !apiKey) {
     throw new Error(`Missing API key env var: ${config.apiKeyEnv}`);
   }
   return createProvider(config.name, {
@@ -155,6 +182,8 @@ export async function getProviderFromConfig(config: {
     apiKey,
     cwd: config.rustRoot,
     onActivity: config.onActivity,
+    codexBin: config.codexBin,
+    codexPortSandbox: config.codexPortSandbox,
   });
 }
 

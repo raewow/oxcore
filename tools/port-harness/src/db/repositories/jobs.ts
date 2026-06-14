@@ -17,8 +17,11 @@ const STAGE_LABELS: Record<string, string> = {
 
 export interface JobTarget {
   taskId: number;
+  symbolId: number | null;
   symbolName: string;
   file: string;
+  flowId: number | null;
+  flowName: string | null;
   state: "done" | "running" | "pending";
 }
 
@@ -104,12 +107,22 @@ export function enrichJob(
         const taskId = taskIds[i]!;
         const row = db
           .prepare(
-            `SELECT cs.name AS symbol_name, cs.file AS symbol_file
+          `SELECT cs.id AS symbol_id, cs.name AS symbol_name, cs.file AS symbol_file,
+                  mt.flow_id, bf.name AS flow_name
              FROM migration_task mt
              JOIN code_symbol cs ON cs.id = mt.source_symbol_id
+             LEFT JOIN business_flow bf ON bf.id = mt.flow_id
              WHERE mt.id = ?`,
           )
-          .get(taskId) as { symbol_name: string; symbol_file: string } | undefined;
+          .get(taskId) as
+          | {
+              symbol_id: number;
+              symbol_name: string;
+              symbol_file: string;
+              flow_id: number | null;
+              flow_name: string | null;
+            }
+          | undefined;
 
         const symbolName = row?.symbol_name ?? `task ${taskId}`;
         const file = row?.symbol_file ?? "";
@@ -119,7 +132,15 @@ export function enrichJob(
         if (i < job.progress) state = "done";
         else if (i === job.progress && job.status === "running") state = "running";
 
-        targets.push({ taskId, symbolName, file, state });
+        targets.push({
+          taskId,
+          symbolId: row?.symbol_id ?? null,
+          symbolName,
+          file,
+          flowId: row?.flow_id ?? null,
+          flowName: row?.flow_name ?? null,
+          state,
+        });
       }
 
       const fileHint =
@@ -416,6 +437,71 @@ export function getRecentAgentRuns(db: Database.Database, limit = 10) {
   return db
     .prepare("SELECT * FROM agent_run ORDER BY created_at DESC LIMIT ?")
     .all(limit);
+}
+
+export function listWorkingFiles(db: Database.Database, limit = 8) {
+  const jobs = listJobs(db, 50) as RawJob[];
+  const active = jobs.filter((job) => job.status === "running" || job.status === "queued");
+  const byFile = new Map<
+    string,
+    {
+      file: string;
+      job_ids: number[];
+      stages: string[];
+      current_items: string[];
+      running: number;
+      queued: number;
+      progress: number;
+      total: number;
+    }
+  >();
+
+  for (const job of active) {
+    const enriched = enrichJob(db, job, { targetLimit: undefined });
+    const files = new Set<string>();
+    for (const target of enriched.targets) {
+      if (target.file) files.add(target.file);
+    }
+
+    if (!files.size) {
+      try {
+        const parsed = JSON.parse(job.target_ids);
+        if (parsed && typeof parsed === "object") {
+          const file = "file" in parsed ? parsed.file : "path" in parsed ? parsed.path : null;
+          if (typeof file === "string") files.add(file);
+        }
+      } catch {
+        // ignore malformed job payloads
+      }
+    }
+
+    for (const file of files) {
+      const row =
+        byFile.get(file) ??
+        {
+          file,
+          job_ids: [],
+          stages: [],
+          current_items: [],
+          running: 0,
+          queued: 0,
+          progress: 0,
+          total: 0,
+        };
+      row.job_ids.push(job.id);
+      if (!row.stages.includes(enriched.stage_label)) row.stages.push(enriched.stage_label);
+      if (job.current_item && !row.current_items.includes(job.current_item)) {
+        row.current_items.push(job.current_item);
+      }
+      if (job.status === "running") row.running++;
+      if (job.status === "queued") row.queued++;
+      row.progress += job.progress;
+      row.total += job.total;
+      byFile.set(file, row);
+    }
+  }
+
+  return [...byFile.values()].slice(0, limit);
 }
 
 export function insertFixture(

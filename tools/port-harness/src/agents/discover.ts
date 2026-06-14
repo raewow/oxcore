@@ -6,6 +6,7 @@ import { hashPrompt } from "./provider.js";
 import { DiscoverOutputSchema, type DiscoverOutput } from "../models/index.js";
 import {
   searchHarness,
+  searchReferenceFiles,
   getMatchedFileStats,
   type DiscoverSeedHit,
 } from "../discover/search.js";
@@ -58,13 +59,17 @@ export async function runDiscover(
   const topSymbolIds = seedHits.slice(0, 15).map((h) => h.symbol_id);
   const callGraphNeighbors = getCallGraphNeighbors(db, topSymbolIds, 20);
   const fileStats = getMatchedFileStats(db, seedHits);
+  const referenceFileHits = searchReferenceFiles(config.referenceRoot, query, 80);
 
-  activity?.log(`DB seed: ${seedHits.length} hit(s), ${callGraphNeighbors.length} call-graph neighbor(s)`);
+  activity?.log(
+    `DB seed: ${seedHits.length} hit(s), ${callGraphNeighbors.length} call-graph neighbor(s), ${referenceFileHits.length} file hit(s)`,
+  );
 
   const seedPayload = {
     hits: seedHits,
     callGraphNeighbors,
     fileStats,
+    referenceFileHits,
   };
 
   db.prepare("UPDATE investigation SET seed_json = ? WHERE id = ?").run(
@@ -77,6 +82,7 @@ export async function runDiscover(
     seedHits: JSON.stringify(seedHits.slice(0, 30), null, 2),
     callGraphNeighbors: JSON.stringify(callGraphNeighbors, null, 2),
     fileStats: JSON.stringify(fileStats, null, 2),
+    referenceFileHits: JSON.stringify(referenceFileHits, null, 2),
     referenceRoot: config.referenceRoot,
     rustRoot: config.rustRoot,
   });
@@ -91,6 +97,7 @@ export async function runDiscover(
       system,
       prompt,
       DiscoverOutputSchema,
+      { stage: "discover" },
     );
 
     const output = enrichCandidates(db, rawOutput);
@@ -115,10 +122,15 @@ export async function runDiscover(
   }
 }
 
-export function buildSeedForQuery(db: Database.Database, query: string): {
+export function buildSeedForQuery(
+  db: Database.Database,
+  query: string,
+  referenceRoot?: string,
+): {
   hits: DiscoverSeedHit[];
   callGraphNeighbors: ReturnType<typeof getCallGraphNeighbors>;
   fileStats: ReturnType<typeof getMatchedFileStats>;
+  referenceFileHits: ReturnType<typeof searchReferenceFiles>;
 } {
   const hits = searchHarness(db, query);
   const callGraphNeighbors = getCallGraphNeighbors(
@@ -127,5 +139,6 @@ export function buildSeedForQuery(db: Database.Database, query: string): {
     20,
   );
   const fileStats = getMatchedFileStats(db, hits);
-  return { hits, callGraphNeighbors, fileStats };
+  const referenceFileHits = referenceRoot ? searchReferenceFiles(referenceRoot, query) : [];
+  return { hits, callGraphNeighbors, fileStats, referenceFileHits };
 }

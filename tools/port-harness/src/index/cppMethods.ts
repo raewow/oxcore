@@ -9,9 +9,10 @@ export interface CppMethodSymbol {
   endLine: number;
 }
 
-// C++ method definition at line start: optional return type, then Class::Method(
+// Avoid nested quantifiers on [\w:<>...] — that causes catastrophic backtracking on
+// namespace-heavy lines (e.g. WorldPackets::AuctionHouse::...).
 const CPP_METHOD_DEF_PATTERN =
-  /^\s*(?:template\s*<[^>]*>\s*)?(?:[\w:<>,\s*&]+\s+)+(\w+)::(~?\w+)\s*\(/;
+  /^\s*(?:template\s*<[^>]*>\s*)?(?:\S+\s+)*(\w+)::(~?\w+)\s*\(/;
 
 function findMethodEndLine(lines: string[], startIdx: number): number {
   let braceDepth = 0;
@@ -49,11 +50,16 @@ export function extractMethodsFromCpp(
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
+    if (!line.includes("::") || !line.includes("(")) continue;
+    if (/^\s*(?:return|case|throw)\b/.test(line)) continue;
+
     const match = line.match(CPP_METHOD_DEF_PATTERN);
     if (!match) continue;
 
     const className = match[1]!;
     const methodName = match[2]!;
+    const sigAt = line.indexOf(`${className}::${methodName}(`);
+    if (sigAt > 0 && line.slice(0, sigAt).includes("=")) continue;
     if (methodName.startsWith("Effect")) continue;
 
     let excluded = false;

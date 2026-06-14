@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export type ProviderName = "openai" | "anthropic" | "openai_compat" | "cursor";
+export type ProviderName = "openai" | "anthropic" | "openai_compat" | "cursor" | "opencode" | "codex";
 
 export interface FlowMapping {
   flow: string;
@@ -16,7 +16,9 @@ export interface HarnessConfig {
   provider: {
     name: ProviderName;
     model: string;
-    apiKeyEnv: string;
+    apiKeyEnv?: string;
+    codexBin?: string;
+    codexPortSandbox?: "read-only" | "workspace-write" | "danger-full-access";
   };
   index: {
     maxChunkLines: number;
@@ -69,6 +71,8 @@ function defaultConfig(): HarnessConfig {
       name: "cursor",
       model: "composer-2.5",
       apiKeyEnv: "CURSOR_API_KEY",
+      codexBin: "codex",
+      codexPortSandbox: "workspace-write",
     },
     index: {
       maxChunkLines: 150,

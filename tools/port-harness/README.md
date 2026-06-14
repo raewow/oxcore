@@ -42,6 +42,40 @@ npm run dev -- verify --task 1                     # doc review only
 npm run dev -- verify --task 1 --cargo             # also run cargo test
 ```
 
+## Feature discovery
+
+Feature groups let you collect related files, flows, and tasks, then queue work from that set.
+
+```bash
+# Create a spells feature and attach known entry files.
+npm run dev -- feature create spells \
+  --description "Spell casting, targeting, effects, resources, and spell packets" \
+  --dir src/game/Spells \
+  --file src/game/Handlers/SpellHandler.cpp src/game/Server/Packets/Spell.cpp \
+  --match Server/Protocol/Opcodes
+
+# Run discovery, assign discovered candidates to the feature, and queue index/extract/verify jobs.
+npm run dev -- feature discover spells \
+  --query "Discover all C++ code needed to port spell casting, target selection, spell effects, cooldowns, power/reagents, channels, delayed spells, spell handlers, spell packets, and spell opcodes" \
+  --sync --assign --queue
+
+# Inspect the feature and queue additional work as needed.
+npm run dev -- feature show spells
+npm run dev -- feature queue spells --stage pipeline
+npm run dev -- feature queue spells --stage extract
+npm run dev -- feature queue spells --stage assemble-flows
+```
+
+Useful commands:
+
+- `feature suggest <feature> --accept-all` refreshes keyword suggestions and accepts them.
+- `feature create/assign --dir <path>` assigns every `.cpp` under a reference directory.
+- `feature create/assign --match <text>` assigns files whose path contains a substring, useful for opcode tables.
+- Add `--include-headers` with `--dir` or `--match` when header-only declarations matter.
+- `feature queue <feature> --stage pipeline` queues index, extract, and flow assembly per assigned `.cpp`.
+- `feature queue <feature> --stage index` indexes assigned `.cpp` files.
+- `feature queue <feature> --stage extract --status discovered` documents assigned discovered tasks.
+
 ## Domain config (optional)
 
 For known symbol→flow mappings or assemble-flow hints, add to `port-harness.config.ts`:

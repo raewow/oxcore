@@ -9,6 +9,7 @@ import { createJobsRoutes, getJobQueues } from "./routes/jobs.js";
 import { createStatsRoutes } from "./routes/stats.js";
 import { createFilesRoutes } from "./routes/files.js";
 import { createDiscoverRoutes } from "./routes/discover.js";
+import { createFeaturesRoutes } from "./routes/features.js";
 
 export function createApp(db: Database.Database, config: HarnessConfig): Hono {
   const app = new Hono();
@@ -23,6 +24,7 @@ export function createApp(db: Database.Database, config: HarnessConfig): Hono {
   app.route("/api/jobs", createJobsRoutes(db, config, queues));
   app.route("/api/stats", createStatsRoutes(db));
   app.route("/api/files", createFilesRoutes(db, config, queues));
+  app.route("/api/features", createFeaturesRoutes(db, config));
   app.route("/api/discover", createDiscoverRoutes(db, config, queues));
 
   app.get("/api/health", (c) => c.json({ ok: true }));
