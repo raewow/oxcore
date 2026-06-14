@@ -10,6 +10,7 @@ import { FeatureDetail } from "./pages/FeatureDetail";
 import { SymbolDetail } from "./pages/SymbolDetail";
 import { Jobs } from "./pages/Jobs";
 import { Discover } from "./pages/Discover";
+import Settings from "./pages/Settings";
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
           <NavLink to="/flows">Flows</NavLink>
           <NavLink to="/discover">Discover</NavLink>
           <NavLink to="/jobs">Jobs</NavLink>
+          <NavLink to="/settings">Settings</NavLink>
         </nav>
       </aside>
       <main className="main-content">
@@ -41,6 +43,7 @@ export default function App() {
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/discover" element={<Discover />} />
           <Route path="/symbols/:id" element={<SymbolDetail />} />
+          <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
     </div>

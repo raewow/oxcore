@@ -2,7 +2,7 @@ Investigate a reported bug or missing behavior in a C++ game server being ported
 
 ## User Report
 {query}
-
+{featureContext}
 ## Port Harness DB Seed Hits
 These symbols/claims/flows matched the query in the migration database (may be incomplete if files are not indexed):
 

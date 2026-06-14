@@ -1,8 +1,8 @@
 import type Database from "better-sqlite3";
 import type { HarnessConfig } from "../config.js";
 import * as jobsRepo from "../db/repositories/jobs.js";
-import { getProviderFromConfig } from "../agents/provider.js";
 import { runPipelineJob } from "../agents/pipeline.js";
+import { resolveActiveProvider } from "./activeProvider.js";
 import { createJobActivity } from "./jobActivity.js";
 import { JobPausedError } from "./jobErrors.js";
 import { runBackgroundJob } from "./backgroundJobs.js";
@@ -121,11 +121,7 @@ export class JobQueues {
       db,
       Math.max(1, config.jobs.concurrency),
       async (jobId, activity, shouldPause) => {
-        const provider = await getProviderFromConfig({
-          ...config.provider,
-          rustRoot: config.rustRoot,
-          onActivity: (msg) => activity.log(msg),
-        });
+        const provider = await resolveActiveProvider(db, config, (msg) => activity.log(msg));
         await runPipelineJob(db, config, provider, jobId, activity, shouldPause);
       },
     );

@@ -106,19 +106,17 @@ export const ExtractOutputSchema = z.object({
       file: z.string(),
       start_line: z.number(),
       end_line: z.number(),
-      confidence: z.enum(["high", "medium", "low"]).optional(),
+      confidence: z.enum(["high", "medium", "low"]).nullable(),
     }),
   ),
-  dependencies: z
-    .array(
-      z.object({
-        type: DependencyType,
-        description: z.string(),
-        file: z.string().optional(),
-        start_line: z.number().optional(),
-      }),
-    )
-    .optional(),
+  dependencies: z.array(
+    z.object({
+      type: DependencyType,
+      description: z.string(),
+      file: z.string().nullable(),
+      start_line: z.number().nullable(),
+    }),
+  ),
 });
 export type ExtractOutput = z.infer<typeof ExtractOutputSchema>;
 
@@ -169,15 +167,15 @@ export type FixtureOutput = z.infer<typeof FixtureOutputSchema>;
 export const RustPlanOutputSchema = z.object({
   target_rust_file: z.string(),
   rust_symbol_name: z.string(),
-  structs: z.array(z.string()).optional(),
-  enums: z.array(z.string()).optional(),
-  notes: z.string().optional(),
+  structs: z.array(z.string()).nullable(),
+  enums: z.array(z.string()).nullable(),
+  notes: z.string().nullable(),
 });
 export type RustPlanOutput = z.infer<typeof RustPlanOutputSchema>;
 
 export const PortOutputSchema = z.object({
   rust_code: z.string(),
-  todos: z.array(z.string()).optional(),
+  todos: z.array(z.string()).nullable(),
   port_comments: z.array(
     z.object({
       file: z.string(),
@@ -206,15 +204,15 @@ export const AuditOutputSchema = z.object({
     z.object({
       file: z.string(),
       symbol: z.string(),
-      start_line: z.number().optional(),
-      end_line: z.number().optional(),
+      start_line: z.number().nullable(),
+      end_line: z.number().nullable(),
     }),
   ),
   coverage: z.object({
     claims_covered: z.number(),
     claims_total: z.number(),
-    branches_covered: z.number().optional(),
-    branches_total: z.number().optional(),
+    branches_covered: z.number().nullable(),
+    branches_total: z.number().nullable(),
   }),
   passed: z.boolean(),
   issues: z.array(
@@ -222,11 +220,11 @@ export const AuditOutputSchema = z.object({
       severity: z.enum(["error", "warning", "info"]),
       category: z.string(),
       message: z.string(),
-      claim_ref: z.string().optional(),
+      claim_ref: z.string().nullable(),
     }),
   ),
-  missing_behaviours: z.array(z.string()).optional(),
-  planning_notes: z.array(z.string()).optional(),
+  missing_behaviours: z.array(z.string()).nullable(),
+  planning_notes: z.array(z.string()).nullable(),
   summary: z.string(),
 });
 export type AuditOutput = z.infer<typeof AuditOutputSchema>;
@@ -257,9 +255,9 @@ export const DiscoverOutputSchema = z.object({
       file: z.string(),
       relevance: DiscoverRelevance,
       reason: z.string(),
-      task_id: z.number().optional(),
-      task_status: z.string().optional(),
-      flow_name: z.string().optional(),
+      task_id: z.number().nullable(),
+      task_status: z.string().nullable(),
+      flow_name: z.string().nullable(),
       in_index: z.boolean(),
       suggested_action: DiscoverSuggestedAction,
     }),

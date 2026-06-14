@@ -156,10 +156,15 @@ export async function runExtract(
       for (const claim of retryValidation.claims) {
         claimRepo.insertClaim(db, claim);
       }
-      if (retryOutput.dependencies) {
-        for (const dep of retryOutput.dependencies) {
-          claimRepo.insertDependency(db, symbol.id, dep.type, dep.description, dep.file, dep.start_line);
-        }
+      for (const dep of retryOutput.dependencies) {
+        claimRepo.insertDependency(
+          db,
+          symbol.id,
+          dep.type,
+          dep.description,
+          dep.file ?? undefined,
+          dep.start_line ?? undefined,
+        );
       }
       jobsRepo.insertAgentRun(
         db,
@@ -176,10 +181,15 @@ export async function runExtract(
       for (const claim of validation.claims) {
         claimRepo.insertClaim(db, claim);
       }
-      if (output.dependencies) {
-        for (const dep of output.dependencies) {
-          claimRepo.insertDependency(db, symbol.id, dep.type, dep.description, dep.file, dep.start_line);
-        }
+      for (const dep of output.dependencies) {
+        claimRepo.insertDependency(
+          db,
+          symbol.id,
+          dep.type,
+          dep.description,
+          dep.file ?? undefined,
+          dep.start_line ?? undefined,
+        );
       }
       jobsRepo.insertAgentRun(
         db,
@@ -430,11 +440,17 @@ export async function runPlanRust(
     taskRepo.upsertTask(db, symbol.id, {
       target_rust_file: output.target_rust_file,
       rust_symbol_name: output.rust_symbol_name,
-      notes: output.notes,
+      notes: output.notes ?? undefined,
       status: "rust_planned",
     });
 
-    exportPlanDoc(symbol.name, output);
+    exportPlanDoc(symbol.name, {
+      target_rust_file: output.target_rust_file,
+      rust_symbol_name: output.rust_symbol_name,
+      structs: output.structs ?? undefined,
+      enums: output.enums ?? undefined,
+      notes: output.notes ?? undefined,
+    });
     jobsRepo.insertAgentRun(
       db,
       "plan-rust",
@@ -735,7 +751,11 @@ export async function runAuditRust(
       status: output.passed ? "reviewed" : task.status,
     });
 
-    exportAuditDoc(symbol.name, output);
+    exportAuditDoc(symbol.name, {
+      ...output,
+      missing_behaviours: output.missing_behaviours ?? undefined,
+      planning_notes: output.planning_notes ?? undefined,
+    });
     jobsRepo.insertAgentRun(
       db,
       "audit-rust",
@@ -807,6 +827,7 @@ export async function runPipelineJob(
       const payload = JSON.parse(job.target_ids) as {
         query: string;
         investigationId: number;
+        featureFiles?: string[];
       };
       activity.log(`Discovering: ${payload.query.slice(0, 60)}…`);
       const result = await runDiscover(
@@ -816,6 +837,7 @@ export async function runPipelineJob(
         payload.query,
         payload.investigationId,
         activity,
+        payload.featureFiles,
       );
       if (!result.success) {
         activity.log(`Failed: ${result.error}`);

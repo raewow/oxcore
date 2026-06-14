@@ -71,6 +71,30 @@ export function resolveCodexBin(configured?: string): string {
   return findWindowsAppsCodex() ?? requested;
 }
 
+export function normalizeSchemaForCodex(schema: Record<string, unknown>): Record<string, unknown> {
+  const visit = (node: unknown): unknown => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return node;
+    const obj = node as Record<string, unknown>;
+
+    if (obj.properties && typeof obj.properties === "object" && !Array.isArray(obj.properties)) {
+      const properties = obj.properties as Record<string, unknown>;
+      obj.required = Object.keys(properties);
+      obj.additionalProperties = false;
+      for (const value of Object.values(properties)) visit(value);
+    }
+
+    if (obj.items) visit(obj.items);
+    for (const key of ["anyOf", "oneOf", "allOf"]) {
+      const variants = obj[key];
+      if (Array.isArray(variants)) variants.forEach(visit);
+    }
+
+    return obj;
+  };
+
+  return visit(structuredClone(schema)) as Record<string, unknown>;
+}
+
 function extractJson(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenced?.[1]) return fenced[1].trim();
@@ -112,7 +136,7 @@ export function createCodexProvider(options: CodexProviderOptions): AgentProvide
       schema: z.ZodType<T>,
       callOptions: AgentCallOptions = {},
     ): Promise<T> {
-      const jsonSchema = schemaToJsonSchema(schema);
+      const jsonSchema = normalizeSchemaForCodex(schemaToJsonSchema(schema));
       const stamp = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const promptFile = join(tmpdir(), `port-harness-codex-prompt-${stamp}.txt`);
       const schemaFile = join(tmpdir(), `port-harness-codex-schema-${stamp}.json`);

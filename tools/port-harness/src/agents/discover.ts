@@ -15,6 +15,7 @@ import * as investigationRepo from "../db/repositories/investigation.js";
 import * as codeSymbolRepo from "../db/repositories/codeSymbol.js";
 import * as taskRepo from "../db/repositories/migrationTask.js";
 import * as jobsRepo from "../db/repositories/jobs.js";
+import { filePathMatches } from "../files/paths.js";
 import type { JobActivity } from "../server/jobActivity.js";
 
 function enrichCandidates(
@@ -44,6 +45,22 @@ function enrichCandidates(
   return { ...output, candidates };
 }
 
+function boostByFeatureFiles<T extends { file?: string; path?: string }>(
+  items: T[],
+  featureFiles: string[],
+): T[] {
+  if (!featureFiles.length) return items;
+  const inFeature = items.filter((item) => {
+    const file = (item as { file?: string }).file ?? (item as { path?: string }).path ?? "";
+    return featureFiles.some((f) => filePathMatches(file, f));
+  });
+  const rest = items.filter((item) => {
+    const file = (item as { file?: string }).file ?? (item as { path?: string }).path ?? "";
+    return !featureFiles.some((f) => filePathMatches(file, f));
+  });
+  return [...inFeature, ...rest];
+}
+
 export async function runDiscover(
   db: Database.Database,
   config: HarnessConfig,
@@ -51,15 +68,18 @@ export async function runDiscover(
   query: string,
   investigationId: number,
   activity?: JobActivity,
+  featureFiles?: string[],
 ): Promise<{ success: boolean; error?: string; output?: DiscoverOutput }> {
   activity?.setCurrent("discover");
   activity?.log(`Investigating: ${query.slice(0, 80)}${query.length > 80 ? "…" : ""}`);
 
-  const seedHits = searchHarness(db, query);
+  const rawSeedHits = searchHarness(db, query);
+  const seedHits = boostByFeatureFiles(rawSeedHits, featureFiles ?? []);
   const topSymbolIds = seedHits.slice(0, 15).map((h) => h.symbol_id);
   const callGraphNeighbors = getCallGraphNeighbors(db, topSymbolIds, 20);
   const fileStats = getMatchedFileStats(db, seedHits);
-  const referenceFileHits = searchReferenceFiles(config.referenceRoot, query, 80);
+  const rawReferenceFileHits = searchReferenceFiles(config.referenceRoot, query, 80);
+  const referenceFileHits = boostByFeatureFiles(rawReferenceFileHits, featureFiles ?? []);
 
   activity?.log(
     `DB seed: ${seedHits.length} hit(s), ${callGraphNeighbors.length} call-graph neighbor(s), ${referenceFileHits.length} file hit(s)`,
@@ -77,8 +97,14 @@ export async function runDiscover(
     investigationId,
   );
 
+  const featureContext =
+    featureFiles?.length
+      ? `\n## Feature Focus\nThis investigation is scoped to the following feature files (prioritise these over global hits):\n${featureFiles.join("\n")}\n`
+      : "";
+
   const prompt = fillPrompt(readPrompt("discover_symptom"), {
     query,
+    featureContext,
     seedHits: JSON.stringify(seedHits.slice(0, 30), null, 2),
     callGraphNeighbors: JSON.stringify(callGraphNeighbors, null, 2),
     fileStats: JSON.stringify(fileStats, null, 2),
@@ -126,19 +152,22 @@ export function buildSeedForQuery(
   db: Database.Database,
   query: string,
   referenceRoot?: string,
+  featureFiles?: string[],
 ): {
   hits: DiscoverSeedHit[];
   callGraphNeighbors: ReturnType<typeof getCallGraphNeighbors>;
   fileStats: ReturnType<typeof getMatchedFileStats>;
   referenceFileHits: ReturnType<typeof searchReferenceFiles>;
 } {
-  const hits = searchHarness(db, query);
+  const rawHits = searchHarness(db, query);
+  const hits = boostByFeatureFiles(rawHits, featureFiles ?? []);
   const callGraphNeighbors = getCallGraphNeighbors(
     db,
     hits.slice(0, 15).map((h) => h.symbol_id),
     20,
   );
   const fileStats = getMatchedFileStats(db, hits);
-  const referenceFileHits = referenceRoot ? searchReferenceFiles(referenceRoot, query) : [];
+  const rawRefHits = referenceRoot ? searchReferenceFiles(referenceRoot, query) : [];
+  const referenceFileHits = boostByFeatureFiles(rawRefHits, featureFiles ?? []);
   return { hits, callGraphNeighbors, fileStats, referenceFileHits };
 }

@@ -1,10 +1,28 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { z } from "zod";
 import type { AgentProvider } from "../provider.js";
 import { schemaToJsonSchema } from "../provider.js";
+
+function resolveOpencodeBin(): string {
+  const fromEnv = process.env.OPENCODE_BIN;
+  if (fromEnv) return fromEnv;
+
+  if (process.platform === "win32") {
+    const candidates = [
+      join(process.env.APPDATA ?? "", "npm", "opencode.cmd"),
+      join(process.env.LOCALAPPDATA ?? "", "Microsoft", "WindowsApps", "opencode.exe"),
+    ];
+    for (const p of candidates) {
+      if (p && existsSync(p)) return p;
+    }
+  }
+
+  return "opencode";
+}
 
 function extractJson(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -37,7 +55,7 @@ export async function createOpencodeProvider(
   cwd: string,
   onActivity?: (message: string) => void,
 ): Promise<AgentProvider> {
-  const opencodeBin = process.env.OPENCODE_BIN ?? "opencode";
+  const opencodeBin = resolveOpencodeBin();
 
   return {
     name: "opencode",

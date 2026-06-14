@@ -2,10 +2,12 @@ import { Hono } from "hono";
 import type Database from "better-sqlite3";
 import type { HarnessConfig } from "../../config.js";
 import { buildSeedForQuery, runDiscover } from "../../agents/discover.js";
-import { getProviderFromConfig } from "../../agents/provider.js";
+import { resolveActiveProvider } from "../activeProvider.js";
 import { scanReferenceCppInDir } from "../../files/scanner.js";
 import * as investigationRepo from "../../db/repositories/investigation.js";
+import * as featureRepo from "../../db/repositories/features.js";
 import * as jobsRepo from "../../db/repositories/jobs.js";
+import { filePathMatches } from "../../files/paths.js";
 import type { JobQueues } from "../jobQueue.js";
 
 export function createDiscoverRoutes(
@@ -47,25 +49,38 @@ export function createDiscoverRoutes(
   });
 
   app.post("/", async (c) => {
-    const body = await c.req.json<{ query: string; sync?: boolean }>();
+    const body = await c.req.json<{ query: string; sync?: boolean; featureId?: number }>();
     if (!body.query?.trim()) {
       return c.json({ error: "query required" }, 400);
     }
 
     const query = body.query.trim();
-    const seed = buildSeedForQuery(db, query, config.referenceRoot);
+    const featureId = body.featureId ?? undefined;
+
+    let featureFiles: string[] | undefined;
+    if (featureId) {
+      const assignments = featureRepo.listAssignments(db, featureId);
+      const tasks = featureRepo.getFeatureTasks(db, featureId);
+      const fromTasks = tasks.map((t) => t.symbol_file);
+      const fromAssignments = assignments
+        .filter((a) => a.target_type === "file")
+        .map((a) => a.target_id);
+      const all = [...fromTasks, ...fromAssignments];
+      featureFiles = [...new Set(all.filter(Boolean))];
+    }
+
+    const seed = buildSeedForQuery(db, query, config.referenceRoot, featureFiles);
     const investigationId = investigationRepo.createInvestigation(
       db,
       query,
       JSON.stringify(seed),
+      undefined,
+      featureId,
     );
 
     if (body.sync) {
-      const provider = await getProviderFromConfig({
-        ...config.provider,
-        rustRoot: config.rustRoot,
-      });
-      const result = await runDiscover(db, config, provider, query, investigationId);
+      const provider = await resolveActiveProvider(db, config);
+      const result = await runDiscover(db, config, provider, query, investigationId, undefined, featureFiles);
       const inv = investigationRepo.getInvestigationById(db, investigationId);
       return c.json({
         ok: result.success,
@@ -76,7 +91,7 @@ export function createDiscoverRoutes(
       });
     }
 
-    const jobId = jobsRepo.createJob(db, "discover", { query, investigationId });
+    const jobId = jobsRepo.createJob(db, "discover", { query, investigationId, featureFiles });
     investigationRepo.setInvestigationJobId(db, investigationId, jobId);
     queues.enqueue(jobId);
 

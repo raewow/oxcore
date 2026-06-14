@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type FlowDetailResponse } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import { SourceViewer } from "../components/SourceViewer";
+import { Markdown } from "../components/Markdown";
 
 const NEXT_ACTION_LABELS: Record<string, string> = {
   audit: "Run audit",
@@ -131,9 +132,13 @@ function SymbolDetailPanel({
 }) {
   const [tab, setTab] = useState<DetailTab>(defaultTab);
   const tabs: { id: DetailTab; label: string; available: boolean }[] = [
-    { id: "audit", label: "Audit", available: !!task.audit },
-    { id: "plan", label: "Plan", available: !!task.plan },
-    { id: "draft", label: "Draft", available: !!task.port_draft },
+    { id: "audit", label: "Audit", available: !!(task.audit || task.generated_docs.audit_markdown) },
+    { id: "plan", label: "Plan", available: !!(task.plan || task.generated_docs.plan_markdown) },
+    {
+      id: "draft",
+      label: "Draft",
+      available: !!(task.port_draft || task.generated_docs.port_code),
+    },
   ];
   const activeTabs = tabs.filter((t) => t.available);
 
@@ -152,115 +157,145 @@ function SymbolDetailPanel({
         ))}
       </div>
 
-      {tab === "audit" && task.audit && (
+      {tab === "audit" && (task.audit || task.generated_docs.audit_markdown) && (
         <div>
-          <p style={{ marginBottom: "0.5rem" }}>
-            <strong>Summary:</strong> {task.audit.summary}
-          </p>
-          {task.audit.rust_locations.length > 0 && (
-            <p style={{ marginBottom: "0.5rem", fontSize: "0.85rem" }}>
-              <strong>Rust:</strong>{" "}
-              {task.audit.rust_locations
-                .map((l) => `${l.symbol} in ${l.file}`)
-                .join("; ")}
-            </p>
-          )}
-          {task.audit.issues.length > 0 && (
+          {task.audit && (
             <>
-              <strong>Issues:</strong>
-              <ul className="audit-issues">
-                {task.audit.issues.map((issue, i) => (
-                  <li key={i} className={`audit-issue-${issue.severity}`}>
-                    [{issue.severity}] {issue.message}
-                  </li>
-                ))}
-              </ul>
+              <p style={{ marginBottom: "0.5rem" }}>
+                <strong>Summary:</strong> {task.audit.summary}
+              </p>
+              {task.audit.rust_locations.length > 0 && (
+                <p style={{ marginBottom: "0.5rem", fontSize: "0.85rem" }}>
+                  <strong>Rust:</strong>{" "}
+                  {task.audit.rust_locations
+                    .map((l) => `${l.symbol} in ${l.file}`)
+                    .join("; ")}
+                </p>
+              )}
+              {task.audit.issues.length > 0 && (
+                <>
+                  <strong>Issues:</strong>
+                  <ul className="audit-issues">
+                    {task.audit.issues.map((issue, i) => (
+                      <li key={i} className={`audit-issue-${issue.severity}`}>
+                        [{issue.severity}] {issue.message}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {(task.audit.missing_behaviours ?? []).length > 0 && (
+                <>
+                  <strong>Missing behaviours:</strong>
+                  <ul className="audit-issues">
+                    {(task.audit.missing_behaviours ?? []).map((behaviour, i) => (
+                      <li key={i}>{behaviour}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {(task.audit.planning_notes ?? []).length > 0 && (
+                <>
+                  <strong>Planning notes:</strong>
+                  <ul className="audit-issues">
+                    {(task.audit.planning_notes ?? []).map((note, i) => (
+                      <li key={i}>{note}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </>
           )}
-          {(task.audit.missing_behaviours ?? []).length > 0 && (
-            <>
-              <strong>Missing behaviours:</strong>
-              <ul className="audit-issues">
-                {(task.audit.missing_behaviours ?? []).map((behaviour, i) => (
-                  <li key={i}>{behaviour}</li>
-                ))}
-              </ul>
-            </>
-          )}
-          {(task.audit.planning_notes ?? []).length > 0 && (
-            <>
-              <strong>Planning notes:</strong>
-              <ul className="audit-issues">
-                {(task.audit.planning_notes ?? []).map((note, i) => (
-                  <li key={i}>{note}</li>
-                ))}
-              </ul>
-            </>
-          )}
-          <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.5rem" }}>
-            Full report:{" "}
-            <code>tools/port-harness/docs/audits/{task.symbol_name.replace(/::/g, "_")}.md</code>
-          </p>
-        </div>
-      )}
-
-      {tab === "plan" && task.plan && (
-        <div>
-          <p style={{ marginBottom: "0.5rem" }}>
-            <strong>Target file:</strong> <code>{task.plan.target_rust_file || "—"}</code>
-          </p>
-          <p style={{ marginBottom: "0.5rem" }}>
-            <strong>Rust symbol:</strong> <code>{task.plan.rust_symbol_name || "—"}</code>
-          </p>
-          {task.plan.structs.length > 0 && (
-            <p style={{ marginBottom: "0.5rem" }}>
-              <strong>Structs:</strong> {task.plan.structs.join(", ")}
-            </p>
-          )}
-          {task.plan.enums.length > 0 && (
-            <p style={{ marginBottom: "0.5rem" }}>
-              <strong>Enums:</strong> {task.plan.enums.join(", ")}
-            </p>
-          )}
-          {task.plan.notes && (
-            <p style={{ marginBottom: "0.5rem", whiteSpace: "pre-wrap" }}>
-              <strong>Notes:</strong> {task.plan.notes}
-            </p>
-          )}
-          {task.plan.planned_at && (
-            <p style={{ fontSize: "0.8rem", color: "#94a3b8" }}>
-              Planned: {new Date(task.plan.planned_at).toLocaleString()}
-            </p>
-          )}
-          <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.5rem" }}>
-            Full plan:{" "}
-            <code>tools/port-harness/docs/plans/{task.symbol_name.replace(/::/g, "_")}.md</code>
-          </p>
-        </div>
-      )}
-
-      {tab === "draft" && task.port_draft && (
-        <div>
-          {task.port_draft.todos.length > 0 && (
-            <>
-              <strong>TODOs:</strong>
-              <ul className="audit-issues">
-                {task.port_draft.todos.map((todo, i) => (
-                  <li key={i}>{todo}</li>
-                ))}
-              </ul>
-            </>
-          )}
-          <pre className="artifact-code">{task.port_draft.rust_code}</pre>
-          {task.port_draft.ported_at && (
+          {task.generated_docs.audit_markdown ? (
+            <div className="markdown-panel" style={{ marginTop: task.audit ? "1rem" : 0 }}>
+              <Markdown content={task.generated_docs.audit_markdown} />
+            </div>
+          ) : (
             <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.5rem" }}>
-              Ported: {new Date(task.port_draft.ported_at).toLocaleString()}
+              Full report:{" "}
+              <code>
+                tools/port-harness/docs/audits/{task.symbol_name.replace(/::/g, "_")}.md
+              </code>
             </p>
           )}
-          {task.port_draft.file_path && (
-            <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.25rem" }}>
-              File: <code>{task.port_draft.file_path}</code>
+        </div>
+      )}
+
+      {tab === "plan" && (task.plan || task.generated_docs.plan_markdown) && (
+        <div>
+          {task.plan && (
+            <>
+              <p style={{ marginBottom: "0.5rem" }}>
+                <strong>Target file:</strong> <code>{task.plan.target_rust_file || "—"}</code>
+              </p>
+              <p style={{ marginBottom: "0.5rem" }}>
+                <strong>Rust symbol:</strong> <code>{task.plan.rust_symbol_name || "—"}</code>
+              </p>
+              {task.plan.structs.length > 0 && (
+                <p style={{ marginBottom: "0.5rem" }}>
+                  <strong>Structs:</strong> {task.plan.structs.join(", ")}
+                </p>
+              )}
+              {task.plan.enums.length > 0 && (
+                <p style={{ marginBottom: "0.5rem" }}>
+                  <strong>Enums:</strong> {task.plan.enums.join(", ")}
+                </p>
+              )}
+              {task.plan.notes && (
+                <p style={{ marginBottom: "0.5rem", whiteSpace: "pre-wrap" }}>
+                  <strong>Notes:</strong> {task.plan.notes}
+                </p>
+              )}
+              {task.plan.planned_at && (
+                <p style={{ fontSize: "0.8rem", color: "#94a3b8" }}>
+                  Planned: {new Date(task.plan.planned_at).toLocaleString()}
+                </p>
+              )}
+            </>
+          )}
+          {task.generated_docs.plan_markdown ? (
+            <div className="markdown-panel" style={{ marginTop: task.plan ? "1rem" : 0 }}>
+              <Markdown content={task.generated_docs.plan_markdown} />
+            </div>
+          ) : (
+            <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.5rem" }}>
+              Full plan:{" "}
+              <code>
+                tools/port-harness/docs/plans/{task.symbol_name.replace(/::/g, "_")}.md
+              </code>
             </p>
+          )}
+        </div>
+      )}
+
+      {tab === "draft" && (task.port_draft || task.generated_docs.port_code) && (
+        <div>
+          {task.port_draft ? (
+            <>
+              {task.port_draft.todos.length > 0 && (
+                <>
+                  <strong>TODOs:</strong>
+                  <ul className="audit-issues">
+                    {task.port_draft.todos.map((todo, i) => (
+                      <li key={i}>{todo}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              <pre className="artifact-code">{task.port_draft.rust_code}</pre>
+              {task.port_draft.ported_at && (
+                <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.5rem" }}>
+                  Ported: {new Date(task.port_draft.ported_at).toLocaleString()}
+                </p>
+              )}
+              {task.port_draft.file_path && (
+                <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.25rem" }}>
+                  File: <code>{task.port_draft.file_path}</code>
+                </p>
+              )}
+            </>
+          ) : (
+            <pre className="artifact-code">{task.generated_docs.port_code}</pre>
           )}
         </div>
       )}
@@ -325,18 +360,6 @@ function SymbolDetailPanel({
             <code>{task.generated_docs.plan_path}</code>
             <code>{task.generated_docs.port_path}</code>
           </div>
-          {task.generated_docs.audit_markdown && (
-            <details>
-              <summary>Audit markdown</summary>
-              <pre className="artifact-code">{task.generated_docs.audit_markdown}</pre>
-            </details>
-          )}
-          {task.generated_docs.plan_markdown && (
-            <details>
-              <summary>Plan markdown</summary>
-              <pre className="artifact-code">{task.generated_docs.plan_markdown}</pre>
-            </details>
-          )}
           {task.generated_docs.port_code && !task.port_draft && (
             <details>
               <summary>Port code</summary>
@@ -350,13 +373,20 @@ function SymbolDetailPanel({
 }
 
 function defaultDetailTab(task: FlowDetailResponse["tasks"][number]): DetailTab {
-  if (task.audit) return "audit";
-  if (task.plan) return "plan";
+  if (task.audit || task.generated_docs.audit_markdown) return "audit";
+  if (task.plan || task.generated_docs.plan_markdown) return "plan";
   return "draft";
 }
 
 function hasSymbolDetail(task: FlowDetailResponse["tasks"][number]): boolean {
-  return !!(task.audit || task.plan || task.port_draft);
+  return !!(
+    task.audit ||
+    task.plan ||
+    task.port_draft ||
+    task.generated_docs.audit_markdown ||
+    task.generated_docs.plan_markdown ||
+    task.generated_docs.port_code
+  );
 }
 
 export function FlowDetail() {

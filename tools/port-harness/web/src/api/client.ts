@@ -458,10 +458,10 @@ export const api = {
       job: PipelineJob | null;
     }>(`/discover/${id}`),
 
-  startDiscovery: (query: string) =>
+  startDiscovery: (query: string, opts?: { featureId?: number }) =>
     fetchJson<{ ok: boolean; investigationId: number; jobId: number; seedHitCount: number }>(
       "/discover",
-      { method: "POST", body: JSON.stringify({ query }) },
+      { method: "POST", body: JSON.stringify({ query, featureId: opts?.featureId }) },
     ),
 
   discoverActions: (
@@ -518,16 +518,64 @@ export const api = {
     fetchJson<{ ok: boolean }>(`/features/suggestions/${suggestionId}/reject`, {
       method: "POST",
     }),
+
+  getFeatureInvestigations: (id: number) =>
+    fetchJson<FeatureInvestigationSummary[]>(`/features/${id}/investigations`),
+
+  indexAllForFeature: (id: number) =>
+    fetchJson<{ ok: boolean; jobIds: number[]; fileCount: number; message?: string }>(
+      `/features/${id}/index-all`,
+      { method: "POST" },
+    ),
+
+  documentAllForFeature: (id: number) =>
+    fetchJson<{ ok: boolean; jobIds: number[]; totalTasks: number; message?: string }>(
+      `/features/${id}/document-all`,
+      { method: "POST" },
+    ),
+
+  assembleFlowsForFeature: (id: number) =>
+    fetchJson<{ ok: boolean; jobIds: number[]; fileCount: number; message?: string }>(
+      `/features/${id}/assemble-flows-all`,
+      { method: "POST" },
+    ),
+
+  getSettings: () => fetchJson<SettingsResponse>("/settings"),
+
+  updateSettings: (body: { active_provider?: string | null; active_model?: string | null }) =>
+    fetchJson<{ ok: boolean; active_provider: string | null; active_model: string | null }>(
+      "/settings",
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
 };
+
+export interface SettingsResponse {
+  active_provider: string | null;
+  active_model: string | null;
+  available_providers: string[];
+  config_default: { name: string; model: string };
+}
+
+export interface FeatureInvestigationSummary {
+  id: number;
+  query: string;
+  status: string;
+  candidate_count: number;
+  created_at: string;
+  finished_at: string | null;
+  candidates: DiscoverCandidate[];
+  hypothesis: string | null;
+  suggested_next_steps: string[];
+}
 
 export interface DiscoverCandidate {
   symbol: string;
   file: string;
   relevance: "high" | "medium" | "low";
   reason: string;
-  task_id?: number;
-  task_status?: string;
-  flow_name?: string;
+  task_id: number | null;
+  task_status: string | null;
+  flow_name: string | null;
   in_index: boolean;
   suggested_action: "index" | "extract" | "verify" | "inspect" | "check_rust";
 }

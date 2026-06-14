@@ -59,7 +59,11 @@ export async function createProvider(
       if (!options.cwd) {
         throw new Error("opencode provider requires cwd (repo root)");
       }
-      return createOpencodeProvider(options.model, options.cwd, options.onActivity);
+      return createOpencodeProvider(
+        options.model || "anthropic/claude-sonnet-4-6",
+        options.cwd,
+        options.onActivity,
+      );
     case "codex":
       if (!options.cwd) {
         throw new Error("codex provider requires cwd (repo root)");

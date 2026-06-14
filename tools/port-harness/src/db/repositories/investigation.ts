@@ -8,6 +8,7 @@ export interface Investigation {
   seed_json: string | null;
   result_json: string | null;
   job_id: number | null;
+  feature_id: number | null;
   created_at: string;
   finished_at: string | null;
 }
@@ -17,14 +18,25 @@ export function createInvestigation(
   query: string,
   seedJson: string,
   jobId?: number,
+  featureId?: number,
 ): number {
   const result = db
     .prepare(
-      `INSERT INTO investigation (query, status, seed_json, job_id)
-       VALUES (?, 'running', ?, ?)`,
+      `INSERT INTO investigation (query, status, seed_json, job_id, feature_id)
+       VALUES (?, 'running', ?, ?, ?)`,
     )
-    .run(query, seedJson, jobId ?? null);
+    .run(query, seedJson, jobId ?? null, featureId ?? null);
   return Number(result.lastInsertRowid);
+}
+
+export function listInvestigationsByFeature(
+  db: Database.Database,
+  featureId: number,
+  limit = 20,
+): Investigation[] {
+  return db
+    .prepare("SELECT * FROM investigation WHERE feature_id = ? ORDER BY created_at DESC LIMIT ?")
+    .all(featureId, limit) as Investigation[];
 }
 
 export function finishInvestigation(

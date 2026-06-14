@@ -5,8 +5,10 @@ import * as featureRepo from "../../db/repositories/features.js";
 import * as jobsRepo from "../../db/repositories/jobs.js";
 import * as taskRepo from "../../db/repositories/migrationTask.js";
 import * as fileStatsRepo from "../../db/repositories/fileStats.js";
+import * as investigationRepo from "../../db/repositories/investigation.js";
 import { scanReferenceFiles } from "../../files/scanner.js";
 import { filePathMatches } from "../../files/paths.js";
+import type { JobQueues } from "../jobQueue.js";
 
 function dependencyRowsForFiles(db: Database.Database, files: string[]) {
   if (!files.length) return { nodes: [], edges: [] };
@@ -70,7 +72,7 @@ function featureFileStatus(
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export function createFeaturesRoutes(db: Database.Database, config: HarnessConfig): Hono {
+export function createFeaturesRoutes(db: Database.Database, config: HarnessConfig, queues: JobQueues): Hono {
   const app = new Hono();
 
   app.get("/", (c) => {
@@ -198,6 +200,106 @@ export function createFeaturesRoutes(db: Database.Database, config: HarnessConfi
     const suggestionId = parseInt(c.req.param("suggestionId"), 10);
     if (!featureRepo.rejectSuggestion(db, suggestionId)) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
+  });
+
+  app.get("/:id/investigations", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    if (!featureRepo.getFeature(db, id)) return c.json({ error: "Not found" }, 404);
+    const investigations = investigationRepo.listInvestigationsByFeature(db, id);
+    return c.json(
+      investigations.map((inv) => {
+        const result = investigationRepo.parseInvestigationResult(inv);
+        return {
+          id: inv.id,
+          query: inv.query,
+          status: inv.status,
+          candidate_count: result?.candidates.length ?? 0,
+          created_at: inv.created_at,
+          finished_at: inv.finished_at,
+          candidates: result?.candidates ?? [],
+          hypothesis: result?.hypothesis ?? null,
+          suggested_next_steps: result?.suggested_next_steps ?? [],
+        };
+      }),
+    );
+  });
+
+  app.post("/:id/index-all", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    if (!featureRepo.getFeature(db, id)) return c.json({ error: "Not found" }, 404);
+
+    const assignments = featureRepo.listAssignments(db, id);
+    const tasks = featureRepo.getFeatureTasks(db, id);
+    const allFiles = [
+      ...tasks.map((t) => t.symbol_file),
+      ...assignments.filter((a) => a.target_type === "file").map((a) => a.target_id),
+    ];
+    const fileStatus = featureFileStatus(db, config, [...new Set(allFiles)]);
+    const unindexed = fileStatus.filter((f) => !f.indexed && f.kind === "cpp").map((f) => f.path);
+
+    if (!unindexed.length) {
+      return c.json({ ok: true, jobIds: [], fileCount: 0, message: "All files already indexed" });
+    }
+
+    const jobId = jobsRepo.createJob(db, "index", { paths: unindexed }, unindexed.length);
+    queues.enqueue(jobId);
+
+    return c.json({ ok: true, jobIds: [jobId], fileCount: unindexed.length });
+  });
+
+  app.post("/:id/document-all", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    if (!featureRepo.getFeature(db, id)) return c.json({ error: "Not found" }, 404);
+
+    const assignments = featureRepo.listAssignments(db, id);
+    const tasks = featureRepo.getFeatureTasks(db, id);
+    const allFiles = [
+      ...tasks.map((t) => t.symbol_file),
+      ...assignments.filter((a) => a.target_type === "file").map((a) => a.target_id),
+    ];
+    const fileStatus = featureFileStatus(db, config, [...new Set(allFiles)]);
+    const indexed = fileStatus.filter((f) => f.indexed);
+
+    const allTaskIds: number[] = [];
+    for (const file of indexed) {
+      const ids = fileStatsRepo.getTaskIdsForFile(db, file.path, "discovered");
+      allTaskIds.push(...ids);
+    }
+
+    if (!allTaskIds.length) {
+      return c.json({ ok: true, jobIds: [], totalTasks: 0, message: "No discovered tasks to document" });
+    }
+
+    const jobIds = jobsRepo.createBatchedJobs(db, "extract", allTaskIds, config.jobs.maxBatchSize);
+    for (const jobId of jobIds) queues.enqueue(jobId);
+
+    return c.json({ ok: true, jobIds, totalTasks: allTaskIds.length, batches: jobIds.length });
+  });
+
+  app.post("/:id/assemble-flows-all", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    if (!featureRepo.getFeature(db, id)) return c.json({ error: "Not found" }, 404);
+
+    const assignments = featureRepo.listAssignments(db, id);
+    const tasks = featureRepo.getFeatureTasks(db, id);
+    const allFiles = [
+      ...tasks.map((t) => t.symbol_file),
+      ...assignments.filter((a) => a.target_type === "file").map((a) => a.target_id),
+    ];
+    const fileStatus = featureFileStatus(db, config, [...new Set(allFiles)]);
+    const cppFiles = fileStatus.filter((f) => f.indexed && f.kind === "cpp");
+
+    if (!cppFiles.length) {
+      return c.json({ ok: true, jobIds: [], fileCount: 0, message: "No indexed cpp files" });
+    }
+
+    const jobIds = cppFiles.map((f) => {
+      const jobId = jobsRepo.createJob(db, "assemble-flows", { file: f.path });
+      queues.enqueue(jobId);
+      return jobId;
+    });
+
+    return c.json({ ok: true, jobIds, fileCount: cppFiles.length });
   });
 
   return app;
