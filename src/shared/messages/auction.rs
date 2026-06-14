@@ -42,31 +42,56 @@ impl ToWorldPacket for MsgAuctionHello {
 /// SMSG_AUCTION_COMMAND_RESULT - Result of an auction action
 ///
 /// Sent in response to auction actions like creating, bidding, or canceling.
+/// Mirrors C++ `WorldSession::SendAuctionCommandResult` wire format.
 #[derive(Debug, Clone)]
 pub struct SmsgAuctionCommandResult {
-    /// Auction ID
+    /// Auction ID (0 when auc is null)
     pub auction_id: u32,
     /// Type of auction action performed
     pub action: AuctionAction,
     /// Result of the action
     pub error: AuctionError,
-    /// Amount by which the auction was outbid (only for BID_PLACED action)
-    pub auction_outbid: Option<u32>,
+    /// Inventory error (serialized when error == AUCTION_ERR_INVENTORY)
+    pub inventory_error: Option<crate::world::game::inventory::inventory_types::InventoryResult>,
+    /// Bidder GUID (serialized when error == AUCTION_ERR_HIGHER_BID)
+    pub bidder_guid: Option<ObjectGuid>,
+    /// Current bid (serialized when error == AUCTION_ERR_HIGHER_BID)
+    pub bid: Option<u32>,
+    /// Outbid amount (serialized when error == AUCTION_OK + BidPlaced, or AUCTION_ERR_HIGHER_BID)
+    pub outbid: Option<u32>,
 }
 
 impl ToWorldPacket for SmsgAuctionCommandResult {
     fn to_world_packet(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AUCTION_COMMAND_RESULT);
+        // Base fields always present (C++ lines 73-75)
         packet.write_u32(self.auction_id);
         packet.write_u32(self.action as u32);
+        packet.write_u32(self.error as u32);
 
-        if self.action == AuctionAction::BidPlaced {
-            packet.write_u32(self.error as u32);
-            if self.error == AuctionError::Ok {
-                packet.write_u32(self.auction_outbid.unwrap_or(0));
+        match self.error {
+            AuctionError::Ok => {
+                if self.action == AuctionAction::BidPlaced {
+                    packet.write_u32(self.outbid.unwrap_or(0));
+                }
             }
-        } else {
-            packet.write_u32(self.error as u32);
+            AuctionError::Inventory => {
+                if let Some(inv) = self.inventory_error {
+                    packet.write_u32(inv as u32);
+                }
+            }
+            AuctionError::HigherBid => {
+                if let Some(guid) = self.bidder_guid {
+                    packet.write_u64(guid.raw());
+                }
+                if let Some(bid) = self.bid {
+                    packet.write_u32(bid);
+                }
+                if let Some(outbid) = self.outbid {
+                    packet.write_u32(outbid);
+                }
+            }
+            _ => {}
         }
 
         packet
@@ -285,12 +310,60 @@ mod tests {
     }
 
     #[test]
-    fn test_smsg_auction_command_result() {
+    fn test_smsg_auction_command_result_ok_bid_placed() {
         let msg = SmsgAuctionCommandResult {
             auction_id: 123,
             action: AuctionAction::BidPlaced,
             error: AuctionError::Ok,
-            auction_outbid: Some(100),
+            inventory_error: None,
+            bidder_guid: None,
+            bid: None,
+            outbid: Some(100),
+        };
+        let packet = msg.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
+    }
+
+    #[test]
+    fn test_smsg_auction_command_result_inventory_error() {
+        let msg = SmsgAuctionCommandResult {
+            auction_id: 0,
+            action: AuctionAction::Started,
+            error: AuctionError::Inventory,
+            inventory_error: Some(crate::world::game::inventory::inventory_types::InventoryResult::BagFull),
+            bidder_guid: None,
+            bid: None,
+            outbid: None,
+        };
+        let packet = msg.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
+    }
+
+    #[test]
+    fn test_smsg_auction_command_result_higher_bid() {
+        let msg = SmsgAuctionCommandResult {
+            auction_id: 456,
+            action: AuctionAction::BidPlaced,
+            error: AuctionError::HigherBid,
+            inventory_error: None,
+            bidder_guid: Some(ObjectGuid::from_low(789)),
+            bid: Some(1000),
+            outbid: Some(50),
+        };
+        let packet = msg.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
+    }
+
+    #[test]
+    fn test_smsg_auction_command_result_ok_no_extra() {
+        let msg = SmsgAuctionCommandResult {
+            auction_id: 123,
+            action: AuctionAction::Started,
+            error: AuctionError::Ok,
+            inventory_error: None,
+            bidder_guid: None,
+            bid: None,
+            outbid: None,
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
