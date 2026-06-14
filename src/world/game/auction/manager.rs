@@ -385,6 +385,47 @@ impl AuctionHouseManager {
             .map(|entry| Arc::clone(entry.value()))
     }
 
+    /// Calculates auction deposit for a given item, time, and house entry.
+    ///
+    /// Mirrors C++ `AuctionHouseMgr::GetAuctionDeposit` (AuctionHouseMgr.cpp:98-110).
+    /// Preserved behaviour claims:
+    /// - integer division `(time / MIN_AUCTION_TIME)` before float cast → zero when time < 7200s.
+    /// - unsigned wrapping on inner product `sell_price * count * (time / MIN_AUCTION_TIME)`.
+    /// - deposit is scaled by `entry.deposit_percent / 100.0f`.
+    /// - min deposit floor from config.
+    /// - final truncation via `u32` cast (fractional copper discarded).
+    pub fn get_auction_deposit(
+        &self,
+        entry: &AuctionHouseEntry,
+        time: u32,
+        item: &Item,
+        min_deposit: u32,
+        rate: f32,
+    ) -> u32 {
+        const MIN_AUCTION_TIME: u32 = 2 * 3600; // 2 hours
+
+        let proto = match self.item_mgr.get_template(item.entry) {
+            Some(t) => t,
+            None => return 0,
+        };
+
+        // C++ computes SellPrice * GetCount() * (time / MIN_AUCTION_TIME) as uint32 first.
+        let base = proto
+            .sell_price
+            .wrapping_mul(item.count)
+            .wrapping_mul(time / MIN_AUCTION_TIME);
+        let mut deposit = base as f32;
+
+        deposit = deposit * entry.deposit_percent as f32 / 100.0;
+
+        let min_deposit_f = min_deposit as f32;
+        if deposit < min_deposit_f {
+            deposit = min_deposit_f;
+        }
+
+        (deposit * rate) as u32
+    }
+
     async fn delete_auction_from_db(&self, auction_id: u32) -> Result<()> {
         self.auction_repo
             .delete_auction(auction_id)

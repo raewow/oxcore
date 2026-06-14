@@ -178,6 +178,12 @@ pub struct Config {
     #[serde(default = "default_min_petition_signs")]
     pub min_petition_signs: Option<u32>, // Minimum signatures required to turn in a guild charter (default: 9, range: 0-9)
 
+    // Auction House Settings
+    #[serde(default = "default_auction_deposit_min")]
+    pub auction_deposit_min: u32, // Minimum auction deposit in copper (default: 0)
+    #[serde(default = "default_rate_auction_deposit")]
+    pub rate_auction_deposit: f32, // Rate multiplier for auction deposits (default: 1.0)
+
     // Mail Settings
     #[serde(default = "default_mail_delivery_delay")]
     pub mail_delivery_delay: u32, // Delivery delay in seconds for items/money mail (0 = instant, 3600 = 1 hour retail default)
@@ -346,6 +352,14 @@ fn default_min_petition_signs() -> Option<u32> {
     Some(9) // Vanilla WoW requires 9 signatures (range: 0-9)
 }
 
+fn default_auction_deposit_min() -> u32 {
+    0
+}
+
+fn default_rate_auction_deposit() -> f32 {
+    1.0
+}
+
 fn default_mail_delivery_delay() -> u32 {
     3600 // 1 hour in seconds (retail default)
 }
@@ -407,6 +421,8 @@ impl Default for Config {
             allow_cross_faction_trade: false,
             allow_cross_faction_auction: false,
             unlinked_auction_houses: false,
+            auction_deposit_min: default_auction_deposit_min(),
+            rate_auction_deposit: default_rate_auction_deposit(),
             allow_cross_faction_mail: false,
             allow_cross_faction_add_friend: false,
             chat_flood_protection_delay: default_chat_flood_protection_delay(),

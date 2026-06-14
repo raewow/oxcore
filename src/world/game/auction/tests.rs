@@ -4,6 +4,7 @@ use super::manager::AuctionHouseManager;
 use super::parsing::{parse_enchantments, parse_spell_charges};
 use crate::shared::database::characters::models::auction::AuctionRow;
 use crate::shared::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
+use crate::shared::database::characters::repositories::mail_repository_trait::MockMailRepositoryTrait;
 use crate::shared::database::characters::repositories::CharacterRepository;
 use crate::shared::protocol::{HighGuid, ObjectGuid};
 use crate::world::dbc::manager::DbcManager;
@@ -43,10 +44,14 @@ fn test_item_template(entry: u32) -> ItemTemplate {
 }
 
 fn test_item(guid_low: u32, entry: u32) -> Arc<Item> {
+    test_item_with_count(guid_low, entry, 1)
+}
+
+fn test_item_with_count(guid_low: u32, entry: u32, count: u32) -> Arc<Item> {
     Arc::new(Item::from_db_row(
         ObjectGuid::new_without_entry(HighGuid::Item, guid_low),
         entry,
-        1,
+        count,
         ObjectGuid::empty(),
         0,
         0,
@@ -83,6 +88,15 @@ fn create_test_manager(
     dbc: Arc<RwLock<DbcManager>>,
     item_mgr: Arc<ItemManager>,
 ) -> AuctionHouseManager {
+    create_test_manager_with_mail(mock_repo, dbc, item_mgr, MockMailRepositoryTrait::new())
+}
+
+fn create_test_manager_with_mail(
+    mock_repo: MockAuctionRepositoryTrait,
+    dbc: Arc<RwLock<DbcManager>>,
+    item_mgr: Arc<ItemManager>,
+    mail_repo: MockMailRepositoryTrait,
+) -> AuctionHouseManager {
     // Character repo requires a real pool; load_auctions only calls it for seller account lookup.
     // Use a disconnected pool — find_by_guid will fail gracefully and return account 0.
     let pool = Arc::new(
@@ -92,6 +106,7 @@ fn create_test_manager(
     AuctionHouseManager::new(
         Arc::new(mock_repo),
         Arc::new(CharacterRepository::new(pool)),
+        Arc::new(mail_repo),
         dbc,
         item_mgr,
     )
@@ -327,4 +342,121 @@ async fn load_auction_items_query_failure_treated_as_empty() {
     mgr.load_auction_items().await.unwrap();
 
     assert_eq!(mgr.item_count(), 0);
+}
+
+// ========== GET AUCTION DEPOSIT TESTS ==========
+
+#[tokio::test]
+async fn get_auction_deposit_basic_calculation() {
+    let dbc = dbc_with_houses(&[(2, 0)]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let mut template = test_item_template(25);
+    template.sell_price = 100;
+    item_mgr.add_template(template);
+
+    let mock_repo = MockAuctionRepositoryTrait::new();
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    let item = test_item(1, 25);
+    let house = AuctionHouseEntry {
+        house_id: 2,
+        faction: 0,
+        deposit_percent: 5,
+        cut_percent: 5,
+    };
+
+    // time = 7200 (1 min auction time unit) => base = 100 * 1 * 1 = 100
+    // deposit = 100 * 5 / 100 = 5
+    // rate = 1.0, min = 0 => 5
+    assert_eq!(mgr.get_auction_deposit(&house, 7200, &item, 0, 1.0), 5);
+}
+
+#[tokio::test]
+async fn get_auction_deposit_time_below_min_zeros_base() {
+    let dbc = dbc_with_houses(&[(2, 0)]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let mut template = test_item_template(25);
+    template.sell_price = 100;
+    item_mgr.add_template(template);
+
+    let mock_repo = MockAuctionRepositoryTrait::new();
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    let item = test_item(1, 25);
+    let house = AuctionHouseEntry {
+        house_id: 2,
+        faction: 0,
+        deposit_percent: 5,
+        cut_percent: 5,
+    };
+
+    // time < 7200 => integer division gives 0, base = 0, deposit = 0
+    // but min deposit floor = 10 => result = 10
+    assert_eq!(mgr.get_auction_deposit(&house, 3600, &item, 10, 1.0), 10);
+}
+
+#[tokio::test]
+async fn get_auction_deposit_rate_applied() {
+    let dbc = dbc_with_houses(&[(2, 0)]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let mut template = test_item_template(25);
+    template.sell_price = 100;
+    item_mgr.add_template(template);
+
+    let mock_repo = MockAuctionRepositoryTrait::new();
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    let item = test_item(1, 25);
+    let house = AuctionHouseEntry {
+        house_id: 2,
+        faction: 0,
+        deposit_percent: 5,
+        cut_percent: 5,
+    };
+
+    // base = 100, deposit = 5, rate = 2.0 => 10
+    assert_eq!(mgr.get_auction_deposit(&house, 7200, &item, 0, 2.0), 10);
+}
+
+#[tokio::test]
+async fn get_auction_deposit_stack_count_multiplies() {
+    let dbc = dbc_with_houses(&[(2, 0)]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let mut template = test_item_template(25);
+    template.sell_price = 100;
+    item_mgr.add_template(template);
+
+    let mock_repo = MockAuctionRepositoryTrait::new();
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    let item = test_item_with_count(1, 25, 5);
+    let house = AuctionHouseEntry {
+        house_id: 2,
+        faction: 0,
+        deposit_percent: 5,
+        cut_percent: 5,
+    };
+
+    // base = 100 * 5 * 1 = 500, deposit = 500 * 5 / 100 = 25
+    assert_eq!(mgr.get_auction_deposit(&house, 7200, &item, 0, 1.0), 25);
+}
+
+#[tokio::test]
+async fn get_auction_deposit_missing_template_returns_zero() {
+    let dbc = dbc_with_houses(&[(2, 0)]);
+    let item_mgr = Arc::new(ItemManager::new());
+    // no template added for entry 99
+
+    let mock_repo = MockAuctionRepositoryTrait::new();
+    let mgr = create_test_manager(mock_repo, dbc, item_mgr);
+
+    let item = test_item(1, 99);
+    let house = AuctionHouseEntry {
+        house_id: 2,
+        faction: 0,
+        deposit_percent: 5,
+        cut_percent: 5,
+    };
+
+    assert_eq!(mgr.get_auction_deposit(&house, 7200, &item, 0, 1.0), 0);
 }
