@@ -4,6 +4,7 @@ use super::manager::AuctionHouseManager;
 use super::parsing::{parse_enchantments, parse_spell_charges};
 use crate::shared::database::characters::models::auction::AuctionRow;
 use crate::shared::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
+use crate::shared::database::characters::repositories::item_repository_trait::MockItemRepositoryTrait;
 use crate::shared::database::characters::repositories::mail_repository_trait::MockMailRepositoryTrait;
 use crate::shared::database::characters::repositories::CharacterRepository;
 use crate::shared::protocol::{HighGuid, ObjectGuid};
@@ -88,7 +89,13 @@ fn create_test_manager(
     dbc: Arc<RwLock<DbcManager>>,
     item_mgr: Arc<ItemManager>,
 ) -> AuctionHouseManager {
-    create_test_manager_with_mail(mock_repo, dbc, item_mgr, MockMailRepositoryTrait::new())
+    create_test_manager_with_mail(
+        mock_repo,
+        dbc,
+        item_mgr,
+        MockMailRepositoryTrait::new(),
+        MockItemRepositoryTrait::new(),
+    )
 }
 
 fn create_test_manager_with_mail(
@@ -96,6 +103,7 @@ fn create_test_manager_with_mail(
     dbc: Arc<RwLock<DbcManager>>,
     item_mgr: Arc<ItemManager>,
     mail_repo: MockMailRepositoryTrait,
+    item_repo: MockItemRepositoryTrait,
 ) -> AuctionHouseManager {
     // Character repo requires a real pool; load_auctions only calls it for seller account lookup.
     // Use a disconnected pool — find_by_guid will fail gracefully and return account 0.
@@ -107,6 +115,7 @@ fn create_test_manager_with_mail(
         Arc::new(mock_repo),
         Arc::new(CharacterRepository::new(pool)),
         Arc::new(mail_repo),
+        Arc::new(item_repo),
         dbc,
         item_mgr,
     )
@@ -741,4 +750,122 @@ async fn get_checked_auction_house_npc_invalid_denies() {
         None,
     );
     assert!(house.is_none());
+}
+
+// ========== SEND_AUCTION_WON_MAIL / SEND_AUCTION_EXPIRED_MAIL TESTS ==========
+
+fn test_auction(item_guid_low: u32, item_template: u32, seller_guid_low: u32) -> crate::shared::game::auction::AuctionEntry {
+    use crate::shared::protocol::HighGuid;
+    crate::shared::game::auction::AuctionEntry::new(
+        1,
+        1,
+        ObjectGuid::new_without_entry(HighGuid::Item, item_guid_low),
+        item_template,
+        ObjectGuid::new_without_entry(HighGuid::Player, seller_guid_low),
+        0,
+        1000,
+        2000,
+        9999999999,
+        50,
+    )
+}
+
+#[tokio::test]
+async fn send_auction_won_mail_no_item_returns_ok() {
+    let dbc = dbc_with_houses(&[]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let auction = test_auction(99, 25, 1);
+
+    let mgr = create_test_manager_with_mail(
+        MockAuctionRepositoryTrait::new(),
+        dbc,
+        item_mgr,
+        MockMailRepositoryTrait::new(),
+        MockItemRepositoryTrait::new(),
+    );
+
+    // Item 99 is not in the cache — function returns Ok without touching repos.
+    let result = mgr.send_auction_won_mail(&auction).await;
+    assert!(result.is_ok());
+    assert_eq!(mgr.item_count(), 0);
+}
+
+#[tokio::test]
+async fn send_auction_won_mail_no_bidder_account_destroys_item() {
+    let dbc = dbc_with_houses(&[]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let auction = test_auction(42, 25, 1);
+
+    let mut item_repo = MockItemRepositoryTrait::new();
+    item_repo
+        .expect_delete()
+        .with(eq(42u32))
+        .once()
+        .returning(|_| Ok(()));
+
+    let mgr = create_test_manager_with_mail(
+        MockAuctionRepositoryTrait::new(),
+        dbc,
+        item_mgr,
+        MockMailRepositoryTrait::new(),
+        item_repo,
+    );
+
+    mgr.insert_item_for_test(test_item(42, 25));
+    assert_eq!(mgr.item_count(), 1);
+
+    // Disconnected character_repo returns account 0 → no-receiver path: delete DB row, evict cache.
+    let result = mgr.send_auction_won_mail(&auction).await;
+    assert!(result.is_ok());
+    assert_eq!(mgr.item_count(), 0);
+}
+
+#[tokio::test]
+async fn send_auction_expired_mail_no_item_logs_error_and_returns_ok() {
+    let dbc = dbc_with_houses(&[]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let auction = test_auction(77, 25, 1);
+
+    let mgr = create_test_manager_with_mail(
+        MockAuctionRepositoryTrait::new(),
+        dbc,
+        item_mgr,
+        MockMailRepositoryTrait::new(),
+        MockItemRepositoryTrait::new(),
+    );
+
+    // Item 77 not in cache — logs error and returns Ok without touching repos.
+    let result = mgr.send_auction_expired_mail(&auction).await;
+    assert!(result.is_ok());
+    assert_eq!(mgr.item_count(), 0);
+}
+
+#[tokio::test]
+async fn send_auction_expired_mail_no_owner_account_destroys_item() {
+    let dbc = dbc_with_houses(&[]);
+    let item_mgr = Arc::new(ItemManager::new());
+    let auction = test_auction(55, 25, 1);
+
+    let mut item_repo = MockItemRepositoryTrait::new();
+    item_repo
+        .expect_delete()
+        .with(eq(55u32))
+        .once()
+        .returning(|_| Ok(()));
+
+    let mgr = create_test_manager_with_mail(
+        MockAuctionRepositoryTrait::new(),
+        dbc,
+        item_mgr,
+        MockMailRepositoryTrait::new(),
+        item_repo,
+    );
+
+    mgr.insert_item_for_test(test_item(55, 25));
+    assert_eq!(mgr.item_count(), 1);
+
+    // Disconnected character_repo returns account 0 → no-owner path: delete DB row, evict cache.
+    let result = mgr.send_auction_expired_mail(&auction).await;
+    assert!(result.is_ok());
+    assert_eq!(mgr.item_count(), 0);
 }

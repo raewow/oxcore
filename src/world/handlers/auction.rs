@@ -791,6 +791,8 @@ mod tests {
     use crate::world::game::auction::manager::AuctionHouseManager;
     use crate::shared::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
     use crate::shared::database::characters::repositories::character_repository::CharacterRepository;
+    use crate::shared::database::characters::repositories::item_repository::ItemRepository;
+    use crate::shared::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
     use crate::shared::database::characters::repositories::mail_repository::MailRepository;
     use parking_lot::RwLock;
     use sqlx::mysql::MySqlPoolOptions;
@@ -906,6 +908,8 @@ mod tests {
         );
         let character_repo = Arc::new(CharacterRepository::new(Arc::clone(&pool)));
         let mail_repo = Arc::new(MailRepository::new(Arc::clone(&pool)));
+        let item_repo: Arc<dyn ItemRepositoryTrait> =
+            Arc::new(ItemRepository::new(Arc::clone(&pool)));
         let auction_repo = Arc::new(MockAuctionRepositoryTrait::new());
         let item_mgr = Arc::new(ItemManager::new());
 
@@ -942,6 +946,7 @@ mod tests {
             auction_repo,
             character_repo,
             mail_repo,
+            item_repo,
             Arc::new(RwLock::new(dbc)),
             item_mgr,
         ))
@@ -1036,6 +1041,8 @@ mod tests {
             );
             let character_repo = Arc::new(CharacterRepository::new(Arc::clone(&pool)));
             let mail_repo = Arc::new(MailRepository::new(Arc::clone(&pool)));
+            let item_repo: Arc<dyn ItemRepositoryTrait> =
+                Arc::new(ItemRepository::new(Arc::clone(&pool)));
             let auction_repo = Arc::new(MockAuctionRepositoryTrait::new());
             let item_mgr = Arc::new(ItemManager::new());
             let mut dbc = DbcManager::new();
@@ -1052,6 +1059,7 @@ mod tests {
                 auction_repo,
                 character_repo,
                 mail_repo,
+                item_repo,
                 Arc::new(RwLock::new(dbc)),
                 item_mgr,
             ))

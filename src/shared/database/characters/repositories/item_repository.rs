@@ -1,5 +1,7 @@
 use super::super::models::item::*;
+use super::item_repository_trait::ItemRepositoryTrait;
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use sqlx::MySqlPool;
 use std::sync::Arc;
 
@@ -261,5 +263,16 @@ impl ItemRepository {
             .await
             .context("Failed to commit item deletion for owner")?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl ItemRepositoryTrait for ItemRepository {
+    async fn update_owner(&self, guid: u32, owner_guid: u32) -> Result<()> {
+        Self::update_owner(self, guid, owner_guid).await
+    }
+
+    async fn delete(&self, guid: u32) -> Result<()> {
+        Self::delete(self, guid).await
     }
 }

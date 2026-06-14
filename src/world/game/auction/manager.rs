@@ -10,6 +10,7 @@ use tracing::{error, info};
 use crate::shared::database::characters::models::auction::{AuctionItemLoadRow, AuctionRow};
 use crate::shared::database::characters::models::mail::MailRow;
 use crate::shared::database::characters::repositories::auction_repository_trait::AuctionRepositoryTrait;
+use crate::shared::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
 use crate::shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
 use crate::shared::database::characters::repositories::CharacterRepository;
 use crate::shared::game::auction::AuctionEntry;
@@ -30,7 +31,9 @@ const GOBLIN_AUCTION_HOUSE_ID: u32 = 7;
 const WOW_PATCH_109: u32 = 109;
 
 /// Mail subject suffix constants (Mail.h AuctionAction enum).
+const AUCTION_WON: u32 = 1;
 const AUCTION_SUCCESSFUL: u32 = 2;
+const AUCTION_EXPIRED: u32 = 3;
 const AUCTION_CANCELED: u32 = 5;
 
 const MAIL_AUCTION_EXPIRE_SECS: i64 = 30 * 24 * 60 * 60;
@@ -80,6 +83,7 @@ pub struct AuctionHouseManager {
     auction_repo: Arc<dyn AuctionRepositoryTrait>,
     character_repo: Arc<CharacterRepository>,
     mail_repo: Arc<dyn MailRepositoryTrait>,
+    item_repo: Arc<dyn ItemRepositoryTrait>,
     dbc: Arc<RwLock<DbcManager>>,
     item_mgr: Arc<ItemManager>,
     auction_items: DashMap<u32, Arc<Item>>,
@@ -92,6 +96,7 @@ impl AuctionHouseManager {
         auction_repo: Arc<dyn AuctionRepositoryTrait>,
         character_repo: Arc<CharacterRepository>,
         mail_repo: Arc<dyn MailRepositoryTrait>,
+        item_repo: Arc<dyn ItemRepositoryTrait>,
         dbc: Arc<RwLock<DbcManager>>,
         item_mgr: Arc<ItemManager>,
     ) -> Self {
@@ -99,6 +104,7 @@ impl AuctionHouseManager {
             auction_repo,
             character_repo,
             mail_repo,
+            item_repo,
             dbc,
             item_mgr,
             auction_items: DashMap::new(),
@@ -606,6 +612,175 @@ impl AuctionHouseManager {
             error!("SendAuctionSuccessfulMail: failed to create mail: {e}");
         }
 
+        Ok(())
+    }
+
+    /// Delivers the won item to the bidder by mail, or destroys it when no account can be resolved.
+    ///
+    /// Mirrors C++ AuctionHouseMgr::SendAuctionWonMail. Online bidder notification
+    /// (SendAuctionBidderNotification) is the caller's responsibility.
+    pub async fn send_auction_won_mail(&self, auction: &AuctionEntry) -> Result<()> {
+        let item_guid_low = auction.item_guid.low();
+        let Some(pitem) = self.get_a_item(item_guid_low) else {
+            return Ok(());
+        };
+
+        let bidder_guid_low = auction.bidder_guid.low();
+        let bidder_acc_id = self.get_player_account_id_by_guid(bidder_guid_low).await;
+
+        // TODO: if bidder is online, send SendAuctionBidderNotification(auction, won=true)
+        // via broadcast_mgr — needs caller to handle since manager has no session access.
+
+        if bidder_acc_id == 0 {
+            // No account found — destroy the item.
+            if let Err(e) = self.item_repo.delete(item_guid_low).await {
+                error!("SendAuctionWonMail: failed to delete item {item_guid_low}: {e}");
+            }
+            self.remove_a_item(item_guid_low);
+            drop(pitem);
+            return Ok(());
+        }
+
+        let subject = format!("{}:0:{}", auction.item_template, AUCTION_WON);
+        // Body: seller guid as 16-wide right-aligned hex, then bid and buyout in decimal.
+        let body = format!(
+            "{:>16x}:{}:{}",
+            auction.seller_guid.low(),
+            auction.current_bid,
+            auction.buyout_price,
+        );
+
+        tracing::debug!("AuctionWon body string : {}", body);
+
+        // Transfer DB ownership to bidder so the item survives if the original seller is deleted.
+        if let Err(e) = self.item_repo.update_owner(item_guid_low, bidder_guid_low).await {
+            error!("SendAuctionWonMail: failed to update item owner: {e}");
+        }
+
+        let item_text_id = match self.mail_repo.create_item_text(&body).await {
+            Ok(id) => id,
+            Err(e) => {
+                error!("SendAuctionWonMail: failed to create item text: {e}");
+                0
+            }
+        };
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let mail_row = MailRow {
+            id: 0,
+            message_type: MailMessageType::Auction as u8,
+            stationery: MailStationery::Auction as i8,
+            mail_template_id: 0,
+            sender_guid: auction.id,
+            receiver_guid: bidder_guid_low,
+            subject: Some(subject),
+            item_text_id,
+            has_items: 1,
+            expire_time: now + MAIL_AUCTION_EXPIRE_SECS,
+            deliver_time: now,
+            money: 0,
+            cod: 0,
+            checked: MailCheckMask::COPIED,
+        };
+
+        let mail_id = match self.mail_repo.create(&mail_row).await {
+            Ok(id) => id,
+            Err(e) => {
+                error!("SendAuctionWonMail: failed to create mail: {e}");
+                self.remove_a_item(item_guid_low);
+                return Ok(());
+            }
+        };
+
+        if let Err(e) = self
+            .mail_repo
+            .add_item(mail_id, item_guid_low, auction.item_template, bidder_guid_low)
+            .await
+        {
+            error!("SendAuctionWonMail: failed to attach item to mail: {e}");
+        }
+
+        self.remove_a_item(item_guid_low);
+        Ok(())
+    }
+
+    /// Returns an expired listing's item to the seller by mail, or destroys it when no owner can be resolved.
+    ///
+    /// Mirrors C++ AuctionHouseMgr::SendAuctionExpiredMail. Online owner notification
+    /// (SendAuctionOwnerNotification) is the caller's responsibility.
+    pub async fn send_auction_expired_mail(&self, auction: &AuctionEntry) -> Result<()> {
+        let item_guid_low = auction.item_guid.low();
+        let Some(pitem) = self.get_a_item(item_guid_low) else {
+            error!(
+                "Auction item (GUID: {}) not found, and lost.",
+                item_guid_low
+            );
+            return Ok(());
+        };
+
+        let owner_guid_low = auction.seller_guid.low();
+        let owner_acc_id = self.get_player_account_id_by_guid(owner_guid_low).await;
+
+        // TODO: if owner is online, send SendAuctionOwnerNotification(auction, sold=false)
+        // via broadcast_mgr — needs caller to handle since manager has no session access.
+
+        if owner_acc_id == 0 {
+            // No account found — destroy the item.
+            if let Err(e) = self.item_repo.delete(item_guid_low).await {
+                error!("SendAuctionExpiredMail: failed to delete item {item_guid_low}: {e}");
+            }
+            self.remove_a_item(item_guid_low);
+            drop(pitem);
+            return Ok(());
+        }
+
+        let subject = format!("{}:0:{}", auction.item_template, AUCTION_EXPIRED);
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let mail_row = MailRow {
+            id: 0,
+            message_type: MailMessageType::Auction as u8,
+            stationery: MailStationery::Auction as i8,
+            mail_template_id: 0,
+            sender_guid: auction.id,
+            receiver_guid: owner_guid_low,
+            subject: Some(subject),
+            item_text_id: 0,
+            has_items: 1,
+            expire_time: now + MAIL_AUCTION_EXPIRE_SECS,
+            deliver_time: now,
+            money: 0,
+            cod: 0,
+            checked: MailCheckMask::COPIED,
+        };
+
+        self.remove_a_item(item_guid_low);
+
+        let mail_id = match self.mail_repo.create(&mail_row).await {
+            Ok(id) => id,
+            Err(e) => {
+                error!("SendAuctionExpiredMail: failed to create mail: {e}");
+                return Ok(());
+            }
+        };
+
+        if let Err(e) = self
+            .mail_repo
+            .add_item(mail_id, item_guid_low, auction.item_template, owner_guid_low)
+            .await
+        {
+            error!("SendAuctionExpiredMail: failed to attach item to mail: {e}");
+        }
+
+        drop(pitem);
         Ok(())
     }
 

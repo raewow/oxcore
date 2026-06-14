@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use crate::shared::console::{CommandRegistry, ConsoleCommand};
 use crate::shared::database::characters::repositories::{
-    AuctionRepository, AuctionRepositoryTrait, CharacterRepository, MailRepository,
-    MailRepositoryTrait,
+    AuctionRepository, AuctionRepositoryTrait, CharacterRepository, ItemRepository,
+    ItemRepositoryTrait, MailRepository, MailRepositoryTrait,
 };
 use crate::shared::database::world::repositories::QuestTemplateRepository;
 use crate::shared::database::Databases;
@@ -141,10 +141,13 @@ impl World {
             Arc::new(AuctionRepository::new(Arc::clone(&character_pool)));
         let mail_repo: Arc<dyn MailRepositoryTrait> =
             Arc::new(MailRepository::new(Arc::clone(&character_pool)));
+        let item_repo: Arc<dyn ItemRepositoryTrait> =
+            Arc::new(ItemRepository::new(Arc::clone(&character_pool)));
         let auction_mgr = Arc::new(AuctionHouseManager::new(
             auction_repo,
             Arc::new(CharacterRepository::new(Arc::clone(&character_pool))),
             mail_repo,
+            item_repo,
             Arc::clone(&dbc),
             Arc::clone(&item_mgr),
         ));

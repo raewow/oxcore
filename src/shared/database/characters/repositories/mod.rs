@@ -11,6 +11,7 @@ pub mod instance_repository;
 pub mod inventory_repository;
 pub mod inventory_repository_trait;
 pub mod item_repository;
+pub mod item_repository_trait;
 pub mod mail_repository;
 pub mod mail_repository_trait;
 pub mod petition_repository;
@@ -37,6 +38,9 @@ pub use inventory_repository_trait::InventorySlotRow;
 #[cfg(test)]
 pub use inventory_repository_trait::MockInventoryRepositoryTrait;
 pub use item_repository::ItemRepository;
+pub use item_repository_trait::ItemRepositoryTrait;
+#[cfg(test)]
+pub use item_repository_trait::MockItemRepositoryTrait;
 pub use mail_repository::MailRepository;
 pub use mail_repository_trait::MailRepositoryTrait;
 pub use petition_repository::PetitionRepository;
