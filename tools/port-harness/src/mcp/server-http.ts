@@ -19,7 +19,8 @@ import * as claimRepo from "../db/repositories/behaviourClaim.js";
 import * as taskRepo from "../db/repositories/migrationTask.js";
 import * as featureRepo from "../db/repositories/features.js";
 import { getFeatureCoverage } from "../db/repositories/coverage.js";
-import { getFlowDetailsForMcp, listFlowsForMcp } from "./flowTools.js";
+import { flowDraftSchema, flowSaveSchema, flowUpdateSchema } from "./flowSchemas.js";
+import { createFlow, getFlowDetailsForMcp, listFlowsForMcp, saveFlows, updateFlow } from "./flowTools.js";
 
 const PORT = Number(process.env.MCP_PORT ?? 3456);
 
@@ -141,6 +142,33 @@ function buildServer() {
     description: "List all business flows with progress and stage.",
     inputSchema: {},
   }, async () => json(listFlowsForMcp(db)));
+
+  server.registerTool("save_flows", {
+    title: "Save flows",
+    description:
+      "Upsert one or more business flows, replace their branches/mutations, and relink entry tasks.",
+    inputSchema: flowSaveSchema,
+  }, async ({ flows }) => json(saveFlows(db, flows)));
+
+  server.registerTool("create_flow", {
+    title: "Create flow",
+    description: "Create a single business flow from assembled output.",
+    inputSchema: { flow: flowDraftSchema },
+  }, async ({ flow }) => {
+    const result = createFlow(db, flow);
+    if (!result.ok) return err(result.error ?? "Failed to create flow");
+    return json(result);
+  });
+
+  server.registerTool("update_flow", {
+    title: "Update flow",
+    description: "Update an existing flow by id or name.",
+    inputSchema: flowUpdateSchema,
+  }, async ({ flow, ...patch }) => {
+    const result = updateFlow(db, flow, patch);
+    if (!result.ok) return err(result.error ?? "Failed to update flow");
+    return json(result);
+  });
 
   server.registerTool("flow_details", {
     title: "Flow details",

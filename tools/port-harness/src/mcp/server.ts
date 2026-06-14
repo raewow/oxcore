@@ -2,9 +2,9 @@
 /**
  * Port-harness MCP server (read + status writes).
  *
- * Exposes the symbol index, call graph, behaviour claims, and feature tracking in
- * `port_harness.db` to any MCP client (e.g. Claude Code). All tools are read-only
- * except `set_task_status`, which advances a symbol along the porting ladder.
+ * Exposes the symbol index, call graph, behaviour claims, flow assembly, and feature
+ * tracking in `port_harness.db` to any MCP client (e.g. Claude Code). Most tools are
+ * read-only; writes are limited to task status and flow persistence helpers.
  *
  * Run:  npm run mcp      (tsx src/mcp/server.ts)
  */
@@ -19,7 +19,8 @@ import * as claimRepo from "../db/repositories/behaviourClaim.js";
 import * as taskRepo from "../db/repositories/migrationTask.js";
 import * as featureRepo from "../db/repositories/features.js";
 import { getFeatureCoverage } from "../db/repositories/coverage.js";
-import { getFlowDetailsForMcp, listFlowsForMcp } from "./flowTools.js";
+import { flowDraftSchema, flowSaveSchema, flowUpdateSchema } from "./flowSchemas.js";
+import { createFlow, getFlowDetailsForMcp, listFlowsForMcp, saveFlows, updateFlow } from "./flowTools.js";
 
 const db = getDb();
 
@@ -196,6 +197,47 @@ server.registerTool(
     inputSchema: {},
   },
   async () => json(listFlowsForMcp(db)),
+);
+
+server.registerTool(
+  "save_flows",
+  {
+    title: "Save flows",
+    description:
+      "Upsert one or more business flows, replace their branches/mutations, and relink entry tasks. Use this to persist assembled/generated flows into the harness database.",
+    inputSchema: flowSaveSchema,
+  },
+  async ({ flows }) => json(saveFlows(db, flows)),
+);
+
+server.registerTool(
+  "create_flow",
+  {
+    title: "Create flow",
+    description:
+      "Create a single business flow from assembled output. Use when Claude has produced a new flow that does not yet exist in the harness.",
+    inputSchema: { flow: flowDraftSchema },
+  },
+  async ({ flow }) => {
+    const result = createFlow(db, flow);
+    if (!result.ok) return err(result.error ?? "Failed to create flow");
+    return json(result);
+  },
+);
+
+server.registerTool(
+  "update_flow",
+  {
+    title: "Update flow",
+    description:
+      "Update an existing flow by id or name. Use this for iterative assembly when the flow already exists and only some fields need to change.",
+    inputSchema: flowUpdateSchema,
+  },
+  async ({ flow, ...patch }) => {
+    const result = updateFlow(db, flow, patch);
+    if (!result.ok) return err(result.error ?? "Failed to update flow");
+    return json(result);
+  },
 );
 
 server.registerTool(
