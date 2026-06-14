@@ -17,7 +17,9 @@ export async function resolveActiveProvider(
 ): Promise<AgentProvider> {
   const override = getActiveProviderOverride(db);
   const name = (override.name ?? config.provider.name) as ProviderName;
-  const model = override.model ?? config.provider.model;
+  // If provider is overridden but model isn't explicitly set, don't inherit
+  // the old provider's model — let the new provider pick its own default.
+  const model = override.model ?? (override.name ? undefined : config.provider.model);
 
   // Use override provider's expected API key env; keep config values for codex-specific opts
   const apiKeyEnv = API_KEY_ENV[name] ?? config.provider.apiKeyEnv;

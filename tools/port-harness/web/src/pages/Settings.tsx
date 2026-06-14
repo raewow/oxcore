@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.js";
 
 const MODEL_HINTS: Record<string, string> = {
-  opencode: "anthropic/claude-sonnet-4-6",
+  opencode: "kimi-k2.6  (or leave blank to use opencode's default)",
   codex: "gpt-5.4-mini",
   cursor: "composer-2.5",
   openai: "gpt-4o",

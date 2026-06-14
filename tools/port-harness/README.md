@@ -98,6 +98,22 @@ See `src/domains/spells.example.ts` for a spell-system reference. Run `npm run d
 
 The harness does **not** write into `src/` or `tests/` until you explicitly port and land code yourself. Rust test stubs are opt-in under `generated/` for reference only.
 
+## MCP server (Claude Code)
+
+Exposes the DB (symbol index, call graph, behaviour claims, feature tracking) to Claude Code as tools, so you query/track porting without one-off scripts.
+
+```bash
+npm run mcp   # stdio MCP server
+```
+
+Registered for the repo via `../../.mcp.json`; restart Claude Code to load it, then drive it with the `/port-feature` skill. Tools:
+
+- `find_symbol`, `symbol_callees`, `symbol_callers` — search + walk the call graph
+- `behaviour_claims` — the extracted spec to preserve when porting
+- `feature_coverage` — "is every detail mapped?" (closure %, symbols to pull in, top gaps)
+- `feature_status`, `next_tasks` — progress + what to work on next
+- `set_task_status` — the only mutating tool; advances a symbol along the porting ladder
+
 ## Web dashboard
 
 http://127.0.0.1:5173

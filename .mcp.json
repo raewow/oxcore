@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "port-harness": {
+      "type": "sse",
+      "url": "http://localhost:3456/sse"
+    }
+  }
+}

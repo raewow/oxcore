@@ -23,7 +23,7 @@ export function schemaToJsonSchema(schema: z.ZodType): Record<string, unknown> {
 }
 
 export interface ProviderOptions {
-  model: string;
+  model?: string;
   apiKey?: string;
   baseUrl?: string;
   /** Repo root — used as Cursor local agent cwd */
@@ -44,23 +44,23 @@ export async function createProvider(
         throw new Error("Cursor provider requires cwd (repo root)");
       }
       return createCursorProvider(
-        options.model,
+        options.model ?? "composer-2.5",
         options.apiKey!,
         options.cwd,
         options.onActivity,
       );
     case "openai":
-      return await createOpenAIProvider(options.model, options.apiKey!);
+      return await createOpenAIProvider(options.model ?? "gpt-4o", options.apiKey!);
     case "anthropic":
-      return await createAnthropicProvider(options.model, options.apiKey!);
+      return await createAnthropicProvider(options.model ?? "claude-sonnet-4-6", options.apiKey!);
     case "openai_compat":
-      return createOpenAICompatProvider(options.model, options.apiKey!, options.baseUrl);
+      return createOpenAICompatProvider(options.model ?? "default", options.apiKey!, options.baseUrl);
     case "opencode":
       if (!options.cwd) {
         throw new Error("opencode provider requires cwd (repo root)");
       }
       return createOpencodeProvider(
-        options.model || "anthropic/claude-sonnet-4-6",
+        options.model || undefined,
         options.cwd,
         options.onActivity,
       );
@@ -170,7 +170,7 @@ function createOpenAICompatProvider(
 
 export async function getProviderFromConfig(config: {
   name: string;
-  model: string;
+  model?: string;
   apiKeyEnv?: string;
   rustRoot?: string;
   onActivity?: (message: string) => void;

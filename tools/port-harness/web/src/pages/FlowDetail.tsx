@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type FlowDetailResponse } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import { SourceViewer } from "../components/SourceViewer";
-import { Markdown } from "../components/Markdown";
+import { MarkdownContent } from "../components/Markdown";
 
 const NEXT_ACTION_LABELS: Record<string, string> = {
   audit: "Run audit",
@@ -208,7 +208,7 @@ function SymbolDetailPanel({
           )}
           {task.generated_docs.audit_markdown ? (
             <div className="markdown-panel" style={{ marginTop: task.audit ? "1rem" : 0 }}>
-              <Markdown content={task.generated_docs.audit_markdown} />
+              <MarkdownContent content={task.generated_docs.audit_markdown} />
             </div>
           ) : (
             <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.5rem" }}>
@@ -255,7 +255,7 @@ function SymbolDetailPanel({
           )}
           {task.generated_docs.plan_markdown ? (
             <div className="markdown-panel" style={{ marginTop: task.plan ? "1rem" : 0 }}>
-              <Markdown content={task.generated_docs.plan_markdown} />
+              <MarkdownContent content={task.generated_docs.plan_markdown} />
             </div>
           ) : (
             <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.5rem" }}>
