@@ -1,11 +1,7 @@
 # Spell::SendSpellCooldown
 
-**File:** src/game/Server/Packets/Spell.cpp
+Spell::SendSpellCooldown adds the spell cooldown to the caster unless the spell is passive or the player has the no-cooldown cheat enabled.
 
-## Summary
-Spell::SendSpellCooldown is a parameterless void method that early-returns for passive spells or player casters with PLAYER_CHEAT_NO_COOLDOWN, otherwise invokes m_caster->AddCooldown with m_spellInfo, an optional cast-item prototype from m_CastItem, and permanent=true when the spell has SPELL_ATTR_COOLDOWN_ON_EVENT.
+For normal casts it calls `m_caster->AddCooldown(...)`, passing the spell prototype, the cast item prototype when one exists, and the event-cooldown flag when the spell has `SPELL_ATTR_COOLDOWN_ON_EVENT`.
 
-## Source
-```cpp
-
-```
+Implementation location: `reference/core/src/game/Spells/Spell.cpp:3936-3946`.
