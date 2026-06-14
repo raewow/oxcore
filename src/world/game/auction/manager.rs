@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use parking_lot::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -83,6 +84,7 @@ pub struct AuctionHouseManager {
     item_mgr: Arc<ItemManager>,
     auction_items: DashMap<u32, Arc<Item>>,
     auction_houses: DashMap<u32, Arc<AuctionHouseObject>>,
+    allow_cross_faction_auction: AtomicBool,
 }
 
 impl AuctionHouseManager {
@@ -101,6 +103,7 @@ impl AuctionHouseManager {
             item_mgr,
             auction_items: DashMap::new(),
             auction_houses: DashMap::new(),
+            allow_cross_faction_auction: AtomicBool::new(false),
         }
     }
 
@@ -111,6 +114,9 @@ impl AuctionHouseManager {
         unlinked_auction_houses: bool,
         wow_patch: u32,
     ) -> Result<()> {
+        self.allow_cross_faction_auction
+            .store(allow_cross_faction_auction, Ordering::Relaxed);
+
         let dbc = self.dbc.read();
         let entries: Vec<AuctionHouseEntry> = dbc
             .get_all_auction_houses()
@@ -397,7 +403,10 @@ impl AuctionHouseManager {
     /// Maps a creature faction template ID to an auction house ID.
     ///
     /// Mirrors C++ `AuctionHouseMgr::GetAuctionHouseId` (AuctionHouseMgr.cpp:522-578).
-    pub fn get_auction_house_id_from_faction_template(faction_template_id: u32) -> u32 {
+    pub fn get_auction_house_id_from_faction_template(&self, faction_template_id: u32) -> u32 {
+        const FACTION_MASK_ALLIANCE: u32 = 2;
+        const FACTION_MASK_HORDE: u32 = 4;
+
         match faction_template_id {
             11 | 12 => 1,   // Human
             29 | 85 => 6,   // Orc
@@ -410,11 +419,19 @@ impl AuctionHouseManager {
             534 => 2,       // Alliance Generic
             855 => 7,       // Everlook
             _ => {
-                // Fallback: use ourMask to determine alliance/horde/neutral
-                // FACTION_MASK_ALLIANCE = 2, FACTION_MASK_HORDE = 4
-                // Since we don't have the FactionTemplate entry here without the DBC,
-                // callers that need the exact fallback should use the DBC lookup.
-                7 // goblin (neutral) as default
+                let dbc = self.dbc.read();
+                match dbc.get_faction_template(faction_template_id) {
+                    None => 7,
+                    Some(entry) => {
+                        if entry.our_mask & FACTION_MASK_ALLIANCE != 0 {
+                            1
+                        } else if entry.our_mask & FACTION_MASK_HORDE != 0 {
+                            6
+                        } else {
+                            7
+                        }
+                    }
+                }
             }
         }
     }
@@ -422,11 +439,16 @@ impl AuctionHouseManager {
     /// Returns the auction house entry for a player, based on team and access mode.
     ///
     /// Mirrors C++ `AuctionHouseMgr::GetAuctionHouseEntry` player branch (lines 594-610).
+    /// When cross-faction auction is enabled (CONFIG_BOOL_ALLOW_TWO_SIDE_INTERACTION_AUCTION),
+    /// returns house 1's entry for all players (matching C++ behaviour where houseId stays 1).
     pub fn get_auction_house_for_player(
         &self,
         team: crate::shared::game::chat::Team,
         auction_access_mode: i8,
     ) -> Option<AuctionHouseEntry> {
+        if self.allow_cross_faction_auction.load(Ordering::Relaxed) {
+            return self.get_auction_house_entry(1);
+        }
         let house_id = if auction_access_mode > 0 {
             7 // neutral
         } else {
@@ -446,12 +468,15 @@ impl AuctionHouseManager {
     /// Returns the auction house entry for an NPC, based on faction template.
     ///
     /// Mirrors C++ `AuctionHouseMgr::GetAuctionHouseEntry` creature branch (lines 586-592).
+    /// When cross-faction auction is enabled, returns house 1's entry (matching C++ houseId=1 path).
     pub fn get_auction_house_for_npc(
         &self,
         faction_template_id: u32,
     ) -> Option<AuctionHouseEntry> {
-        let house_id =
-            Self::get_auction_house_id_from_faction_template(faction_template_id);
+        if self.allow_cross_faction_auction.load(Ordering::Relaxed) {
+            return self.get_auction_house_entry(1);
+        }
+        let house_id = self.get_auction_house_id_from_faction_template(faction_template_id);
         self.get_auction_house_entry(house_id)
     }
 

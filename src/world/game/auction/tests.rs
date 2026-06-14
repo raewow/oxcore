@@ -8,7 +8,7 @@ use crate::shared::database::characters::repositories::mail_repository_trait::Mo
 use crate::shared::database::characters::repositories::CharacterRepository;
 use crate::shared::protocol::{HighGuid, ObjectGuid};
 use crate::world::dbc::manager::DbcManager;
-use crate::world::dbc::structures::AuctionHouseEntry;
+use crate::world::dbc::structures::{AuctionHouseEntry, FactionTemplateDbcEntry};
 use crate::world::game::items::manager::ItemTemplate;
 use crate::world::game::items::Item;
 use crate::world::game::ItemManager;
@@ -372,29 +372,159 @@ async fn add_a_item_rejects_duplicate_guid_low() {
 
 // ========== GET AUCTION HOUSE ID FROM FACTION TEMPLATE TESTS ==========
 
-#[test]
-fn get_auction_house_id_from_faction_template_known_values() {
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(11), 1);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(12), 1);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(29), 6);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(85), 6);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(55), 2);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(57), 2);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(68), 4);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(71), 4);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(79), 3);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(80), 3);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(104), 5);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(105), 5);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(120), 7);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(474), 7);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(534), 2);
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(855), 7);
+fn minimal_manager() -> AuctionHouseManager {
+    create_test_manager(
+        MockAuctionRepositoryTrait::new(),
+        dbc_with_houses(&[]),
+        Arc::new(ItemManager::new()),
+    )
 }
 
-#[test]
-fn get_auction_house_id_from_faction_template_unknown_defaults_to_neutral() {
-    assert_eq!(AuctionHouseManager::get_auction_house_id_from_faction_template(9999), 7);
+#[tokio::test]
+async fn get_auction_house_id_from_faction_template_known_values() {
+    let mgr = minimal_manager();
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(11), 1);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(12), 1);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(29), 6);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(85), 6);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(55), 2);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(57), 2);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(68), 4);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(71), 4);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(79), 3);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(80), 3);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(104), 5);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(105), 5);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(120), 7);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(474), 7);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(534), 2);
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(855), 7);
+}
+
+#[tokio::test]
+async fn get_auction_house_id_from_faction_template_unknown_no_dbc_entry_defaults_to_neutral() {
+    let mgr = minimal_manager(); // empty DBC — no faction template entry for 9999
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(9999), 7);
+}
+
+#[tokio::test]
+async fn get_auction_house_id_from_faction_template_dbc_fallback_alliance_mask() {
+    let mut dbc = DbcManager::new();
+    dbc.faction_template.insert(
+        5000,
+        FactionTemplateDbcEntry {
+            id: 5000,
+            faction: 0,
+            faction_flags: 0,
+            our_mask: 2, // FACTION_MASK_ALLIANCE
+            friendly_mask: 0,
+            hostile_mask: 0,
+            enemy_factions: [0; 4],
+            friend_factions: [0; 4],
+        },
+    );
+    let mgr = create_test_manager(
+        MockAuctionRepositoryTrait::new(),
+        Arc::new(RwLock::new(dbc)),
+        Arc::new(ItemManager::new()),
+    );
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(5000), 1);
+}
+
+#[tokio::test]
+async fn get_auction_house_id_from_faction_template_dbc_fallback_horde_mask() {
+    let mut dbc = DbcManager::new();
+    dbc.faction_template.insert(
+        5001,
+        FactionTemplateDbcEntry {
+            id: 5001,
+            faction: 0,
+            faction_flags: 0,
+            our_mask: 4, // FACTION_MASK_HORDE
+            friendly_mask: 0,
+            hostile_mask: 0,
+            enemy_factions: [0; 4],
+            friend_factions: [0; 4],
+        },
+    );
+    let mgr = create_test_manager(
+        MockAuctionRepositoryTrait::new(),
+        Arc::new(RwLock::new(dbc)),
+        Arc::new(ItemManager::new()),
+    );
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(5001), 6);
+}
+
+#[tokio::test]
+async fn get_auction_house_id_from_faction_template_dbc_fallback_neither_mask() {
+    let mut dbc = DbcManager::new();
+    dbc.faction_template.insert(
+        5002,
+        FactionTemplateDbcEntry {
+            id: 5002,
+            faction: 0,
+            faction_flags: 0,
+            our_mask: 8, // only FACTION_MASK_MONSTER, not alliance or horde
+            friendly_mask: 0,
+            hostile_mask: 0,
+            enemy_factions: [0; 4],
+            friend_factions: [0; 4],
+        },
+    );
+    let mgr = create_test_manager(
+        MockAuctionRepositoryTrait::new(),
+        Arc::new(RwLock::new(dbc)),
+        Arc::new(ItemManager::new()),
+    );
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(5002), 7);
+}
+
+#[tokio::test]
+async fn get_auction_house_id_from_faction_template_dbc_fallback_both_masks_alliance_wins() {
+    let mut dbc = DbcManager::new();
+    dbc.faction_template.insert(
+        5003,
+        FactionTemplateDbcEntry {
+            id: 5003,
+            faction: 0,
+            faction_flags: 0,
+            our_mask: 2 | 4, // both alliance and horde — alliance checked first
+            friendly_mask: 0,
+            hostile_mask: 0,
+            enemy_factions: [0; 4],
+            friend_factions: [0; 4],
+        },
+    );
+    let mgr = create_test_manager(
+        MockAuctionRepositoryTrait::new(),
+        Arc::new(RwLock::new(dbc)),
+        Arc::new(ItemManager::new()),
+    );
+    assert_eq!(mgr.get_auction_house_id_from_faction_template(5003), 1);
+}
+
+#[tokio::test]
+async fn get_auction_house_for_player_cross_faction_returns_house_1() {
+    let dbc = dbc_with_houses(&[(1, 0), (6, 0), (7, 0)]);
+    let mgr = create_test_manager(MockAuctionRepositoryTrait::new(), dbc, Arc::new(ItemManager::new()));
+    mgr.load_auction_houses(true, false, 112).unwrap();
+
+    // Horde player should still get house 1 entry when cross-faction is on
+    let entry = mgr.get_auction_house_for_player(Team::Horde, 0);
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().house_id, 1);
+}
+
+#[tokio::test]
+async fn get_auction_house_for_npc_cross_faction_returns_house_1() {
+    let dbc = dbc_with_houses(&[(1, 0), (6, 0)]);
+    let mgr = create_test_manager(MockAuctionRepositoryTrait::new(), dbc, Arc::new(ItemManager::new()));
+    mgr.load_auction_houses(true, false, 112).unwrap();
+
+    // Orc NPC (faction template 29 → house 6) should return house 1 entry when cross-faction is on
+    let entry = mgr.get_auction_house_for_npc(29);
+    assert!(entry.is_some());
+    assert_eq!(entry.unwrap().house_id, 1);
 }
 
 // ========== GET AUCTION DEPOSIT TESTS ==========
