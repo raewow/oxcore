@@ -309,6 +309,9 @@ mod tests {
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::MSG_AUCTION_HELLO);
+        assert_eq!(packet.data().len(), 12);
+        assert_eq!(u64::from_le_bytes(packet.data()[0..8].try_into().unwrap()), 123);
+        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), 0);
     }
 
     #[test]

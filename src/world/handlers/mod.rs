@@ -433,6 +433,9 @@ pub async fn dispatch_packet(
                 }
 
                 // Auction handlers
+                Opcode::MSG_AUCTION_HELLO => {
+                    auction::handle_auction_hello(session, packet, world).await?;
+                }
                 Opcode::CMSG_AUCTION_SELL_ITEM => {
                     auction::handle_auction_sell_item(session, packet, world).await?;
                 }
