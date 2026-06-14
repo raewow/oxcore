@@ -110,8 +110,9 @@ Registered for the repo via `../../.mcp.json`; restart Claude Code to load it, t
 
 - `find_symbol`, `symbol_callees`, `symbol_callers` — search + walk the call graph
 - `behaviour_claims` — the extracted spec to preserve when porting
+- `list_flows`, `flow_details` — inspect flows after document stage, including branches, mutations, and linked tasks
 - `feature_coverage` — "is every detail mapped?" (closure %, symbols to pull in, top gaps)
-- `feature_status`, `next_tasks` — progress + what to work on next
+- `feature_status`, `next_tasks` — progress + what to work on next, now with flow context on tasks
 - `set_task_status` — the only mutating tool; advances a symbol along the porting ladder
 
 ## Web dashboard

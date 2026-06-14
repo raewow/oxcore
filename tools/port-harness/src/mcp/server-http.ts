@@ -19,6 +19,7 @@ import * as claimRepo from "../db/repositories/behaviourClaim.js";
 import * as taskRepo from "../db/repositories/migrationTask.js";
 import * as featureRepo from "../db/repositories/features.js";
 import { getFeatureCoverage } from "../db/repositories/coverage.js";
+import { getFlowDetailsForMcp, listFlowsForMcp } from "./flowTools.js";
 
 const PORT = Number(process.env.MCP_PORT ?? 3456);
 
@@ -135,6 +136,22 @@ function buildServer() {
     return json({ feature: f.name, total_tasks: stats.total, by_status: stats.by_status, blocking_count: incomplete.length, blocking: incomplete.slice(0, 100) });
   });
 
+  server.registerTool("list_flows", {
+    title: "List flows",
+    description: "List all business flows with progress and stage.",
+    inputSchema: {},
+  }, async () => json(listFlowsForMcp(db)));
+
+  server.registerTool("flow_details", {
+    title: "Flow details",
+    description: "Get the full flow record plus branches, mutations, linked tasks, and plan/port drafts.",
+    inputSchema: { flow: z.string() },
+  }, async ({ flow }) => {
+    const details = getFlowDetailsForMcp(db, null, flow);
+    if (!details) return err(`No flow "${flow}"`);
+    return json(details);
+  });
+
   server.registerTool("next_tasks", {
     title: "Next tasks",
     description: "The next symbols to work on for a feature.",
@@ -147,7 +164,7 @@ function buildServer() {
     let tasks = featureRepo.getFeatureTasks(db, f.id);
     if (status) tasks = tasks.filter((t) => t.status === status);
     tasks.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || a.symbol_file.localeCompare(b.symbol_file));
-    return json(tasks.slice(0, limit ?? 15).map((t) => ({ task_id: t.id, symbol: t.symbol_name, file: t.symbol_file, lines: `${t.start_line}-${t.end_line}`, status: t.status, claim_count: t.claim_count })));
+    return json(tasks.slice(0, limit ?? 15).map((t) => ({ task_id: t.id, symbol: t.symbol_name, file: t.symbol_file, lines: `${t.start_line}-${t.end_line}`, status: t.status, flow_name: t.flow_name, risk_level: t.risk_level, target_rust_file: t.target_rust_file, rust_symbol_name: t.rust_symbol_name, claim_count: t.claim_count })));
   });
 
   server.registerTool("set_task_status", {

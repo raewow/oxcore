@@ -19,6 +19,7 @@ import * as claimRepo from "../db/repositories/behaviourClaim.js";
 import * as taskRepo from "../db/repositories/migrationTask.js";
 import * as featureRepo from "../db/repositories/features.js";
 import { getFeatureCoverage } from "../db/repositories/coverage.js";
+import { getFlowDetailsForMcp, listFlowsForMcp } from "./flowTools.js";
 
 const db = getDb();
 
@@ -187,6 +188,32 @@ server.registerTool(
 );
 
 server.registerTool(
+  "list_flows",
+  {
+    title: "List flows",
+    description:
+      "List all business flows with progress, stage, and symbol counts. Use this after documentation to choose what to plan and port next.",
+    inputSchema: {},
+  },
+  async () => json(listFlowsForMcp(db)),
+);
+
+server.registerTool(
+  "flow_details",
+  {
+    title: "Flow details",
+    description:
+      "Get the full flow record plus branches, mutations, linked tasks, audit state, and plan/port drafts. This is the bridge from documentation to planning and porting.",
+    inputSchema: { flow: z.string().describe("Flow name or id") },
+  },
+  async ({ flow }) => {
+    const details = getFlowDetailsForMcp(db, null, flow);
+    if (!details) return err(`No flow "${flow}"`);
+    return json(details);
+  },
+);
+
+server.registerTool(
   "next_tasks",
   {
     title: "Next tasks",
@@ -227,6 +254,10 @@ server.registerTool(
         file: t.symbol_file,
         lines: `${t.start_line}-${t.end_line}`,
         status: t.status,
+        flow_name: t.flow_name,
+        risk_level: t.risk_level,
+        target_rust_file: t.target_rust_file,
+        rust_symbol_name: t.rust_symbol_name,
         claim_count: t.claim_count,
       })),
     );
