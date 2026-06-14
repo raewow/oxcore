@@ -3,11 +3,13 @@
  * Port-harness MCP server — HTTP/SSE transport.
  *
  * Run standalone:  npm run mcp:http
- * Then set .mcp.json to: { "type": "sse", "url": "http://localhost:3456/sse" }
+ * Codex: codex mcp add port-harness --url http://localhost:3456/mcp
+ * Legacy SSE clients: { "type": "sse", "url": "http://localhost:3456/sse" }
  */
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import type Database from "better-sqlite3";
 import { getDb } from "../db/client.js";
@@ -169,6 +171,28 @@ const sessions = new Map<string, SSEServerTransport>();
 const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   log(`${req.method} ${req.url}`);
 
+  if (req.url === "/mcp") {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Method not allowed." },
+        id: null,
+      }));
+      return;
+    }
+
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    const server = buildServer();
+    await server.connect(transport);
+    res.on("close", () => {
+      void transport.close();
+      void server.close();
+    });
+    await transport.handleRequest(req, res);
+    return;
+  }
+
   if (req.method === "GET" && req.url === "/sse") {
     log("New SSE client connected");
     const transport = new SSEServerTransport("/messages", res);
@@ -198,10 +222,11 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
   }
 
   res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end(`port-harness MCP (SSE)\nConnect at: http://localhost:${PORT}/sse\n`);
+  res.end(`port-harness MCP\nCodex Streamable HTTP: http://localhost:${PORT}/mcp\nLegacy SSE: http://localhost:${PORT}/sse\n`);
 });
 
 httpServer.listen(PORT, () => {
   log(`Listening on http://localhost:${PORT}`);
+  log(`Streamable HTTP endpoint: http://localhost:${PORT}/mcp`);
   log(`SSE endpoint: http://localhost:${PORT}/sse`);
 });
