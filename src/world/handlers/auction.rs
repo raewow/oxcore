@@ -11,7 +11,7 @@ use crate::shared::game::auction::{
 };
 use crate::shared::messages::auction::{
     MsgAuctionHello, SmsgAuctionBidderListResult, SmsgAuctionCommandResult,
-    SmsgAuctionOwnerListResult,
+    SmsgAuctionListResult, SmsgAuctionOwnerListResult,
 };
 use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
@@ -37,12 +37,24 @@ const NPC_FLAG_AUCTIONEER: u32 = 0x0000_0200;
 /// Valid auction durations in seconds (matching C++ MIN_AUCTION_TIME = 2h).
 const VALID_AUCTION_DURATIONS: [u32; 3] = [7200, 28800, 86400]; // 2h, 8h, 24h
 
+struct AuctionSearchParams {
+    search_name: String,
+    level_min: u8,
+    level_max: u8,
+    auction_slot_id: u32,
+    auction_main_category: u32,
+    auction_sub_category: u32,
+    quality: u32,
+    usable: u8,
+}
+
 struct AuctionHouseClientQueryTask {
     query_type: AuctionQueryType,
     auction_house: Arc<AuctionHouseObject>,
     account_id: u32,
     listfrom: u32,
     outbidded_auction_ids: Vec<u32>,
+    search_params: Option<AuctionSearchParams>,
 }
 
 fn read_bid_refresh_ids(packet: &mut WorldPacket) -> Vec<u32> {
@@ -172,6 +184,7 @@ pub async fn handle_auction_list_bidder_items(
         account_id: session.account_id(),
         listfrom: paging_element_start_index,
         outbidded_auction_ids: bid_auction_ids_to_refresh,
+        search_params: None,
     };
 
     session.set_received_ah_list_request(true);
@@ -518,6 +531,7 @@ pub async fn handle_auction_list_owner_items(
         account_id: session.account_id(),
         listfrom,
         outbidded_auction_ids: Vec::new(),
+        search_params: None,
     };
 
     session.set_received_ah_list_request(true);
@@ -577,6 +591,189 @@ async fn execute_auction_list_owner_items_task(
 
     session.clear_received_ah_list_request();
     eprintln!("OWNER_TASK: done");
+}
+
+/// Handle CMSG_AUCTION_LIST_ITEMS (0x0258)
+///
+/// Packet format (vanilla 1.12.1):
+/// - auctioneerGuid (packed u64)
+/// - listfrom       (u32)
+/// - searchedname   (null-terminated string)
+/// - levelmin       (u8)
+/// - levelmax       (u8)
+/// - auctionSlotID  (u32)
+/// - auctionMainCategory (u32)
+/// - auctionSubCategory  (u32)
+/// - quality        (u32)
+/// - usable         (u8)
+///
+/// Mirrors C++ `WorldSession::HandleAuctionListItems`.
+pub async fn handle_auction_list_items(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    if session.received_ah_list_request() {
+        return Ok(());
+    }
+
+    let auctioneer_guid = packet
+        .read_guid()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
+    let listfrom = packet.read_u32().unwrap_or(0);
+    let search_name_raw = packet.read_string().unwrap_or_default();
+    let level_min = packet.read_u8().unwrap_or(0);
+    let level_max = packet.read_u8().unwrap_or(0);
+    let auction_slot_id = packet.read_u32().unwrap_or(0);
+    let auction_main_category = packet.read_u32().unwrap_or(u32::MAX);
+    let auction_sub_category = packet.read_u32().unwrap_or(u32::MAX);
+    let quality = packet.read_u32().unwrap_or(u32::MAX);
+    let usable = packet.read_u8().unwrap_or(0);
+
+    // Reject invalid (non-UTF-8) search names; mirrors C++ Utf8toWStr failure branch.
+    // Empty string is always valid.
+    if !search_name_raw.is_empty() && search_name_raw.contains('\u{FFFD}') {
+        return Ok(());
+    }
+
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let player = world
+        .managers
+        .player_mgr
+        .get_player(player_guid)
+        .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
+
+    let auction_house = match get_checked_auction_house_for_auctioneer(
+        &player,
+        auctioneer_guid,
+        &world.managers.auction_mgr,
+        None,
+    ) {
+        Some(house) => house,
+        None => return Ok(()),
+    };
+
+    drop(player);
+    let _ = world.managers.player_mgr.with_player_mut(player_guid, |player| {
+        let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+        if !removed.is_empty() {
+            player.auras.needs_client_update = true;
+            player.auras.needs_stat_recalc = true;
+        }
+    });
+
+    let Some(auction_house_map) = world
+        .managers
+        .auction_mgr
+        .get_auctions_map_by_house_id(auction_house.house_id)
+    else {
+        return Ok(());
+    };
+
+    let task = AuctionHouseClientQueryTask {
+        query_type: AuctionQueryType::List,
+        auction_house: auction_house_map,
+        account_id: session.account_id(),
+        listfrom,
+        outbidded_auction_ids: Vec::new(),
+        search_params: Some(AuctionSearchParams {
+            search_name: search_name_raw.to_lowercase(),
+            level_min,
+            level_max,
+            auction_slot_id,
+            auction_main_category,
+            auction_sub_category,
+            quality,
+            usable,
+        }),
+    };
+
+    session.set_received_ah_list_request(true);
+
+    let world_clone = world.clone();
+    tokio::spawn(execute_auction_list_items_task(world_clone, player_guid, task));
+
+    Ok(())
+}
+
+async fn execute_auction_list_items_task(
+    world: World,
+    player_guid: crate::shared::protocol::ObjectGuid,
+    task: AuctionHouseClientQueryTask,
+) {
+    let Some(session) = world.session_mgr.get_session_by_player(player_guid) else {
+        return;
+    };
+
+    let params = match &task.search_params {
+        Some(p) => p,
+        None => {
+            tracing::warn!("auction list items task missing search params");
+            session.clear_received_ah_list_request();
+            return;
+        }
+    };
+
+    let mut auctions: Vec<AuctionEntry> = task
+        .auction_house
+        .auctions_snapshot()
+        .into_iter()
+        .filter(|auction| {
+            let Some(tmpl) = world.managers.item_mgr.get_template(auction.item_template) else {
+                return params.search_name.is_empty();
+            };
+
+            if !params.search_name.is_empty()
+                && !tmpl.name.to_lowercase().contains(&params.search_name)
+            {
+                return false;
+            }
+
+            if params.level_min > 0 && (tmpl.required_level as u8) < params.level_min {
+                return false;
+            }
+            if params.level_max > 0 && (tmpl.required_level as u8) > params.level_max {
+                return false;
+            }
+
+            // u32::MAX means "all" in the client protocol
+            if params.auction_main_category != u32::MAX
+                && tmpl.item_class != params.auction_main_category
+            {
+                return false;
+            }
+            if params.auction_sub_category != u32::MAX
+                && tmpl.item_subclass != params.auction_sub_category
+            {
+                return false;
+            }
+            if params.quality != u32::MAX && (tmpl.quality as u32) < params.quality {
+                return false;
+            }
+
+            true
+        })
+        .collect();
+    auctions.sort_by_key(|a| a.id);
+
+    let total_count = auctions.len() as u32;
+    let page: Vec<AuctionEntry> = auctions
+        .into_iter()
+        .skip(task.listfrom as usize)
+        .take(50)
+        .collect();
+    let refs: Vec<&AuctionEntry> = page.iter().collect();
+
+    if let Err(e) = session.send_msg(SmsgAuctionListResult {
+        auctions: &refs,
+        total_count,
+    }) {
+        tracing::error!("Failed to send auction list result: {}", e);
+    }
+
+    session.clear_received_ah_list_request();
 }
 
 #[cfg(test)]
@@ -1019,6 +1216,115 @@ mod tests {
             u64::from_le_bytes(packet.data()[56..64].try_into().unwrap()),
             bidder_guid.raw()
         );
+        assert!(!session.received_ah_list_request());
+    }
+
+    fn make_list_items_packet(auctioneer_guid: crate::shared::protocol::ObjectGuid, search: &str) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::CMSG_AUCTION_LIST_ITEMS);
+        packet.write_guid(auctioneer_guid);
+        packet.write_u32(0);           // listfrom
+        // null-terminated search string
+        for b in search.as_bytes() { packet.write_u8(*b); }
+        packet.write_u8(0);            // null terminator
+        packet.write_u8(0);            // levelmin
+        packet.write_u8(0);            // levelmax
+        packet.write_u32(u32::MAX);    // auctionSlotID (all)
+        packet.write_u32(u32::MAX);    // auctionMainCategory (all)
+        packet.write_u32(u32::MAX);    // auctionSubCategory (all)
+        packet.write_u32(u32::MAX);    // quality (all)
+        packet.write_u8(0);            // usable (all)
+        packet
+    }
+
+    #[tokio::test]
+    async fn auction_list_items_rejects_duplicate_request() {
+        let (session, mut rx) = make_session();
+        session.set_received_ah_list_request(true);
+        let mut packet = make_list_items_packet(test_auctioneer_guid(100), "");
+        let result = handle_auction_list_items(&session, &mut packet, &make_world_fixture()).await;
+        assert!(result.is_ok());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn auction_list_items_rejects_invalid_auctioneer() {
+        let (session, mut rx) = make_session();
+        let mut packet = make_list_items_packet(test_auctioneer_guid(999), "");
+        let result = handle_auction_list_items(&session, &mut packet, &make_world_fixture()).await;
+        assert!(result.is_ok());
+        assert!(rx.try_recv().is_err());
+        assert!(!session.received_ah_list_request());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn auction_list_items_success_sends_list_result() {
+        let (session, mut rx) = make_session();
+        let session = Arc::new(session);
+        let world = make_world_fixture();
+        world.session_mgr.add_session(Arc::clone(&session));
+        world.session_mgr.register_player(session.id(), test_player_guid());
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(test_player_guid(), |player| {
+                player.auction_access_mode = 1;
+            });
+        world
+            .managers
+            .auction_mgr
+            .load_auction_houses(false, false, 112)
+            .unwrap();
+
+        let house = world
+            .managers
+            .auction_mgr
+            .get_auctions_map_by_house_id(7)
+            .expect("auction house map");
+        house.add_auction(AuctionEntry {
+            id: 8001,
+            house_id: 7,
+            item_guid: crate::shared::protocol::ObjectGuid::new_without_entry(
+                crate::shared::protocol::HighGuid::Item,
+                88,
+            ),
+            item_template: 5678,
+            seller_guid: crate::shared::protocol::ObjectGuid::new_player(3),
+            seller_account: 3,
+            start_bid: 200,
+            current_bid: 200,
+            buyout_price: 1000,
+            expire_time: 4_102_444_800,
+            bidder_guid: crate::shared::protocol::ObjectGuid::empty(),
+            deposit: 20,
+            deposit_time: 0,
+            locked_ip_address: String::new(),
+        });
+
+        let mut packet = make_list_items_packet(test_player_guid(), "");
+
+        let result = handle_auction_list_items(session.as_ref(), &mut packet, &world).await;
+        assert!(result.is_ok());
+        assert!(session.received_ah_list_request());
+
+        let packet = {
+            let mut out = None;
+            for _ in 0..1000 {
+                match rx.try_recv() {
+                    Ok(p) => { out = Some(p); break; }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                    }
+                    Err(e) => panic!("channel error: {e}"),
+                }
+            }
+            out.expect("expected list result packet")
+        };
+
+        assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_LIST_RESULT);
+        // count = 1
+        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 1);
+        // first auction id = 8001
+        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), 8001);
         assert!(!session.received_ah_list_request());
     }
 
