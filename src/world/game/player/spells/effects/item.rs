@@ -284,6 +284,7 @@ mod tests {
         SpellEntry {
             id,
             name: format!("TestSpell{}", id),
+            rank_text: String::new(),
             school: 0,
             category: 0,
             dispel: 0,
@@ -350,6 +351,7 @@ mod tests {
             spell_icon_id: 0,
             active_icon_id: 0,
             spell_priority: 0,
+            min_target_level: 0,
             mana_cost_percentage: 0,
             start_recovery_category: 0,
             start_recovery_time: 0,
@@ -359,6 +361,10 @@ mod tests {
             max_affected_targets: 0,
             dmg_class: 0,
             prevention_type: 0,
+            custom: 0,
+            internal: 0,
+            allowed_target_mask: 0,
+            script_id: 0,
             dmg_multiplier: [1.0; 3],
         }
     }

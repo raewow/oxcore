@@ -4,7 +4,10 @@
 //! They are used to parse and store DBC data loaded from files.
 
 use crate::world::dbc::file_loader::DbcRecord;
+use crate::world::dbc::manager::DbcManager;
 use crate::world::dbc::store::DbcEntry;
+use crate::world::game::player::spells::state::{SpellCastError, SpellCastResult};
+use crate::world::game::spell::manager::SpellManager;
 use anyhow::{Context, Result};
 
 /// ChrClasses DBC entry
@@ -1189,6 +1192,7 @@ impl DbcEntry for TalentTabEntry {
 pub struct SpellEntry {
     pub id: u32,
     pub name: String,
+    pub rank_text: String,
     pub school: u32,
     pub category: u32,
     pub dispel: u32,
@@ -1274,6 +1278,7 @@ pub struct SpellEntry {
     pub spell_icon_id: u32,
     pub active_icon_id: u32,
     pub spell_priority: u32,
+    pub min_target_level: u32,
     pub mana_cost_percentage: u32,
     pub start_recovery_category: u32,
     pub start_recovery_time: u32,
@@ -1283,6 +1288,10 @@ pub struct SpellEntry {
     pub max_affected_targets: u32,
     pub dmg_class: u32,
     pub prevention_type: u32,
+    pub custom: u32,
+    pub internal: u32,
+    pub allowed_target_mask: u32,
+    pub script_id: u32,
     pub dmg_multiplier: [f32; 3],
 }
 
@@ -1308,6 +1317,161 @@ impl SpellEntry {
             e == 6 || e == 27 || e == 35 || e == 119 || e == 128 || e == 129 || e == 132
             // ApplyAura effects
         })
+    }
+
+    pub fn is_passive_spell(&self) -> bool {
+        self.has_attribute(0x0000_0040)
+    }
+
+    pub fn is_autocastable(&self) -> bool {
+        (self.attributes_ex & 0x0002_0000) == 0 && !self.is_passive_spell()
+    }
+
+    pub fn is_positive_effect(&self, idx: usize) -> bool {
+        if idx >= self.effect.len() || self.effect[idx] == 0 {
+            return false;
+        }
+
+        if self.custom & 0x0000_0001 != 0 {
+            return true;
+        }
+        if self.custom & 0x0000_0002 != 0 {
+            return false;
+        }
+
+        match self.effect[idx] {
+            10 | 36 | 37 => true,
+            1 => self.effect_implicit_target_a[idx] == 1,
+            38 => false,
+            6 => match self.effect_apply_aura_name[idx] {
+                3 | 8 | 62 | 84 | 85 => true,
+                20 | 21 | 33 | 44 | 89 => false,
+                107 | 108 => self.effect_misc_value[idx] <= 0,
+                _ => self.effect_implicit_target_a[idx] == 1 || self.effect_implicit_target_b[idx] == 0,
+            },
+            _ => self.effect_implicit_target_a[idx] == 1 || self.effect_implicit_target_b[idx] == 0,
+        }
+    }
+
+    pub fn is_positive_spell(&self) -> bool {
+        (self.attributes & 0x0400_0000) == 0 && self.effect.iter().enumerate().all(|(idx, &effect)| effect == 0 || self.is_positive_effect(idx))
+    }
+
+    pub fn is_reflectable_spell(&self) -> bool {
+        self.dmg_class == 2 && !self.is_passive_spell() && !self.is_positive_spell()
+    }
+
+    pub fn get_weapon_attack_type(&self) -> u32 {
+        match self.dmg_class {
+            1 => {
+                if (self.attributes_ex3 & 0x0000_0800) != 0 { 1 } else { 0 }
+            }
+            2 => 2,
+            _ => {
+                if (self.attributes_ex2 & 0x0000_4000) != 0 { 2 } else { 0 }
+            }
+        }
+    }
+
+    pub fn get_cast_time(&self, dbc: &DbcManager) -> u32 {
+        let Some(entry) = dbc.get_spell_cast_time(self.casting_time_index) else { return 0; };
+        let cast_time = entry.cast_time as i32;
+        if cast_time <= 0 { 0 } else { cast_time as u32 }
+    }
+
+    pub fn get_cast_time_for_bonus(&self, _effect_type: u32) -> f32 {
+        let mut cast_time = self.get_cast_time(&crate::world::dbc::manager::DbcManager::new()) as f32;
+        if cast_time > 7000.0 { cast_time = 7000.0; }
+        if cast_time < 1500.0 { cast_time = 1500.0; }
+        cast_time / 3500.0
+    }
+
+    pub fn calculate_default_coefficient(&self) -> f64 {
+        self.get_cast_time_for_bonus(0) as f64
+    }
+
+    pub fn calculate_custom_coefficient(&self, coeff: f64) -> f64 {
+        coeff
+    }
+
+    pub fn get_duration(&self, dbc: &DbcManager) -> i32 {
+        dbc.get_spell_duration(self.duration_index).map(|d| d.duration).unwrap_or(0)
+    }
+
+    pub fn get_max_duration(&self, dbc: &DbcManager) -> i32 {
+        dbc.get_spell_duration(self.duration_index).map(|d| d.max_duration).unwrap_or(0)
+    }
+
+    pub fn calculate_duration(&self, _level: u32, dbc: &DbcManager) -> i32 {
+        self.get_duration(dbc)
+    }
+
+    pub fn get_aura_max_ticks(&self, dbc: &DbcManager) -> u32 {
+        let duration = self.get_duration(dbc);
+        if duration <= 0 { return 1; }
+        for idx in 0..self.effect.len() {
+            if self.effect[idx] == 6 && self.effect_amplitude[idx] != 0 {
+                return duration as u32 / self.effect_amplitude[idx];
+            }
+        }
+        6
+    }
+
+    pub fn get_rank(&self) -> u32 {
+        self.rank_text
+            .strip_prefix("Rank ")
+            .and_then(|text| text.trim().parse::<u32>().ok())
+            .unwrap_or(0)
+    }
+
+    pub fn get_error_at_shapeshifted_cast(&self, form: u32) -> SpellCastResult {
+        let stance_mask = if form == 0 { 0 } else { 1u32 << (form.saturating_sub(1)) };
+        if stance_mask & self.stances_not != 0 {
+            return SpellCastResult::Failed(SpellCastError::WrongShapeshift);
+        }
+        if stance_mask & self.stances != 0 {
+            return SpellCastResult::Success;
+        }
+        if form == 0 && self.stances != 0 {
+            return SpellCastResult::Failed(SpellCastError::WrongShapeshift);
+        }
+        SpellCastResult::Success
+    }
+
+    pub fn is_target_in_range(&self, dist: f32, dbc: &DbcManager) -> bool {
+        match self.range_index {
+            1 => true,
+            13 => true,
+            2 => dist <= 5.0,
+            _ => dbc
+                .get_spell_range(self.range_index)
+                .map(|range| dist < range.range_max && dist >= range.range_min)
+                .unwrap_or(false),
+        }
+    }
+
+    pub fn has_aura_or_triggers_another_spell_with_aura(
+        &self,
+        aura_type: u32,
+        spell_mgr: &SpellManager,
+    ) -> bool {
+        for idx in 0..self.effect.len() {
+            if self.effect_apply_aura_name[idx] == aura_type {
+                return true;
+            }
+            if self.effect[idx] == 32 {
+                if let Some(spell) = spell_mgr.get(self.effect_trigger_spell[idx]) {
+                    if spell.effect_apply_aura_name.iter().any(|&aura| aura == aura_type) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    pub fn can_trigger_weapon_procs(&self) -> bool {
+        self.equipped_item_class == 2 && self.range_index == 1
     }
 }
 
@@ -1373,6 +1537,7 @@ impl DbcEntry for SpellEntry {
         let entry = Self {
             id,
             name: String::new(),
+            rank_text: String::new(),
             school: record.get_u32(1).unwrap_or(0),
             category: record.get_u32(2).unwrap_or(0),
             dispel: record.get_u32(4).unwrap_or(0),
@@ -1460,6 +1625,7 @@ impl DbcEntry for SpellEntry {
             spell_icon_id: record.get_u32(120).unwrap_or(0),
             active_icon_id: record.get_u32(121).unwrap_or(0),
             spell_priority: record.get_u32(122).unwrap_or(0),
+            min_target_level: record.get_u32(162).unwrap_or(0),
             mana_cost_percentage: record.get_u32(159).unwrap_or(0),
             start_recovery_category: record.get_u32(160).unwrap_or(0),
             start_recovery_time: record.get_u32(161).unwrap_or(0),
@@ -1475,6 +1641,10 @@ impl DbcEntry for SpellEntry {
             max_affected_targets: record.get_u32(167).unwrap_or(0),
             dmg_class: record.get_u32(168).unwrap_or(0),
             prevention_type: record.get_u32(169).unwrap_or(0),
+            custom: record.get_u32(176).unwrap_or(0),
+            internal: 0,
+            allowed_target_mask: 0,
+            script_id: 0,
             dmg_multiplier: [
                 record.get_f32(171).unwrap_or(1.0),
                 record.get_f32(172).unwrap_or(1.0),

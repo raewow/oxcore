@@ -5,8 +5,76 @@ use crate::world::dbc::structures::SpellEntry;
 use anyhow::Result;
 use dashmap::DashMap;
 use sqlx::MySqlPool;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::info;
+
+#[derive(Debug, Clone)]
+pub struct SpellChainNode {
+    pub first: u32,
+    pub prev: u32,
+    pub next: u32,
+    pub rank: u32,
+    pub last: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpellProcEventEntry {
+    pub school_mask: u32,
+    pub spell_family: u32,
+    pub spell_family_mask: u64,
+    pub proc_flags: u32,
+    pub ppm_rate: f32,
+    pub custom_chance: f32,
+    pub cooldown: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpellThreatEntry {
+    pub flat: i32,
+    pub pct: f32,
+    pub ap_bonus: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpellLearnSkillNode {
+    pub skill_id: u32,
+    pub step: u32,
+    pub char_pts: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpellLearnSpellNode {
+    pub spell: u32,
+    pub active: bool,
+    pub autolearned: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpellArea {
+    pub spell: u32,
+    pub area_id: u32,
+    pub quest_start: u32,
+    pub quest_end: u32,
+    pub aura_spell: i32,
+    pub racemask: u32,
+    pub gender: u8,
+    pub quest_start_can_active: bool,
+    pub autocast: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpellTargetEntry {
+    pub type_: u32,
+    pub target_id: u32,
+    pub can_focus: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PetAura;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SpellGroupStackRule(pub u32);
 
 /// Destination coordinates loaded from spell_target_position table
 #[derive(Debug, Clone)]
@@ -21,6 +89,22 @@ pub struct SpellTargetPosition {
 pub struct SpellManager {
     spells: DashMap<u32, Arc<SpellEntry>>,
     target_positions: DashMap<u32, SpellTargetPosition>,
+    spell_chains: HashMap<u32, SpellChainNode>,
+    spell_chains_next: HashMap<u32, Vec<u32>>,
+    spell_proc_events: HashMap<u32, SpellProcEventEntry>,
+    spell_proc_item_enchant: HashMap<u32, f32>,
+    spell_enchant_charges: HashMap<u32, u32>,
+    spell_threats: HashMap<u32, SpellThreatEntry>,
+    spell_elixirs: HashMap<u32, u8>,
+    spell_learn_skills: HashMap<u32, SpellLearnSkillNode>,
+    spell_learn_spells: HashMap<u32, Vec<SpellLearnSpellNode>>,
+    spell_script_targets: HashMap<u32, Vec<SpellTargetEntry>>,
+    spell_areas: Vec<SpellArea>,
+    spell_pet_auras: HashMap<u16, PetAura>,
+    spell_groups: HashMap<u32, Vec<u32>>,
+    spell_group_stack: HashMap<u32, SpellGroupStackRule>,
+    spell_cones: HashMap<u32, f32>,
+    existing_spell_ids: HashSet<u32>,
 }
 
 impl SpellManager {
@@ -28,6 +112,22 @@ impl SpellManager {
         Self {
             spells: DashMap::new(),
             target_positions: DashMap::new(),
+            spell_chains: HashMap::new(),
+            spell_chains_next: HashMap::new(),
+            spell_proc_events: HashMap::new(),
+            spell_proc_item_enchant: HashMap::new(),
+            spell_enchant_charges: HashMap::new(),
+            spell_threats: HashMap::new(),
+            spell_elixirs: HashMap::new(),
+            spell_learn_skills: HashMap::new(),
+            spell_learn_spells: HashMap::new(),
+            spell_script_targets: HashMap::new(),
+            spell_areas: Vec::new(),
+            spell_pet_auras: HashMap::new(),
+            spell_groups: HashMap::new(),
+            spell_group_stack: HashMap::new(),
+            spell_cones: HashMap::new(),
+            existing_spell_ids: HashSet::new(),
         }
     }
 

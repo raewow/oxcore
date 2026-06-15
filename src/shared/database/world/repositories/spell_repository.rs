@@ -70,6 +70,7 @@ impl SpellRepository {
                 id: row.get(0),
                 // build at index 1 - skipped
                 name: row.get::<String, _>(124),
+                rank_text: row.get::<String, _>(126),
                 school: row.get(2),
                 category: row.get(3),
                 // castUI at index 4 - skipped
@@ -193,12 +194,11 @@ impl SpellRepository {
                 spell_icon_id: row.get(121),
                 active_icon_id: row.get(122),
                 spell_priority: row.get(123),
-                // name at 124, nameFlags at 125, nameSubtext at 126, nameSubtextFlags at 127
+                min_target_level: row.get(135),
                 // description at 128, descriptionFlags at 129, auraDescription at 130, auraDescriptionFlags at 131
                 mana_cost_percentage: row.get(132),
                 start_recovery_category: row.get(133),
                 start_recovery_time: row.get(134),
-                // minTargetLevel at 135
                 max_target_level: row.get(136),
                 spell_family_name: row.get(137),
                 spell_family_flags: row.get::<u64, _>(138),
@@ -206,6 +206,10 @@ impl SpellRepository {
                 dmg_class: row.get(140),
                 prevention_type: row.get(141),
                 // stanceBarOrder at 142
+                custom: row.get(160),
+                internal: 0,
+                allowed_target_mask: 0,
+                script_id: 0,
                 dmg_multiplier: [
                     row.get::<f32, _>(143),
                     row.get::<f32, _>(144),
