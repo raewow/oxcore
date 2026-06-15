@@ -674,6 +674,7 @@ impl Opcode {
     pub const CMSG_QUEST_CONFIRM_ACCEPT: Opcode = Opcode(0x019B); // 411
     pub const SMSG_QUEST_CONFIRM_ACCEPT: Opcode = Opcode(0x019C); // 412
     pub const CMSG_PUSHQUESTTOPARTY: Opcode = Opcode(0x019D); // 413
+    pub const MSG_QUEST_PUSH_RESULT: Opcode = Opcode(0x0276); // 630
 
     // ============================================================================
     // Guild

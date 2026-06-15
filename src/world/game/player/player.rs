@@ -131,6 +131,18 @@ pub struct Player {
     /// to light up the "Accept" button on the death screen. Cleared when
     /// CMSG_SELF_RES consumes it or on normal resurrection.
     pub self_res_spell: u32,
+    /// Pending quest-share info set by a party member who wants to share a quest.
+    /// Cleared when the player accepts/declines or when the sharer goes away.
+    pub quest_share_info: Option<QuestShareInfo>,
+}
+
+/// Tracks a quest shared by another player pending confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuestShareInfo {
+    /// GUID of the player who initiated the share.
+    pub player_guid: ObjectGuid,
+    /// Quest ID being shared.
+    pub quest_id: u32,
 }
 
 impl Player {
@@ -197,6 +209,7 @@ impl Player {
             homebind_y: 0.0,
             homebind_z: 0.0,
             self_res_spell: 0,
+            quest_share_info: None,
         }
     }
 

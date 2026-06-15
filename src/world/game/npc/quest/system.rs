@@ -12,10 +12,10 @@ use crate::shared::database::characters::models::quest::{QuestStatusRewardedRow,
 use crate::shared::database::characters::repositories::QuestRepositoryTrait;
 use crate::shared::messages::gossip::SmsgGossipComplete;
 use crate::shared::messages::quest::{
-    QuestListItem, RequestItemInfo, RewardItemInfo, SmsgQuestgiverOfferRewardV2,
-    SmsgQuestgiverQuestComplete, SmsgQuestgiverQuestDetailsV2, SmsgQuestgiverQuestListV2,
-    SmsgQuestgiverRequestItemsV2, SmsgQuestgiverStatus, SmsgQuestlogFull, SmsgQuestupdateAddItem,
-    SmsgQuestupdateAddKill, SmsgQuestupdateComplete, SmsgQuestupdateFailed,
+    MsgQuestPushResult, QuestListItem, RequestItemInfo, RewardItemInfo, SmsgQuestConfirmAccept,
+    SmsgQuestgiverOfferRewardV2, SmsgQuestgiverQuestComplete, SmsgQuestgiverQuestDetailsV2,
+    SmsgQuestgiverQuestListV2, SmsgQuestgiverRequestItemsV2, SmsgQuestgiverStatus, SmsgQuestlogFull,
+    SmsgQuestupdateAddItem, SmsgQuestupdateAddKill, SmsgQuestupdateComplete, SmsgQuestupdateFailed,
     SmsgQuestupdateFailedtimer,
 };
 use crate::shared::messages::update::{
@@ -30,6 +30,7 @@ use crate::world::game::creature::CreatureManager;
 use crate::world::game::inventory::{AddItemResult, GoldResult, InventorySystem};
 use crate::world::game::items::ItemManager;
 use crate::world::game::player::experience::ExperienceSystem;
+use crate::world::game::player::player::QuestShareInfo;
 use crate::world::game::player::PlayerManager;
 use crate::world::World;
 
@@ -38,6 +39,9 @@ use super::types::{
     DialogStatus, QuestFlags, QuestProgress, QuestSpecialFlags, QuestStatus, QuestTemplate,
     MAX_QUEST_LOG_SIZE, QUEST_OBJECTIVES_COUNT,
 };
+
+/// Maximum distance for quest sharing between players.
+const QUEST_SHARE_DISTANCE: f32 = 14.0;
 
 /// Quest system - handles business logic and packet sending
 pub struct QuestSystem {
@@ -1081,6 +1085,123 @@ impl QuestSystem {
         Ok(())
     }
 
+    /// Internal helper: add an accepted quest to a player, persist it, and send updates.
+    ///
+    /// Returns `true` on success. On failure, sends `SmsgQuestlogFull` and returns `false`.
+    /// This is shared between direct accept and party confirm accept paths.
+    async fn add_accepted_quest(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        world: &World,
+    ) -> bool {
+        // Check quest log size
+        let can_add = self
+            .player_mgr
+            .get_player(player_guid)
+            .map(|p| p.active_quests.len() < MAX_QUEST_LOG_SIZE)
+            .unwrap_or(false);
+
+        if !can_add {
+            let msg = SmsgQuestlogFull;
+            self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            return false;
+        }
+
+        // Add quest to player and get the slot index
+        let Some(slot) = self.player_mgr.with_player_mut(player_guid, |p| {
+            let slot = p.active_quests.len();
+            p.active_quests.push(QuestProgress::new(quest.id));
+            slot
+        }) else {
+            warn!("Player {:?} not found when adding quest {}", player_guid, quest.id);
+            return false;
+        };
+
+        let quest_id_for_spawn = quest.id;
+        let accepted_row = QuestStatusRow {
+            guid: player_guid.counter(),
+            quest: quest_id_for_spawn,
+            status: QuestStatus::Incomplete as u8,
+            rewarded: false,
+            explored: false,
+            timer: 0,
+            mob_count1: 0,
+            mob_count2: 0,
+            mob_count3: 0,
+            mob_count4: 0,
+            item_count1: 0,
+            item_count2: 0,
+            item_count3: 0,
+            item_count4: 0,
+            reward_choice: 0,
+        };
+        let repository = Arc::clone(&self.repository);
+        tokio::spawn(async move {
+            if let Err(e) = repository.save_quest_status(&accepted_row).await {
+                warn!(
+                    "Failed to persist accepted quest {} for player {:?}: {}",
+                    quest_id_for_spawn, player_guid, e
+                );
+            }
+        });
+
+        // Update PLAYER_QUEST_LOG_* update fields
+        const MAX_QUEST_OFFSET: u32 = 3;
+        const QUEST_ID_OFFSET: u32 = 0;
+        const QUEST_COUNT_STATE_OFFSET: u32 = 1;
+        const QUEST_TIME_OFFSET: u32 = 2;
+
+        let slot_u32 = slot as u32;
+        let quest_id_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_ID_OFFSET;
+        let count_state_field =
+            PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_COUNT_STATE_OFFSET;
+        let timer_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_TIME_OFFSET;
+
+        let world_guid = ObjectGuid::from_low(player_guid.counter());
+        let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+            ValuesUpdateBlock::new(world_guid, ObjectType::Player)
+                .set_field(quest_id_field, quest.id)
+                .set_field(count_state_field, 0)
+                .set_field(timer_field, 0),
+        ));
+        self.broadcast_mgr
+            .send_msg_to_player(player_guid, values_update);
+
+        if quest.src_spell != 0 {
+            if let Err(e) = world
+                .systems
+                .spells
+                .cast_spell(player_guid, quest.src_spell, Some(player_guid), true, world)
+                .await
+            {
+                warn!(
+                    "Failed to cast source spell {} for quest {} on {:?}: {}",
+                    quest.src_spell, quest.id, player_guid, e
+                );
+            }
+        }
+
+        if quest.is_auto_complete() || self.sync_item_objectives_from_inventory(player_guid, quest)
+        {
+            self.player_mgr.with_player_mut(player_guid, |p| {
+                if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest.id)
+                {
+                    if progress.is_complete(quest) || quest.is_auto_complete() {
+                        progress.status = QuestStatus::Complete;
+                        progress.mark_changed();
+                    }
+                }
+            });
+
+            let complete_msg = SmsgQuestupdateComplete { quest_id: quest.id };
+            self.broadcast_mgr
+                .send_msg_to_player(player_guid, complete_msg);
+        }
+
+        true
+    }
+
     /// Handle quest accept
     pub async fn handle_quest_accept(
         &self,
@@ -1117,28 +1238,57 @@ impl QuestSystem {
                 "Player {:?} tried to accept quest {} from invalid quest giver {:?}",
                 player_guid, quest_id, quest_giver_guid
             );
+            self.player_mgr.clear_quest_share_info(player_guid);
+            let msg = SmsgGossipComplete;
+            self.broadcast_mgr.send_msg_to_player(player_guid, msg);
             return Ok(());
         }
 
         // Validate can take quest
         if !self.can_take_quest(player_guid, &quest, world) {
             warn!("Player {:?} cannot accept quest {}", player_guid, quest_id);
-            return Ok(());
-        }
-
-        // Check quest log size
-        let can_add = self
-            .player_mgr
-            .get_player(player_guid)
-            .map(|p| p.active_quests.len() < MAX_QUEST_LOG_SIZE)
-            .unwrap_or(false);
-
-        if !can_add {
-            let msg = SmsgQuestlogFull;
+            self.player_mgr.clear_quest_share_info(player_guid);
+            let msg = SmsgGossipComplete;
             self.broadcast_mgr.send_msg_to_player(player_guid, msg);
             return Ok(());
         }
 
+        // Handle stored quest-share info
+        if let Some(share) = self.player_mgr.get_quest_share_info(player_guid) {
+            if share.quest_id == quest.id {
+                // Find the original sharer
+                if let Some(sharer) = self.player_mgr.get_player(share.player_guid) {
+                    let sharer_pos = sharer.movement.position;
+                    let player_pos = self.player_mgr.get_position(player_guid);
+                    let same_map = sharer.map_id == self.player_mgr.get_player(player_guid).map(|p| p.map_id).unwrap_or(u32::MAX);
+                    let within_distance = player_pos.map(|p| p.is_within_range(&sharer_pos, QUEST_SHARE_DISTANCE)).unwrap_or(false);
+
+                    if !same_map || !within_distance {
+                        self.player_mgr.clear_quest_share_info(player_guid);
+                        let msg = SmsgGossipComplete;
+                        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+                        let too_far = MsgQuestPushResult {
+                            sender_guid: player_guid,
+                            msg: 4, // QUEST_PARTY_MSG_TOO_FAR
+                        };
+                        self.broadcast_mgr.send_msg_to_player(share.player_guid, too_far);
+                        return Ok(());
+                    }
+
+                    // Notify sharer that the quest was accepted
+                    let accepted = MsgQuestPushResult {
+                        sender_guid: player_guid,
+                        msg: 2, // QUEST_PARTY_MSG_ACCEPT_QUEST
+                    };
+                    self.broadcast_mgr.send_msg_to_player(share.player_guid, accepted);
+                }
+                self.player_mgr.clear_quest_share_info(player_guid);
+            } else {
+                self.player_mgr.clear_quest_share_info(player_guid);
+            }
+        }
+
+        // Add source item if present
         if quest.src_item_id != 0 && quest.src_item_count > 0 {
             let result = self
                 .inventory
@@ -1149,110 +1299,63 @@ impl QuestSystem {
                     "Player {:?} cannot accept quest {}: failed to add source item {} x{}: {:?}",
                     player_guid, quest_id, quest.src_item_id, quest.src_item_count, result
                 );
+                self.player_mgr.clear_quest_share_info(player_guid);
+                let msg = SmsgGossipComplete;
+                self.broadcast_mgr.send_msg_to_player(player_guid, msg);
                 return Ok(());
             }
         }
 
-        // Add quest to player and get the slot index
-        let Some(slot) = self.player_mgr.with_player_mut(player_guid, |p| {
-            let slot = p.active_quests.len();
-            p.active_quests.push(QuestProgress::new(quest_id));
-            slot
-        }) else {
-            warn!(
-                "Player {:?} not found when accepting quest {}",
-                player_guid, quest_id
-            );
+        if !self.add_accepted_quest(player_guid, &quest, world).await {
+            self.player_mgr.clear_quest_share_info(player_guid);
+            let msg = SmsgGossipComplete;
+            self.broadcast_mgr.send_msg_to_player(player_guid, msg);
             return Ok(());
-        };
-
-        let accepted_row = QuestStatusRow {
-            guid: player_guid.counter(),
-            quest: quest_id,
-            status: QuestStatus::Incomplete as u8,
-            rewarded: false,
-            explored: false,
-            timer: 0,
-            mob_count1: 0,
-            mob_count2: 0,
-            mob_count3: 0,
-            mob_count4: 0,
-            item_count1: 0,
-            item_count2: 0,
-            item_count3: 0,
-            item_count4: 0,
-            reward_choice: 0,
-        };
-        let repository = Arc::clone(&self.repository);
-        tokio::spawn(async move {
-            if let Err(e) = repository.save_quest_status(&accepted_row).await {
-                warn!(
-                    "Failed to persist accepted quest {} for player {:?}: {}",
-                    quest_id, player_guid, e
-                );
-            }
-        });
-
-        // Update PLAYER_QUEST_LOG_* update fields so the client shows the quest
-        // Each quest slot uses 3 fields: QUEST_ID, COUNT_STATE, TIMER
-        const MAX_QUEST_OFFSET: u32 = 3;
-        const QUEST_ID_OFFSET: u32 = 0;
-        const QUEST_COUNT_STATE_OFFSET: u32 = 1;
-        const QUEST_TIME_OFFSET: u32 = 2;
-
-        let slot_u32 = slot as u32;
-        let quest_id_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_ID_OFFSET;
-        let count_state_field =
-            PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_COUNT_STATE_OFFSET;
-        let timer_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_TIME_OFFSET;
-
-        // Convert world ObjectGuid to world::common ObjectGuid for the message
-        let world_guid = ObjectGuid::from_low(player_guid.counter());
-
-        let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
-            ValuesUpdateBlock::new(world_guid, ObjectType::Player)
-                .set_field(quest_id_field, quest_id)
-                .set_field(count_state_field, 0) // Initialize count/state to 0
-                .set_field(timer_field, 0), // Set timer to 0
-        ));
-
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, values_update);
-
-        if quest.src_spell != 0 {
-            if let Err(e) = world
-                .systems
-                .spells
-                .cast_spell(player_guid, quest.src_spell, Some(player_guid), true, world)
-                .await
-            {
-                warn!(
-                    "Failed to cast source spell {} for quest {} on {:?}: {}",
-                    quest.src_spell, quest_id, player_guid, e
-                );
-            }
-        }
-
-        if quest.is_auto_complete() || self.sync_item_objectives_from_inventory(player_guid, &quest)
-        {
-            self.player_mgr.with_player_mut(player_guid, |p| {
-                if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id)
-                {
-                    if progress.is_complete(&quest) || quest.is_auto_complete() {
-                        progress.status = QuestStatus::Complete;
-                        progress.mark_changed();
-                    }
-                }
-            });
-
-            let complete_msg = SmsgQuestupdateComplete { quest_id };
-            self.broadcast_mgr
-                .send_msg_to_player(player_guid, complete_msg);
         }
 
         // Send gossip complete to close quest window
         let msg = SmsgGossipComplete;
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+
+        // Party accept: fanout confirm prompts to eligible group members
+        if quest.quest_flags.has_flag(QuestFlags::PARTY_ACCEPT) {
+            if let Some(group) = world.systems.group.get_player_group(player_guid) {
+                let player_map_id = self.player_mgr.get_player(player_guid).map(|p| p.map_id);
+                for member in &group.members {
+                    if member.guid == player_guid {
+                        continue;
+                    }
+                    if !member.status.is_online() {
+                        continue;
+                    }
+                    let member_map_id = self.player_mgr.get_player(member.guid).map(|p| p.map_id);
+                    if member_map_id != player_map_id {
+                        continue;
+                    }
+                    if !self.can_take_quest(member.guid, &quest, world) {
+                        continue;
+                    }
+                    // Set share info on the member
+                    self.player_mgr.set_quest_share_info(
+                        member.guid,
+                        QuestShareInfo {
+                            player_guid,
+                            quest_id: quest.id,
+                        },
+                    );
+                    // Close any gossip window on the member
+                    let close = SmsgGossipComplete;
+                    self.broadcast_mgr.send_msg_to_player(member.guid, close);
+                    // Send confirm-accept prompt
+                    let confirm = SmsgQuestConfirmAccept {
+                        quest_id: quest.id,
+                        title: quest.title.clone(),
+                        sender_guid: player_guid,
+                    };
+                    self.broadcast_mgr.send_msg_to_player(member.guid, confirm);
+                }
+            }
+        }
 
         // Fire OnQuestAccept Lua callback if a gossip script is registered for this NPC
         if let Some(entry) = creature_entry {
@@ -1270,6 +1373,101 @@ impl QuestSystem {
         info!(
             "Player {:?} accepted quest {} from {:?}",
             player_guid, quest_id, quest_giver_guid
+        );
+        Ok(())
+    }
+
+    /// Handle quest confirm accept
+    ///
+    /// Called when a player confirms accepting a quest shared by a party member.
+    pub async fn handle_quest_confirm_accept(
+        &self,
+        player_guid: ObjectGuid,
+        quest_id: u32,
+        world: &World,
+    ) -> Result<()> {
+        let Some(quest) = self.manager.get_quest_template(quest_id) else {
+            warn!("Quest {} not found for confirm accept", quest_id);
+            return Ok(());
+        };
+
+        // Must have PARTY_ACCEPT flag
+        if !quest.quest_flags.has_flag(QuestFlags::PARTY_ACCEPT) {
+            return Ok(());
+        }
+
+        // Must have matching share info
+        let Some(share) = self.player_mgr.get_quest_share_info(player_guid) else {
+            return Ok(());
+        };
+        if share.quest_id != quest_id {
+            return Ok(());
+        }
+
+        // Original sharer must still be online
+        let Some(original) = self.player_mgr.get_player(share.player_guid) else {
+            self.player_mgr.clear_quest_share_info(player_guid);
+            return Ok(());
+        };
+
+        // Group/raid relationship check
+        let player_group = world.systems.group.get_player_group(player_guid);
+        let original_group = world.systems.group.get_player_group(share.player_guid);
+        let in_same_group = player_group.is_some()
+            && original_group.is_some()
+            && player_group.as_ref().unwrap().id == original_group.as_ref().unwrap().id;
+
+        if quest.quest_type == crate::world::game::npc::quest::types::QuestType::Raid {
+            if !in_same_group {
+                return Ok(());
+            }
+        } else {
+            // For non-raid quests, require same group (not just raid)
+            if !in_same_group {
+                return Ok(());
+            }
+            // Also ensure the group is not a raid for non-raid quests
+            if let Some(ref g) = player_group {
+                if g.is_raid {
+                    return Ok(());
+                }
+            }
+        }
+
+        // Sharable validation: if SHARABLE flag, original player must still have the quest
+        if quest.quest_flags.has_flag(QuestFlags::SHARABLE) {
+            let original_has_quest = self.player_mgr.with_player(share.player_guid, |p| {
+                p.active_quests.iter().any(|q| q.quest_id == quest_id)
+            });
+            if !original_has_quest.unwrap_or(false) {
+                return Ok(());
+            }
+        }
+
+        // Must have either SHARABLE or PARTY_ACCEPT
+        if !quest.quest_flags.has_flag(QuestFlags::SHARABLE | QuestFlags::PARTY_ACCEPT) {
+            return Ok(());
+        }
+
+        // Can take quest?
+        if !self.can_take_quest(player_guid, &quest, world) {
+            return Ok(());
+        }
+
+        // Add quest without a questgiver object to avoid duplicate DB script execution
+        if !self.add_accepted_quest(player_guid, &quest, world).await {
+            return Ok(());
+        }
+
+        self.player_mgr.clear_quest_share_info(player_guid);
+
+        // Send gossip complete to close the confirmation window
+        let msg = SmsgGossipComplete;
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+
+        info!(
+            "Player {:?} confirmed accept of shared quest {} from {:?}",
+            player_guid, quest_id, share.player_guid
         );
         Ok(())
     }

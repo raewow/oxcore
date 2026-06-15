@@ -21,6 +21,7 @@
 //! - [`SmsgQuestQueryResponse`] - Quest information response
 
 use crate::shared::messages::ToWorldPacket;
+use crate::shared::protocol::packet::WorldPacketGuidExt;
 use crate::shared::protocol::ObjectGuid;
 use crate::shared::protocol::Opcode;
 use crate::shared::protocol::WorldPacket;
@@ -719,12 +720,15 @@ impl ToWorldPacket for SmsgQuestQueryResponseV2<'_> {
 /// SMSG_QUEST_CONFIRM_ACCEPT - Quest confirm accept response
 ///
 /// Sent in response to CMSG_QUEST_CONFIRM_ACCEPT to confirm quest was added.
+/// Serializes: quest_id, title, sender_guid (packed).
 #[derive(Debug, Clone)]
 pub struct SmsgQuestConfirmAccept {
     /// Quest ID
     pub quest_id: u32,
     /// Quest title
     pub title: String,
+    /// GUID of the player who accepted the quest (the party member who shares it).
+    pub sender_guid: ObjectGuid,
 }
 
 impl ToWorldPacket for SmsgQuestConfirmAccept {
@@ -732,6 +736,29 @@ impl ToWorldPacket for SmsgQuestConfirmAccept {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUEST_CONFIRM_ACCEPT);
         packet.write_u32(self.quest_id);
         packet.write_string(&self.title);
+        packet.write_packed_guid(self.sender_guid);
+        packet
+    }
+}
+
+/// MSG_QUEST_PUSH_RESULT - Quest push result notification
+///
+/// Bidirectional packet used to notify the original sharer about the
+/// accept/decline/distance/etc. status of a shared quest offer.
+/// Serializes: sender_guid (packed), msg (u8).
+#[derive(Debug, Clone)]
+pub struct MsgQuestPushResult {
+    /// GUID of the player who received the push.
+    pub sender_guid: ObjectGuid,
+    /// Result code from QuestShareMessages.
+    pub msg: u8,
+}
+
+impl ToWorldPacket for MsgQuestPushResult {
+    fn to_world_packet(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
+        packet.write_packed_guid(self.sender_guid);
+        packet.write_u8(self.msg);
         packet
     }
 }
@@ -878,5 +905,29 @@ mod tests {
         assert_eq!(u32::from_le_bytes(packet.data()[16..20].try_into().unwrap()), 81);
         assert_eq!(u32::from_le_bytes(packet.data()[20..24].try_into().unwrap()), 77);
         assert_eq!(i32::from_le_bytes(packet.data()[24..28].try_into().unwrap()), -12);
+    }
+
+    #[test]
+    fn test_smsg_quest_confirm_accept_with_sender_guid() {
+        let msg = SmsgQuestConfirmAccept {
+            quest_id: 42,
+            title: "Shared Quest".to_string(),
+            sender_guid: ObjectGuid::from_low(7),
+        };
+        let packet = msg.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::SMSG_QUEST_CONFIRM_ACCEPT);
+        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 42);
+        // Title should be serialized after quest_id
+        assert!(packet.data().len() > 4);
+    }
+
+    #[test]
+    fn test_msg_quest_push_result() {
+        let msg = MsgQuestPushResult {
+            sender_guid: ObjectGuid::from_low(5),
+            msg: 4, // QUEST_PARTY_MSG_TOO_FAR
+        };
+        let packet = msg.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
     }
 }

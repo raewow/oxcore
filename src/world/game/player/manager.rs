@@ -823,6 +823,31 @@ impl PlayerManager {
     pub fn get_money(&self, guid: ObjectGuid) -> Option<u32> {
         self.get_player(guid).map(|p| p.money)
     }
+
+    // ========== Quest-share helpers ==========
+
+    /// Get a player's pending quest-share info, if any.
+    pub fn get_quest_share_info(&self, guid: ObjectGuid) -> Option<crate::world::game::player::player::QuestShareInfo> {
+        self.with_player(guid, |p| p.quest_share_info).flatten()
+    }
+
+    /// Set a player's pending quest-share info.
+    pub fn set_quest_share_info(
+        &self,
+        guid: ObjectGuid,
+        info: crate::world::game::player::player::QuestShareInfo,
+    ) {
+        self.with_player_mut(guid, |p| {
+            p.quest_share_info = Some(info);
+        });
+    }
+
+    /// Clear a player's pending quest-share info.
+    pub fn clear_quest_share_info(&self, guid: ObjectGuid) {
+        self.with_player_mut(guid, |p| {
+            p.quest_share_info = None;
+        });
+    }
 }
 
 impl Default for PlayerManager {
@@ -1164,5 +1189,52 @@ mod tests {
         let skills = mgr.collect_skills_for_save(guid);
         let swords = skills.iter().find(|&&(id, _, _)| id == 43).unwrap();
         assert_eq!(swords.1, 151, "Skill-up value must appear in save data");
+    }
+
+    // ========== Quest-share helpers ==========
+
+    #[test]
+    fn quest_share_info_default_is_none() {
+        let guid = test_guid(50);
+        let mgr = make_manager_with_player(guid);
+        assert!(mgr.get_quest_share_info(guid).is_none());
+    }
+
+    #[test]
+    fn quest_share_info_set_and_get_roundtrip() {
+        let guid = test_guid(51);
+        let mgr = make_manager_with_player(guid);
+        let sharer = test_guid(100);
+
+        let info = crate::world::game::player::player::QuestShareInfo {
+            player_guid: sharer,
+            quest_id: 42,
+        };
+        mgr.set_quest_share_info(guid, info);
+
+        let retrieved = mgr.get_quest_share_info(guid);
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().player_guid, sharer);
+        assert_eq!(retrieved.unwrap().quest_id, 42);
+    }
+
+    #[test]
+    fn quest_share_info_clear_removes() {
+        let guid = test_guid(52);
+        let mgr = make_manager_with_player(guid);
+
+        mgr.set_quest_share_info(guid, crate::world::game::player::player::QuestShareInfo {
+            player_guid: test_guid(200),
+            quest_id: 99,
+        });
+        mgr.clear_quest_share_info(guid);
+
+        assert!(mgr.get_quest_share_info(guid).is_none());
+    }
+
+    #[test]
+    fn quest_share_info_unknown_player_returns_none() {
+        let mgr = PlayerManager::new();
+        assert!(mgr.get_quest_share_info(test_guid(999)).is_none());
     }
 }

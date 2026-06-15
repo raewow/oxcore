@@ -473,26 +473,12 @@ pub async fn handle_quest_confirm_accept(
         player_guid, quest_id
     );
 
-    // Check if quest exists
-    let Some(quest) = world.systems.quest.manager.get_quest_template(quest_id) else {
-        warn!("Quest {} not found", quest_id);
-        return Ok(());
-    };
-
-    // Check if player can take quest
-    if !world
+    world
         .systems
         .quest
-        .can_take_quest(player_guid, &quest, world)
-    {
-        warn!("Player {:?} cannot accept quest {}", player_guid, quest_id);
-        return Ok(());
-    }
+        .handle_quest_confirm_accept(player_guid, quest_id, world)
+        .await?;
 
-    warn!(
-        "CMSG_QUEST_CONFIRM_ACCEPT for quest {} from {:?} ignored: party quest sharing state is not implemented yet",
-        quest_id, player_guid
-    );
     Ok(())
 }
 
