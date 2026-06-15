@@ -326,6 +326,77 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  "set_task_audit",
+  {
+    title: "Set task audit record",
+    description:
+      "Write an audit-rust record for a symbol's task. This advances the flow stage out of 'audit' and into 'plan'/'review'/'done'. Call after manually verifying a ported symbol against its behaviour claims.",
+    inputSchema: {
+      symbol: z.string().describe("Qualified symbol name, e.g. 'WorldSession::HandleAuctionListItems'"),
+      implementation_status: z
+        .enum(["complete", "partial", "missing", "incorrect"])
+        .describe("How fully the Rust port covers the C++ behaviour claims"),
+      passed: z.boolean().describe("True if the port is correct and tests confirm behaviour"),
+      summary: z.string().describe("Short audit summary (1-3 sentences)"),
+      rust_locations: z
+        .array(
+          z.object({
+            file: z.string(),
+            symbol: z.string(),
+            start_line: z.number().optional(),
+            end_line: z.number().optional(),
+          }),
+        )
+        .optional()
+        .describe("Rust file/symbol locations where the port lives"),
+      issues: z
+        .array(
+          z.object({
+            severity: z.enum(["error", "warning", "info"]),
+            message: z.string(),
+            claim_ref: z.string().optional(),
+          }),
+        )
+        .optional()
+        .describe("Any issues found during audit"),
+      missing_behaviours: z
+        .array(z.string())
+        .optional()
+        .describe("Behaviour claims not yet implemented"),
+    },
+  },
+  async ({ symbol, implementation_status, passed, summary, rust_locations, issues, missing_behaviours }) => {
+    const sym = symbolRepo.listAllSymbols(db).find((s) => s.name === symbol);
+    if (!sym) return err(`No exact symbol "${symbol}". Use find_symbol to get the precise name.`);
+
+    const task = db
+      .prepare(`SELECT id FROM migration_task WHERE source_symbol_id = ?`)
+      .get(sym.id) as { id: number } | undefined;
+    if (!task) return err(`No task found for symbol "${symbol}". Run set_task_status first.`);
+
+    const outputJson = JSON.stringify({
+      implementation_status,
+      passed,
+      summary,
+      coverage: { claims_covered: 0, claims_total: 0 },
+      rust_locations: rust_locations ?? [],
+      issues: issues ?? [],
+      missing_behaviours: missing_behaviours ?? [],
+      planning_notes: [],
+    });
+
+    const promptHash = Buffer.from(`manual:${sym.id}:${Date.now()}`).toString("base64").slice(0, 16);
+
+    db.prepare(
+      `INSERT INTO agent_run (stage, provider, model, prompt_hash, output_json, symbol_id, task_id)
+       VALUES ('audit-rust', 'claude-code', 'manual', ?, ?, ?, ?)`,
+    ).run(promptHash, outputJson, sym.id, task.id);
+
+    return json({ ok: true, symbol: sym.name, task_id: task.id, implementation_status, passed });
+  },
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
 console.error("[port-harness] MCP server ready on stdio");
