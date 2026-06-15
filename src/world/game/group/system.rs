@@ -1529,4 +1529,14 @@ impl GroupSystem {
 
         Ok(())
     }
+
+    #[cfg(test)]
+    pub fn add_group_test(&self, group: GroupData) {
+        self.groups.insert(group.id, group);
+    }
+
+    #[cfg(test)]
+    pub fn add_player_to_group_test(&self, player_guid: ObjectGuid, group_id: u32) {
+        self.player_groups.insert(player_guid, group_id);
+    }
 }

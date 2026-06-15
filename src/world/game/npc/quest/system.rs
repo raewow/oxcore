@@ -41,7 +41,7 @@ use super::types::{
 };
 
 /// Maximum distance for quest sharing between players.
-const QUEST_SHARE_DISTANCE: f32 = 14.0;
+pub const QUEST_SHARE_DISTANCE: f32 = 14.0;
 
 /// Quest system - handles business logic and packet sending
 pub struct QuestSystem {
@@ -1863,39 +1863,37 @@ impl QuestSystem {
             }
         }
 
-        // 2. Give XP reward
-        let xp_reward = if quest.rew_xp > 0 {
-            quest.rew_xp
-        } else {
-            // Calculate XP based on player level and quest level
-            // Formula: Base XP * (quest level / player level)
-            let base_xp = crate::world::game::player::experience::calculate_xp_for_level(
-                quest.quest_level as u8,
+        // 2. Give XP reward or max-level gold conversion
+        let wow_patch = world.config.wow_patch.unwrap_or(112);
+        let rate_drop_money = world.config.rate_drop_money;
+        let max_level = crate::shared::game::experience::MAX_PLAYER_LEVEL;
+
+        let xp_reward = if player_level >= max_level {
+            // Max level: give gold instead of XP
+            let gold_reward = quest.get_rew_money_max_level_at_complete(
+                rate_drop_money,
+                wow_patch,
+                world.config.no_quest_xp_to_gold,
             );
-            let level_diff_factor = if player_level > quest.quest_level as u8 {
-                let diff = player_level - quest.quest_level as u8;
-                if diff >= 5 {
-                    0 // Gray quest, no XP
-                } else {
-                    100 - (diff * 20) // -20% per level above quest level
-                }
-            } else {
-                100
-            };
-            (base_xp * level_diff_factor as u32) / 100
+            if gold_reward > 0 {
+                self.inventory.add_gold(player_guid, gold_reward);
+            }
+            0
+        } else {
+            let xp = quest.xp_value(player_level as u32);
+            if xp > 0 {
+                use crate::shared::game::experience::XpSource;
+                let _ = self
+                    .experience
+                    .add_xp(player_guid, xp, XpSource::Quest, None, 0.0);
+            }
+            xp
         };
 
-        if xp_reward > 0 {
-            use crate::shared::game::experience::XpSource;
-            let _ = self
-                .experience
-                .add_xp(player_guid, xp_reward, XpSource::Quest, None, 0.0);
-        }
-
-        // 3. Give money reward (if positive)
-        if quest.rew_or_req_money > 0 {
-            let money = quest.rew_or_req_money as u32;
-            self.inventory.add_gold(player_guid, money);
+        // 3. Give money reward (scaled by rate)
+        let money = quest.get_reward_or_req_money(rate_drop_money);
+        if money > 0 {
+            self.inventory.add_gold(player_guid, money as u32);
         }
 
         // 4. Give reward items (choice + fixed)
@@ -3283,7 +3281,7 @@ mod tests {
     fn register_test_gossip_script(
         world: &World,
         entry: u32,
-        on_dialog_status: impl Fn(mlua::Table, mlua::Table) -> mlua::Result<u32> + 'static,
+        on_dialog_status: impl Fn(mlua::Table, mlua::Table) -> mlua::Result<u32> + Send + 'static,
     ) {
         world.managers.lua_mgr.with_lua(|lua| {
             let table = lua.create_table().unwrap();

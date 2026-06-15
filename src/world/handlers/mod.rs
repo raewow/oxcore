@@ -506,6 +506,12 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_QUEST_CONFIRM_ACCEPT => {
                     quest_handler::handle_quest_confirm_accept(session, packet, world).await?;
                 }
+                Opcode::CMSG_PUSHQUESTTOPARTY => {
+                    quest_handler::handle_push_quest_to_party(session, packet, world).await?;
+                }
+                Opcode::MSG_QUEST_PUSH_RESULT => {
+                    quest_handler::handle_quest_push_result(session, packet, world).await?;
+                }
 
                 // Reputation handlers
                 Opcode::CMSG_SET_FACTION_ATWAR => {

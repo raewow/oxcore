@@ -290,6 +290,83 @@ impl QuestTemplate {
         matches!(self.method, QuestMethod::AutoComplete)
     }
 
+    /// Calculate XP reward value using the C++ XP decay formula.
+    ///
+    /// Mirrors `Quest::XPValue` in QuestDef.cpp:
+    /// - If `rew_xp` is 0, returns 0 (no XP reward).
+    /// - Otherwise, applies a level-delta multiplier:
+    ///   player level ≤ quest level + 5 → 100%
+    ///   player level == quest level + 6 → 80%
+    ///   player level == quest level + 7 → 60%
+    ///   player level == quest level + 8 → 40%
+    ///   player level == quest level + 9 → 20%
+    ///   player level ≥ quest level + 10 → 10%
+    pub fn xp_value(&self, player_level: u32) -> u32 {
+        if self.rew_xp == 0 {
+            return 0;
+        }
+        let quest_level = self.quest_level;
+        if player_level <= quest_level + 5 {
+            self.rew_xp
+        } else if player_level == quest_level + 6 {
+            (self.rew_xp as f64 * 0.8).ceil() as u32
+        } else if player_level == quest_level + 7 {
+            (self.rew_xp as f64 * 0.6).ceil() as u32
+        } else if player_level == quest_level + 8 {
+            (self.rew_xp as f64 * 0.4).ceil() as u32
+        } else if player_level == quest_level + 9 {
+            (self.rew_xp as f64 * 0.2).ceil() as u32
+        } else {
+            (self.rew_xp as f64 * 0.1).ceil() as u32
+        }
+    }
+
+    /// Get reward or required money.
+    ///
+    /// Mirrors `Quest::GetRewOrReqMoney` in QuestDef.cpp:
+    /// - Negative/zero values (required money) returned unchanged.
+    /// - Positive values (reward money) scaled by `rate_drop_money`.
+    pub fn get_reward_or_req_money(&self, rate_drop_money: f32) -> i32 {
+        if self.rew_or_req_money > 0 {
+            (self.rew_or_req_money as f32 * rate_drop_money).round() as i32
+        } else {
+            self.rew_or_req_money
+        }
+    }
+
+    /// Get max-level gold reward at completion.
+    ///
+    /// Mirrors `Quest::GetRewMoneyMaxLevelAtComplete` in QuestDef.cpp:
+    /// - Before patch 1.10 (wow_patch < 110): returns 0 if `no_quest_xp_to_gold` is true;
+    ///   otherwise returns scaled `rew_money_max_level`.
+    /// - Patch 1.10+ (wow_patch >= 110): always returns scaled `rew_money_max_level`.
+    pub fn get_rew_money_max_level_at_complete(
+        &self,
+        rate_drop_money: f32,
+        wow_patch: u32,
+        no_xp_to_gold: bool,
+    ) -> u32 {
+        if self.rew_money_max_level == 0 {
+            return 0;
+        }
+        if wow_patch < 110 && no_xp_to_gold {
+            return 0;
+        }
+        (self.rew_money_max_level as f32 * rate_drop_money).round() as u32
+    }
+
+    /// Check if the quest can be completed in a raid group.
+    ///
+    /// Mirrors `Quest::IsAllowedInRaid` in QuestDef.cpp:
+    /// - Returns true if quest type is `Raid`, or quest flags include `RAID`,
+    ///   or the global `ignore_raid` config is true.
+    pub fn is_allowed_in_raid(&self, ignore_raid: bool) -> bool {
+        if ignore_raid {
+            return true;
+        }
+        self.quest_type == QuestType::Raid || self.quest_flags.contains(QuestFlags::RAID)
+    }
+
     /// Check if quest is repeatable
     pub fn is_repeatable(&self) -> bool {
         self.special_flags.contains(QuestSpecialFlags::REPEATABLE)
@@ -510,4 +587,197 @@ pub struct GossipQuestData {
     pub icon: u32,
     pub level: u32,
     pub title: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn template_with_xp(xp: u32, level: u32) -> QuestTemplate {
+        QuestTemplate {
+            rew_xp: xp,
+            quest_level: level,
+            ..QuestTemplate::default()
+        }
+    }
+
+    fn template_with_money(money: i32) -> QuestTemplate {
+        QuestTemplate {
+            rew_or_req_money: money,
+            ..QuestTemplate::default()
+        }
+    }
+
+    fn template_with_max_level_gold(gold: u32) -> QuestTemplate {
+        QuestTemplate {
+            rew_money_max_level: gold,
+            ..QuestTemplate::default()
+        }
+    }
+
+    fn template_raid_type() -> QuestTemplate {
+        QuestTemplate {
+            quest_type: QuestType::Raid,
+            ..QuestTemplate::default()
+        }
+    }
+
+    // --- xp_value tests ---
+
+    #[test]
+    fn xp_zero_when_rew_xp_is_zero() {
+        let t = template_with_xp(0, 10);
+        assert_eq!(t.xp_value(10), 0);
+        assert_eq!(t.xp_value(20), 0);
+    }
+
+    #[test]
+    fn xp_full_when_player_at_or_below_quest_plus_5() {
+        let t = template_with_xp(1000, 10);
+        // player == quest level
+        assert_eq!(t.xp_value(10), 1000);
+        // player below quest
+        assert_eq!(t.xp_value(5), 1000);
+        // player == quest + 4
+        assert_eq!(t.xp_value(14), 1000);
+        // player == quest + 5
+        assert_eq!(t.xp_value(15), 1000);
+    }
+
+    #[test]
+    fn xp_decays_after_quest_plus_5() {
+        let t = template_with_xp(1000, 10);
+        assert_eq!(t.xp_value(16), 800);   // diff=6 → 80%
+        assert_eq!(t.xp_value(17), 600);   // diff=7 → 60%
+        assert_eq!(t.xp_value(18), 400);   // diff=8 → 40%
+        assert_eq!(t.xp_value(19), 200);   // diff=9 → 20%
+        assert_eq!(t.xp_value(20), 100);   // diff=10+ → 10%
+        assert_eq!(t.xp_value(99), 100);   // diff=89 → 10%
+    }
+
+    #[test]
+    fn xp_decay_uses_ceil() {
+        // 333 * 0.8 = 266.4 → ceil = 267
+        let t = template_with_xp(333, 10);
+        assert_eq!(t.xp_value(16), 267);
+        // 333 * 0.6 = 199.8 → ceil = 200
+        assert_eq!(t.xp_value(17), 200);
+    }
+
+    // --- get_reward_or_req_money tests ---
+
+    #[test]
+    fn money_negative_unchanged() {
+        let t = template_with_money(-100);
+        assert_eq!(t.get_reward_or_req_money(1.0), -100);
+        assert_eq!(t.get_reward_or_req_money(2.0), -100);
+    }
+
+    #[test]
+    fn money_zero_unchanged() {
+        let t = template_with_money(0);
+        assert_eq!(t.get_reward_or_req_money(1.0), 0);
+        assert_eq!(t.get_reward_or_req_money(5.0), 0);
+    }
+
+    #[test]
+    fn money_positive_scaled_by_rate() {
+        let t = template_with_money(1000);
+        assert_eq!(t.get_reward_or_req_money(1.0), 1000);
+        assert_eq!(t.get_reward_or_req_money(2.0), 2000);
+        assert_eq!(t.get_reward_or_req_money(0.5), 500);
+    }
+
+    #[test]
+    fn money_positive_scaled_rounds() {
+        let t = template_with_money(100);
+        assert_eq!(t.get_reward_or_req_money(1.1), 110);
+        assert_eq!(t.get_reward_or_req_money(0.33), 33);
+    }
+
+    // --- get_rew_money_max_level_at_complete tests ---
+
+    #[test]
+    fn max_level_gold_zero_when_field_is_zero() {
+        let t = template_with_max_level_gold(0);
+        assert_eq!(
+            t.get_rew_money_max_level_at_complete(1.0, 112, false),
+            0
+        );
+    }
+
+    #[test]
+    fn max_level_gold_zero_pre_110_with_xp_to_gold_disabled() {
+        let t = template_with_max_level_gold(10000);
+        // wow_patch < 110 and no_xp_to_gold = true → 0
+        assert_eq!(
+            t.get_rew_money_max_level_at_complete(1.0, 109, true),
+            0
+        );
+    }
+
+    #[test]
+    fn max_level_gold_scaled_pre_110_when_xp_to_gold_enabled() {
+        let t = template_with_max_level_gold(10000);
+        // wow_patch < 110 and no_xp_to_gold = false → allow
+        assert_eq!(
+            t.get_rew_money_max_level_at_complete(2.0, 109, false),
+            20000
+        );
+    }
+
+    #[test]
+    fn max_level_gold_scaled_post_110_always() {
+        let t = template_with_max_level_gold(10000);
+        assert_eq!(
+            t.get_rew_money_max_level_at_complete(1.5, 110, true),
+            15000
+        );
+        assert_eq!(
+            t.get_rew_money_max_level_at_complete(1.5, 112, true),
+            15000
+        );
+    }
+
+    #[test]
+    fn max_level_gold_rounds() {
+        let t = template_with_max_level_gold(100);
+        assert_eq!(
+            t.get_rew_money_max_level_at_complete(1.1, 110, true),
+            110
+        );
+        assert_eq!(
+            t.get_rew_money_max_level_at_complete(0.33, 110, true),
+            33
+        );
+    }
+
+    // --- is_allowed_in_raid tests ---
+
+    #[test]
+    fn raid_allowed_when_ignore_raid_true() {
+        let t = QuestTemplate::default();
+        assert!(t.is_allowed_in_raid(true));
+    }
+
+    #[test]
+    fn raid_allowed_when_quest_type_is_raid() {
+        let t = template_raid_type();
+        assert!(t.is_allowed_in_raid(false));
+    }
+
+    #[test]
+    fn raid_allowed_when_raid_flag_set() {
+        let t = QuestTemplate {
+            quest_flags: QuestFlags::RAID,
+            ..QuestTemplate::default()
+        };
+        assert!(t.is_allowed_in_raid(false));
+    }
+
+    #[test]
+    fn raid_disallowed_when_none_match() {
+        let t = QuestTemplate::default();
+        assert!(!t.is_allowed_in_raid(false));
+    }
 }

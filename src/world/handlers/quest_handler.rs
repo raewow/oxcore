@@ -6,8 +6,13 @@ use anyhow::Result;
 use tracing::{debug, info, warn};
 
 use crate::shared::messages::gossip::SmsgGossipComplete;
-use crate::shared::messages::quest::{QuestObjectiveData, SmsgQuestQueryResponseV2};
-use crate::shared::protocol::{Opcode, WorldPacket};
+use crate::shared::messages::quest::{
+    MsgQuestPushResult, QuestObjectiveData, SmsgQuestQueryResponseV2,
+};
+use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
+use crate::world::game::npc::quest::system::QUEST_SHARE_DISTANCE;
+use crate::world::game::npc::quest::types::{QuestStatus, MAX_QUEST_LOG_SIZE};
+use crate::world::game::player::player::QuestShareInfo;
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
@@ -693,6 +698,213 @@ pub async fn handle_questgiver_choose_reward(
             world,
         )
         .await?;
+
+    Ok(())
+}
+
+/// Handle CMSG_PUSHQUESTTOPARTY (0x19D)
+///
+/// Sent when player clicks "Share Quest" in the quest log.
+/// Iterates group members and sends quest details or rejection messages.
+/// Packet format: quest_id (u32)
+pub async fn handle_push_quest_to_party(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+
+    let quest_id = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read quest ID"))?;
+
+    info!(
+        "CMSG_PUSHQUESTTOPARTY: player={:?}, quest={}",
+        player_guid, quest_id
+    );
+
+    let Some(quest) = world.systems.quest.manager.get_quest_template(quest_id) else {
+        return Ok(());
+    };
+
+    let Some(group) = world.systems.group.get_player_group(player_guid) else {
+        return Ok(());
+    };
+
+    for member in &group.members {
+        if member.guid == player_guid {
+            continue;
+        }
+
+        // Send "sharing quest" indicator to sharer
+        let sharing = MsgQuestPushResult {
+            sender_guid: member.guid,
+            msg: crate::shared::game::quest::quest_share_msg::SHARING_QUEST,
+        };
+        world.managers.broadcast_mgr.send_msg_to_player(player_guid, sharing);
+
+        // Distance + map check
+        let sharer_pos = world.managers.player_mgr.get_position(player_guid);
+        let member_pos = world.managers.player_mgr.get_position(member.guid);
+        let sharer_map = world
+            .managers
+            .player_mgr
+            .get_player(player_guid)
+            .map(|p| p.map_id);
+        let member_map = world
+            .managers
+            .player_mgr
+            .get_player(member.guid)
+            .map(|p| p.map_id);
+        let same_map = sharer_map
+            .zip(member_map)
+            .map(|(a, b)| a == b)
+            .unwrap_or(false);
+        let in_range = sharer_pos
+            .zip(member_pos)
+            .map(|(sp, mp)| sp.is_within_range(&mp, QUEST_SHARE_DISTANCE))
+            .unwrap_or(false);
+
+        if !same_map || !in_range {
+            let msg = MsgQuestPushResult {
+                sender_guid: member.guid,
+                msg: crate::shared::game::quest::quest_share_msg::TOO_FAR,
+            };
+            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            continue;
+        }
+
+        // Already completed?
+        let status = world.systems.quest.get_quest_status(member.guid, quest_id);
+        if status == QuestStatus::Complete {
+            let msg = MsgQuestPushResult {
+                sender_guid: member.guid,
+                msg: crate::shared::game::quest::quest_share_msg::FINISH_QUEST,
+            };
+            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            continue;
+        }
+
+        // Already has quest (in progress)?
+        if status == QuestStatus::Incomplete {
+            let msg = MsgQuestPushResult {
+                sender_guid: member.guid,
+                msg: crate::shared::game::quest::quest_share_msg::HAVE_QUEST,
+            };
+            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            continue;
+        }
+
+        // Can take quest?
+        if !world.systems.quest.can_take_quest(member.guid, &quest, world) {
+            let msg = MsgQuestPushResult {
+                sender_guid: member.guid,
+                msg: crate::shared::game::quest::quest_share_msg::CANT_TAKE_QUEST,
+            };
+            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            continue;
+        }
+
+        // Log full?
+        let log_full = world
+            .managers
+            .player_mgr
+            .with_player(member.guid, |p| p.active_quests.len() >= MAX_QUEST_LOG_SIZE)
+            .unwrap_or(true);
+        if log_full {
+            let msg = MsgQuestPushResult {
+                sender_guid: member.guid,
+                msg: crate::shared::game::quest::quest_share_msg::LOG_FULL,
+            };
+            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            continue;
+        }
+
+        // Already busy with another share?
+        if world
+            .managers
+            .player_mgr
+            .get_quest_share_info(member.guid)
+            .is_some()
+        {
+            let msg = MsgQuestPushResult {
+                sender_guid: member.guid,
+                msg: crate::shared::game::quest::quest_share_msg::BUSY,
+            };
+            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            continue;
+        }
+
+        // All checks pass: send quest details to recipient
+        let _ = world
+            .systems
+            .quest
+            .send_quest_details(member.guid, player_guid, quest_id, world);
+
+        // Set quest share info on recipient
+        world.managers.player_mgr.set_quest_share_info(
+            member.guid,
+            QuestShareInfo {
+                player_guid,
+                quest_id,
+            },
+        );
+    }
+
+    Ok(())
+}
+
+/// Handle MSG_QUEST_PUSH_RESULT (0x276) — client→server direction
+///
+/// Sent by a player who received a shared quest to relay their response
+/// (accept/decline/too_far/etc.) back to the original sharer.
+/// Packet format: guid (packed — the responder), msg (u8)
+pub async fn handle_quest_push_result(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+
+    let _sender_guid = packet
+        .read_guid()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read sender GUID"))?;
+
+    let msg = packet
+        .read_u8()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read message"))?;
+
+    info!(
+        "MSG_QUEST_PUSH_RESULT: player={:?}, msg={}",
+        player_guid, msg
+    );
+
+    let Some(share) = world.managers.player_mgr.get_quest_share_info(player_guid) else {
+        return Ok(());
+    };
+
+    // Forward the response to the original sharer
+    if world
+        .managers
+        .player_mgr
+        .get_player(share.player_guid)
+        .is_some()
+    {
+        let response = MsgQuestPushResult {
+            sender_guid: player_guid,
+            msg,
+        };
+        world
+            .managers
+            .broadcast_mgr
+            .send_msg_to_player(share.player_guid, response);
+    }
+
+    world.managers.player_mgr.clear_quest_share_info(player_guid);
 
     Ok(())
 }
@@ -1491,5 +1703,430 @@ mod tests {
         handle_questgiver_hello(&session, &mut packet, &world)
             .await
             .expect("handler should succeed even with no active channel");
+    }
+
+    // ===== Push quest to party tests =====
+
+    fn test_member_guid() -> ObjectGuid {
+        ObjectGuid::new_without_entry(HighGuid::Player, 2)
+    }
+
+    fn add_second_player(
+        world: &mut crate::world::World,
+    ) -> (Arc<WorldSession>, mpsc::UnboundedReceiver<crate::shared::protocol::WorldPacket>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let session = Arc::new(WorldSession::new(2, 2, "Member".to_string(), 0, tx));
+        let player_guid = test_member_guid();
+        session.set_player_guid(Some(player_guid));
+        world.session_mgr.add_session(Arc::clone(&session));
+        world.session_mgr.register_player(session.id(), player_guid);
+
+        let mut player = Player::new(player_guid, "Member".to_string(), 0, 0, 0, 10, 1, 1, 0);
+        player.set_broadcaster(Arc::new(PlayerBroadcaster::new(
+            session.packet_tx(),
+            player_guid,
+        )));
+        world.managers.player_mgr.add_player(player, 1);
+        (session, rx)
+    }
+
+    fn add_group_with_members(
+        world: &mut crate::world::World,
+        leader_guid: ObjectGuid,
+        member_guid: ObjectGuid,
+    ) {
+        let mut group = crate::world::game::group::types::GroupData::new(
+            1,
+            leader_guid,
+            "Tester".to_string(),
+        );
+        group
+            .add_member(member_guid, "Member".to_string())
+            .expect("add member");
+        world.systems.group.add_group_test(group);
+        world.systems.group.add_player_to_group_test(leader_guid, 1);
+        world.systems.group.add_player_to_group_test(member_guid, 1);
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_not_logged_in() {
+        let mut world = test_world();
+        let session = Arc::new(WorldSession::new(99, 99, "NoPlayer".to_string(), 0, mpsc::unbounded_channel().0));
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        packet.write_u32(1);
+        let result = handle_push_quest_to_party(&session, &mut packet, &world).await;
+        assert!(result.is_err(), "should error when not logged in");
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_no_quest_template() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, _) = add_player(&mut world);
+        let member_guid = test_member_guid();
+        add_second_player(&mut world);
+        add_group_with_members(&mut world, test_player_guid(), member_guid);
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        packet.write_u32(999); // non-existent quest
+        handle_push_quest_to_party(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed silently for unknown quest");
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_no_group() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, _) = add_player(&mut world);
+        add_quest(&mut world, 1, None);
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        packet.write_u32(1);
+        handle_push_quest_to_party(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed silently when not in group");
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_successful_push() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let member_guid = test_member_guid();
+        let (member_session, mut member_rx) = add_second_player(&mut world);
+        add_group_with_members(&mut world, test_player_guid(), member_guid);
+        add_quest(&mut world, 1, None);
+
+        // Place both players on the same map and within distance
+        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
+            p.movement.position = pos;
+        });
+        world.managers.player_mgr.with_player_mut(member_guid, |p| {
+            p.movement.position = pos;
+        });
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        packet.write_u32(1);
+
+        handle_push_quest_to_party(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        // Sharer should get SHARING_QUEST (0) message
+        let out = read_packet(&mut rx);
+        assert_eq!(out.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+
+        // Member should get quest details
+        let member_out = member_rx.try_recv().expect("member should get a packet");
+        assert_eq!(member_out.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_DETAILS);
+
+        // Member should have quest share info set
+        let share = world
+            .managers
+            .player_mgr
+            .get_quest_share_info(member_guid);
+        assert!(share.is_some(), "member should have quest share info");
+        assert_eq!(share.unwrap().quest_id, 1);
+        assert_eq!(share.unwrap().player_guid, test_player_guid());
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_too_far() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let member_guid = test_member_guid();
+        add_second_player(&mut world);
+        add_group_with_members(&mut world, test_player_guid(), member_guid);
+        add_quest(&mut world, 1, None);
+
+        // Place member far away
+        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
+            p.movement.position = pos;
+        });
+        world.managers.player_mgr.with_player_mut(member_guid, |p| {
+            p.movement.position = crate::shared::protocol::Position::new(100.0, 0.0, 0.0, 0.0);
+        });
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        packet.write_u32(1);
+
+        handle_push_quest_to_party(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        // Sharer should get SHARING_QUEST then TOO_FAR
+        let out1 = read_packet(&mut rx);
+        assert_eq!(out1.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+
+        let out2 = read_packet(&mut rx);
+        assert_eq!(out2.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_already_completed() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let member_guid = test_member_guid();
+        add_second_player(&mut world);
+        add_group_with_members(&mut world, test_player_guid(), member_guid);
+        add_quest(&mut world, 1, None);
+
+        // Place both players on same map and within distance
+        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
+            p.movement.position = pos;
+        });
+        world.managers.player_mgr.with_player_mut(member_guid, |p| {
+            p.movement.position = pos;
+        });
+
+        // Mark quest as complete on member
+        world.managers.player_mgr.with_player_mut(member_guid, |player| {
+            let mut prog = crate::world::game::npc::quest::types::QuestProgress::new(1);
+            prog.status = crate::world::game::npc::quest::types::QuestStatus::Complete;
+            player.active_quests.push(prog);
+        });
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        packet.write_u32(1);
+
+        handle_push_quest_to_party(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        // First packet: SHARING_QUEST, second packet: FINISH_QUEST
+        let out1 = read_packet(&mut rx);
+        assert_eq!(out1.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+        let out2 = read_packet(&mut rx);
+        assert_eq!(out2.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_already_has_quest() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let member_guid = test_member_guid();
+        add_second_player(&mut world);
+        add_group_with_members(&mut world, test_player_guid(), member_guid);
+        add_quest(&mut world, 1, None);
+
+        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
+            p.movement.position = pos;
+        });
+        world.managers.player_mgr.with_player_mut(member_guid, |p| {
+            p.movement.position = pos;
+        });
+
+        // Give member the quest as in-progress
+        world.managers.player_mgr.with_player_mut(member_guid, |player| {
+            player.active_quests.push(crate::world::game::npc::quest::types::QuestProgress::new(1));
+        });
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        packet.write_u32(1);
+
+        handle_push_quest_to_party(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        let out1 = read_packet(&mut rx);
+        assert_eq!(out1.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+        let out2 = read_packet(&mut rx);
+        assert_eq!(out2.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_log_full() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let member_guid = test_member_guid();
+        add_second_player(&mut world);
+        add_group_with_members(&mut world, test_player_guid(), member_guid);
+        add_quest(&mut world, 1, None);
+
+        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
+            p.movement.position = pos;
+        });
+        world.managers.player_mgr.with_player_mut(member_guid, |p| {
+            p.movement.position = pos;
+        });
+
+        // Fill member's quest log to max
+        let max_slots = crate::world::game::npc::quest::types::MAX_QUEST_LOG_SIZE;
+        world.managers.player_mgr.with_player_mut(member_guid, |player| {
+            for i in 0..max_slots {
+                player
+                    .active_quests
+                    .push(crate::world::game::npc::quest::types::QuestProgress::new(
+                        (100 + i) as u32,
+                    ));
+            }
+        });
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        packet.write_u32(1);
+
+        handle_push_quest_to_party(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        let out1 = read_packet(&mut rx);
+        assert_eq!(out1.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+        let out2 = read_packet(&mut rx);
+        assert_eq!(out2.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_busy() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let member_guid = test_member_guid();
+        add_second_player(&mut world);
+        add_group_with_members(&mut world, test_player_guid(), member_guid);
+        add_quest(&mut world, 1, None);
+
+        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
+            p.movement.position = pos;
+        });
+        world.managers.player_mgr.with_player_mut(member_guid, |p| {
+            p.movement.position = pos;
+        });
+
+        // Set existing quest share info on member (makes them busy)
+        world.managers.player_mgr.set_quest_share_info(
+            member_guid,
+            QuestShareInfo {
+                player_guid: test_player_guid(),
+                quest_id: 99,
+            },
+        );
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        packet.write_u32(1);
+
+        handle_push_quest_to_party(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        let out1 = read_packet(&mut rx);
+        assert_eq!(out1.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+        let out2 = read_packet(&mut rx);
+        assert_eq!(out2.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+    }
+
+    // ===== Quest push result tests =====
+
+    #[tokio::test]
+    async fn quest_push_result_not_logged_in() {
+        let world = test_world();
+        let session = Arc::new(WorldSession::new(99, 99, "NoPlayer".to_string(), 0, mpsc::unbounded_channel().0));
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
+        packet.write_guid(test_player_guid());
+        packet.write_u8(2); // accept
+        let result = handle_quest_push_result(&session, &mut packet, &world).await;
+        assert!(result.is_err(), "should error when not logged in");
+    }
+
+    #[tokio::test]
+    async fn quest_push_result_no_share_info() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, _rx) = add_player(&mut world);
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
+        packet.write_guid(test_player_guid());
+        packet.write_u8(2); // accept
+
+        handle_quest_push_result(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed silently when no share info");
+    }
+
+    #[tokio::test]
+    async fn quest_push_result_forwards_to_sharer() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (sharer_session, mut sharer_rx) = add_player(&mut world);
+        let member_guid = test_member_guid();
+        let (member_session, _member_rx) = add_second_player(&mut world);
+
+        // Set share info on member pointing to sharer
+        world.managers.player_mgr.set_quest_share_info(
+            member_guid,
+            QuestShareInfo {
+                player_guid: test_player_guid(),
+                quest_id: 1,
+            },
+        );
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
+        packet.write_guid(member_guid);
+        packet.write_u8(crate::shared::game::quest::quest_share_msg::ACCEPT_QUEST);
+
+        handle_quest_push_result(&member_session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        // Sharer should receive the forwarded response
+        let out = read_packet(&mut sharer_rx);
+        assert_eq!(out.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+
+        // Share info should be cleared
+        assert!(
+            world
+                .managers
+                .player_mgr
+                .get_quest_share_info(member_guid)
+                .is_none(),
+            "share info should be cleared"
+        );
+    }
+
+    #[tokio::test]
+    async fn quest_push_result_sharer_offline() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (_sharer_session, _) = add_player(&mut world);
+        let member_guid = test_member_guid();
+        let (member_session, _member_rx) = add_second_player(&mut world);
+
+        // Set share info on member pointing to a GUID that has no session (offline)
+        let offline_guid = ObjectGuid::new_without_entry(HighGuid::Player, 99);
+        world.managers.player_mgr.set_quest_share_info(
+            member_guid,
+            QuestShareInfo {
+                player_guid: offline_guid,
+                quest_id: 1,
+            },
+        );
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
+        packet.write_guid(member_guid);
+        packet.write_u8(crate::shared::game::quest::quest_share_msg::DECLINE_QUEST);
+
+        handle_quest_push_result(&member_session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        // Share info should still be cleared
+        assert!(
+            world
+                .managers
+                .player_mgr
+                .get_quest_share_info(member_guid)
+                .is_none(),
+            "share info should be cleared even when sharer is offline"
+        );
     }
 }

@@ -67,3 +67,15 @@ pub enum QuestShareState {
     Accepted = 2,
     Declined = 3,
 }
+
+pub mod quest_share_msg {
+    pub const SHARING_QUEST: u8 = 0;
+    pub const CANT_TAKE_QUEST: u8 = 1;
+    pub const ACCEPT_QUEST: u8 = 2;
+    pub const DECLINE_QUEST: u8 = 3;
+    pub const TOO_FAR: u8 = 4;
+    pub const BUSY: u8 = 5;
+    pub const LOG_FULL: u8 = 6;
+    pub const HAVE_QUEST: u8 = 7;
+    pub const FINISH_QUEST: u8 = 8;
+}
