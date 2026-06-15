@@ -5,7 +5,7 @@
 //! auction-specific logic.
 
 use crate::shared::game::auction::{AuctionAction, AuctionEntry, AuctionError};
-use crate::shared::messages::auction::{SmsgAuctionCommandResult, SmsgAuctionOwnerNotification, SmsgAuctionRemovedNotification};
+use crate::shared::messages::auction::{SmsgAuctionBidderNotification, SmsgAuctionCommandResult, SmsgAuctionOwnerNotification, SmsgAuctionRemovedNotification};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::core::session::WorldSession;
@@ -116,6 +116,30 @@ pub fn send_auction_removed_notification(
 
     session.send_msg(SmsgAuctionRemovedNotification {
         auction_id: auction.id,
+        item_template: auction.item_template,
+        item_random_property_id,
+    })
+}
+
+/// Send SMSG_AUCTION_BIDDER_NOTIFICATION to the client session.
+///
+/// Mirrors C++ `WorldSession::SendAuctionBidderNotification`.
+/// `won=true` for buyout/expiry win; `won=false` for outbid.
+/// `outbid_amount` is set to `auction.get_outbid_amount()` when outbid, `0` when won.
+pub fn send_auction_bidder_notification(
+    session: &WorldSession,
+    auction: &AuctionEntry,
+    house_id: u32,
+    won: bool,
+    item_random_property_id: u32,
+) -> anyhow::Result<()> {
+    let outbid_amount = if won { 0 } else { auction.get_outbid_amount() };
+    session.send_msg(SmsgAuctionBidderNotification {
+        house_id,
+        auction_id: auction.id,
+        bidder_guid: auction.bidder_guid,
+        won,
+        outbid_amount,
         item_template: auction.item_template,
         item_random_property_id,
     })

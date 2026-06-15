@@ -34,7 +34,9 @@ const WOW_PATCH_109: u32 = 109;
 const AUCTION_WON: u32 = 1;
 const AUCTION_SUCCESSFUL: u32 = 2;
 const AUCTION_EXPIRED: u32 = 3;
+const AUCTION_CANCELLED_TO_BIDDER: u32 = 4;
 const AUCTION_CANCELED: u32 = 5;
+const AUCTION_OUTBIDDED: u32 = 6;
 
 const MAIL_AUCTION_EXPIRE_SECS: i64 = 30 * 24 * 60 * 60;
 
@@ -68,6 +70,16 @@ impl AuctionHouseObject {
 
     pub fn remove_auction(&self, id: u32) -> bool {
         self.auctions.remove(&id).is_some()
+    }
+
+    pub fn update_bid(&self, auction_id: u32, bidder_guid: ObjectGuid, bid: u32) -> bool {
+        if let Some(mut entry) = self.auctions.get_mut(&auction_id) {
+            entry.bidder_guid = bidder_guid;
+            entry.current_bid = bid;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn get_account_auction_count(&self, account_id: u32) -> usize {
@@ -668,7 +680,12 @@ impl AuctionHouseManager {
             return Ok(());
         }
 
-        let subject = format!("{}:0:{}", auction.item_template, AUCTION_CANCELED);
+        let bidder_acc_id = self.get_player_account_id_by_guid(bidder_guid_low).await;
+        if bidder_acc_id == 0 {
+            return Ok(());
+        }
+
+        let subject = format!("{}:0:{}", auction.item_template, AUCTION_CANCELLED_TO_BIDDER);
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -697,6 +714,63 @@ impl AuctionHouseManager {
         }
 
         Ok(())
+    }
+
+    /// Refunds the outbid bidder by mail when a higher bid is placed.
+    ///
+    /// Mirrors C++ `WorldSession::SendAuctionOutbiddedMail`.
+    /// Live `SmsgAuctionBidderNotification` to the online bidder is the caller's responsibility.
+    pub async fn notify_bidder_outbid_or_won(&self, auction: &AuctionEntry) -> Result<()> {
+        let bidder_guid_low = auction.bidder_guid.low();
+        if bidder_guid_low == 0 {
+            return Ok(());
+        }
+
+        let bidder_acc_id = self.get_player_account_id_by_guid(bidder_guid_low).await;
+        if bidder_acc_id == 0 {
+            return Ok(());
+        }
+
+        let subject = format!("{}:0:{}", auction.item_template, AUCTION_OUTBIDDED);
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let mail_row = MailRow {
+            id: 0,
+            message_type: MailMessageType::Auction as u8,
+            stationery: MailStationery::Auction as i8,
+            mail_template_id: 0,
+            sender_guid: auction.id,
+            receiver_guid: bidder_guid_low,
+            subject: Some(subject),
+            item_text_id: 0,
+            has_items: 0,
+            expire_time: now + MAIL_AUCTION_EXPIRE_SECS,
+            deliver_time: now,
+            money: auction.current_bid,
+            cod: 0,
+            checked: MailCheckMask::COPIED,
+        };
+
+        if let Err(e) = self.mail_repo.create(&mail_row).await {
+            error!("notify_bidder_outbid_or_won: failed to create mail: {e}");
+        }
+
+        Ok(())
+    }
+
+    pub async fn update_bid_in_db(&self, auction_id: u32, bidder_guid: u32, new_bid: u32) -> Result<()> {
+        self.auction_repo
+            .update_bid(auction_id, bidder_guid, new_bid as i32)
+            .await
+            .context("Failed to update bid in database")
+    }
+
+    pub async fn lookup_player_account_id(&self, guid_low: u32) -> u32 {
+        self.get_player_account_id_by_guid(guid_low).await
     }
 
     /// Mails the auction item back to the owner when they cancel a live listing.

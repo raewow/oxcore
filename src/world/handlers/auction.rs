@@ -18,8 +18,8 @@ use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::game::auction::manager::{AuctionHouseManager, AuctionHouseObject};
 use crate::world::game::auction::{
-    get_checked_auction_house_for_auctioneer, send_auction_command_result,
-    send_auction_removed_notification,
+    get_checked_auction_house_for_auctioneer, send_auction_bidder_notification,
+    send_auction_command_result, send_auction_owner_notification, send_auction_removed_notification,
 };
 use crate::world::game::creature::CreatureManager;
 use crate::world::game::inventory::inventory_types::{is_bank_pos, InventoryResult};
@@ -650,6 +650,9 @@ pub async fn handle_auction_remove_item(
             return Ok(());
         }
         world.managers.auction_mgr.send_auction_cancelled_to_bidder_mail(&auction).await?;
+        if let Some(bidder_session) = world.session_mgr.get_session_by_player(auction.bidder_guid) {
+            let _ = send_auction_removed_notification(&bidder_session, &auction, &world.managers.auction_mgr);
+        }
         world.systems.inventory.remove_gold(player_guid, cut);
     }
 
@@ -689,6 +692,318 @@ pub async fn handle_auction_remove_item(
 
     // Remove auction from in-memory house map.
     auction_house_map.remove_auction(auction_id);
+
+    Ok(())
+}
+
+/// Handle CMSG_AUCTION_PLACE_BID (0x025A)
+///
+/// Packet format (vanilla 1.12.1):
+/// - auctioneerGuid (packed u64)
+/// - auctionId     (u32)
+/// - price         (u32)
+///
+/// Mirrors C++ `WorldSession::HandleAuctionPlaceBid`.
+pub async fn handle_auction_place_bid(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+
+    let auctioneer_guid = packet
+        .read_guid()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
+    let auction_id = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read auction ID"))?;
+    let price = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read bid price"))?;
+
+    debug!(
+        "CMSG_AUCTION_PLACE_BID: player={:?} auctioneer={:?} auction_id={} price={}",
+        player_guid, auctioneer_guid, auction_id, price
+    );
+
+    // GM trade restriction.
+    let gm_allow_trades = world.config.gm_allow_trades.unwrap_or(false);
+    if !gm_allow_trades && session.security() > 0 {
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::BidPlaced,
+            AuctionError::RestrictedAccount,
+            None,
+        )?;
+        return Ok(());
+    }
+
+    // auction_id or price of zero is a cheater signal.
+    if auction_id == 0 || price == 0 {
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::BidPlaced,
+            AuctionError::ItemNotFound,
+            None,
+        )?;
+        return Ok(());
+    }
+
+    // Auctioneer validation.
+    let player = world
+        .managers
+        .player_mgr
+        .get_player(player_guid)
+        .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
+
+    let house_entry = get_checked_auction_house_for_auctioneer(
+        &player,
+        auctioneer_guid,
+        &world.managers.auction_mgr,
+        None,
+    );
+    let Some(house_entry) = house_entry else {
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::BidPlaced,
+            AuctionError::ItemNotFound,
+            None,
+        )?;
+        return Ok(());
+    };
+
+    drop(player);
+
+    // Remove feign death.
+    let _ = world.managers.player_mgr.with_player_mut(player_guid, |p| {
+        let removed = p.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+        if !removed.is_empty() {
+            p.auras.needs_client_update = true;
+            p.auras.needs_stat_recalc = true;
+        }
+    });
+
+    let Some(auction_house_map) = world
+        .managers
+        .auction_mgr
+        .get_auctions_map_by_house_id(house_entry.house_id)
+    else {
+        return Ok(());
+    };
+
+    // Auction must exist.
+    let Some(auction) = auction_house_map.get_auction(auction_id) else {
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::BidPlaced,
+            AuctionError::ItemNotFound,
+            None,
+        )?;
+        return Ok(());
+    };
+
+    // Can't bid on your own auction.
+    if auction.seller_guid == player_guid {
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::BidPlaced,
+            AuctionError::BidOwn,
+            None,
+        )?;
+        return Ok(());
+    }
+
+    // Cross-account ownership check: same account even if seller is offline.
+    if auction.seller_account != 0 && auction.seller_account == session.account_id() {
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::BidPlaced,
+            AuctionError::BidOwn,
+            None,
+        )?;
+        return Ok(());
+    }
+
+    // Bid must meet the starting price.
+    if price < auction.start_bid {
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::BidPlaced,
+            AuctionError::BidIncrement,
+            None,
+        )?;
+        return Ok(());
+    }
+
+    // Bid must exceed the current bid.
+    if price <= auction.current_bid {
+        send_auction_command_result(
+            session,
+            Some(&auction),
+            AuctionAction::BidPlaced,
+            AuctionError::HigherBid,
+            None,
+        )?;
+        return Ok(());
+    }
+
+    let buyout = auction.buyout_price;
+
+    // Bid must meet the minimum increment when not buying out.
+    if (buyout == 0 || price < buyout)
+        && price < auction.current_bid + auction.get_outbid_amount()
+    {
+        send_auction_command_result(
+            session,
+            Some(&auction),
+            AuctionAction::BidPlaced,
+            AuctionError::BidIncrement,
+            None,
+        )?;
+        return Ok(());
+    }
+
+    let player_money = world.systems.inventory.get_money(player_guid).unwrap_or(0);
+    // C++ silently returns without a packet when the player can't afford it.
+    if price > player_money {
+        return Ok(());
+    }
+
+    let is_rebid = auction.has_bid() && auction.bidder_guid == player_guid;
+
+    // Displace existing bidder (if any and it's not a re-bid by the same player).
+    if !is_rebid && auction.has_bid() {
+        world
+            .managers
+            .auction_mgr
+            .notify_bidder_outbid_or_won(&auction)
+            .await?;
+        if let Some(old_session) = world.session_mgr.get_session_by_player(auction.bidder_guid) {
+            let random_prop = world
+                .managers
+                .auction_mgr
+                .get_a_item(auction.item_guid.low())
+                .map(|i| i.random_property_id as u32)
+                .unwrap_or(0);
+            let _ = send_auction_bidder_notification(
+                &old_session,
+                &auction,
+                house_entry.house_id,
+                false,
+                random_prop,
+            );
+        }
+    }
+
+    if buyout != 0 && price >= buyout {
+        // --- BUYOUT PATH ---
+        let deduct = if is_rebid { buyout - auction.current_bid } else { buyout };
+        world.systems.inventory.remove_gold(player_guid, deduct);
+
+        let mut settled_auction = auction.clone();
+        settled_auction.bidder_guid = player_guid;
+        settled_auction.current_bid = buyout;
+
+        // Snapshot random property before send_auction_won_mail removes the item.
+        let random_prop = world
+            .managers
+            .auction_mgr
+            .get_a_item(settled_auction.item_guid.low())
+            .map(|i| i.random_property_id as u32)
+            .unwrap_or(0);
+
+        let cut_percent = house_entry.cut_percent as f32;
+        world
+            .managers
+            .auction_mgr
+            .send_auction_successful_mail(&settled_auction, cut_percent, 1.0)
+            .await?;
+
+        if let Some(seller_session) = world
+            .session_mgr
+            .get_session_by_player(settled_auction.seller_guid)
+        {
+            let _ = send_auction_owner_notification(&seller_session, &settled_auction, true, random_prop as i32);
+        }
+
+        world
+            .managers
+            .auction_mgr
+            .send_auction_won_mail(&settled_auction)
+            .await?;
+
+        // Live won notification to buyer (current session).
+        let _ = send_auction_bidder_notification(
+            session,
+            &settled_auction,
+            house_entry.house_id,
+            true,
+            random_prop,
+        );
+
+        send_auction_command_result(
+            session,
+            Some(&settled_auction),
+            AuctionAction::BidPlaced,
+            AuctionError::Ok,
+            None,
+        )?;
+
+        auction_house_map.remove_auction(auction_id);
+        world
+            .managers
+            .auction_mgr
+            .delete_auction_from_db(auction_id)
+            .await?;
+        // TODO: persist player gold deduction to DB (no character_repo.update_money yet)
+    } else {
+        // --- BID PATH ---
+        let deduct = if is_rebid { price - auction.current_bid } else { price };
+        world.systems.inventory.remove_gold(player_guid, deduct);
+
+        auction_house_map.update_bid(auction_id, player_guid, price);
+
+        let mut updated_auction = auction.clone();
+        updated_auction.bidder_guid = player_guid;
+        updated_auction.current_bid = price;
+
+        if let Some(seller_session) = world
+            .session_mgr
+            .get_session_by_player(updated_auction.seller_guid)
+        {
+            let random_prop = world
+                .managers
+                .auction_mgr
+                .get_a_item(updated_auction.item_guid.low())
+                .map(|i| i.random_property_id as u32)
+                .unwrap_or(0);
+            let _ = send_auction_owner_notification(&seller_session, &updated_auction, false, random_prop as i32);
+        }
+
+        world
+            .managers
+            .auction_mgr
+            .update_bid_in_db(auction_id, player_guid.low(), price)
+            .await?;
+
+        send_auction_command_result(
+            session,
+            Some(&updated_auction),
+            AuctionAction::BidPlaced,
+            AuctionError::Ok,
+            None,
+        )?;
+        // TODO: persist player gold deduction to DB (no character_repo.update_money yet)
+    }
 
     Ok(())
 }

@@ -451,6 +451,9 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_AUCTION_REMOVE_ITEM => {
                     auction::handle_auction_remove_item(session, packet, world).await?;
                 }
+                Opcode::CMSG_AUCTION_PLACE_BID => {
+                    auction::handle_auction_place_bid(session, packet, world).await?;
+                }
 
                 // Vendor handlers
                 Opcode::CMSG_LIST_INVENTORY => {
