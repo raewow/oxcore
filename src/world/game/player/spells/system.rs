@@ -1051,7 +1051,8 @@ impl SpellSystem {
         slot: CurrentSpellType,
         world: &World,
     ) -> Result<bool> {
-        let cancelled_info: Option<(u32, bool)> = world
+        // Capture: spell_id, was_channeling, was_preparing, was_triggered
+        let cancelled_info: Option<(u32, bool, bool, bool)> = world
             .systems
             .player
             .manager()
@@ -1059,18 +1060,34 @@ impl SpellSystem {
                 player
                     .spells
                     .clear_current_spell(slot)
-                    .map(|active| (active.spell_id, active.is_channeling))
+                    .map(|active| {
+                        let was_preparing = active.state == SpellState::Preparing;
+                        (active.spell_id, active.is_channeling, was_preparing, active.is_triggered)
+                    })
             })
             .flatten();
 
         // Remove any pending events for this spell
-        if let Some((spell_id, _)) = cancelled_info {
+        if let Some((spell_id, _, _, _)) = cancelled_info {
             if let Ok(mut queue) = self.event_queue.lock() {
                 queue.cancel_events_for(caster_guid, spell_id);
             }
         }
 
-        if let Some((spell_id, was_channeling)) = cancelled_info {
+        if let Some((spell_id, was_channeling, was_preparing, was_triggered)) = cancelled_info {
+            // MaNGOS Spell::cancel PREPARING branch: reset GCD so the player isn't locked out
+            // after cancelling a cast that hasn't fired yet.
+            if was_preparing && !was_triggered {
+                let now = get_game_time_ms();
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(caster_guid, |player| {
+                        player.spells.gcd_end = now;
+                    });
+            }
+
             // Broadcast SMSG_SPELL_FAILURE
             let msg = SmsgSpellFailure {
                 caster_guid,

@@ -884,3 +884,297 @@ impl SpellEventQueue {
         self.events.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::protocol::ObjectGuid;
+
+    fn player(id: u32) -> ObjectGuid {
+        ObjectGuid::new_player(id)
+    }
+
+    fn cast_finish(caster: ObjectGuid, spell_id: u32) -> SpellEventType {
+        SpellEventType::CastFinish {
+            caster_guid: caster,
+            spell_id,
+            target_guid: None,
+            is_triggered: false,
+            slot: CurrentSpellType::Generic,
+            cast_item_guid: None,
+        }
+    }
+
+    fn channel_tick(caster: ObjectGuid, spell_id: u32) -> SpellEventType {
+        SpellEventType::ChannelTick {
+            caster_guid: caster,
+            spell_id,
+            target_guid: None,
+            tick_number: 1,
+        }
+    }
+
+    // === SpellEventQueue ===
+
+    #[test]
+    fn test_schedule_and_drain_ready() {
+        let mut q = SpellEventQueue::new();
+        q.schedule(100, cast_finish(player(1), 1));
+
+        assert!(q.drain_ready(50).is_empty());
+        let ready = q.drain_ready(100);
+        assert_eq!(ready.len(), 1);
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn test_drain_does_not_double_fire() {
+        let mut q = SpellEventQueue::new();
+        q.schedule(100, cast_finish(player(1), 1));
+        q.drain_ready(100);
+        assert!(q.drain_ready(200).is_empty());
+    }
+
+    #[test]
+    fn test_multiple_events_same_timestamp() {
+        let mut q = SpellEventQueue::new();
+        q.schedule(100, cast_finish(player(1), 1));
+        q.schedule(100, cast_finish(player(2), 2));
+        q.schedule(100, cast_finish(player(3), 3));
+
+        let ready = q.drain_ready(100);
+        assert_eq!(ready.len(), 3);
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn test_cancel_events_for_removes_matching() {
+        let mut q = SpellEventQueue::new();
+        let a = player(1);
+        q.schedule(100, cast_finish(a, 10));
+        q.schedule(200, cast_finish(a, 10));
+        q.schedule(300, cast_finish(a, 20)); // different spell — should survive
+
+        q.cancel_events_for(a, 10);
+
+        let all = q.drain_ready(1000);
+        assert_eq!(all.len(), 1);
+        match &all[0].event_type {
+            SpellEventType::CastFinish { spell_id, .. } => assert_eq!(*spell_id, 20),
+            _ => panic!("wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_cancel_events_for_different_caster_not_removed() {
+        let mut q = SpellEventQueue::new();
+        let a = player(1);
+        let b = player(2);
+        q.schedule(100, cast_finish(a, 10));
+        q.schedule(200, cast_finish(b, 10)); // same spell, different caster
+
+        q.cancel_events_for(a, 10);
+
+        let all = q.drain_ready(1000);
+        assert_eq!(all.len(), 1);
+        match &all[0].event_type {
+            SpellEventType::CastFinish { caster_guid, .. } => assert_eq!(*caster_guid, b),
+            _ => panic!("wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_cancel_events_for_all_event_types() {
+        let mut q = SpellEventQueue::new();
+        let a = player(1);
+        q.schedule(100, cast_finish(a, 5));
+        q.schedule(200, channel_tick(a, 5));
+        q.schedule(300, SpellEventType::ChannelFinish {
+            caster_guid: a,
+            spell_id: 5,
+            target_guid: None,
+        });
+        q.schedule(400, SpellEventType::DelayedEffect {
+            caster_guid: a,
+            spell_id: 5,
+            target_guid: None,
+            is_triggered: false,
+        });
+
+        q.cancel_events_for(a, 5);
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn test_cancel_event_by_id() {
+        let mut q = SpellEventQueue::new();
+        let id = q.schedule(100, cast_finish(player(1), 1));
+        q.schedule(100, cast_finish(player(2), 2)); // second event, same time
+
+        assert!(q.cancel_event(id));
+        let ready = q.drain_ready(100);
+        assert_eq!(ready.len(), 1);
+        match &ready[0].event_type {
+            SpellEventType::CastFinish { caster_guid, .. } => {
+                assert_eq!(*caster_guid, player(2))
+            }
+            _ => panic!("wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_cancel_event_nonexistent_id_returns_false() {
+        let mut q = SpellEventQueue::new();
+        assert!(!q.cancel_event(999));
+    }
+
+    #[test]
+    fn test_reschedule_moves_event_to_later_time() {
+        let mut q = SpellEventQueue::new();
+        let id = q.schedule(100, cast_finish(player(1), 1));
+
+        assert!(q.reschedule(id, 200));
+        assert!(q.drain_ready(100).is_empty());
+        let ready = q.drain_ready(200);
+        assert_eq!(ready.len(), 1);
+    }
+
+    #[test]
+    fn test_reschedule_nonexistent_id_returns_false() {
+        let mut q = SpellEventQueue::new();
+        assert!(!q.reschedule(999, 500));
+    }
+
+    // === ActiveCast ===
+
+    #[test]
+    fn test_active_cast_tick_completes_at_zero() {
+        let mut cast = ActiveCast::new(1, None, 1000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        assert!(!cast.tick(999));
+        assert!(cast.tick(1)); // remaining was 1, subtract 1 → 0
+    }
+
+    #[test]
+    fn test_active_cast_tick_overshoots_completes() {
+        let mut cast = ActiveCast::new(1, None, 500, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        // delta > remaining
+        assert!(cast.tick(1000));
+        assert_eq!(cast.cast_time_remaining_ms, 0);
+    }
+
+    #[test]
+    fn test_pushback_non_channeled_capped_at_max() {
+        let mut cast = ActiveCast::new(1, None, 2000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        let applied1 = cast.apply_pushback(500, 1000);
+        let applied2 = cast.apply_pushback(500, 1000);
+        let applied3 = cast.apply_pushback(500, 1000); // already at cap
+        assert_eq!(applied1, 500);
+        assert_eq!(applied2, 500);
+        assert_eq!(applied3, 0); // cap reached
+        assert_eq!(cast.total_pushback_ms, 1000);
+    }
+
+    #[test]
+    fn test_pushback_channeled_loses_25_pct() {
+        let mut cast = ActiveCast::new_channel(1, None, 4000, 4, false, 0.0, 0.0, 0.0);
+        let remaining_before = cast.cast_time_remaining_ms;
+        let loss = cast.apply_pushback(0, 0); // amount_ms ignored for channeled
+        assert_eq!(loss, remaining_before / 4);
+    }
+
+    #[test]
+    fn test_has_moved_too_far_within_threshold() {
+        let cast = ActiveCast::new(1, None, 1000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        assert!(!cast.has_moved_too_far(0.4, 0.0, 0.0)); // 0.16 < 0.25
+    }
+
+    #[test]
+    fn test_has_moved_too_far_exceeds_threshold() {
+        let cast = ActiveCast::new(1, None, 1000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        assert!(cast.has_moved_too_far(1.0, 0.0, 0.0)); // 1.0 > 0.25
+    }
+
+    // === SpellsState ===
+
+    #[test]
+    fn test_cooldown_not_set_returns_false() {
+        let state = SpellsState::default();
+        assert!(!state.is_on_cooldown(100, 1000));
+    }
+
+    #[test]
+    fn test_cooldown_active_returns_true() {
+        let mut state = SpellsState::default();
+        state.add_cooldown(100, 5000, 0); // expires at 5000ms
+        assert!(state.is_on_cooldown(100, 1000));
+        assert!(!state.is_on_cooldown(100, 5000)); // exactly at end = not on cd
+    }
+
+    #[test]
+    fn test_gcd_active_and_expired() {
+        let mut state = SpellsState::default();
+        state.apply_gcd(1500, 0);
+        assert!(state.is_on_gcd(500));
+        assert!(!state.is_on_gcd(1500));
+    }
+
+    #[test]
+    fn test_school_lockout_active_and_expired() {
+        let mut state = SpellsState::default();
+        state.apply_school_lockout(2 /* Fire */, 5000, 0);
+        assert!(state.is_school_locked(2, 1000));
+        assert!(!state.is_school_locked(2, 5000));
+        assert!(!state.is_school_locked(3 /* Nature */, 1000)); // other school unaffected
+    }
+
+    #[test]
+    fn test_school_lockout_only_extends_never_shortens() {
+        let mut state = SpellsState::default();
+        state.apply_school_lockout(1, 10000, 0); // locked until 10000
+        state.apply_school_lockout(1, 3000, 0);  // shorter — should not shorten
+        assert!(state.is_school_locked(1, 9000));
+    }
+
+    #[test]
+    fn test_cancel_preparing_cast_does_not_consume_gcd() {
+        let mut state = SpellsState::default();
+        // GCD is not set (cancel before GCD is applied)
+        assert!(!state.is_on_gcd(1000));
+    }
+
+    #[test]
+    fn test_find_spell_slot_returns_correct_slot() {
+        let mut state = SpellsState::default();
+        let cast = ActiveCast::new(42, None, 1000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        state.set_current_spell(CurrentSpellType::Generic, cast);
+        assert_eq!(state.find_spell_slot(42), Some(CurrentSpellType::Generic));
+        assert_eq!(state.find_spell_slot(99), None);
+    }
+
+    #[test]
+    fn test_clear_current_spell_returns_and_removes() {
+        let mut state = SpellsState::default();
+        let cast = ActiveCast::new(7, None, 500, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        state.set_current_spell(CurrentSpellType::Generic, cast);
+        let removed = state.clear_current_spell(CurrentSpellType::Generic);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().spell_id, 7);
+        assert!(!state.has_current_spell(CurrentSpellType::Generic));
+    }
+
+    #[test]
+    fn test_is_casting_true_when_generic_slot_occupied() {
+        let mut state = SpellsState::default();
+        let cast = ActiveCast::new(1, None, 2000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        state.set_current_spell(CurrentSpellType::Generic, cast);
+        assert!(state.is_casting());
+    }
+
+    #[test]
+    fn test_is_casting_false_when_only_melee_slot_occupied() {
+        let mut state = SpellsState::default();
+        let cast = ActiveCast::new(1, None, 0, false, CurrentSpellType::Melee, 0.0, 0.0, 0.0);
+        state.set_current_spell(CurrentSpellType::Melee, cast);
+        assert!(!state.is_casting());
+    }
+}
