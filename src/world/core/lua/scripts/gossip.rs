@@ -80,6 +80,23 @@ impl LuaGossipScript {
         })
     }
 
+    /// Called to override the quest dialog status for this NPC.
+    /// Returns Some(status) if the script overrides the status (0-7 valid range),
+    /// None if no override (let relation-based computation handle it).
+    /// Matches C++ sScriptMgr.GetDialogStatus behaviour.
+    pub fn get_dialog_status(&self, lua: &Lua, player: &PlayerSnapshot) -> Option<u32> {
+        let table = self.get_script_table(lua)?;
+        let func: Function = table.get("OnDialogStatus").ok()?;
+        let input = player.to_lua_table(lua).ok()?;
+        let result: u32 = func.call((table.clone(), input)).ok()?;
+        // C++ convention: values 0..=7 are direct override, >7 = fallback
+        if result <= 7 {
+            Some(result)
+        } else {
+            None
+        }
+    }
+
     /// Check if a specific callback is defined in the script.
     pub fn has_callback(&self, lua: &Lua, callback: &str) -> bool {
         if let Some(table) = self.get_script_table(lua) {

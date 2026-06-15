@@ -93,14 +93,69 @@ impl QuestSystem {
     }
 
     /// Calculate quest giver status for a concrete creature or gameobject GUID.
+    ///
+    /// Follows C++ ordering: script GetDialogStatus first (values 0-7 override),
+    /// then falls back to relation-based status computation.
     pub fn get_quest_giver_status_for_guid(
         &self,
         quest_giver_guid: ObjectGuid,
         player_guid: ObjectGuid,
         world: &World,
     ) -> Option<DialogStatus> {
-        let (_, start_quests, finish_quests) =
+        // Step 1: Resolve questgiver type to get entry
+        let (entry, start_quests, finish_quests) =
             self.quest_giver_relations(quest_giver_guid, world)?;
+
+        // Step 2: Script first chance — Lua OnDialogStatus overrides relation status
+        // Values 0-7 from script override directly; >7 = fallback
+        if let Some(script) = world.managers.lua_mgr.get_gossip_script(entry) {
+            let player_snap = build_player_snapshot(player_guid, world);
+            let script_status: Option<u32> = world.managers.lua_mgr.with_lua(|lua| {
+                script.get_dialog_status(lua, &player_snap)
+            });
+            if let Some(status) = script_status {
+                if status <= 7 {
+                    return Some(match status {
+                        0 => DialogStatus::None,
+                        1 => DialogStatus::Unavailable,
+                        2 => DialogStatus::Chat,
+                        3 => DialogStatus::Incomplete,
+                        4 => DialogStatus::RewardRep,
+                        5 => DialogStatus::Available,
+                        6 => DialogStatus::RewardOld,
+                        7 => DialogStatus::Reward2,
+                        _ => unreachable!(),
+                    });
+                }
+            }
+        }
+
+        // Also try gameobject script for GO questgivers
+        if quest_giver_guid.is_game_object() {
+            if let Some(script) = world.managers.lua_mgr.get_game_object_script(entry) {
+                let player_snap = build_player_snapshot(player_guid, world);
+                let script_status: Option<u32> = world.managers.lua_mgr.with_lua(|lua| {
+                    script.get_dialog_status(lua, &player_snap)
+                });
+                if let Some(status) = script_status {
+                    if status <= 7 {
+                        return Some(match status {
+                            0 => DialogStatus::None,
+                            1 => DialogStatus::Unavailable,
+                            2 => DialogStatus::Chat,
+                            3 => DialogStatus::Incomplete,
+                            4 => DialogStatus::RewardRep,
+                            5 => DialogStatus::Available,
+                            6 => DialogStatus::RewardOld,
+                            7 => DialogStatus::Reward2,
+                            _ => unreachable!(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Step 3: Fallback to relation-based status computation
 
         Some(self.get_quest_giver_status_from_relations(
             player_guid,
@@ -120,15 +175,15 @@ impl QuestSystem {
         let mut status = DialogStatus::None;
 
         // Get player quest info
-        let (active_quests, rewarded_quests) = self
+        let (active_quests, rewarded_quests, player_level) = self
             .player_mgr
             .get_player(player_guid)
             .map(|p| {
                 let active: HashSet<u32> = p.active_quests.iter().map(|q| q.quest_id).collect();
                 let rewarded: HashSet<u32> = p.rewarded_quests.iter().copied().collect();
-                (active, rewarded)
+                (active, rewarded, p.level)
             })
-            .unwrap_or_default();
+            .unwrap_or_else(|| (HashSet::new(), HashSet::new(), 0));
 
         // Priority 1: Check completable quests (higher priority)
         for &quest_id in &finish_quests {
@@ -184,7 +239,16 @@ impl QuestSystem {
 
             // Check if can take
             if self.can_take_quest(player_guid, &quest, world) {
-                status = status.max(DialogStatus::Available);
+                let hide_diff = world.config.quest_low_level_hide_diff;
+                if hide_diff > 0
+                    && quest.quest_level > 0
+                    && (player_level as u32) > quest.quest_level
+                    && (player_level as u32) - quest.quest_level >= hide_diff
+                {
+                    status = status.max(DialogStatus::Chat);
+                } else {
+                    status = status.max(DialogStatus::Available);
+                }
             } else {
                 status = status.max(DialogStatus::Unavailable);
             }
@@ -2875,6 +2939,7 @@ mod tests {
     use crate::shared::protocol::{ObjectGuid, Position};
     use crate::world::config::Config;
     use crate::world::game::creature::{Creature, CreatureTemplate};
+    use crate::world::game::creature::ai::NPC_FLAG_QUEST_GIVER;
     use crate::world::game::gameobject::{GameObject, GameObjectTemplate};
     use crate::world::game::player::Player;
     use sqlx::mysql::MySqlPoolOptions;
@@ -3123,6 +3188,364 @@ mod tests {
                 &world,
             ),
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn low_level_hidden_quest_returns_chat() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, 0x00000002);
+        add_player(&world, player_guid, 60);
+
+        // Enable low-level hiding: diff=10 means quests 10+ levels below player show as Chat
+        Arc::make_mut(&mut world.config).quest_low_level_hide_diff = 10;
+
+        let mut quest = test_quest(1);
+        quest.quest_level = 40; // player is 60, diff = 20 >= 10 → Chat
+        quest.min_level = 35;
+        world.systems.quest.manager.add_quest_template(quest);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(100, 1);
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Chat)
+        );
+    }
+
+    #[tokio::test]
+    async fn low_level_quest_below_hide_threshold_returns_available() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, 0x00000002);
+        add_player(&world, player_guid, 60);
+
+        // Enable low-level hiding: diff=10, quest at lv 55 → diff=5 < 10 → still Available
+        Arc::make_mut(&mut world.config).quest_low_level_hide_diff = 10;
+
+        let mut quest = test_quest(1);
+        quest.quest_level = 55; // player is 60, diff = 5 < 10 → Available
+        quest.min_level = 50;
+        world.systems.quest.manager.add_quest_template(quest);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(100, 1);
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Available)
+        );
+    }
+
+    #[tokio::test]
+    async fn low_level_quest_hide_disabled_returns_available() {
+        let world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, 0x00000002);
+        add_player(&world, player_guid, 60);
+
+        // hide_diff defaults to 0 → disabled, should show Available
+        let mut quest = test_quest(1);
+        quest.quest_level = 1;
+        quest.min_level = 1;
+        world.systems.quest.manager.add_quest_template(quest);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(100, 1);
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Available)
+        );
+    }
+
+    // --- Script dialog status override tests ---
+
+    /// Register a Lua gossip script table for testing.
+    /// The `on_dialog_status` closure receives (script_table, player_table) and returns a u32.
+    fn register_test_gossip_script(
+        world: &World,
+        entry: u32,
+        on_dialog_status: impl Fn(mlua::Table, mlua::Table) -> mlua::Result<u32> + 'static,
+    ) {
+        world.managers.lua_mgr.with_lua(|lua| {
+            let table = lua.create_table().unwrap();
+            let func = lua.create_function(move |_, (t, p): (mlua::Table, mlua::Table)| {
+                on_dialog_status(t, p)
+            }).unwrap();
+            table.set("OnDialogStatus", func).unwrap();
+            world.managers.lua_mgr.register_gossip_script_table(entry, table);
+            Ok::<_, mlua::Error>(())
+        });
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_overrides_to_none() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // Register a script that returns None (0) – should override even though quest is available
+        let mut quest = test_quest(1);
+        quest.quest_level = 1;
+        quest.min_level = 1;
+        world.systems.quest.manager.add_quest_template(quest);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(100, 1);
+
+        register_test_gossip_script(&world, 100, |_, _| Ok(0u32));
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::None)
+        );
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_overrides_to_available() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // No quests registered – relation status would be None, but script says Available (5)
+        register_test_gossip_script(&world, 100, |_, _| Ok(5u32));
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Available)
+        );
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_overrides_to_unavailable() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // Register available quest + script that says Unavailable (1) – script wins
+        let mut quest = test_quest(1);
+        quest.quest_level = 1;
+        quest.min_level = 1;
+        world.systems.quest.manager.add_quest_template(quest);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(100, 1);
+
+        register_test_gossip_script(&world, 100, |_, _| Ok(1u32));
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Unavailable)
+        );
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_fallback_on_greater_than_7() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // Script returns 99 (>7) – should fall through to relation status
+        let mut quest = test_quest(1);
+        quest.quest_level = 1;
+        quest.min_level = 1;
+        world.systems.quest.manager.add_quest_template(quest);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(100, 1);
+
+        register_test_gossip_script(&world, 100, |_, _| Ok(99u32));
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Available)
+        );
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_script_without_callback_does_not_override() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // Register a gossip script table WITHOUT OnDialogStatus – should not override
+        world.managers.lua_mgr.with_lua(|lua| {
+            let table = lua.create_table().unwrap();
+            // No OnDialogStatus set
+            world.managers.lua_mgr.register_gossip_script_table(100, table);
+            Ok::<_, mlua::Error>(())
+        });
+
+        let mut quest = test_quest(1);
+        quest.quest_level = 1;
+        quest.min_level = 1;
+        world.systems.quest.manager.add_quest_template(quest);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(100, 1);
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Available)
+        );
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_reward2_via_script() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // Script returns Reward2 (7) – highest status
+        register_test_gossip_script(&world, 100, |_, _| Ok(7u32));
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Reward2)
+        );
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_reward_rep_via_script() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // Script returns RewardRep (4)
+        register_test_gossip_script(&world, 100, |_, _| Ok(4u32));
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::RewardRep)
+        );
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_incomplete_via_script() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // Script returns Incomplete (3)
+        register_test_gossip_script(&world, 100, |_, _| Ok(3u32));
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Incomplete)
+        );
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_chat_via_script() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // Script returns Chat (2)
+        register_test_gossip_script(&world, 100, |_, _| Ok(2u32));
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Chat)
+        );
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_reward_old_via_script() {
+        let mut world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // Script returns RewardOld (6)
+        register_test_gossip_script(&world, 100, |_, _| Ok(6u32));
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::RewardOld)
+        );
+    }
+
+    #[tokio::test]
+    async fn script_dialog_status_no_script_does_not_override() {
+        let world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, NPC_FLAG_QUEST_GIVER);
+        add_player(&world, player_guid, 60);
+
+        // No script registered for entry 100 – should use relation status (None with no quests)
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::None)
         );
     }
 }

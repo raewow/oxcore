@@ -222,6 +222,21 @@ impl LuaScriptManager {
         }
     }
 
+    /// Register a gossip script table directly (used by tests).
+    /// This is the Rust equivalent of calling `RegisterGossipScript(entry, script_table)` in Lua.
+    pub fn register_gossip_script_table(&self, entry: u32, script_table: mlua::Table) {
+        let key = format!("gossip_{}", entry);
+        let lua = self.lua.read();
+        let _ = lua.set_named_registry_value(&key, script_table);
+        self.registry.gossip.write().insert(
+            entry,
+            super::api::ScriptEntry {
+                name: key,
+                file_path: String::new(),
+            },
+        );
+    }
+
     /// Check if an area trigger script exists for the given trigger ID.
     pub fn has_area_trigger_script(&self, trigger_id: u32) -> bool {
         self.registry.area_trigger.read().contains_key(&trigger_id)

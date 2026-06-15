@@ -14,6 +14,7 @@ use crate::world::core::session::WorldSession;
 use crate::world::game::creature::ai::{is_hostile_faction, is_npc, NPC_FLAG_QUEST_GIVER};
 use crate::world::game::common::player_constants::get_faction_for_race;
 use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
+use crate::world::game::player::spells::state::CurrentSpellType;
 use crate::world::World;
 
 /// Handle CMSG_QUESTGIVER_STATUS_QUERY (0x182)
@@ -232,8 +233,43 @@ pub async fn handle_questgiver_hello(
         }
     }
 
-    // TODO: Interrupt interacting spells and remove interacting auras
-    // (requires aura/spell interrupt primitives not yet ported)
+    // --- Interacting spells/auras cleanup ---
+    // Matches vmangos HandleQuestgiverHelloOpcode:
+    //   pPlayer->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_QUEST | AURA_INTERRUPT_FLAG_SPEECH)
+    //   pPlayer->InterruptSpellsWithChannelFlags(AURA_INTERRUPT_FLAG_QUEST | AURA_INTERRUPT_FLAG_SPEECH)
+    const INTERACT_INTERRUPT_FLAGS: u32 = 0x00000C00; // TALK (0x400) | USE (0x800)
+
+    world
+        .systems
+        .auras
+        .remove_auras_with_interrupt_flag(player_guid, INTERACT_INTERRUPT_FLAGS, world)
+        .await?;
+
+    {
+        let should_interrupt_channel = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                player
+                    .spells
+                    .get_current_spell(CurrentSpellType::Channeled)
+                    .and_then(|cast| {
+                        world
+                            .managers
+                            .spell_mgr
+                            .get(cast.spell_id)
+                            .filter(|entry| {
+                                (entry.channel_interrupt_flags & INTERACT_INTERRUPT_FLAGS) != 0
+                            })
+                    })
+                    .is_some()
+            })
+            .unwrap_or(false);
+        if should_interrupt_channel {
+            world.systems.spells.cancel_cast(player_guid, world).await?;
+        }
+    }
 
     // Lua OnGossipHello first chance
     if let Some(script) = world.managers.lua_mgr.get_gossip_script(entry) {
@@ -1255,5 +1291,205 @@ mod tests {
             .with_creature_mut(npc_guid, |c| c.movement_paused)
             .expect("creature should exist");
         assert!(!paused, "civilian creature movement should not be paused");
+    }
+
+    // --- Aura/Spell interrupt tests ---
+
+    const CHANNELED_SPELL_ID: u32 = 9999;
+    const INTERACT_INTERRUPT_FLAGS: u32 = 0x00000C00; // TALK | USE
+
+    fn make_channeled_spell(channel_interrupt_flags: u32) -> crate::world::dbc::structures::SpellEntry {
+        crate::world::dbc::structures::SpellEntry {
+            id: CHANNELED_SPELL_ID,
+            name: "Test Channel".to_string(),
+            rank_text: String::new(),
+            school: 0,
+            category: 0,
+            dispel: 0,
+            mechanic: 0,
+            attributes: 0,
+            attributes_ex: 0,
+            attributes_ex2: 0,
+            attributes_ex3: 0,
+            attributes_ex4: 0,
+            stances: 0,
+            stances_not: 0,
+            targets: 0,
+            target_creature_type: 0,
+            requires_spell_focus: 0,
+            caster_aura_state: 0,
+            target_aura_state: 0,
+            casting_time_index: 0,
+            recovery_time: 0,
+            category_recovery_time: 0,
+            interrupt_flags: 0,
+            aura_interrupt_flags: 0,
+            channel_interrupt_flags,
+            proc_flags: 0,
+            proc_chance: 0,
+            proc_charges: 0,
+            max_level: 0,
+            base_level: 0,
+            spell_level: 0,
+            duration_index: 0,
+            power_type: 0,
+            mana_cost: 0,
+            mana_cost_per_level: 0,
+            mana_per_second: 0,
+            mana_per_second_per_level: 0,
+            range_index: 0,
+            speed: 0.0,
+            stack_amount: 0,
+            totem: [0; 2],
+            reagent: [0; 8],
+            reagent_count: [0; 8],
+            equipped_item_class: 0,
+            equipped_item_sub_class_mask: 0,
+            equipped_item_inventory_type_mask: 0,
+            effect: [0; 3],
+            effect_die_sides: [0; 3],
+            effect_base_dice: [0; 3],
+            effect_dice_per_level: [0.0; 3],
+            effect_real_points_per_level: [0.0; 3],
+            effect_base_points: [0; 3],
+            effect_bonus_coefficient: [0.0; 3],
+            effect_mechanic: [0; 3],
+            effect_implicit_target_a: [0; 3],
+            effect_implicit_target_b: [0; 3],
+            effect_radius_index: [0; 3],
+            effect_apply_aura_name: [0; 3],
+            effect_amplitude: [0; 3],
+            effect_multiple_value: [0.0; 3],
+            effect_chain_target: [0; 3],
+            effect_item_type: [0; 3],
+            effect_misc_value: [0; 3],
+            effect_trigger_spell: [0; 3],
+            effect_points_per_combo_point: [0.0; 3],
+            spell_visual: 0,
+            spell_icon_id: 0,
+            active_icon_id: 0,
+            spell_priority: 0,
+            min_target_level: 0,
+            mana_cost_percentage: 0,
+            start_recovery_category: 0,
+            start_recovery_time: 0,
+            max_target_level: 0,
+            spell_family_name: 0,
+            spell_family_flags: 0,
+            max_affected_targets: 0,
+            dmg_class: 0,
+            prevention_type: 0,
+            custom: 0,
+            internal: 0,
+            allowed_target_mask: 0,
+            script_id: 0,
+            dmg_multiplier: [1.0; 3],
+        }
+    }
+
+    fn add_channeled_cast(world: &mut crate::world::World, player_guid: ObjectGuid, spell_id: u32) {
+        let cast = crate::world::game::player::spells::state::ActiveCast::new_channel(
+            spell_id,
+            None,
+            10_000,
+            10,
+            false,
+            0.0,
+            0.0,
+            0.0,
+        );
+        world.managers.player_mgr.with_player_mut(player_guid, |player| {
+            player.spells.set_current_spell(
+                crate::world::game::player::spells::state::CurrentSpellType::Channeled,
+                cast,
+            );
+        });
+    }
+
+    fn has_channeled_cast(world: &crate::world::World, player_guid: ObjectGuid) -> bool {
+        world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| {
+                player
+                    .spells
+                    .get_current_spell(crate::world::game::player::spells::state::CurrentSpellType::Channeled)
+                    .is_some()
+            })
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn questgiver_hello_cancels_channeled_spell_with_matching_flags() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut _rx) = add_player(&mut world);
+        let player_guid = test_player_guid();
+        let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
+
+        // Register a channeled spell with matching interrupt flags
+        world.managers.spell_mgr.add_spell(make_channeled_spell(INTERACT_INTERRUPT_FLAGS));
+
+        // Give the player a channeled cast
+        add_channeled_cast(&mut world, player_guid, CHANNELED_SPELL_ID);
+        assert!(has_channeled_cast(&world, player_guid), "channel should be active before hello");
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        assert!(
+            !has_channeled_cast(&world, player_guid),
+            "channeled spell with matching interrupt flags should be cancelled after hello"
+        );
+    }
+
+    #[tokio::test]
+    async fn questgiver_hello_does_not_cancel_channeled_spell_without_matching_flags() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut _rx) = add_player(&mut world);
+        let player_guid = test_player_guid();
+        let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
+
+        // Register a channeled spell with NON-matching interrupt flags (DAMAGE flag = 0x2)
+        world.managers.spell_mgr.add_spell(make_channeled_spell(0x2));
+
+        // Give the player a channeled cast
+        add_channeled_cast(&mut world, player_guid, CHANNELED_SPELL_ID);
+        assert!(has_channeled_cast(&world, player_guid), "channel should be active before hello");
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        assert!(
+            has_channeled_cast(&world, player_guid),
+            "channeled spell without matching interrupt flags should still be active after hello"
+        );
+    }
+
+    #[tokio::test]
+    async fn questgiver_hello_no_channeled_spell_does_not_error() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut _rx) = add_player(&mut world);
+        let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
+
+        // No channeled spell set up on the player
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(npc_guid);
+
+        // Handler should succeed without error even with no channel to cancel
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed even with no active channel");
     }
 }

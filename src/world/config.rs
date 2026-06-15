@@ -168,6 +168,10 @@ pub struct Config {
     #[serde(default)]
     pub no_respec_price_decay: Option<bool>, // Disable price decay over time (default: false)
 
+    // Quest System Settings
+    #[serde(default = "default_quest_low_level_hide_diff")]
+    pub quest_low_level_hide_diff: u32, // Hide quest giver icons for quests below this level diff (0=disabled)
+
     // Talent Rate Settings
     #[serde(default = "default_rate_talent")]
     pub rate_talent: Option<f32>, // Talent point earning rate multiplier (default: 1.0)
@@ -378,6 +382,10 @@ fn default_realm_heartbeat_interval() -> u64 {
     30
 }
 
+fn default_quest_low_level_hide_diff() -> u32 {
+    0 // Disabled by default (all quests show available/trivial icons)
+}
+
 impl Config {
     /// Load configuration from a TOML file
     pub fn from_file(path: &str) -> Result<Self> {
@@ -457,6 +465,7 @@ impl Default for Config {
             respec_min_multiplier: default_respec_min_multiplier(),
             respec_max_multiplier: default_respec_max_multiplier(),
             no_respec_price_decay: None,
+            quest_low_level_hide_diff: default_quest_low_level_hide_diff(),
             rate_talent: default_rate_talent(),
             default_shutdown_timer: default_shutdown_timer(),
             min_petition_signs: default_min_petition_signs(),

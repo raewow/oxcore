@@ -90,6 +90,7 @@ async fn main() -> Result<()> {
     world_config.log_file = config.log_file.clone();
     world_config.logs_dir = config.logs_dir.clone();
     world_config.realm_heartbeat_interval = config.realm_heartbeat_interval;
+    world_config.quest_low_level_hide_diff = config.quest_low_level_hide_diff;
     world_config.realm_id = config.realm_id;
     world_config.realm_name = config.realm_name.clone();
     let world_config_for_start = world_config.clone();

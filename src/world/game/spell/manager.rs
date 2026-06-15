@@ -207,6 +207,11 @@ impl SpellManager {
     }
 
     /// Search spells by name (case-insensitive substring match)
+    /// Insert a spell entry (used by tests)
+    pub fn add_spell(&self, entry: SpellEntry) {
+        self.spells.insert(entry.id, Arc::new(entry));
+    }
+
     pub fn search_by_name(&self, search: &str) -> Vec<Arc<SpellEntry>> {
         let search_lower = search.to_lowercase();
         let mut results: Vec<Arc<SpellEntry>> = self
