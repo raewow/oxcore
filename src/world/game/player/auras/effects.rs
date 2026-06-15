@@ -166,6 +166,9 @@ pub fn is_stat_modifier_aura(aura_type: u32) -> bool {
             | AURA_MOD_INCREASE_ENERGY_PERCENT
             | AURA_MOD_MELEE_HASTE
             | AURA_MOD_RANGED_HASTE
+            | AURA_MOD_POWER_REGEN
+            | AURA_MOD_POWER_REGEN_PERCENT
+            | AURA_MOD_MANA_REGEN_INTERRUPT
             | AURA_MOD_DAMAGE_PERCENT_TAKEN
             | AURA_MOD_CASTING_SPEED_NOT_STACK
             | AURA_MOD_INCREASE_SPEED

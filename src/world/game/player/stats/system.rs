@@ -296,11 +296,38 @@ impl StatsSystem {
             player.stats.max_ranged_damage = 0.0;
 
             // 13. Mana regen
-            player.stats.mana_regen_base = derived::mana_regen_from_spirit(class, spirit);
-            let aura_mana_regen_interrupt = player.auras.container.get_total_aura_modifier(
-                crate::world::game::player::auras::effects::AURA_MOD_MANA_REGEN_INTERRUPT,
-            ) as f32;
-            player.stats.mana_regen_interrupt = aura_mana_regen_interrupt;
+            {
+                use crate::world::game::player::auras::effects::{
+                    AURA_MOD_MANA_REGEN_INTERRUPT, AURA_MOD_POWER_REGEN,
+                    AURA_MOD_POWER_REGEN_PERCENT,
+                };
+
+                let spirit_regen = derived::mana_regen_from_spirit(class, spirit);
+                let regen_percent_bonus = player
+                    .auras
+                    .container
+                    .get_total_aura_modifier(AURA_MOD_POWER_REGEN_PERCENT)
+                    as f32;
+                let flat_mp5 = player
+                    .auras
+                    .container
+                    .get_total_aura_modifier_by_misc(AURA_MOD_POWER_REGEN, 0)
+                    as f32;
+                let interrupt_percent = player
+                    .auras
+                    .container
+                    .get_total_aura_modifier(AURA_MOD_MANA_REGEN_INTERRUPT)
+                    as f32;
+                let (full_regen, interrupt_regen) = derived::calculate_mana_regen_rates(
+                    spirit_regen,
+                    regen_percent_bonus,
+                    flat_mp5,
+                    interrupt_percent,
+                );
+
+                player.stats.mana_regen_base = full_regen;
+                player.stats.mana_regen_interrupt = interrupt_regen;
+            }
 
             player.stats.dirty = true;
         });

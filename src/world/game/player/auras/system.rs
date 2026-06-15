@@ -624,6 +624,8 @@ impl AuraSystem {
             let stat_modifier = create_stat_modifier(spell_id, aura_type, value, misc_value);
             if let Some(modifier) = stat_modifier {
                 self.apply_modifier(target_guid, modifier, world).await?;
+            } else {
+                world.systems.stats.recalculate_all(target_guid);
             }
         }
 

@@ -99,16 +99,6 @@ impl PowerSystem {
 
     /// Process one regen tick for a player
     fn regen_tick(&self, guid: ObjectGuid, player: &mut Player, now: u64) {
-        // Sum flat mana-per-tick from AURA_MOD_POWER_REGEN (85) auras (drinks, Blessing of Wisdom)
-        // misc_value 0 = Mana. Value is flat mana restored per 2-second tick.
-        let drink_regen: f32 = player
-            .auras
-            .container
-            .all_auras()
-            .filter(|a| a.aura_type == 85 && a.misc_value == 0)
-            .map(|a| a.current_value() as f32)
-            .sum();
-
         // Sync power max from stats (stats can change from gear/buffs at any time)
         player.power.max[PowerType::Mana as usize] = player.stats.max_mana;
 
@@ -120,16 +110,13 @@ impl PowerSystem {
                 // Check 5-second rule
                 power.spirit_regen_active = now >= power.last_mana_use_time + FIVE_SECOND_RULE_MS;
 
-                // Base mana regen (spirit + MP5 from gear)
-                let regen = regen::calculate_mana_regen_per_tick(
+                // StatsSystem precomputes aura-adjusted full and interrupt regen.
+                let mut total_regen = regen::calculate_mana_regen_per_tick(
                     stats.mana_regen_base,
-                    power.mp5_from_gear,
+                    stats.mana_regen_interrupt,
                     power.spirit_regen_active,
-                    power.casting_regen_pct,
                 );
-
-                // Drink regen is flat mana per tick, added on top (like legacy)
-                let total_regen = regen + drink_regen;
+                total_regen += power.mp5_from_gear * 2.0 / 5.0;
 
                 // Apply with accumulator for fractional amounts
                 power.regen_accumulator += total_regen;

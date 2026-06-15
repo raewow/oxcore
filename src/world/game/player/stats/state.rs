@@ -54,7 +54,9 @@ pub struct StatsState {
     pub min_ranged_damage: f32,
     pub max_ranged_damage: f32,
 
+    /// Full mana regeneration rate in mana per second.
     pub mana_regen_base: f32,
+    /// Mana regeneration rate while inside the 5-second rule, in mana per second.
     pub mana_regen_interrupt: f32,
 
     /// Set when stats need to be broadcast to client

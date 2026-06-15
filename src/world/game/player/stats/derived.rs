@@ -210,6 +210,25 @@ pub fn mana_regen_from_spirit(class: u8, spirit: f32) -> f32 {
     }
 }
 
+/// Final mana regeneration rates, expressed as mana per second.
+///
+/// `spirit_regen_per_5` is the spirit component before aura modifiers. `flat_mp5`
+/// is converted to mana per second before being added, matching the C++ flow.
+pub fn calculate_mana_regen_rates(
+    spirit_regen_per_5: f32,
+    regen_percent_bonus: f32,
+    flat_mp5: f32,
+    interrupt_percent: f32,
+) -> (f32, f32) {
+    let spirit_regen = spirit_regen_per_5 * (100.0 + regen_percent_bonus) / 100.0;
+    let flat_per_second = flat_mp5 / 5.0;
+    let spirit_per_second = spirit_regen / 5.0;
+    let full_regen = flat_per_second + spirit_per_second;
+    let interrupt_regen = flat_per_second + spirit_per_second * interrupt_percent / 100.0;
+
+    (full_regen.max(0.0), interrupt_regen.max(0.0))
+}
+
 // === Power Type ===
 
 /// Get power type for class (0=mana, 1=rage, 3=energy)
@@ -268,5 +287,13 @@ mod tests {
         assert_eq!(power_type_for_class(1), 1); // Warrior = rage
         assert_eq!(power_type_for_class(4), 3); // Rogue = energy
         assert_eq!(power_type_for_class(8), 0); // Mage = mana
+    }
+
+    #[test]
+    fn test_mana_regen_rates_include_percent_mp5_and_interrupt() {
+        let (full, interrupt) = calculate_mana_regen_rates(50.0, 20.0, 25.0, 30.0);
+
+        assert!((full - 17.0).abs() < 0.0001); // (50 * 1.2 / 5) + (25 / 5)
+        assert!((interrupt - 8.6).abs() < 0.0001); // (50 * 1.2 / 5 * 0.3) + (25 / 5)
     }
 }

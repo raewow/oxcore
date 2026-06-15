@@ -15,30 +15,22 @@
 /// - MP5 from gear/enchants always works regardless
 /// - Talents like Meditation allow a % of spirit regen to work while casting
 
-/// Calculate mana regen per tick (called every 2 seconds)
-/// spirit_regen: base mana regen from spirit (from StatsState.mana_regen_base)
-/// mp5: mana per 5 seconds from gear
-/// spirit_regen_active: whether 5-second rule allows spirit regen
-/// casting_regen_pct: % of spirit regen allowed while casting (0-100)
+/// Calculate mana regen per tick (called every 2 seconds).
+///
+/// `full_regen_per_second` and `interrupt_regen_per_second` are precomputed by
+/// StatsSystem from spirit, MP5 auras, and interrupt-percentage auras.
 pub fn calculate_mana_regen_per_tick(
-    spirit_regen: f32,
-    mp5: f32,
+    full_regen_per_second: f32,
+    interrupt_regen_per_second: f32,
     spirit_regen_active: bool,
-    casting_regen_pct: f32,
 ) -> f32 {
-    // MP5 always applies (converted to per-2-second tick)
-    let mp5_per_tick = mp5 * 2.0 / 5.0;
-
-    // Spirit regen component
-    let spirit_component = if spirit_regen_active {
-        // Full spirit regen (not casting or 5s elapsed)
-        spirit_regen * 2.0 / 5.0
+    let regen_per_second = if spirit_regen_active {
+        full_regen_per_second
     } else {
-        // Partial spirit regen while casting (from talents)
-        spirit_regen * 2.0 / 5.0 * (casting_regen_pct / 100.0)
+        interrupt_regen_per_second
     };
 
-    mp5_per_tick + spirit_component
+    regen_per_second.max(0.0) * 2.0
 }
 
 /// === RAGE MECHANICS ===
@@ -117,4 +109,19 @@ pub fn calculate_health_regen_per_tick(spirit: u32, level: u8) -> u32 {
     // Simplified: spirit * 0.5 per 2 seconds
     let regen = (spirit as f32 * 0.5).ceil() as u32;
     regen
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mana_regen_tick_uses_full_regen_outside_five_second_rule() {
+        assert_eq!(calculate_mana_regen_per_tick(12.5, 4.0, true), 25.0);
+    }
+
+    #[test]
+    fn mana_regen_tick_uses_interrupt_regen_inside_five_second_rule() {
+        assert_eq!(calculate_mana_regen_per_tick(12.5, 4.0, false), 8.0);
+    }
 }
