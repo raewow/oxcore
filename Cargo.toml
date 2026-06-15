@@ -111,5 +111,11 @@ default = []
 tokio-test = "0.4"
 mockall = "0.13"
 
+[profile.dev]
+opt-level = 1
+
+[profile.test]
+opt-level = 1
+
 [lints.rust]
 unused = "allow"
