@@ -219,7 +219,7 @@ impl QuestSystem {
             })
     }
 
-    fn quest_giver_can_start_or_finish(
+    pub fn quest_giver_can_start_or_finish(
         &self,
         quest_giver_guid: ObjectGuid,
         quest_id: u32,

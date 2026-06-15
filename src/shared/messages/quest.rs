@@ -818,4 +818,65 @@ mod tests {
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTUPDATE_ADD_KILL);
     }
+
+    #[test]
+    fn test_smsg_quest_query_response() {
+        let objectives_data = [
+            QuestObjectiveData {
+                creature_or_go_id: 7,
+                creature_or_go_count: 3,
+                item_id: 11,
+                item_count: 2,
+            },
+            QuestObjectiveData::default(),
+            QuestObjectiveData::default(),
+            QuestObjectiveData::default(),
+        ];
+        let objective_text = [
+            String::from("A"),
+            String::from("B"),
+            String::from("C"),
+            String::from("D"),
+        ];
+
+        let msg = SmsgQuestQueryResponseV2 {
+            quest_id: 123,
+            method: 2,
+            quest_level: 60,
+            zone_or_sort: -42,
+            quest_type: 81,
+            rep_objective_faction: 77,
+            rep_objective_value: -12,
+            next_quest_in_chain: 999,
+            rew_or_req_money: 555,
+            rew_money_max_level: 777,
+            rew_spell: 888,
+            src_item_id: 999,
+            quest_flags: QuestFlags::default(),
+            rew_item_id: [1, 2, 3, 4],
+            rew_item_count: [5, 6, 7, 8],
+            rew_choice_item_id: [9, 10, 11, 12, 13, 14],
+            rew_choice_item_count: [15, 16, 17, 18, 19, 20],
+            point_map_id: 21,
+            point_x: 1.5,
+            point_y: -2.5,
+            point_opt: 22,
+            title: "Quest title",
+            objectives: "Quest objectives",
+            details: "Quest details",
+            end_text: "Quest end",
+            objectives_data: objectives_data.clone(),
+            objective_text: &objective_text,
+        };
+
+        let packet = msg.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::SMSG_QUEST_QUERY_RESPONSE);
+        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 123);
+        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), 2);
+        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), 60);
+        assert_eq!(i32::from_le_bytes(packet.data()[12..16].try_into().unwrap()), -42);
+        assert_eq!(u32::from_le_bytes(packet.data()[16..20].try_into().unwrap()), 81);
+        assert_eq!(u32::from_le_bytes(packet.data()[20..24].try_into().unwrap()), 77);
+        assert_eq!(i32::from_le_bytes(packet.data()[24..28].try_into().unwrap()), -12);
+    }
 }

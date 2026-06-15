@@ -476,6 +476,9 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_QUESTGIVER_QUERY_QUEST => {
                     quest_handler::handle_questgiver_query_quest(session, packet, world).await?;
                 }
+                Opcode::CMSG_QUEST_QUERY => {
+                    quest_handler::handle_quest_query(session, packet, world).await?;
+                }
                 Opcode::CMSG_QUESTGIVER_ACCEPT_QUEST => {
                     quest_handler::handle_questgiver_accept_quest(session, packet, world).await?;
                 }
@@ -490,6 +493,9 @@ pub async fn dispatch_packet(
                 }
                 Opcode::CMSG_QUESTGIVER_CANCEL => {
                     quest_handler::handle_questgiver_cancel(session, packet, world).await?;
+                }
+                Opcode::CMSG_QUESTGIVER_QUEST_AUTOLAUNCH => {
+                    quest_handler::handle_questgiver_quest_auto_launch(session, packet, world).await?;
                 }
                 Opcode::CMSG_QUESTLOG_REMOVE_QUEST => {
                     quest_handler::handle_questlog_remove_quest(session, packet, world).await?;
