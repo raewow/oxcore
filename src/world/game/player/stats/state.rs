@@ -63,6 +63,32 @@ pub struct StatsState {
     pub dirty: bool,
 }
 
+impl StatsState {
+    /// Add `delta` to current health, clamping to [0, max_health]. Returns actual gain (negative = loss).
+    /// Matches C++ Unit::ModifyHealth — callers use the return value to decide broadcasts / death checks.
+    pub fn modify_health(&mut self, delta: i32) -> i32 {
+        if delta == 0 {
+            return 0;
+        }
+        let current = self.health as i32;
+        let val = current + delta;
+        if val <= 0 {
+            self.health = 0;
+            return -current;
+        }
+        let max = self.max_health as i32;
+        if val < max {
+            self.health = val as u32;
+            val - current
+        } else if current != max {
+            self.health = max as u32;
+            max - current
+        } else {
+            0
+        }
+    }
+}
+
 impl Default for StatsState {
     fn default() -> Self {
         Self {

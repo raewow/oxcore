@@ -554,6 +554,12 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_CANCEL_AURA => {
                     spells::handle_cancel_aura(session, packet, world).await?;
                 }
+                Opcode::CMSG_CANCEL_GROWTH_AURA => {
+                    spells::handle_cancel_growth_aura(session, packet, world).await?;
+                }
+                Opcode::CMSG_CANCEL_AUTO_REPEAT_SPELL => {
+                    spells::handle_cancel_auto_repeat_spell(session, packet, world).await?;
+                }
 
                 // Talent handlers
                 Opcode::CMSG_LEARN_TALENT => {

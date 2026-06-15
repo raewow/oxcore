@@ -205,6 +205,8 @@ impl SystemManager {
         let stats = Arc::new(StatsSystem::new(
             broadcast_mgr.clone(),
             player_mgr.clone(),
+            inventory.clone(),
+            item_mgr.clone(),
             world_pool,
         ));
 

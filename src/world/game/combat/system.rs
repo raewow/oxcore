@@ -208,17 +208,16 @@ impl CombatSystem {
         player_mgr: &PlayerManager,
     ) -> Result<()> {
         player_mgr.with_player_mut(target, |player| {
-            // Apply damage to health
             let current_health = player.stats.health;
-            let new_health = current_health.saturating_sub(damage);
-            player.stats.health = new_health;
+            let loss = player.stats.modify_health(-(damage as i32));
+            let new_health = player.stats.health;
 
             // Enter combat
             player.combat.enter_combat(target);
 
             debug!(
-                "Player {} took {} damage, health: {} -> {}",
-                target, damage, current_health, new_health
+                "Player {} took {} damage (actual={}), health: {} -> {}",
+                target, damage, -loss, current_health, new_health
             );
 
             // TODO: Broadcast health update

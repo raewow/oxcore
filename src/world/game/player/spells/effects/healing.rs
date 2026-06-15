@@ -62,26 +62,23 @@ pub async fn effect_heal(input: &EffectInput, world: &World) -> Result<EffectRes
 
     let heal_amount = final_heal as u32;
 
-    // Apply healing
+    // Apply healing via modify_health (clamps to max_health, returns actual gain).
     let healed = world
         .systems
         .player
         .manager()
         .with_player_mut(target_guid, |player| {
-            let max_heal = player.stats.max_health.saturating_sub(player.stats.health);
-            let actual_heal = heal_amount.min(max_heal);
-            player.stats.health += actual_heal;
-
+            let before = player.stats.health;
+            let gain = player.stats.modify_health(heal_amount as i32);
             tracing::debug!(
                 "Spell heal: {} healed for {} (crit: {}), health: {} -> {}",
                 player.name,
-                actual_heal,
+                gain,
                 is_crit,
-                player.stats.health - actual_heal,
+                before,
                 player.stats.health
             );
-
-            actual_heal
+            gain as u32
         })
         .unwrap_or(0);
 

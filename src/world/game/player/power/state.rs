@@ -75,6 +75,10 @@ pub struct PowerState {
     /// Percentage of spirit regen that works while casting
     /// From talents/auras like Meditation, Arcane Meditation
     pub casting_regen_pct: f32,
+
+    /// Fractional health regen carried between ticks (Player::m_carryHealthRegen).
+    /// Accumulates sub-integer regen so nothing is silently lost.
+    pub carry_health_regen: f32,
 }
 
 impl Default for PowerState {
@@ -90,6 +94,7 @@ impl Default for PowerState {
             is_drinking: false,
             mp5_from_gear: 0.0,
             casting_regen_pct: 0.0,
+            carry_health_regen: 0.0,
         }
     }
 }
@@ -157,5 +162,59 @@ impl PowerState {
     /// Set mana (convenience method)
     pub fn set_mana(&mut self, value: u32) {
         self.set_current(PowerType::Mana, value);
+    }
+
+    /// Add `delta` to current power, clamping to [0, max]. Returns the actual gain (negative = loss).
+    /// Matches C++ Unit::ModifyPower — callers use the return value to decide whether to broadcast.
+    pub fn modify_power(&mut self, power_type: PowerType, delta: i32) -> i32 {
+        if delta == 0 {
+            return 0;
+        }
+        let idx = power_type as usize;
+        let current = self.current[idx] as i32;
+        let val = current + delta;
+        if val <= 0 {
+            self.current[idx] = 0;
+            return -current;
+        }
+        let max = self.max[idx] as i32;
+        if val < max {
+            self.current[idx] = val as u32;
+            val - current
+        } else if current != max {
+            self.current[idx] = max as u32;
+            max - current
+        } else {
+            0
+        }
+    }
+
+    /// Switch the active power type (shapeshift / form change).
+    /// Resets current and max power for the new type per C++ Unit::SetPowerType.
+    /// The caller (system layer) is responsible for broadcasting UNIT_FIELD_BYTES_0.
+    pub fn set_power_type(&mut self, new_type: PowerType) {
+        use super::regen::{MAX_ENERGY, MAX_FOCUS, MAX_HAPPINESS, MAX_RAGE};
+        self.power_type = new_type;
+        match new_type {
+            PowerType::Mana => {
+                // Mana max/current are managed by StatsSystem — no reset here.
+            }
+            PowerType::Rage => {
+                self.max[PowerType::Rage as usize] = MAX_RAGE;
+                self.current[PowerType::Rage as usize] = 0;
+            }
+            PowerType::Focus => {
+                self.max[PowerType::Focus as usize] = MAX_FOCUS;
+                self.current[PowerType::Focus as usize] = MAX_FOCUS;
+            }
+            PowerType::Energy => {
+                self.max[PowerType::Energy as usize] = MAX_ENERGY;
+                self.current[PowerType::Energy as usize] = 0;
+            }
+            PowerType::Happiness => {
+                self.max[PowerType::Happiness as usize] = MAX_HAPPINESS;
+                self.current[PowerType::Happiness as usize] = MAX_HAPPINESS;
+            }
+        }
     }
 }

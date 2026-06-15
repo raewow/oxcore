@@ -81,6 +81,11 @@ pub const MAX_ENERGY: u32 = 100;
 pub const FOCUS_REGEN_PER_TICK: u32 = 24;
 pub const MAX_FOCUS: u32 = 100;
 
+/// === HAPPINESS MECHANICS (Hunter Pet) ===
+/// Internal happiness is in tenths of a point; the client shows 0–100 happiness bars
+/// mapping to three tiers: unhappy < 333333, content < 666666, happy = 1050000.
+pub const MAX_HAPPINESS: u32 = 1050000;
+
 /// === EATING/DRINKING ===
 ///
 /// Food/drink are auras that provide regeneration:
@@ -100,15 +105,24 @@ pub const MAX_FOCUS: u32 = 100;
 ///
 /// Note: Health regen is typically handled in the stats or combat system
 
-/// Calculate health regen per tick (2 seconds) from spirit
-/// This is a simplified formula - actual implementation may vary
-pub fn calculate_health_regen_per_tick(spirit: u32, level: u8) -> u32 {
-    if level == 0 {
-        return 0;
-    }
-    // Simplified: spirit * 0.5 per 2 seconds
-    let regen = (spirit as f32 * 0.5).ceil() as u32;
-    regen
+/// Calculate health regen per tick (2 seconds) from spirit.
+/// Matches C++ Player::GetRegenHPPerSpirit — coefficient scales with level.
+/// Returns f32 because callers use a carry accumulator for fractional amounts.
+pub fn calculate_health_regen_per_tick(spirit: u32, level: u8) -> f32 {
+    let hp_per_spirit: f32 = if level < 20 {
+        0.20
+    } else if level < 30 {
+        0.22
+    } else if level < 40 {
+        0.25
+    } else if level < 50 {
+        0.27
+    } else if level < 60 {
+        0.28
+    } else {
+        0.30
+    };
+    hp_per_spirit * spirit as f32
 }
 
 #[cfg(test)]

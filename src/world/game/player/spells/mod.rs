@@ -43,4 +43,11 @@ pub use state::{
     SpellModType, SpellSchool, SpellsState, NUM_SPELL_SCHOOLS,
 };
 pub use system::SpellSystem;
-pub use validation::{check_power, ignore_item_requirements, spell_cast_error_to_u8, validate_cast};
+pub use validation::{
+    can_open_lock, check_cast, check_caster_auras, check_items, check_pet_cast, check_power,
+    check_range, check_taming_spell, ignore_item_requirements, spell_cast_error_to_u8,
+    validate_cast, validate_explicit_target_mask, CasterAuraCheckInput, CastItemData,
+    CheckCastInput, CheckItemsInput, CheckPetCastInput, CheckRangeInput, ConsumableEffect,
+    ConsumableEffectKind, DisenchantData, EnchantItemData, LockEntry, LockEntrySlot,
+    OpenLockResult, PetTameFailure, RangedWeaponSubclass, WeaponDamageRangedData,
+};

@@ -155,15 +155,14 @@ impl EnvironmentSystem {
             return 0;
         }
 
-        // Clamp to current health so we don't report a bogus amount.
+        // Apply damage via modify_health which clamps to [0, max_health].
         let applied = world
             .systems
             .player
             .manager()
             .with_player_mut(player_guid, |player| {
-                let applied = amount.min(player.stats.health);
-                player.stats.health = player.stats.health.saturating_sub(applied);
-                applied
+                let loss = player.stats.modify_health(-(amount as i32));
+                (-loss) as u32
             })
             .unwrap_or(0);
 

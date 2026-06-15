@@ -305,10 +305,17 @@ pub const TARGET_FLAG_STRING: u32 = 0x2000;
 pub const TARGET_FLAG_CORPSE: u32 = 0x8000;
 /// Non-combat pet / dynamic unit target (packed GUID follows)
 pub const TARGET_FLAG_UNK2: u32 = 0x0100;
-/// PVP corpse target (packed GUID follows)
+/// PVP corpse / enemy corpse target (packed GUID follows)
 pub const TARGET_FLAG_PVP_CORPSE: u32 = 0x0200;
+pub const TARGET_FLAG_CORPSE_ENEMY: u32 = 0x0200;
 /// Object UNK (packed GUID follows)
 pub const TARGET_FLAG_OBJECT_UNK: u32 = 0x0080;
+/// Mini-pet unit target (packed GUID follows)
+pub const TARGET_FLAG_UNIT_MINIPET: u32 = 0x0400;
+/// Locked object (GO or item with a lock) target
+pub const TARGET_FLAG_LOCKED: u32 = 0x4000;
+/// Friendly corpse target (ally resurrection)
+pub const TARGET_FLAG_CORPSE_ALLY: u32 = 0x8000;
 
 /// Parsed spell cast targets from the client packet.
 ///
@@ -665,6 +672,51 @@ pub enum SpellCastError {
     NoComboPoints,
     /// Silent failure — cast silently rejected, client shows no error message
     DontReport,
+    /// Target or destination is out of spell range
+    OutOfRange,
+    /// Target is too close (minimum range not met)
+    TooClose,
+    /// Caster is not facing the target (SPELL_CUSTOM_FACE_TARGET or combat-range spells)
+    NotInFront,
+    /// Skill/level too low to open the lock or use the ability (SPELL_FAILED_LOW_CASTLEVEL)
+    LowCastLevel,
+    // ── CheckCast / CheckPetCast errors ───────────────────────────────────
+    NotStanding,
+    AffectingCombat,
+    OnlyStealthed,
+    OnlyOutdoors,
+    OnlyIndoors,
+    AuraBounced,
+    TargetNotDead,
+    HighLevel,
+    TargetAffectingCombat,
+    CantCastOnTapped,
+    TargetIsPlayer,
+    NotBehind,
+    NotOnTaxi,
+    NoPet,
+    TargetsDead,
+    DamageImmune,
+    AlreadyBeingTamed,
+    // ── Item check errors (CheckItems) ─────────────────────────────────────
+    AlreadyAtFullHealth,
+    AlreadyAtFullPower,
+    CantBeDisenchanted,
+    EquippedItem,
+    EquippedItemClass,
+    EquippedItemClassMainhand,
+    EquippedItemClassOffhand,
+    Error,
+    ItemGone,
+    ItemNotReady,
+    LowLevel,
+    MainhandEmpty,
+    NeedExoticAmmo,
+    NoAmmo,
+    NoChargesRemain,
+    NotTradeable,
+    RequiresSpellFocus,
+    TargetNotPlayer,
 }
 
 /// Result of a spell cast attempt

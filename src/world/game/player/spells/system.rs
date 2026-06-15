@@ -1044,6 +1044,17 @@ impl SpellSystem {
         Ok(())
     }
 
+    /// Cancel the current auto-repeat spell, such as Auto Shot or wand Shoot.
+    pub async fn cancel_auto_repeat_spell(
+        &self,
+        caster_guid: ObjectGuid,
+        world: &World,
+    ) -> Result<()> {
+        self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Autorepeat, world)
+            .await?;
+        Ok(())
+    }
+
     /// Cancel the spell in a specific slot. Returns true if a spell was cancelled.
     async fn cancel_spell_in_slot(
         &self,

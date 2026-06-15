@@ -16,6 +16,14 @@ use crate::shared::protocol::ObjectGuid;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::world::game::common::update_fields::*;
+use crate::world::game::inventory::inventory_types::{EquipmentSlot, INVENTORY_SLOT_BAG_0};
+use crate::world::game::inventory::InventorySystem;
+use crate::world::game::items::ItemManager;
+use crate::world::game::player::skills::{
+    get_skill_max_for_level, SkillSaveState, SKILL_2H_AXES, SKILL_2H_MACES, SKILL_2H_SWORDS,
+    SKILL_AXES, SKILL_BOWS, SKILL_CROSSBOWS, SKILL_DAGGERS, SKILL_DEFENSE, SKILL_FIST_WEAPONS,
+    SKILL_GUNS, SKILL_MACES, SKILL_POLEARMS, SKILL_STAVES, SKILL_SWORDS, SKILL_THROWN, SKILL_WANDS,
+};
 use crate::world::game::player::PlayerManager;
 
 use super::base_stats::BaseStatsData;
@@ -26,6 +34,8 @@ use super::modifiers::{UnitModifierType, UnitMods};
 pub struct StatsSystem {
     broadcast_mgr: Arc<BroadcastManager>,
     player_mgr: Arc<PlayerManager>,
+    inventory: Arc<InventorySystem>,
+    item_mgr: Arc<ItemManager>,
     world_pool: Arc<sqlx::MySqlPool>,
     base_stats: OnceLock<BaseStatsData>,
 }
@@ -34,11 +44,15 @@ impl StatsSystem {
     pub fn new(
         broadcast_mgr: Arc<BroadcastManager>,
         player_mgr: Arc<PlayerManager>,
+        inventory: Arc<InventorySystem>,
+        item_mgr: Arc<ItemManager>,
         world_pool: Arc<sqlx::MySqlPool>,
     ) -> Self {
         Self {
             broadcast_mgr,
             player_mgr,
+            inventory,
+            item_mgr,
             world_pool,
             base_stats: OnceLock::new(),
         }
@@ -60,6 +74,39 @@ impl StatsSystem {
 
     pub async fn shutdown(&self) -> Result<()> {
         Ok(())
+    }
+
+    fn equipped_weapon_skill(&self, guid: ObjectGuid, slot: EquipmentSlot) -> Option<u16> {
+        let item_guid =
+            self.inventory
+                .cache()
+                .get_item_at(guid, INVENTORY_SLOT_BAG_0, slot as u8)?;
+        let item = self.inventory.cache().get_item(guid, item_guid)?;
+        let entry = item.read().entry;
+        let template = self.item_mgr.get_template(entry)?;
+
+        if template.item_class != 2 {
+            return None;
+        }
+
+        match template.item_subclass {
+            0 => Some(SKILL_AXES),
+            1 => Some(SKILL_2H_AXES),
+            2 => Some(SKILL_BOWS),
+            3 => Some(SKILL_GUNS),
+            4 => Some(SKILL_MACES),
+            5 => Some(SKILL_2H_MACES),
+            6 => Some(SKILL_POLEARMS),
+            7 => Some(SKILL_SWORDS),
+            8 => Some(SKILL_2H_SWORDS),
+            10 => Some(SKILL_STAVES),
+            13 => Some(SKILL_FIST_WEAPONS),
+            15 => Some(SKILL_DAGGERS),
+            16 => Some(SKILL_THROWN),
+            18 => Some(SKILL_CROSSBOWS),
+            19 => Some(SKILL_WANDS),
+            _ => None,
+        }
     }
 
     pub fn on_player_login(&self, guid: ObjectGuid) -> Result<()> {
@@ -90,6 +137,15 @@ impl StatsSystem {
             let race = player.race;
             let class = player.class;
             let level = player.level;
+            let max_skill_for_level = get_skill_max_for_level(level);
+            let defense_skill = player
+                .skills
+                .skills
+                .get(&SKILL_DEFENSE)
+                .filter(|skill| skill.state != SkillSaveState::Deleted)
+                .map(|skill| skill.current_value)
+                .unwrap_or(max_skill_for_level);
+            let defense_bonus = derived::defense_skill_bonus(defense_skill, max_skill_for_level);
 
             // 1. Load base stats from DB
             let base = base_stats.get_level_stats(race, class, level);
@@ -259,13 +315,31 @@ impl StatsSystem {
             // 9. Crit
             let agi_crit = derived::melee_crit_from_agility(class, level, agility);
             let base_crit = derived::class_base_crit(class);
+            let melee_weapon_bonus = self
+                .equipped_weapon_skill(guid, EquipmentSlot::Mainhand)
+                .and_then(|skill_id| player.skills.skills.get(&skill_id))
+                .filter(|skill| skill.state != SkillSaveState::Deleted)
+                .map(|skill| {
+                    derived::weapon_skill_crit_bonus(skill.current_value, max_skill_for_level)
+                })
+                .unwrap_or(0.0);
             let aura_melee_crit = player.auras.container.get_total_aura_modifier(
                 crate::world::game::player::auras::effects::AURA_MOD_CRIT_PERCENT,
             ) as f32;
-            player.stats.melee_crit_pct = (base_crit + agi_crit + aura_melee_crit).max(0.0);
+            player.stats.melee_crit_pct =
+                (base_crit + agi_crit + melee_weapon_bonus + aura_melee_crit).max(0.0);
 
             let ranged_agi_crit = derived::ranged_crit_from_agility(class, level, agility);
-            player.stats.ranged_crit_pct = (base_crit + ranged_agi_crit + aura_melee_crit).max(0.0);
+            let ranged_weapon_bonus = self
+                .equipped_weapon_skill(guid, EquipmentSlot::Ranged)
+                .and_then(|skill_id| player.skills.skills.get(&skill_id))
+                .filter(|skill| skill.state != SkillSaveState::Deleted)
+                .map(|skill| {
+                    derived::weapon_skill_crit_bonus(skill.current_value, max_skill_for_level)
+                })
+                .unwrap_or(0.0);
+            player.stats.ranged_crit_pct =
+                (base_crit + ranged_agi_crit + ranged_weapon_bonus + aura_melee_crit).max(0.0);
 
             // 9b. Spell crit (from intellect, class-specific, + aura bonus)
             let int_spell_crit = derived::spell_crit_from_intellect(class, level, intellect);
@@ -279,11 +353,21 @@ impl StatsSystem {
             // 10. Dodge
             let agi_dodge = derived::dodge_from_agility(class, level, agility);
             let base_dodge = derived::class_base_dodge(class);
-            player.stats.dodge_pct = (base_dodge + agi_dodge).max(0.0);
+            let aura_dodge = player.auras.container.get_total_aura_modifier(
+                crate::world::game::player::auras::effects::AURA_MOD_DODGE_PERCENT,
+            ) as f32;
+            player.stats.dodge_pct = (base_dodge + agi_dodge + defense_bonus + aura_dodge).max(0.0);
 
             // 11. Parry / Block (base 5%, requires abilities)
-            player.stats.parry_pct = 5.0;
-            player.stats.block_pct = 5.0;
+            let aura_parry = player.auras.container.get_total_aura_modifier(
+                crate::world::game::player::auras::effects::AURA_MOD_PARRY_PERCENT,
+            ) as f32;
+            player.stats.parry_pct = (5.0 + defense_bonus + aura_parry).max(0.0);
+
+            let aura_block = player.auras.container.get_total_aura_modifier(
+                crate::world::game::player::auras::effects::AURA_MOD_BLOCK_PERCENT,
+            ) as f32;
+            player.stats.block_pct = (5.0 + defense_bonus + aura_block).max(0.0);
 
             // 12. Damage ranges (bare-hand default: 2.0s speed, AP-based)
             let default_speed_ms: u32 = 2000;

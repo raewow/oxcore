@@ -189,6 +189,16 @@ pub fn class_base_dodge(class: u8) -> f32 {
     class_base_crit(class)
 }
 
+/// Displayed dodge/parry/block bonus from defense skill difference.
+pub fn defense_skill_bonus(defense_skill: u16, max_for_level: u16) -> f32 {
+    (defense_skill as i32 - max_for_level as i32) as f32 * 0.04
+}
+
+/// Displayed crit bonus from weapon skill difference.
+pub fn weapon_skill_crit_bonus(weapon_skill: u16, max_for_level: u16) -> f32 {
+    (weapon_skill as i32 - max_for_level as i32) as f32 * 0.04
+}
+
 // === Armor ===
 
 /// Armor bonus from agility (2 armor per point)
@@ -287,6 +297,20 @@ mod tests {
         assert_eq!(power_type_for_class(1), 1); // Warrior = rage
         assert_eq!(power_type_for_class(4), 3); // Rogue = energy
         assert_eq!(power_type_for_class(8), 0); // Mage = mana
+    }
+
+    #[test]
+    fn test_defense_skill_bonus() {
+        assert!((defense_skill_bonus(295, 300) + 0.2).abs() < 0.0001);
+        assert!((defense_skill_bonus(300, 300) - 0.0).abs() < 0.0001);
+        assert!((defense_skill_bonus(305, 300) - 0.2).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_weapon_skill_crit_bonus() {
+        assert!((weapon_skill_crit_bonus(290, 300) + 0.4).abs() < 0.0001);
+        assert!((weapon_skill_crit_bonus(300, 300) - 0.0).abs() < 0.0001);
+        assert!((weapon_skill_crit_bonus(310, 300) - 0.4).abs() < 0.0001);
     }
 
     #[test]

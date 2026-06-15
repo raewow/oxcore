@@ -214,21 +214,35 @@ pub async fn handle_cancel_aura(
     Ok(())
 }
 
-/// CMSG_CANCEL_AUTO_REPEAT_SPELL (opcode 0x013C)
+/// CMSG_CANCEL_GROWTH_AURA (opcode 0x029B)
+///
+/// Growth aura cancellation is intentionally handled elsewhere.
+pub async fn handle_cancel_growth_aura(
+    _session: &WorldSession,
+    _packet: &mut WorldPacket,
+    _world: &World,
+) -> Result<()> {
+    Ok(())
+}
+
+/// CMSG_CANCEL_AUTO_REPEAT_SPELL (opcode 0x026D)
 ///
 /// Sent when the player cancels auto-repeat spells (auto-shot, wand).
 pub async fn handle_cancel_auto_repeat_spell(
     session: &WorldSession,
     _packet: &mut WorldPacket,
-    _world: &World,
+    world: &World,
 ) -> Result<()> {
-    let _player_guid = match session.player_guid() {
+    let player_guid = match session.player_guid() {
         Some(guid) => guid,
         None => return Ok(()),
     };
 
-    // TODO: Implement auto-repeat spell cancellation
-    // This requires integration with the combat system
+    world
+        .systems
+        .spells
+        .cancel_auto_repeat_spell(player_guid, world)
+        .await?;
 
     Ok(())
 }

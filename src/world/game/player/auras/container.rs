@@ -303,12 +303,26 @@ impl AuraContainer {
             .sum()
     }
 
-    /// Get total modifier for auras of a given type with a specific misc_value.
-    /// Used for: MOD_STAT where misc_value = stat index, MOD_RESISTANCE where misc_value = school.
+    /// Get total modifier for auras of a given type with an exact misc_value match.
+    /// Used for: MOD_STAT (misc_value = stat index 0-4), MOD_POWER_REGEN (misc_value = power type).
     pub fn get_total_aura_modifier_by_misc(&self, aura_type: u32, misc_value: i32) -> i32 {
         self.auras
             .values()
             .filter(|a| a.aura_type == aura_type && a.misc_value == misc_value)
+            .map(|a| a.current_value())
+            .sum()
+    }
+
+    /// Get total modifier for auras of a given type where `misc_value & misc_mask != 0`.
+    /// Used for school-mask queries: e.g. fire resistance modifier where misc_mask = SPELL_SCHOOL_MASK_FIRE.
+    /// Matches C++ Unit::GetTotalAuraModifierByMiscMask — bitmask overlap, not equality.
+    pub fn get_total_aura_modifier_by_misc_mask(&self, aura_type: u32, misc_mask: u32) -> i32 {
+        if misc_mask == 0 {
+            return 0;
+        }
+        self.auras
+            .values()
+            .filter(|a| a.aura_type == aura_type && (a.misc_value as u32 & misc_mask) != 0)
             .map(|a| a.current_value())
             .sum()
     }

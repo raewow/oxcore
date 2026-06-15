@@ -158,8 +158,54 @@ impl PowerSystem {
             }
         }
 
-        // Health regen (out of combat: spirit-based, in combat: 0 for non-druids)
-        // TODO: Health regen formulas when combat system integration is available
+        // Health regen (Player::RegenerateHealth). Skipped when at max health.
+        // Full implementation requires aura system (MOD_HEALTH_REGEN_PERCENT,
+        // MOD_REGEN food flat, MOD_REGEN_DURING_COMBAT, MOD_HEALTH_REGEN_IN_COMBAT)
+        // and polymorph detection. Those modifiers default to zero here until
+        // the aura system exposes them on PowerState/StatsState.
+        {
+            let cur_health = player.stats.health;
+            let max_health = player.stats.max_health;
+            if cur_health < max_health {
+                let in_combat = player.combat.in_combat;
+                let mut add_value: f32 = 0.0;
+
+                // Polymorph: regen 10% of max health per 2-second tick regardless of combat.
+                // Polymorph is detected via SPELL_AURA_MOD_CONFUSE — not yet available from
+                // the aura system, so this branch is left for future integration.
+                let is_polymorphed = false;
+
+                if is_polymorphed {
+                    add_value = max_health as f32 / 10.0;
+                } else if !in_combat {
+                    // Spirit-based regen out of combat (MOD_REGEN_DURING_COMBAT talent variant
+                    // is omitted until aura totals are wired in).
+                    add_value = regen::calculate_health_regen_per_tick(
+                        player.stats.spirit,
+                        player.level,
+                    );
+                    // TODO: multiply by MOD_HEALTH_REGEN_PERCENT aura total
+                    // TODO: multiply by 1.5 if not standing (player.stand_state != 0)
+                    // TODO: add MOD_REGEN food flat (scaled by periodictime fraction)
+                }
+
+                // Always-active combat regen bonus (SPELL_AURA_MOD_HEALTH_REGEN_IN_COMBAT).
+                // 2.0 because the tick fires every 2 seconds; the aura stores HP per 5 sec
+                // so we scale: rate * 2 * (total / 5). Defaults to 0 until aura totals wired.
+                let mod_regen_in_combat: f32 = 0.0;
+                add_value += 2.0 * (mod_regen_in_combat / 5.0);
+
+                // Carry fractional regen across ticks so sub-integer amounts aren't silently lost.
+                let with_carry = add_value + player.power.carry_health_regen;
+                let whole = with_carry as i32;
+                player.power.carry_health_regen = with_carry - whole as f32;
+
+                if whole > 0 {
+                    player.stats.modify_health(whole);
+                    // TODO: broadcast UNIT_FIELD_HEALTH update when health system wired
+                }
+            }
+        }
     }
 
     /// Consume power for a spell cast

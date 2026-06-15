@@ -862,9 +862,17 @@ impl DeathSystem {
                     }
                 };
 
-                // Set health and mana
+                // Set health and mana. Reset rage (C++ ResurrectPlayer: SetPower(RAGE,0))
+                // and restore energy proportionally (SetPower(ENERGY, max*pct)).
                 player.stats.health = health;
                 player.power.set_mana(mana);
+                player.power.current[super::super::power::state::PowerType::Rage as usize] = 0;
+                if max_health > 0 {
+                    let pct = health as f32 / max_health as f32;
+                    let max_energy = player.power.max[super::super::power::state::PowerType::Energy as usize];
+                    player.power.current[super::super::power::state::PowerType::Energy as usize] =
+                        (max_energy as f32 * pct) as u32;
+                }
 
                 // Remove ghost form; collect spell IDs whose auras we need to drop.
                 let auras_to_remove =
