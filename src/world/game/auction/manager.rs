@@ -76,6 +76,31 @@ impl AuctionHouseObject {
             .filter(|e| e.value().seller_account == account_id)
             .count()
     }
+
+    /// Clear stale IP locks and return entries whose expire_time has passed.
+    ///
+    /// Mirrors C++ `AuctionHouseObject::Update` (AuctionHouseMgr.cpp:623-676).
+    /// IP locks older than 5 minutes are cleared independently of expiry.
+    /// Expired entries are removed from the in-memory map and returned to the caller
+    /// for mail dispatch and DB deletion.
+    pub fn process_tick(&self, now: u64) -> Vec<AuctionEntry> {
+        let mut expired = Vec::new();
+
+        for mut entry in self.auctions.iter_mut() {
+            if entry.deposit_time + 300 < now {
+                entry.locked_ip_address.clear();
+            }
+            if now > entry.expire_time {
+                expired.push(entry.value().clone());
+            }
+        }
+
+        for auction in &expired {
+            self.auctions.remove(&auction.id);
+        }
+
+        expired
+    }
 }
 
 struct BarGoLink {
@@ -553,6 +578,56 @@ impl AuctionHouseManager {
             .delete_auction(auction_id)
             .await
             .context("Failed to delete auction from database")
+    }
+
+    /// Periodic tick: expire auctions and clear stale IP locks across all unique houses.
+    ///
+    /// Mirrors C++ `AuctionHouseMgr::Update` (AuctionHouseMgr.cpp:495-499) which iterates
+    /// m_vRealAuctionHouses and delegates to `AuctionHouseObject::Update`.
+    /// Houses sharing an Arc (cross-faction / linked mode) are deduplicated by pointer
+    /// so each logical house is ticked exactly once.
+    pub async fn update(&self) -> anyhow::Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut seen: Vec<usize> = Vec::new();
+        let mut unique_houses: Vec<Arc<AuctionHouseObject>> = Vec::new();
+
+        for entry in self.auction_houses.iter() {
+            let addr = Arc::as_ptr(entry.value()) as usize;
+            if !seen.contains(&addr) {
+                seen.push(addr);
+                unique_houses.push(Arc::clone(entry.value()));
+            }
+        }
+
+        for house in unique_houses {
+            let expired = house.process_tick(now);
+            for auction in expired {
+                if auction.has_bid() {
+                    let cut_percent = self
+                        .get_auction_house_entry(auction.house_id)
+                        .map(|e| e.cut_percent as f32)
+                        .unwrap_or(0.0);
+                    if let Err(e) = self.send_auction_successful_mail(&auction, cut_percent, 1.0).await {
+                        error!("AuctionHouseManager::update SendAuctionSuccessfulMail failed: {e}");
+                    }
+                    if let Err(e) = self.send_auction_won_mail(&auction).await {
+                        error!("AuctionHouseManager::update SendAuctionWonMail failed: {e}");
+                    }
+                } else if let Err(e) = self.send_auction_expired_mail(&auction).await {
+                    error!("AuctionHouseManager::update SendAuctionExpiredMail failed: {e}");
+                }
+
+                if let Err(e) = self.delete_auction_from_db(auction.id).await {
+                    error!("AuctionHouseManager::update delete_auction_from_db failed: {e}");
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn seed_auction_id(&self, max_id: u32) {

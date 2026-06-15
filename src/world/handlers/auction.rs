@@ -19,6 +19,7 @@ use crate::world::core::session::WorldSession;
 use crate::world::game::auction::manager::{AuctionHouseManager, AuctionHouseObject};
 use crate::world::game::auction::{
     get_checked_auction_house_for_auctioneer, send_auction_command_result,
+    send_auction_removed_notification,
 };
 use crate::world::game::creature::CreatureManager;
 use crate::world::game::inventory::inventory_types::{is_bank_pos, InventoryResult};
@@ -671,6 +672,8 @@ pub async fn handle_auction_remove_item(
 
     // Mail item back to owner; also removes item from the auction item cache.
     world.managers.auction_mgr.send_auction_cancel_mail_to_owner(&auction).await?;
+
+    send_auction_removed_notification(session, &auction, &world.managers.auction_mgr)?;
 
     send_auction_command_result(
         session,

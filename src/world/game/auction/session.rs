@@ -5,7 +5,7 @@
 //! auction-specific logic.
 
 use crate::shared::game::auction::{AuctionAction, AuctionEntry, AuctionError};
-use crate::shared::messages::auction::{SmsgAuctionCommandResult, SmsgAuctionOwnerNotification};
+use crate::shared::messages::auction::{SmsgAuctionCommandResult, SmsgAuctionOwnerNotification, SmsgAuctionRemovedNotification};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::core::session::WorldSession;
@@ -98,6 +98,27 @@ pub fn send_auction_owner_notification(
     };
 
     session.send_msg(msg)
+}
+
+/// Send SMSG_AUCTION_REMOVED_NOTIFICATION to the client session.
+///
+/// Mirrors C++ `WorldSession::SendAuctionRemovedNotification`.
+/// Looks up the item to resolve randomPropertyId; passes 0 when the item is not found.
+pub fn send_auction_removed_notification(
+    session: &WorldSession,
+    auction: &AuctionEntry,
+    manager: &AuctionHouseManager,
+) -> anyhow::Result<()> {
+    let item_random_property_id = manager
+        .get_a_item(auction.item_guid.low())
+        .map(|item| item.random_property_id as u32)
+        .unwrap_or(0);
+
+    session.send_msg(SmsgAuctionRemovedNotification {
+        auction_id: auction.id,
+        item_template: auction.item_template,
+        item_random_property_id,
+    })
 }
 
 /// Validate auctioneer access and return the corresponding auction house entry.

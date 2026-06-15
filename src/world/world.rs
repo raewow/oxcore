@@ -464,6 +464,16 @@ impl World {
             }
         }
 
+        // Auction expiry tick - every 1200 ticks (~60s at 50ms) matching C++ WUPDATE_AUCTIONS
+        static AUCTION_UPDATE_COUNTER: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(0);
+        let auction_count = AUCTION_UPDATE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if auction_count % 1200 == 0 {
+            if let Err(e) = self.managers.auction_mgr.update().await {
+                tracing::error!("Auction update failed: {}", e);
+            }
+        }
+
         // Aggro scanning (Phase 5) - every 4th tick for performance
         static AGGRO_SCAN_COUNTER: std::sync::atomic::AtomicU32 =
             std::sync::atomic::AtomicU32::new(0);

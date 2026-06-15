@@ -289,20 +289,20 @@ impl ToWorldPacket for SmsgAuctionOwnerNotification {
 
 /// SMSG_AUCTION_REMOVED_NOTIFICATION - Notification that an auction was removed
 ///
-/// Sent to notify the player that an auction they were watching was removed.
+/// Sent to notify the player that an auction listing was removed or cancelled.
+/// Wire format: auctionId (u32), itemTemplate (u32), randomPropertyId (u32).
 #[derive(Debug, Clone)]
 pub struct SmsgAuctionRemovedNotification {
-    /// Item template ID
+    pub auction_id: u32,
     pub item_template: u32,
-    /// Item random property ID
     pub item_random_property_id: u32,
 }
 
 impl ToWorldPacket for SmsgAuctionRemovedNotification {
     fn to_world_packet(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AUCTION_REMOVED_NOTIFICATION);
+        packet.write_u32(self.auction_id);
         packet.write_u32(self.item_template);
-        packet.write_u32(self.item_template); // Item field (same as template for now)
         packet.write_u32(self.item_random_property_id);
         packet
     }
@@ -483,10 +483,14 @@ mod tests {
     #[test]
     fn test_smsg_auction_removed_notification() {
         let msg = SmsgAuctionRemovedNotification {
+            auction_id: 999,
             item_template: 123,
             item_random_property_id: 45,
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_REMOVED_NOTIFICATION);
+        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 999);
+        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), 123);
+        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), 45);
     }
 }
