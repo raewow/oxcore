@@ -48,7 +48,7 @@ pub struct MotionMaster {
     /// Movement in progress
     moving: bool,
     /// State flags (updating, paused, etc.)
-    flags: MotionMasterFlags,
+    pub flags: MotionMasterFlags,
 }
 
 impl std::fmt::Debug for MotionMaster {

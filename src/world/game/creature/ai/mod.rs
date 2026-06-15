@@ -16,7 +16,7 @@
 //! └─────────────────┘     └─────────────────┘     └─────────────────┘
 //! ```
 
-mod aggro;
+pub mod aggro;
 mod aggro_scan;
 mod decision;
 pub mod executor;
@@ -25,6 +25,10 @@ mod system;
 mod types;
 
 // Public exports
+pub use aggro::{
+    is_hostile_faction, is_npc, is_valid_aggro_target, should_aggro_creature, NPC_FLAG_GOSSIP,
+    NPC_FLAG_QUEST_GIVER, NPC_FLAG_TRAINER, NPC_FLAG_VENDOR,
+};
 pub use aggro_scan::scan_for_aggro;
 pub use snapshot::{AIDecisionResult, AIInput, CreatureSnapshot, TargetSnapshot, ThreatEntry};
 pub use system::{process_ai_event, queue_event, update_creature_ai};

@@ -77,7 +77,7 @@ pub fn is_npc(npc_flags: u32) -> bool {
 }
 
 /// Simplified faction hostility check
-fn is_hostile_faction(faction_a: u32, faction_b: u32, target_is_player: bool) -> bool {
+pub fn is_hostile_faction(faction_a: u32, faction_b: u32, target_is_player: bool) -> bool {
     if target_is_player {
         HOSTILE_TO_PLAYERS.contains(&faction_a)
     } else {

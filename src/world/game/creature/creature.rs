@@ -142,6 +142,8 @@ pub struct Creature {
     pub speed_walk: f32,
     /// Run speed rate multiplier from DB (actual run speed = rate * 7.0)
     pub speed_run: f32,
+    /// Whether out-of-combat movement has been paused (player interaction)
+    pub movement_paused: bool,
 }
 
 impl Creature {
@@ -246,6 +248,7 @@ impl Creature {
             wander_distance: 0.0,
             speed_walk: 1.0,    // Default rate, overridden by model_info
             speed_run: 1.14286, // Default rate (vmangos DEFAULT_NPC_RUN_SPEED_RATE)
+            movement_paused: false,
         }
     }
 
@@ -274,6 +277,19 @@ impl Creature {
     /// Check if creature just died (health reached 0)
     pub fn is_dead(&self) -> bool {
         self.current_health == 0
+    }
+
+    /// Pause out-of-combat movement when a player interacts with us
+    /// (matches vmangos Creature::PauseOutOfCombatMovement behaviour)
+    pub fn pause_out_of_combat_movement(&mut self) {
+        self.movement_paused = true;
+        self.motion_master.flags.insert(2); // MotionMasterFlags::PAUSED = 0x02
+    }
+
+    /// Resume out-of-combat movement after interaction ends
+    pub fn resume_out_of_combat_movement(&mut self) {
+        self.movement_paused = false;
+        self.motion_master.flags.remove(2); // MotionMasterFlags::PAUSED = 0x02
     }
 
     /// Update attack timer, returns true if attack is ready

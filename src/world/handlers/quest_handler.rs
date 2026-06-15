@@ -11,6 +11,9 @@ use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
+use crate::world::game::creature::ai::{is_hostile_faction, is_npc, NPC_FLAG_QUEST_GIVER};
+use crate::world::game::common::player_constants::get_faction_for_race;
+use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
 use crate::world::World;
 
 /// Handle CMSG_QUESTGIVER_STATUS_QUERY (0x182)
@@ -35,7 +38,33 @@ pub async fn handle_questgiver_status_query(
         player_guid, quest_giver_guid
     );
 
-    // Delegate to quest system
+    // Hostile creature questgivers always show no quest status
+    if quest_giver_guid.is_creature() {
+        let is_hostile = world
+            .managers
+            .creature_mgr
+            .get_creature(quest_giver_guid)
+            .and_then(|c| {
+                world.managers.player_mgr.with_player(player_guid, |p| {
+                    is_hostile_faction(c.faction, get_faction_for_race(p.race), true)
+                })
+            })
+            .unwrap_or(false);
+        if is_hostile {
+            debug!(
+                "Questgiver {:?} is hostile to player {:?}, suppressing status",
+                quest_giver_guid, player_guid
+            );
+            let msg = crate::shared::messages::quest::SmsgQuestgiverStatus {
+                guid: quest_giver_guid,
+                status: crate::shared::messages::quest::DialogStatus::None,
+            };
+            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            return Ok(());
+        }
+    }
+
+    // Delegate to quest system for script/relation-based status
     world
         .systems
         .quest
@@ -106,7 +135,6 @@ pub async fn handle_quest_query(
 /// Handle CMSG_QUESTGIVER_HELLO (0x184)
 ///
 /// Sent when player right-clicks a quest giver NPC.
-/// This delegates to the gossip system to provide a unified interaction flow.
 /// Packet format: GUID (packed)
 pub async fn handle_questgiver_hello(
     session: &WorldSession,
@@ -126,20 +154,88 @@ pub async fn handle_questgiver_hello(
         player_guid, quest_giver_guid
     );
 
-    // Get creature entry and npc_flags
-    let Some((entry, npc_flags)) = world
-        .managers
-        .creature_mgr
-        .get_creature(quest_giver_guid)
-        .map(|c| (c.entry, c.npc_flags))
-    else {
-        debug!(
-            "Questgiver hello for unresolved or non-creature guid {:?}",
-            quest_giver_guid
-        );
-        return Ok(());
+    // Resolve creature questgiver with interaction validation.
+    // Must exist, be alive, and have NPC interaction flags (gossip or quest giver).
+    let (entry, npc_flags, creature_type) = {
+        let Some(creature) = world
+            .managers
+            .creature_mgr
+            .get_creature(quest_giver_guid)
+        else {
+            debug!(
+                "Questgiver hello for unresolved or non-creature guid {:?}",
+                quest_giver_guid
+            );
+            return Ok(());
+        };
+
+        if !creature.is_alive() {
+            debug!(
+                "Questgiver {:?} is dead, rejecting hello",
+                quest_giver_guid
+            );
+            return Ok(());
+        }
+
+        let npc_flags = creature.npc_flags;
+
+        // Must have at least one NPC interaction flag to open quest/gossip
+        if !is_npc(npc_flags) {
+            debug!(
+                "Questgiver {:?} has no interaction flags (0x{:08X}), rejecting hello",
+                quest_giver_guid, npc_flags
+            );
+            return Ok(());
+        }
+
+        (creature.entry, npc_flags, creature.creature_type)
     };
 
+    // Feign death cleanup (matches auction handler pattern)
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+            if !removed.is_empty() {
+                player.auras.needs_client_update = true;
+                player.auras.needs_stat_recalc = true;
+                debug!(
+                    "Cleared {} feign death aura(s) for player {:?}",
+                    removed.len(),
+                    player_guid
+                );
+            }
+        });
+
+    // Movement pause for non-civilian, non-totem creatures
+    // (matches vmangos Creature::OnPlayerInteract behaviour)
+    {
+        const CREATURE_FLAG_EXTRA_CIVILIAN: u32 = 0x00000002;
+        const CREATURE_TYPE_TOTEM: u8 = 11;
+
+        let is_civilian = world
+            .managers
+            .creature_mgr
+            .get_template(entry)
+            .map(|t| (t.flags_extra & CREATURE_FLAG_EXTRA_CIVILIAN) != 0)
+            .unwrap_or(false);
+        let is_totem = creature_type == CREATURE_TYPE_TOTEM;
+
+        if !is_civilian && !is_totem {
+            world.managers.creature_mgr.with_creature_mut(
+                quest_giver_guid,
+                |c| {
+                    c.pause_out_of_combat_movement();
+                },
+            );
+        }
+    }
+
+    // TODO: Interrupt interacting spells and remove interacting auras
+    // (requires aura/spell interrupt primitives not yet ported)
+
+    // Lua OnGossipHello first chance
     if let Some(script) = world.managers.lua_mgr.get_gossip_script(entry) {
         let player_snap = build_player_snapshot(player_guid, world);
         let actions = world
@@ -152,7 +248,7 @@ pub async fn handle_questgiver_hello(
         }
     }
 
-    let quest_data = if (npc_flags & 0x00000002) != 0 {
+    let quest_data = if (npc_flags & NPC_FLAG_QUEST_GIVER) != 0 {
         Some(
             world
                 .systems
@@ -649,6 +745,16 @@ mod tests {
     }
 
     fn add_creature(world: &mut crate::world::World, entry: u32, npc_flags: u32) -> ObjectGuid {
+        add_creature_with_flags(world, entry, npc_flags, 0, 7)
+    }
+
+    fn add_creature_with_flags(
+        world: &mut crate::world::World,
+        entry: u32,
+        npc_flags: u32,
+        flags_extra: u32,
+        creature_type: u8,
+    ) -> ObjectGuid {
         let guid = test_creature_guid(entry, 1);
         let template = CreatureTemplate {
             entry,
@@ -665,8 +771,8 @@ mod tests {
             npc_flags,
             unit_flags: 0,
             static_flags1: 0,
-            flags_extra: 0,
-            creature_type: 7,
+            flags_extra,
+            creature_type,
             unit_class: 1,
             health_multiplier: 1.0,
             power_multiplier: 1.0,
@@ -857,5 +963,297 @@ mod tests {
         assert_eq!(player.active_quests.len(), 1);
         assert_eq!(player.active_quests[0].quest_id, 2);
         assert!(rx.try_recv().is_ok());
+    }
+
+    // --- Status query tests for hostile creature suppression ---
+
+    fn add_creature_with_faction(
+        world: &mut crate::world::World,
+        entry: u32,
+        npc_flags: u32,
+        faction: u32,
+    ) -> ObjectGuid {
+        let guid = test_creature_guid(entry, 1);
+        let template = CreatureTemplate {
+            entry,
+            name: format!("Creature {entry}"),
+            subname: None,
+            min_level: 1,
+            max_level: 1,
+            faction,
+            model_id_1: 1,
+            model_id_2: 0,
+            model_id_3: 0,
+            model_id_4: 0,
+            scale: 1.0,
+            npc_flags,
+            unit_flags: 0,
+            static_flags1: 0,
+            flags_extra: 0,
+            creature_type: 7,
+            unit_class: 1,
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            damage_variance: 0.0,
+            attack_time: 2000,
+            rank: 0,
+            gossip_menu_id: 0,
+            vendor_id: 0,
+            trainer_id: 0,
+            trainer_type: 0,
+            spells: [0; 4],
+        };
+
+        world.managers.creature_mgr.add_template(template.clone());
+        world.managers.creature_mgr.add_creature(Creature::new(
+            guid,
+            entry,
+            1,
+            Position::default(),
+            0,
+            0,
+            &template,
+            1,
+            None,
+        ));
+        guid
+    }
+
+    #[tokio::test]
+    async fn questgiver_status_query_hostile_suppresses() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        // Faction 14 = Monster (hostile to all players)
+        let npc_guid = add_creature_with_faction(&mut world, 100, 0x0000_0002, 14);
+        add_quest(&mut world, 1, Some(100));
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_status_query(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        // Hostile creatures send DialogStatus::None — we verify a packet IS sent
+        // (the handler sends it explicitly rather than silently returning)
+        let out = read_packet(&mut rx);
+        assert_eq!(out.opcode(), Opcode::SMSG_QUESTGIVER_STATUS);
+    }
+
+    #[tokio::test]
+    async fn questgiver_status_query_nonhostile_sends_available_status() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        // Faction 35 = Friendly to players (not in HOSTILE_TO_PLAYERS)
+        let npc_guid = add_creature_with_faction(&mut world, 100, 0x0000_0002, 35);
+        add_quest(&mut world, 1, Some(100));
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_status_query(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        let out = read_packet(&mut rx);
+        assert_eq!(out.opcode(), Opcode::SMSG_QUESTGIVER_STATUS);
+    }
+
+    #[tokio::test]
+    async fn questgiver_status_query_unknown_guid_returns_without_packet() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let unknown_guid = ObjectGuid::new_creature(999, 1);
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
+        packet.write_guid(unknown_guid);
+
+        handle_questgiver_status_query(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        assert!(rx.try_recv().is_err(), "no packet should be sent for unknown guid");
+    }
+
+    // --- Hello handler tests ---
+
+    #[tokio::test]
+    async fn questgiver_hello_dead_creature_rejected() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
+        // Kill the creature
+        world.managers.creature_mgr.with_creature_mut(npc_guid, |c| {
+            c.current_health = 0;
+        });
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        assert!(rx.try_recv().is_err(), "no gossip should open for dead creature");
+    }
+
+    #[tokio::test]
+    async fn questgiver_hello_no_npc_flags_rejected() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        // npc_flags = 0 means no interaction flags
+        let npc_guid = add_creature(&mut world, 100, 0);
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        assert!(rx.try_recv().is_err(), "no gossip should open for creature without npc flags");
+    }
+
+    #[tokio::test]
+    async fn questgiver_hello_unknown_guid_rejected() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let unknown_guid = ObjectGuid::new_creature(999, 1);
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(unknown_guid);
+
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        assert!(rx.try_recv().is_err(), "no gossip should open for unknown guid");
+    }
+
+    #[tokio::test]
+    async fn questgiver_hello_clears_feign_death() {
+        use crate::world::game::player::auras::Aura;
+        use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
+        use crate::world::game::player::auras::aura::AuraFlags;
+
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let player_guid = test_player_guid();
+        let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
+
+        // Give the player a feign death aura (follows auction test pattern)
+        world.managers.player_mgr.with_player_mut(player_guid, |player| {
+            player.auras.container.add_aura(Aura::new(
+                AURA_FEIGN_DEATH,
+                player_guid,
+                0,
+                AURA_FEIGN_DEATH,
+                0,
+                1,
+                Some(10_000),
+                0,
+                1,
+                0,
+                AuraFlags::default(),
+            ));
+        });
+
+        // Verify feign death is present before hello
+        let has_feign = world.managers.player_mgr.with_player(player_guid, |player| {
+            player.auras.container.has_aura(AURA_FEIGN_DEATH)
+        }).unwrap_or(false);
+        assert!(has_feign, "feign death should be present before hello");
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        // Verify feign death is removed after hello
+        let has_feign = world.managers.player_mgr.with_player(player_guid, |player| {
+            player.auras.container.has_aura(AURA_FEIGN_DEATH)
+        }).unwrap_or(true);
+        assert!(!has_feign, "feign death should be cleared after hello");
+
+        // Should still receive a gossip packet since creature is valid
+        let out = rx.try_recv();
+        assert!(out.is_ok(), "valid questgiver should send gossip after hello");
+    }
+
+    #[tokio::test]
+    async fn questgiver_hello_normal_questgiver_sends_gossip() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
+        add_quest(&mut world, 1, Some(100));
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        let out = read_packet(&mut rx);
+        assert_eq!(out.opcode(), Opcode::SMSG_GOSSIP_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn questgiver_hello_pauses_non_civilian_non_totem_movement() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut _rx) = add_player(&mut world);
+        let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
+
+        // Default test creature has flags_extra=0 (not civilian) and creature_type=7 (not totem)
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        // Movement should be paused after hello
+        let paused = world
+            .managers
+            .creature_mgr
+            .with_creature_mut(npc_guid, |c| c.movement_paused)
+            .expect("creature should exist");
+        assert!(paused, "non-civilian, non-totem creature should have movement paused after hello");
+    }
+
+    #[tokio::test]
+    async fn questgiver_hello_does_not_pause_civilian_movement() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut _rx) = add_player(&mut world);
+        let npc_guid = add_creature_with_flags(&mut world, 100, NPC_FLAG_QUEST_GIVER, 0x02, 7);
+
+        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        // Movement should NOT be paused for civilian creatures
+        let paused = world
+            .managers
+            .creature_mgr
+            .with_creature_mut(npc_guid, |c| c.movement_paused)
+            .expect("creature should exist");
+        assert!(!paused, "civilian creature movement should not be paused");
     }
 }
