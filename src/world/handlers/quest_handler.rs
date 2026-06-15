@@ -7,6 +7,7 @@ use tracing::{debug, info, warn};
 
 use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
+use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
 use crate::world::World;
 
@@ -65,94 +66,55 @@ pub async fn handle_questgiver_hello(
     );
 
     // Get creature entry and npc_flags
-    let (entry, npc_flags) = world
+    let Some((entry, npc_flags)) = world
         .managers
         .creature_mgr
         .get_creature(quest_giver_guid)
         .map(|c| (c.entry, c.npc_flags))
-        .unwrap_or((0, 0));
-
-    // Check if NPC also has GOSSIP flag - if so, let gossip hello handle it
-    let has_gossip_flag = (npc_flags & 0x00000001) != 0;
-
-    if has_gossip_flag {
-        // NPC has both QUESTGIVER and GOSSIP flags - use gossip system
-        // This prevents duplicate handling
-        info!("NPC has GOSSIP flag, delegating to gossip system");
+    else {
+        debug!(
+            "Questgiver hello for unresolved or non-creature guid {:?}",
+            quest_giver_guid
+        );
         return Ok(());
-    }
+    };
 
-    // NPC is a pure quest giver (no GOSSIP flag) - handle directly
-    // Prepare quest data
-    let quest_data = world
-        .systems
-        .quest
-        .prepare_quest_menu(player_guid, entry, world);
-
-    // Check if we should auto-display a single quest
-    let quest_count = quest_data.len();
-
-    if quest_count == 1 {
-        // Auto-display the single quest directly
-        if let Some(quest) = quest_data.first() {
-            let quest_id = quest.quest_id;
-            info!(
-                "Auto-displaying single quest {} for player {:?} from NPC {:?}",
-                quest_id, player_guid, quest_giver_guid
-            );
-
-            // Check quest status to determine which dialog to show
-            use crate::world::game::npc::quest::types::QuestStatus;
-            let quest_status = world.systems.quest.get_quest_status(player_guid, quest_id);
-
-            match quest_status {
-                QuestStatus::Complete => {
-                    // Quest is complete - show reward dialog
-                    info!(
-                        "Quest {} is complete for player {:?}, showing reward dialog",
-                        quest_id, player_guid
-                    );
-                    world
-                        .systems
-                        .quest
-                        .handle_quest_complete(player_guid, quest_giver_guid, quest_id, world)
-                        .await?;
-                }
-                QuestStatus::Incomplete => {
-                    // Quest is incomplete - show request items/objectives dialog
-                    info!(
-                        "Quest {} is incomplete for player {:?}",
-                        quest_id, player_guid
-                    );
-                    world
-                        .systems
-                        .quest
-                        .handle_quest_complete(player_guid, quest_giver_guid, quest_id, world)
-                        .await?;
-                }
-                _ => {
-                    // Quest is available or none - show quest details for accepting
-                    info!(
-                        "Quest {} is available for player {:?}, showing details dialog",
-                        quest_id, player_guid
-                    );
-                    world.systems.quest.send_quest_details(
-                        player_guid,
-                        quest_giver_guid,
-                        quest_id,
-                        world,
-                    )?;
-                }
-            }
+    if let Some(script) = world.managers.lua_mgr.get_gossip_script(entry) {
+        let player_snap = build_player_snapshot(player_guid, world);
+        let actions = world
+            .managers
+            .lua_mgr
+            .with_lua(|lua| script.on_gossip_hello(lua, &player_snap, quest_giver_guid));
+        if !actions.is_empty() {
+            execute_gossip_actions(actions, player_guid, quest_giver_guid, world).await?;
             return Ok(());
         }
     }
 
-    // Send quest list using the correct SMSG_QUESTGIVER_QUEST_LIST packet
+    let quest_data = if (npc_flags & 0x00000002) != 0 {
+        Some(
+            world
+                .systems
+                .quest
+                .prepare_quest_menu(player_guid, entry, world)
+                .into_iter()
+                .map(|q| crate::shared::messages::GossipQuestData {
+                    quest_id: q.quest_id,
+                    icon: q.icon,
+                    level: q.level,
+                    title: q.title,
+                })
+                .collect(),
+        )
+    } else {
+        None
+    };
+
     world
         .systems
-        .quest
-        .send_quest_giver_quest_list(player_guid, quest_giver_guid, entry, world)?;
+        .gossip
+        .send_gossip_menu(player_guid, quest_giver_guid, None, quest_data)
+        .await?;
 
     Ok(())
 }

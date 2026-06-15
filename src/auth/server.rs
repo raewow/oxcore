@@ -8,7 +8,10 @@ use crate::auth::context::AuthServer;
 use crate::auth::patch::PatchCache;
 use crate::auth::realm::{AllowedBuilds, RealmList};
 
-pub async fn start_server(server: Arc<AuthServer>, mut shutdown: tokio::sync::broadcast::Receiver<()>) -> Result<()> {
+pub async fn start_server(
+    server: Arc<AuthServer>,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+) -> Result<()> {
     let config = &server.config;
     let database = server.database.clone();
 

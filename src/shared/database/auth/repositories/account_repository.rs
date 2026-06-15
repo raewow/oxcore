@@ -144,10 +144,10 @@ impl AccountRepository {
 
     /// Create a new account with SRP6 credentials.
     pub async fn create_account(&self, username: &str, password: &str) -> Result<u32> {
-        let username_norm = NormalizedString::new(username)
-            .map_err(|e| anyhow!("Invalid username: {}", e))?;
-        let password_norm = NormalizedString::new(password)
-            .map_err(|e| anyhow!("Invalid password: {}", e))?;
+        let username_norm =
+            NormalizedString::new(username).map_err(|e| anyhow!("Invalid username: {}", e))?;
+        let password_norm =
+            NormalizedString::new(password).map_err(|e| anyhow!("Invalid password: {}", e))?;
 
         let verifier = SrpVerifier::from_username_and_password(username_norm, password_norm);
         let stored_username = verifier.username().to_string();
@@ -158,15 +158,13 @@ impl AccountRepository {
         let salt_hex = hex::encode_upper(verifier.salt());
         let v_hex = hex::encode_upper(verifier.password_verifier());
 
-        let result = sqlx::query(
-            "INSERT INTO `account` (`username`, `v`, `s`) VALUES (?, ?, ?)",
-        )
-        .bind(&stored_username)
-        .bind(&v_hex)
-        .bind(&salt_hex)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to create account")?;
+        let result = sqlx::query("INSERT INTO `account` (`username`, `v`, `s`) VALUES (?, ?, ?)")
+            .bind(&stored_username)
+            .bind(&v_hex)
+            .bind(&salt_hex)
+            .execute(&*self.pool)
+            .await
+            .context("Failed to create account")?;
 
         Ok(result.last_insert_id() as u32)
     }

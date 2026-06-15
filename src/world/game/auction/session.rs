@@ -5,7 +5,10 @@
 //! auction-specific logic.
 
 use crate::shared::game::auction::{AuctionAction, AuctionEntry, AuctionError};
-use crate::shared::messages::auction::{SmsgAuctionBidderNotification, SmsgAuctionCommandResult, SmsgAuctionOwnerNotification, SmsgAuctionRemovedNotification};
+use crate::shared::messages::auction::{
+    SmsgAuctionBidderNotification, SmsgAuctionCommandResult, SmsgAuctionOwnerNotification,
+    SmsgAuctionRemovedNotification,
+};
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::core::session::WorldSession;
@@ -52,8 +55,8 @@ pub fn send_auction_command_result(
             }
         }
         AuctionError::HigherBid => {
-            let auction = auction
-                .ok_or_else(|| anyhow::anyhow!("HigherBid requires auction data"))?;
+            let auction =
+                auction.ok_or_else(|| anyhow::anyhow!("HigherBid requires auction data"))?;
             SmsgAuctionCommandResult::HigherBid {
                 auction_id,
                 action,
@@ -167,10 +170,7 @@ pub fn get_checked_auction_house_for_auctioneer(
             // TODO: Check if player has "auction" command access (ChatHandler.FindCommand)
             // C++ uses GetPlayer()->GetAuctionAccessMode() == 0 && !ChatHandler(...).FindCommand("auction")
             // For now, default to denying when auction_access_mode == 0 and no command permission.
-            tracing::debug!(
-                "{} attempt open auction in cheating way.",
-                auctioneer_guid
-            );
+            tracing::debug!("{} attempt open auction in cheating way.", auctioneer_guid);
             return None;
         }
         return manager.get_auction_house_for_player(player.get_team(), player.auction_access_mode);
@@ -180,10 +180,7 @@ pub fn get_checked_auction_house_for_auctioneer(
     let faction_template_id = match npc_interaction_validator {
         Some(id) => id,
         None => {
-            tracing::debug!(
-                "Auctioneer {} accessed in cheating way.",
-                auctioneer_guid
-            );
+            tracing::debug!("Auctioneer {} accessed in cheating way.", auctioneer_guid);
             return None;
         }
     };

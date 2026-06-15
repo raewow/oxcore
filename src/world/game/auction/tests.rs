@@ -108,8 +108,7 @@ fn create_test_manager_with_mail(
     // Character repo requires a real pool; load_auctions only calls it for seller account lookup.
     // Use a disconnected pool — find_by_guid will fail gracefully and return account 0.
     let pool = Arc::new(
-        sqlx::MySqlPool::connect_lazy("mysql://localhost/unused_auction_test")
-            .expect("lazy pool"),
+        sqlx::MySqlPool::connect_lazy("mysql://localhost/unused_auction_test").expect("lazy pool"),
     );
     AuctionHouseManager::new(
         Arc::new(mock_repo),
@@ -164,10 +163,7 @@ fn parse_spell_charges_partial() {
 
 #[test]
 fn parse_spell_charges_caps_at_five() {
-    assert_eq!(
-        parse_spell_charges(Some("1 2 3 4 5 6 7")),
-        [1, 2, 3, 4, 5]
-    );
+    assert_eq!(parse_spell_charges(Some("1 2 3 4 5 6 7")), [1, 2, 3, 4, 5]);
 }
 
 // ========== LOAD AUCTION HOUSES TESTS ==========
@@ -313,7 +309,13 @@ async fn load_auctions_invalid_house_deletes_and_removes_item() {
         .times(1)
         .returning(|_| Ok(()));
 
-    let mgr = create_test_manager_with_mail(mock_repo, dbc, item_mgr, MockMailRepositoryTrait::new(), item_repo);
+    let mgr = create_test_manager_with_mail(
+        mock_repo,
+        dbc,
+        item_mgr,
+        MockMailRepositoryTrait::new(),
+        item_repo,
+    );
     mgr.load_auction_houses(false, false, 112).unwrap();
     mgr.insert_item_for_test(test_item(300, 25));
 
@@ -523,7 +525,11 @@ async fn get_auction_house_id_from_faction_template_dbc_fallback_both_masks_alli
 #[tokio::test]
 async fn get_auction_house_for_player_cross_faction_returns_house_1() {
     let dbc = dbc_with_houses(&[(1, 0), (6, 0), (7, 0)]);
-    let mgr = create_test_manager(MockAuctionRepositoryTrait::new(), dbc, Arc::new(ItemManager::new()));
+    let mgr = create_test_manager(
+        MockAuctionRepositoryTrait::new(),
+        dbc,
+        Arc::new(ItemManager::new()),
+    );
     mgr.load_auction_houses(true, false, 112).unwrap();
 
     // Horde player should still get house 1 entry when cross-faction is on
@@ -535,7 +541,11 @@ async fn get_auction_house_for_player_cross_faction_returns_house_1() {
 #[tokio::test]
 async fn get_auction_house_for_npc_cross_faction_returns_house_1() {
     let dbc = dbc_with_houses(&[(1, 0), (6, 0)]);
-    let mgr = create_test_manager(MockAuctionRepositoryTrait::new(), dbc, Arc::new(ItemManager::new()));
+    let mgr = create_test_manager(
+        MockAuctionRepositoryTrait::new(),
+        dbc,
+        Arc::new(ItemManager::new()),
+    );
     mgr.load_auction_houses(true, false, 112).unwrap();
 
     // Orc NPC (faction template 29 → house 6) should return house 1 entry when cross-faction is on
@@ -691,12 +701,7 @@ async fn get_checked_auction_house_self_with_access_mode_returns_house() {
     let mut player = test_player(42, 1); // human = alliance
     player.auction_access_mode = 1; // neutral
 
-    let house = get_checked_auction_house_for_auctioneer(
-        &player,
-        player.guid,
-        &mgr,
-        None,
-    );
+    let house = get_checked_auction_house_for_auctioneer(&player, player.guid, &mgr, None);
     assert!(house.is_some());
     assert_eq!(house.unwrap().house_id, 7); // neutral
 }
@@ -709,14 +714,9 @@ async fn get_checked_auction_house_self_without_access_mode_denies() {
     let mgr = create_test_manager(mock_repo, dbc, item_mgr);
 
     let player = test_player(42, 1); // human = alliance
-    // auction_access_mode defaults to 0
+                                     // auction_access_mode defaults to 0
 
-    let house = get_checked_auction_house_for_auctioneer(
-        &player,
-        player.guid,
-        &mgr,
-        None,
-    );
+    let house = get_checked_auction_house_for_auctioneer(&player, player.guid, &mgr, None);
     assert!(house.is_none());
 }
 
@@ -731,12 +731,7 @@ async fn get_checked_auction_house_npc_valid_returns_house() {
     let npc_guid = ObjectGuid::new_without_entry(crate::shared::protocol::HighGuid::Unit, 999);
 
     // faction template 11 = human = house 1
-    let house = get_checked_auction_house_for_auctioneer(
-        &player,
-        npc_guid,
-        &mgr,
-        Some(11),
-    );
+    let house = get_checked_auction_house_for_auctioneer(&player, npc_guid, &mgr, Some(11));
     assert!(house.is_some());
     assert_eq!(house.unwrap().house_id, 1);
 }
@@ -751,18 +746,17 @@ async fn get_checked_auction_house_npc_invalid_denies() {
     let player = test_player(42, 1);
     let npc_guid = ObjectGuid::new_without_entry(crate::shared::protocol::HighGuid::Unit, 999);
 
-    let house = get_checked_auction_house_for_auctioneer(
-        &player,
-        npc_guid,
-        &mgr,
-        None,
-    );
+    let house = get_checked_auction_house_for_auctioneer(&player, npc_guid, &mgr, None);
     assert!(house.is_none());
 }
 
 // ========== SEND_AUCTION_WON_MAIL / SEND_AUCTION_EXPIRED_MAIL TESTS ==========
 
-fn test_auction(item_guid_low: u32, item_template: u32, seller_guid_low: u32) -> crate::shared::game::auction::AuctionEntry {
+fn test_auction(
+    item_guid_low: u32,
+    item_template: u32,
+    seller_guid_low: u32,
+) -> crate::shared::game::auction::AuctionEntry {
     use crate::shared::protocol::HighGuid;
     crate::shared::game::auction::AuctionEntry::new(
         1,

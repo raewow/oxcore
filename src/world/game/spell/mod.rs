@@ -1,5 +1,5 @@
-pub mod manager;
 pub mod helpers;
+pub mod manager;
 
-pub use manager::SpellManager;
 pub use helpers::*;
+pub use manager::SpellManager;

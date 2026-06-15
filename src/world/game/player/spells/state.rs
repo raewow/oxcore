@@ -989,17 +989,23 @@ mod tests {
         let a = player(1);
         q.schedule(100, cast_finish(a, 5));
         q.schedule(200, channel_tick(a, 5));
-        q.schedule(300, SpellEventType::ChannelFinish {
-            caster_guid: a,
-            spell_id: 5,
-            target_guid: None,
-        });
-        q.schedule(400, SpellEventType::DelayedEffect {
-            caster_guid: a,
-            spell_id: 5,
-            target_guid: None,
-            is_triggered: false,
-        });
+        q.schedule(
+            300,
+            SpellEventType::ChannelFinish {
+                caster_guid: a,
+                spell_id: 5,
+                target_guid: None,
+            },
+        );
+        q.schedule(
+            400,
+            SpellEventType::DelayedEffect {
+                caster_guid: a,
+                spell_id: 5,
+                target_guid: None,
+                is_triggered: false,
+            },
+        );
 
         q.cancel_events_for(a, 5);
         assert!(q.is_empty());
@@ -1049,14 +1055,32 @@ mod tests {
 
     #[test]
     fn test_active_cast_tick_completes_at_zero() {
-        let mut cast = ActiveCast::new(1, None, 1000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        let mut cast = ActiveCast::new(
+            1,
+            None,
+            1000,
+            false,
+            CurrentSpellType::Generic,
+            0.0,
+            0.0,
+            0.0,
+        );
         assert!(!cast.tick(999));
         assert!(cast.tick(1)); // remaining was 1, subtract 1 → 0
     }
 
     #[test]
     fn test_active_cast_tick_overshoots_completes() {
-        let mut cast = ActiveCast::new(1, None, 500, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        let mut cast = ActiveCast::new(
+            1,
+            None,
+            500,
+            false,
+            CurrentSpellType::Generic,
+            0.0,
+            0.0,
+            0.0,
+        );
         // delta > remaining
         assert!(cast.tick(1000));
         assert_eq!(cast.cast_time_remaining_ms, 0);
@@ -1064,7 +1088,16 @@ mod tests {
 
     #[test]
     fn test_pushback_non_channeled_capped_at_max() {
-        let mut cast = ActiveCast::new(1, None, 2000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        let mut cast = ActiveCast::new(
+            1,
+            None,
+            2000,
+            false,
+            CurrentSpellType::Generic,
+            0.0,
+            0.0,
+            0.0,
+        );
         let applied1 = cast.apply_pushback(500, 1000);
         let applied2 = cast.apply_pushback(500, 1000);
         let applied3 = cast.apply_pushback(500, 1000); // already at cap
@@ -1084,13 +1117,31 @@ mod tests {
 
     #[test]
     fn test_has_moved_too_far_within_threshold() {
-        let cast = ActiveCast::new(1, None, 1000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        let cast = ActiveCast::new(
+            1,
+            None,
+            1000,
+            false,
+            CurrentSpellType::Generic,
+            0.0,
+            0.0,
+            0.0,
+        );
         assert!(!cast.has_moved_too_far(0.4, 0.0, 0.0)); // 0.16 < 0.25
     }
 
     #[test]
     fn test_has_moved_too_far_exceeds_threshold() {
-        let cast = ActiveCast::new(1, None, 1000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        let cast = ActiveCast::new(
+            1,
+            None,
+            1000,
+            false,
+            CurrentSpellType::Generic,
+            0.0,
+            0.0,
+            0.0,
+        );
         assert!(cast.has_moved_too_far(1.0, 0.0, 0.0)); // 1.0 > 0.25
     }
 
@@ -1131,7 +1182,7 @@ mod tests {
     fn test_school_lockout_only_extends_never_shortens() {
         let mut state = SpellsState::default();
         state.apply_school_lockout(1, 10000, 0); // locked until 10000
-        state.apply_school_lockout(1, 3000, 0);  // shorter — should not shorten
+        state.apply_school_lockout(1, 3000, 0); // shorter — should not shorten
         assert!(state.is_school_locked(1, 9000));
     }
 
@@ -1145,7 +1196,16 @@ mod tests {
     #[test]
     fn test_find_spell_slot_returns_correct_slot() {
         let mut state = SpellsState::default();
-        let cast = ActiveCast::new(42, None, 1000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        let cast = ActiveCast::new(
+            42,
+            None,
+            1000,
+            false,
+            CurrentSpellType::Generic,
+            0.0,
+            0.0,
+            0.0,
+        );
         state.set_current_spell(CurrentSpellType::Generic, cast);
         assert_eq!(state.find_spell_slot(42), Some(CurrentSpellType::Generic));
         assert_eq!(state.find_spell_slot(99), None);
@@ -1154,7 +1214,16 @@ mod tests {
     #[test]
     fn test_clear_current_spell_returns_and_removes() {
         let mut state = SpellsState::default();
-        let cast = ActiveCast::new(7, None, 500, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        let cast = ActiveCast::new(
+            7,
+            None,
+            500,
+            false,
+            CurrentSpellType::Generic,
+            0.0,
+            0.0,
+            0.0,
+        );
         state.set_current_spell(CurrentSpellType::Generic, cast);
         let removed = state.clear_current_spell(CurrentSpellType::Generic);
         assert!(removed.is_some());
@@ -1165,7 +1234,16 @@ mod tests {
     #[test]
     fn test_is_casting_true_when_generic_slot_occupied() {
         let mut state = SpellsState::default();
-        let cast = ActiveCast::new(1, None, 2000, false, CurrentSpellType::Generic, 0.0, 0.0, 0.0);
+        let cast = ActiveCast::new(
+            1,
+            None,
+            2000,
+            false,
+            CurrentSpellType::Generic,
+            0.0,
+            0.0,
+            0.0,
+        );
         state.set_current_spell(CurrentSpellType::Generic, cast);
         assert!(state.is_casting());
     }

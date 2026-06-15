@@ -106,7 +106,10 @@ pub fn get_spell_specific(spell: &SpellEntry) -> SpellSpecific {
             }
         }
         SPELLFAMILY_PRIEST => {
-            if (spell.attributes & 0x0800_0000) != 0 && (spell.aura_interrupt_flags & 0x0000_0008) != 0 && (spell.spell_icon_id == 52 || spell.spell_icon_id == 79) {
+            if (spell.attributes & 0x0800_0000) != 0
+                && (spell.aura_interrupt_flags & 0x0000_0008) != 0
+                && (spell.spell_icon_id == 52 || spell.spell_icon_id == 79)
+            {
                 return SpellSpecific::WellFed;
             }
         }
@@ -140,17 +143,25 @@ pub fn get_spell_specific(spell: &SpellEntry) -> SpellSpecific {
 
     if spell.effect_apply_aura_name.iter().any(|&aura| {
         aura == AURA_TRACK_CREATURES || aura == AURA_TRACK_RESOURCES || aura == AURA_TRACK_STEALTHED
-    })
-        && ((spell.attributes_ex & 0x0002_0000) != 0 || (spell.attributes & 0x0800_0000) != 0)
+    }) && ((spell.attributes_ex & 0x0002_0000) != 0 || (spell.attributes & 0x0800_0000) != 0)
     {
         return SpellSpecific::Tracker;
     }
 
-    if spell.effect_apply_aura_name.iter().any(|&aura| aura == AURA_MOD_MELEE_HASTE) && spell.effect_base_points.iter().any(|&points| points < 0) {
+    if spell
+        .effect_apply_aura_name
+        .iter()
+        .any(|&aura| aura == AURA_MOD_MELEE_HASTE)
+        && spell.effect_base_points.iter().any(|&points| points < 0)
+    {
         return SpellSpecific::NegativeHaste;
     }
 
-    if spell.effect_apply_aura_name.iter().any(|&aura| aura == AURA_MOD_DECREASE_SPEED) {
+    if spell
+        .effect_apply_aura_name
+        .iter()
+        .any(|&aura| aura == AURA_MOD_DECREASE_SPEED)
+    {
         return SpellSpecific::Snare;
     }
 
@@ -177,7 +188,9 @@ pub fn compare_aura_ranks(spell1: &SpellEntry, spell2: &SpellEntry) -> bool {
 pub fn compare_spell_specific_auras(a: &SpellEntry, b: &SpellEntry) -> bool {
     for idx in 0..a.effect.len() {
         for jdx in 0..b.effect.len() {
-            if a.effect[idx] == SPELL_EFFECT_APPLY_AURA && a.effect_apply_aura_name[idx] == b.effect_apply_aura_name[jdx] {
+            if a.effect[idx] == SPELL_EFFECT_APPLY_AURA
+                && a.effect_apply_aura_name[idx] == b.effect_apply_aura_name[jdx]
+            {
                 if a.effect_base_points[idx] != b.effect_base_points[jdx] {
                     return true;
                 }
@@ -212,8 +225,10 @@ pub fn is_single_target_spells(a: &SpellEntry, b: &SpellEntry) -> bool {
         return true;
     }
 
-    matches!(get_spell_specific(a), SpellSpecific::Judgement | SpellSpecific::MagePolymorph)
-        && get_spell_specific(a) == get_spell_specific(b)
+    matches!(
+        get_spell_specific(a),
+        SpellSpecific::Judgement | SpellSpecific::MagePolymorph
+    ) && get_spell_specific(a) == get_spell_specific(b)
 }
 
 #[cfg(test)]

@@ -33,7 +33,12 @@ async fn ensure_database(url: &str) -> Result<()> {
         .max_connections(1)
         .connect(&parts.server_url)
         .await
-        .with_context(|| format!("Failed to connect to MySQL server at {}", mask(&parts.server_url)))?;
+        .with_context(|| {
+            format!(
+                "Failed to connect to MySQL server at {}",
+                mask(&parts.server_url)
+            )
+        })?;
 
     let db = parts.database.replace('`', "``");
     let sql = format!(

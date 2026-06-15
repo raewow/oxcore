@@ -29,7 +29,10 @@ pub async fn cmd_help(ctx: &CommandContext<'_, AuthServer>, args: &str) -> Resul
 pub async fn cmd_info(ctx: &CommandContext<'_, AuthServer>, _args: &str) -> Result<String> {
     let snapshot = ctx.context.metrics.snapshot();
     let mut output = String::from("Auth Server Information:\n");
-    output.push_str(&format!("  Bind: {}:{}\n", ctx.context.config.bind_ip, ctx.context.config.realm_server_port));
+    output.push_str(&format!(
+        "  Bind: {}:{}\n",
+        ctx.context.config.bind_ip, ctx.context.config.realm_server_port
+    ));
     output.push_str(&format!(
         "  Connections: {} total, {} active\n",
         snapshot.connections_total, snapshot.connections_active

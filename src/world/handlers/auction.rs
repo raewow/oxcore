@@ -6,12 +6,10 @@ use anyhow::Result;
 use std::sync::Arc;
 use tracing::debug;
 
-use crate::shared::game::auction::{
-    AuctionAction, AuctionEntry, AuctionError, AuctionQueryType,
-};
+use crate::shared::game::auction::{AuctionAction, AuctionEntry, AuctionError, AuctionQueryType};
 use crate::shared::messages::auction::{
-    MsgAuctionHello, SmsgAuctionBidderListResult, SmsgAuctionCommandResult,
-    SmsgAuctionListResult, SmsgAuctionOwnerListResult,
+    MsgAuctionHello, SmsgAuctionBidderListResult, SmsgAuctionCommandResult, SmsgAuctionListResult,
+    SmsgAuctionOwnerListResult,
 };
 use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
@@ -19,7 +17,8 @@ use crate::world::core::session::WorldSession;
 use crate::world::game::auction::manager::{AuctionHouseManager, AuctionHouseObject};
 use crate::world::game::auction::{
     get_checked_auction_house_for_auctioneer, send_auction_bidder_notification,
-    send_auction_command_result, send_auction_owner_notification, send_auction_removed_notification,
+    send_auction_command_result, send_auction_owner_notification,
+    send_auction_removed_notification,
 };
 use crate::world::game::creature::CreatureManager;
 use crate::world::game::inventory::inventory_types::{is_bank_pos, InventoryResult};
@@ -164,13 +163,16 @@ pub async fn handle_auction_list_bidder_items(
 
     // Drop the read lock before acquiring a write lock to avoid deadlock.
     drop(player);
-    let _ = world.managers.player_mgr.with_player_mut(player_guid, |player| {
-        let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
-        if !removed.is_empty() {
-            player.auras.needs_client_update = true;
-            player.auras.needs_stat_recalc = true;
-        }
-    });
+    let _ = world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+            if !removed.is_empty() {
+                player.auras.needs_client_update = true;
+                player.auras.needs_stat_recalc = true;
+            }
+        });
 
     let Some(auction_house_map) = world
         .managers
@@ -360,7 +362,12 @@ pub async fn handle_auction_sell_item(
 
     // --- item must not already be in another auction ---
     let item_guid_low = item_guid.low();
-    if world.managers.auction_mgr.get_a_item(item_guid_low).is_some() {
+    if world
+        .managers
+        .auction_mgr
+        .get_a_item(item_guid_low)
+        .is_some()
+    {
         debug!(
             "CMSG_AUCTION_SELL_ITEM: item {} already in auction, rejecting",
             item_guid_low
@@ -497,9 +504,7 @@ pub async fn handle_auction_sell_item(
     world.systems.inventory.remove_gold(player_guid, deposit);
 
     // --- remove item from player inventory ---
-    let item_template = {
-        item_arc.read().entry
-    };
+    let item_template = { item_arc.read().entry };
     let auction_item = match world
         .systems
         .inventory
@@ -547,7 +552,11 @@ pub async fn handle_auction_sell_item(
     auction_house_map.add_auction(entry.clone());
 
     // --- persist to DB ---
-    world.managers.auction_mgr.save_auction_to_db(&entry).await?;
+    world
+        .managers
+        .auction_mgr
+        .save_auction_to_db(&entry)
+        .await?;
 
     // --- notify client ---
     send_auction_command_result(
@@ -607,13 +616,16 @@ pub async fn handle_auction_remove_item(
     drop(player);
 
     // Remove feign death before any auction interaction.
-    let _ = world.managers.player_mgr.with_player_mut(player_guid, |player| {
-        let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
-        if !removed.is_empty() {
-            player.auras.needs_client_update = true;
-            player.auras.needs_stat_recalc = true;
-        }
-    });
+    let _ = world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+            if !removed.is_empty() {
+                player.auras.needs_client_update = true;
+                player.auras.needs_stat_recalc = true;
+            }
+        });
 
     let Some(auction_house_map) = world
         .managers
@@ -649,16 +661,29 @@ pub async fn handle_auction_remove_item(
         if player_money < cut {
             return Ok(());
         }
-        world.managers.auction_mgr.send_auction_cancelled_to_bidder_mail(&auction).await?;
+        world
+            .managers
+            .auction_mgr
+            .send_auction_cancelled_to_bidder_mail(&auction)
+            .await?;
         if let Some(bidder_session) = world.session_mgr.get_session_by_player(auction.bidder_guid) {
-            let _ = send_auction_removed_notification(&bidder_session, &auction, &world.managers.auction_mgr);
+            let _ = send_auction_removed_notification(
+                &bidder_session,
+                &auction,
+                &world.managers.auction_mgr,
+            );
         }
         world.systems.inventory.remove_gold(player_guid, cut);
     }
 
     // Item must exist in the auction manager cache.
     let item_guid_low = auction.item_guid.low();
-    if world.managers.auction_mgr.get_a_item(item_guid_low).is_none() {
+    if world
+        .managers
+        .auction_mgr
+        .get_a_item(item_guid_low)
+        .is_none()
+    {
         debug!(
             "HandleAuctionRemoveItem: item {} not found for auction {}",
             item_guid_low, auction_id
@@ -674,7 +699,11 @@ pub async fn handle_auction_remove_item(
     }
 
     // Mail item back to owner; also removes item from the auction item cache.
-    world.managers.auction_mgr.send_auction_cancel_mail_to_owner(&auction).await?;
+    world
+        .managers
+        .auction_mgr
+        .send_auction_cancel_mail_to_owner(&auction)
+        .await?;
 
     send_auction_removed_notification(session, &auction, &world.managers.auction_mgr)?;
 
@@ -687,7 +716,11 @@ pub async fn handle_auction_remove_item(
     )?;
 
     // Persist: remove auction row from DB.
-    world.managers.auction_mgr.delete_auction_from_db(auction.id).await?;
+    world
+        .managers
+        .auction_mgr
+        .delete_auction_from_db(auction.id)
+        .await?;
     // TODO: persist player gold deduction to DB (no character_repo.update_money yet)
 
     // Remove auction from in-memory house map.
@@ -859,8 +892,7 @@ pub async fn handle_auction_place_bid(
     let buyout = auction.buyout_price;
 
     // Bid must meet the minimum increment when not buying out.
-    if (buyout == 0 || price < buyout)
-        && price < auction.current_bid + auction.get_outbid_amount()
+    if (buyout == 0 || price < buyout) && price < auction.current_bid + auction.get_outbid_amount()
     {
         send_auction_command_result(
             session,
@@ -906,7 +938,11 @@ pub async fn handle_auction_place_bid(
 
     if buyout != 0 && price >= buyout {
         // --- BUYOUT PATH ---
-        let deduct = if is_rebid { buyout - auction.current_bid } else { buyout };
+        let deduct = if is_rebid {
+            buyout - auction.current_bid
+        } else {
+            buyout
+        };
         world.systems.inventory.remove_gold(player_guid, deduct);
 
         let mut settled_auction = auction.clone();
@@ -932,7 +968,12 @@ pub async fn handle_auction_place_bid(
             .session_mgr
             .get_session_by_player(settled_auction.seller_guid)
         {
-            let _ = send_auction_owner_notification(&seller_session, &settled_auction, true, random_prop as i32);
+            let _ = send_auction_owner_notification(
+                &seller_session,
+                &settled_auction,
+                true,
+                random_prop as i32,
+            );
         }
 
         world
@@ -967,7 +1008,11 @@ pub async fn handle_auction_place_bid(
         // TODO: persist player gold deduction to DB (no character_repo.update_money yet)
     } else {
         // --- BID PATH ---
-        let deduct = if is_rebid { price - auction.current_bid } else { price };
+        let deduct = if is_rebid {
+            price - auction.current_bid
+        } else {
+            price
+        };
         world.systems.inventory.remove_gold(player_guid, deduct);
 
         auction_house_map.update_bid(auction_id, player_guid, price);
@@ -986,7 +1031,12 @@ pub async fn handle_auction_place_bid(
                 .get_a_item(updated_auction.item_guid.low())
                 .map(|i| i.random_property_id as u32)
                 .unwrap_or(0);
-            let _ = send_auction_owner_notification(&seller_session, &updated_auction, false, random_prop as i32);
+            let _ = send_auction_owner_notification(
+                &seller_session,
+                &updated_auction,
+                false,
+                random_prop as i32,
+            );
         }
 
         world
@@ -1143,13 +1193,16 @@ pub async fn handle_auction_list_owner_items(
 
     // Drop the read lock before acquiring a write lock to avoid deadlock.
     drop(player);
-    let _ = world.managers.player_mgr.with_player_mut(player_guid, |player| {
-        let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
-        if !removed.is_empty() {
-            player.auras.needs_client_update = true;
-            player.auras.needs_stat_recalc = true;
-        }
-    });
+    let _ = world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+            if !removed.is_empty() {
+                player.auras.needs_client_update = true;
+                player.auras.needs_stat_recalc = true;
+            }
+        });
 
     let Some(auction_house_map) = world
         .managers
@@ -1290,13 +1343,16 @@ pub async fn handle_auction_list_items(
     };
 
     drop(player);
-    let _ = world.managers.player_mgr.with_player_mut(player_guid, |player| {
-        let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
-        if !removed.is_empty() {
-            player.auras.needs_client_update = true;
-            player.auras.needs_stat_recalc = true;
-        }
-    });
+    let _ = world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            let removed = player.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+            if !removed.is_empty() {
+                player.auras.needs_client_update = true;
+                player.auras.needs_stat_recalc = true;
+            }
+        });
 
     let Some(auction_house_map) = world
         .managers
@@ -1327,7 +1383,11 @@ pub async fn handle_auction_list_items(
     session.set_received_ah_list_request(true);
 
     let world_clone = world.clone();
-    tokio::spawn(execute_auction_list_items_task(world_clone, player_guid, task));
+    tokio::spawn(execute_auction_list_items_task(
+        world_clone,
+        player_guid,
+        task,
+    ));
 
     Ok(())
 }
@@ -1413,21 +1473,21 @@ async fn execute_auction_list_items_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
-    use crate::world::core::session::WorldSession;
-    use crate::world::dbc::manager::DbcManager;
-    use crate::world::dbc::structures::AuctionHouseEntry;
-    use crate::world::game::creature::{Creature, CreatureManager, CreatureTemplate};
-    use crate::world::game::items::manager::ItemManager;
-    use crate::world::game::player::auras::aura::{Aura, AuraFlags};
-    use crate::world::game::player::player::Player;
-    use crate::world::game::player::PlayerManager;
-    use crate::world::game::auction::manager::AuctionHouseManager;
     use crate::shared::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
     use crate::shared::database::characters::repositories::character_repository::CharacterRepository;
     use crate::shared::database::characters::repositories::item_repository::ItemRepository;
     use crate::shared::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
     use crate::shared::database::characters::repositories::mail_repository::MailRepository;
+    use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
+    use crate::world::core::session::WorldSession;
+    use crate::world::dbc::manager::DbcManager;
+    use crate::world::dbc::structures::AuctionHouseEntry;
+    use crate::world::game::auction::manager::AuctionHouseManager;
+    use crate::world::game::creature::{Creature, CreatureManager, CreatureTemplate};
+    use crate::world::game::items::manager::ItemManager;
+    use crate::world::game::player::auras::aura::{Aura, AuraFlags};
+    use crate::world::game::player::player::Player;
+    use crate::world::game::player::PlayerManager;
     use parking_lot::RwLock;
     use sqlx::mysql::MySqlPoolOptions;
     use std::sync::Arc;
@@ -1611,8 +1671,14 @@ mod tests {
         let packet = read_packet(rx);
         assert_eq!(packet.opcode(), Opcode::MSG_AUCTION_HELLO);
         assert_eq!(packet.data().len(), 12);
-        assert_eq!(u64::from_le_bytes(packet.data()[0..8].try_into().unwrap()), auctioneer_guid.raw());
-        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), 1);
+        assert_eq!(
+            u64::from_le_bytes(packet.data()[0..8].try_into().unwrap()),
+            auctioneer_guid.raw()
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()),
+            1
+        );
         let player = player_mgr.get_player(test_player_guid()).expect("player");
         assert!(!player.auras.container.has_aura(AURA_FEIGN_DEATH));
     }
@@ -1721,12 +1787,8 @@ mod tests {
         packet.write_guid(test_auctioneer_guid(100));
         packet.write_u32(0);
 
-        let result = handle_auction_list_owner_items(
-            &session,
-            &mut packet,
-            &make_world_fixture(),
-        )
-        .await;
+        let result =
+            handle_auction_list_owner_items(&session, &mut packet, &make_world_fixture()).await;
 
         assert!(result.is_ok());
         assert!(rx.try_recv().is_err());
@@ -1739,12 +1801,8 @@ mod tests {
         packet.write_guid(test_auctioneer_guid(999)); // Unknown auctioneer
         packet.write_u32(0);
 
-        let result = handle_auction_list_owner_items(
-            &session,
-            &mut packet,
-            &make_world_fixture(),
-        )
-        .await;
+        let result =
+            handle_auction_list_owner_items(&session, &mut packet, &make_world_fixture()).await;
 
         assert!(result.is_ok());
         assert!(rx.try_recv().is_err());
@@ -1764,12 +1822,7 @@ mod tests {
         packet.write_guid(test_player_guid());
         packet.write_u32(0);
 
-        let result = handle_auction_list_owner_items(
-            &session,
-            &mut packet,
-            &world,
-        )
-        .await;
+        let result = handle_auction_list_owner_items(&session, &mut packet, &world).await;
 
         assert!(result.is_ok());
         assert!(session.received_ah_list_request());
@@ -1783,7 +1836,9 @@ mod tests {
         let session = Arc::new(session);
         let world = make_world_fixture();
         world.session_mgr.add_session(Arc::clone(&session));
-        world.session_mgr.register_player(session.id(), test_player_guid());
+        world
+            .session_mgr
+            .register_player(session.id(), test_player_guid());
         world
             .managers
             .player_mgr
@@ -1847,9 +1902,18 @@ mod tests {
         };
 
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_BIDDER_LIST_RESULT);
-        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 1);
-        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), 9001);
-        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), 1234);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
+            1
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()),
+            9001
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()),
+            1234
+        );
         assert_eq!(
             u64::from_le_bytes(packet.data()[32..40].try_into().unwrap()),
             crate::shared::protocol::ObjectGuid::new_player(2).raw()
@@ -1861,20 +1925,25 @@ mod tests {
         assert!(!session.received_ah_list_request());
     }
 
-    fn make_list_items_packet(auctioneer_guid: crate::shared::protocol::ObjectGuid, search: &str) -> WorldPacket {
+    fn make_list_items_packet(
+        auctioneer_guid: crate::shared::protocol::ObjectGuid,
+        search: &str,
+    ) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::CMSG_AUCTION_LIST_ITEMS);
         packet.write_guid(auctioneer_guid);
-        packet.write_u32(0);           // listfrom
-        // null-terminated search string
-        for b in search.as_bytes() { packet.write_u8(*b); }
-        packet.write_u8(0);            // null terminator
-        packet.write_u8(0);            // levelmin
-        packet.write_u8(0);            // levelmax
-        packet.write_u32(u32::MAX);    // auctionSlotID (all)
-        packet.write_u32(u32::MAX);    // auctionMainCategory (all)
-        packet.write_u32(u32::MAX);    // auctionSubCategory (all)
-        packet.write_u32(u32::MAX);    // quality (all)
-        packet.write_u8(0);            // usable (all)
+        packet.write_u32(0); // listfrom
+                             // null-terminated search string
+        for b in search.as_bytes() {
+            packet.write_u8(*b);
+        }
+        packet.write_u8(0); // null terminator
+        packet.write_u8(0); // levelmin
+        packet.write_u8(0); // levelmax
+        packet.write_u32(u32::MAX); // auctionSlotID (all)
+        packet.write_u32(u32::MAX); // auctionMainCategory (all)
+        packet.write_u32(u32::MAX); // auctionSubCategory (all)
+        packet.write_u32(u32::MAX); // quality (all)
+        packet.write_u8(0); // usable (all)
         packet
     }
 
@@ -1904,7 +1973,9 @@ mod tests {
         let session = Arc::new(session);
         let world = make_world_fixture();
         world.session_mgr.add_session(Arc::clone(&session));
-        world.session_mgr.register_player(session.id(), test_player_guid());
+        world
+            .session_mgr
+            .register_player(session.id(), test_player_guid());
         world
             .managers
             .player_mgr
@@ -1952,7 +2023,10 @@ mod tests {
             let mut out = None;
             for _ in 0..1000 {
                 match rx.try_recv() {
-                    Ok(p) => { out = Some(p); break; }
+                    Ok(p) => {
+                        out = Some(p);
+                        break;
+                    }
                     Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                         tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
                     }
@@ -1964,9 +2038,15 @@ mod tests {
 
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_LIST_RESULT);
         // count = 1
-        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 1);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
+            1
+        );
         // first auction id = 8001
-        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), 8001);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()),
+            8001
+        );
         assert!(!session.received_ah_list_request());
     }
 

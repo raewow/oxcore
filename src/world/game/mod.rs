@@ -23,8 +23,8 @@ pub mod ticket;
 pub mod trade;
 pub mod visibility;
 
-pub use broadcast_mgr::BroadcastManager;
 pub use auction::{AuctionHouseManager, AuctionHouseObject};
+pub use broadcast_mgr::BroadcastManager;
 pub use creature::CreatureManager;
 pub use gameobject::GameObjectManager;
 pub use items::ItemManager;

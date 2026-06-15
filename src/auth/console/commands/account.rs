@@ -27,9 +27,7 @@ pub async fn cmd_account(ctx: &CommandContext<'_, AuthServer>, args: &str) -> Re
 
 async fn cmd_create(ctx: &CommandContext<'_, AuthServer>, parts: &[&str]) -> Result<String> {
     if parts.len() < 2 {
-        return Ok(
-            "Usage: account create <username> <password> [gmlevel]".to_string(),
-        );
+        return Ok("Usage: account create <username> <password> [gmlevel]".to_string());
     }
 
     let username = parts[0];

@@ -2855,7 +2855,8 @@ impl InventorySystem {
             (r.bag, r.slot, r.clone())
         };
 
-        self.cache.set_item_at(player_guid, item_bag, item_slot, None);
+        self.cache
+            .set_item_at(player_guid, item_bag, item_slot, None);
         self.cache.remove_item(player_guid, item_guid);
 
         let _ = self

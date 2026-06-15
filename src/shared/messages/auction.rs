@@ -55,10 +55,7 @@ pub enum SmsgAuctionCommandResult {
         action: AuctionAction,
     },
     /// AUCTION_OK + BidPlaced: appends outbid amount
-    OkBidPlaced {
-        auction_id: u32,
-        outbid: u32,
-    },
+    OkBidPlaced { auction_id: u32, outbid: u32 },
     /// AUCTION_ERR_INVENTORY: appends inventory error code
     Inventory {
         auction_id: u32,
@@ -123,11 +120,16 @@ impl ToWorldPacket for SmsgAuctionCommandResult {
             Self::OkBidPlaced { outbid, .. } => {
                 packet.write_u32(*outbid);
             }
-            Self::Inventory { inventory_error, .. } => {
+            Self::Inventory {
+                inventory_error, ..
+            } => {
                 packet.write_u32(*inventory_error as u32);
             }
             Self::HigherBid {
-                bidder_guid, bid, outbid, ..
+                bidder_guid,
+                bid,
+                outbid,
+                ..
             } => {
                 packet.write_u64(bidder_guid.raw());
                 packet.write_u32(*bid);
@@ -352,8 +354,14 @@ mod tests {
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::MSG_AUCTION_HELLO);
         assert_eq!(packet.data().len(), 12);
-        assert_eq!(u64::from_le_bytes(packet.data()[0..8].try_into().unwrap()), 123);
-        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), 0);
+        assert_eq!(
+            u64::from_le_bytes(packet.data()[0..8].try_into().unwrap()),
+            123
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()),
+            0
+        );
     }
 
     #[test]
@@ -365,9 +373,18 @@ mod tests {
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
         assert_eq!(packet.data().len(), 12); // 3 * u32
-        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 123);
-        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), AuctionAction::Started as u32);
-        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), AuctionError::Ok as u32);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
+            123
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()),
+            AuctionAction::Started as u32
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()),
+            AuctionError::Ok as u32
+        );
     }
 
     #[test]
@@ -379,10 +396,22 @@ mod tests {
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
         assert_eq!(packet.data().len(), 16); // 4 * u32
-        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 123);
-        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), AuctionAction::BidPlaced as u32);
-        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), AuctionError::Ok as u32);
-        assert_eq!(u32::from_le_bytes(packet.data()[12..16].try_into().unwrap()), 100);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
+            123
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()),
+            AuctionAction::BidPlaced as u32
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()),
+            AuctionError::Ok as u32
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[12..16].try_into().unwrap()),
+            100
+        );
     }
 
     #[test]
@@ -390,15 +419,28 @@ mod tests {
         let msg = SmsgAuctionCommandResult::Inventory {
             auction_id: 0,
             action: AuctionAction::Started,
-            inventory_error: crate::world::game::inventory::inventory_types::InventoryResult::BagFull,
+            inventory_error:
+                crate::world::game::inventory::inventory_types::InventoryResult::BagFull,
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
         assert_eq!(packet.data().len(), 16); // 4 * u32
-        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 0);
-        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), AuctionAction::Started as u32);
-        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), AuctionError::Inventory as u32);
-        assert_eq!(u32::from_le_bytes(packet.data()[12..16].try_into().unwrap()), crate::world::game::inventory::inventory_types::InventoryResult::BagFull as u32);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
+            0
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()),
+            AuctionAction::Started as u32
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()),
+            AuctionError::Inventory as u32
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[12..16].try_into().unwrap()),
+            crate::world::game::inventory::inventory_types::InventoryResult::BagFull as u32
+        );
     }
 
     #[test]
@@ -414,12 +456,30 @@ mod tests {
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
         assert_eq!(packet.data().len(), 28); // 3 * u32 + u64 + 2 * u32
-        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 456);
-        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), AuctionAction::BidPlaced as u32);
-        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), AuctionError::HigherBid as u32);
-        assert_eq!(u64::from_le_bytes(packet.data()[12..20].try_into().unwrap()), bidder_guid.raw());
-        assert_eq!(u32::from_le_bytes(packet.data()[20..24].try_into().unwrap()), 1000);
-        assert_eq!(u32::from_le_bytes(packet.data()[24..28].try_into().unwrap()), 50);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
+            456
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()),
+            AuctionAction::BidPlaced as u32
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()),
+            AuctionError::HigherBid as u32
+        );
+        assert_eq!(
+            u64::from_le_bytes(packet.data()[12..20].try_into().unwrap()),
+            bidder_guid.raw()
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[20..24].try_into().unwrap()),
+            1000
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[24..28].try_into().unwrap()),
+            50
+        );
     }
 
     #[test]
@@ -432,9 +492,18 @@ mod tests {
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
         assert_eq!(packet.data().len(), 12); // 3 * u32
-        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 0);
-        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), AuctionAction::Started as u32);
-        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), AuctionError::NotEnoughMoney as u32);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
+            0
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()),
+            AuctionAction::Started as u32
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()),
+            AuctionError::NotEnoughMoney as u32
+        );
     }
 
     #[test]
@@ -489,8 +558,17 @@ mod tests {
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_REMOVED_NOTIFICATION);
-        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 999);
-        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), 123);
-        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), 45);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
+            999
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()),
+            123
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()),
+            45
+        );
     }
 }

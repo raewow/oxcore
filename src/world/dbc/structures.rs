@@ -1347,14 +1347,22 @@ impl SpellEntry {
                 3 | 8 | 62 | 84 | 85 => true,
                 20 | 21 | 33 | 44 | 89 => false,
                 107 | 108 => self.effect_misc_value[idx] <= 0,
-                _ => self.effect_implicit_target_a[idx] == 1 || self.effect_implicit_target_b[idx] == 0,
+                _ => {
+                    self.effect_implicit_target_a[idx] == 1
+                        || self.effect_implicit_target_b[idx] == 0
+                }
             },
             _ => self.effect_implicit_target_a[idx] == 1 || self.effect_implicit_target_b[idx] == 0,
         }
     }
 
     pub fn is_positive_spell(&self) -> bool {
-        (self.attributes & 0x0400_0000) == 0 && self.effect.iter().enumerate().all(|(idx, &effect)| effect == 0 || self.is_positive_effect(idx))
+        (self.attributes & 0x0400_0000) == 0
+            && self
+                .effect
+                .iter()
+                .enumerate()
+                .all(|(idx, &effect)| effect == 0 || self.is_positive_effect(idx))
     }
 
     pub fn is_reflectable_spell(&self) -> bool {
@@ -1364,25 +1372,44 @@ impl SpellEntry {
     pub fn get_weapon_attack_type(&self) -> u32 {
         match self.dmg_class {
             1 => {
-                if (self.attributes_ex3 & 0x0000_0800) != 0 { 1 } else { 0 }
+                if (self.attributes_ex3 & 0x0000_0800) != 0 {
+                    1
+                } else {
+                    0
+                }
             }
             2 => 2,
             _ => {
-                if (self.attributes_ex2 & 0x0000_4000) != 0 { 2 } else { 0 }
+                if (self.attributes_ex2 & 0x0000_4000) != 0 {
+                    2
+                } else {
+                    0
+                }
             }
         }
     }
 
     pub fn get_cast_time(&self, dbc: &DbcManager) -> u32 {
-        let Some(entry) = dbc.get_spell_cast_time(self.casting_time_index) else { return 0; };
+        let Some(entry) = dbc.get_spell_cast_time(self.casting_time_index) else {
+            return 0;
+        };
         let cast_time = entry.cast_time as i32;
-        if cast_time <= 0 { 0 } else { cast_time as u32 }
+        if cast_time <= 0 {
+            0
+        } else {
+            cast_time as u32
+        }
     }
 
     pub fn get_cast_time_for_bonus(&self, _effect_type: u32) -> f32 {
-        let mut cast_time = self.get_cast_time(&crate::world::dbc::manager::DbcManager::new()) as f32;
-        if cast_time > 7000.0 { cast_time = 7000.0; }
-        if cast_time < 1500.0 { cast_time = 1500.0; }
+        let mut cast_time =
+            self.get_cast_time(&crate::world::dbc::manager::DbcManager::new()) as f32;
+        if cast_time > 7000.0 {
+            cast_time = 7000.0;
+        }
+        if cast_time < 1500.0 {
+            cast_time = 1500.0;
+        }
         cast_time / 3500.0
     }
 
@@ -1395,11 +1422,15 @@ impl SpellEntry {
     }
 
     pub fn get_duration(&self, dbc: &DbcManager) -> i32 {
-        dbc.get_spell_duration(self.duration_index).map(|d| d.duration).unwrap_or(0)
+        dbc.get_spell_duration(self.duration_index)
+            .map(|d| d.duration)
+            .unwrap_or(0)
     }
 
     pub fn get_max_duration(&self, dbc: &DbcManager) -> i32 {
-        dbc.get_spell_duration(self.duration_index).map(|d| d.max_duration).unwrap_or(0)
+        dbc.get_spell_duration(self.duration_index)
+            .map(|d| d.max_duration)
+            .unwrap_or(0)
     }
 
     pub fn calculate_duration(&self, _level: u32, dbc: &DbcManager) -> i32 {
@@ -1408,7 +1439,9 @@ impl SpellEntry {
 
     pub fn get_aura_max_ticks(&self, dbc: &DbcManager) -> u32 {
         let duration = self.get_duration(dbc);
-        if duration <= 0 { return 1; }
+        if duration <= 0 {
+            return 1;
+        }
         for idx in 0..self.effect.len() {
             if self.effect[idx] == 6 && self.effect_amplitude[idx] != 0 {
                 return duration as u32 / self.effect_amplitude[idx];
@@ -1425,7 +1458,11 @@ impl SpellEntry {
     }
 
     pub fn get_error_at_shapeshifted_cast(&self, form: u32) -> SpellCastResult {
-        let stance_mask = if form == 0 { 0 } else { 1u32 << (form.saturating_sub(1)) };
+        let stance_mask = if form == 0 {
+            0
+        } else {
+            1u32 << (form.saturating_sub(1))
+        };
         if stance_mask & self.stances_not != 0 {
             return SpellCastResult::Failed(SpellCastError::WrongShapeshift);
         }
@@ -1461,7 +1498,11 @@ impl SpellEntry {
             }
             if self.effect[idx] == 32 {
                 if let Some(spell) = spell_mgr.get(self.effect_trigger_spell[idx]) {
-                    if spell.effect_apply_aura_name.iter().any(|&aura| aura == aura_type) {
+                    if spell
+                        .effect_apply_aura_name
+                        .iter()
+                        .any(|&aura| aura == aura_type)
+                    {
                         return true;
                     }
                 }
@@ -1808,7 +1849,13 @@ mod tests {
         assert!(!spell.is_target_in_range(35.0, &dbc));
 
         spell.stances = 0x1;
-        assert_eq!(spell.get_error_at_shapeshifted_cast(1), SpellCastResult::Success);
-        assert_eq!(spell.get_error_at_shapeshifted_cast(2), SpellCastResult::Failed(SpellCastError::WrongShapeshift));
+        assert_eq!(
+            spell.get_error_at_shapeshifted_cast(1),
+            SpellCastResult::Success
+        );
+        assert_eq!(
+            spell.get_error_at_shapeshifted_cast(2),
+            SpellCastResult::Failed(SpellCastError::WrongShapeshift)
+        );
     }
 }

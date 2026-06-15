@@ -24,7 +24,7 @@ use crate::shared::messages::update::{
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
-use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerTrait};
+use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::common::update_fields::PLAYER_QUEST_LOG_1_1;
 use crate::world::game::creature::CreatureManager;
 use crate::world::game::inventory::{AddItemResult, GoldResult, InventorySystem};
@@ -43,7 +43,7 @@ use super::types::{
 pub struct QuestSystem {
     pub manager: Arc<QuestManager>,
     repository: Arc<dyn QuestRepositoryTrait>,
-    broadcast_mgr: Arc<BroadcastManager>,
+    broadcast_mgr: Arc<dyn BroadcastManagerTrait>,
     player_mgr: Arc<PlayerManager>,
     creature_mgr: Arc<CreatureManager>,
     item_mgr: Arc<ItemManager>,
@@ -56,7 +56,7 @@ impl QuestSystem {
     pub fn new(
         manager: Arc<QuestManager>,
         repository: Arc<dyn QuestRepositoryTrait>,
-        broadcast_mgr: Arc<BroadcastManager>,
+        broadcast_mgr: Arc<dyn BroadcastManagerTrait>,
         player_mgr: Arc<PlayerManager>,
         creature_mgr: Arc<CreatureManager>,
         item_mgr: Arc<ItemManager>,
@@ -85,6 +85,34 @@ impl QuestSystem {
         let start_quests = self.manager.get_creature_quest_relations(entry);
         let finish_quests = self.manager.get_creature_involved_relations(entry);
 
+        self.get_quest_giver_status_from_relations(player_guid, start_quests, finish_quests, world)
+    }
+
+    /// Calculate quest giver status for a concrete creature or gameobject GUID.
+    pub fn get_quest_giver_status_for_guid(
+        &self,
+        quest_giver_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        world: &World,
+    ) -> Option<DialogStatus> {
+        let (_, start_quests, finish_quests) =
+            self.quest_giver_relations(quest_giver_guid, world)?;
+
+        Some(self.get_quest_giver_status_from_relations(
+            player_guid,
+            start_quests,
+            finish_quests,
+            world,
+        ))
+    }
+
+    fn get_quest_giver_status_from_relations(
+        &self,
+        player_guid: ObjectGuid,
+        start_quests: Vec<u32>,
+        finish_quests: Vec<u32>,
+        world: &World,
+    ) -> DialogStatus {
         let mut status = DialogStatus::None;
 
         // Get player quest info
@@ -204,7 +232,7 @@ impl QuestSystem {
             .unwrap_or(false)
     }
 
-    fn can_store_reward_items(
+    pub(crate) fn can_store_reward_items(
         &self,
         player_guid: ObjectGuid,
         quest: &QuestTemplate,
@@ -213,10 +241,10 @@ impl QuestSystem {
         let mut rewards = Vec::new();
 
         let choice_count = quest.get_rew_choice_items_count() as u32;
+        if reward_choice >= choice_count {
+            return None;
+        }
         if choice_count > 0 {
-            if reward_choice >= choice_count {
-                return None;
-            }
             let idx = reward_choice as usize;
             rewards.push((
                 quest.rew_choice_item_id[idx],
@@ -456,67 +484,75 @@ impl QuestSystem {
     }
 
     /// Check if player can complete quest (auto-complete or objective completion)
-    fn can_complete_quest(
+    /// Core completion validation without can_take_quest dependency.
+    /// Separated for testability.
+    pub(crate) fn can_complete_quest_basic(
         &self,
         player_guid: ObjectGuid,
         quest: &QuestTemplate,
-        world: &World,
     ) -> bool {
         if quest.id == 0 {
             return false;
         }
 
-        let (active_status, progress) = self.player_mgr.with_player(player_guid, |p| {
-            p.active_quests
-                .iter()
-                .find(|q| q.quest_id == quest.id)
-                .map(|prog| (prog.status, prog.clone()))
-        }).unwrap_or((QuestStatus::None, QuestProgress::new(0)));
+        let (active_status, progress) = self
+            .player_mgr
+            .with_player(player_guid, |p| {
+                p.active_quests
+                    .iter()
+                    .find(|q| q.quest_id == quest.id)
+                    .map(|prog| (prog.status, prog.clone()))
+            })
+            .flatten()
+            .unwrap_or((QuestStatus::None, QuestProgress::new(0)));
 
         if active_status == QuestStatus::Complete {
             return false; // Already complete
-        }
-
-        // Auto-rewarded quests
-        if quest.quest_flags.contains(QuestFlags::AUTO_REWARDED) {
-            return self.can_take_quest(player_guid, quest, world);
-        }
-
-        // Auto-complete quest
-        if quest.is_auto_complete() && self.can_take_quest(player_guid, quest, world) {
-            return true;
         }
 
         if active_status != QuestStatus::Incomplete {
             return false;
         }
 
-        let Some(progress) = progress else {
+        if progress.quest_id == 0 {
             return false;
-        };
+        }
 
         // Check item objectives
         if quest.special_flags.contains(QuestSpecialFlags::DELIVER) {
             for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
-                if quest.req_item_count[i] != 0 &&
-                    self.inventory.count_items(player_guid, quest.req_item_id[i]) < quest.req_item_count[i] {
+                if quest.req_item_count[i] != 0
+                    && self
+                        .inventory
+                        .count_items(player_guid, quest.req_item_id[i])
+                        < quest.req_item_count[i]
+                {
                     return false;
                 }
             }
         }
 
         // Check creature/GO objectives
-        if quest.special_flags.contains(QuestSpecialFlags::KILL_OR_CAST | QuestSpecialFlags::SPEAKTO) {
+        if quest
+            .special_flags
+            .contains(QuestSpecialFlags::KILL_OR_CAST)
+            || quest.special_flags.contains(QuestSpecialFlags::SPEAKTO)
+        {
             for i in 0..super::types::QUEST_OBJECTIVES_COUNT {
-                if quest.req_creature_or_go_count[i] != 0 &&
-                    progress.creature_or_go_count[i] < quest.req_creature_or_go_count[i] {
+                if quest.req_creature_or_go_count[i] != 0
+                    && progress.creature_or_go_count[i] < quest.req_creature_or_go_count[i]
+                {
                     return false;
                 }
             }
         }
 
         // Check exploration
-        if quest.special_flags.contains(QuestSpecialFlags::EXPLORATION_OR_EVENT) && !progress.explored {
+        if quest
+            .special_flags
+            .contains(QuestSpecialFlags::EXPLORATION_OR_EVENT)
+            && !progress.explored
+        {
             return false;
         }
 
@@ -535,11 +571,15 @@ impl QuestSystem {
 
         // Check reputation objective
         if quest.rep_objective_faction != 0 {
-            let rep = self.player_mgr.with_player(player_guid, |p| {
-                p.reputation.get_standing_by_faction_id(quest.rep_objective_faction)
-                    .map(|s| s.get_absolute_reputation(0))
-                    .unwrap_or(0)
-            }).unwrap_or(0);
+            let rep = self
+                .player_mgr
+                .with_player(player_guid, |p| {
+                    p.reputation
+                        .get_standing_by_faction_id(quest.rep_objective_faction)
+                        .map(|s| s.get_absolute_reputation(0))
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0);
             if rep < quest.rep_objective_value {
                 return false;
             }
@@ -548,30 +588,44 @@ impl QuestSystem {
         true
     }
 
-    /// Check if player can reward quest (basic version without reward index)
-    fn can_reward_quest(
+    fn can_complete_quest(
         &self,
         player_guid: ObjectGuid,
         quest: &QuestTemplate,
         world: &World,
     ) -> bool {
-        // Auto-complete quests must be takable
+        // Auto-rewarded quests
+        if quest.quest_flags.contains(QuestFlags::AUTO_REWARDED) {
+            return self.can_take_quest(player_guid, quest, world);
+        }
+
+        // Auto-complete quest
         if quest.is_auto_complete() {
-            if !self.can_take_quest(player_guid, quest, world) {
-                return false;
-            }
-        } else {
-            // Normal quests must be accepted and complete
-            let status = self.get_quest_status(player_guid, quest.id);
-            if status != QuestStatus::Complete {
-                return false;
-            }
+            return self.can_take_quest(player_guid, quest, world);
+        }
+
+        self.can_complete_quest_basic(player_guid, quest)
+    }
+
+    /// Check if player can reward quest (basic version without reward index)
+    /// Core reward validation without auto-complete/can_take_quest dependency.
+    /// Separated for testability.
+    pub(crate) fn can_reward_quest_basic(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+    ) -> bool {
+        // Normal quests must be accepted and complete
+        let status = self.get_quest_status(player_guid, quest.id);
+        if status != QuestStatus::Complete {
+            return false;
         }
 
         // Prevent completing the same quest twice
-        let already_rewarded = self.player_mgr.with_player(player_guid, |p| {
-            p.rewarded_quests.contains(&quest.id)
-        }).unwrap_or(false);
+        let already_rewarded = self
+            .player_mgr
+            .with_player(player_guid, |p| p.rewarded_quests.contains(&quest.id))
+            .unwrap_or(false);
         if already_rewarded && !quest.is_repeatable() {
             return false;
         }
@@ -579,8 +633,12 @@ impl QuestSystem {
         // Check required items
         if quest.special_flags.contains(QuestSpecialFlags::DELIVER) {
             for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
-                if quest.req_item_count[i] != 0 &&
-                    self.inventory.count_items(player_guid, quest.req_item_id[i]) < quest.req_item_count[i] {
+                if quest.req_item_count[i] != 0
+                    && self
+                        .inventory
+                        .count_items(player_guid, quest.req_item_id[i])
+                        < quest.req_item_count[i]
+                {
                     return false;
                 }
             }
@@ -595,6 +653,22 @@ impl QuestSystem {
         }
 
         true
+    }
+
+    fn can_reward_quest(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        world: &World,
+    ) -> bool {
+        // Auto-complete quests must be takable
+        if quest.is_auto_complete() {
+            if !self.can_take_quest(player_guid, quest, world) {
+                return false;
+            }
+        }
+
+        self.can_reward_quest_basic(player_guid, quest)
     }
 
     /// Check if player can reward quest with specific reward choice
@@ -630,8 +704,13 @@ impl QuestSystem {
 
         if quest.special_flags.contains(QuestSpecialFlags::DELIVER) {
             for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
-                if quest.req_item_id[i] != 0 && quest.req_item_count[i] != 0 &&
-                    self.inventory.count_items(player_guid, quest.req_item_id[i]) < quest.req_item_count[i] {
+                if quest.req_item_id[i] != 0
+                    && quest.req_item_count[i] != 0
+                    && self
+                        .inventory
+                        .count_items(player_guid, quest.req_item_id[i])
+                        < quest.req_item_count[i]
+                {
                     return false;
                 }
             }
@@ -641,7 +720,7 @@ impl QuestSystem {
     }
 
     /// Auto-complete quest (mark as complete, sync item objectives)
-    fn complete_quest(
+    pub(crate) fn complete_quest(
         &self,
         player_guid: ObjectGuid,
         quest_id: u32,
@@ -652,7 +731,9 @@ impl QuestSystem {
                 // Sync item objectives from inventory
                 for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
                     if quest.req_item_id[i] != 0 && quest.req_item_count[i] != 0 {
-                        let carried = self.inventory.count_items(player_guid, quest.req_item_id[i])
+                        let carried = self
+                            .inventory
+                            .count_items(player_guid, quest.req_item_id[i])
                             .min(quest.req_item_count[i]);
                         if carried > progress.item_count[i] {
                             progress.item_count[i] = carried;
@@ -693,7 +774,7 @@ impl QuestSystem {
         }
     }
 
-    fn inventory_satisfies_required_items(
+    pub(crate) fn inventory_satisfies_required_items(
         &self,
         player_guid: ObjectGuid,
         quest: &QuestTemplate,
@@ -749,7 +830,7 @@ impl QuestSystem {
             .unwrap_or(false)
     }
 
-    fn active_quest_is_complete_without_sync(
+    pub(crate) fn active_quest_is_complete_without_sync(
         &self,
         player_guid: ObjectGuid,
         quest_id: u32,
@@ -766,7 +847,7 @@ impl QuestSystem {
             .unwrap_or(false)
     }
 
-    fn active_quest_is_complete(
+    pub(crate) fn active_quest_is_complete(
         &self,
         player_guid: ObjectGuid,
         quest_id: u32,
@@ -798,18 +879,14 @@ impl QuestSystem {
     pub fn send_quest_giver_status(
         &self,
         player_guid: ObjectGuid,
-        creature_guid: ObjectGuid,
+        quest_giver_guid: ObjectGuid,
         world: &World,
-    ) {
-        let Some(entry) = self
-            .creature_mgr
-            .get_creature(creature_guid)
-            .map(|c| c.entry)
+    ) -> bool {
+        let Some(local_status) =
+            self.get_quest_giver_status_for_guid(quest_giver_guid, player_guid, world)
         else {
-            return;
+            return false;
         };
-
-        let local_status = self.get_quest_giver_status(entry, player_guid, world);
 
         // Convert local DialogStatus to message DialogStatus
         let status = match local_status {
@@ -824,11 +901,12 @@ impl QuestSystem {
         };
 
         let msg = SmsgQuestgiverStatus {
-            guid: creature_guid,
+            guid: quest_giver_guid,
             status,
         };
 
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+        true
     }
 
     /// Prepare quest menu items for gossip integration
@@ -1234,12 +1312,7 @@ impl QuestSystem {
             }
         };
 
-        self.send_request_items(
-            player_guid,
-            quest_giver_guid,
-            &quest,
-            completable,
-        );
+        self.send_request_items(player_guid, quest_giver_guid, &quest, completable);
 
         Ok(())
     }
@@ -2594,5 +2667,264 @@ impl QuestSystem {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::database::Databases;
+    use crate::shared::protocol::{ObjectGuid, Position};
+    use crate::world::config::Config;
+    use crate::world::game::creature::{Creature, CreatureTemplate};
+    use crate::world::game::gameobject::{GameObject, GameObjectTemplate};
+    use crate::world::game::player::Player;
+    use sqlx::mysql::MySqlPoolOptions;
+    use std::path::PathBuf;
+
+    fn lazy_pool() -> sqlx::MySqlPool {
+        MySqlPoolOptions::new()
+            .connect_lazy("mysql://test:test@localhost/test")
+            .expect("lazy pool should be constructible")
+    }
+
+    fn test_world() -> World {
+        let databases = Arc::new(Databases {
+            world: lazy_pool(),
+            character: lazy_pool(),
+            auth: lazy_pool(),
+            logs: lazy_pool(),
+        });
+
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    fn test_quest(id: u32) -> QuestTemplate {
+        QuestTemplate {
+            id,
+            title: format!("Quest {id}"),
+            is_active: true,
+            ..QuestTemplate::default()
+        }
+    }
+
+    fn test_creature_template(entry: u32, npc_flags: u32) -> CreatureTemplate {
+        CreatureTemplate {
+            entry,
+            name: format!("Creature {entry}"),
+            subname: None,
+            min_level: 1,
+            max_level: 1,
+            faction: 35,
+            model_id_1: 1,
+            model_id_2: 0,
+            model_id_3: 0,
+            model_id_4: 0,
+            scale: 1.0,
+            npc_flags,
+            unit_flags: 0,
+            static_flags1: 0,
+            flags_extra: 0,
+            creature_type: 7,
+            unit_class: 1,
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            damage_variance: 0.0,
+            attack_time: 2000,
+            rank: 0,
+            gossip_menu_id: 0,
+            vendor_id: 0,
+            trainer_id: 0,
+            trainer_type: 0,
+            spells: [0; 4],
+        }
+    }
+
+    fn test_gameobject_template(entry: u32) -> GameObjectTemplate {
+        GameObjectTemplate {
+            entry,
+            go_type: 3,
+            display_id: 1,
+            name: format!("GameObject {entry}"),
+            icon_name: String::new(),
+            cast_bar_caption: String::new(),
+            faction: 0,
+            flags: 0,
+            size: 1.0,
+            data: [0; 24],
+        }
+    }
+
+    fn add_player(world: &World, player_guid: ObjectGuid, level: u8) {
+        let player = Player::new(player_guid, "Tester".to_string(), 0, 0, 1, level, 1, 1, 0);
+        world.managers.player_mgr.add_player(player, 1);
+    }
+
+    fn add_creature(world: &World, entry: u32, counter: u32, npc_flags: u32) -> ObjectGuid {
+        let guid = ObjectGuid::new_creature(entry, counter);
+        let template = test_creature_template(entry, npc_flags);
+        world.managers.creature_mgr.add_template(template.clone());
+        world.managers.creature_mgr.add_creature(Creature::new(
+            guid,
+            entry,
+            counter,
+            Position::default(),
+            0,
+            0,
+            &template,
+            1,
+            None,
+        ));
+        guid
+    }
+
+    fn add_gameobject(world: &World, entry: u32, counter: u32) -> ObjectGuid {
+        let guid = ObjectGuid::new_gameobject(entry, counter);
+        let template = test_gameobject_template(entry);
+        world
+            .managers
+            .gameobject_mgr
+            .add_template_for_test(template.clone());
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(GameObject::new(
+                guid,
+                entry,
+                counter,
+                Position::default(),
+                0,
+                &template,
+                [0.0; 4],
+                1,
+                100,
+            ));
+        guid
+    }
+
+    #[tokio::test]
+    async fn creature_complete_involved_quest_returns_reward2() {
+        let world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, 0x00000002);
+        add_player(&world, player_guid, 10);
+
+        world
+            .systems
+            .quest
+            .manager
+            .add_quest_template(test_quest(1));
+        world.systems.quest.manager.add_creature_quest_ender(100, 1);
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.active_quests.push(QuestProgress::new(1));
+            });
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Reward2)
+        );
+    }
+
+    #[tokio::test]
+    async fn creature_available_start_quest_returns_available() {
+        let world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, 0x00000002);
+        add_player(&world, player_guid, 10);
+
+        let mut quest = test_quest(1);
+        quest.min_level = 5;
+        world.systems.quest.manager.add_quest_template(quest);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(100, 1);
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Available)
+        );
+    }
+
+    #[tokio::test]
+    async fn creature_level_locked_start_quest_returns_unavailable() {
+        let world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let creature_guid = add_creature(&world, 100, 1, 0x00000002);
+        add_player(&world, player_guid, 10);
+
+        let mut quest = test_quest(1);
+        quest.min_level = 20;
+        world.systems.quest.manager.add_quest_template(quest);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(100, 1);
+
+        assert_eq!(
+            world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(creature_guid, player_guid, &world),
+            Some(DialogStatus::Unavailable)
+        );
+    }
+
+    #[tokio::test]
+    async fn gameobject_questgiver_uses_gameobject_relations() {
+        let world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        let gameobject_guid = add_gameobject(&world, 200, 1);
+        add_player(&world, player_guid, 10);
+
+        world
+            .systems
+            .quest
+            .manager
+            .add_quest_template(test_quest(1));
+        world.systems.quest.manager.add_go_quest_starter(200, 1);
+
+        assert_eq!(
+            world.systems.quest.get_quest_giver_status_for_guid(
+                gameobject_guid,
+                player_guid,
+                &world
+            ),
+            Some(DialogStatus::Available)
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_questgiver_guid_returns_none() {
+        let world = test_world();
+        let player_guid = ObjectGuid::new_player(1);
+        add_player(&world, player_guid, 10);
+
+        assert_eq!(
+            world.systems.quest.get_quest_giver_status_for_guid(
+                ObjectGuid::new_creature(999, 1),
+                player_guid,
+                &world,
+            ),
+            None
+        );
     }
 }

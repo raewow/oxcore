@@ -61,7 +61,10 @@ impl AuctionHouseObject {
     }
 
     pub fn auctions_snapshot(&self) -> Vec<AuctionEntry> {
-        self.auctions.iter().map(|entry| entry.value().clone()).collect()
+        self.auctions
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect()
     }
 
     pub fn get_auction(&self, id: u32) -> Option<AuctionEntry> {
@@ -252,7 +255,8 @@ impl AuctionHouseManager {
             }
             let proto = proto.unwrap();
 
-            let Some(item) = Self::load_auction_item_from_row(item_guid, item_id, &row, &proto) else {
+            let Some(item) = Self::load_auction_item_from_row(item_guid, item_id, &row, &proto)
+            else {
                 continue;
             };
 
@@ -518,10 +522,18 @@ impl AuctionHouseManager {
         } else {
             match team {
                 crate::shared::game::chat::Team::Alliance => {
-                    if auction_access_mode == 0 { 1 } else { 6 }
+                    if auction_access_mode == 0 {
+                        1
+                    } else {
+                        6
+                    }
                 }
                 crate::shared::game::chat::Team::Horde => {
-                    if auction_access_mode == 0 { 6 } else { 1 }
+                    if auction_access_mode == 0 {
+                        6
+                    } else {
+                        1
+                    }
                 }
                 _ => 7,
             }
@@ -533,10 +545,7 @@ impl AuctionHouseManager {
     ///
     /// Mirrors C++ `AuctionHouseMgr::GetAuctionHouseEntry` creature branch (lines 586-592).
     /// When cross-faction auction is enabled, returns house 1's entry (matching C++ houseId=1 path).
-    pub fn get_auction_house_for_npc(
-        &self,
-        faction_template_id: u32,
-    ) -> Option<AuctionHouseEntry> {
+    pub fn get_auction_house_for_npc(&self, faction_template_id: u32) -> Option<AuctionHouseEntry> {
         if self.allow_cross_faction_auction.load(Ordering::Relaxed) {
             return self.get_auction_house_entry(1);
         }
@@ -623,7 +632,10 @@ impl AuctionHouseManager {
                         .get_auction_house_entry(auction.house_id)
                         .map(|e| e.cut_percent as f32)
                         .unwrap_or(0.0);
-                    if let Err(e) = self.send_auction_successful_mail(&auction, cut_percent, 1.0).await {
+                    if let Err(e) = self
+                        .send_auction_successful_mail(&auction, cut_percent, 1.0)
+                        .await
+                    {
                         error!("AuctionHouseManager::update SendAuctionSuccessfulMail failed: {e}");
                     }
                     if let Err(e) = self.send_auction_won_mail(&auction).await {
@@ -674,7 +686,10 @@ impl AuctionHouseManager {
     /// Refunds the bidder's current bid by mail when an owner cancels a live auction.
     ///
     /// Mirrors C++ `WorldSession::SendAuctionCancelledToBidderMail`.
-    pub async fn send_auction_cancelled_to_bidder_mail(&self, auction: &AuctionEntry) -> Result<()> {
+    pub async fn send_auction_cancelled_to_bidder_mail(
+        &self,
+        auction: &AuctionEntry,
+    ) -> Result<()> {
         let bidder_guid_low = auction.bidder_guid.low();
         if bidder_guid_low == 0 {
             return Ok(());
@@ -685,7 +700,10 @@ impl AuctionHouseManager {
             return Ok(());
         }
 
-        let subject = format!("{}:0:{}", auction.item_template, AUCTION_CANCELLED_TO_BIDDER);
+        let subject = format!(
+            "{}:0:{}",
+            auction.item_template, AUCTION_CANCELLED_TO_BIDDER
+        );
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -762,7 +780,12 @@ impl AuctionHouseManager {
         Ok(())
     }
 
-    pub async fn update_bid_in_db(&self, auction_id: u32, bidder_guid: u32, new_bid: u32) -> Result<()> {
+    pub async fn update_bid_in_db(
+        &self,
+        auction_id: u32,
+        bidder_guid: u32,
+        new_bid: u32,
+    ) -> Result<()> {
         self.auction_repo
             .update_bid(auction_id, bidder_guid, new_bid as i32)
             .await
@@ -922,7 +945,11 @@ impl AuctionHouseManager {
         tracing::debug!("AuctionWon body string : {}", body);
 
         // Transfer DB ownership to bidder so the item survives if the original seller is deleted.
-        if let Err(e) = self.item_repo.update_owner(item_guid_low, bidder_guid_low).await {
+        if let Err(e) = self
+            .item_repo
+            .update_owner(item_guid_low, bidder_guid_low)
+            .await
+        {
             error!("SendAuctionWonMail: failed to update item owner: {e}");
         }
 
@@ -967,7 +994,12 @@ impl AuctionHouseManager {
 
         if let Err(e) = self
             .mail_repo
-            .add_item(mail_id, item_guid_low, auction.item_template, bidder_guid_low)
+            .add_item(
+                mail_id,
+                item_guid_low,
+                auction.item_template,
+                bidder_guid_low,
+            )
             .await
         {
             error!("SendAuctionWonMail: failed to attach item to mail: {e}");
@@ -1043,7 +1075,12 @@ impl AuctionHouseManager {
 
         if let Err(e) = self
             .mail_repo
-            .add_item(mail_id, item_guid_low, auction.item_template, owner_guid_low)
+            .add_item(
+                mail_id,
+                item_guid_low,
+                auction.item_template,
+                owner_guid_low,
+            )
             .await
         {
             error!("SendAuctionExpiredMail: failed to attach item to mail: {e}");
@@ -1067,7 +1104,10 @@ impl AuctionHouseManager {
 
         if owner_acc_id == 0 {
             if let Err(e) = self.item_repo.delete(item.guid.low()).await {
-                error!("send_auction_mail_to_owner: failed to delete item {}: {e}", item.guid.low());
+                error!(
+                    "send_auction_mail_to_owner: failed to delete item {}: {e}",
+                    item.guid.low()
+                );
             }
             return Ok(());
         }
@@ -1104,7 +1144,12 @@ impl AuctionHouseManager {
 
         if let Err(e) = self
             .mail_repo
-            .add_item(mail_id, item.guid.low(), auction.item_template, owner_guid_low)
+            .add_item(
+                mail_id,
+                item.guid.low(),
+                auction.item_template,
+                owner_guid_low,
+            )
             .await
         {
             error!("send_auction_mail_to_owner: failed to attach item to mail: {e}");

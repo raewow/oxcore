@@ -1057,13 +1057,15 @@ impl SpellSystem {
             .player
             .manager()
             .with_player_mut(caster_guid, |player| {
-                player
-                    .spells
-                    .clear_current_spell(slot)
-                    .map(|active| {
-                        let was_preparing = active.state == SpellState::Preparing;
-                        (active.spell_id, active.is_channeling, was_preparing, active.is_triggered)
-                    })
+                player.spells.clear_current_spell(slot).map(|active| {
+                    let was_preparing = active.state == SpellState::Preparing;
+                    (
+                        active.spell_id,
+                        active.is_channeling,
+                        was_preparing,
+                        active.is_triggered,
+                    )
+                })
             })
             .flatten();
 

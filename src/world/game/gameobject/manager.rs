@@ -78,6 +78,16 @@ impl GameObjectManager {
         self.gameobjects.get(&guid)
     }
 
+    #[cfg(test)]
+    pub fn add_template_for_test(&self, template: GameObjectTemplate) {
+        self.templates.insert(template.entry, Arc::new(template));
+    }
+
+    #[cfg(test)]
+    pub fn add_gameobject_for_test(&self, gameobject: GameObject) {
+        self.gameobjects.insert(gameobject.guid, gameobject);
+    }
+
     /// Batched immutable access
     pub fn with_gameobject<F, R>(&self, guid: ObjectGuid, f: F) -> Option<R>
     where

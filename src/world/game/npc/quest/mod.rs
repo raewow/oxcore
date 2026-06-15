@@ -13,6 +13,9 @@ pub mod manager;
 pub mod system;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 // Re-exports for convenience
 pub use manager::QuestManager;
 pub use system::QuestSystem;

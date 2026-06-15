@@ -8,8 +8,8 @@
 //! 5. Handler sends response via session
 
 pub mod area_trigger;
-pub mod auth;
 pub mod auction;
+pub mod auth;
 pub mod character;
 pub mod character_create_items;
 pub mod chat;
