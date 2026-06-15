@@ -21,7 +21,7 @@ use crate::world::game::auction::{
     get_checked_auction_house_for_auctioneer, send_auction_command_result,
 };
 use crate::world::game::creature::CreatureManager;
-use crate::world::game::inventory::inventory_types::InventoryResult;
+use crate::world::game::inventory::inventory_types::{is_bank_pos, InventoryResult};
 use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
 use crate::world::game::player::PlayerManager;
 use crate::world::World;
@@ -374,20 +374,188 @@ pub async fn handle_auction_sell_item(
         return Ok(());
     }
 
-    // --- remaining item validation is blocked on InventorySystem ---
-    // The following checks require the actual Item from the player's inventory cache,
-    // which is not yet accessible via world.managers (InventorySystem is not wired).
-    // Blocked steps:
-    //   - GetItemByGuid(item_guid) → null  → AUCTION_ERR_INVENTORY + EQUIP_ERR_ITEM_NOT_FOUND
-    //   - IsBankPos(item.bag, item.slot)   → AUCTION_ERR_INVENTORY + EQUIP_ERR_ITEM_NOT_FOUND
-    //   - !item.CanBeTraded()              → AUCTION_ERR_INVENTORY + EQUIP_ERR_ITEM_NOT_FOUND
-    //   - item.flags & ITEM_FLAG_CONJURED  → AUCTION_ERR_INVENTORY + EQUIP_ERR_ITEM_NOT_FOUND
-    //   - item.duration > 0               → AUCTION_ERR_INVENTORY + EQUIP_ERR_ITEM_NOT_FOUND
-    //   - GetAuctionDeposit(house, etime, item) → real deposit
-    //   - player.money < deposit           → AUCTION_ERR_NOT_ENOUGH_MONEY
-    //   - deduct deposit, create AuctionEntry, add to house + item cache
-    //   - remove item from inventory, persist item + auction to DB
-    //   - send AUCTION_STARTED + AUCTION_OK with real AuctionEntry
+    // --- item must exist in player inventory ---
+    let item_info = world
+        .systems
+        .inventory
+        .cache()
+        .get_item_info(player_guid, item_guid);
+    let item_info = match item_info {
+        Some(i) => i,
+        None => {
+            send_auction_command_result(
+                session,
+                None,
+                AuctionAction::Started,
+                AuctionError::Inventory,
+                Some(InventoryResult::ItemNotFound),
+            )?;
+            return Ok(());
+        }
+    };
+
+    // --- item must not be in bank ---
+    if is_bank_pos(item_info.bag, item_info.slot) {
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::Started,
+            AuctionError::Inventory,
+            Some(InventoryResult::ItemNotFound),
+        )?;
+        return Ok(());
+    }
+
+    // --- item must be tradeable (not bound), not conjured, not temporary ---
+    let item_arc = world
+        .systems
+        .inventory
+        .cache()
+        .get_item(player_guid, item_guid);
+    let item_arc = match item_arc {
+        Some(i) => i,
+        None => {
+            send_auction_command_result(
+                session,
+                None,
+                AuctionAction::Started,
+                AuctionError::Inventory,
+                Some(InventoryResult::ItemNotFound),
+            )?;
+            return Ok(());
+        }
+    };
+
+    {
+        let item = item_arc.read();
+        // ITEM_FLAG_CONJURED = 0x2, or item has a limited duration.
+        let is_conjured = item.flags & 0x2 != 0;
+        // ITEM_FLAG_NO_TRADE: 0x4 (lootable bond), also check 0x10000 (bind on equip already equipped).
+        // C++ CanBeTraded() returns false when IS_BOUND and item.IsBoundByEnchant() etc.
+        // Minimal Vanilla port: reject if flags indicate soulbound (0x1) or conjured (0x2).
+        let is_bound = item.flags & 0x1 != 0;
+        let has_duration = item.duration > 0;
+
+        if is_bound || is_conjured || has_duration {
+            send_auction_command_result(
+                session,
+                None,
+                AuctionAction::Started,
+                AuctionError::Inventory,
+                Some(InventoryResult::ItemNotFound),
+            )?;
+            return Ok(());
+        }
+    }
+
+    // --- calculate deposit ---
+    let deposit = {
+        let item = item_arc.read();
+        world.managers.auction_mgr.get_auction_deposit(
+            &house_entry,
+            etime_secs,
+            &item,
+            world.config.auction_deposit_min,
+            world.config.rate_auction_deposit,
+        )
+    };
+
+    // --- player must have enough gold for deposit ---
+    let player_money = world.systems.inventory.get_money(player_guid).unwrap_or(0);
+    if player_money < deposit {
+        send_auction_command_result(
+            session,
+            None,
+            AuctionAction::Started,
+            AuctionError::NotEnoughMoney,
+            None,
+        )?;
+        return Ok(());
+    }
+
+    // --- get the auction house map early (needed for limit check and registration) ---
+    let auction_house_map = match world
+        .managers
+        .auction_mgr
+        .get_auctions_map_by_house_id(house_entry.house_id)
+    {
+        Some(m) => m,
+        None => {
+            send_auction_command_result(
+                session,
+                None,
+                AuctionAction::Started,
+                AuctionError::DatabaseError,
+                None,
+            )?;
+            return Ok(());
+        }
+    };
+
+    // --- deduct deposit ---
+    world.systems.inventory.remove_gold(player_guid, deposit);
+
+    // --- remove item from player inventory ---
+    let item_template = {
+        item_arc.read().entry
+    };
+    let auction_item = match world
+        .systems
+        .inventory
+        .move_item_to_auction(player_guid, item_guid)
+        .await
+    {
+        Some(i) => i,
+        None => {
+            // Item disappeared between check and removal; refund deposit.
+            world.systems.inventory.add_gold(player_guid, deposit);
+            send_auction_command_result(
+                session,
+                None,
+                AuctionAction::Started,
+                AuctionError::Inventory,
+                Some(InventoryResult::ItemNotFound),
+            )?;
+            return Ok(());
+        }
+    };
+
+    // --- build auction entry ---
+    let auction_id = world.managers.auction_mgr.generate_auction_id();
+    let expire_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        + etime_secs as u64;
+
+    let mut entry = AuctionEntry::new(
+        auction_id,
+        house_entry.house_id,
+        item_guid,
+        item_template,
+        player_guid,
+        session.account_id(),
+        bid,
+        buyout,
+        expire_time,
+        deposit,
+    );
+
+    // --- register in memory ---
+    world.managers.auction_mgr.add_a_item(auction_item);
+    auction_house_map.add_auction(entry.clone());
+
+    // --- persist to DB ---
+    world.managers.auction_mgr.save_auction_to_db(&entry).await?;
+
+    // --- notify client ---
+    send_auction_command_result(
+        session,
+        Some(&entry),
+        AuctionAction::Started,
+        AuctionError::Ok,
+        None,
+    )?;
 
     Ok(())
 }
@@ -476,18 +644,12 @@ pub async fn handle_auction_remove_item(
     // is refunded. If the owner cannot cover the cut, silently abort (matches C++).
     if auction.has_bid() {
         let cut = auction.get_auction_cut(house_entry.cut_percent as f32, 1.0);
-        let player_money = world
-            .managers
-            .player_mgr
-            .get_money(player_guid)
-            .unwrap_or(0);
+        let player_money = world.systems.inventory.get_money(player_guid).unwrap_or(0);
         if player_money < cut {
             return Ok(());
         }
         world.managers.auction_mgr.send_auction_cancelled_to_bidder_mail(&auction).await?;
-        let _ = world.managers.player_mgr.with_player_mut(player_guid, |p| {
-            p.money = p.money.saturating_sub(cut);
-        });
+        world.systems.inventory.remove_gold(player_guid, cut);
     }
 
     // Item must exist in the auction manager cache.

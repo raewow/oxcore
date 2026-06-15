@@ -2837,4 +2837,42 @@ impl InventorySystem {
         self.unload_player_inventory(guid);
         Ok(())
     }
+
+    /// Moves an item from player inventory to the auction house.
+    ///
+    /// Removes the item from the inventory cache and clears its slot on the client.
+    /// The character_inventory DB row is deleted but item_instance is kept (auction owns it).
+    /// Returns the owned Item so the caller can register it in the auction item cache.
+    pub async fn move_item_to_auction(
+        &self,
+        player_guid: ObjectGuid,
+        item_guid: ObjectGuid,
+    ) -> Option<Arc<crate::world::game::items::Item>> {
+        let item_arc = self.cache.get_item(player_guid, item_guid)?;
+
+        let (item_bag, item_slot, item_clone) = {
+            let r = item_arc.read();
+            (r.bag, r.slot, r.clone())
+        };
+
+        self.cache.set_item_at(player_guid, item_bag, item_slot, None);
+        self.cache.remove_item(player_guid, item_guid);
+
+        let _ = self
+            .repository
+            .remove_from_slot(player_guid.low(), item_bag, item_slot)
+            .await;
+
+        self.send_slot_update(player_guid, item_bag, item_slot, None);
+
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgDestroyItem {
+                item_guid,
+                count: 0,
+            },
+        );
+
+        Some(Arc::new(item_clone))
+    }
 }
