@@ -302,7 +302,7 @@ export function getFlowDetailsForMcp(
 
   const branches = flowRepo.getBranchesForFlow(db, flow.id);
   const mutations = flowRepo.getMutationsForFlow(db, flow.id);
-  const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 1000 });
+  const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000, flow: flow.name });
   const flowTasks = tasks.filter((t) => t.flow_id === flow.id);
   const taskIds = flowTasks.map((t) => t.id);
   const auditsByTask = getLatestAuditsForTasks(db, taskIds);

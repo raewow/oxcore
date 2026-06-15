@@ -79,7 +79,7 @@ export function createFlowsRoutes(
 
     const branches = flowRepo.getBranchesForFlow(db, id);
     const mutations = flowRepo.getMutationsForFlow(db, id);
-    const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 1000 });
+    const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000, flow: flow.name });
     const flowTasks = tasks.filter((t) => t.flow_id === id);
     const taskIds = flowTasks.map((t) => t.id);
     const auditsByTask = getLatestAuditsForTasks(db, taskIds);
@@ -142,7 +142,7 @@ export function createFlowsRoutes(
     const flow = flowRepo.getFlowById(db, id);
     if (!flow) return c.json({ error: "Not found" }, 404);
 
-    const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000 });
+    const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000, flow: flow.name });
     const flowTasks = tasks.filter((t) => t.flow_id === id);
     const audits = getLatestAuditsForTasks(
       db,
@@ -168,7 +168,7 @@ export function createFlowsRoutes(
     const flow = flowRepo.getFlowById(db, id);
     if (!flow) return c.json({ error: "Not found" }, 404);
 
-    const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000 });
+    const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000, flow: flow.name });
     const flowTasks = tasks.filter((t) => t.flow_id === id);
     const audits = getLatestAuditsForTasks(
       db,
@@ -197,7 +197,7 @@ export function createFlowsRoutes(
     const flow = flowRepo.getFlowById(db, id);
     if (!flow) return c.json({ error: "Not found" }, 404);
 
-    const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000 });
+    const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000, flow: flow.name });
     const taskIds = tasks.filter((t) => t.flow_id === id).map((t) => t.id);
 
     if (!taskIds.length) {
