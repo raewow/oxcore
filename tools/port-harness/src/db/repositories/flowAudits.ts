@@ -131,9 +131,19 @@ export function recommendNextAction(
   audit: TaskAuditSummary | undefined,
   taskStatus: string,
 ): FlowNextAction {
+  // Terminal (no further action needed)
   if (taskStatus === "reviewed" || taskStatus === "done") return "done";
+
+  // Past port stage — needs verification or review
+  if (taskStatus === "verified" || taskStatus === "rust_compiled") return "review";
+
+  // Past plan stage — needs porting (or compiling, if already written)
+  if (taskStatus === "rust_ported" || taskStatus === "rust_planned") return "port";
+
+  // Pre-plan stage — needs audit documentation
   if (!audit) return "audit";
+
+  // Audit exists — decide based on quality
   if (audit.passed && audit.implementation_status === "complete") return "review";
-  if (taskStatus === "rust_planned") return "port";
   return "plan";
 }

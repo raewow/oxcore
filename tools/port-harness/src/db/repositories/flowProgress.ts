@@ -44,8 +44,8 @@ function taskPipelineScore(
   hasPlan: boolean,
   hasPort: boolean,
 ): number {
-  if (status === "reviewed" || status === "done") return 4;
-  if (hasPort || status === "rust_ported") return 3;
+  if (status === "reviewed" || status === "done" || status === "verified") return 4;
+  if (status === "rust_compiled" || hasPort || status === "rust_ported") return 3;
   if (hasPlan || status === "rust_planned") return 2;
   if (audit) return 1;
   return 0;
