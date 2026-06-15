@@ -1655,3 +1655,160 @@ impl DbcEntry for SpellEntry {
         Ok(Some((id, entry)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_spell_entry(id: u32) -> SpellEntry {
+        SpellEntry {
+            id,
+            name: format!("Spell{}", id),
+            rank_text: String::new(),
+            school: 0,
+            category: 0,
+            dispel: 0,
+            mechanic: 0,
+            attributes: 0,
+            attributes_ex: 0,
+            attributes_ex2: 0,
+            attributes_ex3: 0,
+            attributes_ex4: 0,
+            stances: 0,
+            stances_not: 0,
+            targets: 0,
+            target_creature_type: 0,
+            requires_spell_focus: 0,
+            caster_aura_state: 0,
+            target_aura_state: 0,
+            casting_time_index: 0,
+            recovery_time: 0,
+            category_recovery_time: 0,
+            interrupt_flags: 0,
+            aura_interrupt_flags: 0,
+            channel_interrupt_flags: 0,
+            proc_flags: 0,
+            proc_chance: 0,
+            proc_charges: 0,
+            max_level: 0,
+            base_level: 0,
+            spell_level: 0,
+            duration_index: 0,
+            power_type: 0,
+            mana_cost: 0,
+            mana_cost_per_level: 0,
+            mana_per_second: 0,
+            mana_per_second_per_level: 0,
+            range_index: 0,
+            speed: 0.0,
+            stack_amount: 0,
+            totem: [0; 2],
+            reagent: [0; 8],
+            reagent_count: [0; 8],
+            equipped_item_class: 0,
+            equipped_item_sub_class_mask: 0,
+            equipped_item_inventory_type_mask: 0,
+            effect: [0; 3],
+            effect_die_sides: [0; 3],
+            effect_base_dice: [0; 3],
+            effect_dice_per_level: [0.0; 3],
+            effect_real_points_per_level: [0.0; 3],
+            effect_base_points: [0; 3],
+            effect_bonus_coefficient: [0.0; 3],
+            effect_mechanic: [0; 3],
+            effect_implicit_target_a: [0; 3],
+            effect_implicit_target_b: [0; 3],
+            effect_radius_index: [0; 3],
+            effect_apply_aura_name: [0; 3],
+            effect_amplitude: [0; 3],
+            effect_multiple_value: [0.0; 3],
+            effect_chain_target: [0; 3],
+            effect_item_type: [0; 3],
+            effect_misc_value: [0; 3],
+            effect_trigger_spell: [0; 3],
+            effect_points_per_combo_point: [0.0; 3],
+            spell_visual: 0,
+            spell_icon_id: 0,
+            active_icon_id: 0,
+            spell_priority: 0,
+            min_target_level: 0,
+            mana_cost_percentage: 0,
+            start_recovery_category: 0,
+            start_recovery_time: 0,
+            max_target_level: 0,
+            spell_family_name: 0,
+            spell_family_flags: 0,
+            max_affected_targets: 0,
+            dmg_class: 0,
+            prevention_type: 0,
+            custom: 0,
+            internal: 0,
+            allowed_target_mask: 0,
+            script_id: 0,
+            dmg_multiplier: [1.0; 3],
+        }
+    }
+
+    #[test]
+    fn rank_parsing_prefers_rank_prefix() {
+        let mut spell = make_spell_entry(100);
+        spell.rank_text = "Rank 3".to_string();
+        assert_eq!(spell.get_rank(), 3);
+        spell.rank_text = "Passive".to_string();
+        assert_eq!(spell.get_rank(), 0);
+    }
+
+    #[test]
+    fn cast_time_and_duration_helpers_use_dbc_entries() {
+        let mut dbc = DbcManager::new();
+        dbc.spell_cast_time.insert(
+            1,
+            SpellCastTimeEntry {
+                id: 1,
+                cast_time: 2500,
+                cast_time_per_level: 0,
+                min_cast_time: 0,
+            },
+        );
+        dbc.spell_duration.insert(
+            2,
+            SpellDurationEntry {
+                id: 2,
+                duration: 15000,
+                duration_per_level: 0,
+                max_duration: 30000,
+            },
+        );
+
+        let mut spell = make_spell_entry(101);
+        spell.casting_time_index = 1;
+        spell.duration_index = 2;
+
+        assert_eq!(spell.get_cast_time(&dbc), 2500);
+        assert_eq!(spell.get_duration(&dbc), 15000);
+        assert_eq!(spell.get_max_duration(&dbc), 30000);
+        assert_eq!(spell.get_aura_max_ticks(&dbc), 6);
+    }
+
+    #[test]
+    fn range_and_shapeshift_helpers_use_entry_data() {
+        let mut dbc = DbcManager::new();
+        dbc.spell_range.insert(
+            3,
+            SpellRangeEntry {
+                id: 3,
+                range_min: 0.0,
+                range_max: 30.0,
+            },
+        );
+
+        let mut spell = make_spell_entry(102);
+        spell.range_index = 3;
+        assert!(spell.is_target_in_range(10.0, &dbc));
+        assert!(!spell.is_target_in_range(35.0, &dbc));
+
+        spell.stances = 0x1;
+        assert_eq!(spell.get_error_at_shapeshifted_cast(1), SpellCastResult::Success);
+        assert_eq!(spell.get_error_at_shapeshifted_cast(2), SpellCastResult::Failed(SpellCastError::WrongShapeshift));
+    }
+}
