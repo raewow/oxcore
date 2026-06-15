@@ -661,6 +661,10 @@ pub enum SpellCastError {
     CasterAuraState,
     /// Target does not meet aura state requirement
     TargetAuraState,
+    /// Rogue/Druid tried to use a finishing move with no combo points on the target
+    NoComboPoints,
+    /// Silent failure — cast silently rejected, client shows no error message
+    DontReport,
 }
 
 /// Result of a spell cast attempt

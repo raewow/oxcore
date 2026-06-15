@@ -43,4 +43,4 @@ pub use state::{
     SpellModType, SpellSchool, SpellsState, NUM_SPELL_SCHOOLS,
 };
 pub use system::SpellSystem;
-pub use validation::{spell_cast_error_to_u8, validate_cast};
+pub use validation::{check_power, ignore_item_requirements, spell_cast_error_to_u8, validate_cast};

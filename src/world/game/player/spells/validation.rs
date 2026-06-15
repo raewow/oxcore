@@ -377,7 +377,6 @@ pub fn can_cast_while_moving(spell_id: u32, world: &World) -> bool {
     false
 }
 
-/// Convert SpellCastError to the u8 code expected by the client
 /// Convert SpellCastError to the vanilla 1.12.1 client SpellCastResult enum value.
 /// Values from mangos/src/game/Spells/SpellDefines.h (vanilla 1.12.x build).
 pub fn spell_cast_error_to_u8(error: SpellCastError) -> u8 {
@@ -406,5 +405,120 @@ pub fn spell_cast_error_to_u8(error: SpellCastError) -> u8 {
         WrongShapeshift => 0x56,        // SPELL_FAILED_ONLY_SHAPESHIFT
         CasterAuraState => 0x12,        // SPELL_FAILED_CASTER_AURASTATE
         TargetAuraState => 0x67,        // SPELL_FAILED_TARGET_AURASTATE
+        NoComboPoints => 0x46,          // SPELL_FAILED_NO_COMBO_POINTS
+        DontReport => 0x18,             // SPELL_FAILED_DONT_REPORT (silent)
     }
+}
+
+// ─── Spell::IgnoreItemRequirements ───────────────────────────────────────────
+//
+// C++ lines 7062–7077. Pure boolean; determines whether reagent/item checks
+// should be skipped for a triggered spell.
+//
+// Rules (in order):
+//   1. Non-triggered spells always check item requirements.
+//   2. Triggered with a foreign-owned item target: still check (trade-slot case).
+//   3. Triggered with no triggering spell proto: skip checks.
+//   4. Triggered, triggering spell has Reagent[0] != 0: skip (master already consumed them).
+//   5. Triggered, triggering spell has Reagent[0] == 0: still check.
+pub fn ignore_item_requirements(
+    is_triggered: bool,
+    // true when the item target's owner GUID != the caster's GUID (trade slot case)
+    item_target_has_foreign_owner: bool,
+    // None = no triggering spell info; Some(n) = triggering spell's Reagent[0] value
+    triggering_spell_reagent_0: Option<i32>,
+) -> bool {
+    if !is_triggered {
+        return false;
+    }
+    if item_target_has_foreign_owner {
+        return false;
+    }
+    match triggering_spell_reagent_0 {
+        None => true,      // no triggering spell proto → ignore requirements
+        Some(0) => false,  // triggering spell has no reagents → don't ignore
+        Some(_) => true,   // triggering spell has reagents → master already used them
+    }
+}
+
+// ─── Spell::CheckPower ───────────────────────────────────────────────────────
+//
+// C++ lines 7022–7060. Validates that the caster has enough of the required
+// power resource to cast the spell.
+//
+// Bypasses (all return Ok immediately):
+//   - cast-item spells (item pays the cost)
+//   - triggered spells
+//   - no caster unit
+//
+// Special cases:
+//   - NeedsComboPoints + explicit unit target: target must be the combo target;
+//     on mismatch warrior returns BadTargets, everyone else NoComboPoints.
+//   - powerType == POWER_HEALTH (-2): health must exceed cost or → CasterAuraState.
+//   - unknown powerType (>= MAX_POWERS or negative but not -2) → DontReport.
+//   - non-pet creature without the relevant power type: always Ok.
+pub fn check_power(
+    has_cast_item: bool,
+    is_triggered: bool,
+    has_caster_unit: bool,
+    // spell requires combo points (NeedsComboPoints())
+    needs_combo_points: bool,
+    // effect 0 uses an explicitly selected unit target (IsExplicitlySelectedUnitTarget)
+    effect_0_explicit_unit_target: bool,
+    unit_target_guid: Option<ObjectGuid>,
+    combo_target_guid: Option<ObjectGuid>,
+    // CLASS_WARRIOR = 1 in vanilla
+    caster_class: u8,
+    // powerType from SpellEntry: 0=mana,1=rage,2=focus,3=energy,4=happiness,-2=health
+    power_type: i32,
+    power_cost: i32,
+    caster_health: u32,
+    caster_current_power: u32,
+    // true for non-pet creatures that either lack base mana (for mana spells) or use
+    // a non-mana power type that normal creatures cannot have
+    bypass_creature_power_check: bool,
+) -> SpellCastError {
+    const POWER_HEALTH: i32 = -2;
+    const MAX_POWERS: i32 = 5;
+    const CLASS_WARRIOR: u8 = 1;
+
+    if has_cast_item || is_triggered || !has_caster_unit {
+        return SpellCastError::None;
+    }
+
+    if needs_combo_points && effect_0_explicit_unit_target {
+        let on_combo_target = match (unit_target_guid, combo_target_guid) {
+            (Some(t), Some(c)) => t == c,
+            _ => false,
+        };
+        if !on_combo_target {
+            return if caster_class == CLASS_WARRIOR {
+                SpellCastError::InvalidTarget
+            } else {
+                SpellCastError::NoComboPoints
+            };
+        }
+    }
+
+    if power_type == POWER_HEALTH {
+        return if (caster_health as i32) <= power_cost {
+            SpellCastError::CasterAuraState
+        } else {
+            SpellCastError::None
+        };
+    }
+
+    if power_type < 0 || power_type >= MAX_POWERS {
+        return SpellCastError::DontReport;
+    }
+
+    if bypass_creature_power_check {
+        return SpellCastError::None;
+    }
+
+    if power_cost > 0 && caster_current_power < power_cost as u32 {
+        return SpellCastError::NotEnoughMana;
+    }
+
+    SpellCastError::None
 }
