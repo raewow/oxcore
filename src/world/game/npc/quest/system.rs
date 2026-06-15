@@ -35,8 +35,8 @@ use crate::world::World;
 
 use super::manager::QuestManager;
 use super::types::{
-    DialogStatus, QuestProgress, QuestSpecialFlags, QuestStatus, QuestTemplate, MAX_QUEST_LOG_SIZE,
-    QUEST_OBJECTIVES_COUNT,
+    DialogStatus, QuestFlags, QuestProgress, QuestSpecialFlags, QuestStatus, QuestTemplate,
+    MAX_QUEST_LOG_SIZE, QUEST_OBJECTIVES_COUNT,
 };
 
 /// Quest system - handles business logic and packet sending
@@ -453,6 +453,216 @@ impl QuestSystem {
         // }
 
         true
+    }
+
+    /// Check if player can complete quest (auto-complete or objective completion)
+    fn can_complete_quest(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        world: &World,
+    ) -> bool {
+        if quest.id == 0 {
+            return false;
+        }
+
+        let (active_status, progress) = self.player_mgr.with_player(player_guid, |p| {
+            p.active_quests
+                .iter()
+                .find(|q| q.quest_id == quest.id)
+                .map(|prog| (prog.status, prog.clone()))
+        }).unwrap_or((QuestStatus::None, QuestProgress::new(0)));
+
+        if active_status == QuestStatus::Complete {
+            return false; // Already complete
+        }
+
+        // Auto-rewarded quests
+        if quest.quest_flags.contains(QuestFlags::AUTO_REWARDED) {
+            return self.can_take_quest(player_guid, quest, world);
+        }
+
+        // Auto-complete quest
+        if quest.is_auto_complete() && self.can_take_quest(player_guid, quest, world) {
+            return true;
+        }
+
+        if active_status != QuestStatus::Incomplete {
+            return false;
+        }
+
+        let Some(progress) = progress else {
+            return false;
+        };
+
+        // Check item objectives
+        if quest.special_flags.contains(QuestSpecialFlags::DELIVER) {
+            for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
+                if quest.req_item_count[i] != 0 &&
+                    self.inventory.count_items(player_guid, quest.req_item_id[i]) < quest.req_item_count[i] {
+                    return false;
+                }
+            }
+        }
+
+        // Check creature/GO objectives
+        if quest.special_flags.contains(QuestSpecialFlags::KILL_OR_CAST | QuestSpecialFlags::SPEAKTO) {
+            for i in 0..super::types::QUEST_OBJECTIVES_COUNT {
+                if quest.req_creature_or_go_count[i] != 0 &&
+                    progress.creature_or_go_count[i] < quest.req_creature_or_go_count[i] {
+                    return false;
+                }
+            }
+        }
+
+        // Check exploration
+        if quest.special_flags.contains(QuestSpecialFlags::EXPLORATION_OR_EVENT) && !progress.explored {
+            return false;
+        }
+
+        // Check timer
+        if quest.special_flags.contains(QuestSpecialFlags::TIMED) && progress.timer == 0 {
+            return false;
+        }
+
+        // Check money
+        if quest.rew_or_req_money < 0 {
+            let required_money = (-quest.rew_or_req_money) as u32;
+            if self.inventory.get_money(player_guid).unwrap_or(0) < required_money {
+                return false;
+            }
+        }
+
+        // Check reputation objective
+        if quest.rep_objective_faction != 0 {
+            let rep = self.player_mgr.with_player(player_guid, |p| {
+                p.reputation.get_standing_by_faction_id(quest.rep_objective_faction)
+                    .map(|s| s.get_absolute_reputation(0))
+                    .unwrap_or(0)
+            }).unwrap_or(0);
+            if rep < quest.rep_objective_value {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if player can reward quest (basic version without reward index)
+    fn can_reward_quest(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        world: &World,
+    ) -> bool {
+        // Auto-complete quests must be takable
+        if quest.is_auto_complete() {
+            if !self.can_take_quest(player_guid, quest, world) {
+                return false;
+            }
+        } else {
+            // Normal quests must be accepted and complete
+            let status = self.get_quest_status(player_guid, quest.id);
+            if status != QuestStatus::Complete {
+                return false;
+            }
+        }
+
+        // Prevent completing the same quest twice
+        let already_rewarded = self.player_mgr.with_player(player_guid, |p| {
+            p.rewarded_quests.contains(&quest.id)
+        }).unwrap_or(false);
+        if already_rewarded && !quest.is_repeatable() {
+            return false;
+        }
+
+        // Check required items
+        if quest.special_flags.contains(QuestSpecialFlags::DELIVER) {
+            for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
+                if quest.req_item_count[i] != 0 &&
+                    self.inventory.count_items(player_guid, quest.req_item_id[i]) < quest.req_item_count[i] {
+                    return false;
+                }
+            }
+        }
+
+        // Check money
+        if quest.rew_or_req_money < 0 {
+            let required_money = (-quest.rew_or_req_money) as u32;
+            if self.inventory.get_money(player_guid).unwrap_or(0) < required_money {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if player can reward quest with specific reward choice
+    fn can_reward_quest_with_reward(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        reward_choice: u32,
+        world: &World,
+    ) -> bool {
+        if !self.can_reward_quest(player_guid, quest, world) {
+            return false;
+        }
+
+        // Check reward choice can fit in inventory
+        let Some(can_store) = self.can_store_reward_items(player_guid, quest, reward_choice) else {
+            return false;
+        };
+
+        can_store
+    }
+
+    /// Check if player can complete a repeatable quest
+    fn can_complete_repeatable_quest(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        world: &World,
+    ) -> bool {
+        if !self.can_take_quest(player_guid, quest, world) {
+            return false;
+        }
+
+        if quest.special_flags.contains(QuestSpecialFlags::DELIVER) {
+            for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
+                if quest.req_item_id[i] != 0 && quest.req_item_count[i] != 0 &&
+                    self.inventory.count_items(player_guid, quest.req_item_id[i]) < quest.req_item_count[i] {
+                    return false;
+                }
+            }
+        }
+
+        self.can_reward_quest(player_guid, quest, world)
+    }
+
+    /// Auto-complete quest (mark as complete, sync item objectives)
+    fn complete_quest(
+        &self,
+        player_guid: ObjectGuid,
+        quest_id: u32,
+        quest: &QuestTemplate,
+    ) {
+        self.player_mgr.with_player_mut(player_guid, |p| {
+            if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id) {
+                // Sync item objectives from inventory
+                for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
+                    if quest.req_item_id[i] != 0 && quest.req_item_count[i] != 0 {
+                        let carried = self.inventory.count_items(player_guid, quest.req_item_id[i])
+                            .min(quest.req_item_count[i]);
+                        if carried > progress.item_count[i] {
+                            progress.item_count[i] = carried;
+                        }
+                    }
+                }
+                progress.status = QuestStatus::Complete;
+                progress.mark_changed();
+            }
+        });
     }
 
     /// Get quest status for player
@@ -1012,14 +1222,23 @@ impl QuestSystem {
             return Ok(());
         }
 
-        // Check quest completion status
-        let is_complete = self.active_quest_is_complete(player_guid, quest_id, &quest);
+        let status = self.get_quest_status(player_guid, quest_id);
+
+        let completable = if status == QuestStatus::Complete {
+            self.can_reward_quest(player_guid, &quest, world)
+        } else {
+            if quest.is_repeatable() {
+                self.can_complete_repeatable_quest(player_guid, &quest, world)
+            } else {
+                self.can_reward_quest(player_guid, &quest, world)
+            }
+        };
 
         self.send_request_items(
             player_guid,
             quest_giver_guid,
             &quest,
-            is_complete || quest.is_auto_complete(),
+            completable,
         );
 
         Ok(())
@@ -1081,6 +1300,18 @@ impl QuestSystem {
             return Ok(());
         };
 
+        // Alive check: player must be alive, or creature must be visible for dead
+        if !self.player_mgr.is_player_alive(player_guid) {
+            let creature_visible_for_dead = self
+                .creature_mgr
+                .get_creature(quest_giver_guid)
+                .map(|c| c.unit_flags & 0x00000002 != 0) // TODO: proper IsVisibleForDead flag
+                .unwrap_or(false);
+            if !creature_visible_for_dead {
+                return Ok(());
+            }
+        }
+
         if !self.quest_giver_can_start_or_finish(quest_giver_guid, quest_id, world) {
             warn!(
                 "Player {:?} tried to request reward for quest {} from invalid quest giver {:?}",
@@ -1089,12 +1320,17 @@ impl QuestSystem {
             return Ok(());
         }
 
-        let is_complete = self.active_quest_is_complete(player_guid, quest_id, &quest);
-
-        if !is_complete && !quest.is_auto_complete() {
-            return Ok(());
+        // Auto-complete quest if possible (C++: CanCompleteQuest -> CompleteQuest)
+        let status = self.get_quest_status(player_guid, quest_id);
+        if status != QuestStatus::Complete {
+            if self.can_complete_quest(player_guid, &quest, world) {
+                self.complete_quest(player_guid, quest_id, &quest);
+            } else {
+                return Ok(());
+            }
         }
-        if !self.inventory_satisfies_required_items(player_guid, &quest) {
+
+        if !self.can_reward_quest(player_guid, &quest, world) {
             return Ok(());
         }
 
@@ -1180,6 +1416,18 @@ impl QuestSystem {
             return Ok(());
         };
 
+        // Alive check: player must be alive, or creature must be visible for dead
+        if !self.player_mgr.is_player_alive(player_guid) {
+            let creature_visible_for_dead = self
+                .creature_mgr
+                .get_creature(quest_giver_guid)
+                .map(|c| c.unit_flags & 0x00000002 != 0) // TODO: proper IsVisibleForDead flag
+                .unwrap_or(false);
+            if !creature_visible_for_dead {
+                return Ok(());
+            }
+        }
+
         if !self.quest_giver_can_start_or_finish(quest_giver_guid, quest_id, world) {
             warn!(
                 "Player {:?} tried to reward quest {} from invalid quest giver {:?}",
@@ -1197,47 +1445,9 @@ impl QuestSystem {
             return Ok(());
         }
 
-        let Some(can_store_rewards) =
-            self.can_store_reward_items(player_guid, &quest, reward_choice)
-        else {
-            warn!(
-                "Player {:?} tried to reward quest {} with invalid reward choice {}",
-                player_guid, quest_id, reward_choice
-            );
-            return Ok(());
-        };
-
-        if !can_store_rewards {
-            warn!(
-                "Player {:?} cannot reward quest {}: not enough inventory space",
-                player_guid, quest_id
-            );
-            return Ok(());
-        }
-
-        if quest.rew_or_req_money < 0 {
-            let required_money = (-quest.rew_or_req_money) as u32;
-            if self.inventory.get_money(player_guid).unwrap_or(0) < required_money {
-                warn!(
-                    "Player {:?} cannot reward quest {}: missing required money {}",
-                    player_guid, quest_id, required_money
-                );
-                return Ok(());
-            }
-        }
-
-        // Validate quest is complete
-        let is_complete = self.active_quest_is_complete(player_guid, quest_id, &quest);
-
-        if !is_complete && !quest.is_auto_complete() {
-            return Ok(());
-        }
-
-        if !self.inventory_satisfies_required_items(player_guid, &quest) {
-            warn!(
-                "Player {:?} tried to reward quest {} without required items in inventory",
-                player_guid, quest_id
-            );
+        if !self.can_reward_quest_with_reward(player_guid, &quest, reward_choice, world) {
+            // Re-send offer reward if reward validation fails
+            self.send_offer_reward(player_guid, quest_giver_guid, &quest);
             return Ok(());
         }
 
