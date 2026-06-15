@@ -3,6 +3,34 @@ import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type FlowSummary } from "../api/client";
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handle = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <button
+      type="button"
+      onClick={handle}
+      title="Copy name"
+      style={{
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        padding: "0 2px",
+        fontSize: "0.8rem",
+        color: copied ? "#22c55e" : "#64748b",
+        lineHeight: 1,
+      }}
+    >
+      {copied ? "✓" : "⎘"}
+    </button>
+  );
+}
+
 function truncate(text: string | null, max = 80): string {
   if (!text) return "";
   return text.length > max ? `${text.slice(0, max)}…` : text;
@@ -47,6 +75,7 @@ function FlowProgressCell({ progress }: { progress: FlowSummary["progress"] }) {
 
 export function Flows() {
   const [q, setQ] = useState("");
+  const [featureId, setFeatureId] = useState<number | "">("");
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -54,6 +83,22 @@ export function Flows() {
     queryFn: api.getFlows,
     refetchInterval: 10000,
   });
+
+  const { data: features } = useQuery({
+    queryKey: ["features"],
+    queryFn: api.getFeatures,
+  });
+
+  const { data: featureDetail } = useQuery({
+    queryKey: ["feature", featureId],
+    queryFn: () => api.getFeature(featureId as number),
+    enabled: featureId !== "",
+  });
+
+  const featureFlowIds =
+    featureId !== "" && featureDetail
+      ? new Set(featureDetail.flows.map((f) => f.id))
+      : null;
 
   const markDoneMutation = useMutation({
     mutationFn: (flowId: number) => api.markFlowDone(flowId),
@@ -63,9 +108,11 @@ export function Flows() {
     },
   });
 
-  const flows = (data ?? []).filter((f) =>
-    !q || f.name.toLowerCase().includes(q.toLowerCase()),
-  );
+  const flows = (data ?? []).filter((f) => {
+    if (q && !f.name.toLowerCase().includes(q.toLowerCase())) return false;
+    if (featureFlowIds && !featureFlowIds.has(f.id)) return false;
+    return true;
+  });
 
   if (isLoading) return <div>Loading...</div>;
 
@@ -78,7 +125,7 @@ export function Flows() {
         </p>
       </div>
 
-      <div className="filters" style={{ marginBottom: "1rem" }}>
+      <div className="filters" style={{ marginBottom: "1rem", display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
         <input
           type="search"
           placeholder="Filter by name…"
@@ -86,6 +133,16 @@ export function Flows() {
           onChange={(e) => setQ(e.target.value)}
           style={{ minWidth: 240 }}
         />
+        <select
+          value={featureId}
+          onChange={(e) => setFeatureId(e.target.value === "" ? "" : Number(e.target.value))}
+          style={{ minWidth: 180 }}
+        >
+          <option value="">All features</option>
+          {(features ?? []).map((feat) => (
+            <option key={feat.id} value={feat.id}>{feat.name}</option>
+          ))}
+        </select>
       </div>
 
       {flows.length === 0 ? (
@@ -115,7 +172,10 @@ export function Flows() {
               return (
               <tr key={f.id}>
                 <td>
-                  <Link to={`/flows/${f.id}`}>{f.name}</Link>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                    <Link to={`/flows/${f.id}`}>{f.name}</Link>
+                    <CopyButton text={f.name} />
+                  </div>
                 </td>
                 <td style={{ minWidth: 220 }}>
                   <FlowProgressCell progress={f.progress} />
