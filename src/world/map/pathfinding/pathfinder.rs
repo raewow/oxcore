@@ -5,7 +5,7 @@
 
 use super::mmap_manager::MMapManager;
 use super::types::PathResult;
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 use std::sync::Arc;
 
 /// MMap PathFinder - integrates NavMesh and VMap

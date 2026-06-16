@@ -4,7 +4,7 @@
 //! Tests cover Guild, GuildMember, GuildRank, CachedGuild, and PlayerGuildState.
 
 use super::types::*;
-use crate::shared::protocol::{HighGuid, ObjectGuid};
+use oxcore_shared::protocol::{HighGuid, ObjectGuid};
 use std::collections::HashMap;
 
 // ========== TEST HELPERS ==========
@@ -618,13 +618,13 @@ fn test_guid_consistency() {
 mod integration_tests {
     use super::super::system::GuildSystem;
     use super::*;
-    use crate::shared::database::characters::guild_repository::MockGuildRepositoryTrait;
-    use crate::shared::protocol::Opcode;
-    use crate::shared::protocol::WorldPacket;
     use crate::world::game::broadcast_mgr::MockBroadcastManagerTrait;
     use crate::world::game::items::ItemManager;
     use crate::world::game::player::PlayerManager;
     use mockall::predicate::*;
+    use oxcore_shared::database::characters::guild_repository::MockGuildRepositoryTrait;
+    use oxcore_shared::protocol::Opcode;
+    use oxcore_shared::protocol::WorldPacket;
     use std::sync::Arc;
 
     /// Create a test GuildSystem with mocked repository and broadcaster

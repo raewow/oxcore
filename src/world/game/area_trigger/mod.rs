@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, warn};
 
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 
 /// Area trigger entry from the `areatrigger_template` DB table.
 /// Defines the trigger zone geometry.

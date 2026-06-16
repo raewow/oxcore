@@ -4,11 +4,11 @@
 //! to nearby players. Uses the PlayerBroadcaster listener system managed by
 //! the visibility system.
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::core::session::SessionManager;
 use crate::world::game::player::packet_queue::{categorize_opcode, PacketCategory};
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 use std::sync::Arc;
 
 /// Trait abstraction for broadcast manager operations

@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use super::gameobject::{GameObject, GameObjectTemplate};
 use super::spawn::GameObjectSpawnData;
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::core::common::compress_update_packet_if_needed;
 use crate::world::map::grid_coords::world_to_grid;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Tracks spawn state for grid loading
 #[derive(Debug, Clone)]
@@ -298,12 +298,12 @@ impl GameObjectManager {
         &self,
         guid: ObjectGuid,
         _world: &crate::world::World,
-    ) -> Option<crate::shared::messages::update::SmsgUpdateObject> {
-        use crate::shared::messages::update::*;
+    ) -> Option<oxcore_shared::messages::update::SmsgUpdateObject> {
         use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
         use crate::world::core::common::position::Position as WorldPosition;
         use crate::world::game::common::object_type::ObjectTypeId;
         use crate::world::game::common::update_fields::*;
+        use oxcore_shared::messages::update::*;
 
         let go = self.gameobjects.get(&guid)?;
 
@@ -357,13 +357,13 @@ impl GameObjectManager {
     pub fn build_gameobject_query_packet(
         &self,
         entry: u32,
-    ) -> Option<crate::shared::protocol::WorldPacket> {
-        use crate::shared::protocol::Opcode;
+    ) -> Option<oxcore_shared::protocol::WorldPacket> {
+        use oxcore_shared::protocol::Opcode;
 
         let template = self.templates.get(&entry)?;
 
         let mut packet =
-            crate::shared::protocol::WorldPacket::new(Opcode::SMSG_GAMEOBJECT_QUERY_RESPONSE);
+            oxcore_shared::protocol::WorldPacket::new(Opcode::SMSG_GAMEOBJECT_QUERY_RESPONSE);
         packet.write_u32(entry);
         packet.write_u32(template.go_type);
         packet.write_u32(template.display_id);
@@ -391,8 +391,8 @@ impl GameObjectManager {
         instance_id: u32,
         world: &crate::world::World,
     ) -> anyhow::Result<()> {
-        use crate::shared::messages::update::SmsgUpdateObject;
-        use crate::shared::messages::ToWorldPacket;
+        use oxcore_shared::messages::update::SmsgUpdateObject;
+        use oxcore_shared::messages::ToWorldPacket;
 
         const MAX_BLOCKS_PER_PACKET: usize = 50;
 

@@ -2,7 +2,6 @@
 //!
 //! All handlers are slim (3-10 lines): parse packet, delegate to system.
 
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::game::player::spells::state::{
@@ -13,6 +12,7 @@ use crate::world::game::player::spells::state::{
 use crate::world::World;
 use anyhow::Result;
 use bytes::Buf;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Parse SpellCastTargets from a CMSG_CAST_SPELL packet.
 ///

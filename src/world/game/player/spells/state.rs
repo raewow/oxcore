@@ -2,7 +2,7 @@
 //!
 //! All spell-related state for a player is stored here and embedded in the Player struct.
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Number of spell schools in vanilla WoW.
@@ -953,7 +953,7 @@ impl SpellEventQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::ObjectGuid;
+    use oxcore_shared::protocol::ObjectGuid;
 
     fn player(id: u32) -> ObjectGuid {
         ObjectGuid::new_player(id)

@@ -1,7 +1,7 @@
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::messages::ToWorldPacket;
+use crate::protocol::ObjectGuid;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 // Inventory Result Error Codes - matching MaNGOS InventoryResult enum
 pub const EQUIP_ERR_OK: u8 = 0;

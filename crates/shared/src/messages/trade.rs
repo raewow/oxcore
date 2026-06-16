@@ -7,11 +7,11 @@
 //! - [`SmsgTradeStatus`] - Trade status update
 //! - [`SmsgTradeStatusExtended`] - Extended trade status with item details
 
-use crate::shared::game::trade::{TradeStatus, TRADE_SLOT_COUNT};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::game::trade::{TradeStatus, TRADE_SLOT_COUNT};
+use crate::messages::ToWorldPacket;
+use crate::protocol::guid::ObjectGuid;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// SMSG_TRADE_STATUS - Trade status update
 ///
@@ -187,7 +187,7 @@ impl ToWorldPacket for SmsgTradeStatusExtendedV2 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_smsg_trade_status() {

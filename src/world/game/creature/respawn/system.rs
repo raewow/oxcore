@@ -1,10 +1,10 @@
 //! Respawn System - handles creature respawn lifecycle
 
-use crate::shared::messages::update::SmsgUpdateObject;
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::World;
+use oxcore_shared::messages::update::SmsgUpdateObject;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 use std::sync::Arc;
 
 /// RespawnSystem - handles all respawn business logic and packet sending

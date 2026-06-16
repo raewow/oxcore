@@ -1,6 +1,6 @@
 //! GameObject spawn data from database
 
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 
 /// Represents a gameobject spawn point from the database
 #[derive(Debug, Clone)]

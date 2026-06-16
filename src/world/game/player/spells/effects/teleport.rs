@@ -3,9 +3,9 @@
 //! Handles all teleportation, binding, and transportation effects.
 
 use super::{EffectInput, EffectResult};
-use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// TARGET_LOCATION_CASTER_HOME_BIND from MaNGOS (Hearthstone / recall)
 const TARGET_LOCATION_CASTER_HOME_BIND: u32 = 9;

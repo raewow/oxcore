@@ -5,8 +5,8 @@
 //!
 //! # Usage
 //! ```rust,no_run
-//! use wow_server::shared::messages::inventory_update::SmsgInventorySlotUpdate;
-//! use wow_server::shared::protocol::ObjectGuid;
+//! use oxcore_shared::messages::inventory_update::SmsgInventorySlotUpdate;
+//! use oxcore_shared::protocol::ObjectGuid;
 //!
 //! let msg = SmsgInventorySlotUpdate {
 //!     player_guid: ObjectGuid::from_raw(0x1234),
@@ -17,13 +17,13 @@
 //! # Ok::<(), ()>(())
 //! ```
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::update_fields::{
+use crate::messages::ToWorldPacket;
+use crate::protocol::update_fields::{
     PLAYER_FIELD_BANKBAG_SLOT_1, PLAYER_FIELD_BANK_SLOT_1, PLAYER_FIELD_INV_SLOT_HEAD,
     PLAYER_FIELD_PACK_SLOT_1, PLAYER_VISIBLE_ITEM_1_0,
 };
-use crate::shared::protocol::updates::update_mask::UpdateMask;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use crate::protocol::updates::update_mask::UpdateMask;
+use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 const MAX_VISIBLE_ITEM_OFFSET: u32 = 12;
 const EQUIPMENT_SLOT_COUNT: u8 = 19;

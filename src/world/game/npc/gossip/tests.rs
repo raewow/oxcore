@@ -12,7 +12,6 @@ use parking_lot::Mutex;
 use sqlx::mysql::MySqlPoolOptions;
 use tokio::sync::mpsc;
 
-use crate::shared::protocol::{HighGuid, ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::session::SessionManager;
 use crate::world::game::broadcast_mgr::BroadcastManager;
 use crate::world::game::creature::CreatureManager;
@@ -22,6 +21,7 @@ use crate::world::game::npc::gossip::types::{gossip_option, GossipMenuItem};
 use crate::world::game::player::broadcaster::PlayerBroadcaster;
 use crate::world::game::player::player::Player;
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::protocol::{HighGuid, ObjectGuid, Opcode, WorldPacket};
 
 // ========== INFRASTRUCTURE ==========
 

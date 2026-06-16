@@ -4,9 +4,9 @@
 //! Actions are applied in order with proper locking to maintain consistency.
 
 use super::types::{AIAction, AIState, AIType};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::broadcast_around_creature;
 use crate::world::World;
+use oxcore_shared::protocol::ObjectGuid;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Execute a batch of AI actions for a creature
@@ -892,12 +892,12 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
 
 /// Send health update to nearby players
 fn send_health_update(world: &World, creature_guid: ObjectGuid) {
-    use crate::shared::messages::update::{
-        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-    };
-    use crate::shared::messages::ToWorldPacket;
     use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
     use crate::world::game::common::update_fields::UNIT_FIELD_HEALTH;
+    use oxcore_shared::messages::update::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
+    use oxcore_shared::messages::ToWorldPacket;
 
     if let Some((current_health, max_health)) = world
         .managers
@@ -928,8 +928,8 @@ fn send_health_update(world: &World, creature_guid: ObjectGuid) {
 
 /// Send SMSG_ATTACKSTART when creature enters combat
 fn send_attack_start(world: &World, creature_guid: ObjectGuid, target_guid: ObjectGuid) {
-    use crate::shared::messages::combat::SmsgAttackStart;
-    use crate::shared::messages::ToWorldPacket;
+    use oxcore_shared::messages::combat::SmsgAttackStart;
+    use oxcore_shared::messages::ToWorldPacket;
 
     let packet = SmsgAttackStart {
         attacker_guid: creature_guid,
@@ -948,13 +948,13 @@ fn send_attack_start(world: &World, creature_guid: ObjectGuid, target_guid: Obje
 
 /// Send VALUES update when creature enters combat (UNIT_FIELD_FLAGS + UNIT_FIELD_TARGET)
 fn send_combat_state_update(world: &World, creature_guid: ObjectGuid, target_guid: ObjectGuid) {
-    use crate::shared::messages::update::{
-        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-    };
-    use crate::shared::messages::ToWorldPacket;
     use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
     use crate::world::game::common::unit_flags;
     use crate::world::game::common::update_fields::{UNIT_FIELD_FLAGS, UNIT_FIELD_TARGET};
+    use oxcore_shared::messages::update::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
+    use oxcore_shared::messages::ToWorldPacket;
 
     if let Some(raw_flags) = world
         .managers
@@ -990,13 +990,13 @@ fn send_combat_state_update(world: &World, creature_guid: ObjectGuid, target_gui
 
 /// Send VALUES update when creature leaves combat (clear IN_COMBAT flag + UNIT_FIELD_TARGET)
 fn send_combat_exit_update(world: &World, creature_guid: ObjectGuid) {
-    use crate::shared::messages::update::{
-        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-    };
-    use crate::shared::messages::ToWorldPacket;
     use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
     use crate::world::game::common::unit_flags;
     use crate::world::game::common::update_fields::{UNIT_FIELD_FLAGS, UNIT_FIELD_TARGET};
+    use oxcore_shared::messages::update::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
+    use oxcore_shared::messages::ToWorldPacket;
 
     if let Some(raw_flags) = world
         .managers
@@ -1041,8 +1041,8 @@ pub fn execute_creature_spell_cast(
     target_guid: Option<ObjectGuid>,
     triggered: bool,
 ) {
-    use crate::shared::messages::spells::SmsgSpellGo;
-    use crate::shared::messages::ToWorldPacket;
+    use oxcore_shared::messages::spells::SmsgSpellGo;
+    use oxcore_shared::messages::ToWorldPacket;
 
     // Validate spell exists
     let spell_entry = match world.managers.spell_mgr.get(spell_id) {
@@ -1251,8 +1251,8 @@ fn send_creature_spell_damage_log(
     damage: u32,
     school: u8,
 ) {
-    use crate::shared::protocol::packet::WorldPacketGuidExt;
-    use crate::shared::protocol::{Opcode, WorldPacket};
+    use oxcore_shared::protocol::packet::WorldPacketGuidExt;
+    use oxcore_shared::protocol::{Opcode, WorldPacket};
 
     let mut packet = WorldPacket::new(Opcode::SMSG_SPELLNONMELEEDAMAGELOG);
     packet.write_packed_guid(target_guid);
@@ -1280,9 +1280,9 @@ fn send_creature_spell_damage_log(
 
 /// Send SMSG_MESSAGECHAT for creature speech (Say, Yell, Emote text).
 fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, text: &str) {
-    use crate::shared::game::chat::ChatMsg;
-    use crate::shared::messages::chat::SmsgMessageChat;
-    use crate::shared::messages::ToWorldPacket;
+    use oxcore_shared::game::chat::ChatMsg;
+    use oxcore_shared::messages::chat::SmsgMessageChat;
+    use oxcore_shared::messages::ToWorldPacket;
 
     let name = world
         .managers
@@ -1299,14 +1299,14 @@ fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, t
 
     let packet = SmsgMessageChat {
         msgtype,
-        language: crate::shared::game::chat::Language::Universal,
+        language: oxcore_shared::game::chat::Language::Universal,
         sender_guid: creature_guid,
         sender_name: Some(&name),
         target_guid: None,
         channel_name: None,
         player_rank: None,
         message: text,
-        chat_tag: crate::shared::game::chat::ChatTag::None,
+        chat_tag: oxcore_shared::game::chat::ChatTag::None,
     }
     .to_world_packet();
 
@@ -1315,7 +1315,7 @@ fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, t
 
 /// Send SMSG_EMOTE for creature emote animation.
 fn send_creature_emote(world: &World, creature_guid: ObjectGuid, emote_id: u32) {
-    use crate::shared::protocol::{Opcode, WorldPacket};
+    use oxcore_shared::protocol::{Opcode, WorldPacket};
 
     let mut packet = WorldPacket::new(Opcode::SMSG_EMOTE);
     packet.write_u32(emote_id);
@@ -1326,7 +1326,7 @@ fn send_creature_emote(world: &World, creature_guid: ObjectGuid, emote_id: u32) 
 
 /// Send SMSG_PLAY_OBJECT_SOUND for creature sounds.
 fn send_creature_sound(world: &World, creature_guid: ObjectGuid, sound_id: u32) {
-    use crate::shared::protocol::{Opcode, WorldPacket};
+    use oxcore_shared::protocol::{Opcode, WorldPacket};
 
     let mut packet = WorldPacket::new(Opcode::SMSG_PLAY_OBJECT_SOUND);
     packet.write_u32(sound_id);
@@ -1337,12 +1337,12 @@ fn send_creature_sound(world: &World, creature_guid: ObjectGuid, sound_id: u32) 
 
 /// Send display ID update to nearby players (for Morph/Demorph).
 fn send_display_update(world: &World, creature_guid: ObjectGuid, display_id: u32) {
-    use crate::shared::messages::update::{
-        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-    };
-    use crate::shared::messages::ToWorldPacket;
     use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
     use crate::world::game::common::update_fields::UNIT_FIELD_DISPLAYID;
+    use oxcore_shared::messages::update::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
+    use oxcore_shared::messages::ToWorldPacket;
 
     let world_guid = WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
 

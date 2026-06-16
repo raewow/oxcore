@@ -1,7 +1,7 @@
 use super::pool_manager::PoolManager;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::World;
+use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
 /// PoolSystem - coordinates pool spawning and replacement

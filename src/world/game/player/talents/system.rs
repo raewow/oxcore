@@ -1,6 +1,6 @@
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};

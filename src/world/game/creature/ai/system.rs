@@ -9,13 +9,13 @@ use super::decision::decide;
 use super::executor::execute_actions;
 use super::snapshot::{AIInput, CreatureSnapshot, TargetSnapshot, ThreatEntry};
 use super::types::{AIAction, AIEvent, AIState, AIType};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::core::lua::bridge::{
     ai_input_to_lua_snapshot, invoke_callback, lua_actions_to_ai_actions, map_ai_event_to_callback,
 };
 use crate::world::core::lua::scripts::CreatureScriptState;
 use crate::world::World;
 use dashmap::DashMap;
+use oxcore_shared::protocol::ObjectGuid;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 

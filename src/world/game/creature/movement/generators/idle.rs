@@ -2,7 +2,7 @@
 
 use super::super::generator::{MovementGenerator, MovementUpdate};
 use super::super::types::MovementGeneratorType;
-use crate::shared::protocol::{ObjectGuid, Position};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Default idle generator - creature stands still
 pub struct IdleMovementGenerator;

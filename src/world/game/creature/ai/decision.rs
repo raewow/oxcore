@@ -10,7 +10,7 @@
 
 use super::snapshot::{AIDecisionResult, AIInput, CreatureSnapshot, TargetSnapshot};
 use super::types::{AIAction, AIEvent, AIState, AIStateData, AIType, MovementType, ReactState};
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Maximum chase distance before evade
 const MAX_CHASE_DISTANCE: f32 = 45.0;
@@ -407,8 +407,8 @@ fn try_select_spell(input: &AIInput, target_guid: ObjectGuid, _distance: f32) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
     use crate::world::game::creature::ai::snapshot::ThreatEntry;
+    use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
 
     fn player_guid(id: u32) -> ObjectGuid {
         ObjectGuid::new_without_entry(HighGuid::Player, id)

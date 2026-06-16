@@ -2,7 +2,7 @@
 //!
 //! Contains auto-attack timers, weapon info, combat flags, and combo points.
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashSet;
 
 /// Attack outcome from hit table
@@ -22,7 +22,7 @@ impl AttackOutcome {
     /// Convert outcome to hit info flags for SMSG_ATTACKERSTATEUPDATE
     /// Values from MaNGOS UnitDefines.h (1.12.1 client)
     pub fn to_hit_info(&self) -> u32 {
-        use crate::shared::messages::combat::HitInfo;
+        use oxcore_shared::messages::combat::HitInfo;
         let affects = HitInfo::AffectsVictim as u32;
         match self {
             // No AFFECTS_VICTIM for miss/dodge/parry

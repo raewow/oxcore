@@ -4,11 +4,11 @@
 //! so they insert directly into the database rather than going through the
 //! online InventorySystem (which requires cache and broadcaster).
 
-use crate::shared::database::world::repositories::player_create_info_repository::{
-    PlayerCreateInfoActionRow, PlayerCreateInfoItemRow,
-};
 use crate::world::game::items::manager::ItemManager;
 use anyhow::{Context, Result};
+use oxcore_shared::database::world::repositories::player_create_info_repository::{
+    PlayerCreateInfoActionRow, PlayerCreateInfoItemRow,
+};
 use sqlx::MySqlPool;
 use std::collections::HashSet;
 use tracing::{debug, info, warn};

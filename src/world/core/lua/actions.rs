@@ -596,7 +596,7 @@ impl LuaAction {
                 // `player` is optional — when omitted the executor substitutes the
                 // triggering player (player_guid passed to execute_gossip_actions).
                 player: parse_guid(table, "player")
-                    .unwrap_or_else(crate::shared::protocol::ObjectGuid::empty),
+                    .unwrap_or_else(oxcore_shared::protocol::ObjectGuid::empty),
                 quest_id: table.get("quest_id").ok()?,
             }),
 

@@ -2,12 +2,12 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::shared::messages::chat::SmsgTextEmote;
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::messages::chat::SmsgTextEmote;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_TEXT_EMOTE - player performs a text emote
 pub async fn handle_text_emote(

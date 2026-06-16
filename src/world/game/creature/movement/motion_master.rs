@@ -6,7 +6,7 @@ use super::generators::{
     RandomMovementGenerator, Waypoint, WaypointMovementGenerator,
 };
 use super::types::MovementGeneratorType;
-use crate::shared::protocol::{ObjectGuid, Position};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 use std::collections::BTreeMap;
 
 /// MotionMaster flags for state tracking

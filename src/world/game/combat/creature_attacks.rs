@@ -3,12 +3,6 @@
 //! Executes creature auto-attacks against player targets.
 //! Called from the AI executor when AIAction::MeleeAttack fires.
 
-use crate::shared::messages::combat::{SmsgAttackStart, SmsgAttackStop, SmsgAttackerStateUpdate};
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::game::broadcast_mgr::broadcast_around_creature;
@@ -18,6 +12,12 @@ use crate::world::game::creature::combat::{
     hit_outcome_to_victim_state, roll_melee_hit_outcome, MeleeHitOutcome,
 };
 use crate::world::World;
+use oxcore_shared::messages::combat::{SmsgAttackStart, SmsgAttackStop, SmsgAttackerStateUpdate};
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Perform a creature melee attack against a player target.
 ///

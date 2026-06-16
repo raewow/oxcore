@@ -9,10 +9,10 @@
 //! - [`SmsgSetForcedReactions`] - Sets forced reactions for specific factions
 //! - [`SmsgSetFactionVisible`] - Makes a faction visible to the player
 
-use crate::shared::game::reputation::{ReputationListID, MAX_REPUTATION_LIST_SLOTS};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::game::reputation::{ReputationListID, MAX_REPUTATION_LIST_SLOTS};
+use crate::messages::ToWorldPacket;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 use std::collections::HashMap;
 
 /// SMSG_INITIALIZE_FACTIONS - Initializes all reputation factions for the player
@@ -122,7 +122,7 @@ impl ToWorldPacket for SmsgSetFactionVisible {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_smsg_initialize_factions() {

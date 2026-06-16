@@ -7,7 +7,7 @@
 //! - Language validation
 
 use super::types::*;
-use crate::shared::game::chat::{ChatMsg, Language, Team};
+use oxcore_shared::game::chat::{ChatMsg, Language, Team};
 
 /// Validate a chat message
 ///

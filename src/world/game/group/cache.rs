@@ -4,8 +4,8 @@
 //! the shared message types. It converts from the internal GroupData to a format
 //! suitable for packet serialization.
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::group::types::{GroupData, GroupMember, LootMethod};
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Cached snapshot of group data for packet building
 ///

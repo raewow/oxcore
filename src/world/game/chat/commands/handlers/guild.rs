@@ -9,10 +9,10 @@
 //! - setrank: Set player's guild rank
 //! - rename: Rename a guild
 
-use crate::shared::common::AccountType;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
 use anyhow::{anyhow, Result};
+use oxcore_shared::common::AccountType;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Guild command info
 pub fn guild_info() -> ChatCommandInfo {

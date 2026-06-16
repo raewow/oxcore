@@ -4,8 +4,8 @@
 
 use anyhow::Result;
 
-use crate::shared::common::AccountType;
 use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
+use oxcore_shared::common::AccountType;
 
 /// Lookup spell command - search for spells by name or ID
 pub async fn cmd_lookup_spell(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {

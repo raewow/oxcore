@@ -6,11 +6,11 @@ use rand::Rng;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use crate::shared::database::characters::models::group::{GroupMemberRow, GroupRow};
-use crate::shared::database::characters::repositories::GroupRepositoryTrait;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::database::characters::models::group::{GroupMemberRow, GroupRow};
+use oxcore_shared::database::characters::repositories::GroupRepositoryTrait;
+use oxcore_shared::protocol::ObjectGuid;
 
 use super::types::*;
 
@@ -1410,7 +1410,7 @@ impl GroupSystem {
     #[allow(dead_code)]
     fn broadcast_to_group<M>(&self, group_id: u32, msg: M)
     where
-        M: crate::shared::messages::ToWorldPacket + Clone + Send,
+        M: oxcore_shared::messages::ToWorldPacket + Clone + Send,
     {
         let Some(group) = self.get_group(group_id) else {
             return;

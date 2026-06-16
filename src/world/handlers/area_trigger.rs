@@ -6,19 +6,19 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::shared::game::chat::{ChatMsg, ChatTag, Language};
-use crate::shared::messages::chat::SmsgMessageChat;
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
 use crate::world::game::area_trigger::{self, AreaTriggerEntry};
 use crate::world::game::common::update_fields::PLAYER_FLAGS;
 use crate::world::game::player::environment::RestType;
 use crate::world::World;
+use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language};
+use oxcore_shared::messages::chat::SmsgMessageChat;
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Handle CMSG_AREATRIGGER — player enters an area trigger zone.
 ///
@@ -109,7 +109,7 @@ pub async fn handle_area_trigger(
             execute_gossip_actions(
                 actions,
                 player_guid,
-                crate::shared::protocol::ObjectGuid::empty(),
+                oxcore_shared::protocol::ObjectGuid::empty(),
                 world,
             )
             .await?;

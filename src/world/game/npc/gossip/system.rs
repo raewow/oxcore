@@ -9,14 +9,14 @@ use tracing::{debug, info, warn};
 
 use super::manager::GossipManager;
 use super::types::{gossip_option, GossipMenuItem, DEFAULT_GOSSIP_MESSAGE};
-use crate::shared::messages::gossip::{NpcTextOption, SmsgNpcTextUpdate};
-use crate::shared::messages::{
-    GossipOptionData, SmsgGossipComplete, SmsgGossipMessage, SmsgShowBank,
-};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::world::game::creature::CreatureManager;
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::messages::gossip::{NpcTextOption, SmsgNpcTextUpdate};
+use oxcore_shared::messages::{
+    GossipOptionData, SmsgGossipComplete, SmsgGossipMessage, SmsgShowBank,
+};
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Gossip system - handles gossip menu business logic
 pub struct GossipSystem {
@@ -54,7 +54,7 @@ impl GossipSystem {
         player_guid: ObjectGuid,
         npc_guid: ObjectGuid,
         menu_id_override: Option<u32>,
-        quest_data: Option<Vec<crate::shared::messages::GossipQuestData>>,
+        quest_data: Option<Vec<oxcore_shared::messages::GossipQuestData>>,
     ) -> Result<()> {
         debug!(
             "Sending gossip menu to player {:?} from NPC {:?}",
@@ -131,7 +131,7 @@ impl GossipSystem {
         }
 
         // Debug: dump raw packet bytes
-        let raw_pkt = crate::shared::messages::ToWorldPacket::to_world_packet(&msg);
+        let raw_pkt = oxcore_shared::messages::ToWorldPacket::to_world_packet(&msg);
         let raw_bytes = raw_pkt.data();
         let preview = raw_bytes.len().min(80);
         info!(

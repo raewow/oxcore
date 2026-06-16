@@ -9,10 +9,10 @@
 //! - [`SmsgBuyFailed`] - Buy item failure
 //! - [`SmsgSellItem`] - Sell item result
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::packet::WorldPacketGuidExt;
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::{Opcode, WorldPacket};
+use crate::messages::ToWorldPacket;
+use crate::protocol::packet::WorldPacketGuidExt;
+use crate::protocol::ObjectGuid;
+use crate::protocol::{Opcode, WorldPacket};
 
 /// Vendor item data for SMSG_LIST_INVENTORY
 #[derive(Debug, Clone)]

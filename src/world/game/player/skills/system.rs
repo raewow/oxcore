@@ -1,6 +1,6 @@
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 use rand::Rng;
 
 use super::constants::*;

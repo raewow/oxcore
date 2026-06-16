@@ -15,9 +15,9 @@
 //! - [`SmsgActionButtons`] - Action bar configuration
 //! - [`SmsgInitializeFactionsEmpty`] - Empty faction/reputation data (convenience)
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::position::Position;
-use crate::shared::protocol::{Opcode, WorldPacket};
+use crate::messages::ToWorldPacket;
+use crate::protocol::position::Position;
+use crate::protocol::{Opcode, WorldPacket};
 
 /// Authentication error codes for SMSG_AUTH_RESPONSE
 pub enum AuthErrorCode {

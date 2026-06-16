@@ -7,11 +7,11 @@
 //! - [`SmsgChannelNotify`] - Channel notification (join, leave, kick, ban, etc.)
 //! - [`SmsgChannelList`] - List of channel members
 
-use crate::shared::game::chat::ChatNotify;
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::game::chat::ChatNotify;
+use crate::messages::ToWorldPacket;
+use crate::protocol::ObjectGuid;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// SMSG_CHANNEL_NOTIFY - Channel notification packet
 ///

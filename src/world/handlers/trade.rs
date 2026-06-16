@@ -3,11 +3,11 @@
 use anyhow::Result;
 use tracing::{debug, warn};
 
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::game::trade::TradeStatus;
 use crate::world::World;
+use oxcore_shared::protocol::WorldPacket;
 
 /// CMSG_INITIATE_TRADE handler - start a trade with another player
 pub async fn handle_initiate_trade(

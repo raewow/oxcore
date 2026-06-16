@@ -4,7 +4,7 @@
 //! Uses per-segment timing proportional to segment length (matching MaNGOS)
 //! so creatures move at constant speed regardless of waypoint spacing.
 
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 
 /// Movement spline for smooth path interpolation
 #[derive(Debug, Clone)]

@@ -6,12 +6,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::shared::messages::create::SmsgOutOfRange;
-use crate::shared::messages::update::SmsgUpdateObject;
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::World;
+use oxcore_shared::messages::create::SmsgOutOfRange;
+use oxcore_shared::messages::update::SmsgUpdateObject;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Visibility system - tracks what objects each player can see
 pub struct VisibilitySystem {
@@ -129,8 +129,8 @@ impl VisibilitySystem {
         // 4. Send CREATE_OBJECT2 for appeared PLAYERS
         // NOTE: visible_now is already filtered to players only
         if !appeared.is_empty() {
-            use crate::shared::messages::ToWorldPacket;
-            use crate::shared::protocol::WorldPacket;
+            use oxcore_shared::messages::ToWorldPacket;
+            use oxcore_shared::protocol::WorldPacket;
 
             let viewer_broadcaster = world.managers.player_mgr.get_broadcaster(guid);
 
@@ -181,8 +181,8 @@ impl VisibilitySystem {
 
         // 5. Send OUT_OF_RANGE for disappeared players and remove listeners
         if !disappeared.is_empty() {
-            use crate::shared::messages::ToWorldPacket;
-            use crate::shared::protocol::WorldPacket;
+            use oxcore_shared::messages::ToWorldPacket;
+            use oxcore_shared::protocol::WorldPacket;
 
             let viewer_broadcaster = world.managers.player_mgr.get_broadcaster(guid);
 
@@ -253,7 +253,7 @@ impl VisibilitySystem {
     pub fn on_player_login(
         &self,
         guid: ObjectGuid,
-        position: Option<crate::shared::protocol::Position>,
+        position: Option<oxcore_shared::protocol::Position>,
     ) -> Result<()> {
         // Create visibility tracking for this player
         self.visible_objects.insert(guid, HashSet::new());

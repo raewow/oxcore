@@ -3,7 +3,7 @@
 //! Architecture Note: Per Option 3 decision, combat state is embedded in Creature
 //! for performance (50k creatures, avoid DashMap lookups). Players use CombatSystem.
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashSet;
 
 /// Threat entry for basic threat tracking

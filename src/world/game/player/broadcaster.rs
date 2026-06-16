@@ -4,9 +4,9 @@
 //! who should receive packets sent through BroadcastManager. The visibility system
 //! manages the listener list based on who can see whom.
 
-use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::game::player::packet_queue::{PacketQueue, PacketQueueConfig};
 use arc_swap::ArcSwap;
+use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -1,9 +1,9 @@
 //! Movement-related message structures
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::guid::ObjectGuid as WorldObjectGuid;
-use crate::shared::protocol::packet::WorldPacketGuidExt;
-use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
+use crate::messages::ToWorldPacket;
+use crate::protocol::guid::ObjectGuid as WorldObjectGuid;
+use crate::protocol::packet::WorldPacketGuidExt;
+use crate::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Generic movement broadcast message (MSG_MOVE_*)
 /// Used to broadcast movement to nearby players (Phase 5 - not yet implemented)

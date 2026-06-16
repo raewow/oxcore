@@ -2,7 +2,7 @@
 //!
 //! Handles aggro-on-sight behavior with faction hostility checks.
 
-use crate::shared::protocol::{ObjectGuid, Position};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Base aggro range in yards
 pub const BASE_AGGRO_RANGE: f32 = 20.0;

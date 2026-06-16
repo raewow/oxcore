@@ -3,9 +3,9 @@
 //! Handles quest completion and reputation changes.
 
 use super::{EffectInput, EffectResult};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// SPELL_EFFECT_QUEST_COMPLETE (16)
 ///

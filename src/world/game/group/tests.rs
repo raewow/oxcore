@@ -1,7 +1,7 @@
 //! Group system unit tests
 
 use super::types::*;
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 #[test]
 fn test_group_data_new() {

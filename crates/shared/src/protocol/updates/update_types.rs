@@ -113,7 +113,7 @@ impl ObjectTypeId {
 
 /// Packet opcodes for update packets
 pub mod opcodes {
-    use crate::shared::protocol::opcodes::Opcode;
+    use crate::protocol::opcodes::Opcode;
 
     /// SMSG_UPDATE_OBJECT - Standard update object packet
     pub const SMSG_UPDATE_OBJECT: Opcode = Opcode::SMSG_UPDATE_OBJECT;

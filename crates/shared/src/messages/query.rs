@@ -1,7 +1,7 @@
 //! Query message structs - name, creature, item queries
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use crate::messages::ToWorldPacket;
+use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 // =========================================================================
 // CREATURE QUERY RESPONSE

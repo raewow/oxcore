@@ -3,14 +3,14 @@
 //! This module contains type-safe message structures for all guild-related server packets.
 //! These messages implement the `ToWorldPacket` trait for serialization.
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
 use crate::world::game::guild::types::{
     CachedGuild, GuildEmblem, GuildMember, GuildRank, GRF_ONLINE,
 };
 use chrono::Datelike;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::guid::ObjectGuid;
+use oxcore_shared::protocol::Opcode;
+use oxcore_shared::protocol::WorldPacket;
 use std::collections::HashMap;
 
 // ========== SIMPLE MESSAGES ==========
@@ -359,8 +359,8 @@ pub fn smsg_guild_info_from_cached<'a>(guild: &'a CachedGuild) -> SmsgGuildInfo<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
     use crate::world::game::guild::types::ERR_GUILD_SUCCESS;
+    use oxcore_shared::protocol::Opcode;
     const GUILD_CREATE_S: u32 = 0;
     const GE_JOINED: u8 = 3;
     const GE_PROMOTION: u8 = 6;

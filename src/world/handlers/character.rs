@@ -4,22 +4,6 @@ use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::shared::database::{CharacterRepository, Databases, ReputationRepository};
-use crate::shared::messages::character::{
-    SmsgLogoutCancelAck, SmsgLogoutComplete, SmsgLogoutResponse,
-};
-use crate::shared::messages::create::SmsgOutOfRange;
-use crate::shared::messages::login::{
-    CharacterEnumEntry, EquipmentSlot, SmsgBindPointUpdate, SmsgCharEnum, SmsgInitWorldStates,
-    SmsgInitializeFactionsEmpty, SmsgLoginSetTimeSpeed, SmsgLoginVerifyWorld, SmsgSetRestStart,
-};
-use crate::shared::messages::movement::{SmsgForceMoveRoot, SmsgForceMoveUnroot};
-use crate::shared::messages::social::SmsgStandstateUpdate;
-use crate::shared::messages::update::{
-    CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::core::common::packet_compression::compress_update_packet_if_needed;
 use crate::world::core::common::position::Position as WorldPosition;
@@ -37,6 +21,22 @@ use crate::world::game::common::update_fields::{
 use crate::world::game::player::reputation::FactionEntry;
 use crate::world::game::player::{Player, PlayerBroadcaster};
 use crate::world::World;
+use oxcore_shared::database::{CharacterRepository, Databases, ReputationRepository};
+use oxcore_shared::messages::character::{
+    SmsgLogoutCancelAck, SmsgLogoutComplete, SmsgLogoutResponse,
+};
+use oxcore_shared::messages::create::SmsgOutOfRange;
+use oxcore_shared::messages::login::{
+    CharacterEnumEntry, EquipmentSlot, SmsgBindPointUpdate, SmsgCharEnum, SmsgInitWorldStates,
+    SmsgInitializeFactionsEmpty, SmsgLoginSetTimeSpeed, SmsgLoginVerifyWorld, SmsgSetRestStart,
+};
+use oxcore_shared::messages::movement::{SmsgForceMoveRoot, SmsgForceMoveUnroot};
+use oxcore_shared::messages::social::SmsgStandstateUpdate;
+use oxcore_shared::messages::update::{
+    CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Handle CMSG_CHAR_ENUM - list characters for this account
 pub async fn handle_char_enum(
@@ -396,12 +396,12 @@ pub async fn handle_player_login_with_guid(
             });
 
             // Link any persisted corpse (best-effort; a missing row is non-fatal).
-            use crate::shared::database::characters::repositories::CorpseRepository;
+            use oxcore_shared::database::characters::repositories::CorpseRepository;
             let char_db = Arc::new(databases.character.clone());
             let corpse_repo = CorpseRepository::new(char_db);
             if let Ok(Some(row)) = corpse_repo.find_for_player(guid.counter()).await {
-                let corpse_guid = crate::shared::protocol::ObjectGuid::new_corpse(row.guid);
-                let corpse_pos = crate::shared::protocol::Position::new(
+                let corpse_guid = oxcore_shared::protocol::ObjectGuid::new_corpse(row.guid);
+                let corpse_pos = oxcore_shared::protocol::Position::new(
                     row.position_x,
                     row.position_y,
                     row.position_z,
@@ -501,7 +501,7 @@ pub async fn handle_player_login_with_guid(
             },
             // Quest statuses from DB
             async {
-                use crate::shared::database::characters::repositories::{
+                use oxcore_shared::database::characters::repositories::{
                     QuestRepository, QuestRepositoryTrait,
                 };
                 let quest_repo = QuestRepository::new(char_db.clone());
@@ -509,7 +509,7 @@ pub async fn handle_player_login_with_guid(
             },
             // Rewarded quests from DB
             async {
-                use crate::shared::database::characters::repositories::{
+                use oxcore_shared::database::characters::repositories::{
                     QuestRepository, QuestRepositoryTrait,
                 };
                 let quest_repo = QuestRepository::new(char_db.clone());
@@ -609,7 +609,7 @@ pub async fn handle_player_login_with_guid(
         );
     } else {
         // No saved action buttons - load defaults from playercreateinfo_action
-        use crate::shared::database::world::repositories::PlayerCreateInfoRepository;
+        use oxcore_shared::database::world::repositories::PlayerCreateInfoRepository;
         let create_repo = PlayerCreateInfoRepository::new(Arc::new(databases.world.clone()));
         match create_repo
             .get_create_info_actions(character.race, character.class)
@@ -641,7 +641,7 @@ pub async fn handle_player_login_with_guid(
 
     // 7.07 Load spells - default race/class spells + saved spells from database (in parallel)
     {
-        use crate::shared::database::world::repositories::PlayerCreateInfoRepository;
+        use oxcore_shared::database::world::repositories::PlayerCreateInfoRepository;
 
         const ATTACK_SPELL_ID: u32 = 6603;
 
@@ -763,7 +763,7 @@ pub async fn handle_player_login_with_guid(
 
     // 1.5/11. SMSG_NAME_QUERY_RESPONSE - send player's own name info so chat works
     // The client needs this BEFORE it can display chat messages with this GUID
-    let name_response = crate::shared::messages::query::SmsgNameQueryResponse::new(
+    let name_response = oxcore_shared::messages::query::SmsgNameQueryResponse::new(
         guid,
         &character.name,
         character.race,
@@ -841,8 +841,8 @@ pub async fn handle_player_login_with_guid(
     // 5/11. SMSG_TUTORIAL_FLAGS - tutorial state from player settings
     // Send directly via session (not broadcast_mgr) to ensure delivery during login
     {
-        use crate::shared::messages::login::SmsgTutorialFlags;
         use crate::world::game::player::settings::state::TUTORIAL_FLAG_COUNT;
+        use oxcore_shared::messages::login::SmsgTutorialFlags;
 
         let flags = world
             .managers
@@ -858,7 +858,7 @@ pub async fn handle_player_login_with_guid(
     // 6/11. SMSG_INITIAL_SPELLS - send spellbook to client
     // Send directly via session (not broadcast_mgr) to ensure delivery during login
     {
-        use crate::shared::messages::spells::{InitialSpellCooldown, SmsgInitialSpells};
+        use oxcore_shared::messages::spells::{InitialSpellCooldown, SmsgInitialSpells};
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -900,7 +900,7 @@ pub async fn handle_player_login_with_guid(
     // 6.5/11. SMSG_SET_PROFICIENCY - weapon and armor proficiencies
     let proficiencies = world.systems.skills.on_player_login(guid, world)?;
     for msg in proficiencies {
-        let packet = crate::shared::messages::errors::SmsgSetProficiency {
+        let packet = oxcore_shared::messages::errors::SmsgSetProficiency {
             item_class: msg.item_class,
             proficiency_mask: msg.sub_class_mask,
         };
@@ -911,9 +911,9 @@ pub async fn handle_player_login_with_guid(
     // 7/11. SMSG_ACTION_BUTTONS - action buttons from player settings
     // Send directly via session (not broadcast_mgr) to ensure delivery during login
     {
-        use crate::shared::messages::login::ActionButton as MsgActionButton;
-        use crate::shared::messages::login::SmsgActionButtons;
         use crate::world::game::player::settings::state::MAX_ACTION_BUTTONS;
+        use oxcore_shared::messages::login::ActionButton as MsgActionButton;
+        use oxcore_shared::messages::login::SmsgActionButtons;
 
         let buttons = world
             .managers
@@ -942,8 +942,8 @@ pub async fn handle_player_login_with_guid(
     // Note: ReputationSystem::send_initialize_factions has a bug where it calls
     // async send_msg_to_player without .await from a sync function (future dropped).
     {
-        use crate::shared::game::reputation::MAX_REPUTATION_LIST_SLOTS;
-        use crate::shared::messages::reputation::SmsgInitializeFactions;
+        use oxcore_shared::game::reputation::MAX_REPUTATION_LIST_SLOTS;
+        use oxcore_shared::messages::reputation::SmsgInitializeFactions;
 
         let faction_data = world
             .systems
@@ -1795,14 +1795,14 @@ pub async fn handle_char_create(
     databases: &Databases,
     world: &World,
 ) -> Result<()> {
-    use crate::shared::database::world::repositories::PlayerCreateInfoRepository;
-    use crate::shared::game::chat::Team;
-    use crate::shared::messages::character::SmsgCharCreate;
     use crate::world::config::get_config_mgr;
     use crate::world::game::common::account_result::{char_create, char_name};
     use crate::world::game::player::name_validation::{
         normalize_character_name, validate_character_name, NameValidationResult,
     };
+    use oxcore_shared::database::world::repositories::PlayerCreateInfoRepository;
+    use oxcore_shared::game::chat::Team;
+    use oxcore_shared::messages::character::SmsgCharCreate;
 
     // 1. Parse packet
     let name = packet
@@ -2131,8 +2131,8 @@ pub async fn handle_char_delete(
     databases: &Databases,
     _world: &World,
 ) -> Result<()> {
-    use crate::shared::messages::character::SmsgCharDelete;
     use crate::world::game::common::account_result::char_delete;
+    use oxcore_shared::messages::character::SmsgCharDelete;
 
     // 1. Parse GUID
     let guid_raw = packet
@@ -2191,11 +2191,11 @@ pub async fn handle_char_rename(
     databases: &Databases,
     world: &World,
 ) -> Result<()> {
-    use crate::shared::messages::character::SmsgCharRename;
     use crate::world::game::common::account_result::{char_name, response};
     use crate::world::game::player::name_validation::{
         normalize_character_name, validate_character_name, NameValidationResult,
     };
+    use oxcore_shared::messages::character::SmsgCharRename;
 
     // Character flags
     const CHARACTER_FLAG_RENAME: u32 = 0x00004000;
@@ -2426,11 +2426,11 @@ pub async fn handle_zoneupdate(
     if is_capital || current_rest_type == crate::world::game::player::environment::RestType::InCity
     {
         if let Some(new_flags) = player_mgr.with_player(player_guid, |p| p.player_flags) {
-            use crate::shared::messages::update::{
+            use crate::world::game::common::update_fields::PLAYER_FLAGS;
+            use oxcore_shared::messages::update::{
                 ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
             };
-            use crate::shared::messages::ToWorldPacket;
-            use crate::world::game::common::update_fields::PLAYER_FLAGS;
+            use oxcore_shared::messages::ToWorldPacket;
 
             let world_guid =
                 crate::world::core::common::guid::ObjectGuid::from_low(player_guid.counter());

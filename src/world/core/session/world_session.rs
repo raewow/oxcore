@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Position, WorldPacket};
 use crate::world::core::session::SessionState;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
 
 /// World session - represents an authenticated player connection
 pub struct WorldSession {

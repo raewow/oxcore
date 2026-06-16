@@ -15,7 +15,7 @@ pub mod validation;
 #[cfg(test)]
 mod tests;
 
-pub use crate::shared::game::chat::{ChatMsg, ChatNotify, ChatTag, Language, Team};
+pub use oxcore_shared::game::chat::{ChatMsg, ChatNotify, ChatTag, Language, Team};
 pub use system::ChatSystem;
 pub use types::*;
 pub use validation::*;

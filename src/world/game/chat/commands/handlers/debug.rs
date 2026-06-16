@@ -4,8 +4,8 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::shared::common::AccountType;
 use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
+use oxcore_shared::common::AccountType;
 
 /// Ping command - simple connectivity test
 pub async fn cmd_ping(_ctx: &ChatCommandContext<'_>, _args: &str) -> Result<String> {

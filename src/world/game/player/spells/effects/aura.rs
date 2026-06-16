@@ -3,10 +3,10 @@
 /// Applies buff/debuff auras and area auras to targets.
 /// This is the bridge between the spell system and the aura system.
 use super::{EffectInput, EffectResult};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::player::auras::AuraFlags;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Area aura target types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -3,15 +3,15 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use crate::shared::messages::trade::{
-    SmsgTradeStatusExtendedV2, SmsgTradeStatusV2, TradeSlotInfoV2,
-};
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::inventory::InventorySystem;
 use crate::world::game::player::PlayerManager;
 use crate::world::game::trade::types::TradeStatus;
 use crate::world::game::ItemManager;
+use oxcore_shared::messages::trade::{
+    SmsgTradeStatusExtendedV2, SmsgTradeStatusV2, TradeSlotInfoV2,
+};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 use super::cache::{ActiveTrade, TradeCache};
 use super::types::{

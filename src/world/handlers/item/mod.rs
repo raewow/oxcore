@@ -1,12 +1,12 @@
 use anyhow::{anyhow, Result};
 use tracing::{info, warn};
 
-use crate::shared::messages::SmsgReadItemFailed;
-use crate::shared::messages::SmsgReadItemOk;
-use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::game::inventory::types::EquipResult;
 use crate::world::World;
+use oxcore_shared::messages::SmsgReadItemFailed;
+use oxcore_shared::messages::SmsgReadItemOk;
+use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 
 pub async fn handle_use_item(
     session: &crate::world::core::session::WorldSession,

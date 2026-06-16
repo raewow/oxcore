@@ -13,11 +13,11 @@
 //! - [`SmsgAuctionOwnerNotification`] - Notification to auction owner
 //! - [`SmsgAuctionRemovedNotification`] - Notification that an auction was removed
 
-use crate::shared::game::{AuctionAction, AuctionEntry, AuctionError};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use oxcore_shared::game::{AuctionAction, AuctionEntry, AuctionError};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::guid::ObjectGuid;
+use oxcore_shared::protocol::Opcode;
+use oxcore_shared::protocol::WorldPacket;
 
 /// MSG_AUCTION_HELLO - Open the auction house UI for the player
 ///
@@ -342,8 +342,8 @@ fn write_auction_list_item(packet: &mut WorldPacket, auction: &AuctionEntry) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::game::auction::{AuctionAction, AuctionError};
-    use crate::shared::protocol::Opcode;
+    use oxcore_shared::game::auction::{AuctionAction, AuctionError};
+    use oxcore_shared::protocol::Opcode;
 
     #[test]
     fn test_msg_auction_hello() {

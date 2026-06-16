@@ -6,8 +6,8 @@
 use super::actions::LuaAction;
 use super::scripts::CreatureScriptState;
 use super::snapshot::{LuaCreatureSnapshot, ThreatEntry as LuaThreatEntry};
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::game::creature::ai::{AIAction, AIEvent, AIInput, CombatEndReason, MovementType};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 use std::collections::HashMap;
 
 /// Convert AI system's input into a Lua creature snapshot.
@@ -640,7 +640,7 @@ mod tests {
     use super::*;
 
     fn player_guid(id: u32) -> ObjectGuid {
-        use crate::shared::protocol::HighGuid;
+        use oxcore_shared::protocol::HighGuid;
         ObjectGuid::new_without_entry(HighGuid::Player, id)
     }
 

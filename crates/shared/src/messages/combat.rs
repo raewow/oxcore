@@ -1,7 +1,7 @@
 //! Combat Messages - SMSG_ATTACKERSTATEUPDATE and related packets
 
 use super::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Hit info flags for SMSG_ATTACKERSTATEUPDATE
 /// Values from MaNGOS UnitDefines.h (1.12.1 client)

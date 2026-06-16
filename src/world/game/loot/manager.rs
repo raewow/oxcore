@@ -1,6 +1,6 @@
 use super::types::{Loot, LootItem, LootTableEntry};
-use crate::shared::protocol::ObjectGuid;
 use dashmap::DashMap;
+use oxcore_shared::protocol::ObjectGuid;
 use rand::Rng;
 use std::sync::Arc;
 

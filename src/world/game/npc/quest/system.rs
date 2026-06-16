@@ -8,21 +8,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-use crate::shared::database::characters::models::quest::{QuestStatusRewardedRow, QuestStatusRow};
-use crate::shared::database::characters::repositories::QuestRepositoryTrait;
-use crate::shared::messages::gossip::SmsgGossipComplete;
-use crate::shared::messages::quest::{
-    MsgQuestPushResult, QuestListItem, RequestItemInfo, RewardItemInfo, SmsgQuestConfirmAccept,
-    SmsgQuestgiverOfferRewardV2, SmsgQuestgiverQuestComplete, SmsgQuestgiverQuestDetailsV2,
-    SmsgQuestgiverQuestListV2, SmsgQuestgiverRequestItemsV2, SmsgQuestgiverStatus,
-    SmsgQuestlogFull, SmsgQuestupdateAddItem, SmsgQuestupdateAddKill, SmsgQuestupdateComplete,
-    SmsgQuestupdateFailed, SmsgQuestupdateFailedtimer,
-};
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::common::update_fields::PLAYER_QUEST_LOG_1_1;
@@ -33,6 +18,21 @@ use crate::world::game::player::experience::ExperienceSystem;
 use crate::world::game::player::player::QuestShareInfo;
 use crate::world::game::player::PlayerManager;
 use crate::world::World;
+use oxcore_shared::database::characters::models::quest::{QuestStatusRewardedRow, QuestStatusRow};
+use oxcore_shared::database::characters::repositories::QuestRepositoryTrait;
+use oxcore_shared::messages::gossip::SmsgGossipComplete;
+use oxcore_shared::messages::quest::{
+    MsgQuestPushResult, QuestListItem, RequestItemInfo, RewardItemInfo, SmsgQuestConfirmAccept,
+    SmsgQuestgiverOfferRewardV2, SmsgQuestgiverQuestComplete, SmsgQuestgiverQuestDetailsV2,
+    SmsgQuestgiverQuestListV2, SmsgQuestgiverRequestItemsV2, SmsgQuestgiverStatus,
+    SmsgQuestlogFull, SmsgQuestupdateAddItem, SmsgQuestupdateAddKill, SmsgQuestupdateComplete,
+    SmsgQuestupdateFailed, SmsgQuestupdateFailedtimer,
+};
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::ObjectGuid;
 
 use super::manager::QuestManager;
 use super::types::{
@@ -960,14 +960,14 @@ impl QuestSystem {
 
         // Convert local DialogStatus to message DialogStatus
         let status = match local_status {
-            DialogStatus::None => crate::shared::messages::quest::DialogStatus::None,
-            DialogStatus::Unavailable => crate::shared::messages::quest::DialogStatus::Unavailable,
-            DialogStatus::Chat => crate::shared::messages::quest::DialogStatus::Chat,
-            DialogStatus::Incomplete => crate::shared::messages::quest::DialogStatus::Incomplete,
-            DialogStatus::RewardRep => crate::shared::messages::quest::DialogStatus::RewardRep,
-            DialogStatus::Available => crate::shared::messages::quest::DialogStatus::Available,
-            DialogStatus::RewardOld => crate::shared::messages::quest::DialogStatus::RewardOld,
-            DialogStatus::Reward2 => crate::shared::messages::quest::DialogStatus::Reward2,
+            DialogStatus::None => oxcore_shared::messages::quest::DialogStatus::None,
+            DialogStatus::Unavailable => oxcore_shared::messages::quest::DialogStatus::Unavailable,
+            DialogStatus::Chat => oxcore_shared::messages::quest::DialogStatus::Chat,
+            DialogStatus::Incomplete => oxcore_shared::messages::quest::DialogStatus::Incomplete,
+            DialogStatus::RewardRep => oxcore_shared::messages::quest::DialogStatus::RewardRep,
+            DialogStatus::Available => oxcore_shared::messages::quest::DialogStatus::Available,
+            DialogStatus::RewardOld => oxcore_shared::messages::quest::DialogStatus::RewardOld,
+            DialogStatus::Reward2 => oxcore_shared::messages::quest::DialogStatus::Reward2,
         };
 
         let msg = SmsgQuestgiverStatus {
@@ -1138,7 +1138,7 @@ impl QuestSystem {
             details: &quest.details,
             objectives: &quest.objectives,
             activate_accept: true,
-            quest_flags: crate::shared::messages::quest::QuestFlags(quest.quest_flags.bits()),
+            quest_flags: oxcore_shared::messages::quest::QuestFlags(quest.quest_flags.bits()),
             reward_choices: &reward_choices,
             reward_items: &reward_items,
             money_reward: quest.rew_or_req_money.max(0) as u32,
@@ -1746,7 +1746,7 @@ impl QuestSystem {
             reward_choices: &reward_choices,
             reward_items: &reward_items,
             money_reward: quest.rew_or_req_money.max(0) as u32,
-            quest_flags: crate::shared::messages::quest::QuestFlags(quest.quest_flags.bits()),
+            quest_flags: oxcore_shared::messages::quest::QuestFlags(quest.quest_flags.bits()),
             rew_spell: quest.rew_spell,
             offer_reward_emote: quest.offer_reward_emote,
             offer_reward_emote_delay: quest.offer_reward_emote_delay,
@@ -1883,7 +1883,7 @@ impl QuestSystem {
         // 2. Give XP reward or max-level gold conversion
         let wow_patch = world.config.wow_patch.unwrap_or(112);
         let rate_drop_money = world.config.rate_drop_money;
-        let max_level = crate::shared::game::experience::MAX_PLAYER_LEVEL;
+        let max_level = oxcore_shared::game::experience::MAX_PLAYER_LEVEL;
 
         let xp_reward = if player_level >= max_level {
             // Max level: give gold instead of XP
@@ -1899,7 +1899,7 @@ impl QuestSystem {
         } else {
             let xp = quest.xp_value(player_level as u32);
             if xp > 0 {
-                use crate::shared::game::experience::XpSource;
+                use oxcore_shared::game::experience::XpSource;
                 let _ = self
                     .experience
                     .add_xp(player_guid, xp, XpSource::Quest, None, 0.0);
@@ -2774,7 +2774,7 @@ impl QuestSystem {
             .unwrap_or(false);
 
         if marked {
-            let complete_msg = crate::shared::messages::quest::SmsgQuestupdateComplete { quest_id };
+            let complete_msg = oxcore_shared::messages::quest::SmsgQuestupdateComplete { quest_id };
             self.broadcast_mgr
                 .send_msg_to_player(player_guid, complete_msg);
             tracing::info!(
@@ -2789,7 +2789,7 @@ impl QuestSystem {
     ///
     /// Called during logout to persist quest progress.
     pub async fn save_player_quests(&self, player_guid: ObjectGuid) -> Result<()> {
-        use crate::shared::database::characters::models::quest::{
+        use oxcore_shared::database::characters::models::quest::{
             QuestStatusRewardedRow, QuestStatusRow,
         };
 
@@ -2950,13 +2950,13 @@ impl QuestSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::database::Databases;
-    use crate::shared::protocol::{ObjectGuid, Position};
     use crate::world::config::Config;
     use crate::world::game::creature::ai::NPC_FLAG_QUEST_GIVER;
     use crate::world::game::creature::{Creature, CreatureTemplate};
     use crate::world::game::gameobject::{GameObject, GameObjectTemplate};
     use crate::world::game::player::Player;
+    use oxcore_shared::database::Databases;
+    use oxcore_shared::protocol::{ObjectGuid, Position};
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
 

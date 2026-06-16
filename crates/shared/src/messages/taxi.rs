@@ -9,11 +9,11 @@
 //! - [`SmsgNewTaxiPath`] - Notification of a new taxi path
 //! - [`SmsgActivateTaxiReply`] - Response to a taxi activation request
 
-use crate::shared::game::taxi::{TaxiMask, TAXI_MASK_SIZE};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::game::taxi::{TaxiMask, TAXI_MASK_SIZE};
+use crate::messages::ToWorldPacket;
+use crate::protocol::guid::ObjectGuid;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// SMSG_TAXINODE_STATUS - Status of a specific taxinode
 ///
@@ -111,7 +111,7 @@ pub const ERR_TAXINOTSTANDING: u32 = 12;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_smsg_taxinode_status() {

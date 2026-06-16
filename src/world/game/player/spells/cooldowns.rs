@@ -2,12 +2,12 @@
 //!
 //! Handles per-spell cooldowns, category cooldowns, GCD, and persistence.
 
-use crate::shared::messages::spells::{SmsgClearCooldown, SmsgSpellCooldown};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::messages::spells::{SmsgClearCooldown, SmsgSpellCooldown};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
 /// Get current game time in milliseconds

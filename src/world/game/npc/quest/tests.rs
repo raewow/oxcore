@@ -11,9 +11,6 @@ use super::types::{
     QuestType, QUEST_ITEM_OBJECTIVES_COUNT, QUEST_OBJECTIVES_COUNT, QUEST_REWARDS_COUNT,
     QUEST_REWARD_CHOICES_COUNT,
 };
-use crate::shared::database::characters::repositories::inventory_repository_trait::MockInventoryRepositoryTrait;
-use crate::shared::database::characters::repositories::quest_repository::MockQuestRepositoryTrait;
-use crate::shared::protocol::{HighGuid, ObjectGuid};
 use crate::world::core::session::SessionManager;
 use crate::world::game::broadcast_mgr::{BroadcastManager, MockBroadcastManagerTrait};
 use crate::world::game::creature::CreatureManager;
@@ -25,6 +22,9 @@ use crate::world::game::items::Item;
 use crate::world::game::player::experience::ExperienceSystem;
 use crate::world::game::player::Player;
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::database::characters::repositories::inventory_repository_trait::MockInventoryRepositoryTrait;
+use oxcore_shared::database::characters::repositories::quest_repository::MockQuestRepositoryTrait;
+use oxcore_shared::protocol::{HighGuid, ObjectGuid};
 use parking_lot::RwLock;
 use std::sync::Arc;
 

@@ -4,10 +4,10 @@ use anyhow::Result;
 use bytes::Buf;
 use std::sync::Arc;
 
-use crate::shared::database::{CharacterRepository, Databases};
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::database::{CharacterRepository, Databases};
+use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_CREATURE_QUERY
 ///
@@ -18,7 +18,7 @@ pub async fn handle_creature_query(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    use crate::shared::messages::query::SmsgCreatureQueryResponse;
+    use oxcore_shared::messages::query::SmsgCreatureQueryResponse;
 
     // Read entry and GUID from packet (Vanilla 1.12.1 format)
     let entry = packet
@@ -67,8 +67,8 @@ pub async fn handle_item_query(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    use crate::shared::messages::inventory::SmsgItemQuerySingleResponse;
-    use crate::shared::messages::ToWorldPacket;
+    use oxcore_shared::messages::inventory::SmsgItemQuerySingleResponse;
+    use oxcore_shared::messages::ToWorldPacket;
 
     // Read item entry (u32) and skip GUID (8 bytes)
     let item_entry = packet
@@ -407,8 +407,8 @@ pub async fn handle_name_query(
     databases: &Databases,
     world: &World,
 ) -> Result<()> {
-    use crate::shared::messages::query::SmsgNameQueryResponse;
-    use crate::shared::protocol::ObjectGuid;
+    use oxcore_shared::messages::query::SmsgNameQueryResponse;
+    use oxcore_shared::protocol::ObjectGuid;
 
     // Read GUID from packet (u64 little-endian)
     let guid_raw = packet
@@ -538,8 +538,8 @@ pub async fn handle_gameobject_query(
             entry
         );
         // Send not-found response (entry | 0x80000000 signals "not found" to client)
-        let mut response = crate::shared::protocol::WorldPacket::new(
-            crate::shared::protocol::Opcode::SMSG_GAMEOBJECT_QUERY_RESPONSE,
+        let mut response = oxcore_shared::protocol::WorldPacket::new(
+            oxcore_shared::protocol::Opcode::SMSG_GAMEOBJECT_QUERY_RESPONSE,
         );
         response.write_u32(entry | 0x80000000);
         session.send_packet(response)?;
@@ -566,7 +566,7 @@ pub async fn handle_set_selection(
 /// Note: This doesn't actually set the client's time (SMSG_LOGIN_SETTIMESPEED does that),
 /// but it should use the same time format for consistency.
 pub async fn handle_query_time(session: &WorldSession) -> Result<()> {
-    use crate::shared::protocol::Opcode;
+    use oxcore_shared::protocol::Opcode;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // Get current time in seconds since Unix epoch (same format as SMSG_LOGIN_SETTIMESPEED)

@@ -2,7 +2,7 @@
 //!
 //! Vanilla WoW aura stacking follows specific rules that differ from later expansions.
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Stacking rules for Vanilla 1.12.
 ///

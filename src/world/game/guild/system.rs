@@ -6,9 +6,6 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use crate::shared::database::characters::repositories::GuildRepositoryTrait;
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::player::PlayerManager;
 use crate::world::game::ItemManager;
@@ -17,6 +14,9 @@ use crate::world::messages::guild::{
     smsg_guild_roster_from_cached, SmsgGuildCommandResult, SmsgGuildDecline, SmsgGuildEvent,
     SmsgGuildInvite,
 };
+use oxcore_shared::database::characters::repositories::GuildRepositoryTrait;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 use super::types::*;
 use super::utils::*;
@@ -199,7 +199,7 @@ impl GuildSystem {
             .insert(leader_guid, leader_member.clone());
 
         // 9. Convert to database types
-        use crate::shared::database::characters::models::guild::{
+        use oxcore_shared::database::characters::models::guild::{
             GuildBankTabRow, GuildMemberRow, GuildRankRow, GuildRow,
         };
 
@@ -346,7 +346,7 @@ impl GuildSystem {
             .ok_or_else(|| anyhow!("Guild not found"))?;
 
         // Add to database (rank 5 is default lowest rank)
-        let member_row = crate::shared::database::characters::models::guild::GuildMemberRow {
+        let member_row = oxcore_shared::database::characters::models::guild::GuildMemberRow {
             guild_id,
             guid: player_guid.counter(),
             rank: 5, // Default rank (lowest)
@@ -951,7 +951,7 @@ impl GuildSystem {
         }
 
         // Add rank to database
-        use crate::shared::database::characters::models::guild::GuildRankRow;
+        use oxcore_shared::database::characters::models::guild::GuildRankRow;
         let rank_row = GuildRankRow {
             guild_id,
             id: current_rank_count as u32,
@@ -1196,7 +1196,7 @@ impl GuildSystem {
         }
 
         // Add to database
-        let member_row = crate::shared::database::characters::models::guild::GuildMemberRow {
+        let member_row = oxcore_shared::database::characters::models::guild::GuildMemberRow {
             guild_id,
             guid: player_guid.counter(),
             rank: rank_id,

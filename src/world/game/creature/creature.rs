@@ -7,7 +7,7 @@ use super::combat::{CombatState, ThreatManager};
 use super::death::DeathState;
 use super::manager::{ClassLevelStats, CreatureTemplate};
 use super::movement::{MotionMaster, MoveSpline};
-use crate::shared::protocol::{ObjectGuid, Position};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 use rand::Rng;
 
 /// Slim creature object

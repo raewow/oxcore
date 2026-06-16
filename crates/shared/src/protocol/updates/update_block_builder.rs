@@ -50,10 +50,10 @@ use super::movement_block::MovementSpeeds;
 use super::packet_compression::compress_update_packet_if_needed;
 use super::update_mask::UpdateMask;
 use super::update_types::{ObjectTypeId, ObjectUpdateType};
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::protocol::opcodes::Opcode;
-use crate::shared::protocol::position::Position;
-use crate::shared::protocol::{packet::WorldPacketGuidExt, WorldPacket};
+use crate::protocol::guid::ObjectGuid;
+use crate::protocol::opcodes::Opcode;
+use crate::protocol::position::Position;
+use crate::protocol::{packet::WorldPacketGuidExt, WorldPacket};
 
 /// Update flags for object updates (from movement_block.rs)
 pub mod update_flags {
@@ -423,7 +423,7 @@ impl UpdateBlockBuilder {
             buf.put_u32_le(movement.movement_flags);
 
             // Server timestamp
-            let server_time = crate::shared::common::server_mstime();
+            let server_time = crate::common::server_mstime();
             buf.put_u32_le(server_time);
 
             // Position - validate and normalize orientation before writing
@@ -476,7 +476,7 @@ impl UpdateBlockBuilder {
             packet.write_u32(movement.movement_flags);
 
             // Server uptime timestamp (matches WoW 1.12 client's time domain)
-            let server_time = crate::shared::common::server_mstime();
+            let server_time = crate::common::server_mstime();
             packet.write_u32(server_time);
 
             // Position - validate and normalize orientation before writing

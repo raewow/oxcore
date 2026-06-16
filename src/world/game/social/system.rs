@@ -4,20 +4,20 @@ use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
 use std::sync::Arc;
 
-use crate::shared::database::characters::models::social::CharacterSocialRow;
-use crate::shared::database::characters::repositories::SocialRepositoryTrait;
-use crate::shared::game::social::{
-    FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT,
-    SOCIALMGR_IGNORE_LIMIT,
-};
-use crate::shared::messages::social::{
-    SmsgFriendList, SmsgFriendStatus, SmsgIgnoreList, SmsgWho, WhoPlayerInfo,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::player::PlayerManager;
 use crate::world::game::BroadcastManager;
+use oxcore_shared::database::characters::models::social::CharacterSocialRow;
+use oxcore_shared::database::characters::repositories::SocialRepositoryTrait;
+use oxcore_shared::game::social::{
+    FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT,
+    SOCIALMGR_IGNORE_LIMIT,
+};
+use oxcore_shared::messages::social::{
+    SmsgFriendList, SmsgFriendStatus, SmsgIgnoreList, SmsgWho, WhoPlayerInfo,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
 
 use super::types::{
     FriendEntry, IgnoreEntry, SocialState, WhisperBlockReason, WhisperValidationResult, WhoRequest,

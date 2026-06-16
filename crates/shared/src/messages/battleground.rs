@@ -7,10 +7,10 @@
 //! - [`SmsgBattlefieldStatus`] - Status of a battleground
 //! - [`SmsgBattlefieldList`] - List of available battleground instances
 
-use crate::shared::game::battleground::{BattleGroundStatus, BattleGroundTypeId};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::game::battleground::{BattleGroundStatus, BattleGroundTypeId};
+use crate::messages::ToWorldPacket;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// SMSG_BATTLEFIELD_STATUS - Status of a battleground
 ///
@@ -69,8 +69,8 @@ impl ToWorldPacket for SmsgBattlefieldList<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::game::battleground::{BattleGroundStatus, BattleGroundTypeId};
-    use crate::shared::protocol::Opcode;
+    use crate::game::battleground::{BattleGroundStatus, BattleGroundTypeId};
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_smsg_battlefield_status() {

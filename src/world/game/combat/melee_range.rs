@@ -8,7 +8,7 @@
 //!
 //! Reference: mangos/src/game/Objects/Unit.cpp GetCombatReachToTarget()
 
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 
 /// Base melee range offset added to combined combat reaches (4/3 yards)
 /// Matches MaNGOS BASE_MELEERANGE_OFFSET
@@ -65,7 +65,7 @@ pub fn is_within_melee_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Position;
+    use oxcore_shared::protocol::Position;
 
     fn pos(x: f32, y: f32, z: f32) -> Position {
         Position { x, y, z, o: 0.0 }

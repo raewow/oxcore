@@ -7,8 +7,8 @@ use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
-use crate::shared::protocol::{HighGuid, ObjectGuid};
 use crate::world::game::items::{Bag, Item};
+use oxcore_shared::protocol::{HighGuid, ObjectGuid};
 
 pub const EQUIPMENT_SLOT_COUNT: usize = 19;
 pub const BAG_SLOT_COUNT: usize = 4;
@@ -275,8 +275,8 @@ pub enum PendingInventoryOp {
         item_guid: u32,
     },
     CreateItem {
-        item: crate::shared::database::characters::models::item::ItemInstanceRow,
-        slot: crate::shared::database::characters::repositories::inventory_repository_trait::InventorySlotRow,
+        item: oxcore_shared::database::characters::models::item::ItemInstanceRow,
+        slot: oxcore_shared::database::characters::repositories::inventory_repository_trait::InventorySlotRow,
     },
     UpdateMoney {
         player_guid: u32,

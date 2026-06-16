@@ -25,9 +25,9 @@ pub mod resurrect;
 pub mod script;
 pub mod teleport;
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Input data for a single spell effect.
 ///

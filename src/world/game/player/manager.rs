@@ -6,12 +6,6 @@ use std::sync::Arc;
 
 use super::broadcaster::PlayerBroadcaster;
 use super::player::Player;
-use crate::shared::database::CharacterRepository;
-use crate::shared::messages::update::{
-    CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::core::common::position::Position as WorldPosition;
 use crate::world::core::common::ObjectGuidGenerator;
@@ -22,6 +16,12 @@ use crate::world::game::common::player_constants::{get_faction_for_race, get_pla
 use crate::world::game::common::unit_flags as unit_flags_mod;
 use crate::world::game::common::update_fields::*;
 use crate::world::World;
+use oxcore_shared::database::CharacterRepository;
+use oxcore_shared::messages::update::{
+    CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Manages all online players
 pub struct PlayerManager {
@@ -705,8 +705,8 @@ impl PlayerManager {
         player_guid: ObjectGuid,
         character_db: &sqlx::MySqlPool,
     ) -> anyhow::Result<()> {
-        use crate::shared::database::characters::models::reputation::ReputationRow;
-        use crate::shared::database::characters::repositories::ReputationRepository;
+        use oxcore_shared::database::characters::models::reputation::ReputationRow;
+        use oxcore_shared::database::characters::repositories::ReputationRepository;
 
         let factions = self.collect_reputation_for_save(player_guid);
 
@@ -862,13 +862,13 @@ impl Default for PlayerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::{HighGuid, ObjectGuid};
     use crate::world::game::player::player::Player;
     use crate::world::game::player::reputation::state::FactionStanding;
     use crate::world::game::player::settings::state::{
         ACTION_BUTTON_ITEM, ACTION_BUTTON_MACRO, ACTION_BUTTON_SPELL,
     };
     use crate::world::game::player::skills::state::{SkillData, SkillSaveState, SkillState};
+    use oxcore_shared::protocol::{HighGuid, ObjectGuid};
 
     // ========== Helpers ==========
 

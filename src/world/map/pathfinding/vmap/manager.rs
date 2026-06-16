@@ -6,7 +6,7 @@ use super::file_loader::{MapTileData, VMapFileLoader};
 use super::types::{
     BoundingBox, LiquidLevel, VMapConfig, VMapLoadResult, VMAP_INVALID_HEIGHT_VALUE,
 };
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::path::PathBuf;

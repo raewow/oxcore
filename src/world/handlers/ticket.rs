@@ -4,10 +4,10 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::shared::game::ticket::GmTicketType;
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::game::ticket::GmTicketType;
+use oxcore_shared::protocol::WorldPacket;
 
 /// CMSG_GMTICKET_GETTICKET - Player queries their active ticket
 pub async fn handle_gmticket_getticket(

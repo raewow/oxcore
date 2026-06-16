@@ -18,8 +18,8 @@ use super::stats::StatsState;
 use super::talents::TalentState;
 use super::visibility::VisibilityState;
 use super::CombatState;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::npc::quest::QuestProgress;
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -253,7 +253,7 @@ impl Player {
     }
 
     /// Get the player's team (Alliance/Horde/None)
-    pub fn get_team(&self) -> crate::shared::game::chat::Team {
-        crate::shared::game::chat::Team::from_race(self.race)
+    pub fn get_team(&self) -> oxcore_shared::game::chat::Team {
+        oxcore_shared::game::chat::Team::from_race(self.race)
     }
 }

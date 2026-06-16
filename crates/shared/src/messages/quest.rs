@@ -20,11 +20,11 @@
 //! - [`SmsgQuestgiverQuestDetails`] - Show quest details
 //! - [`SmsgQuestQueryResponse`] - Quest information response
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::packet::WorldPacketGuidExt;
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::messages::ToWorldPacket;
+use crate::protocol::packet::WorldPacketGuidExt;
+use crate::protocol::ObjectGuid;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// Quest dialog status (determines icon above NPC)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -766,7 +766,7 @@ impl ToWorldPacket for MsgQuestPushResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_smsg_questlog_full() {

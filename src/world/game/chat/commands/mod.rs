@@ -8,8 +8,8 @@ pub mod handlers;
 
 pub use context::{ChatCommandContext, ChatCommandInfo};
 
-use crate::shared::common::AccountType;
 use anyhow::Result;
+use oxcore_shared::common::AccountType;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;

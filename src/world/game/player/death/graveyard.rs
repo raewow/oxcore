@@ -4,10 +4,10 @@
 //! The system loads zone-to-graveyard mappings from the `game_graveyard_zone`
 //! database table and resolves coordinates from `WorldSafeLocs.dbc`.
 
-use crate::shared::database::world::repositories::GraveyardRepository;
-use crate::shared::protocol::Position;
 use crate::world::dbc::DbcManager;
 use anyhow::Result;
+use oxcore_shared::database::world::repositories::GraveyardRepository;
+use oxcore_shared::protocol::Position;
 use sqlx::MySqlPool;
 use std::collections::HashMap;
 use std::sync::Arc;

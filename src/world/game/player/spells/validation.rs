@@ -2,10 +2,10 @@
 //!
 //! All pre-cast validation checks are pure functions that read player state.
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::player::spells::state::{SpellCastError, NUM_SPELL_SCHOOLS};
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Get current game time in milliseconds
 fn get_game_time_ms(world: &World) -> u64 {
@@ -306,7 +306,7 @@ pub fn validate_cast(
                     world.systems.player.manager().with_player(target, |p| p.movement.position)
                 } else if target.is_creature() {
                     world.managers.creature_mgr.with_creature(target, |c| {
-                        crate::shared::protocol::Position {
+                        oxcore_shared::protocol::Position {
                             x: c.position.x,
                             y: c.position.y,
                             z: c.position.z,

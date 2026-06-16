@@ -2,10 +2,10 @@
 //!
 //! Stateless system that operates on SettingsState embedded in Player.
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
 use super::account_data::{decompress_account_data, AccountDataType};
@@ -89,8 +89,8 @@ impl SettingsSystem {
 
     /// Send action buttons to client (called during login).
     pub fn send_action_buttons(&self, player_guid: ObjectGuid, world: &World) {
-        use crate::shared::messages::login::ActionButton as MsgActionButton;
-        use crate::shared::messages::login::SmsgActionButtons;
+        use oxcore_shared::messages::login::ActionButton as MsgActionButton;
+        use oxcore_shared::messages::login::SmsgActionButtons;
 
         let buttons = world
             .managers
@@ -308,7 +308,7 @@ impl SettingsSystem {
 
     /// Send tutorial flags during login (SMSG_TUTORIAL_FLAGS).
     pub fn send_tutorial_flags(&self, player_guid: ObjectGuid, world: &World) {
-        use crate::shared::messages::login::SmsgTutorialFlags;
+        use oxcore_shared::messages::login::SmsgTutorialFlags;
 
         let flags = world
             .managers

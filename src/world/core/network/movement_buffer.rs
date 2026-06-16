@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use parking_lot::Mutex;
 
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::common::MovementInfo;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// A single buffered movement packet, pre-parsed at push time
 pub struct BufferedMovement {

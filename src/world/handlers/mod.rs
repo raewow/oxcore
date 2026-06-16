@@ -39,12 +39,12 @@ pub mod vendor_handler;
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::shared::database::Databases;
-use crate::shared::messages::SmsgPong;
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::{SessionState, WorldSession};
 use crate::world::World;
+use oxcore_shared::database::Databases;
+use oxcore_shared::messages::SmsgPong;
+use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 /// Dispatch incoming packet to appropriate handler
 ///

@@ -1,6 +1,6 @@
 //! Guild system types (excluding bank-related types)
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashMap;
 
 // Constants

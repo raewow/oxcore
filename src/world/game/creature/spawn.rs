@@ -1,6 +1,6 @@
 //! Creature spawn data from database
 
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 
 /// Spawn flags for creature behavior
 pub mod spawn_flags {

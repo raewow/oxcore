@@ -4,10 +4,10 @@ use smallvec::SmallVec;
 use std::collections::HashSet;
 use std::time::Instant;
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::map::grid::Cell;
 use crate::world::map::grid::GridState;
 use crate::world::map::grid_coords::{world_to_cell_in_grid, world_to_grid};
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Number of grids per side (64x64 = 4096 grids)
 pub const MAX_GRIDS: usize = 64;

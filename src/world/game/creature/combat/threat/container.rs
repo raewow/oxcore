@@ -5,7 +5,7 @@
 //! - Offline references: Targets that cannot be attacked (GMs, taxi flyers, dead units)
 
 use super::manager::HostileReference;
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Threat container with online/offline separation
 ///

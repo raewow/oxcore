@@ -4,9 +4,9 @@
 //! Formulas ported from old system.
 
 use super::{EffectInput, EffectResult};
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 /// SPELL_EFFECT_HEAL (10)
 ///
@@ -242,8 +242,8 @@ pub async fn effect_spirit_heal(input: &EffectInput, world: &World) -> Result<Ef
 
 /// Build and broadcast SMSG_SPELLHEALLOG packet (P5).
 fn send_spell_heal_log(
-    caster_guid: crate::shared::protocol::ObjectGuid,
-    target_guid: crate::shared::protocol::ObjectGuid,
+    caster_guid: oxcore_shared::protocol::ObjectGuid,
+    target_guid: oxcore_shared::protocol::ObjectGuid,
     spell_id: u32,
     heal_amount: u32,
     overheal: u32,

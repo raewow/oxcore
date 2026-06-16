@@ -8,9 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, trace, warn};
 
-use crate::shared::protocol::{ObjectGuid, Opcode};
 use crate::world::game::broadcast_mgr::BroadcastManagerTrait;
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::protocol::{ObjectGuid, Opcode};
 
 use super::auto_attack::{update_auto_attack, PendingAttack};
 use super::damage::calculate_melee_damage;

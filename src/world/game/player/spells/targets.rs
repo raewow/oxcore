@@ -7,9 +7,9 @@
 //! describe HOW targets are selected. The client-provided SpellCastTargets
 //! supplies the explicit target (who/where the player clicked).
 
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::game::player::spells::state::SpellCastTargets;
 use crate::world::World;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// MaNGOS implicit target types (from SpellEntry effect_implicit_target fields)
 ///

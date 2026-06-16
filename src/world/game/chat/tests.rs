@@ -1,14 +1,14 @@
 //! Tests for the Chat System (world)
 
 use super::*;
-use crate::shared::database::characters::models::social::CharacterSocialRow;
-use crate::shared::database::characters::repositories::SocialRepositoryTrait;
-use crate::shared::game::chat::{ChatMsg, ChatTag, Language, Team};
-use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
 use crate::world::core::session::SessionManager;
 use crate::world::game::broadcast_mgr::BroadcastManager;
 use crate::world::game::player::PlayerManager;
 use mockall::mock;
+use oxcore_shared::database::characters::models::social::CharacterSocialRow;
+use oxcore_shared::database::characters::repositories::SocialRepositoryTrait;
+use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language, Team};
+use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
 use std::sync::Arc;
 use std::time::Duration;
 

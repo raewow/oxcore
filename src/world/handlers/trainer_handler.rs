@@ -3,17 +3,17 @@
 use anyhow::Result;
 use tracing::{info, warn};
 
-use crate::shared::messages::spells::{SmsgPlaySpellVisual, SmsgSpellGo, SmsgSpellStart};
-use crate::shared::messages::trainer::{
-    SmsgTrainerBuyFailed, SmsgTrainerBuySucceeded, SmsgTrainerList, TrainerBuyError,
-    TrainerSpellData,
-};
-use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::game::broadcast_mgr::broadcast_around_creature;
 use crate::world::game::npc::trainer::types::TrainerSpellState;
 use crate::world::World;
+use oxcore_shared::messages::spells::{SmsgPlaySpellVisual, SmsgSpellGo, SmsgSpellStart};
+use oxcore_shared::messages::trainer::{
+    SmsgTrainerBuyFailed, SmsgTrainerBuySucceeded, SmsgTrainerList, TrainerBuyError,
+    TrainerSpellData,
+};
+use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 
 /// Handle CMSG_TRAINER_LIST (0x1B0)
 pub async fn handle_trainer_list(
@@ -165,7 +165,7 @@ pub async fn send_trainer_list(
     };
 
     // Log raw packet bytes for debugging
-    let raw = crate::shared::messages::ToWorldPacket::to_world_packet(&msg);
+    let raw = oxcore_shared::messages::ToWorldPacket::to_world_packet(&msg);
     let raw_bytes = raw.data();
     let preview_len = raw_bytes.len().min(80);
     info!(
@@ -498,7 +498,7 @@ fn send_trainer_spell_animation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::{HighGuid, Opcode};
+    use oxcore_shared::protocol::{HighGuid, Opcode};
 
     fn player_guid() -> ObjectGuid {
         ObjectGuid::new_without_entry(HighGuid::Player, 1)
@@ -559,7 +559,7 @@ mod tests {
     /// Opcode must be SMSG_PLAY_SPELL_VISUAL (0x1F3 = 499).
     #[test]
     fn play_spell_visual_opcode() {
-        use crate::shared::messages::spells::SmsgPlaySpellVisual;
+        use oxcore_shared::messages::spells::SmsgPlaySpellVisual;
         let pkt = SmsgPlaySpellVisual {
             caster_guid: player_guid(),
             spell_visual_kit_id: 42,
@@ -571,7 +571,7 @@ mod tests {
     /// Packet body: full 8-byte GUID then 4-byte kit ID (little-endian).
     #[test]
     fn play_spell_visual_body_layout() {
-        use crate::shared::messages::spells::SmsgPlaySpellVisual;
+        use oxcore_shared::messages::spells::SmsgPlaySpellVisual;
         let guid = player_guid();
         let kit_id: u32 = 0xBEEF;
         let pkt = SmsgPlaySpellVisual {

@@ -7,17 +7,17 @@ use super::state::{
     rank_cap_to_reputation_rank, FactionEntry, FactionStanding, ReputationSpilloverTemplate,
     ReputationState,
 };
-use crate::shared::game::reputation::{
-    apply_level_reduction, ReputationListID, ReputationRank, FACTION_FLAG_AT_WAR,
-    FACTION_FLAG_VISIBLE, MAX_REPUTATION_LIST_SLOTS, REPUTATION_BOTTOM, REPUTATION_CAP,
-};
-use crate::shared::messages::reputation::{
-    SmsgInitializeFactions, SmsgSetFactionStanding, SmsgSetForcedReactions,
-};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::game::reputation::{
+    apply_level_reduction, ReputationListID, ReputationRank, FACTION_FLAG_AT_WAR,
+    FACTION_FLAG_VISIBLE, MAX_REPUTATION_LIST_SLOTS, REPUTATION_BOTTOM, REPUTATION_CAP,
+};
+use oxcore_shared::messages::reputation::{
+    SmsgInitializeFactions, SmsgSetFactionStanding, SmsgSetForcedReactions,
+};
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 

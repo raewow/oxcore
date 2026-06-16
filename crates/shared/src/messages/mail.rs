@@ -9,10 +9,10 @@
 //! - [`SmsgReceivedMail`] - Notification that mail was received
 //! - [`SmsgItemTextQueryResponse`] - Response to item text query
 
-use crate::shared::game::mail::{Mail, MailMessageType, MailResponseResult, MailResponseType};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::game::mail::{Mail, MailMessageType, MailResponseResult, MailResponseType};
+use crate::messages::ToWorldPacket;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// SMSG_SEND_MAIL_RESULT - Result of sending mail
 ///
@@ -92,7 +92,7 @@ impl ToWorldPacket for SmsgMailListResult<'_> {
             match mail.message_type {
                 MailMessageType::Normal => {
                     // Send GUID for player mail
-                    use crate::shared::protocol::guid::{HighGuid, ObjectGuid};
+                    use crate::protocol::guid::{HighGuid, ObjectGuid};
                     let sender_guid =
                         ObjectGuid::new_without_entry(HighGuid::Player, mail.sender_guid);
                     packet.write_u64(sender_guid.raw());
@@ -196,8 +196,8 @@ impl ToWorldPacket for SmsgItemTextQueryResponse<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::game::mail::{Mail, MailCheckMask, MailMessageType, MailState};
-    use crate::shared::protocol::Opcode;
+    use crate::game::mail::{Mail, MailCheckMask, MailMessageType, MailState};
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_smsg_send_mail_result() {

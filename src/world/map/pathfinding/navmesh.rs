@@ -4,7 +4,7 @@
 //! Parses Detour .mmtile format and uses A* through polygon neighbors.
 
 use super::types::PathResult;
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 use std::collections::HashMap;
 
 const INVALID_POLY: u16 = 0xFFFF;

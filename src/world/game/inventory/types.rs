@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Maximum money a player can hold (99999 gold, 99 silver, 99 copper)
 pub const MAX_MONEY: u32 = 999_999_999;
@@ -123,8 +123,8 @@ pub struct ItemTransferData {
     pub max_durability: u32,
     pub enchantments: Vec<(u32, u32, u32)>,
     pub random_property_id: i32,
-    pub creator_guid: Option<crate::shared::protocol::ObjectGuid>,
-    pub gift_creator_guid: Option<crate::shared::protocol::ObjectGuid>,
+    pub creator_guid: Option<oxcore_shared::protocol::ObjectGuid>,
+    pub gift_creator_guid: Option<oxcore_shared::protocol::ObjectGuid>,
     pub duration: u32,
     pub spell_charges: [i32; 5],
     pub flags: u32,
@@ -135,7 +135,7 @@ pub struct ItemTransferData {
 pub enum TransferItemResult {
     /// Success with new item GUID in target inventory
     Success {
-        new_item_guid: crate::shared::protocol::ObjectGuid,
+        new_item_guid: oxcore_shared::protocol::ObjectGuid,
     },
     /// Item not found in source inventory
     ItemNotFound,

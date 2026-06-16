@@ -6,9 +6,9 @@
 //! ## Server Messages (SMSG)
 //! - [`SmsgMeetingstoneSetqueue`] - Set meeting stone queue status
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::messages::ToWorldPacket;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// SMSG_MEETINGSTONE_SETQUEUE - Set meeting stone queue status
 ///
@@ -30,7 +30,7 @@ impl ToWorldPacket for SmsgMeetingstoneSetqueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_smsg_meetingstone_setqueue() {

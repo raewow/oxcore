@@ -2,17 +2,17 @@
 //!
 //! Stateless system that operates on PowerState embedded in Player.
 
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::BroadcastManagerTrait;
 use crate::world::game::common::update_fields::*;
 use crate::world::game::player::manager::PlayerManager;
 use crate::world::game::player::Player;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

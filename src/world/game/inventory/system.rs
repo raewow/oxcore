@@ -10,26 +10,26 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::shared::database::characters::models::item::ItemInstanceRow;
-use crate::shared::database::characters::repositories::inventory_repository_trait::{
-    InventoryRepositoryTrait, InventorySlotRow,
-};
-use crate::shared::messages::inventory::{SmsgDestroyItem, SmsgItemPushResult};
-use crate::shared::messages::inventory_update::{
-    SmsgInventorySlotUpdate, SmsgInventorySlotsUpdate, SmsgVisibleItemUpdate,
-};
-use crate::shared::messages::login::EquipmentSlot;
-use crate::shared::messages::player::SmsgPlayerMoneyUpdate;
-use crate::shared::messages::update::{CreateObjectBlock, SmsgUpdateObject, UpdateBlockData};
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
-use crate::shared::protocol::{HighGuid, ObjectGuid};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::inventory::inventory_types::{
     EquipmentSlot as EquipmentSlotEnum, INVENTORY_SLOT_BAG_0,
 };
 use crate::world::game::ItemManager;
+use oxcore_shared::database::characters::models::item::ItemInstanceRow;
+use oxcore_shared::database::characters::repositories::inventory_repository_trait::{
+    InventoryRepositoryTrait, InventorySlotRow,
+};
+use oxcore_shared::messages::inventory::{SmsgDestroyItem, SmsgItemPushResult};
+use oxcore_shared::messages::inventory_update::{
+    SmsgInventorySlotUpdate, SmsgInventorySlotsUpdate, SmsgVisibleItemUpdate,
+};
+use oxcore_shared::messages::login::EquipmentSlot;
+use oxcore_shared::messages::player::SmsgPlayerMoneyUpdate;
+use oxcore_shared::messages::update::{CreateObjectBlock, SmsgUpdateObject, UpdateBlockData};
+use oxcore_shared::protocol::Opcode;
+use oxcore_shared::protocol::WorldPacket;
+use oxcore_shared::protocol::{HighGuid, ObjectGuid};
 use tracing::{info, warn};
 
 use super::cache::{CachedItemInfo, InventoryCache, PlayerInventoryData};
@@ -75,7 +75,7 @@ impl InventorySystem {
     fn send_inventory_error(&self, player_guid: ObjectGuid, error: u8) {
         self.broadcast_mgr.send_msg_to_player(
             player_guid,
-            crate::shared::messages::SmsgInventoryChangeFailure::new(error),
+            oxcore_shared::messages::SmsgInventoryChangeFailure::new(error),
         );
     }
 
@@ -88,7 +88,7 @@ impl InventorySystem {
     ) {
         self.broadcast_mgr.send_msg_to_player(
             player_guid,
-            crate::shared::messages::SmsgInventoryChangeFailure::with_items(
+            oxcore_shared::messages::SmsgInventoryChangeFailure::with_items(
                 error, src_item, dst_item,
             ),
         );
@@ -97,8 +97,8 @@ impl InventorySystem {
     fn send_inventory_error_with_level(&self, player_guid: ObjectGuid, required_level: u32) {
         self.broadcast_mgr.send_msg_to_player(
             player_guid,
-            crate::shared::messages::SmsgInventoryChangeFailure::with_level_requirement(
-                crate::shared::messages::EQUIP_ERR_CANT_EQUIP_LEVEL_I,
+            oxcore_shared::messages::SmsgInventoryChangeFailure::with_level_requirement(
+                oxcore_shared::messages::EQUIP_ERR_CANT_EQUIP_LEVEL_I,
                 required_level,
             ),
         );
@@ -109,11 +109,11 @@ impl InventorySystem {
         player_guid: ObjectGuid,
         vendor_guid: ObjectGuid,
         item_id: u32,
-        error: crate::shared::messages::vendor::BuyError,
+        error: oxcore_shared::messages::vendor::BuyError,
     ) {
         self.broadcast_mgr.send_msg_to_player(
             player_guid,
-            crate::shared::messages::vendor::SmsgBuyFailed {
+            oxcore_shared::messages::vendor::SmsgBuyFailed {
                 vendor_guid,
                 item_id,
                 error,
@@ -124,7 +124,7 @@ impl InventorySystem {
     pub fn send_buy_bank_slot_result(&self, player_guid: ObjectGuid, result: u8) {
         self.broadcast_mgr.send_msg_to_player(
             player_guid,
-            crate::shared::messages::SmsgBuyBankSlotResult { result },
+            oxcore_shared::messages::SmsgBuyBankSlotResult { result },
         );
     }
 
@@ -613,7 +613,7 @@ impl InventorySystem {
         let item = match self.cache.get_item(player_guid, item_guid) {
             Some(i) => i,
             None => {
-                self.send_inventory_error(player_guid, crate::shared::messages::ERR_ITEM_NOT_FOUND);
+                self.send_inventory_error(player_guid, oxcore_shared::messages::ERR_ITEM_NOT_FOUND);
                 return RemoveItemResult::ItemNotFound;
             }
         };
@@ -625,7 +625,7 @@ impl InventorySystem {
         drop(item_read);
 
         if count > item_count {
-            self.send_inventory_error(player_guid, crate::shared::messages::ERR_ITEM_NOT_FOUND);
+            self.send_inventory_error(player_guid, oxcore_shared::messages::ERR_ITEM_NOT_FOUND);
             return RemoveItemResult::InsufficientCount;
         }
 
@@ -721,7 +721,7 @@ impl InventorySystem {
                 );
                 self.send_inventory_error(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                    oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
                 );
                 return MoveItemResult::InvalidSource;
             }
@@ -757,7 +757,7 @@ impl InventorySystem {
                                         if available_space == 0 {
                                             self.send_inventory_error_with_items(
                                                 player_guid,
-                                                crate::shared::messages::EQUIP_ERR_ITEM_CANT_STACK,
+                                                oxcore_shared::messages::EQUIP_ERR_ITEM_CANT_STACK,
                                                 Some(src_item_guid),
                                                 Some(dst_guid),
                                             );
@@ -1063,7 +1063,7 @@ impl InventorySystem {
             None => {
                 self.send_inventory_error(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                    oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
                 );
                 return MoveItemResult::InvalidSource;
             }
@@ -1092,7 +1092,7 @@ impl InventorySystem {
             None => {
                 self.send_inventory_error(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_BANK_FULL,
+                    oxcore_shared::messages::EQUIP_ERR_BANK_FULL,
                 );
                 return MoveItemResult::InvalidDestination;
             }
@@ -1113,7 +1113,7 @@ impl InventorySystem {
             let (dst_bag, dst_slot) = match self.cache.find_free_inventory_slot(player_guid) {
                 Some(slot) => slot,
                 None => {
-                    self.send_inventory_error(player_guid, crate::shared::messages::ERR_INV_FULL);
+                    self.send_inventory_error(player_guid, oxcore_shared::messages::ERR_INV_FULL);
                     return MoveItemResult::InvalidDestination;
                 }
             };
@@ -1247,7 +1247,7 @@ impl InventorySystem {
         let update_packet = SmsgUpdateObject {
             has_transport: false,
             blocks: vec![
-                crate::shared::messages::update::UpdateBlockData::CreateObject2(create_block),
+                oxcore_shared::messages::update::UpdateBlockData::CreateObject2(create_block),
             ],
         };
 
@@ -1323,7 +1323,7 @@ impl InventorySystem {
             tracing::warn!("[INVENTORY] split_item FAILED: count is zero");
             self.send_inventory_error(
                 player_guid,
-                crate::shared::messages::EQUIP_ERR_COULDNT_SPLIT_ITEMS,
+                oxcore_shared::messages::EQUIP_ERR_COULDNT_SPLIT_ITEMS,
             );
             return SplitItemResult::InvalidCount;
         }
@@ -1338,7 +1338,7 @@ impl InventorySystem {
                 );
                 self.send_inventory_error(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                    oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
                 );
                 return SplitItemResult::SourceNotFound;
             }
@@ -1353,7 +1353,7 @@ impl InventorySystem {
                 );
                 self.send_inventory_error(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                    oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
                 );
                 return SplitItemResult::SourceNotFound;
             }
@@ -1379,7 +1379,7 @@ impl InventorySystem {
             );
             self.send_inventory_error_with_items(
                 player_guid,
-                crate::shared::messages::EQUIP_ERR_TRIED_TO_SPLIT_MORE_THAN_COUNT,
+                oxcore_shared::messages::EQUIP_ERR_TRIED_TO_SPLIT_MORE_THAN_COUNT,
                 Some(src_item_guid),
                 None,
             );
@@ -1396,7 +1396,7 @@ impl InventorySystem {
                 );
                 self.send_inventory_error(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                    oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
                 );
                 return SplitItemResult::InvalidCount;
             }
@@ -1417,7 +1417,7 @@ impl InventorySystem {
                     );
                     self.send_inventory_error_with_items(
                         player_guid,
-                        crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                        oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
                         Some(src_item_guid),
                         Some(dst_guid),
                     );
@@ -1445,7 +1445,7 @@ impl InventorySystem {
                 );
                 self.send_inventory_error_with_items(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_ITEM_CANT_STACK,
+                    oxcore_shared::messages::EQUIP_ERR_ITEM_CANT_STACK,
                     Some(src_item_guid),
                     Some(dst_guid),
                 );
@@ -1458,7 +1458,7 @@ impl InventorySystem {
                     dst_info.count, count, max_stack);
                 self.send_inventory_error_with_items(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_ITEM_CANT_STACK,
+                    oxcore_shared::messages::EQUIP_ERR_ITEM_CANT_STACK,
                     Some(src_item_guid),
                     Some(dst_guid),
                 );
@@ -1490,7 +1490,7 @@ impl InventorySystem {
                 tracing::error!("[INVENTORY] split_item MERGE FAILED: database error: {}", e);
                 self.send_inventory_error_with_items(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                    oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
                     Some(src_item_guid),
                     Some(dst_guid),
                 );
@@ -1528,7 +1528,7 @@ impl InventorySystem {
                     );
                     self.send_inventory_error(
                         player_guid,
-                        crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                        oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
                     );
                     return SplitItemResult::DatabaseError(e.to_string());
                 }
@@ -1572,7 +1572,7 @@ impl InventorySystem {
                 );
                 self.send_inventory_error(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                    oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
                 );
                 return SplitItemResult::DatabaseError(e.to_string());
             }
@@ -1589,7 +1589,7 @@ impl InventorySystem {
                     .update_item_count(src_item_guid.low(), src_info.count);
                 self.send_inventory_error(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                    oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
                 );
                 return SplitItemResult::DatabaseError(e.to_string());
             }
@@ -2046,7 +2046,7 @@ impl InventorySystem {
             );
             self.send_inventory_error(
                 player_guid,
-                crate::shared::messages::EQUIP_ERR_ITEM_DOESNT_GO_TO_SLOT,
+                oxcore_shared::messages::EQUIP_ERR_ITEM_DOESNT_GO_TO_SLOT,
             );
             return EquipResult::WrongSlot;
         }
@@ -2062,7 +2062,7 @@ impl InventorySystem {
                 );
                 self.send_inventory_error(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                    oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
                 );
                 return EquipResult::ItemNotFound;
             }
@@ -2078,7 +2078,7 @@ impl InventorySystem {
                 );
                 self.send_inventory_error(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+                    oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
                 );
                 return EquipResult::ItemNotFound;
             }
@@ -2122,7 +2122,7 @@ impl InventorySystem {
                     );
                     self.send_inventory_error_with_items(
                         player_guid,
-                        crate::shared::messages::EQUIP_ERR_INVENTORY_FULL,
+                        oxcore_shared::messages::EQUIP_ERR_INVENTORY_FULL,
                         Some(src_item_guid),
                         Some(existing_guid),
                     );
@@ -2152,7 +2152,7 @@ impl InventorySystem {
                 tracing::error!("[EQUIP_ITEM] FAILED: Database error during swap: {}", e);
                 self.send_inventory_error_with_items(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                    oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
                     Some(src_item_guid),
                     Some(existing_guid),
                 );
@@ -2178,7 +2178,7 @@ impl InventorySystem {
                 // This is a serious error that requires manual intervention or rollback logic
                 self.send_inventory_error_with_items(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                    oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
                     Some(src_item_guid),
                     Some(existing_guid),
                 );
@@ -2241,7 +2241,7 @@ impl InventorySystem {
                 tracing::error!("[EQUIP_ITEM] FAILED: Database error during equip: {}", e);
                 self.send_inventory_error_with_items(
                     player_guid,
-                    crate::shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                    oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
                     Some(src_item_guid),
                     None,
                 );
@@ -2279,7 +2279,7 @@ impl InventorySystem {
         }
 
         if equip_slot >= EquipmentSlotEnum::END as u8 {
-            self.send_inventory_error(player_guid, crate::shared::messages::ERR_NOT_EQUIPPABLE);
+            self.send_inventory_error(player_guid, oxcore_shared::messages::ERR_NOT_EQUIPPABLE);
             return EquipResult::WrongSlot;
         }
 
@@ -2289,7 +2289,7 @@ impl InventorySystem {
         {
             Some(g) => g,
             None => {
-                self.send_inventory_error(player_guid, crate::shared::messages::ERR_ITEM_NOT_FOUND);
+                self.send_inventory_error(player_guid, oxcore_shared::messages::ERR_ITEM_NOT_FOUND);
                 return EquipResult::ItemNotFound;
             }
         };
@@ -2297,7 +2297,7 @@ impl InventorySystem {
         let free_slot = match self.cache.find_free_inventory_slot(player_guid) {
             Some((bag, slot)) => (bag, slot),
             None => {
-                self.send_inventory_error(player_guid, crate::shared::messages::ERR_INV_FULL);
+                self.send_inventory_error(player_guid, oxcore_shared::messages::ERR_INV_FULL);
                 return EquipResult::InventoryFull;
             }
         };
@@ -2662,7 +2662,7 @@ impl InventorySystem {
         let mut final_money: Option<(u32, u32)> = None; // (player_guid, amount)
         let mut final_counts: HashMap<u32, u32> = HashMap::new(); // item_guid -> count
         let mut deletes: Vec<u32> = Vec::new(); // item_guids to delete
-        let mut creates: Vec<(crate::shared::database::characters::models::item::ItemInstanceRow, crate::shared::database::characters::repositories::inventory_repository_trait::InventorySlotRow)> = Vec::new();
+        let mut creates: Vec<(oxcore_shared::database::characters::models::item::ItemInstanceRow, oxcore_shared::database::characters::repositories::inventory_repository_trait::InventorySlotRow)> = Vec::new();
         let mut moves: HashMap<u32, (u32, u8, u8)> = HashMap::new(); // item_guid -> (player_guid, bag, slot)
         let mut swaps: Vec<(u32, u32, u8, u8, Option<u32>, u8, u8)> = Vec::new();
 

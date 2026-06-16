@@ -5,15 +5,15 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use crate::shared::common::AccountType;
-use crate::shared::database::characters::models::mail::MailRow;
-use crate::shared::database::characters::repositories::mail_repository::MailRepository;
-use crate::shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
-use crate::shared::game::mail::{MailMessageType, MailStationery};
-use crate::shared::messages::mail::SmsgReceivedMail;
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
+use oxcore_shared::common::AccountType;
+use oxcore_shared::database::characters::models::mail::MailRow;
+use oxcore_shared::database::characters::repositories::mail_repository::MailRepository;
+use oxcore_shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
+use oxcore_shared::game::mail::{MailMessageType, MailStationery};
+use oxcore_shared::messages::mail::SmsgReceivedMail;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::ObjectGuid;
 
 const EXPIRE_DAYS: i64 = 30; // Mail expires after 30 days
 

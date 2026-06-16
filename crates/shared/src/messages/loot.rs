@@ -1,5 +1,5 @@
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use crate::messages::ToWorldPacket;
+use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// SMSG_LOOT_RESPONSE (0x0160)
 #[derive(Debug, Clone)]

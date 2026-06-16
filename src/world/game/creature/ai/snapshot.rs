@@ -7,7 +7,7 @@
 //! 4. Execute actions with proper locking
 
 use super::types::{AIState, AIStateData};
-use crate::shared::protocol::{ObjectGuid, Position};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Read-only snapshot of creature state for AI decisions
 /// Captured with brief lock, then used without holding any locks

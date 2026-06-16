@@ -5,9 +5,9 @@
 use anyhow::Result;
 use tracing::debug;
 
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_SET_SELECTION (0x13D / 317)
 ///
@@ -27,7 +27,7 @@ pub async fn handle_set_selection(
         .read_u64()
         .ok_or_else(|| anyhow::anyhow!("Failed to read target GUID"))?;
 
-    let target = crate::shared::protocol::ObjectGuid::from(target_guid);
+    let target = oxcore_shared::protocol::ObjectGuid::from(target_guid);
 
     debug!(
         "CMSG_SET_SELECTION: player={:?}, target={:?}",

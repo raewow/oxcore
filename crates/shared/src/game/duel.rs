@@ -1,7 +1,7 @@
 #[derive(Debug, Clone)]
 pub struct DuelInfo {
-    pub initiator_guid: crate::shared::protocol::ObjectGuid,
-    pub opponent_guid: crate::shared::protocol::ObjectGuid,
+    pub initiator_guid: crate::protocol::ObjectGuid,
+    pub opponent_guid: crate::protocol::ObjectGuid,
     pub start_time: u64,
     pub duration: u32,
     pub initiator_health: f32,
@@ -19,8 +19,8 @@ pub struct DuelInfo {
 
 impl DuelInfo {
     pub fn new(
-        initiator_guid: crate::shared::protocol::ObjectGuid,
-        opponent_guid: crate::shared::protocol::ObjectGuid,
+        initiator_guid: crate::protocol::ObjectGuid,
+        opponent_guid: crate::protocol::ObjectGuid,
     ) -> Self {
         Self {
             initiator_guid,
@@ -44,8 +44,8 @@ impl DuelInfo {
 
 #[derive(Debug, Clone)]
 pub struct DuelRequest {
-    pub initiator_guid: crate::shared::protocol::ObjectGuid,
-    pub target_guid: crate::shared::protocol::ObjectGuid,
+    pub initiator_guid: crate::protocol::ObjectGuid,
+    pub target_guid: crate::protocol::ObjectGuid,
     pub request_id: u32,
     pub timeout: u64,
 }

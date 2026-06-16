@@ -3,7 +3,7 @@
 //! Template data lives in GameObjectManager.
 
 use super::types::{GOState, GameObjectType, LootState};
-use crate::shared::protocol::{ObjectGuid, Position};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Slim gameobject entity
 #[derive(Debug, Clone)]

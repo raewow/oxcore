@@ -5,10 +5,10 @@
 use anyhow::Result;
 use tracing::debug;
 
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_LIST_INVENTORY (0x19E)
 ///

@@ -1,1 +1,1 @@
-pub use crate::shared::protocol::packet::WorldPacketGuidExt;
+pub use oxcore_shared::protocol::packet::WorldPacketGuidExt;

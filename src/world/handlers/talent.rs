@@ -1,7 +1,7 @@
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_LEARN_TALENT (opcode 0x0251)
 ///

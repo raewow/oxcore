@@ -4,9 +4,9 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::shared::common::AccountType;
 use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
 use crate::world::game::inventory::AddItemResult;
+use oxcore_shared::common::AccountType;
 
 /// Lookup item command - search for items by name or ID
 pub async fn cmd_lookup_item(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {

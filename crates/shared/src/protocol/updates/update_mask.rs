@@ -1,4 +1,4 @@
-use crate::shared::protocol::WorldPacket;
+use crate::protocol::WorldPacket;
 use std::collections::HashMap;
 
 /// Internal enum for field value types

@@ -1,6 +1,6 @@
 //! VMap types and constants
 
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 
 /// VMap load result
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

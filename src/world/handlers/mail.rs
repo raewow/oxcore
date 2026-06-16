@@ -2,14 +2,14 @@ use anyhow::Result;
 use std::sync::Arc;
 use tracing::{debug, warn};
 
-use crate::shared::database::characters::repositories::mail_repository::MailRepository;
-use crate::shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
-use crate::shared::game::mail::MailMessageType;
-use crate::shared::protocol::guid::{HighGuid, ObjectGuid};
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::database::characters::repositories::mail_repository::MailRepository;
+use oxcore_shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
+use oxcore_shared::game::mail::MailMessageType;
+use oxcore_shared::protocol::guid::{HighGuid, ObjectGuid};
+use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 /// Handle MSG_QUERY_NEXT_MAIL_TIME - client queries if there is pending mail
 ///

@@ -1,5 +1,5 @@
 use super::super::models::mail::*;
-use crate::shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
+use crate::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use sqlx::MySqlPool;

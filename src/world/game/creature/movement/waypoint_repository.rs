@@ -5,7 +5,7 @@
 //! - creature_movement_template: Per-entry waypoints (FromEntry)
 
 use super::generators::Waypoint;
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 use sqlx::MySqlPool;
 use std::collections::HashMap;
 

@@ -11,11 +11,11 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
-use crate::shared::protocol::{HighGuid, ObjectGuid, Opcode, Position, WorldPacket};
 use crate::world::core::common::{MoveFlags, MovementInfo};
 use crate::world::game::player::broadcaster::PlayerBroadcaster;
 use crate::world::game::player::player::Player;
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::protocol::{HighGuid, ObjectGuid, Opcode, Position, WorldPacket};
 
 use super::state::MovementState;
 use super::validator;

@@ -1,5 +1,5 @@
-use crate::shared::protocol::packet::WorldPacketGuidExt;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use crate::protocol::packet::WorldPacketGuidExt;
+use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// SMSG_SPELL_START (opcode 0x0131)
 /// Broadcast when a spell cast begins (cast bar appears).
@@ -114,7 +114,7 @@ impl SmsgPlaySpellVisual {
 #[cfg(test)]
 mod spell_packet_tests {
     use super::*;
-    use crate::shared::protocol::HighGuid;
+    use crate::protocol::HighGuid;
     use bytes::Buf;
 
     fn player_guid(id: u32) -> ObjectGuid {

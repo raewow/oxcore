@@ -4,11 +4,11 @@ use super::generator::MovementUpdate;
 use super::generators::{ChaseMovementGenerator, FleeMovementGenerator};
 use super::spline::MoveSpline;
 use super::types::MovementGeneratorType;
-use crate::shared::messages::movement::SmsgMonsterMove;
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::World;
+use oxcore_shared::messages::movement::SmsgMonsterMove;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 use std::sync::Arc;
 
 /// MovementSystem - handles all movement business logic and packet sending

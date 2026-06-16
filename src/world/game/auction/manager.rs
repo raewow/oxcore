@@ -7,22 +7,22 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::shared::database::characters::models::auction::{AuctionItemLoadRow, AuctionRow};
-use crate::shared::database::characters::models::mail::MailRow;
-use crate::shared::database::characters::repositories::auction_repository_trait::AuctionRepositoryTrait;
-use crate::shared::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
-use crate::shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
-use crate::shared::database::characters::repositories::CharacterRepository;
-use crate::shared::game::auction::AuctionEntry;
-use crate::shared::game::chat::Team;
-use crate::shared::game::mail::{MailCheckMask, MailMessageType, MailStationery};
-use crate::shared::protocol::{HighGuid, ObjectGuid};
 use crate::world::dbc::structures::AuctionHouseEntry;
 use crate::world::dbc::DbcManager;
 use crate::world::game::auction::parsing::{parse_enchantments, parse_spell_charges};
 use crate::world::game::items::manager::ItemTemplate;
 use crate::world::game::items::Item;
 use crate::world::game::ItemManager;
+use oxcore_shared::database::characters::models::auction::{AuctionItemLoadRow, AuctionRow};
+use oxcore_shared::database::characters::models::mail::MailRow;
+use oxcore_shared::database::characters::repositories::auction_repository_trait::AuctionRepositoryTrait;
+use oxcore_shared::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
+use oxcore_shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
+use oxcore_shared::database::characters::repositories::CharacterRepository;
+use oxcore_shared::game::auction::AuctionEntry;
+use oxcore_shared::game::chat::Team;
+use oxcore_shared::game::mail::{MailCheckMask, MailMessageType, MailStationery};
+use oxcore_shared::protocol::{HighGuid, ObjectGuid};
 
 /// Goblin (neutral) auction house id used when sending cancel mail for invalid house_id rows.
 const GOBLIN_AUCTION_HOUSE_ID: u32 = 7;
@@ -511,7 +511,7 @@ impl AuctionHouseManager {
     /// returns house 1's entry for all players (matching C++ behaviour where houseId stays 1).
     pub fn get_auction_house_for_player(
         &self,
-        team: crate::shared::game::chat::Team,
+        team: oxcore_shared::game::chat::Team,
         auction_access_mode: i8,
     ) -> Option<AuctionHouseEntry> {
         if self.allow_cross_faction_auction.load(Ordering::Relaxed) {
@@ -521,14 +521,14 @@ impl AuctionHouseManager {
             7 // neutral
         } else {
             match team {
-                crate::shared::game::chat::Team::Alliance => {
+                oxcore_shared::game::chat::Team::Alliance => {
                     if auction_access_mode == 0 {
                         1
                     } else {
                         6
                     }
                 }
-                crate::shared::game::chat::Team::Horde => {
+                oxcore_shared::game::chat::Team::Horde => {
                     if auction_access_mode == 0 {
                         6
                     } else {
@@ -663,7 +663,7 @@ impl AuctionHouseManager {
     }
 
     pub async fn save_auction_to_db(&self, auction: &AuctionEntry) -> Result<()> {
-        use crate::shared::database::characters::models::auction::AuctionRow;
+        use oxcore_shared::database::characters::models::auction::AuctionRow;
         let row = AuctionRow {
             id: auction.id,
             house_id: auction.house_id,

@@ -8,8 +8,8 @@
 //! By handling melee attacks here instead of through the AI decision pipeline,
 //! we eliminate the extra tick of latency from snapshot -> decision -> action -> execute.
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Update combat timers and execute melee attacks for all creatures
 /// Called from the world update loop

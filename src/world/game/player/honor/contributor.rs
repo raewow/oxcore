@@ -1,7 +1,7 @@
 //! Contributor tracking — records which players recently dealt damage to
 //! this unit, used by the honor system to distribute PvP kill credit.
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Keep contributors that dealt damage within the last 60 seconds.
 pub const CONTRIBUTOR_WINDOW_SECS: u64 = 60;

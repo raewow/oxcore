@@ -3,7 +3,7 @@
 //! This module defines the per-player reputation state that is embedded
 //! directly in the Player struct. The ReputationSystem operates on this state.
 
-use crate::shared::game::reputation::{
+use oxcore_shared::game::reputation::{
     ReputationListID, ReputationRank, FACTION_FLAG_AT_WAR, FACTION_FLAG_HIDDEN,
     FACTION_FLAG_INACTIVE, FACTION_FLAG_INVISIBLE_FORCED, FACTION_FLAG_PEACE_FORCED,
     FACTION_FLAG_RIVAL, FACTION_FLAG_VISIBLE, MAX_REPUTATION_LIST_SLOTS, POINTS_IN_RANK,

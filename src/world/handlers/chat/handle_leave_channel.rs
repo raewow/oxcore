@@ -2,10 +2,10 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::shared::game::chat::Team;
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::game::chat::Team;
+use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_LEAVE_CHANNEL - player leaves a chat channel
 pub async fn handle_leave_channel(

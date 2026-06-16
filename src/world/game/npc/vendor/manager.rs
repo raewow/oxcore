@@ -10,8 +10,8 @@ use std::sync::Arc;
 use tracing::info;
 
 use super::types::{ItemExtendedCost, VendorItem, VendorItemCount};
-use crate::shared::database::world::repositories::VendorRepository;
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::database::world::repositories::VendorRepository;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Manages vendor data (state storage + database loading)
 pub struct VendorManager {

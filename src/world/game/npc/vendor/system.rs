@@ -9,17 +9,17 @@ use tracing::{debug, info, warn};
 
 use super::manager::VendorManager;
 use super::types::{ReputationRank, VendorItem};
-use crate::shared::messages::vendor::{
-    BuyError, BuyResult, SellResult, SmsgBuyFailed, SmsgBuyItem, SmsgListInventory, SmsgSellItem,
-    VendorItemData,
-};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::world::game::creature::CreatureManager;
 use crate::world::game::inventory::InventorySystem;
 use crate::world::game::items::ItemManager;
 use crate::world::game::player::PlayerManager;
 use crate::world::World;
+use oxcore_shared::messages::vendor::{
+    BuyError, BuyResult, SellResult, SmsgBuyFailed, SmsgBuyItem, SmsgListInventory, SmsgSellItem,
+    VendorItemData,
+};
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Vendor system - handles vendor business logic
 pub struct VendorSystem {

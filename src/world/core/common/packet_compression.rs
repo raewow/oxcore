@@ -1,10 +1,10 @@
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use anyhow::Result;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::Opcode;
+use oxcore_shared::protocol::WorldPacket;
 use std::io::Write;
 use tracing::info;
 

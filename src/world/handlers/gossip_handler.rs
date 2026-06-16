@@ -5,11 +5,11 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 const NPC_FLAG_BANKER: u32 = 0x00000100;
 
@@ -245,7 +245,7 @@ pub async fn handle_gossip_hello(
     let gossip_quests = quest_data.map(|quests| {
         quests
             .into_iter()
-            .map(|q| crate::shared::messages::GossipQuestData {
+            .map(|q| oxcore_shared::messages::GossipQuestData {
                 quest_id: q.quest_id,
                 icon: q.icon,
                 level: q.level,
@@ -415,7 +415,7 @@ pub async fn handle_banker_activate(
         "CMSG_BANKER_ACTIVATE: player={:?}, banker={:?}",
         player_guid, banker_guid
     );
-    session.send_msg(crate::shared::messages::SmsgShowBank { banker_guid })?;
+    session.send_msg(oxcore_shared::messages::SmsgShowBank { banker_guid })?;
 
     Ok(())
 }
@@ -444,7 +444,7 @@ pub async fn handle_npc_text_query(
 
     debug!("CMSG_NPC_TEXT_QUERY: text_id={}", text_id);
 
-    use crate::shared::messages::gossip::{NpcTextOption, SmsgNpcTextUpdate};
+    use oxcore_shared::messages::gossip::{NpcTextOption, SmsgNpcTextUpdate};
 
     // Look up NPC text from gossip manager
     let msg = if let Some(npc_text) = world.systems.gossip_manager.get_npc_text(text_id) {

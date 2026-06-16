@@ -2,7 +2,7 @@
 
 use super::file_loader::Triangle;
 use super::types::{AreaInfo, BoundingBox, LiquidLevel, ModelType};
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 use std::sync::Arc;
 
 /// BSP tree node

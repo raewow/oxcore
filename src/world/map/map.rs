@@ -4,8 +4,8 @@ use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::HashSet;
 
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::map::grid::GridManager;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Default visibility distance (one grid = 533.33 units)
 pub const DEFAULT_VISIBILITY_DISTANCE: f32 = 533.33333;

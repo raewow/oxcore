@@ -10,9 +10,9 @@
 //! - [`SmsgGmTicketUpdateText`] - Response to ticket text update
 //! - [`SmsgGmTicketDeleteTicket`] - Response to ticket deletion
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::messages::ToWorldPacket;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// SMSG_GMTICKET_SYSTEMSTATUS - Status of the GM ticket system
 ///
@@ -127,7 +127,7 @@ impl ToWorldPacket for SmsgGmTicketDeleteTicket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_smsg_gm_ticket_system_status() {

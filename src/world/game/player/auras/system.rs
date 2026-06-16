@@ -7,12 +7,6 @@
 //! - Stat changes delegate to StatsSystem
 //! - Packets sent via BroadcastManager
 
-use crate::shared::messages::auras::SmsgUpdateAuraDuration;
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::game::broadcast_mgr::BroadcastManager;
 use crate::world::game::common::update_fields::*;
 use crate::world::game::player::auras::aura::{Aura, AuraFlags};
@@ -21,6 +15,12 @@ use crate::world::game::player::auras::effects::{ModifierSource, StatModifier};
 use crate::world::game::player::auras::periodic;
 use crate::world::game::player::auras::proc;
 use crate::world::World;
+use oxcore_shared::messages::auras::SmsgUpdateAuraDuration;
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -1630,11 +1630,11 @@ fn create_stat_modifier(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
     use crate::world::core::session::SessionManager;
     use crate::world::game::creature::manager::{CreatureManager, CreatureTemplate};
     use crate::world::game::creature::Creature;
     use crate::world::game::player::PlayerManager;
+    use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
     use std::sync::Arc;
 
     // ── helpers ──────────────────────────────────────────────────────────────

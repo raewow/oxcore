@@ -3,9 +3,9 @@
 //! Handles profession, skill, and crafting-related effects.
 
 use super::{EffectInput, EffectResult};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// SPELL_EFFECT_SKILL_STEP (44)
 ///

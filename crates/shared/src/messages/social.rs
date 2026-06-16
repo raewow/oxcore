@@ -10,9 +10,9 @@
 //! - [`SmsgWho`] - WHO command response with matching players
 //! - [`SmsgStandstateUpdate`] - Stand state animation update (sit, stand, kneel, etc.)
 
-use crate::shared::game::social::{FriendInfo, FriendStatus, FriendsResult};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{HighGuid, ObjectGuid, Opcode, WorldPacket};
+use crate::game::social::{FriendInfo, FriendStatus, FriendsResult};
+use crate::messages::ToWorldPacket;
+use crate::protocol::{HighGuid, ObjectGuid, Opcode, WorldPacket};
 
 /// SMSG_FRIEND_LIST - Complete friend list with status information
 ///
@@ -189,9 +189,9 @@ impl ToWorldPacket for SmsgStandstateUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
+    use crate::protocol::Opcode;
     // Use shared types instead of world types
-    use crate::shared::game::social::{FriendInfo, FriendStatus, FriendsResult};
+    use crate::game::social::{FriendInfo, FriendStatus, FriendsResult};
 
     #[test]
     fn test_smsg_friend_list() {

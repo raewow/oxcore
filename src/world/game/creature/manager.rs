@@ -10,10 +10,10 @@ use super::death::DeathState;
 use super::movement::generators::{RandomMovementGenerator, WaypointMovementGenerator};
 use super::movement::WaypointManager;
 use super::{Creature, CreatureSpawnData};
-use crate::shared::database::world::repositories::CreatureRepository;
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::core::common::compress_update_packet_if_needed;
 use crate::world::map::grid_coords::world_to_grid;
+use oxcore_shared::database::world::repositories::CreatureRepository;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Creature model info from creature_display_info_addon table
 /// Stores bounding_radius, combat_reach, and speed rates per display_id
@@ -988,13 +988,13 @@ impl CreatureManager {
         &self,
         guid: ObjectGuid,
         _world: &crate::world::World,
-    ) -> Option<crate::shared::messages::update::SmsgUpdateObject> {
-        use crate::shared::messages::update::*;
+    ) -> Option<oxcore_shared::messages::update::SmsgUpdateObject> {
         use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
         use crate::world::core::common::position::Position as WorldPosition;
         use crate::world::game::common::object_type::MovementSpeeds;
         use crate::world::game::common::object_type::ObjectTypeId;
         use crate::world::game::common::update_fields::*;
+        use oxcore_shared::messages::update::*;
 
         let creature = self.creatures.get(&guid)?;
 
@@ -1151,9 +1151,9 @@ impl CreatureManager {
     pub fn build_movement_sync_packet(
         &self,
         guid: ObjectGuid,
-    ) -> Option<crate::shared::protocol::WorldPacket> {
-        use crate::shared::messages::movement::{spline_flags, SmsgMonsterMove};
-        use crate::shared::messages::ToWorldPacket;
+    ) -> Option<oxcore_shared::protocol::WorldPacket> {
+        use oxcore_shared::messages::movement::{spline_flags, SmsgMonsterMove};
+        use oxcore_shared::messages::ToWorldPacket;
 
         let creature = self.creatures.get(&guid)?;
 
@@ -1199,8 +1199,8 @@ impl CreatureManager {
         instance_id: u32,
         world: &crate::world::World,
     ) -> anyhow::Result<()> {
-        use crate::shared::messages::update::{SmsgUpdateObject, UpdateBlockData};
-        use crate::shared::messages::ToWorldPacket;
+        use oxcore_shared::messages::update::{SmsgUpdateObject, UpdateBlockData};
+        use oxcore_shared::messages::ToWorldPacket;
 
         const MAX_BLOCKS_PER_PACKET: usize = 50;
 
@@ -1311,13 +1311,13 @@ impl CreatureManager {
     pub fn build_creature_query_packet(
         &self,
         entry: u32,
-    ) -> Option<crate::shared::protocol::WorldPacket> {
-        use crate::shared::protocol::Opcode;
+    ) -> Option<oxcore_shared::protocol::WorldPacket> {
+        use oxcore_shared::protocol::Opcode;
 
         let template = self.templates.get(&entry)?;
 
         let mut packet =
-            crate::shared::protocol::WorldPacket::new(Opcode::SMSG_CREATURE_QUERY_RESPONSE);
+            oxcore_shared::protocol::WorldPacket::new(Opcode::SMSG_CREATURE_QUERY_RESPONSE);
         packet.write_u32(entry);
         packet.write_cstring(&template.name);
         packet.write_u8(0); // name2

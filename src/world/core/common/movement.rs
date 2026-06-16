@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 
-use crate::shared::protocol::{ObjectGuid, Position, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
 
 /// Movement flags - 32-bit bitmask representing various movement states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

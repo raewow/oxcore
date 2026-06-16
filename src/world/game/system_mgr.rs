@@ -3,11 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
 
-use crate::shared::database::characters::repositories::InventoryRepository;
-use crate::shared::database::characters::repositories::{
-    GroupRepository, GuildRepository, QuestRepository, SocialRepository, TicketRepository,
-};
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::game::broadcast_mgr::BroadcastManagerTrait;
 use crate::world::game::chat::ChatSystem;
 use crate::world::game::combat::CombatSystem;
@@ -43,6 +38,11 @@ use crate::world::game::visibility::VisibilitySystem;
 use crate::world::game::{BroadcastManager, ItemManager};
 use crate::world::map::grid::GridSystem;
 use crate::world::World;
+use oxcore_shared::database::characters::repositories::InventoryRepository;
+use oxcore_shared::database::characters::repositories::{
+    GroupRepository, GuildRepository, QuestRepository, SocialRepository, TicketRepository,
+};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 pub struct SystemManager {
     pub player: Arc<PlayerSystem>,
@@ -189,7 +189,7 @@ impl SystemManager {
         // Create quest manager and system
         let quest_manager = Arc::new(QuestManager::new(world_pool.clone()));
         let quest_repo: Arc<
-            dyn crate::shared::database::characters::repositories::QuestRepositoryTrait,
+            dyn oxcore_shared::database::characters::repositories::QuestRepositoryTrait,
         > = Arc::new(QuestRepository::new(character_pool.clone()));
         let quest = Arc::new(QuestSystem::new(
             quest_manager.clone(),

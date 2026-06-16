@@ -3,10 +3,10 @@
 //! Spell modifiers come from talents (SPELL_AURA_ADD_FLAT_MODIFIER / ADD_PCT_MODIFIER)
 //! and some auras. They modify properties of spells the player casts.
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::player::spells::state::{SpellMod, SpellModOp, SpellModType};
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Add a spell modifier (from a talent or aura being applied).
 ///

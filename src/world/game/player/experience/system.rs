@@ -8,15 +8,6 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tracing::{debug, info};
 
-use crate::shared::game::experience::{
-    XpColor, XpSource, BASE_CREATURE_XP, BASE_XP, MAX_PLAYER_LEVEL,
-};
-use crate::shared::messages::experience::{SmsgLevelupInfo, SmsgLogXpGain};
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::world::game::common::update_fields::{
@@ -24,6 +15,15 @@ use crate::world::game::common::update_fields::{
 };
 use crate::world::game::player::stats::StatsSystem;
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::game::experience::{
+    XpColor, XpSource, BASE_CREATURE_XP, BASE_XP, MAX_PLAYER_LEVEL,
+};
+use oxcore_shared::messages::experience::{SmsgLevelupInfo, SmsgLogXpGain};
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::ObjectGuid;
 
 // ========== Standalone Calculation Functions ==========
 // These are pure functions for testing without system dependencies

@@ -6,12 +6,12 @@
 //!
 //! # Example
 //! ```rust,no_run
-//! use wow_server::shared::messages::create::{
+//! use oxcore_shared::messages::create::{
 //!     SmsgCreateObject,
 //! };
-//! use wow_server::shared::protocol::guid::ObjectGuid;
-//! use wow_server::shared::protocol::position::Position;
-//! use wow_server::shared::messages::ToWorldPacket;
+//! use oxcore_shared::protocol::guid::ObjectGuid;
+//! use oxcore_shared::protocol::position::Position;
+//! use oxcore_shared::messages::ToWorldPacket;
 //!
 //! // Simple creature creation
 //! let guid = ObjectGuid::from_raw(0x0000000000000004);
@@ -25,26 +25,24 @@
 //!     .to_world_packet();
 //!
 //! // Item with stack count
-//! use wow_server::shared::protocol::update_fields::ITEM_FIELD_STACK_COUNT;
+//! use oxcore_shared::protocol::update_fields::ITEM_FIELD_STACK_COUNT;
 //! let item_guid = ObjectGuid::from_raw(0x0000000000000005);
 //! let packet = SmsgCreateObject::for_item(item_guid, 25)
 //!     .set_field(ITEM_FIELD_STACK_COUNT, 5)
 //!     .to_world_packet();
 //! ```
 
-use crate::shared::messages::update::{
-    CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::protocol::position::Position;
-use crate::shared::protocol::updates::movement_block::MovementSpeeds;
-use crate::shared::protocol::updates::update_block_builder;
-use crate::shared::protocol::updates::update_types::ObjectTypeId;
-use crate::shared::protocol::WorldPacket;
+use crate::messages::update::{CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData};
+use crate::messages::ToWorldPacket;
+use crate::protocol::guid::ObjectGuid;
+use crate::protocol::position::Position;
+use crate::protocol::updates::movement_block::MovementSpeeds;
+use crate::protocol::updates::update_block_builder;
+use crate::protocol::updates::update_types::ObjectTypeId;
+use crate::protocol::WorldPacket;
 
 // Re-export convenience types from update module
-pub use crate::shared::messages::update::MovementBlockData;
+pub use crate::messages::update::MovementBlockData;
 
 // =========================================================================
 // MAIN STRUCT - SmsgCreateObject
@@ -62,7 +60,7 @@ pub use crate::shared::messages::update::MovementBlockData;
 /// to create multi-block packets, or directly converted to a packet via `.to_world_packet()`.
 #[derive(Debug, Clone)]
 pub struct SmsgCreateObject {
-    pub guid: crate::shared::protocol::guid::ObjectGuid,
+    pub guid: crate::protocol::guid::ObjectGuid,
     pub type_id: ObjectTypeId,
     pub object_type: ObjectType,
 }
@@ -78,7 +76,7 @@ impl SmsgCreateObject {
     /// For common cases, use the convenience constructors like `for_player()`,
     /// `for_creature()`, etc.
     pub fn new(
-        guid: crate::shared::protocol::guid::ObjectGuid,
+        guid: crate::protocol::guid::ObjectGuid,
         type_id: ObjectTypeId,
         object_type: ObjectType,
     ) -> Self {
@@ -94,37 +92,28 @@ impl SmsgCreateObject {
     // =====================================================================
 
     /// Create a player spawn packet with position.
-    pub fn for_player(guid: crate::shared::protocol::guid::ObjectGuid, position: Position) -> Self {
+    pub fn for_player(guid: crate::protocol::guid::ObjectGuid, position: Position) -> Self {
         Self::new(guid, ObjectTypeId::Player, ObjectType::Player).with_position(position)
     }
 
     /// Create a creature spawn packet with position.
-    pub fn for_creature(
-        guid: crate::shared::protocol::guid::ObjectGuid,
-        position: Position,
-    ) -> Self {
+    pub fn for_creature(guid: crate::protocol::guid::ObjectGuid, position: Position) -> Self {
         Self::new(guid, ObjectTypeId::Unit, ObjectType::Unit).with_position(position)
     }
 
     /// Create a gameobject spawn packet with position.
-    pub fn for_gameobject(
-        guid: crate::shared::protocol::guid::ObjectGuid,
-        position: Position,
-    ) -> Self {
+    pub fn for_gameobject(guid: crate::protocol::guid::ObjectGuid, position: Position) -> Self {
         Self::new(guid, ObjectTypeId::GameObject, ObjectType::GameObject).with_position(position)
     }
 
     /// Create a dynamic object spawn packet with position.
-    pub fn for_dynamic_object(
-        guid: crate::shared::protocol::guid::ObjectGuid,
-        position: Position,
-    ) -> Self {
+    pub fn for_dynamic_object(guid: crate::protocol::guid::ObjectGuid, position: Position) -> Self {
         Self::new(guid, ObjectTypeId::DynamicObject, ObjectType::DynamicObject)
             .with_position(position)
     }
 
     /// Create a corpse spawn packet with position.
-    pub fn for_corpse(guid: crate::shared::protocol::guid::ObjectGuid, position: Position) -> Self {
+    pub fn for_corpse(guid: crate::protocol::guid::ObjectGuid, position: Position) -> Self {
         Self::new(guid, ObjectTypeId::Corpse, ObjectType::Corpse).with_position(position)
     }
 
@@ -133,17 +122,17 @@ impl SmsgCreateObject {
     // =====================================================================
 
     /// Create a player spawn packet (without position - must be added via `.with_position()` or `.with_movement()`).
-    pub fn for_player_only(guid: crate::shared::protocol::guid::ObjectGuid) -> Self {
+    pub fn for_player_only(guid: crate::protocol::guid::ObjectGuid) -> Self {
         Self::new(guid, ObjectTypeId::Player, ObjectType::Player)
     }
 
     /// Create a creature spawn packet (without position - must be added via `.with_position()` or `.with_movement()`).
-    pub fn for_creature_only(guid: crate::shared::protocol::guid::ObjectGuid) -> Self {
+    pub fn for_creature_only(guid: crate::protocol::guid::ObjectGuid) -> Self {
         Self::new(guid, ObjectTypeId::Unit, ObjectType::Unit)
     }
 
     /// Create a gameobject spawn packet (without position - must be added via `.with_position()`).
-    pub fn for_gameobject_only(guid: crate::shared::protocol::guid::ObjectGuid) -> Self {
+    pub fn for_gameobject_only(guid: crate::protocol::guid::ObjectGuid) -> Self {
         Self::new(guid, ObjectTypeId::GameObject, ObjectType::GameObject)
     }
 
@@ -159,7 +148,7 @@ impl SmsgCreateObject {
     /// # Note
     /// This creates the basic CREATE_OBJECT block. You typically need to add
     /// additional fields like `ITEM_FIELD_ENTRY` and `ITEM_FIELD_STACK_COUNT`.
-    pub fn for_item(guid: crate::shared::protocol::guid::ObjectGuid, _entry: u32) -> Self {
+    pub fn for_item(guid: crate::protocol::guid::ObjectGuid, _entry: u32) -> Self {
         Self::new(guid, ObjectTypeId::Item, ObjectType::Item)
     }
 
@@ -167,7 +156,7 @@ impl SmsgCreateObject {
     ///
     /// Containers (bags) don't require position data in the update packet.
     /// Use the `entry` parameter to set the container's entry ID.
-    pub fn for_container(guid: crate::shared::protocol::guid::ObjectGuid, _entry: u32) -> Self {
+    pub fn for_container(guid: crate::protocol::guid::ObjectGuid, _entry: u32) -> Self {
         Self::new(guid, ObjectTypeId::Container, ObjectType::Container)
     }
 
@@ -288,7 +277,7 @@ impl SmsgCreateObject {
     pub fn set_guid_field(
         self,
         index: u32,
-        guid: crate::shared::protocol::guid::ObjectGuid,
+        guid: crate::protocol::guid::ObjectGuid,
     ) -> SmsgUpdateObject {
         SmsgUpdateObject::new().add_block(UpdateBlockData::CreateObject(
             CreateObjectBlock::new(self.guid, self.type_id, self.object_type)
@@ -355,9 +344,9 @@ impl ToWorldPacket for SmsgOutOfRange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::guid::ObjectGuid;
-    use crate::shared::protocol::update_fields::{ITEM_FIELD_STACK_COUNT, UNIT_FIELD_HEALTH};
-    use crate::shared::protocol::Opcode;
+    use crate::protocol::guid::ObjectGuid;
+    use crate::protocol::update_fields::{ITEM_FIELD_STACK_COUNT, UNIT_FIELD_HEALTH};
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_create_player_simple() {

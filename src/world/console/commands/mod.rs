@@ -5,8 +5,8 @@
 pub mod debug;
 pub mod server;
 
-use crate::shared::console::CommandRegistry;
 use crate::world::World;
+use oxcore_shared::console::CommandRegistry;
 
 /// Register all commands in the registry
 pub fn register_all_commands(registry: &mut CommandRegistry<World>) {

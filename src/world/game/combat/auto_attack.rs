@@ -3,7 +3,7 @@
 //! Handles main-hand, off-hand, and ranged swing timers.
 
 use super::state::{AttackHand, CombatState};
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// A pending attack ready to be executed
 #[derive(Debug, Clone)]

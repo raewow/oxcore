@@ -3,11 +3,11 @@
 use anyhow::Result;
 use tracing::{debug, info};
 
-use crate::shared::game::chat::Team;
-use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::core::session::WorldSession;
 use crate::world::game::social::types::WhoRequest;
 use crate::world::World;
+use oxcore_shared::game::chat::Team;
+use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 
 pub async fn handle_add_friend(
     session: &WorldSession,

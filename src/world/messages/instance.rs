@@ -8,10 +8,10 @@
 //! - [`SmsgInstanceReset`] - Notification that an instance has been reset
 //! - [`SmsgInstanceResetFailed`] - Notification that an instance reset failed
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
 use crate::world::game::instance::{InstanceResetFailReason, InstanceResetWarningType};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::Opcode;
+use oxcore_shared::protocol::WorldPacket;
 
 /// SMSG_INSTANCE_RESET_WARNING - Warning before an instance is reset
 ///
@@ -80,8 +80,8 @@ impl ToWorldPacket for SmsgInstanceResetFailed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
     use crate::world::game::instance::{InstanceResetFailReason, InstanceResetWarningType};
+    use oxcore_shared::protocol::Opcode;
 
     #[test]
     fn test_smsg_instance_reset_warning() {

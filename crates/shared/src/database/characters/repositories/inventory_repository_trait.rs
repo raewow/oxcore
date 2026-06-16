@@ -1,4 +1,4 @@
-use crate::shared::database::characters::models::item::*;
+use crate::database::characters::models::item::*;
 use anyhow::Result;
 use async_trait::async_trait;
 

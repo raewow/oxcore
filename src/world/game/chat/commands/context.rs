@@ -2,10 +2,10 @@
 //!
 //! Defines the context and metadata types for in-game chat commands.
 
-use crate::shared::common::AccountType;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::common::AccountType;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Context passed to chat command handlers
 pub struct ChatCommandContext<'a> {

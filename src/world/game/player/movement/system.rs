@@ -3,9 +3,9 @@
 use anyhow::{anyhow, Result};
 use std::time::Duration;
 
-use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 use crate::world::core::common::{MoveFlags, MovementInfo};
 use crate::world::World;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 use super::validator;
 
@@ -312,11 +312,11 @@ fn check_rest_area_exit(player_guid: ObjectGuid, map_id: u32, pos: Position, wor
 
     // Send updated PLAYER_FLAGS to the client
     if let Some(new_flags) = player_mgr.with_player(player_guid, |p| p.player_flags) {
-        use crate::shared::messages::update::{
+        use crate::world::game::common::update_fields::PLAYER_FLAGS;
+        use oxcore_shared::messages::update::{
             ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
         };
-        use crate::shared::messages::ToWorldPacket;
-        use crate::world::game::common::update_fields::PLAYER_FLAGS;
+        use oxcore_shared::messages::ToWorldPacket;
 
         let world_guid =
             crate::world::core::common::guid::ObjectGuid::from_low(player_guid.counter());

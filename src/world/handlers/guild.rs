@@ -3,10 +3,10 @@
 use anyhow::{anyhow, Result};
 use tracing::{debug, info};
 
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::session::WorldSession;
 use crate::world::messages::guild::SmsgGuildDecline;
 use crate::world::World;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 pub async fn handle_guild_query(
     session: &WorldSession,

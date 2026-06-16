@@ -2,8 +2,6 @@
 //!
 //! Contains all fields needed for inventory operations and update packets.
 
-use crate::shared::messages::update::{CreateObjectBlock, ObjectType};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::game::common::object_type::update_flags;
 use crate::world::game::common::object_type::ObjectTypeId;
@@ -15,6 +13,8 @@ use crate::world::game::common::update_fields::{
     ITEM_FIELD_RANDOM_PROPERTIES_ID, ITEM_FIELD_SPELL_CHARGES, ITEM_FIELD_STACK_COUNT,
     OBJECT_FIELD_ENTRY, OBJECT_FIELD_GUID, OBJECT_FIELD_SCALE_X, OBJECT_FIELD_TYPE,
 };
+use oxcore_shared::messages::update::{CreateObjectBlock, ObjectType};
+use oxcore_shared::protocol::ObjectGuid;
 
 #[derive(Debug, Clone)]
 pub struct Item {

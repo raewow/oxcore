@@ -8,11 +8,6 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tracing::info;
 
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::world::game::common::update_fields::*;
@@ -25,6 +20,11 @@ use crate::world::game::player::skills::{
     SKILL_GUNS, SKILL_MACES, SKILL_POLEARMS, SKILL_STAVES, SKILL_SWORDS, SKILL_THROWN, SKILL_WANDS,
 };
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::ObjectGuid;
 
 use super::base_stats::BaseStatsData;
 use super::derived;

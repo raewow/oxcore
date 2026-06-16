@@ -3,11 +3,6 @@
 //! Manages the casting pipeline:
 //! validate -> start -> timer -> execute -> finish
 
-use crate::shared::messages::spells::{
-    SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailure, SmsgSpellGo, SmsgSpellStart,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::player::spells::cooldowns;
 use crate::world::game::player::spells::effects::EffectsDispatcher;
@@ -20,6 +15,11 @@ use crate::world::game::player::spells::state::{
 use crate::world::game::player::spells::validation;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::messages::spells::{
+    SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailure, SmsgSpellGo, SmsgSpellStart,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::ObjectGuid;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -315,8 +315,8 @@ impl SpellSystem {
             });
 
         // Send SMSG_CHANNEL_START
-        let mut packet = crate::shared::protocol::WorldPacket::new(
-            crate::shared::protocol::Opcode::MSG_CHANNEL_START,
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(
+            oxcore_shared::protocol::Opcode::MSG_CHANNEL_START,
         );
         packet.write_u32(spell_id);
         packet.write_u32(duration_ms);
@@ -879,7 +879,7 @@ impl SpellSystem {
             world
                 .managers
                 .creature_mgr
-                .with_creature(target_guid, |c| crate::shared::protocol::Position {
+                .with_creature(target_guid, |c| oxcore_shared::protocol::Position {
                     x: c.position.x,
                     y: c.position.y,
                     z: c.position.z,
@@ -1113,8 +1113,8 @@ impl SpellSystem {
             // If cancelling a channel, send SMSG_CHANNEL_UPDATE with 0 remaining
             // and remove auras applied by the cancelled channel (MaNGOS RemoveAurasByCasterSpell)
             if was_channeling {
-                let mut packet = crate::shared::protocol::WorldPacket::new(
-                    crate::shared::protocol::Opcode::MSG_CHANNEL_UPDATE,
+                let mut packet = oxcore_shared::protocol::WorldPacket::new(
+                    oxcore_shared::protocol::Opcode::MSG_CHANNEL_UPDATE,
                 );
                 packet.write_u32(0); // 0 = channel interrupted
                 self.broadcast_mgr.send_msg_to_player(caster_guid, packet);

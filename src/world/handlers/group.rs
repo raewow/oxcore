@@ -6,13 +6,13 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::core::session::WorldSession;
 use crate::world::game::group::{
     ERR_ALREADY_IN_GROUP_S, ERR_BAD_PLAYER_NAME_S, ERR_GROUP_FULL, ERR_IGNORING_YOU_S,
     ERR_NOT_LEADER, ERR_PARTY_RESULT_OK, ERR_PLAYER_WRONG_FACTION, PARTY_OP_INVITE, PARTY_OP_LEAVE,
 };
 use crate::world::World;
+use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 
 /// Handle CMSG_GROUP_INVITE - player invites someone to group
 /// Packet format: playerName (cstring)
@@ -401,7 +401,7 @@ pub async fn handle_raid_target_update(
 /// Sent when player opens character screen or joins a raid group
 /// Packet format: empty
 pub async fn handle_request_raid_info(session: &WorldSession, _world: &World) -> Result<()> {
-    use crate::shared::protocol::Opcode;
+    use oxcore_shared::protocol::Opcode;
 
     let player_guid = session
         .player_guid()
@@ -411,7 +411,7 @@ pub async fn handle_request_raid_info(session: &WorldSession, _world: &World) ->
 
     // Send empty raid instance info (no lockouts)
     // Packet format: u32 count, then for each: map_id (u32), reset_time (u32), instance_id (u32)
-    let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::SMSG_RAID_INSTANCE_INFO);
+    let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::SMSG_RAID_INSTANCE_INFO);
     packet.write_u32(0); // No raid lockouts
 
     session.send_packet(packet);
@@ -427,8 +427,8 @@ pub async fn handle_request_party_member_stats(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    use crate::shared::protocol::Opcode;
     use crate::world::game::common::group_update_flags;
+    use oxcore_shared::protocol::Opcode;
 
     let player_guid = session
         .player_guid()
@@ -445,7 +445,7 @@ pub async fn handle_request_party_member_stats(
     let target_player = world.managers.player_mgr.get_player(target_guid);
 
     let mut response =
-        crate::shared::protocol::WorldPacket::new(Opcode::SMSG_PARTY_MEMBER_STATS_FULL);
+        oxcore_shared::protocol::WorldPacket::new(Opcode::SMSG_PARTY_MEMBER_STATS_FULL);
 
     // Write packed GUID (for 1.12.1)
     response.write_packed_guid_raw(target_guid.raw());

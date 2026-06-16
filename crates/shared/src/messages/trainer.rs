@@ -5,10 +5,10 @@
 //! - [`SmsgTrainerBuySucceeded`] - Spell purchase success
 //! - [`SmsgTrainerBuyFailed`] - Spell purchase failure
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::packet::WorldPacketGuidExt;
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::{Opcode, WorldPacket};
+use crate::messages::ToWorldPacket;
+use crate::protocol::packet::WorldPacketGuidExt;
+use crate::protocol::ObjectGuid;
+use crate::protocol::{Opcode, WorldPacket};
 
 /// Per-spell data for SMSG_TRAINER_LIST
 #[derive(Debug, Clone)]
@@ -120,7 +120,7 @@ impl ToWorldPacket for SmsgTrainerBuyFailed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::ObjectGuid;
+    use crate::protocol::ObjectGuid;
 
     fn read_u32_le(data: &[u8], offset: usize) -> u32 {
         u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())

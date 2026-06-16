@@ -1,10 +1,10 @@
 //! Server Management Commands for world
 
-use crate::shared::common::AccountType;
-use crate::shared::console::command::{CommandContext, CommandInfo};
-use crate::shared::console::output::print_console;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::common::AccountType;
+use oxcore_shared::console::command::{CommandContext, CommandInfo};
+use oxcore_shared::console::output::print_console;
 use std::time::Duration;
 
 /// Help command - shows available commands or help for a specific command

@@ -1,10 +1,10 @@
 //! Social system types for world
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashMap;
 
 // Re-export types from shared that are used by messages and system
-pub use crate::shared::game::social::{
+pub use oxcore_shared::game::social::{
     FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT,
     SOCIALMGR_IGNORE_LIMIT,
 };

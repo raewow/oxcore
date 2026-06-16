@@ -8,7 +8,7 @@
 //!
 //! Following world patterns: Pure data, no side effects.
 
-use crate::shared::protocol::{ObjectGuid, Position};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 use std::collections::HashMap;
 
 /// AI state machine states

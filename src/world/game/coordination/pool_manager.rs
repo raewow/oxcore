@@ -1,7 +1,7 @@
 use super::pool_repository::PoolData;
 use super::pool_types::{PoolMember, PoolMemberType, PoolState, PoolTemplate};
-use crate::shared::protocol::ObjectGuid;
 use dashmap::DashMap;
+use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
 /// Manages all spawn pools - state only, no database

@@ -1,7 +1,7 @@
 use super::link_flags::{LinkEvent, LinkFlags};
 use super::linking_repository::CreatureLinkRow;
-use crate::shared::protocol::ObjectGuid;
 use dashmap::DashMap;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// A link between two creatures
 #[derive(Debug, Clone)]

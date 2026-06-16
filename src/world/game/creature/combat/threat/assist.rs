@@ -1,13 +1,13 @@
 //! Assist Threat Helper
 //!
+use crate::world::game::creature::Creature;
 /// Healing and buffing generate "assist threat" - threat added to the creature targeting the assisted player.
 /// Rules:
 /// 1. Healing/buffing generates threat for the healer
 /// 2. Threat is added to all creatures attacking the healed target
 /// 3. Threat is ZERO if the creature is under hard CC (fear, blind, stun, confuse)
 /// 4. Totems don't generate or receive assist threat
-use crate::shared::protocol::ObjectGuid;
-use crate::world::game::creature::Creature;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Hard CC unit flags that prevent assist threat
 pub const UNIT_FLAG_CONFUSED: u32 = 0x00000400;
@@ -61,7 +61,7 @@ impl AssistThreatHelper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::{ObjectGuid, Position};
+    use oxcore_shared::protocol::{ObjectGuid, Position};
 
     fn create_test_creature() -> Creature {
         use crate::world::game::creature::{manager::CreatureTemplate, Creature};

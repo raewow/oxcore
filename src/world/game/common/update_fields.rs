@@ -1,1 +1,1 @@
-pub use crate::shared::protocol::update_fields::*;
+pub use oxcore_shared::protocol::update_fields::*;

@@ -1,5 +1,5 @@
-use crate::shared::protocol::position::Position;
-use crate::shared::protocol::WorldPacket;
+use crate::protocol::position::Position;
+use crate::protocol::WorldPacket;
 use anyhow::Result;
 use tracing::warn;
 
@@ -67,7 +67,7 @@ impl MovementBlock {
         packet.write_u32(movement_flags);
 
         // Server uptime timestamp (matches WoW 1.12 client's time domain)
-        let server_time = crate::shared::common::server_mstime();
+        let server_time = crate::common::server_mstime();
         packet.write_u32(server_time);
 
         // Position (4 floats)
@@ -218,7 +218,7 @@ impl MovementSpeeds {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::opcodes::Opcode;
+    use crate::protocol::opcodes::Opcode;
 
     #[test]
     fn test_item_movement_block() {

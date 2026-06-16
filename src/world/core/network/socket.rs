@@ -14,9 +14,6 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::shared::database::Databases;
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::network::crypt::AuthCrypt;
 use crate::world::core::network::protocol::{
     build_server_header, client_payload_size, parse_client_header, server_packet_size,
@@ -25,6 +22,9 @@ use crate::world::core::network::protocol::{
 use crate::world::core::session::{SessionManager, WorldSession};
 use crate::world::handlers::auth as auth_handler;
 use crate::world::World;
+use oxcore_shared::database::Databases;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Connection state for WorldSocket
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -415,7 +415,7 @@ impl WorldSocket {
 
     /// Send auth challenge (SMSG_AUTH_CHALLENGE)
     async fn send_auth_challenge(&mut self) -> Result<()> {
-        use crate::shared::messages::login::SmsgAuthChallenge;
+        use oxcore_shared::messages::login::SmsgAuthChallenge;
 
         let challenge = SmsgAuthChallenge {
             seed: self.server_seed,
@@ -493,7 +493,7 @@ impl WorldSocket {
     /// Send SMSG_AUTH_RESPONSE (success)
     /// Note: This is sent ENCRYPTED after crypt initialization (checked by send_packet)
     async fn send_auth_response_success(&mut self) -> Result<()> {
-        use crate::shared::messages::login::{AuthErrorCode, SmsgAuthResponse};
+        use oxcore_shared::messages::login::{AuthErrorCode, SmsgAuthResponse};
 
         debug!(
             "[AUTH] Sending SMSG_AUTH_RESPONSE (success, encrypted={}) to {}",
@@ -519,7 +519,7 @@ impl WorldSocket {
 
     /// Send SMSG_AUTH_RESPONSE (error case)
     async fn send_auth_response(&mut self, error_code: u8) -> Result<()> {
-        use crate::shared::messages::login::SmsgAuthResponse;
+        use oxcore_shared::messages::login::SmsgAuthResponse;
 
         let response = SmsgAuthResponse { error_code };
         let packet_data = response.to_world_packet();

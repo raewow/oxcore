@@ -5,10 +5,10 @@
 use anyhow::Result;
 use sqlx::Row;
 
-use crate::shared::common::AccountType;
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::{Opcode, Position, WorldPacket};
 use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
+use oxcore_shared::common::AccountType;
+use oxcore_shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::{Opcode, Position, WorldPacket};
 
 /// Base movement speeds (from MaNGOS/Unit.cpp)
 const BASE_RUN_SPEED: f32 = 7.0;
@@ -99,7 +99,7 @@ pub fn speed_info() -> ChatCommandInfo {
 
 /// Kill command - instantly kills the current target
 pub async fn cmd_kill(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {
-    use crate::shared::protocol::ObjectGuid;
+    use oxcore_shared::protocol::ObjectGuid;
 
     let args = args.trim();
     let target_guid = if matches!(args.to_ascii_lowercase().as_str(), "self" | "me") {
@@ -174,13 +174,13 @@ pub async fn cmd_kill(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String
 /// Send death VALUES update to nearby players so the client sees the creature die.
 /// Same as creature_combat.rs send_creature_killed_update but callable from GM commands.
 fn send_creature_killed_update(world: &crate::world::World, creature_guid: ObjectGuid) {
-    use crate::shared::messages::update::{
-        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-    };
-    use crate::shared::messages::ToWorldPacket;
     use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
     use crate::world::game::broadcast_mgr::broadcast_around_creature;
     use crate::world::game::common::update_fields::*;
+    use oxcore_shared::messages::update::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
+    use oxcore_shared::messages::ToWorldPacket;
 
     let Some((max_health, unit_flags)) = world
         .managers

@@ -5,8 +5,8 @@
 //! - Environmental damage logging
 //! - Exploration experience
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{Opcode, WorldPacket};
+use crate::messages::ToWorldPacket;
+use crate::protocol::{Opcode, WorldPacket};
 
 /// SMSG_START_MIRROR_TIMER - Start or update a client-visible timer bar
 ///

@@ -11,8 +11,8 @@
 //! - Non-binary spells: partial resist (0/25/50/75/100%)
 //! - Physical spells use melee miss table instead
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Result of a spell hit roll.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

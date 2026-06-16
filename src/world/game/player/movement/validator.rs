@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::core::common::MovementInfo;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Validate movement for anti-cheat
 pub fn validate_movement(

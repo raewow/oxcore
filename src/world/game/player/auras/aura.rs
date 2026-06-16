@@ -1,6 +1,6 @@
 //! Aura struct - represents a single active buff/debuff on a unit
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Number of effects per spell in vanilla WoW
 pub const MAX_SPELL_EFFECTS: usize = 3;

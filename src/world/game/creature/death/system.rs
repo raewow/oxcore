@@ -1,12 +1,12 @@
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::game::broadcast_mgr::broadcast_around_creature;
 use crate::world::game::common::update_fields::*;
 use crate::world::World;
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Default corpse decay times by creature type
 pub const CORPSE_DECAY_NORMAL: u32 = 60_000; // 60 seconds
@@ -180,7 +180,7 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
             );
 
             if xp > 0 {
-                use crate::shared::game::experience::XpSource;
+                use oxcore_shared::game::experience::XpSource;
                 let _ = world
                     .systems
                     .experience
@@ -337,7 +337,7 @@ pub fn send_dynamic_flags_update(world: &World, guid: ObjectGuid, flags: u32) {
 fn send_destroy_object(
     world: &World,
     guid: ObjectGuid,
-    _position: crate::shared::protocol::Position,
+    _position: oxcore_shared::protocol::Position,
 ) {
     let world_guid = WorldObjectGuid::new_creature(guid.entry(), guid.counter());
     let mut packet = WorldPacket::new(Opcode::SMSG_DESTROY_OBJECT);

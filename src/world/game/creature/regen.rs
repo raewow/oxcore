@@ -6,17 +6,17 @@
 //! Health: Out of combat = max_health / 3 per tick. In combat = 0.
 //! Mana: Out of combat = max_mana / 3 per tick. In combat = 0 (simplified).
 
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::game::broadcast_mgr::broadcast_around_creature;
 use crate::world::game::common::update_fields::{
     UNIT_FIELD_HEALTH, UNIT_FIELD_MAXHEALTH, UNIT_FIELD_POWER1,
 };
 use crate::world::World;
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Regeneration tick interval: 2 seconds
 const REGEN_INTERVAL_MS: u32 = 2000;

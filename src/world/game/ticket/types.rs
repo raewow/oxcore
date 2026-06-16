@@ -2,8 +2,8 @@
 //!
 //! In-memory representations of GM tickets.
 
-use crate::shared::game::ticket::{GmTicketEscalationStatus, GmTicketType};
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::game::ticket::{GmTicketEscalationStatus, GmTicketType};
+use oxcore_shared::protocol::ObjectGuid;
 
 /// In-memory ticket entry (cached from database)
 #[derive(Debug, Clone)]

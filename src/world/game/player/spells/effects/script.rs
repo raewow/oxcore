@@ -97,7 +97,7 @@ pub async fn effect_send_event(input: &EffectInput, world: &World) -> Result<Eff
                     input.caster_guid,
                     input
                         .target_guid
-                        .unwrap_or_else(crate::shared::protocol::ObjectGuid::empty),
+                        .unwrap_or_else(oxcore_shared::protocol::ObjectGuid::empty),
                     world,
                 )
                 .await?;

@@ -1,18 +1,18 @@
 //! Tests for the Social System (world)
 
 use super::*;
-use crate::shared::database::characters::models::social::CharacterSocialRow;
-use crate::shared::database::characters::repositories::SocialRepositoryTrait;
-use crate::shared::game::social::{
-    FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT,
-    SOCIALMGR_IGNORE_LIMIT,
-};
-use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
 use crate::world::core::session::SessionManager;
 use crate::world::game::broadcast_mgr::BroadcastManager;
 use crate::world::game::player::PlayerManager;
 use mockall::mock;
 use mockall::predicate::*;
+use oxcore_shared::database::characters::models::social::CharacterSocialRow;
+use oxcore_shared::database::characters::repositories::SocialRepositoryTrait;
+use oxcore_shared::game::social::{
+    FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT,
+    SOCIALMGR_IGNORE_LIMIT,
+};
+use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
 use std::sync::Arc;
 
 // ========== MOCK REPOSITORY ==========

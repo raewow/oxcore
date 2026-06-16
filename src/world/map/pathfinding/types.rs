@@ -1,6 +1,6 @@
 //! Pathfinding types - path results, flags, and height queries
 
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 
 /// Path calculation result
 #[derive(Debug, Clone)]

@@ -6,11 +6,11 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, warn};
 
-use crate::shared::database::Databases;
-use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::core::session::WorldSession;
 use crate::world::handlers::dispatch_packet;
 use crate::world::world::World;
+use oxcore_shared::database::Databases;
+use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 
 /// Per-player packet handler with ordering guarantees
 pub struct PlayerPacketHandler {

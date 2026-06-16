@@ -5,7 +5,7 @@
 
 use super::pathfinder::PathFinder as MMapPathFinder;
 use super::types::PathResult;
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 use std::sync::Arc;
 
 /// Game-level PathFinder (wraps low-level MMap PathFinder)

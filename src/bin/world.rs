@@ -7,14 +7,14 @@
 //! - Async-first design for 10k+ player scalability
 
 use anyhow::{Context, Result};
+use oxcore_shared::config::{find_config_file, load_toml};
+use oxcore_shared::console::run_console_input;
+use oxcore_shared::database::{DatabaseUrls, Databases};
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
-use wow_server::shared::config::{find_config_file, load_toml};
-use wow_server::shared::console::run_console_input;
-use wow_server::shared::database::{DatabaseUrls, Databases};
 use wow_server::world::config::initialize_config_mgr;
 use wow_server::world::core::network::socket_mgr::WorldSocketMgr;
 use wow_server::world::logging;

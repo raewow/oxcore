@@ -6,8 +6,8 @@
 
 use super::super::actions::{parse_actions, LuaAction};
 use super::super::snapshot::LuaGuid;
-use crate::shared::protocol::ObjectGuid;
 use mlua::{Function, Lua, Table, Value};
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Lua effect dummy script handler.
 ///

@@ -9,11 +9,11 @@ use tracing::debug;
 
 use super::actions::LuaAction;
 use super::snapshot::PlayerSnapshot;
-use crate::shared::messages::gossip::{
+use crate::world::World;
+use oxcore_shared::messages::gossip::{
     GossipOptionData, GossipQuestData, SmsgGossipComplete, SmsgGossipMessage,
 };
-use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
-use crate::world::World;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Build a `PlayerSnapshot` from world state for gossip/quest callbacks.
 pub fn build_player_snapshot(player_guid: ObjectGuid, world: &World) -> PlayerSnapshot {
@@ -438,10 +438,10 @@ pub async fn execute_gossip_actions(
 
 /// Send SMSG_MESSAGECHAT from an NPC to nearby players.
 fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, text: &str) {
-    use crate::shared::game::chat::{ChatMsg, ChatTag, Language};
-    use crate::shared::messages::chat::SmsgMessageChat;
-    use crate::shared::messages::ToWorldPacket;
     use crate::world::game::broadcast_mgr::broadcast_around_creature;
+    use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language};
+    use oxcore_shared::messages::chat::SmsgMessageChat;
+    use oxcore_shared::messages::ToWorldPacket;
 
     let name = world
         .managers

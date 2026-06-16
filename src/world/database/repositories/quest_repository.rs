@@ -6,10 +6,10 @@ use anyhow::{Context, Result};
 use sqlx::MySqlPool;
 use std::sync::Arc;
 
-use crate::shared::database::world::models::quest::*;
 use crate::world::game::npc::quest::{
     QuestFlags, QuestManager, QuestMethod, QuestSpecialFlags, QuestTemplate, QuestType,
 };
+use oxcore_shared::database::world::models::quest::*;
 
 /// Repository for loading quest data from world database
 pub struct QuestTemplateRepository;

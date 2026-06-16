@@ -4,8 +4,8 @@
 
 use anyhow::Result;
 
-use crate::shared::common::AccountType;
 use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
+use oxcore_shared::common::AccountType;
 
 /// Help command - shows available commands and usage
 pub async fn cmd_help(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {

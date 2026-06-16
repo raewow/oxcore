@@ -4,11 +4,11 @@
 //! in shared::game::chat and should be imported from there.
 //! This module contains only implementation-specific types.
 
-use crate::shared::game::chat::{
+use oxcore_shared::game::chat::{
     ChannelJoinResult, ChannelLeaveResult, ChatMsg, ChatNotify, ChatTag, Language, Team,
     EMOTE_RANGE, TEXT_EMOTE_RANGE,
 };
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 

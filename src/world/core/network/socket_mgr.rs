@@ -10,10 +10,10 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
-use crate::shared::database::Databases;
 use crate::world::core::network::socket::WorldSocket;
 use crate::world::core::session::SessionManager;
 use crate::world::World;
+use oxcore_shared::database::Databases;
 
 /// Manages the world server TCP listener and connections
 pub struct WorldSocketMgr {

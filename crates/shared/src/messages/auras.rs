@@ -1,10 +1,10 @@
 //! Aura-related server messages
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::opcodes::Opcode;
-use crate::shared::protocol::packet::WorldPacketGuidExt;
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::WorldPacket;
+use crate::messages::ToWorldPacket;
+use crate::protocol::opcodes::Opcode;
+use crate::protocol::packet::WorldPacketGuidExt;
+use crate::protocol::ObjectGuid;
+use crate::protocol::WorldPacket;
 
 /// SMSG_AURA_UPDATE (opcode 0x0495)
 ///

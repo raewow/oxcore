@@ -4,10 +4,10 @@
 
 use anyhow::Result;
 
-use crate::shared::common::AccountType;
-use crate::shared::game::experience::XpSource;
 use crate::world::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
 use crate::world::game::inventory::GoldResult;
+use oxcore_shared::common::AccountType;
+use oxcore_shared::game::experience::XpSource;
 
 /// Add XP command - adds experience points to the player
 pub async fn cmd_addxp(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {

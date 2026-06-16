@@ -7,10 +7,10 @@ pub enum AuctionHouseId {
 }
 
 impl AuctionHouseId {
-    pub fn from_team(team: crate::shared::game::chat::Team) -> Self {
+    pub fn from_team(team: crate::game::chat::Team) -> Self {
         match team {
-            crate::shared::game::chat::Team::Alliance => AuctionHouseId::Alliance,
-            crate::shared::game::chat::Team::Horde => AuctionHouseId::Horde,
+            crate::game::chat::Team::Alliance => AuctionHouseId::Alliance,
+            crate::game::chat::Team::Horde => AuctionHouseId::Horde,
             _ => AuctionHouseId::Neutral,
         }
     }
@@ -50,15 +50,15 @@ pub enum AuctionQueryType {
 pub struct AuctionEntry {
     pub id: u32,
     pub house_id: u32,
-    pub item_guid: crate::shared::protocol::ObjectGuid,
+    pub item_guid: crate::protocol::ObjectGuid,
     pub item_template: u32,
-    pub seller_guid: crate::shared::protocol::ObjectGuid,
+    pub seller_guid: crate::protocol::ObjectGuid,
     pub seller_account: u32,
     pub start_bid: u32,
     pub current_bid: u32,
     pub buyout_price: u32,
     pub expire_time: u64,
-    pub bidder_guid: crate::shared::protocol::ObjectGuid,
+    pub bidder_guid: crate::protocol::ObjectGuid,
     pub deposit: u32,
     pub deposit_time: u64,
     pub locked_ip_address: String,
@@ -68,9 +68,9 @@ impl AuctionEntry {
     pub fn new(
         id: u32,
         house_id: u32,
-        item_guid: crate::shared::protocol::ObjectGuid,
+        item_guid: crate::protocol::ObjectGuid,
         item_template: u32,
-        seller_guid: crate::shared::protocol::ObjectGuid,
+        seller_guid: crate::protocol::ObjectGuid,
         seller_account: u32,
         start_bid: u32,
         buyout_price: u32,
@@ -92,7 +92,7 @@ impl AuctionEntry {
             current_bid: start_bid,
             buyout_price,
             expire_time,
-            bidder_guid: crate::shared::protocol::ObjectGuid::empty(),
+            bidder_guid: crate::protocol::ObjectGuid::empty(),
             deposit,
             deposit_time,
             locked_ip_address: String::new(),

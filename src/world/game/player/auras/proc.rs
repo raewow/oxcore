@@ -1,10 +1,10 @@
 //! Proc system handlers for aura-triggered effects
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::BroadcastManager;
 use crate::world::game::player::auras::effects::*;
 use crate::world::game::player::auras::system::ProcCandidate;
 use crate::world::World;
+use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
 use anyhow::Result;

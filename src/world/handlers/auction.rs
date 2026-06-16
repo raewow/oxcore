@@ -6,8 +6,6 @@ use anyhow::Result;
 use std::sync::Arc;
 use tracing::debug;
 
-use crate::shared::game::auction::{AuctionAction, AuctionEntry, AuctionError, AuctionQueryType};
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::game::auction::manager::{AuctionHouseManager, AuctionHouseObject};
@@ -25,6 +23,8 @@ use crate::world::messages::auction::{
     SmsgAuctionOwnerListResult,
 };
 use crate::world::World;
+use oxcore_shared::game::auction::{AuctionAction, AuctionEntry, AuctionError, AuctionQueryType};
+use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 /// Hard cap on bid/buyout to prevent gold dupe exploits.
 const MAX_AUCTION_PRICE: u32 = 2_000_000_000;
@@ -74,7 +74,7 @@ fn read_bid_refresh_ids(packet: &mut WorldPacket) -> Vec<u32> {
 
 async fn execute_auction_list_bidder_items_task(
     world: World,
-    player_guid: crate::shared::protocol::ObjectGuid,
+    player_guid: oxcore_shared::protocol::ObjectGuid,
     task: AuctionHouseClientQueryTask,
 ) {
     if task.query_type != AuctionQueryType::ListBidder {
@@ -1062,8 +1062,8 @@ pub async fn handle_auction_place_bid(
 /// clearing feign death if needed, and sending the open-auction response.
 fn send_auction_hello_response(
     session: &WorldSession,
-    player_guid: crate::shared::protocol::ObjectGuid,
-    auctioneer_guid: crate::shared::protocol::ObjectGuid,
+    player_guid: oxcore_shared::protocol::ObjectGuid,
+    auctioneer_guid: oxcore_shared::protocol::ObjectGuid,
     player_mgr: &PlayerManager,
     creature_mgr: &CreatureManager,
     auction_mgr: &AuctionHouseManager,
@@ -1236,7 +1236,7 @@ pub async fn handle_auction_list_owner_items(
 
 async fn execute_auction_list_owner_items_task(
     world: World,
-    player_guid: crate::shared::protocol::ObjectGuid,
+    player_guid: oxcore_shared::protocol::ObjectGuid,
     task: AuctionHouseClientQueryTask,
 ) {
     if task.query_type != AuctionQueryType::ListOwner {
@@ -1394,7 +1394,7 @@ pub async fn handle_auction_list_items(
 
 async fn execute_auction_list_items_task(
     world: World,
-    player_guid: crate::shared::protocol::ObjectGuid,
+    player_guid: oxcore_shared::protocol::ObjectGuid,
     task: AuctionHouseClientQueryTask,
 ) {
     let Some(session) = world.session_mgr.get_session_by_player(player_guid) else {
@@ -1473,12 +1473,6 @@ async fn execute_auction_list_items_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
-    use crate::shared::database::characters::repositories::character_repository::CharacterRepository;
-    use crate::shared::database::characters::repositories::item_repository::ItemRepository;
-    use crate::shared::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
-    use crate::shared::database::characters::repositories::mail_repository::MailRepository;
-    use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
     use crate::world::core::session::WorldSession;
     use crate::world::dbc::manager::DbcManager;
     use crate::world::dbc::structures::AuctionHouseEntry;
@@ -1488,6 +1482,12 @@ mod tests {
     use crate::world::game::player::auras::aura::{Aura, AuraFlags};
     use crate::world::game::player::player::Player;
     use crate::world::game::player::PlayerManager;
+    use oxcore_shared::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
+    use oxcore_shared::database::characters::repositories::character_repository::CharacterRepository;
+    use oxcore_shared::database::characters::repositories::item_repository::ItemRepository;
+    use oxcore_shared::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
+    use oxcore_shared::database::characters::repositories::mail_repository::MailRepository;
+    use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
     use parking_lot::RwLock;
     use sqlx::mysql::MySqlPoolOptions;
     use std::sync::Arc;
@@ -1860,12 +1860,12 @@ mod tests {
         house.add_auction(AuctionEntry {
             id: 9001,
             house_id: 7,
-            item_guid: crate::shared::protocol::ObjectGuid::new_without_entry(
-                crate::shared::protocol::HighGuid::Item,
+            item_guid: oxcore_shared::protocol::ObjectGuid::new_without_entry(
+                oxcore_shared::protocol::HighGuid::Item,
                 77,
             ),
             item_template: 1234,
-            seller_guid: crate::shared::protocol::ObjectGuid::new_player(2),
+            seller_guid: oxcore_shared::protocol::ObjectGuid::new_player(2),
             seller_account: 2,
             start_bid: 100,
             current_bid: 125,
@@ -1916,7 +1916,7 @@ mod tests {
         );
         assert_eq!(
             u64::from_le_bytes(packet.data()[32..40].try_into().unwrap()),
-            crate::shared::protocol::ObjectGuid::new_player(2).raw()
+            oxcore_shared::protocol::ObjectGuid::new_player(2).raw()
         );
         assert_eq!(
             u64::from_le_bytes(packet.data()[56..64].try_into().unwrap()),
@@ -1926,7 +1926,7 @@ mod tests {
     }
 
     fn make_list_items_packet(
-        auctioneer_guid: crate::shared::protocol::ObjectGuid,
+        auctioneer_guid: oxcore_shared::protocol::ObjectGuid,
         search: &str,
     ) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::CMSG_AUCTION_LIST_ITEMS);
@@ -1996,18 +1996,18 @@ mod tests {
         house.add_auction(AuctionEntry {
             id: 8001,
             house_id: 7,
-            item_guid: crate::shared::protocol::ObjectGuid::new_without_entry(
-                crate::shared::protocol::HighGuid::Item,
+            item_guid: oxcore_shared::protocol::ObjectGuid::new_without_entry(
+                oxcore_shared::protocol::HighGuid::Item,
                 88,
             ),
             item_template: 5678,
-            seller_guid: crate::shared::protocol::ObjectGuid::new_player(3),
+            seller_guid: oxcore_shared::protocol::ObjectGuid::new_player(3),
             seller_account: 3,
             start_bid: 200,
             current_bid: 200,
             buyout_price: 1000,
             expire_time: 4_102_444_800,
-            bidder_guid: crate::shared::protocol::ObjectGuid::empty(),
+            bidder_guid: oxcore_shared::protocol::ObjectGuid::empty(),
             deposit: 20,
             deposit_time: 0,
             locked_ip_address: String::new(),
@@ -2056,7 +2056,7 @@ mod tests {
                 .connect_lazy("mysql://test:test@localhost/test")
                 .expect("lazy pool"),
         );
-        let databases = Arc::new(crate::shared::database::Databases {
+        let databases = Arc::new(oxcore_shared::database::Databases {
             world: (*pool).clone(),
             character: (*pool).clone(),
             auth: (*pool).clone(),

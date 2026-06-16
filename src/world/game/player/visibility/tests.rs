@@ -14,11 +14,11 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
-use crate::shared::protocol::{HighGuid, ObjectGuid, Opcode, Position, WorldPacket};
 use crate::world::game::player::broadcaster::PlayerBroadcaster;
 use crate::world::game::player::player::Player;
 use crate::world::game::player::PlayerManager;
 use crate::world::map::grid_coords::{CellPair, CELL_SIZE};
+use oxcore_shared::protocol::{HighGuid, ObjectGuid, Opcode, Position, WorldPacket};
 
 use super::state::VisibilityState;
 

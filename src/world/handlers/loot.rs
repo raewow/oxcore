@@ -1,8 +1,8 @@
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_LOOT (0x015D)
 pub async fn handle_loot(

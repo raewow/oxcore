@@ -1,9 +1,9 @@
 //! Debug Commands for world
 
-use crate::shared::common::AccountType;
-use crate::shared::console::command::{CommandContext, CommandInfo};
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::common::AccountType;
+use oxcore_shared::console::command::{CommandContext, CommandInfo};
 
 /// Stats command - shows server statistics
 pub async fn cmd_stats(ctx: &CommandContext<'_, World>, _args: &str) -> Result<String> {

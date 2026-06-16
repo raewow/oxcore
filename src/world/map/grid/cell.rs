@@ -2,7 +2,7 @@
 
 use smallvec::SmallVec;
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// A single cell within a grid
 #[derive(Debug, Clone)]

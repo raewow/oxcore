@@ -1,7 +1,7 @@
 //! Bag object - represents a container (bag, quiver, ammo pouch)
 //! Max 36 slots per bag, follows composition pattern with Item
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Maximum bag size (36 slots) - matches MaNGOS MAX_BAG_SIZE
 pub const MAX_BAG_SIZE: usize = 36;

@@ -11,7 +11,7 @@
 
 use super::calc::ThreatCalcHelper;
 use super::container::ThreatContainer;
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Hostile reference - represents a single target on the threat list
 #[derive(Debug, Clone)]

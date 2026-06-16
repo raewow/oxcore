@@ -1,9 +1,9 @@
 // Instance manager - handles all instance operations
 
 use super::types::{InstanceBinding, InstanceResetMethod, InstanceResetWarningType, InstanceState};
-use crate::shared::database::Databases;
-use crate::shared::protocol::ObjectGuid;
 use anyhow::{Context, Result};
+use oxcore_shared::database::Databases;
+use oxcore_shared::protocol::ObjectGuid;
 use parking_lot::RwLock;
 use sqlx::Row;
 use std::collections::HashMap;

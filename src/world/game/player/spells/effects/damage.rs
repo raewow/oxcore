@@ -3,11 +3,11 @@
 //! Handles school damage, weapon damage, health leech, environmental damage, and normalized weapon damage.
 //! Formulas ported from old system (world/game/spell/effects/damage.rs).
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::game::player::spells::effects::{EffectInput, EffectResult};
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Environmental damage types (from misc_value)
 #[repr(u32)]
@@ -812,12 +812,12 @@ async fn heal_target(target_guid: ObjectGuid, healing: u32, world: &World) -> Re
 /// Send creature health update to nearby players via SMSG_UPDATE_OBJECT.
 /// Mirrors the send_health_update() in creature_combat handler.
 fn send_creature_health_update(creature_guid: ObjectGuid, world: &World) {
-    use crate::shared::messages::{
-        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-    };
     use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
     use crate::world::game::broadcast_mgr::broadcast_around_creature;
     use crate::world::game::common::update_fields::{UNIT_FIELD_HEALTH, UNIT_FIELD_MAXHEALTH};
+    use oxcore_shared::messages::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
 
     if let Some((current, max)) = world.managers.creature_mgr.get_health(creature_guid) {
         let world_guid =
@@ -834,12 +834,12 @@ fn send_creature_health_update(creature_guid: ObjectGuid, world: &World) {
 /// Send creature death update to nearby players via SMSG_UPDATE_OBJECT.
 /// Mirrors send_creature_killed_update() in creature_combat handler.
 fn send_creature_killed_update(caster_guid: ObjectGuid, creature_guid: ObjectGuid, world: &World) {
-    use crate::shared::messages::{
-        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-    };
     use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
     use crate::world::game::broadcast_mgr::broadcast_around_creature;
     use crate::world::game::common::update_fields::*;
+    use oxcore_shared::messages::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
 
     let (max_health, unit_flags) = world
         .managers
@@ -868,7 +868,7 @@ fn send_creature_killed_update(caster_guid: ObjectGuid, creature_guid: ObjectGui
     broadcast_around_creature(world, creature_guid, &update.to_world_packet());
 
     // Also send attack stop from both sides
-    let stop_packet = crate::shared::messages::combat::SmsgAttackStop {
+    let stop_packet = oxcore_shared::messages::combat::SmsgAttackStop {
         attacker_guid: caster_guid,
         target_guid: creature_guid,
         unk: 1, // target is dead

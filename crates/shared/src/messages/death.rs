@@ -2,8 +2,8 @@
 //!
 //! All packets involved in the death and resurrection cycle.
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use crate::messages::ToWorldPacket;
+use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// SMSG_CORPSE_RECLAIM_DELAY (0x0269)
 ///

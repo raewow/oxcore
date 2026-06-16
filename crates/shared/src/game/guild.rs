@@ -114,7 +114,7 @@ pub struct GuildLogEntry {
     pub id: u32,
     pub timestamp: u32,
     pub event_type: GuildEvent,
-    pub guid: crate::shared::protocol::ObjectGuid,
+    pub guid: crate::protocol::ObjectGuid,
     pub data: [u32; 4],
 }
 
@@ -124,7 +124,7 @@ impl GuildLogEntry {
             id: 0,
             timestamp: 0,
             event_type,
-            guid: crate::shared::protocol::ObjectGuid::empty(),
+            guid: crate::protocol::ObjectGuid::empty(),
             data: [0; 4],
         }
     }

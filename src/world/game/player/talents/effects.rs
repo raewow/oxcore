@@ -1,7 +1,7 @@
 use super::dbc::TalentStore;
 use super::state::TalentState;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Apply the effects of a single talent rank.
 ///

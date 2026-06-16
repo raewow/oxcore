@@ -1,6 +1,6 @@
 //! AuraState - Per-player aura state embedded in Player struct
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashMap;
 
 use super::container::AuraContainer;

@@ -1,11 +1,5 @@
 //! Attack Handler - Player attacks on creatures
 
-use crate::shared::messages::combat::{SmsgAttackStart, SmsgAttackStop, SmsgAttackerStateUpdate};
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::game::broadcast_mgr::broadcast_around_creature;
 use crate::world::game::common::update_fields::*;
@@ -14,6 +8,12 @@ use crate::world::game::creature::combat::{
     hit_outcome_to_victim_state, roll_melee_hit_outcome, MeleeHitOutcome,
 };
 use crate::world::World;
+use oxcore_shared::messages::combat::{SmsgAttackStart, SmsgAttackStop, SmsgAttackerStateUpdate};
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Handle player attack swing (CMSG_ATTACKSWING)
 /// Initializes auto-attack state and sends SMSG_ATTACKSTART.
@@ -34,8 +34,8 @@ pub async fn handle_attack_swing(
     if !world.managers.creature_mgr.is_alive(target_guid) {
         tracing::info!("[COMBAT] CMSG_ATTACKSWING on dead target {:?} from {:?} — sending DEADTARGET + ATTACKSTOP", target_guid, attacker_guid);
         // Tell client the target is dead (stops client auto-attack loop)
-        let dead_packet = crate::shared::protocol::WorldPacket::new(
-            crate::shared::protocol::Opcode::SMSG_ATTACKSWING_DEADTARGET,
+        let dead_packet = oxcore_shared::protocol::WorldPacket::new(
+            oxcore_shared::protocol::Opcode::SMSG_ATTACKSWING_DEADTARGET,
         );
         world
             .managers
@@ -99,8 +99,8 @@ pub async fn execute_pending_attack_vs_creature(
     // Validate target is still alive
     if !world.managers.creature_mgr.is_alive(target_guid) {
         // Send SMSG_ATTACKSWING_DEADTARGET to stop client auto-attack loop
-        let dead_packet = crate::shared::protocol::WorldPacket::new(
-            crate::shared::protocol::Opcode::SMSG_ATTACKSWING_DEADTARGET,
+        let dead_packet = oxcore_shared::protocol::WorldPacket::new(
+            oxcore_shared::protocol::Opcode::SMSG_ATTACKSWING_DEADTARGET,
         );
         world
             .managers

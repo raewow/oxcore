@@ -9,12 +9,12 @@
 //! - CMSG_AREA_SPIRIT_HEALER_QUERY / QUEUE: Battleground spirit healer wave
 //! - CMSG_SETDEATHBINDPOINT / CMSG_GETDEATHBINDZONE: Hearthstone bindpoint
 
-use crate::shared::database::{CharacterRepository, Databases};
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::database::{CharacterRepository, Databases};
+use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use std::sync::Arc;
 use tracing::{debug, warn};
 

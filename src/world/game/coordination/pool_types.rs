@@ -1,4 +1,4 @@
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Pool member types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

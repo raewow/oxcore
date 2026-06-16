@@ -2,18 +2,18 @@
 
 use super::manager::AuctionHouseManager;
 use super::parsing::{parse_enchantments, parse_spell_charges};
-use crate::shared::database::characters::models::auction::AuctionRow;
-use crate::shared::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
-use crate::shared::database::characters::repositories::item_repository_trait::MockItemRepositoryTrait;
-use crate::shared::database::characters::repositories::mail_repository_trait::MockMailRepositoryTrait;
-use crate::shared::database::characters::repositories::CharacterRepository;
-use crate::shared::protocol::{HighGuid, ObjectGuid};
 use crate::world::dbc::manager::DbcManager;
 use crate::world::dbc::structures::{AuctionHouseEntry, FactionTemplateDbcEntry};
 use crate::world::game::items::manager::ItemTemplate;
 use crate::world::game::items::Item;
 use crate::world::game::ItemManager;
 use mockall::predicate::*;
+use oxcore_shared::database::characters::models::auction::AuctionRow;
+use oxcore_shared::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
+use oxcore_shared::database::characters::repositories::item_repository_trait::MockItemRepositoryTrait;
+use oxcore_shared::database::characters::repositories::mail_repository_trait::MockMailRepositoryTrait;
+use oxcore_shared::database::characters::repositories::CharacterRepository;
+use oxcore_shared::protocol::{HighGuid, ObjectGuid};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -673,13 +673,13 @@ async fn get_auction_deposit_missing_template_returns_zero() {
 
 // ========== GET CHECKED AUCTION HOUSE FOR AUCTIONEER TESTS ==========
 
-use crate::shared::game::chat::Team;
 use crate::world::game::auction::get_checked_auction_house_for_auctioneer;
 use crate::world::game::player::Player;
+use oxcore_shared::game::chat::Team;
 
 fn test_player(human_guid: u32, race: u8) -> Player {
     Player::new(
-        ObjectGuid::new_without_entry(crate::shared::protocol::HighGuid::Player, human_guid),
+        ObjectGuid::new_without_entry(oxcore_shared::protocol::HighGuid::Player, human_guid),
         "Test".to_string(),
         0,
         0,
@@ -728,7 +728,7 @@ async fn get_checked_auction_house_npc_valid_returns_house() {
     let mgr = create_test_manager(mock_repo, dbc, item_mgr);
 
     let player = test_player(42, 1); // human = alliance
-    let npc_guid = ObjectGuid::new_without_entry(crate::shared::protocol::HighGuid::Unit, 999);
+    let npc_guid = ObjectGuid::new_without_entry(oxcore_shared::protocol::HighGuid::Unit, 999);
 
     // faction template 11 = human = house 1
     let house = get_checked_auction_house_for_auctioneer(&player, npc_guid, &mgr, Some(11));
@@ -744,7 +744,7 @@ async fn get_checked_auction_house_npc_invalid_denies() {
     let mgr = create_test_manager(mock_repo, dbc, item_mgr);
 
     let player = test_player(42, 1);
-    let npc_guid = ObjectGuid::new_without_entry(crate::shared::protocol::HighGuid::Unit, 999);
+    let npc_guid = ObjectGuid::new_without_entry(oxcore_shared::protocol::HighGuid::Unit, 999);
 
     let house = get_checked_auction_house_for_auctioneer(&player, npc_guid, &mgr, None);
     assert!(house.is_none());
@@ -756,9 +756,9 @@ fn test_auction(
     item_guid_low: u32,
     item_template: u32,
     seller_guid_low: u32,
-) -> crate::shared::game::auction::AuctionEntry {
-    use crate::shared::protocol::HighGuid;
-    crate::shared::game::auction::AuctionEntry::new(
+) -> oxcore_shared::game::auction::AuctionEntry {
+    use oxcore_shared::protocol::HighGuid;
+    oxcore_shared::game::auction::AuctionEntry::new(
         1,
         1,
         ObjectGuid::new_without_entry(HighGuid::Item, item_guid_low),

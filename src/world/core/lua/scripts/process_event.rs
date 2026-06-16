@@ -5,8 +5,8 @@
 
 use super::super::actions::{parse_actions, LuaAction};
 use super::super::snapshot::{LuaGuid, PlayerSnapshot};
-use crate::shared::protocol::ObjectGuid;
 use mlua::{Function, Lua, Table, Value};
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Lua process event script handler.
 ///

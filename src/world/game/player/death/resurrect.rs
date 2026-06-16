@@ -5,8 +5,8 @@
 
 use super::flow::*;
 use super::state::{DeathState, DeathSystemState, ResurrectionData};
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::Position;
 
 /// Resurrection method determines the consequences of coming back to life.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

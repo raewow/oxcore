@@ -1,6 +1,6 @@
 //! Group system types, constants, and structures
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 use std::time::Instant;
 
 // ========== CONSTANTS ==========

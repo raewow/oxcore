@@ -7,13 +7,13 @@ use dashmap::DashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::shared::database::characters::repositories::TicketRepository;
-use crate::shared::game::ticket::{
-    GmTicketEscalationStatus, GmTicketResponse, GmTicketStatus, GmTicketSystemStatus, GmTicketType,
-};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::database::characters::repositories::TicketRepository;
+use oxcore_shared::game::ticket::{
+    GmTicketEscalationStatus, GmTicketResponse, GmTicketStatus, GmTicketSystemStatus, GmTicketType,
+};
+use oxcore_shared::protocol::ObjectGuid;
 
 use super::types::TicketEntry;
 
@@ -65,7 +65,7 @@ impl TicketSystem {
 
     pub async fn shutdown(&self) -> Result<()> {
         // Save all tickets to database
-        use crate::shared::database::characters::models::ticket::GmTicketRow;
+        use oxcore_shared::database::characters::models::ticket::GmTicketRow;
         for entry in self.tickets.iter() {
             let ticket = entry.value();
             let row = GmTicketRow {
@@ -103,7 +103,7 @@ impl TicketSystem {
     pub async fn on_player_logout(&self, guid: ObjectGuid) -> Result<()> {
         // Save ticket if exists and remove from cache
         if let Some((_guid, ticket)) = self.tickets.remove(&guid) {
-            use crate::shared::database::characters::models::ticket::GmTicketRow;
+            use oxcore_shared::database::characters::models::ticket::GmTicketRow;
             let row = GmTicketRow {
                 ticket_id: ticket.ticket_id,
                 guid: ticket.player_guid.counter(),
@@ -169,7 +169,7 @@ impl TicketSystem {
         };
 
         // Save to database (INSERT)
-        use crate::shared::database::characters::models::ticket::GmTicketRow;
+        use oxcore_shared::database::characters::models::ticket::GmTicketRow;
         let row = GmTicketRow {
             ticket_id,
             guid: player_guid.counter(),
@@ -211,7 +211,7 @@ impl TicketSystem {
             entry.last_modified_time = now;
 
             // Update database
-            use crate::shared::database::characters::models::ticket::GmTicketRow;
+            use oxcore_shared::database::characters::models::ticket::GmTicketRow;
             let row = GmTicketRow {
                 ticket_id: entry.ticket_id,
                 guid: entry.player_guid.counter(),
@@ -254,7 +254,7 @@ impl TicketSystem {
     // ========== Broadcast Methods (send via BroadcastManager) ==========
 
     pub fn send_ticket(&self, player_guid: ObjectGuid) {
-        use crate::shared::messages::ticket::{SmsgGmTicketGetTicket, TicketData};
+        use oxcore_shared::messages::ticket::{SmsgGmTicketGetTicket, TicketData};
 
         let msg = if let Some(ticket) = self.tickets.get(&player_guid) {
             let now = SystemTime::now()
@@ -285,7 +285,7 @@ impl TicketSystem {
     }
 
     pub fn send_system_status(&self, player_guid: ObjectGuid) {
-        use crate::shared::messages::ticket::SmsgGmTicketSystemStatus;
+        use oxcore_shared::messages::ticket::SmsgGmTicketSystemStatus;
 
         let status = if self.system_enabled {
             GmTicketSystemStatus::Enabled as u32
@@ -298,7 +298,7 @@ impl TicketSystem {
     }
 
     pub fn send_create_response(&self, player_guid: ObjectGuid, result: GmTicketResponse) {
-        use crate::shared::messages::ticket::SmsgGmTicketCreate;
+        use oxcore_shared::messages::ticket::SmsgGmTicketCreate;
         self.broadcast_mgr.send_msg_to_player(
             player_guid,
             SmsgGmTicketCreate {
@@ -308,7 +308,7 @@ impl TicketSystem {
     }
 
     pub fn send_update_response(&self, player_guid: ObjectGuid, result: GmTicketResponse) {
-        use crate::shared::messages::ticket::SmsgGmTicketUpdateText;
+        use oxcore_shared::messages::ticket::SmsgGmTicketUpdateText;
         self.broadcast_mgr.send_msg_to_player(
             player_guid,
             SmsgGmTicketUpdateText {
@@ -318,7 +318,7 @@ impl TicketSystem {
     }
 
     pub fn send_delete_response(&self, player_guid: ObjectGuid, result: GmTicketResponse) {
-        use crate::shared::messages::ticket::SmsgGmTicketDeleteTicket;
+        use oxcore_shared::messages::ticket::SmsgGmTicketDeleteTicket;
         self.broadcast_mgr.send_msg_to_player(
             player_guid,
             SmsgGmTicketDeleteTicket {

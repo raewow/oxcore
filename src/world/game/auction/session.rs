@@ -4,9 +4,6 @@
 //! Kept here rather than on `WorldSession` to avoid polluting the generic session with
 //! auction-specific logic.
 
-use crate::shared::game::auction::{AuctionAction, AuctionEntry, AuctionError};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::core::session::WorldSession;
 use crate::world::game::auction::AuctionHouseManager;
 use crate::world::game::inventory::inventory_types::InventoryResult;
@@ -14,6 +11,9 @@ use crate::world::messages::auction::{
     SmsgAuctionBidderNotification, SmsgAuctionCommandResult, SmsgAuctionOwnerNotification,
     SmsgAuctionRemovedNotification,
 };
+use oxcore_shared::game::auction::{AuctionAction, AuctionEntry, AuctionError};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Send SMSG_AUCTION_COMMAND_RESULT to the client session.
 ///

@@ -12,7 +12,7 @@
 //! - [2 bytes] Opcode (little endian)
 //! - [N bytes] Payload
 
-use crate::shared::protocol::Opcode;
+use oxcore_shared::protocol::Opcode;
 
 /// Client packet header size (6 bytes)
 /// [2 bytes] Size (big endian) - includes opcode

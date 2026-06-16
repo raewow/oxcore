@@ -1,9 +1,9 @@
 //! GridSystem - coordinates grid loading/unloading operations
 
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::map::grid::GridManager;
 use crate::world::World;
 use dashmap::DashMap;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -343,7 +343,7 @@ impl GridSystem {
     /// BEFORE we send creature packets to the client.
     pub async fn force_load_grids_for_player(
         &self,
-        player_guid: crate::shared::protocol::ObjectGuid,
+        player_guid: oxcore_shared::protocol::ObjectGuid,
         map_id: u32,
         instance_id: u32,
         world: &World,

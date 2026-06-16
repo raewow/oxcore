@@ -1,4 +1,4 @@
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 bitflags::bitflags! {
     /// Creature linking flags

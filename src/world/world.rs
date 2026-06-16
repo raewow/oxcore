@@ -3,13 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::shared::console::{CommandRegistry, ConsoleCommand};
-use crate::shared::database::characters::repositories::{
-    AuctionRepository, AuctionRepositoryTrait, CharacterRepository, ItemRepository,
-    ItemRepositoryTrait, MailRepository, MailRepositoryTrait,
-};
-use crate::shared::database::Databases;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::config::Config;
 use crate::world::core::lua::LuaScriptManager;
 use crate::world::core::session::SessionManager;
@@ -29,6 +22,13 @@ use crate::world::game::SystemManager;
 use crate::world::map::manager::MapManager;
 use crate::world::map::pathfinding::vmap::{VMapConfig, VMapManager};
 use crate::world::map::pathfinding::{MMapManager, PathFinder};
+use oxcore_shared::console::{CommandRegistry, ConsoleCommand};
+use oxcore_shared::database::characters::repositories::{
+    AuctionRepository, AuctionRepositoryTrait, CharacterRepository, ItemRepository,
+    ItemRepositoryTrait, MailRepository, MailRepositoryTrait,
+};
+use oxcore_shared::database::Databases;
+use oxcore_shared::protocol::ObjectGuid;
 use parking_lot::RwLock;
 use tokio::sync::RwLock as TokioRwLock;
 

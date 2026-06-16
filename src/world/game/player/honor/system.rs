@@ -6,10 +6,10 @@
 
 use std::sync::Arc;
 
-use crate::shared::database::characters::models::honor::HonorCPRow;
-use crate::shared::database::characters::repositories::HonorRepository;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
+use oxcore_shared::database::characters::models::honor::HonorCPRow;
+use oxcore_shared::database::characters::repositories::HonorRepository;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Stateless honor orchestrator. All per-player state lives on `Player`.
 pub struct HonorSystem;

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use super::navmesh::{parse_detour_tile, NavMesh};
 use super::types::PathResult;
 use super::vmap::VMapManager;
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 use tracing::{debug, info, warn};
 
 /// MMap file magic and version (must match extractor output)

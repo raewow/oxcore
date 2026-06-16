@@ -1,8 +1,8 @@
 use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 
-use crate::shared::protocol::opcodes::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::protocol::opcodes::Opcode;
+use crate::protocol::WorldPacket;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use std::io::Write;

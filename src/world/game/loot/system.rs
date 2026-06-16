@@ -1,10 +1,10 @@
-use crate::shared::messages::loot::*;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::items::ItemManager;
 use crate::world::game::loot::manager::LootManager;
 use crate::world::game::player::PlayerManager;
 use crate::world::World;
+use oxcore_shared::messages::loot::*;
+use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
 /// LootSystem - handles all loot business logic and packet sending

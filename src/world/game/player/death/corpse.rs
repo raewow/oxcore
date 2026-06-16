@@ -4,8 +4,8 @@
 //! It stores the player's visual appearance so other players see a body
 //! on the ground.
 
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::Position;
 
 /// Corpse types determine loot and reclaim behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

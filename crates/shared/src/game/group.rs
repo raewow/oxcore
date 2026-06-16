@@ -95,7 +95,7 @@ pub enum GroupType {
 
 #[derive(Debug, Clone)]
 pub struct GroupMember {
-    pub guid: crate::shared::protocol::ObjectGuid,
+    pub guid: crate::protocol::ObjectGuid,
     pub name: String,
     pub class: u8,
     pub race: u8,
@@ -109,7 +109,7 @@ pub struct GroupMember {
 }
 
 impl GroupMember {
-    pub fn new(guid: crate::shared::protocol::ObjectGuid) -> Self {
+    pub fn new(guid: crate::protocol::ObjectGuid) -> Self {
         Self {
             guid,
             name: String::new(),

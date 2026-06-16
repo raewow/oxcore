@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::player::death::corpse::Corpse;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// CorpseManager holds all active corpse world objects across every map.
 pub struct CorpseManager {
@@ -154,12 +154,12 @@ pub enum CorpseExpiration {
         guid: ObjectGuid,
         owner_guid: ObjectGuid,
         map_id: u32,
-        position: crate::shared::protocol::Position,
+        position: oxcore_shared::protocol::Position,
     },
     Remove {
         guid: ObjectGuid,
         map_id: u32,
-        position: crate::shared::protocol::Position,
+        position: oxcore_shared::protocol::Position,
     },
 }
 
@@ -184,11 +184,11 @@ impl CorpseManager {
         &self,
         guid: ObjectGuid,
         _world: &crate::world::World,
-    ) -> Option<crate::shared::messages::update::SmsgUpdateObject> {
-        use crate::shared::messages::update::*;
-        use crate::shared::protocol::update_fields::*;
-        use crate::shared::protocol::updates::update_block_builder::update_flags;
-        use crate::shared::protocol::updates::update_types::ObjectTypeId;
+    ) -> Option<oxcore_shared::messages::update::SmsgUpdateObject> {
+        use oxcore_shared::messages::update::*;
+        use oxcore_shared::protocol::update_fields::*;
+        use oxcore_shared::protocol::updates::update_block_builder::update_flags;
+        use oxcore_shared::protocol::updates::update_types::ObjectTypeId;
 
         let corpse = self.get(guid)?;
 

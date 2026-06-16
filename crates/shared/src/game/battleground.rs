@@ -55,9 +55,9 @@ impl BattleGroundWinner {
 
 #[derive(Debug, Clone)]
 pub struct BattleGroundPlayer {
-    pub guid: crate::shared::protocol::ObjectGuid,
+    pub guid: crate::protocol::ObjectGuid,
     pub name: String,
-    pub team: crate::shared::game::chat::Team,
+    pub team: crate::game::chat::Team,
     pub score: BattleGroundScore,
     pub is_afk: bool,
     pub is_disconnected: bool,
@@ -68,10 +68,7 @@ pub struct BattleGroundPlayer {
 }
 
 impl BattleGroundPlayer {
-    pub fn new(
-        guid: crate::shared::protocol::ObjectGuid,
-        team: crate::shared::game::chat::Team,
-    ) -> Self {
+    pub fn new(guid: crate::protocol::ObjectGuid, team: crate::game::chat::Team) -> Self {
         Self {
             guid,
             name: String::new(),

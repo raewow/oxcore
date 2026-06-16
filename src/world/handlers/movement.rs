@@ -3,14 +3,14 @@
 use anyhow::{anyhow, Result};
 use tracing::{debug, info, trace};
 
-use crate::shared::messages::character::SmsgLogoutCancelAck;
-use crate::shared::messages::movement::SmsgForceMoveUnroot;
-use crate::shared::messages::social::SmsgStandstateUpdate;
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::core::common::MovementInfo;
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::messages::character::SmsgLogoutCancelAck;
+use oxcore_shared::messages::movement::SmsgForceMoveUnroot;
+use oxcore_shared::messages::social::SmsgStandstateUpdate;
+use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 /// Handle MSG_MOVE_WORLDPORT_ACK - acknowledge far teleport
 ///
@@ -99,7 +99,7 @@ pub async fn handle_worldport_ack(
     info!("[WORLDPORT-ACK] ✓ Player added to new map");
 
     // Send initialization packets (critical for client to exit loading screen)
-    use crate::shared::messages::login::{
+    use oxcore_shared::messages::login::{
         SmsgBindPointUpdate, SmsgInitWorldStates, SmsgSetRestStart,
     };
 
@@ -143,8 +143,8 @@ pub async fn handle_worldport_ack(
     // knows about each item object before the player fields reference their GUIDs.
     info!("[WORLDPORT-ACK] Building player CREATE_OBJECT2 block...");
 
-    use crate::shared::messages::update::{SmsgUpdateObject, UpdateBlockData};
     use crate::world::handlers::character::build_player_create_block_for_player;
+    use oxcore_shared::messages::update::{SmsgUpdateObject, UpdateBlockData};
 
     let player_block = {
         let player_ref = world

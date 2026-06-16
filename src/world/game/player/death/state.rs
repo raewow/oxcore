@@ -3,8 +3,8 @@
 //! Contains the DeathState enum and DeathSystemState struct that tracks
 //! all death-related state for a player.
 
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::Position;
 
 /// Death state machine for units (players and creatures).
 ///

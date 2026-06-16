@@ -147,7 +147,7 @@ pub fn calculate_melee_damage(
 /// Convert MeleeHitOutcome to hit info flags for SMSG_ATTACKERSTATEUPDATE
 /// Matches MaNGOS UnitDefines.h flag values for 1.12.1 client
 pub fn hit_outcome_to_hit_info(outcome: &MeleeHitOutcome) -> u32 {
-    use crate::shared::messages::combat::HitInfo;
+    use oxcore_shared::messages::combat::HitInfo;
 
     let affects = HitInfo::AffectsVictim as u32;
 
@@ -168,7 +168,7 @@ pub fn hit_outcome_to_hit_info(outcome: &MeleeHitOutcome) -> u32 {
 /// Convert MeleeHitOutcome to victim state for SMSG_ATTACKERSTATEUPDATE
 /// Values from MaNGOS UnitDefines.h: UNAFFECTED=0, NORMAL=1, DODGE=2, PARRY=3, INTERRUPT=4, BLOCKS=5
 pub fn hit_outcome_to_victim_state(outcome: &MeleeHitOutcome) -> u32 {
-    use crate::shared::messages::combat::VictimState;
+    use oxcore_shared::messages::combat::VictimState;
 
     match outcome {
         MeleeHitOutcome::Miss => VictimState::Intact as u32,

@@ -7,8 +7,8 @@
 //! - [`SmsgLogXpGain`] - XP gain notification (kill or quest)
 //! - [`SmsgLevelupInfo`] - Level up notification with stat gains
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use crate::messages::ToWorldPacket;
+use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// SMSG_LOG_XPGAIN - XP gain notification
 ///

@@ -1,16 +1,16 @@
 //! Trade system types for world
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 use std::time::Instant;
 
 // Re-export constants from shared
-pub use crate::shared::game::trade::{
+pub use oxcore_shared::game::trade::{
     TRADE_DISTANCE_METERS, TRADE_DISTANCE_YARDS, TRADE_SCAM_PREVENTION_DELAY_MS, TRADE_SLOT_COUNT,
     TRADE_SLOT_INVALID, TRADE_SLOT_NONTRADED, TRADE_SLOT_TRADED_COUNT,
 };
 
 // Re-export TradeStatus from shared so all crate code uses the same type
-pub use crate::shared::game::trade::TradeStatus;
+pub use oxcore_shared::game::trade::TradeStatus;
 
 // ========== ADDITIONAL CONSTANTS ==========
 

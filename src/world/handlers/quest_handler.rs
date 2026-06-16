@@ -5,11 +5,6 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::shared::messages::gossip::SmsgGossipComplete;
-use crate::shared::messages::quest::{
-    MsgQuestPushResult, QuestObjectiveData, SmsgQuestQueryResponseV2,
-};
-use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
@@ -21,6 +16,11 @@ use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
 use crate::world::game::player::player::QuestShareInfo;
 use crate::world::game::player::spells::state::CurrentSpellType;
 use crate::world::World;
+use oxcore_shared::messages::gossip::SmsgGossipComplete;
+use oxcore_shared::messages::quest::{
+    MsgQuestPushResult, QuestObjectiveData, SmsgQuestQueryResponseV2,
+};
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Handle CMSG_QUESTGIVER_STATUS_QUERY (0x182)
 ///
@@ -61,9 +61,9 @@ pub async fn handle_questgiver_status_query(
                 "Questgiver {:?} is hostile to player {:?}, suppressing status",
                 quest_giver_guid, player_guid
             );
-            let msg = crate::shared::messages::quest::SmsgQuestgiverStatus {
+            let msg = oxcore_shared::messages::quest::SmsgQuestgiverStatus {
                 guid: quest_giver_guid,
-                status: crate::shared::messages::quest::DialogStatus::None,
+                status: oxcore_shared::messages::quest::DialogStatus::None,
             };
             world
                 .managers
@@ -120,7 +120,7 @@ pub async fn handle_quest_query(
         rew_money_max_level: quest.rew_money_max_level,
         rew_spell: quest.rew_spell,
         src_item_id: quest.src_item_id,
-        quest_flags: crate::shared::messages::quest::QuestFlags(quest.quest_flags.bits()),
+        quest_flags: oxcore_shared::messages::quest::QuestFlags(quest.quest_flags.bits()),
         rew_item_id: quest.rew_item_id,
         rew_item_count: quest.rew_item_count,
         rew_choice_item_id: quest.rew_choice_item_id,
@@ -288,7 +288,7 @@ pub async fn handle_questgiver_hello(
                 .quest
                 .prepare_quest_menu(player_guid, entry, world)
                 .into_iter()
-                .map(|q| crate::shared::messages::GossipQuestData {
+                .map(|q| oxcore_shared::messages::GossipQuestData {
                     quest_id: q.quest_id,
                     icon: q.icon,
                     level: q.level,
@@ -464,7 +464,7 @@ pub async fn handle_questgiver_cancel(
     info!("CMSG_QUESTGIVER_CANCEL: player={:?}", player_guid);
 
     // Send gossip complete to close the quest window
-    use crate::shared::messages::gossip::SmsgGossipComplete;
+    use oxcore_shared::messages::gossip::SmsgGossipComplete;
     world
         .managers
         .broadcast_mgr
@@ -732,7 +732,7 @@ pub async fn handle_push_quest_to_party(
         // Send "sharing quest" indicator to sharer
         let sharing = MsgQuestPushResult {
             sender_guid: member.guid,
-            msg: crate::shared::game::quest::quest_share_msg::SHARING_QUEST,
+            msg: oxcore_shared::game::quest::quest_share_msg::SHARING_QUEST,
         };
         world
             .managers
@@ -764,7 +764,7 @@ pub async fn handle_push_quest_to_party(
         if !same_map || !in_range {
             let msg = MsgQuestPushResult {
                 sender_guid: member.guid,
-                msg: crate::shared::game::quest::quest_share_msg::TOO_FAR,
+                msg: oxcore_shared::game::quest::quest_share_msg::TOO_FAR,
             };
             world
                 .managers
@@ -778,7 +778,7 @@ pub async fn handle_push_quest_to_party(
         if status == QuestStatus::Complete {
             let msg = MsgQuestPushResult {
                 sender_guid: member.guid,
-                msg: crate::shared::game::quest::quest_share_msg::FINISH_QUEST,
+                msg: oxcore_shared::game::quest::quest_share_msg::FINISH_QUEST,
             };
             world
                 .managers
@@ -791,7 +791,7 @@ pub async fn handle_push_quest_to_party(
         if status == QuestStatus::Incomplete {
             let msg = MsgQuestPushResult {
                 sender_guid: member.guid,
-                msg: crate::shared::game::quest::quest_share_msg::HAVE_QUEST,
+                msg: oxcore_shared::game::quest::quest_share_msg::HAVE_QUEST,
             };
             world
                 .managers
@@ -808,7 +808,7 @@ pub async fn handle_push_quest_to_party(
         {
             let msg = MsgQuestPushResult {
                 sender_guid: member.guid,
-                msg: crate::shared::game::quest::quest_share_msg::CANT_TAKE_QUEST,
+                msg: oxcore_shared::game::quest::quest_share_msg::CANT_TAKE_QUEST,
             };
             world
                 .managers
@@ -826,7 +826,7 @@ pub async fn handle_push_quest_to_party(
         if log_full {
             let msg = MsgQuestPushResult {
                 sender_guid: member.guid,
-                msg: crate::shared::game::quest::quest_share_msg::LOG_FULL,
+                msg: oxcore_shared::game::quest::quest_share_msg::LOG_FULL,
             };
             world
                 .managers
@@ -844,7 +844,7 @@ pub async fn handle_push_quest_to_party(
         {
             let msg = MsgQuestPushResult {
                 sender_guid: member.guid,
-                msg: crate::shared::game::quest::quest_share_msg::BUSY,
+                msg: oxcore_shared::game::quest::quest_share_msg::BUSY,
             };
             world
                 .managers
@@ -931,11 +931,6 @@ pub async fn handle_quest_push_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::database::characters::repositories::quest_repository::{
-        MockQuestRepositoryTrait, QuestRepositoryTrait,
-    };
-    use crate::shared::database::Databases;
-    use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
     use crate::world::config::Config;
     use crate::world::core::session::WorldSession;
     use crate::world::game::broadcast_mgr::BroadcastManagerTrait;
@@ -944,6 +939,11 @@ mod tests {
     use crate::world::game::npc::quest::types::{QuestProgress, QuestTemplate};
     use crate::world::game::player::broadcaster::PlayerBroadcaster;
     use crate::world::game::player::Player;
+    use oxcore_shared::database::characters::repositories::quest_repository::{
+        MockQuestRepositoryTrait, QuestRepositoryTrait,
+    };
+    use oxcore_shared::database::Databases;
+    use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -1006,7 +1006,7 @@ mod tests {
         world: &mut crate::world::World,
     ) -> (
         Arc<WorldSession>,
-        mpsc::UnboundedReceiver<crate::shared::protocol::WorldPacket>,
+        mpsc::UnboundedReceiver<oxcore_shared::protocol::WorldPacket>,
     ) {
         let (tx, rx) = mpsc::unbounded_channel();
         let session = Arc::new(WorldSession::new(1, 1, "Tester".to_string(), 0, tx));
@@ -1107,8 +1107,8 @@ mod tests {
     }
 
     fn read_packet(
-        rx: &mut mpsc::UnboundedReceiver<crate::shared::protocol::WorldPacket>,
-    ) -> crate::shared::protocol::WorldPacket {
+        rx: &mut mpsc::UnboundedReceiver<oxcore_shared::protocol::WorldPacket>,
+    ) -> oxcore_shared::protocol::WorldPacket {
         rx.try_recv().expect("expected a packet")
     }
 
@@ -1121,7 +1121,7 @@ mod tests {
         add_quest(&mut world, 1, Some(200));
 
         let mut packet =
-            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUERY_QUEST);
+            oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUERY_QUEST);
         packet.write_guid(npc_guid);
         packet.write_u32(1);
 
@@ -1142,7 +1142,7 @@ mod tests {
         add_quest(&mut world, 1, Some(100));
 
         let mut packet =
-            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUERY_QUEST);
+            oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUERY_QUEST);
         packet.write_guid(npc_guid);
         packet.write_u32(1);
 
@@ -1161,7 +1161,7 @@ mod tests {
         let (session, mut rx) = add_player(&mut world);
         add_quest(&mut world, 1, Some(100));
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUEST_QUERY);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUEST_QUERY);
         packet.write_u32(1);
 
         handle_quest_query(&session, &mut packet, &world)
@@ -1178,7 +1178,7 @@ mod tests {
         install_mock_quest_system(&mut world);
         let (session, mut rx) = add_player(&mut world);
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_CANCEL);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_CANCEL);
         handle_questgiver_cancel(&session, &mut packet, &world)
             .await
             .expect("handler should succeed");
@@ -1194,7 +1194,7 @@ mod tests {
         let (session, mut rx) = add_player(&mut world);
 
         let mut packet =
-            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUEST_AUTOLAUNCH);
+            oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUEST_AUTOLAUNCH);
         handle_questgiver_quest_auto_launch(&session, &mut packet, &world)
             .await
             .expect("handler should succeed");
@@ -1217,7 +1217,7 @@ mod tests {
             });
 
         let mut invalid =
-            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTLOG_SWAP_QUEST);
+            oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTLOG_SWAP_QUEST);
         invalid.write_u8(1);
         invalid.write_u8(25);
         handle_questlog_swap_quest(&session, &mut invalid, &world)
@@ -1226,7 +1226,7 @@ mod tests {
 
         assert!(rx.try_recv().is_err());
 
-        let mut valid = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTLOG_SWAP_QUEST);
+        let mut valid = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTLOG_SWAP_QUEST);
         valid.write_u8(0);
         valid.write_u8(1);
         handle_questlog_swap_quest(&session, &mut valid, &world)
@@ -1258,7 +1258,7 @@ mod tests {
             });
 
         let mut packet =
-            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTLOG_REMOVE_QUEST);
+            oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTLOG_REMOVE_QUEST);
         packet.write_u8(0);
         handle_questlog_remove_quest(&session, &mut packet, &world)
             .await
@@ -1340,7 +1340,7 @@ mod tests {
         add_quest(&mut world, 1, Some(100));
 
         let mut packet =
-            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
+            oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
         packet.write_guid(npc_guid);
 
         handle_questgiver_status_query(&session, &mut packet, &world)
@@ -1363,7 +1363,7 @@ mod tests {
         add_quest(&mut world, 1, Some(100));
 
         let mut packet =
-            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
+            oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
         packet.write_guid(npc_guid);
 
         handle_questgiver_status_query(&session, &mut packet, &world)
@@ -1382,7 +1382,7 @@ mod tests {
         let unknown_guid = ObjectGuid::new_creature(999, 1);
 
         let mut packet =
-            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
+            oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
         packet.write_guid(unknown_guid);
 
         handle_questgiver_status_query(&session, &mut packet, &world)
@@ -1411,7 +1411,7 @@ mod tests {
                 c.current_health = 0;
             });
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
 
         handle_questgiver_hello(&session, &mut packet, &world)
@@ -1432,7 +1432,7 @@ mod tests {
         // npc_flags = 0 means no interaction flags
         let npc_guid = add_creature(&mut world, 100, 0);
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
 
         handle_questgiver_hello(&session, &mut packet, &world)
@@ -1452,7 +1452,7 @@ mod tests {
         let (session, mut rx) = add_player(&mut world);
         let unknown_guid = ObjectGuid::new_creature(999, 1);
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(unknown_guid);
 
         handle_questgiver_hello(&session, &mut packet, &world)
@@ -1507,7 +1507,7 @@ mod tests {
             .unwrap_or(false);
         assert!(has_feign, "feign death should be present before hello");
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
 
         handle_questgiver_hello(&session, &mut packet, &world)
@@ -1540,7 +1540,7 @@ mod tests {
         let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
         add_quest(&mut world, 1, Some(100));
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
 
         handle_questgiver_hello(&session, &mut packet, &world)
@@ -1559,7 +1559,7 @@ mod tests {
         let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
 
         // Default test creature has flags_extra=0 (not civilian) and creature_type=7 (not totem)
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
 
         handle_questgiver_hello(&session, &mut packet, &world)
@@ -1585,7 +1585,7 @@ mod tests {
         let (session, mut _rx) = add_player(&mut world);
         let npc_guid = add_creature_with_flags(&mut world, 100, NPC_FLAG_QUEST_GIVER, 0x02, 7);
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
 
         handle_questgiver_hello(&session, &mut packet, &world)
@@ -1748,7 +1748,7 @@ mod tests {
             "channel should be active before hello"
         );
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
 
         handle_questgiver_hello(&session, &mut packet, &world)
@@ -1782,7 +1782,7 @@ mod tests {
             "channel should be active before hello"
         );
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
 
         handle_questgiver_hello(&session, &mut packet, &world)
@@ -1804,7 +1804,7 @@ mod tests {
 
         // No channeled spell set up on the player
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
 
         // Handler should succeed without error even with no channel to cancel
@@ -1823,7 +1823,7 @@ mod tests {
         world: &mut crate::world::World,
     ) -> (
         Arc<WorldSession>,
-        mpsc::UnboundedReceiver<crate::shared::protocol::WorldPacket>,
+        mpsc::UnboundedReceiver<oxcore_shared::protocol::WorldPacket>,
     ) {
         let (tx, rx) = mpsc::unbounded_channel();
         let session = Arc::new(WorldSession::new(2, 2, "Member".to_string(), 0, tx));
@@ -1866,7 +1866,7 @@ mod tests {
             0,
             mpsc::unbounded_channel().0,
         ));
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
         let result = handle_push_quest_to_party(&session, &mut packet, &world).await;
         assert!(result.is_err(), "should error when not logged in");
@@ -1881,7 +1881,7 @@ mod tests {
         add_second_player(&mut world);
         add_group_with_members(&mut world, test_player_guid(), member_guid);
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(999); // non-existent quest
         handle_push_quest_to_party(&session, &mut packet, &world)
             .await
@@ -1895,7 +1895,7 @@ mod tests {
         let (session, _) = add_player(&mut world);
         add_quest(&mut world, 1, None);
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
         handle_push_quest_to_party(&session, &mut packet, &world)
             .await
@@ -1913,7 +1913,7 @@ mod tests {
         add_quest(&mut world, 1, None);
 
         // Place both players on the same map and within distance
-        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        let pos = oxcore_shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
         world
             .managers
             .player_mgr
@@ -1924,7 +1924,7 @@ mod tests {
             p.movement.position = pos;
         });
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
 
         handle_push_quest_to_party(&session, &mut packet, &world)
@@ -1957,7 +1957,7 @@ mod tests {
         add_quest(&mut world, 1, None);
 
         // Place member far away
-        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        let pos = oxcore_shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
         world
             .managers
             .player_mgr
@@ -1965,10 +1965,10 @@ mod tests {
                 p.movement.position = pos;
             });
         world.managers.player_mgr.with_player_mut(member_guid, |p| {
-            p.movement.position = crate::shared::protocol::Position::new(100.0, 0.0, 0.0, 0.0);
+            p.movement.position = oxcore_shared::protocol::Position::new(100.0, 0.0, 0.0, 0.0);
         });
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
 
         handle_push_quest_to_party(&session, &mut packet, &world)
@@ -1994,7 +1994,7 @@ mod tests {
         add_quest(&mut world, 1, None);
 
         // Place both players on same map and within distance
-        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        let pos = oxcore_shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
         world
             .managers
             .player_mgr
@@ -2015,7 +2015,7 @@ mod tests {
                 player.active_quests.push(prog);
             });
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
 
         handle_push_quest_to_party(&session, &mut packet, &world)
@@ -2039,7 +2039,7 @@ mod tests {
         add_group_with_members(&mut world, test_player_guid(), member_guid);
         add_quest(&mut world, 1, None);
 
-        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        let pos = oxcore_shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
         world
             .managers
             .player_mgr
@@ -2060,7 +2060,7 @@ mod tests {
                     .push(crate::world::game::npc::quest::types::QuestProgress::new(1));
             });
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
 
         handle_push_quest_to_party(&session, &mut packet, &world)
@@ -2083,7 +2083,7 @@ mod tests {
         add_group_with_members(&mut world, test_player_guid(), member_guid);
         add_quest(&mut world, 1, None);
 
-        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        let pos = oxcore_shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
         world
             .managers
             .player_mgr
@@ -2107,7 +2107,7 @@ mod tests {
                 }
             });
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
 
         handle_push_quest_to_party(&session, &mut packet, &world)
@@ -2130,7 +2130,7 @@ mod tests {
         add_group_with_members(&mut world, test_player_guid(), member_guid);
         add_quest(&mut world, 1, None);
 
-        let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
+        let pos = oxcore_shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
         world
             .managers
             .player_mgr
@@ -2150,7 +2150,7 @@ mod tests {
             },
         );
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
 
         handle_push_quest_to_party(&session, &mut packet, &world)
@@ -2175,7 +2175,7 @@ mod tests {
             0,
             mpsc::unbounded_channel().0,
         ));
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
         packet.write_guid(test_player_guid());
         packet.write_u8(2); // accept
         let result = handle_quest_push_result(&session, &mut packet, &world).await;
@@ -2188,7 +2188,7 @@ mod tests {
         install_mock_quest_system(&mut world);
         let (session, _rx) = add_player(&mut world);
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
         packet.write_guid(test_player_guid());
         packet.write_u8(2); // accept
 
@@ -2214,9 +2214,9 @@ mod tests {
             },
         );
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
         packet.write_guid(member_guid);
-        packet.write_u8(crate::shared::game::quest::quest_share_msg::ACCEPT_QUEST);
+        packet.write_u8(oxcore_shared::game::quest::quest_share_msg::ACCEPT_QUEST);
 
         handle_quest_push_result(&member_session, &mut packet, &world)
             .await
@@ -2255,9 +2255,9 @@ mod tests {
             },
         );
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
         packet.write_guid(member_guid);
-        packet.write_u8(crate::shared::game::quest::quest_share_msg::DECLINE_QUEST);
+        packet.write_u8(oxcore_shared::game::quest::quest_share_msg::DECLINE_QUEST);
 
         handle_quest_push_result(&member_session, &mut packet, &world)
             .await

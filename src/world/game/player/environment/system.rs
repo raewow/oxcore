@@ -1,6 +1,6 @@
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 use std::time::Duration;
 
 use super::fall;
@@ -142,7 +142,7 @@ impl EnvironmentSystem {
         amount: u32,
         world: &World,
     ) -> u32 {
-        use crate::shared::protocol::{Opcode, WorldPacket};
+        use oxcore_shared::protocol::{Opcode, WorldPacket};
 
         // Immunity: don't damage already-dead players.
         let is_alive = world
@@ -315,8 +315,8 @@ impl EnvironmentSystem {
     /// Iterates over client-visible timers and sends start/stop packets
     /// only when the timer status has changed since the last send.
     fn send_mirror_timers(&self, player: &mut crate::world::game::player::Player, forced: bool) {
-        use crate::shared::messages::environment::{SmsgStartMirrorTimer, SmsgStopMirrorTimer};
-        use crate::shared::messages::ToWorldPacket;
+        use oxcore_shared::messages::environment::{SmsgStartMirrorTimer, SmsgStopMirrorTimer};
+        use oxcore_shared::messages::ToWorldPacket;
 
         for timer_type in [
             MirrorTimerType::Fatigue,

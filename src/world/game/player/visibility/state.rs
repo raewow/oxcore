@@ -7,8 +7,8 @@
 
 use std::collections::HashSet;
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::map::grid_coords::CellPair;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Per-player visibility state
 #[derive(Debug)]

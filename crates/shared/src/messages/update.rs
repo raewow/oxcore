@@ -5,12 +5,12 @@
 //!
 //! # Example
 //! ```rust,no_run
-//! use wow_server::shared::messages::update::{
+//! use oxcore_shared::messages::update::{
 //!     SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock, ObjectType,
 //!     SmsgValuesUpdate,
 //! };
-//! use wow_server::shared::protocol::guid::ObjectGuid;
-//! use wow_server::shared::protocol::update_fields::UNIT_FIELD_HEALTH;
+//! use oxcore_shared::protocol::guid::ObjectGuid;
+//! use oxcore_shared::protocol::update_fields::UNIT_FIELD_HEALTH;
 //!
 //! // Simple VALUES_UPDATE using convenience builder
 //! let guid = ObjectGuid::from_raw(0x0000000000000004);
@@ -25,19 +25,19 @@
 //!     ));
 //! ```
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::protocol::position::Position;
-use crate::shared::protocol::updates::movement_block::MovementSpeeds;
-use crate::shared::protocol::updates::update_block_builder::{
+use crate::messages::ToWorldPacket;
+use crate::protocol::guid::ObjectGuid;
+use crate::protocol::position::Position;
+use crate::protocol::updates::movement_block::MovementSpeeds;
+use crate::protocol::updates::update_block_builder::{
     min_mask_blocks, update_flags, UpdateBlockBuilder,
 };
-use crate::shared::protocol::updates::update_types::ObjectTypeId;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::protocol::updates::update_types::ObjectTypeId;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 // Re-export convenience types
-pub use crate::shared::protocol::updates::update_types::ObjectUpdateType;
+pub use crate::protocol::updates::update_types::ObjectUpdateType;
 
 // =========================================================================
 // MAIN CONTAINER - SmsgUpdateObject
@@ -430,11 +430,11 @@ impl MovementUpdateBlock {
 ///
 /// # Example
 /// ```rust,no_run
-/// use wow_server::shared::messages::update::SmsgValuesUpdate;
-/// use wow_server::shared::messages::ToWorldPacket;
-/// use wow_server::shared::protocol::guid::ObjectGuid;
-/// use wow_server::shared::protocol::update_fields::UNIT_FIELD_HEALTH;
-/// use wow_server::shared::messages::update::ObjectType;
+/// use oxcore_shared::messages::update::SmsgValuesUpdate;
+/// use oxcore_shared::messages::ToWorldPacket;
+/// use oxcore_shared::protocol::guid::ObjectGuid;
+/// use oxcore_shared::protocol::update_fields::UNIT_FIELD_HEALTH;
+/// use oxcore_shared::messages::update::ObjectType;
 ///
 /// let guid = ObjectGuid::from_raw(0x0000000000000004);
 /// let packet = SmsgValuesUpdate::new(guid, ObjectType::Unit)

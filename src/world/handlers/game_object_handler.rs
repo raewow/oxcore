@@ -6,11 +6,11 @@
 use anyhow::Result;
 use tracing::debug;
 
-use crate::shared::protocol::WorldPacket;
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
 use crate::world::World;
+use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_GAMEOBJ_USE (0x00B1)
 ///
@@ -83,8 +83,8 @@ pub async fn handle_gameobj_use(
 /// Called internally when a player opens a chest or door (not directly from a packet).
 /// Routes to Lua OnGameObjectOpen script if registered.
 pub async fn handle_gameobj_open(
-    player_guid: crate::shared::protocol::ObjectGuid,
-    go_guid: crate::shared::protocol::ObjectGuid,
+    player_guid: oxcore_shared::protocol::ObjectGuid,
+    go_guid: oxcore_shared::protocol::ObjectGuid,
     world: &World,
 ) -> Result<()> {
     let go_entry = world

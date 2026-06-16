@@ -36,11 +36,11 @@ impl PetitionResult {
 
 #[derive(Debug, Clone)]
 pub struct PetitionInfo {
-    pub guid: crate::shared::protocol::ObjectGuid,
+    pub guid: crate::protocol::ObjectGuid,
     pub petition_id: u32,
     pub petition_name: String,
     pub deadline: u32,
-    pub creator_guid: crate::shared::protocol::ObjectGuid,
+    pub creator_guid: crate::protocol::ObjectGuid,
     pub signs: u8,
     pub min_signatures: u8,
     pub max_signatures: u8,
@@ -49,13 +49,13 @@ pub struct PetitionInfo {
 }
 
 impl PetitionInfo {
-    pub fn new(guid: crate::shared::protocol::ObjectGuid) -> Self {
+    pub fn new(guid: crate::protocol::ObjectGuid) -> Self {
         Self {
             guid,
             petition_id: 0,
             petition_name: String::new(),
             deadline: 0,
-            creator_guid: crate::shared::protocol::ObjectGuid::empty(),
+            creator_guid: crate::protocol::ObjectGuid::empty(),
             signs: 0,
             min_signatures: 0,
             max_signatures: 0,
@@ -67,14 +67,14 @@ impl PetitionInfo {
 
 #[derive(Debug, Clone)]
 pub struct PetitionSignature {
-    pub player_guid: crate::shared::protocol::ObjectGuid,
+    pub player_guid: crate::protocol::ObjectGuid,
     pub player_account: u32,
     pub name: String,
     pub offer_result: PetitionResult,
 }
 
 impl PetitionSignature {
-    pub fn new(player_guid: crate::shared::protocol::ObjectGuid) -> Self {
+    pub fn new(player_guid: crate::protocol::ObjectGuid) -> Self {
         Self {
             player_guid,
             player_account: 0,

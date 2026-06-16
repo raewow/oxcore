@@ -1,5 +1,5 @@
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid as SharedObjectGuid, Opcode, WorldPacket};
+use crate::messages::ToWorldPacket;
+use crate::protocol::{ObjectGuid as SharedObjectGuid, Opcode, WorldPacket};
 
 #[derive(Debug, Clone)]
 pub struct SmsgItemPushResult {

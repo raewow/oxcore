@@ -1,4 +1,4 @@
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashMap;
 
 /// Loot instance for a creature corpse

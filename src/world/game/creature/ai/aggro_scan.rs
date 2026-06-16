@@ -8,8 +8,8 @@ use super::aggro::{
 };
 use super::system::queue_event;
 use super::types::{AIEvent, AIState};
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::World;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Scan for players in aggro range
 /// Called periodically for idle creatures

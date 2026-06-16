@@ -1,9 +1,9 @@
 use super::link_flags::LinkEvent;
 use super::linking_manager::LinkingManager;
-use crate::shared::protocol::ObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::creature::death::DeathState;
 use crate::world::World;
+use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
 /// LinkingSystem - coordinates event propagation between linked creatures

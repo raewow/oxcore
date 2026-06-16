@@ -11,10 +11,10 @@
 //! - [`SmsgDuelComplete`] - Notify players that a duel has completed
 //! - [`SmsgDuelWinner`] - Announce the duel winner
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::messages::ToWorldPacket;
+use crate::protocol::guid::ObjectGuid;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// SMSG_DUEL_REQUESTED - Notify players that a duel has been requested
 ///
@@ -120,7 +120,7 @@ impl ToWorldPacket for SmsgDuelWinner<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::Opcode;
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_smsg_duel_requested() {

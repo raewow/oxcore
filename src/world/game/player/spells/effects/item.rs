@@ -3,9 +3,9 @@
 //! Handles item creation, enchanting, disenchanting, and item manipulation.
 
 use super::{EffectInput, EffectResult};
-use crate::shared::protocol::ObjectGuid;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Equipment slots for enchanting
 #[repr(u8)]

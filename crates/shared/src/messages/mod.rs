@@ -5,7 +5,7 @@
 //!
 //! # Example
 //! ```rust,no_run
-//! use wow_server::shared::messages::{ToWorldPacket, SmsgGuildInvite};
+//! use oxcore_shared::messages::{ToWorldPacket, SmsgGuildInvite};
 //! # async fn example(session: wow_server::world::core::session::world_session::WorldSession) -> anyhow::Result<()> {
 //! let msg = SmsgGuildInvite {
 //!     inviter_name: "Alice",
@@ -16,7 +16,7 @@
 //! # }
 //! ```
 
-use crate::shared::protocol::WorldPacket;
+use crate::protocol::WorldPacket;
 
 /// Trait for types that can be serialized to a WorldPacket
 ///

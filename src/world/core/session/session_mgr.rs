@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
-use crate::shared::protocol::ObjectGuid;
 use crate::world::core::session::{SessionState, WorldSession};
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Manages all active world sessions
 pub struct SessionManager {

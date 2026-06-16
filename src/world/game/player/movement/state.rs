@@ -1,6 +1,6 @@
 //! Movement state - position, speeds, and movement flags
 
-use crate::shared::protocol::Position;
+use oxcore_shared::protocol::Position;
 
 /// Per-player movement state
 #[derive(Debug, Clone)]

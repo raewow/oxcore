@@ -2,7 +2,7 @@
 
 use super::cache::TradeCache;
 use super::types::*;
-use crate::shared::protocol::{HighGuid, ObjectGuid};
+use oxcore_shared::protocol::{HighGuid, ObjectGuid};
 
 // ========== TEST HELPERS ==========
 

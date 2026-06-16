@@ -11,23 +11,23 @@ use super::graveyard::{self, GraveyardManager};
 use super::resurrect::{self, ResurrectionMethod};
 use super::sickness;
 use super::state::{DeathState, DeathSystemState};
-use crate::shared::messages::death::{SmsgCorpseReclaimDelay, SmsgResurrectRequest};
-use crate::shared::messages::inventory::SmsgDurabilityDamageDeath;
-use crate::shared::messages::update::{
-    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::update_fields::{
-    PLAYER_FLAGS, UNIT_FIELD_BYTES_1, UNIT_FIELD_FLAGS, UNIT_FIELD_HEALTH, UNIT_FIELD_POWER1,
-};
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::Position;
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::dbc::DbcManager;
 use crate::world::game::broadcast_mgr::BroadcastManagerTrait;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::messages::death::{SmsgCorpseReclaimDelay, SmsgResurrectRequest};
+use oxcore_shared::messages::inventory::SmsgDurabilityDamageDeath;
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::update_fields::{
+    PLAYER_FLAGS, UNIT_FIELD_BYTES_1, UNIT_FIELD_FLAGS, UNIT_FIELD_HEALTH, UNIT_FIELD_POWER1,
+};
+use oxcore_shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::Position;
+use oxcore_shared::protocol::{Opcode, WorldPacket};
 use sqlx::MySqlPool;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -62,8 +62,8 @@ const MOVEMENT_FLAG_WATERWALKING: u32 = 0x10000000;
 /// Bridge: Corpse struct → CorpseRow DB model.
 fn corpse_to_row(
     corpse: &Corpse,
-) -> crate::shared::database::characters::models::corpse::CorpseRow {
-    use crate::shared::database::characters::models::corpse::CorpseRow;
+) -> oxcore_shared::database::characters::models::corpse::CorpseRow {
+    use oxcore_shared::database::characters::models::corpse::CorpseRow;
     CorpseRow {
         guid: corpse.guid.counter(),
         player_guid: corpse.owner_guid.counter(),
@@ -619,7 +619,7 @@ impl DeathSystem {
                     let pool = Arc::new(world.databases.character.clone());
                     let counter = guid.counter();
                     tokio::spawn(async move {
-                        use crate::shared::database::characters::repositories::CorpseRepository;
+                        use oxcore_shared::database::characters::repositories::CorpseRepository;
                         let repo = CorpseRepository::new(pool);
                         // Load + rewrite with corpse_type=0. We do it via save()
                         // with ON DUPLICATE KEY UPDATE so this is a single
@@ -1203,7 +1203,7 @@ impl DeathSystem {
         let pool = Arc::new(world.databases.character.clone());
         let row = corpse_to_row(&corpse);
         tokio::spawn(async move {
-            use crate::shared::database::characters::repositories::CorpseRepository;
+            use oxcore_shared::database::characters::repositories::CorpseRepository;
             let repo = CorpseRepository::new(pool);
             if let Err(e) = repo.save(&row).await {
                 warn!("Failed to persist corpse {:?}: {}", row.guid, e);
@@ -1242,7 +1242,7 @@ impl DeathSystem {
         let pool = Arc::new(world.databases.character.clone());
         let counter = corpse_guid.counter();
         tokio::spawn(async move {
-            use crate::shared::database::characters::repositories::CorpseRepository;
+            use oxcore_shared::database::characters::repositories::CorpseRepository;
             let repo = CorpseRepository::new(pool);
             if let Err(e) = repo.delete(counter).await {
                 warn!("Failed to delete persisted corpse {}: {}", counter, e);
@@ -1256,8 +1256,8 @@ impl DeathSystem {
     /// Map grids. Appearance/equipment are filled with defaults; a corpse
     /// loaded from disk is a placeholder body — enough for visibility + reclaim.
     pub async fn load_corpses(&self, world: &World) -> Result<()> {
-        use crate::shared::database::characters::repositories::CorpseRepository;
         use crate::world::game::player::death::corpse::{Corpse, CorpseType};
+        use oxcore_shared::database::characters::repositories::CorpseRepository;
 
         let pool = Arc::new(world.databases.character.clone());
         let repo = CorpseRepository::new(pool);

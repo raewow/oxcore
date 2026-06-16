@@ -8,7 +8,7 @@ use super::cache::{
     BUYBACK_SLOT_COUNT, EQUIPMENT_SLOT_COUNT, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_COUNT,
     KEYRING_SLOT_COUNT,
 };
-use crate::shared::protocol::{HighGuid, ObjectGuid};
+use oxcore_shared::protocol::{HighGuid, ObjectGuid};
 
 // ========== TEST HELPERS ==========
 
@@ -644,12 +644,12 @@ mod integration_tests {
     use super::super::system::InventorySystem;
     use super::super::types::GoldResult;
     use super::*;
-    use crate::shared::database::characters::repositories::inventory_repository_trait::MockInventoryRepositoryTrait;
-    use crate::shared::protocol::Opcode;
-    use crate::shared::protocol::WorldPacket;
     use crate::world::game::broadcast_mgr::MockBroadcastManagerTrait;
     use crate::world::game::ItemManager;
     use mockall::predicate::*;
+    use oxcore_shared::database::characters::repositories::inventory_repository_trait::MockInventoryRepositoryTrait;
+    use oxcore_shared::protocol::Opcode;
+    use oxcore_shared::protocol::WorldPacket;
     use std::sync::Arc;
 
     /// Create a test InventorySystem with mocked repository and broadcaster

@@ -3,10 +3,10 @@
 //! These handlers are slim wrappers that parse packets and delegate
 //! to the ReputationSystem. No business logic lives here.
 
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::session::WorldSession;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::{Opcode, WorldPacket};
 use tracing::{debug, warn};
 
 /// Handle CMSG_SET_FACTION_ATWAR (0x0125)

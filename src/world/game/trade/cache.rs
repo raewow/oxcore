@@ -5,7 +5,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::ObjectGuid;
 
 use super::types::{TradeData, TradeError, TradeState};
 
@@ -212,7 +212,7 @@ impl Default for TradeCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::protocol::HighGuid;
+    use oxcore_shared::protocol::HighGuid;
 
     fn test_guid(low: u32) -> ObjectGuid {
         ObjectGuid::new_without_entry(HighGuid::Player, low)

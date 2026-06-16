@@ -7,9 +7,9 @@
 //! - [`SmsgUpdateAccountData`] - Response to account data update or request
 //! - [`SmsgAccountDataTimes`] - Account data timestamps (sent during login)
 
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::game::player::settings::account_data::compress_account_data;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 /// SMSG_UPDATE_ACCOUNT_DATA - Response to account data operations
 ///

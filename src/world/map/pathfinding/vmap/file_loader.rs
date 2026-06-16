@@ -2,9 +2,9 @@
 //! Aligned with MaNGOS VMapManager2 and MapTree implementation
 
 use super::types::{BoundingBox, ModelInstance, ModelType};
-use crate::shared::protocol::Position;
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
+use oxcore_shared::protocol::Position;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};

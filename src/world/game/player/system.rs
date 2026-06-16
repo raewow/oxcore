@@ -8,8 +8,8 @@ use tracing::info;
 use super::manager::PlayerManager;
 use super::movement::MovementSystem;
 use super::visibility::VisibilitySubsystem;
-use crate::shared::protocol::{ObjectGuid, Position};
 use crate::world::World;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Player System - wraps PlayerManager with system lifecycle
 pub struct PlayerSystem {
@@ -97,8 +97,8 @@ impl PlayerSystem {
         diff: Duration,
         world: &World,
     ) -> Result<()> {
-        use crate::shared::protocol::{Opcode, WorldPacket};
         use crate::world::game::combat::melee_range::{self, DEFAULT_COMBAT_REACH};
+        use oxcore_shared::protocol::{Opcode, WorldPacket};
 
         let diff_ms = diff.as_millis() as u32;
 

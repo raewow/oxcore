@@ -11,10 +11,10 @@
 //! - CMSG_TUTORIAL_CLEAR (0x0100)
 //! - CMSG_TUTORIAL_RESET (0x0101)
 
-use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::session::WorldSession;
 use crate::world::World;
 use anyhow::Result;
+use oxcore_shared::protocol::{Opcode, WorldPacket};
 use tracing::{debug, warn};
 
 /// Handle CMSG_SET_ACTION_BUTTON (0x0128)

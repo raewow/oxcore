@@ -10,12 +10,12 @@
 //! - [`SmsgChatRestricted`] - Player is muted/chat restricted
 //! - [`SmsgChatPlayerAmbiguous`] - Multiple players match whisper target
 
-use crate::shared::game::chat::{ChatMsg, ChatTag, Language};
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::packet::WorldPacketGuidExt;
-use crate::shared::protocol::ObjectGuid;
-use crate::shared::protocol::Opcode;
-use crate::shared::protocol::WorldPacket;
+use crate::game::chat::{ChatMsg, ChatTag, Language};
+use crate::messages::ToWorldPacket;
+use crate::protocol::packet::WorldPacketGuidExt;
+use crate::protocol::ObjectGuid;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// SMSG_MESSAGECHAT - Main chat message packet
 ///
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_monster_say_packet_structure() {
-        use crate::shared::game::chat::{ChatMsg, ChatTag, Language};
+        use crate::game::chat::{ChatMsg, ChatTag, Language};
 
         let guid = ObjectGuid::from_low(42);
         let msg = SmsgMessageChat {
@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn test_monster_yell_packet_structure() {
-        use crate::shared::game::chat::{ChatMsg, ChatTag, Language};
+        use crate::game::chat::{ChatMsg, ChatTag, Language};
 
         let guid = ObjectGuid::from_low(99);
         let msg = SmsgMessageChat {
@@ -551,7 +551,7 @@ mod tests {
     fn test_monster_say_no_spurious_flags_field() {
         // Regression test: the old hand-built packet had a u32 flags field
         // between sender GUID and name length, corrupting the packet.
-        use crate::shared::game::chat::{ChatMsg, ChatTag, Language};
+        use crate::game::chat::{ChatMsg, ChatTag, Language};
 
         let guid = ObjectGuid::from_low(1);
         let msg = SmsgMessageChat {

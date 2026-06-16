@@ -7,14 +7,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::shared::game::chat::{ChatMsg, ChatTag, Language, Team};
-use crate::shared::messages::channel::{ChannelMemberInfo, *};
-use crate::shared::messages::chat::*;
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, Position, WorldPacket};
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::player::PlayerManager;
 use crate::world::game::BroadcastManager;
+use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language, Team};
+use oxcore_shared::messages::channel::{ChannelMemberInfo, *};
+use oxcore_shared::messages::chat::*;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
 
 use super::commands::{self, CommandRegistry};
 use super::types::*;
@@ -1155,7 +1155,7 @@ impl ChatSystem {
     pub fn get_command_help(
         &self,
         command: Option<&str>,
-        security: crate::shared::common::AccountType,
+        security: oxcore_shared::common::AccountType,
     ) -> String {
         self.command_registry.get_help(command, security)
     }

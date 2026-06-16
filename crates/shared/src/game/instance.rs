@@ -81,7 +81,7 @@ impl InstanceSave {
 pub struct BossEncounter {
     pub credit_type: u32,
     pub credit_entry: u32,
-    pub last_enemy_guid: crate::shared::protocol::ObjectGuid,
+    pub last_enemy_guid: crate::protocol::ObjectGuid,
     pub progress: u32,
     pub completed_encounter: bool,
 }
@@ -91,7 +91,7 @@ impl BossEncounter {
         Self {
             credit_type: 0,
             credit_entry,
-            last_enemy_guid: crate::shared::protocol::ObjectGuid::empty(),
+            last_enemy_guid: crate::protocol::ObjectGuid::empty(),
             progress: 0,
             completed_encounter: false,
         }

@@ -6,14 +6,14 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::shared::common::AccountType;
-use crate::shared::game::chat::{ChatMsg, ChatTag, Language, Team};
-use crate::shared::messages::chat::SmsgMessageChat;
-use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::{ObjectGuid, WorldPacket};
 use crate::world::core::session::WorldSession;
 use crate::world::game::chat::commands::ChatCommandContext;
 use crate::world::World;
+use oxcore_shared::common::AccountType;
+use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language, Team};
+use oxcore_shared::messages::chat::SmsgMessageChat;
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 
 /// Handle CMSG_MESSAGECHAT - player sends a chat message
 pub async fn handle_messagechat(
