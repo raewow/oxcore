@@ -1,0 +1,21 @@
+[package]
+name = "oxcore-tui"
+version = "0.1.0"
+edition = "2021"
+description = "Shared ratatui terminal UI for oxcore servers (auth + world)"
+
+[dependencies]
+oxcore-shared.workspace = true
+
+anyhow = "1.0"
+chrono = "0.4"
+parking_lot = "0.12"
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi", "registry"] }
+ratatui = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
+futures = "0.3"
+
+[lints.rust]
+unused = "allow"

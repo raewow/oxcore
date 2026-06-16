@@ -71,14 +71,31 @@ The tool reads database connection URLs from the same `config.toml` used by the 
 
 ```bash
 # From repo root
-# Run the binaries
+# Run BOTH servers in one process with the shared TUI (recommended)
+cargo run --bin oxcore
+
+# Run only one server through the unified runtime
+cargo run --bin oxcore -- --only auth
+cargo run --bin oxcore -- --only world
+
+# Run a single server standalone (also shows the TUI)
 cargo run --bin auth
 cargo run --bin world
+
+# Disable the TUI (plain stderr/file logging, for systemd/CI/piped logs)
+cargo run --bin oxcore -- --headless
 
 # Or do a build
 cargo build --release
 
 ```
+
+All binaries launch a shared ratatui terminal UI with tabs (**Both / Auth / World /
+Performance**), an autosuggesting command input box, live connection/player counts, and
+colour-coded logs. On the **Both** tab, prefix a command with `auth:` or `world:` to route
+it (bare commands go to world); the Auth/World tabs route automatically. Press `Tab` to
+switch tabs, `→` to accept an autosuggestion, `q`/`Ctrl+C` to quit. The UI auto-disables
+when stdout is not a TTY, or pass `--headless`.
 
 ## Running the Server
 
@@ -106,7 +123,7 @@ target\release\auth.exe
 
 The auth server will start on port 3724 (default) and handle client authentication.
 
-Once the auth server is running, use the console prompt (`server>`) to create accounts and set GM levels:
+Once the auth server is running, use the TUI input box (bottom of the screen) to create accounts and set GM levels:
 
 ```text
 account create myuser mypassword
@@ -120,7 +137,7 @@ account create myuser mypassword 7
 account setgm myuser 7
 ```
 
-Type `help` at the `server>` prompt for other console commands.
+Type `help` in the TUI input box for other console commands.
 
 ### Step 3: Start the World Server
 
@@ -132,6 +149,9 @@ cargo run --release --bin world
 # Or if already built
 target\release\world.exe
 ```
+
+> Tip: instead of running `auth` and `world` in two terminals, run `cargo run --release
+> --bin oxcore` to start both in one process and switch between them with the TUI tabs.
 
 
 ### Client Configuration

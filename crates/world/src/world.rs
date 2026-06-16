@@ -32,6 +32,19 @@ use oxcore_shared::protocol::ObjectGuid;
 use parking_lot::RwLock;
 use tokio::sync::RwLock as TokioRwLock;
 
+/// Live update-loop performance stats, surfaced to the TUI Performance tab.
+#[derive(Default, Clone)]
+pub struct TickStats {
+    /// Duration of the last full update() in milliseconds.
+    pub last_tick_ms: f64,
+    /// Exponential moving average of ticks per second.
+    pub tps: f64,
+    /// Per-phase timings for the last tick: (name, milliseconds).
+    pub phases: Vec<(String, f64)>,
+    /// Instant of the previous tick (for TPS calculation).
+    pub last_update: Option<std::time::Instant>,
+}
+
 pub struct Managers {
     // TODO moves these out of this struct
     pub player_mgr: Arc<PlayerManager>,
@@ -70,6 +83,8 @@ pub struct World {
     pub console_rx: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<ConsoleCommand>>>,
     pub command_registry: Arc<TokioRwLock<CommandRegistry<World>>>,
     background_tasks: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    /// Live update-loop performance stats for the TUI.
+    pub tick_stats: Arc<parking_lot::Mutex<TickStats>>,
     /// Per-player packet handlers
     pub player_handlers: Arc<
         dashmap::DashMap<ObjectGuid, crate::core::network::player_handler::PlayerPacketHandler>,
@@ -196,6 +211,7 @@ impl World {
             console_rx: Arc::new(tokio::sync::Mutex::new(tokio::sync::mpsc::channel(1).1)),
             command_registry: Arc::new(TokioRwLock::new(command_registry)),
             background_tasks: Arc::new(std::sync::Mutex::new(Vec::new())),
+            tick_stats: Arc::new(parking_lot::Mutex::new(TickStats::default())),
             player_handlers: Arc::new(dashmap::DashMap::new()),
             movement_buffers: Arc::new(dashmap::DashMap::new()),
             data_dir,
@@ -382,9 +398,12 @@ impl World {
     }
 
     async fn update(&self) -> Result<()> {
+        let tick_start = std::time::Instant::now();
         let diff = self.update_interval;
         let diff_ms = diff.as_millis() as u32;
 
+        // --- Phase: grid loading/unloading ---
+        let phase_grid = std::time::Instant::now();
         // Process grid loading/unloading for all active maps (continents and instances)
         // This handles lazy creature spawning based on player proximity
         for (map_id, instance_id) in self.managers.map_mgr.get_active_map_keys() {
@@ -402,7 +421,10 @@ impl World {
                 );
             }
         }
+        let grid_ms = phase_grid.elapsed().as_secs_f64() * 1000.0;
 
+        // --- Phase: movement + maps ---
+        let phase_maps = std::time::Instant::now();
         // Process creature movement FIRST so positions are current for combat
         // and AI range checks (matches vmangos: Unit::Update does spline/movement
         // before AI UpdateAI calls DoMeleeAttackIfReady)
@@ -415,7 +437,10 @@ impl World {
         // Flush queued packets (packet collapsing optimization)
         // Movement packets accumulated during map updates are sent here with collapsing applied
         self.managers.broadcast_mgr.flush_all_queues();
+        let maps_ms = phase_maps.elapsed().as_secs_f64() * 1000.0;
 
+        // --- Phase: systems (general + spells + auras) ---
+        let phase_systems = std::time::Instant::now();
         self.systems.update_all(diff, self)?;
 
         // Update spell cast timers for all players
@@ -423,7 +448,10 @@ impl World {
 
         // Update aura durations and periodic effects for all players
         self.systems.auras.update_all_auras(diff, self).await?;
+        let systems_ms = phase_systems.elapsed().as_secs_f64() * 1000.0;
 
+        // --- Phase: creatures (deaths/respawn/combat/ai/regen) ---
+        let phase_creatures = std::time::Instant::now();
         // Process creature deaths (Phase 3)
         crate::game::creature::death::process_deaths(self).await?;
 
@@ -443,6 +471,7 @@ impl World {
 
         // Process creature regeneration (health + mana)
         crate::game::creature::regen::update_regeneration(self, diff_ms);
+        let creatures_ms = phase_creatures.elapsed().as_secs_f64() * 1000.0;
 
         // Process timed quest expiry
         self.systems.quest.update_quest_timers(diff_ms, self);
@@ -487,6 +516,37 @@ impl World {
             .await
         {
             // Console processed successfully
+        }
+
+        // Record performance stats for this tick (consumed by the TUI Performance tab).
+        {
+            let now = std::time::Instant::now();
+            let total_ms = tick_start.elapsed().as_secs_f64() * 1000.0;
+            let mut stats = self.tick_stats.lock();
+            let instant_tps = match stats.last_update {
+                Some(prev) => {
+                    let dt = now.duration_since(prev).as_secs_f64();
+                    if dt > 0.0 {
+                        1.0 / dt
+                    } else {
+                        0.0
+                    }
+                }
+                None => 0.0,
+            };
+            stats.tps = if stats.tps > 0.0 {
+                stats.tps * 0.9 + instant_tps * 0.1
+            } else {
+                instant_tps
+            };
+            stats.last_tick_ms = total_ms;
+            stats.last_update = Some(now);
+            stats.phases = vec![
+                ("grid".to_string(), grid_ms),
+                ("maps".to_string(), maps_ms),
+                ("systems".to_string(), systems_ms),
+                ("creatures".to_string(), creatures_ms),
+            ];
         }
 
         Ok(())
@@ -610,7 +670,9 @@ impl World {
     }
 
     pub async fn start(&self, config: &crate::config::Config) -> Result<()> {
-        self.setup_logging(config)?;
+        // NOTE: logging is initialised once by the caller (runtime/bin) before start(),
+        // and shutdown is driven by the caller's broadcast channel — so this no longer
+        // installs a tracing subscriber or its own ctrl-c handler.
         if let Err(e) = self.init().await {
             tracing::error!("World initialization FAILED: {:?}", e);
             return Err(e);
@@ -645,7 +707,6 @@ impl World {
         }
 
         self.start_realm_heartbeat();
-        self.start_shutdown_signal_handler();
 
         Ok(())
     }
@@ -733,6 +794,7 @@ impl Clone for World {
             console_rx: Arc::clone(&self.console_rx),
             command_registry: Arc::clone(&self.command_registry),
             background_tasks: Arc::clone(&self.background_tasks),
+            tick_stats: Arc::clone(&self.tick_stats),
             player_handlers: Arc::clone(&self.player_handlers),
             movement_buffers: Arc::clone(&self.movement_buffers),
             data_dir: self.data_dir.clone(),

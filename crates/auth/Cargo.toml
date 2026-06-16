@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 oxcore-shared.workspace = true
+oxcore-tui.workspace = true
 
 anyhow = "1.0"
 base32 = "0.4"
