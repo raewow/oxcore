@@ -1,6 +1,6 @@
 //! Server management commands for the auth server.
 
-use crate::auth::context::AuthServer;
+use crate::context::AuthServer;
 use crate::shared::common::AccountType;
 use crate::shared::console::command::{CommandContext, CommandInfo};
 use crate::shared::console::output::print_console;

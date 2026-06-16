@@ -6,19 +6,20 @@ authors = ["MaNGOS Rust Port"]
 description = "World of Warcraft server (realmd + worldserver) ported to Rust"
 
 [workspace]
-members = [".", "crates/db"]
-default-members = [".", "crates/db"]
+members = [".", "crates/auth", "crates/db", "crates/shared"]
+default-members = [".", "crates/auth", "crates/db", "crates/shared"]
 resolver = "2"
+
+[workspace.dependencies]
+oxcore-shared = { path = "crates/shared" }
 
 [[bin]]
 name = "world"
 path = "src/bin/world.rs"
 
-[[bin]]
-name = "auth"
-path = "src/bin/auth.rs"
-
 [dependencies]
+oxcore-shared.workspace = true
+
 # Async runtime
 tokio = { version = "1.35", features = [
     "rt-multi-thread",

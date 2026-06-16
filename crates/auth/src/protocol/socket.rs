@@ -7,18 +7,18 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::{debug, error, info, warn};
 
-use crate::auth::auth::packets::{
+use crate::common::codes::{AuthCmd, AuthResult, AuthStatus, LockFlag};
+use crate::config::Config;
+use crate::database::Database;
+use crate::metrics::Metrics;
+use crate::patch::PatchCache;
+use crate::protocol::packets::{
     AuthLogonChallengeC, AuthLogonChallengeS, AuthLogonProofC, AuthLogonProofS,
     AuthReconnectChallengeS, AuthReconnectProofC, AuthReconnectProofS,
 };
-use crate::auth::auth::srp6_v2::Srp6;
-use crate::auth::auth::{pin::verify_pin_data, Geolock};
-use crate::auth::common::codes::{AuthCmd, AuthResult, AuthStatus, LockFlag};
-use crate::auth::config::Config;
-use crate::auth::database::Database;
-use crate::auth::metrics::Metrics;
-use crate::auth::patch::PatchCache;
-use crate::auth::realm::{AllowedBuilds, RealmList};
+use crate::protocol::srp6_v2::Srp6;
+use crate::protocol::{pin::verify_pin_data, Geolock};
+use crate::realm::{AllowedBuilds, RealmList};
 use sha1::{Digest, Sha1};
 use std::path::PathBuf;
 
@@ -580,7 +580,7 @@ impl AuthSocket {
                     self.send_packet(&version_response).await?;
 
                     // Send XFER_INIT packet
-                    let xfer_init = crate::auth::auth::packets::XferInit::new(file_size, md5_hash);
+                    let xfer_init = crate::protocol::packets::XferInit::new(file_size, md5_hash);
                     let mut xfer_buf = BytesMut::new();
                     xfer_init.write_to(&mut xfer_buf);
                     self.send_packet(&xfer_buf).await?;
@@ -685,7 +685,7 @@ impl AuthSocket {
                         if let Some(secret) = totp_secret {
                             for i in -2..=2 {
                                 if let Ok(totp_pin) =
-                                    crate::auth::auth::totp::generate_totp_with_offset(&secret, i)
+                                    crate::protocol::totp::generate_totp_with_offset(&secret, i)
                                 {
                                     if verify_pin_data(
                                         totp_pin,
@@ -1141,7 +1141,7 @@ impl AuthSocket {
             };
 
             chunk_buf.clear();
-            chunk_buf.put_u8(crate::auth::common::codes::AuthCmd::XferData as u8);
+            chunk_buf.put_u8(crate::common::codes::AuthCmd::XferData as u8);
             chunk_buf.put_u16_le(n as u16);
             chunk_buf.extend_from_slice(&buffer[..n]);
 

@@ -1485,6 +1485,61 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxcore-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base32",
+ "bytes",
+ "chrono",
+ "clap",
+ "digest",
+ "hex",
+ "hmac",
+ "md5",
+ "num-bigint",
+ "oxcore-shared",
+ "rand",
+ "serde",
+ "sha1",
+ "sha2",
+ "sqlx",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "wow_srp",
+]
+
+[[package]]
+name = "oxcore-db"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "serde",
+ "sqlx",
+ "tokio",
+ "toml",
+]
+
+[[package]]
+name = "oxcore-shared"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "hex",
+ "serde",
+ "sqlx",
+ "tokio",
+ "toml",
+ "tracing",
+ "wow_srp",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1709,19 +1764,6 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
-]
-
-[[package]]
-name = "rcore-db"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "serde",
- "sqlx",
- "tokio",
- "toml",
 ]
 
 [[package]]
@@ -3061,6 +3103,7 @@ dependencies = [
  "nalgebra",
  "num-bigint",
  "num-traits",
+ "oxcore-shared",
  "parking_lot",
  "pathfinding",
  "rand",

@@ -1324,7 +1324,7 @@ impl CreatureManager {
         packet.write_u8(0); // name3
         packet.write_u8(0); // name4
         packet.write_cstring(template.subname.as_deref().unwrap_or(""));
-        // type_flags: Not stored in rcore DB schema. Use 0 for now.
+        // type_flags: Not stored in oxcore DB schema. Use 0 for now.
         // Ghost visibility is handled server-side via static_flags1 VISIBLE_TO_GHOSTS.
         packet.write_u32(0);
         packet.write_u32(template.creature_type as u32);

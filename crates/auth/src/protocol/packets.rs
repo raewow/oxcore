@@ -1,4 +1,4 @@
-use crate::auth::common::codes::AuthCmd;
+use crate::common::codes::AuthCmd;
 use bytes::{Buf, BufMut, BytesMut};
 
 /// Client logon challenge packet (C -> S)
@@ -136,7 +136,7 @@ pub struct AuthLogonProofC {
     pub crc_hash: [u8; 20],
     pub number_of_keys: u8,
     pub security_flags: Option<u8>,
-    pub pin_data: Option<crate::auth::auth::pin::PinData>,
+    pub pin_data: Option<crate::protocol::pin::PinData>,
 }
 
 impl AuthLogonProofC {
@@ -176,7 +176,7 @@ impl AuthLogonProofC {
             buf.copy_to_slice(&mut salt);
             let mut hash = [0u8; 20];
             buf.copy_to_slice(&mut hash);
-            Some(crate::auth::auth::pin::PinData { salt, hash })
+            Some(crate::protocol::pin::PinData { salt, hash })
         } else {
             None
         };

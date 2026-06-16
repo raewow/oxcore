@@ -3,8 +3,8 @@
 //! Defines the command handler functions and registry for console commands.
 //! This is a generic framework that can work with any server context.
 
-use crate::shared::common::AccountType;
-use crate::shared::console::output::print_console;
+use crate::common::AccountType;
+use crate::console::output::print_console;
 use anyhow::Result;
 use std::collections::HashMap;
 

@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use tokio::sync::{broadcast, Mutex, RwLock};
 
-use crate::auth::config::Config;
-use crate::auth::database::Database;
-use crate::auth::metrics::Metrics;
+use crate::config::Config;
+use crate::database::Database;
+use crate::metrics::Metrics;
 use crate::shared::console::{CommandRegistry, ConsoleCommand};
 
 pub struct AuthServer {
@@ -25,7 +25,7 @@ impl AuthServer {
         metrics: Arc<Metrics>,
         shutdown_tx: broadcast::Sender<()>,
     ) -> Self {
-        use crate::auth::console::commands::register_all_commands;
+        use crate::console::commands::register_all_commands;
 
         let mut command_registry = CommandRegistry::new();
         register_all_commands(&mut command_registry);

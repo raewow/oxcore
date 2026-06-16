@@ -1,0 +1,33 @@
+[package]
+name = "oxcore-auth"
+version = "0.1.0"
+edition = "2021"
+description = "Authentication server for oxcore"
+
+[[bin]]
+name = "auth"
+path = "src/main.rs"
+
+[dependencies]
+oxcore-shared.workspace = true
+
+anyhow = "1.0"
+base32 = "0.4"
+bytes = "1.5"
+chrono = "0.4"
+clap = { version = "4.4", features = ["derive"] }
+digest = "0.10"
+hex = "0.4"
+hmac = "0.12"
+md5 = "0.7"
+num-bigint = "0.4"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+sha1 = "0.10"
+sha2 = "0.10"
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "mysql", "chrono"] }
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi", "registry"] }
+wow_srp = "0.7"

@@ -1,15 +1,22 @@
 // Database modules organized by database
-pub mod auth;
 pub mod characters;
 pub mod logs;
 pub mod world;
+
+pub use oxcore_shared::database::auth;
 
 use anyhow::{Context, Result};
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::MySqlPool;
 use tracing::info;
 
-use crate::world::config::Config;
+#[derive(Debug, Clone)]
+pub struct DatabaseUrls {
+    pub world: String,
+    pub character: String,
+    pub auth: String,
+    pub logs: String,
+}
 
 /// Container for all database connection pools
 #[derive(Clone)]
@@ -22,14 +29,8 @@ pub struct Databases {
 
 impl Databases {
     /// Create all database connection pools from config
-    pub async fn new(config: &Config) -> Result<Self> {
-        Self::from_urls(
-            &config.world_database_url,
-            &config.character_database_url,
-            &config.login_database_url,
-            &config.logs_database_url,
-        )
-        .await
+    pub async fn new(urls: &DatabaseUrls) -> Result<Self> {
+        Self::from_urls(&urls.world, &urls.character, &urls.auth, &urls.logs).await
     }
 
     /// Create all database connection pools from URLs

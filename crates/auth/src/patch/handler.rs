@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info};
 
-use crate::auth::common::codes::AuthCmd;
+use crate::common::codes::AuthCmd;
 
 /// Chunk structure for patch data transfer
 #[repr(C, packed)]

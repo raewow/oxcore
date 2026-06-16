@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use tracing::{error, info, warn};
 
-use crate::auth::config::Config;
-use crate::auth::database::Database;
+use crate::config::Config;
+use crate::database::Database;
 
 pub async fn initialize_database(config: &Config) -> Result<Database> {
     let database = Database::new(config)

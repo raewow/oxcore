@@ -3,7 +3,7 @@ use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
-use crate::auth::config::Config;
+use crate::config::Config;
 
 pub fn init_basic() -> Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));

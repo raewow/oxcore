@@ -36,7 +36,7 @@ pub async fn handle_creature_query(
             entry,
             &template.name,
             template.subname.as_deref().unwrap_or(""),
-            0, // type_flags not stored in rcore DB schema
+            0, // type_flags not stored in oxcore DB schema
             template.creature_type,
             template.get_display_id(), // Use first non-zero display_id
         );

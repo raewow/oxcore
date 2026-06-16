@@ -3,7 +3,7 @@ use sqlx::MySqlPool;
 use std::sync::Arc;
 use tracing::info;
 
-use crate::auth::config::Config;
+use crate::config::Config;
 use crate::shared::database::auth::repositories::*;
 
 #[derive(Clone)]

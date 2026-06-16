@@ -1,19 +1,17 @@
 [package]
-name = "oxcore-db"
+name = "oxcore-shared"
 version = "0.1.0"
 edition = "2021"
 authors = ["MaNGOS Rust Port"]
-description = "Database migration tool for oxcore"
-
-[[bin]]
-name = "db"
-path = "src/main.rs"
+description = "Shared protocol, database, and utility code for oxcore"
 
 [dependencies]
 anyhow = "1.0"
 chrono = "0.4"
-clap = { version = "4.4", features = ["derive"] }
+hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "mysql", "chrono"] }
-tokio = { version = "1.35", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "sync"] }
 toml = "0.8"
+tracing = "0.1"
+wow_srp = "0.7"

@@ -1,15 +1,15 @@
 use anyhow::Result;
+use oxcore_auth::context::AuthServer;
+use oxcore_auth::init::initialize_database;
+use oxcore_auth::logging;
+use oxcore_auth::metrics::Metrics;
+use oxcore_auth::server::start_server;
+use oxcore_auth::shared::config::{find_config_file, load_toml};
+use oxcore_auth::shared::console::run_console_input;
+use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info};
-
-use wow_server::auth::context::AuthServer;
-use wow_server::auth::init::initialize_database;
-use wow_server::auth::logging;
-use wow_server::auth::metrics::Metrics;
-use wow_server::auth::server::start_server;
-use wow_server::shared::config::{find_config_file, RootConfig};
-use wow_server::shared::console::run_console_input;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(find_config_file);
 
-    let root = match RootConfig::load(&config_path) {
+    let root = match load_toml::<RootConfig, _>(&config_path) {
         Ok(root) => root,
         Err(e) => {
             logging::init_basic()?;
@@ -122,6 +122,11 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+struct RootConfig {
+    auth: oxcore_auth::config::Config,
+}
+
 fn print_banner() {
     println!();
     println!("▄████▄ ▄▄ ▄▄ ▄█████  ▄▄▄  ▄▄▄▄  ▄▄▄▄▄");
@@ -149,6 +154,6 @@ fn parse_args() -> Args {
         .get_matches();
 
     Args {
-        config_path: matches.get_one::<String>("config").map(|s| s.clone()),
+        config_path: matches.get_one::<String>("config").cloned(),
     }
 }

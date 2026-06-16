@@ -30,7 +30,7 @@ pub struct Realm {
     pub population: f32,
     pub realm_builds: String,
     pub realm_builds_set: std::collections::HashSet<u32>, // Parsed realm builds
-    pub realm_build_info: Option<crate::auth::realm::build_info::RealmBuildInfo>,
+    pub realm_build_info: Option<crate::realm::build_info::RealmBuildInfo>,
     pub last_seen: Option<DateTime<Utc>>, // Last heartbeat timestamp from world server
 }
 
@@ -174,7 +174,7 @@ impl RealmList {
         account_id: Option<u32>,
         account_security: &std::collections::HashMap<u32, u8>,
         account_default_security: u8,
-        allowed_builds: &crate::auth::realm::AllowedBuilds,
+        allowed_builds: &crate::realm::AllowedBuilds,
         client_ip: Option<&std::net::IpAddr>,
     ) -> Result<BytesMut> {
         // Update realms if needed
@@ -245,12 +245,11 @@ impl RealmList {
                     realmflags |= REALM_FLAG_OFFLINE;
                 }
 
-                let category_id =
-                    crate::auth::realm::category::get_realm_category_id_by_build_and_zone(
-                        client_build,
-                        realm.timezone,
-                        build_info.as_ref(),
-                    );
+                let category_id = crate::realm::category::get_realm_category_id_by_build_and_zone(
+                    client_build,
+                    realm.timezone,
+                    build_info.as_ref(),
+                );
 
                 // Realm icon (u32)
                 buf.put_u32_le(realm.icon as u32);
@@ -334,12 +333,11 @@ impl RealmList {
                 }
 
                 // Get realm category ID
-                let _category_id =
-                    crate::auth::realm::category::get_realm_category_id_by_build_and_zone(
-                        client_build,
-                        realm.timezone,
-                        build_info.as_ref(),
-                    );
+                let _category_id = crate::realm::category::get_realm_category_id_by_build_and_zone(
+                    client_build,
+                    realm.timezone,
+                    build_info.as_ref(),
+                );
 
                 // Realm type (u8): icon value
                 buf.put_u8(realm.icon);

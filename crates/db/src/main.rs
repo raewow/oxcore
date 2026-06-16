@@ -11,7 +11,7 @@ use config::Config;
 #[derive(Parser)]
 #[command(
     name = "db",
-    about = "Database tool for rcore",
+    about = "Database tool for oxcore",
     after_help = commands::help::AFTER_HELP
 )]
 struct Cli {

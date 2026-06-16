@@ -303,7 +303,7 @@ fn default_true() -> bool {
 }
 
 fn default_motd() -> String {
-    "Welcome to rcore!".to_string()
+    "Welcome to oxcore!".to_string()
 }
 
 fn default_autobroadcast_db_check_interval() -> Option<u32> {

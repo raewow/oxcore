@@ -3,7 +3,7 @@
 pub mod account;
 pub mod server;
 
-use crate::auth::context::AuthServer;
+use crate::context::AuthServer;
 use crate::shared::console::CommandRegistry;
 
 pub fn register_all_commands(registry: &mut CommandRegistry<AuthServer>) {

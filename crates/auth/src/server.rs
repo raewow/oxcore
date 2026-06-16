@@ -3,10 +3,10 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
-use crate::auth::auth::AuthSocket;
-use crate::auth::context::AuthServer;
-use crate::auth::patch::PatchCache;
-use crate::auth::realm::{AllowedBuilds, RealmList};
+use crate::context::AuthServer;
+use crate::patch::PatchCache;
+use crate::protocol::AuthSocket;
+use crate::realm::{AllowedBuilds, RealmList};
 
 pub async fn start_server(
     server: Arc<AuthServer>,

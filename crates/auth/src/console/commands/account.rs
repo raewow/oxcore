@@ -1,6 +1,6 @@
 //! Account management console commands.
 
-use crate::auth::context::AuthServer;
+use crate::context::AuthServer;
 use crate::shared::common::AccountType;
 use crate::shared::console::command::{CommandContext, CommandInfo};
 use anyhow::{anyhow, Result};

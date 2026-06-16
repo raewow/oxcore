@@ -1,4 +1,4 @@
-use crate::auth::realm::build_info::RealmBuildInfo;
+use crate::realm::build_info::RealmBuildInfo;
 
 /// Maximum number of realm zones
 const MAX_REALM_ZONES: usize = 38;

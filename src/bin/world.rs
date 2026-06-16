@@ -7,13 +7,14 @@
 //! - Async-first design for 10k+ player scalability
 
 use anyhow::{Context, Result};
+use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
-use wow_server::shared::config::{find_config_file, RootConfig};
+use wow_server::shared::config::{find_config_file, load_toml};
 use wow_server::shared::console::run_console_input;
-use wow_server::shared::database::Databases;
+use wow_server::shared::database::{DatabaseUrls, Databases};
 use wow_server::world::config::initialize_config_mgr;
 use wow_server::world::core::network::socket_mgr::WorldSocketMgr;
 use wow_server::world::logging;
@@ -31,7 +32,7 @@ async fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(find_config_file);
 
-    let root = match RootConfig::load(&config_path) {
+    let root = match load_toml::<RootConfig, _>(&config_path) {
         Ok(root) => root,
         Err(e) => {
             logging::init_basic_logging()?;
@@ -48,7 +49,14 @@ async fn main() -> Result<()> {
     let config = root.world;
 
     // 3. Initialize database connection pools
-    let databases = match Databases::new(&config).await {
+    let database_urls = DatabaseUrls {
+        world: config.world_database_url.clone(),
+        character: config.character_database_url.clone(),
+        auth: config.login_database_url.clone(),
+        logs: config.logs_database_url.clone(),
+    };
+
+    let databases = match Databases::new(&database_urls).await {
         Ok(db) => db,
         Err(e) => {
             error!("Failed to initialize databases: {}", e);
@@ -204,6 +212,11 @@ async fn main() -> Result<()> {
     // Force process exit to ensure we don't hang on background tasks
     // All cleanup has been done, so it's safe to exit
     std::process::exit(0);
+}
+
+#[derive(Debug, Deserialize)]
+struct RootConfig {
+    world: wow_server::world::config::Config,
 }
 
 fn print_banner() {
