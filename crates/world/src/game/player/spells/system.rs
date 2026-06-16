@@ -23,6 +23,15 @@ use oxcore_shared::protocol::ObjectGuid;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// Whether a spell consumes combo points on completion (MaNGOS `SpellEntry::NeedsComboPoints`).
+///
+/// `NeedsComboPoints() = AttributesEx & (FINISHING_MOVE_DAMAGE | FINISHING_MOVE_DURATION)`.
+fn spell_needs_combo_points(attributes_ex: u32) -> bool {
+    const FINISHING_MOVE_DAMAGE: u32 = 0x0010_0000;
+    const FINISHING_MOVE_DURATION: u32 = 0x0040_0000;
+    attributes_ex & (FINISHING_MOVE_DAMAGE | FINISHING_MOVE_DURATION) != 0
+}
+
 /// Get current game time in milliseconds
 fn get_game_time_ms() -> u64 {
     std::time::SystemTime::now()
@@ -539,8 +548,19 @@ impl SpellSystem {
                         .unwrap_or(false);
 
                     if still_active {
-                        self.execute_channel_tick(caster_guid, spell_id, target_guid, world)
+                        // MaNGOS Spell::update HasValidUnitPresentInTargetList: a channel whose
+                        // unit target has vanished or died must be cancelled, not ticked.
+                        if !Self::is_channel_target_valid(target_guid, caster_guid, world) {
+                            self.cancel_spell_in_slot(
+                                caster_guid,
+                                CurrentSpellType::Channeled,
+                                world,
+                            )
                             .await?;
+                        } else {
+                            self.execute_channel_tick(caster_guid, spell_id, target_guid, world)
+                                .await?;
+                        }
                     }
                 }
                 SpellEventType::ChannelFinish {
@@ -1001,7 +1021,55 @@ impl SpellSystem {
             }
         }
 
+        // Clear combo points after a finishing move completes (MaNGOS Spell::finish).
+        // MaNGOS keeps combo points if a negative spell missed an enemy; we do not yet track
+        // per-target miss conditions here (miss_targets is empty), so finishers always drop them.
+        if caster_guid.is_player() {
+            if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
+                if spell_needs_combo_points(entry.attributes_ex) {
+                    world
+                        .systems
+                        .combat
+                        .clear_combo_points(caster_guid, &world.systems.player.manager());
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    /// Whether a channeled spell's unit target is still present and alive.
+    ///
+    /// MaNGOS cancels a channel via `HasValidUnitPresentInTargetList` when the target has
+    /// despawned or died. A self-channel or a channel with no unit target stays valid (those
+    /// are area/ground channels which do not depend on a single unit).
+    fn is_channel_target_valid(
+        target_guid: Option<ObjectGuid>,
+        caster_guid: ObjectGuid,
+        world: &World,
+    ) -> bool {
+        let target = match target_guid {
+            Some(t) if t != caster_guid => t,
+            _ => return true,
+        };
+
+        if target.is_player() {
+            world
+                .systems
+                .player
+                .manager()
+                .with_player(target, |p| p.stats.health > 0)
+                .unwrap_or(false)
+        } else if target.is_creature() {
+            world
+                .managers
+                .creature_mgr
+                .with_creature(target, |c| c.current_health > 0)
+                .unwrap_or(false)
+        } else {
+            // GameObjects and other target types have no aliveness concept here.
+            true
+        }
     }
 
     // =========================================================================
@@ -1109,6 +1177,10 @@ impl SpellSystem {
             };
             self.broadcast_mgr
                 .send_msg_to_player(caster_guid, msg.to_world_packet());
+
+            // Also send SMSG_CAST_RESULT(SPELL_FAILED_INTERRUPTED) so the client cast bar clears
+            // (MaNGOS Spell::cancel sends SendCastResult on the PREPARING/DELAYED cancel path).
+            self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted)?;
 
             // If cancelling a channel, send SMSG_CHANNEL_UPDATE with 0 remaining
             // and remove auras applied by the cancelled channel (MaNGOS RemoveAurasByCasterSpell)
@@ -1579,4 +1651,30 @@ enum CastUpdateInfo {
         spell_id: u32,
         target_guid: Option<ObjectGuid>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finisher_attributes_need_combo_points() {
+        // SPELL_ATTR_EX_FINISHING_MOVE_DAMAGE (e.g. Eviscerate, Sinister Strike finishers)
+        assert!(spell_needs_combo_points(0x0010_0000));
+        // SPELL_ATTR_EX_FINISHING_MOVE_DURATION (e.g. Kidney Shot, Rupture)
+        assert!(spell_needs_combo_points(0x0040_0000));
+        // Both bits set
+        assert!(spell_needs_combo_points(0x0050_0000));
+        // Combined with unrelated attribute bits
+        assert!(spell_needs_combo_points(0x0010_0000 | 0x0000_0001));
+    }
+
+    #[test]
+    fn non_finisher_attributes_do_not_need_combo_points() {
+        assert!(!spell_needs_combo_points(0x0000_0000));
+        // Neighbouring bits that are NOT the combo-point flags
+        assert!(!spell_needs_combo_points(0x0020_0000)); // bit 21
+        assert!(!spell_needs_combo_points(0x0080_0000)); // bit 23
+        assert!(!spell_needs_combo_points(0x0000_0001 | 0x0008_0000));
+    }
 }
