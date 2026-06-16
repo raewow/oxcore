@@ -22,18 +22,16 @@
 //! 4. On accept, group is created (if needed) and SMSG_GROUP_LIST sent to all members
 //! 5. Members can leave, leader can promote/demote, convert to raid, etc.
 
-pub mod cache;
 pub mod system;
-pub mod types;
 
 #[cfg(test)]
 mod tests;
 
-pub use cache::CachedGroup;
-pub use system::GroupSystem;
-pub use types::{
-    GroupData, GroupError, GroupInvite, GroupMember, LootMethod, MemberStatus,
-    ERR_ALREADY_IN_GROUP_S, ERR_BAD_PLAYER_NAME_S, ERR_GROUP_FULL, ERR_IGNORING_YOU_S,
-    ERR_NOT_LEADER, ERR_PARTY_RESULT_OK, ERR_PLAYER_WRONG_FACTION, ERR_TARGET_NOT_IN_GROUP_S,
-    MAX_GROUP_SIZE, MAX_RAID_SIZE, MAX_RAID_SUBGROUPS, PARTY_OP_INVITE, PARTY_OP_LEAVE,
+pub use oxcore_shared::game::group::{
+    group_update_flags, CachedGroup, GroupData, GroupError, GroupInvite, GroupMember, LootMethod,
+    MemberStatus, ERR_ALREADY_IN_GROUP_S, ERR_BAD_PLAYER_NAME_S, ERR_GROUP_FULL,
+    ERR_IGNORING_YOU_S, ERR_NOT_LEADER, ERR_PARTY_RESULT_OK, ERR_PLAYER_WRONG_FACTION,
+    ERR_TARGET_NOT_IN_GROUP_S, MAX_GROUP_SIZE, MAX_RAID_SIZE, MAX_RAID_SUBGROUPS, PARTY_OP_INVITE,
+    PARTY_OP_LEAVE,
 };
+pub use system::GroupSystem;

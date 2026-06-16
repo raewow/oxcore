@@ -780,7 +780,7 @@ pub async fn handle_player_login_with_guid(
     // Send directly via session (not broadcast_mgr) to ensure delivery during login
     {
         use crate::world::game::player::settings::state::NUM_ACCOUNT_DATA_TYPES;
-        use crate::world::messages::settings::SmsgAccountDataTimes;
+        use oxcore_shared::messages::settings::SmsgAccountDataTimes;
 
         let timestamps = world
             .managers

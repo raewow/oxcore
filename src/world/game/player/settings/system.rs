@@ -8,8 +8,8 @@ use anyhow::Result;
 use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
-use super::account_data::{decompress_account_data, AccountDataType};
 use super::state::{AccountDataEntry, SettingsState, MAX_ACTION_BUTTONS, NUM_ACCOUNT_DATA_TYPES};
+use oxcore_shared::game::account_data::{decompress_account_data, AccountDataType};
 
 /// Stateless system that operates on SettingsState through PlayerManager.
 /// All packets are sent via BroadcastManager, never directly on sessions.
@@ -173,7 +173,7 @@ impl SettingsSystem {
             });
 
         // Echo back SMSG_UPDATE_ACCOUNT_DATA to confirm receipt
-        use crate::world::messages::settings::SmsgUpdateAccountData;
+        use oxcore_shared::messages::settings::SmsgUpdateAccountData;
         let response = SmsgUpdateAccountData {
             data_type,
             data: decompressed,
@@ -216,7 +216,7 @@ impl SettingsSystem {
             })
             .unwrap_or_default();
 
-        use crate::world::messages::settings::SmsgUpdateAccountData;
+        use oxcore_shared::messages::settings::SmsgUpdateAccountData;
         let response = SmsgUpdateAccountData { data_type, data };
         self.broadcast_mgr.send_msg_to_player(player_guid, response);
 
@@ -225,7 +225,7 @@ impl SettingsSystem {
 
     /// Send account data times during login (SMSG_ACCOUNT_DATA_TIMES).
     pub fn send_account_data_times(&self, player_guid: ObjectGuid, world: &World) {
-        use crate::world::messages::settings::SmsgAccountDataTimes;
+        use oxcore_shared::messages::settings::SmsgAccountDataTimes;
 
         let timestamps = world
             .managers

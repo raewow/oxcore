@@ -1847,7 +1847,7 @@ mod tests {
         member_guid: ObjectGuid,
     ) {
         let mut group =
-            crate::world::game::group::types::GroupData::new(1, leader_guid, "Tester".to_string());
+            oxcore_shared::game::group::GroupData::new(1, leader_guid, "Tester".to_string());
         group
             .add_member(member_guid, "Member".to_string())
             .expect("add member");

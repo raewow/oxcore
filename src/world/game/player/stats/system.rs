@@ -11,7 +11,6 @@ use tracing::info;
 use crate::world::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::world::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::world::game::common::update_fields::*;
-use crate::world::game::inventory::inventory_types::{EquipmentSlot, INVENTORY_SLOT_BAG_0};
 use crate::world::game::inventory::InventorySystem;
 use crate::world::game::items::ItemManager;
 use crate::world::game::player::skills::{
@@ -20,6 +19,7 @@ use crate::world::game::player::skills::{
     SKILL_GUNS, SKILL_MACES, SKILL_POLEARMS, SKILL_STAVES, SKILL_SWORDS, SKILL_THROWN, SKILL_WANDS,
 };
 use crate::world::game::player::PlayerManager;
+use oxcore_shared::game::inventory::{EquipmentSlot, INVENTORY_SLOT_BAG_0};
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };

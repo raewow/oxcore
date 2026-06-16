@@ -18,12 +18,16 @@
 //! - Guild info queries
 
 mod system;
-pub mod types;
 pub mod utils;
 
 #[cfg(test)]
 pub mod tests;
 
+pub use oxcore_shared::game::guild::{
+    CachedGuild, Guild, GuildData, GuildEmblem, GuildEvent, GuildId, GuildMember, GuildPermissions,
+    GuildRank, PlayerGuildState, ERR_GUILD_NAME_EXISTS, ERR_GUILD_NAME_INVALID,
+    ERR_GUILD_PERMISSIONS, ERR_GUILD_SUCCESS, GRF_ONLINE, GRIGHT_OFFCHATLISTEN,
+    GUILD_NAME_MAX_LENGTH, GUILD_RANKS_MAX_COUNT,
+};
 pub use system::GuildSystem;
-pub use types::*;
 pub use utils::*;

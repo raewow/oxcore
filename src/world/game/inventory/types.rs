@@ -67,7 +67,7 @@ pub enum MoveItemResult {
     /// Invalid destination position
     InvalidDestination,
     /// Cannot place item in destination slot
-    CannotEquip(crate::world::game::inventory::inventory_types::InventoryResult),
+    CannotEquip(oxcore_shared::game::inventory::InventoryResult),
     /// Player not found in cache
     PlayerNotLoaded,
     /// Database error
@@ -174,7 +174,7 @@ pub enum EquipResult {
     /// Player not found in cache
     PlayerNotLoaded,
     /// Inventory error code
-    InventoryError(crate::world::game::inventory::inventory_types::InventoryResult),
+    InventoryError(oxcore_shared::game::inventory::InventoryResult),
     /// Database error
     DatabaseError(String),
 }
@@ -281,7 +281,7 @@ impl ItemPosition {
     /// Create from main inventory slot (bag 255)
     pub fn main_inventory(slot: u8) -> Self {
         Self {
-            bag: crate::world::game::inventory::inventory_types::INVENTORY_SLOT_BAG_0,
+            bag: oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0,
             slot,
         }
     }

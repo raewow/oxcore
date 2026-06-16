@@ -15,15 +15,15 @@ use crate::world::game::auction::{
     send_auction_removed_notification,
 };
 use crate::world::game::creature::CreatureManager;
-use crate::world::game::inventory::inventory_types::{is_bank_pos, InventoryResult};
 use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
 use crate::world::game::player::PlayerManager;
-use crate::world::messages::auction::{
+use crate::world::World;
+use oxcore_shared::game::auction::{AuctionAction, AuctionEntry, AuctionError, AuctionQueryType};
+use oxcore_shared::game::inventory::{is_bank_pos, InventoryResult};
+use oxcore_shared::messages::auction::{
     MsgAuctionHello, SmsgAuctionBidderListResult, SmsgAuctionCommandResult, SmsgAuctionListResult,
     SmsgAuctionOwnerListResult,
 };
-use crate::world::World;
-use oxcore_shared::game::auction::{AuctionAction, AuctionEntry, AuctionError, AuctionQueryType};
 use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 /// Hard cap on bid/buyout to prevent gold dupe exploits.

@@ -22,10 +22,10 @@
 //! - [`MsgMinimapPing`] - Send minimap ping to group
 //! - [`MsgRandomRoll`] - Broadcast random roll result
 
-use crate::world::game::common::group_update_flags;
-use crate::world::game::group::{CachedGroup, GroupMember, LootMethod, MemberStatus};
-use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use crate::game::group::group_update_flags;
+use crate::game::group::{CachedGroup, LootMethod};
+use crate::messages::ToWorldPacket;
+use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// SMSG_LOOT_START_ROLL - Start a loot roll for an item
 ///
@@ -724,9 +724,9 @@ impl ToWorldPacket for MsgRandomRoll {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::game::group::types::group_update_flags;
-    use crate::world::game::group::{CachedGroup, GroupMember, LootMethod, MemberStatus};
-    use oxcore_shared::protocol::{ObjectGuid, Opcode};
+    use crate::game::group::group_update_flags;
+    use crate::game::group::{CachedGroup, GroupMember, LootMethod, MemberStatus};
+    use crate::protocol::{ObjectGuid, Opcode};
 
     #[test]
     fn test_smsg_group_list() {

@@ -12,7 +12,13 @@ use oxcore_shared::database::characters::models::group::{GroupMemberRow, GroupRo
 use oxcore_shared::database::characters::repositories::GroupRepositoryTrait;
 use oxcore_shared::protocol::ObjectGuid;
 
-use super::types::*;
+use oxcore_shared::game::group::{
+    group_update_flags, CachedGroup, GroupData, GroupError, GroupInvite, GroupMember, LootMethod,
+    MemberStatus, ERR_ALREADY_IN_GROUP_S, ERR_BAD_PLAYER_NAME_S, ERR_GROUP_FULL,
+    ERR_IGNORING_YOU_S, ERR_NOT_LEADER, ERR_PARTY_RESULT_OK, ERR_PLAYER_WRONG_FACTION,
+    ERR_TARGET_NOT_IN_GROUP_S, MAX_GROUP_SIZE, MAX_RAID_SIZE, MAX_RAID_SUBGROUPS, PARTY_OP_INVITE,
+    PARTY_OP_LEAVE,
+};
 
 /// Group System - manages player parties and raids
 pub struct GroupSystem {
@@ -368,7 +374,7 @@ impl GroupSystem {
             .map_err(|e| GroupError::Internal(e.to_string()))?;
 
         // Notify all members
-        use crate::world::messages::group::SmsgGroupDestroyed;
+        use oxcore_shared::messages::group::SmsgGroupDestroyed;
         for member in &group.members {
             self.broadcast_mgr
                 .send_msg_to_player(member.guid, SmsgGroupDestroyed);
@@ -441,7 +447,7 @@ impl GroupSystem {
         self.pending_invites.insert(target_guid, invite);
 
         // Send SMSG_GROUP_INVITE to target
-        use crate::world::messages::group::SmsgGroupInvite;
+        use oxcore_shared::messages::group::SmsgGroupInvite;
         let msg = SmsgGroupInvite {
             inviter_name: &inviter_name,
         };
@@ -494,7 +500,7 @@ impl GroupSystem {
 
         if let Some(invite) = invite {
             // Send notification to inviter that player declined
-            use crate::world::messages::group::SmsgPartyCommandResult;
+            use oxcore_shared::messages::group::SmsgPartyCommandResult;
             let player_name = self
                 .player_mgr
                 .get_player_name(player_guid)
@@ -538,7 +544,7 @@ impl GroupSystem {
         }
 
         // Send SMSG_GROUP_DESTROYED to leaving player
-        use crate::world::messages::group::SmsgGroupDestroyed;
+        use oxcore_shared::messages::group::SmsgGroupDestroyed;
         self.broadcast_mgr
             .send_msg_to_player(player_guid, SmsgGroupDestroyed);
 
@@ -592,7 +598,7 @@ impl GroupSystem {
         }
 
         // Send SMSG_GROUP_UNINVITE to kicked player
-        use crate::world::messages::group::SmsgGroupUninvite;
+        use oxcore_shared::messages::group::SmsgGroupUninvite;
         self.broadcast_mgr
             .send_msg_to_player(target_guid, SmsgGroupUninvite);
 
@@ -732,7 +738,7 @@ impl GroupSystem {
             .get_player_name(new_leader_guid)
             .unwrap_or_else(|| "Unknown".to_string());
 
-        use crate::world::messages::group::SmsgGroupSetLeader;
+        use oxcore_shared::messages::group::SmsgGroupSetLeader;
         let msg = SmsgGroupSetLeader {
             leader_name: &new_leader_name,
         };
@@ -905,7 +911,7 @@ impl GroupSystem {
         }
 
         // Send SMSG_PARTY_COMMAND_RESULT before converting
-        use crate::world::messages::group::SmsgPartyCommandResult;
+        use oxcore_shared::messages::group::SmsgPartyCommandResult;
         let cmd_result = SmsgPartyCommandResult {
             operation: PARTY_OP_INVITE,
             member_name: "",
@@ -1158,7 +1164,7 @@ impl GroupSystem {
         }
 
         // Broadcast target icon update to group
-        use crate::world::messages::group::MsgRaidTargetUpdate;
+        use oxcore_shared::messages::group::MsgRaidTargetUpdate;
         let Some(group) = self.get_group(group_id) else {
             return Ok(());
         };
@@ -1194,7 +1200,7 @@ impl GroupSystem {
             return;
         };
 
-        use crate::world::messages::group::MsgRaidTargetUpdate;
+        use oxcore_shared::messages::group::MsgRaidTargetUpdate;
         let msg = MsgRaidTargetUpdate {
             mode: 0, // set icons
             target_icons: group.target_icons,
@@ -1218,7 +1224,7 @@ impl GroupSystem {
         }
 
         // Broadcast ready check to all members
-        use crate::world::messages::group::MsgRaidReadyCheck;
+        use oxcore_shared::messages::group::MsgRaidReadyCheck;
         if let Some(group) = self.get_group(group_id) {
             let msg = MsgRaidReadyCheck {
                 player_guid,
@@ -1249,7 +1255,7 @@ impl GroupSystem {
             .ok_or(GroupError::NotInGroup)?;
 
         // Send response to all group members
-        use crate::world::messages::group::MsgRaidReadyCheck;
+        use oxcore_shared::messages::group::MsgRaidReadyCheck;
         let msg = MsgRaidReadyCheck {
             player_guid,
             ready: Some(ready),
@@ -1279,7 +1285,7 @@ impl GroupSystem {
             .ok_or(GroupError::NotInGroup)?;
 
         // Broadcast to all group members except sender
-        use crate::world::messages::group::MsgMinimapPing;
+        use oxcore_shared::messages::group::MsgMinimapPing;
         let msg = MsgMinimapPing { player_guid, x, y };
 
         for member in &group.members {
@@ -1313,7 +1319,7 @@ impl GroupSystem {
         };
 
         // Broadcast to group (or just player if not in group)
-        use crate::world::messages::group::MsgRandomRoll;
+        use oxcore_shared::messages::group::MsgRandomRoll;
         if let Some(group) = self.get_player_group(player_guid) {
             let msg = MsgRandomRoll {
                 min,
@@ -1378,11 +1384,11 @@ impl GroupSystem {
         );
 
         // Convert to CachedGroup for packet building
-        use crate::world::game::group::cache::CachedGroup;
+        use oxcore_shared::game::group::CachedGroup;
         let cached_group = CachedGroup::from_group_data(&group);
 
         // Send SMSG_GROUP_LIST to each member (each needs different own_flags)
-        use crate::world::messages::group::SmsgGroupList;
+        use oxcore_shared::messages::group::SmsgGroupList;
         for member in &group.members {
             let msg = SmsgGroupList {
                 group: &cached_group,
@@ -1395,7 +1401,7 @@ impl GroupSystem {
 
         // Send MSG_RAID_TARGET_UPDATE after group list
         // Mode 1 = full icon list - only includes non-empty icons
-        use crate::world::messages::group::MsgRaidTargetUpdate;
+        use oxcore_shared::messages::group::MsgRaidTargetUpdate;
         let raid_target_msg = MsgRaidTargetUpdate {
             mode: 1, // Full icon list
             target_icons: group.target_icons,

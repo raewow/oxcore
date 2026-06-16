@@ -9,17 +9,22 @@ use std::sync::Arc;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::world::game::player::PlayerManager;
 use crate::world::game::ItemManager;
-use crate::world::messages::guild::{
+use oxcore_shared::database::characters::repositories::GuildRepositoryTrait;
+use oxcore_shared::messages::guild::{
     smsg_guild_event_from_params, smsg_guild_query_response_from_cached,
     smsg_guild_roster_from_cached, SmsgGuildCommandResult, SmsgGuildDecline, SmsgGuildEvent,
     SmsgGuildInvite,
 };
-use oxcore_shared::database::characters::repositories::GuildRepositoryTrait;
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
-use super::types::*;
 use super::utils::*;
+use oxcore_shared::game::guild::{
+    CachedGuild, Guild, GuildData, GuildEmblem, GuildEvent, GuildId, GuildMember, GuildPermissions,
+    GuildRank, PlayerGuildState, ERR_ALREADY_IN_GUILD_S, ERR_GUILD_NAME_EXISTS,
+    ERR_GUILD_NAME_INVALID, ERR_GUILD_PERMISSIONS, ERR_GUILD_SUCCESS, GRF_ONLINE,
+    GRIGHT_OFFCHATLISTEN, GUILD_NAME_MAX_LENGTH, GUILD_RANKS_MAX_COUNT,
+};
 
 pub struct GuildSystem {
     /// Guild data indexed by guild ID

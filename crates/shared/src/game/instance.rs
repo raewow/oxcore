@@ -1,36 +1,51 @@
+// Instance types and structures
+
+/// Instance reset method
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum InstanceResetFailReason {
-    PlayerNotInInstance = 0,
-    MapNotFound = 1,
-    NoValidSocket = 2,
-    PlayerAlive = 3,
-    PlayerInCombat = 4,
-    GuildChallengeActive = 5,
-    GuildChallengeComplete = 6,
+pub enum InstanceResetMethod {
+    Manual = 0,
+    Expire = 1,
+    Reset = 2,
 }
 
-impl InstanceResetFailReason {
-    pub fn as_u8(self) -> u8 {
-        self as u8
-    }
+/// Instance reset warning type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstanceResetWarningType {
+    Hours1 = 1,
+    Hours30Min = 2,
+    Hours15Min = 3,
+    Expired = 4,
 }
 
+/// Instance reset failure reason (sent to client)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
-pub enum InstanceResetWarningType {
-    InitialCD = 0,
-    WipeCD = 1,
-    InitialWipeCD = 2,
-    EncounterWipeCD = 3,
-    LongCD = 4,
-    ResetNow = 5,
+pub enum InstanceResetFailReason {
+    General = 0,
+    Offline = 1,
+    Zoning = 2,
+    Silently = 3,
 }
 
-impl InstanceResetWarningType {
-    pub fn as_u32(self) -> u32 {
-        self as u32
-    }
+/// Instance state - represents a dungeon/raid instance
+#[derive(Debug, Clone)]
+pub struct InstanceState {
+    pub map_id: u32,
+    pub instance_id: u32,
+    pub difficulty: u8,
+    pub permanent: bool,
+    pub reset_time: u64,
+    pub created_time: u64,
+    pub completed_encounters: Vec<u32>,
+}
+
+/// Instance binding for a player or group
+#[derive(Debug, Clone)]
+pub struct InstanceBinding {
+    pub map_id: u32,
+    pub instance_id: u32,
+    pub permanent: bool,
+    pub reset_time: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -79,21 +94,8 @@ impl InstanceSave {
 
 #[derive(Debug, Clone)]
 pub struct BossEncounter {
-    pub credit_type: u32,
-    pub credit_entry: u32,
-    pub last_enemy_guid: crate::protocol::ObjectGuid,
-    pub progress: u32,
-    pub completed_encounter: bool,
-}
-
-impl BossEncounter {
-    pub fn new(credit_entry: u32) -> Self {
-        Self {
-            credit_type: 0,
-            credit_entry,
-            last_enemy_guid: crate::protocol::ObjectGuid::empty(),
-            progress: 0,
-            completed_encounter: false,
-        }
-    }
+    pub id: u32,
+    pub name: String,
+    pub is_completed: bool,
+    pub completion_time: u64,
 }

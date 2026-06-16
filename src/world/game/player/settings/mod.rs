@@ -7,11 +7,12 @@
 //! - Tutorial flags (256 bitflags across 8 u32 words)
 //! - Database persistence and login synchronization
 
-pub mod account_data;
 pub mod state;
 pub mod system;
 
-pub use account_data::{compress_account_data, decompress_account_data, AccountDataType};
+pub use oxcore_shared::game::account_data::{
+    compress_account_data, decompress_account_data, AccountDataType,
+};
 pub use state::{
     AccountDataEntry, ActionButton, MacroEntry, SettingsState, ACTION_BUTTON_ITEM,
     ACTION_BUTTON_MACRO, ACTION_BUTTON_SPELL, MAX_ACTION_BUTTONS, MAX_MACROS,

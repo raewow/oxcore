@@ -6,12 +6,12 @@
 
 use crate::world::core::session::WorldSession;
 use crate::world::game::auction::AuctionHouseManager;
-use crate::world::game::inventory::inventory_types::InventoryResult;
-use crate::world::messages::auction::{
+use oxcore_shared::game::auction::{AuctionAction, AuctionEntry, AuctionError};
+use oxcore_shared::game::inventory::InventoryResult;
+use oxcore_shared::messages::auction::{
     SmsgAuctionBidderNotification, SmsgAuctionCommandResult, SmsgAuctionOwnerNotification,
     SmsgAuctionRemovedNotification,
 };
-use oxcore_shared::game::auction::{AuctionAction, AuctionEntry, AuctionError};
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
 

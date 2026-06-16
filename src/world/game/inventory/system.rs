@@ -12,14 +12,12 @@ use std::time::Duration;
 
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
-use crate::world::game::inventory::inventory_types::{
-    EquipmentSlot as EquipmentSlotEnum, INVENTORY_SLOT_BAG_0,
-};
 use crate::world::game::ItemManager;
 use oxcore_shared::database::characters::models::item::ItemInstanceRow;
 use oxcore_shared::database::characters::repositories::inventory_repository_trait::{
     InventoryRepositoryTrait, InventorySlotRow,
 };
+use oxcore_shared::game::inventory::{EquipmentSlot as EquipmentSlotEnum, INVENTORY_SLOT_BAG_0};
 use oxcore_shared::messages::inventory::{SmsgDestroyItem, SmsgItemPushResult};
 use oxcore_shared::messages::inventory_update::{
     SmsgInventorySlotUpdate, SmsgInventorySlotsUpdate, SmsgVisibleItemUpdate,
@@ -1107,7 +1105,7 @@ impl InventorySystem {
         src_bag: u8,
         src_slot: u8,
     ) -> MoveItemResult {
-        use crate::world::game::inventory::inventory_types::is_bank_pos;
+        use oxcore_shared::game::inventory::is_bank_pos;
 
         if is_bank_pos(src_bag, src_slot) {
             let (dst_bag, dst_slot) = match self.cache.find_free_inventory_slot(player_guid) {
@@ -2564,7 +2562,7 @@ impl InventorySystem {
             PLAYER_FIELD_BANKBAG_SLOT_1, PLAYER_FIELD_BANK_SLOT_1, PLAYER_FIELD_INV_SLOT_HEAD,
             PLAYER_FIELD_PACK_SLOT_1,
         };
-        use crate::world::game::inventory::inventory_types::{
+        use oxcore_shared::game::inventory::{
             BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BANK_SLOT_ITEM_END, BANK_SLOT_ITEM_START,
             INVENTORY_SLOT_ITEM_END, INVENTORY_SLOT_ITEM_START,
         };

@@ -1,6 +1,6 @@
 //! Guild system utility functions
 
-use super::types::*;
+use oxcore_shared::game::guild::{GuildEmblem, GuildRank, GUILD_RANKS_MAX_COUNT};
 
 /// Calculate rank permissions mask
 pub fn calc_rank_permissions() -> u32 {

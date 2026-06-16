@@ -43,7 +43,7 @@ pub async fn handle_group_invite(
         Err(e) => {
             // Send error message to player
             use crate::world::game::group::GroupError;
-            use crate::world::messages::group::SmsgPartyCommandResult;
+            use oxcore_shared::messages::group::SmsgPartyCommandResult;
 
             let result_code = match e {
                 GroupError::TargetNotFound => ERR_BAD_PLAYER_NAME_S,
@@ -427,7 +427,7 @@ pub async fn handle_request_party_member_stats(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    use crate::world::game::common::group_update_flags;
+    use oxcore_shared::game::group::group_update_flags;
     use oxcore_shared::protocol::Opcode;
 
     let player_guid = session

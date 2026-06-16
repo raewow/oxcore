@@ -13,11 +13,11 @@
 //! - [`SmsgAuctionOwnerNotification`] - Notification to auction owner
 //! - [`SmsgAuctionRemovedNotification`] - Notification that an auction was removed
 
-use oxcore_shared::game::{AuctionAction, AuctionEntry, AuctionError};
-use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::guid::ObjectGuid;
-use oxcore_shared::protocol::Opcode;
-use oxcore_shared::protocol::WorldPacket;
+use crate::game::{AuctionAction, AuctionEntry, AuctionError};
+use crate::messages::ToWorldPacket;
+use crate::protocol::guid::ObjectGuid;
+use crate::protocol::Opcode;
+use crate::protocol::WorldPacket;
 
 /// MSG_AUCTION_HELLO - Open the auction house UI for the player
 ///
@@ -60,7 +60,7 @@ pub enum SmsgAuctionCommandResult {
     Inventory {
         auction_id: u32,
         action: AuctionAction,
-        inventory_error: crate::world::game::inventory::inventory_types::InventoryResult,
+        inventory_error: crate::game::InventoryResult,
     },
     /// AUCTION_ERR_HIGHER_BID: appends bidder GUID, bid, and outbid
     HigherBid {
@@ -342,8 +342,8 @@ fn write_auction_list_item(packet: &mut WorldPacket, auction: &AuctionEntry) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxcore_shared::game::auction::{AuctionAction, AuctionError};
-    use oxcore_shared::protocol::Opcode;
+    use crate::game::auction::{AuctionAction, AuctionError};
+    use crate::protocol::Opcode;
 
     #[test]
     fn test_msg_auction_hello() {
@@ -419,8 +419,7 @@ mod tests {
         let msg = SmsgAuctionCommandResult::Inventory {
             auction_id: 0,
             action: AuctionAction::Started,
-            inventory_error:
-                crate::world::game::inventory::inventory_types::InventoryResult::BagFull,
+            inventory_error: crate::game::InventoryResult::BagFull,
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
@@ -439,7 +438,7 @@ mod tests {
         );
         assert_eq!(
             u32::from_le_bytes(packet.data()[12..16].try_into().unwrap()),
-            crate::world::game::inventory::inventory_types::InventoryResult::BagFull as u32
+            crate::game::InventoryResult::BagFull as u32
         );
     }
 
