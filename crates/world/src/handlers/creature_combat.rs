@@ -246,7 +246,65 @@ pub async fn execute_pending_attack_vs_creature(
         }
     }
 
+    // Caster-side melee-swing procs (weapon enchants, Windfury, flurry triggers, etc.).
+    // The proc eligibility gate filters non-connecting outcomes for default procs; a swing
+    // always counts as a DEAL_MELEE_SWING event with the rolled hit outcome.
+    {
+        use crate::game::player::auras::proc::proc_flags;
+        let _ = world
+            .systems
+            .auras
+            .check_procs(
+                attacker_guid,
+                proc_flags::DEAL_MELEE_SWING | proc_flags::MAIN_HAND_WEAPON_SWING,
+                melee_swing_proc_ex(&hit_outcome),
+                None, // melee swing — no triggering spell
+                damage,
+                world,
+            )
+            .await;
+    }
+
     Ok(target_died)
+}
+
+/// Map a melee swing outcome to the proc extra-flag (ProcFlagsEx) describing it.
+fn melee_swing_proc_ex(outcome: &MeleeHitOutcome) -> u32 {
+    use crate::game::player::auras::proc::proc_flags_ex;
+    match outcome {
+        MeleeHitOutcome::Crit => proc_flags_ex::CRITICAL_HIT,
+        MeleeHitOutcome::Miss => proc_flags_ex::MISS,
+        MeleeHitOutcome::Dodge => proc_flags_ex::DODGE,
+        MeleeHitOutcome::Parry => proc_flags_ex::PARRY,
+        MeleeHitOutcome::Block { .. } => proc_flags_ex::BLOCK,
+        // Hit, Glancing and Crushing all connect as a normal hit for proc purposes.
+        _ => proc_flags_ex::NORMAL_HIT,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::player::auras::proc::proc_flags_ex;
+
+    #[test]
+    fn swing_outcome_maps_to_proc_ex() {
+        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Crit), proc_flags_ex::CRITICAL_HIT);
+        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Hit), proc_flags_ex::NORMAL_HIT);
+        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Miss), proc_flags_ex::MISS);
+        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Dodge), proc_flags_ex::DODGE);
+        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Parry), proc_flags_ex::PARRY);
+        assert_eq!(
+            melee_swing_proc_ex(&MeleeHitOutcome::Block { blocked_amount: 5 }),
+            proc_flags_ex::BLOCK
+        );
+        // Glancing/Crushing connect as normal hits for proc purposes.
+        assert_eq!(
+            melee_swing_proc_ex(&MeleeHitOutcome::Glancing { reduction: 0.3 }),
+            proc_flags_ex::NORMAL_HIT
+        );
+        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Crushing), proc_flags_ex::NORMAL_HIT);
+    }
 }
 
 /// Handle attack stop (CMSG_ATTACKSTOP)
