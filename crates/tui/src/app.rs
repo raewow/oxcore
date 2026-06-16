@@ -74,18 +74,33 @@ pub enum TabKind {
     Performance,
 }
 
+/// Which text input currently receives keystrokes.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Focus {
+    Command,
+    Filter,
+}
+
 pub struct App {
     pub panes: Vec<ServerPane>,
     pub store: Arc<LogStore>,
     pub tabs: Vec<TabKind>,
     pub active: usize,
     pub input: String,
+    /// Cursor position within `input`, as a char index (0..=len).
+    pub input_cursor: usize,
     pub history: Vec<String>,
     pub history_cursor: Option<usize>,
     /// Lines scrolled up from the bottom of the log view.
     pub scroll: usize,
     pub should_quit: bool,
     pub perf: Vec<PaneSeries>,
+    /// Active log filter substring (empty = no filtering).
+    pub filter: String,
+    /// Which input has keyboard focus.
+    pub focus: Focus,
+    /// Whether the quit-confirmation popup is showing.
+    pub confirm_quit: bool,
 }
 
 impl App {
@@ -107,11 +122,15 @@ impl App {
             tabs,
             active: 0,
             input: String::new(),
+            input_cursor: 0,
             history: Vec::new(),
             history_cursor: None,
             scroll: 0,
             should_quit: false,
             perf,
+            filter: String::new(),
+            focus: Focus::Command,
+            confirm_quit: false,
         }
     }
 
@@ -224,6 +243,13 @@ impl App {
 
     /// The autosuggest ghost text (the completion of the current command word).
     pub fn suggestion(&self) -> Option<String> {
+        if self.focus != Focus::Command {
+            return None;
+        }
+        // Only suggest when the cursor is at the end of the line.
+        if self.input_cursor != char_len(&self.input) {
+            return None;
+        }
         let (candidates, word) = self.completion_context()?;
         candidates
             .iter()
@@ -234,17 +260,133 @@ impl App {
     pub fn accept_suggestion(&mut self) {
         if let Some(ghost) = self.suggestion() {
             self.input.push_str(&ghost);
+            self.input_cursor = char_len(&self.input);
         }
     }
 
     pub fn push_char(&mut self, c: char) {
-        self.input.push(c);
-        self.history_cursor = None;
+        match self.focus {
+            Focus::Filter => {
+                self.filter.push(c);
+                self.scroll = 0;
+            }
+            Focus::Command => {
+                let byte = byte_index(&self.input, self.input_cursor);
+                self.input.insert(byte, c);
+                self.input_cursor += 1;
+                self.history_cursor = None;
+            }
+        }
     }
 
     pub fn backspace(&mut self) {
-        self.input.pop();
-        self.history_cursor = None;
+        match self.focus {
+            Focus::Filter => {
+                self.filter.pop();
+                self.scroll = 0;
+            }
+            Focus::Command => {
+                if self.input_cursor > 0 {
+                    let byte = byte_index(&self.input, self.input_cursor - 1);
+                    self.input.remove(byte);
+                    self.input_cursor -= 1;
+                }
+                self.history_cursor = None;
+            }
+        }
+    }
+
+    /// Delete the character at the cursor (Del key), command input only.
+    pub fn delete_char(&mut self) {
+        if self.focus != Focus::Command {
+            return;
+        }
+        if self.input_cursor < char_len(&self.input) {
+            let byte = byte_index(&self.input, self.input_cursor);
+            self.input.remove(byte);
+        }
+    }
+
+    /// Move the cursor left (command input only).
+    pub fn cursor_left(&mut self) {
+        if self.focus == Focus::Command {
+            self.input_cursor = self.input_cursor.saturating_sub(1);
+        }
+    }
+
+    /// Move the cursor right; if already at the end, accept any autosuggestion.
+    pub fn cursor_right(&mut self) {
+        if self.focus != Focus::Command {
+            return;
+        }
+        if self.input_cursor < char_len(&self.input) {
+            self.input_cursor += 1;
+        } else {
+            self.accept_suggestion();
+        }
+    }
+
+    pub fn cursor_home(&mut self) {
+        if self.focus == Focus::Command {
+            self.input_cursor = 0;
+        }
+    }
+
+    pub fn cursor_end(&mut self) {
+        if self.focus == Focus::Command {
+            self.input_cursor = char_len(&self.input);
+        }
+    }
+
+    /// Toggle keyboard focus between the command box and the filter box.
+    pub fn toggle_filter_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::Command => Focus::Filter,
+            Focus::Filter => Focus::Command,
+        };
+    }
+
+    /// Whether the filter box should be drawn (focused or holding a query).
+    pub fn filter_active(&self) -> bool {
+        self.focus == Focus::Filter || !self.filter.is_empty()
+    }
+
+    /// Clear the filter and return focus to the command box.
+    pub fn clear_filter(&mut self) {
+        self.filter.clear();
+        self.focus = Focus::Command;
+        self.scroll = 0;
+    }
+
+    /// Case-insensitive substring match over level + source tag + message.
+    pub fn matches_filter(&self, rec: &crate::log_layer::LogRecord) -> bool {
+        if self.filter.is_empty() {
+            return true;
+        }
+        let needle = self.filter.to_lowercase();
+        let hay = format!(
+            "{} {} {}",
+            rec.level.as_str(),
+            rec.source.tag(),
+            rec.message
+        )
+        .to_lowercase();
+        hay.contains(&needle)
+    }
+
+    /// Begin the quit-confirmation flow (shows the popup; does not quit yet).
+    pub fn request_quit(&mut self) {
+        self.confirm_quit = true;
+    }
+
+    /// Confirm the quit from the popup.
+    pub fn confirm_quit_yes(&mut self) {
+        self.should_quit = true;
+    }
+
+    /// Dismiss the quit popup.
+    pub fn cancel_quit(&mut self) {
+        self.confirm_quit = false;
     }
 
     pub fn history_up(&mut self) {
@@ -258,6 +400,7 @@ impl App {
         };
         self.history_cursor = Some(next);
         self.input = self.history[next].clone();
+        self.input_cursor = char_len(&self.input);
     }
 
     pub fn history_down(&mut self) {
@@ -271,6 +414,7 @@ impl App {
                 self.input.clear();
             }
         }
+        self.input_cursor = char_len(&self.input);
     }
 
     pub fn scroll_up(&mut self, amount: usize) {
@@ -306,6 +450,7 @@ impl App {
         self.history.push(entry);
         self.history_cursor = None;
         self.input.clear();
+        self.input_cursor = 0;
         self.scroll = 0;
     }
 
@@ -324,6 +469,18 @@ impl App {
     pub fn snapshot(&self, pane_idx: usize) -> MetricsSnapshot {
         self.panes[pane_idx].metrics.snapshot()
     }
+}
+
+fn char_len(s: &str) -> usize {
+    s.chars().count()
+}
+
+/// Byte offset of the `n`th char (clamped to the string end).
+fn byte_index(s: &str, n: usize) -> usize {
+    s.char_indices()
+        .nth(n)
+        .map(|(b, _)| b)
+        .unwrap_or_else(|| s.len())
 }
 
 fn strip_prefix_ci<'a>(input: &'a str, prefix: &str) -> Option<&'a str> {

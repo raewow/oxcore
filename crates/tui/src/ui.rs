@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Sparkline, Tabs, Wrap};
 use ratatui::Frame;
 use tracing::Level;
 
-use crate::app::{App, TabKind};
+use crate::app::{App, Focus, TabKind};
 use crate::log_layer::{LogFilter, LogRecord, LogStore};
 use crate::progress::ProgressSnapshot;
 
@@ -39,6 +39,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
 
     render_input(f, chunks[2], app);
+
+    // Overlays drawn last so they sit on top.
+    if app.filter_active() && !matches!(app.current_tab(), TabKind::Performance) {
+        render_filter_box(f, app);
+    }
+    if app.confirm_quit {
+        render_quit_popup(f);
+    }
 }
 
 fn render_tabs(f: &mut Frame, area: Rect, app: &App) {
@@ -237,11 +245,28 @@ fn record_line(rec: &LogRecord, show_source: bool) -> Line<'static> {
 fn render_logs(f: &mut Frame, area: Rect, app: &App) {
     let filter = app.log_filter();
     let show_source = matches!(app.current_tab(), TabKind::Both);
-    let records = app.store.filtered(filter);
+    let mut records = app.store.filtered(filter);
+    let total_before = records.len();
+
+    // Apply the text filter (if any) on top of the tab filter.
+    if !app.filter.is_empty() {
+        records.retain(|r| app.matches_filter(r));
+    }
+
+    let title = if app.filter.is_empty() {
+        " logs ".to_string()
+    } else {
+        format!(
+            " logs · filter: \"{}\" ({}/{}) ",
+            app.filter,
+            records.len(),
+            total_before
+        )
+    };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" logs ")
+        .title(title)
         .border_style(Style::default().fg(Color::DarkGray));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -398,18 +423,21 @@ fn render_spark(f: &mut Frame, area: Rect, title: &str, data: &[u64], color: Col
 }
 
 fn render_input(f: &mut Frame, area: Rect, app: &App) {
-    let disabled = matches!(app.current_tab(), TabKind::Performance);
-    let title = if disabled {
+    let tab_disabled = matches!(app.current_tab(), TabKind::Performance);
+    // The command box is "inactive" when on Performance, when the filter is focused, or
+    // while the quit popup is up.
+    let active = !tab_disabled && app.focus == Focus::Command && !app.confirm_quit;
+    let title = if tab_disabled {
         " input (switch tab to send commands) "
     } else {
-        " input  (Tab: switch · → : complete · ↑↓ history · PgUp/PgDn scroll · q: quit) "
+        " input  (Tab: switch · ^F: filter · → : complete · ↑↓ history · PgUp/PgDn scroll · q: quit) "
     };
 
     let mut spans = vec![
         Span::styled("> ", Style::default().fg(ACCENT)),
         Span::raw(app.input.clone()),
     ];
-    if !disabled {
+    if active {
         if let Some(ghost) = app.suggestion() {
             spans.push(Span::styled(ghost, Style::default().fg(Color::DarkGray)));
         }
@@ -418,14 +446,88 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .border_style(Style::default().fg(if disabled { Color::DarkGray } else { ACCENT }));
+        .border_style(Style::default().fg(if active { ACCENT } else { Color::DarkGray }));
     let inner = block.inner(area);
     f.render_widget(Paragraph::new(Line::from(spans)).block(block), area);
 
-    if !disabled {
-        // Cursor sits right after the typed input (before ghost text).
-        let x = inner.x + 2 + app.input.chars().count() as u16;
+    if active {
+        // Cursor sits at the editing position within the typed input.
+        let x = inner.x + 2 + app.input_cursor as u16;
         let cx = x.min(inner.x + inner.width.saturating_sub(1));
         f.set_cursor_position((cx, inner.y));
     }
+}
+
+/// Floating filter input anchored to the top-right (drawn over the body).
+fn render_filter_box(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let width = 36u16.min(area.width);
+    let rect = Rect {
+        x: area.width.saturating_sub(width),
+        y: 1,
+        width,
+        height: 3,
+    };
+
+    let focused = app.focus == Focus::Filter;
+    let border = if focused { ACCENT } else { Color::DarkGray };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" filter (^F) ")
+        .border_style(Style::default().fg(border));
+    let inner = block.inner(rect);
+
+    let line = Line::from(vec![
+        Span::styled("🔍 ", Style::default().fg(border)),
+        Span::raw(app.filter.clone()),
+    ]);
+
+    f.render_widget(ratatui::widgets::Clear, rect);
+    f.render_widget(Paragraph::new(line).block(block), rect);
+
+    if focused {
+        let x = inner.x + 2 + app.filter.chars().count() as u16;
+        let cx = x.min(inner.x + inner.width.saturating_sub(1));
+        f.set_cursor_position((cx, inner.y));
+    }
+}
+
+/// Centered "quit?" confirmation popup (drawn over everything).
+fn render_quit_popup(f: &mut Frame) {
+    let area = f.area();
+    let width = 40u16.min(area.width);
+    let height = 5u16.min(area.height);
+    let rect = Rect {
+        x: (area.width.saturating_sub(width)) / 2,
+        y: (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" confirm ")
+        .border_style(Style::default().fg(ACCENT));
+
+    let lines = vec![
+        Line::from(Span::styled(
+            "Quit oxcore?",
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("[Y]es", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::raw("      "),
+            Span::styled("[N]o", Style::default().fg(Color::Gray)),
+        ]),
+    ];
+
+    f.render_widget(ratatui::widgets::Clear, rect);
+    f.render_widget(
+        Paragraph::new(Text::from(lines))
+            .block(block)
+            .alignment(Alignment::Center),
+        rect,
+    );
 }
