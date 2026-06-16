@@ -1,11 +1,13 @@
 pub mod config;
 pub mod console;
 pub mod core;
+pub mod database;
 pub mod dbc;
 pub mod game;
 pub mod handlers;
 pub mod logging;
 pub mod map;
+pub mod messages;
 pub mod world;
 
 pub use config::Config;

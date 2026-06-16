@@ -1,6 +1,6 @@
 //! SpellManager - owns spell template data loaded from SQL
 
-use crate::shared::database::world::repositories::SpellRepository;
+use crate::world::database::repositories::SpellRepository;
 use crate::world::dbc::structures::SpellEntry;
 use anyhow::Result;
 use dashmap::DashMap;

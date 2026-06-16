@@ -34,7 +34,6 @@ impl ToWorldPacket for WorldPacket {
 }
 
 // Module declarations
-pub mod auction;
 pub mod auras;
 pub mod battleground;
 pub mod channel;
@@ -48,9 +47,6 @@ pub mod environment;
 pub mod errors;
 pub mod experience;
 pub mod gossip;
-pub mod group;
-pub mod guild;
-pub mod instance;
 pub mod inventory;
 pub mod inventory_update;
 pub mod lfg;
@@ -63,7 +59,6 @@ pub mod player;
 pub mod query;
 pub mod quest;
 pub mod reputation;
-pub mod settings;
 pub mod social;
 pub mod spells;
 pub mod taxi;
@@ -74,7 +69,6 @@ pub mod update;
 pub mod vendor;
 
 // Re-exports for convenience
-pub use auction::*;
 pub use auras::*;
 pub use battleground::*;
 pub use channel::*;
@@ -88,9 +82,6 @@ pub use environment::*;
 pub use errors::*;
 pub use experience::*;
 pub use gossip::*;
-pub use group::*;
-pub use guild::*;
-pub use instance::*;
 pub use inventory::*;
 pub use inventory_update::*;
 pub use lfg::*;
@@ -103,7 +94,6 @@ pub use player::*;
 pub use query::*;
 pub use quest::*;
 pub use reputation::*;
-pub use settings::*;
 pub use social::*;
 pub use spells::*;
 pub use taxi::*;

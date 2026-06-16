@@ -35,16 +35,16 @@ pub use instance_repository::InstanceRepository;
 pub use inventory_repository::InventoryRepository;
 pub use inventory_repository_trait::InventoryRepositoryTrait;
 pub use inventory_repository_trait::InventorySlotRow;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub use inventory_repository_trait::MockInventoryRepositoryTrait;
 pub use item_repository::ItemRepository;
 pub use item_repository_trait::ItemRepositoryTrait;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub use item_repository_trait::MockItemRepositoryTrait;
 pub use mail_repository::MailRepository;
 pub use mail_repository_trait::MailRepositoryTrait;
 pub use petition_repository::PetitionRepository;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub use quest_repository::MockQuestRepositoryTrait;
 pub use quest_repository::{QuestRepository, QuestRepositoryTrait};
 pub use reputation_repository::ReputationRepository;

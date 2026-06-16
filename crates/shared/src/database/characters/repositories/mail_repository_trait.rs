@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 /// Trait abstraction for mail repository operations.
 /// Enables dependency injection and mocking for tests.
-#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 #[async_trait]
 pub trait MailRepositoryTrait: Send + Sync {
     // ========== QUERY METHODS ==========

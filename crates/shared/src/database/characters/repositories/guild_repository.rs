@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 /// Trait abstraction for guild database operations
 /// Enables mocking for tests via mockall
-#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 #[async_trait]
 pub trait GuildRepositoryTrait: Send + Sync {
     // ========== QUERY METHODS ==========

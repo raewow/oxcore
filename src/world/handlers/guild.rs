@@ -3,9 +3,9 @@
 use anyhow::{anyhow, Result};
 use tracing::{debug, info};
 
-use crate::shared::messages::guild::SmsgGuildDecline;
 use crate::shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use crate::world::core::session::WorldSession;
+use crate::world::messages::guild::SmsgGuildDecline;
 use crate::world::World;
 
 pub async fn handle_guild_query(

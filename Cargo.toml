@@ -109,6 +109,7 @@ default = []
 # pure Rust pathfinding algorithms (A* via pathfinding crate v4.6)
 
 [dev-dependencies]
+oxcore-shared = { path = "crates/shared", features = ["testing"] }
 tokio-test = "0.4"
 mockall = "0.13"
 

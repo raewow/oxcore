@@ -7,10 +7,6 @@ use std::sync::Arc;
 use tracing::debug;
 
 use crate::shared::game::auction::{AuctionAction, AuctionEntry, AuctionError, AuctionQueryType};
-use crate::shared::messages::auction::{
-    MsgAuctionHello, SmsgAuctionBidderListResult, SmsgAuctionCommandResult, SmsgAuctionListResult,
-    SmsgAuctionOwnerListResult,
-};
 use crate::shared::protocol::{Opcode, WorldPacket};
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::session::WorldSession;
@@ -24,6 +20,10 @@ use crate::world::game::creature::CreatureManager;
 use crate::world::game::inventory::inventory_types::{is_bank_pos, InventoryResult};
 use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
 use crate::world::game::player::PlayerManager;
+use crate::world::messages::auction::{
+    MsgAuctionHello, SmsgAuctionBidderListResult, SmsgAuctionCommandResult, SmsgAuctionListResult,
+    SmsgAuctionOwnerListResult,
+};
 use crate::world::World;
 
 /// Hard cap on bid/buyout to prevent gold dupe exploits.

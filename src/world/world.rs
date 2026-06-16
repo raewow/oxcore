@@ -8,12 +8,12 @@ use crate::shared::database::characters::repositories::{
     AuctionRepository, AuctionRepositoryTrait, CharacterRepository, ItemRepository,
     ItemRepositoryTrait, MailRepository, MailRepositoryTrait,
 };
-use crate::shared::database::world::repositories::QuestTemplateRepository;
 use crate::shared::database::Databases;
 use crate::shared::protocol::ObjectGuid;
 use crate::world::config::Config;
 use crate::world::core::lua::LuaScriptManager;
 use crate::world::core::session::SessionManager;
+use crate::world::database::repositories::QuestTemplateRepository;
 use crate::world::dbc::DbcManager;
 use crate::world::game::area_trigger::AreaTriggerManager;
 use crate::world::game::auction::AuctionHouseManager;

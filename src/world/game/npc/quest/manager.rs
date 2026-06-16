@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::info;
 
 use super::types::{QuestRelation, QuestTemplate};
-use crate::shared::database::world::repositories::QuestTemplateRepository;
+use crate::world::database::repositories::QuestTemplateRepository;
 
 /// Manages quest data (state storage + database loading)
 #[derive(Debug)]

@@ -42,8 +42,8 @@ pub async fn handle_group_invite(
         Ok(()) => {}
         Err(e) => {
             // Send error message to player
-            use crate::shared::messages::group::SmsgPartyCommandResult;
             use crate::world::game::group::GroupError;
+            use crate::world::messages::group::SmsgPartyCommandResult;
 
             let result_code = match e {
                 GroupError::TargetNotFound => ERR_BAD_PLAYER_NAME_S,

@@ -1529,9 +1529,17 @@ name = "oxcore-shared"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "bitflags 2.10.0",
+ "byteorder",
+ "bytes",
  "chrono",
+ "flate2",
  "hex",
+ "mockall",
+ "rand",
  "serde",
+ "serde_json",
  "sqlx",
  "tokio",
  "toml",

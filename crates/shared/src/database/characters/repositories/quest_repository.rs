@@ -7,7 +7,7 @@ use std::sync::Arc;
 /// Trait for quest repository operations
 /// This enables mocking for unit tests
 #[async_trait]
-#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 pub trait QuestRepositoryTrait: Send + Sync {
     // Query methods
     async fn find_quest_statuses(&self, guid: u32) -> Result<Vec<QuestStatusRow>>;

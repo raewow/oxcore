@@ -5,13 +5,28 @@ edition = "2021"
 authors = ["MaNGOS Rust Port"]
 description = "Shared protocol, database, and utility code for oxcore"
 
+[features]
+default = []
+testing = ["dep:mockall"]
+
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1.89"
+bitflags = "2.4"
+byteorder = "1.5"
+bytes = "1.5"
 chrono = "0.4"
+flate2 = "1.0"
 hex = "0.4"
+rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "mysql", "chrono"] }
 tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "sync"] }
 toml = "0.8"
 tracing = "0.1"
 wow_srp = "0.7"
+mockall = { version = "0.13", optional = true }
+
+[dev-dependencies]
+mockall = "0.13"

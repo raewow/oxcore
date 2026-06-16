@@ -173,7 +173,7 @@ impl SettingsSystem {
             });
 
         // Echo back SMSG_UPDATE_ACCOUNT_DATA to confirm receipt
-        use crate::shared::messages::settings::SmsgUpdateAccountData;
+        use crate::world::messages::settings::SmsgUpdateAccountData;
         let response = SmsgUpdateAccountData {
             data_type,
             data: decompressed,
@@ -216,7 +216,7 @@ impl SettingsSystem {
             })
             .unwrap_or_default();
 
-        use crate::shared::messages::settings::SmsgUpdateAccountData;
+        use crate::world::messages::settings::SmsgUpdateAccountData;
         let response = SmsgUpdateAccountData { data_type, data };
         self.broadcast_mgr.send_msg_to_player(player_guid, response);
 
@@ -225,7 +225,7 @@ impl SettingsSystem {
 
     /// Send account data times during login (SMSG_ACCOUNT_DATA_TIMES).
     pub fn send_account_data_times(&self, player_guid: ObjectGuid, world: &World) {
-        use crate::shared::messages::settings::SmsgAccountDataTimes;
+        use crate::world::messages::settings::SmsgAccountDataTimes;
 
         let timestamps = world
             .managers

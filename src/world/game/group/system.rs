@@ -368,7 +368,7 @@ impl GroupSystem {
             .map_err(|e| GroupError::Internal(e.to_string()))?;
 
         // Notify all members
-        use crate::shared::messages::group::SmsgGroupDestroyed;
+        use crate::world::messages::group::SmsgGroupDestroyed;
         for member in &group.members {
             self.broadcast_mgr
                 .send_msg_to_player(member.guid, SmsgGroupDestroyed);
@@ -441,7 +441,7 @@ impl GroupSystem {
         self.pending_invites.insert(target_guid, invite);
 
         // Send SMSG_GROUP_INVITE to target
-        use crate::shared::messages::group::SmsgGroupInvite;
+        use crate::world::messages::group::SmsgGroupInvite;
         let msg = SmsgGroupInvite {
             inviter_name: &inviter_name,
         };
@@ -494,7 +494,7 @@ impl GroupSystem {
 
         if let Some(invite) = invite {
             // Send notification to inviter that player declined
-            use crate::shared::messages::group::SmsgPartyCommandResult;
+            use crate::world::messages::group::SmsgPartyCommandResult;
             let player_name = self
                 .player_mgr
                 .get_player_name(player_guid)
@@ -538,7 +538,7 @@ impl GroupSystem {
         }
 
         // Send SMSG_GROUP_DESTROYED to leaving player
-        use crate::shared::messages::group::SmsgGroupDestroyed;
+        use crate::world::messages::group::SmsgGroupDestroyed;
         self.broadcast_mgr
             .send_msg_to_player(player_guid, SmsgGroupDestroyed);
 
@@ -592,7 +592,7 @@ impl GroupSystem {
         }
 
         // Send SMSG_GROUP_UNINVITE to kicked player
-        use crate::shared::messages::group::SmsgGroupUninvite;
+        use crate::world::messages::group::SmsgGroupUninvite;
         self.broadcast_mgr
             .send_msg_to_player(target_guid, SmsgGroupUninvite);
 
@@ -732,7 +732,7 @@ impl GroupSystem {
             .get_player_name(new_leader_guid)
             .unwrap_or_else(|| "Unknown".to_string());
 
-        use crate::shared::messages::group::SmsgGroupSetLeader;
+        use crate::world::messages::group::SmsgGroupSetLeader;
         let msg = SmsgGroupSetLeader {
             leader_name: &new_leader_name,
         };
@@ -905,7 +905,7 @@ impl GroupSystem {
         }
 
         // Send SMSG_PARTY_COMMAND_RESULT before converting
-        use crate::shared::messages::group::SmsgPartyCommandResult;
+        use crate::world::messages::group::SmsgPartyCommandResult;
         let cmd_result = SmsgPartyCommandResult {
             operation: PARTY_OP_INVITE,
             member_name: "",
@@ -1158,7 +1158,7 @@ impl GroupSystem {
         }
 
         // Broadcast target icon update to group
-        use crate::shared::messages::group::MsgRaidTargetUpdate;
+        use crate::world::messages::group::MsgRaidTargetUpdate;
         let Some(group) = self.get_group(group_id) else {
             return Ok(());
         };
@@ -1194,7 +1194,7 @@ impl GroupSystem {
             return;
         };
 
-        use crate::shared::messages::group::MsgRaidTargetUpdate;
+        use crate::world::messages::group::MsgRaidTargetUpdate;
         let msg = MsgRaidTargetUpdate {
             mode: 0, // set icons
             target_icons: group.target_icons,
@@ -1218,7 +1218,7 @@ impl GroupSystem {
         }
 
         // Broadcast ready check to all members
-        use crate::shared::messages::group::MsgRaidReadyCheck;
+        use crate::world::messages::group::MsgRaidReadyCheck;
         if let Some(group) = self.get_group(group_id) {
             let msg = MsgRaidReadyCheck {
                 player_guid,
@@ -1249,7 +1249,7 @@ impl GroupSystem {
             .ok_or(GroupError::NotInGroup)?;
 
         // Send response to all group members
-        use crate::shared::messages::group::MsgRaidReadyCheck;
+        use crate::world::messages::group::MsgRaidReadyCheck;
         let msg = MsgRaidReadyCheck {
             player_guid,
             ready: Some(ready),
@@ -1279,7 +1279,7 @@ impl GroupSystem {
             .ok_or(GroupError::NotInGroup)?;
 
         // Broadcast to all group members except sender
-        use crate::shared::messages::group::MsgMinimapPing;
+        use crate::world::messages::group::MsgMinimapPing;
         let msg = MsgMinimapPing { player_guid, x, y };
 
         for member in &group.members {
@@ -1313,7 +1313,7 @@ impl GroupSystem {
         };
 
         // Broadcast to group (or just player if not in group)
-        use crate::shared::messages::group::MsgRandomRoll;
+        use crate::world::messages::group::MsgRandomRoll;
         if let Some(group) = self.get_player_group(player_guid) {
             let msg = MsgRandomRoll {
                 min,
@@ -1382,7 +1382,7 @@ impl GroupSystem {
         let cached_group = CachedGroup::from_group_data(&group);
 
         // Send SMSG_GROUP_LIST to each member (each needs different own_flags)
-        use crate::shared::messages::group::SmsgGroupList;
+        use crate::world::messages::group::SmsgGroupList;
         for member in &group.members {
             let msg = SmsgGroupList {
                 group: &cached_group,
@@ -1395,7 +1395,7 @@ impl GroupSystem {
 
         // Send MSG_RAID_TARGET_UPDATE after group list
         // Mode 1 = full icon list - only includes non-empty icons
-        use crate::shared::messages::group::MsgRaidTargetUpdate;
+        use crate::world::messages::group::MsgRaidTargetUpdate;
         let raid_target_msg = MsgRaidTargetUpdate {
             mode: 1, // Full icon list
             target_icons: group.target_icons,
