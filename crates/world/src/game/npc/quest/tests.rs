@@ -183,6 +183,7 @@ fn create_test_setup() -> TestQuestSetup {
         Arc::new(inv_mock_repo),
         Arc::new(inv_mock_broadcaster),
         item_mgr.clone(),
+        Some(player_mgr.clone()),
     ));
 
     // Experience system with real broadcast manager

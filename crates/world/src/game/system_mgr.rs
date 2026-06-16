@@ -133,6 +133,7 @@ impl SystemManager {
             inventory_repo,
             broadcast_mgr.clone(),
             item_mgr.clone(),
+            Some(player_mgr.clone()),
         ));
 
         let trade = Arc::new(TradeSystem::new(
