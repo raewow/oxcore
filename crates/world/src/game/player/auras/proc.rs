@@ -468,7 +468,11 @@ mod tests {
     #[test]
     fn rejects_when_proc_flags_do_not_intersect() {
         // Aura procs on melee swing, event is a harmful spell → no intersection.
-        assert!(!can_trigger(None, proc_flags::DEAL_MELEE_SWING, proc_flags_ex::NORMAL_HIT));
+        assert!(!can_trigger(
+            None,
+            proc_flags::DEAL_MELEE_SWING,
+            proc_flags_ex::NORMAL_HIT
+        ));
     }
 
     #[test]
@@ -497,8 +501,16 @@ mod tests {
     fn custom_proc_ex_requires_matching_outcome() {
         let aura = proc_flags::DEAL_HARMFUL_SPELL;
         let crit_only = event(proc_flags_ex::CRITICAL_HIT);
-        assert!(can_trigger(Some(&crit_only), aura, proc_flags_ex::CRITICAL_HIT));
-        assert!(!can_trigger(Some(&crit_only), aura, proc_flags_ex::NORMAL_HIT));
+        assert!(can_trigger(
+            Some(&crit_only),
+            aura,
+            proc_flags_ex::CRITICAL_HIT
+        ));
+        assert!(!can_trigger(
+            Some(&crit_only),
+            aura,
+            proc_flags_ex::NORMAL_HIT
+        ));
     }
 
     #[test]

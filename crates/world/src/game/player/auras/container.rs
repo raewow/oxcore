@@ -313,6 +313,16 @@ impl AuraContainer {
             .sum()
     }
 
+    /// Get multiplicative modifier for auras of a given type with an exact misc_value match.
+    pub fn get_total_aura_multiplier_by_misc(&self, aura_type: u32, misc_value: i32) -> f32 {
+        self.auras
+            .values()
+            .filter(|a| a.aura_type == aura_type && a.misc_value == misc_value)
+            .fold(1.0, |multiplier, aura| {
+                multiplier * (100.0 + aura.current_value() as f32) / 100.0
+            })
+    }
+
     /// Get total modifier for auras of a given type where `misc_value & misc_mask != 0`.
     /// Used for school-mask queries: e.g. fire resistance modifier where misc_mask = SPELL_SCHOOL_MASK_FIRE.
     /// Matches C++ Unit::GetTotalAuraModifierByMiscMask — bitmask overlap, not equality.

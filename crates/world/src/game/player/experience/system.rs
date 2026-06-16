@@ -10,9 +10,7 @@ use tracing::{debug, info};
 
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
-use crate::game::common::update_fields::{
-    PLAYER_NEXT_LEVEL_XP, PLAYER_XP, UNIT_FIELD_LEVEL,
-};
+use crate::game::common::update_fields::{PLAYER_NEXT_LEVEL_XP, PLAYER_XP, UNIT_FIELD_LEVEL};
 use crate::game::player::stats::StatsSystem;
 use crate::game::player::PlayerManager;
 use oxcore_shared::game::experience::{

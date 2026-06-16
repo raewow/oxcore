@@ -14,8 +14,8 @@ pub mod world;
 pub use character::{ChrClassesEntry, ChrRacesEntry};
 pub use faction::{FactionDbcEntry, FactionTemplateDbcEntry};
 pub use item_object::{
-    AuctionHouseEntry, BankBagSlotPricesEntry, CreatureDisplayInfoEntry, GameObjectDisplayInfoEntry,
-    ItemEntry, LockEntry,
+    AuctionHouseEntry, BankBagSlotPricesEntry, CreatureDisplayInfoEntry,
+    GameObjectDisplayInfoEntry, ItemEntry, LockEntry,
 };
 pub use skill::{SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry};
 pub use spell::{

@@ -91,7 +91,14 @@ impl SpellSystem {
             unit_target_guid: target_guid,
             ..Default::default()
         };
-        Box::pin(self.cast_spell_inner(caster_guid, spell_id, cast_targets, is_triggered, None, world))
+        Box::pin(self.cast_spell_inner(
+            caster_guid,
+            spell_id,
+            cast_targets,
+            is_triggered,
+            None,
+            world,
+        ))
     }
 
     /// Cast a spell with the full client-provided targets (unit/GO/item/corpse + source/dest
@@ -106,7 +113,14 @@ impl SpellSystem {
         world: &'a World,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
     {
-        Box::pin(self.cast_spell_inner(caster_guid, spell_id, cast_targets, is_triggered, None, world))
+        Box::pin(self.cast_spell_inner(
+            caster_guid,
+            spell_id,
+            cast_targets,
+            is_triggered,
+            None,
+            world,
+        ))
     }
 
     pub fn cast_spell_from_item<'a>(
@@ -589,13 +603,8 @@ impl SpellSystem {
                             )
                             .await?;
                         } else {
-                            self.execute_channel_tick(
-                                caster_guid,
-                                spell_id,
-                                &cast_targets,
-                                world,
-                            )
-                            .await?;
+                            self.execute_channel_tick(caster_guid, spell_id, &cast_targets, world)
+                                .await?;
                         }
                     }
                 }
@@ -803,8 +812,15 @@ impl SpellSystem {
                     };
                     self.execute_spell(player_guid, spell_id, &cast_targets, is_triggered, world)
                         .await?;
-                    self.finish_cast(player_guid, spell_id, &cast_targets, is_triggered, None, world)
-                        .await?;
+                    self.finish_cast(
+                        player_guid,
+                        spell_id,
+                        &cast_targets,
+                        is_triggered,
+                        None,
+                        world,
+                    )
+                    .await?;
                 }
                 CastUpdateInfo::ChannelTick {
                     spell_id,
@@ -1366,46 +1382,56 @@ impl SpellSystem {
         let mut pushback_applied = 0u32;
         let mut spell_id_for_reschedule: Option<u32> = None;
 
-        world.systems.player.manager().with_player_mut(target_guid, |player| {
-            // Apply pushback to Generic slot first, then Channeled
-            let slot_idx = if player.spells.current_spells[CurrentSpellType::Generic as usize].is_some() {
-                CurrentSpellType::Generic as usize
-            } else {
-                CurrentSpellType::Channeled as usize
-            };
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                // Apply pushback to Generic slot first, then Channeled
+                let slot_idx =
+                    if player.spells.current_spells[CurrentSpellType::Generic as usize].is_some() {
+                        CurrentSpellType::Generic as usize
+                    } else {
+                        CurrentSpellType::Channeled as usize
+                    };
 
-            if let Some(active) = player.spells.current_spells[slot_idx].as_mut() {
-                // Check NotLoseCastTime spell modifier (reduces pushback, e.g., Concentration Aura)
-                let mut pushback_reduction_pct = 0i32;
-                for modifier in &player.spells.spell_modifiers {
-                    if modifier.op == crate::game::player::spells::state::SpellModOp::NotLoseCastTime {
-                        pushback_reduction_pct += modifier.value;
+                if let Some(active) = player.spells.current_spells[slot_idx].as_mut() {
+                    // Check NotLoseCastTime spell modifier (reduces pushback, e.g., Concentration Aura)
+                    let mut pushback_reduction_pct = 0i32;
+                    for modifier in &player.spells.spell_modifiers {
+                        if modifier.op
+                            == crate::game::player::spells::state::SpellModOp::NotLoseCastTime
+                        {
+                            pushback_reduction_pct += modifier.value;
+                        }
+                    }
+
+                    // Vanilla pushback values
+                    let max_pushback = 1000u32; // 1 second max total for non-channeled
+                    let base_pushback = 500u32; // 0.5 second per hit for non-channeled
+
+                    // Apply pushback reduction
+                    let pushback_per_hit = if pushback_reduction_pct > 0 {
+                        let reduction =
+                            (base_pushback as f32 * pushback_reduction_pct as f32 / 100.0) as u32;
+                        base_pushback.saturating_sub(reduction)
+                    } else {
+                        base_pushback
+                    };
+
+                    pushback_applied = active.apply_pushback(pushback_per_hit, max_pushback);
+
+                    if pushback_applied > 0 {
+                        spell_id_for_reschedule = Some(active.spell_id);
+                        tracing::debug!(
+                            "Cast pushback: pushed back {}ms on spell {} (reduction={}%)",
+                            pushback_applied,
+                            active.spell_id,
+                            pushback_reduction_pct
+                        );
                     }
                 }
-
-                // Vanilla pushback values
-                let max_pushback = 1000u32; // 1 second max total for non-channeled
-                let base_pushback = 500u32; // 0.5 second per hit for non-channeled
-
-                // Apply pushback reduction
-                let pushback_per_hit = if pushback_reduction_pct > 0 {
-                    let reduction = (base_pushback as f32 * pushback_reduction_pct as f32 / 100.0) as u32;
-                    base_pushback.saturating_sub(reduction)
-                } else {
-                    base_pushback
-                };
-
-                pushback_applied = active.apply_pushback(pushback_per_hit, max_pushback);
-
-                if pushback_applied > 0 {
-                    spell_id_for_reschedule = Some(active.spell_id);
-                    tracing::debug!(
-                        "Cast pushback: pushed back {}ms on spell {} (reduction={}%)",
-                        pushback_applied, active.spell_id, pushback_reduction_pct
-                    );
-                }
-            }
-        });
+            });
 
         Ok(pushback_applied)
     }

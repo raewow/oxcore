@@ -318,8 +318,7 @@ fn check_rest_area_exit(player_guid: ObjectGuid, map_id: u32, pos: Position, wor
         };
         use oxcore_shared::messages::ToWorldPacket;
 
-        let world_guid =
-            crate::core::common::guid::ObjectGuid::from_low(player_guid.counter());
+        let world_guid = crate::core::common::guid::ObjectGuid::from_low(player_guid.counter());
         let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
             ValuesUpdateBlock::new(world_guid, ObjectType::Player)
                 .set_field(PLAYER_FLAGS, new_flags),

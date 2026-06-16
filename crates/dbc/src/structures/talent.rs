@@ -119,5 +119,3 @@ impl DbcEntry for TalentTabEntry {
         Ok(Some((id, entry)))
     }
 }
-
-

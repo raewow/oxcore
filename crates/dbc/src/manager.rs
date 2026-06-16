@@ -95,7 +95,11 @@ impl DbcManager {
         }
         load_dbc_store(store, path.to_str().unwrap())
             .with_context(|| format!("Failed to load {}", filename))?;
-        debug!("Loaded {} {} entries", store.len(), filename.replace(".dbc", ""));
+        debug!(
+            "Loaded {} {} entries",
+            store.len(),
+            filename.replace(".dbc", "")
+        );
         Ok(())
     }
 
@@ -112,7 +116,11 @@ impl DbcManager {
         }
         load_dbc_store(store, path.to_str().unwrap())
             .with_context(|| format!("Failed to load {}", filename))?;
-        debug!("Loaded {} {} entries", store.len(), filename.replace(".dbc", ""));
+        debug!(
+            "Loaded {} {} entries",
+            store.len(),
+            filename.replace(".dbc", "")
+        );
         Ok(())
     }
 
@@ -132,7 +140,11 @@ impl DbcManager {
         Self::load_dbc(&mut self.area_table, dbc_path, "AreaTable.dbc")?;
         Self::load_dbc(&mut self.area_trigger, dbc_path, "AreaTrigger.dbc")?;
         Self::load_dbc(&mut self.auction_house, dbc_path, "AuctionHouse.dbc")?;
-        Self::load_dbc(&mut self.bank_bag_slot_prices, dbc_path, "BankBagSlotPrices.dbc")?;
+        Self::load_dbc(
+            &mut self.bank_bag_slot_prices,
+            dbc_path,
+            "BankBagSlotPrices.dbc",
+        )?;
         Self::load_dbc(&mut self.chr_classes, dbc_path, "ChrClasses.dbc")?;
         Self::load_dbc(&mut self.chr_races, dbc_path, "ChrRaces.dbc")?;
         Self::load_dbc(&mut self.map, dbc_path, "Map.dbc")?;
@@ -144,7 +156,9 @@ impl DbcManager {
                 Ok(_) => {
                     debug!("Loaded {} Faction entries", self.faction.len());
                     if self.faction.len() == 0 {
-                        warn!("WARNING: Faction.dbc loaded but contains 0 entries - this is unusual!");
+                        warn!(
+                            "WARNING: Faction.dbc loaded but contains 0 entries - this is unusual!"
+                        );
                     }
                 }
                 Err(e) => {
@@ -169,21 +183,39 @@ impl DbcManager {
                 }
             }
         } else {
-            error!("CRITICAL: Faction.dbc not found at: {}", faction_path.display());
-            error!("Please ensure Faction.dbc is in the DBC directory: {}", dbc_path.display());
+            error!(
+                "CRITICAL: Faction.dbc not found at: {}",
+                faction_path.display()
+            );
+            error!(
+                "Please ensure Faction.dbc is in the DBC directory: {}",
+                dbc_path.display()
+            );
         }
 
         Self::load_dbc(&mut self.faction_template, dbc_path, "FactionTemplate.dbc")?;
-        Self::load_dbc(&mut self.creature_display_info, dbc_path, "CreatureDisplayInfo.dbc")?;
+        Self::load_dbc(
+            &mut self.creature_display_info,
+            dbc_path,
+            "CreatureDisplayInfo.dbc",
+        )?;
         Self::load_dbc_optional(&mut self.item, dbc_path, "Item.dbc")?;
         Self::load_dbc(&mut self.skill_line, dbc_path, "SkillLine.dbc")?;
         Self::load_dbc(&mut self.skill_tiers, dbc_path, "SkillTiers.dbc")?;
-        Self::load_dbc(&mut self.skill_race_class_info, dbc_path, "SkillRaceClassInfo.dbc")?;
+        Self::load_dbc(
+            &mut self.skill_race_class_info,
+            dbc_path,
+            "SkillRaceClassInfo.dbc",
+        )?;
         Self::load_dbc(&mut self.spell_cast_time, dbc_path, "SpellCastTimes.dbc")?;
         Self::load_dbc(&mut self.spell_duration, dbc_path, "SpellDuration.dbc")?;
         Self::load_dbc(&mut self.spell_radius, dbc_path, "SpellRadius.dbc")?;
         Self::load_dbc(&mut self.spell_range, dbc_path, "SpellRange.dbc")?;
-        Self::load_dbc_optional(&mut self.spell_focus_object, dbc_path, "SpellFocusObject.dbc")?;
+        Self::load_dbc_optional(
+            &mut self.spell_focus_object,
+            dbc_path,
+            "SpellFocusObject.dbc",
+        )?;
         Self::load_dbc(&mut self.world_safe_locs, dbc_path, "WorldSafeLocs.dbc")?;
         Self::load_dbc(&mut self.talent, dbc_path, "Talent.dbc")?;
         Self::load_dbc(&mut self.talent_tab, dbc_path, "TalentTab.dbc")?;

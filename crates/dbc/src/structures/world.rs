@@ -182,5 +182,3 @@ impl DbcEntry for WorldSafeLocsEntry {
         Ok(Some((id, entry)))
     }
 }
-
-

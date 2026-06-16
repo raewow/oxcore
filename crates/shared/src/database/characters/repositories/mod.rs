@@ -25,7 +25,9 @@ pub mod ticket_repository;
 pub use auction_repository::AuctionRepository;
 pub use auction_repository_trait::AuctionRepositoryTrait;
 pub use battleground_repository::BattlegroundRepository;
-pub use character_repository::{CharacterRepository, CharacterRepositoryTrait};
+pub use character_repository::{
+    CharacterDeleteMode, CharacterRepository, CharacterRepositoryTrait,
+};
 pub use corpse_repository::CorpseRepository;
 pub use group_repository::GroupRepository;
 pub use group_repository_trait::GroupRepositoryTrait;

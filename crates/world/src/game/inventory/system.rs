@@ -236,8 +236,8 @@ impl InventorySystem {
         slot: u8,
         is_swap: bool,
     ) -> Option<oxcore_shared::game::inventory::InventoryResult> {
-        use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
         use oxcore_shared::game::inventory::InventoryResult;
+        use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
 
         // Only applies to equipped items (bag 255, slots 0-18) and bag slots (19-22)
         let is_equip_pos = bag == INVENTORY_SLOT_BAG_0 && slot < 19;
@@ -272,7 +272,9 @@ impl InventorySystem {
 
         // Check if player is in combat
         if let Some(ref player_mgr) = self.player_mgr {
-            let in_combat = player_mgr.with_player(player_guid, |p| p.combat.in_combat).unwrap_or(false);
+            let in_combat = player_mgr
+                .with_player(player_guid, |p| p.combat.in_combat)
+                .unwrap_or(false);
 
             if in_combat {
                 // Weapons, offhands, projectiles, and relics can be changed in combat
@@ -320,10 +322,10 @@ impl InventorySystem {
         slot: u8,
         _item_entry: u32,
     ) -> Option<oxcore_shared::game::inventory::InventoryResult> {
-        use oxcore_shared::game::inventory::{
-            is_bank_pos, BANK_SLOT_BAG_START, BANK_SLOT_BAG_END, INVENTORY_SLOT_BAG_0,
-        };
         use oxcore_shared::game::inventory::InventoryResult;
+        use oxcore_shared::game::inventory::{
+            is_bank_pos, BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, INVENTORY_SLOT_BAG_0,
+        };
 
         if !is_bank_pos(bag, slot) {
             return Some(InventoryResult::ItemDoesntGoToSlot);
@@ -2281,7 +2283,9 @@ impl InventorySystem {
 
         // Check if existing item can be unequipped (swap case)
         if let Some(_) = existing_item_guid {
-            if let Some(error) = self.can_unequip_item(player_guid, INVENTORY_SLOT_BAG_0, equip_slot, true) {
+            if let Some(error) =
+                self.can_unequip_item(player_guid, INVENTORY_SLOT_BAG_0, equip_slot, true)
+            {
                 self.send_inventory_error(player_guid, error as u8);
                 return EquipResult::ItemNotFound;
             }
@@ -2463,7 +2467,9 @@ impl InventorySystem {
         }
 
         // Check if item can be unequipped
-        if let Some(error) = self.can_unequip_item(player_guid, INVENTORY_SLOT_BAG_0, equip_slot, false) {
+        if let Some(error) =
+            self.can_unequip_item(player_guid, INVENTORY_SLOT_BAG_0, equip_slot, false)
+        {
             self.send_inventory_error(player_guid, error as u8);
             return EquipResult::ItemNotFound;
         }
@@ -2970,8 +2976,16 @@ impl InventorySystem {
         // 4.5. Duration updates (batched)
         if !final_durations.is_empty() {
             for (item_guid, duration) in final_durations {
-                if let Err(e) = self.repository.update_item_duration(item_guid, duration).await {
-                    tracing::error!("[FLUSH] Failed to update duration for item {}: {}", item_guid, e);
+                if let Err(e) = self
+                    .repository
+                    .update_item_duration(item_guid, duration)
+                    .await
+                {
+                    tracing::error!(
+                        "[FLUSH] Failed to update duration for item {}: {}",
+                        item_guid,
+                        e
+                    );
                 }
             }
         }

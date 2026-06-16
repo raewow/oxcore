@@ -231,12 +231,8 @@ pub async fn handle_gossip_hello(
                 "Opening trainer window directly for player {:?} from NPC {:?} (no gossip menu)",
                 player_guid, npc_guid
             );
-            crate::handlers::trainer_handler::send_trainer_list(
-                player_guid,
-                npc_guid,
-                world,
-            )
-            .await?;
+            crate::handlers::trainer_handler::send_trainer_list(player_guid, npc_guid, world)
+                .await?;
             return Ok(());
         }
     }
@@ -363,12 +359,8 @@ pub async fn handle_gossip_select_option(
                     "Opening trainer window for player {:?} from NPC {:?}",
                     player_guid, npc_guid
                 );
-                crate::handlers::trainer_handler::send_trainer_list(
-                    player_guid,
-                    npc_guid,
-                    world,
-                )
-                .await?;
+                crate::handlers::trainer_handler::send_trainer_list(player_guid, npc_guid, world)
+                    .await?;
             }
             _ => {
                 // Other options are handled by the gossip system

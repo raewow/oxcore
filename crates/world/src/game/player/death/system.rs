@@ -1103,11 +1103,9 @@ impl DeathSystem {
             .unwrap_or(false);
         if has_reincarn {
             // 21169 is the rez spell id. If it's off cooldown, return it.
-            if let Ok(false) = crate::game::player::spells::cooldowns::is_on_cooldown(
-                player_guid,
-                21169,
-                world,
-            ) {
+            if let Ok(false) =
+                crate::game::player::spells::cooldowns::is_on_cooldown(player_guid, 21169, world)
+            {
                 return 21169;
             }
         }

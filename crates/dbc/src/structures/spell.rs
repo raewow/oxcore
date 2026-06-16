@@ -402,8 +402,7 @@ impl SpellEntry {
     }
 
     pub fn get_cast_time_for_bonus(&self, _effect_type: u32) -> f32 {
-        let mut cast_time =
-            self.get_cast_time(&crate::manager::DbcManager::new()) as f32;
+        let mut cast_time = self.get_cast_time(&crate::manager::DbcManager::new()) as f32;
         if cast_time > 7000.0 {
             cast_time = 7000.0;
         }
@@ -807,4 +806,3 @@ mod tests {
         assert!(!spell.is_target_in_range(35.0, &dbc));
     }
 }
-

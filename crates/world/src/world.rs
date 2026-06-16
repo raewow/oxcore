@@ -72,17 +72,11 @@ pub struct World {
     background_tasks: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     /// Per-player packet handlers
     pub player_handlers: Arc<
-        dashmap::DashMap<
-            ObjectGuid,
-            crate::core::network::player_handler::PlayerPacketHandler,
-        >,
+        dashmap::DashMap<ObjectGuid, crate::core::network::player_handler::PlayerPacketHandler>,
     >,
     /// Per-player movement buffers (socket writes, map update reads)
     pub movement_buffers: Arc<
-        dashmap::DashMap<
-            ObjectGuid,
-            Arc<crate::core::network::movement_buffer::MovementBuffer>,
-        >,
+        dashmap::DashMap<ObjectGuid, Arc<crate::core::network::movement_buffer::MovementBuffer>>,
     >,
     pub data_dir: PathBuf,
 }
@@ -684,9 +678,9 @@ impl World {
         &self,
         player_guid: ObjectGuid,
     ) -> Arc<crate::core::network::movement_buffer::MovementBuffer> {
-        let buffer = Arc::new(
-            crate::core::network::movement_buffer::MovementBuffer::new(player_guid),
-        );
+        let buffer = Arc::new(crate::core::network::movement_buffer::MovementBuffer::new(
+            player_guid,
+        ));
         self.movement_buffers
             .insert(player_guid, Arc::clone(&buffer));
         buffer

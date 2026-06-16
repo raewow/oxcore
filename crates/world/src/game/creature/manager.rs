@@ -209,9 +209,7 @@ impl CreatureManager {
             CREATURE_STATIC_FLAG_IMMUNE_TO_NPC, CREATURE_STATIC_FLAG_IMMUNE_TO_PC,
             CREATURE_STATIC_FLAG_UNINTERACTIBLE,
         };
-        use crate::game::common::unit_flags::{
-            IMMUNE_TO_NPC, IMMUNE_TO_PLAYER, NOT_SELECTABLE,
-        };
+        use crate::game::common::unit_flags::{IMMUNE_TO_NPC, IMMUNE_TO_PLAYER, NOT_SELECTABLE};
 
         let mut unit_flags = 0u32;
 

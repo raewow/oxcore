@@ -86,8 +86,7 @@ pub async fn effect_send_event(input: &EffectInput, world: &World) -> Result<Eff
     if event_id > 0 {
         if let Some(script) = world.managers.lua_mgr.get_process_event_script(event_id) {
             // Build a minimal player snapshot for the caster
-            let player_snap =
-                crate::core::lua::build_player_snapshot(input.caster_guid, world);
+            let player_snap = crate::core::lua::build_player_snapshot(input.caster_guid, world);
             let actions = world.managers.lua_mgr.with_lua(|lua| {
                 script.on_process_event(lua, &player_snap, input.caster_guid, true)
             });

@@ -189,12 +189,7 @@ fn roll_melee_spell_hit(
     // Weapon/defense skills are level*5 placeholders (as in the white-hit combat path).
     let skill_diff = caster_level * 5 - victim_level * 5;
 
-    let miss = melee_spell_miss_chance(
-        target_is_player,
-        victim_level as u8,
-        skill_diff,
-        hit_bonus,
-    );
+    let miss = melee_spell_miss_chance(target_is_player, victim_level as u8, skill_diff, hit_bonus);
 
     let roll: f32 = rand::random::<f32>() * 100.0;
     let mut threshold = miss;
@@ -532,7 +527,7 @@ mod tests {
         assert!((average_resist_fraction(60, 200, 1) - 0.5).abs() < 0.001);
         assert_eq!(average_resist_fraction(60, 200, 0), 0.0); // physical exempt
         assert_eq!(average_resist_fraction(60, 0, 1), 0.0); // no resistance
-        // Clamped at 0.75.
+                                                            // Clamped at 0.75.
         assert!((average_resist_fraction(60, 1000, 1) - 0.75).abs() < 0.001);
     }
 }

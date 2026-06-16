@@ -16,6 +16,24 @@ use crate::game::common::update_fields::{
 use oxcore_shared::messages::update::{CreateObjectBlock, ObjectType};
 use oxcore_shared::protocol::ObjectGuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemUpdateState {
+    Unchanged,
+    Changed,
+    New,
+    Removed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemLootUpdateState {
+    None,
+    Temporary,
+    Unchanged,
+    Changed,
+    New,
+    Removed,
+}
+
 #[derive(Debug, Clone)]
 pub struct Item {
     pub guid: ObjectGuid,
@@ -33,6 +51,8 @@ pub struct Item {
     pub gift_creator_guid: Option<ObjectGuid>,
     pub duration: u32,
     pub spell_charges: [i32; 5],
+    pub update_state: ItemUpdateState,
+    pub loot_state: ItemLootUpdateState,
 }
 
 impl Item {
@@ -69,6 +89,64 @@ impl Item {
             gift_creator_guid,
             duration,
             spell_charges,
+            update_state: ItemUpdateState::Unchanged,
+            loot_state: ItemLootUpdateState::None,
+        }
+    }
+
+    fn mark_changed(&mut self) {
+        if self.update_state != ItemUpdateState::New {
+            self.update_state = ItemUpdateState::Changed;
+        }
+    }
+
+    /// Update loot persistence state.
+    /// Maps to C++ Item::SetLootState.
+    pub fn set_loot_state(&mut self, state: ItemLootUpdateState) {
+        match state {
+            ItemLootUpdateState::None | ItemLootUpdateState::New => {
+                debug_assert!(false, "invalid direct item loot state transition");
+                return;
+            }
+            ItemLootUpdateState::Temporary => {
+                debug_assert_eq!(self.loot_state, ItemLootUpdateState::None);
+                self.loot_state = ItemLootUpdateState::Temporary;
+            }
+            ItemLootUpdateState::Changed => {
+                if self.loot_state != ItemLootUpdateState::New
+                    && self.loot_state != ItemLootUpdateState::Temporary
+                {
+                    self.loot_state = if self.loot_state == ItemLootUpdateState::None {
+                        ItemLootUpdateState::New
+                    } else {
+                        ItemLootUpdateState::Changed
+                    };
+                }
+            }
+            ItemLootUpdateState::Unchanged => {
+                if self.loot_state == ItemLootUpdateState::Removed {
+                    self.loot_state = ItemLootUpdateState::None;
+                } else if self.loot_state != ItemLootUpdateState::Temporary {
+                    self.loot_state = ItemLootUpdateState::Unchanged;
+                }
+            }
+            ItemLootUpdateState::Removed => {
+                if self.loot_state == ItemLootUpdateState::New
+                    || self.loot_state == ItemLootUpdateState::Temporary
+                {
+                    self.loot_state = ItemLootUpdateState::None;
+                    return;
+                }
+
+                self.loot_state = ItemLootUpdateState::Removed;
+            }
+        }
+
+        if self.loot_state != ItemLootUpdateState::None
+            && self.loot_state != ItemLootUpdateState::Unchanged
+            && self.loot_state != ItemLootUpdateState::Temporary
+        {
+            self.mark_changed();
         }
     }
 
@@ -293,5 +371,116 @@ impl Item {
     /// Maps to C++ Item::ChangeEntry
     pub fn change_entry(&mut self, new_entry: u32) {
         self.entry = new_entry;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn guid(raw: u64) -> ObjectGuid {
+        ObjectGuid::from_raw(raw)
+    }
+
+    fn test_item() -> Item {
+        Item::new(
+            guid(1),
+            100,
+            1,
+            guid(2),
+            0,
+            0,
+            0,
+            10,
+            10,
+            Vec::new(),
+            0,
+            None,
+            None,
+            0,
+            [0; 5],
+        )
+    }
+
+    #[test]
+    fn item_starts_with_no_loot_and_unchanged_update_state() {
+        let item = test_item();
+
+        assert_eq!(item.loot_state, ItemLootUpdateState::None);
+        assert_eq!(item.update_state, ItemUpdateState::Unchanged);
+    }
+
+    #[test]
+    fn temporary_loot_stays_temporary_until_removed() {
+        let mut item = test_item();
+
+        item.set_loot_state(ItemLootUpdateState::Temporary);
+        assert_eq!(item.loot_state, ItemLootUpdateState::Temporary);
+        assert_eq!(item.update_state, ItemUpdateState::Unchanged);
+
+        item.set_loot_state(ItemLootUpdateState::Changed);
+        assert_eq!(item.loot_state, ItemLootUpdateState::Temporary);
+        assert_eq!(item.update_state, ItemUpdateState::Unchanged);
+
+        item.set_loot_state(ItemLootUpdateState::Removed);
+        assert_eq!(item.loot_state, ItemLootUpdateState::None);
+        assert_eq!(item.update_state, ItemUpdateState::Unchanged);
+    }
+
+    #[test]
+    fn changed_from_none_becomes_new_and_marks_item_changed() {
+        let mut item = test_item();
+
+        item.set_loot_state(ItemLootUpdateState::Changed);
+
+        assert_eq!(item.loot_state, ItemLootUpdateState::New);
+        assert_eq!(item.update_state, ItemUpdateState::Changed);
+    }
+
+    #[test]
+    fn new_loot_stays_new_until_removed_or_saved() {
+        let mut item = test_item();
+        item.set_loot_state(ItemLootUpdateState::Changed);
+
+        item.update_state = ItemUpdateState::Unchanged;
+        item.set_loot_state(ItemLootUpdateState::Changed);
+        assert_eq!(item.loot_state, ItemLootUpdateState::New);
+        assert_eq!(item.update_state, ItemUpdateState::Changed);
+
+        item.set_loot_state(ItemLootUpdateState::Removed);
+        assert_eq!(item.loot_state, ItemLootUpdateState::None);
+        assert_eq!(item.update_state, ItemUpdateState::Changed);
+    }
+
+    #[test]
+    fn saved_loot_can_change_remove_and_clear_after_save() {
+        let mut item = test_item();
+        item.set_loot_state(ItemLootUpdateState::Unchanged);
+        assert_eq!(item.loot_state, ItemLootUpdateState::Unchanged);
+
+        item.set_loot_state(ItemLootUpdateState::Changed);
+        assert_eq!(item.loot_state, ItemLootUpdateState::Changed);
+        assert_eq!(item.update_state, ItemUpdateState::Changed);
+
+        item.update_state = ItemUpdateState::Unchanged;
+        item.set_loot_state(ItemLootUpdateState::Removed);
+        assert_eq!(item.loot_state, ItemLootUpdateState::Removed);
+        assert_eq!(item.update_state, ItemUpdateState::Changed);
+
+        item.update_state = ItemUpdateState::Unchanged;
+        item.set_loot_state(ItemLootUpdateState::Unchanged);
+        assert_eq!(item.loot_state, ItemLootUpdateState::None);
+        assert_eq!(item.update_state, ItemUpdateState::Unchanged);
+    }
+
+    #[test]
+    fn changed_loot_preserves_new_update_state() {
+        let mut item = test_item();
+        item.update_state = ItemUpdateState::New;
+
+        item.set_loot_state(ItemLootUpdateState::Changed);
+
+        assert_eq!(item.loot_state, ItemLootUpdateState::New);
+        assert_eq!(item.update_state, ItemUpdateState::New);
     }
 }

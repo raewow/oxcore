@@ -10,16 +10,16 @@ use anyhow::{Context, Result};
 use oxcore_shared::config::{find_config_file, load_toml};
 use oxcore_shared::console::run_console_input;
 use oxcore_shared::database::{DatabaseUrls, Databases};
-use serde::Deserialize;
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::Arc;
-use tracing::{error, info, warn};
 use oxcore_world::config::initialize_config_mgr;
 use oxcore_world::core::network::socket_mgr::WorldSocketMgr;
 use oxcore_world::logging;
 use oxcore_world::Config as WorldConfig;
 use oxcore_world::World;
+use serde::Deserialize;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {

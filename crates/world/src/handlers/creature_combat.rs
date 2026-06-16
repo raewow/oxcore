@@ -289,11 +289,26 @@ mod tests {
 
     #[test]
     fn swing_outcome_maps_to_proc_ex() {
-        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Crit), proc_flags_ex::CRITICAL_HIT);
-        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Hit), proc_flags_ex::NORMAL_HIT);
-        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Miss), proc_flags_ex::MISS);
-        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Dodge), proc_flags_ex::DODGE);
-        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Parry), proc_flags_ex::PARRY);
+        assert_eq!(
+            melee_swing_proc_ex(&MeleeHitOutcome::Crit),
+            proc_flags_ex::CRITICAL_HIT
+        );
+        assert_eq!(
+            melee_swing_proc_ex(&MeleeHitOutcome::Hit),
+            proc_flags_ex::NORMAL_HIT
+        );
+        assert_eq!(
+            melee_swing_proc_ex(&MeleeHitOutcome::Miss),
+            proc_flags_ex::MISS
+        );
+        assert_eq!(
+            melee_swing_proc_ex(&MeleeHitOutcome::Dodge),
+            proc_flags_ex::DODGE
+        );
+        assert_eq!(
+            melee_swing_proc_ex(&MeleeHitOutcome::Parry),
+            proc_flags_ex::PARRY
+        );
         assert_eq!(
             melee_swing_proc_ex(&MeleeHitOutcome::Block { blocked_amount: 5 }),
             proc_flags_ex::BLOCK
@@ -303,7 +318,10 @@ mod tests {
             melee_swing_proc_ex(&MeleeHitOutcome::Glancing { reduction: 0.3 }),
             proc_flags_ex::NORMAL_HIT
         );
-        assert_eq!(melee_swing_proc_ex(&MeleeHitOutcome::Crushing), proc_flags_ex::NORMAL_HIT);
+        assert_eq!(
+            melee_swing_proc_ex(&MeleeHitOutcome::Crushing),
+            proc_flags_ex::NORMAL_HIT
+        );
     }
 }
 

@@ -156,5 +156,3 @@ impl DbcEntry for SkillRaceClassInfoEntry {
         )))
     }
 }
-
-

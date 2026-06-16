@@ -226,13 +226,14 @@ pub fn mana_regen_from_spirit(class: u8, spirit: f32) -> f32 {
 /// is converted to mana per second before being added, matching the C++ flow.
 pub fn calculate_mana_regen_rates(
     spirit_regen_per_5: f32,
-    regen_percent_bonus: f32,
+    regen_multiplier: f32,
     flat_mp5: f32,
     interrupt_percent: f32,
 ) -> (f32, f32) {
-    let spirit_regen = spirit_regen_per_5 * (100.0 + regen_percent_bonus) / 100.0;
+    let spirit_regen = spirit_regen_per_5 * regen_multiplier;
     let flat_per_second = flat_mp5 / 5.0;
     let spirit_per_second = spirit_regen / 5.0;
+    let interrupt_percent = interrupt_percent.min(100.0);
     let full_regen = flat_per_second + spirit_per_second;
     let interrupt_regen = flat_per_second + spirit_per_second * interrupt_percent / 100.0;
 
@@ -315,9 +316,17 @@ mod tests {
 
     #[test]
     fn test_mana_regen_rates_include_percent_mp5_and_interrupt() {
-        let (full, interrupt) = calculate_mana_regen_rates(50.0, 20.0, 25.0, 30.0);
+        let (full, interrupt) = calculate_mana_regen_rates(50.0, 1.2, 25.0, 30.0);
 
         assert!((full - 17.0).abs() < 0.0001); // (50 * 1.2 / 5) + (25 / 5)
         assert!((interrupt - 8.6).abs() < 0.0001); // (50 * 1.2 / 5 * 0.3) + (25 / 5)
+    }
+
+    #[test]
+    fn test_mana_regen_interrupt_percent_caps_at_100() {
+        let (full, interrupt) = calculate_mana_regen_rates(50.0, 1.0, 25.0, 150.0);
+
+        assert!((full - 15.0).abs() < 0.0001);
+        assert!((interrupt - 15.0).abs() < 0.0001);
     }
 }

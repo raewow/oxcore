@@ -323,9 +323,10 @@ impl StatsSystem {
                     derived::weapon_skill_crit_bonus(skill.current_value, max_skill_for_level)
                 })
                 .unwrap_or(0.0);
-            let aura_melee_crit = player.auras.container.get_total_aura_modifier(
-                crate::game::player::auras::effects::AURA_MOD_CRIT_PERCENT,
-            ) as f32;
+            let aura_melee_crit =
+                player.auras.container.get_total_aura_modifier(
+                    crate::game::player::auras::effects::AURA_MOD_CRIT_PERCENT,
+                ) as f32;
             player.stats.melee_crit_pct =
                 (base_crit + agi_crit + melee_weapon_bonus + aura_melee_crit).max(0.0);
 
@@ -387,11 +388,10 @@ impl StatsSystem {
                 };
 
                 let spirit_regen = derived::mana_regen_from_spirit(class, spirit);
-                let regen_percent_bonus = player
+                let regen_multiplier = player
                     .auras
                     .container
-                    .get_total_aura_modifier(AURA_MOD_POWER_REGEN_PERCENT)
-                    as f32;
+                    .get_total_aura_multiplier_by_misc(AURA_MOD_POWER_REGEN_PERCENT, 0);
                 let flat_mp5 = player
                     .auras
                     .container
@@ -404,7 +404,7 @@ impl StatsSystem {
                     as f32;
                 let (full_regen, interrupt_regen) = derived::calculate_mana_regen_rates(
                     spirit_regen,
-                    regen_percent_bonus,
+                    regen_multiplier,
                     flat_mp5,
                     interrupt_percent,
                 );

@@ -21,6 +21,7 @@ use crate::game::common::update_fields::{
 use crate::game::player::reputation::FactionEntry;
 use crate::game::player::{Player, PlayerBroadcaster};
 use crate::World;
+use oxcore_shared::database::characters::CharacterDeleteMode;
 use oxcore_shared::database::{CharacterRepository, Databases, ReputationRepository};
 use oxcore_shared::messages::character::{
     SmsgLogoutCancelAck, SmsgLogoutComplete, SmsgLogoutResponse,
@@ -251,8 +252,7 @@ pub async fn handle_player_login_with_guid(
         player.homebind_z = character.position_z;
         info!("[LOGIN] No homebind found, using current position as fallback");
     }
-    player.next_level_xp =
-        crate::game::player::experience::calculate_xp_for_level(player.level);
+    player.next_level_xp = crate::game::player::experience::calculate_xp_for_level(player.level);
 
     // 4. Add to PlayerManager
     info!("[LOGIN] Adding player to PlayerManager");
@@ -2129,7 +2129,7 @@ pub async fn handle_char_delete(
     session: &WorldSession,
     packet: &mut WorldPacket,
     databases: &Databases,
-    _world: &World,
+    world: &World,
 ) -> Result<()> {
     use crate::game::common::account_result::char_delete;
     use oxcore_shared::messages::character::SmsgCharDelete;
@@ -2150,7 +2150,7 @@ pub async fn handle_char_delete(
     let char_repo = CharacterRepository::new(Arc::new(databases.character.clone()));
     let character = char_repo.find_by_guid(guid).await?;
 
-    match character {
+    let character = match character {
         None => {
             warn!("Character {} not found", guid);
             session.send_msg(SmsgCharDelete {
@@ -2169,11 +2169,19 @@ pub async fn handle_char_delete(
             })?;
             return Ok(());
         }
-        Some(_) => {}
-    }
+        Some(char_data) => char_data,
+    };
 
     // 3. Delete character (repository handles transaction and cascades)
-    char_repo.delete(guid).await?;
+    let configured_method = world.config.char_delete_method.unwrap_or(0);
+    let min_level = world.config.char_delete_min_level.unwrap_or(0) as u8;
+    let mode = if configured_method == 1 && character.level >= min_level {
+        CharacterDeleteMode::Soft
+    } else {
+        CharacterDeleteMode::Hard
+    };
+
+    char_repo.delete(guid, mode).await?;
 
     debug!("Character {} deleted successfully", guid);
 
@@ -2423,8 +2431,7 @@ pub async fn handle_zoneupdate(
     }
 
     // Send updated PLAYER_FLAGS to client
-    if is_capital || current_rest_type == crate::game::player::environment::RestType::InCity
-    {
+    if is_capital || current_rest_type == crate::game::player::environment::RestType::InCity {
         if let Some(new_flags) = player_mgr.with_player(player_guid, |p| p.player_flags) {
             use crate::game::common::update_fields::PLAYER_FLAGS;
             use oxcore_shared::messages::update::{
@@ -2432,8 +2439,7 @@ pub async fn handle_zoneupdate(
             };
             use oxcore_shared::messages::ToWorldPacket;
 
-            let world_guid =
-                crate::core::common::guid::ObjectGuid::from_low(player_guid.counter());
+            let world_guid = crate::core::common::guid::ObjectGuid::from_low(player_guid.counter());
             let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
                 ValuesUpdateBlock::new(world_guid, ObjectType::Player)
                     .set_field(PLAYER_FLAGS, new_flags),

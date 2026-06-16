@@ -394,11 +394,9 @@ impl WorldSocket {
                     self.world.remove_movement_buffer(player_guid);
 
                     // Perform instant logout on disconnect
-                    if let Err(e) = crate::handlers::character::perform_logout_cleanup(
-                        &session,
-                        &self.world,
-                    )
-                    .await
+                    if let Err(e) =
+                        crate::handlers::character::perform_logout_cleanup(&session, &self.world)
+                            .await
                     {
                         error!(
                             "[DISCONNECT] Failed to cleanup player {}: {}",

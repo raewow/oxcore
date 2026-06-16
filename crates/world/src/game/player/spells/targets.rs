@@ -442,7 +442,12 @@ mod tests {
             auth: lazy_pool(),
             logs: lazy_pool(),
         });
-        World::new(databases, Arc::new(Config::default()), 50, PathBuf::from("."))
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
     }
 
     /// A minimal SpellEntry: one school-damage effect resolved to an instant enemy-AoE,
@@ -541,7 +546,12 @@ mod tests {
     }
 
     fn pos(x: f32, y: f32) -> Position {
-        Position { x, y, z: 0.0, o: 0.0 }
+        Position {
+            x,
+            y,
+            z: 0.0,
+            o: 0.0,
+        }
     }
 
     /// Ground-targeted AoE resolves enemies around the destination position, proving the

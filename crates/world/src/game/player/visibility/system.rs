@@ -296,7 +296,9 @@ impl VisibilitySubsystem {
                     .creature_mgr
                     .get_static_flags1(candidate_guid)
                     .unwrap_or(0);
-                let is_ghost_visible = (static_flags & crate::game::common::creature_flags::CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS) != 0;
+                let is_ghost_visible = (static_flags
+                    & crate::game::common::creature_flags::CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS)
+                    != 0;
 
                 if is_ghost_visible && player_is_alive {
                     continue; // Spirit healer visible only to dead players

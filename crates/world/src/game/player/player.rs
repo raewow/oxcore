@@ -20,7 +20,7 @@ use super::visibility::VisibilityState;
 use super::CombatState;
 use crate::game::npc::quest::QuestProgress;
 use oxcore_shared::protocol::ObjectGuid;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Slim player object
@@ -134,6 +134,14 @@ pub struct Player {
     /// Pending quest-share info set by a party member who wants to share a quest.
     /// Cleared when the player accepts/declines or when the sharer goes away.
     pub quest_share_info: Option<QuestShareInfo>,
+    /// Active item set bonuses keyed by item set ID.
+    pub item_set_effects: HashMap<u32, ItemSetEffect>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ItemSetEffect {
+    pub item_count: u32,
+    pub spells: [Option<u32>; 8],
 }
 
 /// Tracks a quest shared by another player pending confirmation.
@@ -210,7 +218,20 @@ impl Player {
             homebind_z: 0.0,
             self_res_spell: 0,
             quest_share_info: None,
+            item_set_effects: HashMap::new(),
         }
+    }
+
+    pub fn get_item_set_effect(&self, set_id: u32) -> Option<&ItemSetEffect> {
+        self.item_set_effects.get(&set_id)
+    }
+
+    pub fn add_item_set_effect(&mut self, set_id: u32) -> &mut ItemSetEffect {
+        self.item_set_effects.entry(set_id).or_default()
+    }
+
+    pub fn remove_item_set_effect(&mut self, set_id: u32) {
+        self.item_set_effects.remove(&set_id);
     }
 
     /// Set appearance
@@ -255,5 +276,70 @@ impl Player {
     /// Get the player's team (Alliance/Horde/None)
     pub fn get_team(&self) -> oxcore_shared::game::chat::Team {
         oxcore_shared::game::chat::Team::from_race(self.race)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_player() -> Player {
+        Player::new(
+            ObjectGuid::new_player(1),
+            "TestPlayer".to_string(),
+            0,
+            0,
+            0,
+            60,
+            1,
+            1,
+            0,
+        )
+    }
+
+    #[test]
+    fn item_set_effects_start_empty() {
+        let player = test_player();
+
+        assert!(player.item_set_effects.is_empty());
+        assert_eq!(player.get_item_set_effect(100), None);
+    }
+
+    #[test]
+    fn add_item_set_effect_inserts_default_effect() {
+        let mut player = test_player();
+
+        let effect = player.add_item_set_effect(100);
+        effect.item_count = 2;
+        effect.spells[0] = Some(1234);
+
+        assert_eq!(player.get_item_set_effect(100).unwrap().item_count, 2);
+        assert_eq!(
+            player.get_item_set_effect(100).unwrap().spells[0],
+            Some(1234)
+        );
+    }
+
+    #[test]
+    fn remove_item_set_effect_erases_only_requested_set() {
+        let mut player = test_player();
+        player.add_item_set_effect(100).item_count = 2;
+        player.add_item_set_effect(200).item_count = 4;
+
+        player.remove_item_set_effect(100);
+
+        assert_eq!(player.get_item_set_effect(100), None);
+        assert_eq!(player.get_item_set_effect(200).unwrap().item_count, 4);
+    }
+
+    #[test]
+    fn remove_missing_item_set_effect_is_noop() {
+        let mut player = test_player();
+        player.add_item_set_effect(200).item_count = 4;
+
+        player.remove_item_set_effect(100);
+
+        assert_eq!(player.item_set_effects.len(), 1);
+        assert_eq!(player.get_item_set_effect(200).unwrap().item_count, 4);
     }
 }

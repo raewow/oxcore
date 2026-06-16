@@ -1606,9 +1606,7 @@ mod tests {
     const CHANNELED_SPELL_ID: u32 = 9999;
     const INTERACT_INTERRUPT_FLAGS: u32 = 0x00000C00; // TALK | USE
 
-    fn make_channeled_spell(
-        channel_interrupt_flags: u32,
-    ) -> crate::dbc::structures::SpellEntry {
+    fn make_channeled_spell(channel_interrupt_flags: u32) -> crate::dbc::structures::SpellEntry {
         crate::dbc::structures::SpellEntry {
             id: CHANNELED_SPELL_ID,
             name: "Test Channel".to_string(),
@@ -2101,9 +2099,11 @@ mod tests {
             .player_mgr
             .with_player_mut(member_guid, |player| {
                 for i in 0..max_slots {
-                    player.active_quests.push(
-                        crate::game::npc::quest::types::QuestProgress::new((100 + i) as u32),
-                    );
+                    player
+                        .active_quests
+                        .push(crate::game::npc::quest::types::QuestProgress::new(
+                            (100 + i) as u32,
+                        ));
                 }
             });
 

@@ -938,10 +938,13 @@ impl AuraSystem {
             match proc_spell_id.and_then(|id| world.managers.spell_mgr.get(id)) {
                 Some(e) => {
                     // A spell applies a periodic aura when any effect is an aura with a tick interval.
-                    let periodic = (0..3).any(|i| {
-                        e.effect_apply_aura_name[i] != 0 && e.effect_amplitude[i] > 0
-                    });
-                    (1u32 << (e.school as u32 & 0x07), e.spell_family_name, periodic)
+                    let periodic = (0..3)
+                        .any(|i| e.effect_apply_aura_name[i] != 0 && e.effect_amplitude[i] > 0);
+                    (
+                        1u32 << (e.school as u32 & 0x07),
+                        e.spell_family_name,
+                        periodic,
+                    )
                 }
                 None => (0, 0, false),
             };

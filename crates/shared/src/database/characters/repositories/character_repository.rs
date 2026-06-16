@@ -4,6 +4,12 @@ use async_trait::async_trait;
 use sqlx::{MySqlPool, Row};
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CharacterDeleteMode {
+    Hard,
+    Soft,
+}
+
 pub struct CharacterRepository {
     pool: Arc<MySqlPool>,
 }
@@ -879,36 +885,102 @@ impl CharacterRepository {
         Ok(())
     }
 
-    /// Delete a character (and all related data).
-    pub async fn delete(&self, guid: u32) -> Result<()> {
-        // Note: This should delete from all character-related tables.
-        // In production, this would be part of a larger transaction that
-        // includes character_spell, character_aura, character_inventory, etc.
+    /// Delete a character using the configured deletion mode.
+    pub async fn delete(&self, guid: u32, mode: CharacterDeleteMode) -> Result<()> {
+        match mode {
+            CharacterDeleteMode::Hard => self.hard_delete(guid).await,
+            CharacterDeleteMode::Soft => self.soft_delete(guid).await,
+        }
+    }
+
+    async fn soft_delete(&self, guid: u32) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .context("System clock before UNIX epoch")?
+            .as_secs() as i64;
+
+        sqlx::query(
+            "UPDATE characters SET deleted_name = name, deleted_account = account, deleted_time = ?, name = '', account = 0 WHERE guid = ?",
+        )
+        .bind(now)
+        .bind(guid)
+        .execute(&*self.pool)
+        .await
+        .context("Failed to soft-delete character")?;
+
+        Ok(())
+    }
+
+    async fn hard_delete(&self, guid: u32) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
-        // Delete from all related tables
-        let tables = vec![
-            "character_spell",
-            "character_aura",
-            "character_inventory",
-            "character_skills",
-            "character_reputation",
+        for table in [
             "character_action",
-            "character_queststatus",
-            "character_spell_cooldown",
+            "character_aura",
+            "character_battleground_data",
+            "character_deleted_items",
+            "character_gifts",
             "character_homebind",
-            "character_social",
-        ];
-
-        for table in tables {
-            sqlx::query(&format!("DELETE FROM {} WHERE guid = ?", table))
+            "character_instance",
+            "character_inventory",
+            "character_queststatus",
+            "character_reputation",
+            "character_skills",
+            "character_forgotten_skills",
+            "character_spell",
+            "character_spell_cooldown",
+        ] {
+            sqlx::query(&format!("DELETE FROM {table} WHERE guid = ?"))
                 .bind(guid)
                 .execute(&mut *tx)
                 .await
-                .context(format!("Failed to delete from {}", table))?;
+                .context(format!("Failed to delete from {table}"))?;
         }
 
-        // Finally delete the character itself
+        sqlx::query("DELETE FROM group_instance WHERE leader_guid = ?")
+            .bind(guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete character group instances")?;
+
+        sqlx::query("DELETE FROM item_instance WHERE owner_guid = ?")
+            .bind(guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete character item instances")?;
+
+        sqlx::query("DELETE FROM character_social WHERE guid = ? OR friend = ?")
+            .bind(guid)
+            .bind(guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete character social links")?;
+
+        sqlx::query("DELETE FROM mail WHERE receiver_guid = ?")
+            .bind(guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete character mail")?;
+
+        sqlx::query("DELETE FROM mail_items WHERE receiver_guid = ?")
+            .bind(guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete character mail items")?;
+
+        sqlx::query("DELETE FROM character_pet WHERE owner_guid = ?")
+            .bind(guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete character pets")?;
+
+        sqlx::query("DELETE FROM guild_eventlog WHERE player_guid1 = ? OR player_guid2 = ?")
+            .bind(guid)
+            .bind(guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete character guild event log")?;
+
         sqlx::query("DELETE FROM characters WHERE guid = ?")
             .bind(guid)
             .execute(&mut *tx)

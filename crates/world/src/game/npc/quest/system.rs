@@ -1857,9 +1857,7 @@ impl QuestSystem {
                         crate::game::inventory::RemoveItemResult::ItemRemoved { .. } => {
                             remaining = remaining.saturating_sub(remove_count);
                         }
-                        crate::game::inventory::RemoveItemResult::CountReduced {
-                            ..
-                        } => {
+                        crate::game::inventory::RemoveItemResult::CountReduced { .. } => {
                             remaining = remaining.saturating_sub(remove_count);
                         }
                         crate::game::inventory::RemoveItemResult::InsufficientCount => {

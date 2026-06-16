@@ -592,23 +592,26 @@ impl InventoryCache {
         bag_slot: u8,
         entry_id: u32,
     ) -> Vec<ObjectGuid> {
-        self.player_inventories.get(&player_guid).map(|inv| {
-            let mut result = Vec::new();
-            if let Some(bag_guid) = inv.resolve_bag_guid(bag_slot) {
-                if let Some(bag) = inv.bags.get(&bag_guid) {
-                    for slot in 0..bag.actual_size {
-                        if let Some(item_guid) = bag.get_slot(slot) {
-                            if let Some(item) = inv.items.get(&item_guid) {
-                                if item.read().entry == entry_id {
-                                    result.push(item_guid);
+        self.player_inventories
+            .get(&player_guid)
+            .map(|inv| {
+                let mut result = Vec::new();
+                if let Some(bag_guid) = inv.resolve_bag_guid(bag_slot) {
+                    if let Some(bag) = inv.bags.get(&bag_guid) {
+                        for slot in 0..bag.actual_size {
+                            if let Some(item_guid) = bag.get_slot(slot) {
+                                if let Some(item) = inv.items.get(&item_guid) {
+                                    if item.read().entry == entry_id {
+                                        result.push(item_guid);
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            result
-        }).unwrap_or_default()
+                result
+            })
+            .unwrap_or_default()
     }
 
     /// Count items by entry within a specific bag, excluding a specific item
@@ -620,27 +623,30 @@ impl InventoryCache {
         entry_id: u32,
         exclude_guid: Option<ObjectGuid>,
     ) -> u32 {
-        self.player_inventories.get(&player_guid).map(|inv| {
-            let mut count = 0;
-            if let Some(bag_guid) = inv.resolve_bag_guid(bag_slot) {
-                if let Some(bag) = inv.bags.get(&bag_guid) {
-                    for slot in 0..bag.actual_size {
-                        if let Some(item_guid) = bag.get_slot(slot) {
-                            if exclude_guid == Some(item_guid) {
-                                continue;
-                            }
-                            if let Some(item) = inv.items.get(&item_guid) {
-                                let item = item.read();
-                                if item.entry == entry_id {
-                                    count += item.count;
+        self.player_inventories
+            .get(&player_guid)
+            .map(|inv| {
+                let mut count = 0;
+                if let Some(bag_guid) = inv.resolve_bag_guid(bag_slot) {
+                    if let Some(bag) = inv.bags.get(&bag_guid) {
+                        for slot in 0..bag.actual_size {
+                            if let Some(item_guid) = bag.get_slot(slot) {
+                                if exclude_guid == Some(item_guid) {
+                                    continue;
+                                }
+                                if let Some(item) = inv.items.get(&item_guid) {
+                                    let item = item.read();
+                                    if item.entry == entry_id {
+                                        count += item.count;
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            count
-        }).unwrap_or(0)
+                count
+            })
+            .unwrap_or(0)
     }
 
     /// Get slot number of an item within a specific bag by its GUID
@@ -653,9 +659,9 @@ impl InventoryCache {
     ) -> Option<u8> {
         self.player_inventories.get(&player_guid).and_then(|inv| {
             inv.resolve_bag_guid(bag_slot).and_then(|bag_guid| {
-                inv.bags.get(&bag_guid).and_then(|bag| {
-                    bag.get_slot_by_guid(item_guid)
-                })
+                inv.bags
+                    .get(&bag_guid)
+                    .and_then(|bag| bag.get_slot_by_guid(item_guid))
             })
         })
     }

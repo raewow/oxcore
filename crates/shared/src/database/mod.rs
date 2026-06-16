@@ -155,7 +155,7 @@ pub use auth::{
 
 // Characters database types
 pub use characters::{
-    CharacterRepository, CharacterRow, GroupRepository, GroupRow, GuildRepository, GuildRow,
-    ItemInstanceRow, ItemRepository, MailRepository, MailRow, ReputationRepository,
-    SocialRepository,
+    CharacterDeleteMode, CharacterRepository, CharacterRow, GroupRepository, GroupRow,
+    GuildRepository, GuildRow, ItemInstanceRow, ItemRepository, MailRepository, MailRow,
+    ReputationRepository, SocialRepository,
 };

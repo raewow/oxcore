@@ -161,3 +161,67 @@ impl Bag {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn guid(raw: u64) -> ObjectGuid {
+        ObjectGuid::from_raw(raw)
+    }
+
+    #[test]
+    fn new_initializes_all_storage_slots_empty() {
+        let bag = Bag::new(guid(1), 23);
+
+        assert_eq!(bag.guid, guid(1));
+        assert_eq!(bag.entry_id, 23);
+        assert_eq!(bag.capacity(), MAX_BAG_SIZE as u8);
+        assert_eq!(bag.actual_size(), 16);
+        assert!(bag.slots.iter().all(Option::is_none));
+        assert!(bag.is_empty());
+        assert_eq!(bag.free_slots(), 16);
+        assert_eq!(bag.item_count(), 0);
+    }
+
+    #[test]
+    fn with_size_clamps_to_max_bag_size() {
+        let bag = Bag::with_size(guid(1), 123, 100);
+
+        assert_eq!(bag.actual_size(), MAX_BAG_SIZE as u8);
+        assert_eq!(bag.free_slots(), MAX_BAG_SIZE as u32);
+    }
+
+    #[test]
+    fn slot_access_is_limited_to_actual_bag_size() {
+        let mut bag = Bag::with_size(guid(1), 123, 2);
+
+        assert!(bag.set_slot(0, Some(guid(10))));
+        assert!(bag.set_slot(1, Some(guid(11))));
+        assert!(!bag.set_slot(2, Some(guid(12))));
+
+        assert_eq!(bag.get_slot(0), Some(guid(10)));
+        assert_eq!(bag.get_item_by_pos(1), Some(guid(11)));
+        assert_eq!(bag.get_slot(2), None);
+        assert_eq!(bag.get_item_by_pos(2), None);
+        assert_eq!(bag.get_slot_by_guid(guid(11)), Some(1));
+        assert_eq!(bag.get_slot_by_guid(guid(12)), None);
+        assert!(!bag.is_empty());
+        assert_eq!(bag.free_slots(), 0);
+        assert_eq!(bag.item_count(), 2);
+    }
+
+    #[test]
+    fn clear_empties_all_storage_slots() {
+        let mut bag = Bag::with_size(guid(1), 123, 2);
+        assert!(bag.set_slot(0, Some(guid(10))));
+        assert!(bag.set_slot(1, Some(guid(11))));
+
+        bag.clear();
+
+        assert!(bag.slots.iter().all(Option::is_none));
+        assert!(bag.is_empty());
+        assert_eq!(bag.free_slots(), 2);
+        assert_eq!(bag.item_count(), 0);
+    }
+}

@@ -448,5 +448,3 @@ impl DbcEntry for ChrRacesEntry {
         Ok(Some((id, entry)))
     }
 }
-
-

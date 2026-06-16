@@ -233,5 +233,3 @@ impl DbcEntry for ItemEntry {
         Ok(Some((id, entry)))
     }
 }
-
-

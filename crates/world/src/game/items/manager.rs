@@ -49,26 +49,29 @@ impl ItemTemplate {
         let mut slots = [255u8; 4]; // NULL_SLOT = 255
 
         match self.inventory_type {
-            1 => slots[0] = 0,   // INVTYPE_HEAD -> EQUIPMENT_SLOT_HEAD
-            2 => slots[0] = 1,   // INVTYPE_NECK -> EQUIPMENT_SLOT_NECK
-            3 => slots[0] = 2,   // INVTYPE_SHOULDERS -> EQUIPMENT_SLOT_SHOULDERS
-            4 => slots[0] = 3,   // INVTYPE_BODY -> EQUIPMENT_SLOT_BODY
-            5 => slots[0] = 4,   // INVTYPE_CHEST -> EQUIPMENT_SLOT_CHEST
-            6 => slots[0] = 4,   // INVTYPE_ROBE -> EQUIPMENT_SLOT_CHEST
-            7 => slots[0] = 5,   // INVTYPE_WAIST -> EQUIPMENT_SLOT_WAIST
-            8 => slots[0] = 6,   // INVTYPE_LEGS -> EQUIPMENT_SLOT_LEGS
-            9 => slots[0] = 7,   // INVTYPE_FEET -> EQUIPMENT_SLOT_FEET
-            10 => slots[0] = 8,  // INVTYPE_WRISTS -> EQUIPMENT_SLOT_WRISTS
-            11 => {             // INVTYPE_FINGER
-                slots[0] = 10;  // EQUIPMENT_SLOT_FINGER1
-                slots[1] = 11;  // EQUIPMENT_SLOT_FINGER2
+            1 => slots[0] = 0,  // INVTYPE_HEAD -> EQUIPMENT_SLOT_HEAD
+            2 => slots[0] = 1,  // INVTYPE_NECK -> EQUIPMENT_SLOT_NECK
+            3 => slots[0] = 2,  // INVTYPE_SHOULDERS -> EQUIPMENT_SLOT_SHOULDERS
+            4 => slots[0] = 3,  // INVTYPE_BODY -> EQUIPMENT_SLOT_BODY
+            5 => slots[0] = 4,  // INVTYPE_CHEST -> EQUIPMENT_SLOT_CHEST
+            6 => slots[0] = 4,  // INVTYPE_ROBE -> EQUIPMENT_SLOT_CHEST
+            7 => slots[0] = 5,  // INVTYPE_WAIST -> EQUIPMENT_SLOT_WAIST
+            8 => slots[0] = 6,  // INVTYPE_LEGS -> EQUIPMENT_SLOT_LEGS
+            9 => slots[0] = 7,  // INVTYPE_FEET -> EQUIPMENT_SLOT_FEET
+            10 => slots[0] = 8, // INVTYPE_WRISTS -> EQUIPMENT_SLOT_WRISTS
+            11 => {
+                // INVTYPE_FINGER
+                slots[0] = 10; // EQUIPMENT_SLOT_FINGER1
+                slots[1] = 11; // EQUIPMENT_SLOT_FINGER2
             }
-            12 => {             // INVTYPE_TRINKET
-                slots[0] = 12;  // EQUIPMENT_SLOT_TRINKET1
-                slots[1] = 13;  // EQUIPMENT_SLOT_TRINKET2
+            12 => {
+                // INVTYPE_TRINKET
+                slots[0] = 12; // EQUIPMENT_SLOT_TRINKET1
+                slots[1] = 13; // EQUIPMENT_SLOT_TRINKET2
             }
-            13 => {             // INVTYPE_WEAPON
-                slots[0] = 15;  // EQUIPMENT_SLOT_MAINHAND
+            13 => {
+                // INVTYPE_WEAPON
+                slots[0] = 15; // EQUIPMENT_SLOT_MAINHAND
                 if can_dual_wield {
                     slots[1] = 16; // EQUIPMENT_SLOT_OFFHAND
                 }
@@ -77,8 +80,9 @@ impl ItemTemplate {
             15 => slots[0] = 17, // INVTYPE_RANGED -> EQUIPMENT_SLOT_RANGED
             16 => slots[0] = 14, // INVTYPE_CLOAK -> EQUIPMENT_SLOT_BACK
             17 => slots[0] = 15, // INVTYPE_2HWEAPON -> EQUIPMENT_SLOT_MAINHAND
-            18 => {             // INVTYPE_BAG
-                slots[0] = 19;  // INVENTORY_SLOT_BAG_START
+            18 => {
+                // INVTYPE_BAG
+                slots[0] = 19; // INVENTORY_SLOT_BAG_START
                 slots[1] = 20;
                 slots[2] = 21;
                 slots[3] = 22;
@@ -90,26 +94,35 @@ impl ItemTemplate {
             23 => slots[0] = 16, // INVTYPE_HOLDABLE -> EQUIPMENT_SLOT_OFFHAND
             25 => slots[0] = 17, // INVTYPE_THROWN -> EQUIPMENT_SLOT_RANGED
             26 => slots[0] = 17, // INVTYPE_RANGEDRIGHT -> EQUIPMENT_SLOT_RANGED
-            28 => {             // INVTYPE_RELIC
+            28 => {
+                // INVTYPE_RELIC
                 // Class-specific relic slots
                 match self.item_subclass {
-                    2 => { // ITEM_SUBCLASS_ARMOR_LIBRAM
-                        if class_id == 2 { // CLASS_PALADIN
+                    2 => {
+                        // ITEM_SUBCLASS_ARMOR_LIBRAM
+                        if class_id == 2 {
+                            // CLASS_PALADIN
                             slots[0] = 17; // EQUIPMENT_SLOT_RANGED
                         }
                     }
-                    3 => { // ITEM_SUBCLASS_ARMOR_IDOL
-                        if class_id == 11 { // CLASS_DRUID
+                    3 => {
+                        // ITEM_SUBCLASS_ARMOR_IDOL
+                        if class_id == 11 {
+                            // CLASS_DRUID
                             slots[0] = 17; // EQUIPMENT_SLOT_RANGED
                         }
                     }
-                    4 => { // ITEM_SUBCLASS_ARMOR_TOTEM
-                        if class_id == 7 { // CLASS_SHAMAN
+                    4 => {
+                        // ITEM_SUBCLASS_ARMOR_TOTEM
+                        if class_id == 7 {
+                            // CLASS_SHAMAN
                             slots[0] = 17; // EQUIPMENT_SLOT_RANGED
                         }
                     }
-                    5 => { // ITEM_SUBCLASS_ARMOR_MISC
-                        if class_id == 9 { // CLASS_WARLOCK
+                    5 => {
+                        // ITEM_SUBCLASS_ARMOR_MISC
+                        if class_id == 9 {
+                            // CLASS_WARLOCK
                             slots[0] = 17; // EQUIPMENT_SLOT_RANGED
                         }
                     }
@@ -213,11 +226,11 @@ impl ItemTemplate {
             }
             ITEM_CLASS_ARMOR => {
                 match self.item_subclass {
-                    1 => 9078,  // Cloth
-                    2 => 9077,  // Leather
-                    3 => 8737,  // Mail
-                    4 => 750,   // Plate
-                    6 => 9116,  // Shield
+                    1 => 9078, // Cloth
+                    2 => 9077, // Leather
+                    3 => 8737, // Mail
+                    4 => 750,  // Plate
+                    6 => 9116, // Shield
                     _ => 0,
                 }
             }
@@ -227,10 +240,7 @@ impl ItemTemplate {
 
     /// Check if this item template fits the spell's equipment requirements
     /// Maps to C++ Item::IsFitToSpellRequirements (static version)
-    pub fn is_fit_to_spell_requirements(
-        &self,
-        spell: &oxcore_dbc::structures::SpellEntry,
-    ) -> bool {
+    pub fn is_fit_to_spell_requirements(&self, spell: &oxcore_dbc::structures::SpellEntry) -> bool {
         // Check item class
         if spell.equipped_item_class != -1 {
             // Exception for Enchant Cloak - Minor Agility (spell ID 13419)

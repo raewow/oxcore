@@ -200,5 +200,3 @@ impl DbcEntry for FactionTemplateDbcEntry {
         Ok(Some((id, entry)))
     }
 }
-
-
