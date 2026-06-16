@@ -41,7 +41,7 @@ use crate::shared::protocol::position::Position;
 use crate::shared::protocol::updates::movement_block::MovementSpeeds;
 use crate::shared::protocol::updates::update_block_builder;
 use crate::shared::protocol::updates::update_types::ObjectTypeId;
-use crate::shared::protocol::{Opcode, WorldPacket};
+use crate::shared::protocol::WorldPacket;
 
 // Re-export convenience types from update module
 pub use crate::shared::messages::update::MovementBlockData;
@@ -159,7 +159,7 @@ impl SmsgCreateObject {
     /// # Note
     /// This creates the basic CREATE_OBJECT block. You typically need to add
     /// additional fields like `ITEM_FIELD_ENTRY` and `ITEM_FIELD_STACK_COUNT`.
-    pub fn for_item(guid: crate::shared::protocol::guid::ObjectGuid, entry: u32) -> Self {
+    pub fn for_item(guid: crate::shared::protocol::guid::ObjectGuid, _entry: u32) -> Self {
         Self::new(guid, ObjectTypeId::Item, ObjectType::Item)
     }
 
@@ -167,7 +167,7 @@ impl SmsgCreateObject {
     ///
     /// Containers (bags) don't require position data in the update packet.
     /// Use the `entry` parameter to set the container's entry ID.
-    pub fn for_container(guid: crate::shared::protocol::guid::ObjectGuid, entry: u32) -> Self {
+    pub fn for_container(guid: crate::shared::protocol::guid::ObjectGuid, _entry: u32) -> Self {
         Self::new(guid, ObjectTypeId::Container, ObjectType::Container)
     }
 
@@ -179,9 +179,7 @@ impl SmsgCreateObject {
     ///
     /// Uses UPDATEFLAG_HAS_POSITION which only sends x, y, z, orientation.
     /// Suitable for GameObjects, Corpses, and other non-living objects.
-    pub fn with_position(self, position: Position) -> Self {
-        let mut block = CreateObjectBlock::new(self.guid, self.type_id, self.object_type);
-        block = block.with_position(position);
+    pub fn with_position(self, _position: Position) -> Self {
         Self {
             guid: self.guid,
             type_id: self.type_id,
@@ -359,6 +357,7 @@ mod tests {
     use super::*;
     use crate::shared::protocol::guid::ObjectGuid;
     use crate::shared::protocol::update_fields::{ITEM_FIELD_STACK_COUNT, UNIT_FIELD_HEALTH};
+    use crate::shared::protocol::Opcode;
 
     #[test]
     fn test_create_player_simple() {

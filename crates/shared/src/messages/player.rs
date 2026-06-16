@@ -4,7 +4,6 @@
 
 use crate::shared::messages::ToWorldPacket;
 use crate::shared::protocol::guid::ObjectGuid;
-use crate::shared::protocol::packet::WorldPacketGuidExt;
 use crate::shared::protocol::update_fields::PLAYER_FIELD_COINAGE;
 use crate::shared::protocol::Opcode;
 use crate::shared::protocol::WorldPacket;

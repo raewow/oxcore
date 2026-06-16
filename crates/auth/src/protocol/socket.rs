@@ -212,24 +212,6 @@ impl AuthSocket {
         }
     }
 
-    fn read_column<'r, T>(
-        row: &'r sqlx::mysql::MySqlRow,
-        index: usize,
-        column_name: &str,
-        account_name: &str,
-    ) -> Result<T, sqlx::Error>
-    where
-        T: sqlx::Decode<'r, sqlx::MySql> + sqlx::Type<sqlx::MySql>,
-    {
-        row.try_get::<T, _>(index).map_err(|e| {
-            error!(
-                "Failed to read column {} (index {}) for account '{}': {:?}",
-                column_name, index, account_name, e
-            );
-            e
-        })
-    }
-
     async fn handle_logon_challenge(&mut self) -> Result<()> {
         if self.buffer.len() < 4 {
             return Ok(());
@@ -866,7 +848,7 @@ impl AuthSocket {
             );
         }
 
-        let (session_key_hex, account_id) = match self
+        let (_session_key_hex, account_id) = match self
             .database
             .accounts
             .find_session_key(&self.safelogin)

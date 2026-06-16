@@ -122,7 +122,6 @@ impl ToWorldPacket for SmsgSetFactionVisible {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::game::reputation::MAX_REPUTATION_LIST_SLOTS;
     use crate::shared::protocol::Opcode;
 
     #[test]

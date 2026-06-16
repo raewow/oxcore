@@ -497,7 +497,7 @@ impl InventoryRepository {
     }
 
     /// Reserve item GUIDs (for creating multiple items)
-    pub async fn reserve_item_guids(&self, count: u32) -> Result<u32> {
+    pub async fn reserve_item_guids(&self, _count: u32) -> Result<u32> {
         let start_guid = self.get_next_item_guid().await?;
         // In a production system, you'd want to use a sequence or atomic counter
         // For now, just return the starting GUID and trust caller to use correctly

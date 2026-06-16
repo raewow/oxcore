@@ -44,7 +44,7 @@
 
 use anyhow::Result;
 use bytes::{BufMut, BytesMut};
-use tracing::{info, warn};
+use tracing::warn;
 
 use super::movement_block::MovementSpeeds;
 use super::packet_compression::compress_update_packet_if_needed;

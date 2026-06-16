@@ -134,18 +134,6 @@ impl SmsgInventoryChangeFailure {
 
 impl ToWorldPacket for SmsgInventoryChangeFailure {
     fn to_world_packet(&self) -> WorldPacket {
-        // Calculate packet size
-        // Base: 1 byte for error
-        // If error != OK: +16 bytes for 2 GUIDs + 1 byte for bag_type
-        // If error == CANT_EQUIP_LEVEL_I: +4 bytes for required_level
-        let size = if self.error == EQUIP_ERR_OK {
-            1
-        } else if self.error == EQUIP_ERR_CANT_EQUIP_LEVEL_I {
-            1 + 4 + 16 + 1
-        } else {
-            1 + 16 + 1
-        };
-
         let mut packet = WorldPacket::new(Opcode::SMSG_INVENTORY_CHANGE_FAILURE);
         packet.write_u8(self.error);
 

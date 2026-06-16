@@ -9,11 +9,8 @@
 //! - [`SmsgReceivedMail`] - Notification that mail was received
 //! - [`SmsgItemTextQueryResponse`] - Response to item text query
 
-use crate::shared::game::mail::{
-    Mail, MailCheckMask, MailMessageType, MailResponseResult, MailResponseType, MailStationery,
-};
+use crate::shared::game::mail::{Mail, MailMessageType, MailResponseResult, MailResponseType};
 use crate::shared::messages::ToWorldPacket;
-use crate::shared::protocol::guid::ObjectGuid;
 use crate::shared::protocol::Opcode;
 use crate::shared::protocol::WorldPacket;
 

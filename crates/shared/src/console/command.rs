@@ -115,11 +115,6 @@ impl<Context> CommandRegistry<Context> {
         self.commands.get(&name.to_lowercase()).map(|e| &e.info)
     }
 
-    /// Get command handler by name
-    fn get_handler(&self, name: &str) -> Option<&CommandHandler<Context>> {
-        self.commands.get(&name.to_lowercase()).map(|e| &e.handler)
-    }
-
     /// Get all registered command names
     pub fn command_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.commands.keys().cloned().collect();

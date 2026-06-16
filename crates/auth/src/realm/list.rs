@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytes::{BufMut, BytesMut};
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
@@ -12,7 +12,11 @@ const REALM_FLAG_OFFLINE: u8 = 0x02;
 const REALM_FLAG_SPECIFYBUILD: u8 = 0x04;
 const REALM_FLAG_NEW_PLAYERS: u8 = 0x20;
 const REALM_FLAG_RECOMMENDED: u8 = 0x40;
-const REALM_FLAG_VALID_MASK: u8 = 0x67; // OFFLINE | SPECIFYBUILD | NEW_PLAYERS | RECOMMENDED
+const REALM_FLAG_VALID_MASK: u8 = REALM_FLAG_OFFLINE
+    | REALM_FLAG_SPECIFYBUILD
+    | REALM_FLAG_NEW_PLAYERS
+    | REALM_FLAG_RECOMMENDED
+    | 0x01;
 
 /// Realm information structure
 #[derive(Debug, Clone)]

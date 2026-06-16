@@ -1,7 +1,7 @@
 use crate::shared::protocol::position::Position;
-use crate::shared::protocol::{packet::WorldPacketGuidExt, WorldPacket};
+use crate::shared::protocol::WorldPacket;
 use anyhow::Result;
-use tracing::{info, warn};
+use tracing::warn;
 
 /// Update flags for movement blocks
 pub mod update_flags {

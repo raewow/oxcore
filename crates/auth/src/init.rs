@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::database::Database;
