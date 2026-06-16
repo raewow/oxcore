@@ -41,6 +41,234 @@ impl ItemTemplate {
     pub fn get_max_stack_size(&self) -> u32 {
         self.stackable
     }
+
+    /// Get allowed equipment slots for this item based on inventory type
+    /// Maps to C++ ItemPrototype::GetAllowedEquipSlots
+    /// Returns up to 4 possible slots (NULL_SLOT for unused entries)
+    pub fn get_allowed_equip_slots(&self, class_id: u8, can_dual_wield: bool) -> [u8; 4] {
+        let mut slots = [255u8; 4]; // NULL_SLOT = 255
+
+        match self.inventory_type {
+            1 => slots[0] = 0,   // INVTYPE_HEAD -> EQUIPMENT_SLOT_HEAD
+            2 => slots[0] = 1,   // INVTYPE_NECK -> EQUIPMENT_SLOT_NECK
+            3 => slots[0] = 2,   // INVTYPE_SHOULDERS -> EQUIPMENT_SLOT_SHOULDERS
+            4 => slots[0] = 3,   // INVTYPE_BODY -> EQUIPMENT_SLOT_BODY
+            5 => slots[0] = 4,   // INVTYPE_CHEST -> EQUIPMENT_SLOT_CHEST
+            6 => slots[0] = 4,   // INVTYPE_ROBE -> EQUIPMENT_SLOT_CHEST
+            7 => slots[0] = 5,   // INVTYPE_WAIST -> EQUIPMENT_SLOT_WAIST
+            8 => slots[0] = 6,   // INVTYPE_LEGS -> EQUIPMENT_SLOT_LEGS
+            9 => slots[0] = 7,   // INVTYPE_FEET -> EQUIPMENT_SLOT_FEET
+            10 => slots[0] = 8,  // INVTYPE_WRISTS -> EQUIPMENT_SLOT_WRISTS
+            11 => {             // INVTYPE_FINGER
+                slots[0] = 10;  // EQUIPMENT_SLOT_FINGER1
+                slots[1] = 11;  // EQUIPMENT_SLOT_FINGER2
+            }
+            12 => {             // INVTYPE_TRINKET
+                slots[0] = 12;  // EQUIPMENT_SLOT_TRINKET1
+                slots[1] = 13;  // EQUIPMENT_SLOT_TRINKET2
+            }
+            13 => {             // INVTYPE_WEAPON
+                slots[0] = 15;  // EQUIPMENT_SLOT_MAINHAND
+                if can_dual_wield {
+                    slots[1] = 16; // EQUIPMENT_SLOT_OFFHAND
+                }
+            }
+            14 => slots[0] = 16, // INVTYPE_SHIELD -> EQUIPMENT_SLOT_OFFHAND
+            15 => slots[0] = 17, // INVTYPE_RANGED -> EQUIPMENT_SLOT_RANGED
+            16 => slots[0] = 14, // INVTYPE_CLOAK -> EQUIPMENT_SLOT_BACK
+            17 => slots[0] = 15, // INVTYPE_2HWEAPON -> EQUIPMENT_SLOT_MAINHAND
+            18 => {             // INVTYPE_BAG
+                slots[0] = 19;  // INVENTORY_SLOT_BAG_START
+                slots[1] = 20;
+                slots[2] = 21;
+                slots[3] = 22;
+            }
+            19 => slots[0] = 18, // INVTYPE_TABARD -> EQUIPMENT_SLOT_TABARD
+            20 => slots[0] = 4,  // INVTYPE_ROBE -> EQUIPMENT_SLOT_CHEST
+            21 => slots[0] = 15, // INVTYPE_WEAPONMAINHAND -> EQUIPMENT_SLOT_MAINHAND
+            22 => slots[0] = 16, // INVTYPE_WEAPONOFFHAND -> EQUIPMENT_SLOT_OFFHAND
+            23 => slots[0] = 16, // INVTYPE_HOLDABLE -> EQUIPMENT_SLOT_OFFHAND
+            25 => slots[0] = 17, // INVTYPE_THROWN -> EQUIPMENT_SLOT_RANGED
+            26 => slots[0] = 17, // INVTYPE_RANGEDRIGHT -> EQUIPMENT_SLOT_RANGED
+            28 => {             // INVTYPE_RELIC
+                // Class-specific relic slots
+                match self.item_subclass {
+                    2 => { // ITEM_SUBCLASS_ARMOR_LIBRAM
+                        if class_id == 2 { // CLASS_PALADIN
+                            slots[0] = 17; // EQUIPMENT_SLOT_RANGED
+                        }
+                    }
+                    3 => { // ITEM_SUBCLASS_ARMOR_IDOL
+                        if class_id == 11 { // CLASS_DRUID
+                            slots[0] = 17; // EQUIPMENT_SLOT_RANGED
+                        }
+                    }
+                    4 => { // ITEM_SUBCLASS_ARMOR_TOTEM
+                        if class_id == 7 { // CLASS_SHAMAN
+                            slots[0] = 17; // EQUIPMENT_SLOT_RANGED
+                        }
+                    }
+                    5 => { // ITEM_SUBCLASS_ARMOR_MISC
+                        if class_id == 9 { // CLASS_WARLOCK
+                            slots[0] = 17; // EQUIPMENT_SLOT_RANGED
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+
+        slots
+    }
+
+    /// Get the proficiency skill required to equip this item
+    /// Maps to C++ ItemPrototype::GetProficiencySkill
+    pub fn get_proficiency_skill(&self) -> u32 {
+        const ITEM_CLASS_WEAPON: u32 = 2;
+        const ITEM_CLASS_ARMOR: u32 = 4;
+
+        const ITEM_WEAPON_SKILLS: [u32; 21] = [
+            44,  // SKILL_AXES (subclass 0)
+            172, // SKILL_2H_AXES (subclass 1)
+            45,  // SKILL_BOWS (subclass 2)
+            46,  // SKILL_GUNS (subclass 3)
+            54,  // SKILL_MACES (subclass 4)
+            160, // SKILL_2H_MACES (subclass 5)
+            229, // SKILL_POLEARMS (subclass 6)
+            43,  // SKILL_SWORDS (subclass 7)
+            55,  // SKILL_2H_SWORDS (subclass 8)
+            0,   // unused (subclass 9)
+            136, // SKILL_STAVES (subclass 10)
+            0,   // unused (subclass 11)
+            0,   // unused (subclass 12)
+            162, // SKILL_UNARMED (subclass 13)
+            0,   // unused (subclass 14)
+            173, // SKILL_DAGGERS (subclass 15)
+            176, // SKILL_THROWN (subclass 16)
+            0,   // SKILL_ASSASSINATION (subclass 17) - not in constants
+            226, // SKILL_CROSSBOWS (subclass 18)
+            228, // SKILL_WANDS (subclass 19)
+            356, // SKILL_FISHING (subclass 20)
+        ];
+
+        const ITEM_ARMOR_SKILLS: [u32; 10] = [
+            0,   // subclass 0 (misc)
+            415, // SKILL_CLOTH (subclass 1)
+            414, // SKILL_LEATHER (subclass 2)
+            413, // SKILL_MAIL (subclass 3)
+            293, // SKILL_PLATE_MAIL (subclass 4)
+            0,   // subclass 5 (buckler)
+            433, // SKILL_SHIELD (subclass 6)
+            0,   // subclass 7 (libram)
+            0,   // subclass 8 (idol)
+            0,   // subclass 9 (totem)
+        ];
+
+        match self.item_class {
+            ITEM_CLASS_WEAPON => {
+                if self.item_subclass < ITEM_WEAPON_SKILLS.len() as u32 {
+                    ITEM_WEAPON_SKILLS[self.item_subclass as usize]
+                } else {
+                    0
+                }
+            }
+            ITEM_CLASS_ARMOR => {
+                if self.item_subclass < ITEM_ARMOR_SKILLS.len() as u32 {
+                    ITEM_ARMOR_SKILLS[self.item_subclass as usize]
+                } else {
+                    0
+                }
+            }
+            _ => 0,
+        }
+    }
+
+    /// Get the proficiency spell ID that teaches this item's proficiency
+    /// Maps to C++ ItemPrototype::GetProficiencySpell
+    pub fn get_proficiency_spell(&self) -> u32 {
+        const ITEM_CLASS_WEAPON: u32 = 2;
+        const ITEM_CLASS_ARMOR: u32 = 4;
+
+        match self.item_class {
+            ITEM_CLASS_WEAPON => {
+                match self.item_subclass {
+                    0 => 196,   // Axe
+                    1 => 197,   // 2H Axe
+                    2 => 264,   // Bow
+                    3 => 266,   // Gun
+                    4 => 198,   // Mace
+                    5 => 199,   // 2H Mace
+                    6 => 200,   // Polearm
+                    7 => 201,   // Sword
+                    8 => 202,   // 2H Sword
+                    10 => 227,  // Staff
+                    15 => 1180, // Dagger
+                    16 => 2567, // Thrown
+                    17 => 3386, // Spear
+                    18 => 5011, // Crossbow
+                    19 => 5009, // Wand
+                    _ => 0,
+                }
+            }
+            ITEM_CLASS_ARMOR => {
+                match self.item_subclass {
+                    1 => 9078,  // Cloth
+                    2 => 9077,  // Leather
+                    3 => 8737,  // Mail
+                    4 => 750,   // Plate
+                    6 => 9116,  // Shield
+                    _ => 0,
+                }
+            }
+            _ => 0,
+        }
+    }
+
+    /// Check if this item template fits the spell's equipment requirements
+    /// Maps to C++ Item::IsFitToSpellRequirements (static version)
+    pub fn is_fit_to_spell_requirements(
+        &self,
+        spell: &oxcore_dbc::structures::SpellEntry,
+    ) -> bool {
+        // Check item class
+        if spell.equipped_item_class != -1 {
+            // Exception for Enchant Cloak - Minor Agility (spell ID 13419)
+            if spell.id == 13419 && self.inventory_type == 16 {
+                // INVTYPE_CLOAK
+                return true;
+            }
+
+            if spell.equipped_item_class != self.item_class as i32 && spell.id != 13419 {
+                return false;
+            }
+
+            // Check subclass mask
+            if spell.equipped_item_sub_class_mask != 0 {
+                if (spell.equipped_item_sub_class_mask & (1 << self.item_subclass)) == 0 {
+                    return false;
+                }
+            }
+        }
+
+        // Check inventory type mask
+        if spell.equipped_item_inventory_type_mask != 0 {
+            if (spell.equipped_item_inventory_type_mask & (1 << self.inventory_type)) == 0 {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if an enchantment makes the item soulbound
+    /// Maps to C++ Item::IsBoundByEnchant
+    /// Note: This requires SpellItemEnchantment DBC data which is not yet loaded
+    pub fn is_bound_by_enchant(&self, _enchantments: &[(u32, u32, u32)]) -> bool {
+        // TODO: Check SpellItemEnchantmentEntry for ENCHANTMENT_CAN_SOULBOUND flag
+        // when enchantment DBC data is available
+        false
+    }
 }
 
 /// Manages item templates and provides database loading

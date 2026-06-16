@@ -2659,6 +2659,7 @@ impl InventorySystem {
         // Collapse redundant operations
         let mut final_money: Option<(u32, u32)> = None; // (player_guid, amount)
         let mut final_counts: HashMap<u32, u32> = HashMap::new(); // item_guid -> count
+        let mut final_durations: HashMap<u32, u32> = HashMap::new(); // item_guid -> duration
         let mut deletes: Vec<u32> = Vec::new(); // item_guids to delete
         let mut creates: Vec<(oxcore_shared::database::characters::models::item::ItemInstanceRow, oxcore_shared::database::characters::repositories::inventory_repository_trait::InventorySlotRow)> = Vec::new();
         let mut moves: HashMap<u32, (u32, u8, u8)> = HashMap::new(); // item_guid -> (player_guid, bag, slot)
@@ -2720,6 +2721,15 @@ impl InventorySystem {
                         slot2,
                     ));
                 }
+                PendingInventoryOp::UpdateDuration {
+                    item_guid,
+                    duration,
+                } => {
+                    // Later duration update overrides earlier one
+                    if !deletes.contains(&item_guid) {
+                        final_durations.insert(item_guid, duration);
+                    }
+                }
             }
         }
 
@@ -2767,6 +2777,15 @@ impl InventorySystem {
             let updates: Vec<(u32, u32)> = final_counts.into_iter().collect();
             if let Err(e) = self.repository.batch_update_counts(&updates).await {
                 tracing::error!("[FLUSH] Failed to batch update counts: {}", e);
+            }
+        }
+
+        // 4.5. Duration updates (batched)
+        if !final_durations.is_empty() {
+            for (item_guid, duration) in final_durations {
+                if let Err(e) = self.repository.update_item_duration(item_guid, duration).await {
+                    tracing::error!("[FLUSH] Failed to update duration for item {}: {}", item_guid, e);
+                }
             }
         }
 
@@ -2873,5 +2892,67 @@ impl InventorySystem {
         );
 
         Some(Arc::new(item_clone))
+    }
+
+    /// Update item durations for a player, destroying expired items
+    /// Maps to C++ Item::UpdateDuration
+    pub fn update_item_durations(&self, player_guid: ObjectGuid, diff_ms: u32) {
+        if !self.cache.has_player_inventory(player_guid) {
+            return;
+        }
+
+        let items = self.cache.get_all_items(player_guid);
+        for item_arc in items {
+            let item_read = item_arc.read();
+            let duration = item_read.duration;
+            let item_guid = item_read.guid;
+            let item_bag = item_read.bag;
+            let item_slot = item_read.slot;
+            drop(item_read);
+
+            if duration == 0 {
+                continue;
+            }
+
+            // Convert diff from milliseconds to seconds (or keep as-is depending on how duration is stored)
+            // C++ uses seconds for duration, diff is typically in milliseconds from world update
+            let diff_seconds = diff_ms / 1000;
+            if diff_seconds == 0 {
+                continue;
+            }
+
+            if duration <= diff_seconds {
+                // Item expired - destroy it
+                tracing::info!(
+                    "[INVENTORY] Item {:?} duration expired ({}s), destroying",
+                    item_guid,
+                    duration
+                );
+                self.remove_item(player_guid, item_guid, u32::MAX);
+            } else {
+                // Decrement duration
+                let new_duration = duration - diff_seconds;
+                {
+                    let mut item_write = item_arc.write();
+                    item_write.duration = new_duration;
+                }
+
+                // Queue DB update for new duration
+                self.cache.push_pending_op(
+                    player_guid,
+                    super::cache::PendingInventoryOp::UpdateDuration {
+                        item_guid: item_guid.low(),
+                        duration: new_duration,
+                    },
+                );
+
+                tracing::debug!(
+                    "[INVENTORY] Item {:?} duration updated: {}s -> {}s",
+                    item_guid,
+                    duration,
+                    new_duration
+                );
+            }
+        }
     }
 }

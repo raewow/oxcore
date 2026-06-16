@@ -107,6 +107,9 @@ pub trait InventoryRepositoryTrait: Send + Sync {
     /// Batch update item counts (for multi-stack operations)
     async fn batch_update_counts(&self, updates: &[(u32, u32)]) -> Result<()>;
 
+    /// Update item duration
+    async fn update_item_duration(&self, item_guid: u32, duration: u32) -> Result<()>;
+
     /// Batch update item durability (for death penalty)
     async fn batch_update_durability(&self, updates: &[(u32, u16)]) -> Result<()>;
 

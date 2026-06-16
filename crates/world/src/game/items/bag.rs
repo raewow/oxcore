@@ -94,10 +94,26 @@ impl Bag {
     }
 
     /// Check if bag is completely empty
+    /// Maps to C++ Bag::IsEmpty
     pub fn is_empty(&self) -> bool {
         self.slots[..self.actual_size as usize]
             .iter()
             .all(|slot| slot.is_none())
+    }
+
+    /// Find the slot containing a specific item GUID
+    /// Maps to C++ Bag::GetSlotByItemGUID
+    pub fn get_slot_by_guid(&self, guid: ObjectGuid) -> Option<u8> {
+        self.slots[..self.actual_size as usize]
+            .iter()
+            .position(|slot| *slot == Some(guid))
+            .map(|pos| pos as u8)
+    }
+
+    /// Get item GUID at position (alias for get_slot)
+    /// Maps to C++ Bag::GetItemByPos
+    pub fn get_item_by_pos(&self, slot: u8) -> Option<ObjectGuid> {
+        self.get_slot(slot)
     }
 
     /// Count free (empty) slots in bag

@@ -380,6 +380,18 @@ impl InventoryRepository {
         Ok(())
     }
 
+    /// Update item duration
+    pub async fn update_item_duration(&self, item_guid: u32, duration: u32) -> Result<()> {
+        sqlx::query("UPDATE item_instance SET duration = ? WHERE guid = ?")
+            .bind(duration)
+            .bind(item_guid)
+            .execute(&*self.pool)
+            .await
+            .context("Failed to update item duration")?;
+
+        Ok(())
+    }
+
     /// Update item enchantments
     pub async fn update_item_enchantments(&self, item_guid: u32, enchantments: &str) -> Result<()> {
         sqlx::query("UPDATE item_instance SET enchantments = ? WHERE guid = ?")
@@ -591,6 +603,10 @@ impl InventoryRepositoryTrait for InventoryRepository {
 
     async fn update_item_durability(&self, item_guid: u32, durability: u16) -> Result<()> {
         self.update_item_durability(item_guid, durability).await
+    }
+
+    async fn update_item_duration(&self, item_guid: u32, duration: u32) -> Result<()> {
+        self.update_item_duration(item_guid, duration).await
     }
 
     async fn update_item_enchantments(&self, item_guid: u32, enchantments: &str) -> Result<()> {

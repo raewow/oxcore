@@ -61,7 +61,7 @@ impl PlayerInventoryData {
         }
     }
 
-    fn resolve_bag_guid(&self, bag: u8) -> Option<ObjectGuid> {
+    pub fn resolve_bag_guid(&self, bag: u8) -> Option<ObjectGuid> {
         if bag >= 19 && bag < 23 {
             self.bag_guids[(bag - 19) as usize]
         } else if bag >= 63 && bag < 69 {
@@ -281,6 +281,10 @@ pub enum PendingInventoryOp {
     UpdateMoney {
         player_guid: u32,
         amount: u32,
+    },
+    UpdateDuration {
+        item_guid: u32,
+        duration: u32,
     },
 }
 
@@ -578,6 +582,82 @@ impl InventoryCache {
         if let Some(mut inv) = self.player_inventories.get_mut(&player_guid) {
             inv.get_or_add_bag(bag_guid, entry_id, size);
         }
+    }
+
+    /// Find items by entry within a specific bag
+    /// Maps to C++ Bag::GetItemByEntry
+    pub fn find_items_by_entry_in_bag(
+        &self,
+        player_guid: ObjectGuid,
+        bag_slot: u8,
+        entry_id: u32,
+    ) -> Vec<ObjectGuid> {
+        self.player_inventories.get(&player_guid).map(|inv| {
+            let mut result = Vec::new();
+            if let Some(bag_guid) = inv.resolve_bag_guid(bag_slot) {
+                if let Some(bag) = inv.bags.get(&bag_guid) {
+                    for slot in 0..bag.actual_size {
+                        if let Some(item_guid) = bag.get_slot(slot) {
+                            if let Some(item) = inv.items.get(&item_guid) {
+                                if item.read().entry == entry_id {
+                                    result.push(item_guid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            result
+        }).unwrap_or_default()
+    }
+
+    /// Count items by entry within a specific bag, excluding a specific item
+    /// Maps to C++ Bag::GetItemCount
+    pub fn count_items_by_entry_in_bag(
+        &self,
+        player_guid: ObjectGuid,
+        bag_slot: u8,
+        entry_id: u32,
+        exclude_guid: Option<ObjectGuid>,
+    ) -> u32 {
+        self.player_inventories.get(&player_guid).map(|inv| {
+            let mut count = 0;
+            if let Some(bag_guid) = inv.resolve_bag_guid(bag_slot) {
+                if let Some(bag) = inv.bags.get(&bag_guid) {
+                    for slot in 0..bag.actual_size {
+                        if let Some(item_guid) = bag.get_slot(slot) {
+                            if exclude_guid == Some(item_guid) {
+                                continue;
+                            }
+                            if let Some(item) = inv.items.get(&item_guid) {
+                                let item = item.read();
+                                if item.entry == entry_id {
+                                    count += item.count;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            count
+        }).unwrap_or(0)
+    }
+
+    /// Get slot number of an item within a specific bag by its GUID
+    /// Maps to C++ Bag::GetSlotByItemGUID
+    pub fn get_bag_slot_by_item_guid(
+        &self,
+        player_guid: ObjectGuid,
+        bag_slot: u8,
+        item_guid: ObjectGuid,
+    ) -> Option<u8> {
+        self.player_inventories.get(&player_guid).and_then(|inv| {
+            inv.resolve_bag_guid(bag_slot).and_then(|bag_guid| {
+                inv.bags.get(&bag_guid).and_then(|bag| {
+                    bag.get_slot_by_guid(item_guid)
+                })
+            })
+        })
     }
 }
 
