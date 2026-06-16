@@ -117,8 +117,12 @@ impl DeathSystem {
         world_pool: Arc<MySqlPool>,
         dbc_mgr: &DbcManager,
     ) -> Result<()> {
-        let mut mgr = self.graveyard_mgr.write().unwrap();
-        mgr.load(world_pool, dbc_mgr).await?;
+        // Load into a fresh manager first so we don't hold the (non-Send) write guard
+        // across the `.await` — otherwise the whole startup future becomes !Send and
+        // can't be driven from a spawned task.
+        let mut new_mgr = GraveyardManager::new();
+        new_mgr.load(world_pool, dbc_mgr).await?;
+        *self.graveyard_mgr.write().unwrap() = new_mgr;
         Ok(())
     }
 

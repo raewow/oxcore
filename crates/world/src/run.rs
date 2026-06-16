@@ -61,7 +61,10 @@ pub async fn serve(
     config: Config,
     shutdown_rx: broadcast::Receiver<()>,
     console_rx: mpsc::Receiver<ConsoleCommand>,
+    progress: oxcore_tui::Progress,
 ) -> Result<Arc<World>> {
+    progress.set_label("connecting databases");
+
     // 1. Databases
     let database_urls = DatabaseUrls {
         world: config.world_database_url.clone(),
@@ -85,6 +88,7 @@ pub async fn serve(
     ));
 
     initialize_config_mgr(world_config_for_start.clone());
+    world.set_progress(progress.clone());
     world.set_shutdown_receiver(shutdown_rx.resubscribe()).await;
 
     let realm_id = if config.realm_id <= 0 { 1 } else { config.realm_id };

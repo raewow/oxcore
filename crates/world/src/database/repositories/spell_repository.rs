@@ -54,7 +54,7 @@ impl SpellRepository {
             minTargetLevel, maxTargetLevel, spellFamilyName, spellFamilyFlags,
             maxAffectedTargets, dmgClass, preventionType, stanceBarOrder,
             dmgMultiplier1, dmgMultiplier2, dmgMultiplier3,
-            minFactionId, minReputation, requiredAuraVision
+            minFactionId, minReputation, requiredAuraVision, customFlags
             FROM spell_template t1
             WHERE build=(SELECT max(build) FROM spell_template t2 WHERE t1.entry=t2.entry AND build <= 5875)";
 
@@ -206,7 +206,7 @@ impl SpellRepository {
                 dmg_class: row.get(140),
                 prevention_type: row.get(141),
                 // stanceBarOrder at 142
-                custom: row.get(160),
+                custom: row.get(149),
                 internal: 0,
                 allowed_target_mask: 0,
                 script_id: 0,

@@ -10,6 +10,7 @@ pub mod input;
 pub mod log_layer;
 pub mod logging;
 pub mod metrics;
+pub mod progress;
 pub mod runner;
 pub mod ui;
 
@@ -17,5 +18,6 @@ pub use app::ServerPane;
 pub use log_layer::{LogFilter, LogRecord, LogSource, LogStore, TuiLogLayer};
 pub use logging::{install_headless_subscriber, install_tui_subscriber, LogSettings};
 pub use metrics::{MetricsSnapshot, MetricsSource};
-pub use runner::run_tui;
+pub use progress::{Progress, ProgressSnapshot};
+pub use runner::{run_tui_loading, LoadUpdate};
 pub use ui::LOGO;

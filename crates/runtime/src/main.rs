@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use oxcore_shared::config::{find_config_file, load_toml};
-use oxcore_tui::{LogSettings, LogStore, ServerPane};
+use oxcore_tui::{LoadUpdate, LogSettings, LogStore, Progress, ServerPane};
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info};
@@ -139,51 +139,111 @@ async fn main() -> Result<()> {
     // One shared shutdown broadcast for everything.
     let (shutdown_tx, _shutdown_rx) = broadcast::channel(1);
 
-    let mut panes: Vec<ServerPane> = Vec::new();
-
-    // --- Auth ---
-    if matches!(args.only, RunMode::Both | RunMode::Auth) {
-        let config = root
-            .auth
-            .clone()
-            .context("[auth] config section missing")?;
-        let metrics = Arc::new(oxcore_auth::metrics::Metrics::new());
-        let (tx, rx) = mpsc::channel(100);
-        let server = oxcore_auth::serve(config, metrics.clone(), shutdown_tx.clone(), rx).await?;
-        let commands = server.command_registry.read().await.command_names();
-        panes.push(ServerPane {
-            name: "Auth".to_string(),
-            source: oxcore_tui::LogSource::Auth,
-            metrics: Box::new(oxcore_auth::AuthMetrics::new(metrics)),
-            cmd_tx: tx,
-            commands,
-        });
-    }
-
-    // --- World ---
-    if matches!(args.only, RunMode::Both | RunMode::World) {
-        let config = root
-            .world
-            .clone()
-            .context("[world] config section missing")?;
-        let (tx, rx) = mpsc::channel(100);
-        let world = oxcore_world::serve(config, shutdown_tx.subscribe(), rx).await?;
-        let commands = world.command_registry.read().await.command_names();
-        panes.push(ServerPane {
-            name: "World".to_string(),
-            source: oxcore_tui::LogSource::World,
-            metrics: Box::new(oxcore_world::WorldMetrics::new(world)),
-            cmd_tx: tx,
-            commands,
-        });
-    }
-
     if use_tui {
-        oxcore_tui::run_tui(panes, store, shutdown_tx.clone()).await?;
-        // TUI exited (user quit); give servers a moment to tear down.
+        // Paint the loading screen immediately; build the servers in the background and
+        // hand the panes back when ready. World init drives the progress bar.
+        let progress = Progress::new();
+        let (load_tx, load_rx) = mpsc::channel(16);
+        let only = args.only;
+        let auth_cfg = root.auth.clone();
+        let world_cfg = root.world.clone();
+        let shutdown_task = shutdown_tx.clone();
+        let progress_task = progress.clone();
+
+        tokio::spawn(async move {
+            let mut panes: Vec<ServerPane> = Vec::new();
+
+            if matches!(only, RunMode::Both | RunMode::Auth) {
+                let _ = load_tx
+                    .send(LoadUpdate::Status("starting auth server".to_string()))
+                    .await;
+                let config = match auth_cfg {
+                    Some(c) => c,
+                    None => {
+                        let _ = load_tx
+                            .send(LoadUpdate::Failed("[auth] config section missing".to_string()))
+                            .await;
+                        return;
+                    }
+                };
+                let metrics = Arc::new(oxcore_auth::metrics::Metrics::new());
+                let (tx, rx) = mpsc::channel(100);
+                match oxcore_auth::serve(config, metrics.clone(), shutdown_task.clone(), rx).await {
+                    Ok(server) => {
+                        let commands = server.command_registry.read().await.command_names();
+                        panes.push(ServerPane {
+                            name: "Auth".to_string(),
+                            source: oxcore_tui::LogSource::Auth,
+                            metrics: Box::new(oxcore_auth::AuthMetrics::new(metrics)),
+                            cmd_tx: tx,
+                            commands,
+                        });
+                        let _ = load_tx
+                            .send(LoadUpdate::Status("auth ready".to_string()))
+                            .await;
+                    }
+                    Err(e) => {
+                        let _ = load_tx
+                            .send(LoadUpdate::Failed(format!("auth: {}", e)))
+                            .await;
+                        return;
+                    }
+                }
+            }
+
+            if matches!(only, RunMode::Both | RunMode::World) {
+                let _ = load_tx
+                    .send(LoadUpdate::Status("starting world server".to_string()))
+                    .await;
+                let config = match world_cfg {
+                    Some(c) => c,
+                    None => {
+                        let _ = load_tx
+                            .send(LoadUpdate::Failed("[world] config section missing".to_string()))
+                            .await;
+                        return;
+                    }
+                };
+                let (tx, rx) = mpsc::channel(100);
+                match oxcore_world::serve(config, shutdown_task.subscribe(), rx, progress_task).await
+                {
+                    Ok(world) => {
+                        let commands = world.command_registry.read().await.command_names();
+                        panes.push(ServerPane {
+                            name: "World".to_string(),
+                            source: oxcore_tui::LogSource::World,
+                            metrics: Box::new(oxcore_world::WorldMetrics::new(world)),
+                            cmd_tx: tx,
+                            commands,
+                        });
+                    }
+                    Err(e) => {
+                        let _ = load_tx
+                            .send(LoadUpdate::Failed(format!("world: {}", e)))
+                            .await;
+                        return;
+                    }
+                }
+            }
+
+            let _ = load_tx.send(LoadUpdate::Ready(panes)).await;
+        });
+
+        oxcore_tui::run_tui_loading(store, progress, shutdown_tx.clone(), load_rx).await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
     } else {
-        // Headless: single ctrl-c handler maps to the shared shutdown.
+        // Headless: serve directly, then a single ctrl-c maps to the shared shutdown.
+        if matches!(args.only, RunMode::Both | RunMode::Auth) {
+            let config = root.auth.clone().context("[auth] config section missing")?;
+            let metrics = Arc::new(oxcore_auth::metrics::Metrics::new());
+            let (_tx, rx) = mpsc::channel(100);
+            oxcore_auth::serve(config, metrics, shutdown_tx.clone(), rx).await?;
+        }
+        if matches!(args.only, RunMode::Both | RunMode::World) {
+            let config = root.world.clone().context("[world] config section missing")?;
+            let (_tx, rx) = mpsc::channel(100);
+            oxcore_world::serve(config, shutdown_tx.subscribe(), rx, Progress::new()).await?;
+        }
         info!("running headless; press Ctrl+C to stop");
         let _ = tokio::signal::ctrl_c().await;
         info!("shutdown signal received");

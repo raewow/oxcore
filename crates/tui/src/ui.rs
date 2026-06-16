@@ -3,12 +3,15 @@
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Sparkline, Tabs, Wrap};
+use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Sparkline, Tabs, Wrap};
 use ratatui::Frame;
 use tracing::Level;
 
 use crate::app::{App, TabKind};
-use crate::log_layer::LogRecord;
+use crate::log_layer::{LogFilter, LogRecord, LogStore};
+use crate::progress::ProgressSnapshot;
+
+const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 pub const LOGO: [&str; 3] = [
     "▄████▄ ▄▄ ▄▄ ▄█████  ▄▄▄  ▄▄▄▄  ▄▄▄▄▄",
@@ -77,6 +80,120 @@ fn render_body(f: &mut Frame, area: Rect, app: &mut App) {
 
     render_logs(f, log_area, app);
     render_status(f, cols[1], app);
+}
+
+/// The startup loading screen: logo, progress bar (or spinner), and a live log tail.
+pub fn render_loading(
+    f: &mut Frame,
+    store: &LogStore,
+    progress: &ProgressSnapshot,
+    status: &str,
+    error: Option<&str>,
+    spinner: usize,
+) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Length(4),
+            Constraint::Min(0),
+        ])
+        .split(f.area());
+
+    render_logo(f, chunks[0]);
+    render_progress(f, chunks[1], progress, status, error, spinner);
+
+    // Live tail of init logs (all sources).
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" startup log ")
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(chunks[2]);
+    f.render_widget(block, chunks[2]);
+
+    let records = store.filtered(LogFilter::All);
+    let height = inner.height as usize;
+    let start = records.len().saturating_sub(height);
+    let lines: Vec<Line> = records[start..]
+        .iter()
+        .map(|r| record_line(r, true))
+        .collect();
+    f.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+fn render_progress(
+    f: &mut Frame,
+    area: Rect,
+    progress: &ProgressSnapshot,
+    status: &str,
+    error: Option<&str>,
+    spinner: usize,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ACCENT));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if let Some(err) = error {
+        let lines = vec![
+            Line::from(Span::styled(
+                format!("startup failed: {}", err),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                "press any key to exit",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+        f.render_widget(
+            Paragraph::new(Text::from(lines)).alignment(Alignment::Center),
+            inner,
+        );
+        return;
+    }
+
+    let frame = SPINNER[spinner % SPINNER.len()];
+
+    if progress.total > 0 {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
+            .split(inner);
+
+        let ratio = (progress.current as f64 / progress.total as f64).clamp(0.0, 1.0);
+        let pct = (ratio * 100.0).round() as u16;
+        let gauge = Gauge::default()
+            .gauge_style(Style::default().fg(ACCENT))
+            .ratio(ratio)
+            .label(format!("{}%", pct));
+        f.render_widget(gauge, rows[0]);
+
+        let label = Line::from(vec![
+            Span::styled(format!("{} ", frame), Style::default().fg(ACCENT)),
+            Span::styled(
+                format!("Step {}/{}: ", progress.current, progress.total),
+                Style::default().fg(Color::Gray),
+            ),
+            Span::styled(progress.label.clone(), Style::default().fg(Color::White)),
+        ]);
+        f.render_widget(Paragraph::new(label).alignment(Alignment::Center), rows[1]);
+    } else {
+        // Indeterminate: spinner + status/label.
+        let text = if progress.label.is_empty() {
+            status.to_string()
+        } else {
+            progress.label.clone()
+        };
+        let line = Line::from(vec![
+            Span::styled(format!("{} ", frame), Style::default().fg(ACCENT)),
+            Span::styled(text, Style::default().fg(Color::White)),
+        ]);
+        f.render_widget(Paragraph::new(line).alignment(Alignment::Center), inner);
+    }
 }
 
 fn render_logo(f: &mut Frame, area: Rect) {

@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use oxcore_auth::shared::config::{find_config_file, load_toml};
-use oxcore_tui::{LogSettings, LogStore, LogSource, ServerPane};
+use oxcore_tui::{LoadUpdate, LogSettings, LogStore, LogSource, Progress, ServerPane};
 use serde::Deserialize;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -57,22 +57,36 @@ async fn main() -> Result<()> {
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(100);
     let metrics = Arc::new(oxcore_auth::metrics::Metrics::new());
 
-    let server =
-        oxcore_auth::serve(config, metrics.clone(), shutdown_tx.clone(), cmd_rx).await?;
-    let commands = server.command_registry.read().await.command_names();
-
-    let pane = ServerPane {
-        name: "Auth".to_string(),
-        source: LogSource::Auth,
-        metrics: Box::new(oxcore_auth::AuthMetrics::new(metrics)),
-        cmd_tx,
-        commands,
-    };
-
     if use_tui {
-        oxcore_tui::run_tui(vec![pane], store, shutdown_tx.clone()).await?;
+        // Auth init is fast, so the progress bar stays indeterminate (spinner + log tail).
+        let progress = Progress::new();
+        let (load_tx, load_rx) = tokio::sync::mpsc::channel(16);
+        let shutdown_task = shutdown_tx.clone();
+        tokio::spawn(async move {
+            let _ = load_tx
+                .send(LoadUpdate::Status("starting auth server".to_string()))
+                .await;
+            match oxcore_auth::serve(config, metrics.clone(), shutdown_task, cmd_rx).await {
+                Ok(server) => {
+                    let commands = server.command_registry.read().await.command_names();
+                    let pane = ServerPane {
+                        name: "Auth".to_string(),
+                        source: LogSource::Auth,
+                        metrics: Box::new(oxcore_auth::AuthMetrics::new(metrics)),
+                        cmd_tx,
+                        commands,
+                    };
+                    let _ = load_tx.send(LoadUpdate::Ready(vec![pane])).await;
+                }
+                Err(e) => {
+                    let _ = load_tx.send(LoadUpdate::Failed(format!("auth: {}", e))).await;
+                }
+            }
+        });
+        oxcore_tui::run_tui_loading(store, progress, shutdown_tx.clone(), load_rx).await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
     } else {
+        oxcore_auth::serve(config, metrics, shutdown_tx.clone(), cmd_rx).await?;
         info!("running headless; press Ctrl+C to stop");
         let _ = tokio::signal::ctrl_c().await;
         let _ = shutdown_tx.send(());

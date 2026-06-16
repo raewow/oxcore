@@ -85,6 +85,8 @@ pub struct World {
     background_tasks: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     /// Live update-loop performance stats for the TUI.
     pub tick_stats: Arc<parking_lot::Mutex<TickStats>>,
+    /// Optional startup progress reporter, driven by `init()` for the TUI loading screen.
+    pub progress: Arc<parking_lot::Mutex<Option<oxcore_tui::Progress>>>,
     /// Per-player packet handlers
     pub player_handlers: Arc<
         dashmap::DashMap<ObjectGuid, crate::core::network::player_handler::PlayerPacketHandler>,
@@ -212,6 +214,7 @@ impl World {
             command_registry: Arc::new(TokioRwLock::new(command_registry)),
             background_tasks: Arc::new(std::sync::Mutex::new(Vec::new())),
             tick_stats: Arc::new(parking_lot::Mutex::new(TickStats::default())),
+            progress: Arc::new(parking_lot::Mutex::new(None)),
             player_handlers: Arc::new(dashmap::DashMap::new()),
             movement_buffers: Arc::new(dashmap::DashMap::new()),
             data_dir,
@@ -219,7 +222,19 @@ impl World {
     }
 
     pub async fn init(&self) -> Result<()> {
+        // Startup progress reporting for the TUI loading screen (no-op when unset).
+        let progress = self.progress.lock().clone();
+        let step = |label: &str| {
+            if let Some(p) = &progress {
+                p.step(label);
+            }
+        };
+        if let Some(p) = &progress {
+            p.set_total(11);
+        }
+
         // Load DBC data files
+        step("Loading DBC files");
         tracing::info!("Loading DBC files...");
         {
             let dbc_path = self.data_dir.join("dbc");
@@ -228,6 +243,7 @@ impl World {
                 .context("Failed to load DBC files")?;
         }
         // Load spells from SQL (DBC field offsets are unreliable for vanilla 1.12.1)
+        step("Loading spells");
         self.managers
             .spell_mgr
             .load(&self.databases.world)
@@ -235,6 +251,7 @@ impl World {
             .context("Failed to load spells from SQL")?;
 
         // Initialize GUID generators from database
+        step("Loading items & GUIDs");
         self.managers
             .player_mgr
             .init_guid_generator(&self.databases.character)
@@ -254,6 +271,7 @@ impl World {
             .await?;
 
         // Load auction house maps and auction data (requires DBC + item templates)
+        step("Loading auction houses");
         let wow_patch = self.config.wow_patch.unwrap_or(112);
         self.managers
             .auction_mgr
@@ -275,6 +293,7 @@ impl World {
             .context("Failed to load auctions")?;
 
         // Load creature templates and spawns
+        step("Loading creatures");
         self.managers.creature_mgr.load_templates().await?;
         self.managers.creature_mgr.load_model_info().await?;
 
@@ -286,11 +305,13 @@ impl World {
         self.managers.creature_mgr.load_spawns().await?;
 
         // Load gameobject templates and spawns
+        step("Loading gameobjects");
         self.managers.gameobject_mgr.set_patch(creature_patch);
         self.managers.gameobject_mgr.load_templates().await?;
         self.managers.gameobject_mgr.load_spawns().await?;
 
         // Load waypoint data
+        step("Loading waypoints & loot");
         use crate::game::creature::movement::waypoint_repository::WaypointRepository;
         let waypoint_repo = WaypointRepository::new(self.databases.world.clone());
         let waypoint_data = waypoint_repo
@@ -307,6 +328,7 @@ impl World {
             .context("Failed to load loot tables")?;
 
         // Load area trigger data
+        step("Loading area triggers & instances");
         self.managers
             .area_trigger_mgr
             .load()
@@ -321,6 +343,7 @@ impl World {
             .context("Failed to initialize instance manager")?;
 
         // Initialize Lua scripting
+        step("Loading Lua scripts");
         match self.managers.lua_mgr.initialize() {
             Ok(result) => {
                 let stats = self.managers.lua_mgr.stats();
@@ -347,11 +370,13 @@ impl World {
         }
 
         // Load quest data from world database
+        step("Loading quests");
         QuestTemplateRepository::load(&self.systems.quest_manager, &self.databases.world)
             .await
             .context("Failed to load quest data")?;
 
         // Initialize game systems
+        step("Initializing systems");
         self.systems.init_all().await?;
 
         // Load graveyard data (needs both DBC and world DB)
@@ -376,6 +401,10 @@ impl World {
                     .trainer_manager
                     .register_creature_trainer_template(entry.entry, entry.trainer_id);
             }
+        }
+
+        if let Some(p) = &progress {
+            p.finish();
         }
 
         Ok(())
@@ -615,6 +644,11 @@ impl World {
         *self.console_rx.lock().await = rx;
     }
 
+    /// Install a startup progress reporter (driven by `init()` for the TUI loading screen).
+    pub fn set_progress(&self, progress: oxcore_tui::Progress) {
+        *self.progress.lock() = Some(progress);
+    }
+
     pub async fn get_command_registry(
         &self,
     ) -> tokio::sync::RwLockReadGuard<'_, CommandRegistry<World>> {
@@ -795,6 +829,7 @@ impl Clone for World {
             command_registry: Arc::clone(&self.command_registry),
             background_tasks: Arc::clone(&self.background_tasks),
             tick_stats: Arc::clone(&self.tick_stats),
+            progress: Arc::clone(&self.progress),
             player_handlers: Arc::clone(&self.player_handlers),
             movement_buffers: Arc::clone(&self.movement_buffers),
             data_dir: self.data_dir.clone(),

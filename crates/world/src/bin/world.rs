@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use oxcore_shared::config::{find_config_file, load_toml};
-use oxcore_tui::{LogSettings, LogStore, LogSource, ServerPane};
+use oxcore_tui::{LoadUpdate, LogSettings, LogStore, LogSource, Progress, ServerPane};
 use serde::Deserialize;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -56,21 +56,34 @@ async fn main() -> Result<()> {
     let (shutdown_tx, _rx) = tokio::sync::broadcast::channel(1);
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(100);
 
-    let world = oxcore_world::serve(config, shutdown_tx.subscribe(), cmd_rx).await?;
-    let commands = world.command_registry.read().await.command_names();
-
-    let pane = ServerPane {
-        name: "World".to_string(),
-        source: LogSource::World,
-        metrics: Box::new(oxcore_world::WorldMetrics::new(world)),
-        cmd_tx,
-        commands,
-    };
-
     if use_tui {
-        oxcore_tui::run_tui(vec![pane], store, shutdown_tx.clone()).await?;
+        let progress = Progress::new();
+        let (load_tx, load_rx) = tokio::sync::mpsc::channel(16);
+        let progress_task = progress.clone();
+        let shutdown_task = shutdown_tx.clone();
+        tokio::spawn(async move {
+            match oxcore_world::serve(config, shutdown_task.subscribe(), cmd_rx, progress_task).await
+            {
+                Ok(world) => {
+                    let commands = world.command_registry.read().await.command_names();
+                    let pane = ServerPane {
+                        name: "World".to_string(),
+                        source: LogSource::World,
+                        metrics: Box::new(oxcore_world::WorldMetrics::new(world)),
+                        cmd_tx,
+                        commands,
+                    };
+                    let _ = load_tx.send(LoadUpdate::Ready(vec![pane])).await;
+                }
+                Err(e) => {
+                    let _ = load_tx.send(LoadUpdate::Failed(format!("world: {}", e))).await;
+                }
+            }
+        });
+        oxcore_tui::run_tui_loading(store, progress, shutdown_tx.clone(), load_rx).await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
     } else {
+        oxcore_world::serve(config, shutdown_tx.subscribe(), cmd_rx, Progress::new()).await?;
         info!("running headless; press Ctrl+C to stop");
         let _ = tokio::signal::ctrl_c().await;
         let _ = shutdown_tx.send(());
