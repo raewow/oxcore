@@ -25,18 +25,16 @@ pub async fn run(config: &Config) -> Result<()> {
 
         db::ensure_migrations_table(&pool).await?;
 
-        // Apply base tables if the DB is empty
         if !db::base_tables_applied(&pool).await? {
             let base_dir = config.base_dir.join(db_name);
             db::apply_base(&pool, &base_dir).await?;
         }
 
-        // Find and apply pending migrations
         let applied = db::applied_migrations(&pool).await?;
         let applied_set: std::collections::HashSet<_> = applied.iter().collect();
 
         let mut migrations = collect_migrations(&config.migrations_dir, db_name)?;
-        migrations.sort_by(|a, b| a.0.cmp(&b.0)); // sort by id
+        migrations.sort_by(|a, b| a.0.cmp(&b.0));
 
         let pending: Vec<_> = migrations
             .iter()
@@ -64,7 +62,7 @@ pub async fn run(config: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Returns (id, name, path) for all migrations matching this db
+/// Returns (id, name, path) for all migrations matching this db.
 pub fn collect_migrations(
     migrations_dir: &std::path::Path,
     db_name: &str,
@@ -85,10 +83,8 @@ pub fn collect_migrations(
             continue;
         }
 
-        // filename format: YYYYMMDDHHMMSS_<db>_<name>.sql
         if let Some(id) = fname.get(..14) {
             if id.chars().all(|c| c.is_ascii_digit()) {
-                // name = everything after "YYYYMMDDHHMMSS_<db>_", before ".sql"
                 let after_db = &fname[14 + 1 + db_name.len() + 1..fname.len() - 4];
                 result.push((id.to_string(), after_db.to_string(), entry.path()));
             }

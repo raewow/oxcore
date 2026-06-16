@@ -1712,6 +1712,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcore-db"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "serde",
+ "sqlx",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -137,14 +137,12 @@ pub async fn applied_migrations(pool: &MySqlPool) -> Result<Vec<String>> {
 }
 
 pub async fn run_migration(pool: &MySqlPool, id: &str, name: &str, sql: &str) -> Result<()> {
-    // Execute each statement in the file
     for stmt in split_statements(sql) {
         sqlx::query(stmt)
             .execute(pool)
             .await
             .with_context(|| format!("Failed executing: {}...", &stmt[..stmt.len().min(80)]))?;
     }
-    // Record it
     sqlx::query("INSERT INTO migrations (id, name) VALUES (?, ?)")
         .bind(id)
         .bind(name)
@@ -155,7 +153,6 @@ pub async fn run_migration(pool: &MySqlPool, id: &str, name: &str, sql: &str) ->
 }
 
 pub async fn base_tables_applied(pool: &MySqlPool) -> Result<bool> {
-    // If any tables exist beyond 'migrations' itself, consider base applied
     let count: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM information_schema.TABLES
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME != 'migrations'",
@@ -188,7 +185,7 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
         let sql = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
         for stmt in split_statements(&sql) {
-            let _ = sqlx::query(stmt).execute(pool).await; // tolerate "already exists"
+            let _ = sqlx::query(stmt).execute(pool).await;
         }
     }
 

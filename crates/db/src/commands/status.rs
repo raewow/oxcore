@@ -20,7 +20,6 @@ pub async fn run(config: &Config) -> Result<()> {
             continue;
         };
 
-        // Check migrations table exists
         let has_table: (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM information_schema.TABLES
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'migrations'",
@@ -34,7 +33,6 @@ pub async fn run(config: &Config) -> Result<()> {
             continue;
         }
 
-        // Base tables
         let base_dir = config.base_dir.join(db_name);
         let base_file_count = count_sql_files(&base_dir);
         let base_applied = db::base_tables_applied(&pool).await?;

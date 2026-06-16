@@ -1,7 +1,6 @@
 use anyhow::{bail, Context, Result};
-use std::path::PathBuf;
-
-use wow_server::shared::config::{find_config_file, RootConfig};
+use serde::Deserialize;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct Config {
@@ -13,6 +12,28 @@ pub struct Config {
     pub base_dir: PathBuf,
     /// Absolute path to sql/migrations/
     pub migrations_dir: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+struct RootConfig {
+    world: WorldConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorldConfig {
+    world_database_url: String,
+    character_database_url: String,
+    login_database_url: String,
+    logs_database_url: String,
+}
+
+impl RootConfig {
+    fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let contents = std::fs::read_to_string(path.as_ref())
+            .with_context(|| format!("Failed to read: {}", path.as_ref().display()))?;
+        toml::from_str(&contents)
+            .with_context(|| format!("Failed to parse: {}", path.as_ref().display()))
+    }
 }
 
 impl Config {
@@ -50,6 +71,18 @@ impl Config {
             migrations_dir: sql_dir.join("migrations"),
         })
     }
+}
+
+fn find_config_file() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let path = dir.join("config.toml");
+            if path.exists() {
+                return path;
+            }
+        }
+    }
+    PathBuf::from("config.toml")
 }
 
 /// Walk upward from CWD to find the sql/ directory (sits at repo root).

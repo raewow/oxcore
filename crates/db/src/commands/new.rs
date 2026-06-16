@@ -13,7 +13,6 @@ pub fn run(db: &str, name: &str, migrations_dir: &Path) -> Result<()> {
         );
     }
 
-    // Normalise name: lowercase, spaces → underscores
     let name = name.to_lowercase().replace(' ', "_");
 
     let timestamp = Utc::now().format("%Y%m%d%H%M%S").to_string();
