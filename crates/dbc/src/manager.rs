@@ -1,4 +1,4 @@
-use crate::store::{load_dbc_store, DbcStore};
+use crate::store::{load_dbc_store, DbcEntry, DbcStore};
 use crate::structures::{
     AreaTableEntry, AreaTriggerEntry, AuctionHouseEntry, BankBagSlotPricesEntry, ChrClassesEntry,
     ChrRacesEntry, CreatureDisplayInfoEntry, FactionDbcEntry, FactionTemplateDbcEntry,
@@ -40,16 +40,8 @@ pub struct DbcManager {
 
 impl DbcManager {
     pub fn new() -> Self {
-        // Faction.dbc format: "iii" + 88*i (for BaseRepValue array) + other fields
-        // For vanilla 1.12.1, format string:
-        // i = int32/u32 (ID), i = int32 (reputationListID), then 88*i for BaseRepValue array
-        // Note: 'n' is not a valid format char, use 'i' for uint32/int32 fields
-        // The format string needs to match at least the fields we care about (first 90 fields)
-        // If the DBC has more fields, they'll be ignored (treated as 'x')
+        // Computed format strings for DBCs with complex layouts
         let faction_format = "iii".to_string() + &"i".repeat(88);
-        // ChrRaces.dbc format: "n" + many fields
-        // We need: field 0 (id), field 4 (model_m), field 5 (model_f), field 12 (resSicknessSpellId), field 16 (cinematicSequenceId)
-        // Format: "n" (id) + "x"*4 (skip 1-3) + "i" (field 4) + "i" (field 5) + "x"*6 (skip 6-11) + "i" (field 12) + "x"*3 (skip 13-15) + "i" (field 16) + "x"*many
         let chr_races_format = "n".to_string()
             + &"x".repeat(4)
             + "ii"
@@ -58,15 +50,9 @@ impl DbcManager {
             + &"x".repeat(3)
             + "i"
             + &"x".repeat(20);
-        // ChrClasses.dbc format: "n" + many fields
-        // Format: "n" (id) + "i"*2 (Flags, PowerType) + "i"*3 (string offsets - treated as u32) + "i"*5 (SpellFamily, CinematicSequenceID, RequiredExpansion, ArmorType, DisplayPower) + "i" (WeaponProficiencyMask) + "i" (ArmorProficiencyMask)
-        // Field indices: 0=ID, 1=Flags, 2=PowerType, 3-5=strings (offsets, read as u32), 6-10=u32s, 11=WeaponMask, 12=ArmorMask
-        // String offsets are u32 values, so we read them as "i" (u32) and skip them
         let chr_classes_format =
             "nii".to_string() + &"i".repeat(3) + &"i".repeat(5) + "ii" + &"x".repeat(200);
-        // Map.dbc format: "n" + many fields - we only need fields 0, 2, 4, 5
-        // Format string: "n" (id) + "x" (skip field 1) + "i" (mapType) + "x" (skip field 3) + "i" (maxPlayers) + "i" (resetDelay) + "x"*many (skip rest)
-        let map_format = "nxiixi".to_string() + &"x".repeat(200); // Read first 6 fields, skip rest
+        let map_format = "nxiixi".to_string() + &"x".repeat(200);
 
         Self {
             area_table: DbcStore::new("niiixxxxxxxxxxxxxxxxxxxiiixx"),
@@ -77,7 +63,7 @@ impl DbcManager {
             chr_races: DbcStore::new(&chr_races_format),
             creature_display_info: DbcStore::new("nixifxxxxxxx"),
             faction: DbcStore::new(&faction_format),
-            faction_template: DbcStore::new("iiiiiiiiiiiiii"), // 14 fields: all u32 (ID, faction, flags, masks, enemy[4], friend[4])
+            faction_template: DbcStore::new("iiiiiiiiiiiiii"),
             gameobject_display_info: DbcStore::new("nsxxxxxxxxxx"),
             lock: DbcStore::new("niiiiiiiiiiiiiiiiiiiiiiiixxxxxxxx"),
             map: DbcStore::new(&map_format),
@@ -86,24 +72,48 @@ impl DbcManager {
             spell_focus_object: DbcStore::new("n"),
             spell_radius: DbcStore::new("nff"),
             spell_range: DbcStore::new("nff"),
-            item: DbcStore::new("n"), // Item.dbc - we only need the ID field (field 0)
-            // SkillLine.dbc format: "n" (id) + "i" (categoryId) + string offsets (8 locales) + string flags + "i" (spellIcon)
-            // Format: "n" (id) + "i" (categoryId) + "x"*10 (skip string offsets/flags) + "i" (spellIcon at field 21)
-            skill_line: DbcStore::new("nixxxxxxxxxxxxxxxxixx"), // 22 fields: id, categoryId, skip 10, spellIcon, skip rest
-            // SkillTiers.dbc format: "n" (id) + 16*u32 (skillValue) + 16*u32 (maxSkillValue) = 33 fields
-            skill_tiers: DbcStore::new(&("n".to_string() + &"i".repeat(32))), // 33 fields: id + 32 u32s
-            // SkillRaceClassInfo.dbc format: "n" (id) + "i"*6 (skillId, raceMask, classMask, flags, reqLevel, skillTierId)
-            skill_race_class_info: DbcStore::new("niiiiii"), // 7 fields: id + 6 u32s
-            // WorldSafeLocs.dbc format: "n" (id) + "i" (mapId) + "fff" (x, y, z) + string offsets
-            // Format: "nifff" + skip rest (name strings)
-            world_safe_locs: DbcStore::new("nifffxxxxxxxx"), // 13 fields: id, mapId, x, y, z, name[8]
-            // Talent.dbc format: "niiiii" + 5 rank_spell_ids + "ii" + skip + "ii" for second prereq
-            // Fields: id, tab_id, row, column, rank_spell_ids[5], depends_on_talent, depends_on_rank, skip[6], depends_on_talent_2, depends_on_rank_2
-            talent: DbcStore::new("niiiiiiiiiiixxxxxxii"), // 20 fields total
-            // TalentTab.dbc format: "n" + name[8] + spell_icon + class_mask + tab_page + name[8] for other locales
-            // Fields: id, name[8], spell_icon, class_mask, tab_page, ...
-            talent_tab: DbcStore::new("nxxxxxxxxiiixxxxxxxxxxxxxxxxxxxxxxxxxxx"), // 39 fields total
+            item: DbcStore::new("n"),
+            skill_line: DbcStore::new("nixxxxxxxxxxxxxxxxixx"),
+            skill_tiers: DbcStore::new(&("n".to_string() + &"i".repeat(32))),
+            skill_race_class_info: DbcStore::new("niiiiii"),
+            world_safe_locs: DbcStore::new("nifffxxxxxxxx"),
+            talent: DbcStore::new("niiiiiiiiiiixxxxxxii"),
+            talent_tab: DbcStore::new("nxxxxxxxxiiixxxxxxxxxxxxxxxxxxxxxxxxxxx"),
         }
+    }
+
+    /// Helper to load a single DBC file into its store.
+    fn load_dbc<T: DbcEntry>(
+        store: &mut DbcStore<T>,
+        dbc_path: &Path,
+        filename: &str,
+    ) -> Result<()> {
+        let path = dbc_path.join(filename);
+        if !path.exists() {
+            warn!("{} not found, skipping", filename);
+            return Ok(());
+        }
+        load_dbc_store(store, path.to_str().unwrap())
+            .with_context(|| format!("Failed to load {}", filename))?;
+        debug!("Loaded {} {} entries", store.len(), filename.replace(".dbc", ""));
+        Ok(())
+    }
+
+    /// Helper to load a DBC that logs at debug level when missing.
+    fn load_dbc_optional<T: DbcEntry>(
+        store: &mut DbcStore<T>,
+        dbc_path: &Path,
+        filename: &str,
+    ) -> Result<()> {
+        let path = dbc_path.join(filename);
+        if !path.exists() {
+            debug!("{} not found, skipping", filename);
+            return Ok(());
+        }
+        load_dbc_store(store, path.to_str().unwrap())
+            .with_context(|| format!("Failed to load {}", filename))?;
+        debug!("Loaded {} {} entries", store.len(), filename.replace(".dbc", ""));
+        Ok(())
     }
 
     pub fn load_all(&mut self, dbc_path: &str) -> Result<()> {
@@ -119,102 +129,29 @@ impl DbcManager {
 
         debug!("Loading DBC files from: {}", dbc_path.display());
 
-        let area_table_path = dbc_path.join("AreaTable.dbc");
-        if area_table_path.exists() {
-            load_dbc_store(&mut self.area_table, area_table_path.to_str().unwrap())
-                .context("Failed to load AreaTable.dbc")?;
-            debug!("Loaded {} AreaTable entries", self.area_table.len());
-        } else {
-            warn!("AreaTable.dbc not found, skipping");
-        }
+        Self::load_dbc(&mut self.area_table, dbc_path, "AreaTable.dbc")?;
+        Self::load_dbc(&mut self.area_trigger, dbc_path, "AreaTrigger.dbc")?;
+        Self::load_dbc(&mut self.auction_house, dbc_path, "AuctionHouse.dbc")?;
+        Self::load_dbc(&mut self.bank_bag_slot_prices, dbc_path, "BankBagSlotPrices.dbc")?;
+        Self::load_dbc(&mut self.chr_classes, dbc_path, "ChrClasses.dbc")?;
+        Self::load_dbc(&mut self.chr_races, dbc_path, "ChrRaces.dbc")?;
+        Self::load_dbc(&mut self.map, dbc_path, "Map.dbc")?;
 
-        let area_trigger_path = dbc_path.join("AreaTrigger.dbc");
-        if area_trigger_path.exists() {
-            load_dbc_store(&mut self.area_trigger, area_trigger_path.to_str().unwrap())
-                .context("Failed to load AreaTrigger.dbc")?;
-            debug!("Loaded {} AreaTrigger entries", self.area_trigger.len());
-        } else {
-            warn!("AreaTrigger.dbc not found, skipping");
-        }
-
-        // Load AuctionHouse.dbc
-        let auction_house_path = dbc_path.join("AuctionHouse.dbc");
-        if auction_house_path.exists() {
-            load_dbc_store(
-                &mut self.auction_house,
-                auction_house_path.to_str().unwrap(),
-            )
-            .context("Failed to load AuctionHouse.dbc")?;
-            debug!("Loaded {} AuctionHouse entries", self.auction_house.len());
-        } else {
-            warn!("AuctionHouse.dbc not found, skipping");
-        }
-
-        // Load BankBagSlotPrices.dbc
-        let bank_bag_path = dbc_path.join("BankBagSlotPrices.dbc");
-        if bank_bag_path.exists() {
-            load_dbc_store(
-                &mut self.bank_bag_slot_prices,
-                bank_bag_path.to_str().unwrap(),
-            )
-            .context("Failed to load BankBagSlotPrices.dbc")?;
-            debug!(
-                "Loaded {} BankBagSlotPrices entries",
-                self.bank_bag_slot_prices.len()
-            );
-        } else {
-            warn!("BankBagSlotPrices.dbc not found, skipping");
-        }
-
-        // Load ChrClasses.dbc
-        let chr_classes_path = dbc_path.join("ChrClasses.dbc");
-        if chr_classes_path.exists() {
-            load_dbc_store(&mut self.chr_classes, chr_classes_path.to_str().unwrap())
-                .context("Failed to load ChrClasses.dbc")?;
-            debug!("Loaded {} ChrClasses entries", self.chr_classes.len());
-        } else {
-            warn!("ChrClasses.dbc not found, skipping");
-        }
-
-        // Load ChrRaces.dbc
-        let chr_races_path = dbc_path.join("ChrRaces.dbc");
-        if chr_races_path.exists() {
-            load_dbc_store(&mut self.chr_races, chr_races_path.to_str().unwrap())
-                .context("Failed to load ChrRaces.dbc")?;
-            debug!("Loaded {} ChrRaces entries", self.chr_races.len());
-        } else {
-            warn!("ChrRaces.dbc not found, skipping");
-        }
-
-        // Load Map.dbc
-        let map_path = dbc_path.join("Map.dbc");
-        if map_path.exists() {
-            load_dbc_store(&mut self.map, map_path.to_str().unwrap())
-                .context("Failed to load Map.dbc")?;
-            debug!("Loaded {} Map entries", self.map.len());
-        } else {
-            warn!("Map.dbc not found, skipping");
-        }
-
-        // Load Faction.dbc
+        // Faction.dbc is critical - special error handling
         let faction_path = dbc_path.join("Faction.dbc");
         if faction_path.exists() {
             match load_dbc_store(&mut self.faction, faction_path.to_str().unwrap()) {
                 Ok(_) => {
                     debug!("Loaded {} Faction entries", self.faction.len());
                     if self.faction.len() == 0 {
-                        warn!(
-                            "WARNING: Faction.dbc loaded but contains 0 entries - this is unusual!"
-                        );
+                        warn!("WARNING: Faction.dbc loaded but contains 0 entries - this is unusual!");
                     }
                 }
                 Err(e) => {
                     error!("CRITICAL: Failed to load Faction.dbc: {:#}", e);
-                    // Try to get more details about the error
                     if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
                         error!("IO Error details: {}", io_err);
                     }
-                    // Log the full error chain
                     let mut current_err: &dyn std::error::Error = e.as_ref();
                     let mut depth = 0;
                     while depth < 5 {
@@ -226,206 +163,30 @@ impl DbcManager {
                             break;
                         }
                     }
-                    // Don't fail completely, but log the error
                     return Err(e).context(
                         "Failed to load Faction.dbc - this is critical for reputation system",
                     );
                 }
             }
         } else {
-            error!(
-                "CRITICAL: Faction.dbc not found at: {}",
-                faction_path.display()
-            );
-            error!(
-                "Please ensure Faction.dbc is in the DBC directory: {}",
-                dbc_path.display()
-            );
+            error!("CRITICAL: Faction.dbc not found at: {}", faction_path.display());
+            error!("Please ensure Faction.dbc is in the DBC directory: {}", dbc_path.display());
         }
 
-        // Load FactionTemplate.dbc
-        let faction_template_path = dbc_path.join("FactionTemplate.dbc");
-        if faction_template_path.exists() {
-            load_dbc_store(
-                &mut self.faction_template,
-                faction_template_path.to_str().unwrap(),
-            )
-            .context("Failed to load FactionTemplate.dbc")?;
-            debug!(
-                "Loaded {} FactionTemplate entries",
-                self.faction_template.len()
-            );
-        } else {
-            warn!("FactionTemplate.dbc not found, skipping");
-        }
-
-        // Load CreatureDisplayInfo.dbc
-        let creature_display_info_path = dbc_path.join("CreatureDisplayInfo.dbc");
-        if creature_display_info_path.exists() {
-            load_dbc_store(
-                &mut self.creature_display_info,
-                creature_display_info_path.to_str().unwrap(),
-            )
-            .context("Failed to load CreatureDisplayInfo.dbc")?;
-            debug!(
-                "Loaded {} CreatureDisplayInfo entries",
-                self.creature_display_info.len()
-            );
-        } else {
-            warn!("CreatureDisplayInfo.dbc not found, skipping (display ID validation will be limited)");
-        }
-
-        // Load Item.dbc
-        // Note: Item.dbc may not exist in all DBC sets, but items can still be loaded from database
-        let item_path = dbc_path.join("Item.dbc");
-        if item_path.exists() {
-            load_dbc_store(&mut self.item, item_path.to_str().unwrap())
-                .context("Failed to load Item.dbc")?;
-            debug!("Loaded {} Item entries from DBC", self.item.len());
-        } else {
-            debug!("Item.dbc not found in DBC directory (items will be loaded from database only)");
-        }
-
-        // Load SkillLine.dbc
-        let skill_line_path = dbc_path.join("SkillLine.dbc");
-        if skill_line_path.exists() {
-            load_dbc_store(&mut self.skill_line, skill_line_path.to_str().unwrap())
-                .context("Failed to load SkillLine.dbc")?;
-            debug!("Loaded {} SkillLine entries", self.skill_line.len());
-        } else {
-            warn!("SkillLine.dbc not found, skill validation will be limited");
-        }
-
-        // Load SkillTiers.dbc
-        let skill_tiers_path = dbc_path.join("SkillTiers.dbc");
-        if skill_tiers_path.exists() {
-            load_dbc_store(&mut self.skill_tiers, skill_tiers_path.to_str().unwrap())
-                .context("Failed to load SkillTiers.dbc")?;
-            debug!("Loaded {} SkillTiers entries", self.skill_tiers.len());
-        } else {
-            warn!("SkillTiers.dbc not found, skill step calculation will be limited");
-        }
-
-        // Load SkillRaceClassInfo.dbc
-        let skill_race_class_info_path = dbc_path.join("SkillRaceClassInfo.dbc");
-        if skill_race_class_info_path.exists() {
-            load_dbc_store(
-                &mut self.skill_race_class_info,
-                skill_race_class_info_path.to_str().unwrap(),
-            )
-            .context("Failed to load SkillRaceClassInfo.dbc")?;
-            debug!(
-                "Loaded {} SkillRaceClassInfo entries",
-                self.skill_race_class_info.len()
-            );
-        } else {
-            warn!("SkillRaceClassInfo.dbc not found, skill race/class validation will be limited");
-        }
-
-        // Load SpellCastTimes.dbc
-        let spell_cast_time_path = dbc_path.join("SpellCastTimes.dbc");
-        if spell_cast_time_path.exists() {
-            load_dbc_store(
-                &mut self.spell_cast_time,
-                spell_cast_time_path.to_str().unwrap(),
-            )
-            .context("Failed to load SpellCastTimes.dbc")?;
-            debug!(
-                "Loaded {} SpellCastTimes entries",
-                self.spell_cast_time.len()
-            );
-        } else {
-            warn!("SpellCastTimes.dbc not found, spell cast times will not work correctly!");
-        }
-
-        // Load SpellDuration.dbc
-        let spell_duration_path = dbc_path.join("SpellDuration.dbc");
-        if spell_duration_path.exists() {
-            load_dbc_store(
-                &mut self.spell_duration,
-                spell_duration_path.to_str().unwrap(),
-            )
-            .context("Failed to load SpellDuration.dbc")?;
-            debug!("Loaded {} SpellDuration entries", self.spell_duration.len());
-        } else {
-            warn!("SpellDuration.dbc not found, spell durations will be limited");
-        }
-
-        // Load SpellRadius.dbc
-        let spell_radius_path = dbc_path.join("SpellRadius.dbc");
-        if spell_radius_path.exists() {
-            load_dbc_store(&mut self.spell_radius, spell_radius_path.to_str().unwrap())
-                .context("Failed to load SpellRadius.dbc")?;
-            debug!("Loaded {} SpellRadius entries", self.spell_radius.len());
-        } else {
-            warn!("SpellRadius.dbc not found, spell radius will be limited");
-        }
-
-        // Load SpellRange.dbc
-        let spell_range_path = dbc_path.join("SpellRange.dbc");
-        if spell_range_path.exists() {
-            load_dbc_store(&mut self.spell_range, spell_range_path.to_str().unwrap())
-                .context("Failed to load SpellRange.dbc")?;
-            debug!("Loaded {} SpellRange entries", self.spell_range.len());
-        } else {
-            warn!("SpellRange.dbc not found, spell range validation will be limited");
-        }
-
-        // Load SpellFocusObject.dbc
-        let spell_focus_object_path = dbc_path.join("SpellFocusObject.dbc");
-        if spell_focus_object_path.exists() {
-            load_dbc_store(
-                &mut self.spell_focus_object,
-                spell_focus_object_path.to_str().unwrap(),
-            )
-            .context("Failed to load SpellFocusObject.dbc")?;
-            debug!(
-                "Loaded {} SpellFocusObject entries",
-                self.spell_focus_object.len()
-            );
-        } else {
-            debug!("SpellFocusObject.dbc not found, spell focus validation will be limited");
-        }
-
-        // Spells are loaded from SQL (spell_template) instead of Spell.dbc
-        // because the DBC field offsets differ from what the code expects.
-        // Call load_spells_from_sql() separately after DBC loading.
-
-        // Load WorldSafeLocs.dbc - contains graveyard and safe teleport locations
-        let world_safe_locs_path = dbc_path.join("WorldSafeLocs.dbc");
-        if world_safe_locs_path.exists() {
-            load_dbc_store(
-                &mut self.world_safe_locs,
-                world_safe_locs_path.to_str().unwrap(),
-            )
-            .context("Failed to load WorldSafeLocs.dbc")?;
-            debug!(
-                "Loaded {} WorldSafeLocs entries",
-                self.world_safe_locs.len()
-            );
-        } else {
-            warn!("WorldSafeLocs.dbc not found - graveyard teleportation will not work!");
-        }
-
-        // Load Talent.dbc - contains talent definitions
-        let talent_path = dbc_path.join("Talent.dbc");
-        if talent_path.exists() {
-            load_dbc_store(&mut self.talent, talent_path.to_str().unwrap())
-                .context("Failed to load Talent.dbc")?;
-            debug!("Loaded {} Talent entries", self.talent.len());
-        } else {
-            warn!("Talent.dbc not found - talent system will not work!");
-        }
-
-        // Load TalentTab.dbc - contains talent tab (tree) definitions
-        let talent_tab_path = dbc_path.join("TalentTab.dbc");
-        if talent_tab_path.exists() {
-            load_dbc_store(&mut self.talent_tab, talent_tab_path.to_str().unwrap())
-                .context("Failed to load TalentTab.dbc")?;
-            debug!("Loaded {} TalentTab entries", self.talent_tab.len());
-        } else {
-            warn!("TalentTab.dbc not found - talent system will not work!");
-        }
+        Self::load_dbc(&mut self.faction_template, dbc_path, "FactionTemplate.dbc")?;
+        Self::load_dbc(&mut self.creature_display_info, dbc_path, "CreatureDisplayInfo.dbc")?;
+        Self::load_dbc_optional(&mut self.item, dbc_path, "Item.dbc")?;
+        Self::load_dbc(&mut self.skill_line, dbc_path, "SkillLine.dbc")?;
+        Self::load_dbc(&mut self.skill_tiers, dbc_path, "SkillTiers.dbc")?;
+        Self::load_dbc(&mut self.skill_race_class_info, dbc_path, "SkillRaceClassInfo.dbc")?;
+        Self::load_dbc(&mut self.spell_cast_time, dbc_path, "SpellCastTimes.dbc")?;
+        Self::load_dbc(&mut self.spell_duration, dbc_path, "SpellDuration.dbc")?;
+        Self::load_dbc(&mut self.spell_radius, dbc_path, "SpellRadius.dbc")?;
+        Self::load_dbc(&mut self.spell_range, dbc_path, "SpellRange.dbc")?;
+        Self::load_dbc_optional(&mut self.spell_focus_object, dbc_path, "SpellFocusObject.dbc")?;
+        Self::load_dbc(&mut self.world_safe_locs, dbc_path, "WorldSafeLocs.dbc")?;
+        Self::load_dbc(&mut self.talent, dbc_path, "Talent.dbc")?;
+        Self::load_dbc(&mut self.talent_tab, dbc_path, "TalentTab.dbc")?;
 
         info!("DBC loading complete");
         Ok(())
@@ -574,33 +335,24 @@ impl DbcManager {
         race: u8,
         class: u8,
     ) -> Option<&SkillRaceClassInfoEntry> {
-        // SkillRaceClassInfo is indexed by skill_id (we use skill_id as the key)
-        // We need to iterate through all entries with this skill_id and check race/class masks
         for (_, entry) in self.skill_race_class_info.entries() {
             if entry.skill_id != skill_id {
                 continue;
             }
-
-            // Check race mask (if mask is set, race must match)
             if entry.race_mask != 0 {
                 let race_bit = 1 << (race - 1);
                 if (entry.race_mask & race_bit) == 0 {
                     continue;
                 }
             }
-
-            // Check class mask (if mask is set, class must match)
             if entry.class_mask != 0 {
                 let class_bit = 1 << (class - 1);
                 if (entry.class_mask & class_bit) == 0 {
                     continue;
                 }
             }
-
-            // Found matching entry
             return Some(entry);
         }
-
         None
     }
 
@@ -633,8 +385,6 @@ impl DbcManager {
     pub fn get_all_talent_tabs(&self) -> impl Iterator<Item = (&u32, &TalentTabEntry)> {
         self.talent_tab.entries()
     }
-
-    // Spells are loaded via SpellManager from SQL, not from DBC.
 }
 
 impl Default for DbcManager {
