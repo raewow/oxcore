@@ -89,6 +89,174 @@ fn average_resist_fraction(caster_level: i32, resistance: u32, school: u8) -> f3
     (resistance as f32 * 0.15 / caster_level as f32).clamp(0.0, 0.75)
 }
 
+/// Melee/ranged spell miss chance percent (MaNGOS `MeleeSpellMissChance`).
+///
+/// `skill_diff` = attacker weapon skill − victim defense skill (positive favours the attacker).
+/// Base 5% miss, adjusted by skill difference (PvP 0.04/pt; PvE 0.1/pt, or 0.2/pt when the
+/// attacker is 10+ skill below), reduced by the attacker's +hit, clamped to [0, 60].
+fn melee_spell_miss_chance(
+    victim_is_player: bool,
+    victim_level: u8,
+    skill_diff: i32,
+    hit_bonus: f32,
+) -> f32 {
+    let mut miss = if victim_is_player {
+        5.0 - skill_diff as f32 * 0.04
+    } else if skill_diff < -10 {
+        5.0 - skill_diff as f32 * 0.2
+    } else {
+        5.0 - skill_diff as f32 * 0.1
+    };
+
+    // Low-level creature reduction.
+    if !victim_is_player && victim_level < 10 {
+        miss *= victim_level as f32 / 10.0;
+    }
+
+    // The first 1% of +hit is ignored against targets 10+ defense above the attacker.
+    let mut hit = hit_bonus;
+    if skill_diff < -10 && hit > 0.0 {
+        hit -= 1.0;
+    }
+    miss -= hit;
+
+    miss.clamp(0.0, 60.0)
+}
+
+/// Melee/ranged spell hit roll (MaNGOS `MeleeSpellHitResult`): a single-roll table of
+/// miss → dodge → parry → block. Crit is rolled separately during damage. Dodge/parry/block
+/// are read from real player victims; creature avoidance is not modelled yet (treated as 0),
+/// so creature victims face only the skill-based miss. Outcomes collapse to Hit/Miss because
+/// SpellHitOutcome has no dodge/parry/block variants (not surfaced to the client yet).
+fn roll_melee_spell_hit(
+    caster_guid: ObjectGuid,
+    target_guid: ObjectGuid,
+    spell: &crate::dbc::structures::SpellEntry,
+    world: &World,
+) -> SpellHitOutcome {
+    let is_ranged = spell.dmg_class == SPELL_DAMAGE_CLASS_RANGED;
+
+    // Caster level + melee/ranged +hit from auras.
+    let (caster_level, hit_bonus) = if caster_guid.is_player() {
+        world
+            .managers
+            .player_mgr
+            .with_player(caster_guid, |p| {
+                use crate::game::player::auras::effects::AURA_MOD_HIT_CHANCE;
+                let mut bonus = 0i32;
+                for aura in p.auras.container.all_auras() {
+                    if aura.aura_type == AURA_MOD_HIT_CHANCE {
+                        bonus += aura.current_value();
+                    }
+                }
+                (p.level as i32, bonus as f32)
+            })
+            .unwrap_or((60, 0.0))
+    } else {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(caster_guid, |c| (c.level as i32, 0.0f32))
+            .unwrap_or((60, 0.0))
+    };
+
+    // Victim level + avoidance (real for players, unmodelled for creatures).
+    let target_is_player = target_guid.is_player();
+    let (victim_level, dodge, parry, block, can_parry, can_block) = if target_is_player {
+        world
+            .managers
+            .player_mgr
+            .with_player(target_guid, |p| {
+                (
+                    p.level as i32,
+                    p.stats.dodge_pct,
+                    p.stats.parry_pct,
+                    p.stats.block_pct,
+                    p.combat.can_parry,
+                    p.combat.can_block,
+                )
+            })
+            .unwrap_or((60, 0.0, 0.0, 0.0, false, false))
+    } else {
+        let lvl = world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |c| c.level as i32)
+            .unwrap_or(60);
+        (lvl, 0.0, 0.0, 0.0, false, false)
+    };
+
+    // Weapon/defense skills are level*5 placeholders (as in the white-hit combat path).
+    let skill_diff = caster_level * 5 - victim_level * 5;
+
+    let miss = melee_spell_miss_chance(
+        target_is_player,
+        victim_level as u8,
+        skill_diff,
+        hit_bonus,
+    );
+
+    let roll: f32 = rand::random::<f32>() * 100.0;
+    let mut threshold = miss;
+    if roll < threshold {
+        return SpellHitOutcome::Miss;
+    }
+
+    // SPELL_ATTR_NO_ACTIVE_DEFENSE (0x00200000): cannot be dodged/parried/blocked.
+    if spell.attributes & 0x0020_0000 != 0 {
+        return SpellHitOutcome::Hit;
+    }
+    // Ranged spells cannot be dodged/parried/blocked.
+    if is_ranged {
+        return SpellHitOutcome::Hit;
+    }
+
+    // Dodge: avoidance reduced by skill difference (0.04/pt vs players, 0.10/pt vs creatures).
+    let dodge_mod = if target_is_player {
+        skill_diff as f32 * 0.04
+    } else {
+        skill_diff as f32 * 0.10
+    };
+    let mut dodge_chance = (dodge - dodge_mod).max(0.0);
+    if !target_is_player && (victim_level as u8) < 10 {
+        dodge_chance *= victim_level as f32 / 10.0;
+    }
+    threshold += dodge_chance;
+    if roll < threshold {
+        return SpellHitOutcome::Miss; // dodged
+    }
+
+    // Parry.
+    if can_parry {
+        let parry_mod = if target_is_player {
+            skill_diff as f32 * 0.04
+        } else if skill_diff < -10 {
+            skill_diff as f32 * 0.60
+        } else {
+            skill_diff as f32 * 0.20
+        };
+        let mut parry_chance = (parry - parry_mod).max(0.0);
+        if !target_is_player && (victim_level as u8) < 10 {
+            parry_chance *= victim_level as f32 / 10.0;
+        }
+        threshold += parry_chance;
+        if roll < threshold {
+            return SpellHitOutcome::Miss; // parried
+        }
+    }
+
+    // Full block only applies to spells flagged SPELL_ATTR_EX3_COMPLETELY_BLOCKED (0x08);
+    // other spells take a partial block during damage calculation instead.
+    if can_block && spell.attributes_ex3 & 0x0000_0008 != 0 {
+        threshold += block.max(0.0);
+        if roll < threshold {
+            return SpellHitOutcome::Miss; // fully blocked
+        }
+    }
+
+    SpellHitOutcome::Hit
+}
+
 /// Roll spell hit for a target.
 ///
 /// Returns the outcome (hit, miss, resist, immune, reflect).
@@ -115,7 +283,9 @@ pub fn roll_spell_hit(
     // table — MeleeSpellHitResult (dodge/parry/block) is a separate task, so auto-hit here.
     match spell_entry.dmg_class {
         SPELL_DAMAGE_CLASS_NONE => return SpellHitOutcome::Hit,
-        SPELL_DAMAGE_CLASS_MELEE | SPELL_DAMAGE_CLASS_RANGED => return SpellHitOutcome::Hit,
+        SPELL_DAMAGE_CLASS_MELEE | SPELL_DAMAGE_CLASS_RANGED => {
+            return roll_melee_spell_hit(caster_guid, target_guid, &spell_entry, world)
+        }
         _ => {}
     }
 
@@ -320,6 +490,40 @@ mod tests {
         // 96% base * (1 - 0.25 resist) = 72%.
         let hit = magic_hit_chance_pct(60, 60, false, 0, Some(0.25));
         assert!((hit - 72.0).abs() < 0.001, "got {hit}");
+    }
+
+    #[test]
+    fn melee_miss_base_is_5_percent_at_equal_skill() {
+        assert!((melee_spell_miss_chance(true, 60, 0, 0.0) - 5.0).abs() < 0.001);
+        assert!((melee_spell_miss_chance(false, 60, 0, 0.0) - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn melee_miss_pve_skill_gap_is_steeper_when_far_below() {
+        // Attacker 15 skill below a creature: -15 < -10 → 5 - (-15)*0.2 = 8%.
+        assert!((melee_spell_miss_chance(false, 60, -15, 0.0) - 8.0).abs() < 0.001);
+        // Attacker 5 skill below a creature: 5 - (-5)*0.1 = 5.5%.
+        assert!((melee_spell_miss_chance(false, 60, -5, 0.0) - 5.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn melee_miss_pvp_uses_smaller_skill_factor() {
+        // vs player: 5 - (-15)*0.04 = 5.6% (much less than the 8% PvE case).
+        assert!((melee_spell_miss_chance(true, 60, -15, 0.0) - 5.6).abs() < 0.001);
+    }
+
+    #[test]
+    fn melee_miss_reduced_by_hit_and_clamped() {
+        // +10 hit on a 5% base → floored at 0.
+        assert_eq!(melee_spell_miss_chance(true, 60, 0, 10.0), 0.0);
+        // Huge skill deficit vs creature is capped at 60%.
+        assert_eq!(melee_spell_miss_chance(false, 60, -1000, 0.0), 60.0);
+    }
+
+    #[test]
+    fn melee_miss_low_level_creature_reduction() {
+        // A level-5 creature halves its miss chance (5 * 5/10 = 2.5%).
+        assert!((melee_spell_miss_chance(false, 5, 0, 0.0) - 2.5).abs() < 0.001);
     }
 
     #[test]
