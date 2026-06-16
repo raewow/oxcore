@@ -87,14 +87,26 @@ impl SpellSystem {
         world: &'a World,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
     {
-        Box::pin(self.cast_spell_inner(
-            caster_guid,
-            spell_id,
-            target_guid,
-            is_triggered,
-            None,
-            world,
-        ))
+        let cast_targets = SpellCastTargets {
+            unit_target_guid: target_guid,
+            ..Default::default()
+        };
+        Box::pin(self.cast_spell_inner(caster_guid, spell_id, cast_targets, is_triggered, None, world))
+    }
+
+    /// Cast a spell with the full client-provided targets (unit/GO/item/corpse + source/dest
+    /// positions). Used by the CMSG_CAST_SPELL handler so ground-targeted AoE keeps its
+    /// destination position through the pipeline.
+    pub fn cast_spell_with_targets<'a>(
+        &'a self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        cast_targets: SpellCastTargets,
+        is_triggered: bool,
+        world: &'a World,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
+    {
+        Box::pin(self.cast_spell_inner(caster_guid, spell_id, cast_targets, is_triggered, None, world))
     }
 
     pub fn cast_spell_from_item<'a>(
@@ -106,10 +118,14 @@ impl SpellSystem {
         world: &'a World,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
     {
+        let cast_targets = SpellCastTargets {
+            unit_target_guid: target_guid,
+            ..Default::default()
+        };
         Box::pin(self.cast_spell_inner(
             caster_guid,
             spell_id,
-            target_guid,
+            cast_targets,
             true,
             Some(item_guid),
             world,
@@ -120,11 +136,13 @@ impl SpellSystem {
         &self,
         caster_guid: ObjectGuid,
         spell_id: u32,
-        target_guid: Option<ObjectGuid>,
+        cast_targets: SpellCastTargets,
         is_triggered: bool,
         cast_item_guid: Option<ObjectGuid>,
         world: &World,
     ) -> Result<SpellCastResult> {
+        let target_guid = cast_targets.unit_target();
+
         // Step 1: Validate
         let validate_result =
             validation::validate_cast(caster_guid, spell_id, target_guid, is_triggered, world)?;
@@ -177,22 +195,22 @@ impl SpellSystem {
             self.start_channel(
                 caster_guid,
                 spell_id,
-                target_guid,
                 channel_duration,
                 tick_count,
                 is_triggered,
                 cast_item_guid,
+                cast_targets,
                 world,
             )
             .await?;
         } else if cast_time_ms == 0 {
             // Instant cast - execute immediately
-            self.execute_spell(caster_guid, spell_id, target_guid, is_triggered, world)
+            self.execute_spell(caster_guid, spell_id, &cast_targets, is_triggered, world)
                 .await?;
             self.finish_cast(
                 caster_guid,
                 spell_id,
-                target_guid,
+                &cast_targets,
                 is_triggered,
                 cast_item_guid,
                 world,
@@ -203,11 +221,11 @@ impl SpellSystem {
             self.start_cast(
                 caster_guid,
                 spell_id,
-                target_guid,
                 cast_time_ms,
                 is_triggered,
                 slot,
                 cast_item_guid,
+                cast_targets,
                 world,
             )
             .await?;
@@ -221,13 +239,14 @@ impl SpellSystem {
         &self,
         caster_guid: ObjectGuid,
         spell_id: u32,
-        target_guid: Option<ObjectGuid>,
         cast_time_ms: u32,
         is_triggered: bool,
         slot: CurrentSpellType,
         cast_item_guid: Option<ObjectGuid>,
+        cast_targets: SpellCastTargets,
         world: &World,
     ) -> Result<()> {
+        let target_guid = cast_targets.unit_target();
         world
             .systems
             .player
@@ -239,19 +258,18 @@ impl SpellSystem {
                     player.movement.position.z,
                 );
 
-                player.spells.set_current_spell(
+                let mut active = ActiveCast::new(
+                    spell_id,
+                    target_guid,
+                    cast_time_ms,
+                    is_triggered,
                     slot,
-                    ActiveCast::new(
-                        spell_id,
-                        target_guid,
-                        cast_time_ms,
-                        is_triggered,
-                        slot,
-                        x,
-                        y,
-                        z,
-                    ),
+                    x,
+                    y,
+                    z,
                 );
+                active.cast_targets = cast_targets.clone();
+                player.spells.set_current_spell(slot, active);
             });
 
         // Schedule CastFinish event
@@ -266,6 +284,7 @@ impl SpellSystem {
                     is_triggered,
                     slot,
                     cast_item_guid,
+                    cast_targets,
                 },
             );
         }
@@ -291,13 +310,14 @@ impl SpellSystem {
         &self,
         caster_guid: ObjectGuid,
         spell_id: u32,
-        target_guid: Option<ObjectGuid>,
         duration_ms: u32,
         tick_count: u32,
         is_triggered: bool,
         cast_item_guid: Option<ObjectGuid>,
+        cast_targets: SpellCastTargets,
         world: &World,
     ) -> Result<()> {
+        let target_guid = cast_targets.unit_target();
         world
             .systems
             .player
@@ -308,19 +328,20 @@ impl SpellSystem {
                     player.movement.position.y,
                     player.movement.position.z,
                 );
-                player.spells.set_current_spell(
-                    CurrentSpellType::Channeled,
-                    ActiveCast::new_channel(
-                        spell_id,
-                        target_guid,
-                        duration_ms,
-                        tick_count,
-                        is_triggered,
-                        x,
-                        y,
-                        z,
-                    ),
+                let mut active = ActiveCast::new_channel(
+                    spell_id,
+                    target_guid,
+                    duration_ms,
+                    tick_count,
+                    is_triggered,
+                    x,
+                    y,
+                    z,
                 );
+                active.cast_targets = cast_targets.clone();
+                player
+                    .spells
+                    .set_current_spell(CurrentSpellType::Channeled, active);
             });
 
         // Send SMSG_CHANNEL_START
@@ -347,6 +368,7 @@ impl SpellSystem {
                         spell_id,
                         target_guid,
                         tick_number: tick,
+                        cast_targets: cast_targets.clone(),
                     },
                 );
             }
@@ -356,6 +378,7 @@ impl SpellSystem {
                     caster_guid,
                     spell_id,
                     target_guid,
+                    cast_targets,
                 },
             );
         }
@@ -476,6 +499,7 @@ impl SpellSystem {
                     is_triggered,
                     slot,
                     cast_item_guid,
+                    cast_targets,
                 } => {
                     // Verify the spell is still in the slot (wasn't cancelled)
                     let still_active = world
@@ -515,12 +539,18 @@ impl SpellSystem {
                             continue;
                         }
 
-                        self.execute_spell(caster_guid, spell_id, target_guid, is_triggered, world)
-                            .await?;
+                        self.execute_spell(
+                            caster_guid,
+                            spell_id,
+                            &cast_targets,
+                            is_triggered,
+                            world,
+                        )
+                        .await?;
                         self.finish_cast(
                             caster_guid,
                             spell_id,
-                            target_guid,
+                            &cast_targets,
                             is_triggered,
                             cast_item_guid,
                             world,
@@ -532,6 +562,7 @@ impl SpellSystem {
                     caster_guid,
                     spell_id,
                     target_guid,
+                    cast_targets,
                     ..
                 } => {
                     // Verify channel is still active
@@ -558,8 +589,13 @@ impl SpellSystem {
                             )
                             .await?;
                         } else {
-                            self.execute_channel_tick(caster_guid, spell_id, target_guid, world)
-                                .await?;
+                            self.execute_channel_tick(
+                                caster_guid,
+                                spell_id,
+                                &cast_targets,
+                                world,
+                            )
+                            .await?;
                         }
                     }
                 }
@@ -567,6 +603,7 @@ impl SpellSystem {
                     caster_guid,
                     spell_id,
                     target_guid,
+                    cast_targets,
                 } => {
                     // Verify channel is still active
                     let still_active = world
@@ -591,7 +628,7 @@ impl SpellSystem {
                                     .spells
                                     .clear_current_spell(CurrentSpellType::Channeled);
                             });
-                        self.finish_cast(caster_guid, spell_id, target_guid, false, None, world)
+                        self.finish_cast(caster_guid, spell_id, &cast_targets, false, None, world)
                             .await?;
                     }
                 }
@@ -600,6 +637,7 @@ impl SpellSystem {
                     spell_id,
                     target_guid,
                     is_triggered,
+                    cast_targets,
                 } => {
                     tracing::info!(
                         "[SPELL_PROJECTILE_HIT] spell={spell_id} caster={caster_guid:?} target={target_guid:?} — executing delayed damage"
@@ -607,7 +645,7 @@ impl SpellSystem {
                     self.execute_spell_immediate(
                         caster_guid,
                         spell_id,
-                        target_guid,
+                        &cast_targets,
                         is_triggered,
                         world,
                     )
@@ -653,10 +691,14 @@ impl SpellSystem {
 
         // Execute ready effects
         for effect in ready_effects {
+            let cast_targets = SpellCastTargets {
+                unit_target_guid: effect.target_guid,
+                ..Default::default()
+            };
             self.execute_spell_immediate(
                 effect.caster_guid,
                 effect.spell_id,
-                effect.target_guid,
+                &cast_targets,
                 effect.is_triggered,
                 world,
             )
@@ -755,31 +797,36 @@ impl SpellSystem {
                         continue;
                     }
 
-                    self.execute_spell(player_guid, spell_id, target_guid, is_triggered, world)
+                    let cast_targets = SpellCastTargets {
+                        unit_target_guid: target_guid,
+                        ..Default::default()
+                    };
+                    self.execute_spell(player_guid, spell_id, &cast_targets, is_triggered, world)
                         .await?;
-                    self.finish_cast(
-                        player_guid,
-                        spell_id,
-                        target_guid,
-                        is_triggered,
-                        None,
-                        world,
-                    )
-                    .await?;
+                    self.finish_cast(player_guid, spell_id, &cast_targets, is_triggered, None, world)
+                        .await?;
                 }
                 CastUpdateInfo::ChannelTick {
                     spell_id,
                     target_guid,
                     ..
                 } => {
-                    self.execute_channel_tick(player_guid, spell_id, target_guid, world)
+                    let cast_targets = SpellCastTargets {
+                        unit_target_guid: target_guid,
+                        ..Default::default()
+                    };
+                    self.execute_channel_tick(player_guid, spell_id, &cast_targets, world)
                         .await?;
                 }
                 CastUpdateInfo::ChannelComplete {
                     spell_id,
                     target_guid,
                 } => {
-                    self.finish_cast(player_guid, spell_id, target_guid, false, None, world)
+                    let cast_targets = SpellCastTargets {
+                        unit_target_guid: target_guid,
+                        ..Default::default()
+                    };
+                    self.finish_cast(player_guid, spell_id, &cast_targets, false, None, world)
                         .await?;
                 }
             }
@@ -797,12 +844,11 @@ impl SpellSystem {
         &self,
         caster_guid: ObjectGuid,
         spell_id: u32,
-        target_guid: Option<ObjectGuid>,
+        cast_targets: &SpellCastTargets,
         is_triggered: bool,
         world: &World,
     ) -> Result<()> {
-        use crate::game::player::spells::state::DelayedSpellEffect;
-        use crate::game::player::spells::targets;
+        let target_guid = cast_targets.unit_target();
 
         // Check if spell has projectile travel time
         let speed = world
@@ -831,6 +877,7 @@ impl SpellSystem {
                             spell_id,
                             target_guid,
                             is_triggered,
+                            cast_targets: cast_targets.clone(),
                         },
                     );
                 }
@@ -839,7 +886,7 @@ impl SpellSystem {
         }
 
         // Immediate execution
-        self.execute_spell_immediate(caster_guid, spell_id, target_guid, is_triggered, world)
+        self.execute_spell_immediate(caster_guid, spell_id, cast_targets, is_triggered, world)
             .await
     }
 
@@ -848,18 +895,14 @@ impl SpellSystem {
         &self,
         caster_guid: ObjectGuid,
         spell_id: u32,
-        target_guid: Option<ObjectGuid>,
+        cast_targets: &SpellCastTargets,
         is_triggered: bool,
         world: &World,
     ) -> Result<()> {
         use crate::game::player::spells::targets;
 
-        let cast_targets = SpellCastTargets {
-            unit_target_guid: target_guid,
-            ..Default::default()
-        };
-
-        let resolved = targets::resolve_spell_targets(spell_id, &cast_targets, caster_guid, world);
+        let target_guid = cast_targets.unit_target();
+        let resolved = targets::resolve_spell_targets(spell_id, cast_targets, caster_guid, world);
 
         self.effects_dispatcher
             .dispatch_with_targets(
@@ -928,11 +971,11 @@ impl SpellSystem {
         &self,
         caster_guid: ObjectGuid,
         spell_id: u32,
-        target_guid: Option<ObjectGuid>,
+        cast_targets: &SpellCastTargets,
         world: &World,
     ) -> Result<()> {
         // Channel ticks re-execute the spell effects
-        self.execute_spell(caster_guid, spell_id, target_guid, true, world)
+        self.execute_spell(caster_guid, spell_id, cast_targets, true, world)
             .await
     }
 
@@ -941,19 +984,17 @@ impl SpellSystem {
         &self,
         caster_guid: ObjectGuid,
         spell_id: u32,
-        target_guid: Option<ObjectGuid>,
+        cast_targets: &SpellCastTargets,
         is_triggered: bool,
         cast_item_guid: Option<ObjectGuid>,
         world: &World,
     ) -> Result<()> {
         use crate::game::player::spells::targets;
 
+        let target_guid = cast_targets.unit_target();
+
         // Resolve targets for SMSG_SPELL_GO hit list
-        let cast_targets = SpellCastTargets {
-            unit_target_guid: target_guid,
-            ..Default::default()
-        };
-        let resolved = targets::resolve_spell_targets(spell_id, &cast_targets, caster_guid, world);
+        let resolved = targets::resolve_spell_targets(spell_id, cast_targets, caster_guid, world);
 
         // Collect all unique hit targets across all effects
         let mut hit_targets: Vec<ObjectGuid> = resolved

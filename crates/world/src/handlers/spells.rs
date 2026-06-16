@@ -192,10 +192,10 @@ pub async fn handle_cast_spell(
     world
         .systems
         .spells
-        .cast_spell(
+        .cast_spell_with_targets(
             player_guid,
             spell_id,
-            target_guid,
+            targets,
             false, // not triggered
             world,
         )

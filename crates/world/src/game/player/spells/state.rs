@@ -400,6 +400,11 @@ pub struct ActiveCast {
     pub start_position_x: f32,
     pub start_position_y: f32,
     pub start_position_z: f32,
+
+    /// Full client-provided targets (unit/GO/item/corpse + source/dest positions).
+    /// Carried so ground-targeted AoE and item/GO effects keep their data when the cast
+    /// resolves later (cast-time / channel / delayed projectile).
+    pub cast_targets: SpellCastTargets,
 }
 
 impl ActiveCast {
@@ -431,6 +436,7 @@ impl ActiveCast {
             start_position_x: x,
             start_position_y: y,
             start_position_z: z,
+            cast_targets: SpellCastTargets::default(),
         }
     }
 
@@ -468,6 +474,7 @@ impl ActiveCast {
             start_position_x: x,
             start_position_y: y,
             start_position_z: z,
+            cast_targets: SpellCastTargets::default(),
         }
     }
 
@@ -801,6 +808,7 @@ pub enum SpellEventType {
         is_triggered: bool,
         slot: CurrentSpellType,
         cast_item_guid: Option<ObjectGuid>,
+        cast_targets: SpellCastTargets,
     },
     /// Channel tick — execute one channel tick
     ChannelTick {
@@ -808,12 +816,14 @@ pub enum SpellEventType {
         spell_id: u32,
         target_guid: Option<ObjectGuid>,
         tick_number: u32,
+        cast_targets: SpellCastTargets,
     },
     /// Channel complete — finish the channel
     ChannelFinish {
         caster_guid: ObjectGuid,
         spell_id: u32,
         target_guid: Option<ObjectGuid>,
+        cast_targets: SpellCastTargets,
     },
     /// Delayed spell effect — projectile arrived
     DelayedEffect {
@@ -821,6 +831,7 @@ pub enum SpellEventType {
         spell_id: u32,
         target_guid: Option<ObjectGuid>,
         is_triggered: bool,
+        cast_targets: SpellCastTargets,
     },
 }
 
@@ -967,6 +978,7 @@ mod tests {
             is_triggered: false,
             slot: CurrentSpellType::Generic,
             cast_item_guid: None,
+            cast_targets: SpellCastTargets::default(),
         }
     }
 
@@ -976,6 +988,7 @@ mod tests {
             spell_id,
             target_guid: None,
             tick_number: 1,
+            cast_targets: SpellCastTargets::default(),
         }
     }
 
@@ -1060,6 +1073,7 @@ mod tests {
                 caster_guid: a,
                 spell_id: 5,
                 target_guid: None,
+                cast_targets: SpellCastTargets::default(),
             },
         );
         q.schedule(
@@ -1069,6 +1083,7 @@ mod tests {
                 spell_id: 5,
                 target_guid: None,
                 is_triggered: false,
+                cast_targets: SpellCastTargets::default(),
             },
         );
 
