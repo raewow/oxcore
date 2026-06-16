@@ -76,6 +76,10 @@ pub trait InventoryRepositoryTrait: Send + Sync {
     /// Delete item instance and remove from inventory
     async fn delete_item(&self, item_guid: u32) -> Result<()>;
 
+    /// Delete item from all related tables (item_instance, character_inventory, auction, mail_items, character_gifts)
+    /// Maps to C++ Item::DeleteAllFromDB static method
+    async fn delete_item_all(&self, item_guid: u32) -> Result<()>;
+
     /// Remove item from inventory slot (but don't delete item instance)
     async fn remove_from_slot(&self, player_guid: u32, bag: u8, slot: u8) -> Result<()>;
 

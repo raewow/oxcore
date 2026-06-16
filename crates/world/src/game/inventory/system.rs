@@ -678,6 +678,28 @@ impl InventorySystem {
         }
     }
 
+    /// Delete item from all related tables (item_instance, character_inventory, auction, mail_items, character_gifts)
+    /// Maps to C++ Item::DeleteAllFromDB static method
+    /// This is used when an item needs to be completely removed from the database
+    /// (e.g., auction expired, mail deleted, etc.)
+    pub async fn delete_item_all(&self, item_guid: ObjectGuid) -> Result<()> {
+        tracing::info!(
+            "[INVENTORY] delete_item_all: permanently deleting item {:?}",
+            item_guid
+        );
+
+        if let Err(e) = self.repository.delete_item_all(item_guid.low()).await {
+            tracing::error!(
+                "[INVENTORY] delete_item_all FAILED for item {:?}: {}",
+                item_guid,
+                e
+            );
+            return Err(e);
+        }
+
+        Ok(())
+    }
+
     pub fn move_item(
         &self,
         player_guid: ObjectGuid,

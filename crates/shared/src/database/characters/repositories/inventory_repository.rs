@@ -297,6 +297,57 @@ impl InventoryRepository {
         Ok(())
     }
 
+    /// Delete item from all related tables (item_instance, character_inventory, auction, mail_items, character_gifts)
+    /// Maps to C++ Item::DeleteAllFromDB static method
+    pub async fn delete_item_all(&self, item_guid: u32) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // Delete from inventory
+        sqlx::query("DELETE FROM character_inventory WHERE item_guid = ?")
+            .bind(item_guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete from inventory")?;
+
+        // Delete from auction
+        sqlx::query("DELETE FROM auction WHERE item_guid = ?")
+            .bind(item_guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete from auction")?;
+
+        // Delete from mail items
+        sqlx::query("DELETE FROM mail_items WHERE item_guid = ?")
+            .bind(item_guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete from mail_items")?;
+
+        // Delete from gifts
+        sqlx::query("DELETE FROM character_gifts WHERE item_guid = ?")
+            .bind(item_guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete from character_gifts")?;
+
+        // Delete loot
+        sqlx::query("DELETE FROM item_loot WHERE guid = ?")
+            .bind(item_guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete item loot")?;
+
+        // Delete item instance
+        sqlx::query("DELETE FROM item_instance WHERE guid = ?")
+            .bind(item_guid)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete item instance")?;
+
+        tx.commit().await.context("Failed to commit delete_all")?;
+        Ok(())
+    }
+
     /// Remove item from inventory slot (but don't delete item instance)
     pub async fn remove_from_slot(&self, player_guid: u32, bag: u8, slot: u8) -> Result<()> {
         sqlx::query("DELETE FROM character_inventory WHERE guid = ? AND bag = ? AND slot = ?")
@@ -583,6 +634,10 @@ impl InventoryRepositoryTrait for InventoryRepository {
 
     async fn delete_item(&self, item_guid: u32) -> Result<()> {
         self.delete_item(item_guid).await
+    }
+
+    async fn delete_item_all(&self, item_guid: u32) -> Result<()> {
+        self.delete_item_all(item_guid).await
     }
 
     async fn remove_from_slot(&self, player_guid: u32, bag: u8, slot: u8) -> Result<()> {
