@@ -155,6 +155,47 @@ pub fn is_spell_proc_event_can_triggered_by(
     false
 }
 
+/// The caster-side proc flag for completing a spell cast (MaNGOS `m_procAttacker`,
+/// `Spell::prepareDataForTriggerSystem`). Picks by damage class and polarity; the swing/trap/
+/// periodic refinements are omitted (handled where those flags matter).
+pub fn spell_cast_attacker_proc_flag(
+    dmg_class: u32,
+    is_positive: bool,
+    is_heal: bool,
+    is_auto_repeat: bool,
+) -> u32 {
+    use proc_flags as pf;
+    const SPELL_DAMAGE_CLASS_MAGIC: u32 = 1;
+    const SPELL_DAMAGE_CLASS_MELEE: u32 = 2;
+    const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+
+    match dmg_class {
+        SPELL_DAMAGE_CLASS_MELEE => pf::DEAL_MELEE_ABILITY,
+        SPELL_DAMAGE_CLASS_RANGED => {
+            if is_auto_repeat {
+                pf::DEAL_RANGED_ATTACK
+            } else {
+                pf::DEAL_RANGED_ABILITY
+            }
+        }
+        _ => {
+            if is_positive {
+                if is_heal {
+                    pf::DEAL_HELPFUL_SPELL
+                } else {
+                    pf::DEAL_HELPFUL_ABILITY
+                }
+            } else if is_auto_repeat {
+                pf::DEAL_RANGED_ATTACK
+            } else if dmg_class == SPELL_DAMAGE_CLASS_MAGIC {
+                pf::DEAL_HARMFUL_SPELL
+            } else {
+                pf::DEAL_HARMFUL_ABILITY
+            }
+        }
+    }
+}
+
 /// Result of dispatching a proc — may request a triggered spell cast.
 pub struct ProcResult {
     /// If set, this spell should be cast as triggered on the player's current target
@@ -465,6 +506,53 @@ mod tests {
         let aura = proc_flags::DEAL_HARMFUL_SPELL;
         let always = event(proc_flags_ex::EX_TRIGGER_ALWAYS);
         assert!(can_trigger(Some(&always), aura, proc_flags_ex::MISS));
+    }
+
+    #[test]
+    fn cast_attacker_flag_by_class_and_polarity() {
+        // Harmful magic spell → deal-harmful-spell.
+        assert_eq!(
+            spell_cast_attacker_proc_flag(1, false, false, false),
+            proc_flags::DEAL_HARMFUL_SPELL
+        );
+        // Positive heal → deal-helpful-spell; positive non-heal → deal-helpful-ability.
+        assert_eq!(
+            spell_cast_attacker_proc_flag(1, true, true, false),
+            proc_flags::DEAL_HELPFUL_SPELL
+        );
+        assert_eq!(
+            spell_cast_attacker_proc_flag(1, true, false, false),
+            proc_flags::DEAL_HELPFUL_ABILITY
+        );
+        // Melee/ranged ability spells.
+        assert_eq!(
+            spell_cast_attacker_proc_flag(2, false, false, false),
+            proc_flags::DEAL_MELEE_ABILITY
+        );
+        assert_eq!(
+            spell_cast_attacker_proc_flag(3, false, false, false),
+            proc_flags::DEAL_RANGED_ABILITY
+        );
+        // Auto-repeat (wand/auto-shot) → ranged auto attack.
+        assert_eq!(
+            spell_cast_attacker_proc_flag(0, false, false, true),
+            proc_flags::DEAL_RANGED_ATTACK
+        );
+    }
+
+    #[test]
+    fn cast_end_proc_does_not_double_fire_with_damage() {
+        // A Clearcasting-style aura: procs on DEAL_HARMFUL_SPELL, configured with CAST_END.
+        let aura = proc_flags::DEAL_HARMFUL_SPELL;
+        let ev = event(proc_flags_ex::CAST_END);
+        // Fires on the cast-end event...
+        assert!(can_trigger(
+            Some(&ev),
+            aura,
+            proc_flags_ex::CAST_END | proc_flags_ex::NORMAL_HIT
+        ));
+        // ...but NOT on the later damage event (no CAST_END) → no double proc.
+        assert!(!can_trigger(Some(&ev), aura, proc_flags_ex::NORMAL_HIT));
     }
 
     #[test]
