@@ -91,6 +91,25 @@ fn parse_spell_cast_targets(
     Ok(targets)
 }
 
+/// Whether an implicit-target id is a client-chosen explicit unit target.
+///
+/// Mirrors MaNGOS `Spells::IsExplicitlySelectedUnitTarget` (SpellEntry.h): the set of
+/// implicit targets where the client picks the unit, used to reject negative spells the
+/// player explicitly aimed at themselves.
+fn is_explicitly_selected_unit_target(target: u32) -> bool {
+    matches!(
+        target,
+        6   // TARGET_UNIT_ENEMY
+        | 21  // TARGET_UNIT_FRIEND
+        | 25  // TARGET_UNIT
+        | 35  // TARGET_UNIT_PARTY
+        | 45  // TARGET_UNIT_FRIEND_CHAIN_HEAL
+        | 53  // TARGET_LOCATION_CASTER_TARGET_POSITION
+        | 57  // TARGET_UNIT_RAID
+        | 61 // TARGET_UNIT_RAID_AND_CLASS
+    )
+}
+
 /// CMSG_CAST_SPELL (opcode 0x012E)
 ///
 /// Sent when the player presses a spell button.
@@ -109,11 +128,66 @@ pub async fn handle_cast_spell(
         None => return Ok(()),
     };
 
+    // Unknown spell id: silently ignore (matches MaNGOS early return).
+    let spell_entry = match world.managers.spell_mgr.get(spell_id) {
+        Some(entry) => entry,
+        None => return Ok(()),
+    };
+
+    // Guard: the player must actually know the spell and it must not be passive.
+    // MaNGOS treats a violation as a cheat attempt — log and drop, no client response.
+    let knows_spell = world
+        .systems
+        .player
+        .manager()
+        .with_player(player_guid, |p| p.spells.knows_spell(spell_id))
+        .unwrap_or(false);
+    if !knows_spell || spell_entry.is_passive_spell() {
+        tracing::warn!(
+            "Player {:?} tried to cast spell {} they shouldn't have (known={}, passive={})",
+            player_guid,
+            spell_id,
+            knows_spell,
+            spell_entry.is_passive_spell()
+        );
+        return Ok(());
+    }
+
     // Parse full SpellCastTargets from the packet
     let targets = parse_spell_cast_targets(packet, player_guid)?;
 
     // Extract unit target for the current pipeline (will pass full targets later)
     let target_guid = targets.unit_target();
+
+    // Cannot explicitly cast a negative spell on yourself (SPELL_FAILED_BAD_TARGETS).
+    // The core itself casts negative spells on the caster for some mechanics, so this only
+    // applies when the client explicitly selected the caster as the unit target.
+    if target_guid == Some(player_guid)
+        && is_explicitly_selected_unit_target(spell_entry.effect_implicit_target_a[0])
+        && !spell_entry.is_positive_spell()
+    {
+        // SpellCastError::InvalidTarget maps to SPELL_FAILED_BAD_TARGETS (0x0A).
+        world.systems.spells.send_cast_result(
+            player_guid,
+            spell_id,
+            crate::game::player::spells::state::SpellCastError::InvalidTarget,
+        );
+        return Ok(());
+    }
+
+    // Casting a spell interrupts looting.
+    if let Some(loot_guid) = world
+        .systems
+        .player
+        .manager()
+        .get_looting_target(player_guid)
+    {
+        world
+            .systems
+            .loot
+            .handle_loot_release(player_guid, loot_guid, world)
+            .await?;
+    }
 
     world
         .systems
@@ -196,11 +270,46 @@ pub async fn handle_cancel_aura(
         None => return Ok(()),
     };
 
-    // Check if this is a channeled spell — if so, interrupt the channel instead
-    if let Some(spell_entry) = world.managers.spell_mgr.get(spell_id) {
-        // SPELL_ATTR_EX_CHANNELED_1 = 0x04, SPELL_ATTR_EX_CHANNELED_2 = 0x40
-        if (spell_entry.attributes_ex & 0x04) != 0 || (spell_entry.attributes_ex & 0x40) != 0 {
-            world.systems.spells.cancel_cast(player_guid, world).await?;
+    let spell_entry = match world.managers.spell_mgr.get(spell_id) {
+        Some(entry) => entry,
+        None => return Ok(()),
+    };
+
+    // Guard battery mirroring MaNGOS HandleCancelAuraOpcode (SpellHandler.cpp:333-405).
+    // SPELL_ATTR_NO_AURA_CANCEL (0x80000000): aura is flagged un-cancellable by the client.
+    if spell_entry.attributes & 0x8000_0000 != 0 {
+        return Ok(());
+    }
+    // SPELL_ATTR_DO_NOT_DISPLAY (0x80): hidden from spellbook/aura bar.
+    if spell_entry.attributes & 0x0000_0080 != 0 {
+        return Ok(());
+    }
+    // SPELL_ATTR_EX_NO_AURA_ICON (0x10000000) with no active icon: client can't show it.
+    if spell_entry.attributes_ex & 0x1000_0000 != 0 && spell_entry.active_icon_id == 0 {
+        return Ok(());
+    }
+    // Passive auras can't be cancelled.
+    if spell_entry.is_passive_spell() {
+        return Ok(());
+    }
+    // Negative auras can't be cancelled by the client. MaNGOS allows an exception only for
+    // POSSESS auras while remote-controlled; we have no possession/remote-control mover, so a
+    // normal self-mover player can never cancel a non-positive aura.
+    if !spell_entry.is_positive_spell() {
+        return Ok(());
+    }
+
+    // Channeled spell currently being cast: interrupt the channel instead of removing an aura.
+    // SPELL_ATTR_EX_CHANNELED_1 = 0x04, SPELL_ATTR_EX_CHANNELED_2 = 0x40
+    if (spell_entry.attributes_ex & 0x04) != 0 || (spell_entry.attributes_ex & 0x40) != 0 {
+        world.systems.spells.cancel_cast(player_guid, world).await?;
+        return Ok(());
+    }
+
+    // A non-own area aura can't be cancelled (e.g. another player's Devotion Aura on you).
+    if spell_has_area_aura_effect(&spell_entry.effect) {
+        let own_aura = aura_caster_is_self(player_guid, spell_id, world);
+        if !own_aura {
             return Ok(());
         }
     }
@@ -212,6 +321,39 @@ pub async fn handle_cancel_aura(
         .await?;
 
     Ok(())
+}
+
+/// Whether any of a spell's effects is an area-aura effect (MaNGOS `IsAreaAuraEffect`).
+fn spell_has_area_aura_effect(effects: &[u32; 3]) -> bool {
+    effects.iter().any(|&e| {
+        matches!(
+            e,
+            35   // APPLY_AREA_AURA_PARTY
+            | 119  // APPLY_AREA_AURA_PET
+            | 128  // APPLY_AREA_AURA_FRIEND
+            | 129  // APPLY_AREA_AURA_ENEMY
+            | 132 // APPLY_AREA_AURA_RAID
+        )
+    })
+}
+
+/// Whether the given spell's aura on the player was cast by the player themselves.
+/// Returns true if no holder is found (mirrors MaNGOS: the area-aura caster check only
+/// blocks when a holder exists with a different caster).
+fn aura_caster_is_self(player_guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
+    world
+        .systems
+        .player
+        .manager()
+        .with_player(player_guid, |player| {
+            for effect_index in 0..3u8 {
+                if let Some(aura) = player.auras.container.get_aura(spell_id, effect_index) {
+                    return aura.caster_guid == player_guid;
+                }
+            }
+            true
+        })
+        .unwrap_or(true)
 }
 
 /// CMSG_CANCEL_GROWTH_AURA (opcode 0x029B)
@@ -245,4 +387,50 @@ pub async fn handle_cancel_auto_repeat_spell(
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_unit_targets_match_mangos_set() {
+        // Client-chosen unit targets (TARGET_UNIT_ENEMY/FRIEND/UNIT/PARTY/CHAIN_HEAL/
+        // CASTER_TARGET_POSITION/RAID/RAID_AND_CLASS).
+        for t in [6, 21, 25, 35, 45, 53, 57, 61] {
+            assert!(
+                is_explicitly_selected_unit_target(t),
+                "target {t} should be explicit"
+            );
+        }
+    }
+
+    #[test]
+    fn non_explicit_targets_are_rejected() {
+        // Self (1), area/AoE (15, 16, 22, 24), pet (27), nearby-enemy (2), and none (0)
+        // are NOT client-selected explicit unit targets.
+        for t in [0, 1, 2, 15, 16, 22, 24, 27] {
+            assert!(
+                !is_explicitly_selected_unit_target(t),
+                "target {t} should not be explicit"
+            );
+        }
+    }
+
+    #[test]
+    fn detects_area_aura_effects() {
+        // APPLY_AREA_AURA_PARTY/PET/FRIEND/ENEMY/RAID in any effect slot.
+        assert!(spell_has_area_aura_effect(&[35, 0, 0]));
+        assert!(spell_has_area_aura_effect(&[0, 119, 0]));
+        assert!(spell_has_area_aura_effect(&[0, 0, 128]));
+        assert!(spell_has_area_aura_effect(&[129, 0, 0]));
+        assert!(spell_has_area_aura_effect(&[0, 132, 0]));
+    }
+
+    #[test]
+    fn ignores_non_area_aura_effects() {
+        // APPLY_AURA (6), SCHOOL_DAMAGE (2), HEAL (10), none (0).
+        assert!(!spell_has_area_aura_effect(&[0, 0, 0]));
+        assert!(!spell_has_area_aura_effect(&[6, 2, 10]));
+    }
 }

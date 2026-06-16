@@ -1629,6 +1629,12 @@ impl SpellSystem {
 
         Ok(())
     }
+
+    /// Send a SMSG_CAST_RESULT failure to the caster for a pre-pipeline rejection
+    /// (e.g. a handler refusing a cast before it reaches `cast_spell`).
+    pub fn send_cast_result(&self, caster_guid: ObjectGuid, spell_id: u32, error: SpellCastError) {
+        let _ = self.send_cast_failure(caster_guid, spell_id, error);
+    }
 }
 
 // =============================================================================
