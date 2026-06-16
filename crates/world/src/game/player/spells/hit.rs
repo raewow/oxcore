@@ -37,11 +37,64 @@ impl SpellHitOutcome {
     }
 }
 
+/// Spell damage classes (SpellEntry.dmg_class), used to route the hit roll.
+const SPELL_DAMAGE_CLASS_NONE: u32 = 0;
+const SPELL_DAMAGE_CLASS_MELEE: u32 = 2;
+const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+
+/// Magic spell hit chance as a percentage in [1, 99] (MaNGOS `MagicSpellHitChance`).
+///
+/// Base hit by level difference: 96% at equal level, −1%/level up to +2, then a steeper
+/// −`lchance`/level (7 vs players, 11 vs creatures). Floored at 22% before adding the
+/// caster's spell-hit bonus. For binary spells the average resist is folded into the hit
+/// chance. Returns the final hit percentage (the caller derives miss = 100 − hit).
+fn magic_hit_chance_pct(
+    caster_level: i32,
+    target_level: i32,
+    target_is_player: bool,
+    spell_hit_bonus: i32,
+    binary_resist_avg: Option<f32>,
+) -> f32 {
+    let leveldif = target_level - caster_level;
+    let lchance = if target_is_player { 7 } else { 11 };
+
+    let mut mod_hit = if leveldif < 3 {
+        96.0 - leveldif as f32
+    } else {
+        94.0 - (leveldif - 2) as f32 * lchance as f32
+    };
+
+    // Miss chance from level difference is capped (classic test: lvl1 vs lvl60 → ~22% hit).
+    if mod_hit < 22.0 {
+        mod_hit = 22.0;
+    }
+
+    // Caster spell-hit bonus from gear/talents/auras.
+    mod_hit += spell_hit_bonus as f32;
+
+    // Binary spells fold the average resist into the hit chance.
+    if let Some(resist_avg) = binary_resist_avg {
+        mod_hit *= 1.0 - resist_avg;
+    }
+
+    mod_hit.clamp(1.0, 99.0)
+}
+
+/// Average resist fraction in [0, 0.75] (MaNGOS `GetSpellResistChance`, player-vs-target
+/// case without innate level resist or spell penetration): `resistance * 0.15 / caster_level`.
+fn average_resist_fraction(caster_level: i32, resistance: u32, school: u8) -> f32 {
+    if school == 0 || resistance == 0 || caster_level <= 0 {
+        return 0.0;
+    }
+    (resistance as f32 * 0.15 / caster_level as f32).clamp(0.0, 0.75)
+}
+
 /// Roll spell hit for a target.
 ///
 /// Returns the outcome (hit, miss, resist, immune, reflect).
-/// Physical spells (school=0) use melee hit table.
-/// Magic spells use spell hit table with resist rolls.
+/// Routes by the spell's damage class (MaNGOS `SpellHitResult`): NONE never misses,
+/// MELEE/RANGED use the melee table (not yet ported — treated as a hit), MAGIC uses the
+/// level-based hit roll plus resistance.
 pub fn roll_spell_hit(
     caster_guid: ObjectGuid,
     target_guid: ObjectGuid,
@@ -52,6 +105,19 @@ pub fn roll_spell_hit(
         Some(entry) => entry,
         None => return SpellHitOutcome::Hit, // Unknown spell = auto-hit
     };
+
+    // Self-cast and positive spells can never miss (MaNGOS SpellHitResult early returns).
+    if caster_guid == target_guid || spell_entry.is_positive_spell() {
+        return SpellHitOutcome::Hit;
+    }
+
+    // Route by damage class. NONE never misses; melee/ranged use the (un-ported) melee
+    // table — MeleeSpellHitResult (dodge/parry/block) is a separate task, so auto-hit here.
+    match spell_entry.dmg_class {
+        SPELL_DAMAGE_CLASS_NONE => return SpellHitOutcome::Hit,
+        SPELL_DAMAGE_CLASS_MELEE | SPELL_DAMAGE_CLASS_RANGED => return SpellHitOutcome::Hit,
+        _ => {}
+    }
 
     let school = spell_entry.school as u8;
 
@@ -108,46 +174,38 @@ pub fn roll_spell_hit(
             .unwrap_or((60, 0))
     };
 
-    // Step 1: Miss check
-    let level_diff = target_level - caster_level;
+    // Step 1: Hit roll (level-based, MagicSpellHitChance). Binary spells fold the average
+    // resist into the hit chance; non-binary spells roll partial resist on the damage after.
+    let is_binary = school != 0 && is_binary_spell(spell_id, world);
+    let resist_avg = average_resist_fraction(caster_level, target_resistance, school);
+    let binary_resist_avg = if is_binary { Some(resist_avg) } else { None };
 
-    // Base miss rate: 4% + 1% per level difference, min 1%
-    let base_miss_pct = if level_diff > 2 {
-        // Boss-level targets (3+ levels above): steeper miss rate
-        5.0 + (level_diff as f32 - 2.0) * 2.0
-    } else {
-        (4.0 + level_diff as f32).max(1.0)
-    };
+    let hit_pct = magic_hit_chance_pct(
+        caster_level,
+        target_level,
+        target_guid.is_player(),
+        spell_hit_bonus,
+        binary_resist_avg,
+    );
 
-    // Spell hit from gear/talents reduces miss chance
-    let miss_pct = (base_miss_pct - spell_hit_bonus as f32).max(1.0);
-
-    let miss_roll: f32 = rand::random::<f32>() * 100.0;
-    if miss_roll < miss_pct {
-        return SpellHitOutcome::Miss;
+    let roll: f32 = rand::random::<f32>() * 100.0;
+    if roll >= hit_pct {
+        // A binary spell that fails its (resist-folded) roll is a full resist; otherwise a miss.
+        return if is_binary {
+            SpellHitOutcome::Resist
+        } else {
+            SpellHitOutcome::Miss
+        };
     }
 
-    // Step 2: Resistance check (magic spells only)
-    if school != 0 {
-        // Check binary resist
-        let is_binary = is_binary_spell(spell_id, world);
-
-        if is_binary {
-            // Binary: full resist or full land
-            let resist_chance = calculate_resist_chance(caster_level, target_resistance, school);
-            let resist_roll: f32 = rand::random::<f32>() * 100.0;
-            if resist_roll < resist_chance {
-                return SpellHitOutcome::Resist;
-            }
-        } else {
-            // Non-binary: partial resist roll (0/25/50/75/100%)
-            let partial = roll_partial_resist(caster_level, target_resistance, school);
-            if partial == 100 {
-                return SpellHitOutcome::Resist;
-            }
-            if partial > 0 {
-                return SpellHitOutcome::PartialResist(partial);
-            }
+    // Step 2: Non-binary magic spells roll partial resist on the landed hit (0/25/50/75/100%).
+    if school != 0 && !is_binary {
+        let partial = roll_partial_resist(caster_level, target_resistance, school);
+        if partial == 100 {
+            return SpellHitOutcome::Resist;
+        }
+        if partial > 0 {
+            return SpellHitOutcome::PartialResist(partial);
         }
     }
 
@@ -181,28 +239,13 @@ fn is_binary_spell(spell_id: u32, world: &World) -> bool {
     true
 }
 
-/// Calculate binary resist chance based on resistance and caster level.
-/// Vanilla formula: resistance / (caster_level * 5) * 75
-fn calculate_resist_chance(caster_level: i32, resistance: u32, _school: u8) -> f32 {
-    if resistance == 0 {
-        return 0.0;
-    }
-    let resist_pct = resistance as f32 / (caster_level as f32 * 5.0);
-    (resist_pct * 75.0).min(75.0)
-}
-
 /// Roll for partial resistance.
 /// Returns the percentage of damage resisted (0, 25, 50, 75, or 100).
 ///
-/// Vanilla formula based on average resistance percentage:
-/// avg_resist% = target_resistance / (caster_level * 5)
-/// Then distributed across the 5 possible outcomes using a weighted table.
-fn roll_partial_resist(caster_level: i32, resistance: u32, _school: u8) -> u8 {
-    if resistance == 0 {
-        return 0;
-    }
-
-    let avg_resist = (resistance as f32 / (caster_level as f32 * 5.0)).min(0.75);
+/// Centered on the average resist fraction (`GetSpellResistChance`), distributed across the
+/// five possible outcomes using a weighted table.
+fn roll_partial_resist(caster_level: i32, resistance: u32, school: u8) -> u8 {
+    let avg_resist = average_resist_fraction(caster_level, resistance, school);
 
     // Simplified distribution: roll against average resist
     let roll: f32 = rand::random::<f32>();
@@ -228,5 +271,64 @@ fn roll_partial_resist(caster_level: i32, resistance: u32, _school: u8) -> u8 {
         25
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equal_level_hit_is_96_percent() {
+        // 96% base hit (4% miss) at equal level, no bonus, non-binary.
+        let hit = magic_hit_chance_pct(60, 60, false, 0, None);
+        assert!((hit - 96.0).abs() < 0.001, "got {hit}");
+    }
+
+    #[test]
+    fn each_level_above_costs_one_percent_up_to_two() {
+        assert!((magic_hit_chance_pct(60, 61, false, 0, None) - 95.0).abs() < 0.001);
+        assert!((magic_hit_chance_pct(60, 62, false, 0, None) - 94.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn pve_level_gap_beyond_two_is_steeper_than_pvp() {
+        // leveldif = 5: PvE uses 94 - 3*11 = 61; PvP uses 94 - 3*7 = 73.
+        let pve = magic_hit_chance_pct(60, 65, false, 0, None);
+        let pvp = magic_hit_chance_pct(60, 65, true, 0, None);
+        assert!((pve - 61.0).abs() < 0.001, "pve {pve}");
+        assert!((pvp - 73.0).abs() < 0.001, "pvp {pvp}");
+        assert!(pve < pvp, "PvE level gaps should miss more than PvP");
+    }
+
+    #[test]
+    fn huge_level_gap_floors_at_22_before_bonus() {
+        // lvl 1 vs lvl 60 creature: floor 22 applies before the (zero) hit bonus.
+        let hit = magic_hit_chance_pct(1, 60, false, 0, None);
+        assert!((hit - 22.0).abs() < 0.001, "got {hit}");
+    }
+
+    #[test]
+    fn hit_chance_is_clamped_to_99() {
+        // A large hit bonus cannot push hit chance above 99%.
+        let hit = magic_hit_chance_pct(60, 60, false, 50, None);
+        assert!((hit - 99.0).abs() < 0.001, "got {hit}");
+    }
+
+    #[test]
+    fn binary_folds_average_resist_into_hit_chance() {
+        // 96% base * (1 - 0.25 resist) = 72%.
+        let hit = magic_hit_chance_pct(60, 60, false, 0, Some(0.25));
+        assert!((hit - 72.0).abs() < 0.001, "got {hit}");
+    }
+
+    #[test]
+    fn average_resist_matches_mangos_formula() {
+        // resistance * 0.15 / level: 200 res at lvl 60 → 0.5; physical school exempt.
+        assert!((average_resist_fraction(60, 200, 1) - 0.5).abs() < 0.001);
+        assert_eq!(average_resist_fraction(60, 200, 0), 0.0); // physical exempt
+        assert_eq!(average_resist_fraction(60, 0, 1), 0.0); // no resistance
+        // Clamped at 0.75.
+        assert!((average_resist_fraction(60, 1000, 1) - 0.75).abs() < 0.001);
     }
 }
