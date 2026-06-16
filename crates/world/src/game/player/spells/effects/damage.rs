@@ -608,27 +608,34 @@ async fn apply_damage(
         // Fire proc checks: caster dealt spell damage, target took spell damage
         // Use damage (pre-absorb) for proc triggering, damage_after_absorb for amounts
         if damage > 0 {
-            use crate::game::player::auras::proc::proc_flags;
-            // Caster: spell hit dealt
+            use crate::game::player::auras::proc::{proc_flags, proc_flags_ex};
+            let proc_ex = if is_crit {
+                proc_flags_ex::CRITICAL_HIT
+            } else {
+                proc_flags_ex::NORMAL_HIT
+            };
+            // Caster: dealt a harmful spell.
             let _ = world
                 .systems
                 .auras
                 .check_procs(
                     caster_guid,
-                    proc_flags::SPELL_HIT | proc_flags::DAMAGE_DEALT,
+                    proc_flags::DEAL_HARMFUL_SPELL,
+                    proc_ex,
                     Some(spell_id),
                     damage_after_absorb,
                     world,
                 )
                 .await;
-            // Target: spell hit taken (only if target is a player)
+            // Target: took a harmful spell (only if target is a player).
             if target_guid.is_player() {
                 let _ = world
                     .systems
                     .auras
                     .check_procs(
                         target_guid,
-                        proc_flags::SPELL_HIT_TAKEN | proc_flags::DAMAGE_TAKEN,
+                        proc_flags::TAKE_HARMFUL_SPELL | proc_flags::TAKEN_ANY_DAMAGE,
+                        proc_ex,
                         Some(spell_id),
                         damage_after_absorb,
                         world,

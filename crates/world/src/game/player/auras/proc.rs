@@ -9,29 +9,40 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-/// Proc flags - bit flags indicating what combat event occurred.
-/// These mirror the MaNGOS ProcFlags enum.
+/// Proc flags — bit flags indicating what combat event occurred.
+///
+/// These MUST match the classic `ProcFlags` enum (SpellDefines.h) because they are matched
+/// against each spell's `proc_flags` field loaded from the DBC. A mismatched bit layout makes
+/// `spell.proc_flags & event_flags` silently fail, so procs never fire.
 pub mod proc_flags {
     pub const NONE: u32 = 0x00000000;
-    pub const KILLED: u32 = 0x00000001; // Target was killed
-    pub const KILL: u32 = 0x00000002; // Attacker killed target
-    pub const MELEE_HIT: u32 = 0x00000004; // Successful melee attack
-    pub const MELEE_HIT_TAKEN: u32 = 0x00000008; // Was hit by melee
-    pub const SPELL_HIT: u32 = 0x00000010; // Spell dealt damage
-    pub const SPELL_HIT_TAKEN: u32 = 0x00000020; // Was hit by spell
-    pub const SPELL_CAST: u32 = 0x00000040; // Completed a spell cast
-    pub const DAMAGE_DEALT: u32 = 0x00000080; // Dealt any damage
-    pub const DAMAGE_TAKEN: u32 = 0x00000100; // Took any damage
-    pub const HEAL: u32 = 0x00000200; // Healed a target
-    pub const HEAL_TAKEN: u32 = 0x00000400; // Received healing
-    pub const ON_DO_PERIODIC: u32 = 0x00000800; // Dealt periodic damage
-    pub const ON_TAKE_PERIODIC: u32 = 0x00001000; // Took periodic damage
-    pub const ON_BLOCK: u32 = 0x00002000; // Blocked an attack
-    pub const ON_DODGE: u32 = 0x00004000; // Dodged an attack
-    pub const ON_PARRY: u32 = 0x00008000; // Parried an attack
+    pub const HEARTBEAT: u32 = 0x00000001; // 00 On tick
+    pub const KILL: u32 = 0x00000002; // 01 Killed a target
+    pub const DEAL_MELEE_SWING: u32 = 0x00000004; // 02 Successful melee auto attack
+    pub const TAKE_MELEE_SWING: u32 = 0x00000008; // 03 Took melee auto-attack damage
+    pub const DEAL_MELEE_ABILITY: u32 = 0x00000010; // 04 Landed a melee-weapon spell
+    pub const TAKE_MELEE_ABILITY: u32 = 0x00000020; // 05 Took melee-weapon spell damage
+    pub const DEAL_RANGED_ATTACK: u32 = 0x00000040; // 06 Successful ranged auto attack
+    pub const TAKE_RANGED_ATTACK: u32 = 0x00000080; // 07 Took ranged auto-attack damage
+    pub const DEAL_RANGED_ABILITY: u32 = 0x00000100; // 08 Landed a ranged-weapon spell
+    pub const TAKE_RANGED_ABILITY: u32 = 0x00000200; // 09 Took ranged-weapon spell damage
+    pub const DEAL_HELPFUL_ABILITY: u32 = 0x00000400; // 10 Cast a positive no-damage-class spell
+    pub const TAKE_HELPFUL_ABILITY: u32 = 0x00000800; // 11 Took a positive no-damage-class spell
+    pub const DEAL_HARMFUL_ABILITY: u32 = 0x00001000; // 12 Cast a negative no-damage-class spell
+    pub const TAKE_HARMFUL_ABILITY: u32 = 0x00002000; // 13 Took a negative no-damage-class spell
+    pub const DEAL_HELPFUL_SPELL: u32 = 0x00004000; // 14 Cast a positive spell (default: healing)
+    pub const TAKE_HELPFUL_SPELL: u32 = 0x00008000; // 15 Took a positive spell (default: healing)
+    pub const DEAL_HARMFUL_SPELL: u32 = 0x00010000; // 16 Cast a negative spell (default: on damage)
+    pub const TAKE_HARMFUL_SPELL: u32 = 0x00020000; // 17 Took a negative spell (default: on damage)
+    pub const DEAL_HARMFUL_PERIODIC: u32 = 0x00040000; // 18 Dealt a periodic tick
+    pub const TAKE_HARMFUL_PERIODIC: u32 = 0x00080000; // 19 Took a periodic tick
+    pub const TAKEN_ANY_DAMAGE: u32 = 0x00100000; // 20 Took any damage
+    pub const ON_TRAP_ACTIVATION: u32 = 0x00200000; // 21 Trap activated
+    pub const MAIN_HAND_WEAPON_SWING: u32 = 0x00400000; // 22 Main-hand swing
+    pub const OFF_HAND_WEAPON_SWING: u32 = 0x00800000; // 23 Off-hand swing
 }
 
-/// Extended proc flags for specific hit results.
+/// Extended proc flags describing the hit result of the event (classic `ProcFlagsEx`).
 pub mod proc_flags_ex {
     pub const NONE: u32 = 0x00000000;
     pub const NORMAL_HIT: u32 = 0x00000001;
@@ -47,6 +58,14 @@ pub mod proc_flags_ex {
     pub const ABSORB: u32 = 0x00000400;
     pub const REFLECT: u32 = 0x00000800;
     pub const INTERRUPT: u32 = 0x00001000;
+    pub const EX_TRIGGER_ALWAYS: u32 = 0x00010000; // Fire regardless of other flags (drop charges)
+    pub const NO_PERIODIC: u32 = 0x00020000; // Never proc on a periodic event
+    pub const PERIODIC_POSITIVE: u32 = 0x00040000; // Periodic heal
+    pub const CAST_END: u32 = 0x00080000; // Procs at end of cast only
+
+    /// Outcomes that did not connect (miss/dodge/parry/etc.) — used to skip damage procs.
+    pub const NO_DAMAGE_MASK: u32 =
+        MISS | RESIST | DODGE | PARRY | BLOCK | EVADE | IMMUNE | DEFLECT | ABSORB | REFLECT;
 }
 
 /// Result of dispatching a proc — may request a triggered spell cast.
@@ -61,6 +80,7 @@ pub fn dispatch_proc(
     player_guid: ObjectGuid,
     candidate: &ProcCandidate,
     _proc_flags: u32,
+    _proc_ex: u32,
     proc_spell_id: Option<u32>,
     damage: u32,
     world: &World,
@@ -243,4 +263,50 @@ pub fn roll_proc_chance(proc_chance: f32) -> bool {
 pub fn ppm_proc_chance(ppm_rate: f32, weapon_speed_ms: u32) -> f32 {
     let weapon_speed_sec = weapon_speed_ms as f32 / 1000.0;
     ppm_rate * weapon_speed_sec / 60.0 * 100.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proc_flags_match_classic_dbc_layout() {
+        // These bit positions are what the spell DBC's proc_flags field uses; they must match
+        // SpellDefines.h ProcFlags exactly or DBC matching silently fails.
+        assert_eq!(proc_flags::DEAL_MELEE_SWING, 0x00000004);
+        assert_eq!(proc_flags::DEAL_MELEE_ABILITY, 0x00000010);
+        assert_eq!(proc_flags::DEAL_HELPFUL_SPELL, 0x00004000);
+        assert_eq!(proc_flags::TAKE_HELPFUL_SPELL, 0x00008000);
+        assert_eq!(proc_flags::DEAL_HARMFUL_SPELL, 0x00010000);
+        assert_eq!(proc_flags::TAKE_HARMFUL_SPELL, 0x00020000);
+        assert_eq!(proc_flags::TAKEN_ANY_DAMAGE, 0x00100000);
+    }
+
+    #[test]
+    fn proc_flags_ex_match_classic_dbc_layout() {
+        assert_eq!(proc_flags_ex::NORMAL_HIT, 0x00000001);
+        assert_eq!(proc_flags_ex::CRITICAL_HIT, 0x00000002);
+        assert_eq!(proc_flags_ex::CAST_END, 0x00080000);
+        assert_eq!(proc_flags_ex::EX_TRIGGER_ALWAYS, 0x00010000);
+    }
+
+    #[test]
+    fn no_damage_mask_covers_avoidance_outcomes() {
+        use proc_flags_ex::*;
+        assert_ne!(NO_DAMAGE_MASK & MISS, 0);
+        assert_ne!(NO_DAMAGE_MASK & DODGE, 0);
+        assert_ne!(NO_DAMAGE_MASK & PARRY, 0);
+        assert_ne!(NO_DAMAGE_MASK & RESIST, 0);
+        // Connecting outcomes are NOT in the no-damage mask.
+        assert_eq!(NO_DAMAGE_MASK & NORMAL_HIT, 0);
+        assert_eq!(NO_DAMAGE_MASK & CRITICAL_HIT, 0);
+    }
+
+    #[test]
+    fn ppm_chance_scales_with_weapon_speed() {
+        // 1 PPM with a 3.0s weapon → 5% per swing.
+        assert!((ppm_proc_chance(1.0, 3000) - 5.0).abs() < 0.001);
+        // Faster weapon → lower per-swing chance.
+        assert!(ppm_proc_chance(1.0, 1500) < ppm_proc_chance(1.0, 3000));
+    }
 }

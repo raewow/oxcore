@@ -927,10 +927,18 @@ impl AuraSystem {
         &self,
         player_guid: ObjectGuid,
         event_proc_flags: u32,
+        proc_ex: u32,
         proc_spell_id: Option<u32>,
         damage: u32,
         world: &World,
     ) -> Result<()> {
+        // A proc with no custom spell_proc_event only fires on a connecting outcome; skip
+        // events that missed/dodged/parried/resisted (MaNGOS IsTriggeredAtSpellProcEvent default).
+        if proc_ex & proc::proc_flags_ex::NO_DAMAGE_MASK != 0
+            && proc_ex & proc::proc_flags_ex::EX_TRIGGER_ALWAYS == 0
+        {
+            return Ok(());
+        }
         // Collect procable auras (snapshot pattern)
         let procable_auras: Vec<ProcCandidate> = world
             .systems
@@ -1008,6 +1016,7 @@ impl AuraSystem {
                 player_guid,
                 candidate,
                 event_proc_flags,
+                proc_ex,
                 proc_spell_id,
                 damage,
                 world,

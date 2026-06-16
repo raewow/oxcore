@@ -96,27 +96,34 @@ pub async fn effect_heal(input: &EffectInput, world: &World) -> Result<EffectRes
 
     // Fire proc checks for healing
     if healed > 0 {
-        use crate::game::player::auras::proc::proc_flags;
-        // Caster: healed a target
+        use crate::game::player::auras::proc::{proc_flags, proc_flags_ex};
+        let proc_ex = if is_crit {
+            proc_flags_ex::CRITICAL_HIT
+        } else {
+            proc_flags_ex::NORMAL_HIT
+        };
+        // Caster: cast a helpful (healing) spell.
         let _ = world
             .systems
             .auras
             .check_procs(
                 input.caster_guid,
-                proc_flags::HEAL,
+                proc_flags::DEAL_HELPFUL_SPELL,
+                proc_ex,
                 Some(input.spell_id),
                 healed,
                 world,
             )
             .await;
-        // Target: received healing
+        // Target: received a helpful (healing) spell.
         if target_guid.is_player() {
             let _ = world
                 .systems
                 .auras
                 .check_procs(
                     target_guid,
-                    proc_flags::HEAL_TAKEN,
+                    proc_flags::TAKE_HELPFUL_SPELL,
+                    proc_ex,
                     Some(input.spell_id),
                     healed,
                     world,
