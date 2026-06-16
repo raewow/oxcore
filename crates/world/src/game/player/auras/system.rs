@@ -932,13 +932,20 @@ impl AuraSystem {
         damage: u32,
         world: &World,
     ) -> Result<()> {
-        // A proc with no custom spell_proc_event only fires on a connecting outcome; skip
-        // events that missed/dodged/parried/resisted (MaNGOS IsTriggeredAtSpellProcEvent default).
-        if proc_ex & proc::proc_flags_ex::NO_DAMAGE_MASK != 0
-            && proc_ex & proc::proc_flags_ex::EX_TRIGGER_ALWAYS == 0
-        {
-            return Ok(());
-        }
+        // Context of the spell that caused the event (None/Normal-school for a melee swing).
+        let is_melee = proc_spell_id.is_none();
+        let (proc_spell_school_mask, proc_spell_family, proc_spell_is_periodic) =
+            match proc_spell_id.and_then(|id| world.managers.spell_mgr.get(id)) {
+                Some(e) => {
+                    // A spell applies a periodic aura when any effect is an aura with a tick interval.
+                    let periodic = (0..3).any(|i| {
+                        e.effect_apply_aura_name[i] != 0 && e.effect_amplitude[i] > 0
+                    });
+                    (1u32 << (e.school as u32 & 0x07), e.spell_family_name, periodic)
+                }
+                None => (0, 0, false),
+            };
+
         // Collect procable auras (snapshot pattern)
         let procable_auras: Vec<ProcCandidate> = world
             .systems
@@ -971,8 +978,19 @@ impl AuraSystem {
                         None => continue,
                     };
 
-                    // If the spell has proc_flags, they must match the event
-                    if spell_proc_flags != 0 && (spell_proc_flags & event_proc_flags) == 0 {
+                    // Full eligibility (MaNGOS IsSpellProcEventCanTriggeredBy): proc-flag match,
+                    // cast-end pairing, school/family gates, and hit-outcome requirement.
+                    let proc_event = world.managers.spell_mgr.get_proc_event(aura.spell_id);
+                    if !proc::is_spell_proc_event_can_triggered_by(
+                        proc_event.as_ref(),
+                        spell_proc_flags,
+                        event_proc_flags,
+                        proc_ex,
+                        is_melee,
+                        proc_spell_school_mask,
+                        proc_spell_family,
+                        proc_spell_is_periodic,
+                    ) {
                         continue;
                     }
 

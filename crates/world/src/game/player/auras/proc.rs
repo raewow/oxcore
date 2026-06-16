@@ -68,6 +68,93 @@ pub mod proc_flags_ex {
         MISS | RESIST | DODGE | PARRY | BLOCK | EVADE | IMMUNE | DEFLECT | ABSORB | REFLECT;
 }
 
+use crate::game::spell::manager::SpellProcEventEntry;
+
+/// Whether a proc aura may trigger for a given combat event
+/// (MaNGOS `SpellMgr::IsSpellProcEventCanTriggeredBy`).
+///
+/// - `proc_event`: the aura spell's custom `spell_proc_event` config (None if unconfigured).
+/// - `aura_proc_flags`: the proc aura's own `proc_flags` (the "EventProcFlag").
+/// - `event_proc_flags` / `event_proc_ex`: the actual event's flags and hit-outcome flags.
+/// - `is_melee`: the event came from a melee swing (no triggering spell).
+/// - `proc_spell_school_mask` / `proc_spell_family`: the triggering spell's school mask and family.
+/// - `proc_spell_is_periodic`: the triggering spell applies a periodic aura.
+pub fn is_spell_proc_event_can_triggered_by(
+    proc_event: Option<&SpellProcEventEntry>,
+    aura_proc_flags: u32,
+    event_proc_flags: u32,
+    event_proc_ex: u32,
+    is_melee: bool,
+    proc_spell_school_mask: u32,
+    proc_spell_family: u32,
+    proc_spell_is_periodic: bool,
+) -> bool {
+    use proc_flags as pf;
+    use proc_flags_ex as pex;
+
+    let event_procex = proc_event.map(|e| e.proc_ex).unwrap_or(pex::NONE);
+
+    // The event flags must intersect the aura's proc flags.
+    if event_proc_flags & aura_proc_flags == 0 {
+        return false;
+    }
+
+    // Either both require cast-end, or neither — keeps cast-end procs and hit procs separate.
+    if (event_proc_ex & pex::CAST_END) != (event_procex & pex::CAST_END) {
+        return false;
+    }
+
+    // Kill / heartbeat / trap activation always trigger.
+    if event_proc_flags & (pf::HEARTBEAT | pf::KILL | pf::ON_TRAP_ACTIVATION) != 0 {
+        return true;
+    }
+
+    // School / family gates, only when the aura has custom proc-event data.
+    if let Some(ev) = proc_event {
+        const SCHOOL_MASK_NORMAL: u32 = 0x01;
+        if is_melee {
+            if ev.school_mask != 0 && ev.school_mask & SCHOOL_MASK_NORMAL == 0 {
+                return false;
+            }
+        } else {
+            if ev.school_mask != 0 && ev.school_mask & proc_spell_school_mask == 0 {
+                return false;
+            }
+            if ev.spell_family != 0 && ev.spell_family != proc_spell_family {
+                return false;
+            }
+        }
+    }
+
+    if event_procex == pex::NONE {
+        // No custom requirement: never proc from a periodic heal; otherwise proc on hit/crit.
+        if event_proc_flags & (pf::DEAL_HARMFUL_PERIODIC | pf::TAKE_HARMFUL_PERIODIC) != 0
+            && event_proc_ex & pex::PERIODIC_POSITIVE != 0
+        {
+            return false;
+        }
+        if event_proc_ex & (pex::NORMAL_HIT | pex::CRITICAL_HIT) != 0 {
+            return true;
+        }
+    } else {
+        // Custom requirement present (resist/reflect/immune/periodic/specific outcome).
+        if event_procex & pex::EX_TRIGGER_ALWAYS != 0 {
+            return true;
+        }
+        if event_procex & pex::NO_PERIODIC != 0
+            && (event_proc_flags & (pf::DEAL_HARMFUL_PERIODIC | pf::TAKE_HARMFUL_PERIODIC) != 0
+                || proc_spell_is_periodic)
+        {
+            return false;
+        }
+        if event_procex & event_proc_ex != 0 {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Result of dispatching a proc — may request a triggered spell cast.
 pub struct ProcResult {
     /// If set, this spell should be cast as triggered on the player's current target
@@ -308,5 +395,85 @@ mod tests {
         assert!((ppm_proc_chance(1.0, 3000) - 5.0).abs() < 0.001);
         // Faster weapon → lower per-swing chance.
         assert!(ppm_proc_chance(1.0, 1500) < ppm_proc_chance(1.0, 3000));
+    }
+
+    fn event(proc_ex: u32) -> SpellProcEventEntry {
+        SpellProcEventEntry {
+            school_mask: 0,
+            spell_family: 0,
+            spell_family_mask: 0,
+            proc_flags: 0,
+            proc_ex,
+            ppm_rate: 0.0,
+            custom_chance: 0.0,
+            cooldown: 0,
+        }
+    }
+
+    // Convenience: harmful-spell event with the given hit outcome.
+    fn can_trigger(proc_event: Option<&SpellProcEventEntry>, aura_flags: u32, ev_ex: u32) -> bool {
+        is_spell_proc_event_can_triggered_by(
+            proc_event,
+            aura_flags,
+            proc_flags::DEAL_HARMFUL_SPELL,
+            ev_ex,
+            false,
+            0x04, // some school mask
+            5,    // some family
+            false,
+        )
+    }
+
+    #[test]
+    fn rejects_when_proc_flags_do_not_intersect() {
+        // Aura procs on melee swing, event is a harmful spell → no intersection.
+        assert!(!can_trigger(None, proc_flags::DEAL_MELEE_SWING, proc_flags_ex::NORMAL_HIT));
+    }
+
+    #[test]
+    fn no_event_triggers_on_hit_and_crit_only() {
+        let aura = proc_flags::DEAL_HARMFUL_SPELL;
+        assert!(can_trigger(None, aura, proc_flags_ex::NORMAL_HIT));
+        assert!(can_trigger(None, aura, proc_flags_ex::CRITICAL_HIT));
+        // A pure miss/resist does not trigger a default proc.
+        assert!(!can_trigger(None, aura, proc_flags_ex::MISS));
+        assert!(!can_trigger(None, aura, proc_flags_ex::RESIST));
+    }
+
+    #[test]
+    fn cast_end_must_be_paired() {
+        let aura = proc_flags::DEAL_HARMFUL_SPELL;
+        // Cast-end event but a default (non-cast-end) proc → rejected.
+        assert!(!can_trigger(None, aura, proc_flags_ex::CAST_END));
+        // Cast-end event and a cast-end-configured proc → eligible.
+        let ev = event(proc_flags_ex::CAST_END);
+        assert!(can_trigger(Some(&ev), aura, proc_flags_ex::CAST_END));
+        // Cast-end proc on a normal hit event → rejected (CAST_END mismatch).
+        assert!(!can_trigger(Some(&ev), aura, proc_flags_ex::NORMAL_HIT));
+    }
+
+    #[test]
+    fn custom_proc_ex_requires_matching_outcome() {
+        let aura = proc_flags::DEAL_HARMFUL_SPELL;
+        let crit_only = event(proc_flags_ex::CRITICAL_HIT);
+        assert!(can_trigger(Some(&crit_only), aura, proc_flags_ex::CRITICAL_HIT));
+        assert!(!can_trigger(Some(&crit_only), aura, proc_flags_ex::NORMAL_HIT));
+    }
+
+    #[test]
+    fn ex_trigger_always_bypasses_outcome() {
+        let aura = proc_flags::DEAL_HARMFUL_SPELL;
+        let always = event(proc_flags_ex::EX_TRIGGER_ALWAYS);
+        assert!(can_trigger(Some(&always), aura, proc_flags_ex::MISS));
+    }
+
+    #[test]
+    fn school_mask_gate_rejects_wrong_school() {
+        let aura = proc_flags::DEAL_HARMFUL_SPELL;
+        let mut ev = event(proc_flags_ex::NORMAL_HIT);
+        ev.school_mask = 0x02; // requires a different school than the event's 0x04
+        assert!(!can_trigger(Some(&ev), aura, proc_flags_ex::NORMAL_HIT));
+        ev.school_mask = 0x04; // now matches
+        assert!(can_trigger(Some(&ev), aura, proc_flags_ex::NORMAL_HIT));
     }
 }

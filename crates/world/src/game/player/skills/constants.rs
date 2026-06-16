@@ -19,6 +19,7 @@ pub const SKILL_POLEARMS: u16 = 229;
 pub const SKILL_CROSSBOWS: u16 = 226;
 pub const SKILL_WANDS: u16 = 228;
 pub const SKILL_FIST_WEAPONS: u16 = 473;
+pub const SKILL_FISHING: u16 = 356;
 
 // === Armor Proficiencies ===
 pub const SKILL_CLOTH: u16 = 415;
