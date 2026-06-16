@@ -1466,10 +1466,7 @@ impl SpellEntry {
         if stance_mask & self.stances_not != 0 {
             return SpellCastResult::Failed(SpellCastError::WrongShapeshift);
         }
-        if stance_mask & self.stances != 0 {
-            return SpellCastResult::Success;
-        }
-        if form == 0 && self.stances != 0 {
+        if self.stances != 0 && (stance_mask == 0 || stance_mask & self.stances == 0) {
             return SpellCastResult::Failed(SpellCastError::WrongShapeshift);
         }
         SpellCastResult::Success
