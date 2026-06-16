@@ -827,7 +827,10 @@ impl PlayerManager {
     // ========== Quest-share helpers ==========
 
     /// Get a player's pending quest-share info, if any.
-    pub fn get_quest_share_info(&self, guid: ObjectGuid) -> Option<crate::world::game::player::player::QuestShareInfo> {
+    pub fn get_quest_share_info(
+        &self,
+        guid: ObjectGuid,
+    ) -> Option<crate::world::game::player::player::QuestShareInfo> {
         self.with_player(guid, |p| p.quest_share_info).flatten()
     }
 
@@ -1223,10 +1226,13 @@ mod tests {
         let guid = test_guid(52);
         let mgr = make_manager_with_player(guid);
 
-        mgr.set_quest_share_info(guid, crate::world::game::player::player::QuestShareInfo {
-            player_guid: test_guid(200),
-            quest_id: 99,
-        });
+        mgr.set_quest_share_info(
+            guid,
+            crate::world::game::player::player::QuestShareInfo {
+                player_guid: test_guid(200),
+                quest_id: 99,
+            },
+        );
         mgr.clear_quest_share_info(guid);
 
         assert!(mgr.get_quest_share_info(guid).is_none());

@@ -869,7 +869,8 @@ impl DeathSystem {
                 player.power.current[super::super::power::state::PowerType::Rage as usize] = 0;
                 if max_health > 0 {
                     let pct = health as f32 / max_health as f32;
-                    let max_energy = player.power.max[super::super::power::state::PowerType::Energy as usize];
+                    let max_energy =
+                        player.power.max[super::super::power::state::PowerType::Energy as usize];
                     player.power.current[super::super::power::state::PowerType::Energy as usize] =
                         (max_energy as f32 * pct) as u32;
                 }

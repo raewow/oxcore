@@ -180,10 +180,8 @@ impl PowerSystem {
                 } else if !in_combat {
                     // Spirit-based regen out of combat (MOD_REGEN_DURING_COMBAT talent variant
                     // is omitted until aura totals are wired in).
-                    add_value = regen::calculate_health_regen_per_tick(
-                        player.stats.spirit,
-                        player.level,
-                    );
+                    add_value =
+                        regen::calculate_health_regen_per_tick(player.stats.spirit, player.level);
                     // TODO: multiply by MOD_HEALTH_REGEN_PERCENT aura total
                     // TODO: multiply by 1.5 if not standing (player.stand_state != 0)
                     // TODO: add MOD_REGEN food flat (scaled by periodictime fraction)

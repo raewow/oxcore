@@ -393,6 +393,9 @@ pub struct ActiveCast {
     /// Triggered casts bypass GCD and some validation checks.
     pub is_triggered: bool,
 
+    /// Whether this cast originated from a client request.
+    pub is_client_started: bool,
+
     /// Caster position at cast start (for movement interrupt check)
     pub start_position_x: f32,
     pub start_position_y: f32,
@@ -424,6 +427,7 @@ impl ActiveCast {
             channel_tick_timer_ms: 0,
             channel_tick_interval_ms: 0,
             is_triggered,
+            is_client_started: false,
             start_position_x: x,
             start_position_y: y,
             start_position_z: z,
@@ -460,10 +464,15 @@ impl ActiveCast {
             channel_tick_timer_ms: tick_interval,
             channel_tick_interval_ms: tick_interval,
             is_triggered,
+            is_client_started: false,
             start_position_x: x,
             start_position_y: y,
             start_position_z: z,
         }
+    }
+
+    pub fn set_client_started(&mut self, is_client_started: bool) {
+        self.is_client_started = is_client_started;
     }
 
     /// Apply cast time pushback from taking damage
@@ -1140,6 +1149,30 @@ mod tests {
         // delta > remaining
         assert!(cast.tick(1000));
         assert_eq!(cast.cast_time_remaining_ms, 0);
+    }
+
+    #[test]
+    fn test_set_client_started_assigns_flag_only() {
+        let mut cast = ActiveCast::new(
+            1,
+            None,
+            500,
+            false,
+            CurrentSpellType::Generic,
+            0.0,
+            0.0,
+            0.0,
+        );
+        let remaining = cast.cast_time_remaining_ms;
+        let state = cast.state;
+
+        assert!(!cast.is_client_started);
+        cast.set_client_started(true);
+        assert!(cast.is_client_started);
+        cast.set_client_started(false);
+        assert!(!cast.is_client_started);
+        assert_eq!(cast.cast_time_remaining_ms, remaining);
+        assert_eq!(cast.state, state);
     }
 
     #[test]

@@ -412,42 +412,42 @@ pub fn spell_cast_error_to_u8(error: SpellCastError) -> u8 {
         NotInFront => 0x41,             // SPELL_FAILED_UNIT_NOT_INFRONT
         LowCastLevel => 0x28,           // SPELL_FAILED_LOW_CASTLEVEL
         // Item check errors
-        AlreadyAtFullHealth => 0x01,    // SPELL_FAILED_ALREADY_AT_FULL_HEALTH
-        AlreadyAtFullPower => 0x02,     // SPELL_FAILED_ALREADY_AT_FULL_POWER
-        CantBeDisenchanted => 0x0C,     // SPELL_FAILED_CANT_BE_DISENCHANTED
-        EquippedItem => 0x18,           // SPELL_FAILED_EQUIPPED_ITEM
-        EquippedItemClass => 0x19,      // SPELL_FAILED_EQUIPPED_ITEM_CLASS
+        AlreadyAtFullHealth => 0x01, // SPELL_FAILED_ALREADY_AT_FULL_HEALTH
+        AlreadyAtFullPower => 0x02,  // SPELL_FAILED_ALREADY_AT_FULL_POWER
+        CantBeDisenchanted => 0x0C,  // SPELL_FAILED_CANT_BE_DISENCHANTED
+        EquippedItem => 0x18,        // SPELL_FAILED_EQUIPPED_ITEM
+        EquippedItemClass => 0x19,   // SPELL_FAILED_EQUIPPED_ITEM_CLASS
         EquippedItemClassMainhand => 0x1A, // SPELL_FAILED_EQUIPPED_ITEM_CLASS_MAINHAND
-        EquippedItemClassOffhand => 0x1B,  // SPELL_FAILED_EQUIPPED_ITEM_CLASS_OFFHAND
-        Error => 0x1C,                  // SPELL_FAILED_ERROR
-        ItemGone => 0x26,               // SPELL_FAILED_ITEM_GONE
-        ItemNotReady => 0x27,           // SPELL_FAILED_ITEM_NOT_READY
-        LowLevel => 0x2B,               // SPELL_FAILED_LOWLEVEL
-        MainhandEmpty => 0x2D,          // SPELL_FAILED_MAINHAND_EMPTY
-        NeedExoticAmmo => 0x31,         // SPELL_FAILED_NEED_EXOTIC_AMMO
-        NoAmmo => 0x43,                 // SPELL_FAILED_NO_AMMO
-        NoChargesRemain => 0x44,        // SPELL_FAILED_NO_CHARGES_REMAIN
-        NotTradeable => 0x3F,           // SPELL_FAILED_NOT_TRADEABLE
-        RequiresSpellFocus => 0x5E,     // SPELL_FAILED_REQUIRES_SPELL_FOCUS
-        TargetNotPlayer => 0x71,        // SPELL_FAILED_TARGET_NOT_PLAYER
+        EquippedItemClassOffhand => 0x1B, // SPELL_FAILED_EQUIPPED_ITEM_CLASS_OFFHAND
+        Error => 0x1C,               // SPELL_FAILED_ERROR
+        ItemGone => 0x26,            // SPELL_FAILED_ITEM_GONE
+        ItemNotReady => 0x27,        // SPELL_FAILED_ITEM_NOT_READY
+        LowLevel => 0x2B,            // SPELL_FAILED_LOWLEVEL
+        MainhandEmpty => 0x2D,       // SPELL_FAILED_MAINHAND_EMPTY
+        NeedExoticAmmo => 0x31,      // SPELL_FAILED_NEED_EXOTIC_AMMO
+        NoAmmo => 0x43,              // SPELL_FAILED_NO_AMMO
+        NoChargesRemain => 0x44,     // SPELL_FAILED_NO_CHARGES_REMAIN
+        NotTradeable => 0x3F,        // SPELL_FAILED_NOT_TRADEABLE
+        RequiresSpellFocus => 0x5E,  // SPELL_FAILED_REQUIRES_SPELL_FOCUS
+        TargetNotPlayer => 0x71,     // SPELL_FAILED_TARGET_NOT_PLAYER
         // CheckCast / CheckPetCast errors
-        NotStanding => 0x3D,            // SPELL_FAILED_NOT_STANDING
-        AffectingCombat => 0x00,        // SPELL_FAILED_AFFECTING_COMBAT
-        OnlyStealthed => 0x57,          // SPELL_FAILED_ONLY_STEALTHED
-        OnlyOutdoors => 0x55,           // SPELL_FAILED_ONLY_OUTDOORS
-        OnlyIndoors => 0x52,            // SPELL_FAILED_ONLY_INDOORS
-        AuraBounced => 0x07,            // SPELL_FAILED_AURA_BOUNCED
-        TargetNotDead => 0x6E,          // SPELL_FAILED_TARGET_NOT_DEAD
-        HighLevel => 0x20,              // SPELL_FAILED_HIGHLEVEL
-        TargetAffectingCombat => 0x66,  // SPELL_FAILED_TARGET_AFFECTING_COMBAT
-        CantCastOnTapped => 0x0E,       // SPELL_FAILED_CANT_CAST_ON_TAPPED
-        TargetIsPlayer => 0x6D,         // SPELL_FAILED_TARGET_IS_PLAYER
-        NotBehind => 0x32,              // SPELL_FAILED_NOT_BEHIND
-        NotOnTaxi => 0x3A,              // SPELL_FAILED_NOT_ON_TAXI
-        NoPet => 0x4C,                  // SPELL_FAILED_NO_PET
-        TargetsDead => 0x65,            // SPELL_FAILED_TARGETS_DEAD
-        DamageImmune => 0x22,           // SPELL_FAILED_IMMUNE (closest mapping)
-        AlreadyBeingTamed => 0x03,      // SPELL_FAILED_ALREADY_BEING_TAMED
+        NotStanding => 0x3D,           // SPELL_FAILED_NOT_STANDING
+        AffectingCombat => 0x00,       // SPELL_FAILED_AFFECTING_COMBAT
+        OnlyStealthed => 0x57,         // SPELL_FAILED_ONLY_STEALTHED
+        OnlyOutdoors => 0x55,          // SPELL_FAILED_ONLY_OUTDOORS
+        OnlyIndoors => 0x52,           // SPELL_FAILED_ONLY_INDOORS
+        AuraBounced => 0x07,           // SPELL_FAILED_AURA_BOUNCED
+        TargetNotDead => 0x6E,         // SPELL_FAILED_TARGET_NOT_DEAD
+        HighLevel => 0x20,             // SPELL_FAILED_HIGHLEVEL
+        TargetAffectingCombat => 0x66, // SPELL_FAILED_TARGET_AFFECTING_COMBAT
+        CantCastOnTapped => 0x0E,      // SPELL_FAILED_CANT_CAST_ON_TAPPED
+        TargetIsPlayer => 0x6D,        // SPELL_FAILED_TARGET_IS_PLAYER
+        NotBehind => 0x32,             // SPELL_FAILED_NOT_BEHIND
+        NotOnTaxi => 0x3A,             // SPELL_FAILED_NOT_ON_TAXI
+        NoPet => 0x4C,                 // SPELL_FAILED_NO_PET
+        TargetsDead => 0x65,           // SPELL_FAILED_TARGETS_DEAD
+        DamageImmune => 0x22,          // SPELL_FAILED_IMMUNE (closest mapping)
+        AlreadyBeingTamed => 0x03,     // SPELL_FAILED_ALREADY_BEING_TAMED
     }
 }
 
@@ -476,9 +476,9 @@ pub fn ignore_item_requirements(
         return false;
     }
     match triggering_spell_reagent_0 {
-        None => true,      // no triggering spell proto → ignore requirements
-        Some(0) => false,  // triggering spell has no reagents → don't ignore
-        Some(_) => true,   // triggering spell has reagents → master already used them
+        None => true,     // no triggering spell proto → ignore requirements
+        Some(0) => false, // triggering spell has no reagents → don't ignore
+        Some(_) => true,  // triggering spell has reagents → master already used them
     }
 }
 
@@ -701,9 +701,17 @@ pub fn check_range(input: &CheckRangeInput) -> SpellCastError {
     }
 
     let range_mod = (if input.strict {
-        if input.caster_is_player { 1.25_f32 } else { 0.0_f32 }
+        if input.caster_is_player {
+            1.25_f32
+        } else {
+            0.0_f32
+        }
     } else {
-        if input.caster_is_player { 6.25_f32 } else { 2.25_f32 }
+        if input.caster_is_player {
+            6.25_f32
+        } else {
+            2.25_f32
+        }
     }) + input.leeway_bonus;
 
     let max_range = input.max_range + range_mod;
@@ -790,9 +798,9 @@ const UNIT_FLAG_SILENCED: u32 = 0x00000200;
 const UNIT_FLAG_PACIFIED: u32 = 0x00020000;
 
 // MECHANIC bit positions (1-indexed in C++: 1 << (MECHANIC_X - 1))
-const MECHANIC_STUN_BIT: u32 = 1 << 11;   // MECHANIC_STUN = 12
-const MECHANIC_FEAR_BIT: u32 = 1 << 7;    // MECHANIC_FEAR = 8
-// CONFUSED_MECHANIC_MASK covers disoriented + confused mechanics
+const MECHANIC_STUN_BIT: u32 = 1 << 11; // MECHANIC_STUN = 12
+const MECHANIC_FEAR_BIT: u32 = 1 << 7; // MECHANIC_FEAR = 8
+                                       // CONFUSED_MECHANIC_MASK covers disoriented + confused mechanics
 const CONFUSED_MECHANIC_MASK: u32 = (1 << 4) | (1 << 22); // MECHANIC_DISORIENTED=5, MECHANIC_CONFUSED=23
 
 const SPELL_PREVENTION_TYPE_SILENCE: u8 = 1;
@@ -865,13 +873,17 @@ fn mechanic_immune_bit(mechanic_immune: u32, bit: u32) -> u32 {
 
 // Per-effect consumable check data (only populated for build > 1.10.2)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConsumableEffectKind { Heal, Energize, Other }
+pub enum ConsumableEffectKind {
+    Heal,
+    Energize,
+    Other,
+}
 
 #[derive(Debug, Clone)]
 pub struct ConsumableEffect {
     pub kind: ConsumableEffectKind,
     pub implicit_target_is_pet: bool,
-    pub target_at_full: bool,  // full health (Heal) or full power (Energize)
+    pub target_at_full: bool, // full health (Heal) or full power (Energize)
 }
 
 #[derive(Debug, Clone)]
@@ -904,7 +916,7 @@ pub struct ItemTargetData {
 #[derive(Debug, Clone)]
 pub struct EnchantItemData {
     pub target_exists: bool,
-    pub item_level_ok: bool,     // item.GetProto()->ItemLevel >= spell.baseLevel
+    pub item_level_ok: bool, // item.GetProto()->ItemLevel >= spell.baseLevel
     pub owner_is_caster: bool,
     pub own_item_only_attr: bool, // SPELL_ATTR_EX2_ENCHANT_OWN_ITEM_ONLY
     pub enchant_can_soulbound: bool, // pEnchant->slot & ENCHANTMENT_CAN_SOULBOUND
@@ -940,8 +952,8 @@ pub struct WeaponDamageRangedData {
     /// For gun/bow/xbow: PLAYER_AMMO_ID != 0
     pub ammo_id_set: bool,
     pub ammo_proto_exists: bool,
-    pub ammo_needs_exotic: bool,   // SPELL_ATTR_NEED_EXOTIC_AMMO on the spell
-    pub ammo_is_exotic: bool,      // ITEM_FLAG_EXOTIC on ammo proto
+    pub ammo_needs_exotic: bool, // SPELL_ATTR_NEED_EXOTIC_AMMO on the spell
+    pub ammo_is_exotic: bool,    // ITEM_FLAG_EXOTIC on ammo proto
     pub ammo_is_projectile_class: bool,
     pub ammo_matches_weapon: bool, // arrow for bow/xbow, bullet for gun
     pub ammo_has_count: bool,      // player has at least 1 ammo
@@ -950,7 +962,7 @@ pub struct WeaponDamageRangedData {
 #[derive(Debug, Clone)]
 pub struct CheckItemsInput {
     pub is_triggered: bool,
-    pub attack_type: u8,  // 0=BASE_ATTACK, 1=OFF_ATTACK, 2=RANGED_ATTACK
+    pub attack_type: u8, // 0=BASE_ATTACK, 1=OFF_ATTACK, 2=RANGED_ATTACK
 
     // Effects (3 effect slots)
     pub effects: [u32; 3],
@@ -963,9 +975,9 @@ pub struct CheckItemsInput {
     pub totem: [u32; 2],
 
     pub requires_spell_focus: bool,
-    pub held_item_only_attr: bool,  // SPELL_ATTR_HELD_ITEM_ONLY
-    pub requires_main_hand_attr: bool,  // SPELL_ATTR_EX3_REQUIRES_MAIN_HAND_WEAPON (build > 1.5.1)
-    pub requires_offhand_attr: bool,    // SPELL_ATTR_EX3_REQUIRES_OFFHAND_WEAPON (build > 1.9.4)
+    pub held_item_only_attr: bool,     // SPELL_ATTR_HELD_ITEM_ONLY
+    pub requires_main_hand_attr: bool, // SPELL_ATTR_EX3_REQUIRES_MAIN_HAND_WEAPON (build > 1.5.1)
+    pub requires_offhand_attr: bool,   // SPELL_ATTR_EX3_REQUIRES_OFFHAND_WEAPON (build > 1.9.4)
 
     // === Section 1: Creature weapon ===
     pub creature_has_weapon_but_disarmed: bool,
@@ -980,7 +992,7 @@ pub struct CheckItemsInput {
     // === Section 4: Item target / equipment fit ===
     pub item_target_guid_set: bool,
     pub item_target: Option<ItemTargetData>,
-    pub item_target_is_trade_mask: bool,  // (target_mask & TARGET_FLAG_TRADE_ITEM) != 0
+    pub item_target_is_trade_mask: bool, // (target_mask & TARGET_FLAG_TRADE_ITEM) != 0
     // When no item target: Some(bool) = HasItemFitToSpellRequirements, None = non-player
     pub player_has_fit_equipment: Option<bool>,
 
@@ -1170,7 +1182,9 @@ pub fn check_items(input: &CheckItemsInput) -> SpellCastError {
             if let Some(ci) = &input.cast_item {
                 if ci.entry == input.reagent[i] as u32 {
                     for s in 0..5 {
-                        if let Some((charges, proto_charges)) = input.cast_item_charges_for_reagent[s] {
+                        if let Some((charges, proto_charges)) =
+                            input.cast_item_charges_for_reagent[s]
+                        {
                             if proto_charges < 0 && charges.abs() < 2 && needed > 1 {
                                 needed += 1;
                                 break;
@@ -1385,13 +1399,13 @@ pub struct CheckCastInput {
     pub spell_allow_while_dead: bool,
 
     // === Section 4: GCD / BG / combat / mask / shapeshift (strict, non-triggered) ===
-    pub gcd_active: bool,                     // HasGCD(spell), strict only
-    pub battleground_ended: bool,             // bg status == STATUS_WAIT_LEAVE
+    pub gcd_active: bool,         // HasGCD(spell), strict only
+    pub battleground_ended: bool, // bg status == STATUS_WAIT_LEAVE
     pub caster_is_in_combat: bool,
     pub spell_is_non_combat: bool,
-    pub explicit_target_mask_valid: bool,     // ValidateExplicitTargetMask result
-    pub is_client_started: bool,              // m_isClientStarted flag
-    pub shapeshift_error: SpellCastError,     // GetErrorAtShapeshiftedCast (SpellCastError::None = ok)
+    pub explicit_target_mask_valid: bool, // ValidateExplicitTargetMask result
+    pub is_client_started: bool,          // m_isClientStarted flag
+    pub shapeshift_error: SpellCastError, // GetErrorAtShapeshiftedCast (SpellCastError::None = ok)
     pub spell_only_stealthed: bool,
     pub caster_has_stealth_aura: bool,
 
@@ -1423,12 +1437,12 @@ pub struct CheckCastInput {
     pub targets_empty: bool,
 
     // Unit target: aura-applies block (positive spell, applies-aura, non-AoE)
-    pub spell_applies_aura_non_aoe: bool,     // IsSpellAppliesAura && !IsAoE
+    pub spell_applies_aura_non_aoe: bool, // IsSpellAppliesAura && !IsAoE
     pub target_aura_bounced: bool,
     pub target_is_shapeshifted: bool,
     pub target_is_mounted: bool,
-    pub spell_interrupt_shapeshifting: bool,  // HasAuraInterruptFlag(SHAPESHIFTING_CANCELS)
-    pub spell_interrupt_mount: bool,          // HasAuraInterruptFlag(MOUNT_CANCELS)
+    pub spell_interrupt_shapeshifting: bool, // HasAuraInterruptFlag(SHAPESHIFTING_CANCELS)
+    pub spell_interrupt_mount: bool,         // HasAuraInterruptFlag(MOUNT_CANCELS)
 
     // Unit target: general state
     pub spell_death_only: bool,
@@ -1438,7 +1452,7 @@ pub struct CheckCastInput {
     pub target_level: u32,
 
     // Unit target: non-caster, non-triggered checks
-    pub non_caster_target: bool,              // target != caster && !caster_source_targets_only
+    pub non_caster_target: bool, // target != caster && !caster_source_targets_only
     pub target_is_taxiing: bool,
     pub spell_has_summon_player_effect: bool,
     pub target_in_los: bool,
@@ -1447,37 +1461,37 @@ pub struct CheckCastInput {
     pub spell_only_peaceful_targets: bool,
     pub spell_allow_low_level_buff: bool,
     pub caster_is_player_not_cast_item: bool,
-    pub target_rank_correct: bool,            // SelectAuraRankForLevel matches (or not a player)
+    pub target_rank_correct: bool, // SelectAuraRankForLevel matches (or not a player)
     pub spell_cannot_cast_on_tapped: bool,
     pub target_tapped_by_others: bool,
     pub spell_only_on_player: bool,
     pub target_is_player: bool,
 
     // Unit target: creature type and targeting mode
-    pub target_creature_type_ok: bool,        // CheckTargetCreatureType
-    pub target_is_valid_help: bool,           // IsValidHelpfulTarget (explicit positive effects)
-    pub target_is_valid_attack: bool,         // IsValidAttackTarget (explicit negative effects)
-    pub has_explicit_positive_effect: bool,   // any IsExplicitPositiveTarget in effects
+    pub target_creature_type_ok: bool, // CheckTargetCreatureType
+    pub target_is_valid_help: bool,    // IsValidHelpfulTarget (explicit positive effects)
+    pub target_is_valid_attack: bool,  // IsValidAttackTarget (explicit negative effects)
+    pub has_explicit_positive_effect: bool, // any IsExplicitPositiveTarget in effects
     pub has_explicit_negative_effect: bool,
-    pub caster_is_creature_with_owner: bool,  // for pet/charmed extra check
-    pub spell_is_positive_simple: bool,       // IsPositiveSpell() no target context
+    pub caster_is_creature_with_owner: bool, // for pet/charmed extra check
+    pub spell_is_positive_simple: bool,      // IsPositiveSpell() no target context
     pub spell_has_dispel: bool,
 
     // Unit target: immune, facing, positive context
     pub target_immune_to_spell: bool,
-    pub spell_is_positive_for_target: bool,   // IsPositiveSpell(caster, target)
+    pub spell_is_positive_for_target: bool, // IsPositiveSpell(caster, target)
     pub spell_is_from_behind: bool,
     pub caster_is_behind_target: bool,
-    pub spell_target_faces_caster: bool,      // Attributes == 0x150010 special check
+    pub spell_target_faces_caster: bool, // Attributes == 0x150010 special check
     pub target_faces_caster: bool,
 
     // Unit target: pet-target effect block
-    pub has_pet_target_effect: bool,          // any EffectImplicitTargetA == TARGET_UNIT_CASTER_PET
+    pub has_pet_target_effect: bool, // any EffectImplicitTargetA == TARGET_UNIT_CASTER_PET
     pub pet_exists: bool,
     pub pet_is_alive: bool,
     pub pet_in_los: bool,
-    pub is_triggered_by_aura_spell: bool,     // m_triggeredByAuraSpell != nullptr
-    pub target_alive_state_ok: bool,          // CanTargetAliveState for explicit non-pet effects
+    pub is_triggered_by_aura_spell: bool, // m_triggeredByAuraSpell != nullptr
+    pub target_alive_state_ok: bool,      // CanTargetAliveState for explicit non-pet effects
 
     // GO target
     pub go_immune_under_immunity: bool,
@@ -1486,7 +1500,7 @@ pub struct CheckCastInput {
     pub dest_in_los: bool,
 
     // === Section 13: Zone ===
-    pub location_error: SpellCastError,       // GetSpellAllowedInLocationError
+    pub location_error: SpellCastError, // GetSpellAllowedInLocationError
 
     // === Section 14: Mounted ===
     pub caster_is_mounted: bool,
@@ -1496,15 +1510,15 @@ pub struct CheckCastInput {
 
     // === Sections 15–16: Sub-function pre-computed results ===
     // Caller must invoke each sub-function and pass the result.
-    pub items_result: SpellCastError,         // check_items result (non-passive)
-    pub range_result: SpellCastError,         // check_range result (non-triggered)
-    pub bg_spell_check: SpellCastError,       // bg->CheckSpellCast (None if not in BG)
-    pub power_result: SpellCastError,         // check_power result (non-triggered)
-    pub aura_result: SpellCastError,          // check_caster_auras result (non-triggered)
+    pub items_result: SpellCastError, // check_items result (non-passive)
+    pub range_result: SpellCastError, // check_range result (non-triggered)
+    pub bg_spell_check: SpellCastError, // bg->CheckSpellCast (None if not in BG)
+    pub power_result: SpellCastError, // check_power result (non-triggered)
+    pub aura_result: SpellCastError,  // check_caster_auras result (non-triggered)
 
     // === Section 17: Possessed caster ===
     pub caster_is_possessed: bool,
-    pub spell_category_is_enrage: bool,       // category == 21
+    pub spell_category_is_enrage: bool, // category == 21
 
     // === Section 18: TargetAuraState 20% ===
     pub spell_target_aura_state_20pct: bool,
@@ -1529,7 +1543,8 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
     }
 
     // 1. Standing (non-triggered, caster unit exists)
-    if !input.is_triggered && input.caster_unit_exists
+    if !input.is_triggered
+        && input.caster_unit_exists
         && !input.caster_is_standing
         && !input.spell_allow_while_sitting
     {
@@ -1537,8 +1552,10 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
     }
 
     // 2. Player cooldown (non-triggered, player, not passive/auto-repeat)
-    if !input.is_triggered && input.caster_is_player
-        && !input.spell_is_passive && !input.spell_is_auto_repeat
+    if !input.is_triggered
+        && input.caster_is_player
+        && !input.spell_is_passive
+        && !input.spell_is_auto_repeat
         && input.spell_on_cooldown
     {
         return if input.is_triggered_by_aura || input.spell_cooldown_on_event {
@@ -1549,7 +1566,8 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
     }
 
     // 3. Death check
-    if input.caster_unit_exists && !input.caster_is_alive
+    if input.caster_unit_exists
+        && !input.caster_is_alive
         && !input.spell_is_passive
         && !input.spell_allow_while_dead
         && !(input.is_triggered && !input.is_triggered_by_aura)
@@ -1623,10 +1641,7 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
     }
 
     // 8. NO_ACTIVE_PETS (player)
-    if input.caster_is_player
-        && input.spell_no_active_pets
-        && input.player_has_pet_or_charm
-    {
+    if input.caster_is_player && input.spell_no_active_pets && input.player_has_pet_or_charm {
         return SpellCastError::DontReport;
     }
 
@@ -1651,10 +1666,14 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
         }
 
         // Level range
-        if input.spell_min_target_level > 0 && input.target_level < input.spell_min_target_level as u32 {
+        if input.spell_min_target_level > 0
+            && input.target_level < input.spell_min_target_level as u32
+        {
             return SpellCastError::LowLevel;
         }
-        if input.spell_max_target_level > 0 && input.target_level > input.spell_max_target_level as u32 {
+        if input.spell_max_target_level > 0
+            && input.target_level > input.spell_max_target_level as u32
+        {
             return SpellCastError::HighLevel;
         }
 
@@ -1682,7 +1701,8 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
                 if input.strict
                     && input.spell_only_on_player
                     && !input.target_is_player
-                    && !input.spell_is_positive_for_target  // proxy for !IsAoE (close enough)
+                    && !input.spell_is_positive_for_target
+                // proxy for !IsAoE (close enough)
                 {
                     return SpellCastError::InvalidTarget;
                 }
@@ -1765,7 +1785,11 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
     }
 
     // Dest LoS (empty targets + player + dest location)
-    if input.targets_empty && input.caster_is_player && input.has_dest_location && !input.dest_in_los {
+    if input.targets_empty
+        && input.caster_is_player
+        && input.has_dest_location
+        && !input.dest_in_los
+    {
         return SpellCastError::TargetNotInLineOfSight;
     }
 
@@ -1775,8 +1799,10 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
     }
 
     // 14. Mounted / taxi (non-triggered, player)
-    if input.caster_is_player && !input.is_triggered
-        && input.caster_is_mounted && !input.spell_is_not_passive
+    if input.caster_is_player
+        && !input.is_triggered
+        && input.caster_is_mounted
+        && !input.spell_is_not_passive
         && !input.spell_allow_while_mounted
     {
         if input.caster_is_taxiing {
@@ -1862,16 +1888,16 @@ pub struct CheckPetCastInput {
 
     // Pet / charmed caster block (only evaluated when caster is pet/charmed creature)
     pub caster_is_pet_or_charmed: bool,
-    pub owner_is_alive: bool,           // GetCharmerOrOwner()->IsAlive(); true if no owner
-    pub target_resolved: bool,          // after fallback: m_targets.getUnitTarget() exists
+    pub owner_is_alive: bool, // GetCharmerOrOwner()->IsAlive(); true if no owner
+    pub target_resolved: bool, // after fallback: m_targets.getUnitTarget() exists
     pub effects_need_unit_target: bool, // any EffectImplicitTargetA in target-requiring set
-    pub target_is_explicitly_selected: bool,  // IsExplicitlySelectedUnitTarget(effect[0])
-    pub target_is_targetable: bool,     // IsTargetableBy(caster, false, true, positive)
+    pub target_is_explicitly_selected: bool, // IsExplicitlySelectedUnitTarget(effect[0])
+    pub target_is_targetable: bool, // IsTargetableBy(caster, false, true, positive)
     pub caster_is_hostile_to_target: bool,
     pub spell_is_positive_for_target: bool,
-    pub check_valid_attack_target: bool,   // true unless any effect = TARGET_UNIT/_CONE/_SRC
-    pub target_is_valid_attack: bool,      // IsValidAttackTarget
-    pub spell_is_ready: bool,             // IsSpellReady
+    pub check_valid_attack_target: bool, // true unless any effect = TARGET_UNIT/_CONE/_SRC
+    pub target_is_valid_attack: bool,    // IsValidAttackTarget
+    pub spell_is_ready: bool,            // IsSpellReady
 
     // Pre-computed full CheckCast(true) result — caller builds CheckCastInput and runs check_cast
     pub check_cast_result: SpellCastError,
@@ -1949,9 +1975,9 @@ pub fn check_pet_cast(input: &CheckPetCastInput) -> SpellCastError {
 // SpellEntry::Targets unit/item/etc flag values match the SpellCastTargets
 // packet flag values in vanilla (direct bitmask comparison in C++).
 use crate::world::game::player::spells::state::{
-    TARGET_FLAG_CORPSE_ALLY, TARGET_FLAG_CORPSE_ENEMY, TARGET_FLAG_DEST_LOCATION,
-    TARGET_FLAG_ITEM, TARGET_FLAG_LOCKED, TARGET_FLAG_OBJECT, TARGET_FLAG_SOURCE_LOCATION,
-    TARGET_FLAG_TRADE_ITEM, TARGET_FLAG_UNIT, TARGET_FLAG_UNIT_MINIPET,
+    TARGET_FLAG_CORPSE_ALLY, TARGET_FLAG_CORPSE_ENEMY, TARGET_FLAG_DEST_LOCATION, TARGET_FLAG_ITEM,
+    TARGET_FLAG_LOCKED, TARGET_FLAG_OBJECT, TARGET_FLAG_SOURCE_LOCATION, TARGET_FLAG_TRADE_ITEM,
+    TARGET_FLAG_UNIT, TARGET_FLAG_UNIT_MINIPET,
 };
 
 // SpellEntry::Targets extended unit/corpse flags (same bit range as packet flags)
@@ -2008,7 +2034,8 @@ pub fn validate_explicit_target_mask(
         | TARGET_FLAG_UNIT_MINIPET
         | SPELL_TARGET_UNIT_DEAD;
 
-    if (client_target_mask & TARGET_FLAG_UNIT) == 0 && (expected_target_mask & all_unit_flags) != 0 {
+    if (client_target_mask & TARGET_FLAG_UNIT) == 0 && (expected_target_mask & all_unit_flags) != 0
+    {
         tracing::warn!("[ANTICHEAT] spell={spell_id} expected UNIT flag missing from client mask {client_target_mask:#010x}");
         return false;
     }
@@ -2087,9 +2114,9 @@ pub const LOCK_KEY_SKILL: u8 = 2;
 #[derive(Debug, Clone, Copy)]
 pub struct LockEntrySlot {
     pub key_type: u8,
-    pub index: u32,         // item entry (LOCK_KEY_ITEM) or LockType index (LOCK_KEY_SKILL)
+    pub index: u32, // item entry (LOCK_KEY_ITEM) or LockType index (LOCK_KEY_SKILL)
     pub required_skill: i32,
-    pub skill_id: u32,      // result of SkillByLockType(index); 0 = SKILL_NONE
+    pub skill_id: u32,          // result of SkillByLockType(index); 0 = SKILL_NONE
     pub is_blasting_type: bool, // LockType(index) == LOCKTYPE_BLASTING
 }
 
@@ -2118,7 +2145,11 @@ pub fn can_open_lock(
     get_player_skill: Option<&dyn Fn(u32) -> i32>,
 ) -> Result<OpenLockResult, SpellCastError> {
     if lock_id == 0 {
-        return Ok(OpenLockResult { skill_id: 0, req_skill_value: 0, skill_value: 0 });
+        return Ok(OpenLockResult {
+            skill_id: 0,
+            req_skill_value: 0,
+            skill_value: 0,
+        });
     }
 
     let entry = match lock_entry {
@@ -2132,7 +2163,11 @@ pub fn can_open_lock(
                 if slot.index != 0 {
                     if let Some(item_entry) = cast_item_entry {
                         if item_entry == slot.index {
-                            return Ok(OpenLockResult { skill_id: 0, req_skill_value: 0, skill_value: 0 });
+                            return Ok(OpenLockResult {
+                                skill_id: 0,
+                                req_skill_value: 0,
+                                skill_value: 0,
+                            });
                         }
                     }
                 }
@@ -2162,7 +2197,11 @@ pub fn can_open_lock(
                     });
                 }
 
-                return Ok(OpenLockResult { skill_id: slot.skill_id, req_skill_value: slot.required_skill, skill_value: spell_skill_bonus });
+                return Ok(OpenLockResult {
+                    skill_id: slot.skill_id,
+                    req_skill_value: slot.required_skill,
+                    skill_value: spell_skill_bonus,
+                });
             }
             _ => {}
         }
