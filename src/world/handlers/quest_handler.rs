@@ -10,15 +10,15 @@ use crate::shared::messages::quest::{
     MsgQuestPushResult, QuestObjectiveData, SmsgQuestQueryResponseV2,
 };
 use crate::shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
-use crate::world::game::npc::quest::system::QUEST_SHARE_DISTANCE;
-use crate::world::game::npc::quest::types::{QuestStatus, MAX_QUEST_LOG_SIZE};
-use crate::world::game::player::player::QuestShareInfo;
 use crate::world::core::common::packet::WorldPacketGuidExt;
 use crate::world::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::world::core::session::WorldSession;
-use crate::world::game::creature::ai::{is_hostile_faction, is_npc, NPC_FLAG_QUEST_GIVER};
 use crate::world::game::common::player_constants::get_faction_for_race;
+use crate::world::game::creature::ai::{is_hostile_faction, is_npc, NPC_FLAG_QUEST_GIVER};
+use crate::world::game::npc::quest::system::QUEST_SHARE_DISTANCE;
+use crate::world::game::npc::quest::types::{QuestStatus, MAX_QUEST_LOG_SIZE};
 use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
+use crate::world::game::player::player::QuestShareInfo;
 use crate::world::game::player::spells::state::CurrentSpellType;
 use crate::world::World;
 
@@ -65,7 +65,10 @@ pub async fn handle_questgiver_status_query(
                 guid: quest_giver_guid,
                 status: crate::shared::messages::quest::DialogStatus::None,
             };
-            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            world
+                .managers
+                .broadcast_mgr
+                .send_msg_to_player(player_guid, msg);
             return Ok(());
         }
     }
@@ -163,11 +166,7 @@ pub async fn handle_questgiver_hello(
     // Resolve creature questgiver with interaction validation.
     // Must exist, be alive, and have NPC interaction flags (gossip or quest giver).
     let (entry, npc_flags, creature_type) = {
-        let Some(creature) = world
-            .managers
-            .creature_mgr
-            .get_creature(quest_giver_guid)
-        else {
+        let Some(creature) = world.managers.creature_mgr.get_creature(quest_giver_guid) else {
             debug!(
                 "Questgiver hello for unresolved or non-creature guid {:?}",
                 quest_giver_guid
@@ -176,10 +175,7 @@ pub async fn handle_questgiver_hello(
         };
 
         if !creature.is_alive() {
-            debug!(
-                "Questgiver {:?} is dead, rejecting hello",
-                quest_giver_guid
-            );
+            debug!("Questgiver {:?} is dead, rejecting hello", quest_giver_guid);
             return Ok(());
         }
 
@@ -229,12 +225,12 @@ pub async fn handle_questgiver_hello(
         let is_totem = creature_type == CREATURE_TYPE_TOTEM;
 
         if !is_civilian && !is_totem {
-            world.managers.creature_mgr.with_creature_mut(
-                quest_giver_guid,
-                |c| {
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(quest_giver_guid, |c| {
                     c.pause_out_of_combat_movement();
-                },
-            );
+                });
         }
     }
 
@@ -260,13 +256,9 @@ pub async fn handle_questgiver_hello(
                     .spells
                     .get_current_spell(CurrentSpellType::Channeled)
                     .and_then(|cast| {
-                        world
-                            .managers
-                            .spell_mgr
-                            .get(cast.spell_id)
-                            .filter(|entry| {
-                                (entry.channel_interrupt_flags & INTERACT_INTERRUPT_FLAGS) != 0
-                            })
+                        world.managers.spell_mgr.get(cast.spell_id).filter(|entry| {
+                            (entry.channel_interrupt_flags & INTERACT_INTERRUPT_FLAGS) != 0
+                        })
                     })
                     .is_some()
             })
@@ -343,23 +335,24 @@ pub async fn handle_questgiver_query_quest(
         player_guid, quest_giver_guid, quest_id
     );
 
-    let related = world
-        .systems
-        .quest
-        .quest_giver_can_start_or_finish(quest_giver_guid, quest_id, world)
-        || world
+    let related =
+        world
             .systems
-            .inventory
-            .cache()
-            .get_item(player_guid, quest_giver_guid)
-            .and_then(|item| {
-                world
-                    .managers
-                    .item_mgr
-                    .get_template(item.read().entry)
-                    .map(|template| template.start_quest == quest_id)
-            })
-            .unwrap_or(false);
+            .quest
+            .quest_giver_can_start_or_finish(quest_giver_guid, quest_id, world)
+            || world
+                .systems
+                .inventory
+                .cache()
+                .get_item(player_guid, quest_giver_guid)
+                .and_then(|item| {
+                    world
+                        .managers
+                        .item_mgr
+                        .get_template(item.read().entry)
+                        .map(|template| template.start_quest == quest_id)
+                })
+                .unwrap_or(false);
 
     if !related {
         world
@@ -374,12 +367,10 @@ pub async fn handle_questgiver_query_quest(
             "Quest {} is related to {:?}, showing details dialog",
             quest.id, player_guid
         );
-        world.systems.quest.send_quest_details(
-            player_guid,
-            quest_giver_guid,
-            quest.id,
-            world,
-        )?;
+        world
+            .systems
+            .quest
+            .send_quest_details(player_guid, quest_giver_guid, quest.id, world)?;
     }
 
     Ok(())
@@ -743,7 +734,10 @@ pub async fn handle_push_quest_to_party(
             sender_guid: member.guid,
             msg: crate::shared::game::quest::quest_share_msg::SHARING_QUEST,
         };
-        world.managers.broadcast_mgr.send_msg_to_player(player_guid, sharing);
+        world
+            .managers
+            .broadcast_mgr
+            .send_msg_to_player(player_guid, sharing);
 
         // Distance + map check
         let sharer_pos = world.managers.player_mgr.get_position(player_guid);
@@ -772,7 +766,10 @@ pub async fn handle_push_quest_to_party(
                 sender_guid: member.guid,
                 msg: crate::shared::game::quest::quest_share_msg::TOO_FAR,
             };
-            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            world
+                .managers
+                .broadcast_mgr
+                .send_msg_to_player(player_guid, msg);
             continue;
         }
 
@@ -783,7 +780,10 @@ pub async fn handle_push_quest_to_party(
                 sender_guid: member.guid,
                 msg: crate::shared::game::quest::quest_share_msg::FINISH_QUEST,
             };
-            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            world
+                .managers
+                .broadcast_mgr
+                .send_msg_to_player(player_guid, msg);
             continue;
         }
 
@@ -793,17 +793,27 @@ pub async fn handle_push_quest_to_party(
                 sender_guid: member.guid,
                 msg: crate::shared::game::quest::quest_share_msg::HAVE_QUEST,
             };
-            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            world
+                .managers
+                .broadcast_mgr
+                .send_msg_to_player(player_guid, msg);
             continue;
         }
 
         // Can take quest?
-        if !world.systems.quest.can_take_quest(member.guid, &quest, world) {
+        if !world
+            .systems
+            .quest
+            .can_take_quest(member.guid, &quest, world)
+        {
             let msg = MsgQuestPushResult {
                 sender_guid: member.guid,
                 msg: crate::shared::game::quest::quest_share_msg::CANT_TAKE_QUEST,
             };
-            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            world
+                .managers
+                .broadcast_mgr
+                .send_msg_to_player(player_guid, msg);
             continue;
         }
 
@@ -818,7 +828,10 @@ pub async fn handle_push_quest_to_party(
                 sender_guid: member.guid,
                 msg: crate::shared::game::quest::quest_share_msg::LOG_FULL,
             };
-            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            world
+                .managers
+                .broadcast_mgr
+                .send_msg_to_player(player_guid, msg);
             continue;
         }
 
@@ -833,7 +846,10 @@ pub async fn handle_push_quest_to_party(
                 sender_guid: member.guid,
                 msg: crate::shared::game::quest::quest_share_msg::BUSY,
             };
-            world.managers.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            world
+                .managers
+                .broadcast_mgr
+                .send_msg_to_player(player_guid, msg);
             continue;
         }
 
@@ -904,7 +920,10 @@ pub async fn handle_quest_push_result(
             .send_msg_to_player(share.player_guid, response);
     }
 
-    world.managers.player_mgr.clear_quest_share_info(player_guid);
+    world
+        .managers
+        .player_mgr
+        .clear_quest_share_info(player_guid);
 
     Ok(())
 }
@@ -918,13 +937,13 @@ mod tests {
     use crate::shared::database::Databases;
     use crate::shared::protocol::{HighGuid, ObjectGuid, Position};
     use crate::world::config::Config;
-    use crate::world::game::broadcast_mgr::BroadcastManagerTrait;
     use crate::world::core::session::WorldSession;
+    use crate::world::game::broadcast_mgr::BroadcastManagerTrait;
     use crate::world::game::creature::{Creature, CreatureTemplate};
+    use crate::world::game::npc::quest::system::QuestSystem;
     use crate::world::game::npc::quest::types::{QuestProgress, QuestTemplate};
     use crate::world::game::player::broadcaster::PlayerBroadcaster;
     use crate::world::game::player::Player;
-    use crate::world::game::npc::quest::system::QuestSystem;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -944,7 +963,12 @@ mod tests {
             logs: lazy_pool(),
         });
 
-        crate::world::World::new(databases, Arc::new(Config::default()), 50, PathBuf::from("."))
+        crate::world::World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
     }
 
     fn install_mock_quest_system(world: &mut crate::world::World) {
@@ -978,7 +1002,12 @@ mod tests {
         ObjectGuid::new_creature(entry, counter)
     }
 
-    fn add_player(world: &mut crate::world::World) -> (Arc<WorldSession>, mpsc::UnboundedReceiver<crate::shared::protocol::WorldPacket>) {
+    fn add_player(
+        world: &mut crate::world::World,
+    ) -> (
+        Arc<WorldSession>,
+        mpsc::UnboundedReceiver<crate::shared::protocol::WorldPacket>,
+    ) {
         let (tx, rx) = mpsc::unbounded_channel();
         let session = Arc::new(WorldSession::new(1, 1, "Tester".to_string(), 0, tx));
         let player_guid = test_player_guid();
@@ -987,7 +1016,10 @@ mod tests {
         world.session_mgr.register_player(session.id(), player_guid);
 
         let mut player = Player::new(player_guid, "Tester".to_string(), 0, 0, 0, 10, 1, 1, 0);
-        player.set_broadcaster(Arc::new(PlayerBroadcaster::new(session.packet_tx(), player_guid)));
+        player.set_broadcaster(Arc::new(PlayerBroadcaster::new(
+            session.packet_tx(),
+            player_guid,
+        )));
         world.managers.player_mgr.add_player(player, 1);
         (session, rx)
     }
@@ -1061,12 +1093,22 @@ mod tests {
         world.systems.quest.manager.add_quest_template(quest);
 
         if let Some(entry) = creature_entry {
-            world.systems.quest.manager.add_creature_quest_starter(entry, quest_id);
-            world.systems.quest.manager.add_creature_quest_ender(entry, quest_id);
+            world
+                .systems
+                .quest
+                .manager
+                .add_creature_quest_starter(entry, quest_id);
+            world
+                .systems
+                .quest
+                .manager
+                .add_creature_quest_ender(entry, quest_id);
         }
     }
 
-    fn read_packet(rx: &mut mpsc::UnboundedReceiver<crate::shared::protocol::WorldPacket>) -> crate::shared::protocol::WorldPacket {
+    fn read_packet(
+        rx: &mut mpsc::UnboundedReceiver<crate::shared::protocol::WorldPacket>,
+    ) -> crate::shared::protocol::WorldPacket {
         rx.try_recv().expect("expected a packet")
     }
 
@@ -1078,7 +1120,8 @@ mod tests {
         let npc_guid = add_creature(&mut world, 100, 0x0000_0002);
         add_quest(&mut world, 1, Some(200));
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUERY_QUEST);
+        let mut packet =
+            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUERY_QUEST);
         packet.write_guid(npc_guid);
         packet.write_u32(1);
 
@@ -1098,7 +1141,8 @@ mod tests {
         let npc_guid = add_creature(&mut world, 100, 0x0000_0002);
         add_quest(&mut world, 1, Some(100));
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUERY_QUEST);
+        let mut packet =
+            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUERY_QUEST);
         packet.write_guid(npc_guid);
         packet.write_u32(1);
 
@@ -1149,7 +1193,8 @@ mod tests {
         install_mock_quest_system(&mut world);
         let (session, mut rx) = add_player(&mut world);
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUEST_AUTOLAUNCH);
+        let mut packet =
+            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_QUEST_AUTOLAUNCH);
         handle_questgiver_quest_auto_launch(&session, &mut packet, &world)
             .await
             .expect("handler should succeed");
@@ -1163,12 +1208,16 @@ mod tests {
         install_mock_quest_system(&mut world);
         let (session, mut rx) = add_player(&mut world);
         let player_guid = test_player_guid();
-        world.managers.player_mgr.with_player_mut(player_guid, |player| {
-            player.active_quests.push(QuestProgress::new(1));
-            player.active_quests.push(QuestProgress::new(2));
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.active_quests.push(QuestProgress::new(1));
+                player.active_quests.push(QuestProgress::new(2));
+            });
 
-        let mut invalid = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTLOG_SWAP_QUEST);
+        let mut invalid =
+            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTLOG_SWAP_QUEST);
         invalid.write_u8(1);
         invalid.write_u8(25);
         handle_questlog_swap_quest(&session, &mut invalid, &world)
@@ -1184,7 +1233,11 @@ mod tests {
             .await
             .expect("handler should succeed");
 
-        let player = world.managers.player_mgr.get_player(player_guid).expect("player");
+        let player = world
+            .managers
+            .player_mgr
+            .get_player(player_guid)
+            .expect("player");
         assert_eq!(player.active_quests[0].quest_id, 2);
         assert_eq!(player.active_quests[1].quest_id, 1);
         assert!(rx.try_recv().is_err());
@@ -1196,18 +1249,26 @@ mod tests {
         install_mock_quest_system(&mut world);
         let (session, mut rx) = add_player(&mut world);
         let player_guid = test_player_guid();
-        world.managers.player_mgr.with_player_mut(player_guid, |player| {
-            player.active_quests.push(QuestProgress::new(1));
-            player.active_quests.push(QuestProgress::new(2));
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.active_quests.push(QuestProgress::new(1));
+                player.active_quests.push(QuestProgress::new(2));
+            });
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTLOG_REMOVE_QUEST);
+        let mut packet =
+            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTLOG_REMOVE_QUEST);
         packet.write_u8(0);
         handle_questlog_remove_quest(&session, &mut packet, &world)
             .await
             .expect("handler should succeed");
 
-        let player = world.managers.player_mgr.get_player(player_guid).expect("player");
+        let player = world
+            .managers
+            .player_mgr
+            .get_player(player_guid)
+            .expect("player");
         assert_eq!(player.active_quests.len(), 1);
         assert_eq!(player.active_quests[0].quest_id, 2);
         assert!(rx.try_recv().is_ok());
@@ -1278,7 +1339,8 @@ mod tests {
         let npc_guid = add_creature_with_faction(&mut world, 100, 0x0000_0002, 14);
         add_quest(&mut world, 1, Some(100));
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
+        let mut packet =
+            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
         packet.write_guid(npc_guid);
 
         handle_questgiver_status_query(&session, &mut packet, &world)
@@ -1300,7 +1362,8 @@ mod tests {
         let npc_guid = add_creature_with_faction(&mut world, 100, 0x0000_0002, 35);
         add_quest(&mut world, 1, Some(100));
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
+        let mut packet =
+            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
         packet.write_guid(npc_guid);
 
         handle_questgiver_status_query(&session, &mut packet, &world)
@@ -1318,14 +1381,18 @@ mod tests {
         let (session, mut rx) = add_player(&mut world);
         let unknown_guid = ObjectGuid::new_creature(999, 1);
 
-        let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
+        let mut packet =
+            crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
         packet.write_guid(unknown_guid);
 
         handle_questgiver_status_query(&session, &mut packet, &world)
             .await
             .expect("handler should succeed");
 
-        assert!(rx.try_recv().is_err(), "no packet should be sent for unknown guid");
+        assert!(
+            rx.try_recv().is_err(),
+            "no packet should be sent for unknown guid"
+        );
     }
 
     // --- Hello handler tests ---
@@ -1337,9 +1404,12 @@ mod tests {
         let (session, mut rx) = add_player(&mut world);
         let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
         // Kill the creature
-        world.managers.creature_mgr.with_creature_mut(npc_guid, |c| {
-            c.current_health = 0;
-        });
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(npc_guid, |c| {
+                c.current_health = 0;
+            });
 
         let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
@@ -1348,7 +1418,10 @@ mod tests {
             .await
             .expect("handler should succeed");
 
-        assert!(rx.try_recv().is_err(), "no gossip should open for dead creature");
+        assert!(
+            rx.try_recv().is_err(),
+            "no gossip should open for dead creature"
+        );
     }
 
     #[tokio::test]
@@ -1366,7 +1439,10 @@ mod tests {
             .await
             .expect("handler should succeed");
 
-        assert!(rx.try_recv().is_err(), "no gossip should open for creature without npc flags");
+        assert!(
+            rx.try_recv().is_err(),
+            "no gossip should open for creature without npc flags"
+        );
     }
 
     #[tokio::test]
@@ -1383,14 +1459,17 @@ mod tests {
             .await
             .expect("handler should succeed");
 
-        assert!(rx.try_recv().is_err(), "no gossip should open for unknown guid");
+        assert!(
+            rx.try_recv().is_err(),
+            "no gossip should open for unknown guid"
+        );
     }
 
     #[tokio::test]
     async fn questgiver_hello_clears_feign_death() {
-        use crate::world::game::player::auras::Aura;
-        use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
         use crate::world::game::player::auras::aura::AuraFlags;
+        use crate::world::game::player::auras::effects::AURA_FEIGN_DEATH;
+        use crate::world::game::player::auras::Aura;
 
         let mut world = test_world();
         install_mock_quest_system(&mut world);
@@ -1399,26 +1478,33 @@ mod tests {
         let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
 
         // Give the player a feign death aura (follows auction test pattern)
-        world.managers.player_mgr.with_player_mut(player_guid, |player| {
-            player.auras.container.add_aura(Aura::new(
-                AURA_FEIGN_DEATH,
-                player_guid,
-                0,
-                AURA_FEIGN_DEATH,
-                0,
-                1,
-                Some(10_000),
-                0,
-                1,
-                0,
-                AuraFlags::default(),
-            ));
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.auras.container.add_aura(Aura::new(
+                    AURA_FEIGN_DEATH,
+                    player_guid,
+                    0,
+                    AURA_FEIGN_DEATH,
+                    0,
+                    1,
+                    Some(10_000),
+                    0,
+                    1,
+                    0,
+                    AuraFlags::default(),
+                ));
+            });
 
         // Verify feign death is present before hello
-        let has_feign = world.managers.player_mgr.with_player(player_guid, |player| {
-            player.auras.container.has_aura(AURA_FEIGN_DEATH)
-        }).unwrap_or(false);
+        let has_feign = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| {
+                player.auras.container.has_aura(AURA_FEIGN_DEATH)
+            })
+            .unwrap_or(false);
         assert!(has_feign, "feign death should be present before hello");
 
         let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
@@ -1429,14 +1515,21 @@ mod tests {
             .expect("handler should succeed");
 
         // Verify feign death is removed after hello
-        let has_feign = world.managers.player_mgr.with_player(player_guid, |player| {
-            player.auras.container.has_aura(AURA_FEIGN_DEATH)
-        }).unwrap_or(true);
+        let has_feign = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| {
+                player.auras.container.has_aura(AURA_FEIGN_DEATH)
+            })
+            .unwrap_or(true);
         assert!(!has_feign, "feign death should be cleared after hello");
 
         // Should still receive a gossip packet since creature is valid
         let out = rx.try_recv();
-        assert!(out.is_ok(), "valid questgiver should send gossip after hello");
+        assert!(
+            out.is_ok(),
+            "valid questgiver should send gossip after hello"
+        );
     }
 
     #[tokio::test]
@@ -1479,7 +1572,10 @@ mod tests {
             .creature_mgr
             .with_creature_mut(npc_guid, |c| c.movement_paused)
             .expect("creature should exist");
-        assert!(paused, "non-civilian, non-totem creature should have movement paused after hello");
+        assert!(
+            paused,
+            "non-civilian, non-totem creature should have movement paused after hello"
+        );
     }
 
     #[tokio::test]
@@ -1510,7 +1606,9 @@ mod tests {
     const CHANNELED_SPELL_ID: u32 = 9999;
     const INTERACT_INTERRUPT_FLAGS: u32 = 0x00000C00; // TALK | USE
 
-    fn make_channeled_spell(channel_interrupt_flags: u32) -> crate::world::dbc::structures::SpellEntry {
+    fn make_channeled_spell(
+        channel_interrupt_flags: u32,
+    ) -> crate::world::dbc::structures::SpellEntry {
         crate::world::dbc::structures::SpellEntry {
             id: CHANNELED_SPELL_ID,
             name: "Test Channel".to_string(),
@@ -1601,21 +1699,17 @@ mod tests {
 
     fn add_channeled_cast(world: &mut crate::world::World, player_guid: ObjectGuid, spell_id: u32) {
         let cast = crate::world::game::player::spells::state::ActiveCast::new_channel(
-            spell_id,
-            None,
-            10_000,
-            10,
-            false,
-            0.0,
-            0.0,
-            0.0,
+            spell_id, None, 10_000, 10, false, 0.0, 0.0, 0.0,
         );
-        world.managers.player_mgr.with_player_mut(player_guid, |player| {
-            player.spells.set_current_spell(
-                crate::world::game::player::spells::state::CurrentSpellType::Channeled,
-                cast,
-            );
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.spells.set_current_spell(
+                    crate::world::game::player::spells::state::CurrentSpellType::Channeled,
+                    cast,
+                );
+            });
     }
 
     fn has_channeled_cast(world: &crate::world::World, player_guid: ObjectGuid) -> bool {
@@ -1625,7 +1719,9 @@ mod tests {
             .with_player(player_guid, |player| {
                 player
                     .spells
-                    .get_current_spell(crate::world::game::player::spells::state::CurrentSpellType::Channeled)
+                    .get_current_spell(
+                        crate::world::game::player::spells::state::CurrentSpellType::Channeled,
+                    )
                     .is_some()
             })
             .unwrap_or(false)
@@ -1640,11 +1736,17 @@ mod tests {
         let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
 
         // Register a channeled spell with matching interrupt flags
-        world.managers.spell_mgr.add_spell(make_channeled_spell(INTERACT_INTERRUPT_FLAGS));
+        world
+            .managers
+            .spell_mgr
+            .add_spell(make_channeled_spell(INTERACT_INTERRUPT_FLAGS));
 
         // Give the player a channeled cast
         add_channeled_cast(&mut world, player_guid, CHANNELED_SPELL_ID);
-        assert!(has_channeled_cast(&world, player_guid), "channel should be active before hello");
+        assert!(
+            has_channeled_cast(&world, player_guid),
+            "channel should be active before hello"
+        );
 
         let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
@@ -1668,11 +1770,17 @@ mod tests {
         let npc_guid = add_creature(&mut world, 100, NPC_FLAG_QUEST_GIVER);
 
         // Register a channeled spell with NON-matching interrupt flags (DAMAGE flag = 0x2)
-        world.managers.spell_mgr.add_spell(make_channeled_spell(0x2));
+        world
+            .managers
+            .spell_mgr
+            .add_spell(make_channeled_spell(0x2));
 
         // Give the player a channeled cast
         add_channeled_cast(&mut world, player_guid, CHANNELED_SPELL_ID);
-        assert!(has_channeled_cast(&world, player_guid), "channel should be active before hello");
+        assert!(
+            has_channeled_cast(&world, player_guid),
+            "channel should be active before hello"
+        );
 
         let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
         packet.write_guid(npc_guid);
@@ -1713,7 +1821,10 @@ mod tests {
 
     fn add_second_player(
         world: &mut crate::world::World,
-    ) -> (Arc<WorldSession>, mpsc::UnboundedReceiver<crate::shared::protocol::WorldPacket>) {
+    ) -> (
+        Arc<WorldSession>,
+        mpsc::UnboundedReceiver<crate::shared::protocol::WorldPacket>,
+    ) {
         let (tx, rx) = mpsc::unbounded_channel();
         let session = Arc::new(WorldSession::new(2, 2, "Member".to_string(), 0, tx));
         let player_guid = test_member_guid();
@@ -1735,11 +1846,8 @@ mod tests {
         leader_guid: ObjectGuid,
         member_guid: ObjectGuid,
     ) {
-        let mut group = crate::world::game::group::types::GroupData::new(
-            1,
-            leader_guid,
-            "Tester".to_string(),
-        );
+        let mut group =
+            crate::world::game::group::types::GroupData::new(1, leader_guid, "Tester".to_string());
         group
             .add_member(member_guid, "Member".to_string())
             .expect("add member");
@@ -1751,7 +1859,13 @@ mod tests {
     #[tokio::test]
     async fn push_quest_to_party_not_logged_in() {
         let mut world = test_world();
-        let session = Arc::new(WorldSession::new(99, 99, "NoPlayer".to_string(), 0, mpsc::unbounded_channel().0));
+        let session = Arc::new(WorldSession::new(
+            99,
+            99,
+            "NoPlayer".to_string(),
+            0,
+            mpsc::unbounded_channel().0,
+        ));
         let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
         let result = handle_push_quest_to_party(&session, &mut packet, &world).await;
@@ -1800,9 +1914,12 @@ mod tests {
 
         // Place both players on the same map and within distance
         let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
-        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
-            p.movement.position = pos;
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(test_player_guid(), |p| {
+                p.movement.position = pos;
+            });
         world.managers.player_mgr.with_player_mut(member_guid, |p| {
             p.movement.position = pos;
         });
@@ -1823,10 +1940,7 @@ mod tests {
         assert_eq!(member_out.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_DETAILS);
 
         // Member should have quest share info set
-        let share = world
-            .managers
-            .player_mgr
-            .get_quest_share_info(member_guid);
+        let share = world.managers.player_mgr.get_quest_share_info(member_guid);
         assert!(share.is_some(), "member should have quest share info");
         assert_eq!(share.unwrap().quest_id, 1);
         assert_eq!(share.unwrap().player_guid, test_player_guid());
@@ -1844,9 +1958,12 @@ mod tests {
 
         // Place member far away
         let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
-        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
-            p.movement.position = pos;
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(test_player_guid(), |p| {
+                p.movement.position = pos;
+            });
         world.managers.player_mgr.with_player_mut(member_guid, |p| {
             p.movement.position = crate::shared::protocol::Position::new(100.0, 0.0, 0.0, 0.0);
         });
@@ -1878,19 +1995,25 @@ mod tests {
 
         // Place both players on same map and within distance
         let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
-        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
-            p.movement.position = pos;
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(test_player_guid(), |p| {
+                p.movement.position = pos;
+            });
         world.managers.player_mgr.with_player_mut(member_guid, |p| {
             p.movement.position = pos;
         });
 
         // Mark quest as complete on member
-        world.managers.player_mgr.with_player_mut(member_guid, |player| {
-            let mut prog = crate::world::game::npc::quest::types::QuestProgress::new(1);
-            prog.status = crate::world::game::npc::quest::types::QuestStatus::Complete;
-            player.active_quests.push(prog);
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(member_guid, |player| {
+                let mut prog = crate::world::game::npc::quest::types::QuestProgress::new(1);
+                prog.status = crate::world::game::npc::quest::types::QuestStatus::Complete;
+                player.active_quests.push(prog);
+            });
 
         let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
@@ -1917,17 +2040,25 @@ mod tests {
         add_quest(&mut world, 1, None);
 
         let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
-        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
-            p.movement.position = pos;
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(test_player_guid(), |p| {
+                p.movement.position = pos;
+            });
         world.managers.player_mgr.with_player_mut(member_guid, |p| {
             p.movement.position = pos;
         });
 
         // Give member the quest as in-progress
-        world.managers.player_mgr.with_player_mut(member_guid, |player| {
-            player.active_quests.push(crate::world::game::npc::quest::types::QuestProgress::new(1));
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(member_guid, |player| {
+                player
+                    .active_quests
+                    .push(crate::world::game::npc::quest::types::QuestProgress::new(1));
+            });
 
         let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
@@ -1953,24 +2084,28 @@ mod tests {
         add_quest(&mut world, 1, None);
 
         let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
-        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
-            p.movement.position = pos;
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(test_player_guid(), |p| {
+                p.movement.position = pos;
+            });
         world.managers.player_mgr.with_player_mut(member_guid, |p| {
             p.movement.position = pos;
         });
 
         // Fill member's quest log to max
         let max_slots = crate::world::game::npc::quest::types::MAX_QUEST_LOG_SIZE;
-        world.managers.player_mgr.with_player_mut(member_guid, |player| {
-            for i in 0..max_slots {
-                player
-                    .active_quests
-                    .push(crate::world::game::npc::quest::types::QuestProgress::new(
-                        (100 + i) as u32,
-                    ));
-            }
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(member_guid, |player| {
+                for i in 0..max_slots {
+                    player.active_quests.push(
+                        crate::world::game::npc::quest::types::QuestProgress::new((100 + i) as u32),
+                    );
+                }
+            });
 
         let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::CMSG_PUSHQUESTTOPARTY);
         packet.write_u32(1);
@@ -1996,9 +2131,12 @@ mod tests {
         add_quest(&mut world, 1, None);
 
         let pos = crate::shared::protocol::Position::new(0.0, 0.0, 0.0, 0.0);
-        world.managers.player_mgr.with_player_mut(test_player_guid(), |p| {
-            p.movement.position = pos;
-        });
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(test_player_guid(), |p| {
+                p.movement.position = pos;
+            });
         world.managers.player_mgr.with_player_mut(member_guid, |p| {
             p.movement.position = pos;
         });
@@ -2030,7 +2168,13 @@ mod tests {
     #[tokio::test]
     async fn quest_push_result_not_logged_in() {
         let world = test_world();
-        let session = Arc::new(WorldSession::new(99, 99, "NoPlayer".to_string(), 0, mpsc::unbounded_channel().0));
+        let session = Arc::new(WorldSession::new(
+            99,
+            99,
+            "NoPlayer".to_string(),
+            0,
+            mpsc::unbounded_channel().0,
+        ));
         let mut packet = crate::shared::protocol::WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
         packet.write_guid(test_player_guid());
         packet.write_u8(2); // accept

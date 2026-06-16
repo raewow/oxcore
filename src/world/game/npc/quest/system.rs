@@ -14,9 +14,9 @@ use crate::shared::messages::gossip::SmsgGossipComplete;
 use crate::shared::messages::quest::{
     MsgQuestPushResult, QuestListItem, RequestItemInfo, RewardItemInfo, SmsgQuestConfirmAccept,
     SmsgQuestgiverOfferRewardV2, SmsgQuestgiverQuestComplete, SmsgQuestgiverQuestDetailsV2,
-    SmsgQuestgiverQuestListV2, SmsgQuestgiverRequestItemsV2, SmsgQuestgiverStatus, SmsgQuestlogFull,
-    SmsgQuestupdateAddItem, SmsgQuestupdateAddKill, SmsgQuestupdateComplete, SmsgQuestupdateFailed,
-    SmsgQuestupdateFailedtimer,
+    SmsgQuestgiverQuestListV2, SmsgQuestgiverRequestItemsV2, SmsgQuestgiverStatus,
+    SmsgQuestlogFull, SmsgQuestupdateAddItem, SmsgQuestupdateAddKill, SmsgQuestupdateComplete,
+    SmsgQuestupdateFailed, SmsgQuestupdateFailedtimer,
 };
 use crate::shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
@@ -110,9 +110,10 @@ impl QuestSystem {
         // Values 0-7 from script override directly; >7 = fallback
         if let Some(script) = world.managers.lua_mgr.get_gossip_script(entry) {
             let player_snap = build_player_snapshot(player_guid, world);
-            let script_status: Option<u32> = world.managers.lua_mgr.with_lua(|lua| {
-                script.get_dialog_status(lua, &player_snap)
-            });
+            let script_status: Option<u32> = world
+                .managers
+                .lua_mgr
+                .with_lua(|lua| script.get_dialog_status(lua, &player_snap));
             if let Some(status) = script_status {
                 if status <= 7 {
                     return Some(match status {
@@ -134,9 +135,10 @@ impl QuestSystem {
         if quest_giver_guid.is_game_object() {
             if let Some(script) = world.managers.lua_mgr.get_game_object_script(entry) {
                 let player_snap = build_player_snapshot(player_guid, world);
-                let script_status: Option<u32> = world.managers.lua_mgr.with_lua(|lua| {
-                    script.get_dialog_status(lua, &player_snap)
-                });
+                let script_status: Option<u32> = world
+                    .managers
+                    .lua_mgr
+                    .with_lua(|lua| script.get_dialog_status(lua, &player_snap));
                 if let Some(status) = script_status {
                     if status <= 7 {
                         return Some(match status {
@@ -1178,7 +1180,10 @@ impl QuestSystem {
             p.active_quests.push(QuestProgress::new(quest.id));
             slot
         }) else {
-            warn!("Player {:?} not found when adding quest {}", player_guid, quest.id);
+            warn!(
+                "Player {:?} not found when adding quest {}",
+                player_guid, quest.id
+            );
             return false;
         };
 
@@ -1324,8 +1329,15 @@ impl QuestSystem {
                 if let Some(sharer) = self.player_mgr.get_player(share.player_guid) {
                     let sharer_pos = sharer.movement.position;
                     let player_pos = self.player_mgr.get_position(player_guid);
-                    let same_map = sharer.map_id == self.player_mgr.get_player(player_guid).map(|p| p.map_id).unwrap_or(u32::MAX);
-                    let within_distance = player_pos.map(|p| p.is_within_range(&sharer_pos, QUEST_SHARE_DISTANCE)).unwrap_or(false);
+                    let same_map = sharer.map_id
+                        == self
+                            .player_mgr
+                            .get_player(player_guid)
+                            .map(|p| p.map_id)
+                            .unwrap_or(u32::MAX);
+                    let within_distance = player_pos
+                        .map(|p| p.is_within_range(&sharer_pos, QUEST_SHARE_DISTANCE))
+                        .unwrap_or(false);
 
                     if !same_map || !within_distance {
                         self.player_mgr.clear_quest_share_info(player_guid);
@@ -1335,7 +1347,8 @@ impl QuestSystem {
                             sender_guid: player_guid,
                             msg: 4, // QUEST_PARTY_MSG_TOO_FAR
                         };
-                        self.broadcast_mgr.send_msg_to_player(share.player_guid, too_far);
+                        self.broadcast_mgr
+                            .send_msg_to_player(share.player_guid, too_far);
                         return Ok(());
                     }
 
@@ -1344,7 +1357,8 @@ impl QuestSystem {
                         sender_guid: player_guid,
                         msg: 2, // QUEST_PARTY_MSG_ACCEPT_QUEST
                     };
-                    self.broadcast_mgr.send_msg_to_player(share.player_guid, accepted);
+                    self.broadcast_mgr
+                        .send_msg_to_player(share.player_guid, accepted);
                 }
                 self.player_mgr.clear_quest_share_info(player_guid);
             } else {
@@ -1509,7 +1523,10 @@ impl QuestSystem {
         }
 
         // Must have either SHARABLE or PARTY_ACCEPT
-        if !quest.quest_flags.has_flag(QuestFlags::SHARABLE | QuestFlags::PARTY_ACCEPT) {
+        if !quest
+            .quest_flags
+            .has_flag(QuestFlags::SHARABLE | QuestFlags::PARTY_ACCEPT)
+        {
             return Ok(());
         }
 
@@ -2936,8 +2953,8 @@ mod tests {
     use crate::shared::database::Databases;
     use crate::shared::protocol::{ObjectGuid, Position};
     use crate::world::config::Config;
-    use crate::world::game::creature::{Creature, CreatureTemplate};
     use crate::world::game::creature::ai::NPC_FLAG_QUEST_GIVER;
+    use crate::world::game::creature::{Creature, CreatureTemplate};
     use crate::world::game::gameobject::{GameObject, GameObjectTemplate};
     use crate::world::game::player::Player;
     use sqlx::mysql::MySqlPoolOptions;
@@ -3285,11 +3302,16 @@ mod tests {
     ) {
         world.managers.lua_mgr.with_lua(|lua| {
             let table = lua.create_table().unwrap();
-            let func = lua.create_function(move |_, (t, p): (mlua::Table, mlua::Table)| {
-                on_dialog_status(t, p)
-            }).unwrap();
+            let func = lua
+                .create_function(move |_, (t, p): (mlua::Table, mlua::Table)| {
+                    on_dialog_status(t, p)
+                })
+                .unwrap();
             table.set("OnDialogStatus", func).unwrap();
-            world.managers.lua_mgr.register_gossip_script_table(entry, table);
+            world
+                .managers
+                .lua_mgr
+                .register_gossip_script_table(entry, table);
             Ok::<_, mlua::Error>(())
         });
     }
@@ -3411,7 +3433,10 @@ mod tests {
         world.managers.lua_mgr.with_lua(|lua| {
             let table = lua.create_table().unwrap();
             // No OnDialogStatus set
-            world.managers.lua_mgr.register_gossip_script_table(100, table);
+            world
+                .managers
+                .lua_mgr
+                .register_gossip_script_table(100, table);
             Ok::<_, mlua::Error>(())
         });
 

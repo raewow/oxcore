@@ -647,12 +647,12 @@ mod tests {
     #[test]
     fn xp_decays_after_quest_plus_5() {
         let t = template_with_xp(1000, 10);
-        assert_eq!(t.xp_value(16), 800);   // diff=6 → 80%
-        assert_eq!(t.xp_value(17), 600);   // diff=7 → 60%
-        assert_eq!(t.xp_value(18), 400);   // diff=8 → 40%
-        assert_eq!(t.xp_value(19), 200);   // diff=9 → 20%
-        assert_eq!(t.xp_value(20), 100);   // diff=10+ → 10%
-        assert_eq!(t.xp_value(99), 100);   // diff=89 → 10%
+        assert_eq!(t.xp_value(16), 800); // diff=6 → 80%
+        assert_eq!(t.xp_value(17), 600); // diff=7 → 60%
+        assert_eq!(t.xp_value(18), 400); // diff=8 → 40%
+        assert_eq!(t.xp_value(19), 200); // diff=9 → 20%
+        assert_eq!(t.xp_value(20), 100); // diff=10+ → 10%
+        assert_eq!(t.xp_value(99), 100); // diff=89 → 10%
     }
 
     #[test]
@@ -700,20 +700,14 @@ mod tests {
     #[test]
     fn max_level_gold_zero_when_field_is_zero() {
         let t = template_with_max_level_gold(0);
-        assert_eq!(
-            t.get_rew_money_max_level_at_complete(1.0, 112, false),
-            0
-        );
+        assert_eq!(t.get_rew_money_max_level_at_complete(1.0, 112, false), 0);
     }
 
     #[test]
     fn max_level_gold_zero_pre_110_with_xp_to_gold_disabled() {
         let t = template_with_max_level_gold(10000);
         // wow_patch < 110 and no_xp_to_gold = true → 0
-        assert_eq!(
-            t.get_rew_money_max_level_at_complete(1.0, 109, true),
-            0
-        );
+        assert_eq!(t.get_rew_money_max_level_at_complete(1.0, 109, true), 0);
     }
 
     #[test]
@@ -729,27 +723,15 @@ mod tests {
     #[test]
     fn max_level_gold_scaled_post_110_always() {
         let t = template_with_max_level_gold(10000);
-        assert_eq!(
-            t.get_rew_money_max_level_at_complete(1.5, 110, true),
-            15000
-        );
-        assert_eq!(
-            t.get_rew_money_max_level_at_complete(1.5, 112, true),
-            15000
-        );
+        assert_eq!(t.get_rew_money_max_level_at_complete(1.5, 110, true), 15000);
+        assert_eq!(t.get_rew_money_max_level_at_complete(1.5, 112, true), 15000);
     }
 
     #[test]
     fn max_level_gold_rounds() {
         let t = template_with_max_level_gold(100);
-        assert_eq!(
-            t.get_rew_money_max_level_at_complete(1.1, 110, true),
-            110
-        );
-        assert_eq!(
-            t.get_rew_money_max_level_at_complete(0.33, 110, true),
-            33
-        );
+        assert_eq!(t.get_rew_money_max_level_at_complete(1.1, 110, true), 110);
+        assert_eq!(t.get_rew_money_max_level_at_complete(0.33, 110, true), 33);
     }
 
     // --- is_allowed_in_raid tests ---

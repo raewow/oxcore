@@ -898,13 +898,34 @@ mod tests {
 
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUEST_QUERY_RESPONSE);
-        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 123);
-        assert_eq!(u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()), 2);
-        assert_eq!(u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()), 60);
-        assert_eq!(i32::from_le_bytes(packet.data()[12..16].try_into().unwrap()), -42);
-        assert_eq!(u32::from_le_bytes(packet.data()[16..20].try_into().unwrap()), 81);
-        assert_eq!(u32::from_le_bytes(packet.data()[20..24].try_into().unwrap()), 77);
-        assert_eq!(i32::from_le_bytes(packet.data()[24..28].try_into().unwrap()), -12);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
+            123
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[4..8].try_into().unwrap()),
+            2
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[8..12].try_into().unwrap()),
+            60
+        );
+        assert_eq!(
+            i32::from_le_bytes(packet.data()[12..16].try_into().unwrap()),
+            -42
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[16..20].try_into().unwrap()),
+            81
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[20..24].try_into().unwrap()),
+            77
+        );
+        assert_eq!(
+            i32::from_le_bytes(packet.data()[24..28].try_into().unwrap()),
+            -12
+        );
     }
 
     #[test]
@@ -916,7 +937,10 @@ mod tests {
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUEST_CONFIRM_ACCEPT);
-        assert_eq!(u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()), 42);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
+            42
+        );
         // Title should be serialized after quest_id
         assert!(packet.data().len() > 4);
     }
