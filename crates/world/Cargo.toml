@@ -1,0 +1,95 @@
+[package]
+name = "oxcore-world"
+version = "0.1.0"
+edition = "2021"
+authors = ["MaNGOS Rust Port"]
+description = "World/game server library for oxcore (managers, systems, handlers, networking)"
+
+[features]
+default = []
+testing = ["oxcore-shared/testing"]
+
+[dependencies]
+oxcore-shared.workspace = true
+oxcore-dbc.workspace = true
+oxcore-map.workspace = true
+
+# Async runtime
+tokio = { version = "1.35", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "io-util",
+    "time",
+    "sync",
+    "signal",
+    "fs",
+    "process",
+] }
+futures = "0.3"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "mysql", "chrono"] }
+
+# Cryptography
+sha1 = "0.10"
+md5 = "0.7"
+digest = "0.10"
+hmac = "0.12"
+sha2 = "0.10"
+base32 = "0.4"
+rand = "0.8"
+hex = "0.4"
+wow_srp = "0.7"
+
+# Configuration
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi", "registry"] }
+
+# Concurrency & Threading
+parking_lot = "0.12"
+crossbeam = "0.8"
+dashmap = "5.5"
+arc-swap = "1.6"
+smallvec = "1.11"
+bitflags = "2.4"
+bitvec = "1.0"
+
+# Game Math & Utilities
+byteorder = "1.5"
+bytes = "1.5"
+uuid = { version = "1.6", features = ["v4"] }
+
+# Error Handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Other Utilities
+chrono = "0.4"
+humantime = "2.1"
+serde_json = "1.0"
+num-traits = "0.2"
+rustrict = "0.7.36"
+
+# Compression
+flate2 = "1.0"
+
+# Command line parsing
+clap = { version = "4.4", features = ["derive"] }
+
+# Lua scripting (vendored bundles Lua statically)
+mlua = { version = "0.10", features = ["lua54", "serialize", "send", "vendored"] }
+
+async-trait = "0.1.89"
+
+[dev-dependencies]
+oxcore-shared = { path = "../shared", features = ["testing"] }
+tokio-test = "0.4"
+mockall = "0.13"
+
+[lints.rust]
+unused = "allow"

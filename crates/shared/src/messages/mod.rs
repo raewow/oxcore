@@ -6,7 +6,7 @@
 //! # Example
 //! ```rust,no_run
 //! use oxcore_shared::messages::{ToWorldPacket, SmsgGuildInvite};
-//! # async fn example(session: wow_server::world::core::session::world_session::WorldSession) -> anyhow::Result<()> {
+//! # async fn example(session: oxcore_world::core::session::world_session::WorldSession) -> anyhow::Result<()> {
 //! let msg = SmsgGuildInvite {
 //!     inviter_name: "Alice",
 //!     guild_name: "MyGuild",
