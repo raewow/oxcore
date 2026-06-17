@@ -184,8 +184,18 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
         let path = entry.path();
         let sql = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
+        let mut failed = 0usize;
         for stmt in split_statements(&sql) {
-            let _ = sqlx::query(stmt).execute(pool).await;
+            if sqlx::query(stmt).execute(pool).await.is_err() {
+                failed += 1;
+            }
+        }
+        if failed > 0 {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            println!("    WARNING: {failed} statement(s) failed in {name}");
         }
     }
 
@@ -195,11 +205,95 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
     Ok(())
 }
 
+/// Split a SQL script into individual statements on top-level `;`.
+///
+/// `;` characters inside single-quoted string literals or backtick-quoted
+/// identifiers are ignored, so mysqldump INSERTs whose text columns contain
+/// semicolons (e.g. quest Details/Objectives) are kept intact. Backslash
+/// escapes inside strings are honoured.
 fn split_statements(sql: &str) -> Vec<&str> {
-    sql.split(';')
+    let bytes = sql.as_bytes();
+    let mut statements = Vec::new();
+    let mut start = 0usize;
+    let mut in_single = false;
+    let mut in_backtick = false;
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_single {
+            match c {
+                // Backslash escapes the next byte (\\, \', \n, ...).
+                b'\\' => {
+                    i += 2;
+                    continue;
+                }
+                b'\'' => in_single = false,
+                _ => {}
+            }
+        } else if in_backtick {
+            if c == b'`' {
+                in_backtick = false;
+            }
+        } else {
+            match c {
+                b'\'' => in_single = true,
+                b'`' => in_backtick = true,
+                b';' => {
+                    statements.push(&sql[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+
+    if start < sql.len() {
+        statements.push(&sql[start..]);
+    }
+
+    statements
+        .into_iter()
         .map(str::trim)
         .filter(|s| !s.is_empty() && !s.starts_with("--") && !s.starts_with("/*"))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_statements;
+
+    #[test]
+    fn keeps_semicolons_inside_string_literals() {
+        // Mirrors a mysqldump quest_template INSERT: semicolons live inside the
+        // quoted text columns and must not split the statement.
+        let sql = "INSERT INTO `quest_template` VALUES \
+            (1,'Go to the site; then return','Details; more'),\
+            (2,'Another; quest','Objectives; here');\n\
+            INSERT INTO `quest_template` VALUES (3,'x','y');";
+        let stmts = split_statements(sql);
+        assert_eq!(stmts.len(), 2, "expected 2 statements, got {stmts:?}");
+        assert!(stmts[0].contains("site; then return"));
+        assert!(stmts[1].starts_with("INSERT INTO `quest_template` VALUES (3"));
+    }
+
+    #[test]
+    fn handles_escaped_quotes_and_backticks() {
+        // \' is an escaped quote (string continues); a ; right after must stay inside.
+        let sql = "INSERT INTO `t` VALUES ('it\\'s a test; really','ok');CREATE TABLE `a;b` (x int);";
+        let stmts = split_statements(sql);
+        assert_eq!(stmts.len(), 2, "got {stmts:?}");
+        assert!(stmts[0].contains("it\\'s a test; really"));
+        assert!(stmts[1].contains("`a;b`"));
+    }
+
+    #[test]
+    fn drops_comments_and_empty() {
+        let sql = "-- a comment\n/*!40101 SET X */;\nSELECT 1;;";
+        let stmts = split_statements(sql);
+        assert_eq!(stmts, vec!["SELECT 1"]);
+    }
 }
 
 fn mask(url: &str) -> String {
