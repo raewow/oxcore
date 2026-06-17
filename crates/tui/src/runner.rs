@@ -5,7 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
+    KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -46,14 +49,14 @@ struct TermGuard;
 impl Drop for TermGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(std::io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
     }
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     Ok(Terminal::new(backend)?)
 }
@@ -98,6 +101,11 @@ pub async fn run_tui_loading(
             }
             result = log_updates.changed() => {
                 if result.is_ok() {
+                    if let Phase::Running(app) = &mut phase {
+                        if app.follow_logs {
+                            app.follow_latest();
+                        }
+                    }
                     needs_draw = true;
                 }
             }
@@ -128,6 +136,13 @@ pub async fn run_tui_loading(
                                 }
                                 needs_draw = true;
                             }
+                        }
+                    }
+                    Some(Ok(Event::Mouse(mouse))) => {
+                        if let Phase::Running(app) = &mut phase {
+                            let size = terminal.size()?;
+                            input::handle_mouse(app, mouse, size);
+                            needs_draw = true;
                         }
                     }
                     Some(Ok(_)) => {}

@@ -121,13 +121,10 @@ pub fn render_loading(
 
     let records = store.filtered(LogFilter::All);
     let height = inner.height as usize;
-    let start = records.len().saturating_sub(height);
-    let lines: Vec<Line> = records[start..]
-        .iter()
-        .map(|r| record_line(r, true))
-        .collect();
+    let lines: Vec<Line> = records.iter().flat_map(|r| record_lines(r, true)).collect();
+    let start = lines.len().saturating_sub(height);
     f.render_widget(
-        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        Paragraph::new(Text::from(lines[start..].to_vec())).wrap(Wrap { trim: false }),
         inner,
     );
 }
@@ -233,28 +230,56 @@ fn source_style(source: LogSource) -> Style {
     Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
-fn record_line(rec: &LogRecord, show_source: bool) -> Line<'static> {
+fn record_line(
+    rec: &LogRecord,
+    show_source: bool,
+    message: String,
+    continued: bool,
+) -> Line<'static> {
     let mut spans = vec![
         Span::styled(
-            format!("{} ", rec.time),
+            if continued {
+                "             ".to_string()
+            } else {
+                format!("{} ", rec.time)
+            },
             Style::default().fg(Color::DarkGray),
         ),
         Span::styled(
-            format!("{:>5} ", rec.level.as_str()),
+            if continued {
+                "      ".to_string()
+            } else {
+                format!("{:>5} ", rec.level.as_str())
+            },
             level_style(rec.level).add_modifier(Modifier::BOLD),
         ),
     ];
     if show_source {
         spans.push(Span::styled(
-            format!("[{}] ", rec.source.tag()),
+            if continued {
+                "       ".to_string()
+            } else {
+                format!("[{}] ", rec.source.tag())
+            },
             source_style(rec.source),
         ));
     }
-    spans.push(Span::raw(rec.message.clone()));
+    spans.push(Span::raw(message));
     Line::from(spans)
 }
 
-fn render_logs(f: &mut Frame, area: Rect, app: &App) {
+fn record_lines(rec: &LogRecord, show_source: bool) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for (idx, message) in rec.message.lines().enumerate() {
+        lines.push(record_line(rec, show_source, message.to_string(), idx > 0));
+    }
+    if lines.is_empty() {
+        lines.push(record_line(rec, show_source, String::new(), false));
+    }
+    lines
+}
+
+fn render_logs(f: &mut Frame, area: Rect, app: &mut App) {
     let filter = app.log_filter();
     let show_source = matches!(app.current_tab(), TabKind::Both);
     let mut records = app.store.filtered(filter);
@@ -284,18 +309,18 @@ fn render_logs(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    let lines: Vec<Line> = records
+        .iter()
+        .flat_map(|r| record_lines(r, show_source))
+        .collect();
+
     let height = inner.height as usize;
-    let total = records.len();
+    let total = lines.len();
+    app.clamp_scroll_to(total, height);
     // `scroll` lines up from the bottom.
     let end = total.saturating_sub(app.scroll);
     let start = end.saturating_sub(height);
-    let visible = &records[start..end];
-
-    let lines: Vec<Line> = visible
-        .iter()
-        .map(|r| record_line(r, show_source))
-        .collect();
-    let para = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
+    let para = Paragraph::new(Text::from(lines[start..end].to_vec())).wrap(Wrap { trim: false });
     f.render_widget(para, inner);
 }
 

@@ -1,8 +1,9 @@
 //! Key event handling for the TUI.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Size;
 
-use crate::app::{App, Focus};
+use crate::app::{App, Focus, TabKind};
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     // Quit-confirmation popup captures all input while open.
@@ -45,6 +46,22 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.prev_tab();
             return;
         }
+        KeyCode::PageUp => {
+            app.scroll_up(10);
+            return;
+        }
+        KeyCode::PageDown => {
+            app.scroll_down(10);
+            return;
+        }
+        KeyCode::Up if ctrl => {
+            app.scroll_up(1);
+            return;
+        }
+        KeyCode::Down if ctrl => {
+            app.scroll_down(1);
+            return;
+        }
         _ => {}
     }
 
@@ -67,11 +84,58 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::End => app.cursor_end(),
             KeyCode::Up => app.history_up(),
             KeyCode::Down => app.history_down(),
-            KeyCode::PageUp => app.scroll_up(10),
-            KeyCode::PageDown => app.scroll_down(10),
             KeyCode::Char('q') if app.input.is_empty() => app.request_quit(),
             KeyCode::Char(c) => app.push_char(c),
             _ => {}
         },
     }
+}
+
+pub fn handle_mouse(app: &mut App, mouse: MouseEvent, size: Size) {
+    if app.confirm_quit {
+        return;
+    }
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) if mouse.row == 0 => {
+            if let Some(idx) = tab_at(app, mouse.column) {
+                app.select_tab(idx);
+            }
+        }
+        MouseEventKind::ScrollUp if over_logs(app, size, mouse.column, mouse.row) => {
+            app.scroll_up(3);
+        }
+        MouseEventKind::ScrollDown if over_logs(app, size, mouse.column, mouse.row) => {
+            app.scroll_down(3);
+        }
+        _ => {}
+    }
+}
+
+fn tab_at(app: &App, x: u16) -> Option<usize> {
+    let mut start = 0u16;
+    for (idx, title) in app.tab_titles().iter().enumerate() {
+        let width = title.chars().count() as u16 + 2;
+        if x >= start && x < start.saturating_add(width) {
+            return Some(idx);
+        }
+        start = start.saturating_add(width);
+    }
+    None
+}
+
+fn over_logs(app: &App, size: Size, x: u16, y: u16) -> bool {
+    if matches!(app.current_tab(), TabKind::Performance) || size.height <= 4 {
+        return false;
+    }
+
+    let body_y = 1;
+    let body_h = size.height.saturating_sub(4);
+    let log_w = size.width.saturating_sub(34);
+    if x >= log_w || y < body_y || y >= body_y.saturating_add(body_h) {
+        return false;
+    }
+
+    let log_y = if app.show_logo() { body_y + 4 } else { body_y };
+    y >= log_y && y < body_y.saturating_add(body_h)
 }

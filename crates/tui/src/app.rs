@@ -94,6 +94,8 @@ pub struct App {
     pub history_cursor: Option<usize>,
     /// Lines scrolled up from the bottom of the log view.
     pub scroll: usize,
+    /// Whether new log records should keep the viewport pinned to the newest lines.
+    pub follow_logs: bool,
     pub should_quit: bool,
     pub perf: Vec<PaneSeries>,
     /// Active log filter substring (empty = no filtering).
@@ -128,6 +130,7 @@ impl App {
             history: Vec::new(),
             history_cursor: None,
             scroll: 0,
+            follow_logs: true,
             should_quit: false,
             perf,
             filter: String::new(),
@@ -167,12 +170,19 @@ impl App {
 
     pub fn next_tab(&mut self) {
         self.active = (self.active + 1) % self.tabs.len();
-        self.scroll = 0;
+        self.follow_latest();
     }
 
     pub fn prev_tab(&mut self) {
         self.active = (self.active + self.tabs.len() - 1) % self.tabs.len();
-        self.scroll = 0;
+        self.follow_latest();
+    }
+
+    pub fn select_tab(&mut self, idx: usize) {
+        if idx < self.tabs.len() {
+            self.active = idx;
+            self.follow_latest();
+        }
     }
 
     /// The log filter for the current tab.
@@ -288,7 +298,7 @@ impl App {
         match self.focus {
             Focus::Filter => {
                 self.filter.push(c);
-                self.scroll = 0;
+                self.follow_latest();
             }
             Focus::Command => {
                 let byte = byte_index(&self.input, self.input_cursor);
@@ -303,7 +313,7 @@ impl App {
         match self.focus {
             Focus::Filter => {
                 self.filter.pop();
-                self.scroll = 0;
+                self.follow_latest();
             }
             Focus::Command => {
                 if self.input_cursor > 0 {
@@ -375,7 +385,7 @@ impl App {
     pub fn clear_filter(&mut self) {
         self.filter.clear();
         self.focus = Focus::Command;
-        self.scroll = 0;
+        self.follow_latest();
     }
 
     /// Case-insensitive substring match over level + source tag + message.
@@ -392,6 +402,11 @@ impl App {
         )
         .to_lowercase();
         hay.contains(&needle)
+    }
+
+    pub fn clamp_scroll_to(&mut self, total_lines: usize, viewport_height: usize) {
+        let max_scroll = total_lines.saturating_sub(viewport_height);
+        self.scroll = self.scroll.min(max_scroll);
     }
 
     /// Begin the quit-confirmation flow (shows the popup; does not quit yet).
@@ -439,10 +454,19 @@ impl App {
 
     pub fn scroll_up(&mut self, amount: usize) {
         self.scroll = self.scroll.saturating_add(amount);
+        self.follow_logs = false;
     }
 
     pub fn scroll_down(&mut self, amount: usize) {
         self.scroll = self.scroll.saturating_sub(amount);
+        if self.scroll == 0 {
+            self.follow_logs = true;
+        }
+    }
+
+    pub fn follow_latest(&mut self) {
+        self.scroll = 0;
+        self.follow_logs = true;
     }
 
     /// Submit the current input as a console command to the resolved pane.
@@ -507,7 +531,7 @@ impl App {
         self.history_cursor = None;
         self.input.clear();
         self.input_cursor = 0;
-        self.scroll = 0;
+        self.follow_latest();
     }
 
     /// Sample metrics into the perf history (called ~1/s).
