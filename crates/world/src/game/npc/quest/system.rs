@@ -311,16 +311,19 @@ impl QuestSystem {
         let mut rewards = Vec::new();
 
         let choice_count = quest.get_rew_choice_items_count() as u32;
-        if reward_choice >= choice_count {
-            return None;
-        }
         if choice_count > 0 {
+            // A choice reward exists: the selected index must be valid.
+            if reward_choice >= choice_count {
+                return None;
+            }
             let idx = reward_choice as usize;
             rewards.push((
                 quest.rew_choice_item_id[idx],
                 quest.rew_choice_item_count[idx],
             ));
         }
+        // No choice rewards: the client sends reward_choice = 0, which is meaningless
+        // here and must be ignored rather than rejected.
 
         for i in 0..super::types::QUEST_REWARDS_COUNT {
             rewards.push((quest.rew_item_id[i], quest.rew_item_count[i]));
@@ -1251,18 +1254,31 @@ impl QuestSystem {
             }
         }
 
-        if quest.is_auto_complete() || self.sync_item_objectives_from_inventory(player_guid, quest)
-        {
-            self.player_mgr.with_player_mut(player_guid, |p| {
-                if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest.id)
+        // Sync any required items already in the player's bags, then mark the quest
+        // complete on accept if it has no outstanding objectives. This covers
+        // no-objective quests, deliver quests whose items are already carried, and
+        // auto-complete quests. Matches C++ AddQuest -> CanCompleteQuest -> SetQuestStatus(COMPLETE).
+        // Without this, pack_quest_count_state reports the quest as incomplete and the
+        // client never shows it as ready to turn in.
+        self.sync_item_objectives_from_inventory(player_guid, quest);
+
+        let complete_on_accept = self
+            .player_mgr
+            .with_player_mut(player_guid, |p| {
+                if let Some(progress) =
+                    p.active_quests.iter_mut().find(|q| q.quest_id == quest.id)
                 {
                     if progress.is_complete(quest) || quest.is_auto_complete() {
                         progress.status = QuestStatus::Complete;
                         progress.mark_changed();
+                        return true;
                     }
                 }
-            });
+                false
+            })
+            .unwrap_or(false);
 
+        if complete_on_accept {
             let complete_msg = SmsgQuestupdateComplete { quest_id: quest.id };
             self.broadcast_mgr
                 .send_msg_to_player(player_guid, complete_msg);

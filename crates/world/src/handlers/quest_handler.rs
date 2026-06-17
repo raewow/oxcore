@@ -9,7 +9,9 @@ use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
 use crate::game::common::player_constants::get_faction_for_race;
-use crate::game::creature::ai::{is_hostile_faction, is_npc, NPC_FLAG_QUEST_GIVER};
+use crate::game::creature::ai::{
+    is_hostile_faction, is_npc, NPC_FLAG_GOSSIP, NPC_FLAG_QUEST_GIVER, NPC_FLAG_VENDOR,
+};
 use crate::game::npc::quest::system::QUEST_SHARE_DISTANCE;
 use crate::game::npc::quest::types::{QuestStatus, MAX_QUEST_LOG_SIZE};
 use crate::game::player::auras::effects::AURA_FEIGN_DEATH;
@@ -281,12 +283,58 @@ pub async fn handle_questgiver_hello(
         }
     }
 
-    let quest_data = if (npc_flags & NPC_FLAG_QUEST_GIVER) != 0 {
+    // Build the quest list this NPC offers/accepts for the player.
+    let quest_list = if (npc_flags & NPC_FLAG_QUEST_GIVER) != 0 {
+        world
+            .systems
+            .quest
+            .prepare_quest_menu(player_guid, entry, world)
+    } else {
+        Vec::new()
+    };
+
+    // SendPreparedGossip: an NPC without the gossip flag that has quests (and is
+    // not a vendor) opens the quest interface directly instead of a gossip menu.
+    let has_gossip_flag = (npc_flags & NPC_FLAG_GOSSIP) != 0;
+    let has_vendor_flag = (npc_flags & NPC_FLAG_VENDOR) != 0;
+
+    if !has_gossip_flag && !has_vendor_flag && !quest_list.is_empty() {
+        if quest_list.len() == 1 {
+            let quest_id = quest_list[0].quest_id;
+            match world.systems.quest.get_quest_status(player_guid, quest_id) {
+                QuestStatus::Complete | QuestStatus::Incomplete => {
+                    world
+                        .systems
+                        .quest
+                        .handle_quest_complete(player_guid, quest_giver_guid, quest_id, world)
+                        .await?;
+                }
+                _ => {
+                    world.systems.quest.send_quest_details(
+                        player_guid,
+                        quest_giver_guid,
+                        quest_id,
+                        world,
+                    )?;
+                }
+            }
+        } else {
+            world.systems.quest.send_quest_giver_quest_list(
+                player_guid,
+                quest_giver_guid,
+                entry,
+                world,
+            )?;
+        }
+        return Ok(());
+    }
+
+    // Otherwise show the gossip menu (any quests are folded into its quest section).
+    let quest_data = if quest_list.is_empty() {
+        None
+    } else {
         Some(
-            world
-                .systems
-                .quest
-                .prepare_quest_menu(player_guid, entry, world)
+            quest_list
                 .into_iter()
                 .map(|q| oxcore_shared::messages::GossipQuestData {
                     quest_id: q.quest_id,
@@ -296,8 +344,6 @@ pub async fn handle_questgiver_hello(
                 })
                 .collect(),
         )
-    } else {
-        None
     };
 
     world

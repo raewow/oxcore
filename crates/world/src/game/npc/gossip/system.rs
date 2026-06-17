@@ -338,6 +338,14 @@ impl GossipSystem {
         let mut filtered = Vec::new();
 
         for item in items {
+            // Quests are delivered in the dedicated quest section of the gossip
+            // packet, never as a clickable gossip option. The generic menu-0
+            // fallback contains a QUESTGIVER placeholder row; skip it (matches
+            // PrepareGossipMenu setting hasMenuItem=false for GOSSIP_OPTION_QUESTGIVER).
+            if item.option_id == gossip_option::QUESTGIVER {
+                continue;
+            }
+
             // Check NPC flag requirement
             if item.npc_option_npcflag > 0 {
                 if (npc_flags & item.npc_option_npcflag) == 0 {
