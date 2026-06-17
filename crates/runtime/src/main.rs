@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use oxcore_shared::config::{find_config_file, load_toml};
-use oxcore_tui::{LoadUpdate, LogSettings, LogStore, Progress, ServerPane};
+use oxcore_tui::{LoadUpdate, LogControl, LogSettings, LogStore, Progress, ServerPane};
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info};
@@ -120,16 +120,24 @@ async fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(find_config_file);
 
-    let root: RootConfig = load_toml(&config_path)
-        .with_context(|| format!("Failed to load configuration from {}", config_path.display()))?;
+    let root: RootConfig = load_toml(&config_path).with_context(|| {
+        format!(
+            "Failed to load configuration from {}",
+            config_path.display()
+        )
+    })?;
 
     // Decide output mode.
     let use_tui = !args.headless && std::io::stdout().is_terminal();
     let settings = log_settings(&root);
 
     let store = LogStore::new(5000);
+    let mut log_control: Option<LogControl> = None;
     if use_tui {
-        oxcore_tui::install_tui_subscriber(store.clone(), &settings)?;
+        log_control = Some(oxcore_tui::install_tui_subscriber(
+            store.clone(),
+            &settings,
+        )?);
     } else {
         oxcore_tui::install_headless_subscriber(&settings)?;
     }
@@ -161,7 +169,9 @@ async fn main() -> Result<()> {
                     Some(c) => c,
                     None => {
                         let _ = load_tx
-                            .send(LoadUpdate::Failed("[auth] config section missing".to_string()))
+                            .send(LoadUpdate::Failed(
+                                "[auth] config section missing".to_string(),
+                            ))
                             .await;
                         return;
                     }
@@ -199,13 +209,16 @@ async fn main() -> Result<()> {
                     Some(c) => c,
                     None => {
                         let _ = load_tx
-                            .send(LoadUpdate::Failed("[world] config section missing".to_string()))
+                            .send(LoadUpdate::Failed(
+                                "[world] config section missing".to_string(),
+                            ))
                             .await;
                         return;
                     }
                 };
                 let (tx, rx) = mpsc::channel(100);
-                match oxcore_world::serve(config, shutdown_task.subscribe(), rx, progress_task).await
+                match oxcore_world::serve(config, shutdown_task.subscribe(), rx, progress_task)
+                    .await
                 {
                     Ok(world) => {
                         let commands = world.command_registry.read().await.command_names();
@@ -229,7 +242,14 @@ async fn main() -> Result<()> {
             let _ = load_tx.send(LoadUpdate::Ready(panes)).await;
         });
 
-        oxcore_tui::run_tui_loading(store, progress, shutdown_tx.clone(), load_rx).await?;
+        oxcore_tui::run_tui_loading(
+            store,
+            log_control.context("TUI log control was not initialized")?,
+            progress,
+            shutdown_tx.clone(),
+            load_rx,
+        )
+        .await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
     } else {
         // Headless: serve directly, then a single ctrl-c maps to the shared shutdown.
@@ -240,7 +260,10 @@ async fn main() -> Result<()> {
             oxcore_auth::serve(config, metrics, shutdown_tx.clone(), rx).await?;
         }
         if matches!(args.only, RunMode::Both | RunMode::World) {
-            let config = root.world.clone().context("[world] config section missing")?;
+            let config = root
+                .world
+                .clone()
+                .context("[world] config section missing")?;
             let (_tx, rx) = mpsc::channel(100);
             oxcore_world::serve(config, shutdown_tx.subscribe(), rx, Progress::new()).await?;
         }

@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use tracing::Level;
 
 use crate::log_layer::{LogFilter, LogSource, LogStore};
+use crate::logging::{level_str, parse_level, LogControl};
 use crate::metrics::{MetricsSnapshot, MetricsSource};
 
 const HISTORY_LEN: usize = 120;
@@ -101,10 +102,11 @@ pub struct App {
     pub focus: Focus,
     /// Whether the quit-confirmation popup is showing.
     pub confirm_quit: bool,
+    pub log_control: LogControl,
 }
 
 impl App {
-    pub fn new(panes: Vec<ServerPane>, store: Arc<LogStore>) -> Self {
+    pub fn new(panes: Vec<ServerPane>, store: Arc<LogStore>, log_control: LogControl) -> Self {
         let mut tabs = Vec::new();
         if panes.len() > 1 {
             tabs.push(TabKind::Both);
@@ -131,7 +133,21 @@ impl App {
             filter: String::new(),
             focus: Focus::Command,
             confirm_quit: false,
+            log_control,
         }
+    }
+
+    pub fn log_level_name(&self) -> &'static str {
+        self.log_control.level_name()
+    }
+
+    pub fn cycle_log_level(&mut self) {
+        let level = self.log_control.cycle_debug_levels();
+        self.store.push_synthetic(
+            LogSource::Other,
+            Level::INFO,
+            format!("TUI log level set to {}", level_str(level)),
+        );
     }
 
     pub fn current_tab(&self) -> TabKind {
@@ -435,6 +451,11 @@ impl App {
         if entry.is_empty() {
             return;
         }
+        if entry == ":log" || entry.starts_with(":log ") {
+            self.submit_log_command(entry.strip_prefix(":log").unwrap_or_default().trim());
+            self.finish_submit(entry);
+            return;
+        }
         if let Some((pane_idx, cmd_text)) = self.resolve_target() {
             let pane = &self.panes[pane_idx];
             // Echo into the log view so the user sees what was sent.
@@ -451,6 +472,37 @@ impl App {
                 }
             }
         }
+        self.finish_submit(entry);
+    }
+
+    fn submit_log_command(&mut self, arg: &str) {
+        if arg.is_empty() {
+            self.store.push_synthetic(
+                LogSource::Other,
+                Level::INFO,
+                format!("TUI log level is {}", self.log_control.level_name()),
+            );
+            return;
+        }
+
+        match parse_level(arg) {
+            Some(level) => {
+                self.log_control.set_level(level);
+                self.store.push_synthetic(
+                    LogSource::Other,
+                    Level::INFO,
+                    format!("TUI log level set to {}", level_str(level)),
+                );
+            }
+            None => self.store.push_synthetic(
+                LogSource::Other,
+                Level::ERROR,
+                "usage: :log error|warn|info|debug|trace".to_string(),
+            ),
+        }
+    }
+
+    fn finish_submit(&mut self, entry: String) {
         self.history.push(entry);
         self.history_cursor = None;
         self.input.clear();

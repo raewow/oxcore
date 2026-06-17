@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use oxcore_auth::shared::config::{find_config_file, load_toml};
-use oxcore_tui::{LoadUpdate, LogSettings, LogStore, LogSource, Progress, ServerPane};
+use oxcore_tui::{LoadUpdate, LogControl, LogSettings, LogSource, LogStore, Progress, ServerPane};
 use serde::Deserialize;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -32,8 +32,12 @@ async fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(find_config_file);
 
-    let root: RootConfig = load_toml(&config_path)
-        .with_context(|| format!("Failed to load configuration from {}", config_path.display()))?;
+    let root: RootConfig = load_toml(&config_path).with_context(|| {
+        format!(
+            "Failed to load configuration from {}",
+            config_path.display()
+        )
+    })?;
     let config = root.auth;
 
     let use_tui = !args.headless && std::io::stdout().is_terminal();
@@ -45,8 +49,12 @@ async fn main() -> Result<()> {
     };
 
     let store = LogStore::new(5000);
+    let mut log_control: Option<LogControl> = None;
     if use_tui {
-        oxcore_tui::install_tui_subscriber(store.clone(), &settings)?;
+        log_control = Some(oxcore_tui::install_tui_subscriber(
+            store.clone(),
+            &settings,
+        )?);
     } else {
         oxcore_tui::install_headless_subscriber(&settings)?;
     }
@@ -79,11 +87,20 @@ async fn main() -> Result<()> {
                     let _ = load_tx.send(LoadUpdate::Ready(vec![pane])).await;
                 }
                 Err(e) => {
-                    let _ = load_tx.send(LoadUpdate::Failed(format!("auth: {}", e))).await;
+                    let _ = load_tx
+                        .send(LoadUpdate::Failed(format!("auth: {}", e)))
+                        .await;
                 }
             }
         });
-        oxcore_tui::run_tui_loading(store, progress, shutdown_tx.clone(), load_rx).await?;
+        oxcore_tui::run_tui_loading(
+            store,
+            log_control.context("TUI log control was not initialized")?,
+            progress,
+            shutdown_tx.clone(),
+            load_rx,
+        )
+        .await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
     } else {
         oxcore_auth::serve(config, metrics, shutdown_tx.clone(), cmd_rx).await?;

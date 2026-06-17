@@ -69,7 +69,10 @@ impl oxcore_tui::MetricsSource for AuthMetrics {
             gauges: vec![
                 ("total conns".to_string(), s.connections_total.to_string()),
                 ("auth ok".to_string(), s.authentications_success.to_string()),
-                ("auth fail".to_string(), s.authentications_failed.to_string()),
+                (
+                    "auth fail".to_string(),
+                    s.authentications_failed.to_string(),
+                ),
                 ("realm reqs".to_string(), s.realm_list_requests.to_string()),
                 ("patches".to_string(), s.patch_transfers.to_string()),
                 ("ip bans".to_string(), s.ip_bans.to_string()),

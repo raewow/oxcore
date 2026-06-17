@@ -91,7 +91,11 @@ pub async fn serve(
     world.set_progress(progress.clone());
     world.set_shutdown_receiver(shutdown_rx.resubscribe()).await;
 
-    let realm_id = if config.realm_id <= 0 { 1 } else { config.realm_id };
+    let realm_id = if config.realm_id <= 0 {
+        1
+    } else {
+        config.realm_id
+    };
     world.set_realm_id(realm_id);
 
     world.set_console_receiver(console_rx).await;

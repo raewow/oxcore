@@ -18,6 +18,7 @@ use tokio::sync::{broadcast, mpsc};
 use crate::app::{App, ServerPane};
 use crate::input;
 use crate::log_layer::LogStore;
+use crate::logging::LogControl;
 use crate::progress::Progress;
 use crate::ui;
 
@@ -66,6 +67,7 @@ fn is_quit_key(key: &crossterm::event::KeyEvent) -> bool {
 /// then swap to the tabbed running view once panes arrive. Broadcasts shutdown on quit.
 pub async fn run_tui_loading(
     store: Arc<LogStore>,
+    log_control: LogControl,
     progress: Progress,
     shutdown_tx: broadcast::Sender<()>,
     mut updates: mpsc::Receiver<LoadUpdate>,
@@ -142,7 +144,8 @@ pub async fn run_tui_loading(
                         LoadUpdate::Status(s) => *status = s,
                         LoadUpdate::Failed(e) => *error = Some(e),
                         LoadUpdate::Ready(panes) => {
-                            phase = Phase::Running(App::new(panes, store.clone()));
+                            phase =
+                                Phase::Running(App::new(panes, store.clone(), log_control.clone()));
                             break;
                         }
                     }

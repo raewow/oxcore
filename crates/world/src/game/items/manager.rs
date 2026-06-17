@@ -524,10 +524,7 @@ impl ItemManager {
             self.add_required_target(entry, ItemRequiredTarget::new(target_type, target_entry));
         }
 
-        info!(
-            "Loaded {} item required-target rules",
-            rows_len - skipped
-        );
+        info!("Loaded {} item required-target rules", rows_len - skipped);
         Ok(())
     }
 

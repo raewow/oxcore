@@ -266,10 +266,11 @@ fn render_logs(f: &mut Frame, area: Rect, app: &App) {
     }
 
     let title = if app.filter.is_empty() {
-        " logs ".to_string()
+        format!(" logs · level: {} ", app.log_level_name())
     } else {
         format!(
-            " logs · filter: \"{}\" ({}/{}) ",
+            " logs · level: {} · filter: \"{}\" ({}/{}) ",
+            app.log_level_name(),
             app.filter,
             records.len(),
             total_before
@@ -327,6 +328,14 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(
                 snap.connections.to_string(),
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled("log ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                app.log_level_name(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             ),
         ])];
         for (label, value) in &snap.gauges {
@@ -445,7 +454,7 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
     let title = if tab_disabled {
         " input (switch tab to send commands) "
     } else {
-        " input  (Tab: switch · ^F: filter · → : complete · ↑↓ history · PgUp/PgDn scroll · q: quit) "
+        " input  (Tab: switch · ^F: filter · ^L: log level · :log debug · → complete · q quit) "
     };
 
     let mut spans = vec![

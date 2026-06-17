@@ -29,6 +29,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         return;
     }
 
+    // Ctrl+L cycles the TUI capture level through info/debug/trace.
+    if ctrl && matches!(key.code, KeyCode::Char('l') | KeyCode::Char('L')) {
+        app.cycle_log_level();
+        return;
+    }
+
     // Tab switching works regardless of focus.
     match key.code {
         KeyCode::Tab => {

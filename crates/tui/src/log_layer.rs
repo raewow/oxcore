@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use tokio::sync::watch;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
@@ -120,14 +120,25 @@ fn now_string() -> String {
     chrono::Local::now().format("%H:%M:%S%.3f").to_string()
 }
 
-/// The tracing layer. Attach with a level filter via `.with_filter(..)`.
+/// The tracing layer. It checks a shared level so the TUI can change capture levels live.
 pub struct TuiLogLayer {
     store: Arc<LogStore>,
+    level: Arc<AtomicU8>,
 }
 
 impl TuiLogLayer {
-    pub fn new(store: Arc<LogStore>) -> Self {
-        Self { store }
+    pub fn new(store: Arc<LogStore>, level: Arc<AtomicU8>) -> Self {
+        Self { store, level }
+    }
+}
+
+fn level_value(level: &Level) -> u8 {
+    match *level {
+        Level::ERROR => 0,
+        Level::WARN => 1,
+        Level::INFO => 2,
+        Level::DEBUG => 3,
+        Level::TRACE => 4,
     }
 }
 
@@ -166,6 +177,10 @@ impl Visit for MessageVisitor {
 impl<S: Subscriber> Layer<S> for TuiLogLayer {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
         let meta = event.metadata();
+        if level_value(meta.level()) > self.level.load(Ordering::Relaxed) {
+            return;
+        }
+
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
 
