@@ -29,7 +29,7 @@ use oxcore_shared::protocol::ObjectGuid;
 
 use super::base_stats::BaseStatsData;
 use super::derived;
-use super::modifiers::{UnitModifierType, UnitMods};
+use super::modifiers::{BaseModGroup, UnitModifierType, UnitMods};
 
 #[derive(Default, Clone, Copy)]
 struct EquippedWeaponDamage {
@@ -65,6 +65,7 @@ struct EquippedItemBonuses {
     ranged_attack_power: i32,
     spell_power: i32,
     healing_power: i32,
+    block_value: i32,
     mainhand_damage: Option<EquippedWeaponDamage>,
     offhand_damage: Option<EquippedWeaponDamage>,
     ranged_damage: Option<EquippedWeaponDamage>,
@@ -84,6 +85,7 @@ impl EquippedItemBonuses {
         self.resistances[4] += template.frost_res as i32;
         self.resistances[5] += template.shadow_res as i32;
         self.resistances[6] += template.arcane_res as i32;
+        self.block_value += template.block as i32;
 
         let weapon_damage = EquippedWeaponDamage::from_template(template);
         match EquipmentSlot::from_u8(slot) {
@@ -480,6 +482,12 @@ impl StatsSystem {
                 crate::game::player::auras::effects::AURA_MOD_BLOCK_PERCENT,
             ) as f32;
             player.stats.block_pct = (5.0 + defense_bonus + aura_block).max(0.0);
+            let base_block_value = player
+                .stats
+                .base_mods
+                .get_total_base_mod_value(BaseModGroup::ShieldBlockValue);
+            player.stats.block_value =
+                (equipped_bonuses.block_value as f32 + base_block_value).max(0.0) as u32;
 
             // 12. Damage ranges
             let default_speed_ms: u32 = 2000;
@@ -717,6 +725,7 @@ impl StatsSystem {
                 player.stats.dodge_pct,
                 player.stats.parry_pct,
                 player.stats.block_pct,
+                player.stats.block_value,
                 player.stats.min_damage,
                 player.stats.max_damage,
                 player.stats.min_offhand_damage,
@@ -745,6 +754,7 @@ impl StatsSystem {
             dodge,
             parry,
             block,
+            _block_value,
             min_dmg,
             max_dmg,
             min_oh_dmg,
@@ -826,7 +836,7 @@ mod tests {
             dmg_min: [0.0; 5],
             dmg_max: [0.0; 5],
             dmg_type: [0; 5],
-            block: 0,
+            block: 25,
             armor: 50,
             holy_res: 1,
             fire_res: 2,
@@ -853,6 +863,7 @@ mod tests {
         assert_eq!(bonuses.max_health, 200);
         assert_eq!(bonuses.melee_attack_power, 30);
         assert_eq!(bonuses.ranged_attack_power, 40);
+        assert_eq!(bonuses.block_value, 25);
         assert_eq!(bonuses.armor, 50);
         assert_eq!(bonuses.resistances, [50, 1, 2, 3, 4, 5, 6]);
     }

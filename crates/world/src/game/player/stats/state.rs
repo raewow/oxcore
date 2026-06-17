@@ -40,6 +40,7 @@ pub struct StatsState {
     pub dodge_pct: f32,
     pub parry_pct: f32,
     pub block_pct: f32,
+    pub block_value: u32,
 
     /// Spell power per school [Physical, Holy, Fire, Nature, Frost, Shadow, Arcane]
     /// Computed from gear + auras. Used for spell damage/healing scaling.
@@ -120,6 +121,7 @@ impl Default for StatsState {
             dodge_pct: 0.0,
             parry_pct: 0.0,
             block_pct: 0.0,
+            block_value: 0,
 
             spell_power: [0; 7],
             healing_power: 0,

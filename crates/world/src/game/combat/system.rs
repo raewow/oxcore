@@ -117,18 +117,16 @@ impl CombatSystem {
 
         // Get defender data (for now assume it's another player)
         // TODO: Handle creature targets
-        let defender_data = player_mgr.with_player(attack.target, |player| {
-            DefenderData {
-                level: player.level,
-                defense_skill: player.level as u16 * 5,
-                dodge_chance: player.stats.dodge_pct,
-                parry_chance: player.stats.parry_pct,
-                block_chance: player.stats.block_pct,
-                block_value: 0, // TODO: Get from shield
-                armor: player.stats.armor,
-                can_parry: player.combat.can_parry,
-                can_block: player.combat.can_block,
-            }
+        let defender_data = player_mgr.with_player(attack.target, |player| DefenderData {
+            level: player.level,
+            defense_skill: player.level as u16 * 5,
+            dodge_chance: player.stats.dodge_pct,
+            parry_chance: player.stats.parry_pct,
+            block_chance: player.stats.block_pct,
+            block_value: player.stats.block_value,
+            armor: player.stats.armor,
+            can_parry: player.combat.can_parry,
+            can_block: player.combat.can_block,
         });
 
         let Some(defender_data) = defender_data else {
