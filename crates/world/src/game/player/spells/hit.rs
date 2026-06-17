@@ -11,6 +11,8 @@
 //! - Non-binary spells: partial resist (0/25/50/75/100%)
 //! - Physical spells use melee miss table instead
 
+use crate::game::common::creature_flags::CREATURE_STATIC_FLAG_NO_DEFENSE;
+use crate::game::player::skills::{SkillSaveState, SKILL_DEFENSE};
 use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
 
@@ -123,6 +125,58 @@ fn melee_spell_miss_chance(
     miss.clamp(0.0, 60.0)
 }
 
+fn unit_melee_skill(level: u8) -> u16 {
+    level as u16 * 5
+}
+
+fn player_defense_skill_value(
+    skill: Option<&crate::game::player::skills::SkillData>,
+    target_is_player: bool,
+) -> u16 {
+    let Some(skill) = skill.filter(|skill| skill.state != SkillSaveState::Deleted) else {
+        return 0;
+    };
+
+    if target_is_player {
+        skill.max_value
+    } else {
+        skill.current_value
+    }
+}
+
+/// Defense skill for melee-based spell hit checks.
+fn get_defense_skill_value(
+    defender_guid: ObjectGuid,
+    attacker_guid: Option<ObjectGuid>,
+    world: &World,
+) -> u16 {
+    if defender_guid.is_player() {
+        let target_is_player = attacker_guid.is_some_and(|guid| guid.is_player());
+        return world
+            .managers
+            .player_mgr
+            .with_player(defender_guid, |player| {
+                player_defense_skill_value(
+                    player.skills.skills.get(&SKILL_DEFENSE),
+                    target_is_player,
+                )
+            })
+            .unwrap_or(0);
+    }
+
+    world
+        .managers
+        .creature_mgr
+        .with_creature(defender_guid, |creature| {
+            if creature.static_flags1 & CREATURE_STATIC_FLAG_NO_DEFENSE != 0 {
+                0
+            } else {
+                unit_melee_skill(creature.level)
+            }
+        })
+        .unwrap_or(0)
+}
+
 /// Melee/ranged spell hit roll (MaNGOS `MeleeSpellHitResult`): a single-roll table of
 /// miss → dodge → parry → block. Crit is rolled separately during damage. Dodge/parry/block
 /// are read from real player victims; creature avoidance is not modelled yet (treated as 0),
@@ -186,8 +240,9 @@ fn roll_melee_spell_hit(
         (lvl, 0.0, 0.0, 0.0, false, false)
     };
 
-    // Weapon/defense skills are level*5 placeholders (as in the white-hit combat path).
-    let skill_diff = caster_level * 5 - victim_level * 5;
+    let attacker_weapon_skill = caster_level * 5;
+    let defender_defense_skill = get_defense_skill_value(target_guid, Some(caster_guid), world);
+    let skill_diff = attacker_weapon_skill - defender_defense_skill as i32;
 
     let miss = melee_spell_miss_chance(target_is_player, victim_level as u8, skill_diff, hit_bonus);
 
