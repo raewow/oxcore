@@ -28,6 +28,15 @@ pub struct ItemTemplate {
     pub sell_price: u32,
     pub container_slots: u8,
     pub start_quest: u32,
+    pub stat_type: [u8; 10],
+    pub stat_value: [i16; 10],
+    pub armor: i16,
+    pub holy_res: i16,
+    pub fire_res: i16,
+    pub nature_res: i16,
+    pub frost_res: i16,
+    pub shadow_res: i16,
+    pub arcane_res: i16,
     // Spell fields for item usage
     pub spell_id: [u32; 5],
     pub spell_trigger: [u32; 5],
@@ -350,10 +359,15 @@ impl ItemManager {
     pub async fn load_item_templates(&self, pool: &sqlx::MySqlPool) -> Result<()> {
         let rows = sqlx::query(
             "SELECT entry, name, display_id, quality, item_level, required_level,
-                      inventory_type, `class`, subclass, max_count, stackable, max_durability,
+                       inventory_type, `class`, subclass, max_count, stackable, max_durability,
                      buy_price, sell_price, container_slots, start_quest,
-                     spellid_1, spellid_2, spellid_3, spellid_4, spellid_5,
-                     spelltrigger_1, spelltrigger_2, spelltrigger_3, spelltrigger_4, spelltrigger_5,
+                     stat_type1, stat_type2, stat_type3, stat_type4, stat_type5,
+                     stat_type6, stat_type7, stat_type8, stat_type9, stat_type10,
+                     stat_value1, stat_value2, stat_value3, stat_value4, stat_value5,
+                     stat_value6, stat_value7, stat_value8, stat_value9, stat_value10,
+                     armor, holy_res, fire_res, nature_res, frost_res, shadow_res, arcane_res,
+                      spellid_1, spellid_2, spellid_3, spellid_4, spellid_5,
+                      spelltrigger_1, spelltrigger_2, spelltrigger_3, spelltrigger_4, spelltrigger_5,
                      spellcharges_1, spellcharges_2, spellcharges_3, spellcharges_4, spellcharges_5,
                      spellcooldown_1, spellcooldown_2, spellcooldown_3, spellcooldown_4, spellcooldown_5,
                      spellcategory_1, spellcategory_2, spellcategory_3, spellcategory_4, spellcategory_5,
@@ -385,6 +399,37 @@ impl ItemManager {
             let sell_price: u32 = row.try_get("sell_price")?;
             let container_slots: u8 = row.try_get("container_slots")?;
             let start_quest: u32 = row.try_get("start_quest")?;
+            let stat_type = [
+                row.try_get("stat_type1")?,
+                row.try_get("stat_type2")?,
+                row.try_get("stat_type3")?,
+                row.try_get("stat_type4")?,
+                row.try_get("stat_type5")?,
+                row.try_get("stat_type6")?,
+                row.try_get("stat_type7")?,
+                row.try_get("stat_type8")?,
+                row.try_get("stat_type9")?,
+                row.try_get("stat_type10")?,
+            ];
+            let stat_value = [
+                row.try_get("stat_value1")?,
+                row.try_get("stat_value2")?,
+                row.try_get("stat_value3")?,
+                row.try_get("stat_value4")?,
+                row.try_get("stat_value5")?,
+                row.try_get("stat_value6")?,
+                row.try_get("stat_value7")?,
+                row.try_get("stat_value8")?,
+                row.try_get("stat_value9")?,
+                row.try_get("stat_value10")?,
+            ];
+            let armor: i16 = row.try_get("armor")?;
+            let holy_res: i16 = row.try_get("holy_res")?;
+            let fire_res: i16 = row.try_get("fire_res")?;
+            let nature_res: i16 = row.try_get("nature_res")?;
+            let frost_res: i16 = row.try_get("frost_res")?;
+            let shadow_res: i16 = row.try_get("shadow_res")?;
+            let arcane_res: i16 = row.try_get("arcane_res")?;
 
             // Read spell data (default to 0 for all fields)
             let spell_id = [
@@ -464,6 +509,15 @@ impl ItemManager {
                 sell_price,
                 container_slots,
                 start_quest,
+                stat_type,
+                stat_value,
+                armor,
+                holy_res,
+                fire_res,
+                nature_res,
+                frost_res,
+                shadow_res,
+                arcane_res,
                 spell_id,
                 spell_trigger,
                 spell_charges,

@@ -12,6 +12,7 @@ use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::game::common::update_fields::*;
 use crate::game::inventory::InventorySystem;
+use crate::game::items::manager::ItemTemplate;
 use crate::game::items::ItemManager;
 use crate::game::player::skills::{
     get_skill_max_for_level, SkillSaveState, SKILL_2H_AXES, SKILL_2H_MACES, SKILL_2H_SWORDS,
@@ -29,6 +30,53 @@ use oxcore_shared::protocol::ObjectGuid;
 use super::base_stats::BaseStatsData;
 use super::derived;
 use super::modifiers::{UnitModifierType, UnitMods};
+
+#[derive(Default)]
+struct EquippedItemBonuses {
+    stats: [i32; 5],
+    max_health: i32,
+    max_mana: i32,
+    armor: i32,
+    resistances: [i32; 7],
+    melee_attack_power: i32,
+    ranged_attack_power: i32,
+    spell_power: i32,
+    healing_power: i32,
+}
+
+impl EquippedItemBonuses {
+    fn add_template(&mut self, template: &ItemTemplate) {
+        for (&stat_type, &stat_value) in template.stat_type.iter().zip(template.stat_value.iter()) {
+            self.add_item_stat(stat_type, stat_value as i32);
+        }
+
+        self.armor += template.armor as i32;
+        self.resistances[0] += template.armor as i32;
+        self.resistances[1] += template.holy_res as i32;
+        self.resistances[2] += template.fire_res as i32;
+        self.resistances[3] += template.nature_res as i32;
+        self.resistances[4] += template.frost_res as i32;
+        self.resistances[5] += template.shadow_res as i32;
+        self.resistances[6] += template.arcane_res as i32;
+    }
+
+    fn add_item_stat(&mut self, stat_type: u8, value: i32) {
+        match stat_type {
+            0 => self.max_mana += value,
+            1 => self.max_health += value,
+            3 => self.stats[1] += value,
+            4 => self.stats[0] += value,
+            5 => self.stats[3] += value,
+            6 => self.stats[4] += value,
+            7 => self.stats[2] += value,
+            38 => self.melee_attack_power += value,
+            39 => self.ranged_attack_power += value,
+            41 => self.healing_power += value,
+            42 | 45 => self.spell_power += value,
+            _ => {}
+        }
+    }
+}
 
 /// Stateless stats system
 pub struct StatsSystem {
@@ -109,6 +157,23 @@ impl StatsSystem {
         }
     }
 
+    fn equipped_item_bonuses(&self, guid: ObjectGuid) -> EquippedItemBonuses {
+        let mut bonuses = EquippedItemBonuses::default();
+
+        for (_, item_guid) in self.inventory.cache().get_equipment_slots(guid) {
+            let Some(item) = self.inventory.cache().get_item(guid, item_guid) else {
+                continue;
+            };
+            let entry = item.read().entry;
+            let Some(template) = self.item_mgr.get_template(entry) else {
+                continue;
+            };
+            bonuses.add_template(&template);
+        }
+
+        bonuses
+    }
+
     pub fn on_player_login(&self, guid: ObjectGuid) -> Result<()> {
         self.recalculate_all(guid);
         // Set health/mana to max on login (fresh character state)
@@ -132,6 +197,7 @@ impl StatsSystem {
             Some(bs) => bs,
             None => return,
         };
+        let equipped_bonuses = self.equipped_item_bonuses(guid);
 
         self.player_mgr.with_player_mut(guid, |player| {
             let race = player.race;
@@ -155,26 +221,26 @@ impl StatsSystem {
             player.stats.base_mana = class_base.base_mana;
 
             // 2. Calculate effective stats using modifier formula
-            let strength = player
-                .stats
-                .unit_mods
-                .calculate_total_value(UnitMods::StatStrength, base.strength as f32);
-            let agility = player
-                .stats
-                .unit_mods
-                .calculate_total_value(UnitMods::StatAgility, base.agility as f32);
-            let stamina = player
-                .stats
-                .unit_mods
-                .calculate_total_value(UnitMods::StatStamina, base.stamina as f32);
-            let intellect = player
-                .stats
-                .unit_mods
-                .calculate_total_value(UnitMods::StatIntellect, base.intellect as f32);
-            let spirit = player
-                .stats
-                .unit_mods
-                .calculate_total_value(UnitMods::StatSpirit, base.spirit as f32);
+            let strength = player.stats.unit_mods.calculate_total_value(
+                UnitMods::StatStrength,
+                (base.strength as i32 + equipped_bonuses.stats[0]).max(0) as f32,
+            );
+            let agility = player.stats.unit_mods.calculate_total_value(
+                UnitMods::StatAgility,
+                (base.agility as i32 + equipped_bonuses.stats[1]).max(0) as f32,
+            );
+            let stamina = player.stats.unit_mods.calculate_total_value(
+                UnitMods::StatStamina,
+                (base.stamina as i32 + equipped_bonuses.stats[2]).max(0) as f32,
+            );
+            let intellect = player.stats.unit_mods.calculate_total_value(
+                UnitMods::StatIntellect,
+                (base.intellect as i32 + equipped_bonuses.stats[3]).max(0) as f32,
+            );
+            let spirit = player.stats.unit_mods.calculate_total_value(
+                UnitMods::StatSpirit,
+                (base.spirit as i32 + equipped_bonuses.stats[4]).max(0) as f32,
+            );
 
             player.stats.strength = strength.max(0.0) as u32;
             player.stats.agility = agility.max(0.0) as u32;
@@ -201,7 +267,9 @@ impl StatsSystem {
                 .unit_mods
                 .get_modifier_value(UnitMods::Health, UnitModifierType::TotalPct);
 
-            let max_health = ((class_base.base_health as f32 + health_base_value)
+            let max_health = ((class_base.base_health as f32
+                + equipped_bonuses.max_health as f32
+                + health_base_value)
                 * health_base_pct
                 + health_total_value
                 + stamina_bonus)
@@ -240,7 +308,10 @@ impl StatsSystem {
                     .unit_mods
                     .get_modifier_value(UnitMods::Mana, UnitModifierType::TotalPct);
 
-                let max_mana = ((class_base.base_mana as f32 + mana_base_value) * mana_base_pct
+                let max_mana = ((class_base.base_mana as f32
+                    + equipped_bonuses.max_mana as f32
+                    + mana_base_value)
+                    * mana_base_pct
                     + mana_total_value
                     + int_bonus)
                     * mana_total_pct;
@@ -262,10 +333,12 @@ impl StatsSystem {
 
             // 5. Attack power
             let melee_ap = derived::calculate_melee_ap(class, level, strength, agility);
-            player.stats.melee_attack_power = melee_ap.max(0.0) as i32;
+            player.stats.melee_attack_power =
+                (melee_ap + equipped_bonuses.melee_attack_power as f32).max(0.0) as i32;
 
             let ranged_ap = derived::calculate_ranged_ap(class, level, agility);
-            player.stats.ranged_attack_power = ranged_ap.max(0.0) as i32;
+            player.stats.ranged_attack_power =
+                (ranged_ap + equipped_bonuses.ranged_attack_power as f32).max(0.0) as i32;
 
             // 6. Armor: agility bonus + equipment (via UnitMods::Armor)
             let agi_armor = derived::armor_from_agility(agility);
@@ -273,6 +346,7 @@ impl StatsSystem {
                 .stats
                 .unit_mods
                 .calculate_total_value(UnitMods::Armor, 0.0)
+                + equipped_bonuses.armor as f32
                 + agi_armor;
             player.stats.armor = armor_total.max(0.0) as u32;
             player.stats.resistances[0] = player.stats.armor;
@@ -280,7 +354,8 @@ impl StatsSystem {
             // 7. Resistances (schools 1-6)
             for school in 1..7u8 {
                 if let Some(unit_mod) = UnitMods::from_resistance(school) {
-                    let value = player.stats.unit_mods.calculate_total_value(unit_mod, 0.0);
+                    let value = player.stats.unit_mods.calculate_total_value(unit_mod, 0.0)
+                        + equipped_bonuses.resistances[school as usize] as f32;
                     player.stats.resistances[school as usize] = value.max(0.0) as u32;
                 }
             }
@@ -302,14 +377,16 @@ impl StatsSystem {
                         .filter(|a| (a.misc_value & school_mask) != 0)
                         .map(|a| a.current_value())
                         .sum();
-                    player.stats.spell_power[school] = from_auras.max(0) as u32;
+                    player.stats.spell_power[school] =
+                        (from_auras + equipped_bonuses.spell_power).max(0) as u32;
                 }
                 // Healing power: AURA_MOD_HEALING_DONE (misc_value irrelevant, always applies)
                 let healing_from_auras = player
                     .auras
                     .container
                     .get_total_aura_modifier(AURA_MOD_HEALING_DONE);
-                player.stats.healing_power = healing_from_auras.max(0) as u32;
+                player.stats.healing_power =
+                    (healing_from_auras + equipped_bonuses.healing_power).max(0) as u32;
             }
 
             // 9. Crit
