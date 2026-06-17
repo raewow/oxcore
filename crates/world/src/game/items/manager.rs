@@ -30,6 +30,11 @@ pub struct ItemTemplate {
     pub start_quest: u32,
     pub stat_type: [u8; 10],
     pub stat_value: [i16; 10],
+    pub delay: u16,
+    pub dmg_min: [f32; 5],
+    pub dmg_max: [f32; 5],
+    pub dmg_type: [u8; 5],
+    pub block: u32,
     pub armor: i16,
     pub holy_res: i16,
     pub fire_res: i16,
@@ -365,6 +370,9 @@ impl ItemManager {
                      stat_type6, stat_type7, stat_type8, stat_type9, stat_type10,
                      stat_value1, stat_value2, stat_value3, stat_value4, stat_value5,
                      stat_value6, stat_value7, stat_value8, stat_value9, stat_value10,
+                     delay, dmg_min1, dmg_min2, dmg_min3, dmg_min4, dmg_min5,
+                     dmg_max1, dmg_max2, dmg_max3, dmg_max4, dmg_max5,
+                     dmg_type1, dmg_type2, dmg_type3, dmg_type4, dmg_type5, block,
                      armor, holy_res, fire_res, nature_res, frost_res, shadow_res, arcane_res,
                       spellid_1, spellid_2, spellid_3, spellid_4, spellid_5,
                       spelltrigger_1, spelltrigger_2, spelltrigger_3, spelltrigger_4, spelltrigger_5,
@@ -423,6 +431,29 @@ impl ItemManager {
                 row.try_get("stat_value9")?,
                 row.try_get("stat_value10")?,
             ];
+            let delay: u16 = row.try_get("delay")?;
+            let dmg_min = [
+                row.try_get("dmg_min1")?,
+                row.try_get("dmg_min2")?,
+                row.try_get("dmg_min3")?,
+                row.try_get("dmg_min4")?,
+                row.try_get("dmg_min5")?,
+            ];
+            let dmg_max = [
+                row.try_get("dmg_max1")?,
+                row.try_get("dmg_max2")?,
+                row.try_get("dmg_max3")?,
+                row.try_get("dmg_max4")?,
+                row.try_get("dmg_max5")?,
+            ];
+            let dmg_type = [
+                row.try_get("dmg_type1")?,
+                row.try_get("dmg_type2")?,
+                row.try_get("dmg_type3")?,
+                row.try_get("dmg_type4")?,
+                row.try_get("dmg_type5")?,
+            ];
+            let block: u32 = row.try_get("block")?;
             let armor: i16 = row.try_get("armor")?;
             let holy_res: i16 = row.try_get("holy_res")?;
             let fire_res: i16 = row.try_get("fire_res")?;
@@ -511,6 +542,11 @@ impl ItemManager {
                 start_quest,
                 stat_type,
                 stat_value,
+                delay,
+                dmg_min,
+                dmg_max,
+                dmg_type,
+                block,
                 armor,
                 holy_res,
                 fire_res,

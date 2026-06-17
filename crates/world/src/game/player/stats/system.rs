@@ -31,6 +31,29 @@ use super::base_stats::BaseStatsData;
 use super::derived;
 use super::modifiers::{UnitModifierType, UnitMods};
 
+#[derive(Default, Clone, Copy)]
+struct EquippedWeaponDamage {
+    min: f32,
+    max: f32,
+    delay_ms: u32,
+}
+
+impl EquippedWeaponDamage {
+    fn from_template(template: &ItemTemplate) -> Option<Self> {
+        let min: f32 = template.dmg_min.iter().sum();
+        let max: f32 = template.dmg_max.iter().sum();
+        if min <= 0.0 && max <= 0.0 {
+            return None;
+        }
+
+        Some(Self {
+            min,
+            max,
+            delay_ms: u32::from(template.delay).max(1),
+        })
+    }
+}
+
 #[derive(Default)]
 struct EquippedItemBonuses {
     stats: [i32; 5],
@@ -42,10 +65,13 @@ struct EquippedItemBonuses {
     ranged_attack_power: i32,
     spell_power: i32,
     healing_power: i32,
+    mainhand_damage: Option<EquippedWeaponDamage>,
+    offhand_damage: Option<EquippedWeaponDamage>,
+    ranged_damage: Option<EquippedWeaponDamage>,
 }
 
 impl EquippedItemBonuses {
-    fn add_template(&mut self, template: &ItemTemplate) {
+    fn add_template(&mut self, slot: u8, template: &ItemTemplate) {
         for (&stat_type, &stat_value) in template.stat_type.iter().zip(template.stat_value.iter()) {
             self.add_item_stat(stat_type, stat_value as i32);
         }
@@ -58,6 +84,14 @@ impl EquippedItemBonuses {
         self.resistances[4] += template.frost_res as i32;
         self.resistances[5] += template.shadow_res as i32;
         self.resistances[6] += template.arcane_res as i32;
+
+        let weapon_damage = EquippedWeaponDamage::from_template(template);
+        match EquipmentSlot::from_u8(slot) {
+            Some(EquipmentSlot::Mainhand) => self.mainhand_damage = weapon_damage,
+            Some(EquipmentSlot::Offhand) => self.offhand_damage = weapon_damage,
+            Some(EquipmentSlot::Ranged) => self.ranged_damage = weapon_damage,
+            _ => {}
+        }
     }
 
     fn add_item_stat(&mut self, stat_type: u8, value: i32) {
@@ -160,7 +194,7 @@ impl StatsSystem {
     fn equipped_item_bonuses(&self, guid: ObjectGuid) -> EquippedItemBonuses {
         let mut bonuses = EquippedItemBonuses::default();
 
-        for (_, item_guid) in self.inventory.cache().get_equipment_slots(guid) {
+        for (slot, item_guid) in self.inventory.cache().get_equipment_slots(guid) {
             let Some(item) = self.inventory.cache().get_item(guid, item_guid) else {
                 continue;
             };
@@ -168,7 +202,7 @@ impl StatsSystem {
             let Some(template) = self.item_mgr.get_template(entry) else {
                 continue;
             };
-            bonuses.add_template(&template);
+            bonuses.add_template(slot, &template);
         }
 
         bonuses
@@ -447,15 +481,68 @@ impl StatsSystem {
             ) as f32;
             player.stats.block_pct = (5.0 + defense_bonus + aura_block).max(0.0);
 
-            // 12. Damage ranges (bare-hand default: 2.0s speed, AP-based)
+            // 12. Damage ranges
             let default_speed_ms: u32 = 2000;
-            let ap_dmg = derived::ap_damage_modifier(melee_ap.max(0.0), default_speed_ms);
-            player.stats.min_damage = (1.0 + ap_dmg).max(0.0);
-            player.stats.max_damage = (2.0 + ap_dmg).max(0.0);
-            player.stats.min_offhand_damage = 0.0;
-            player.stats.max_offhand_damage = 0.0;
-            player.stats.min_ranged_damage = 0.0;
-            player.stats.max_ranged_damage = 0.0;
+            let melee_ap_for_damage = player.stats.melee_attack_power.max(0) as f32;
+            let ranged_ap_for_damage = player.stats.ranged_attack_power.max(0) as f32;
+
+            if let Some(mainhand) = equipped_bonuses.mainhand_damage {
+                let ap_dmg = derived::ap_damage_modifier(melee_ap_for_damage, mainhand.delay_ms);
+                let min = (mainhand.min + ap_dmg).max(0.0);
+                let max = (mainhand.max + ap_dmg).max(min);
+                player.stats.min_damage = player
+                    .stats
+                    .unit_mods
+                    .calculate_total_value(UnitMods::DamageMainhand, min)
+                    .max(0.0);
+                player.stats.max_damage = player
+                    .stats
+                    .unit_mods
+                    .calculate_total_value(UnitMods::DamageMainhand, max)
+                    .max(player.stats.min_damage);
+            } else {
+                let ap_dmg = derived::ap_damage_modifier(melee_ap_for_damage, default_speed_ms);
+                player.stats.min_damage = (1.0 + ap_dmg).max(0.0);
+                player.stats.max_damage = (2.0 + ap_dmg).max(player.stats.min_damage);
+            }
+
+            if let Some(offhand) = equipped_bonuses.offhand_damage {
+                let ap_dmg = derived::ap_damage_modifier(melee_ap_for_damage, offhand.delay_ms);
+                let min = (offhand.min + ap_dmg).max(0.0);
+                let max = (offhand.max + ap_dmg).max(min);
+                player.stats.min_offhand_damage = player
+                    .stats
+                    .unit_mods
+                    .calculate_total_value(UnitMods::DamageOffhand, min)
+                    .max(0.0);
+                player.stats.max_offhand_damage = player
+                    .stats
+                    .unit_mods
+                    .calculate_total_value(UnitMods::DamageOffhand, max)
+                    .max(player.stats.min_offhand_damage);
+            } else {
+                player.stats.min_offhand_damage = 0.0;
+                player.stats.max_offhand_damage = 0.0;
+            }
+
+            if let Some(ranged) = equipped_bonuses.ranged_damage {
+                let ap_dmg = derived::ap_damage_modifier(ranged_ap_for_damage, ranged.delay_ms);
+                let min = (ranged.min + ap_dmg).max(0.0);
+                let max = (ranged.max + ap_dmg).max(min);
+                player.stats.min_ranged_damage = player
+                    .stats
+                    .unit_mods
+                    .calculate_total_value(UnitMods::DamageRanged, min)
+                    .max(0.0);
+                player.stats.max_ranged_damage = player
+                    .stats
+                    .unit_mods
+                    .calculate_total_value(UnitMods::DamageRanged, max)
+                    .max(player.stats.min_ranged_damage);
+            } else {
+                player.stats.min_ranged_damage = 0.0;
+                player.stats.max_ranged_damage = 0.0;
+            }
 
             // 13. Mana regen
             {
@@ -708,5 +795,116 @@ impl StatsSystem {
         let packet = update_msg.to_world_packet();
 
         self.broadcast_mgr.broadcast_nearby(guid, &packet, true);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item_template_with_bonuses() -> ItemTemplate {
+        ItemTemplate {
+            entry: 1,
+            name: "Equipped Test Item".to_string(),
+            display_id: 0,
+            quality: 0,
+            item_level: 1,
+            required_level: 1,
+            item_class: 0,
+            item_subclass: 0,
+            inventory_type: 0,
+            max_count: 0,
+            stackable: 1,
+            max_durability: 0,
+            buy_price: 0,
+            sell_price: 0,
+            container_slots: 0,
+            start_quest: 0,
+            stat_type: [4, 3, 7, 5, 6, 0, 1, 38, 39, 255],
+            stat_value: [10, 11, 12, 13, 14, 100, 200, 30, 40, 999],
+            delay: 0,
+            dmg_min: [0.0; 5],
+            dmg_max: [0.0; 5],
+            dmg_type: [0; 5],
+            block: 0,
+            armor: 50,
+            holy_res: 1,
+            fire_res: 2,
+            nature_res: 3,
+            frost_res: 4,
+            shadow_res: 5,
+            arcane_res: 6,
+            spell_id: [0; 5],
+            spell_trigger: [0; 5],
+            spell_charges: [0; 5],
+            spell_cooldown: [0; 5],
+            spell_category: [0; 5],
+            spell_category_cooldown: [0; 5],
+        }
+    }
+
+    #[test]
+    fn equipped_item_bonuses_map_core_stats_and_resistances() {
+        let mut bonuses = EquippedItemBonuses::default();
+        bonuses.add_template(EquipmentSlot::Chest as u8, &item_template_with_bonuses());
+
+        assert_eq!(bonuses.stats, [10, 11, 12, 13, 14]);
+        assert_eq!(bonuses.max_mana, 100);
+        assert_eq!(bonuses.max_health, 200);
+        assert_eq!(bonuses.melee_attack_power, 30);
+        assert_eq!(bonuses.ranged_attack_power, 40);
+        assert_eq!(bonuses.armor, 50);
+        assert_eq!(bonuses.resistances, [50, 1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn equipped_item_bonuses_map_spell_and_healing_power() {
+        let mut template = item_template_with_bonuses();
+        template.stat_type = [41, 42, 45, 0, 0, 0, 0, 0, 0, 0];
+        template.stat_value = [15, 20, 25, 0, 0, 0, 0, 0, 0, 0];
+
+        let mut bonuses = EquippedItemBonuses::default();
+        bonuses.add_template(EquipmentSlot::Chest as u8, &template);
+
+        assert_eq!(bonuses.healing_power, 15);
+        assert_eq!(bonuses.spell_power, 45);
+    }
+
+    #[test]
+    fn equipped_item_bonuses_collect_weapon_damage_by_slot() {
+        let mut mainhand = item_template_with_bonuses();
+        mainhand.dmg_min = [3.0, 1.0, 0.0, 0.0, 0.0];
+        mainhand.dmg_max = [8.0, 2.0, 0.0, 0.0, 0.0];
+        mainhand.delay = 2400;
+
+        let mut offhand = item_template_with_bonuses();
+        offhand.dmg_min = [2.0, 0.0, 0.0, 0.0, 0.0];
+        offhand.dmg_max = [5.0, 0.0, 0.0, 0.0, 0.0];
+        offhand.delay = 1600;
+
+        let mut ranged = item_template_with_bonuses();
+        ranged.dmg_min = [7.0, 0.0, 0.0, 0.0, 0.0];
+        ranged.dmg_max = [11.0, 0.0, 0.0, 0.0, 0.0];
+        ranged.delay = 2800;
+
+        let mut bonuses = EquippedItemBonuses::default();
+        bonuses.add_template(EquipmentSlot::Mainhand as u8, &mainhand);
+        bonuses.add_template(EquipmentSlot::Offhand as u8, &offhand);
+        bonuses.add_template(EquipmentSlot::Ranged as u8, &ranged);
+
+        let mainhand_damage = bonuses.mainhand_damage.unwrap();
+        assert_eq!(mainhand_damage.min, 4.0);
+        assert_eq!(mainhand_damage.max, 10.0);
+        assert_eq!(mainhand_damage.delay_ms, 2400);
+
+        let offhand_damage = bonuses.offhand_damage.unwrap();
+        assert_eq!(offhand_damage.min, 2.0);
+        assert_eq!(offhand_damage.max, 5.0);
+        assert_eq!(offhand_damage.delay_ms, 1600);
+
+        let ranged_damage = bonuses.ranged_damage.unwrap();
+        assert_eq!(ranged_damage.min, 7.0);
+        assert_eq!(ranged_damage.max, 11.0);
+        assert_eq!(ranged_damage.delay_ms, 2800);
     }
 }
