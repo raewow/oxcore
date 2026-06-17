@@ -82,43 +82,27 @@ pub async fn run_tui_loading(
     let mut failure: Option<String> = None;
 
     let mut events = EventStream::new();
+    let mut log_updates = store.subscribe();
     let mut render_tick = tokio::time::interval(Duration::from_millis(50));
     let mut sample_tick = tokio::time::interval(Duration::from_secs(1));
 
     loop {
+        let mut needs_draw = false;
+
         tokio::select! {
             _ = render_tick.tick() => {
                 spinner = spinner.wrapping_add(1);
-
-                // Drain any pending load updates while still loading.
-                if let Phase::Loading { status, error } = &mut phase {
-                    while let Ok(update) = updates.try_recv() {
-                        match update {
-                            LoadUpdate::Status(s) => *status = s,
-                            LoadUpdate::Failed(e) => *error = Some(e),
-                            LoadUpdate::Ready(panes) => {
-                                phase = Phase::Running(App::new(panes, store.clone()));
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                match &mut phase {
-                    Phase::Loading { status, error } => {
-                        let snap = progress.snapshot();
-                        terminal.draw(|f| {
-                            ui::render_loading(f, &store, &snap, status, error.as_deref(), spinner)
-                        })?;
-                    }
-                    Phase::Running(app) => {
-                        terminal.draw(|f| ui::render(f, app))?;
-                    }
+                needs_draw = true;
+            }
+            result = log_updates.changed() => {
+                if result.is_ok() {
+                    needs_draw = true;
                 }
             }
             _ = sample_tick.tick() => {
                 if let Phase::Running(app) = &mut phase {
                     app.sample();
+                    needs_draw = true;
                 }
             }
             maybe_event = events.next() => {
@@ -130,6 +114,7 @@ pub async fn run_tui_loading(
                                 if app.should_quit {
                                     quit = true;
                                 }
+                                needs_draw = true;
                             }
                             Phase::Loading { error, .. } => {
                                 // Any key dismisses an error; otherwise only quit keys exit.
@@ -139,11 +124,40 @@ pub async fn run_tui_loading(
                                 } else if is_quit_key(&key) {
                                     quit = true;
                                 }
+                                needs_draw = true;
                             }
                         }
                     }
                     Some(Ok(_)) => {}
                     Some(Err(_)) | None => break,
+                }
+            }
+        }
+
+        if needs_draw {
+            // Drain any pending load updates while still loading.
+            if let Phase::Loading { status, error } = &mut phase {
+                while let Ok(update) = updates.try_recv() {
+                    match update {
+                        LoadUpdate::Status(s) => *status = s,
+                        LoadUpdate::Failed(e) => *error = Some(e),
+                        LoadUpdate::Ready(panes) => {
+                            phase = Phase::Running(App::new(panes, store.clone()));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            match &mut phase {
+                Phase::Loading { status, error } => {
+                    let snap = progress.snapshot();
+                    terminal.draw(|f| {
+                        ui::render_loading(f, &store, &snap, status, error.as_deref(), spinner)
+                    })?;
+                }
+                Phase::Running(app) => {
+                    terminal.draw(|f| ui::render(f, app))?;
                 }
             }
         }

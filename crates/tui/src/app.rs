@@ -142,7 +142,7 @@ impl App {
         self.tabs
             .iter()
             .map(|t| match t {
-                TabKind::Both => "Both".to_string(),
+                TabKind::Both => "All".to_string(),
                 TabKind::Pane(i) => self.panes[*i].name.clone(),
                 TabKind::Performance => "Performance".to_string(),
             })
@@ -167,8 +167,8 @@ impl App {
         }
     }
 
-    /// Whether the OXCORE logo should be shown. Shown once on the "Both" tab, or — when
-    /// there is no Both tab (single-pane standalone) — on the single server tab.
+    /// Whether the OXCORE logo should be shown. Shown once on the "All" tab, or — when
+    /// there is no All tab (single-pane standalone) — on the single server tab.
     pub fn show_logo(&self) -> bool {
         let has_both = self.tabs.iter().any(|t| matches!(t, TabKind::Both));
         match self.current_tab() {
@@ -187,7 +187,9 @@ impl App {
 
     fn default_pane(&self) -> Option<usize> {
         // Prefer world as the bare-command default, else first pane.
-        self.pane_by_name("world").or(Some(0)).filter(|_| !self.panes.is_empty())
+        self.pane_by_name("world")
+            .or(Some(0))
+            .filter(|_| !self.panes.is_empty())
     }
 
     /// Resolve (pane index, command text) for the current input on the current tab.
@@ -201,9 +203,11 @@ impl App {
             TabKind::Pane(i) => Some((i, input.to_string())),
             TabKind::Both => {
                 if let Some(rest) = strip_prefix_ci(input, "auth:") {
-                    self.pane_by_name("auth").map(|i| (i, rest.trim().to_string()))
+                    self.pane_by_name("auth")
+                        .map(|i| (i, rest.trim().to_string()))
                 } else if let Some(rest) = strip_prefix_ci(input, "world:") {
-                    self.pane_by_name("world").map(|i| (i, rest.trim().to_string()))
+                    self.pane_by_name("world")
+                        .map(|i| (i, rest.trim().to_string()))
                 } else {
                     self.default_pane().map(|i| (i, input.to_string()))
                 }

@@ -8,7 +8,7 @@ use ratatui::Frame;
 use tracing::Level;
 
 use crate::app::{App, Focus, TabKind};
-use crate::log_layer::{LogFilter, LogRecord, LogStore};
+use crate::log_layer::{LogFilter, LogRecord, LogSource, LogStore};
 use crate::progress::ProgressSnapshot;
 
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -224,9 +224,21 @@ fn level_style(level: Level) -> Style {
     Style::default().fg(color)
 }
 
+fn source_style(source: LogSource) -> Style {
+    let color = match source {
+        LogSource::Auth => Color::LightBlue,
+        LogSource::World => Color::LightGreen,
+        LogSource::Other => Color::LightMagenta,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
 fn record_line(rec: &LogRecord, show_source: bool) -> Line<'static> {
     let mut spans = vec![
-        Span::styled(format!("{} ", rec.time), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{} ", rec.time),
+            Style::default().fg(Color::DarkGray),
+        ),
         Span::styled(
             format!("{:>5} ", rec.level.as_str()),
             level_style(rec.level).add_modifier(Modifier::BOLD),
@@ -235,7 +247,7 @@ fn record_line(rec: &LogRecord, show_source: bool) -> Line<'static> {
     if show_source {
         spans.push(Span::styled(
             format!("[{}] ", rec.source.tag()),
-            Style::default().fg(Color::Magenta),
+            source_style(rec.source),
         ));
     }
     spans.push(Span::raw(rec.message.clone()));
@@ -278,7 +290,10 @@ fn render_logs(f: &mut Frame, area: Rect, app: &App) {
     let start = end.saturating_sub(height);
     let visible = &records[start..end];
 
-    let lines: Vec<Line> = visible.iter().map(|r| record_line(r, show_source)).collect();
+    let lines: Vec<Line> = visible
+        .iter()
+        .map(|r| record_line(r, show_source))
+        .collect();
     let para = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
     f.render_widget(para, inner);
 }
@@ -324,7 +339,7 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" {} ", pane.name))
-            .border_style(Style::default().fg(ACCENT));
+            .border_style(source_style(pane.source));
         let para = Paragraph::new(Text::from(lines)).block(block);
         f.render_widget(para, rows[slot]);
     }
@@ -353,7 +368,7 @@ fn render_perf_pane(f: &mut Frame, area: Rect, app: &App, idx: usize) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" {} — performance ", pane.name))
-        .border_style(Style::default().fg(ACCENT));
+        .border_style(source_style(pane.source));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -513,11 +528,16 @@ fn render_quit_popup(f: &mut Frame) {
     let lines = vec![
         Line::from(Span::styled(
             "Quit oxcore?",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("[Y]es", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[Y]es",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw("      "),
             Span::styled("[N]o", Style::default().fg(Color::Gray)),
         ]),

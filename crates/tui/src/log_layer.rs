@@ -7,6 +7,8 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::watch;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::layer::Context;
@@ -62,22 +64,36 @@ pub struct LogRecord {
 pub struct LogStore {
     records: Mutex<VecDeque<LogRecord>>,
     capacity: usize,
+    revision: AtomicU64,
+    updates: watch::Sender<u64>,
 }
 
 impl LogStore {
     pub fn new(capacity: usize) -> Arc<Self> {
+        let (updates, _) = watch::channel(0);
         Arc::new(Self {
             records: Mutex::new(VecDeque::with_capacity(capacity.min(1024))),
             capacity,
+            revision: AtomicU64::new(0),
+            updates,
         })
     }
 
     pub fn push(&self, rec: LogRecord) {
-        let mut q = self.records.lock();
-        if q.len() >= self.capacity {
-            q.pop_front();
+        {
+            let mut q = self.records.lock();
+            if q.len() >= self.capacity {
+                q.pop_front();
+            }
+            q.push_back(rec);
         }
-        q.push_back(rec);
+
+        let revision = self.revision.fetch_add(1, Ordering::Relaxed) + 1;
+        let _ = self.updates.send(revision);
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<u64> {
+        self.updates.subscribe()
     }
 
     /// Push a synthetic line (e.g. an echo of a typed console command).
