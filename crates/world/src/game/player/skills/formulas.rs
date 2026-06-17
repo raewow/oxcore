@@ -38,6 +38,38 @@ pub fn get_skill_range_type(category_id: u32, has_skill_tier: bool) -> SkillRang
     }
 }
 
+/// Calculate the skill-up chance for a given skill value against
+/// gray/green/yellow/orange difficulty thresholds.
+///
+/// Returns a value scaled by 10 (e.g. 750 = 75% chance).
+/// The caller rolls 1-1000 and compares against this value.
+///
+/// Logic matches MaNGOS SkillGainChance():
+/// - skillValue >= grayLevel  -> grey chance
+/// - skillValue >= greenLevel -> green chance
+/// - skillValue >= yellowLevel -> yellow chance
+/// - otherwise                -> orange chance
+pub fn calculate_skill_gain_chance(
+    skill_value: u16,
+    gray_level: u16,
+    green_level: u16,
+    yellow_level: u16,
+    grey_chance: u32,
+    green_chance: u32,
+    yellow_chance: u32,
+    orange_chance: u32,
+) -> u32 {
+    if skill_value >= gray_level {
+        grey_chance * 10
+    } else if skill_value >= green_level {
+        green_chance * 10
+    } else if skill_value >= yellow_level {
+        yellow_chance * 10
+    } else {
+        orange_chance * 10
+    }
+}
+
 /// Get the starting skill value when a new weapon skill is learned.
 /// Weapon skills always start at 1 (you must use the weapon to improve).
 /// Defense skill starts at level * 5 (always maxed on creation).

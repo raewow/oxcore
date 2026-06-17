@@ -488,6 +488,241 @@ impl SkillSystem {
         Ok(())
     }
 
+    // =========================================================================
+    // Direct & Probabilistic Skill Updates
+    // =========================================================================
+
+    /// Update a skill by a fixed step, clamping to max.
+    ///
+    /// Corresponds to C++ Player::UpdateSkill.
+    /// Returns true if the skill was actually increased.
+    pub fn update_skill(
+        &self,
+        player_guid: ObjectGuid,
+        skill_id: u16,
+        step: u16,
+        world: &World,
+    ) -> bool {
+        if skill_id == 0 || step == 0 {
+            return false;
+        }
+
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                let skill_data = player.skills.skills.get_mut(&skill_id)?;
+                if skill_data.state == SkillSaveState::Deleted {
+                    return None;
+                }
+                if skill_data.max_value == 0 || skill_data.current_value == 0 || skill_data.current_value >= skill_data.max_value {
+                    return None;
+                }
+
+                let new_value = (skill_data.current_value + step).min(skill_data.max_value);
+                if new_value == skill_data.current_value {
+                    return None;
+                }
+
+                skill_data.current_value = new_value;
+                if skill_data.state != SkillSaveState::New {
+                    skill_data.state = SkillSaveState::Changed;
+                }
+                Some(true)
+            })
+            .flatten()
+            .unwrap_or(false)
+    }
+
+    /// Probabilistic skill update with a configurable chance.
+    ///
+    /// Corresponds to C++ Player::UpdateSkillPro.
+    /// `chance` is scaled by 10 (e.g. 750 = 75%).
+    /// `step` is the number of points to add on success.
+    /// Returns true if the skill was increased.
+    pub fn update_skill_pro(
+        &self,
+        player_guid: ObjectGuid,
+        skill_id: u16,
+        chance: u32,
+        step: u16,
+        world: &World,
+    ) -> bool {
+        if skill_id == 0 {
+            return false;
+        }
+        if chance == 0 {
+            return false;
+        }
+
+        let snapshot = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                let skill_data = player.skills.skills.get(&skill_id)?;
+                if skill_data.state == SkillSaveState::Deleted {
+                    return None;
+                }
+                if skill_data.max_value == 0 || skill_data.current_value == 0 || skill_data.current_value >= skill_data.max_value {
+                    return None;
+                }
+                Some((skill_data.current_value, skill_data.max_value))
+            })
+            .flatten();
+
+        let (current, max) = match snapshot {
+            Some(s) => s,
+            None => return false,
+        };
+
+        if current >= max {
+            return false;
+        }
+
+        // Roll 1-1000 against the scaled chance
+        let roll = rand::thread_rng().gen_range(1..=1000u32);
+        if roll > chance {
+            return false;
+        }
+
+        // Apply the increase
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                if let Some(skill_data) = player.skills.skills.get_mut(&skill_id) {
+                    if skill_data.current_value < skill_data.max_value {
+                        let new_value = (skill_data.current_value + step).min(skill_data.max_value);
+                        if new_value != skill_data.current_value {
+                            skill_data.current_value = new_value;
+                            if skill_data.state != SkillSaveState::New {
+                                skill_data.state = SkillSaveState::Changed;
+                            }
+                            return true;
+                        }
+                    }
+                }
+                false
+            })
+            .unwrap_or(false)
+    }
+
+    /// Update a gathering skill (herbalism, mining, skinning, lockpicking).
+    ///
+    /// Corresponds to C++ Player::UpdateGatherSkill.
+    /// Uses skill difficulty bands and configurable chance reduction for
+    /// skinning and mining based on skill value.
+    pub fn update_gather_skill(
+        &self,
+        player_guid: ObjectGuid,
+        skill_id: u16,
+        skill_value: u16,
+        red_level: u16,
+        multiplicator: u32,
+        world: &World,
+    ) -> bool {
+        if skill_id == 0 {
+            return false;
+        }
+
+        // TODO: HasTrialRestrictions check - deferred until trial system exists
+        // if self.has_trial_restriction_for_skill(player_guid, skill_id, skill_value, world) {
+        //     return false;
+        // }
+
+        let gathering_gain = world.config.skill_gain_gathering;
+        let config_orange = world.config.skill_chance_orange;
+        let config_yellow = world.config.skill_chance_yellow;
+        let config_green = world.config.skill_chance_green;
+        let config_grey = world.config.skill_chance_grey;
+
+        let base_chance = calculate_skill_gain_chance(
+            skill_value,
+            red_level + 100,
+            red_level + 50,
+            red_level + 25,
+            config_grey,
+            config_green,
+            config_yellow,
+            config_orange,
+        );
+
+        match skill_id {
+            SKILL_HERBALISM | SKILL_LOCKPICKING => {
+                self.update_skill_pro(
+                    player_guid,
+                    skill_id,
+                    base_chance * multiplicator,
+                    gathering_gain as u16,
+                    world,
+                )
+            }
+            SKILL_SKINNING => {
+                let steps = world.config.skill_chance_skinning_steps;
+                let adjusted_chance = if steps == 0 {
+                    base_chance * multiplicator
+                } else {
+                    (base_chance * multiplicator) >> (skill_value as u32 / steps)
+                };
+                self.update_skill_pro(
+                    player_guid,
+                    skill_id,
+                    adjusted_chance,
+                    gathering_gain as u16,
+                    world,
+                )
+            }
+            SKILL_MINING => {
+                let steps = world.config.skill_chance_mining_steps;
+                let adjusted_chance = if steps == 0 {
+                    base_chance * multiplicator
+                } else {
+                    (base_chance * multiplicator) >> (skill_value as u32 / steps)
+                };
+                self.update_skill_pro(
+                    player_guid,
+                    skill_id,
+                    adjusted_chance,
+                    gathering_gain as u16,
+                    world,
+                )
+            }
+            _ => false,
+        }
+    }
+
+    /// Update fishing skill with its special chance formula.
+    ///
+    /// Corresponds to C++ Player::UpdateFishingSkill.
+    /// Chance is 100% below skill 75, then decreases as 2500 / (skillValue - 50).
+    pub fn update_fishing_skill(&self, player_guid: ObjectGuid, world: &World) -> bool {
+        // TODO: HasTrialRestrictions check - deferred until trial system exists
+        let skill_value = match self.get_skill_value(player_guid, SKILL_FISHING, world) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        let chance = if skill_value < 75 {
+            1000 // 100% chance scaled by 10
+        } else {
+            // 2500 / (skillValue - 50), scaled by 10
+            let raw = 2500u32 / (skill_value as u32 - 50);
+            raw * 10
+        };
+
+        let gathering_gain = world.config.skill_gain_gathering;
+        self.update_skill_pro(
+            player_guid,
+            SKILL_FISHING,
+            chance,
+            gathering_gain as u16,
+            world,
+        )
+    }
+
     /// Get a skill value for a player (for hit table calculations).
     pub fn get_skill_value(
         &self,

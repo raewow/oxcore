@@ -194,6 +194,24 @@ pub struct Config {
     #[serde(default = "default_rate_auction_deposit")]
     pub rate_auction_deposit: f32, // Rate multiplier for auction deposits (default: 1.0)
 
+    // Skill System Settings
+    #[serde(default = "default_skill_chance_orange")]
+    pub skill_chance_orange: u32, // Skill-up chance for orange recipes (default: 100 = 100%)
+    #[serde(default = "default_skill_chance_yellow")]
+    pub skill_chance_yellow: u32, // Skill-up chance for yellow recipes (default: 75 = 75%)
+    #[serde(default = "default_skill_chance_green")]
+    pub skill_chance_green: u32, // Skill-up chance for green recipes (default: 25 = 25%)
+    #[serde(default = "default_skill_chance_grey")]
+    pub skill_chance_grey: u32, // Skill-up chance for grey recipes (default: 0 = 0%)
+    #[serde(default = "default_skill_chance_mining_steps")]
+    pub skill_chance_mining_steps: u32, // Mining skill chance reduction step size (default: 75)
+    #[serde(default = "default_skill_chance_skinning_steps")]
+    pub skill_chance_skinning_steps: u32, // Skinning skill chance reduction step size (default: 75)
+    #[serde(default = "default_skill_gain_crafting")]
+    pub skill_gain_crafting: u32, // Points gained per crafting skill-up (default: 1)
+    #[serde(default = "default_skill_gain_gathering")]
+    pub skill_gain_gathering: u32, // Points gained per gathering skill-up (default: 1)
+
     // Mail Settings
     #[serde(default = "default_mail_delivery_delay")]
     pub mail_delivery_delay: u32, // Delivery delay in seconds for items/money mail (0 = instant, 3600 = 1 hour retail default)
@@ -370,6 +388,38 @@ fn default_rate_auction_deposit() -> f32 {
     1.0
 }
 
+fn default_skill_chance_orange() -> u32 {
+    100
+}
+
+fn default_skill_chance_yellow() -> u32 {
+    75
+}
+
+fn default_skill_chance_green() -> u32 {
+    25
+}
+
+fn default_skill_chance_grey() -> u32 {
+    0
+}
+
+fn default_skill_chance_mining_steps() -> u32 {
+    75
+}
+
+fn default_skill_chance_skinning_steps() -> u32 {
+    75
+}
+
+fn default_skill_gain_crafting() -> u32 {
+    1
+}
+
+fn default_skill_gain_gathering() -> u32 {
+    1
+}
+
 fn default_mail_delivery_delay() -> u32 {
     3600 // 1 hour in seconds (retail default)
 }
@@ -446,6 +496,14 @@ impl Default for Config {
             unlinked_auction_houses: false,
             auction_deposit_min: default_auction_deposit_min(),
             rate_auction_deposit: default_rate_auction_deposit(),
+            skill_chance_orange: default_skill_chance_orange(),
+            skill_chance_yellow: default_skill_chance_yellow(),
+            skill_chance_green: default_skill_chance_green(),
+            skill_chance_grey: default_skill_chance_grey(),
+            skill_chance_mining_steps: default_skill_chance_mining_steps(),
+            skill_chance_skinning_steps: default_skill_chance_skinning_steps(),
+            skill_gain_crafting: default_skill_gain_crafting(),
+            skill_gain_gathering: default_skill_gain_gathering(),
             allow_cross_faction_mail: false,
             allow_cross_faction_add_friend: false,
             chat_flood_protection_delay: default_chat_flood_protection_delay(),

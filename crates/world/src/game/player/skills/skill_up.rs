@@ -1,3 +1,5 @@
+use super::formulas::calculate_skill_gain_chance;
+
 /// Calculate the chance (0-100) that a weapon skill increases after a successful hit.
 ///
 /// The formula is ported from MaNGOS Player::UpdateCombatSkills() and has two regimes:
@@ -190,5 +192,29 @@ mod tests {
     fn test_no_skill_gain_pvp() {
         assert!(!can_gain_skill_from_target(true));
         assert!(can_gain_skill_from_target(false));
+    }
+
+    #[test]
+    fn test_skill_gain_chance_orange() {
+        let chance = calculate_skill_gain_chance(50, 200, 150, 100, 0, 25, 75, 100);
+        assert_eq!(chance, 1000); // 100 * 10
+    }
+
+    #[test]
+    fn test_skill_gain_chance_yellow() {
+        let chance = calculate_skill_gain_chance(110, 200, 150, 100, 0, 25, 75, 100);
+        assert_eq!(chance, 750); // 75 * 10
+    }
+
+    #[test]
+    fn test_skill_gain_chance_green() {
+        let chance = calculate_skill_gain_chance(160, 200, 150, 100, 0, 25, 75, 100);
+        assert_eq!(chance, 250); // 25 * 10
+    }
+
+    #[test]
+    fn test_skill_gain_chance_grey() {
+        let chance = calculate_skill_gain_chance(210, 200, 150, 100, 0, 25, 75, 100);
+        assert_eq!(chance, 0); // 0 * 10
     }
 }

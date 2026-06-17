@@ -20,6 +20,10 @@ pub const SKILL_CROSSBOWS: u16 = 226;
 pub const SKILL_WANDS: u16 = 228;
 pub const SKILL_FIST_WEAPONS: u16 = 473;
 pub const SKILL_FISHING: u16 = 356;
+pub const SKILL_HERBALISM: u16 = 182;
+pub const SKILL_MINING: u16 = 186;
+pub const SKILL_SKINNING: u16 = 393;
+pub const SKILL_LOCKPICKING: u16 = 633;
 
 // === Armor Proficiencies ===
 pub const SKILL_CLOTH: u16 = 415;
@@ -55,6 +59,10 @@ pub enum SkillRangeType {
 /// Skill is always set to max value for the player's level.
 /// Used for armor proficiencies and some special skills.
 pub const SKILL_FLAG_ALWAYS_MAX_VALUE: u32 = 0x0001;
+
+// === Trial Account Limits ===
+pub const MAX_TRIAL_MAIN_PROFESSION_SKILL: u16 = 100;
+pub const MAX_TRIAL_SECONDARY_PROFESSION_SKILL: u16 = 150;
 
 // === Item Classes for Proficiency ===
 pub const ITEM_CLASS_WEAPON: u8 = 2;
