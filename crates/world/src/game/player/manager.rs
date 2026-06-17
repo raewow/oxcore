@@ -410,6 +410,7 @@ impl PlayerManager {
             .set_float_field(PLAYER_DODGE_PERCENTAGE, player.stats.dodge_pct)
             .set_float_field(PLAYER_PARRY_PERCENTAGE, player.stats.parry_pct)
             .set_float_field(PLAYER_BLOCK_PERCENTAGE, player.stats.block_pct)
+            .set_field(PLAYER_AMMO_ID, player.ammo_id)
             .set_field(UNIT_FIELD_FACTIONTEMPLATE, faction_template)
             .set_field(UNIT_FIELD_DISPLAYID, display_id)
             .set_field(UNIT_FIELD_NATIVEDISPLAYID, display_id)

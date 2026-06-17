@@ -31,6 +31,7 @@ pub struct ItemTemplate {
     pub stat_type: [u8; 10],
     pub stat_value: [i16; 10],
     pub delay: u16,
+    pub ammo_type: u8,
     pub dmg_min: [f32; 5],
     pub dmg_max: [f32; 5],
     pub dmg_type: [u8; 5],
@@ -370,7 +371,7 @@ impl ItemManager {
                      stat_type6, stat_type7, stat_type8, stat_type9, stat_type10,
                      stat_value1, stat_value2, stat_value3, stat_value4, stat_value5,
                      stat_value6, stat_value7, stat_value8, stat_value9, stat_value10,
-                     delay, dmg_min1, dmg_min2, dmg_min3, dmg_min4, dmg_min5,
+                     delay, ammo_type, dmg_min1, dmg_min2, dmg_min3, dmg_min4, dmg_min5,
                      dmg_max1, dmg_max2, dmg_max3, dmg_max4, dmg_max5,
                      dmg_type1, dmg_type2, dmg_type3, dmg_type4, dmg_type5, block,
                      armor, holy_res, fire_res, nature_res, frost_res, shadow_res, arcane_res,
@@ -432,6 +433,7 @@ impl ItemManager {
                 row.try_get("stat_value10")?,
             ];
             let delay: u16 = row.try_get("delay")?;
+            let ammo_type: u8 = row.try_get("ammo_type")?;
             let dmg_min = [
                 row.try_get("dmg_min1")?,
                 row.try_get("dmg_min2")?,
@@ -543,6 +545,7 @@ impl ItemManager {
                 stat_type,
                 stat_value,
                 delay,
+                ammo_type,
                 dmg_min,
                 dmg_max,
                 dmg_type,

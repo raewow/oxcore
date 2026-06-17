@@ -837,18 +837,41 @@ pub async fn handle_destroy_item(
 pub async fn handle_set_ammo(
     session: &crate::core::session::WorldSession,
     packet: &mut WorldPacket,
-    _world: &World,
+    world: &World,
 ) -> Result<()> {
-    let _item_entry = packet
+    const ITEM_CLASS_PROJECTILE: u32 = 6;
+
+    let item_entry = packet
         .read_u32()
         .ok_or_else(|| anyhow!("Failed to read item entry"))?;
 
-    let _player_guid = match session.player_guid() {
+    let player_guid = match session.player_guid() {
         Some(guid) => guid,
         None => return Ok(()),
     };
 
-    warn!("CMSG_SET_AMMO received but not implemented");
+    if item_entry != 0 {
+        let Some(template) = world.managers.item_mgr.get_template(item_entry) else {
+            warn!("CMSG_SET_AMMO: unknown ammo entry {}", item_entry);
+            return Ok(());
+        };
+
+        if template.item_class != ITEM_CLASS_PROJECTILE || template.ammo_type == 0 {
+            warn!("CMSG_SET_AMMO: entry {} is not projectile ammo", item_entry);
+            return Ok(());
+        }
+    }
+
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            player.ammo_id = item_entry;
+        });
+
+    world.systems.stats.recalculate_all(player_guid);
+    world.systems.stats.send_stat_update(player_guid);
 
     Ok(())
 }

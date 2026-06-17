@@ -104,6 +104,8 @@ pub struct Player {
     pub settings: SettingsState,
     /// Money in copper
     pub money: u32,
+    /// Equipped ammo item entry (`PLAYER_AMMO_ID`).
+    pub ammo_id: u32,
     /// Environment state (rest XP, mirror timers, environmental hazards)
     pub environment: EnvironmentState,
     /// Target currently being looted
@@ -206,6 +208,7 @@ impl Player {
             reputation: ReputationState::new(),
             settings: SettingsState::default(),
             money: 0,
+            ammo_id: 0,
             environment: EnvironmentState::default(),
             looting_target: None,
             current_gossip_menu_id: None,

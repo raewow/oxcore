@@ -36,6 +36,7 @@ struct EquippedWeaponDamage {
     min: f32,
     max: f32,
     delay_ms: u32,
+    ammo_type: u8,
 }
 
 impl EquippedWeaponDamage {
@@ -50,6 +51,7 @@ impl EquippedWeaponDamage {
             min,
             max,
             delay_ms: u32::from(template.delay).max(1),
+            ammo_type: template.ammo_type,
         })
     }
 }
@@ -208,6 +210,22 @@ impl StatsSystem {
         }
 
         bonuses
+    }
+
+    fn ammo_dps_for_template(template: &ItemTemplate) -> Option<f32> {
+        const ITEM_CLASS_PROJECTILE: u32 = 6;
+
+        if template.item_class != ITEM_CLASS_PROJECTILE || template.ammo_type == 0 {
+            return None;
+        }
+
+        let min: f32 = template.dmg_min.iter().sum();
+        let max: f32 = template.dmg_max.iter().sum();
+        if min <= 0.0 && max <= 0.0 {
+            return None;
+        }
+
+        Some((min + max) / 2.0)
     }
 
     pub fn on_player_login(&self, guid: ObjectGuid) -> Result<()> {
@@ -534,9 +552,19 @@ impl StatsSystem {
             }
 
             if let Some(ranged) = equipped_bonuses.ranged_damage {
+                let ammo_dps = if ranged.ammo_type == 0 || player.ammo_id == 0 {
+                    0.0
+                } else {
+                    self.item_mgr
+                        .get_template(player.ammo_id)
+                        .filter(|ammo| ammo.ammo_type == ranged.ammo_type)
+                        .and_then(|ammo| Self::ammo_dps_for_template(&ammo))
+                        .unwrap_or(0.0)
+                };
                 let ap_dmg = derived::ap_damage_modifier(ranged_ap_for_damage, ranged.delay_ms);
-                let min = (ranged.min + ap_dmg).max(0.0);
-                let max = (ranged.max + ap_dmg).max(min);
+                let ammo_damage = ammo_dps * (ranged.delay_ms as f32 / 1000.0);
+                let min = (ranged.min + ap_dmg + ammo_damage).max(0.0);
+                let max = (ranged.max + ap_dmg + ammo_damage).max(min);
                 player.stats.min_ranged_damage = player
                     .stats
                     .unit_mods
@@ -726,6 +754,7 @@ impl StatsSystem {
                 player.stats.parry_pct,
                 player.stats.block_pct,
                 player.stats.block_value,
+                player.ammo_id,
                 player.stats.min_damage,
                 player.stats.max_damage,
                 player.stats.min_offhand_damage,
@@ -755,6 +784,7 @@ impl StatsSystem {
             parry,
             block,
             _block_value,
+            ammo_id,
             min_dmg,
             max_dmg,
             min_oh_dmg,
@@ -799,7 +829,8 @@ impl StatsSystem {
             .set_float_field(PLAYER_RANGED_CRIT_PERCENTAGE, ranged_crit)
             .set_float_field(PLAYER_DODGE_PERCENTAGE, dodge)
             .set_float_field(PLAYER_PARRY_PERCENTAGE, parry)
-            .set_float_field(PLAYER_BLOCK_PERCENTAGE, block);
+            .set_float_field(PLAYER_BLOCK_PERCENTAGE, block)
+            .set_field(PLAYER_AMMO_ID, ammo_id);
 
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
         let packet = update_msg.to_world_packet();
@@ -833,6 +864,7 @@ mod tests {
             stat_type: [4, 3, 7, 5, 6, 0, 1, 38, 39, 255],
             stat_value: [10, 11, 12, 13, 14, 100, 200, 30, 40, 999],
             delay: 0,
+            ammo_type: 0,
             dmg_min: [0.0; 5],
             dmg_max: [0.0; 5],
             dmg_type: [0; 5],
@@ -917,5 +949,38 @@ mod tests {
         assert_eq!(ranged_damage.min, 7.0);
         assert_eq!(ranged_damage.max, 11.0);
         assert_eq!(ranged_damage.delay_ms, 2800);
+        assert_eq!(ranged_damage.ammo_type, 0);
+    }
+
+    #[test]
+    fn ammo_dps_requires_projectile_ammo_template() {
+        let mut ammo = item_template_with_bonuses();
+        ammo.item_class = 6;
+        ammo.ammo_type = 2;
+        ammo.dmg_min = [4.0, 0.0, 0.0, 0.0, 0.0];
+        ammo.dmg_max = [8.0, 0.0, 0.0, 0.0, 0.0];
+
+        assert_eq!(StatsSystem::ammo_dps_for_template(&ammo), Some(6.0));
+
+        ammo.item_class = 2;
+        assert_eq!(StatsSystem::ammo_dps_for_template(&ammo), None);
+
+        ammo.item_class = 6;
+        ammo.ammo_type = 0;
+        assert_eq!(StatsSystem::ammo_dps_for_template(&ammo), None);
+    }
+
+    #[test]
+    fn ranged_weapon_damage_remembers_required_ammo_type() {
+        let mut ranged = item_template_with_bonuses();
+        ranged.dmg_min = [7.0, 0.0, 0.0, 0.0, 0.0];
+        ranged.dmg_max = [11.0, 0.0, 0.0, 0.0, 0.0];
+        ranged.delay = 2800;
+        ranged.ammo_type = 3;
+
+        let mut bonuses = EquippedItemBonuses::default();
+        bonuses.add_template(EquipmentSlot::Ranged as u8, &ranged);
+
+        assert_eq!(bonuses.ranged_damage.unwrap().ammo_type, 3);
     }
 }

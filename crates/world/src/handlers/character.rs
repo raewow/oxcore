@@ -230,6 +230,7 @@ pub async fn handle_player_login_with_guid(
     player.rest_bonus = character.rest_bonus;
     player.player_flags = character.character_flags;
     player.xp = character.xp;
+    player.ammo_id = character.ammo_id;
 
     // Load homebind from database
     let homebind = char_repo.find_homebind(guid.counter()).await?;

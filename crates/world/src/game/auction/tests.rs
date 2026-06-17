@@ -38,6 +38,7 @@ fn test_item_template(entry: u32) -> ItemTemplate {
         stat_type: [0; 10],
         stat_value: [0; 10],
         delay: 0,
+        ammo_type: 0,
         dmg_min: [0.0; 5],
         dmg_max: [0.0; 5],
         dmg_type: [0; 5],
