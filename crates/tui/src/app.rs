@@ -104,6 +104,8 @@ pub struct App {
     pub focus: Focus,
     /// Whether the quit-confirmation popup is showing.
     pub confirm_quit: bool,
+    /// Whether terminal mouse capture is enabled for wheel scrolling/tab clicks.
+    pub mouse_enabled: bool,
     pub log_control: LogControl,
 }
 
@@ -136,8 +138,13 @@ impl App {
             filter: String::new(),
             focus: Focus::Command,
             confirm_quit: false,
+            mouse_enabled: false,
             log_control,
         }
+    }
+
+    pub fn set_mouse_enabled(&mut self, enabled: bool) {
+        self.mouse_enabled = enabled;
     }
 
     pub fn log_level_name(&self) -> &'static str {

@@ -478,8 +478,10 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
     let active = !tab_disabled && app.focus == Focus::Command && !app.confirm_quit;
     let title = if tab_disabled {
         " input (switch tab to send commands) "
+    } else if app.mouse_enabled {
+        " input  (Tab: switch · F2: mouse off/select text · mouse: tabs/scroll · ^F: filter · q quit) "
     } else {
-        " input  (Tab: switch · ^F: filter · ^L: log level · :log debug · → complete · q quit) "
+        " input  (Tab: switch · F2: mouse on · select text enabled · ^F: filter · ^L: log level · q quit) "
     };
 
     let mut spans = vec![

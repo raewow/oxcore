@@ -56,9 +56,21 @@ impl Drop for TermGuard {
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     Ok(Terminal::new(backend)?)
+}
+
+fn set_mouse_capture(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    enabled: bool,
+) -> Result<()> {
+    if enabled {
+        execute!(terminal.backend_mut(), EnableMouseCapture)?;
+    } else {
+        execute!(terminal.backend_mut(), DisableMouseCapture)?;
+    }
+    Ok(())
 }
 
 fn is_quit_key(key: &crossterm::event::KeyEvent) -> bool {
@@ -120,7 +132,13 @@ pub async fn run_tui_loading(
                     Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => {
                         match &mut phase {
                             Phase::Running(app) => {
-                                input::handle_key(app, key);
+                                if key.code == KeyCode::F(2) {
+                                    let enabled = !app.mouse_enabled;
+                                    set_mouse_capture(&mut terminal, enabled)?;
+                                    app.set_mouse_enabled(enabled);
+                                } else {
+                                    input::handle_key(app, key);
+                                }
                                 if app.should_quit {
                                     quit = true;
                                 }
@@ -140,9 +158,11 @@ pub async fn run_tui_loading(
                     }
                     Some(Ok(Event::Mouse(mouse))) => {
                         if let Phase::Running(app) = &mut phase {
-                            let size = terminal.size()?;
-                            input::handle_mouse(app, mouse, size);
-                            needs_draw = true;
+                            if app.mouse_enabled {
+                                let size = terminal.size()?;
+                                input::handle_mouse(app, mouse, size);
+                                needs_draw = true;
+                            }
                         }
                     }
                     Some(Ok(_)) => {}

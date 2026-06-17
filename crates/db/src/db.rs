@@ -281,7 +281,8 @@ mod tests {
     #[test]
     fn handles_escaped_quotes_and_backticks() {
         // \' is an escaped quote (string continues); a ; right after must stay inside.
-        let sql = "INSERT INTO `t` VALUES ('it\\'s a test; really','ok');CREATE TABLE `a;b` (x int);";
+        let sql =
+            "INSERT INTO `t` VALUES ('it\\'s a test; really','ok');CREATE TABLE `a;b` (x int);";
         let stmts = split_statements(sql);
         assert_eq!(stmts.len(), 2, "got {stmts:?}");
         assert!(stmts[0].contains("it\\'s a test; really"));
