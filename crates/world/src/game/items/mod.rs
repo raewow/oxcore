@@ -3,5 +3,5 @@ pub mod item;
 pub mod manager;
 
 pub use bag::{Bag, MAX_BAG_SIZE};
-pub use item::Item;
+pub use item::{Item, ItemRequiredTarget, ItemTargetType};
 pub use manager::ItemManager;

@@ -264,6 +264,12 @@ impl World {
             .load_item_templates(&self.databases.world)
             .await?;
 
+        // Load item required-target rules (item_required_target)
+        self.managers
+            .item_mgr
+            .load_item_required_targets(&self.databases.world)
+            .await?;
+
         // Initialize item GUID generator from database
         self.managers
             .item_mgr

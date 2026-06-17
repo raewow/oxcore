@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tracing::info;
 
+use super::item::{ItemRequiredTarget, ItemTargetType};
+
 /// Item template from database
 #[derive(Debug, Clone)]
 pub struct ItemTemplate {
@@ -284,6 +286,8 @@ impl ItemTemplate {
 /// Manages item templates and provides database loading
 pub struct ItemManager {
     templates: DashMap<u32, Arc<ItemTemplate>>,
+    /// item entry -> required-target rules (loaded from `item_required_target`)
+    required_targets: DashMap<u32, Vec<ItemRequiredTarget>>,
     next_guid: AtomicU32,
 }
 
@@ -291,6 +295,7 @@ impl ItemManager {
     pub fn new() -> Self {
         Self {
             templates: DashMap::new(),
+            required_targets: DashMap::new(),
             next_guid: AtomicU32::new(0),
         }
     }
@@ -484,6 +489,74 @@ impl ItemManager {
     /// Number of loaded templates
     pub fn template_count(&self) -> usize {
         self.templates.len()
+    }
+
+    /// Register a required-target rule for an item entry.
+    pub fn add_required_target(&self, entry: u32, target: ItemRequiredTarget) {
+        self.required_targets.entry(entry).or_default().push(target);
+    }
+
+    /// Load all item required-target rules from the `item_required_target` table.
+    pub async fn load_item_required_targets(&self, pool: &sqlx::MySqlPool) -> Result<()> {
+        let rows = sqlx::query("SELECT entry, `type`, target_entry FROM item_required_target")
+            .fetch_all(pool)
+            .await
+            .context("Failed to load item_required_target")?;
+
+        let rows_len = rows.len();
+        let mut skipped = 0;
+
+        for row in rows {
+            let entry: u32 = row.try_get("entry")?;
+            let raw_type: u8 = row.try_get("type")?;
+            let target_entry: u32 = row.try_get("target_entry")?;
+
+            let Some(target_type) = ItemTargetType::from_db(raw_type) else {
+                tracing::warn!(
+                    "Item (Entry: {}) has unknown item_required_target type {}, skipped.",
+                    entry,
+                    raw_type
+                );
+                skipped += 1;
+                continue;
+            };
+
+            self.add_required_target(entry, ItemRequiredTarget::new(target_type, target_entry));
+        }
+
+        info!(
+            "Loaded {} item required-target rules",
+            rows_len - skipped
+        );
+        Ok(())
+    }
+
+    /// Check whether `target` is a valid use-target for the given item entry.
+    /// Maps to C++ Item::IsTargetValidForItemUse.
+    ///
+    /// `target` is `None` when no unit is targeted; otherwise it is
+    /// `(target_is_unit, target_entry, target_alive)`. Items with no
+    /// required-target rules are always usable.
+    pub fn is_target_valid_for_item_use(
+        &self,
+        item_entry: u32,
+        target: Option<(bool, u32, bool)>,
+    ) -> bool {
+        let Some(rules) = self.required_targets.get(&item_entry) else {
+            return true;
+        };
+
+        if rules.is_empty() {
+            return true;
+        }
+
+        let Some((is_unit, entry, alive)) = target else {
+            return false;
+        };
+
+        rules
+            .iter()
+            .any(|rule| rule.is_fit_to_requirements(is_unit, entry, alive))
     }
 
     /// Initialize the GUID generator from the database

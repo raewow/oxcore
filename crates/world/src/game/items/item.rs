@@ -24,6 +24,68 @@ pub enum ItemUpdateState {
     Removed,
 }
 
+/// Kind of unit an item requires as its use target.
+/// Mirrors the `type` column of the `item_required_target` table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemTargetType {
+    /// ITEM_TARGET_TYPE_CREATURE: target must be a living creature.
+    Creature,
+    /// ITEM_TARGET_TYPE_DEAD: target must be a dead creature.
+    Dead,
+}
+
+impl ItemTargetType {
+    pub fn from_db(raw: u8) -> Option<Self> {
+        match raw {
+            1 => Some(ItemTargetType::Creature),
+            2 => Some(ItemTargetType::Dead),
+            _ => None,
+        }
+    }
+}
+
+/// A single required-target rule for an item.
+/// Maps to C++ `ItemRequiredTarget`.
+#[derive(Debug, Clone, Copy)]
+pub struct ItemRequiredTarget {
+    pub target_type: ItemTargetType,
+    pub target_entry: u32,
+}
+
+impl ItemRequiredTarget {
+    pub fn new(target_type: ItemTargetType, target_entry: u32) -> Self {
+        Self {
+            target_type,
+            target_entry,
+        }
+    }
+
+    /// Check whether a candidate target satisfies this rule.
+    /// Maps to C++ ItemRequiredTarget::IsFitToRequirements.
+    ///
+    /// `target_is_unit` is true only for creatures (C++ TYPEID_UNIT); players
+    /// and other object types never satisfy a required-target rule.
+    pub fn is_fit_to_requirements(
+        &self,
+        target_is_unit: bool,
+        target_entry: u32,
+        target_alive: bool,
+    ) -> bool {
+        if !target_is_unit {
+            return false;
+        }
+
+        if target_entry != self.target_entry {
+            return false;
+        }
+
+        match self.target_type {
+            ItemTargetType::Creature => target_alive,
+            ItemTargetType::Dead => !target_alive,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemLootUpdateState {
     None,
@@ -471,6 +533,38 @@ mod tests {
         item.set_loot_state(ItemLootUpdateState::Unchanged);
         assert_eq!(item.loot_state, ItemLootUpdateState::None);
         assert_eq!(item.update_state, ItemUpdateState::Unchanged);
+    }
+
+    #[test]
+    fn required_target_creature_must_match_entry_and_be_alive() {
+        let req = ItemRequiredTarget::new(ItemTargetType::Creature, 2530);
+
+        // Right entry, alive -> fits
+        assert!(req.is_fit_to_requirements(true, 2530, true));
+        // Right entry, dead -> fails (creature rule needs alive)
+        assert!(!req.is_fit_to_requirements(true, 2530, false));
+        // Wrong entry -> fails
+        assert!(!req.is_fit_to_requirements(true, 9999, true));
+        // Not a creature (e.g. a player) -> fails
+        assert!(!req.is_fit_to_requirements(false, 2530, true));
+    }
+
+    #[test]
+    fn required_target_dead_must_match_entry_and_be_dead() {
+        let req = ItemRequiredTarget::new(ItemTargetType::Dead, 7318);
+
+        assert!(req.is_fit_to_requirements(true, 7318, false));
+        assert!(!req.is_fit_to_requirements(true, 7318, true));
+        assert!(!req.is_fit_to_requirements(true, 1, false));
+        assert!(!req.is_fit_to_requirements(false, 7318, false));
+    }
+
+    #[test]
+    fn item_target_type_parses_known_db_values_only() {
+        assert_eq!(ItemTargetType::from_db(1), Some(ItemTargetType::Creature));
+        assert_eq!(ItemTargetType::from_db(2), Some(ItemTargetType::Dead));
+        assert_eq!(ItemTargetType::from_db(0), None);
+        assert_eq!(ItemTargetType::from_db(3), None);
     }
 
     #[test]
