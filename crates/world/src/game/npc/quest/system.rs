@@ -251,9 +251,13 @@ impl QuestSystem {
                 } else {
                     status = status.max(DialogStatus::Available);
                 }
-            } else {
+            } else if self.can_see_start_quest(player_guid, &quest, world) {
+                // Prerequisites are satisfied but the player's level is too low:
+                // show a greyed "available later" marker (matches C++ DIALOG_STATUS_UNAVAILABLE).
                 status = status.max(DialogStatus::Unavailable);
             }
+            // Otherwise a prerequisite is unmet (e.g. an earlier quest in the chain):
+            // show no marker at all, matching C++ CanSeeStartQuest returning false.
         }
 
         status
@@ -381,6 +385,30 @@ impl QuestSystem {
         quest: &QuestTemplate,
         world: &World,
     ) -> bool {
+        self.can_take_quest_inner(player_guid, quest, world, true)
+    }
+
+    /// Like `can_take_quest` but ignores the minimum-level requirement. Mirrors C++
+    /// `CanSeeStartQuest`: true when every prerequisite (class/race/skill/prev-quest/
+    /// chain/reputation/exclusive group/etc.) is satisfied and only the player's level
+    /// may still be too low. Used to decide whether a quest-giver shows a greyed
+    /// "available later" marker versus no marker at all.
+    pub fn can_see_start_quest(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        world: &World,
+    ) -> bool {
+        self.can_take_quest_inner(player_guid, quest, world, false)
+    }
+
+    fn can_take_quest_inner(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        world: &World,
+        enforce_min_level: bool,
+    ) -> bool {
         let Some(player) = self.player_mgr.get_player(player_guid) else {
             return false;
         };
@@ -403,7 +431,7 @@ impl QuestSystem {
         }
 
         // 2. Level requirements
-        if player.level < quest.min_level as u8 {
+        if enforce_min_level && player.level < quest.min_level as u8 {
             return false;
         }
         if quest.max_level > 0 && player.level > quest.max_level as u8 {
@@ -1021,9 +1049,9 @@ impl QuestSystem {
         let mut quest_items = Vec::new();
         let mut seen = HashSet::new();
 
-        // Add completable quests first
+        // Add completable / in-progress quests first.
         for &quest_id in &finish_quests {
-            if !seen.insert(quest_id) {
+            if seen.contains(&quest_id) {
                 continue;
             }
             let Some(quest) = self.manager.get_quest_template(quest_id) else {
@@ -1034,6 +1062,7 @@ impl QuestSystem {
 
             if status == QuestStatus::Complete && !rewarded_quests.contains(&quest_id) {
                 // Yellow ? for complete (ready to turn in)
+                seen.insert(quest_id);
                 quest_items.push(super::types::GossipQuestData {
                     quest_id,
                     icon: DialogStatus::Reward2 as u32,
@@ -1042,6 +1071,7 @@ impl QuestSystem {
                 });
             } else if status == QuestStatus::Incomplete {
                 // Gray ? for incomplete (not ready yet)
+                seen.insert(quest_id);
                 quest_items.push(super::types::GossipQuestData {
                     quest_id,
                     icon: DialogStatus::Incomplete as u32,
@@ -1049,6 +1079,9 @@ impl QuestSystem {
                     title: quest.title.clone(),
                 });
             }
+            // Status None/other: do NOT mark as seen. An NPC that both ends and starts
+            // a quest (e.g. investigate-and-return quests like 15 at Marshal McBride)
+            // must still have it considered by the available-quest loop below.
         }
 
         // Add available quests (only those the player can actually take)
@@ -1190,11 +1223,40 @@ impl QuestSystem {
             return false;
         };
 
+        // Sync any required items already in the player's bags, then mark the quest
+        // complete on accept if it has no outstanding objectives. This covers
+        // no-objective quests, deliver quests whose items are already carried, and
+        // auto-complete quests. Matches C++ AddQuest -> CanCompleteQuest -> SetQuestStatus(COMPLETE).
+        // Determined before persisting so the saved row and the client quest-log slot
+        // both reflect completion (otherwise the quest reverts to incomplete on relog).
+        self.sync_item_objectives_from_inventory(player_guid, quest);
+
+        let complete_on_accept = self
+            .player_mgr
+            .with_player_mut(player_guid, |p| {
+                if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest.id)
+                {
+                    if progress.is_complete(quest) || quest.is_auto_complete() {
+                        progress.status = QuestStatus::Complete;
+                        progress.mark_changed();
+                        return true;
+                    }
+                }
+                false
+            })
+            .unwrap_or(false);
+
+        let accepted_status = if complete_on_accept {
+            QuestStatus::Complete
+        } else {
+            QuestStatus::Incomplete
+        };
+
         let quest_id_for_spawn = quest.id;
         let accepted_row = QuestStatusRow {
             guid: player_guid.counter(),
             quest: quest_id_for_spawn,
-            status: QuestStatus::Incomplete as u8,
+            status: accepted_status as u8,
             rewarded: false,
             explored: false,
             timer: 0,
@@ -1223,6 +1285,7 @@ impl QuestSystem {
         const QUEST_ID_OFFSET: u32 = 0;
         const QUEST_COUNT_STATE_OFFSET: u32 = 1;
         const QUEST_TIME_OFFSET: u32 = 2;
+        const QUEST_STATE_COMPLETE: u32 = 0x01;
 
         let slot_u32 = slot as u32;
         let quest_id_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_ID_OFFSET;
@@ -1230,15 +1293,28 @@ impl QuestSystem {
             PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_COUNT_STATE_OFFSET;
         let timer_field = PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_TIME_OFFSET;
 
+        // The quest state lives in the high byte (bits 24+); see pack_quest_count_state.
+        let count_state_value = if complete_on_accept {
+            QUEST_STATE_COMPLETE << 24
+        } else {
+            0
+        };
+
         let world_guid = ObjectGuid::from_low(player_guid.counter());
         let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
             ValuesUpdateBlock::new(world_guid, ObjectType::Player)
                 .set_field(quest_id_field, quest.id)
-                .set_field(count_state_field, 0)
+                .set_field(count_state_field, count_state_value)
                 .set_field(timer_field, 0),
         ));
         self.broadcast_mgr
             .send_msg_to_player(player_guid, values_update);
+
+        if complete_on_accept {
+            let complete_msg = SmsgQuestupdateComplete { quest_id: quest.id };
+            self.broadcast_mgr
+                .send_msg_to_player(player_guid, complete_msg);
+        }
 
         if quest.src_spell != 0 {
             if let Err(e) = world
@@ -1252,36 +1328,6 @@ impl QuestSystem {
                     quest.src_spell, quest.id, player_guid, e
                 );
             }
-        }
-
-        // Sync any required items already in the player's bags, then mark the quest
-        // complete on accept if it has no outstanding objectives. This covers
-        // no-objective quests, deliver quests whose items are already carried, and
-        // auto-complete quests. Matches C++ AddQuest -> CanCompleteQuest -> SetQuestStatus(COMPLETE).
-        // Without this, pack_quest_count_state reports the quest as incomplete and the
-        // client never shows it as ready to turn in.
-        self.sync_item_objectives_from_inventory(player_guid, quest);
-
-        let complete_on_accept = self
-            .player_mgr
-            .with_player_mut(player_guid, |p| {
-                if let Some(progress) =
-                    p.active_quests.iter_mut().find(|q| q.quest_id == quest.id)
-                {
-                    if progress.is_complete(quest) || quest.is_auto_complete() {
-                        progress.status = QuestStatus::Complete;
-                        progress.mark_changed();
-                        return true;
-                    }
-                }
-                false
-            })
-            .unwrap_or(false);
-
-        if complete_on_accept {
-            let complete_msg = SmsgQuestupdateComplete { quest_id: quest.id };
-            self.broadcast_mgr
-                .send_msg_to_player(player_guid, complete_msg);
         }
 
         true
@@ -1994,22 +2040,34 @@ impl QuestSystem {
             }
         }
 
-        // Remove from active quests
+        // Remove from active quests (capture the slot + old length so the client
+        // quest-log fields can be rewritten, shifting later quests down).
         let rewarded_choice_item_id = if quest.get_rew_choice_items_count() > 0 {
             quest.rew_choice_item_id[reward_choice as usize]
         } else {
             0
         };
-        self.player_mgr.with_player_mut(player_guid, |p| {
+        let removal = self.player_mgr.with_player_mut(player_guid, |p| {
             if let Some(progress) = p.active_quests.iter_mut().find(|q| q.quest_id == quest_id) {
                 progress.reward_choice = rewarded_choice_item_id;
                 progress.status = QuestStatus::Complete;
                 progress.rewarded = true;
                 progress.mark_changed();
             }
-            p.active_quests.retain(|q| q.quest_id != quest_id);
+            let old_len = p.active_quests.len();
+            let slot = p.active_quests.iter().position(|q| q.quest_id == quest_id);
+            if let Some(s) = slot {
+                p.active_quests.remove(s);
+            }
             p.rewarded_quests.insert(quest_id);
+            (slot, old_len)
         });
+
+        // Clear the turned-in quest from the client's quest log. Without this the
+        // server drops it but the client keeps showing it in the log.
+        if let Some((Some(slot), old_len)) = removal {
+            self.refresh_quest_log_slots(player_guid, slot, old_len);
+        }
 
         let rewarded_row = QuestStatusRewardedRow {
             guid: player_guid.counter(),
@@ -2136,6 +2194,50 @@ impl QuestSystem {
         }
 
         Ok(())
+    }
+
+    /// Rewrite the client's PLAYER_QUEST_LOG_* fields for slots [from_slot, old_len),
+    /// reflecting the current active_quests after a removal. Quests after the removed
+    /// slot shift down by one, and the now-vacant trailing slot is cleared to 0.
+    fn refresh_quest_log_slots(&self, player_guid: ObjectGuid, from_slot: usize, old_len: usize) {
+        const MAX_QUEST_OFFSET: u32 = 3;
+        const QUEST_ID_OFFSET: u32 = 0;
+        const QUEST_COUNT_STATE_OFFSET: u32 = 1;
+        const QUEST_TIME_OFFSET: u32 = 2;
+
+        let world_guid = ObjectGuid::from_low(player_guid.counter());
+        let active_quests = self
+            .player_mgr
+            .get_player(player_guid)
+            .map(|p| p.active_quests.clone())
+            .unwrap_or_default();
+
+        let mut values = ValuesUpdateBlock::new(world_guid, ObjectType::Player);
+        for slot_idx in from_slot..old_len {
+            let slot_u32 = slot_idx as u32;
+            let quest_id_field =
+                PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_ID_OFFSET;
+            let count_state_field =
+                PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_COUNT_STATE_OFFSET;
+            let timer_field =
+                PLAYER_QUEST_LOG_1_1 + slot_u32 * MAX_QUEST_OFFSET + QUEST_TIME_OFFSET;
+
+            if let Some(progress) = active_quests.get(slot_idx) {
+                values = values
+                    .set_field(quest_id_field, progress.quest_id)
+                    .set_field(count_state_field, Self::pack_quest_count_state(progress))
+                    .set_field(timer_field, progress.timer);
+            } else {
+                values = values
+                    .set_field(quest_id_field, 0)
+                    .set_field(count_state_field, 0)
+                    .set_field(timer_field, 0);
+            }
+        }
+
+        let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values));
+        self.broadcast_mgr
+            .send_msg_to_player(player_guid, values_update);
     }
 
     /// Send quest giver quest list
@@ -2911,7 +3013,7 @@ impl QuestSystem {
                 _ => QuestStatus::Incomplete,
             };
 
-            let progress = QuestProgress {
+            let mut progress = QuestProgress {
                 quest_id: row.quest,
                 status,
                 rewarded: row.rewarded,
@@ -2932,6 +3034,17 @@ impl QuestSystem {
                 ],
                 update_state: super::types::QuestUpdateState::Unchanged,
             };
+
+            // Self-heal: promote to Complete if the stored objectives are already met
+            // (covers no-objective quests and rows persisted before completion-on-accept
+            // was tracked). Matches C++ recomputing quest status on load.
+            if progress.status != QuestStatus::Complete {
+                if let Some(template) = self.manager.get_quest_template(row.quest) {
+                    if progress.is_complete(&template) || template.is_auto_complete() {
+                        progress.status = QuestStatus::Complete;
+                    }
+                }
+            }
 
             self.player_mgr.with_player_mut(player_guid, |p| {
                 p.active_quests.push(progress);
