@@ -694,6 +694,74 @@ impl SkillSystem {
         }
     }
 
+    /// Update crafting skill after a successful craft (spell cast).
+    ///
+    /// Corresponds to C++ Player::UpdateCraftSkill.
+    /// Looks up the spell in SkillLineAbility.dbc to find the associated
+    /// skill, then rolls for a skill-up using the color-band thresholds
+    /// stored in the DBC entry (min_value / max_value).
+    pub fn update_craft_skill(
+        &self,
+        player_guid: ObjectGuid,
+        spell_id: u32,
+        world: &World,
+    ) -> bool {
+        if spell_id == 0 {
+            return false;
+        }
+
+        let dbc = world.dbc.read();
+        let abilities: Vec<_> = dbc
+            .get_skill_line_abilities_by_spell_id(spell_id)
+            .filter(|entry| entry.skill_id != 0)
+            .cloned()
+            .collect();
+        drop(dbc);
+
+        for ability in abilities {
+            // Check trial restrictions (profession/secondary skill caps)
+            // TODO: HasTrialRestrictions check - deferred until trial system exists
+            // if self.has_trial_restriction_for_skill(player_guid, ability.skill_id as u16, world) {
+            //     return false;
+            // }
+
+            let skill_id = ability.skill_id as u16;
+
+            // Snapshot current skill value
+            let skill_value = match self.get_skill_value(player_guid, skill_id, world) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            let craft_gain = world.config.skill_gain_crafting;
+            let config_orange = world.config.skill_chance_orange;
+            let config_yellow = world.config.skill_chance_yellow;
+            let config_green = world.config.skill_chance_green;
+            let config_grey = world.config.skill_chance_grey;
+
+            let chance = calculate_skill_gain_chance(
+                skill_value,
+                ability.max_value as u16,
+                ((ability.max_value + ability.min_value) / 2) as u16,
+                ability.min_value as u16,
+                config_grey,
+                config_green,
+                config_yellow,
+                config_orange,
+            );
+
+            return self.update_skill_pro(
+                player_guid,
+                skill_id,
+                chance,
+                craft_gain as u16,
+                world,
+            );
+        }
+
+        false
+    }
+
     /// Update fishing skill with its special chance formula.
     ///
     /// Corresponds to C++ Player::UpdateFishingSkill.

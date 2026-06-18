@@ -156,3 +156,74 @@ impl DbcEntry for SkillRaceClassInfoEntry {
         )))
     }
 }
+
+/// SkillLineAbility DBC entry
+/// Format: "niiiixxiiiiixxi"
+/// In vanilla 1.12.1, SkillLineAbility.dbc has:
+/// - Field 0: ID (uint32)
+/// - Field 1: skillId (uint32)
+/// - Field 2: spellId (uint32)
+/// - Field 3: racemask (uint32)
+/// - Field 4: classmask (uint32)
+/// - Fields 5-6: racemaskNot, classmaskNot (always 0, skipped)
+/// - Field 7: req_skill_value (uint32)
+/// - Field 8: forward_spellid (uint32)
+/// - Field 9: learnOnGetSkill (uint32)
+/// - Field 10: max_value (uint32)
+/// - Field 11: min_value (uint32)
+/// - Fields 12-13: unknown (always 0, skipped)
+/// - Field 14: reqtrainpoints (uint32)
+#[derive(Debug, Clone)]
+pub struct SkillLineAbilityEntry {
+    pub id: u32,
+    pub skill_id: u32,
+    pub spell_id: u32,
+    pub race_mask: u32,
+    pub class_mask: u32,
+    pub req_skill_value: u32,
+    pub forward_spell_id: u32,
+    pub learn_on_get_skill: u32,
+    pub max_value: u32,
+    pub min_value: u32,
+    pub req_train_points: u32,
+}
+
+impl DbcEntry for SkillLineAbilityEntry {
+    fn from_record(record: &DbcRecord) -> Result<Option<(u32, Self)>> {
+        let id = record.get_u32(0).context("Failed to read SkillLineAbility ID")?;
+
+        if id == 0 {
+            return Ok(None);
+        }
+
+        let skill_id = record.get_u32(1).context("Failed to read SkillLineAbility skillId")?;
+        let spell_id = record.get_u32(2).context("Failed to read SkillLineAbility spellId")?;
+        let race_mask = record.get_u32(3).context("Failed to read SkillLineAbility racemask")?;
+        let class_mask = record.get_u32(4).context("Failed to read SkillLineAbility classmask")?;
+        // Fields 5-6 skipped (racemaskNot, classmaskNot)
+        let req_skill_value = record.get_u32(7).context("Failed to read SkillLineAbility req_skill_value")?;
+        let forward_spell_id = record.get_u32(8).context("Failed to read SkillLineAbility forward_spellid")?;
+        let learn_on_get_skill = record.get_u32(9).context("Failed to read SkillLineAbility learnOnGetSkill")?;
+        let max_value = record.get_u32(10).context("Failed to read SkillLineAbility max_value")?;
+        let min_value = record.get_u32(11).context("Failed to read SkillLineAbility min_value")?;
+        // Fields 12-13 skipped (unknown)
+        let req_train_points = record.get_u32(14).context("Failed to read SkillLineAbility reqtrainpoints")?;
+
+        Ok(Some((
+            id,
+            Self {
+                id,
+                skill_id,
+                spell_id,
+                race_mask,
+                class_mask,
+                req_skill_value,
+                forward_spell_id,
+                learn_on_get_skill,
+                max_value,
+                min_value,
+                req_train_points,
+            },
+        )))
+    }
+}

@@ -9,6 +9,7 @@ pub use store::{load_dbc_store, DbcEntry, DbcStore};
 pub use structures::{
     AreaTableEntry, AreaTriggerEntry, AuctionHouseEntry, BankBagSlotPricesEntry,
     CreatureDisplayInfoEntry, FactionDbcEntry, FactionTemplateDbcEntry, GameObjectDisplayInfoEntry,
-    ItemEntry, LockEntry, SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry,
+    ItemEntry, LockEntry, SkillLineAbilityEntry, SkillLineEntry, SkillRaceClassInfoEntry,
+    SkillTiersEntry,
     SpellFocusObjectEntry,
 };

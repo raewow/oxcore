@@ -2,8 +2,8 @@ use crate::store::{load_dbc_store, DbcEntry, DbcStore};
 use crate::structures::{
     AreaTableEntry, AreaTriggerEntry, AuctionHouseEntry, BankBagSlotPricesEntry, ChrClassesEntry,
     ChrRacesEntry, CreatureDisplayInfoEntry, FactionDbcEntry, FactionTemplateDbcEntry,
-    GameObjectDisplayInfoEntry, ItemEntry, LockEntry, MapEntry, SkillLineEntry,
-    SkillRaceClassInfoEntry, SkillTiersEntry, SpellCastTimeEntry, SpellDurationEntry,
+    GameObjectDisplayInfoEntry, ItemEntry, LockEntry, MapEntry, SkillLineAbilityEntry,
+    SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry, SpellCastTimeEntry, SpellDurationEntry,
     SpellFocusObjectEntry, SpellRadiusEntry, SpellRangeEntry, TalentEntry, TalentTabEntry,
     WorldSafeLocsEntry,
 };
@@ -31,6 +31,7 @@ pub struct DbcManager {
     pub spell_range: DbcStore<SpellRangeEntry>,
     pub item: DbcStore<ItemEntry>,
     pub skill_line: DbcStore<SkillLineEntry>,
+    pub skill_line_ability: DbcStore<SkillLineAbilityEntry>,
     pub skill_tiers: DbcStore<SkillTiersEntry>,
     pub skill_race_class_info: DbcStore<SkillRaceClassInfoEntry>,
     pub talent: DbcStore<TalentEntry>,
@@ -74,6 +75,7 @@ impl DbcManager {
             spell_range: DbcStore::new("nff"),
             item: DbcStore::new("n"),
             skill_line: DbcStore::new("nixxxxxxxxxxxxxxxxixx"),
+            skill_line_ability: DbcStore::new("niiiixxiiiiixxi"),
             skill_tiers: DbcStore::new(&("n".to_string() + &"i".repeat(32))),
             skill_race_class_info: DbcStore::new("niiiiii"),
             world_safe_locs: DbcStore::new("nifffxxxxxxxx"),
@@ -201,6 +203,11 @@ impl DbcManager {
         )?;
         Self::load_dbc_optional(&mut self.item, dbc_path, "Item.dbc")?;
         Self::load_dbc(&mut self.skill_line, dbc_path, "SkillLine.dbc")?;
+        Self::load_dbc(
+            &mut self.skill_line_ability,
+            dbc_path,
+            "SkillLineAbility.dbc",
+        )?;
         Self::load_dbc(&mut self.skill_tiers, dbc_path, "SkillTiers.dbc")?;
         Self::load_dbc(
             &mut self.skill_race_class_info,
@@ -352,6 +359,18 @@ impl DbcManager {
     /// Get skill line entry by ID
     pub fn get_skill_line(&self, skill_id: u32) -> Option<&SkillLineEntry> {
         self.skill_line.lookup(skill_id)
+    }
+
+    /// Get all SkillLineAbility entries linked to a given spell ID.
+    /// Corresponds to C++ SpellMgr::GetSkillLineAbilityMapBoundsBySpellId.
+    pub fn get_skill_line_abilities_by_spell_id(
+        &self,
+        spell_id: u32,
+    ) -> impl Iterator<Item = &SkillLineAbilityEntry> {
+        self.skill_line_ability
+            .entries()
+            .filter(move |(_, entry)| entry.spell_id == spell_id)
+            .map(|(_, entry)| entry)
     }
 
     /// Get skill tiers entry by ID

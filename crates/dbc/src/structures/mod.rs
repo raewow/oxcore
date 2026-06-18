@@ -17,7 +17,7 @@ pub use item_object::{
     AuctionHouseEntry, BankBagSlotPricesEntry, CreatureDisplayInfoEntry,
     GameObjectDisplayInfoEntry, ItemEntry, LockEntry,
 };
-pub use skill::{SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry};
+pub use skill::{SkillLineAbilityEntry, SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry};
 pub use spell::{
     SpellCastTimeEntry, SpellDurationEntry, SpellEntry, SpellFocusObjectEntry, SpellRadiusEntry,
     SpellRangeEntry,
