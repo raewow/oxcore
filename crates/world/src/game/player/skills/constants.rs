@@ -25,6 +25,21 @@ pub const SKILL_MINING: u16 = 186;
 pub const SKILL_SKINNING: u16 = 393;
 pub const SKILL_LOCKPICKING: u16 = 633;
 
+// === Secondary / Lifestyle Skills ===
+pub const SKILL_COOKING: u16 = 185;
+pub const SKILL_FIRST_AID: u16 = 129;
+
+// === Riding Skills ===
+pub const SKILL_RIDING_HORSE: u16 = 148;
+pub const SKILL_RIDING_WOLF: u16 = 149;
+pub const SKILL_RIDING_TIGER: u16 = 150;
+pub const SKILL_RIDING_RAM: u16 = 152;
+pub const SKILL_RIDING_RAPTOR: u16 = 533;
+pub const SKILL_RIDING_MECHANOSTRIDER: u16 = 553;
+pub const SKILL_RIDING_UNDEAD_HORSE: u16 = 554;
+pub const SKILL_RIDING_KODO: u16 = 713;
+pub const SKILL_RIDING: u16 = 762;
+
 // === Armor Proficiencies ===
 pub const SKILL_CLOTH: u16 = 415;
 pub const SKILL_LEATHER: u16 = 414;

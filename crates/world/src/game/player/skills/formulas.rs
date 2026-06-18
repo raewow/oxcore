@@ -70,6 +70,33 @@ pub fn calculate_skill_gain_chance(
     }
 }
 
+/// Determine whether a skill is a profession or riding skill.
+///
+/// Matches C++ IsProfessionOrRidingSkill():
+/// - Primary profession: skill category == SKILL_CATEGORY_PROFESSION
+/// - Secondary: fishing, cooking, first aid
+/// - Riding: any riding skill
+pub fn is_profession_or_riding_skill(skill_id: u16, category_id: i32) -> bool {
+    if category_id == SKILL_CATEGORY_PROFESSION as i32 {
+        return true;
+    }
+    matches!(
+        skill_id,
+        SKILL_FISHING
+            | SKILL_COOKING
+            | SKILL_FIRST_AID
+            | SKILL_RIDING_HORSE
+            | SKILL_RIDING_WOLF
+            | SKILL_RIDING_TIGER
+            | SKILL_RIDING_RAM
+            | SKILL_RIDING_RAPTOR
+            | SKILL_RIDING_MECHANOSTRIDER
+            | SKILL_RIDING_UNDEAD_HORSE
+            | SKILL_RIDING_KODO
+            | SKILL_RIDING
+    )
+}
+
 /// Get the starting skill value when a new weapon skill is learned.
 /// Weapon skills always start at 1 (you must use the weapon to improve).
 /// Defense skill starts at level * 5 (always maxed on creation).

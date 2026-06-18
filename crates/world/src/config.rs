@@ -46,6 +46,8 @@ pub struct Config {
     pub characters_per_realm: u32,
     #[serde(default = "default_start_player_level")]
     pub start_player_level: u32,
+    #[serde(default = "default_max_player_level")]
+    pub max_player_level: u32,
     #[serde(default)]
     pub start_player_money: u32,
     #[serde(default = "default_min_player_name")]
@@ -211,6 +213,12 @@ pub struct Config {
     pub skill_gain_crafting: u32, // Points gained per crafting skill-up (default: 1)
     #[serde(default = "default_skill_gain_gathering")]
     pub skill_gain_gathering: u32, // Points gained per gathering skill-up (default: 1)
+    #[serde(default = "default_skill_gain_weapon")]
+    pub skill_gain_weapon: u32, // Points gained per weapon skill-up (default: 1)
+    #[serde(default = "default_skill_gain_defense")]
+    pub skill_gain_defense: u32, // Points gained per defense skill-up (default: 1)
+    #[serde(default)]
+    pub always_max_skill_for_level: bool, // Set all level-based skills to max on level-up (default: false)
 
     // Mail Settings
     #[serde(default = "default_mail_delivery_delay")]
@@ -278,6 +286,10 @@ fn default_characters_per_realm() -> u32 {
 
 fn default_start_player_level() -> u32 {
     1
+}
+
+fn default_max_player_level() -> u32 {
+    60
 }
 
 fn default_min_player_name() -> u32 {
@@ -420,6 +432,14 @@ fn default_skill_gain_gathering() -> u32 {
     1
 }
 
+fn default_skill_gain_weapon() -> u32 {
+    1
+}
+
+fn default_skill_gain_defense() -> u32 {
+    1
+}
+
 fn default_mail_delivery_delay() -> u32 {
     3600 // 1 hour in seconds (retail default)
 }
@@ -476,6 +496,7 @@ impl Default for Config {
             player_limit: 0,
             characters_per_realm: default_characters_per_realm(),
             start_player_level: default_start_player_level(),
+            max_player_level: default_max_player_level(),
             start_player_money: 0,
             min_player_name: default_min_player_name(),
             max_player_name: default_max_player_name(),
@@ -504,6 +525,9 @@ impl Default for Config {
             skill_chance_skinning_steps: default_skill_chance_skinning_steps(),
             skill_gain_crafting: default_skill_gain_crafting(),
             skill_gain_gathering: default_skill_gain_gathering(),
+            skill_gain_weapon: default_skill_gain_weapon(),
+            skill_gain_defense: default_skill_gain_defense(),
+            always_max_skill_for_level: false,
             allow_cross_faction_mail: false,
             allow_cross_faction_add_friend: false,
             chat_flood_protection_delay: default_chat_flood_protection_delay(),
