@@ -4,6 +4,7 @@ use tracing::{info, warn};
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::inventory::types::EquipResult;
 use crate::World;
+use oxcore_shared::game::inventory::{is_bank_pos, INVENTORY_SLOT_BAG_0};
 use oxcore_shared::messages::SmsgReadItemFailed;
 use oxcore_shared::messages::SmsgReadItemOk;
 use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
@@ -316,11 +317,28 @@ pub async fn handle_swap_inv_item(
         None => return Ok(()),
     };
 
-    const INVENTORY_SLOT_BAG_0: u8 = 255;
-
     // Check if source and destination are the same
     if src_slot == dst_slot {
         tracing::debug!("[CMSG_SWAP_INV_ITEM] Ignoring swap of same slot");
+        return Ok(());
+    }
+
+    if (is_bank_pos(INVENTORY_SLOT_BAG_0, src_slot)
+        || is_bank_pos(INVENTORY_SLOT_BAG_0, dst_slot))
+        && world
+            .managers
+            .player_mgr
+            .get_player(player_guid)
+            .is_none_or(|player| player.current_banker_guid.is_none())
+    {
+        session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(
+            oxcore_shared::messages::EQUIP_ERR_TOO_FAR_AWAY_FROM_BANK,
+        ))?;
+        tracing::warn!(
+            "[CMSG_SWAP_INV_ITEM] Bank slot swap rejected without active banker: src={} dst={}",
+            src_slot,
+            dst_slot
+        );
         return Ok(());
     }
 

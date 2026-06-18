@@ -407,6 +407,9 @@ pub async fn handle_banker_activate(
         "CMSG_BANKER_ACTIVATE: player={:?}, banker={:?}",
         player_guid, banker_guid
     );
+    if let Some(mut player) = world.managers.player_mgr.get_player_mut(player_guid) {
+        player.current_banker_guid = Some(banker_guid);
+    }
     session.send_msg(oxcore_shared::messages::SmsgShowBank { banker_guid })?;
 
     Ok(())

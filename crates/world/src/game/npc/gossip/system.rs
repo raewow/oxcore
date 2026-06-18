@@ -268,6 +268,7 @@ impl GossipSystem {
                     },
                 );
                 if let Some(mut player) = self.player_mgr.get_player_mut(player_guid) {
+                    player.current_banker_guid = Some(npc_guid);
                     player.current_gossip_menu_id = None;
                 }
             }
