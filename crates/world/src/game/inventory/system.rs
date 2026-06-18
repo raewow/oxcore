@@ -17,7 +17,12 @@ use oxcore_shared::database::characters::models::item::ItemInstanceRow;
 use oxcore_shared::database::characters::repositories::inventory_repository_trait::{
     InventoryRepositoryTrait, InventorySlotRow,
 };
-use oxcore_shared::game::inventory::{EquipmentSlot as EquipmentSlotEnum, INVENTORY_SLOT_BAG_0};
+use oxcore_shared::game::inventory::{
+    EquipmentSlot as EquipmentSlotEnum, BANK_SLOT_BAG_END, BANK_SLOT_BAG_START,
+    BANK_SLOT_ITEM_END, BANK_SLOT_ITEM_START, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END,
+    INVENTORY_SLOT_BAG_START, INVENTORY_SLOT_ITEM_END, INVENTORY_SLOT_ITEM_START,
+    KEYRING_SLOT_END, KEYRING_SLOT_START,
+};
 use oxcore_shared::messages::inventory::{SmsgDestroyItem, SmsgItemPushResult};
 use oxcore_shared::messages::inventory_update::{
     SmsgInventorySlotUpdate, SmsgInventorySlotsUpdate, SmsgVisibleItemUpdate,
@@ -104,6 +109,33 @@ impl InventorySystem {
                 required_level,
             ),
         );
+    }
+
+    fn is_valid_item_position(&self, player_guid: ObjectGuid, bag: u8, slot: u8) -> bool {
+        if bag == INVENTORY_SLOT_BAG_0 {
+            return slot < EquipmentSlotEnum::END as u8
+                || (INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END).contains(&slot)
+                || (INVENTORY_SLOT_ITEM_START..INVENTORY_SLOT_ITEM_END).contains(&slot)
+                || (BANK_SLOT_ITEM_START..BANK_SLOT_ITEM_END).contains(&slot)
+                || (BANK_SLOT_BAG_START..BANK_SLOT_BAG_END).contains(&slot)
+                || (KEYRING_SLOT_START..KEYRING_SLOT_END).contains(&slot);
+        }
+
+        if !((INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END).contains(&bag)
+            || (BANK_SLOT_BAG_START..BANK_SLOT_BAG_END).contains(&bag))
+        {
+            return false;
+        }
+
+        let Some(inv) = self.cache.get_player_inventory(player_guid) else {
+            return false;
+        };
+        let Some(bag_guid) = inv.resolve_bag_guid(bag) else {
+            return false;
+        };
+        inv.bags
+            .get(&bag_guid)
+            .is_some_and(|bag| bag.is_valid_slot(slot))
     }
 
     fn send_buy_failed(
@@ -878,6 +910,32 @@ impl InventorySystem {
             return MoveItemResult::Moved;
         }
 
+        if !self.is_valid_item_position(player_guid, src_bag, src_slot) {
+            tracing::warn!(
+                "[INVENTORY] move_item FAILED: invalid source bag={} slot={}",
+                src_bag,
+                src_slot
+            );
+            self.send_inventory_error(
+                player_guid,
+                oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+            );
+            return MoveItemResult::InvalidSource;
+        }
+
+        if !self.is_valid_item_position(player_guid, dst_bag, dst_slot) {
+            tracing::warn!(
+                "[INVENTORY] move_item FAILED: invalid destination bag={} slot={}",
+                dst_bag,
+                dst_slot
+            );
+            self.send_inventory_error(
+                player_guid,
+                oxcore_shared::messages::EQUIP_ERR_ITEM_DOESNT_GO_TO_SLOT,
+            );
+            return MoveItemResult::InvalidDestination;
+        }
+
         // Check if source item can be unequipped (only applies to equipped items)
         if let Some(error) = self.can_unequip_item(player_guid, src_bag, src_slot, false) {
             self.send_inventory_error(player_guid, error as u8);
@@ -1044,10 +1102,26 @@ impl InventorySystem {
                 );
 
                 // Update cache
-                self.cache
+                let source_updated = self
+                    .cache
                     .set_item_at(player_guid, src_bag, src_slot, Some(dst_guid));
-                self.cache
+                let destination_updated = self
+                    .cache
                     .set_item_at(player_guid, dst_bag, dst_slot, Some(src_item_guid));
+                if !source_updated || !destination_updated {
+                    tracing::error!(
+                        "[INVENTORY] move_item FAILED: could not update cache for swap {}:{} -> {}:{}",
+                        src_bag,
+                        src_slot,
+                        dst_bag,
+                        dst_slot
+                    );
+                    self.send_inventory_error(
+                        player_guid,
+                        oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                    );
+                    return MoveItemResult::DatabaseError("invalid cache swap destination".to_string());
+                }
                 self.cache
                     .update_item_position(player_guid, src_item_guid, dst_bag, dst_slot);
                 self.cache
@@ -1091,9 +1165,24 @@ impl InventorySystem {
                 );
 
                 // Update cache
-                self.cache.set_item_at(player_guid, src_bag, src_slot, None);
-                self.cache
+                let source_cleared = self.cache.set_item_at(player_guid, src_bag, src_slot, None);
+                let destination_updated = self
+                    .cache
                     .set_item_at(player_guid, dst_bag, dst_slot, Some(src_item_guid));
+                if !source_cleared || !destination_updated {
+                    tracing::error!(
+                        "[INVENTORY] move_item FAILED: could not update cache for move {}:{} -> {}:{}",
+                        src_bag,
+                        src_slot,
+                        dst_bag,
+                        dst_slot
+                    );
+                    self.send_inventory_error(
+                        player_guid,
+                        oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                    );
+                    return MoveItemResult::DatabaseError("invalid cache move destination".to_string());
+                }
                 self.cache
                     .update_item_position(player_guid, src_item_guid, dst_bag, dst_slot);
 
@@ -1501,6 +1590,19 @@ impl InventorySystem {
             return SplitItemResult::InvalidCount;
         }
 
+        if !self.is_valid_item_position(player_guid, src_bag, src_slot) {
+            tracing::warn!(
+                "[INVENTORY] split_item FAILED: invalid source bag={} slot={}",
+                src_bag,
+                src_slot
+            );
+            self.send_inventory_error(
+                player_guid,
+                oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+            );
+            return SplitItemResult::SourceNotFound;
+        }
+
         let src_item_guid = match self.cache.get_item_at(player_guid, src_bag, src_slot) {
             Some(g) => g,
             None => {
@@ -1574,6 +1676,19 @@ impl InventorySystem {
                 return SplitItemResult::InvalidCount;
             }
         };
+
+        if !self.is_valid_item_position(player_guid, dst_bag, dst_slot) {
+            tracing::warn!(
+                "[INVENTORY] split_item FAILED: invalid destination bag={} slot={}",
+                dst_bag,
+                dst_slot
+            );
+            self.send_inventory_error(
+                player_guid,
+                oxcore_shared::messages::EQUIP_ERR_ITEM_DOESNT_GO_TO_SLOT,
+            );
+            return SplitItemResult::DestinationOccupied;
+        }
 
         let dst_item_guid = self.cache.get_item_at(player_guid, dst_bag, dst_slot);
 
@@ -1770,8 +1885,21 @@ impl InventorySystem {
             // Update cache after successful database operations
             self.cache
                 .update_item_count(player_guid, src_item_guid, new_src_count);
-            self.cache
-                .set_item_at(player_guid, dst_bag, dst_slot, Some(new_item_guid));
+            if !self
+                .cache
+                .set_item_at(player_guid, dst_bag, dst_slot, Some(new_item_guid))
+            {
+                tracing::error!(
+                    "[INVENTORY] split_item FAILED: could not update cache destination bag={} slot={}",
+                    dst_bag,
+                    dst_slot
+                );
+                self.send_inventory_error(
+                    player_guid,
+                    oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
+                );
+                return SplitItemResult::DatabaseError("invalid cache destination".to_string());
+            }
 
             // Create and cache the new item object
             let new_item = Item::from_db_row(
