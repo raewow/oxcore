@@ -239,6 +239,35 @@ impl PowerSystem {
         Ok(success)
     }
 
+    /// Spend power for a finished spell cast (faithful `Spell::TakePower` deduction).
+    ///
+    /// Unlike [`consume_power`], this never fails: it deducts the amount clamped at
+    /// zero (mirroring C++ `Unit::ModifyPower`), since the affordability check already
+    /// happened during cast validation. When `reset_mana_timer` is true and the power
+    /// is mana, the five-second-rule timer is reset (caller decides based on the
+    /// spell's `DONT_BLOCK_MANA_REGEN` attribute and a positive cost).
+    pub fn spend_spell_power(
+        &self,
+        player_guid: ObjectGuid,
+        power_type: PowerType,
+        amount: u32,
+        reset_mana_timer: bool,
+        world: &World,
+    ) -> Result<()> {
+        let player_mgr = world.managers.player_mgr.clone();
+
+        player_mgr.with_player_mut(player_guid, |player| {
+            player.power.modify_power(power_type, -(amount as i32));
+
+            if power_type == PowerType::Mana && reset_mana_timer {
+                player.power.last_mana_use_time = get_time_ms();
+                player.power.spirit_regen_active = false;
+            }
+        });
+
+        self.send_power_update(player_guid, power_type, world)
+    }
+
     /// Restore power (from potions, spells, etc.)
     pub fn restore_power(
         &self,

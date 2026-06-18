@@ -184,7 +184,8 @@ impl SpellSystem {
 
         // Step 4: Consume resources (mana/rage/energy) and apply GCD
         if !is_triggered {
-            self.consume_resources(caster_guid, spell_id, world).await?;
+            self.consume_resources(caster_guid, spell_id, cast_item_guid, world)
+                .await?;
             self.apply_gcd(caster_guid, spell_id, world).await?;
 
             // Remove auras with CASTING interrupt flag
@@ -1440,64 +1441,148 @@ impl SpellSystem {
     // Resource Consumption
     // =========================================================================
 
-    /// Consume power (mana/rage/energy) for a spell cast.
+    /// Consume the power cost of a spell cast (faithful `Spell::TakePower`).
+    ///
+    /// `cast_item_guid` is the item the spell was cast from, if any: item casts pay
+    /// no power. Triggered-by-aura and channeling-visual casts are already excluded
+    /// because this is only called for non-triggered casts.
     async fn consume_resources(
         &self,
         caster_guid: ObjectGuid,
         spell_id: u32,
+        cast_item_guid: Option<ObjectGuid>,
         world: &World,
-    ) -> Result<bool> {
-        // Get spell entry
-        let spell_entry = match world.managers.spell_mgr.get(spell_id) {
-            Some(entry) => (*entry).clone(),
-            None => return Ok(true), // No cost if spell not found
-        };
-
-        // Calculate cost (base cost + modifiers from talents/auras)
-        let cost = self.calculate_power_cost(caster_guid, &spell_entry, world)?;
-
-        if cost > 0 {
-            // Get power type from spell entry
-            let power_type = match spell_entry.power_type {
-                0 => crate::game::player::power::PowerType::Mana,
-                1 => crate::game::player::power::PowerType::Rage,
-                3 => crate::game::player::power::PowerType::Energy,
-                _ => crate::game::player::power::PowerType::Mana,
-            };
-            let success =
-                world
-                    .systems
-                    .power
-                    .consume_power(caster_guid, power_type, cost, world)?;
-
-            if !success {
-                return Ok(false);
-            }
+    ) -> Result<()> {
+        // Item casts use no power (C++: `if (m_CastItem ...) return;`).
+        if cast_item_guid.is_some() {
+            return Ok(());
         }
 
-        Ok(true)
+        let spell_entry = match world.managers.spell_mgr.get(spell_id) {
+            Some(entry) => (*entry).clone(),
+            None => return Ok(()),
+        };
+
+        // PLAYER_CHEAT_NO_POWER bypass is deferred (no cheat-option system yet).
+
+        let cost = self.calculate_power_cost(caster_guid, &spell_entry, world)?;
+
+        const POWER_HEALTH: u32 = 0xFFFF_FFFE;
+        const MAX_POWERS: u32 = 5;
+
+        // Health as power: deduct health directly and return.
+        if spell_entry.power_type == POWER_HEALTH {
+            self.spend_health_cost(caster_guid, cost, world);
+            return Ok(());
+        }
+
+        if spell_entry.power_type >= MAX_POWERS {
+            tracing::error!(
+                "Spell::TakePower: unknown power type {} for spell {}",
+                spell_entry.power_type,
+                spell_id
+            );
+            return Ok(());
+        }
+
+        let power_type = match crate::game::player::power::PowerType::from_u8(
+            spell_entry.power_type as u8,
+        ) {
+            Some(pt) => pt,
+            None => return Ok(()),
+        };
+
+        // Mana spells reset the five-second rule unless flagged DONT_BLOCK_MANA_REGEN.
+        const SPELL_ATTR_EX2_DONT_BLOCK_MANA_REGEN: u32 = 0x0200_0000;
+        let reset_mana_timer = cost > 0
+            && spell_entry.attributes_ex2 & SPELL_ATTR_EX2_DONT_BLOCK_MANA_REGEN == 0;
+
+        world
+            .systems
+            .power
+            .spend_spell_power(caster_guid, power_type, cost, reset_mana_timer, world)?;
+
+        Ok(())
     }
 
-    /// Calculate power cost after spell modifiers.
+    /// Deduct a health-as-power cost and broadcast the new health value.
+    fn spend_health_cost(&self, caster_guid: ObjectGuid, cost: u32, world: &World) {
+        use crate::game::common::update_fields::UNIT_FIELD_HEALTH;
+        use oxcore_shared::messages::update::{
+            ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+        };
+
+        let new_health = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster_guid, |player| {
+                player.stats.modify_health(-(cost as i32));
+                player.stats.dirty = true;
+                player.stats.health
+            });
+
+        if let Some(new_health) = new_health {
+            let block = ValuesUpdateBlock::new(caster_guid, ObjectType::Player)
+                .set_field(UNIT_FIELD_HEALTH, new_health);
+            let packet = SmsgUpdateObject::new()
+                .add_block(UpdateBlockData::Values(block))
+                .to_world_packet();
+            self.broadcast_mgr.broadcast_nearby(caster_guid, &packet, true);
+        }
+    }
+
+    /// Calculate the power cost of a spell (faithful `Spell::CalculatePowerCost`).
     fn calculate_power_cost(
         &self,
         caster_guid: ObjectGuid,
         spell_entry: &crate::dbc::structures::SpellEntry,
         world: &World,
     ) -> Result<u32> {
-        // Base cost from spell DBC entry
-        let base_cost = spell_entry.mana_cost;
+        // Snapshot the caster state the cost formula reads, then compute the cost.
+        let cost = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                let pt = spell_entry.power_type as usize;
+                let (current_power, max_power) = if pt < 5 {
+                    (player.power.current[pt], player.power.max[pt])
+                } else {
+                    (0, 0)
+                };
 
-        // Apply cost modifiers from talents/auras (SpellModOp::Cost)
-        let modified_cost = modifiers::calculate_modified_power_cost(
-            caster_guid,
-            base_cost,
-            spell_entry.spell_family_name,
-            spell_entry.spell_family_flags,
-            world,
-        );
+                // GetSpellRank: player skill-based rank is deferred; the per-level cost
+                // term (manaCostPerlevel) is 0 for all 1.12 player spells, so the
+                // level-clamped Unit formula is exact where it matters (creature spells).
+                let level = player.level as u32;
+                let spell_rank = if spell_entry.max_level > 0 && level >= spell_entry.max_level * 5
+                {
+                    spell_entry.max_level * 5
+                } else {
+                    level
+                };
 
-        Ok(modified_cost)
+                let ctx = modifiers::PowerCostContext {
+                    health: player.stats.health,
+                    create_health: player.stats.base_health,
+                    create_mana: player.stats.base_mana,
+                    current_power,
+                    max_power,
+                    level,
+                    spell_rank,
+                };
+
+                modifiers::calculate_power_cost(
+                    spell_entry,
+                    &ctx,
+                    false,
+                    &player.spells.spell_modifiers,
+                )
+            })
+            .unwrap_or(0);
+
+        Ok(cost)
     }
 
     /// Calculate cast time after haste and talent modifiers.

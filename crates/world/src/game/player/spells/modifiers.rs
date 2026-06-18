@@ -3,10 +3,116 @@
 //! Spell modifiers come from talents (SPELL_AURA_ADD_FLAT_MODIFIER / ADD_PCT_MODIFIER)
 //! and some auras. They modify properties of spells the player casts.
 
+use crate::dbc::structures::SpellEntry;
 use crate::game::player::spells::state::{SpellMod, SpellModOp, SpellModType};
 use crate::World;
 use anyhow::Result;
 use oxcore_shared::protocol::ObjectGuid;
+
+/// Spell attribute: damage/cost scales with creature level (`SPELL_ATTR_SCALES_WITH_CREATURE_LEVEL`).
+const SPELL_ATTR_SCALES_WITH_CREATURE_LEVEL: u32 = 0x0008_0000;
+/// AttributesEx: spell drains the caster's entire power pool (`SPELL_ATTR_EX_USE_ALL_MANA`).
+const SPELL_ATTR_EX_USE_ALL_MANA: u32 = 0x0000_0002;
+/// `POWER_HEALTH` sentinel value as stored in `SpellEntry::power_type` (-2 as unsigned).
+const POWER_HEALTH: u32 = 0xFFFF_FFFE;
+/// Number of real power types (mana, rage, focus, energy, happiness).
+const MAX_POWERS: u32 = 5;
+
+/// Caster state needed to compute a spell's power cost.
+///
+/// Mirrors the `Unit*` getters read by C++ `Spell::CalculatePowerCost`.
+pub struct PowerCostContext {
+    /// `caster->GetHealth()` — used by USE_ALL_MANA health spells.
+    pub health: u32,
+    /// `caster->GetCreateHealth()` — base (create) health for percentage-of-health costs.
+    pub create_health: u32,
+    /// `caster->GetCreateMana()` — base (create) mana for percentage-of-mana costs.
+    pub create_mana: u32,
+    /// `caster->GetPower(powerType)` — current pool for USE_ALL_MANA non-health spells.
+    pub current_power: u32,
+    /// `caster->GetMaxPower(powerType)` — max pool for percentage costs on rage/focus/energy/happiness.
+    pub max_power: u32,
+    /// `caster->GetLevel()` — used by creature-level scaling.
+    pub level: u32,
+    /// `caster->GetSpellRank(spellInfo)` — drives the per-level cost term.
+    pub spell_rank: u32,
+}
+
+/// Calculate the power cost of a spell.
+///
+/// Faithful port of C++ `Spell::CalculatePowerCost`. Returns the amount of the
+/// spell's `power_type` that the cast will consume.
+///
+/// `is_item_cast` is true when the spell is cast from an item (charges/use), which
+/// always costs no power. `cost_modifiers` are the caster's active spell modifiers,
+/// from which `SpellModOp::Cost` entries are applied (`SPELLMOD_COST`).
+///
+/// Deferred vs C++: the school-indexed `UNIT_FIELD_POWER_COST_MODIFIER` (flat) and
+/// `UNIT_FIELD_POWER_COST_MULTIPLIER` (pct) aura unit-fields are not yet tracked, so
+/// they default to the no-aura state (0 flat, x1.0). They only become non-zero with
+/// specific gear/auras.
+pub fn calculate_power_cost(
+    spell: &SpellEntry,
+    ctx: &PowerCostContext,
+    is_item_cast: bool,
+    cost_modifiers: &[SpellMod],
+) -> u32 {
+    // Item casts use no power.
+    if is_item_cast {
+        return 0;
+    }
+
+    let power_type = spell.power_type;
+
+    // Drain-all spells (e.g. Lay on Hands): cost is the entire current pool.
+    if spell.attributes_ex & SPELL_ATTR_EX_USE_ALL_MANA != 0 {
+        if power_type == POWER_HEALTH {
+            return ctx.health;
+        }
+        if power_type < MAX_POWERS {
+            return ctx.current_power;
+        }
+        // Unknown power type — no cost.
+        return 0;
+    }
+
+    // Base cost: flat cost + per-level scaling.
+    let per_level =
+        spell.mana_cost_per_level as i32 * (ctx.spell_rank as i32 / 5 - spell.base_level as i32);
+    let mut power_cost = spell.mana_cost as i32 + per_level;
+
+    // Percentage cost from create/max pools.
+    if spell.mana_cost_percentage != 0 {
+        let pct = spell.mana_cost_percentage as i32;
+        match power_type {
+            POWER_HEALTH => power_cost += pct * ctx.create_health as i32 / 100,
+            0 => power_cost += pct * ctx.create_mana as i32 / 100, // POWER_MANA
+            1 | 2 | 3 | 4 => power_cost += pct * ctx.max_power as i32 / 100, // RAGE/FOCUS/ENERGY/HAPPINESS
+            _ => return 0,                                         // unknown power type
+        }
+    }
+
+    // SPELLMOD_COST from talents/auras. (School-indexed flat unit-mod deferred.)
+    power_cost = apply_spell_modifiers_to_value(
+        cost_modifiers,
+        SpellModOp::Cost,
+        power_cost,
+        spell.spell_family_name,
+        spell.spell_family_flags,
+    );
+
+    // Creature-level scaling (mob spells whose cost shrinks with level).
+    if spell.attributes & SPELL_ATTR_SCALES_WITH_CREATURE_LEVEL != 0 && ctx.level > 0 {
+        let denom = 1.117_f32 * spell.spell_level as f32 / ctx.level as f32 - 0.1327_f32;
+        if denom != 0.0 {
+            power_cost = (power_cost as f32 / denom) as i32;
+        }
+    }
+
+    // (School-indexed pct unit-mod multiplier deferred — x1.0 with no auras.)
+
+    power_cost.max(0) as u32
+}
 
 /// Add a spell modifier (from a talent or aura being applied).
 ///
@@ -173,42 +279,6 @@ pub fn calculate_modified_cast_time(
     modified.max(0) as u32
 }
 
-/// Calculate modified power cost for a spell.
-#[allow(dead_code)]
-pub fn calculate_modified_power_cost(
-    player_guid: ObjectGuid,
-    base_cost: u32,
-    _spell_family_name: u32,
-    _spell_family_flags: u64,
-    world: &World,
-) -> u32 {
-    let mut modified = base_cost as i32;
-
-    // Apply cost modifiers from talents/auras (SpellModOp::Cost)
-    world
-        .systems
-        .player
-        .manager()
-        .with_player_mut(player_guid, |player| {
-            for spell_mod in &player.spells.spell_modifiers {
-                if spell_mod.op == SpellModOp::Cost {
-                    // TODO: Check spell_family_mask matches
-                    match spell_mod.mod_type {
-                        SpellModType::Flat => {
-                            modified += spell_mod.value;
-                        }
-                        SpellModType::Pct => {
-                            modified =
-                                (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0)) as i32;
-                        }
-                    }
-                }
-            }
-        });
-
-    modified.max(0) as u32
-}
-
 /// Calculate modified cooldown for a spell.
 #[allow(dead_code)]
 pub fn calculate_modified_cooldown(
@@ -282,4 +352,231 @@ pub fn calculate_modified_gcd(
         });
 
     modified.max(0) as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::player::spells::state::{SpellMod, SpellModOp, SpellModType};
+
+    fn make_spell_entry() -> SpellEntry {
+        SpellEntry {
+            id: 1,
+            name: String::new(),
+            rank_text: String::new(),
+            school: 0,
+            category: 0,
+            dispel: 0,
+            mechanic: 0,
+            attributes: 0,
+            attributes_ex: 0,
+            attributes_ex2: 0,
+            attributes_ex3: 0,
+            attributes_ex4: 0,
+            stances: 0,
+            stances_not: 0,
+            targets: 0,
+            target_creature_type: 0,
+            requires_spell_focus: 0,
+            caster_aura_state: 0,
+            target_aura_state: 0,
+            casting_time_index: 0,
+            recovery_time: 0,
+            category_recovery_time: 0,
+            interrupt_flags: 0,
+            aura_interrupt_flags: 0,
+            channel_interrupt_flags: 0,
+            proc_flags: 0,
+            proc_chance: 0,
+            proc_charges: 0,
+            max_level: 0,
+            base_level: 0,
+            spell_level: 0,
+            duration_index: 0,
+            power_type: 0,
+            mana_cost: 0,
+            mana_cost_per_level: 0,
+            mana_per_second: 0,
+            mana_per_second_per_level: 0,
+            range_index: 0,
+            speed: 0.0,
+            stack_amount: 0,
+            totem: [0; 2],
+            reagent: [0; 8],
+            reagent_count: [0; 8],
+            equipped_item_class: 0,
+            equipped_item_sub_class_mask: 0,
+            equipped_item_inventory_type_mask: 0,
+            effect: [0; 3],
+            effect_die_sides: [0; 3],
+            effect_base_dice: [0; 3],
+            effect_dice_per_level: [0.0; 3],
+            effect_real_points_per_level: [0.0; 3],
+            effect_base_points: [0; 3],
+            effect_bonus_coefficient: [0.0; 3],
+            effect_mechanic: [0; 3],
+            effect_implicit_target_a: [0; 3],
+            effect_implicit_target_b: [0; 3],
+            effect_radius_index: [0; 3],
+            effect_apply_aura_name: [0; 3],
+            effect_amplitude: [0; 3],
+            effect_multiple_value: [0.0; 3],
+            effect_chain_target: [0; 3],
+            effect_item_type: [0; 3],
+            effect_misc_value: [0; 3],
+            effect_trigger_spell: [0; 3],
+            effect_points_per_combo_point: [0.0; 3],
+            spell_visual: 0,
+            spell_icon_id: 0,
+            active_icon_id: 0,
+            spell_priority: 0,
+            min_target_level: 0,
+            mana_cost_percentage: 0,
+            start_recovery_category: 0,
+            start_recovery_time: 0,
+            max_target_level: 0,
+            spell_family_name: 0,
+            spell_family_flags: 0,
+            max_affected_targets: 0,
+            dmg_class: 0,
+            prevention_type: 0,
+            custom: 0,
+            internal: 0,
+            allowed_target_mask: 0,
+            script_id: 0,
+            dmg_multiplier: [1.0; 3],
+        }
+    }
+
+    fn ctx() -> PowerCostContext {
+        PowerCostContext {
+            health: 1000,
+            create_health: 2000,
+            create_mana: 3000,
+            current_power: 500,
+            max_power: 800,
+            level: 60,
+            spell_rank: 60,
+        }
+    }
+
+    fn cost_mod(mod_type: SpellModType, value: i32, family: u32) -> SpellMod {
+        SpellMod {
+            op: SpellModOp::Cost,
+            mod_type,
+            value,
+            spell_family_mask: 0,
+            spell_family_name: family,
+            source_spell_id: 1,
+            source_aura_slot: None,
+        }
+    }
+
+    #[test]
+    fn item_cast_costs_nothing() {
+        let mut spell = make_spell_entry();
+        spell.mana_cost = 100;
+        assert_eq!(calculate_power_cost(&spell, &ctx(), true, &[]), 0);
+    }
+
+    #[test]
+    fn flat_mana_cost() {
+        let mut spell = make_spell_entry();
+        spell.mana_cost = 100;
+        assert_eq!(calculate_power_cost(&spell, &ctx(), false, &[]), 100);
+    }
+
+    #[test]
+    fn use_all_mana_health_returns_current_health() {
+        let mut spell = make_spell_entry();
+        spell.attributes_ex = SPELL_ATTR_EX_USE_ALL_MANA;
+        spell.power_type = POWER_HEALTH;
+        spell.mana_cost = 50; // ignored
+        assert_eq!(calculate_power_cost(&spell, &ctx(), false, &[]), 1000);
+    }
+
+    #[test]
+    fn use_all_mana_returns_current_power() {
+        let mut spell = make_spell_entry();
+        spell.attributes_ex = SPELL_ATTR_EX_USE_ALL_MANA;
+        spell.power_type = 0; // mana
+        assert_eq!(calculate_power_cost(&spell, &ctx(), false, &[]), 500);
+    }
+
+    #[test]
+    fn use_all_mana_unknown_power_is_zero() {
+        let mut spell = make_spell_entry();
+        spell.attributes_ex = SPELL_ATTR_EX_USE_ALL_MANA;
+        spell.power_type = 99; // not health, not < MAX_POWERS
+        assert_eq!(calculate_power_cost(&spell, &ctx(), false, &[]), 0);
+    }
+
+    #[test]
+    fn percentage_of_create_mana() {
+        let mut spell = make_spell_entry();
+        spell.power_type = 0; // mana
+        spell.mana_cost_percentage = 10; // 10% of create_mana(3000) = 300
+        assert_eq!(calculate_power_cost(&spell, &ctx(), false, &[]), 300);
+    }
+
+    #[test]
+    fn percentage_of_create_health() {
+        let mut spell = make_spell_entry();
+        spell.power_type = POWER_HEALTH;
+        spell.mana_cost_percentage = 5; // 5% of create_health(2000) = 100
+        assert_eq!(calculate_power_cost(&spell, &ctx(), false, &[]), 100);
+    }
+
+    #[test]
+    fn percentage_of_max_power_for_energy() {
+        let mut spell = make_spell_entry();
+        spell.power_type = 3; // energy
+        spell.mana_cost_percentage = 25; // 25% of max_power(800) = 200
+        assert_eq!(calculate_power_cost(&spell, &ctx(), false, &[]), 200);
+    }
+
+    #[test]
+    fn per_level_cost_scaling() {
+        let mut spell = make_spell_entry();
+        spell.mana_cost = 100;
+        spell.mana_cost_per_level = 2;
+        spell.base_level = 1;
+        // spell_rank 60 -> 60/5 - 1 = 11; 100 + 2*11 = 122
+        assert_eq!(calculate_power_cost(&spell, &ctx(), false, &[]), 122);
+    }
+
+    #[test]
+    fn spellmod_cost_flat_and_pct() {
+        let mut spell = make_spell_entry();
+        spell.mana_cost = 100;
+        spell.spell_family_name = 3;
+        let mods = vec![
+            cost_mod(SpellModType::Flat, -20, 3),
+            cost_mod(SpellModType::Pct, -50, 3),
+        ];
+        // (100 - 20) * (1 - 0.5) = 40
+        assert_eq!(calculate_power_cost(&spell, &ctx(), false, &mods), 40);
+    }
+
+    #[test]
+    fn cost_clamped_to_zero() {
+        let mut spell = make_spell_entry();
+        spell.mana_cost = 10;
+        spell.spell_family_name = 3;
+        let mods = vec![cost_mod(SpellModType::Flat, -999, 3)];
+        assert_eq!(calculate_power_cost(&spell, &ctx(), false, &mods), 0);
+    }
+
+    #[test]
+    fn creature_level_scaling_applies() {
+        let mut spell = make_spell_entry();
+        spell.mana_cost = 100;
+        spell.attributes = SPELL_ATTR_SCALES_WITH_CREATURE_LEVEL;
+        spell.spell_level = 30;
+        let mut c = ctx();
+        c.level = 60;
+        let expected = (100.0_f32 / (1.117_f32 * 30.0 / 60.0 - 0.1327_f32)) as i32 as u32;
+        assert_eq!(calculate_power_cost(&spell, &c, false, &[]), expected);
+        assert!(calculate_power_cost(&spell, &c, false, &[]) > 100);
+    }
 }
