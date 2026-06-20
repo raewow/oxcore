@@ -378,9 +378,20 @@ impl ChatSystem {
             .ok_or(ChatError::ChannelNotFound)?;
 
         if let Some(member) = channel_data.members.get_mut(&player_guid) {
+            let old_flags = member.flags.as_u8();
+            if member.flags.has_flag(ChannelMemberFlags::MODERATOR) == is_moderator {
+                return Ok(());
+            }
             member
                 .flags
                 .set_flag(ChannelMemberFlags::MODERATOR, is_moderator);
+
+            let notify = SmsgChannelNotify::mode_change(channel_name, player_guid, old_flags, member.flags.as_u8());
+            let packet = notify.to_world_packet();
+            let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
+            self.broadcast_mgr
+                .broadcast_to_players(&member_guids, &packet);
+
             Ok(())
         } else {
             Err(ChatError::NotInChannel)
@@ -401,7 +412,18 @@ impl ChatSystem {
             .ok_or(ChatError::ChannelNotFound)?;
 
         if let Some(member) = channel_data.members.get_mut(&player_guid) {
+            let old_flags = member.flags.as_u8();
+            if member.flags.has_flag(ChannelMemberFlags::MUTED) == is_muted {
+                return Ok(());
+            }
             member.flags.set_flag(ChannelMemberFlags::MUTED, is_muted);
+
+            let notify = SmsgChannelNotify::mode_change(channel_name, player_guid, old_flags, member.flags.as_u8());
+            let packet = notify.to_world_packet();
+            let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
+            self.broadcast_mgr
+                .broadcast_to_players(&member_guids, &packet);
+
             Ok(())
         } else {
             Err(ChatError::NotInChannel)
@@ -439,6 +461,296 @@ impl ChatSystem {
             .ok_or(ChatError::ChannelNotFound)?;
 
         Ok(channel_data.banned.remove(&player_guid))
+    }
+
+    pub fn set_password(
+        &self,
+        team: Team,
+        channel_name: &str,
+        player_guid: ObjectGuid,
+        password: &str,
+    ) -> Result<(), ChatError> {
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
+
+        let mut channel_data = team_channels
+            .get_mut(channel_name)
+            .ok_or(ChatError::ChannelNotFound)?;
+
+        let member = channel_data
+            .members
+            .get(&player_guid)
+            .ok_or(ChatError::NotInChannel)?;
+
+        if !member.is_owner() {
+            return Err(ChatError::NotOwner);
+        }
+
+        channel_data.channel.password = password.to_string();
+
+        let notify = SmsgChannelNotify::password_changed(channel_name, player_guid);
+        let packet = notify.to_world_packet();
+
+        let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
+        self.broadcast_mgr
+            .broadcast_to_players(&member_guids, &packet);
+
+        Ok(())
+    }
+
+    pub fn set_owner_by_name(
+        &self,
+        team: Team,
+        channel_name: &str,
+        player_guid: ObjectGuid,
+        target_name: &str,
+    ) -> Result<(), ChatError> {
+        let target_guid = self
+            .find_player_by_name(target_name)
+            .ok_or(ChatError::TargetNotFound)?;
+
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
+
+        let mut channel_data = team_channels
+            .get_mut(channel_name)
+            .ok_or(ChatError::ChannelNotFound)?;
+
+        let member = channel_data
+            .members
+            .get(&player_guid)
+            .ok_or(ChatError::NotInChannel)?;
+
+        if !member.is_owner() {
+            return Err(ChatError::NotOwner);
+        }
+
+        if !channel_data.members.contains_key(&target_guid) {
+            return Err(ChatError::TargetNotFound);
+        }
+
+        // Clear old owner flag
+        let old_owner_guid = channel_data.channel.owner_guid;
+        if let Some(old_owner) = channel_data.members.get_mut(&old_owner_guid) {
+            old_owner.flags.set_flag(ChannelMemberFlags::OWNER, false);
+        }
+
+        // Set new owner
+        channel_data.channel.owner_guid = target_guid;
+        if let Some(new_owner) = channel_data.members.get_mut(&target_guid) {
+            new_owner.flags.set_flag(ChannelMemberFlags::OWNER, true);
+            new_owner.flags.set_flag(ChannelMemberFlags::MODERATOR, true);
+        }
+
+        let notify = SmsgChannelNotify::owner_changed(channel_name, target_guid);
+        let packet = notify.to_world_packet();
+
+        let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
+        self.broadcast_mgr
+            .broadcast_to_players(&member_guids, &packet);
+
+        Ok(())
+    }
+
+    pub fn send_owner_info(
+        &self,
+        team: Team,
+        channel_name: &str,
+        player_guid: ObjectGuid,
+    ) -> Result<(), ChatError> {
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
+
+        let channel_data = team_channels
+            .get(channel_name)
+            .ok_or(ChatError::ChannelNotFound)?;
+
+        let owner_name = self
+            .player_mgr
+            .get_player_name(channel_data.channel.owner_guid)
+            .unwrap_or_default();
+
+        let notify = SmsgChannelNotify::channel_owner(channel_name, &owner_name);
+        self.broadcast_mgr
+            .send_to_player(player_guid, notify.to_world_packet());
+
+        Ok(())
+    }
+
+    pub fn kick_player_by_name(
+        &self,
+        team: Team,
+        channel_name: &str,
+        player_guid: ObjectGuid,
+        target_name: &str,
+    ) -> Result<(), ChatError> {
+        let target_guid = self
+            .find_player_by_name(target_name)
+            .ok_or(ChatError::TargetNotFound)?;
+
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
+
+        let mut channel_data = team_channels
+            .get_mut(channel_name)
+            .ok_or(ChatError::ChannelNotFound)?;
+
+        let member = channel_data
+            .members
+            .get(&player_guid)
+            .ok_or(ChatError::NotInChannel)?;
+
+        if !member.is_owner() && !member.is_moderator() {
+            return Err(ChatError::NotModerator);
+        }
+
+        if !channel_data.members.contains_key(&target_guid) {
+            return Err(ChatError::TargetNotFound);
+        }
+
+        // Don't allow kicking the owner
+        if target_guid == channel_data.channel.owner_guid {
+            return Err(ChatError::NotOwner);
+        }
+
+        channel_data.members.remove(&target_guid);
+
+        // Notify kicked player
+        let kick_notify = SmsgChannelNotify::player_kicked(channel_name, target_guid, player_guid);
+        self.broadcast_mgr
+            .send_to_player(target_guid, kick_notify.to_world_packet());
+
+        // Notify remaining members
+        let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
+        let left_notify = SmsgChannelNotify::player_left(channel_name, target_guid);
+        let packet = left_notify.to_world_packet();
+        self.broadcast_mgr
+            .broadcast_to_players(&member_guids, &packet);
+
+        Ok(())
+    }
+
+    pub fn invite_player_by_name(
+        &self,
+        team: Team,
+        channel_name: &str,
+        player_guid: ObjectGuid,
+        target_name: &str,
+    ) -> Result<(), ChatError> {
+        let target_guid = self
+            .find_player_by_name(target_name)
+            .ok_or(ChatError::TargetNotFound)?;
+
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
+
+        let channel_data = team_channels
+            .get(channel_name)
+            .ok_or(ChatError::ChannelNotFound)?;
+
+        let member = channel_data
+            .members
+            .get(&player_guid)
+            .ok_or(ChatError::NotInChannel)?;
+
+        if !member.is_owner() && !member.is_moderator() {
+            return Err(ChatError::NotModerator);
+        }
+
+        if channel_data.members.contains_key(&target_guid) {
+            let notify = SmsgChannelNotify::player_already_member(channel_name, target_guid);
+            self.broadcast_mgr
+                .send_to_player(player_guid, notify.to_world_packet());
+            return Ok(());
+        }
+
+        if channel_data.banned.contains(&target_guid) {
+            let notify = SmsgChannelNotify::player_invite_banned(channel_name, target_name);
+            self.broadcast_mgr
+                .send_to_player(player_guid, notify.to_world_packet());
+            return Ok(());
+        }
+
+        // Send invite notification to target
+        let notify = SmsgChannelNotify::invite(channel_name, player_guid);
+        self.broadcast_mgr
+            .send_to_player(target_guid, notify.to_world_packet());
+
+        // Send confirmation to inviter
+        let invite_notify = SmsgChannelNotify::player_invited(channel_name, target_name);
+        self.broadcast_mgr
+            .send_to_player(player_guid, invite_notify.to_world_packet());
+
+        Ok(())
+    }
+
+    pub fn toggle_announcements(
+        &self,
+        team: Team,
+        channel_name: &str,
+        player_guid: ObjectGuid,
+    ) -> Result<(), ChatError> {
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
+
+        let mut channel_data = team_channels
+            .get_mut(channel_name)
+            .ok_or(ChatError::ChannelNotFound)?;
+
+        let member = channel_data
+            .members
+            .get(&player_guid)
+            .ok_or(ChatError::NotInChannel)?;
+
+        if !member.is_owner() {
+            return Err(ChatError::NotOwner);
+        }
+
+        channel_data.channel.announce = !channel_data.channel.announce;
+
+        let notify = if channel_data.channel.announce {
+            SmsgChannelNotify::announcements_on(channel_name, player_guid)
+        } else {
+            SmsgChannelNotify::announcements_off(channel_name, player_guid)
+        };
+
+        let packet = notify.to_world_packet();
+        let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
+        self.broadcast_mgr
+            .broadcast_to_players(&member_guids, &packet);
+
+        Ok(())
+    }
+
+    pub fn toggle_moderate(
+        &self,
+        team: Team,
+        channel_name: &str,
+        player_guid: ObjectGuid,
+    ) -> Result<(), ChatError> {
+        let team_channels = self.channels.get(&team).ok_or(ChatError::ChannelNotFound)?;
+
+        let mut channel_data = team_channels
+            .get_mut(channel_name)
+            .ok_or(ChatError::ChannelNotFound)?;
+
+        let member = channel_data
+            .members
+            .get(&player_guid)
+            .ok_or(ChatError::NotInChannel)?;
+
+        if !member.is_owner() {
+            return Err(ChatError::NotOwner);
+        }
+
+        channel_data.channel.moderate = !channel_data.channel.moderate;
+
+        let notify = if channel_data.channel.moderate {
+            SmsgChannelNotify::moderation_on(channel_name, player_guid)
+        } else {
+            SmsgChannelNotify::moderation_off(channel_name, player_guid)
+        };
+
+        let packet = notify.to_world_packet();
+        let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
+        self.broadcast_mgr
+            .broadcast_to_players(&member_guids, &packet);
+
+        Ok(())
     }
 
     // ========== MESSAGE SENDING ==========

@@ -185,6 +185,45 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_TEXT_EMOTE => {
                     chat::handle_text_emote(session, packet, world).await?;
                 }
+                Opcode::CMSG_CHANNEL_PASSWORD => {
+                    chat::handle_channel_password(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_SET_OWNER => {
+                    chat::handle_channel_set_owner(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_OWNER => {
+                    chat::handle_channel_owner(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_MODERATOR => {
+                    chat::handle_channel_moderator(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_UNMODERATOR => {
+                    chat::handle_channel_unmoderator(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_MUTE => {
+                    chat::handle_channel_mute(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_UNMUTE => {
+                    chat::handle_channel_unmute(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_INVITE => {
+                    chat::handle_channel_invite(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_KICK => {
+                    chat::handle_channel_kick(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_BAN => {
+                    chat::handle_channel_ban(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_UNBAN => {
+                    chat::handle_channel_unban(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_ANNOUNCEMENTS => {
+                    chat::handle_channel_announcements(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHANNEL_MODERATE => {
+                    chat::handle_channel_moderate(session, packet, world).await?;
+                }
 
                 // Logout handlers
                 Opcode::CMSG_LOGOUT_REQUEST => {
