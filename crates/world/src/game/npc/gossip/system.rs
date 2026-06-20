@@ -195,6 +195,55 @@ impl GossipSystem {
         Ok(())
     }
 
+    pub async fn send_gameobject_gossip_menu(
+        &self,
+        player_guid: ObjectGuid,
+        go_guid: ObjectGuid,
+        menu_id: u32,
+        quest_data: Option<Vec<oxcore_shared::messages::GossipQuestData>>,
+    ) -> Result<()> {
+        let menus = self.manager.get_menus(menu_id);
+        let text_id = menus
+            .first()
+            .map(|menu| menu.text_id)
+            .unwrap_or(DEFAULT_GOSSIP_MESSAGE);
+        let items = self.manager.get_menu_items(menu_id);
+        let options: Vec<GossipOptionData> = items
+            .iter()
+            .filter(|item| item.option_id == gossip_option::GOSSIP)
+            .map(|item| GossipOptionData {
+                index: item.id,
+                icon: item.option_icon,
+                coded: item.box_coded,
+                money: item.box_money,
+                text: item.option_text.clone(),
+            })
+            .collect();
+        let quests = quest_data.unwrap_or_default();
+
+        if menu_id == 0 && options.is_empty() && quests.is_empty() && text_id == DEFAULT_GOSSIP_MESSAGE
+        {
+            return Ok(());
+        }
+
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgGossipMessage {
+                source_guid: go_guid,
+                menu_id,
+                text_id,
+                options,
+                quests,
+            },
+        );
+
+        if let Some(mut player) = self.player_mgr.get_player_mut(player_guid) {
+            player.current_gossip_menu_id = Some(menu_id);
+        }
+
+        Ok(())
+    }
+
     /// Handle gossip option selection
     ///
     /// # Arguments

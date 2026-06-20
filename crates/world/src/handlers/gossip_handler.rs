@@ -8,10 +8,16 @@ use tracing::{debug, info, warn};
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
+use crate::game::common::creature_flags::CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS;
+use crate::game::common::player_constants::get_faction_for_race;
+use crate::game::creature::ai::is_hostile_faction;
+use crate::game::player::spells::state::CurrentSpellType;
 use crate::World;
 use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 const NPC_FLAG_BANKER: u32 = 0x00000100;
+const INTERACTION_DISTANCE: f32 = 5.0;
+const UNIT_FLAG_NOT_SELECTABLE: u32 = 0x02000000;
 
 /// Handle CMSG_GOSSIP_HELLO (0x17B)
 ///
@@ -37,12 +43,109 @@ pub async fn handle_gossip_hello(
     );
 
     // Get creature info to check if it's a quest giver
-    let (entry, npc_flags) = world
-        .managers
-        .creature_mgr
-        .get_creature(npc_guid)
-        .map(|c| (c.entry, c.npc_flags))
-        .unwrap_or((0, 0));
+    let (entry, npc_flags, creature_type) = {
+        let Some(creature) = world.managers.creature_mgr.get_creature(npc_guid) else {
+            debug!(
+                "Gossip hello for unresolved or non-creature guid {:?}",
+                npc_guid
+            );
+            return Ok(());
+        };
+
+        if !creature.is_alive() {
+            debug!("Gossip hello for dead creature {:?}", npc_guid);
+            return Ok(());
+        }
+
+        let can_interact = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| {
+                if player.map_id != creature.map_id {
+                    return false;
+                }
+
+                if player.is_alive()
+                    && (creature.static_flags1 & CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS) != 0
+                {
+                    return false;
+                }
+
+                if !player.is_alive()
+                    && (creature.static_flags1 & CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS) == 0
+                {
+                    return false;
+                }
+
+                if is_hostile_faction(creature.faction, get_faction_for_race(player.race), true) {
+                    return false;
+                }
+
+                if creature.unit_flags & UNIT_FLAG_NOT_SELECTABLE != 0 {
+                    return false;
+                }
+
+                player
+                    .movement
+                    .position
+                    .is_within_range(&creature.position, INTERACTION_DISTANCE)
+            })
+            .unwrap_or(false);
+
+        if !can_interact || world.managers.creature_mgr.is_in_combat(npc_guid) {
+            debug!("Player {:?} cannot interact with {:?}", player_guid, npc_guid);
+            return Ok(());
+        }
+
+        (creature.entry, creature.npc_flags, creature.creature_type)
+    };
+
+    {
+        const CREATURE_FLAG_EXTRA_CIVILIAN: u32 = 0x00000002;
+        const CREATURE_TYPE_TOTEM: u8 = 11;
+
+        let is_civilian = world
+            .managers
+            .creature_mgr
+            .get_template(entry)
+            .map(|t| (t.flags_extra & CREATURE_FLAG_EXTRA_CIVILIAN) != 0)
+            .unwrap_or(false);
+        let is_totem = creature_type == CREATURE_TYPE_TOTEM;
+
+        if !is_civilian && !is_totem {
+            world.managers.creature_mgr.with_creature_mut(npc_guid, |c| {
+                c.pause_out_of_combat_movement();
+            });
+        }
+    }
+
+    const INTERACT_INTERRUPT_FLAGS: u32 = 0x00000C00;
+
+    world
+        .systems
+        .auras
+        .remove_auras_with_interrupt_flag(player_guid, INTERACT_INTERRUPT_FLAGS, world)
+        .await?;
+
+    let should_interrupt_channel = world
+        .systems
+        .player
+        .manager()
+        .with_player(player_guid, |player| {
+            player
+                .spells
+                .get_current_spell(CurrentSpellType::Channeled)
+                .and_then(|cast| {
+                    world.managers.spell_mgr.get(cast.spell_id).filter(|entry| {
+                        (entry.channel_interrupt_flags & INTERACT_INTERRUPT_FLAGS) != 0
+                    })
+                })
+                .is_some()
+        })
+        .unwrap_or(false);
+    if should_interrupt_channel {
+        world.systems.spells.cancel_cast(player_guid, world).await?;
+    }
 
     info!(
         "NPC entry={}, npc_flags=0x{:08X}, has_gossip={}, has_quest={}, has_vendor={}",
@@ -52,6 +155,15 @@ pub async fn handle_gossip_hello(
         (npc_flags & 0x00000002) != 0,
         (npc_flags & 0x00000080) != 0
     );
+
+    // Spirit guides send the battleground resurrection-wave timer when greeted.
+    const NPC_FLAG_SPIRITGUIDE: u32 = 0x00000040;
+    if (npc_flags & NPC_FLAG_SPIRITGUIDE) != 0 {
+        let mut reply = WorldPacket::new(Opcode::SMSG_AREA_SPIRIT_HEALER_TIME);
+        reply.write_u64(npc_guid.raw());
+        reply.write_u32(0);
+        session.send_packet(reply)?;
+    }
 
     // Spirit healer: NPC_FLAG_SPIRITHEALER = 0x20. When a dead ghost player
     // clicks a spirit healer, skip gossip and send SMSG_SPIRIT_HEALER_CONFIRM
@@ -115,33 +227,14 @@ pub async fn handle_gossip_hello(
         None
     };
 
-    // Check if we should auto-display a single quest (like world implementation)
-    // Conditions: Has exactly 1 quest, is not a vendor, and either:
-    //   - NPC has no GOSSIP flag (quest pickup), OR
-    //   - Quest is complete (quest turn-in)
+    // Check if we should auto-display a single quest.
+    // Conditions: Has exactly 1 quest, is not a vendor, and NPC has no GOSSIP flag.
     let has_gossip_flag = (npc_flags & 0x00000001) != 0;
     let has_vendor_flag = (npc_flags & 0x00000080) != 0;
     let quest_count = quest_data.as_ref().map(|q| q.len()).unwrap_or(0);
 
     // Determine if we should auto-display the quest
-    let should_auto_display = if quest_count == 1 && !has_vendor_flag {
-        if let Some(ref quests) = quest_data {
-            if let Some(quest) = quests.first() {
-                let quest_id = quest.quest_id;
-                use crate::game::npc::quest::types::QuestStatus;
-                let quest_status = world.systems.quest.get_quest_status(player_guid, quest_id);
-
-                // Auto-display if: no gossip flag (pickup) OR quest is complete (turn-in)
-                !has_gossip_flag || quest_status == QuestStatus::Complete
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    } else {
-        false
-    };
+    let should_auto_display = quest_count == 1 && !has_vendor_flag && !has_gossip_flag;
 
     if should_auto_display {
         // Auto-display the single quest directly
