@@ -120,8 +120,8 @@ pub fn apply_hit_outcome(base_damage: u32, outcome: &MeleeHitOutcome) -> u32 {
 /// Formula:
 /// ```text
 /// base_damage = random(weapon_min, weapon_max)
-/// armor_reduction = armor / (armor + 400 + 85 * attacker_level)
-/// final_damage = base_damage * (1 - min(armor_reduction, 0.75))
+/// armor_reduction = vanilla CalcArmorReducedDamage (see combat::armor_reduction_fraction)
+/// final_damage = base_damage * (1 - armor_reduction)
 /// ```
 pub fn calculate_melee_damage(
     attacker_level: u8,
@@ -135,11 +135,8 @@ pub fn calculate_melee_damage(
         weapon_min
     };
 
-    // Vanilla WoW armor reduction formula
-    let armor_reduction =
-        target_armor as f32 / (target_armor as f32 + 400.0 + 85.0 * attacker_level as f32);
-    let armor_reduction = armor_reduction.min(0.75);
-    let damage_multiplier = 1.0 - armor_reduction;
+    let damage_multiplier =
+        1.0 - crate::game::combat::armor_reduction_fraction(target_armor, attacker_level);
 
     (base_damage as f32 * damage_multiplier) as u32
 }

@@ -43,18 +43,21 @@ fn calculate_resistance_reduction(caster_level: u8, resistance: u32, school: u8)
     resist_pct.min(0.75).max(0.0)
 }
 
-/// Calculate armor reduction percentage.
-/// Vanilla formula: armor / (armor + 400 + 85 * attacker_level), capped at 75%.
-fn calculate_armor_reduction(attacker_level: u8, armor: u32) -> f32 {
-    if armor == 0 {
-        return 0.0;
-    }
+/// Apply a critical-strike bonus to spell damage (faithful `SpellCaster::SpellCriticalDamageBonus`).
+///
+/// Melee/ranged-class spells crit for +100% (double); all other classes crit for +50%.
+/// The SPELLMOD_CRIT_DAMAGE_BONUS talent mod and the MOD_CRIT_PERCENT_VERSUS aura
+/// multiplier are deferred until those systems are ported.
+fn spell_critical_damage_bonus(dmg_class: u32, damage: f32) -> f32 {
+    const SPELL_DAMAGE_CLASS_MELEE: u32 = 2;
+    const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
 
-    let armor_f = armor as f32;
-    let level_f = attacker_level as f32;
-    let armor_constant = 400.0 + 85.0 * level_f;
-    let reduction = armor_f / (armor_f + armor_constant);
-    reduction.min(0.75)
+    let crit_bonus = match dmg_class {
+        SPELL_DAMAGE_CLASS_MELEE | SPELL_DAMAGE_CLASS_RANGED => damage,
+        _ => damage / 2.0,
+    };
+
+    damage + crit_bonus
 }
 
 /// SPELL_EFFECT_SCHOOL_DAMAGE (2)
@@ -65,9 +68,9 @@ fn calculate_armor_reduction(attacker_level: u8, armor: u32) -> f32 {
 /// 1. Base damage with dice roll + level scaling via calculate_base_value()
 /// 2. + spell_power[school] * coefficient (from DBC or cast_time / 3500)
 /// 3. Roll crit (spell_crit_pct)
-/// 4. If crit: * 1.5
+/// 4. If crit: apply SpellCriticalDamageBonus (+50%, or +100% for melee/ranged-class spells)
 /// 5. Resistance reduction: resistance / (caster_level * 5), physical exempt
-/// 6. Armor reduction for physical school: armor / (armor + 400 + 85 * level)
+/// 6. Armor reduction for physical school (vanilla CalcArmorReducedDamage formula)
 pub async fn effect_school_damage(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
@@ -116,7 +119,13 @@ pub async fn effect_school_damage(input: &EffectInput, world: &World) -> Result<
     };
 
     if is_crit {
-        final_damage *= 1.5;
+        let dmg_class = world
+            .managers
+            .spell_mgr
+            .get(input.spell_id)
+            .map(|e| e.dmg_class)
+            .unwrap_or(0);
+        final_damage = spell_critical_damage_bonus(dmg_class, final_damage);
     }
 
     // Step 4: Resistance reduction (non-physical schools only)
@@ -520,7 +529,8 @@ fn apply_target_mitigation(
         total_resisted += resisted;
         mitigated *= 1.0 - resist_pct;
     } else {
-        let reduction = calculate_armor_reduction(caster_level, armor);
+        let reduction =
+            crate::game::combat::armor_reduction_fraction(armor, caster_level);
         let armor_reduced = (mitigated * reduction) as u32;
         total_resisted += armor_reduced;
         mitigated *= 1.0 - reduction;
@@ -764,14 +774,12 @@ fn send_spell_damage_log(
     is_crit: bool,
     world: &World,
 ) {
-    let spell_school_mask = if school == 0 { 1u8 } else { 1u8 << school };
-
     let mut packet = WorldPacket::new(Opcode::SMSG_SPELLNONMELEEDAMAGELOG);
     packet.write_packed_guid_raw(target_guid.raw());
     packet.write_packed_guid_raw(caster_guid.raw());
     packet.write_u32(spell_id);
     packet.write_u32(damage);
-    packet.write_u8(spell_school_mask);
+    packet.write_u8(school); // school index (GetFirstSchoolInMask), not a mask
     packet.write_u32(0); // absorbed
     packet.write_u32(resisted);
     packet.write_u8(0); // periodicLog (0 = not periodic)

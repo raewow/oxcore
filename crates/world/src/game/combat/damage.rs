@@ -143,29 +143,41 @@ pub fn calculate_ranged_damage(
     }
 }
 
-/// Armor damage reduction formula (vanilla WoW 1.12)
+/// Fraction of physical damage mitigated by armor (faithful `SpellCaster::CalcArmorReducedDamage`).
 ///
-/// Formula: reduction% = armor / (armor + 400 + 85 * attacker_level)
-/// Capped at 75% reduction
+/// Vanilla 1.12 formula: `t = 0.1 * armor / (8.5 * attacker_level + 40)`, then
+/// `reduction = t / (1 + t)`, clamped to `[0, 0.75]`. This is the single source of
+/// truth for armor mitigation across melee and physical spell damage.
+pub fn armor_reduction_fraction(armor: u32, attacker_level: u8) -> f32 {
+    if armor == 0 {
+        return 0.0;
+    }
+
+    let tmp = 0.1 * armor as f32 / (8.5 * attacker_level as f32 + 40.0);
+    let reduction = tmp / (1.0 + tmp);
+    reduction.clamp(0.0, 0.75)
+}
+
+/// Armor damage reduction (vanilla WoW 1.12).
+///
+/// Applies [`armor_reduction_fraction`] and floors the result at 1 when any damage was
+/// dealt, matching `CalcArmorReducedDamage`'s `(newdamage > 1) ? newdamage : 1`.
 pub fn apply_armor_reduction(damage: f32, armor: u32, attacker_level: u8) -> f32 {
     if armor == 0 {
         return damage;
     }
 
-    let reduction = armor as f32 / (armor as f32 + 400.0 + 85.0 * attacker_level as f32);
-    let reduction = reduction.min(0.75); // Cap at 75%
-
-    damage * (1.0 - reduction)
+    let reduced = damage * (1.0 - armor_reduction_fraction(armor, attacker_level));
+    if damage > 0.0 {
+        reduced.max(1.0)
+    } else {
+        reduced
+    }
 }
 
 /// Calculate armor reduction percentage (for display)
 pub fn calculate_armor_reduction_pct(armor: u32, attacker_level: u8) -> f32 {
-    if armor == 0 {
-        return 0.0;
-    }
-
-    let reduction = armor as f32 / (armor as f32 + 400.0 + 85.0 * attacker_level as f32);
-    (reduction * 100.0).min(75.0)
+    armor_reduction_fraction(armor, attacker_level) * 100.0
 }
 
 /// Spell resistance check (binary resist system for vanilla)

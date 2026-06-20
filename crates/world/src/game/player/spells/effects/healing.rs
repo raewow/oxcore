@@ -8,6 +8,23 @@ use crate::World;
 use anyhow::Result;
 use oxcore_shared::protocol::{Opcode, WorldPacket};
 
+/// Apply a critical-heal bonus to a heal amount (faithful `SpellCaster::SpellCriticalHealingBonus`).
+///
+/// Melee/ranged-class heals crit for +100% (double); all other classes crit for +50%
+/// (the `damage / 2` integer halving the C++ uses). The `MOD_CRIT_PERCENT_VERSUS`
+/// aura multiplier is deferred until that aura type is ported.
+fn spell_critical_healing_bonus(dmg_class: u32, heal: u32) -> u32 {
+    const SPELL_DAMAGE_CLASS_MELEE: u32 = 2;
+    const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+
+    let crit_bonus = match dmg_class {
+        SPELL_DAMAGE_CLASS_MELEE | SPELL_DAMAGE_CLASS_RANGED => heal,
+        _ => heal / 2,
+    };
+
+    heal + crit_bonus
+}
+
 /// SPELL_EFFECT_HEAL (10)
 ///
 /// Direct heal (Flash Heal, Healing Touch, etc.)
@@ -16,7 +33,7 @@ use oxcore_shared::protocol::{Opcode, WorldPacket};
 /// 1. Base value with dice roll + level scaling
 /// 2. + healing_power * coefficient (from DBC or cast_time / 3500)
 /// 3. Roll crit (spell_crit_pct)
-/// 4. If crit: * 1.5
+/// 4. If crit: apply SpellCriticalHealingBonus (+50%, or +100% for melee/ranged-class heals)
 pub async fn effect_heal(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
@@ -56,11 +73,16 @@ pub async fn effect_heal(input: &EffectInput, world: &World) -> Result<EffectRes
         false
     };
 
+    let mut heal_amount = final_heal as u32;
     if is_crit {
-        final_heal *= 1.5;
+        let dmg_class = world
+            .managers
+            .spell_mgr
+            .get(input.spell_id)
+            .map(|e| e.dmg_class)
+            .unwrap_or(0);
+        heal_amount = spell_critical_healing_bonus(dmg_class, heal_amount);
     }
-
-    let heal_amount = final_heal as u32;
 
     // Apply healing via modify_health (clamps to max_health, returns actual gain).
     let healed = world

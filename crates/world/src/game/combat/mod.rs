@@ -29,8 +29,8 @@ pub use hit_table::{
 };
 
 pub use damage::{
-    apply_armor_reduction, calculate_armor_reduction_pct, calculate_melee_damage,
-    calculate_ranged_damage, calculate_spell_resistance,
+    apply_armor_reduction, armor_reduction_fraction, calculate_armor_reduction_pct,
+    calculate_melee_damage, calculate_ranged_damage, calculate_spell_resistance,
 };
 
 pub use auto_attack::{
