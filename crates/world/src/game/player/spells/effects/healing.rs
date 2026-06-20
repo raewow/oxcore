@@ -62,7 +62,18 @@ pub async fn effect_heal(input: &EffectInput, world: &World) -> Result<EffectRes
     // Step 2: Add healing power bonus with coefficient
     if let Some((healing_power, _, _)) = caster_stats {
         let coefficient = input.get_spell_coefficient();
-        final_heal += healing_power as f32 * coefficient;
+        let mut heal_bonus = healing_power as f32 * coefficient;
+        // Downranking penalty applies only to the computed (non-DBC) coefficient.
+        if input.spell_coefficient <= 0.01 {
+            let spell_level = world
+                .managers
+                .spell_mgr
+                .get(input.spell_id)
+                .map(|e| e.spell_level)
+                .unwrap_or(0);
+            heal_bonus *= super::calculate_level_penalty(spell_level);
+        }
+        final_heal += heal_bonus;
     }
 
     // Step 3: Roll for crit (healing crit = 150% heal)

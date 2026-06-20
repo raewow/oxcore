@@ -113,6 +113,18 @@ impl EffectInput {
     }
 }
 
+/// Downranking level penalty for spell-power coefficients (faithful `SpellCaster::CalculateLevelPenalty`).
+///
+/// Returns 1.0 for spells with no spell level or above level 20; otherwise the
+/// spell-power benefit is reduced by 3.75% per level below 20. Applies only to the
+/// computed (non-DBC) coefficient — DBC table coefficients already bake in the penalty.
+pub fn calculate_level_penalty(spell_level: u32) -> f32 {
+    if spell_level == 0 || spell_level > 20 {
+        return 1.0;
+    }
+    1.0 - ((20.0 - spell_level as f32) * 0.0375)
+}
+
 /// Result from an effect handler.
 #[derive(Debug, Clone)]
 pub struct EffectResult {

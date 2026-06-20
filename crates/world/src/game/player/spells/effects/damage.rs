@@ -101,7 +101,17 @@ pub async fn effect_school_damage(input: &EffectInput, world: &World) -> Result<
     // Step 2: Spell power scaling with coefficient
     if let Some((spell_power, _, _)) = caster_stats {
         let coefficient = input.get_spell_coefficient();
-        let spell_power_bonus = spell_power as f32 * coefficient;
+        let mut spell_power_bonus = spell_power as f32 * coefficient;
+        // Downranking penalty applies only to the computed (non-DBC) coefficient.
+        if input.spell_coefficient <= 0.01 {
+            let spell_level = world
+                .managers
+                .spell_mgr
+                .get(input.spell_id)
+                .map(|e| e.spell_level)
+                .unwrap_or(0);
+            spell_power_bonus *= super::calculate_level_penalty(spell_level);
+        }
         final_damage += spell_power_bonus;
 
         tracing::debug!(
