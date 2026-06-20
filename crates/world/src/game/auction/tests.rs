@@ -31,6 +31,7 @@ fn test_item_template(entry: u32) -> ItemTemplate {
         max_count: 0,
         stackable: 1,
         max_durability: 100,
+        buy_count: 1,
         buy_price: 0,
         sell_price: 0,
         container_slots: 0,

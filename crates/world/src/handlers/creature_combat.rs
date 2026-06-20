@@ -1,18 +1,18 @@
 //! Attack Handler - Player attacks on creatures
 
+use crate::World;
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::game::broadcast_mgr::broadcast_around_creature;
 use crate::game::common::update_fields::*;
 use crate::game::creature::combat::{
-    apply_hit_outcome, calculate_melee_damage, hit_outcome_to_hit_info,
-    hit_outcome_to_victim_state, roll_melee_hit_outcome, MeleeHitOutcome,
+    MeleeHitOutcome, apply_hit_outcome, calculate_melee_damage, hit_outcome_to_hit_info,
+    hit_outcome_to_victim_state, roll_melee_hit_outcome,
 };
-use crate::World;
+use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::messages::combat::{SmsgAttackStart, SmsgAttackStop, SmsgAttackerStateUpdate};
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
-use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Handle player attack swing (CMSG_ATTACKSWING)
@@ -32,7 +32,11 @@ pub async fn handle_attack_swing(
     // Check creature exists and is alive
     // MaNGOS: sends SMSG_ATTACKSTOP + SMSG_ATTACKSWING_DEADTARGET when target is dead
     if !world.managers.creature_mgr.is_alive(target_guid) {
-        tracing::info!("[COMBAT] CMSG_ATTACKSWING on dead target {:?} from {:?} — sending DEADTARGET + ATTACKSTOP", target_guid, attacker_guid);
+        tracing::info!(
+            "[COMBAT] CMSG_ATTACKSWING on dead target {:?} from {:?} — sending DEADTARGET + ATTACKSTOP",
+            target_guid,
+            attacker_guid
+        );
         // Tell client the target is dead (stops client auto-attack loop)
         let dead_packet = oxcore_shared::protocol::WorldPacket::new(
             oxcore_shared::protocol::Opcode::SMSG_ATTACKSWING_DEADTARGET,
@@ -59,7 +63,10 @@ pub async fn handle_attack_swing(
     let creature_pos = world.managers.creature_mgr.get_position(target_guid);
     tracing::warn!(
         "[COMBAT] ATTACKSWING: player {:?} attacking creature {:?}, in_objects_created={}, creature_pos={:?}",
-        attacker_guid, target_guid, in_objects_created, creature_pos
+        attacker_guid,
+        target_guid,
+        in_objects_created,
+        creature_pos
     );
 
     // Start auto-attack via CombatSystem (sets is_auto_attacking, attack_target, timer=0)
@@ -423,7 +430,9 @@ fn send_creature_killed_update(world: &World, creature_guid: ObjectGuid) -> anyh
 
     tracing::debug!(
         "[COMBAT] send_creature_killed_update {:?}: HEALTH=0, MAXHEALTH={}, FLAGS=0x{:08X}, BYTES1=7, NPC_FLAGS=0",
-        creature_guid, max_health, cleared_flags
+        creature_guid,
+        max_health,
+        cleared_flags
     );
     let world_guid = WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
     let empty_guid = WorldObjectGuid::from_raw(0);

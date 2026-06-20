@@ -243,6 +243,9 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_ITEM_QUERY_SINGLE => {
                     query::handle_item_query(session, packet, world).await?;
                 }
+                Opcode::CMSG_ITEM_NAME_QUERY => {
+                    query::handle_item_name_query(session, packet, world).await?;
+                }
                 Opcode::CMSG_GAMEOBJECT_QUERY => {
                     query::handle_gameobject_query(session, packet, world).await?;
                 }

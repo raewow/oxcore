@@ -1496,22 +1496,24 @@ impl SpellSystem {
             return Ok(());
         }
 
-        let power_type = match crate::game::player::power::PowerType::from_u8(
-            spell_entry.power_type as u8,
-        ) {
-            Some(pt) => pt,
-            None => return Ok(()),
-        };
+        let power_type =
+            match crate::game::player::power::PowerType::from_u8(spell_entry.power_type as u8) {
+                Some(pt) => pt,
+                None => return Ok(()),
+            };
 
         // Mana spells reset the five-second rule unless flagged DONT_BLOCK_MANA_REGEN.
         const SPELL_ATTR_EX2_DONT_BLOCK_MANA_REGEN: u32 = 0x0200_0000;
-        let reset_mana_timer = cost > 0
-            && spell_entry.attributes_ex2 & SPELL_ATTR_EX2_DONT_BLOCK_MANA_REGEN == 0;
+        let reset_mana_timer =
+            cost > 0 && spell_entry.attributes_ex2 & SPELL_ATTR_EX2_DONT_BLOCK_MANA_REGEN == 0;
 
-        world
-            .systems
-            .power
-            .spend_spell_power(caster_guid, power_type, cost, reset_mana_timer, world)?;
+        world.systems.power.spend_spell_power(
+            caster_guid,
+            power_type,
+            cost,
+            reset_mana_timer,
+            world,
+        )?;
 
         Ok(())
     }
@@ -1539,7 +1541,8 @@ impl SpellSystem {
             let packet = SmsgUpdateObject::new()
                 .add_block(UpdateBlockData::Values(block))
                 .to_world_packet();
-            self.broadcast_mgr.broadcast_nearby(caster_guid, &packet, true);
+            self.broadcast_mgr
+                .broadcast_nearby(caster_guid, &packet, true);
         }
     }
 

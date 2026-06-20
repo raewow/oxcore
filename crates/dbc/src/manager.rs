@@ -3,9 +3,9 @@ use crate::structures::{
     AreaTableEntry, AreaTriggerEntry, AuctionHouseEntry, BankBagSlotPricesEntry, ChrClassesEntry,
     ChrRacesEntry, CreatureDisplayInfoEntry, FactionDbcEntry, FactionTemplateDbcEntry,
     GameObjectDisplayInfoEntry, ItemEntry, LockEntry, MapEntry, SkillLineAbilityEntry,
-    SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry, SpellCastTimeEntry, SpellDurationEntry,
-    SpellFocusObjectEntry, SpellRadiusEntry, SpellRangeEntry, TalentEntry, TalentTabEntry,
-    WorldSafeLocsEntry,
+    SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry, SpellCastTimeEntry,
+    SpellDurationEntry, SpellFocusObjectEntry, SpellRadiusEntry, SpellRangeEntry, TalentEntry,
+    TalentTabEntry, WorldSafeLocsEntry,
 };
 use anyhow::{Context, Result};
 use std::path::Path;

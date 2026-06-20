@@ -1,15 +1,16 @@
 //! Character handlers - enumeration, login, logout
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
 use tracing::{debug, error, info, trace, warn};
 
+use crate::World;
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::core::common::packet_compression::compress_update_packet_if_needed;
 use crate::core::common::position::Position as WorldPosition;
 use crate::core::session::{SessionState, WorldSession};
-use crate::game::common::object_type::update_flags;
 use crate::game::common::object_type::ObjectTypeId;
+use crate::game::common::object_type::update_flags;
 use crate::game::common::update_fields::{
     OBJECT_FIELD_GUID, OBJECT_FIELD_SCALE_X, OBJECT_FIELD_TYPE, PLAYER_BYTES, PLAYER_BYTES_2,
     PLAYER_FIELD_COINAGE, PLAYER_FIELD_INV_SLOT_HEAD, PLAYER_FIELD_PACK_SLOT_1,
@@ -20,9 +21,9 @@ use crate::game::common::update_fields::{
 };
 use crate::game::player::reputation::FactionEntry;
 use crate::game::player::{Player, PlayerBroadcaster};
-use crate::World;
 use oxcore_shared::database::characters::CharacterDeleteMode;
 use oxcore_shared::database::{CharacterRepository, Databases, ReputationRepository};
+use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::messages::character::{
     SmsgLogoutCancelAck, SmsgLogoutComplete, SmsgLogoutResponse,
 };
@@ -36,7 +37,6 @@ use oxcore_shared::messages::social::SmsgStandstateUpdate;
 use oxcore_shared::messages::update::{
     CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
 };
-use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Handle CMSG_CHAR_ENUM - list characters for this account
@@ -367,8 +367,8 @@ pub async fn handle_player_login_with_guid(
                 player.player_flags |= PLAYER_FLAGS_GHOST_RAW;
                 player.movement.water_walking = true;
                 player.movement.run_speed = 7.0 * 1.5; // ghost speed
-                                                       // Re-apply spell 8326 via the aura container so visibility
-                                                       // rules pick it up on the next tick.
+                // Re-apply spell 8326 via the aura container so visibility
+                // rules pick it up on the next tick.
                 use crate::game::player::auras::aura::{Aura, AuraFlags};
                 use crate::game::player::auras::effects;
                 let flags = AuraFlags {
@@ -424,7 +424,7 @@ pub async fn handle_player_login_with_guid(
 
     // 7.0.0 Initialize rest state from saved data + offline accumulation
     {
-        use crate::game::player::environment::{RestType, PLAYER_FLAGS_RESTING};
+        use crate::game::player::environment::{PLAYER_FLAGS_RESTING, RestType};
 
         // Determine saved rest type from character flags
         let saved_rest_type = if character.character_flags & PLAYER_FLAGS_RESTING != 0 {
@@ -1319,7 +1319,12 @@ pub fn build_player_create_block_for_player(
             let is_high = (field_idx - PLAYER_FIELD_INV_SLOT_HEAD) % 2;
             tracing::info!(
                 "[LOGIN]   Inventory slot field: field={} (0x{:X}), slot={}, is_high={}, value={} (0x{:X})",
-                field_idx, field_idx, slot, is_high, value, value
+                field_idx,
+                field_idx,
+                slot,
+                is_high,
+                value,
+                value
             );
         } else if field_idx >= PLAYER_FIELD_PACK_SLOT_1 && field_idx < PLAYER_FIELD_PACK_SLOT_1 + 32
         {
@@ -1328,7 +1333,12 @@ pub fn build_player_create_block_for_player(
             let is_high = (field_idx - PLAYER_FIELD_PACK_SLOT_1) % 2;
             tracing::info!(
                 "[LOGIN]   Pack slot field: field={} (0x{:X}), slot={}, is_high={}, value={} (0x{:X})",
-                field_idx, field_idx, slot, is_high, value, value
+                field_idx,
+                field_idx,
+                slot,
+                is_high,
+                value,
+                value
             );
         }
     }
@@ -1744,7 +1754,10 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
         .player_mgr
         .save_all_player_data(player_guid, &world.databases.character)
         .await?;
-    info!("[LOGOUT] Saved all player data (position, XP, health, rest, spells, actions, reputation, skills) for {:?}", player_guid);
+    info!(
+        "[LOGOUT] Saved all player data (position, XP, health, rest, spells, actions, reputation, skills) for {:?}",
+        player_guid
+    );
 
     // Save quest progress to database
     world.systems.quest.save_player_quests(player_guid).await?;
@@ -1799,7 +1812,7 @@ pub async fn handle_char_create(
     use crate::config::get_config_mgr;
     use crate::game::common::account_result::{char_create, char_name};
     use crate::game::player::name_validation::{
-        normalize_character_name, validate_character_name, NameValidationResult,
+        NameValidationResult, normalize_character_name, validate_character_name,
     };
     use oxcore_shared::database::world::repositories::PlayerCreateInfoRepository;
     use oxcore_shared::game::chat::Team;
@@ -2202,7 +2215,7 @@ pub async fn handle_char_rename(
 ) -> Result<()> {
     use crate::game::common::account_result::{char_name, response};
     use crate::game::player::name_validation::{
-        normalize_character_name, validate_character_name, NameValidationResult,
+        NameValidationResult, normalize_character_name, validate_character_name,
     };
     use oxcore_shared::messages::character::SmsgCharRename;
 
@@ -2435,10 +2448,10 @@ pub async fn handle_zoneupdate(
     if is_capital || current_rest_type == crate::game::player::environment::RestType::InCity {
         if let Some(new_flags) = player_mgr.with_player(player_guid, |p| p.player_flags) {
             use crate::game::common::update_fields::PLAYER_FLAGS;
+            use oxcore_shared::messages::ToWorldPacket;
             use oxcore_shared::messages::update::{
                 ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
             };
-            use oxcore_shared::messages::ToWorldPacket;
 
             let world_guid = crate::core::common::guid::ObjectGuid::from_low(player_guid.counter());
             let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(

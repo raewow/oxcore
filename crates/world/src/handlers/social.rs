@@ -3,9 +3,9 @@
 use anyhow::Result;
 use tracing::{debug, info};
 
+use crate::World;
 use crate::core::session::WorldSession;
 use crate::game::social::types::WhoRequest;
-use crate::World;
 use oxcore_shared::game::chat::Team;
 use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 

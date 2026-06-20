@@ -10,6 +10,5 @@ pub use structures::{
     AreaTableEntry, AreaTriggerEntry, AuctionHouseEntry, BankBagSlotPricesEntry,
     CreatureDisplayInfoEntry, FactionDbcEntry, FactionTemplateDbcEntry, GameObjectDisplayInfoEntry,
     ItemEntry, LockEntry, SkillLineAbilityEntry, SkillLineEntry, SkillRaceClassInfoEntry,
-    SkillTiersEntry,
-    SpellFocusObjectEntry,
+    SkillTiersEntry, SpellFocusObjectEntry,
 };

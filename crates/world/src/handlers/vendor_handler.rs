@@ -5,9 +5,9 @@
 use anyhow::Result;
 use tracing::debug;
 
+use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
-use crate::World;
 use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_LIST_INVENTORY (0x19E)
@@ -103,18 +103,18 @@ pub async fn handle_sell_item(
         .read_guid()
         .ok_or_else(|| anyhow::anyhow!("Failed to read item GUID"))?;
 
-    let _amount = packet.read_u8().unwrap_or(0);
+    let amount = packet.read_u8().unwrap_or(0);
 
     debug!(
-        "CMSG_SELL_ITEM: player={:?}, vendor={:?}, item={:?}",
-        player_guid, vendor_guid, item_guid
+        "CMSG_SELL_ITEM: player={:?}, vendor={:?}, item={:?}, amount={}",
+        player_guid, vendor_guid, item_guid, amount
     );
 
     // Delegate to vendor system
     world
         .systems
         .vendor
-        .handle_sell_item(player_guid, vendor_guid, item_guid)
+        .handle_sell_item(player_guid, vendor_guid, item_guid, amount)
         .await?;
 
     Ok(())

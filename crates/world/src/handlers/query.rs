@@ -396,6 +396,43 @@ pub async fn handle_item_query(
     Ok(())
 }
 
+/// Handle CMSG_ITEM_NAME_QUERY
+pub async fn handle_item_name_query(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    use oxcore_shared::messages::inventory::SmsgItemNameQueryResponse;
+
+    let item_id = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read item ID from CMSG_ITEM_NAME_QUERY"))?;
+
+    // MaNGOS reads an item GUID after the item ID. Some clients/proxies omit it,
+    // so consume it only when present to keep the handler tolerant like item query.
+    let _guid = if packet.data().remaining() >= 8 {
+        packet.read_u64()
+    } else {
+        None
+    };
+
+    tracing::debug!("CMSG_ITEM_NAME_QUERY: item_id={}", item_id);
+
+    if let Some(template) = world.managers.item_mgr.get_template(item_id) {
+        session.send_msg(SmsgItemNameQueryResponse {
+            item_id,
+            name: &template.name,
+        })?;
+    } else {
+        tracing::warn!(
+            "CMSG_ITEM_NAME_QUERY: item template not found for item_id={}",
+            item_id
+        );
+    }
+
+    Ok(())
+}
+
 /// Handle CMSG_NAME_QUERY
 ///
 /// Looks up player name, race, gender, class by GUID.

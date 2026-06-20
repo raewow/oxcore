@@ -5,8 +5,8 @@
 use anyhow::Result;
 use tracing::debug;
 
-use crate::core::session::WorldSession;
 use crate::World;
+use crate::core::session::WorldSession;
 use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_SET_SELECTION (0x13D / 317)

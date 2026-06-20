@@ -539,8 +539,7 @@ fn apply_target_mitigation(
         total_resisted += resisted;
         mitigated *= 1.0 - resist_pct;
     } else {
-        let reduction =
-            crate::game::combat::armor_reduction_fraction(armor, caster_level);
+        let reduction = crate::game::combat::armor_reduction_fraction(armor, caster_level);
         let armor_reduced = (mitigated * reduction) as u32;
         total_resisted += armor_reduced;
         mitigated *= 1.0 - reduction;

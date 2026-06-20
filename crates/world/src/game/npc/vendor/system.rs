@@ -75,6 +75,10 @@ impl VendorSystem {
             player_guid, vendor_guid
         );
 
+        if !self.player_mgr.is_player_alive(player_guid) {
+            return Ok(());
+        }
+
         // Get creature entry
         let entry = {
             let creature = self
@@ -138,7 +142,7 @@ impl VendorSystem {
                     max_count: current_stock,
                     price: discounted_price,
                     max_durability: template.max_durability,
-                    buy_count: 1, // Default stack size
+                    buy_count: template.buy_count.max(1),
                 })
             })
             .collect();
@@ -171,6 +175,12 @@ impl VendorSystem {
             "Player {:?} buying item {} x{} from vendor {:?}",
             player_guid, item_id, count, vendor_guid
         );
+
+        if !self.player_mgr.is_player_alive(player_guid) {
+            return Ok(());
+        }
+
+        let count = count.max(1);
 
         // Get vendor entry
         let entry = {
@@ -215,6 +225,8 @@ impl VendorSystem {
 
         // Calculate price with discount
         let discount = self.calculate_reputation_discount(player_guid, entry);
+        let buy_count = template.buy_count.max(1);
+        let item_count = buy_count.saturating_mul(count as u32);
         let unit_price = (template.buy_price as f32 * discount + 0.5) as u32;
         let total_price = unit_price.saturating_mul(count as u32);
 
@@ -233,7 +245,7 @@ impl VendorSystem {
                 .get_item_stock(vendor_guid, item_id)
                 .unwrap_or(vendor_item.max_count as u32);
 
-            if current_stock < count as u32 {
+            if current_stock < item_count {
                 self.send_buy_failed(player_guid, vendor_guid, item_id, BuyError::ItemSoldOut);
                 return Ok(());
             }
@@ -242,7 +254,7 @@ impl VendorSystem {
         // Try to add items to inventory
         let add_result = self
             .inventory
-            .add_item(player_guid, item_id, count as u32)
+            .add_item(player_guid, item_id, item_count)
             .await;
 
         match add_result {
@@ -252,7 +264,7 @@ impl VendorSystem {
 
                 // Reduce stock for limited items
                 if vendor_item.max_count > 0 {
-                    for _ in 0..count {
+                    for _ in 0..item_count {
                         self.manager.reduce_stock(vendor_guid, item_id);
                     }
                 }
@@ -278,13 +290,13 @@ impl VendorSystem {
                     vendor_guid,
                     vendor_slot,
                     remaining_stock,
-                    count: count as u32,
+                    count: item_count,
                 };
                 self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
                 info!(
                     "Player {:?} bought item {} x{} for {} copper",
-                    player_guid, item_id, count, total_price
+                    player_guid, item_id, item_count, total_price
                 );
             }
             _ => {
@@ -302,11 +314,20 @@ impl VendorSystem {
         player_guid: ObjectGuid,
         vendor_guid: ObjectGuid,
         item_guid: ObjectGuid,
+        amount: u8,
     ) -> Result<()> {
         info!(
-            "Player {:?} selling item {:?} to vendor {:?}",
-            player_guid, item_guid, vendor_guid
+            "Player {:?} selling item {:?} x{} to vendor {:?}",
+            player_guid, item_guid, amount, vendor_guid
         );
+
+        if !self.player_mgr.is_player_alive(player_guid) {
+            return Ok(());
+        }
+
+        if amount == 0 {
+            return Ok(());
+        }
 
         // If vendor_guid is empty (0), try to get from player's current selection
         let vendor_guid = if vendor_guid.is_empty() {
@@ -370,10 +391,21 @@ impl VendorSystem {
         };
 
         // Get item entry and count
-        let (entry_id, count) = {
+        let (entry_id, stack_count) = {
             let item_read = item.read();
             (item_read.entry, item_read.count)
         };
+
+        let sell_count = amount as u32;
+        if sell_count > stack_count {
+            let msg = SmsgSellItem {
+                vendor_guid,
+                item_guid,
+                result: SellResult::CantFindItem,
+            };
+            self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+            return Ok(());
+        }
 
         // Get item template
         let template = match self.item_mgr.get_template(entry_id) {
@@ -403,10 +435,12 @@ impl VendorSystem {
         }
 
         // Calculate total sell price
-        let total_price = template.sell_price.saturating_mul(count);
+        let total_price = template.sell_price.saturating_mul(sell_count);
 
         // Remove item from inventory (sends SMSG_UPDATE_OBJECT slot clear + SMSG_DESTROY_OBJECT)
-        let remove_result = self.inventory.remove_item(player_guid, item_guid, count);
+        let remove_result = self
+            .inventory
+            .remove_item(player_guid, item_guid, sell_count);
         match remove_result {
             crate::game::inventory::RemoveItemResult::ItemRemoved { .. }
             | crate::game::inventory::RemoveItemResult::CountReduced { .. } => {
@@ -423,7 +457,7 @@ impl VendorSystem {
 
                 info!(
                     "Player {:?} sold item {} (x{}) to vendor {:?} for {} copper",
-                    player_guid, entry_id, count, vendor_guid, total_price
+                    player_guid, entry_id, sell_count, vendor_guid, total_price
                 );
             }
             _ => {

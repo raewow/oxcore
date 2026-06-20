@@ -1,9 +1,9 @@
 //! CMSG_JOIN_CHANNEL handler
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
-use crate::core::session::WorldSession;
 use crate::World;
+use crate::core::session::WorldSession;
 use oxcore_shared::game::chat::Team;
 use oxcore_shared::protocol::WorldPacket;
 

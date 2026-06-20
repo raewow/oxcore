@@ -1,11 +1,11 @@
 //! CMSG_EMOTE handler - player performs an animated emote
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
-use crate::core::session::WorldSession;
 use crate::World;
-use oxcore_shared::messages::chat::SmsgEmote;
+use crate::core::session::WorldSession;
 use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::messages::chat::SmsgEmote;
 use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_EMOTE - player performs an emote

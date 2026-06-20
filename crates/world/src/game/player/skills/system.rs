@@ -516,7 +516,10 @@ impl SkillSystem {
                 if skill_data.state == SkillSaveState::Deleted {
                     return None;
                 }
-                if skill_data.max_value == 0 || skill_data.current_value == 0 || skill_data.current_value >= skill_data.max_value {
+                if skill_data.max_value == 0
+                    || skill_data.current_value == 0
+                    || skill_data.current_value >= skill_data.max_value
+                {
                     return None;
                 }
 
@@ -565,7 +568,10 @@ impl SkillSystem {
                 if skill_data.state == SkillSaveState::Deleted {
                     return None;
                 }
-                if skill_data.max_value == 0 || skill_data.current_value == 0 || skill_data.current_value >= skill_data.max_value {
+                if skill_data.max_value == 0
+                    || skill_data.current_value == 0
+                    || skill_data.current_value >= skill_data.max_value
+                {
                     return None;
                 }
                 Some((skill_data.current_value, skill_data.max_value))
@@ -651,15 +657,13 @@ impl SkillSystem {
         );
 
         match skill_id {
-            SKILL_HERBALISM | SKILL_LOCKPICKING => {
-                self.update_skill_pro(
-                    player_guid,
-                    skill_id,
-                    base_chance * multiplicator,
-                    gathering_gain as u16,
-                    world,
-                )
-            }
+            SKILL_HERBALISM | SKILL_LOCKPICKING => self.update_skill_pro(
+                player_guid,
+                skill_id,
+                base_chance * multiplicator,
+                gathering_gain as u16,
+                world,
+            ),
             SKILL_SKINNING => {
                 let steps = world.config.skill_chance_skinning_steps;
                 let adjusted_chance = if steps == 0 {
@@ -750,13 +754,7 @@ impl SkillSystem {
                 config_orange,
             );
 
-            return self.update_skill_pro(
-                player_guid,
-                skill_id,
-                chance,
-                craft_gain as u16,
-                world,
-            );
+            return self.update_skill_pro(player_guid, skill_id, chance, craft_gain as u16, world);
         }
 
         false

@@ -24,6 +24,7 @@ pub struct ItemTemplate {
     pub max_count: u32, // Maximum copies player can have (0 = unlimited)
     pub stackable: u32, // Maximum stack size per slot
     pub max_durability: u32,
+    pub buy_count: u32,
     pub buy_price: u32,
     pub sell_price: u32,
     pub container_slots: u8,
@@ -366,7 +367,7 @@ impl ItemManager {
         let rows = sqlx::query(
             "SELECT entry, name, display_id, quality, item_level, required_level,
                        inventory_type, `class`, subclass, max_count, stackable, max_durability,
-                     buy_price, sell_price, container_slots, start_quest,
+                     buy_count, buy_price, sell_price, container_slots, start_quest,
                      stat_type1, stat_type2, stat_type3, stat_type4, stat_type5,
                      stat_type6, stat_type7, stat_type8, stat_type9, stat_type10,
                      stat_value1, stat_value2, stat_value3, stat_value4, stat_value5,
@@ -404,6 +405,7 @@ impl ItemManager {
             let max_count: u32 = row.try_get("max_count")?;
             let mut stackable: u32 = row.try_get("stackable")?;
             let max_durability: u32 = row.try_get("max_durability")?;
+            let buy_count: u32 = row.try_get("buy_count")?;
             let buy_price: u32 = row.try_get("buy_price")?;
             let sell_price: u32 = row.try_get("sell_price")?;
             let container_slots: u8 = row.try_get("container_slots")?;
@@ -538,6 +540,7 @@ impl ItemManager {
                 max_count,
                 stackable,
                 max_durability,
+                buy_count,
                 buy_price,
                 sell_price,
                 container_slots,

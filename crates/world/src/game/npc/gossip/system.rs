@@ -221,7 +221,10 @@ impl GossipSystem {
             .collect();
         let quests = quest_data.unwrap_or_default();
 
-        if menu_id == 0 && options.is_empty() && quests.is_empty() && text_id == DEFAULT_GOSSIP_MESSAGE
+        if menu_id == 0
+            && options.is_empty()
+            && quests.is_empty()
+            && text_id == DEFAULT_GOSSIP_MESSAGE
         {
             return Ok(());
         }

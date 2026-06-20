@@ -88,7 +88,7 @@ pub fn calculate_power_cost(
             POWER_HEALTH => power_cost += pct * ctx.create_health as i32 / 100,
             0 => power_cost += pct * ctx.create_mana as i32 / 100, // POWER_MANA
             1 | 2 | 3 | 4 => power_cost += pct * ctx.max_power as i32 / 100, // RAGE/FOCUS/ENERGY/HAPPINESS
-            _ => return 0,                                         // unknown power type
+            _ => return 0,                                                   // unknown power type
         }
     }
 

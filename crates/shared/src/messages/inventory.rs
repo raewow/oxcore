@@ -90,6 +90,21 @@ impl ToWorldPacket for SmsgItemEnchantTimeUpdate {
 }
 
 #[derive(Debug, Clone)]
+pub struct SmsgItemNameQueryResponse<'a> {
+    pub item_id: u32,
+    pub name: &'a str,
+}
+
+impl ToWorldPacket for SmsgItemNameQueryResponse<'_> {
+    fn to_world_packet(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_NAME_QUERY_RESPONSE);
+        packet.write_u32(self.item_id);
+        packet.write_cstring(self.name);
+        packet
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SmsgItemQuerySingleResponse {
     pub entry: u32,
     pub class: u32,

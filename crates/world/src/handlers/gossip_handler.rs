@@ -5,6 +5,7 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
+use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
@@ -12,7 +13,6 @@ use crate::game::common::creature_flags::CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS;
 use crate::game::common::player_constants::get_faction_for_race;
 use crate::game::creature::ai::is_hostile_faction;
 use crate::game::player::spells::state::CurrentSpellType;
-use crate::World;
 use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 const NPC_FLAG_BANKER: u32 = 0x00000100;
@@ -93,7 +93,10 @@ pub async fn handle_gossip_hello(
             .unwrap_or(false);
 
         if !can_interact || world.managers.creature_mgr.is_in_combat(npc_guid) {
-            debug!("Player {:?} cannot interact with {:?}", player_guid, npc_guid);
+            debug!(
+                "Player {:?} cannot interact with {:?}",
+                player_guid, npc_guid
+            );
             return Ok(());
         }
 
@@ -113,9 +116,12 @@ pub async fn handle_gossip_hello(
         let is_totem = creature_type == CREATURE_TYPE_TOTEM;
 
         if !is_civilian && !is_totem {
-            world.managers.creature_mgr.with_creature_mut(npc_guid, |c| {
-                c.pause_out_of_combat_movement();
-            });
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(npc_guid, |c| {
+                    c.pause_out_of_combat_movement();
+                });
         }
     }
 

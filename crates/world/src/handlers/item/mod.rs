@@ -1,15 +1,45 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use tracing::{info, warn};
 
+use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::inventory::types::EquipResult;
-use crate::World;
 use oxcore_shared::game::inventory::{
-    is_bag_pos, is_bank_pos, is_equipment_pos, INVENTORY_SLOT_BAG_0,
+    INVENTORY_SLOT_BAG_0, is_bag_pos, is_bank_pos, is_equipment_pos,
 };
-use oxcore_shared::messages::SmsgReadItemFailed;
 use oxcore_shared::messages::SmsgReadItemOk;
 use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
+
+const NPC_FLAG_BANKER: u32 = 0x0000_0100;
+const BUY_BANK_SLOT_NOT_BANKER: u8 = 2;
+
+fn can_use_bank(player_guid: ObjectGuid, banker_guid: Option<ObjectGuid>, world: &World) -> bool {
+    let current_banker_guid = world
+        .managers
+        .player_mgr
+        .get_player(player_guid)
+        .and_then(|player| player.current_banker_guid);
+
+    if let Some(banker_guid) = banker_guid {
+        if current_banker_guid == Some(banker_guid) {
+            return true;
+        }
+
+        return world
+            .managers
+            .creature_mgr
+            .get_creature(banker_guid)
+            .is_some_and(|creature| (creature.npc_flags & NPC_FLAG_BANKER) != 0);
+    }
+
+    current_banker_guid.is_some()
+}
+
+fn send_too_far_from_bank(session: &crate::core::session::WorldSession) -> Result<()> {
+    session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(
+        oxcore_shared::messages::EQUIP_ERR_TOO_FAR_AWAY_FROM_BANK,
+    ))
+}
 
 pub async fn handle_use_item(
     session: &crate::core::session::WorldSession,
@@ -219,15 +249,34 @@ pub async fn handle_read_item(
         None => return Ok(()),
     };
 
-    if let Some(item_guid) = world.systems.inventory.get_item_at(player_guid, bag, slot) {
-        session.send_msg(SmsgReadItemOk { item_guid })?;
-    } else {
-        let _ = packet.read_u8();
-        let _ = packet.read_u8();
-        session.send_msg(SmsgReadItemFailed {
-            item_guid: ObjectGuid::default(),
-        })?;
+    let Some(item_guid) = world.systems.inventory.get_item_at(player_guid, bag, slot) else {
+        session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(
+            oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+        ))?;
+        return Ok(());
+    };
+
+    let Some(item_entry) = world
+        .systems
+        .inventory
+        .cache()
+        .get_item(player_guid, item_guid)
+        .map(|item| item.read().entry)
+    else {
+        session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(
+            oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+        ))?;
+        return Ok(());
+    };
+
+    if world.systems.item_mgr.get_template(item_entry).is_none() {
+        session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(
+            oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+        ))?;
+        return Ok(());
     }
+
+    session.send_msg(SmsgReadItemOk { item_guid })?;
 
     Ok(())
 }
@@ -262,15 +311,9 @@ pub async fn handle_swap_item(
     }
 
     if (is_bank_pos(src_bag, src_slot) || is_bank_pos(dst_bag, dst_slot))
-        && world
-            .managers
-            .player_mgr
-            .get_player(player_guid)
-            .is_none_or(|player| player.current_banker_guid.is_none())
+        && !can_use_bank(player_guid, None, world)
     {
-        session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(
-            oxcore_shared::messages::EQUIP_ERR_TOO_FAR_AWAY_FROM_BANK,
-        ))?;
+        send_too_far_from_bank(session)?;
         tracing::warn!(
             "[CMSG_SWAP_ITEM] Bank slot swap rejected without active banker: src={}:{} dst={}:{}",
             src_bag,
@@ -345,17 +388,10 @@ pub async fn handle_swap_inv_item(
         return Ok(());
     }
 
-    if (is_bank_pos(INVENTORY_SLOT_BAG_0, src_slot)
-        || is_bank_pos(INVENTORY_SLOT_BAG_0, dst_slot))
-        && world
-            .managers
-            .player_mgr
-            .get_player(player_guid)
-            .is_none_or(|player| player.current_banker_guid.is_none())
+    if (is_bank_pos(INVENTORY_SLOT_BAG_0, src_slot) || is_bank_pos(INVENTORY_SLOT_BAG_0, dst_slot))
+        && !can_use_bank(player_guid, None, world)
     {
-        session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(
-            oxcore_shared::messages::EQUIP_ERR_TOO_FAR_AWAY_FROM_BANK,
-        ))?;
+        send_too_far_from_bank(session)?;
         tracing::warn!(
             "[CMSG_SWAP_INV_ITEM] Bank slot swap rejected without active banker: src={} dst={}",
             src_slot,
@@ -840,17 +876,34 @@ pub async fn handle_destroy_item(
         None => return Ok(()),
     };
 
-    let destroy_count = if count > 0 { count as u32 } else { u32::MAX };
-
     if let Some(item_guid) = world.systems.inventory.get_item_at(player_guid, bag, slot) {
+        let destroy_count = if count > 0 {
+            count as u32
+        } else {
+            world
+                .systems
+                .inventory
+                .cache()
+                .get_item(player_guid, item_guid)
+                .map(|item| item.read().count)
+                .unwrap_or(0)
+        };
+
         warn!(
             "CMSG_DESTROYITEM: player={:?} bag={} slot={} count={} item={:?} — client is destroying this item",
             player_guid, bag, slot, destroy_count, item_guid
         );
-        let _ = world
-            .systems
-            .inventory
-            .remove_item(player_guid, item_guid, destroy_count);
+
+        if destroy_count > 0 {
+            let _ = world
+                .systems
+                .inventory
+                .remove_item(player_guid, item_guid, destroy_count);
+        }
+    } else {
+        session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(
+            oxcore_shared::messages::EQUIP_ERR_ITEM_NOT_FOUND,
+        ))?;
     }
 
     Ok(())
@@ -915,6 +968,16 @@ pub async fn handle_autobank_item(
         None => return Ok(()),
     };
 
+    if !can_use_bank(player_guid, None, world) {
+        send_too_far_from_bank(session)?;
+        tracing::warn!(
+            "[CMSG_AUTOBANK_ITEM] Bank move rejected without active banker: bag={} slot={}",
+            bag,
+            slot
+        );
+        return Ok(());
+    }
+
     let result = world
         .systems
         .inventory
@@ -947,6 +1010,16 @@ pub async fn handle_autostore_bank_item(
         None => return Ok(()),
     };
 
+    if !can_use_bank(player_guid, None, world) {
+        send_too_far_from_bank(session)?;
+        tracing::warn!(
+            "[CMSG_AUTOSTORE_BANK_ITEM] Bank move rejected without active banker: bag={} slot={}",
+            bag,
+            slot
+        );
+        return Ok(());
+    }
+
     let result = world
         .systems
         .inventory
@@ -967,14 +1040,28 @@ pub async fn handle_buy_bank_slot(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let _banker_guid = packet
+    let banker_guid = packet
         .read_packed_guid_raw()
         .ok_or_else(|| anyhow!("Failed to read banker guid"))?;
+    let banker_guid = ObjectGuid::from(banker_guid);
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
         None => return Ok(()),
     };
+
+    if !can_use_bank(player_guid, Some(banker_guid), world) {
+        tracing::warn!(
+            "[CMSG_BUY_BANK_SLOT] rejected non-banker: player={:?} banker={:?}",
+            player_guid,
+            banker_guid
+        );
+        world
+            .systems
+            .inventory
+            .send_buy_bank_slot_result(player_guid, BUY_BANK_SLOT_NOT_BANKER);
+        return Ok(());
+    }
 
     world
         .systems

@@ -18,10 +18,9 @@ use oxcore_shared::database::characters::repositories::inventory_repository_trai
     InventoryRepositoryTrait, InventorySlotRow,
 };
 use oxcore_shared::game::inventory::{
-    EquipmentSlot as EquipmentSlotEnum, BANK_SLOT_BAG_END, BANK_SLOT_BAG_START,
-    BANK_SLOT_ITEM_END, BANK_SLOT_ITEM_START, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END,
-    INVENTORY_SLOT_BAG_START, INVENTORY_SLOT_ITEM_END, INVENTORY_SLOT_ITEM_START,
-    KEYRING_SLOT_END, KEYRING_SLOT_START,
+    EquipmentSlot as EquipmentSlotEnum, BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BANK_SLOT_ITEM_END,
+    BANK_SLOT_ITEM_START, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START,
+    INVENTORY_SLOT_ITEM_END, INVENTORY_SLOT_ITEM_START, KEYRING_SLOT_END, KEYRING_SLOT_START,
 };
 use oxcore_shared::messages::inventory::{SmsgDestroyItem, SmsgItemPushResult};
 use oxcore_shared::messages::inventory_update::{
@@ -1102,12 +1101,12 @@ impl InventorySystem {
                 );
 
                 // Update cache
-                let source_updated = self
-                    .cache
-                    .set_item_at(player_guid, src_bag, src_slot, Some(dst_guid));
-                let destination_updated = self
-                    .cache
-                    .set_item_at(player_guid, dst_bag, dst_slot, Some(src_item_guid));
+                let source_updated =
+                    self.cache
+                        .set_item_at(player_guid, src_bag, src_slot, Some(dst_guid));
+                let destination_updated =
+                    self.cache
+                        .set_item_at(player_guid, dst_bag, dst_slot, Some(src_item_guid));
                 if !source_updated || !destination_updated {
                     tracing::error!(
                         "[INVENTORY] move_item FAILED: could not update cache for swap {}:{} -> {}:{}",
@@ -1120,7 +1119,9 @@ impl InventorySystem {
                         player_guid,
                         oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
                     );
-                    return MoveItemResult::DatabaseError("invalid cache swap destination".to_string());
+                    return MoveItemResult::DatabaseError(
+                        "invalid cache swap destination".to_string(),
+                    );
                 }
                 self.cache
                     .update_item_position(player_guid, src_item_guid, dst_bag, dst_slot);
@@ -1166,9 +1167,9 @@ impl InventorySystem {
 
                 // Update cache
                 let source_cleared = self.cache.set_item_at(player_guid, src_bag, src_slot, None);
-                let destination_updated = self
-                    .cache
-                    .set_item_at(player_guid, dst_bag, dst_slot, Some(src_item_guid));
+                let destination_updated =
+                    self.cache
+                        .set_item_at(player_guid, dst_bag, dst_slot, Some(src_item_guid));
                 if !source_cleared || !destination_updated {
                     tracing::error!(
                         "[INVENTORY] move_item FAILED: could not update cache for move {}:{} -> {}:{}",
@@ -1181,7 +1182,9 @@ impl InventorySystem {
                         player_guid,
                         oxcore_shared::messages::EQUIP_ERR_INT_BAG_ERROR,
                     );
-                    return MoveItemResult::DatabaseError("invalid cache move destination".to_string());
+                    return MoveItemResult::DatabaseError(
+                        "invalid cache move destination".to_string(),
+                    );
                 }
                 self.cache
                     .update_item_position(player_guid, src_item_guid, dst_bag, dst_slot);

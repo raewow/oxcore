@@ -1447,7 +1447,11 @@ mod integration_tests {
         assert_eq!(system.destroy_item_count(player_guid, entry, 0), 0);
     }
 
-    fn cast_item_template(entry: u32, spell_charges0: i32, stackable: u32) -> crate::game::items::manager::ItemTemplate {
+    fn cast_item_template(
+        entry: u32,
+        spell_charges0: i32,
+        stackable: u32,
+    ) -> crate::game::items::manager::ItemTemplate {
         crate::game::items::manager::ItemTemplate {
             entry,
             name: format!("Cast Item {entry}"),
@@ -1461,6 +1465,7 @@ mod integration_tests {
             max_count: 0,
             stackable,
             max_durability: 0,
+            buy_count: 1,
             buy_price: 0,
             sell_price: 0,
             container_slots: 0,
@@ -1543,15 +1548,19 @@ mod integration_tests {
 
         let item_guid = test_item_guid(70);
         // Instance has its last expendable charge (-1 -> ticks toward 0).
-        system
-            .cache()
-            .add_item(player_guid, cast_item_instance(70, entry, player_guid, [-1, 0, 0, 0, 0]));
+        system.cache().add_item(
+            player_guid,
+            cast_item_instance(70, entry, player_guid, [-1, 0, 0, 0, 0]),
+        );
         system
             .cache()
             .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));
 
         let destroyed = system.consume_cast_item(player_guid, item_guid).await;
-        assert!(destroyed, "expendable item with no charges left must be destroyed");
+        assert!(
+            destroyed,
+            "expendable item with no charges left must be destroyed"
+        );
         assert!(
             system.cache().get_item(player_guid, item_guid).is_none(),
             "destroyed cast item must be gone from cache"
@@ -1588,9 +1597,10 @@ mod integration_tests {
         system.load_player_inventory(player_guid).await.unwrap();
 
         let item_guid = test_item_guid(71);
-        system
-            .cache()
-            .add_item(player_guid, cast_item_instance(71, entry, player_guid, [3, 0, 0, 0, 0]));
+        system.cache().add_item(
+            player_guid,
+            cast_item_instance(71, entry, player_guid, [3, 0, 0, 0, 0]),
+        );
         system
             .cache()
             .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));

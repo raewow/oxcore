@@ -2,6 +2,7 @@
 //!
 //! All handlers are slim (3-10 lines): parse packet, delegate to system.
 
+use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
 use crate::game::player::spells::state::{
@@ -9,7 +10,6 @@ use crate::game::player::spells::state::{
     TARGET_FLAG_OBJECT, TARGET_FLAG_PVP_CORPSE, TARGET_FLAG_SELF, TARGET_FLAG_SOURCE_LOCATION,
     TARGET_FLAG_STRING, TARGET_FLAG_TRADE_ITEM, TARGET_FLAG_UNIT, TARGET_FLAG_UNK2,
 };
-use crate::World;
 use anyhow::Result;
 use bytes::Buf;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
