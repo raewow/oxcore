@@ -6,6 +6,7 @@
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::player::spells::cooldowns;
 use crate::game::player::spells::effects::EffectsDispatcher;
+use crate::game::player::spells::hit;
 use crate::game::player::spells::learning;
 use crate::game::player::spells::modifiers;
 use crate::game::player::spells::state::{
@@ -186,6 +187,16 @@ impl SpellSystem {
         if !is_triggered {
             self.consume_resources(caster_guid, spell_id, cast_item_guid, world)
                 .await?;
+            self.take_reagents(caster_guid, spell_id, world);
+            if let Some(item_guid) = cast_item_guid {
+                if caster_guid.is_player() {
+                    world
+                        .systems
+                        .inventory
+                        .consume_cast_item(caster_guid, item_guid)
+                        .await;
+                }
+            }
             self.apply_gcd(caster_guid, spell_id, world).await?;
 
             // Remove auras with CASTING interrupt flag
@@ -1530,6 +1541,136 @@ impl SpellSystem {
                 .to_world_packet();
             self.broadcast_mgr.broadcast_nearby(caster_guid, &packet, true);
         }
+    }
+
+    /// Consume a spell's reagents on cast (faithful `Spell::TakeReagents`).
+    ///
+    /// Player-only. Called for non-triggered casts, where `IgnoreItemRequirements`
+    /// is always false (triggered casts have their reagents removed by the master
+    /// spell). The cast-item / item-target reagent-overlap adjustments are deferred
+    /// until item-instance spell charges exist (see `TakeCastItem`).
+    fn take_reagents(&self, caster_guid: ObjectGuid, spell_id: u32, world: &World) {
+        if !caster_guid.is_player() {
+            return;
+        }
+
+        let spell_entry = match world.managers.spell_mgr.get(spell_id) {
+            Some(entry) => entry,
+            None => return,
+        };
+
+        for x in 0..spell_entry.reagent.len() {
+            let reagent = spell_entry.reagent[x];
+            if reagent <= 0 {
+                continue;
+            }
+            let item_id = reagent as u32;
+            let item_count = spell_entry.reagent_count[x];
+            if item_count == 0 {
+                continue;
+            }
+
+            world
+                .systems
+                .inventory
+                .destroy_item_count(caster_guid, item_id, item_count);
+        }
+    }
+
+    /// Restore power to a target from a spell, broadcasting the energize combat log
+    /// (faithful `SpellCaster::EnergizeBySpell` + `SpellCaster::SendEnergizeSpellLog`).
+    ///
+    /// The `SMSG_SPELLENERGIZELOG` packet is sent to the caster's visibility set
+    /// (including the caster) *before* the power is modified — the C++ ordering, where
+    /// the log must precede `ModifyPower`.
+    pub fn energize_by_spell(
+        &self,
+        caster_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        amount: u32,
+        power_type: crate::game::player::power::PowerType,
+        world: &World,
+    ) -> Result<()> {
+        use oxcore_shared::protocol::packet::WorldPacketGuidExt;
+        use oxcore_shared::protocol::{Opcode, WorldPacket};
+
+        let mut packet = WorldPacket::new(Opcode::SMSG_SPELLENERGIZELOG);
+        packet.write_packed_guid(target_guid);
+        packet.write_packed_guid(caster_guid);
+        packet.write_u32(spell_id);
+        packet.write_u32(power_type as u32);
+        packet.write_u32(amount);
+        self.broadcast_mgr
+            .broadcast_nearby(caster_guid, &packet, true);
+
+        world
+            .systems
+            .power
+            .restore_power(target_guid, power_type, amount, world)
+    }
+
+    /// Broadcast `SMSG_SPELLLOGMISS` for a spell that missed a target
+    /// (faithful `SpellCaster::SendSpellMiss`).
+    pub fn send_spell_miss(
+        &self,
+        caster_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        miss_info: hit::SpellMissInfo,
+    ) {
+        use oxcore_shared::protocol::packet::WorldPacketGuidExt;
+        use oxcore_shared::protocol::{Opcode, WorldPacket};
+
+        let mut packet = WorldPacket::new(Opcode::SMSG_SPELLLOGMISS);
+        packet.write_u32(spell_id);
+        packet.write_guid(caster_guid);
+        packet.write_u8(0); // unk8
+        packet.write_u32(1); // target count
+        packet.write_guid(target_guid);
+        packet.write_u8(miss_info as u8);
+        self.broadcast_mgr
+            .broadcast_nearby(caster_guid, &packet, true);
+    }
+
+    /// Broadcast `SMSG_PROCRESIST` for a spell resisted by a target
+    /// (faithful `SpellCaster::SendSpellDamageResist`).
+    pub fn send_spell_damage_resist(
+        &self,
+        caster_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+    ) {
+        use oxcore_shared::protocol::packet::WorldPacketGuidExt;
+        use oxcore_shared::protocol::{Opcode, WorldPacket};
+
+        let mut packet = WorldPacket::new(Opcode::SMSG_PROCRESIST);
+        packet.write_guid(caster_guid);
+        packet.write_guid(target_guid);
+        packet.write_u32(spell_id);
+        packet.write_u8(0); // log format: 0-default, 1-debug
+        self.broadcast_mgr
+            .broadcast_nearby(caster_guid, &packet, true);
+    }
+
+    /// Broadcast `SMSG_SPELLORDAMAGE_IMMUNE` for a spell a target was immune to
+    /// (faithful `SpellCaster::SendSpellOrDamageImmune`).
+    pub fn send_spell_or_damage_immune(
+        &self,
+        caster_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+    ) {
+        use oxcore_shared::protocol::packet::WorldPacketGuidExt;
+        use oxcore_shared::protocol::{Opcode, WorldPacket};
+
+        let mut packet = WorldPacket::new(Opcode::SMSG_SPELLORDAMAGE_IMMUNE);
+        packet.write_guid(caster_guid);
+        packet.write_guid(target_guid);
+        packet.write_u32(spell_id);
+        packet.write_u8(0);
+        self.broadcast_mgr
+            .broadcast_nearby(caster_guid, &packet, true);
     }
 
     /// Calculate the power cost of a spell (faithful `Spell::CalculatePowerCost`).

@@ -247,6 +247,14 @@ impl EffectsDispatcher {
                                 spell_id,
                                 eff_target
                             );
+                            if effect_index == 0 {
+                                world.systems.spells.send_spell_miss(
+                                    caster_guid,
+                                    *eff_target,
+                                    spell_id,
+                                    hit::SpellMissInfo::Miss,
+                                );
+                            }
                             continue;
                         }
                         hit::SpellHitOutcome::Resist => {
@@ -255,6 +263,14 @@ impl EffectsDispatcher {
                                 spell_id,
                                 eff_target
                             );
+                            if effect_index == 0 {
+                                world.systems.spells.send_spell_miss(
+                                    caster_guid,
+                                    *eff_target,
+                                    spell_id,
+                                    hit::SpellMissInfo::Resist,
+                                );
+                            }
                             continue;
                         }
                         hit::SpellHitOutcome::Immune => {
@@ -263,6 +279,14 @@ impl EffectsDispatcher {
                                 spell_id,
                                 eff_target
                             );
+                            if effect_index == 0 {
+                                world.systems.spells.send_spell_miss(
+                                    caster_guid,
+                                    *eff_target,
+                                    spell_id,
+                                    hit::SpellMissInfo::Immune,
+                                );
+                            }
                             continue;
                         }
                         hit::SpellHitOutcome::Reflect => {

@@ -62,20 +62,45 @@ pub async fn effect_energize(input: &EffectInput, world: &World) -> Result<Effec
         None => input.caster_guid,
     };
 
-    let energize_amount = input.base_value.max(0) as u32;
-
-    // Determine power type from misc_value (0=Mana, 1=Rage, 3=Energy)
+    // Reject misc values outside the Powers enum range (< 0 or >= MAX_POWERS).
     let power_type = match input.misc_value {
         0 => PowerType::Mana,
         1 => PowerType::Rage,
+        2 => PowerType::Focus,
         3 => PowerType::Energy,
-        _ => PowerType::Mana,
+        4 => PowerType::Happiness,
+        _ => return Ok(EffectResult::empty()),
     };
 
-    world
+    // Negative energize amounts are ignored (matches `if (damage < 0) return`).
+    if input.base_value < 0 {
+        return Ok(EffectResult::empty());
+    }
+    let energize_amount = input.base_value as u32;
+
+    // Skip dead targets and targets that cannot hold this power (GetMaxPower == 0).
+    // For non-player targets we have no state here, so fall through (restore_power
+    // is itself a no-op for them).
+    let skip = world
         .systems
-        .power
-        .restore_power(target_guid, power_type, energize_amount, world)?;
+        .player
+        .manager()
+        .with_player(target_guid, |player| {
+            player.stats.health == 0 || player.power.max[power_type as usize] == 0
+        })
+        .unwrap_or(false);
+    if skip {
+        return Ok(EffectResult::empty());
+    }
+
+    world.systems.spells.energize_by_spell(
+        input.caster_guid,
+        target_guid,
+        input.spell_id,
+        energize_amount,
+        power_type,
+        world,
+    )?;
 
     Ok(EffectResult::empty())
 }
