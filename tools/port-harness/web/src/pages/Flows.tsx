@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type FlowSummary } from "../api/client";
 
@@ -74,8 +74,36 @@ function FlowProgressCell({ progress }: { progress: FlowSummary["progress"] }) {
 }
 
 export function Flows() {
-  const [q, setQ] = useState("");
-  const [featureId, setFeatureId] = useState<number | "">("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const q = searchParams.get("q") ?? "";
+  const featureParam = searchParams.get("feature");
+  const featureId: number | "" =
+    featureParam !== null && featureParam !== "" ? Number(featureParam) : "";
+
+  const setQ = (value: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set("q", value);
+        else next.delete("q");
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  const setFeatureId = (value: number | "") => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value !== "") next.set("feature", String(value));
+        else next.delete("feature");
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
