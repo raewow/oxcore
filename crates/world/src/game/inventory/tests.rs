@@ -1382,4 +1382,227 @@ mod integration_tests {
             "item must be gone from cache after destruction"
         );
     }
+
+    /// destroy_item_count walks multiple stacks of the same entry and removes the
+    /// requested total, returning only what the player actually held.
+    #[tokio::test]
+    async fn test_destroy_item_count_walks_stacks() {
+        use crate::game::items::item::Item;
+
+        let mut mock_repo = MockInventoryRepositoryTrait::new();
+        let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        make_standard_load_expectations(&mut mock_repo);
+        // remove_item defers DB writes to the pending-ops queue (no direct repo calls).
+        // It sends a variable number of slot/destroy packets, so allow any count.
+        mock_broadcaster
+            .expect_send_to_player()
+            .times(0..)
+            .returning(|_, _| ());
+
+        let system = create_test_system(mock_repo, mock_broadcaster);
+        let player_guid = test_player_guid(1);
+        system.load_player_inventory(player_guid).await.unwrap();
+
+        let entry = 1234;
+        let mut make_stack = |item_id: u32, count: u32, slot: u8| {
+            let guid = test_item_guid(item_id);
+            let item = Arc::new(parking_lot::RwLock::new(Item::new(
+                guid,
+                entry,
+                count,
+                player_guid,
+                slot,
+                INVENTORY_SLOT_BAG_0,
+                0,
+                0,
+                0,
+                vec![],
+                0,
+                None,
+                None,
+                0,
+                [0; 5],
+            )));
+            system.cache().add_item(player_guid, item);
+            system
+                .cache()
+                .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, slot, Some(guid));
+        };
+
+        make_stack(101, 5, 23);
+        make_stack(102, 3, 24);
+        assert_eq!(system.count_items(player_guid, entry), 8);
+
+        // Destroy 6 across the two stacks: one fully consumed, the other reduced.
+        let destroyed = system.destroy_item_count(player_guid, entry, 6);
+        assert_eq!(destroyed, 6);
+        assert_eq!(system.count_items(player_guid, entry), 2);
+
+        // Asking for more than remains only destroys what is left.
+        let destroyed2 = system.destroy_item_count(player_guid, entry, 10);
+        assert_eq!(destroyed2, 2);
+        assert_eq!(system.count_items(player_guid, entry), 0);
+
+        // Zero count is a no-op.
+        assert_eq!(system.destroy_item_count(player_guid, entry, 0), 0);
+    }
+
+    fn cast_item_template(entry: u32, spell_charges0: i32, stackable: u32) -> crate::game::items::manager::ItemTemplate {
+        crate::game::items::manager::ItemTemplate {
+            entry,
+            name: format!("Cast Item {entry}"),
+            display_id: 0,
+            quality: 0,
+            item_level: 1,
+            required_level: 1,
+            item_class: 0,
+            item_subclass: 0,
+            inventory_type: 0,
+            max_count: 0,
+            stackable,
+            max_durability: 0,
+            buy_price: 0,
+            sell_price: 0,
+            container_slots: 0,
+            start_quest: 0,
+            stat_type: [0; 10],
+            stat_value: [0; 10],
+            delay: 0,
+            ammo_type: 0,
+            dmg_min: [0.0; 5],
+            dmg_max: [0.0; 5],
+            dmg_type: [0; 5],
+            block: 0,
+            armor: 0,
+            holy_res: 0,
+            fire_res: 0,
+            nature_res: 0,
+            frost_res: 0,
+            shadow_res: 0,
+            arcane_res: 0,
+            spell_id: [999, 0, 0, 0, 0],
+            spell_trigger: [0; 5],
+            spell_charges: [spell_charges0, 0, 0, 0, 0],
+            spell_cooldown: [0; 5],
+            spell_category: [0; 5],
+            spell_category_cooldown: [0; 5],
+        }
+    }
+
+    fn cast_item_instance(
+        item_id: u32,
+        entry: u32,
+        player_guid: ObjectGuid,
+        charges: [i32; 5],
+    ) -> Arc<parking_lot::RwLock<crate::game::items::item::Item>> {
+        use crate::game::items::item::Item;
+        Arc::new(parking_lot::RwLock::new(Item::new(
+            test_item_guid(item_id),
+            entry,
+            1,
+            player_guid,
+            23,
+            INVENTORY_SLOT_BAG_0,
+            0,
+            0,
+            0,
+            vec![],
+            0,
+            None,
+            None,
+            0,
+            charges,
+        )))
+    }
+
+    /// Expendable cast item (template charge < 0) is destroyed once its last charge
+    /// is spent. No charge persistence — the item is deleted instead.
+    #[tokio::test]
+    async fn test_consume_cast_item_destroys_expendable_when_spent() {
+        let mut mock_repo = MockInventoryRepositoryTrait::new();
+        let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        make_standard_load_expectations(&mut mock_repo);
+        // No update_item_charges expectation: a destroyed item must not persist charges.
+        mock_broadcaster
+            .expect_send_to_player()
+            .times(0..)
+            .returning(|_, _| ());
+
+        let entry = 5555;
+        let mut item_mgr = ItemManager::new();
+        item_mgr.add_template(cast_item_template(entry, -1, 1));
+
+        let system = InventorySystem::with_mocks(
+            Arc::new(mock_repo),
+            Arc::new(mock_broadcaster),
+            InventoryCache::new(),
+            Arc::new(item_mgr),
+        );
+        let player_guid = test_player_guid(1);
+        system.load_player_inventory(player_guid).await.unwrap();
+
+        let item_guid = test_item_guid(70);
+        // Instance has its last expendable charge (-1 -> ticks toward 0).
+        system
+            .cache()
+            .add_item(player_guid, cast_item_instance(70, entry, player_guid, [-1, 0, 0, 0, 0]));
+        system
+            .cache()
+            .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));
+
+        let destroyed = system.consume_cast_item(player_guid, item_guid).await;
+        assert!(destroyed, "expendable item with no charges left must be destroyed");
+        assert!(
+            system.cache().get_item(player_guid, item_guid).is_none(),
+            "destroyed cast item must be gone from cache"
+        );
+    }
+
+    /// Rechargeable cast item (positive template charge) decrements its instance
+    /// charge, persists it, and is NOT destroyed.
+    #[tokio::test]
+    async fn test_consume_cast_item_decrements_rechargeable() {
+        let mut mock_repo = MockInventoryRepositoryTrait::new();
+        let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        make_standard_load_expectations(&mut mock_repo);
+        mock_repo
+            .expect_update_item_charges()
+            .times(1)
+            .returning(|_, _| Ok(()));
+        mock_broadcaster
+            .expect_send_to_player()
+            .times(0..)
+            .returning(|_, _| ());
+
+        let entry = 6666;
+        let mut item_mgr = ItemManager::new();
+        item_mgr.add_template(cast_item_template(entry, 5, 1)); // positive charges, non-stackable
+
+        let system = InventorySystem::with_mocks(
+            Arc::new(mock_repo),
+            Arc::new(mock_broadcaster),
+            InventoryCache::new(),
+            Arc::new(item_mgr),
+        );
+        let player_guid = test_player_guid(1);
+        system.load_player_inventory(player_guid).await.unwrap();
+
+        let item_guid = test_item_guid(71);
+        system
+            .cache()
+            .add_item(player_guid, cast_item_instance(71, entry, player_guid, [3, 0, 0, 0, 0]));
+        system
+            .cache()
+            .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));
+
+        let destroyed = system.consume_cast_item(player_guid, item_guid).await;
+        assert!(!destroyed, "rechargeable item must not be destroyed");
+
+        let item = system.cache().get_item(player_guid, item_guid).unwrap();
+        assert_eq!(
+            item.read().spell_charges[0],
+            2,
+            "charge should decrement from 3 to 2"
+        );
+    }
 }

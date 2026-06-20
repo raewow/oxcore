@@ -45,6 +45,19 @@ impl ToWorldPacket for SmsgDestroyItem {
 }
 
 #[derive(Debug, Clone)]
+pub struct SmsgOpenContainer {
+    pub item_guid: SharedObjectGuid,
+}
+
+impl ToWorldPacket for SmsgOpenContainer {
+    fn to_world_packet(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_OPEN_CONTAINER);
+        packet.write_guid_raw(self.item_guid.raw());
+        packet
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SmsgDurabilityDamageDeath;
 
 impl ToWorldPacket for SmsgDurabilityDamageDeath {

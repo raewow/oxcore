@@ -1545,6 +1545,40 @@ impl InventorySystem {
         self.cache.find_items_by_entry(player_guid, entry_id)
     }
 
+    /// Destroy up to `count` items of a given entry, walking the player's stacks.
+    ///
+    /// Faithful to C++ `Player::DestroyItemCount(entry, count, update)`. Returns the
+    /// number actually destroyed (less than `count` only if the player held fewer).
+    pub fn destroy_item_count(&self, player_guid: ObjectGuid, entry_id: u32, count: u32) -> u32 {
+        if count == 0 {
+            return 0;
+        }
+
+        let mut remaining = count;
+        let mut destroyed = 0;
+
+        for item_guid in self.find_items_by_entry(player_guid, entry_id) {
+            if remaining == 0 {
+                break;
+            }
+
+            let stack = match self.cache.get_item(player_guid, item_guid) {
+                Some(item) => item.read().count,
+                None => continue,
+            };
+            if stack == 0 {
+                continue;
+            }
+
+            let take = remaining.min(stack);
+            self.remove_item(player_guid, item_guid, take);
+            remaining -= take;
+            destroyed += take;
+        }
+
+        destroyed
+    }
+
     pub async fn split_item(
         &self,
         player_guid: ObjectGuid,
@@ -2184,6 +2218,93 @@ impl InventorySystem {
         ChargeResult::Success {
             remaining: new_remaining,
         }
+    }
+
+    /// Consume a charge from a cast item and destroy it when fully expended.
+    ///
+    /// Faithful port of C++ `Spell::TakeCastItem`. Walks the item template's five
+    /// spell slots: each slot that grants a spell with a non-zero charge count ticks
+    /// the item-instance charge one step toward zero (positive decrements, negative
+    /// increments). The new value is written back only for non-stackable items
+    /// (`stackable < 2`), matching MaNGOS. When the item is expendable (a template
+    /// charge is negative) and its charges are spent, the item is destroyed.
+    ///
+    /// Returns true if the item was destroyed.
+    pub async fn consume_cast_item(&self, player_guid: ObjectGuid, item_guid: ObjectGuid) -> bool {
+        let item = match self.cache.get_item(player_guid, item_guid) {
+            Some(i) => i,
+            None => return false,
+        };
+
+        let entry = item.read().entry;
+        let proto = match self.item_mgr.get_template(entry) {
+            Some(p) => p,
+            None => {
+                tracing::error!(
+                    "[INVENTORY] cast item {:?} (entry {}) has no template",
+                    item_guid,
+                    entry
+                );
+                return false;
+            }
+        };
+
+        let mut expendable = false;
+        let mut without_charges = false;
+        let mut charges_changed = false;
+        let charges_str;
+        {
+            let mut item_w = item.write();
+            for i in 0..5 {
+                if proto.spell_id[i] == 0 || proto.spell_charges[i] == 0 {
+                    continue;
+                }
+
+                if proto.spell_charges[i] < 0 {
+                    expendable = true;
+                }
+
+                let mut charges = item_w.spell_charges[i];
+                if charges != 0 {
+                    // abs(charges) decreases by one after a use.
+                    if charges > 0 {
+                        charges -= 1;
+                    } else {
+                        charges += 1;
+                    }
+                    if proto.stackable < 2 {
+                        item_w.spell_charges[i] = charges;
+                        charges_changed = true;
+                    }
+                    item_w.update_state = crate::game::items::item::ItemUpdateState::Changed;
+                }
+
+                without_charges = charges == 0;
+            }
+            charges_str = Self::format_spell_charges(&item_w.spell_charges);
+        }
+
+        if expendable && without_charges {
+            // Destroying the item interrupts/clears the cast item reference upstream.
+            self.remove_item(player_guid, item_guid, 1);
+            return true;
+        }
+
+        if charges_changed {
+            if let Err(e) = self
+                .repository
+                .update_item_charges(item_guid.low(), &charges_str)
+                .await
+            {
+                tracing::error!(
+                    "[INVENTORY] failed to persist cast-item charges for {:?}: {}",
+                    item_guid,
+                    e
+                );
+            }
+        }
+
+        false
     }
 
     const BUYBACK_START_SLOT: u8 = 69;

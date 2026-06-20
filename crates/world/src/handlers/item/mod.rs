@@ -4,7 +4,9 @@ use tracing::{info, warn};
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::inventory::types::EquipResult;
 use crate::World;
-use oxcore_shared::game::inventory::{is_bank_pos, INVENTORY_SLOT_BAG_0};
+use oxcore_shared::game::inventory::{
+    is_bag_pos, is_bank_pos, is_equipment_pos, INVENTORY_SLOT_BAG_0,
+};
 use oxcore_shared::messages::SmsgReadItemFailed;
 use oxcore_shared::messages::SmsgReadItemOk;
 use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
@@ -259,6 +261,26 @@ pub async fn handle_swap_item(
         return Ok(());
     }
 
+    if (is_bank_pos(src_bag, src_slot) || is_bank_pos(dst_bag, dst_slot))
+        && world
+            .managers
+            .player_mgr
+            .get_player(player_guid)
+            .is_none_or(|player| player.current_banker_guid.is_none())
+    {
+        session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(
+            oxcore_shared::messages::EQUIP_ERR_TOO_FAR_AWAY_FROM_BANK,
+        ))?;
+        tracing::warn!(
+            "[CMSG_SWAP_ITEM] Bank slot swap rejected without active banker: src={}:{} dst={}:{}",
+            src_bag,
+            src_slot,
+            dst_bag,
+            dst_slot
+        );
+        return Ok(());
+    }
+
     let result =
         world
             .systems
@@ -495,60 +517,54 @@ pub async fn handle_autoequip_item_slot(
         None => return Ok(()),
     };
 
-    const INVENTORY_SLOT_BAG_0: u8 = 255;
-    let (src_bag, src_slot) = find_item_location(player_guid, item_guid, &world.systems.inventory);
+    if !is_equipment_pos(INVENTORY_SLOT_BAG_0, equip_slot) {
+        return Ok(());
+    }
 
-    if let (Some(src_bag), Some(src_slot)) = (src_bag, src_slot) {
-        let result =
-            world
-                .systems
-                .inventory
-                .equip_item(player_guid, src_bag, src_slot, equip_slot, 1, 1, 1);
+    let (Some(src_bag), Some(src_slot)) =
+        find_item_location(player_guid, item_guid, &world.systems.inventory)
+    else {
+        return Ok(());
+    };
 
-        match result.await {
-            crate::game::inventory::types::EquipResult::Equipped => {
-                tracing::debug!("[CMSG_AUTOEQUIP_ITEM_SLOT] Item equipped successfully");
-            }
-            crate::game::inventory::types::EquipResult::Swapped {
-                unequipped_to_bag,
-                unequipped_to_slot,
-            } => {
-                tracing::debug!(
-                    "[CMSG_AUTOEQUIP_ITEM_SLOT] Items swapped, unequipped to bag={} slot={}",
-                    unequipped_to_bag,
-                    unequipped_to_slot
-                );
-            }
-            crate::game::inventory::types::EquipResult::LevelTooLow => {
-                tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Level too low");
-            }
-            crate::game::inventory::types::EquipResult::WrongClass => {
-                tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Wrong class");
-            }
-            crate::game::inventory::types::EquipResult::MissingProficiency => {
-                tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Missing proficiency");
-            }
-            crate::game::inventory::types::EquipResult::WrongSlot => {
-                tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Wrong slot");
-            }
-            crate::game::inventory::types::EquipResult::InventoryFull => {
-                tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Inventory full");
-            }
-            crate::game::inventory::types::EquipResult::ItemNotFound => {
-                tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Item not found");
-            }
-            crate::game::inventory::types::EquipResult::PlayerNotLoaded => {
-                tracing::error!("[CMSG_AUTOEQUIP_ITEM_SLOT] Player not loaded");
-            }
-            crate::game::inventory::types::EquipResult::DatabaseError(e) => {
-                tracing::error!("[CMSG_AUTOEQUIP_ITEM_SLOT] Database error: {}", e);
-            }
-            other => {
-                tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Unexpected result: {:?}", other);
-            }
+    if src_bag == INVENTORY_SLOT_BAG_0 && src_slot == equip_slot {
+        return Ok(());
+    }
+
+    match world.systems.inventory.move_item(
+        player_guid,
+        src_bag,
+        src_slot,
+        INVENTORY_SLOT_BAG_0,
+        equip_slot,
+    ) {
+        crate::game::inventory::types::MoveItemResult::Moved => {
+            tracing::debug!("[CMSG_AUTOEQUIP_ITEM_SLOT] Item moved to equipment slot");
         }
-    } else {
-        tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Item not found in inventory");
+        crate::game::inventory::types::MoveItemResult::Swapped => {
+            tracing::debug!("[CMSG_AUTOEQUIP_ITEM_SLOT] Item swapped into equipment slot");
+        }
+        crate::game::inventory::types::MoveItemResult::Merged { source_removed } => {
+            tracing::debug!(
+                "[CMSG_AUTOEQUIP_ITEM_SLOT] Items merged, source_removed={}",
+                source_removed
+            );
+        }
+        crate::game::inventory::types::MoveItemResult::InvalidSource => {
+            tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Invalid source slot");
+        }
+        crate::game::inventory::types::MoveItemResult::InvalidDestination => {
+            tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Invalid destination slot");
+        }
+        crate::game::inventory::types::MoveItemResult::PlayerNotLoaded => {
+            tracing::error!("[CMSG_AUTOEQUIP_ITEM_SLOT] Player not loaded");
+        }
+        crate::game::inventory::types::MoveItemResult::DatabaseError(e) => {
+            tracing::error!("[CMSG_AUTOEQUIP_ITEM_SLOT] Database error: {}", e);
+        }
+        other => {
+            tracing::warn!("[CMSG_AUTOEQUIP_ITEM_SLOT] Unexpected result: {:?}", other);
+        }
     }
 
     Ok(())
@@ -603,9 +619,9 @@ pub async fn handle_autoequip_item(
         }
     };
 
-    let (entry_id, count) = {
+    let entry_id = {
         let item = src_item.read();
-        (item.entry, item.count)
+        item.entry
     };
 
     let template = match world.systems.item_mgr.get_template(entry_id) {
@@ -619,41 +635,38 @@ pub async fn handle_autoequip_item(
         }
     };
 
-    // Based on MaNGOS ItemPrototype::GetAllowedEquipSlots (Item.cpp)
-    let equip_slot = match template.inventory_type {
-        1 => 0,   // INVTYPE_HEAD -> EQUIPMENT_SLOT_HEAD
-        2 => 1,   // INVTYPE_NECK -> EQUIPMENT_SLOT_NECK
-        3 => 2,   // INVTYPE_SHOULDERS -> EQUIPMENT_SLOT_SHOULDERS
-        4 => 3,   // INVTYPE_BODY -> EQUIPMENT_SLOT_BODY
-        5 => 4,   // INVTYPE_CHEST -> EQUIPMENT_SLOT_CHEST
-        6 => 4,   // INVTYPE_ROBE -> EQUIPMENT_SLOT_CHEST
-        7 => 5,   // INVTYPE_WAIST -> EQUIPMENT_SLOT_WAIST
-        8 => 6,   // INVTYPE_LEGS -> EQUIPMENT_SLOT_LEGS
-        9 => 7,   // INVTYPE_FEET -> EQUIPMENT_SLOT_FEET
-        10 => 8,  // INVTYPE_WRISTS -> EQUIPMENT_SLOT_WRISTS
-        11 => 10, // INVTYPE_FINGER -> EQUIPMENT_SLOT_FINGER1 (TODO: check if finger2 is empty)
-        12 => 12, // INVTYPE_TRINKET -> EQUIPMENT_SLOT_TRINKET1 (TODO: check if trinket2 is empty)
-        13 => 15, // INVTYPE_WEAPON -> EQUIPMENT_SLOT_MAINHAND
-        14 => 16, // INVTYPE_SHIELD -> EQUIPMENT_SLOT_OFFHAND
-        15 => 17, // INVTYPE_RANGED -> EQUIPMENT_SLOT_RANGED
-        16 => 14, // INVTYPE_CLOAK -> EQUIPMENT_SLOT_BACK
-        17 => 15, // INVTYPE_2HWEAPON -> EQUIPMENT_SLOT_MAINHAND
-        19 => 18, // INVTYPE_TABARD -> EQUIPMENT_SLOT_TABARD
-        20 => 4,  // INVTYPE_ROBE -> EQUIPMENT_SLOT_CHEST
-        21 => 15, // INVTYPE_WEAPONMAINHAND -> EQUIPMENT_SLOT_MAINHAND
-        22 => 16, // INVTYPE_WEAPONOFFHAND -> EQUIPMENT_SLOT_OFFHAND
-        23 => 16, // INVTYPE_HOLDABLE -> EQUIPMENT_SLOT_OFFHAND
-        25 => 17, // INVTYPE_THROWN -> EQUIPMENT_SLOT_RANGED
-        26 => 17, // INVTYPE_RANGEDRIGHT -> EQUIPMENT_SLOT_RANGED
-        _ => {
-            tracing::warn!(
-                "[CMSG_AUTOEQUIP_ITEM] Item {} cannot be equipped (inventory_type={})",
-                entry_id,
-                template.inventory_type
-            );
+    let player_class = world
+        .managers
+        .player_mgr
+        .get_player(player_guid)
+        .map(|player| player.class)
+        .unwrap_or(1);
+    let allowed_slots = template.get_allowed_equip_slots(player_class, true);
+    let equip_slot = match allowed_slots
+        .iter()
+        .copied()
+        .filter(|slot| *slot != 255)
+        .find(|slot| {
+            world
+                .systems
+                .inventory
+                .get_item_at(player_guid, INVENTORY_SLOT_BAG_0, *slot)
+                .is_none()
+        })
+        .or_else(|| allowed_slots.iter().copied().find(|slot| *slot != 255))
+    {
+        Some(slot) => slot,
+        None => {
+            session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(
+                oxcore_shared::messages::EQUIP_ERR_ITEM_CANT_BE_EQUIPPED,
+            ))?;
             return Ok(());
         }
     };
+
+    if src_bag == INVENTORY_SLOT_BAG_0 && src_slot == equip_slot {
+        return Ok(());
+    }
 
     tracing::info!(
         "[CMSG_AUTOEQUIP_ITEM] Item entry={} name='{}' inventory_type={} -> equip_slot={}",
@@ -663,62 +676,53 @@ pub async fn handle_autoequip_item(
         equip_slot
     );
 
-    let result =
-        world
-            .systems
-            .inventory
-            .equip_item(player_guid, src_bag, src_slot, equip_slot, 1, 1, 1);
+    let result = world.systems.inventory.move_item(
+        player_guid,
+        src_bag,
+        src_slot,
+        INVENTORY_SLOT_BAG_0,
+        equip_slot,
+    );
+    let equipped = matches!(
+        result,
+        crate::game::inventory::types::MoveItemResult::Moved
+            | crate::game::inventory::types::MoveItemResult::Swapped
+    );
 
-    match result.await {
-        crate::game::inventory::types::EquipResult::Equipped => {
+    match result {
+        crate::game::inventory::types::MoveItemResult::Moved => {
+            tracing::debug!("[CMSG_AUTOEQUIP_ITEM] Item moved to slot {}", equip_slot);
+        }
+        crate::game::inventory::types::MoveItemResult::Swapped => {
+            tracing::debug!("[CMSG_AUTOEQUIP_ITEM] Item swapped to slot {}", equip_slot);
+        }
+        crate::game::inventory::types::MoveItemResult::Merged { source_removed } => {
             tracing::debug!(
-                "[CMSG_AUTOEQUIP_ITEM] Equipped item {:?} to slot {}",
-                src_item_guid,
-                equip_slot
+                "[CMSG_AUTOEQUIP_ITEM] Items merged, source_removed={}",
+                source_removed
             );
         }
-        crate::game::inventory::types::EquipResult::Swapped {
-            unequipped_to_bag,
-            unequipped_to_slot,
-        } => {
-            tracing::debug!(
-                "[CMSG_AUTOEQUIP_ITEM] Swapped item {:?} to slot {}, unequipped to bag={} slot={}",
-                src_item_guid,
-                equip_slot,
-                unequipped_to_bag,
-                unequipped_to_slot
-            );
+        crate::game::inventory::types::MoveItemResult::InvalidSource => {
+            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Invalid source slot");
         }
-        crate::game::inventory::types::EquipResult::LevelTooLow => {
-            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Level too low");
+        crate::game::inventory::types::MoveItemResult::InvalidDestination => {
+            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Invalid destination slot");
         }
-        crate::game::inventory::types::EquipResult::WrongClass => {
-            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Wrong class");
-        }
-        crate::game::inventory::types::EquipResult::MissingProficiency => {
-            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Missing proficiency");
-        }
-        crate::game::inventory::types::EquipResult::WrongSlot => {
-            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Wrong slot");
-        }
-        crate::game::inventory::types::EquipResult::InventoryFull => {
-            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Inventory full");
-        }
-        crate::game::inventory::types::EquipResult::ItemNotFound => {
-            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Item not found");
-        }
-        crate::game::inventory::types::EquipResult::PlayerNotLoaded => {
+        crate::game::inventory::types::MoveItemResult::PlayerNotLoaded => {
             tracing::error!("[CMSG_AUTOEQUIP_ITEM] Player not loaded");
         }
-        crate::game::inventory::types::EquipResult::DatabaseError(e) => {
+        crate::game::inventory::types::MoveItemResult::DatabaseError(e) => {
             tracing::error!("[CMSG_AUTOEQUIP_ITEM] Database error: {}", e);
         }
-        crate::game::inventory::types::EquipResult::InventoryError(e) => {
-            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Inventory error: {:?}", e);
-        }
         other => {
-            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Equip failed: {:?}", other);
+            tracing::warn!("[CMSG_AUTOEQUIP_ITEM] Move failed: {:?}", other);
         }
+    }
+
+    if equipped && is_bag_pos(INVENTORY_SLOT_BAG_0, equip_slot) {
+        session.send_msg(oxcore_shared::messages::SmsgOpenContainer {
+            item_guid: src_item_guid,
+        })?;
     }
 
     Ok(())
@@ -1011,22 +1015,9 @@ fn find_item_location(
     item_guid: ObjectGuid,
     inventory: &crate::game::inventory::InventorySystem,
 ) -> (Option<u8>, Option<u8>) {
-    const INVENTORY_SLOT_BAG_0: u8 = 255;
-
-    for slot in 0..19u8 {
-        if let Some(guid) = inventory.get_item_at(player_guid, INVENTORY_SLOT_BAG_0, slot) {
-            if guid == item_guid {
-                return (Some(INVENTORY_SLOT_BAG_0), Some(slot));
-            }
-        }
-    }
-
-    for slot in 23..39u8 {
-        if let Some(guid) = inventory.get_item_at(player_guid, INVENTORY_SLOT_BAG_0, slot) {
-            if guid == item_guid {
-                return (Some(INVENTORY_SLOT_BAG_0), Some(slot));
-            }
-        }
+    if let Some(item) = inventory.cache().get_item(player_guid, item_guid) {
+        let item = item.read();
+        return (Some(item.bag), Some(item.slot));
     }
 
     (None, None)

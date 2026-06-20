@@ -316,6 +316,8 @@ impl Opcode {
     pub const SMSG_SPELLNONMELEEDAMAGELOG: Opcode = Opcode(0x0148); // 328
     pub const SMSG_SPELLLOGEXECUTE: Opcode = Opcode(0x024C); // 588
     pub const SMSG_SPELLINSTAKILLLOG: Opcode = Opcode(0x033F); // 815
+    pub const SMSG_PROCRESIST: Opcode = Opcode(0x0260); // 608
+    pub const SMSG_SPELLORDAMAGE_IMMUNE: Opcode = Opcode(0x0263); // 611
 
     // ============================================================================
     // Action Bar
@@ -477,6 +479,7 @@ impl Opcode {
     pub const SMSG_READ_ITEM_FAILED: Opcode = Opcode(0x00AF); // 175
     pub const SMSG_ITEM_COOLDOWN: Opcode = Opcode(0x00B0); // 176
     pub const SMSG_INVENTORY_CHANGE_FAILURE: Opcode = Opcode(0x0112); // 274
+    pub const SMSG_OPEN_CONTAINER: Opcode = Opcode(0x0113); // 275
     pub const CMSG_AUTOEQUIP_GROUND_ITEM: Opcode = Opcode(0x0106); // 262
     pub const CMSG_AUTOSTORE_GROUND_ITEM: Opcode = Opcode(0x0107); // 263
     pub const CMSG_AUTOSTORE_LOOT_ITEM: Opcode = Opcode(0x0108); // 264
