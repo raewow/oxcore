@@ -1579,7 +1579,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn questgiver_hello_normal_questgiver_sends_gossip() {
+    async fn questgiver_hello_normal_questgiver_sends_quest_details() {
         let mut world = test_world();
         install_mock_quest_system(&mut world);
         let (session, mut rx) = add_player(&mut world);
@@ -1594,7 +1594,7 @@ mod tests {
             .expect("handler should succeed");
 
         let out = read_packet(&mut rx);
-        assert_eq!(out.opcode(), Opcode::SMSG_GOSSIP_MESSAGE);
+        assert_eq!(out.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_DETAILS);
     }
 
     #[tokio::test]

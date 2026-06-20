@@ -79,11 +79,20 @@ impl GossipSystem {
         let menus = self.manager.get_menus(menu_id);
         let default_menu = Arc::new(super::types::GossipMenu {
             entry: menu_id,
-            text_id: 0, // Use 0 for quest-only menus (no gossip text)
+            text_id: DEFAULT_GOSSIP_MESSAGE,
             script_id: 0,
             condition_id: 0,
         });
         let menu = menus.first().cloned().unwrap_or(default_menu);
+        let source_text_id = self
+            .manager
+            .get_npc_gossip_text(npc_guid.low())
+            .unwrap_or(DEFAULT_GOSSIP_MESSAGE);
+        let text_id = if menu_id == 0 {
+            source_text_id
+        } else {
+            menu.text_id
+        };
 
         // Get menu items
         let items = self.manager.get_menu_items(menu_id);
@@ -110,7 +119,7 @@ impl GossipSystem {
         let msg = SmsgGossipMessage {
             source_guid: npc_guid,
             menu_id,
-            text_id: menu.text_id,
+            text_id,
             options,
             quests,
         };
@@ -119,7 +128,7 @@ impl GossipSystem {
             "Sending SMSG_GOSSIP_MESSAGE: npc={:?}, menu_id={}, text_id={}, options={}, quests={}",
             npc_guid,
             menu_id,
-            menu.text_id,
+            text_id,
             msg.options.len(),
             msg.quests.len()
         );
@@ -144,7 +153,6 @@ impl GossipSystem {
 
         // Proactively send SMSG_NPC_TEXT_UPDATE so the client can display the greeting
         // text without waiting for a separate CMSG_NPC_TEXT_QUERY round-trip.
-        let text_id = menu.text_id;
         let npc_text_msg = if let Some(npc_text) = self.manager.get_npc_text(text_id) {
             let options = npc_text.options.map(|opt| {
                 let bct = self.manager.get_broadcast_text(opt.broadcast_text_id);
@@ -181,7 +189,7 @@ impl GossipSystem {
 
         info!(
             "Sent gossip menu {} (text_id {}) to player {:?} from NPC {:?}",
-            menu_id, menu.text_id, player_guid, npc_guid
+            menu_id, text_id, player_guid, npc_guid
         );
 
         Ok(())

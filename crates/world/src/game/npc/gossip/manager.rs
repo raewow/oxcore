@@ -26,6 +26,8 @@ pub struct GossipManager {
     broadcast_texts: DashMap<u32, BroadcastText>,
     /// Default gossip menu ID by creature entry
     creature_default_menus: DashMap<u32, u32>,
+    /// Gossip text override by creature spawn guid low
+    npc_gossip_texts: DashMap<u32, u32>,
 }
 
 impl GossipManager {
@@ -38,6 +40,7 @@ impl GossipManager {
             npc_texts: DashMap::new(),
             broadcast_texts: DashMap::new(),
             creature_default_menus: DashMap::new(),
+            npc_gossip_texts: DashMap::new(),
         }
     }
 
@@ -138,13 +141,18 @@ impl GossipManager {
             self.set_creature_menu(row.entry, row.gossip_menu_id);
         }
 
+        for row in &data.npc_gossip {
+            self.set_npc_gossip_text(row.npc_guid, row.textid);
+        }
+
         info!(
-            "GossipManager loaded: {} menus, {} options, {} npc_texts, {} broadcast_texts, {} creature_menus",
+            "GossipManager loaded: {} menus, {} options, {} npc_texts, {} broadcast_texts, {} creature_menus, {} npc_gossip overrides",
             data.menus.len(),
             data.options.len(),
             data.npc_texts.len(),
             data.broadcast_texts.len(),
-            data.creature_menus.len()
+            data.creature_menus.len(),
+            data.npc_gossip.len()
         );
 
         Ok(())
@@ -210,6 +218,16 @@ impl GossipManager {
     /// Set default gossip menu for a creature
     pub fn set_creature_menu(&self, entry: u32, menu_id: u32) {
         self.creature_default_menus.insert(entry, menu_id);
+    }
+
+    /// Get per-creature gossip text override by spawn guid low
+    pub fn get_npc_gossip_text(&self, npc_guid_low: u32) -> Option<u32> {
+        self.npc_gossip_texts.get(&npc_guid_low).map(|v| *v)
+    }
+
+    /// Set per-creature gossip text override by spawn guid low
+    pub fn set_npc_gossip_text(&self, npc_guid_low: u32, text_id: u32) {
+        self.npc_gossip_texts.insert(npc_guid_low, text_id);
     }
 
     /// Get the text ID for a menu entry

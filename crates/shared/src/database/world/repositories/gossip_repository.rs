@@ -103,6 +103,13 @@ pub struct CreatureGossipRow {
     pub gossip_menu_id: u32,
 }
 
+/// Row structure for npc_gossip per-spawn text overrides
+#[derive(sqlx::FromRow)]
+pub struct NpcGossipRow {
+    pub npc_guid: u32,
+    pub textid: u32,
+}
+
 /// Gossip data loaded from database
 pub struct GossipLoadData {
     pub menus: Vec<GossipMenuRow>,
@@ -110,6 +117,7 @@ pub struct GossipLoadData {
     pub npc_texts: Vec<NpcTextRow>,
     pub broadcast_texts: Vec<BroadcastTextRow>,
     pub creature_menus: Vec<CreatureGossipRow>,
+    pub npc_gossip: Vec<NpcGossipRow>,
 }
 
 /// Repository for gossip-related database operations
@@ -130,6 +138,7 @@ impl GossipRepository {
         let npc_texts = self.load_npc_texts().await?;
         let broadcast_texts = self.load_broadcast_texts().await?;
         let creature_menus = self.load_creature_gossip().await?;
+        let npc_gossip = self.load_npc_gossip().await?;
 
         Ok(GossipLoadData {
             menus,
@@ -137,6 +146,7 @@ impl GossipRepository {
             npc_texts,
             broadcast_texts,
             creature_menus,
+            npc_gossip,
         })
     }
 
@@ -197,5 +207,13 @@ impl GossipRepository {
         .fetch_all(&*self.pool)
         .await
         .context("Failed to load creature gossip menus")
+    }
+
+    /// Load per-creature gossip text overrides
+    async fn load_npc_gossip(&self) -> Result<Vec<NpcGossipRow>> {
+        sqlx::query_as::<_, NpcGossipRow>("SELECT npc_guid, textid FROM npc_gossip")
+            .fetch_all(&*self.pool)
+            .await
+            .context("Failed to load NPC gossip text overrides")
     }
 }
