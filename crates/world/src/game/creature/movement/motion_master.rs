@@ -332,6 +332,13 @@ impl MotionMaster {
                     }
                 }
             }
+            MovementGeneratorType::Fleeing => {
+                if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Fleeing) {
+                    if let Some(flee) = gen.as_any_mut().downcast_mut::<FleeMovementGenerator>() {
+                        flee.on_arrival();
+                    }
+                }
+            }
             _ => {}
         }
     }

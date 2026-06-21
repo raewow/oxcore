@@ -21,8 +21,10 @@ pub struct FleeMovementGenerator {
     flee_distance: f32,
     /// Whether we've sent the initial flee destination
     has_destination: bool,
-    /// Creature's position when flee started
-    start_position: Position,
+    /// Force a fresh flee destination on the next update
+    force_update: bool,
+    /// Creature's current position
+    creature_position: Position,
     /// Run speed in yards/sec
     run_speed: f32,
 }
@@ -36,7 +38,8 @@ impl FleeMovementGenerator {
             target_position: Position::default(),
             flee_distance: 20.0,
             has_destination: false,
-            start_position: Position::default(),
+            force_update: false,
+            creature_position: Position::default(),
             run_speed,
         }
     }
@@ -46,8 +49,14 @@ impl FleeMovementGenerator {
         self.target_position = pos;
     }
 
+    /// Update the creature's current position
+    pub fn set_creature_position(&mut self, pos: Position) {
+        self.creature_position = pos;
+    }
+
     /// Calculate flee destination (opposite direction from target)
-    fn calculate_flee_point(&self, current_pos: Position) -> Position {
+    fn calculate_flee_point(&self) -> Position {
+        let current_pos = self.creature_position;
         let dx = current_pos.x - self.target_position.x;
         let dy = current_pos.y - self.target_position.y;
         let dist = (dx * dx + dy * dy).sqrt().max(0.1);
@@ -68,6 +77,12 @@ impl FleeMovementGenerator {
     pub fn flee_from(&self) -> ObjectGuid {
         self.flee_from
     }
+
+    /// Notify the generator that the current flee spline reached its destination.
+    pub fn on_arrival(&mut self) {
+        self.has_destination = false;
+        self.force_update = true;
+    }
 }
 
 impl MovementGenerator for FleeMovementGenerator {
@@ -77,8 +92,9 @@ impl MovementGenerator for FleeMovementGenerator {
 
     fn initialize(&mut self, creature_guid: ObjectGuid, current_pos: Position) {
         self.time_remaining = self.flee_time;
-        self.start_position = current_pos;
+        self.creature_position = current_pos;
         self.has_destination = false;
+        self.force_update = false;
         tracing::debug!(
             "[MOVEMENT] Flee generator initialized for {:?}, fleeing from {:?}",
             creature_guid,
@@ -93,10 +109,11 @@ impl MovementGenerator for FleeMovementGenerator {
             return MovementUpdate::Finished;
         }
 
-        // Send flee destination on first update
-        if !self.has_destination {
+        // Send flee destination on first update or after arrival.
+        if !self.has_destination || self.force_update {
+            self.force_update = false;
             self.has_destination = true;
-            let flee_point = self.calculate_flee_point(self.start_position);
+            let flee_point = self.calculate_flee_point();
             return MovementUpdate::NewDestination {
                 destination: flee_point,
                 speed: self.run_speed,
@@ -121,6 +138,7 @@ impl MovementGenerator for FleeMovementGenerator {
     fn reset(&mut self, _creature_guid: ObjectGuid) {
         self.time_remaining = self.flee_time;
         self.has_destination = false;
+        self.force_update = false;
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

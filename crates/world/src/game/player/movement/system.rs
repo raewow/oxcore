@@ -39,6 +39,9 @@ impl MovementSystem {
 
                 // 3. Update movement state directly
                 player.movement.position = movement_info.position;
+                player.movement.transport_guid = movement_info.transport_guid;
+                player.movement.transport_position = movement_info.transport_position;
+                player.movement.transport_time = movement_info.transport_time;
                 player.movement.flags = movement_info.flags.value();
                 player.movement.timestamp = movement_info.time;
                 player.movement.movement_flags = movement_info.flags.value();

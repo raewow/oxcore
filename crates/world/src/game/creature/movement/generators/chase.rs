@@ -30,6 +30,8 @@ pub struct ChaseMovementGenerator {
     /// Target position at the time of the last path calculation
     /// (vmangos: m_fTargetLastX/Y/Z - set in _setTargetLocation)
     target_last_path_pos: Option<Position>,
+    /// Transport the target is currently on, if any
+    target_transport_guid: Option<ObjectGuid>,
     /// Minimum delay between full repaths to avoid jitter
     repath_cooldown_timer: u32,
     /// Run speed in yards/sec (from creature's speed_run rate * 7.0)
@@ -54,6 +56,7 @@ impl ChaseMovementGenerator {
             reached_target: false,
             check_distance_timer: 0, // Check immediately on first update
             target_last_path_pos: None,
+            target_transport_guid: None,
             repath_cooldown_timer: 0,
             run_speed,
         }
@@ -62,6 +65,11 @@ impl ChaseMovementGenerator {
     /// Update target position from world state
     pub fn update_target_position(&mut self, pos: Position) {
         self.target_position = pos;
+    }
+
+    /// Update target transport state from world state.
+    pub fn update_target_transport(&mut self, transport_guid: Option<ObjectGuid>) {
+        self.target_transport_guid = transport_guid;
     }
 
     /// Update creature's current position from world state
@@ -145,6 +153,7 @@ impl MovementGenerator for ChaseMovementGenerator {
         self.is_moving = false;
         self.reachable = true;
         self.target_last_path_pos = None;
+        self.target_transport_guid = None;
         self.repath_cooldown_timer = 0;
     }
 

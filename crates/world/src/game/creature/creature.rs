@@ -144,6 +144,8 @@ pub struct Creature {
     pub speed_run: f32,
     /// Whether out-of-combat movement has been paused (player interaction)
     pub movement_paused: bool,
+    /// Transport GUID if the creature is currently on a transport
+    pub transport_guid: Option<ObjectGuid>,
 }
 
 impl Creature {
@@ -249,6 +251,7 @@ impl Creature {
             speed_walk: 1.0,    // Default rate, overridden by model_info
             speed_run: 1.14286, // Default rate (vmangos DEFAULT_NPC_RUN_SPEED_RATE)
             movement_paused: false,
+            transport_guid: None,
         }
     }
 

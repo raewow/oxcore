@@ -132,12 +132,14 @@ impl MovementSystem {
             .flatten();
 
         if let Some(target_guid) = target {
-            if let Some(target_pos) = world.managers.player_mgr.get_position(target_guid) {
-                world
+            if let Some(target_state) = world.managers.player_mgr.get_movement_state(target_guid) {
+                let transport_mismatch = world
                     .managers
                     .creature_mgr
                     .with_creature_mut(guid, |creature| {
                         let creature_pos = creature.position;
+                        let transport_mismatch = target_state.transport_guid.is_some()
+                            && creature.transport_guid != target_state.transport_guid;
 
                         // Update chase generator target + creature position
                         if let Some(gen) = creature
@@ -147,8 +149,10 @@ impl MovementSystem {
                             if let Some(chase) =
                                 gen.as_any_mut().downcast_mut::<ChaseMovementGenerator>()
                             {
-                                chase.update_target_position(target_pos);
+                                chase.update_target_position(target_state.position);
+                                chase.update_target_transport(target_state.transport_guid);
                                 chase.set_creature_position(creature_pos);
+                                chase.set_reachable(!transport_mismatch);
                             }
                         }
 
@@ -160,10 +164,19 @@ impl MovementSystem {
                             if let Some(flee) =
                                 gen.as_any_mut().downcast_mut::<FleeMovementGenerator>()
                             {
-                                flee.update_target_position(target_pos);
+                                flee.update_target_position(target_state.position);
+                                flee.set_creature_position(creature_pos);
                             }
                         }
-                    });
+
+                        transport_mismatch
+                    })
+                    .unwrap_or(false);
+
+                if transport_mismatch {
+                    self.send_stop_packet(guid, current_pos, world);
+                    return;
+                }
             }
         }
 

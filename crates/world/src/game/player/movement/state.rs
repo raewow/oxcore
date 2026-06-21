@@ -1,6 +1,7 @@
 //! Movement state - position, speeds, and movement flags
 
 use oxcore_shared::protocol::Position;
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Per-player movement state
 #[derive(Debug, Clone)]
@@ -14,6 +15,12 @@ pub struct MovementState {
     pub run_speed: f32,
     pub swim_speed: f32,
     pub turn_rate: f32,
+    /// Transport GUID if the player is on a transport
+    pub transport_guid: Option<ObjectGuid>,
+    /// Position relative to the current transport
+    pub transport_position: Option<Position>,
+    /// Transport timer from the movement packet
+    pub transport_time: Option<u32>,
     /// Movement flags (from movement packets)
     pub movement_flags: u32,
     /// Last movement packet timestamp (for anti-cheat)
@@ -34,6 +41,9 @@ impl Default for MovementState {
             run_speed: 7.0,
             swim_speed: 4.7222,
             turn_rate: 3.14159,
+            transport_guid: None,
+            transport_position: None,
+            transport_time: None,
             movement_flags: 0,
             last_movement_time: 0,
             water_walking: false,
