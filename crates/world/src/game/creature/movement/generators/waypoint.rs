@@ -6,6 +6,7 @@
 use super::super::generator::{MovementGenerator, MovementUpdate};
 use super::super::types::MovementGeneratorType;
 use oxcore_shared::protocol::{ObjectGuid, Position};
+use rand::Rng;
 
 /// Waypoint data from database
 #[derive(Debug, Clone)]
@@ -36,6 +37,10 @@ pub struct WaypointMovementGenerator {
     is_waiting: bool,
     /// Currently moving to a waypoint
     is_moving: bool,
+    /// Currently wandering around the active waypoint while waiting
+    is_wandering: bool,
+    /// Center position for wandering at the current waypoint
+    current_waypoint_position: Option<Position>,
     /// Walk speed in yards/sec
     walk_speed: f32,
 }
@@ -49,6 +54,8 @@ impl WaypointMovementGenerator {
             wait_timer: 0,
             is_waiting: false,
             is_moving: false,
+            is_wandering: false,
+            current_waypoint_position: None,
             walk_speed,
         }
     }
@@ -76,9 +83,11 @@ impl WaypointMovementGenerator {
     /// Called when creature arrives at waypoint
     pub fn on_arrival(&mut self) {
         self.is_moving = false;
+        self.is_wandering = false;
 
         // Start waiting at current waypoint
         if self.current_index < self.waypoints.len() {
+            self.current_waypoint_position = Some(self.waypoints[self.current_index].position);
             let wait_time = self.waypoints[self.current_index].wait_time;
             if wait_time > 0 {
                 self.wait_timer = wait_time;
@@ -88,6 +97,19 @@ impl WaypointMovementGenerator {
                 self.is_waiting = false;
                 self.advance_waypoint();
             }
+        }
+    }
+
+    fn pick_wander_destination(&self, center: Position, radius: f32) -> Position {
+        let mut rng = rand::thread_rng();
+        let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+        let dist = rng.gen_range(0.0..radius.max(0.0));
+
+        Position {
+            x: center.x + angle.cos() * dist,
+            y: center.y + angle.sin() * dist,
+            z: center.z,
+            o: angle,
         }
     }
 }
@@ -112,18 +134,44 @@ impl MovementGenerator for WaypointMovementGenerator {
 
         // Currently moving to a waypoint?
         if self.is_moving {
+            if self.is_wandering {
+                if self.wait_timer > 0 {
+                    self.wait_timer = self.wait_timer.saturating_sub(diff_ms);
+                }
+            }
             return MovementUpdate::Continue;
         }
 
         // Waiting at waypoint?
         if self.is_waiting {
             self.wait_timer = self.wait_timer.saturating_sub(diff_ms);
+
+            if self.wait_timer > 0
+                && !self.is_wandering
+                && self.waypoints[self.current_index].wander_distance > 0.0
+            {
+                if let Some(center) = self.current_waypoint_position {
+                    self.is_wandering = true;
+                    self.is_moving = true;
+                    let dest = self.pick_wander_destination(
+                        center,
+                        self.waypoints[self.current_index].wander_distance,
+                    );
+                    return MovementUpdate::NewDestination {
+                        destination: dest,
+                        speed: self.walk_speed,
+                        is_walking: true,
+                    };
+                }
+            }
+
             if self.wait_timer > 0 {
                 return MovementUpdate::Continue;
             }
 
             // Done waiting, advance to next
             self.is_waiting = false;
+            self.current_waypoint_position = None;
             if !self.advance_waypoint() {
                 return MovementUpdate::Finished;
             }
@@ -131,6 +179,7 @@ impl MovementGenerator for WaypointMovementGenerator {
 
         // Move to current waypoint
         let wp = &self.waypoints[self.current_index];
+        self.current_waypoint_position = Some(wp.position);
         self.is_moving = true;
 
         MovementUpdate::NewDestination {
@@ -159,6 +208,8 @@ impl MovementGenerator for WaypointMovementGenerator {
         self.wait_timer = 0;
         self.is_waiting = false;
         self.is_moving = false;
+        self.is_wandering = false;
+        self.current_waypoint_position = None;
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
