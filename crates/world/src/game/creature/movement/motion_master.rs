@@ -294,6 +294,50 @@ impl MotionMaster {
         self.clear(creature_guid);
     }
 
+    /// Clean motion generators immediately.
+    pub fn direct_clean(&mut self, creature_guid: ObjectGuid, reset: bool, all: bool) {
+        if all {
+            self.clear(creature_guid);
+        } else {
+            self.clear(creature_guid);
+            if reset {
+                self.initialize(creature_guid);
+            }
+        }
+    }
+
+    /// Deferred clean in the current model maps to the immediate clean path.
+    pub fn delayed_clean(&mut self, creature_guid: ObjectGuid, reset: bool, all: bool) {
+        self.direct_clean(creature_guid, reset, all);
+    }
+
+    /// Expire the current movement generator and optionally reset.
+    pub fn direct_expire(&mut self, creature_guid: ObjectGuid, reset: bool) {
+        self.clear(creature_guid);
+        if reset {
+            self.initialize(creature_guid);
+        }
+    }
+
+    /// Deferred expire in the current model maps to the immediate expire path.
+    pub fn delayed_expire(&mut self, creature_guid: ObjectGuid, reset: bool) {
+        self.direct_expire(creature_guid, reset);
+    }
+
+    /// Ensure the idle generator is the active fallback.
+    pub fn move_idle(&mut self) {
+        if self.generators.is_empty() {
+            self.generators.insert(
+                MovementGeneratorType::Idle,
+                Box::new(IdleMovementGenerator::new()),
+            );
+        }
+
+        self.active_type = MovementGeneratorType::Idle;
+        self.moving = false;
+        self.current_destination = None;
+    }
+
     /// Update movement - called each tick
     ///
     /// Uses re-entrant protection to prevent nested updates
