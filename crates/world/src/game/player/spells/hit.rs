@@ -14,6 +14,7 @@
 use crate::game::common::creature_flags::CREATURE_STATIC_FLAG_NO_DEFENSE;
 use crate::game::player::skills::{SkillSaveState, SKILL_DEFENSE};
 use crate::World;
+use oxcore_shared::game::inventory::{EquipmentSlot, INVENTORY_SLOT_BAG_0};
 use oxcore_shared::protocol::ObjectGuid;
 
 /// Result of a spell hit roll.
@@ -147,6 +148,66 @@ fn unit_melee_skill(level: u8) -> u16 {
     level as u16 * 5
 }
 
+fn weapon_skill_from_subclass(item_subclass: u32) -> Option<u16> {
+    use crate::game::player::skills::{
+        SKILL_2H_AXES, SKILL_2H_MACES, SKILL_2H_SWORDS, SKILL_AXES, SKILL_BOWS, SKILL_CROSSBOWS,
+        SKILL_DAGGERS, SKILL_FIST_WEAPONS, SKILL_GUNS, SKILL_MACES, SKILL_POLEARMS, SKILL_STAVES,
+        SKILL_SWORDS, SKILL_THROWN, SKILL_WANDS,
+    };
+
+    match item_subclass {
+        0 => Some(SKILL_AXES),
+        1 => Some(SKILL_2H_AXES),
+        2 => Some(SKILL_BOWS),
+        3 => Some(SKILL_GUNS),
+        4 => Some(SKILL_MACES),
+        5 => Some(SKILL_2H_MACES),
+        6 => Some(SKILL_POLEARMS),
+        7 => Some(SKILL_SWORDS),
+        8 => Some(SKILL_2H_SWORDS),
+        10 => Some(SKILL_STAVES),
+        13 => Some(SKILL_FIST_WEAPONS),
+        15 => Some(SKILL_DAGGERS),
+        16 => Some(SKILL_THROWN),
+        18 => Some(SKILL_CROSSBOWS),
+        19 => Some(SKILL_WANDS),
+        _ => None,
+    }
+}
+
+fn equipped_weapon_skill_value(
+    guid: ObjectGuid,
+    slot: EquipmentSlot,
+    world: &World,
+) -> Option<u16> {
+    let item_guid = world
+        .systems
+        .inventory
+        .get_item_at(guid, INVENTORY_SLOT_BAG_0, slot as u8)?;
+    let item = world.systems.inventory.cache().get_item(guid, item_guid)?;
+    let entry = item.read().entry;
+    let template = world.managers.item_mgr.get_template(entry)?;
+
+    if template.item_class != 2 {
+        return None;
+    }
+
+    let skill_id = weapon_skill_from_subclass(template.item_subclass)?;
+    world
+        .systems
+        .player
+        .manager()
+        .with_player(guid, |player| {
+            player
+                .skills
+                .skills
+                .get(&skill_id)
+                .filter(|skill| skill.state != SkillSaveState::Deleted)
+                .map(|skill| skill.current_value)
+        })
+        .flatten()
+}
+
 fn player_defense_skill_value(
     skill: Option<&crate::game::player::skills::SkillData>,
     target_is_player: bool,
@@ -258,7 +319,22 @@ fn roll_melee_spell_hit(
         (lvl, 0.0, 0.0, 0.0, false, false)
     };
 
-    let attacker_weapon_skill = caster_level * 5;
+    let attacker_weapon_skill = if caster_guid.is_player() {
+        let weapon_skill = equipped_weapon_skill_value(
+            caster_guid,
+            if is_ranged {
+                EquipmentSlot::Ranged
+            } else {
+                EquipmentSlot::Mainhand
+            },
+            world,
+        )
+        .map(i32::from)
+        .unwrap_or_else(|| caster_level * 5);
+        weapon_skill
+    } else {
+        caster_level * 5
+    };
     let defender_defense_skill = get_defense_skill_value(target_guid, Some(caster_guid), world);
     let skill_diff = attacker_weapon_skill - defender_defense_skill as i32;
 
@@ -592,6 +668,13 @@ mod tests {
     fn melee_miss_low_level_creature_reduction() {
         // A level-5 creature halves its miss chance (5 * 5/10 = 2.5%).
         assert!((melee_spell_miss_chance(false, 5, 0, 0.0) - 2.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn weapon_skill_subclass_mapping_matches_weapon_skills() {
+        assert_eq!(weapon_skill_from_subclass(0), Some(crate::game::player::skills::SKILL_AXES));
+        assert_eq!(weapon_skill_from_subclass(19), Some(crate::game::player::skills::SKILL_WANDS));
+        assert_eq!(weapon_skill_from_subclass(99), None);
     }
 
     #[test]
