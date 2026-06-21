@@ -1104,44 +1104,65 @@ impl SpellSystem {
             }
         }
 
-        // Cast-end procs for the caster (MaNGOS Spell::cast PROC_EX_CAST_END block). Only normal
-        // casts trigger, and the SUPPRESS_CASTER_PROCS attribute opts out. The PROC_EX_CAST_END
-        // flag means only auras configured with CAST_END (via spell_proc_event) fire here, so a
-        // damage spell does not double-proc between its cast-end and its hit.
-        if !is_triggered && caster_guid.is_player() {
-            if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
-                use crate::game::player::auras::proc::{
-                    proc_flags_ex, spell_cast_attacker_proc_flag,
-                };
-                const SUPPRESS_CASTER_PROCS: u32 = 0x0001_0000; // SPELL_ATTR_EX3_SUPPRESS_CASTER_PROCS
-                if entry.attributes_ex3 & SUPPRESS_CASTER_PROCS == 0 {
-                    let is_auto_repeat = (entry.attributes_ex2 & 0x0000_0020) != 0;
-                    let is_heal = entry.effect.iter().any(|&e| e == 10); // SPELL_EFFECT_HEAL
-                    let proc_attacker = spell_cast_attacker_proc_flag(
-                        entry.dmg_class,
-                        entry.is_positive_spell(),
-                        is_heal,
-                        is_auto_repeat,
-                    );
-                    if proc_attacker != 0 {
-                        let _ = world
-                            .systems
-                            .auras
-                            .check_procs(
-                                caster_guid,
-                                proc_attacker,
-                                proc_flags_ex::CAST_END | proc_flags_ex::NORMAL_HIT,
-                                Some(spell_id),
-                                0,
-                                world,
-                            )
-                            .await;
-                    }
-                }
-            }
-        }
+        self.update_pending_procs(caster_guid, spell_id, is_triggered, world)
+            .await;
 
         Ok(())
+    }
+
+    /// Run the pending cast-end proc check for a finished spell cast.
+    ///
+    /// This keeps the proc dispatch in one place so the cast finish path preserves the same
+    /// ordering as the legacy spell caster: combo points first, then proc evaluation.
+    async fn update_pending_procs(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        is_triggered: bool,
+        world: &World,
+    ) {
+        if is_triggered || !caster_guid.is_player() {
+            return;
+        }
+
+        let Some(entry) = world.managers.spell_mgr.get(spell_id) else {
+            return;
+        };
+
+        use crate::game::player::auras::proc::{
+            proc_flags_ex, spell_cast_attacker_proc_flag,
+        };
+
+        const SUPPRESS_CASTER_PROCS: u32 = 0x0001_0000; // SPELL_ATTR_EX3_SUPPRESS_CASTER_PROCS
+        if entry.attributes_ex3 & SUPPRESS_CASTER_PROCS != 0 {
+            return;
+        }
+
+        let is_auto_repeat = (entry.attributes_ex2 & 0x0000_0020) != 0;
+        let is_heal = entry.effect.iter().any(|&e| e == 10); // SPELL_EFFECT_HEAL
+        let proc_attacker = spell_cast_attacker_proc_flag(
+            entry.dmg_class,
+            entry.is_positive_spell(),
+            is_heal,
+            is_auto_repeat,
+        );
+
+        if proc_attacker == 0 {
+            return;
+        }
+
+        let _ = world
+            .systems
+            .auras
+            .check_procs(
+                caster_guid,
+                proc_attacker,
+                proc_flags_ex::CAST_END | proc_flags_ex::NORMAL_HIT,
+                Some(spell_id),
+                0,
+                world,
+            )
+            .await;
     }
 
     /// Whether a channeled spell's unit target is still present and alive.

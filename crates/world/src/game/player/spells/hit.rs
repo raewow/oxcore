@@ -12,6 +12,7 @@
 //! - Physical spells use melee miss table instead
 
 use crate::game::common::creature_flags::CREATURE_STATIC_FLAG_NO_DEFENSE;
+use crate::game::player::spells::caster::get_level_for_target;
 use crate::game::player::skills::{SkillSaveState, SKILL_DEFENSE};
 use crate::World;
 use oxcore_shared::game::inventory::{EquipmentSlot, INVENTORY_SLOT_BAG_0};
@@ -270,7 +271,7 @@ fn roll_melee_spell_hit(
     let is_ranged = spell.dmg_class == SPELL_DAMAGE_CLASS_RANGED;
 
     // Caster level + melee/ranged +hit from auras.
-    let (caster_level, hit_bonus) = if caster_guid.is_player() {
+    let (_caster_level, hit_bonus) = if caster_guid.is_player() {
         world
             .managers
             .player_mgr
@@ -293,7 +294,10 @@ fn roll_melee_spell_hit(
             .unwrap_or((60, 0.0))
     };
 
+    let caster_level_for_target = get_level_for_target(caster_guid, Some(target_guid), world) as i32;
+
     // Victim level + avoidance (real for players, unmodelled for creatures).
+    let victim_level_for_hit = get_level_for_target(target_guid, Some(caster_guid), world) as i32;
     let target_is_player = target_guid.is_player();
     let (victim_level, dodge, parry, block, can_parry, can_block) = if target_is_player {
         world
@@ -301,7 +305,7 @@ fn roll_melee_spell_hit(
             .player_mgr
             .with_player(target_guid, |p| {
                 (
-                    p.level as i32,
+                    victim_level_for_hit,
                     p.stats.dodge_pct,
                     p.stats.parry_pct,
                     p.stats.block_pct,
@@ -314,7 +318,7 @@ fn roll_melee_spell_hit(
         let lvl = world
             .managers
             .creature_mgr
-            .with_creature(target_guid, |c| c.level as i32)
+            .with_creature(target_guid, |_| victim_level_for_hit)
             .unwrap_or(60);
         (lvl, 0.0, 0.0, 0.0, false, false)
     };
@@ -330,10 +334,10 @@ fn roll_melee_spell_hit(
             world,
         )
         .map(i32::from)
-        .unwrap_or_else(|| caster_level * 5);
+        .unwrap_or_else(|| caster_level_for_target * 5);
         weapon_skill
     } else {
-        caster_level * 5
+        caster_level_for_target * 5
     };
     let defender_defense_skill = get_defense_skill_value(target_guid, Some(caster_guid), world);
     let skill_diff = attacker_weapon_skill - defender_defense_skill as i32;
@@ -464,28 +468,24 @@ pub fn roll_spell_hit(
             .unwrap_or((60, 0))
     };
 
+    let caster_level_for_target = get_level_for_target(caster_guid, Some(target_guid), world) as i32;
+
     // Get target level and resistances
-    let (target_level, target_resistance) = if target_guid.is_player() {
+    let target_level = get_level_for_target(target_guid, Some(caster_guid), world) as i32;
+    let target_resistance = if target_guid.is_player() {
         world
             .managers
             .player_mgr
             .with_player(target_guid, |p| {
-                let resist = if school != 0 && (school as usize) < 7 {
+                if school != 0 && (school as usize) < 7 {
                     p.stats.resistances[school as usize]
                 } else {
                     0
-                };
-                (p.level as i32, resist)
+                }
             })
-            .unwrap_or((60, 0))
+            .unwrap_or(0)
     } else {
-        world
-            .managers
-            .creature_mgr
-            .with_creature(target_guid, |c| {
-                (c.level as i32, 0u32) // TODO: creature resistances
-            })
-            .unwrap_or((60, 0))
+        0u32 // TODO: creature resistances
     };
 
     // Step 1: Hit roll (level-based, MagicSpellHitChance). Binary spells fold the average
@@ -495,7 +495,7 @@ pub fn roll_spell_hit(
     let binary_resist_avg = if is_binary { Some(resist_avg) } else { None };
 
     let hit_pct = magic_hit_chance_pct(
-        caster_level,
+        caster_level_for_target,
         target_level,
         target_guid.is_player(),
         spell_hit_bonus,

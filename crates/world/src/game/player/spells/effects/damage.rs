@@ -548,6 +548,34 @@ fn apply_target_mitigation(
     (mitigated, total_resisted)
 }
 
+/// Wake a sitting player when they take damage.
+///
+/// Mirrors the C++ hit-side stand-up behavior in `SpellCaster::ProcDamageAndSpell_real`.
+fn stand_player_up_on_damage(target_guid: ObjectGuid, world: &World) {
+    let should_send = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(target_guid, |player| {
+            if player.stand_state == 0 {
+                return false;
+            }
+
+            player.stand_state = 0;
+            true
+        })
+        .unwrap_or(false);
+
+    if should_send {
+        let mut packet = WorldPacket::new(Opcode::SMSG_STANDSTATE_UPDATE);
+        packet.write_u8(0);
+        world
+            .managers
+            .broadcast_mgr
+            .send_msg_to_player(target_guid, packet);
+    }
+}
+
 /// Apply damage to a target (player or creature).
 /// Handles combat log packets (P5), creature targeting (P1), death (P6), and cast pushback (P6).
 async fn apply_damage(
@@ -621,7 +649,11 @@ async fn apply_damage(
                     0x00000002, // AURA_INTERRUPT_FLAG_DAMAGE (bit 1)
                     world,
                 )
-                .await;
+                    .await;
+        }
+
+        if damage > 0 && !died {
+            stand_player_up_on_damage(target_guid, world);
         }
 
         // Fire proc checks: caster dealt spell damage, target took spell damage

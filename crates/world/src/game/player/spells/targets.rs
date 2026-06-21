@@ -9,7 +9,9 @@
 
 use crate::game::player::spells::state::SpellCastTargets;
 use crate::World;
+use crate::game::player::auras::effects::AURA_SPELL_MAGNET;
 use oxcore_shared::protocol::{ObjectGuid, Position};
+use std::collections::HashMap;
 
 /// MaNGOS implicit target types (from SpellEntry effect_implicit_target fields)
 ///
@@ -141,6 +143,103 @@ impl Default for ResolvedTargets {
     }
 }
 
+/// Select the magnet target for a victim, if a spell-magnet aura redirects it.
+///
+/// If no valid magnet target exists, returns the original victim.
+pub fn select_magnet_target(
+    victim_guid: ObjectGuid,
+    spell_entry: &crate::dbc::structures::SpellEntry,
+    world: &World,
+) -> ObjectGuid {
+    if spell_entry.is_positive_spell() || !victim_guid.is_player() {
+        return victim_guid;
+    }
+
+    let Some((magnet_guid, aura_spell_id, aura_effect_index)) = world
+        .systems
+        .player
+        .manager()
+        .with_player(victim_guid, |victim| {
+            victim
+                .auras
+                .container
+                .all_auras()
+                .find(|aura| aura.aura_type == AURA_SPELL_MAGNET && aura.caster_guid != victim_guid)
+                .map(|aura| (aura.caster_guid, aura.spell_id, aura.effect_index))
+        })
+        .flatten()
+    else {
+        return victim_guid;
+    };
+
+    let victim_map = world
+        .systems
+        .player
+        .manager()
+        .with_player(victim_guid, |victim| (victim.map_id, victim.instance_id))
+        .unwrap_or((0, 0));
+
+    let magnet_valid = if magnet_guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(magnet_guid, |magnet| {
+                magnet.is_alive()
+                    && magnet.map_id == victim_map.0
+                    && magnet.instance_id == victim_map.1
+            })
+            .unwrap_or(false)
+    } else if magnet_guid.is_creature() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(magnet_guid, |magnet| {
+                magnet.current_health > 0
+                    && magnet.map_id == victim_map.0
+                    && magnet.instance_id == victim_map.1
+            })
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
+    if !magnet_valid {
+        return victim_guid;
+    }
+
+    let consumed = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(victim_guid, |victim| {
+            let mut depleted = false;
+            let mut found = false;
+            if let Some(aura) = victim
+                .auras
+                .container
+                .get_aura_mut(aura_spell_id, aura_effect_index)
+            {
+                depleted = !aura.consume_charge();
+                found = true;
+            }
+            if found {
+                if depleted {
+                    victim.auras.container.remove_aura(aura_spell_id, aura_effect_index);
+                }
+                victim.auras.needs_client_update = true;
+            }
+            found
+        })
+        .unwrap_or(false);
+
+    if consumed {
+        magnet_guid
+    } else {
+        victim_guid
+    }
+}
+
 /// Resolve spell targets for all effects.
 ///
 /// Reads the spell's implicit target fields and resolves them to concrete GUIDs.
@@ -152,6 +251,7 @@ pub fn resolve_spell_targets(
     world: &World,
 ) -> ResolvedTargets {
     let mut resolved = ResolvedTargets::default();
+    let mut magnet_cache: HashMap<ObjectGuid, ObjectGuid> = HashMap::new();
 
     let spell_entry = match world.managers.spell_mgr.get(spell_id) {
         Some(entry) => entry,
@@ -205,6 +305,14 @@ pub fn resolve_spell_targets(
         // Deduplicate
         targets.sort_by_key(|g| g.raw());
         targets.dedup_by_key(|g| g.raw());
+
+        // Apply spell magnet redirection once per unique victim for this spell.
+        for target in &mut targets {
+            let redirected = *magnet_cache.entry(*target).or_insert_with(|| {
+                select_magnet_target(*target, &spell_entry, world)
+            });
+            *target = redirected;
+        }
 
         resolved.effect_targets[effect_idx] = targets;
     }
@@ -420,6 +528,9 @@ fn is_hostile(caster_guid: ObjectGuid, target_guid: ObjectGuid, _world: &World) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::player::auras::aura::{Aura, AuraFlags};
+    use crate::game::player::auras::effects::AURA_SPELL_MAGNET;
+    use crate::game::player::player::Player;
     use crate::config::Config;
     use crate::dbc::structures::SpellEntry;
     use crate::game::player::spells::state::TARGET_FLAG_DEST_LOCATION;
@@ -554,6 +665,15 @@ mod tests {
         }
     }
 
+    fn harmful_spell(id: u32) -> SpellEntry {
+        aoe_enemy_spell(id)
+    }
+
+    fn add_test_player(world: &World, guid: ObjectGuid, map_id: u32, instance_id: u32) {
+        let player = Player::new(guid, format!("P{}", guid.counter()), map_id, instance_id, 0, 60, 1, 1, 0);
+        world.managers.player_mgr.add_player(player, guid.counter());
+    }
+
     /// Ground-targeted AoE resolves enemies around the destination position, proving the
     /// destination now reaches resolution (the whole point of threading SpellCastTargets).
     #[tokio::test]
@@ -597,5 +717,93 @@ mod tests {
             !resolved2.effect_targets[0].contains(&near_dest),
             "origin-centered AoE should not hit the distant creature"
         );
+    }
+
+    #[test]
+    fn magnet_target_redirects_and_consumes_last_charge() {
+        let world = test_world();
+        let victim = ObjectGuid::new_player(10);
+        let magnet = ObjectGuid::new_player(11);
+
+        add_test_player(&world, victim, 1, 0);
+        add_test_player(&world, magnet, 1, 0);
+
+        world.managers.player_mgr.with_player_mut(victim, |player| {
+            player.auras.container.add_aura(Aura::new(
+                70000,
+                magnet,
+                0,
+                AURA_SPELL_MAGNET,
+                0,
+                0,
+                Some(1000),
+                0,
+                1,
+                1,
+                AuraFlags {
+                    is_positive: false,
+                    is_negative: true,
+                    is_passive: false,
+                    can_be_cancelled: false,
+                    is_hidden: false,
+                    is_permanent: false,
+                },
+            ));
+        });
+
+        let redirected = select_magnet_target(victim, &harmful_spell(50001), &world);
+        assert_eq!(redirected, magnet);
+
+        let remaining = world
+            .systems
+            .player
+            .manager()
+            .with_player(victim, |player| player.auras.container.has_aura(70000))
+            .unwrap_or(false);
+        assert!(!remaining, "last aura charge should remove the magnet aura");
+    }
+
+    #[test]
+    fn magnet_target_stays_on_original_victim_when_invalid() {
+        let world = test_world();
+        let victim = ObjectGuid::new_player(20);
+        let magnet = ObjectGuid::new_player(21);
+
+        add_test_player(&world, victim, 1, 0);
+        add_test_player(&world, magnet, 2, 0);
+
+        world.managers.player_mgr.with_player_mut(victim, |player| {
+            player.auras.container.add_aura(Aura::new(
+                70001,
+                magnet,
+                0,
+                AURA_SPELL_MAGNET,
+                0,
+                0,
+                Some(1000),
+                0,
+                1,
+                1,
+                AuraFlags {
+                    is_positive: false,
+                    is_negative: true,
+                    is_passive: false,
+                    can_be_cancelled: false,
+                    is_hidden: false,
+                    is_permanent: false,
+                },
+            ));
+        });
+
+        let redirected = select_magnet_target(victim, &harmful_spell(50002), &world);
+        assert_eq!(redirected, victim);
+
+        let aura_still_there = world
+            .systems
+            .player
+            .manager()
+            .with_player(victim, |player| player.auras.container.has_aura(70001))
+            .unwrap_or(false);
+        assert!(aura_still_there, "invalid redirect must not consume aura charges");
     }
 }

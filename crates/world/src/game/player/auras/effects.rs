@@ -77,6 +77,7 @@ pub const AURA_MOD_PACIFY_SILENCE: u32 = 60; // Pacify + Silence
 pub const AURA_MOD_DISARM: u32 = 67; // Disarm
 
 // --- Absorb / Shield ---
+pub const AURA_SPELL_MAGNET: u32 = 28; // Spell redirection / magnet
 pub const AURA_SCHOOL_ABSORB: u32 = 69; // Damage absorb (Power Word: Shield)
 pub const AURA_MANA_SHIELD: u32 = 97; // Mana Shield
 pub const AURA_DAMAGE_SHIELD: u32 = 15; // Damage reflect (Thorns)

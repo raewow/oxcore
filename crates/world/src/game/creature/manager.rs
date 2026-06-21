@@ -758,6 +758,11 @@ impl CreatureManager {
         self.creatures.get_mut(&guid).map(|mut c| f(&mut *c))
     }
 
+    #[cfg(test)]
+    pub fn add_creature_for_test(&self, creature: Creature) {
+        self.creatures.insert(creature.guid, creature);
+    }
+
     /// Apply damage to a creature with threat tracking (Phase 5: ThreatManager)
     /// Returns (actual_damage, is_dead)
     pub fn apply_damage(
