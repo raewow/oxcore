@@ -20,6 +20,10 @@ pub struct RandomMovementGenerator {
     destination: Option<Position>,
     /// Time until next wander (ms)
     next_wander_time: u32,
+    /// Remaining wander steps before a longer pause
+    wander_steps: u8,
+    /// Optional expiry timer for temporary random movement (ms)
+    expire_time_ms: u32,
     /// Walk speed in yards/sec
     walk_speed: f32,
 }
@@ -31,6 +35,8 @@ impl RandomMovementGenerator {
             wander_distance,
             destination: None,
             next_wander_time: 0,
+            wander_steps: 0,
+            expire_time_ms: 0,
             walk_speed,
         }
     }
@@ -55,9 +61,26 @@ impl RandomMovementGenerator {
         rand::thread_rng().gen_range(500..10000)
     }
 
+    fn pick_step_pause() -> u32 {
+        50
+    }
+
+    fn pick_step_count(&self) -> u8 {
+        let upper = if self.wander_distance <= 1.0 { 2 } else { 8 };
+        rand::thread_rng().gen_range(0..=upper)
+    }
+
     /// Called when creature arrives at destination
     pub fn on_arrival(&mut self) {
         self.destination = None;
+
+        if self.wander_steps > 0 {
+            self.wander_steps -= 1;
+            self.next_wander_time = Self::pick_step_pause();
+        } else {
+            self.next_wander_time = Self::pick_pause_time();
+            self.wander_steps = self.pick_step_count();
+        }
     }
 }
 
@@ -67,7 +90,8 @@ impl MovementGenerator for RandomMovementGenerator {
     }
 
     fn initialize(&mut self, creature_guid: ObjectGuid, _current_pos: Position) {
-        self.next_wander_time = Self::pick_pause_time();
+        self.next_wander_time = 1000;
+        self.wander_steps = 0;
         tracing::debug!(
             "[MOVEMENT] Random generator initialized for {:?}, wander_dist={}",
             creature_guid,
@@ -76,6 +100,13 @@ impl MovementGenerator for RandomMovementGenerator {
     }
 
     fn update(&mut self, _creature_guid: ObjectGuid, diff_ms: u32) -> MovementUpdate {
+        if self.expire_time_ms > 0 {
+            self.expire_time_ms = self.expire_time_ms.saturating_sub(diff_ms);
+            if self.expire_time_ms == 0 {
+                return MovementUpdate::Finished;
+            }
+        }
+
         // Currently moving?
         if self.destination.is_some() {
             return MovementUpdate::Continue;
@@ -90,7 +121,6 @@ impl MovementGenerator for RandomMovementGenerator {
         // Time to pick a new destination
         let dest = self.pick_random_destination();
         self.destination = Some(dest);
-        self.next_wander_time = Self::pick_pause_time();
 
         MovementUpdate::NewDestination {
             destination: dest,
@@ -112,7 +142,8 @@ impl MovementGenerator for RandomMovementGenerator {
 
     fn reset(&mut self, _creature_guid: ObjectGuid) {
         self.destination = None;
-        self.next_wander_time = Self::pick_pause_time();
+        self.next_wander_time = 1000;
+        self.wander_steps = 0;
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
