@@ -126,6 +126,10 @@ impl WaypointMovementGenerator {
         self.last_reached_waypoint
     }
 
+    pub fn waypoint_count(&self) -> usize {
+        self.waypoints.len()
+    }
+
     fn pick_wander_destination(&self, center: Position, radius: f32) -> Position {
         let mut rng = rand::thread_rng();
         let angle = rng.gen_range(0.0..std::f32::consts::TAU);

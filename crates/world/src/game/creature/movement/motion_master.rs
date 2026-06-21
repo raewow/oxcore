@@ -69,6 +69,83 @@ impl std::fmt::Debug for MotionMaster {
 }
 
 impl MotionMaster {
+    /// Human-readable movement generator name.
+    pub fn get_movement_generator_type_name(generator: MovementGeneratorType) -> &'static str {
+        match generator {
+            MovementGeneratorType::Idle => "IDLE_MOTION_TYPE",
+            MovementGeneratorType::Random => "RANDOM_MOTION_TYPE",
+            MovementGeneratorType::Waypoint => "WAYPOINT_MOTION_TYPE",
+            MovementGeneratorType::Follow => "FOLLOW_MOTION_TYPE",
+            MovementGeneratorType::Distract => "DISTRACT_MOTION_TYPE",
+            MovementGeneratorType::Confused => "CONFUSED_MOTION_TYPE",
+            MovementGeneratorType::Point => "POINT_MOTION_TYPE",
+            MovementGeneratorType::Chase => "CHASE_MOTION_TYPE",
+            MovementGeneratorType::Fleeing => "FLEEING_MOTION_TYPE",
+            MovementGeneratorType::Home => "HOME_MOTION_TYPE",
+            MovementGeneratorType::Effect => "EFFECT_MOTION_TYPE",
+            MovementGeneratorType::Taxi => "FLIGHT_MOTION_TYPE",
+        }
+    }
+
+    /// Current generator type.
+    pub fn get_current_movement_generator_type(&self) -> MovementGeneratorType {
+        self.active_type
+    }
+
+    /// List all movement generator types currently present.
+    pub fn get_used_movement_generators_list(&self) -> Vec<MovementGeneratorType> {
+        self.generators
+            .values()
+            .map(|generator| generator.generator_type())
+            .collect()
+    }
+
+    /// Check if the creature is using only idle/default movement.
+    pub fn is_using_idle_or_default_movement(&self) -> bool {
+        let current_type = self.get_current_movement_generator_type();
+        if current_type == MovementGeneratorType::Idle {
+            return true;
+        }
+
+        (current_type < MovementGeneratorType::Chase || current_type == MovementGeneratorType::Waypoint)
+            && self.generators.len() <= 1
+    }
+
+    /// Get the current destination if a spline is active.
+    pub fn get_destination(&self) -> Option<Position> {
+        self.current_destination
+    }
+
+    /// Check whether the provided generator is the active top-of-stack generator.
+    pub fn is_top_generator(&self, generator: &dyn MovementGenerator) -> bool {
+        self.generators
+            .get(&self.active_type)
+            .is_some_and(|active| std::ptr::eq::<dyn MovementGenerator>(&**active, generator))
+    }
+
+    /// Update final distance to the target on the active generator, if supported.
+    pub fn update_final_distance_to_target(&mut self, _distance: f32) {}
+
+    /// Remove all generators of the specified type.
+    pub fn clear_type(&mut self, move_type: MovementGeneratorType, creature_guid: ObjectGuid) {
+        let types: Vec<_> = self
+            .generators
+            .iter()
+            .filter_map(|(ty, _)| if *ty == move_type { Some(*ty) } else { None })
+            .collect();
+
+        for ty in types {
+            self.remove_generator(ty, creature_guid);
+        }
+    }
+
+    /// Reinitialize the active patrol movement if one exists.
+    pub fn reinitialize_patrol_movement(&mut self, creature_guid: ObjectGuid) {
+        if let Some(generator) = self.generators.get_mut(&MovementGeneratorType::Waypoint) {
+            generator.reset(creature_guid);
+        }
+    }
+
     pub fn new() -> Self {
         let mut mm = Self {
             generators: BTreeMap::new(),
@@ -405,6 +482,23 @@ impl MotionMaster {
         0
     }
 
+    /// Return a human-readable waypoint summary for debugging.
+    pub fn get_waypoint_path_information(&mut self) -> Option<String> {
+        for generator in self.generators.values_mut().rev() {
+            if generator.generator_type() == MovementGeneratorType::Waypoint {
+                if let Some(waypoint) = generator.as_any_mut().downcast_mut::<WaypointMovementGenerator>() {
+                    return Some(format!(
+                        "waypoints={}, last_reached={}",
+                        waypoint.waypoint_count(),
+                        waypoint.get_last_reached_waypoint()
+                    ));
+                }
+            }
+        }
+
+        None
+    }
+
     /// Start confused movement.
     pub fn move_confused(
         &mut self,
@@ -421,6 +515,21 @@ impl MotionMaster {
 
     /// Taxi flight is handled on the player movement side in this Rust port.
     pub fn move_taxi_flight(&mut self, _path: u32, _pathnode: u32) {}
+
+    /// Charge movement is not fully modeled yet in the Rust creature MotionMaster.
+    pub fn move_charge(
+        &mut self,
+        _target: ObjectGuid,
+        _delay: u32,
+        _trigger_auto_attack: bool,
+        _use_combat_reach: bool,
+    ) {
+    }
+
+    /// Distance-based movement is not fully modeled yet in the Rust creature MotionMaster.
+    pub fn move_distance(&mut self, _target: ObjectGuid, _distance: f32) -> bool {
+        false
+    }
 
     /// Start feared movement away from a target.
     pub fn fear(

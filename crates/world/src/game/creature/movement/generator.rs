@@ -1,6 +1,7 @@
 //! Movement generator trait
 
 use super::types::MovementGeneratorType;
+use super::motion_master::MotionMaster;
 use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Trait for movement generators
@@ -26,8 +27,24 @@ pub trait MovementGenerator: Send + Sync {
     /// Get as Any for downcasting (needed for ChaseMovementGenerator updates)
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 
+    /// Get immutable Any for downcasting when needed.
+    fn as_any_ref(&self) -> &dyn std::any::Any
+    where
+        Self: Sized + 'static,
+    {
+        self
+    }
+
     /// Notify generator that unit speed changed.
     fn unit_speed_changed(&mut self) {}
+
+    /// Check whether this generator is the active top-of-stack generator.
+    fn is_active(&self, motion_master: &MotionMaster) -> bool
+    where
+        Self: Sized,
+    {
+        motion_master.is_top_generator(self)
+    }
 }
 
 /// Result of movement update
