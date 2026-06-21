@@ -48,6 +48,8 @@ pub struct MotionMaster {
     current_destination: Option<Position>,
     /// Movement in progress
     moving: bool,
+    /// Whether an async update has been requested
+    needs_async_update: bool,
     /// State flags (updating, paused, etc.)
     pub flags: MotionMasterFlags,
 }
@@ -71,6 +73,7 @@ impl MotionMaster {
             active_type: MovementGeneratorType::Idle,
             current_destination: None,
             moving: false,
+            needs_async_update: false,
             flags: MotionMasterFlags::new(), // Initialize flags
         };
 
@@ -91,6 +94,33 @@ impl MotionMaster {
     /// Is creature currently moving
     pub fn is_moving(&self) -> bool {
         self.moving
+    }
+
+    /// Initialize motion state and ensure an idle generator exists.
+    pub fn initialize(&mut self, creature_guid: ObjectGuid) {
+        self.clear(creature_guid);
+
+        if self.generators.is_empty() {
+            self.generators.insert(
+                MovementGeneratorType::Idle,
+                Box::new(IdleMovementGenerator::new()),
+            );
+        }
+
+        self.active_type = MovementGeneratorType::Idle;
+        self.moving = false;
+        self.current_destination = None;
+        self.needs_async_update = false;
+        self.flags = MotionMasterFlags::new();
+    }
+
+    /// Re-evaluate the default motion generator without disturbing the active one.
+    pub fn initialize_new_default(&mut self, creature_guid: ObjectGuid, always_replace: bool) {
+        if always_replace {
+            self.initialize(creature_guid);
+        } else {
+            self.update_active(creature_guid);
+        }
     }
 
     /// Add a movement generator
@@ -273,6 +303,16 @@ impl MotionMaster {
         current_pos: Position,
         diff_ms: u32,
     ) -> Option<MovementUpdate> {
+        self.update_motion(creature_guid, current_pos, diff_ms)
+    }
+
+    /// Update motion state for the current tick.
+    pub fn update_motion(
+        &mut self,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        diff_ms: u32,
+    ) -> Option<MovementUpdate> {
         // Re-entrant protection - prevent nested updates
         if self.flags.contains(MotionMasterFlags::UPDATING) {
             tracing::warn!(
@@ -335,6 +375,18 @@ impl MotionMaster {
         self.flags.remove(MotionMasterFlags::UPDATING);
 
         Some(update)
+    }
+
+    /// Run the async update path. The current world model resolves movement synchronously,
+    /// so this mirrors the synchronous update path while clearing the async request flag.
+    pub fn update_motion_async(
+        &mut self,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        diff_ms: u32,
+    ) -> Option<MovementUpdate> {
+        self.needs_async_update = false;
+        self.update_motion(creature_guid, current_pos, diff_ms)
     }
 
     /// Called when creature reaches destination
