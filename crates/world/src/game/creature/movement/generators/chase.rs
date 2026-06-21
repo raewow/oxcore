@@ -20,6 +20,8 @@ pub struct ChaseMovementGenerator {
     creature_combat_reach: f32,
     /// Whether we currently have an active spline moving toward the target
     is_moving: bool,
+    /// Whether the current path is fully reachable
+    reachable: bool,
     /// Has reached target at least once
     pub reached_target: bool,
 
@@ -48,6 +50,7 @@ impl ChaseMovementGenerator {
             creature_position: Position::default(),
             creature_combat_reach,
             is_moving: false,
+            reachable: true,
             reached_target: false,
             check_distance_timer: 0, // Check immediately on first update
             target_last_path_pos: None,
@@ -64,6 +67,15 @@ impl ChaseMovementGenerator {
     /// Update creature's current position from world state
     pub fn set_creature_position(&mut self, pos: Position) {
         self.creature_position = pos;
+    }
+
+    /// Update whether the current chase path is fully reachable.
+    pub fn set_reachable(&mut self, reachable: bool) {
+        self.reachable = reachable;
+    }
+
+    pub fn is_reachable(&self) -> bool {
+        self.reachable
     }
 
     /// Calculate melee reach using the same formula as AI decision
@@ -131,6 +143,7 @@ impl MovementGenerator for ChaseMovementGenerator {
         self.creature_position = current_pos;
         self.check_distance_timer = 0; // Check immediately
         self.is_moving = false;
+        self.reachable = true;
         self.target_last_path_pos = None;
         self.repath_cooldown_timer = 0;
     }

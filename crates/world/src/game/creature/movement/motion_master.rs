@@ -179,6 +179,9 @@ impl MotionMaster {
         current_pos: Position,
         run_speed: f32,
     ) {
+        // Match the C++ targeted-home flow by dropping any stale movement stack
+        // before we push the home generator.
+        self.clear(creature_guid);
         let generator = HomeMovementGenerator::new(home_pos, run_speed);
         self.add_generator(Box::new(generator), creature_guid, current_pos);
     }

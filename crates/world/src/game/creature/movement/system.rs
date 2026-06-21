@@ -244,6 +244,25 @@ impl MovementSystem {
 
                 let final_dest = path_waypoints.last().copied().unwrap_or(destination);
 
+                let _ = world.managers.creature_mgr.with_creature_mut(guid, |creature| {
+                    if let Some(gen) = creature
+                        .motion_master
+                        .get_generator_mut(MovementGeneratorType::Chase)
+                    {
+                        if let Some(chase) =
+                            gen.as_any_mut().downcast_mut::<ChaseMovementGenerator>()
+                        {
+                            chase.set_reachable(path_result.is_complete());
+                        }
+                    }
+                });
+
+                if !path_result.is_complete() && path_waypoints.len() <= 1 {
+                    // No usable path was found. Don't fake a straight-line chase through walls.
+                    self.send_stop_packet(guid, current_pos, world);
+                    return;
+                }
+
                 if path_waypoints.len() > 2 {
                     // Multi-waypoint path from NavMesh/obstacle avoidance
                     // Build full spline path: start + all path waypoints
