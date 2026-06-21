@@ -41,6 +41,11 @@ impl RandomMovementGenerator {
         }
     }
 
+    pub fn with_expire_time(mut self, expire_time_ms: u32) -> Self {
+        self.expire_time_ms = expire_time_ms;
+        self
+    }
+
     /// Pick a random point within wander radius
     fn pick_random_destination(&self) -> Position {
         let mut rng = rand::thread_rng();

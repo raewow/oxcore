@@ -2,9 +2,10 @@
 
 use super::generator::{MovementGenerator, MovementUpdate};
 use super::generators::{
-    AssistanceDistractMovementGenerator, ChaseMovementGenerator, DistractMovementGenerator,
-    FearMovementGenerator, FleeMovementGenerator, FollowMovementGenerator, HomeMovementGenerator,
-    IdleMovementGenerator, RandomMovementGenerator, TimedFearMovementGenerator, Waypoint,
+    AssistanceDistractMovementGenerator, AssistanceMovementGenerator, ChaseMovementGenerator,
+    ConfusedMovementGenerator, DistractMovementGenerator, FearMovementGenerator,
+    FleeMovementGenerator, FollowMovementGenerator, HomeMovementGenerator, IdleMovementGenerator,
+    PointMovementGenerator, RandomMovementGenerator, TimedFearMovementGenerator, Waypoint,
     WaypointMovementGenerator,
 };
 use super::types::MovementGeneratorType;
@@ -153,6 +154,16 @@ impl MotionMaster {
         self.update_active(creature_guid);
     }
 
+    /// Replace current motion with a new generator using MotionMaster mutation semantics.
+    pub fn mutate(
+        &mut self,
+        generator: Box<dyn MovementGenerator>,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+    ) {
+        self.add_generator(generator, creature_guid, current_pos);
+    }
+
     /// Remove a generator by type
     pub fn remove_generator(&mut self, gen_type: MovementGeneratorType, creature_guid: ObjectGuid) {
         if let Some(mut gen) = self.generators.remove(&gen_type) {
@@ -231,6 +242,23 @@ impl MotionMaster {
         self.add_generator(Box::new(generator), creature_guid, current_pos);
     }
 
+    /// Start random wandering using the MotionMaster command shape.
+    pub fn move_random(
+        &mut self,
+        use_current_position: bool,
+        home_pos: Position,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        wander_distance: f32,
+        expire_time_ms: u32,
+        walk_speed: f32,
+    ) {
+        let origin = if use_current_position { current_pos } else { home_pos };
+        let generator = RandomMovementGenerator::new(origin, wander_distance, walk_speed)
+            .with_expire_time(expire_time_ms);
+        self.add_generator(Box::new(generator), creature_guid, current_pos);
+    }
+
     /// Start waypoint movement (patrol path)
     pub fn waypoint(
         &mut self,
@@ -242,6 +270,40 @@ impl MotionMaster {
     ) {
         let generator = WaypointMovementGenerator::new(waypoints, repeating, walk_speed);
         self.add_generator(Box::new(generator), creature_guid, current_pos);
+    }
+
+    /// Start waypoint movement as the creature's default path.
+    pub fn move_waypoint_as_default(
+        &mut self,
+        waypoints: Vec<Waypoint>,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        walk_speed: f32,
+    ) {
+        self.clear(creature_guid);
+        self.waypoint(waypoints, true, creature_guid, current_pos, walk_speed);
+    }
+
+    /// Start waypoint movement.
+    pub fn move_waypoint(
+        &mut self,
+        waypoints: Vec<Waypoint>,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        walk_speed: f32,
+    ) {
+        self.waypoint(waypoints, true, creature_guid, current_pos, walk_speed);
+    }
+
+    /// Start cyclic waypoint movement.
+    pub fn move_cyclic_waypoint(
+        &mut self,
+        waypoints: Vec<Waypoint>,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        walk_speed: f32,
+    ) {
+        self.waypoint(waypoints, true, creature_guid, current_pos, walk_speed);
     }
 
     /// Start fleeing from a target
@@ -271,6 +333,94 @@ impl MotionMaster {
         let generator = FollowMovementGenerator::new(target, follow_distance, follow_angle, walk_speed);
         self.add_generator(Box::new(generator), creature_guid, current_pos);
     }
+
+    /// Start a one-shot movement to a specific point.
+    pub fn move_point(
+        &mut self,
+        id: u32,
+        destination: Position,
+        options: u32,
+        speed: f32,
+        final_orientation: f32,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+    ) {
+        let is_walking = (options & 0x1) != 0;
+        let generator = PointMovementGenerator::new(id, destination, speed, is_walking, final_orientation);
+        self.add_generator(Box::new(generator), creature_guid, current_pos);
+    }
+
+    /// Start a one-shot point movement that should call for help on arrival.
+    pub fn move_seek_assistance(
+        &mut self,
+        destination: Position,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        delay_ms: u32,
+        speed: f32,
+    ) {
+        let generator = AssistanceMovementGenerator::new(0, destination, speed, delay_ms);
+        self.add_generator(Box::new(generator), creature_guid, current_pos);
+    }
+
+    /// Start the post-assistance distraction timer.
+    pub fn move_seek_assistance_distract(&mut self, creature_guid: ObjectGuid, timer_ms: u32) {
+        self.add_generator(
+            Box::new(AssistanceDistractMovementGenerator::new(timer_ms)),
+            creature_guid,
+            Position::default(),
+        );
+    }
+
+    /// Pass a speed change notification to all generators.
+    pub fn propagate_speed_change(&mut self) {
+        for generator in self.generators.values_mut() {
+            generator.unit_speed_changed();
+        }
+    }
+
+    /// Update the next waypoint id on the active waypoint generator.
+    pub fn set_next_waypoint(&mut self, point_id: u32) -> bool {
+        for generator in self.generators.values_mut().rev() {
+            if generator.generator_type() == MovementGeneratorType::Waypoint {
+                if let Some(waypoint) = generator.as_any_mut().downcast_mut::<WaypointMovementGenerator>() {
+                    return waypoint.set_next_waypoint(point_id);
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Get the last reached waypoint id from the active waypoint generator.
+    pub fn get_last_reached_waypoint(&mut self) -> u32 {
+        for generator in self.generators.values_mut().rev() {
+            if generator.generator_type() == MovementGeneratorType::Waypoint {
+                if let Some(waypoint) = generator.as_any_mut().downcast_mut::<WaypointMovementGenerator>() {
+                    return waypoint.get_last_reached_waypoint();
+                }
+            }
+        }
+
+        0
+    }
+
+    /// Start confused movement.
+    pub fn move_confused(
+        &mut self,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+    ) {
+        self.clear(creature_guid);
+        self.add_generator(
+            Box::new(ConfusedMovementGenerator::new()),
+            creature_guid,
+            current_pos,
+        );
+    }
+
+    /// Taxi flight is handled on the player movement side in this Rust port.
+    pub fn move_taxi_flight(&mut self, _path: u32, _pathnode: u32) {}
 
     /// Start feared movement away from a target.
     pub fn fear(
@@ -468,7 +618,7 @@ impl MotionMaster {
     }
 
     /// Called when creature reaches destination
-    pub fn movement_complete(&mut self, creature_guid: ObjectGuid) {
+    pub fn movement_complete(&mut self, creature_guid: ObjectGuid) -> Option<u32> {
         self.moving = false;
         self.current_destination = None;
 
@@ -496,6 +646,25 @@ impl MotionMaster {
                     }
                 }
             }
+            MovementGeneratorType::Point => {
+                let delay = if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Point) {
+                    if let Some(point) = gen.as_any_mut().downcast_mut::<PointMovementGenerator>() {
+                        point.on_arrival();
+                        point.assistance_delay_ms()
+                    } else if let Some(point) = gen.as_any_mut().downcast_mut::<AssistanceMovementGenerator>() {
+                        point.assistance_delay_ms()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if delay.is_some() {
+                    self.remove_generator(MovementGeneratorType::Point, creature_guid);
+                }
+                return delay;
+            }
             MovementGeneratorType::Fleeing => {
                 if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Fleeing) {
                     if let Some(fear) = gen.as_any_mut().downcast_mut::<TimedFearMovementGenerator>() {
@@ -514,8 +683,17 @@ impl MotionMaster {
                     }
                 }
             }
+            MovementGeneratorType::Confused => {
+                if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Confused) {
+                    if let Some(confused) = gen.as_any_mut().downcast_mut::<ConfusedMovementGenerator>() {
+                        confused.on_arrival();
+                    }
+                }
+            }
             _ => {}
         }
+
+        None
     }
 
     /// Update the active generator to highest priority

@@ -9,6 +9,7 @@ pub enum MovementGeneratorType {
     Follow = 3,
     Distract = 4,
     Point = 5,
+    Confused = 6,
     Chase = 8,
     Fleeing = 9,
     Home = 10,

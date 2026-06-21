@@ -393,7 +393,10 @@ impl MovementSystem {
                     .creature_mgr
                     .with_creature_mut(guid, |creature| {
                         creature.move_spline.stop();
-                        creature.motion_master.movement_complete(guid);
+                        let assistance_delay = creature.motion_master.movement_complete(guid);
+                        if let Some(delay) = assistance_delay {
+                            creature.motion_master.move_seek_assistance_distract(guid, delay);
+                        }
                     });
 
                 if !follow_active {

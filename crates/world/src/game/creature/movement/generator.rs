@@ -25,6 +25,9 @@ pub trait MovementGenerator: Send + Sync {
 
     /// Get as Any for downcasting (needed for ChaseMovementGenerator updates)
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+    /// Notify generator that unit speed changed.
+    fn unit_speed_changed(&mut self) {}
 }
 
 /// Result of movement update

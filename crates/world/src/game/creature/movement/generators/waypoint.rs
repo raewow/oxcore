@@ -41,6 +41,8 @@ pub struct WaypointMovementGenerator {
     is_wandering: bool,
     /// Center position for wandering at the current waypoint
     current_waypoint_position: Option<Position>,
+    /// Last waypoint point_id reached
+    last_reached_waypoint: u32,
     /// Walk speed in yards/sec
     walk_speed: f32,
 }
@@ -56,6 +58,7 @@ impl WaypointMovementGenerator {
             is_moving: false,
             is_wandering: false,
             current_waypoint_position: None,
+            last_reached_waypoint: 0,
             walk_speed,
         }
     }
@@ -87,6 +90,7 @@ impl WaypointMovementGenerator {
 
         // Start waiting at current waypoint
         if self.current_index < self.waypoints.len() {
+            self.last_reached_waypoint = self.waypoints[self.current_index].point_id;
             self.current_waypoint_position = Some(self.waypoints[self.current_index].position);
             let wait_time = self.waypoints[self.current_index].wait_time;
             if wait_time > 0 {
@@ -98,6 +102,28 @@ impl WaypointMovementGenerator {
                 self.advance_waypoint();
             }
         }
+    }
+
+    pub fn set_next_waypoint(&mut self, point_id: u32) -> bool {
+        if let Some((idx, _)) = self
+            .waypoints
+            .iter()
+            .enumerate()
+            .find(|(_, wp)| wp.point_id == point_id)
+        {
+            self.current_index = idx;
+            self.is_waiting = false;
+            self.is_moving = false;
+            self.is_wandering = false;
+            self.current_waypoint_position = None;
+            return true;
+        }
+
+        false
+    }
+
+    pub fn get_last_reached_waypoint(&self) -> u32 {
+        self.last_reached_waypoint
     }
 
     fn pick_wander_destination(&self, center: Position, radius: f32) -> Position {
@@ -210,6 +236,7 @@ impl MovementGenerator for WaypointMovementGenerator {
         self.is_moving = false;
         self.is_wandering = false;
         self.current_waypoint_position = None;
+        self.last_reached_waypoint = 0;
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

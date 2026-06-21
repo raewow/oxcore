@@ -13,6 +13,8 @@ impl DistractMovementGenerator {
     pub fn new(timer_ms: u32) -> Self {
         Self { timer_ms }
     }
+
+    pub fn interrupt(&mut self) {}
 }
 
 impl MovementGenerator for DistractMovementGenerator {
