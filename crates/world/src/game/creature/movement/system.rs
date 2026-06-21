@@ -1,7 +1,10 @@
 //! MovementSystem - handles all movement business logic and packet sending
 
 use super::generator::MovementUpdate;
-use super::generators::{ChaseMovementGenerator, FearMovementGenerator, FleeMovementGenerator, TimedFearMovementGenerator};
+use super::generators::{
+    ChaseMovementGenerator, FearMovementGenerator, FleeMovementGenerator, FollowMovementGenerator,
+    TimedFearMovementGenerator,
+};
 use super::spline::MoveSpline;
 use super::types::MovementGeneratorType;
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
@@ -124,7 +127,7 @@ impl MovementSystem {
             }
         }
 
-        // Update target position for chase generators
+        // Update target position for chase/follow/flee generators
         let target = world
             .managers
             .creature_mgr
@@ -184,6 +187,49 @@ impl MovementSystem {
                     return;
                 }
             }
+        }
+
+        if let Some(follow_target) = world
+            .managers
+            .creature_mgr
+            .with_creature_mut(guid, |c| c.following_target)
+            .flatten()
+        {
+            let target_info = if follow_target.is_player() {
+                world
+                    .managers
+                    .player_mgr
+                    .get_movement_state(follow_target)
+                    .map(|state| (state.position, state.transport_guid))
+            } else {
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(follow_target, |target| {
+                        (target.position, target.transport_guid)
+                    })
+            };
+
+            let Some((target_position, _transport_guid)) = target_info else {
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(guid, |creature| creature.stop_following());
+                return;
+            };
+
+            let _ = world.managers.creature_mgr.with_creature_mut(guid, |creature| {
+                let creature_pos = creature.position;
+                if let Some(gen) = creature
+                    .motion_master
+                    .get_generator_mut(MovementGeneratorType::Follow)
+                {
+                    if let Some(follow) = gen.as_any_mut().downcast_mut::<FollowMovementGenerator>() {
+                        follow.update_target_position(target_position);
+                        follow.set_creature_position(creature_pos);
+                    }
+                }
+            });
         }
 
         // Get the CURRENT position (after spline update), not the stale snapshot
@@ -333,6 +379,14 @@ impl MovementSystem {
                 }
             }
             MovementUpdate::Arrived => {
+                let follow_active = world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(guid, |creature| {
+                        creature.motion_master.active_generator() == MovementGeneratorType::Follow
+                    })
+                    .unwrap_or(false);
+
                 // Stop the active spline and notify motion master
                 world
                     .managers
@@ -342,8 +396,10 @@ impl MovementSystem {
                         creature.motion_master.movement_complete(guid);
                     });
 
-                // Send stop packet to client so creature visually stops
-                self.send_stop_packet(guid, current_pos, world);
+                if !follow_active {
+                    // Send stop packet to client so creature visually stops
+                    self.send_stop_packet(guid, current_pos, world);
+                }
             }
             MovementUpdate::Finished | MovementUpdate::Continue => {}
         }

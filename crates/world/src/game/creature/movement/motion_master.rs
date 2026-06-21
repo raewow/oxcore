@@ -3,8 +3,9 @@
 use super::generator::{MovementGenerator, MovementUpdate};
 use super::generators::{
     AssistanceDistractMovementGenerator, ChaseMovementGenerator, DistractMovementGenerator,
-    FearMovementGenerator, FleeMovementGenerator, HomeMovementGenerator, IdleMovementGenerator,
-    RandomMovementGenerator, TimedFearMovementGenerator, Waypoint, WaypointMovementGenerator,
+    FearMovementGenerator, FleeMovementGenerator, FollowMovementGenerator, HomeMovementGenerator,
+    IdleMovementGenerator, RandomMovementGenerator, TimedFearMovementGenerator, Waypoint,
+    WaypointMovementGenerator,
 };
 use super::types::MovementGeneratorType;
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -256,6 +257,21 @@ impl MotionMaster {
         self.add_generator(Box::new(generator), creature_guid, current_pos);
     }
 
+    /// Start following a target at an offset.
+    pub fn move_follow(
+        &mut self,
+        target: ObjectGuid,
+        follow_distance: f32,
+        follow_angle: f32,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        walk_speed: f32,
+    ) {
+        self.clear(creature_guid);
+        let generator = FollowMovementGenerator::new(target, follow_distance, follow_angle, walk_speed);
+        self.add_generator(Box::new(generator), creature_guid, current_pos);
+    }
+
     /// Start feared movement away from a target.
     pub fn fear(
         &mut self,
@@ -488,6 +504,13 @@ impl MotionMaster {
                         fear.on_arrival();
                     } else if let Some(flee) = gen.as_any_mut().downcast_mut::<FleeMovementGenerator>() {
                         flee.on_arrival();
+                    }
+                }
+            }
+            MovementGeneratorType::Follow => {
+                if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Follow) {
+                    if let Some(follow) = gen.as_any_mut().downcast_mut::<FollowMovementGenerator>() {
+                        follow.on_arrival();
                     }
                 }
             }

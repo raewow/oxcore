@@ -3,6 +3,7 @@
 mod chase;
 mod fear;
 mod distract;
+mod follow;
 mod flee;
 mod home;
 mod idle;
@@ -12,6 +13,7 @@ mod waypoint;
 pub use chase::ChaseMovementGenerator;
 pub use fear::{FearMovementGenerator, TimedFearMovementGenerator};
 pub use distract::{AssistanceDistractMovementGenerator, DistractMovementGenerator};
+pub use follow::FollowMovementGenerator;
 pub use flee::FleeMovementGenerator;
 pub use home::HomeMovementGenerator;
 pub use idle::IdleMovementGenerator;
