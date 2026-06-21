@@ -672,6 +672,14 @@ impl SpellSystem {
                     )
                     .await?;
                 }
+                SpellEventType::PendingProc {
+                    caster_guid,
+                    spell_id,
+                    is_triggered,
+                } => {
+                    self.process_pending_procs(caster_guid, spell_id, is_triggered, world)
+                        .await;
+                }
             }
         }
 
@@ -1110,11 +1118,61 @@ impl SpellSystem {
         Ok(())
     }
 
-    /// Run the pending cast-end proc check for a finished spell cast.
+    /// Queue the pending cast-end proc check for a finished spell cast.
     ///
-    /// This keeps the proc dispatch in one place so the cast finish path preserves the same
-    /// ordering as the legacy spell caster: combo points first, then proc evaluation.
+    /// The proc work runs on the next event pass so it stays ordered after the rest of the
+    /// current spell completion work.
     async fn update_pending_procs(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        is_triggered: bool,
+        world: &World,
+    ) {
+        if is_triggered || !caster_guid.is_player() {
+            return;
+        }
+
+        let Some(entry) = world.managers.spell_mgr.get(spell_id) else {
+            return;
+        };
+
+        use crate::game::player::auras::proc::{
+            proc_flags_ex, spell_cast_attacker_proc_flag,
+        };
+
+        const SUPPRESS_CASTER_PROCS: u32 = 0x0001_0000; // SPELL_ATTR_EX3_SUPPRESS_CASTER_PROCS
+        if entry.attributes_ex3 & SUPPRESS_CASTER_PROCS != 0 {
+            return;
+        }
+
+        let is_auto_repeat = (entry.attributes_ex2 & 0x0000_0020) != 0;
+        let is_heal = entry.effect.iter().any(|&e| e == 10); // SPELL_EFFECT_HEAL
+        let proc_attacker = spell_cast_attacker_proc_flag(
+            entry.dmg_class,
+            entry.is_positive_spell(),
+            is_heal,
+            is_auto_repeat,
+        );
+
+        if proc_attacker == 0 {
+            return;
+        }
+
+        if let Ok(mut queue) = self.event_queue.lock() {
+            queue.schedule(
+                get_game_time_ms(),
+                SpellEventType::PendingProc {
+                    caster_guid,
+                    spell_id,
+                    is_triggered,
+                },
+            );
+        }
+    }
+
+    /// Run the pending cast-end proc check once it reaches the event queue.
+    async fn process_pending_procs(
         &self,
         caster_guid: ObjectGuid,
         spell_id: u32,

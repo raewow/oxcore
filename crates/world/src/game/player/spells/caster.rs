@@ -3,6 +3,7 @@ use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
 
 const WORLD_BOSS_LEVEL_DIFF: u32 = 3;
+const SPELL_SCHOOL_MASK_NORMAL: u32 = 0x01;
 
 fn get_unit_level(guid: ObjectGuid, world: &World) -> Option<u32> {
     if guid.is_player() {
@@ -33,14 +34,17 @@ pub fn get_level_for_target(
         .creature_mgr
         .with_creature(source_guid, |creature| (creature.level as u32, creature.entry))
     {
-        if let Some(template) = world.managers.creature_mgr.get_template(creature_entry) {
-            if template.rank == 3 {
-                if let Some(target_guid) = target_guid.filter(|guid| guid.is_unit()) {
-                    if let Some(target_level) = get_unit_level(target_guid, world) {
-                        return target_level
-                            .saturating_add(WORLD_BOSS_LEVEL_DIFF)
-                            .clamp(1, 255);
-                    }
+        if world
+            .managers
+            .creature_mgr
+            .get_template(creature_entry)
+            .is_some_and(|template| template.rank == 3)
+        {
+            if let Some(target_guid) = target_guid.filter(|guid| guid.is_unit()) {
+                if let Some(target_level) = get_unit_level(target_guid, world) {
+                    return target_level
+                        .saturating_add(WORLD_BOSS_LEVEL_DIFF)
+                        .clamp(1, 255);
                 }
             }
         }
@@ -72,7 +76,16 @@ pub fn get_level_for_target(
         }
     }
 
-    world.config.max_player_level.max(1).min(255)
+    world.config.max_player_level.clamp(1, 255)
+}
+
+/// Faithful `SpellCaster::GetMeleeDamageSchoolMask` port.
+pub fn get_melee_damage_school_mask(
+    _source_guid: ObjectGuid,
+    _attack_type: u8,
+    _world: &World,
+) -> u32 {
+    SPELL_SCHOOL_MASK_NORMAL
 }
 
 #[cfg(test)]
@@ -87,8 +100,8 @@ mod tests {
     use oxcore_shared::database::Databases;
     use oxcore_shared::protocol::{ObjectGuid, Position};
     use sqlx::mysql::MySqlPoolOptions;
-    use std::path::PathBuf;
     use std::sync::Arc;
+    use std::path::PathBuf;
 
     fn lazy_pool() -> sqlx::MySqlPool {
         MySqlPoolOptions::new()
@@ -278,5 +291,14 @@ mod tests {
 
         assert_eq!(get_level_for_target(ObjectGuid::new_gameobject(999, 1), Some(target), &world), 29);
         assert_eq!(get_level_for_target(ObjectGuid::new_gameobject(999, 1), None, &world), 60);
+    }
+
+    #[tokio::test]
+    async fn melee_damage_school_mask_is_always_physical() {
+        let world = test_world();
+        let player = ObjectGuid::new_player(3);
+
+        assert_eq!(get_melee_damage_school_mask(player, 0, &world), SPELL_SCHOOL_MASK_NORMAL);
+        assert_eq!(get_melee_damage_school_mask(ObjectGuid::new_creature(1, 1), 0, &world), SPELL_SCHOOL_MASK_NORMAL);
     }
 }

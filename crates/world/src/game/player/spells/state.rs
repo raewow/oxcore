@@ -833,6 +833,12 @@ pub enum SpellEventType {
         is_triggered: bool,
         cast_targets: SpellCastTargets,
     },
+    /// Delayed proc resolution — run after the current spell event batch.
+    PendingProc {
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        is_triggered: bool,
+    },
 }
 
 /// A single scheduled spell event.
@@ -915,6 +921,11 @@ impl SpellEventQueue {
                     caster_guid: c,
                     spell_id: s,
                     ..
+                }
+                | SpellEventType::PendingProc {
+                    caster_guid: c,
+                    spell_id: s,
+                    ..
                 } => !(*c == caster_guid && *s == spell_id),
             });
         }
@@ -989,6 +1000,14 @@ mod tests {
             target_guid: None,
             tick_number: 1,
             cast_targets: SpellCastTargets::default(),
+        }
+    }
+
+    fn pending_proc(caster: ObjectGuid, spell_id: u32) -> SpellEventType {
+        SpellEventType::PendingProc {
+            caster_guid: caster,
+            spell_id,
+            is_triggered: false,
         }
     }
 
@@ -1086,6 +1105,7 @@ mod tests {
                 cast_targets: SpellCastTargets::default(),
             },
         );
+        q.schedule(500, pending_proc(a, 5));
 
         q.cancel_events_for(a, 5);
         assert!(q.is_empty());

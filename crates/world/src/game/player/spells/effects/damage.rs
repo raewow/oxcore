@@ -4,8 +4,13 @@
 //! Formulas ported from old system (world/game/spell/effects/damage.rs).
 
 use crate::game::player::spells::effects::{EffectInput, EffectResult};
+use crate::dbc::structures::SpellEntry;
+use crate::game::player::player::Player;
 use crate::World;
 use anyhow::Result;
+use crate::game::player::auras::effects::{
+    AURA_MOD_DAMAGE_PERCENT_DONE, AURA_MOD_DAMAGE_PERCENT_TAKEN,
+};
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
@@ -58,6 +63,55 @@ fn spell_critical_damage_bonus(dmg_class: u32, damage: f32) -> f32 {
     };
 
     damage + crit_bonus
+}
+
+fn select_weapon_stats(
+    player: &Player,
+    spell_entry: Option<&SpellEntry>,
+    normalized: bool,
+) -> (f32, f32, u32) {
+    let attack_type = spell_entry.map(|entry| entry.get_weapon_attack_type()).unwrap_or(0);
+
+    let (min_dmg, max_dmg, weapon_speed) = match attack_type {
+        1 if player.combat.can_dual_wield => (
+            player.combat.off_hand_min_dmg,
+            player.combat.off_hand_max_dmg,
+            player.combat.off_hand_speed,
+        ),
+        2 if player.combat.has_ranged_weapon => (
+            player.combat.ranged_min_dmg,
+            player.combat.ranged_max_dmg,
+            player.combat.ranged_speed,
+        ),
+        _ => (
+            player.combat.main_hand_min_dmg,
+            player.combat.main_hand_max_dmg,
+            player.combat.main_hand_speed,
+        ),
+    };
+
+    let normalized_speed = if normalized {
+        match attack_type {
+            2 if player.combat.has_ranged_weapon => 2800,
+            _ if weapon_speed <= 1800 => 1700,
+            _ if weapon_speed <= 2900 => 2400,
+            _ => 3300,
+        }
+    } else {
+        weapon_speed
+    };
+
+    (min_dmg, max_dmg, normalized_speed)
+}
+
+#[inline]
+fn spell_school_mask(school: u8) -> u32 {
+    1u32.checked_shl(school as u32).unwrap_or(0)
+}
+
+fn apply_damage_percent_modifiers(damage: f32, damage_percent_done: i32, damage_percent_taken: i32) -> f32 {
+    let modifier = 1.0 + (damage_percent_done + damage_percent_taken) as f32 / 100.0;
+    (damage * modifier).max(0.0)
 }
 
 /// SPELL_EFFECT_SCHOOL_DAMAGE (2)
@@ -120,7 +174,48 @@ pub async fn effect_school_damage(input: &EffectInput, world: &World) -> Result<
         );
     }
 
-    // Step 3: Roll for crit (spell crit = 150% damage)
+    // Step 3: Apply damage percent bonuses/penalties from caster and target auras.
+    // School masks are bitmasks, not indexes: school 0 => 0x01, school 6 => 0x40.
+    let school_mask = spell_school_mask(school);
+    if school_mask != 0 {
+        let caster_damage_bonus = world
+            .systems
+            .player
+            .manager()
+            .with_player(input.caster_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_total_aura_modifier_by_misc_mask(
+                        AURA_MOD_DAMAGE_PERCENT_DONE,
+                        school_mask,
+                    )
+            })
+            .unwrap_or(0);
+
+        let target_damage_taken = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_total_aura_modifier_by_misc_mask(
+                        AURA_MOD_DAMAGE_PERCENT_TAKEN,
+                        school_mask,
+                    )
+            })
+            .unwrap_or(0);
+
+        final_damage = apply_damage_percent_modifiers(
+            final_damage,
+            caster_damage_bonus,
+            target_damage_taken,
+        );
+    }
+
+    // Step 4: Roll for crit (spell crit = 150% damage)
     let is_crit = if let Some((_, crit_pct, _)) = caster_stats {
         let crit_roll = rand::random::<f32>() * 100.0;
         crit_roll < crit_pct
@@ -138,7 +233,7 @@ pub async fn effect_school_damage(input: &EffectInput, world: &World) -> Result<
         final_damage = spell_critical_damage_bonus(dmg_class, final_damage);
     }
 
-    // Step 4: Resistance reduction (non-physical schools only)
+    // Step 5: Resistance reduction (non-physical schools only)
     let (damage_after_mitigation, resisted) = if let Some((_, _, level)) = caster_stats {
         apply_target_mitigation(target_guid, final_damage, school, level, world)
     } else {
@@ -207,6 +302,7 @@ async fn effect_weapon_damage_internal(
         .with_player(input.caster_guid, |p| p.level)
         .unwrap_or(1);
     let bonus_damage = input.calculate_base_value(caster_level).max(0) as f32;
+    let spell_entry = world.managers.spell_mgr.get(input.spell_id);
 
     // Get caster weapon stats, AP, crit, and level
     let caster_data = world
@@ -214,26 +310,16 @@ async fn effect_weapon_damage_internal(
         .player
         .manager()
         .with_player(input.caster_guid, |player| {
-            // Determine normalized speed based on weapon type
-            // TODO: Read actual weapon subclass from equipment for proper categorization
-            // For now, use main hand speed to guess: <=1800ms = dagger, <=2900ms = 1H, else 2H
-            let normalized_speed_ms = if normalized {
-                if player.combat.main_hand_speed <= 1800 {
-                    1700u32 // Dagger: 1.7s
-                } else if player.combat.main_hand_speed <= 2900 {
-                    2400u32 // Other 1H: 2.4s
-                } else {
-                    3300u32 // 2H: 3.3s
-                }
-            } else {
-                player.combat.main_hand_speed
-            };
+            let (min_dmg, max_dmg, ap_speed) = select_weapon_stats(
+                player,
+                spell_entry.as_deref(),
+                normalized,
+            );
 
             (
-                player.combat.main_hand_min_dmg,
-                player.combat.main_hand_max_dmg,
-                player.combat.main_hand_speed,
-                normalized_speed_ms,
+                min_dmg,
+                max_dmg,
+                ap_speed,
                 player.stats.melee_attack_power as f32,
                 player.stats.melee_crit_pct,
                 player.level,
@@ -245,7 +331,7 @@ async fn effect_weapon_damage_internal(
     let mut is_crit = false;
     let mut attacker_level = 60u8;
 
-    if let Some((min_dmg, max_dmg, _weapon_speed, ap_speed, ap, crit_pct, level)) = caster_data {
+    if let Some((min_dmg, max_dmg, ap_speed, ap, crit_pct, level)) = caster_data {
         attacker_level = level;
 
         // 1. Roll weapon damage
@@ -384,6 +470,7 @@ pub async fn effect_weapon_percent_damage(
         .with_player(input.caster_guid, |p| p.level)
         .unwrap_or(1);
     let percent = input.calculate_base_value(caster_level).max(0) as f32 / 100.0;
+    let spell_entry = world.managers.spell_mgr.get(input.spell_id);
 
     // Get caster weapon stats and AP
     let caster_data = world
@@ -391,10 +478,15 @@ pub async fn effect_weapon_percent_damage(
         .player
         .manager()
         .with_player(input.caster_guid, |player| {
+            let (min_dmg, max_dmg, weapon_speed) = select_weapon_stats(
+                player,
+                spell_entry.as_deref(),
+                false,
+            );
             (
-                player.combat.main_hand_min_dmg,
-                player.combat.main_hand_max_dmg,
-                player.combat.main_hand_speed,
+                min_dmg,
+                max_dmg,
+                weapon_speed,
                 player.stats.melee_attack_power as f32,
                 player.stats.melee_crit_pct,
                 player.level,
@@ -546,6 +638,28 @@ fn apply_target_mitigation(
     }
 
     (mitigated, total_resisted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_damage_percent_modifiers, spell_school_mask};
+
+    #[test]
+    fn school_mask_uses_bit_positions() {
+        assert_eq!(spell_school_mask(0), 0x01);
+        assert_eq!(spell_school_mask(6), 0x40);
+    }
+
+    #[test]
+    fn school_mask_rejects_invalid_shifts() {
+        assert_eq!(spell_school_mask(32), 0);
+    }
+
+    #[test]
+    fn damage_percent_modifiers_add_and_clamp() {
+        assert!((apply_damage_percent_modifiers(100.0, 20, -10) - 110.0).abs() < 0.001);
+        assert!((apply_damage_percent_modifiers(100.0, -80, -30) - 0.0).abs() < 0.001);
+    }
 }
 
 /// Wake a sitting player when they take damage.

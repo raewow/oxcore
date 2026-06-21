@@ -52,7 +52,7 @@ pub struct EffectInput {
     /// Spell school (0=Physical, 1=Holy, 2=Fire, 3=Nature, 4=Frost, 5=Shadow, 6=Arcane)
     pub spell_school: u8,
     /// Casting time in milliseconds (from DBC, for fallback coefficient calc)
-    pub casting_time_index: u32,
+    pub casting_time_ms: u32,
 }
 
 impl EffectInput {
@@ -75,7 +75,7 @@ impl EffectInput {
             points_per_level: 0.0,
             spell_coefficient: 0.0,
             spell_school: 0,
-            casting_time_index: 0,
+            casting_time_ms: 0,
         }
     }
 
@@ -103,13 +103,51 @@ impl EffectInput {
         }
 
         // Fallback: calculate from cast time
-        if self.casting_time_index == 0 {
+        if self.casting_time_ms == 0 {
             // Instant cast spells get reduced coefficient
             0.15
         } else {
-            // Formula: cast_time_ms / 3500, capped at 1.0
-            (self.casting_time_index as f32 / 3500.0).min(1.0)
+            // Formula: clamp to the standard 1.5s..7.0s coefficient window.
+            let cast_time_ms = self.casting_time_ms.clamp(1500, 7000) as f32;
+            cast_time_ms / 3500.0
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EffectInput;
+
+    #[test]
+    fn explicit_spell_coefficient_wins() {
+        let mut input = EffectInput::new(Default::default(), None, 0, 0);
+        input.spell_coefficient = 0.42;
+        input.casting_time_ms = 1000;
+
+        assert!((input.get_spell_coefficient() - 0.42).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn instant_spells_use_instant_fallback() {
+        let input = EffectInput::new(Default::default(), None, 0, 0);
+
+        assert!((input.get_spell_coefficient() - 0.15).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn short_casts_clamp_to_bonus_floor() {
+        let mut input = EffectInput::new(Default::default(), None, 0, 0);
+        input.casting_time_ms = 1000;
+
+        assert!((input.get_spell_coefficient() - (1500.0 / 3500.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn long_casts_clamp_to_bonus_ceiling() {
+        let mut input = EffectInput::new(Default::default(), None, 0, 0);
+        input.casting_time_ms = 10_000;
+
+        assert!((input.get_spell_coefficient() - 2.0).abs() < f32::EPSILON);
     }
 }
 
@@ -348,7 +386,12 @@ impl EffectsDispatcher {
                     points_per_level: spell_entry.effect_real_points_per_level[effect_index],
                     spell_coefficient: spell_entry.effect_bonus_coefficient[effect_index],
                     spell_school: spell_entry.school as u8,
-                    casting_time_index: spell_entry.casting_time_index,
+                    casting_time_ms: world
+                        .dbc
+                        .read()
+                        .get_spell_cast_time(spell_entry.casting_time_index)
+                        .map(|entry| entry.cast_time.max(0) as u32)
+                        .unwrap_or(0),
                 };
 
                 match dispatch_effect(effect_type_enum, &input, world).await {
