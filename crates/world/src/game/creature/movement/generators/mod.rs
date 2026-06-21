@@ -1,6 +1,7 @@
 //! Movement generators module
 
 mod chase;
+mod fear;
 mod flee;
 mod home;
 mod idle;
@@ -8,6 +9,7 @@ mod random;
 mod waypoint;
 
 pub use chase::ChaseMovementGenerator;
+pub use fear::{FearMovementGenerator, TimedFearMovementGenerator};
 pub use flee::FleeMovementGenerator;
 pub use home::HomeMovementGenerator;
 pub use idle::IdleMovementGenerator;

@@ -291,12 +291,25 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
             distance,
             duration_ms,
         } => {
-            // Movement comes in Phase 8
+            let current_pos = world
+                .managers
+                .creature_mgr
+                .get_position(creature_guid)
+                .unwrap_or_default();
+
             world
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
                     creature.ai_state = AIState::Fleeing;
+                    creature.motion_master.fear(
+                        flee_from_guid,
+                        duration_ms,
+                        distance,
+                        creature_guid,
+                        current_pos,
+                        creature.run_speed(),
+                    );
                 });
             tracing::debug!(
                 "[AI] Creature {:?} fleeing from {:?} for {} yards, {} ms",

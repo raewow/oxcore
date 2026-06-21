@@ -1,7 +1,7 @@
 //! MovementSystem - handles all movement business logic and packet sending
 
 use super::generator::MovementUpdate;
-use super::generators::{ChaseMovementGenerator, FleeMovementGenerator};
+use super::generators::{ChaseMovementGenerator, FearMovementGenerator, FleeMovementGenerator, TimedFearMovementGenerator};
 use super::spline::MoveSpline;
 use super::types::MovementGeneratorType;
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
@@ -161,7 +161,13 @@ impl MovementSystem {
                             .motion_master
                             .get_generator_mut(MovementGeneratorType::Fleeing)
                         {
-                            if let Some(flee) =
+                            if let Some(fear) = gen.as_any_mut().downcast_mut::<TimedFearMovementGenerator>() {
+                                fear.update_target_position(target_state.position);
+                                fear.set_creature_position(creature_pos);
+                            } else if let Some(fear) = gen.as_any_mut().downcast_mut::<FearMovementGenerator>() {
+                                fear.update_target_position(target_state.position);
+                                fear.set_creature_position(creature_pos);
+                            } else if let Some(flee) =
                                 gen.as_any_mut().downcast_mut::<FleeMovementGenerator>()
                             {
                                 flee.update_target_position(target_state.position);

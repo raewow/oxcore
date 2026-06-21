@@ -2,8 +2,9 @@
 
 use super::generator::{MovementGenerator, MovementUpdate};
 use super::generators::{
-    ChaseMovementGenerator, FleeMovementGenerator, HomeMovementGenerator, IdleMovementGenerator,
-    RandomMovementGenerator, Waypoint, WaypointMovementGenerator,
+    ChaseMovementGenerator, FearMovementGenerator, FleeMovementGenerator, HomeMovementGenerator,
+    IdleMovementGenerator, RandomMovementGenerator, TimedFearMovementGenerator, Waypoint,
+    WaypointMovementGenerator,
 };
 use super::types::MovementGeneratorType;
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -225,6 +226,39 @@ impl MotionMaster {
         self.add_generator(Box::new(generator), creature_guid, current_pos);
     }
 
+    /// Start feared movement away from a target.
+    pub fn fear(
+        &mut self,
+        fright: ObjectGuid,
+        duration_ms: u32,
+        flee_distance: f32,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        run_speed: f32,
+    ) {
+        if duration_ms > 0 {
+            self.add_generator(
+                Box::new(TimedFearMovementGenerator::new(
+                    fright,
+                    duration_ms,
+                    flee_distance,
+                    run_speed,
+                )),
+                creature_guid,
+                current_pos,
+            );
+        } else {
+            self.add_generator(
+                Box::new(
+                    FearMovementGenerator::new(fright, flee_distance)
+                        .with_timing(2000, false, run_speed),
+                ),
+                creature_guid,
+                current_pos,
+            );
+        }
+    }
+
     /// Stop all movement
     pub fn stop(&mut self, creature_guid: ObjectGuid) {
         self.clear(creature_guid);
@@ -334,7 +368,11 @@ impl MotionMaster {
             }
             MovementGeneratorType::Fleeing => {
                 if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Fleeing) {
-                    if let Some(flee) = gen.as_any_mut().downcast_mut::<FleeMovementGenerator>() {
+                    if let Some(fear) = gen.as_any_mut().downcast_mut::<TimedFearMovementGenerator>() {
+                        fear.on_arrival();
+                    } else if let Some(fear) = gen.as_any_mut().downcast_mut::<FearMovementGenerator>() {
+                        fear.on_arrival();
+                    } else if let Some(flee) = gen.as_any_mut().downcast_mut::<FleeMovementGenerator>() {
                         flee.on_arrival();
                     }
                 }
