@@ -39,9 +39,9 @@ impl WaypointRepository {
     /// Load per-GUID waypoints (creature_movement table)
     async fn load_guid_waypoints(&self) -> anyhow::Result<HashMap<u32, Vec<Waypoint>>> {
         let rows = sqlx::query_as::<_, WaypointRow>(
-            r#"SELECT id, point, position_x, position_y, position_z, orientation, waittime
-               FROM creature_movement
-               ORDER BY id, point"#,
+            r#"SELECT id, point, position_x, position_y, position_z, orientation, waittime, wander_distance, script_id
+                FROM creature_movement
+                ORDER BY id, point"#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -52,9 +52,9 @@ impl WaypointRepository {
     /// Load per-entry waypoints (creature_movement_template table)
     async fn load_template_waypoints(&self) -> anyhow::Result<HashMap<u32, Vec<Waypoint>>> {
         let rows = sqlx::query_as::<_, WaypointRow>(
-            r#"SELECT entry as id, point, position_x, position_y, position_z, orientation, waittime
-               FROM creature_movement_template
-               ORDER BY entry, point"#,
+            r#"SELECT entry as id, point, position_x, position_y, position_z, orientation, waittime, wander_distance, script_id
+                FROM creature_movement_template
+                ORDER BY entry, point"#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -76,7 +76,8 @@ impl WaypointRepository {
                     o: row.orientation.unwrap_or(0.0),
                 },
                 wait_time: row.waittime.unwrap_or(0),
-                script_id: 0,
+                wander_distance: row.wander_distance.unwrap_or(0.0),
+                script_id: row.script_id.unwrap_or(0),
                 orientation: row.orientation,
             });
         }
@@ -100,4 +101,6 @@ struct WaypointRow {
     position_z: f32,
     orientation: Option<f32>,
     waittime: Option<u32>,
+    wander_distance: Option<f32>,
+    script_id: Option<u32>,
 }

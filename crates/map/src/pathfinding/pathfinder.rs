@@ -34,8 +34,13 @@ impl PathFinder {
         let navmesh_result = self.mmap_mgr.calculate_path(map_id, start, end);
 
         match navmesh_result {
-            PathResult::Complete(_) | PathResult::Partial(_) => {
-                return navmesh_result;
+            PathResult::Complete(mut waypoints) => {
+                self.smooth_path(map_id, &mut waypoints);
+                return PathResult::Complete(waypoints);
+            }
+            PathResult::Partial(mut waypoints) => {
+                self.smooth_path(map_id, &mut waypoints);
+                return PathResult::Partial(waypoints);
             }
             PathResult::NoPath | PathResult::StraightLine(_, _) => {
                 // NavMesh unavailable or failed - use obstacle avoidance
@@ -131,7 +136,9 @@ impl PathFinder {
                     waypoint.y
                 );
 
-                return PathResult::Complete(vec![start, waypoint, end]);
+                let mut path = vec![start, waypoint, end];
+                self.smooth_path(map_id, &mut path);
+                return PathResult::Complete(path);
             }
         }
 

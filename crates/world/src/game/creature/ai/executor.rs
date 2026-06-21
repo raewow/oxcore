@@ -859,6 +859,7 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                     point_id: i as u32,
                     position: *pos,
                     wait_time: 0,
+                    wander_distance: 0.0,
                     script_id: 0,
                     orientation: None,
                 })

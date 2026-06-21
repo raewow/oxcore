@@ -14,6 +14,8 @@ pub struct Waypoint {
     pub position: Position,
     /// Milliseconds to wait at this point
     pub wait_time: u32,
+    /// Random wander distance while waiting at this point
+    pub wander_distance: f32,
     /// Script to run on arrival
     pub script_id: u32,
     /// Override orientation at this waypoint
