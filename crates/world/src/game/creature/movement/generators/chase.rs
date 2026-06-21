@@ -28,6 +28,8 @@ pub struct ChaseMovementGenerator {
     /// Target position at the time of the last path calculation
     /// (vmangos: m_fTargetLastX/Y/Z - set in _setTargetLocation)
     target_last_path_pos: Option<Position>,
+    /// Minimum delay between full repaths to avoid jitter
+    repath_cooldown_timer: u32,
     /// Run speed in yards/sec (from creature's speed_run rate * 7.0)
     run_speed: f32,
 }
@@ -49,6 +51,7 @@ impl ChaseMovementGenerator {
             reached_target: false,
             check_distance_timer: 0, // Check immediately on first update
             target_last_path_pos: None,
+            repath_cooldown_timer: 0,
             run_speed,
         }
     }
@@ -129,9 +132,12 @@ impl MovementGenerator for ChaseMovementGenerator {
         self.check_distance_timer = 0; // Check immediately
         self.is_moving = false;
         self.target_last_path_pos = None;
+        self.repath_cooldown_timer = 0;
     }
 
     fn update(&mut self, _creature_guid: ObjectGuid, diff_ms: u32) -> MovementUpdate {
+        self.repath_cooldown_timer = self.repath_cooldown_timer.saturating_sub(diff_ms);
+
         // Count down distance check timer
         self.check_distance_timer = self.check_distance_timer.saturating_sub(diff_ms);
 
@@ -162,7 +168,7 @@ impl MovementGenerator for ChaseMovementGenerator {
 
         // Only repath if target has actually moved from where it was when we last pathed
         // (vmangos: compares m_fTargetLastX/Y/Z vs i_target->GetPosition())
-        if self.is_moving && !self.target_moved_enough() {
+        if self.is_moving && (!self.target_moved_enough() || self.repath_cooldown_timer > 0) {
             return MovementUpdate::Continue;
         }
 
@@ -172,6 +178,7 @@ impl MovementGenerator for ChaseMovementGenerator {
         // Calculate contact point (offset from target center)
         let contact = self.get_contact_point();
         self.is_moving = true;
+        self.repath_cooldown_timer = 500;
 
         MovementUpdate::NewDestination {
             destination: contact,
@@ -196,6 +203,7 @@ impl MovementGenerator for ChaseMovementGenerator {
         self.reached_target = false;
         self.is_moving = false;
         self.check_distance_timer = 0;
+        self.repath_cooldown_timer = 0;
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
