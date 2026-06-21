@@ -1,6 +1,7 @@
 //! Movement module - creature movement system
 
 mod generator;
+mod follower_reference;
 pub mod generators;
 mod motion_master;
 mod spline;
@@ -10,6 +11,7 @@ pub mod waypoint_manager;
 pub mod waypoint_repository;
 
 pub use generator::{MovementGenerator, MovementUpdate};
+pub use follower_reference::FollowerReference;
 pub use motion_master::MotionMaster;
 pub use spline::MoveSpline;
 pub use system::MovementSystem;

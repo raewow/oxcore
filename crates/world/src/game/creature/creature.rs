@@ -146,6 +146,10 @@ pub struct Creature {
     pub movement_paused: bool,
     /// Transport GUID if the creature is currently on a transport
     pub transport_guid: Option<ObjectGuid>,
+    /// Current unit this creature is following, if any
+    pub following_target: Option<ObjectGuid>,
+    /// Units currently following this creature
+    pub followers: Vec<ObjectGuid>,
 }
 
 impl Creature {
@@ -252,6 +256,8 @@ impl Creature {
             speed_run: 1.14286, // Default rate (vmangos DEFAULT_NPC_RUN_SPEED_RATE)
             movement_paused: false,
             transport_guid: None,
+            following_target: None,
+            followers: Vec::new(),
         }
     }
 
@@ -293,6 +299,25 @@ impl Creature {
     pub fn resume_out_of_combat_movement(&mut self) {
         self.movement_paused = false;
         self.motion_master.flags.remove(2); // MotionMasterFlags::PAUSED = 0x02
+    }
+
+    /// Register a follower that is tracking this creature.
+    pub fn add_follower(&mut self, follower_guid: ObjectGuid) {
+        if !self.followers.contains(&follower_guid) {
+            self.followers.push(follower_guid);
+        }
+    }
+
+    /// Unregister a follower.
+    pub fn remove_follower(&mut self, follower_guid: ObjectGuid) {
+        self.followers.retain(|guid| *guid != follower_guid);
+    }
+
+    /// Stop following the current target.
+    pub fn stop_following(&mut self) {
+        self.following_target = None;
+        self.ai_state = AIState::Idle;
+        self.motion_master.stop(self.guid);
     }
 
     /// Update attack timer, returns true if attack is ready
