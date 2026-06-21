@@ -180,6 +180,11 @@ impl MovementGenerator for FearMovementGenerator {
         self.next_check_time = 0;
     }
 
+    fn interrupt(&mut self, _creature_guid: ObjectGuid) {
+        self.force_update = false;
+        self.next_check_time = 0;
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -249,6 +254,10 @@ impl MovementGenerator for TimedFearMovementGenerator {
     fn reset(&mut self, creature_guid: ObjectGuid) {
         self.time_remaining = self.total_flee_time;
         self.inner.reset(creature_guid);
+    }
+
+    fn interrupt(&mut self, creature_guid: ObjectGuid) {
+        self.inner.interrupt(creature_guid);
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

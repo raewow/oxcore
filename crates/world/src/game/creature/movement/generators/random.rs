@@ -151,6 +151,10 @@ impl MovementGenerator for RandomMovementGenerator {
         self.wander_steps = 0;
     }
 
+    fn interrupt(&mut self, _creature_guid: ObjectGuid) {
+        self.destination = None;
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }

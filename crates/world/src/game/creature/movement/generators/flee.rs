@@ -141,6 +141,11 @@ impl MovementGenerator for FleeMovementGenerator {
         self.force_update = false;
     }
 
+    fn interrupt(&mut self, _creature_guid: ObjectGuid) {
+        self.has_destination = false;
+        self.force_update = false;
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
