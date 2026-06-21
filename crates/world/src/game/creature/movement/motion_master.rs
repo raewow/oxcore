@@ -2,9 +2,9 @@
 
 use super::generator::{MovementGenerator, MovementUpdate};
 use super::generators::{
-    ChaseMovementGenerator, FearMovementGenerator, FleeMovementGenerator, HomeMovementGenerator,
-    IdleMovementGenerator, RandomMovementGenerator, TimedFearMovementGenerator, Waypoint,
-    WaypointMovementGenerator,
+    AssistanceDistractMovementGenerator, ChaseMovementGenerator, DistractMovementGenerator,
+    FearMovementGenerator, FleeMovementGenerator, HomeMovementGenerator, IdleMovementGenerator,
+    RandomMovementGenerator, TimedFearMovementGenerator, Waypoint, WaypointMovementGenerator,
 };
 use super::types::MovementGeneratorType;
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -294,6 +294,24 @@ impl MotionMaster {
         self.clear(creature_guid);
     }
 
+    /// Start a short distraction movement.
+    pub fn move_distract(&mut self, creature_guid: ObjectGuid, timer_ms: u32) {
+        self.add_generator(
+            Box::new(DistractMovementGenerator::new(timer_ms)),
+            creature_guid,
+            Position::default(),
+        );
+    }
+
+    /// Start an assistance distraction movement.
+    pub fn move_assistance_distract(&mut self, creature_guid: ObjectGuid, timer_ms: u32) {
+        self.add_generator(
+            Box::new(AssistanceDistractMovementGenerator::new(timer_ms)),
+            creature_guid,
+            Position::default(),
+        );
+    }
+
     /// Clean motion generators immediately.
     pub fn direct_clean(&mut self, creature_guid: ObjectGuid, reset: bool, all: bool) {
         if all {
@@ -502,6 +520,12 @@ impl MotionMaster {
         gen_type: MovementGeneratorType,
     ) -> Option<&mut Box<dyn MovementGenerator>> {
         self.generators.get_mut(&gen_type)
+    }
+}
+
+impl Drop for MotionMaster {
+    fn drop(&mut self) {
+        self.generators.clear();
     }
 }
 

@@ -7,6 +7,7 @@ pub enum MovementGeneratorType {
     Random = 1,
     Waypoint = 2,
     Follow = 3,
+    Distract = 4,
     Point = 5,
     Chase = 8,
     Fleeing = 9,
