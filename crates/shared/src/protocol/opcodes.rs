@@ -156,6 +156,9 @@ impl Opcode {
     pub const MSG_MOVE_TELEPORT_ACK: Opcode = Opcode(0x00C7); // 199
     pub const MSG_MOVE_TELEPORT: Opcode = Opcode(0x00C5); // 197
     pub const MSG_MOVE_KNOCK_BACK: Opcode = Opcode(0x00F1); // 241
+    pub const MSG_MOVE_TIME_SKIPPED: Opcode = Opcode(0x02CE); // 718 (same wire value as CMSG, used for observer rebroadcast)
+    pub const CMSG_MOUNTSPECIAL_ANIM: Opcode = Opcode(0x0171); // 369
+    pub const SMSG_MOUNTSPECIAL_ANIM: Opcode = Opcode(0x0172); // 370
 
     // ============================================================================
     // Movement - Speed Changes (Force - to controller)
@@ -167,6 +170,14 @@ impl Opcode {
     pub const SMSG_FORCE_SWIM_SPEED_CHANGE: Opcode = Opcode(0x00E6); // 230
     pub const SMSG_FORCE_SWIM_BACK_SPEED_CHANGE: Opcode = Opcode(0x02DC); // 732
     pub const SMSG_FORCE_TURN_RATE_CHANGE: Opcode = Opcode(0x02DE); // 734
+
+    // Client acknowledgements of the forced speed changes above
+    pub const CMSG_FORCE_WALK_SPEED_CHANGE_ACK: Opcode = Opcode(0x02DB); // 731
+    pub const CMSG_FORCE_RUN_SPEED_CHANGE_ACK: Opcode = Opcode(0x00E3); // 227
+    pub const CMSG_FORCE_RUN_BACK_SPEED_CHANGE_ACK: Opcode = Opcode(0x00E5); // 229
+    pub const CMSG_FORCE_SWIM_SPEED_CHANGE_ACK: Opcode = Opcode(0x00E7); // 231
+    pub const CMSG_FORCE_SWIM_BACK_SPEED_CHANGE_ACK: Opcode = Opcode(0x02DD); // 733
+    pub const CMSG_FORCE_TURN_RATE_CHANGE_ACK: Opcode = Opcode(0x02DF); // 735
 
     // ============================================================================
     // Movement - Speed Changes (Spline - server-controlled units)

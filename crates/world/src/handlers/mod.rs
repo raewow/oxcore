@@ -685,18 +685,32 @@ pub async fn dispatch_packet(
                     mail::handle_item_text_query(session, packet, world).await?;
                 }
 
-                // Movement acknowledgments (read and discard)
+                // Active mover management
                 Opcode::CMSG_SET_ACTIVE_MOVER => {
-                    let _mover_guid = packet.read_guid();
-                    debug!("CMSG_SET_ACTIVE_MOVER acknowledged");
+                    movement::handle_set_active_mover(session, packet, world)?;
+                }
+                Opcode::CMSG_MOVE_NOT_ACTIVE_MOVER => {
+                    movement::handle_move_not_active_mover(session, packet, world).await?;
                 }
                 Opcode::CMSG_MOVE_TIME_SKIPPED => {
-                    let _mover_guid = packet.read_guid();
-                    let _time_skipped = packet.read_u32();
-                    debug!("CMSG_MOVE_TIME_SKIPPED acknowledged");
+                    movement::handle_move_time_skipped(session, packet, world)?;
+                }
+                Opcode::CMSG_MOUNTSPECIAL_ANIM => {
+                    movement::handle_mount_special_anim(session, packet, world)?;
                 }
                 Opcode::CMSG_FORCE_MOVE_ROOT_ACK => {
                     // Client acknowledges being rooted (e.g. during logout)
+                }
+                Opcode::CMSG_FORCE_RUN_SPEED_CHANGE_ACK
+                | Opcode::CMSG_FORCE_RUN_BACK_SPEED_CHANGE_ACK
+                | Opcode::CMSG_FORCE_SWIM_SPEED_CHANGE_ACK
+                | Opcode::CMSG_FORCE_WALK_SPEED_CHANGE_ACK
+                | Opcode::CMSG_FORCE_SWIM_BACK_SPEED_CHANGE_ACK
+                | Opcode::CMSG_FORCE_TURN_RATE_CHANGE_ACK => {
+                    movement::handle_force_speed_change_ack(session, opcode, packet, world)?;
+                }
+                Opcode::CMSG_MOVE_WATER_WALK_ACK | Opcode::CMSG_MOVE_FEATHER_FALL_ACK => {
+                    movement::handle_movement_flag_change_ack(session, opcode, packet, world)?;
                 }
 
                 // Stubs for systems not yet in v2

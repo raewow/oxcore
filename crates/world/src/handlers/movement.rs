@@ -249,6 +249,449 @@ pub async fn handle_worldport_ack(
     Ok(())
 }
 
+/// Validate incoming movement info before applying it (`WorldSession::VerifyMovementInfo`).
+///
+/// Rejects positions that aren't finite/in-bounds, and for on-transport movement
+/// rejects oversized transport offsets or offsets that produce an invalid absolute
+/// world coordinate.
+pub fn verify_movement_info(movement_info: &MovementInfo) -> bool {
+    use crate::core::common::MoveFlags;
+
+    if !is_valid_map_coord(
+        movement_info.position.x,
+        movement_info.position.y,
+        movement_info.position.z,
+        movement_info.position.o,
+    ) {
+        return false;
+    }
+
+    if movement_info.flags.has_flag(MoveFlags::ONTRANSPORT) {
+        let t = movement_info
+            .transport_position
+            .unwrap_or_default();
+
+        // Transports are size-limited. Also received at zeppelin/lift leave with
+        // absolute continent coords, which can be safely skipped.
+        if t.x.abs() > 250.0 || t.y.abs() > 250.0 || t.z.abs() > 100.0 {
+            return false;
+        }
+
+        if !is_valid_map_coord(
+            movement_info.position.x + t.x,
+            movement_info.position.y + t.y,
+            movement_info.position.z + t.z,
+            movement_info.position.o + t.o,
+        ) {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Equivalent of `MaNGOS::IsValidMapCoord` for a single coordinate set.
+///
+/// Coordinates must be finite and within the map coordinate bound (MAX_MAP_COORD
+/// is ~64*533.33 ≈ 17066.666); orientation must be finite.
+fn is_valid_map_coord(x: f32, y: f32, z: f32, o: f32) -> bool {
+    const MAX_MAP_COORD: f32 = 64.0 * 533.3333_f32;
+    x.is_finite()
+        && y.is_finite()
+        && z.is_finite()
+        && o.is_finite()
+        && x.abs() <= MAX_MAP_COORD
+        && y.abs() <= MAX_MAP_COORD
+        && z.abs() <= MAX_MAP_COORD
+}
+
+/// Handle CMSG_SET_ACTIVE_MOVER (`WorldSession::HandleSetActiveMoverOpcode`).
+///
+/// Records which unit the client believes it is controlling. Without pet
+/// possession / mind control, the only legal mover is the player itself; a
+/// mismatch is logged and the client is corrected back to the player GUID.
+pub fn handle_set_active_mover(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    _world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+
+    let guid_raw = packet
+        .read_guid_raw()
+        .ok_or_else(|| anyhow!("SetActiveMover: missing guid"))?;
+
+    // Empty guid: client is releasing the active mover.
+    if guid_raw == 0 {
+        session.set_client_mover_guid(None);
+        return Ok(());
+    }
+
+    let requested = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
+
+    if requested.counter() != player_guid.counter() {
+        debug!(
+            "[SET_ACTIVE_MOVER] Incorrect mover guid {:?}; correcting to player {:?}",
+            requested, player_guid
+        );
+        // Correct the client's view to the player (mover stays the player).
+        session.set_client_mover_guid(Some(player_guid));
+        return Ok(());
+    }
+
+    session.set_client_mover_guid(Some(requested));
+    Ok(())
+}
+
+/// Handle CMSG_MOVE_NOT_ACTIVE_MOVER (`WorldSession::HandleMoveNotActiveMoverOpcode`).
+///
+/// The client gives up control of the active mover. We clear the active-mover
+/// GUID, validate the trailing movement info, apply the relocation and rebroadcast
+/// a heartbeat/stop to observers.
+pub async fn handle_move_not_active_mover(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+
+    let old_mover_raw = packet
+        .read_packed_guid_raw()
+        .or_else(|| packet.read_guid_raw())
+        .ok_or_else(|| anyhow!("NotActiveMover: missing guid"))?;
+    let _ = old_mover_raw;
+
+    session.set_client_mover_guid(None);
+
+    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+    movement_info.mover_guid = player_guid;
+
+    // Do not accept packets sent before the reject window or that fail validation.
+    if movement_info.time <= session.move_reject_time() {
+        return Ok(());
+    }
+    if !verify_movement_info(&movement_info) {
+        return Ok(());
+    }
+
+    // Choose the rebroadcast opcode based on whether the player is still moving.
+    let opcode = rebroadcast_opcode(&movement_info);
+    world
+        .systems
+        .player
+        .movement()
+        .handle_move(player_guid, opcode, movement_info, world)
+        .await
+}
+
+/// Handle CMSG_MOUNTSPECIAL_ANIM (`WorldSession::HandleMountSpecialAnimOpcode`).
+///
+/// Broadcasts SMSG_MOUNTSPECIAL_ANIM (the mount's special animation) to nearby
+/// players so they see the animation.
+pub fn handle_mount_special_anim(
+    session: &WorldSession,
+    _packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+
+    let mut data = WorldPacket::new(Opcode::SMSG_MOUNTSPECIAL_ANIM);
+    data.write_guid_raw(player_guid.raw());
+
+    world
+        .managers
+        .broadcast_mgr
+        .broadcast_nearby_exclude_self(player_guid, &data);
+    Ok(())
+}
+
+/// Handle CMSG_MOVE_TIME_SKIPPED (`WorldSession::HandleMoveTimeSkippedOpcode`).
+///
+/// The client reports it skipped `lag` ms of movement time. We rebroadcast the
+/// skip to observers so their extrapolation of this mover stays in sync.
+pub fn handle_move_time_skipped(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+
+    let guid_raw = packet
+        .read_guid_raw()
+        .ok_or_else(|| anyhow!("MoveTimeSkipped: missing guid"))?;
+    let lag = packet
+        .read_u32()
+        .ok_or_else(|| anyhow!("MoveTimeSkipped: missing lag"))?;
+
+    // Only the player is a valid mover (no pet/possession), so resolve and bail
+    // if the guid isn't controllable by this client.
+    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
+    if session.get_mover_from_guid(mover).is_none() {
+        return Ok(());
+    }
+
+    let mut data = WorldPacket::new(Opcode::MSG_MOVE_TIME_SKIPPED);
+    data.write_packed_guid_raw(player_guid.counter() as u64);
+    data.write_u32(lag);
+
+    world
+        .managers
+        .broadcast_mgr
+        .broadcast_nearby_exclude_self(player_guid, &data);
+    Ok(())
+}
+
+/// Move types that carry a per-type speed/turn rate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpeedMoveType {
+    Walk,
+    Run,
+    RunBack,
+    Swim,
+    SwimBack,
+    TurnRate,
+}
+
+impl SpeedMoveType {
+    /// Map a `CMSG_FORCE_*_CHANGE_ACK` opcode to its move type.
+    fn from_ack_opcode(opcode: Opcode) -> Option<Self> {
+        Some(match opcode {
+            Opcode::CMSG_FORCE_RUN_SPEED_CHANGE_ACK => Self::Run,
+            Opcode::CMSG_FORCE_RUN_BACK_SPEED_CHANGE_ACK => Self::RunBack,
+            Opcode::CMSG_FORCE_SWIM_SPEED_CHANGE_ACK => Self::Swim,
+            Opcode::CMSG_FORCE_WALK_SPEED_CHANGE_ACK => Self::Walk,
+            Opcode::CMSG_FORCE_SWIM_BACK_SPEED_CHANGE_ACK => Self::SwimBack,
+            Opcode::CMSG_FORCE_TURN_RATE_CHANGE_ACK => Self::TurnRate,
+            _ => return None,
+        })
+    }
+
+    /// The MSG_MOVE_SET_* opcode used to inform observers of the new value.
+    fn observer_opcode(self) -> Opcode {
+        match self {
+            Self::Walk => Opcode::MSG_MOVE_SET_WALK_SPEED,
+            Self::Run => Opcode::MSG_MOVE_SET_RUN_SPEED,
+            Self::RunBack => Opcode::MSG_MOVE_SET_RUN_BACK_SPEED,
+            Self::Swim => Opcode::MSG_MOVE_SET_SWIM_SPEED,
+            Self::SwimBack => Opcode::MSG_MOVE_SET_SWIM_BACK_SPEED,
+            Self::TurnRate => Opcode::MSG_MOVE_SET_TURN_RATE,
+        }
+    }
+}
+
+/// Handle the `CMSG_FORCE_*_CHANGE_ACK` family
+/// (`WorldSession::HandleForceSpeedChangeAckOpcodes`).
+///
+/// The client acknowledges a server-forced speed/turn-rate change. We apply the
+/// authoritative value server-side (for the move types rcore tracks) and inform
+/// nearby observers via the matching MSG_MOVE_SET_* opcode.
+///
+/// Note: the pending-movement-change controller queue (`HasPendingMovementChange`
+/// / `FindPendingMovementSpeedChange`) and anticheat tests are not ported yet, so
+/// the ack is accepted unconditionally — the server only emits these forced
+/// changes deliberately (e.g. the GM `.speed` command).
+pub fn handle_force_speed_change_ack(
+    session: &WorldSession,
+    opcode: Opcode,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+
+    let Some(move_type) = SpeedMoveType::from_ack_opcode(opcode) else {
+        return Ok(());
+    };
+
+    // Wire format (1.12): packed guid, movement counter (u32), movement info, speed (f32).
+    let guid_raw = packet
+        .read_packed_guid_raw()
+        .ok_or_else(|| anyhow!("SpeedChangeAck: missing guid"))?;
+    let _movement_counter = packet
+        .read_u32()
+        .ok_or_else(|| anyhow!("SpeedChangeAck: missing counter"))?;
+    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+    let new_speed = packet
+        .read_f32()
+        .ok_or_else(|| anyhow!("SpeedChangeAck: missing speed"))?;
+
+    movement_info.mover_guid = player_guid;
+
+    // Only the player is a valid mover (no pet/possession).
+    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
+    if session.get_mover_from_guid(mover).is_none() {
+        return Ok(());
+    }
+
+    let position_valid =
+        movement_info.time > session.move_reject_time() && verify_movement_info(&movement_info);
+
+    // Apply the authoritative speed and (if valid) the relocation in one lock.
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            match move_type {
+                SpeedMoveType::Walk => player.movement.walk_speed = new_speed,
+                SpeedMoveType::Run => player.movement.run_speed = new_speed,
+                SpeedMoveType::Swim => player.movement.swim_speed = new_speed,
+                SpeedMoveType::TurnRate => player.movement.turn_rate = new_speed,
+                // rcore does not track run-back / swim-back speeds; observers are
+                // still notified below.
+                SpeedMoveType::RunBack | SpeedMoveType::SwimBack => {}
+            }
+            if position_valid {
+                player.movement.position = movement_info.position;
+                player.movement.flags = movement_info.flags.value();
+                player.movement.movement_flags = movement_info.flags.value();
+                player.movement.timestamp = movement_info.time;
+                player.movement.last_movement_time = movement_info.time;
+            }
+        });
+
+    // Inform observers: packed guid + movement info + new speed.
+    // write_to_packet emits the packed mover guid first, matching the C++ layout.
+    let mut data = WorldPacket::new(move_type.observer_opcode());
+    movement_info.write_to_packet(&mut data);
+    data.write_f32(new_speed);
+
+    world
+        .managers
+        .broadcast_mgr
+        .broadcast_nearby_exclude_self(player_guid, &data);
+
+    Ok(())
+}
+
+/// Movement-flag toggles the client can acknowledge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlagChange {
+    WaterWalk,
+    FeatherFall,
+}
+
+impl FlagChange {
+    fn from_ack_opcode(opcode: Opcode) -> Option<Self> {
+        Some(match opcode {
+            Opcode::CMSG_MOVE_WATER_WALK_ACK => Self::WaterWalk,
+            Opcode::CMSG_MOVE_FEATHER_FALL_ACK => Self::FeatherFall,
+            _ => return None,
+        })
+    }
+
+    fn observer_opcode(self) -> Opcode {
+        match self {
+            Self::WaterWalk => Opcode::MSG_MOVE_WATER_WALK,
+            Self::FeatherFall => Opcode::MSG_MOVE_FEATHER_FALL,
+        }
+    }
+}
+
+/// Handle the `CMSG_MOVE_*_ACK` flag-toggle family
+/// (`WorldSession::HandleMovementFlagChangeToggleAck`).
+///
+/// The client acknowledges a server-forced water-walk / feather-fall toggle. We
+/// apply the authoritative flag (for the ones rcore tracks) and notify observers
+/// with the matching MSG_MOVE_* opcode.
+///
+/// Not ported: the pending-change controller queue, anticheat tests, and hover
+/// (rcore never emits SMSG_MOVE_SET_HOVER). Ack accepted unconditionally since the
+/// server only emits these toggles deliberately (e.g. ghost-form water walking).
+pub fn handle_movement_flag_change_ack(
+    session: &WorldSession,
+    opcode: Opcode,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+
+    let Some(change) = FlagChange::from_ack_opcode(opcode) else {
+        return Ok(());
+    };
+
+    // Wire format (1.12): packed guid, movement counter (u32), movement info, apply (u32).
+    let guid_raw = packet
+        .read_packed_guid_raw()
+        .ok_or_else(|| anyhow!("FlagChangeAck: missing guid"))?;
+    let _movement_counter = packet
+        .read_u32()
+        .ok_or_else(|| anyhow!("FlagChangeAck: missing counter"))?;
+    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+    let apply = packet.read_u32().unwrap_or(0) != 0;
+
+    movement_info.mover_guid = player_guid;
+
+    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
+    if session.get_mover_from_guid(mover).is_none() {
+        return Ok(());
+    }
+
+    let position_valid =
+        movement_info.time > session.move_reject_time() && verify_movement_info(&movement_info);
+
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            if let FlagChange::WaterWalk = change {
+                player.movement.water_walking = apply;
+            }
+            if position_valid {
+                player.movement.position = movement_info.position;
+                player.movement.flags = movement_info.flags.value();
+                player.movement.movement_flags = movement_info.flags.value();
+                player.movement.timestamp = movement_info.time;
+                player.movement.last_movement_time = movement_info.time;
+            }
+        });
+
+    // Observers: packed guid + movement info (no apply byte, matching C++).
+    let mut data = WorldPacket::new(change.observer_opcode());
+    movement_info.write_to_packet(&mut data);
+
+    world
+        .managers
+        .broadcast_mgr
+        .broadcast_nearby_exclude_self(player_guid, &data);
+
+    Ok(())
+}
+
+/// Pick the observer rebroadcast opcode for a movement info: heartbeat while
+/// moving, stop otherwise (mirrors the `MOVEFLAG_MASK_MOVING ? HEARTBEAT : STOP`
+/// choice in several handlers).
+fn rebroadcast_opcode(movement_info: &MovementInfo) -> Opcode {
+    use crate::core::common::MoveFlags;
+
+    // MOVEFLAG_MASK_MOVING = forward|backward|strafe l/r|falling far|turn l/r|pitch up/down
+    const MASK_MOVING: u32 = 0x0000_0001
+        | 0x0000_0002
+        | 0x0000_0004
+        | 0x0000_0008
+        | 0x0000_4000
+        | 0x0000_0010
+        | 0x0000_0020
+        | 0x0000_0040
+        | 0x0000_0080;
+
+    if movement_info.flags.has_flag(MoveFlags::from(MASK_MOVING)) {
+        Opcode::MSG_MOVE_HEARTBEAT
+    } else {
+        Opcode::MSG_MOVE_STOP
+    }
+}
+
 /// Handle all MSG_MOVE_* packets
 pub async fn handle_movement(
     session: &WorldSession,
@@ -310,6 +753,22 @@ pub async fn handle_movement(
     // Continue with normal movement processing
     let mut movement_info = MovementInfo::read_from_packet(packet)?;
     movement_info.mover_guid = player_guid;
+
+    // Do not accept packets sent before the reject window (anticheat backoff).
+    if movement_info.time <= session.move_reject_time() {
+        return Ok(());
+    }
+
+    // Ignore client movement while a teleport is awaiting its ACK; the worldport/
+    // teleport-ack handlers own position during that window.
+    if session.get_pending_teleport().is_some() {
+        return Ok(());
+    }
+
+    // Reject physically impossible / out-of-bounds movement info.
+    if !verify_movement_info(&movement_info) {
+        return Ok(());
+    }
 
     debug!(
         "[MOVE-IN] opcode={:?} guid={:?} orient={:.4} time={} flags=0x{:08X}",

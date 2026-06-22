@@ -1,7 +1,7 @@
 //! World Session - represents a player connection
 
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -33,6 +33,11 @@ pub struct WorldSession {
     auction_list_request_in_progress: AtomicBool,
     /// Pending area trigger teleport (dest_map, dest_instance_id, dest_pos)
     pending_teleport: Arc<RwLock<Option<(u32, u32, Position)>>>,
+    /// GUID the client currently believes it is controlling (`m_clientMoverGuid`).
+    /// `None`/empty means the player itself. Set via CMSG_SET_ACTIVE_MOVER.
+    client_mover_guid: RwLock<Option<ObjectGuid>>,
+    /// Server time (ms) before which movement packets are rejected (`m_moveRejectTime`).
+    move_reject_time: AtomicU32,
 }
 
 impl WorldSession {
@@ -56,6 +61,59 @@ impl WorldSession {
             login_in_progress: AtomicBool::new(false),
             auction_list_request_in_progress: AtomicBool::new(false),
             pending_teleport: Arc::new(RwLock::new(None)),
+            client_mover_guid: RwLock::new(None),
+            move_reject_time: AtomicU32::new(0),
+        }
+    }
+
+    /// GUID the client currently controls. Returns the player's own GUID when no
+    /// alternate mover has been set, matching `WorldSession::GetMover()` for the
+    /// common case (no pet possession / mind control yet).
+    pub fn client_mover_guid(&self) -> Option<ObjectGuid> {
+        match *self.client_mover_guid.read() {
+            Some(guid) => Some(guid),
+            None => self.player_guid(),
+        }
+    }
+
+    /// Set the active mover GUID (`m_clientMoverGuid`). Pass `None` to clear.
+    pub fn set_client_mover_guid(&self, guid: Option<ObjectGuid>) {
+        *self.client_mover_guid.write() = guid;
+    }
+
+    /// Resolve a mover GUID the client claims to control, mirroring
+    /// `WorldSession::GetMoverFromGuid`. Without pet/possession support the only
+    /// valid mover is the player itself.
+    pub fn get_mover_from_guid(&self, guid: ObjectGuid) -> Option<ObjectGuid> {
+        let player = self.player_guid()?;
+        if guid.counter() == player.counter() {
+            return Some(player);
+        }
+        // The client may still address the player by the active-mover GUID.
+        if let Some(mover) = *self.client_mover_guid.read() {
+            if guid.counter() == mover.counter() {
+                return Some(player);
+            }
+        }
+        None
+    }
+
+    /// Current move-reject timestamp (`m_moveRejectTime`, ms).
+    pub fn move_reject_time(&self) -> u32 {
+        self.move_reject_time.load(Ordering::Relaxed)
+    }
+
+    /// Reject movement packets with a client timestamp at or before `time_ms`.
+    pub fn set_move_reject_time(&self, time_ms: u32) {
+        self.move_reject_time.store(time_ms, Ordering::Relaxed);
+    }
+
+    /// Reject incoming movement packets for the next `ms` milliseconds
+    /// (`WorldSession::RejectMovementPacketsFor`).
+    pub fn reject_movement_packets_for(&self, ms: u32) {
+        let timeout = crate::core::common::get_ms_time().wrapping_add(ms);
+        if self.move_reject_time() < timeout {
+            self.set_move_reject_time(timeout);
         }
     }
 
