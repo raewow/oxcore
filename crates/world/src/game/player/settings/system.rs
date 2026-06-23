@@ -156,15 +156,18 @@ impl SettingsSystem {
     /// Handle incoming CMSG_UPDATE_ACCOUNT_DATA.
     ///
     /// The client sends compressed data for one of 8 account data types.
-    /// We decompress, store, and echo confirmation back.
+    /// We decompress, store in memory, persist to DB immediately, and echo confirmation back.
     pub async fn handle_account_data_update(
         &self,
         player_guid: ObjectGuid,
+        account_id: u32,
         data_type: u32,
         decompressed_size: u32,
         compressed_data: &[u8],
         world: &World,
     ) -> Result<()> {
+        use oxcore_shared::database::CharacterRepository;
+
         let ad_type = match AccountDataType::from_u32(data_type) {
             Some(t) => t,
             None => {
@@ -207,6 +210,24 @@ impl SettingsSystem {
                 });
                 player.settings.need_save = true;
             });
+
+        // Persist to DB immediately
+        let char_repo = CharacterRepository::new(Arc::new(world.databases.character.clone()));
+        let time_u64 = timestamp as u64;
+        if ad_type.is_global() {
+            char_repo
+                .upsert_account_data(account_id, data_type, time_u64, &decompressed)
+                .await?;
+        } else {
+            char_repo
+                .upsert_character_account_data(
+                    player_guid.counter(),
+                    data_type,
+                    time_u64,
+                    &decompressed,
+                )
+                .await?;
+        }
 
         // Echo back SMSG_UPDATE_ACCOUNT_DATA to confirm receipt
         use oxcore_shared::messages::settings::SmsgUpdateAccountData;

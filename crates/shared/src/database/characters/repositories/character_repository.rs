@@ -502,6 +502,59 @@ impl CharacterRepository {
         Ok(())
     }
 
+    // ========== TUTORIALS ==========
+
+    /// Load tutorial flags for an account. Returns None if no row exists yet.
+    pub async fn find_tutorials(&self, account_id: u64) -> Result<Option<[u32; 8]>> {
+        let row = sqlx::query(
+            "SELECT tut0, tut1, tut2, tut3, tut4, tut5, tut6, tut7 \
+             FROM character_tutorial WHERE account = ?",
+        )
+        .bind(account_id)
+        .fetch_optional(&*self.pool)
+        .await
+        .context("Failed to fetch tutorial flags")?;
+
+        if let Some(r) = row {
+            use sqlx::Row;
+            Ok(Some([
+                r.try_get::<u32, _>("tut0").context("tut0")?,
+                r.try_get::<u32, _>("tut1").context("tut1")?,
+                r.try_get::<u32, _>("tut2").context("tut2")?,
+                r.try_get::<u32, _>("tut3").context("tut3")?,
+                r.try_get::<u32, _>("tut4").context("tut4")?,
+                r.try_get::<u32, _>("tut5").context("tut5")?,
+                r.try_get::<u32, _>("tut6").context("tut6")?,
+                r.try_get::<u32, _>("tut7").context("tut7")?,
+            ]))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Upsert tutorial flags for an account.
+    pub async fn save_tutorials(&self, account_id: u64, flags: &[u32; 8]) -> Result<()> {
+        sqlx::query(
+            "REPLACE INTO character_tutorial \
+             (account, tut0, tut1, tut2, tut3, tut4, tut5, tut6, tut7) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(account_id)
+        .bind(flags[0])
+        .bind(flags[1])
+        .bind(flags[2])
+        .bind(flags[3])
+        .bind(flags[4])
+        .bind(flags[5])
+        .bind(flags[6])
+        .bind(flags[7])
+        .execute(&*self.pool)
+        .await
+        .context("Failed to save tutorial flags")?;
+
+        Ok(())
+    }
+
     // ========== SPELL COOLDOWNS ==========
 
     /// Find all spell cooldowns for a character.
@@ -525,6 +578,111 @@ impl CharacterRepository {
             .await
             .context("Failed to delete character spell cooldowns")?;
 
+        Ok(())
+    }
+
+    // ========== ACCOUNT DATA ==========
+
+    /// Load all global account_data rows for an account (types 0, 2, 4).
+    pub async fn find_account_data(&self, account_id: u32) -> Result<Vec<(u32, u64, Vec<u8>)>> {
+        let rows = sqlx::query("SELECT `type`, `time`, `data` FROM account_data WHERE account = ?")
+            .bind(account_id)
+            .fetch_all(&*self.pool)
+            .await
+            .context("Failed to fetch account_data")?;
+        rows.into_iter()
+            .map(|row| {
+                let data_type: u32 = row.try_get("type")?;
+                let time: u64 = row.try_get("time")?;
+                let data: Vec<u8> = row.try_get("data")?;
+                Ok((data_type, time, data))
+            })
+            .collect()
+    }
+
+    /// Load all character_account_data rows for a character guid (types 1, 3, 5, 6, 7).
+    pub async fn find_character_account_data(
+        &self,
+        guid: u32,
+    ) -> Result<Vec<(u32, u64, Vec<u8>)>> {
+        let rows = sqlx::query(
+            "SELECT `type`, `time`, `data` FROM character_account_data WHERE guid = ?",
+        )
+        .bind(guid)
+        .fetch_all(&*self.pool)
+        .await
+        .context("Failed to fetch character_account_data")?;
+        rows.into_iter()
+            .map(|row| {
+                let data_type: u32 = row.try_get("type")?;
+                let time: u64 = row.try_get("time")?;
+                let data: Vec<u8> = row.try_get("data")?;
+                Ok((data_type, time, data))
+            })
+            .collect()
+    }
+
+    /// Upsert a global account_data entry.
+    pub async fn upsert_account_data(
+        &self,
+        account_id: u32,
+        data_type: u32,
+        time: u64,
+        data: &[u8],
+    ) -> Result<()> {
+        sqlx::query(
+            "REPLACE INTO account_data (account, `type`, `time`, `data`) VALUES (?, ?, ?, ?)",
+        )
+        .bind(account_id)
+        .bind(data_type)
+        .bind(time)
+        .bind(data)
+        .execute(&*self.pool)
+        .await
+        .context("Failed to upsert account_data")?;
+        Ok(())
+    }
+
+    /// Upsert a per-character account_data entry.
+    pub async fn upsert_character_account_data(
+        &self,
+        guid: u32,
+        data_type: u32,
+        time: u64,
+        data: &[u8],
+    ) -> Result<()> {
+        sqlx::query(
+            "REPLACE INTO character_account_data (guid, `type`, `time`, `data`) VALUES (?, ?, ?, ?)",
+        )
+        .bind(guid)
+        .bind(data_type)
+        .bind(time)
+        .bind(data)
+        .execute(&*self.pool)
+        .await
+        .context("Failed to upsert character_account_data")?;
+        Ok(())
+    }
+
+    /// Delete a global account_data entry.
+    pub async fn delete_account_data(&self, account_id: u32, data_type: u32) -> Result<()> {
+        sqlx::query("DELETE FROM account_data WHERE account = ? AND `type` = ?")
+            .bind(account_id)
+            .bind(data_type)
+            .execute(&*self.pool)
+            .await
+            .context("Failed to delete account_data")?;
+        Ok(())
+    }
+
+    /// Delete a per-character account_data entry.
+    pub async fn delete_character_account_data(&self, guid: u32, data_type: u32) -> Result<()> {
+        sqlx::query("DELETE FROM character_account_data WHERE guid = ? AND `type` = ?")
+            .bind(guid)
+            .bind(data_type)
+            .execute(&*self.pool)
+            .await
+            .context("Failed to delete character_account_data")?;
         Ok(())
     }
 

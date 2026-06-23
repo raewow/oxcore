@@ -740,6 +740,72 @@ impl PlayerManager {
         Ok(())
     }
 
+    /// Save tutorial flags to database.
+    pub async fn save_tutorials(
+        &self,
+        player_guid: ObjectGuid,
+        character_db: &sqlx::MySqlPool,
+    ) -> anyhow::Result<()> {
+        let (account_id, flags) = match self.get_player(player_guid) {
+            Some(p) => (p.account_id as u64, p.settings.tutorial_flags),
+            None => return Ok(()),
+        };
+        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
+        char_repo.save_tutorials(account_id, &flags).await?;
+        Ok(())
+    }
+
+    /// Save account data blobs to the database.
+    ///
+    /// Global types (0, 2, 4) go to `account_data`, keyed on account_id.
+    /// Per-character types (1, 3, 5, 6, 7) go to `character_account_data`, keyed on guid.
+    pub async fn save_account_data(
+        &self,
+        player_guid: ObjectGuid,
+        account_id: u32,
+        character_db: &sqlx::MySqlPool,
+    ) -> anyhow::Result<()> {
+        use oxcore_shared::database::CharacterRepository;
+        use oxcore_shared::game::account_data::AccountDataType;
+
+        let entries: Vec<(u32, u32, Vec<u8>)> = {
+            match self.get_player(player_guid) {
+                Some(player) => player
+                    .settings
+                    .account_data
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, slot)| {
+                        slot.as_ref().map(|e| (i as u32, e.time, e.data.clone()))
+                    })
+                    .collect(),
+                None => return Ok(()),
+            }
+        };
+
+        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
+        let guid = player_guid.counter();
+
+        for (data_type, time, data) in entries {
+            let time_u64 = time as u64;
+            match AccountDataType::from_u32(data_type) {
+                Some(t) if t.is_global() => {
+                    char_repo
+                        .upsert_account_data(account_id, data_type, time_u64, &data)
+                        .await?;
+                }
+                Some(_) => {
+                    char_repo
+                        .upsert_character_account_data(guid, data_type, time_u64, &data)
+                        .await?;
+                }
+                None => {}
+            }
+        }
+
+        Ok(())
+    }
+
     /// Save all player data to database (comprehensive save for logout and auto-saves)
     ///
     /// This saves:
@@ -751,12 +817,14 @@ impl PlayerManager {
     /// - Action bar buttons
     /// - Reputation standings
     /// - Skills
+    /// - Account data blobs
     pub async fn save_all_player_data(
         &self,
         player_guid: ObjectGuid,
+        account_id: u32,
         character_db: &sqlx::MySqlPool,
     ) -> anyhow::Result<()> {
-        self.save_all_player_data_with_context(player_guid, character_db, "SAVE")
+        self.save_all_player_data_with_context(player_guid, account_id, character_db, "SAVE")
             .await
     }
 
@@ -764,6 +832,7 @@ impl PlayerManager {
     pub async fn save_all_player_data_with_context(
         &self,
         player_guid: ObjectGuid,
+        account_id: u32,
         character_db: &sqlx::MySqlPool,
         context: &str,
     ) -> anyhow::Result<()> {
@@ -888,6 +957,31 @@ impl PlayerManager {
             return Err(e);
         }
         tracing::info!("[{context}] Saved skills for player {}", player_guid);
+
+        tracing::info!("[{context}] Saving tutorial flags for player {}", player_guid);
+        if let Err(e) = self.save_tutorials(player_guid, character_db).await {
+            tracing::error!(
+                "[{context}] Failed saving tutorial flags for player {}: {}",
+                player_guid,
+                e
+            );
+            return Err(e);
+        }
+        tracing::info!("[{context}] Saved tutorial flags for player {}", player_guid);
+
+        tracing::info!("[{context}] Saving account data for player {}", player_guid);
+        if let Err(e) = self
+            .save_account_data(player_guid, account_id, character_db)
+            .await
+        {
+            tracing::error!(
+                "[{context}] Failed saving account data for player {}: {}",
+                player_guid,
+                e
+            );
+            return Err(e);
+        }
+        tracing::info!("[{context}] Saved account data for player {}", player_guid);
 
         Ok(())
     }

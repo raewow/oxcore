@@ -254,6 +254,7 @@ pub async fn handle_player_login_with_guid(
         info!("[LOGIN] No homebind found, using current position as fallback");
     }
     player.next_level_xp = crate::game::player::experience::calculate_xp_for_level(player.level);
+    player.account_id = session.account_id();
 
     // 4. Add to PlayerManager
     info!("[LOGIN] Adding player to PlayerManager");
@@ -480,8 +481,9 @@ pub async fn handle_player_login_with_guid(
     // 7.0.1 Load player data from database in parallel
     info!("[LOGIN] Loading player data (reputation, skills, actions) in parallel");
 
-    let (reputation_rows, skill_rows, action_rows, active_quests, rewarded_quests) = {
+    let (reputation_rows, skill_rows, action_rows, active_quests, rewarded_quests, tutorial_flags_opt) = {
         let char_guid = guid.counter();
+        let account_id_u64 = session.account_id() as u64;
         let char_db = Arc::new(databases.character.clone());
 
         tokio::try_join!(
@@ -515,6 +517,11 @@ pub async fn handle_player_login_with_guid(
                 };
                 let quest_repo = QuestRepository::new(char_db.clone());
                 quest_repo.find_rewarded_quests(char_guid).await
+            },
+            // Tutorial flags from DB (per-account)
+            async {
+                let char_repo = CharacterRepository::new(char_db.clone());
+                char_repo.find_tutorials(account_id_u64).await
             }
         )?
     };
@@ -531,6 +538,48 @@ pub async fn handle_player_login_with_guid(
         active_quests.len(),
         rewarded_quests.len()
     );
+
+    // Load account data from database (global + per-character)
+    {
+        use oxcore_shared::game::account_data::AccountDataType;
+        use crate::game::player::settings::state::AccountDataEntry;
+
+        let char_guid = guid.counter();
+        let account_id = session.account_id();
+        let char_db = Arc::new(databases.character.clone());
+
+        let (global_rows, char_rows) = tokio::try_join!(
+            async {
+                let repo = CharacterRepository::new(char_db.clone());
+                repo.find_account_data(account_id).await
+            },
+            async {
+                let repo = CharacterRepository::new(char_db.clone());
+                repo.find_character_account_data(char_guid).await
+            }
+        )?;
+
+        world.managers.player_mgr.with_player_mut(guid, |player| {
+            for (data_type, time, data) in global_rows {
+                if let Some(t) = AccountDataType::from_u32(data_type) {
+                    if t.is_global() && (data_type as usize) < player.settings.account_data.len() {
+                        player.settings.account_data[data_type as usize] =
+                            Some(AccountDataEntry { time: time as u32, data });
+                    }
+                }
+            }
+            for (data_type, time, data) in char_rows {
+                if let Some(t) = AccountDataType::from_u32(data_type) {
+                    if !t.is_global() && (data_type as usize) < player.settings.account_data.len() {
+                        player.settings.account_data[data_type as usize] =
+                            Some(AccountDataEntry { time: time as u32, data });
+                    }
+                }
+            }
+        });
+
+        info!("[LOGIN] Account data loaded from database");
+    }
 
     // Load quest state into player
     world
@@ -638,6 +687,17 @@ pub async fn handle_player_login_with_guid(
                 warn!("[LOGIN] Failed to load default action buttons: {}", e);
             }
         }
+    }
+
+    // 7.06.5 Apply tutorial flags loaded from database
+    if let Some(flags) = tutorial_flags_opt {
+        world.managers.player_mgr.with_player_mut(guid, |player| {
+            player.settings.tutorial_flags = flags;
+            player.settings.need_save = false;
+        });
+        info!("[LOGIN] Tutorial flags loaded from database");
+    } else {
+        info!("[LOGIN] No tutorial flags in database, starting with defaults");
     }
 
     // 7.07 Load spells - default race/class spells + saved spells from database (in parallel)
@@ -1801,15 +1861,20 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
     session.send_msg(SmsgLogoutComplete)?;
 
     // Save all player data to database (BEFORE removing from systems)
-    // This saves: position, experience, health/power, rest state, spells, action bars, reputation, skills
+    // This saves: position, experience, health/power, rest state, spells, action bars, reputation, skills, account data
     // This must happen before on_player_logout removes the player from PlayerManager
     world
         .managers
         .player_mgr
-        .save_all_player_data_with_context(player_guid, &world.databases.character, save_context)
+        .save_all_player_data_with_context(
+            player_guid,
+            session.account_id(),
+            &world.databases.character,
+            save_context,
+        )
         .await?;
     info!(
-        "[{save_context}] Saved all player data (position, XP/level, health/power, rest, spells, action bars, reputation, skills) for {:?}",
+        "[{save_context}] Saved all player data (position, XP/level, health/power, rest, spells, action bars, reputation, skills, account data) for {:?}",
         player_guid
     );
 

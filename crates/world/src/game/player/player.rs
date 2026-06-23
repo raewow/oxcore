@@ -119,6 +119,8 @@ pub struct Player {
     /// Auction access mode: 0 = normal, 1 = neutral, -1 = enemy faction
     /// (C++ Player::m_ExtraFlags PLAYER_EXTRA_AUCTION_NEUTRAL / PLAYER_EXTRA_AUCTION_ENEMY)
     pub auction_access_mode: i8,
+    /// Account ID that owns this character (used for per-account DB tables such as tutorial flags).
+    pub account_id: u32,
     /// Homebind map ID (hearthstone destination)
     pub homebind_map: u32,
     /// Homebind zone ID
@@ -217,6 +219,7 @@ impl Player {
             current_banker_guid: None,
             selection: None,
             auction_access_mode: 0,
+            account_id: 0,
             homebind_map: map_id,
             homebind_zone: zone_id,
             homebind_x: 0.0,

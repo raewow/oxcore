@@ -179,6 +179,7 @@ pub async fn handle_update_account_data(
         .settings
         .handle_account_data_update(
             player_guid,
+            session.account_id(),
             data_type,
             decompressed_size,
             &compressed_data,
