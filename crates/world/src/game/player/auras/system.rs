@@ -1087,8 +1087,7 @@ impl AuraSystem {
             }
         }
 
-        // Cast triggered spells (must be done after proc processing to avoid re-entrancy)
-        // Get the player's current target for offensive triggered spells
+        // Cast triggered spells via TriggerProccedSpell (readiness + cooldown)
         let attack_target = world
             .systems
             .player
@@ -1099,11 +1098,11 @@ impl AuraSystem {
             let _ = world
                 .systems
                 .spells
-                .cast_spell(
+                .trigger_procced_spell(
                     player_guid,
-                    trigger_id,
                     attack_target,
-                    true, // is_triggered = true
+                    trigger_id,
+                    0, // no forced cooldown
                     world,
                 )
                 .await;

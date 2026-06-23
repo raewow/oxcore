@@ -2460,6 +2460,41 @@ impl SpellSystem {
         false
     }
 
+    /// TriggerProccedSpell: fire a spell triggered by a proc, with readiness check and optional
+    /// forced cooldown. Returns true if the spell was cast.
+    pub async fn trigger_procced_spell(
+        &self,
+        caster_guid: ObjectGuid,
+        target_guid: Option<ObjectGuid>,
+        triggered_spell_id: u32,
+        forced_cooldown: u32,
+        world: &World,
+    ) -> Result<bool> {
+        if world.managers.spell_mgr.get(triggered_spell_id).is_none() {
+            return Ok(false);
+        }
+
+        if !self.is_spell_ready(caster_guid, triggered_spell_id, world) {
+            return Ok(false);
+        }
+
+        self.cast_spell(caster_guid, triggered_spell_id, target_guid, true, world)
+            .await?;
+
+        if forced_cooldown > 0 {
+            let now = get_game_time_ms();
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(caster_guid, |player| {
+                    player.spells.add_cooldown(triggered_spell_id, forced_cooldown, now);
+                });
+        }
+
+        Ok(true)
+    }
+
     /// SetCurrentCastedSpell: handle slot-assignment interruption logic.
     /// Called before placing a new ActiveCast into the target slot.
     /// Breaks same-type spells, handles cross-slot breakage (generic/channeled/autorepeat),
