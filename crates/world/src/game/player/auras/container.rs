@@ -337,6 +337,22 @@ impl AuraContainer {
             .sum()
     }
 
+    /// Get multiplicative modifier for auras of a given type where `misc_value & misc_mask != 0`.
+    /// Used for school-mask queries: e.g. percent damage done by spell school.
+    /// Matches C++ Unit::GetTotalAuraMultiplierByMiscMask — bitmask overlap, not equality.
+    /// Returns product of (100 + value) / 100 for matching auras.
+    pub fn get_total_aura_multiplier_by_misc_mask(&self, aura_type: u32, misc_mask: u32) -> f32 {
+        if misc_mask == 0 {
+            return 1.0;
+        }
+        self.auras
+            .values()
+            .filter(|a| a.aura_type == aura_type && (a.misc_value as u32 & misc_mask) != 0)
+            .fold(1.0, |multiplier, aura| {
+                multiplier * (100.0 + aura.current_value() as f32) / 100.0
+            })
+    }
+
     /// Get total number of active auras.
     pub fn count(&self) -> usize {
         self.auras.len()

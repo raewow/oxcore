@@ -98,6 +98,16 @@ pub const AURA_FEIGN_DEATH: u32 = 66; // Feign Death
 pub const AURA_ADD_FLAT_MODIFIER: u32 = 107; // Flat spell modifier (talent: -0.5s cast time)
 pub const AURA_ADD_PCT_MODIFIER: u32 = 108; // Pct spell modifier (talent: +10% damage)
 
+// --- Damage Done Modifiers ---
+pub const AURA_MOD_DAMAGE_DONE_CREATURE: u32 = 59; // Flat damage done vs creature type
+pub const AURA_MOD_DAMAGE_DONE_VERSUS: u32 = 168; // % damage done vs creature type
+pub const AURA_MELEE_ATTACK_POWER_ATTACKER_BONUS: u32 = 165; // Melee AP bonus on attacker
+pub const AURA_RANGED_ATTACK_POWER_ATTACKER_BONUS: u32 = 127; // Ranged AP bonus on attacker
+pub const AURA_MOD_MELEE_ATTACK_POWER_VERSUS: u32 = 102; // Melee AP vs creature type
+pub const AURA_MOD_RANGED_ATTACK_POWER_VERSUS: u32 = 131; // Ranged AP vs creature type
+pub const AURA_MOD_OFFHAND_DAMAGE_PCT: u32 = 122; // Off-hand damage penalty
+pub const AURA_MOD_SPELL_HEALING_OF_STAT_PERCENT: u32 = 175; // Heal bonus % of stat (spirit)
+
 // --- Damage Taken Modifiers ---
 pub const AURA_MOD_DAMAGE_PERCENT_TAKEN: u32 = 87; // % damage taken modifier (e.g., Defensive Stance)
 pub const AURA_MOD_CASTING_SPEED_NOT_STACK: u32 = 65; // Casting speed (haste, non-stacking)

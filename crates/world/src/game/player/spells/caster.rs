@@ -1,9 +1,33 @@
+use crate::dbc::structures::SpellEntry;
+use crate::game::player::auras::aura::Aura;
+use crate::game::player::auras::effects::{
+    AURA_MELEE_ATTACK_POWER_ATTACKER_BONUS, AURA_MOD_DAMAGE_DONE,
+    AURA_MOD_DAMAGE_DONE_CREATURE, AURA_MOD_DAMAGE_DONE_VERSUS,
+    AURA_MOD_DAMAGE_PERCENT_DONE, AURA_MOD_HEALING_DONE,
+    AURA_MOD_HEALING_DONE_PERCENT, AURA_MOD_MELEE_ATTACK_POWER_VERSUS,
+    AURA_MOD_OFFHAND_DAMAGE_PCT, AURA_MOD_RANGED_ATTACK_POWER_VERSUS,
+    AURA_MOD_SPELL_HEALING_OF_STAT_PERCENT, AURA_OVERRIDE_CLASS_SCRIPTS,
+    AURA_RANGED_ATTACK_POWER_ATTACKER_BONUS,
+};
 use crate::game::player::player::Player;
+use crate::game::player::spells::state::SpellModOp;
 use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
 
 const WORLD_BOSS_LEVEL_DIFF: u32 = 3;
 const SPELL_SCHOOL_MASK_NORMAL: u32 = 0x01;
+const SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS: u32 = 0x0002_0000;
+const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
+const SPELL_EFFECT_NORMALIZED_WEAPON_DMG: u32 = 121;
+const SPELL_DAMAGE_CLASS_NONE: u32 = 0;
+const SPELL_DAMAGE_CLASS_MAGIC: u32 = 1;
+const SPELL_DAMAGE_CLASS_MELEE: u32 = 2;
+const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+const BASE_ATTACK: u32 = 0;
+const OFF_ATTACK: u32 = 1;
+const RANGED_ATTACK: u32 = 2;
+const DIRECT_DAMAGE: u32 = 0;
+const DOT: u32 = 2;
 
 fn get_unit_level(guid: ObjectGuid, world: &World) -> Option<u32> {
     if guid.is_player() {
@@ -88,6 +112,586 @@ pub fn get_melee_damage_school_mask(
     _world: &World,
 ) -> u32 {
     SPELL_SCHOOL_MASK_NORMAL
+}
+
+/// Creature rank spell damage modifier.
+/// Faithful `Creature::_GetSpellDamageMod` port.
+/// Returns configurable multiplier (defaults to 1.0 for all ranks).
+pub fn get_spell_damage_mod(rank: u8, world: &World) -> f32 {
+    match rank {
+        0 => 1.0,             // CREATURE_ELITE_NORMAL
+        1 => 1.0,             // CREATURE_ELITE_ELITE
+        2 => 1.0,             // CREATURE_ELITE_RAREELITE
+        3 => 1.0,             // CREATURE_ELITE_WORLDBOSS
+        4 => 1.0,             // CREATURE_ELITE_RARE
+        _ => 1.0,
+    }
+}
+
+/// AP multiplier for weapon-damage-based spells.
+/// Faithful `SpellCaster::GetAPMultiplier` port.
+///
+/// `att_type`: 0 = BASE_ATTACK, 1 = OFF_ATTACK, 2 = RANGED_ATTACK
+/// `normalized`: when true uses fixed normalized speeds (dagger=1.7, 1H=2.4, 2H=3.3, ranged=2.8)
+pub fn get_ap_multiplier(att_type: u32, normalized: bool, weapon_speed: f32, inventory_type: u32, weapon_subclass: u32) -> f32 {
+    if !normalized {
+        return weapon_speed / 1000.0;
+    }
+
+    match att_type {
+        RANGED_ATTACK => 2.8,
+        _ => {
+            match inventory_type {
+                17 | 15 | 16 if weapon_subclass == 15 => 1.7,  // Dagger in weapon slot
+                17 | 15 | 16 => 2.4,                            // 1H weapon
+                10 | 5 => 2.8,                                   // Ranged/thrown
+                _ if inventory_type == 14 || inventory_type == 19 => 3.3,  // 2H weapon
+                _ => 2.4,                                        // Default (fist weapon, etc.)
+            }
+        }
+    }
+}
+
+/// Calculate spell bonus with coefficient scaling and level penalty.
+/// Faithful `SpellCaster::SpellBonusWithCoeffs` port.
+///
+/// `total` is running total, `benefit` is the flat bonus being scaled.
+pub fn spell_bonus_with_coeffs(
+    spell_proto: Option<&SpellEntry>,
+    effect_index: u8,
+    mut total: f32,
+    benefit: f32,
+    damage_type: u32,
+    done_part: bool,
+    world: &World,
+) -> f32 {
+    if benefit == 0.0 {
+        return total;
+    }
+
+    let ei = effect_index as usize;
+
+    // 1. Use DBC coefficient if available, else compute default
+    let has_dbc_coeff = spell_proto
+        .map(|s| ei < 3 && s.effect_bonus_coefficient[ei] >= 0.0)
+        .unwrap_or(false);
+
+    let coeff = if let Some(proto) = spell_proto {
+        if has_dbc_coeff {
+            proto.effect_bonus_coefficient[ei]
+        } else {
+            proto.calculate_default_coefficient() as f32
+        }
+    } else {
+        1.0
+    };
+
+    // 2. Level penalty only applies to default (non-DBC) coefficients
+    let lvl_penalty = if has_dbc_coeff {
+        1.0
+    } else if let Some(proto) = spell_proto {
+        crate::game::player::spells::effects::calculate_level_penalty(proto.spell_level)
+    } else {
+        1.0
+    };
+
+    // 3. Custom coefficient (from scripts) — currently no-op
+    //    Faithful `spellProto->CalculateCustomCoefficient(pCaster, damagetype, coeff, spell, donePart)`
+    let coeff = coeff;
+
+    total += benefit * coeff * lvl_penalty;
+    total
+}
+
+/// Caster-side melee damage bonus calculation.
+/// Faithful `SpellCaster::MeleeDamageBonusDone` port.
+///
+/// Calculates flat and percent damage bonuses from caster auras,
+/// victim auras, AP bonuses, creature type modifiers, and pet bonuses.
+///
+/// Only the **player** aura path is implemented; creature auras use defaults.
+pub fn melee_damage_bonus_done(
+    caster_guid: ObjectGuid,
+    victim_guid: ObjectGuid,
+    pdamage: f32,
+    att_type: u32,
+    spell_proto: Option<&SpellEntry>,
+    effect_index: u8,
+    damage_type: u32,
+    stack: u32,
+    flat: bool,
+    world: &World,
+) -> f32 {
+    // Null victim or zero damage → return as-is
+    if pdamage == 0.0 {
+        return 0.0;
+    }
+
+    // Spells with IGNORE_CASTER_MODIFIERS bypass done bonuses
+    if let Some(proto) = spell_proto {
+        if proto.has_attribute(SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS) {
+            return pdamage;
+        }
+    }
+
+    // Differentiate weapon-damage-based spells
+    let is_weapon_damage_based = !(spell_proto.is_some_and(|s| damage_type == DOT || s.has_effect(SPELL_EFFECT_SCHOOL_DAMAGE)));
+
+    // Creature type mask: 1 << (creature_type - 1), 0 if unknown
+    let creature_type_mask = world
+        .managers
+        .creature_mgr
+        .with_creature(victim_guid, |c| {
+            let ct = c.creature_type;
+            if ct > 0 { 1u32 << (ct - 1) } else { 0 }
+        })
+        .unwrap_or(0);
+
+    // School mask
+    let school_mask = spell_proto
+        .map(|s| 1u32 << s.school)
+        .unwrap_or(SPELL_SCHOOL_MASK_NORMAL);
+
+    // === FLAT damage bonus auras ===
+    let mut done_flat = 0i32;
+
+    // ..done flat, already included in weapon-damage-based spells
+    let caster_is_player = caster_guid.is_player();
+    let victim_is_player = victim_guid.is_player();
+
+    if !is_weapon_damage_based && caster_is_player {
+        let mod_damage_done = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_total_aura_modifier_by_misc_mask(AURA_MOD_DAMAGE_DONE, school_mask)
+            })
+            .unwrap_or(0);
+        done_flat += mod_damage_done;
+    }
+
+    // ..done flat (by creature type mask)
+    if creature_type_mask != 0 && caster_is_player {
+        done_flat += world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_total_aura_modifier_by_misc_mask(AURA_MOD_DAMAGE_DONE_CREATURE, creature_type_mask)
+            })
+            .unwrap_or(0);
+    }
+
+    // ..AP bonuses from victim and caster auras
+    let mut ap_bonus = 0i32;
+    if att_type == RANGED_ATTACK {
+        if victim_is_player {
+            ap_bonus += world
+                .systems
+                .player
+                .manager()
+                .with_player(victim_guid, |player| {
+                    player
+                        .auras
+                        .container
+                        .get_total_aura_modifier(AURA_RANGED_ATTACK_POWER_ATTACKER_BONUS)
+                })
+                .unwrap_or(0);
+        }
+        if creature_type_mask != 0 && caster_is_player {
+            ap_bonus += world
+                .systems
+                .player
+                .manager()
+                .with_player(caster_guid, |player| {
+                    player
+                        .auras
+                        .container
+                        .get_total_aura_modifier_by_misc_mask(AURA_MOD_RANGED_ATTACK_POWER_VERSUS, creature_type_mask)
+                })
+                .unwrap_or(0);
+        }
+    } else {
+        if victim_is_player {
+            ap_bonus += world
+                .systems
+                .player
+                .manager()
+                .with_player(victim_guid, |player| {
+                    player
+                        .auras
+                        .container
+                        .get_total_aura_modifier(AURA_MELEE_ATTACK_POWER_ATTACKER_BONUS)
+                })
+                .unwrap_or(0);
+        }
+        if creature_type_mask != 0 && caster_is_player {
+            ap_bonus += world
+                .systems
+                .player
+                .manager()
+                .with_player(caster_guid, |player| {
+                    player
+                        .auras
+                        .container
+                        .get_total_aura_modifier_by_misc_mask(AURA_MOD_MELEE_ATTACK_POWER_VERSUS, creature_type_mask)
+                })
+                .unwrap_or(0);
+        }
+    }
+
+    // === PERCENT damage auras ===
+    let mut done_percent = 1.0f32;
+
+    // Creature rank damage mod (non-player, non-hunter-pet)
+    if !is_weapon_damage_based && !caster_is_player {
+        if let Some(template) = world
+            .managers
+            .creature_mgr
+            .with_creature(caster_guid, |c| world.managers.creature_mgr.get_template(c.entry))
+            .flatten()
+        {
+            done_percent *= get_spell_damage_mod(template.rank, world);
+        }
+    }
+
+    // ..done pct, already included in weapon-damage-based spells
+    if !is_weapon_damage_based && caster_is_player {
+        let pct_done = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_total_aura_multiplier_by_misc_mask(AURA_MOD_DAMAGE_PERCENT_DONE, school_mask)
+            })
+            .unwrap_or(1.0);
+        done_percent *= pct_done;
+
+        // Off-hand penalty
+        if att_type == OFF_ATTACK {
+            let offhand_mod = world
+                .systems
+                .player
+                .manager()
+                .with_player(caster_guid, |player| {
+                    player
+                        .auras
+                        .container
+                        .get_total_aura_modifier(AURA_MOD_OFFHAND_DAMAGE_PCT)
+                })
+                .unwrap_or(0);
+            done_percent *= (100.0 + offhand_mod as f32) / 100.0;
+        }
+    }
+
+    // ..done pct (by creature type mask)
+    if creature_type_mask != 0 && caster_is_player {
+        done_percent *= world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_total_aura_multiplier_by_misc_mask(AURA_MOD_DAMAGE_DONE_VERSUS, creature_type_mask)
+            })
+            .unwrap_or(1.0);
+    }
+
+    // === Final calculation ===
+    let mut done_total = 0.0f32;
+
+    // Scaling of non-weapon-based spells
+    if !is_weapon_damage_based {
+        done_total = spell_bonus_with_coeffs(
+            spell_proto,
+            effect_index,
+            done_total,
+            done_flat as f32,
+            damage_type,
+            true,
+            world,
+        );
+    }
+    // Weapon-damage-based spells
+    else if ap_bonus != 0 || done_flat != 0 {
+        let normalized = spell_proto
+            .is_some_and(|s| s.has_effect(SPELL_EFFECT_NORMALIZED_WEAPON_DMG));
+
+        let weapon_speed = match att_type {
+            OFF_ATTACK => {
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player(caster_guid, |player| player.combat.off_hand_speed)
+                    .unwrap_or(2000)
+            }
+            RANGED_ATTACK => world
+                .systems
+                .player
+                .manager()
+                .with_player(caster_guid, |player| player.combat.ranged_speed)
+                .unwrap_or(2000),
+            _ => world
+                .systems
+                .player
+                .manager()
+                .with_player(caster_guid, |player| player.combat.main_hand_speed)
+                .unwrap_or(2000),
+        } as f32;
+
+        let ap_mult = if normalized {
+            match att_type {
+                RANGED_ATTACK => 2.8,
+                _ if weapon_speed <= 1800.0 => 1.7,
+                _ if weapon_speed <= 2900.0 => 2.4,
+                _ => 3.3,
+            }
+        } else {
+            weapon_speed / 1000.0
+        };
+        done_total += ap_bonus as f32 / 14.0 * ap_mult;
+        done_total += done_flat as f32;
+
+        // Apply weapon damage percent mods (TOTAL_PCT)
+        let unit_mod = match att_type {
+            OFF_ATTACK => crate::game::player::stats::modifiers::UnitMods::DamageOffhand,
+            RANGED_ATTACK => crate::game::player::stats::modifiers::UnitMods::DamageRanged,
+            _ => crate::game::player::stats::modifiers::UnitMods::DamageMainhand,
+        };
+        if caster_is_player {
+            done_total *= world
+                .systems
+                .player
+                .manager()
+                .with_player(caster_guid, |player| {
+                    player
+                        .stats
+                        .unit_mods
+                        .get_modifier_value(unit_mod, crate::game::player::stats::modifiers::UnitModifierType::TotalPct)
+                })
+                .unwrap_or(1.0);
+        }
+    }
+
+    if !flat {
+        done_total = 0.0;
+    }
+
+    let mut tmp_damage = (pdamage + done_total * stack as f32) * done_percent;
+
+    // Apply spell mod to done damage
+    if spell_proto.is_some() && caster_is_player {
+        let mod_op = if damage_type == DOT { SpellModOp::Dot } else { SpellModOp::Damage };
+        tmp_damage = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                crate::game::player::spells::modifiers::apply_spell_modifiers_to_value_f32(
+                    &player.spells.spell_modifiers,
+                    mod_op,
+                    tmp_damage,
+                    spell_proto.map(|s| s.spell_family_name).unwrap_or(0),
+                    spell_proto.map(|s| s.spell_family_flags).unwrap_or(0),
+                )
+            })
+            .unwrap_or(tmp_damage);
+    }
+
+    // Clamp negative to zero
+    if tmp_damage > 0.0 { tmp_damage } else { 0.0 }
+}
+
+/// Base healing bonus from +healing gear and stat conversion.
+/// Faithful `SpellCaster::SpellBaseHealingBonusDone` port.
+///
+/// Sums AURA_MOD_HEALING_DONE values matching school mask,
+/// plus AURA_MOD_SPELL_HEALING_OF_STAT_PERCENT * spirit / 100 for players.
+pub fn spell_base_healing_bonus_done(school_mask: u32, caster_guid: ObjectGuid, world: &World) -> f32 {
+    let mut advertised_benefit = 0.0f32;
+
+    if caster_guid.is_player() {
+        // Flat healing done by school mask
+        advertised_benefit += world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_total_aura_modifier_by_misc_mask(AURA_MOD_HEALING_DONE, school_mask)
+            })
+            .unwrap_or(0) as f32;
+
+        // Healing bonus from stats (spirit in 1.12)
+        let stat_pct = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_total_aura_modifier(AURA_MOD_SPELL_HEALING_OF_STAT_PERCENT)
+            })
+            .unwrap_or(0);
+
+        if stat_pct != 0 {
+            let spirit = world
+                .systems
+                .player
+                .manager()
+                .with_player(caster_guid, |player| player.stats.spirit)
+                .unwrap_or(0);
+            advertised_benefit += spirit as f32 * stat_pct as f32 / 100.0;
+        }
+    }
+
+    advertised_benefit
+}
+
+/// Caster-side healing bonus calculation.
+/// Faithful `SpellCaster::SpellHealingBonusDone` port.
+///
+/// Applies percent healing mods, scripted class overrides, base healing bonus
+/// from gear, coefficient scaling via `SpellBonusWithCoeffs`, and spell mods.
+pub fn spell_healing_bonus_done(
+    caster_guid: ObjectGuid,
+    victim_guid: ObjectGuid,
+    healamount: f32,
+    spell_proto: Option<&SpellEntry>,
+    effect_index: u8,
+    damage_type: u32,
+    stack: u32,
+    world: &World,
+) -> f32 {
+    // Early exit: passive/NONE dmg class, fixed damage, or ignore caster mods
+    if let Some(proto) = spell_proto {
+        if proto.dmg_class == SPELL_DAMAGE_CLASS_NONE && (proto.attributes & 0x0000_0040) != 0 {
+            return if healamount < 0.0 { 0.0 } else { healamount };
+        }
+        if (proto.custom & 0x0000_0004) != 0 {
+            return if healamount < 0.0 { 0.0 } else { healamount };
+        }
+        if proto.has_attribute(SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS) {
+            return if healamount < 0.0 { 0.0 } else { healamount };
+        }
+    }
+
+    let mut done_total_mod = 1.0f32;
+    let mut done_total = 0.0f32;
+
+    // Healing done percent auras
+    if caster_guid.is_player() {
+        done_total_mod *= world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_total_aura_multiplier_by_misc(AURA_MOD_HEALING_DONE_PERCENT, 0)
+            })
+            .unwrap_or(1.0);
+
+        // Scripted class overrides (AURA_OVERRIDE_CLASS_SCRIPTS)
+        let auras_list = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_auras_by_type(AURA_OVERRIDE_CLASS_SCRIPTS)
+                    .into_iter()
+                    .map(|a| a.clone())
+                    .collect::<Vec<Aura>>()
+            })
+            .unwrap_or_default();
+
+        for aura in &auras_list {
+            let misc = aura.misc_value;
+            if !matches!(misc, 4415 | 3736) {
+                continue;
+            }
+            if let Some(proto) = spell_proto {
+                // Check IsAffectedOnSpell: look up aura's spell entry to compare family
+                let aura_spell = world.managers.spell_mgr.get(aura.spell_id);
+                let family_match = aura_spell
+                    .as_ref()
+                    .map_or(true, |s| s.spell_family_name == 0 || s.spell_family_name == proto.spell_family_name);
+                let mask_match = aura_spell
+                    .as_ref()
+                    .map_or(true, |s| s.spell_family_flags == 0 || (s.spell_family_flags & proto.spell_family_flags) != 0);
+                if family_match && mask_match {
+                    let amount = aura.current_value() as f32;
+                    match misc {
+                        4415 => done_total += amount / 4.0,
+                        3736 => done_total += amount,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+    }
+
+    // Base healing bonus from gear (school mask based on spell school)
+    let school_mask = spell_proto
+        .map(|s| 1u32 << s.school)
+        .unwrap_or(1);
+    let advertised_benefit = spell_base_healing_bonus_done(school_mask, caster_guid, world);
+
+    // Coefficient scaling
+    done_total = spell_bonus_with_coeffs(
+        spell_proto,
+        effect_index,
+        done_total,
+        advertised_benefit,
+        damage_type,
+        true,
+        world,
+    );
+
+    // Final calculation
+    let mut heal = (healamount + done_total * stack as f32) * done_total_mod;
+
+    // Apply spell mod to done amount
+    if spell_proto.is_some() && caster_guid.is_player() {
+        let mod_op = if damage_type == DOT { SpellModOp::Dot } else { SpellModOp::Damage };
+        heal = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                crate::game::player::spells::modifiers::apply_spell_modifiers_to_value_f32(
+                    &player.spells.spell_modifiers,
+                    mod_op,
+                    heal,
+                    spell_proto.map(|s| s.spell_family_name).unwrap_or(0),
+                    spell_proto.map(|s| s.spell_family_flags).unwrap_or(0),
+                )
+            })
+            .unwrap_or(heal);
+    }
+
+    if heal < 0.0 { 0.0 } else { heal }
 }
 
 #[cfg(test)]

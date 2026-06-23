@@ -222,6 +222,43 @@ pub fn apply_spell_modifiers_to_value(
     after_pct.max(0)
 }
 
+/// f32 variant of `apply_spell_modifiers_to_value` for damage calculations.
+/// Used by `melee_damage_bonus_done` and similar floating-point pipelines.
+pub fn apply_spell_modifiers_to_value_f32(
+    modifiers: &[SpellMod],
+    op: SpellModOp,
+    base_value: f32,
+    spell_family_name: u32,
+    spell_family_flags: u64,
+) -> f32 {
+    let mut flat_total = 0i32;
+    let mut pct_total = 0i32;
+
+    for spell_mod in modifiers {
+        if spell_mod.op != op {
+            continue;
+        }
+
+        if !does_modifier_apply(spell_mod, spell_family_name, spell_family_flags) {
+            continue;
+        }
+
+        match spell_mod.mod_type {
+            SpellModType::Flat => {
+                flat_total += spell_mod.value;
+            }
+            SpellModType::Pct => {
+                pct_total += spell_mod.value;
+            }
+        }
+    }
+
+    let after_flat = base_value + flat_total as f32;
+    let after_pct = after_flat * (1.0 + pct_total as f32 / 100.0);
+
+    after_pct.max(0.0)
+}
+
 /// Check if a spell modifier applies to a specific spell.
 fn does_modifier_apply(
     spell_mod: &SpellMod,
