@@ -107,6 +107,8 @@ pub const AURA_MOD_MELEE_ATTACK_POWER_VERSUS: u32 = 102; // Melee AP vs creature
 pub const AURA_MOD_RANGED_ATTACK_POWER_VERSUS: u32 = 131; // Ranged AP vs creature type
 pub const AURA_MOD_OFFHAND_DAMAGE_PCT: u32 = 122; // Off-hand damage penalty
 pub const AURA_MOD_SPELL_HEALING_OF_STAT_PERCENT: u32 = 175; // Heal bonus % of stat (spirit)
+pub const AURA_MOD_SPELL_DAMAGE_OF_STAT_PERCENT: u32 = 173; // Spell damage bonus % of stat
+pub const AURA_MOD_FLAT_SPELL_DAMAGE_VERSUS: u32 = 171; // Flat spell damage vs creature type
 
 // --- Damage Taken Modifiers ---
 pub const AURA_MOD_DAMAGE_PERCENT_TAKEN: u32 = 87; // % damage taken modifier (e.g., Defensive Stance)
