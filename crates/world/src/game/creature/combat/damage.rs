@@ -18,6 +18,40 @@ pub enum MeleeHitOutcome {
     Crushing,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CreatureMeleeChances {
+    miss: f32,
+    dodge: f32,
+    parry: f32,
+    block: f32,
+    crit: f32,
+    crushing: f32,
+}
+
+fn creature_melee_chances_vs_player(
+    attacker_level: u8,
+    target_level: u8,
+    target_can_parry: bool,
+    target_can_block: bool,
+) -> CreatureMeleeChances {
+    let skill_diff = (attacker_level as i32 - target_level as i32) * 5;
+    let avoidance = (5.0 - skill_diff as f32 * 0.04).max(0.0);
+    let crushing = if attacker_level >= target_level.saturating_add(3) {
+        ((skill_diff as f32 * 2.0) - 15.0).max(15.0)
+    } else {
+        0.0
+    };
+
+    CreatureMeleeChances {
+        miss: avoidance.min(60.0),
+        dodge: avoidance,
+        parry: if target_can_parry { avoidance } else { 0.0 },
+        block: if target_can_block { avoidance } else { 0.0 },
+        crit: (5.0 + skill_diff as f32 * 0.04).max(0.0),
+        crushing,
+    }
+}
+
 /// Roll hit outcome using the single-roll combat table
 ///
 /// Roll order:
@@ -100,6 +134,71 @@ pub fn roll_melee_hit_outcome(
     }
 
     // Normal hit
+    MeleeHitOutcome::Hit
+}
+
+/// Roll creature auto-attack outcome against a player target.
+///
+/// C++ `RollMeleeOutcomeAgainst` uses weapon-vs-defense skill deltas. For NPCs
+/// attacking players both skills are effectively level * 5, so each level is a
+/// 5 skill-point delta: miss/crit/avoidance shift by 0.2 percentage points per
+/// level. NPCs do not produce glancing blows against players; crushing starts
+/// when the NPC is at least 3 levels higher.
+pub fn roll_creature_melee_hit_outcome(
+    attacker_level: u8,
+    target_level: u8,
+    target_can_parry: bool,
+    target_can_block: bool,
+) -> MeleeHitOutcome {
+    let chances = creature_melee_chances_vs_player(
+        attacker_level,
+        target_level,
+        target_can_parry,
+        target_can_block,
+    );
+    let mut rng = rand::thread_rng();
+    let roll: f32 = rng.gen_range(0.0..100.0);
+    let mut cumulative = 0.0;
+
+    cumulative += chances.miss;
+    if roll < cumulative {
+        return MeleeHitOutcome::Miss;
+    }
+
+    cumulative += chances.dodge;
+    if roll < cumulative {
+        return MeleeHitOutcome::Dodge;
+    }
+
+    if chances.parry > 0.0 {
+        cumulative += chances.parry;
+        if roll < cumulative {
+            return MeleeHitOutcome::Parry;
+        }
+    }
+
+    if chances.block > 0.0 {
+        cumulative += chances.block;
+        if roll < cumulative {
+            let blocked = rng.gen_range(20..=40);
+            return MeleeHitOutcome::Block {
+                blocked_amount: blocked,
+            };
+        }
+    }
+
+    cumulative += chances.crit;
+    if roll < cumulative {
+        return MeleeHitOutcome::Crit;
+    }
+
+    if chances.crushing > 0.0 {
+        cumulative += chances.crushing;
+        if roll < cumulative {
+            return MeleeHitOutcome::Crushing;
+        }
+    }
+
     MeleeHitOutcome::Hit
 }
 
@@ -253,5 +352,35 @@ mod tests {
                 | MeleeHitOutcome::Glancing { .. }
                 | MeleeHitOutcome::Crushing
         ));
+    }
+
+    #[test]
+    fn creature_vs_player_same_level_uses_five_percent_base_table() {
+        let chances = creature_melee_chances_vs_player(60, 60, true, true);
+
+        assert_eq!(chances.miss, 5.0);
+        assert_eq!(chances.dodge, 5.0);
+        assert_eq!(chances.parry, 5.0);
+        assert_eq!(chances.block, 5.0);
+        assert_eq!(chances.crit, 5.0);
+        assert_eq!(chances.crushing, 0.0);
+    }
+
+    #[test]
+    fn creature_vs_player_level_delta_changes_by_skill_points_not_whole_percent_per_level() {
+        let chances = creature_melee_chances_vs_player(61, 60, false, false);
+
+        assert!((chances.miss - 4.8).abs() < f32::EPSILON);
+        assert!((chances.dodge - 4.8).abs() < f32::EPSILON);
+        assert!((chances.crit - 5.2).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn creature_vs_player_has_no_glancing_and_crushes_at_three_levels_up() {
+        let chances_two_up = creature_melee_chances_vs_player(62, 60, false, false);
+        let chances_three_up = creature_melee_chances_vs_player(63, 60, false, false);
+
+        assert_eq!(chances_two_up.crushing, 0.0);
+        assert_eq!(chances_three_up.crushing, 15.0);
     }
 }

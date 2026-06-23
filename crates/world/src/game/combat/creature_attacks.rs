@@ -9,7 +9,7 @@ use crate::game::broadcast_mgr::broadcast_around_creature;
 use crate::game::common::update_fields::*;
 use crate::game::creature::combat::{
     apply_hit_outcome, calculate_melee_damage, hit_outcome_to_hit_info,
-    hit_outcome_to_victim_state, roll_melee_hit_outcome, MeleeHitOutcome,
+    hit_outcome_to_victim_state, roll_creature_melee_hit_outcome, MeleeHitOutcome,
 };
 use crate::World;
 use oxcore_shared::messages::combat::{SmsgAttackStart, SmsgAttackStop, SmsgAttackerStateUpdate};
@@ -107,7 +107,8 @@ pub fn perform_creature_melee_attack(
         });
 
     // Roll hit outcome using the 8-outcome table
-    let hit_outcome = roll_melee_hit_outcome(attacker_level, target_level, can_parry, can_block);
+    let hit_outcome =
+        roll_creature_melee_hit_outcome(attacker_level, target_level, can_parry, can_block);
 
     // Calculate base damage with armor reduction, then apply outcome modifier
     let base_damage = calculate_melee_damage(attacker_level, damage_min, damage_max, target_armor);
