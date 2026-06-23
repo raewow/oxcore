@@ -43,3 +43,26 @@ impl MovementGenerator for IdleMovementGenerator {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_reset_is_noop_and_idle_never_finishes() {
+        let creature = ObjectGuid::from_raw(1);
+        let mut generator = IdleMovementGenerator::new();
+
+        generator.initialize(creature, Position::default());
+        assert_eq!(generator.generator_type(), MovementGeneratorType::Idle);
+        assert!(matches!(generator.update(creature, 1_000), MovementUpdate::Continue));
+        assert!(!generator.is_finished());
+
+        generator.reset(creature);
+        assert!(matches!(generator.update(creature, 1_000), MovementUpdate::Continue));
+        assert!(!generator.is_finished());
+
+        generator.finalize(creature);
+        assert!(matches!(generator.update(creature, 1_000), MovementUpdate::Continue));
+    }
+}

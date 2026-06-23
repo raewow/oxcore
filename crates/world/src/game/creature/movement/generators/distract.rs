@@ -103,3 +103,65 @@ impl MovementGenerator for AssistanceDistractMovementGenerator {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distract_initialize_and_reset_preserve_remaining_timer() {
+        let creature = ObjectGuid::from_raw(1);
+        let mut generator = DistractMovementGenerator::new(2_000);
+
+        generator.initialize(creature, Position::default());
+        assert_eq!(generator.generator_type(), MovementGeneratorType::Distract);
+        assert_eq!(generator.timer_ms, 2_000);
+
+        generator.reset(creature);
+        assert_eq!(generator.timer_ms, 2_000);
+        assert!(!generator.is_finished());
+    }
+
+    #[test]
+    fn distract_update_counts_down_and_finishes_at_zero() {
+        let creature = ObjectGuid::from_raw(1);
+        let mut generator = DistractMovementGenerator::new(2_000);
+
+        assert!(matches!(generator.update(creature, 750), MovementUpdate::Continue));
+        assert_eq!(generator.timer_ms, 1_250);
+        assert!(!generator.is_finished());
+
+        assert!(matches!(generator.update(creature, 1_250), MovementUpdate::Finished));
+        assert_eq!(generator.timer_ms, 0);
+        assert!(generator.is_finished());
+    }
+
+    #[test]
+    fn distract_interrupt_and_finalize_are_noops_for_timer() {
+        let creature = ObjectGuid::from_raw(1);
+        let mut generator = DistractMovementGenerator::new(2_000);
+
+        generator.interrupt();
+        assert_eq!(generator.timer_ms, 2_000);
+
+        generator.finalize(creature);
+        assert_eq!(generator.timer_ms, 2_000);
+        assert!(!generator.is_finished());
+    }
+
+    #[test]
+    fn assistance_distract_delegates_countdown_and_finished_state() {
+        let creature = ObjectGuid::from_raw(1);
+        let mut generator = AssistanceDistractMovementGenerator::new(500);
+
+        generator.initialize(creature, Position::default());
+        assert_eq!(generator.generator_type(), MovementGeneratorType::Distract);
+        assert!(matches!(generator.update(creature, 499), MovementUpdate::Continue));
+        assert!(!generator.is_finished());
+
+        assert!(matches!(generator.update(creature, 1), MovementUpdate::Finished));
+        assert!(generator.is_finished());
+
+        generator.finalize(creature);
+    }
+}

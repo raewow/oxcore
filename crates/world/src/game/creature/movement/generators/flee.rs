@@ -150,3 +150,84 @@ impl MovementGenerator for FleeMovementGenerator {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pos(x: f32, y: f32, z: f32) -> Position {
+        Position { x, y, z, o: 0.0 }
+    }
+
+    #[test]
+    fn initialize_resets_duration_and_destination_state() {
+        let creature = ObjectGuid::from_raw(1);
+        let target = ObjectGuid::from_raw(2);
+        let mut generator = FleeMovementGenerator::new(target, 5_000, 7.0);
+
+        let _ = generator.update(creature, 1_000);
+        generator.on_arrival();
+
+        generator.initialize(creature, pos(10.0, 20.0, 3.0));
+
+        assert_eq!(generator.time_remaining, 5_000);
+        assert_eq!(generator.creature_position, pos(10.0, 20.0, 3.0));
+        assert!(!generator.has_destination);
+        assert!(!generator.force_update);
+    }
+
+    #[test]
+    fn update_emits_running_destination_away_from_target() {
+        let creature = ObjectGuid::from_raw(1);
+        let target = ObjectGuid::from_raw(2);
+        let mut generator = FleeMovementGenerator::new(target, 5_000, 7.0);
+        generator.update_target_position(pos(0.0, 0.0, 0.0));
+        generator.initialize(creature, pos(10.0, 0.0, 1.0));
+
+        match generator.update(creature, 100) {
+            MovementUpdate::NewDestination {
+                destination,
+                speed,
+                is_walking,
+            } => {
+                assert_eq!(destination, pos(30.0, 0.0, 1.0));
+                assert_eq!(speed, 7.0);
+                assert!(!is_walking);
+            }
+            update => panic!("expected flee destination, got {update:?}"),
+        }
+
+        assert!(matches!(generator.update(creature, 100), MovementUpdate::Continue));
+    }
+
+    #[test]
+    fn arrival_requests_a_fresh_destination_on_next_update() {
+        let creature = ObjectGuid::from_raw(1);
+        let target = ObjectGuid::from_raw(2);
+        let mut generator = FleeMovementGenerator::new(target, 5_000, 7.0);
+        generator.update_target_position(pos(0.0, 0.0, 0.0));
+        generator.initialize(creature, pos(10.0, 0.0, 1.0));
+        let _ = generator.update(creature, 100);
+
+        generator.set_creature_position(pos(30.0, 0.0, 1.0));
+        generator.on_arrival();
+
+        match generator.update(creature, 100) {
+            MovementUpdate::NewDestination { destination, .. } => {
+                assert_eq!(destination, pos(50.0, 0.0, 1.0));
+            }
+            update => panic!("expected renewed flee destination, got {update:?}"),
+        }
+    }
+
+    #[test]
+    fn update_finishes_when_duration_expires() {
+        let creature = ObjectGuid::from_raw(1);
+        let target = ObjectGuid::from_raw(2);
+        let mut generator = FleeMovementGenerator::new(target, 1_000, 7.0);
+        generator.initialize(creature, pos(10.0, 0.0, 1.0));
+
+        assert!(matches!(generator.update(creature, 1_000), MovementUpdate::Finished));
+        assert!(generator.is_finished());
+    }
+}

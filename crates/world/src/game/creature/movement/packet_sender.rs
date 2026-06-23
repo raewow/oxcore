@@ -155,3 +155,62 @@ impl MovementPacketSender {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn change_type_mapping_covers_supported_move_types() {
+        let cases = [
+            (MoveType::Walk, MovementChangeType::SpeedChangeWalk),
+            (MoveType::Run, MovementChangeType::SpeedChangeRun),
+            (MoveType::RunBack, MovementChangeType::SpeedChangeRunBack),
+            (MoveType::Swim, MovementChangeType::SpeedChangeSwim),
+            (MoveType::SwimBack, MovementChangeType::SpeedChangeSwimBack),
+            (MoveType::TurnRate, MovementChangeType::RateChangeTurn),
+        ];
+
+        for (move_type, change_type) in cases {
+            assert_eq!(
+                MovementPacketSender::get_change_type_by_move_type(move_type),
+                Some(change_type)
+            );
+            assert_eq!(
+                MovementPacketSender::get_move_type_by_change_type(change_type),
+                move_type
+            );
+        }
+    }
+
+    #[test]
+    fn change_type_mapping_rejects_flight_move_types() {
+        assert_eq!(
+            MovementPacketSender::get_change_type_by_move_type(MoveType::Flight),
+            None
+        );
+        assert_eq!(
+            MovementPacketSender::get_change_type_by_move_type(MoveType::FlightBack),
+            None
+        );
+    }
+
+    #[test]
+    fn speed_broadcast_opcode_mapping_matches_move_type() {
+        let cases = [
+            (MoveType::Walk, Opcode::SMSG_SPLINE_SET_WALK_SPEED),
+            (MoveType::Run, Opcode::SMSG_SPLINE_SET_RUN_SPEED),
+            (MoveType::RunBack, Opcode::SMSG_SPLINE_SET_RUN_BACK_SPEED),
+            (MoveType::Swim, Opcode::SMSG_SPLINE_SET_SWIM_SPEED),
+            (MoveType::SwimBack, Opcode::SMSG_SPLINE_SET_SWIM_BACK_SPEED),
+            (MoveType::TurnRate, Opcode::SMSG_SPLINE_SET_TURN_RATE),
+        ];
+
+        for (move_type, opcode) in cases {
+            assert_eq!(MovementPacketSender::opcode_for_move_type(move_type), Some(opcode));
+        }
+
+        assert_eq!(MovementPacketSender::opcode_for_move_type(MoveType::Flight), None);
+        assert_eq!(MovementPacketSender::opcode_for_move_type(MoveType::FlightBack), None);
+    }
+}

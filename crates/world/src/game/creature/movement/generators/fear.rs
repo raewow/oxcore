@@ -264,3 +264,110 @@ impl MovementGenerator for TimedFearMovementGenerator {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pos(x: f32, y: f32, z: f32) -> Position {
+        Position { x, y, z, o: 0.0 }
+    }
+
+    #[test]
+    fn constructor_configures_timed_walking_fear() {
+        let target = ObjectGuid::from_raw(2);
+        let generator = TimedFearMovementGenerator::new(target, 4_000, 30.0, 6.5);
+
+        assert_eq!(generator.total_flee_time, 4_000);
+        assert_eq!(generator.time_remaining, 4_000);
+        assert_eq!(generator.inner.fright_guid, target);
+        assert_eq!(generator.inner.flee_distance, 30.0);
+        assert!(generator.inner.force_walking);
+        assert_eq!(generator.inner.custom_speed, 6.5);
+        assert!(generator.inner.initial_flee_time >= DEFAULT_INIT_FLEE_TIME);
+        assert!(generator.inner.initial_flee_time <= DEFAULT_INIT_FLEE_TIME + 1_000);
+    }
+
+    #[test]
+    fn initialize_resets_timed_and_inner_fear_state() {
+        let creature = ObjectGuid::from_raw(1);
+        let target = ObjectGuid::from_raw(2);
+        let mut generator = TimedFearMovementGenerator::new(target, 4_000, 30.0, 6.5);
+
+        let _ = generator.update(creature, 1_000);
+        generator.on_arrival();
+        generator.initialize(creature, pos(10.0, 20.0, 3.0));
+
+        assert_eq!(generator.time_remaining, 4_000);
+        assert_eq!(generator.inner.initial_flee_time_remaining, generator.inner.initial_flee_time);
+        assert_eq!(generator.inner.creature_position, pos(10.0, 20.0, 3.0));
+        assert!(!generator.inner.point_init_done);
+        assert!(!generator.inner.force_update);
+        assert_eq!(generator.inner.next_check_time, 0);
+    }
+
+    #[test]
+    fn update_delegates_initial_panic_destination_before_timeout() {
+        let creature = ObjectGuid::from_raw(1);
+        let target = ObjectGuid::from_raw(2);
+        let mut generator = TimedFearMovementGenerator::new(target, 4_000, 30.0, 6.5);
+        generator.update_target_position(pos(0.0, 0.0, 0.0));
+        generator.initialize(creature, pos(10.0, 0.0, 1.0));
+
+        match generator.update(creature, 100) {
+            MovementUpdate::NewDestination {
+                destination,
+                speed,
+                is_walking,
+            } => {
+                let dx = destination.x - 10.0;
+                let dy = destination.y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                assert!((24.0..=39.0).contains(&distance));
+                assert_eq!(destination.z, 1.0);
+                assert_eq!(speed, 6.5);
+                assert!(is_walking);
+            }
+            update => panic!("expected initial fear destination, got {update:?}"),
+        }
+
+        assert!(matches!(generator.update(creature, 100), MovementUpdate::Continue));
+    }
+
+    #[test]
+    fn arrival_requests_post_initial_destination_after_initial_flee() {
+        let creature = ObjectGuid::from_raw(1);
+        let target = ObjectGuid::from_raw(2);
+        let mut generator = TimedFearMovementGenerator::new(target, 5_000, 30.0, 6.5);
+        generator.initialize(creature, pos(10.0, 0.0, 1.0));
+        generator.inner.initial_flee_time_remaining = 0;
+        generator.inner.next_check_time = 0;
+        generator.inner.point_init_done = true;
+        generator.set_creature_position(pos(30.0, 0.0, 1.0));
+
+        generator.on_arrival();
+        generator.inner.next_check_time = 0;
+
+        match generator.update(creature, 100) {
+            MovementUpdate::NewDestination { destination, .. } => {
+                let dx = destination.x - 30.0;
+                let dy = destination.y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                assert!((12.0..=24.0).contains(&distance));
+                assert_eq!(destination.z, 1.0);
+            }
+            update => panic!("expected post-initial fear destination, got {update:?}"),
+        }
+    }
+
+    #[test]
+    fn update_finishes_when_total_duration_expires() {
+        let creature = ObjectGuid::from_raw(1);
+        let target = ObjectGuid::from_raw(2);
+        let mut generator = TimedFearMovementGenerator::new(target, 1_000, 30.0, 6.5);
+        generator.initialize(creature, pos(10.0, 0.0, 1.0));
+
+        assert!(matches!(generator.update(creature, 1_000), MovementUpdate::Finished));
+        assert!(generator.is_finished());
+    }
+}
