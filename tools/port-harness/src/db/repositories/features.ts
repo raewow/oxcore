@@ -32,12 +32,20 @@ export interface FeatureSuggestion {
   created_at: string;
 }
 
+export interface FeatureStageCounts {
+  planned: number;
+  ported: number;
+  done: number;
+}
+
 export interface FeatureSummary extends FeatureGroup {
   file_count: number;
   flow_count: number;
   task_count: number;
   pending_suggestions: number;
   done: number;
+  percent: number;
+  stage_counts: FeatureStageCounts;
   blocked: number;
   total_tasks: number;
 }
@@ -91,6 +99,8 @@ export function listFeatures(db: Database.Database): FeatureSummary[] {
       task_count: counts.task_count ?? 0,
       pending_suggestions: pending.c,
       done: taskStats.done,
+      percent: taskStats.percent,
+      stage_counts: taskStats.stage_counts,
       blocked: taskStats.blocked,
       total_tasks: taskStats.total,
     };
@@ -286,16 +296,35 @@ export function getFeatureTasks(
   );
 }
 
+const PIPELINE_SCORE: Record<string, number> = {
+  done: 4, reviewed: 4, verified: 4,
+  rust_compiled: 3, rust_ported: 3,
+  rust_planned: 2,
+};
+
+const TERMINAL_STATUSES = new Set(["done", "reviewed", "verified"]);
+const PORTED_STATUSES = new Set(["rust_ported", "rust_compiled"]);
+const PLANNED_STATUSES = new Set(["rust_planned"]);
+
 export function getFeatureTaskStats(
   db: Database.Database,
   featureId: number,
-): { total: number; done: number; blocked: number; by_status: { status: string; count: number }[] } {
+): { total: number; done: number; percent: number; stage_counts: FeatureStageCounts; blocked: number; by_status: { status: string; count: number }[] } {
   const tasks = getFeatureTasks(db, featureId);
   const counts = new Map<string, number>();
   for (const task of tasks) counts.set(task.status, (counts.get(task.status) ?? 0) + 1);
+  const scoreSum = tasks.reduce((s, t) => s + (PIPELINE_SCORE[t.status] ?? 0), 0);
+  const percent = tasks.length > 0 ? Math.round((scoreSum / (tasks.length * 4)) * 100) : 0;
+  const stage_counts: FeatureStageCounts = {
+    done: tasks.filter((t) => TERMINAL_STATUSES.has(t.status)).length,
+    ported: tasks.filter((t) => PORTED_STATUSES.has(t.status)).length,
+    planned: tasks.filter((t) => PLANNED_STATUSES.has(t.status)).length,
+  };
   return {
     total: tasks.length,
-    done: counts.get("done") ?? 0,
+    done: stage_counts.done,
+    percent,
+    stage_counts,
     blocked: counts.get("blocked") ?? 0,
     by_status: [...counts.entries()].map(([status, count]) => ({ status, count })),
   };

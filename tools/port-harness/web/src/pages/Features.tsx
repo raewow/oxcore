@@ -48,7 +48,12 @@ export function Features() {
       ) : (
         <div className="feature-grid">
           {(data ?? []).map((feature) => {
-            const pct = feature.total_tasks ? Math.round((feature.done / feature.total_tasks) * 100) : 0;
+            const total = feature.total_tasks;
+            const sc = feature.stage_counts ?? { done: feature.done, ported: 0, planned: 0 };
+            const donePct = total ? (sc.done / total) * 100 : 0;
+            const portedPct = total ? (sc.ported / total) * 100 : 0;
+            const plannedPct = total ? (sc.planned / total) * 100 : 0;
+            const anyProgress = donePct + portedPct + plannedPct > 0;
             return (
               <Link key={feature.id} to={`/features/${feature.id}`} className="feature-card">
                 <div className="feature-card-title">{feature.name}</div>
@@ -67,16 +72,28 @@ export function Features() {
                   )}
                 </div>
 
-                <div className="job-progress" style={{ marginBottom: "0.4rem" }}>
-                  <div
-                    className="job-progress-bar"
-                    style={{ width: `${pct}%` }}
-                  />
+                <div className="feature-progress-bar" style={{ marginBottom: "0.4rem" }}>
+                  {anyProgress ? (
+                    <>
+                      {donePct > 0 && (
+                        <div className="feature-progress-seg feature-progress-done" style={{ width: `${donePct}%` }} title={`${sc.done} done/reviewed`} />
+                      )}
+                      {portedPct > 0 && (
+                        <div className="feature-progress-seg feature-progress-ported" style={{ width: `${portedPct}%` }} title={`${sc.ported} ported`} />
+                      )}
+                      {plannedPct > 0 && (
+                        <div className="feature-progress-seg feature-progress-planned" style={{ width: `${plannedPct}%` }} title={`${sc.planned} planned`} />
+                      )}
+                    </>
+                  ) : null}
                 </div>
 
-                <div className="muted" style={{ fontSize: "0.75rem" }}>
-                  {feature.total_tasks} tasks &middot; {feature.done} done
-                  {feature.blocked > 0 && <span style={{ color: "#f87171" }}> &middot; {feature.blocked} blocked</span>}
+                <div className="muted" style={{ fontSize: "0.75rem", display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
+                  <span>{total} symbols</span>
+                  {sc.done > 0 && <span style={{ color: "#4ade80" }}>{sc.done} done</span>}
+                  {sc.ported > 0 && <span style={{ color: "#a5b4fc" }}>{sc.ported} ported</span>}
+                  {sc.planned > 0 && <span style={{ color: "#93c5fd" }}>{sc.planned} planned</span>}
+                  {feature.blocked > 0 && <span style={{ color: "#f87171" }}>{feature.blocked} blocked</span>}
                 </div>
               </Link>
             );

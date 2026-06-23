@@ -1095,6 +1095,32 @@ summary {
   margin: 1rem 0;
 }
 
+/* Segmented progress bar (Features list) */
+.feature-progress-bar {
+  display: flex;
+  height: 6px;
+  background: #2d3348;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.feature-progress-seg {
+  height: 100%;
+  transition: width 0.3s;
+}
+
+.feature-progress-done {
+  background: #4ade80;
+}
+
+.feature-progress-ported {
+  background: #a5b4fc;
+}
+
+.feature-progress-planned {
+  background: #60a5fa;
+}
+
 /* Pipeline progress header (FlowDetail) */
 .flow-pipeline {
   background: #1a1d27;

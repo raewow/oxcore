@@ -225,6 +225,12 @@ export interface CodeSymbol {
   created_at: string;
 }
 
+export interface FeatureStageCounts {
+  planned: number;
+  ported: number;
+  done: number;
+}
+
 export interface FeatureSummary {
   id: number;
   name: string;
@@ -234,6 +240,8 @@ export interface FeatureSummary {
   task_count: number;
   pending_suggestions: number;
   done: number;
+  percent: number;
+  stage_counts: FeatureStageCounts;
   blocked: number;
   total_tasks: number;
 }
