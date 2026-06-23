@@ -82,8 +82,8 @@ impl Opcode {
 
     pub const SMSG_TUTORIAL_FLAGS: Opcode = Opcode(0x00FD); // 253
     pub const CMSG_TUTORIAL_FLAG: Opcode = Opcode(0x00FE); // 254
-    pub const CMSG_TUTORIAL_CLEAR: Opcode = Opcode(0x0100); // 256
-    pub const CMSG_TUTORIAL_RESET: Opcode = Opcode(0x0101); // 257
+    pub const CMSG_TUTORIAL_CLEAR: Opcode = Opcode(0x00FF); // 255
+    pub const CMSG_TUTORIAL_RESET: Opcode = Opcode(0x0100); // 256
     pub const CMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode(0x020B); // 523
     pub const SMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode(0x020C); // 524
     pub const CMSG_REQUEST_ACCOUNT_DATA: Opcode = Opcode(0x020A); // 522
