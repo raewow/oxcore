@@ -583,6 +583,15 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_TUTORIAL_RESET => {
                     settings::handle_tutorial_reset(session, packet, world).await?;
                 }
+                Opcode::CMSG_COMPLETE_CINEMATIC => {
+                    settings::handle_complete_cinematic(session, packet, world)?;
+                }
+                Opcode::CMSG_NEXT_CINEMATIC_CAMERA => {
+                    settings::handle_next_cinematic_camera(session, packet, world)?;
+                }
+                Opcode::CMSG_SET_ACTION_BAR_TOGGLES => {
+                    settings::handle_set_action_bar_toggles(session, packet, world)?;
+                }
 
                 // Spell handlers
                 Opcode::CMSG_CAST_SPELL => {

@@ -474,6 +474,7 @@ impl Opcode {
     pub const SMSG_TRIGGER_CINEMATIC: Opcode = Opcode(0x00FA); // 250
     pub const CMSG_NEXT_CINEMATIC_CAMERA: Opcode = Opcode(0x00FB); // 251
     pub const CMSG_COMPLETE_CINEMATIC: Opcode = Opcode(0x00FC); // 252
+    pub const CMSG_SET_ACTION_BAR_TOGGLES: Opcode = Opcode(0x0568); // 1384
 
     // ============================================================================
     // Zone

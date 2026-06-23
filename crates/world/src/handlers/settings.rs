@@ -10,12 +10,75 @@
 //! - CMSG_TUTORIAL_FLAG (0x00FF)
 //! - CMSG_TUTORIAL_CLEAR (0x0100)
 //! - CMSG_TUTORIAL_RESET (0x0101)
+//! - CMSG_COMPLETE_CINEMATIC (0x00FC)
+//! - CMSG_NEXT_CINEMATIC_CAMERA (0x00FB)
+//! - CMSG_SET_ACTION_BAR_TOGGLES (0x0568)
 
 use crate::core::session::WorldSession;
 use crate::World;
 use anyhow::Result;
 use oxcore_shared::protocol::{Opcode, WorldPacket};
 use tracing::{debug, warn};
+
+/// Handle CMSG_COMPLETE_CINEMATIC (0x00FC)
+///
+/// Sent by the client when a cinematic finishes playing.
+/// Cinematics play entirely client-side in 1.12; no server state to update.
+pub fn handle_complete_cinematic(
+    _session: &WorldSession,
+    _packet: &mut WorldPacket,
+    _world: &World,
+) -> Result<()> {
+    debug!("CMSG_COMPLETE_CINEMATIC");
+    Ok(())
+}
+
+/// Handle CMSG_NEXT_CINEMATIC_CAMERA (0x00FB)
+///
+/// Empty in reference server; client-side cinematic camera advance notification.
+pub fn handle_next_cinematic_camera(
+    _session: &WorldSession,
+    _packet: &mut WorldPacket,
+    _world: &World,
+) -> Result<()> {
+    Ok(())
+}
+
+/// Handle CMSG_SET_ACTION_BAR_TOGGLES (0x0568)
+///
+/// Wire format:
+///   u8  action_bar bitmask (bits 0-5 = extra bars 2-7 visible)
+pub fn handle_set_action_bar_toggles(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let action_bar = packet
+        .read_u8()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read action_bar byte"))?;
+
+    let player_guid = match session.player_guid() {
+        Some(guid) => guid,
+        None => {
+            if action_bar != 0 {
+                warn!("CMSG_SET_ACTION_BAR_TOGGLES: no player logged in, value={}", action_bar);
+            }
+            return Ok(());
+        }
+    };
+
+    debug!(
+        "CMSG_SET_ACTION_BAR_TOGGLES: player={}, value={}",
+        player_guid, action_bar
+    );
+
+    world
+        .systems
+        .settings
+        .set_action_bar_toggles(player_guid, action_bar, world);
+
+    Ok(())
+}
 
 /// Handle CMSG_SET_ACTION_BUTTON (0x0128)
 ///

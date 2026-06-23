@@ -87,6 +87,9 @@ pub struct SettingsState {
     /// Types 0, 2, 4 are account-wide; types 1, 3, 5, 6, 7 are per-character.
     pub account_data: [Option<AccountDataEntry>; NUM_ACCOUNT_DATA_TYPES],
 
+    /// Which extra action bars are visible. Bits 0-5 = bars 2-7.
+    pub action_bar_toggles: u8,
+
     /// Dirty flag: when true, the system writes state to DB on next save tick.
     pub need_save: bool,
 }
@@ -98,6 +101,7 @@ impl Default for SettingsState {
             macros: Vec::new(),
             tutorial_flags: [0u32; TUTORIAL_FLAG_COUNT],
             account_data: Default::default(),
+            action_bar_toggles: 0,
             need_save: false,
         }
     }
@@ -136,6 +140,12 @@ impl SettingsState {
     /// Clear all tutorial flags (CMSG_TUTORIAL_CLEAR).
     pub fn clear_tutorial_flags(&mut self) {
         self.tutorial_flags = [0u32; TUTORIAL_FLAG_COUNT];
+        self.need_save = true;
+    }
+
+    /// Set the action bar toggles byte.
+    pub fn set_action_bar_toggles(&mut self, value: u8) {
+        self.action_bar_toggles = value;
         self.need_save = true;
     }
 

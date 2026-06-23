@@ -565,6 +565,23 @@ impl ToWorldPacket for SmsgInitWorldStates {
     }
 }
 
+/// SMSG_TRIGGER_CINEMATIC - Trigger a cinematic sequence on the client
+///
+/// Sent to start a cinematic. The cinematic plays entirely client-side.
+#[derive(Debug, Clone)]
+pub struct SmsgTriggerCinematic {
+    /// Cinematic sequence ID (from CinematicSequences.dbc)
+    pub cinematic_sequence_id: u32,
+}
+
+impl ToWorldPacket for SmsgTriggerCinematic {
+    fn to_world_packet(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_TRIGGER_CINEMATIC);
+        packet.write_u32(self.cinematic_sequence_id);
+        packet
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
