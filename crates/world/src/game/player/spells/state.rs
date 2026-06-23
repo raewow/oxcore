@@ -162,6 +162,24 @@ impl SpellsState {
         0
     }
 
+    /// GetExpireTime: returns the later of spell-level and category-level cooldown expire times.
+    /// Returns None if neither cooldown is active. Permanent CDs are not tracked (stub).
+    pub fn get_expire_time(&self, spell_id: u32, category: u32, now: u64) -> Option<u64> {
+        let spell_cd = self.cooldowns.get(&spell_id).copied();
+        let cat_cd = if category > 0 {
+            self.category_cooldowns.get(&category).copied()
+        } else {
+            None
+        };
+        let expire = match (spell_cd, cat_cd) {
+            (Some(sp), Some(cp)) => Some(sp.max(cp)),
+            (Some(sp), None) => Some(sp),
+            (None, Some(cp)) => Some(cp),
+            (None, None) => None,
+        };
+        expire.filter(|&t| t > now)
+    }
+
     /// Clear expired cooldowns (housekeeping)
     pub fn clear_expired_cooldowns(&mut self, now: u64) {
         self.cooldowns.retain(|_, &mut cd_end| cd_end > now);
@@ -413,6 +431,23 @@ impl SpellsState {
             if let Some(ref cast) = self.current_spells[slot as usize] {
                 if cast.spell_id == spell_id {
                     return Some(slot);
+                }
+            }
+        }
+        None
+    }
+
+    /// Find an active cast by spell_id across all slots (MaNGOS SpellCaster::FindCurrentSpellBySpellId).
+    pub fn find_spell_by_id(&self, spell_id: u32) -> Option<&ActiveCast> {
+        for slot in [
+            CurrentSpellType::Generic,
+            CurrentSpellType::Channeled,
+            CurrentSpellType::Melee,
+            CurrentSpellType::Autorepeat,
+        ] {
+            if let Some(ref cast) = self.current_spells[slot as usize] {
+                if cast.spell_id == spell_id {
+                    return Some(cast);
                 }
             }
         }

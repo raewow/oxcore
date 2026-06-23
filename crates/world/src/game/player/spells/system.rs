@@ -24,6 +24,9 @@ use oxcore_shared::protocol::ObjectGuid;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// SPELL_PREVENTION_TYPE_SILENCE — silence-type spells check school lockout.
+const SPELL_PREVENTION_TYPE_SILENCE: u8 = 1;
+
 /// Whether a spell consumes combo points on completion (MaNGOS `SpellEntry::NeedsComboPoints`).
 ///
 /// `NeedsComboPoints() = AttributesEx & (FINISHING_MOVE_DAMAGE | FINISHING_MOVE_DURATION)`.
@@ -170,18 +173,12 @@ impl SpellSystem {
 
         // Step 2: Calculate cast time (modified by haste, talents, etc.)
         let cast_time_ms = self.calculate_cast_time(caster_guid, spell_id, world)?;
+        tracing::debug!("[CAST] spell={spell_id} cast_time_ms={cast_time_ms} triggered={is_triggered}");
 
-        // Step 3: Determine spell slot and cancel any existing spell in that slot
+        // Step 3: Determine spell slot and handle all interruption logic
+        // (MaNGOS SpellCaster::SetCurrentCastedSpell)
         let slot = self.get_spell_slot(spell_id, world);
-
-        // Cancel existing spell in this slot (if any)
-        self.cancel_spell_in_slot(caster_guid, slot, world).await?;
-
-        // For Generic casts, also cancel Channeled (MaNGOS behavior: new generic cancels channel)
-        if slot == CurrentSpellType::Generic {
-            self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Channeled, world)
-                .await?;
-        }
+        self.set_current_casted_spell(caster_guid, spell_id, slot, world).await?;
 
         // Step 4: Consume resources (mana/rage/energy) and apply GCD
         if !is_triggered {
@@ -213,6 +210,13 @@ impl SpellSystem {
 
         // Check if this is a channeled spell
         let is_channeled = slot == CurrentSpellType::Channeled;
+
+        // Confirm the cast to the caster's client immediately (mirrors MaNGOS Spell::prepare
+        // SendCastResult). Must arrive before SMSG_SPELL_START so the cast bar appears.
+        if !is_triggered {
+            self.broadcast_mgr
+                .send_msg_to_player(caster_guid, SmsgCastResult::success(spell_id));
+        }
 
         if is_channeled {
             // Channeled: execute first tick immediately, then channel ticks over time
@@ -1040,10 +1044,6 @@ impl SpellSystem {
             .collect();
         hit_targets.sort_by_key(|g| g.raw());
         hit_targets.dedup_by_key(|g| g.raw());
-
-        // Send SMSG_CAST_RESULT success to unlock client cast bar
-        self.broadcast_mgr
-            .send_msg_to_player(caster_guid, SmsgCastResult::success(spell_id));
 
         // Broadcast SMSG_SPELL_GO
         let msg = SmsgSpellGo {
@@ -2363,6 +2363,235 @@ impl SpellSystem {
                     SpellCastError::Interrupted,
                 )?;
             }
+        }
+
+        Ok(())
+    }
+
+    /// Move a channelled spell with a cast time from the Generic slot to the Channeled slot
+    /// after the initial cast completes. (MaNGOS SpellCaster::MoveChannelledSpellWithCastTime)
+    pub fn move_channelled_spell_with_cast_time(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        world: &World,
+    ) {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster_guid, |player| {
+                let state = &mut player.spells;
+
+                let cast = state
+                    .get_current_spell(CurrentSpellType::Generic)
+                    .filter(|c| c.spell_id == spell_id)
+                    .filter(|c| c.is_channeling)
+                    .filter(|c| !c.is_triggered)
+                    .filter(|c| c.state == SpellState::Casting)
+                    .cloned();
+
+                if let Some(mut cast) = cast {
+                    if let Some(existing) =
+                        state.get_current_spell(CurrentSpellType::Channeled)
+                    {
+                        if existing.spell_id == spell_id {
+                            state.clear_current_spell(CurrentSpellType::Channeled);
+                        }
+                    }
+
+                    state.clear_current_spell(CurrentSpellType::Generic);
+                    cast.slot = CurrentSpellType::Channeled;
+                    state.set_current_spell(CurrentSpellType::Channeled, cast);
+                }
+            });
+    }
+
+    /// IsSpellReady: check if a spell is ready to cast (no cooldown, not locked out by silence).
+    pub fn is_spell_ready(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        world: &World,
+    ) -> bool {
+        let spell_entry = match world.managers.spell_mgr.get(spell_id) {
+            Some(e) => e,
+            None => return false,
+        };
+        let now = get_game_time_ms();
+
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                let state = &player.spells;
+
+                if state.is_on_cooldown(spell_id, now) {
+                    return false;
+                }
+
+                if spell_entry.category > 0 {
+                    if let Some(&cd_end) = state.category_cooldowns.get(&spell_entry.category) {
+                        if cd_end > now {
+                            return false;
+                        }
+                    }
+                }
+
+                if spell_entry.prevention_type == SPELL_PREVENTION_TYPE_SILENCE as u32
+                    && state.check_lockout_by_mask(1 << spell_entry.school, now)
+                {
+                    return false;
+                }
+
+                true
+            })
+            .unwrap_or(false)
+    }
+
+    /// IsSpellOnPermanentCooldown: stub — returns false since Rust doesn't track permanent CDs.
+    pub fn is_spell_on_permanent_cooldown(
+        &self,
+        _caster_guid: ObjectGuid,
+        _spell_id: u32,
+        _world: &World,
+    ) -> bool {
+        false
+    }
+
+    /// SetCurrentCastedSpell: handle slot-assignment interruption logic.
+    /// Called before placing a new ActiveCast into the target slot.
+    /// Breaks same-type spells, handles cross-slot breakage (generic/channeled/autorepeat),
+    /// and respects delayed-state protection.
+    pub async fn set_current_casted_spell(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        slot: CurrentSpellType,
+        world: &World,
+    ) -> Result<()> {
+        let (category, is_channeled) = match world.managers.spell_mgr.get(spell_id) {
+            Some(e) => (
+                e.category,
+                (e.attributes_ex & 0x04) != 0 || (e.attributes_ex & 0x40) != 0,
+            ),
+            None => (0, false),
+        };
+
+        // Snapshot state across all slots
+        let snap: [Option<(u32, SpellState)>; 4] = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                let mut s: [Option<(u32, SpellState)>; 4] = [None, None, None, None];
+                for (i, cast) in player.spells.current_spells.iter().enumerate() {
+                    s[i] = cast.as_ref().map(|c| (c.spell_id, c.state));
+                }
+                s
+            })
+            .unwrap_or([None, None, None, None]);
+
+        // true = existing autorepeat should not be interrupted by a new Generic/Channeled cast
+        let autorepeat_keep = match snap[CurrentSpellType::Autorepeat as usize] {
+            Some((ar_id, _)) => world
+                .managers
+                .spell_mgr
+                .get(ar_id)
+                .map(|e| e.category != 351)
+                .unwrap_or(true),
+            None => true,
+        };
+
+        // 1. Early-return if the same spell already occupies the target slot
+        let slot_idx = slot as usize;
+        if let Some((sid, _)) = snap[slot_idx] {
+            if sid == spell_id {
+                return Ok(());
+            }
+        }
+
+        // 2. Break same-type spell (skip if delayed)
+        if let Some((_, state)) = snap[slot_idx] {
+            if state != SpellState::Delayed {
+                self.cancel_spell_in_slot(caster_guid, slot, world).await?;
+            }
+        }
+
+        // 3. Slot-specific cross-breakage (matching MaNGOS SetCurrentCastedSpell logic)
+        match slot {
+            CurrentSpellType::Generic => {
+                let should_interrupt_channel = match snap[CurrentSpellType::Channeled as usize] {
+                    Some((ch_sid, ch_state)) => {
+                        if ch_state == SpellState::Delayed {
+                            false
+                        } else if !is_channeled {
+                            true
+                        } else {
+                            ch_sid != spell_id
+                        }
+                    }
+                    None => false,
+                };
+
+                if should_interrupt_channel {
+                    self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Channeled, world)
+                        .await?;
+                }
+
+                if !autorepeat_keep {
+                    self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Autorepeat, world)
+                        .await?;
+                }
+            }
+            CurrentSpellType::Channeled => {
+                if let Some((_, state)) = snap[CurrentSpellType::Generic as usize] {
+                    if state != SpellState::Delayed {
+                        self.cancel_spell_in_slot(
+                            caster_guid,
+                            CurrentSpellType::Generic,
+                            world,
+                        )
+                        .await?;
+                    }
+                }
+
+                if snap[CurrentSpellType::Channeled as usize].is_some() {
+                    self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Channeled, world)
+                        .await?;
+                }
+
+                if !autorepeat_keep {
+                    self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Autorepeat, world)
+                        .await?;
+                }
+            }
+            CurrentSpellType::Autorepeat => {
+                if category == 351 {
+                    if let Some((_, state)) = snap[CurrentSpellType::Generic as usize] {
+                        if state != SpellState::Delayed {
+                            self.cancel_spell_in_slot(
+                                caster_guid,
+                                CurrentSpellType::Generic,
+                                world,
+                            )
+                            .await?;
+                        }
+                    }
+                    if let Some((_, state)) = snap[CurrentSpellType::Channeled as usize] {
+                        if state != SpellState::Delayed {
+                            self.cancel_spell_in_slot(
+                                caster_guid,
+                                CurrentSpellType::Channeled,
+                                world,
+                            )
+                            .await?;
+                        }
+                    }
+                }
+            }
+            CurrentSpellType::Melee => {}
         }
 
         Ok(())

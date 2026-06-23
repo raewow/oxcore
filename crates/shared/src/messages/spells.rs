@@ -296,9 +296,8 @@ fn write_spell_cast_targets(packet: &mut WorldPacket, target_guid: Option<Object
             packet.write_packed_guid(guid);
         }
         _ => {
-            // TARGET_FLAG_SELF (0x0000) — no additional target data
+            // TARGET_FLAG_SELF (0x0000) — no additional data
             packet.write_u16(0x0000);
-            packet.write_u8(0); // empty packed GUID
         }
     }
 }
