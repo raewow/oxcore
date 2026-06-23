@@ -90,6 +90,8 @@ pub struct SpellsState {
     // === Delayed Effects (Projectile Travel) ===
     /// Pending spell effects waiting for projectile to arrive.
     /// Ticked every world update; effects execute when delivery_time_ms reaches 0.
+    pub cast_counter: u32,
+
     pub delayed_effects: Vec<DelayedSpellEffect>,
 
     // === Persistence ===
@@ -108,6 +110,7 @@ impl Default for SpellsState {
             gcd_end: 0,
             school_lockouts: [0; NUM_SPELL_SCHOOLS],
             spell_modifiers: Vec::new(),
+            cast_counter: 0,
             delayed_effects: Vec::new(),
             needs_save: false,
         }
@@ -262,6 +265,46 @@ impl SpellsState {
     pub fn is_casting(&self) -> bool {
         self.current_spells[CurrentSpellType::Generic as usize].is_some()
             || self.current_spells[CurrentSpellType::Channeled as usize].is_some()
+    }
+
+    /// Check if any non-melee spell slot is active (MaNGOS SpellCaster::IsNonMeleeSpellCasted).
+    pub fn is_non_melee_spell_casted(
+        &self,
+        with_delayed: bool,
+        skip_channeled: bool,
+        skip_autorepeat: bool,
+    ) -> bool {
+        // Generic: not finished, and (with_delayed or not delayed)
+        if let Some(ref cast) = self.current_spells[CurrentSpellType::Generic as usize] {
+            if cast.state != SpellState::Finished
+                && (with_delayed || cast.state != SpellState::Delayed)
+            {
+                return true;
+            }
+        }
+        // Channeled: not finished (channeled spells are still casted even if delayed)
+        if !skip_channeled {
+            if let Some(ref cast) = self.current_spells[CurrentSpellType::Channeled as usize] {
+                if cast.state != SpellState::Finished {
+                    return true;
+                }
+            }
+        }
+        // Autorepeat: always considered casted if present (even if finished/delayed)
+        if !skip_autorepeat {
+            if self.current_spells[CurrentSpellType::Autorepeat as usize].is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if the Melee slot has a pending next-swing spell (MaNGOS SpellCaster::IsNextSwingSpellCasted).
+    /// Returns the spell_id if present, caller must check IsNextMeleeSwingSpell on the spell entry.
+    pub fn get_next_swing_spell_id(&self) -> Option<u32> {
+        self.current_spells[CurrentSpellType::Melee as usize]
+            .as_ref()
+            .map(|cast| cast.spell_id)
     }
 
     /// Find which slot contains a spell by spell_id. Returns the first match.

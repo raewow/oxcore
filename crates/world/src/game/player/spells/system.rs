@@ -2099,6 +2099,274 @@ impl SpellSystem {
     pub fn send_cast_result(&self, caster_guid: ObjectGuid, spell_id: u32, error: SpellCastError) {
         let _ = self.send_cast_failure(caster_guid, spell_id, error);
     }
+
+    // =========================================================================
+    // SpellCaster Query Methods
+    // =========================================================================
+
+    /// CheckAndIncreaseCastCounter: limit casts in chain per config.
+    pub fn check_and_increase_cast_counter(
+        &self,
+        caster_guid: ObjectGuid,
+        world: &World,
+    ) -> bool {
+        let max_casts = 20; // TODO: CONFIG_UINT32_MAX_SPELL_CASTS_IN_CHAIN
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster_guid, |player| {
+                if max_casts > 0 && player.spells.cast_counter >= max_casts {
+                    false
+                } else {
+                    player.spells.cast_counter += 1;
+                    true
+                }
+            })
+            .unwrap_or(false)
+    }
+
+    /// IsNextSwingSpellCasted: check if the Melee slot holds a next-swing spell.
+    pub fn is_next_swing_spell_casted(
+        &self,
+        caster_guid: ObjectGuid,
+        world: &World,
+    ) -> bool {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                player
+                    .spells
+                    .get_next_swing_spell_id()
+                    .and_then(|spell_id| world.managers.spell_mgr.get(spell_id))
+                    .map(|entry| {
+                        // IsNextMeleeSwingSpell = AttributesEx & 0x00000004
+                        (entry.attributes_ex & 0x0000_0004) != 0
+                    })
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)
+    }
+
+    /// IsNoMovementSpellCasted: check if a currently casting spell has movement interrupt flags.
+    pub fn is_no_movement_spell_casted(
+        &self,
+        caster_guid: ObjectGuid,
+        world: &World,
+    ) -> bool {
+        let spell_interrupt_flag_movement: u32 = 0x00000008; // SPELL_INTERRUPT_FLAG_MOVEMENT
+        let aura_interrupt_moving_cancels: u32 = 0x00000400; // AURA_INTERRUPT_MOVING_CANCELS
+
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                // Generic slot: not finished, not delayed, has movement interrupt flag
+                if let Some(ref cast) =
+                    player.spells.current_spells[CurrentSpellType::Generic as usize]
+                {
+                    if cast.state != SpellState::Finished
+                        && cast.state != SpellState::Delayed
+                    {
+                        if let Some(entry) = world.managers.spell_mgr.get(cast.spell_id) {
+                            if (entry.interrupt_flags & spell_interrupt_flag_movement) != 0 {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                // Channeled slot: not finished, has movement or channel interrupt flag
+                if let Some(ref cast) =
+                    player.spells.current_spells[CurrentSpellType::Channeled as usize]
+                {
+                    if cast.state != SpellState::Finished {
+                        if let Some(entry) = world.managers.spell_mgr.get(cast.spell_id) {
+                            if (entry.interrupt_flags & spell_interrupt_flag_movement) != 0
+                                || (entry.channel_interrupt_flags & aura_interrupt_moving_cancels) != 0
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                false
+            })
+            .unwrap_or(false)
+    }
+
+    // =========================================================================
+    // SpellCaster Interrupt Methods
+    // =========================================================================
+
+    /// InterruptSpellsWithInterruptFlags: interrupt non-melee spells whose InterruptFlags match.
+    pub async fn interrupt_spells_with_interrupt_flags(
+        &self,
+        caster_guid: ObjectGuid,
+        flags: u32,
+        except_spell_id: u32,
+        world: &World,
+    ) -> Result<()> {
+        let slots_to_interrupt: Vec<CurrentSpellType> = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                let mut result = Vec::new();
+                for slot_idx in 0..4 {
+                    let slot = match slot_idx {
+                        0 => CurrentSpellType::Melee,
+                        1 => CurrentSpellType::Autorepeat,
+                        2 => CurrentSpellType::Channeled,
+                        3 => CurrentSpellType::Generic,
+                        _ => continue,
+                    };
+                    if slot == CurrentSpellType::Melee {
+                        continue;
+                    }
+                    if let Some(ref cast) = player.spells.current_spells[slot as usize] {
+                        if cast.state == SpellState::Finished {
+                            continue;
+                        }
+                        if let Some(entry) = world.managers.spell_mgr.get(cast.spell_id) {
+                            let casted_time = cast.original_cast_time_ms;
+                            if casted_time == 0 {
+                                continue;
+                            }
+                            let is_channeled = slot == CurrentSpellType::Channeled;
+                            let is_preparing_or_casting = if is_channeled {
+                                cast.state == SpellState::Casting
+                            } else {
+                                cast.state == SpellState::Preparing
+                                    || cast.state == SpellState::Casting
+                            };
+                            if !is_preparing_or_casting {
+                                continue;
+                            }
+                            let is_next_swing =
+                                (entry.attributes_ex & 0x0000_0004) != 0;
+                            let is_autorepeat = slot == CurrentSpellType::Autorepeat;
+                            let is_triggered = cast.is_triggered;
+                            if !is_next_swing
+                                && !is_autorepeat
+                                && !is_triggered
+                                && (entry.interrupt_flags & flags) != 0
+                                && cast.spell_id != except_spell_id
+                            {
+                                result.push(slot);
+                            }
+                        }
+                    }
+                }
+                result
+            })
+            .unwrap_or_default();
+
+        for slot in slots_to_interrupt {
+            self.cancel_spell_in_slot(caster_guid, slot, world).await?;
+        }
+
+        Ok(())
+    }
+
+    /// InterruptSpellsWithChannelFlags: interrupt channeled spell whose ChannelInterruptFlags match.
+    pub async fn interrupt_spells_with_channel_flags(
+        &self,
+        caster_guid: ObjectGuid,
+        flags: u32,
+        except_spell_id: u32,
+        world: &World,
+    ) -> Result<()> {
+        let should_interrupt = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                if let Some(ref cast) =
+                    player.spells.current_spells[CurrentSpellType::Channeled as usize]
+                {
+                    if cast.state == SpellState::Casting {
+                        if let Some(entry) = world.managers.spell_mgr.get(cast.spell_id) {
+                            return (entry.channel_interrupt_flags & flags) != 0
+                                && cast.spell_id != except_spell_id;
+                        }
+                    }
+                }
+                false
+            })
+            .unwrap_or(false);
+
+        if should_interrupt {
+            self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Channeled, world)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    // =========================================================================
+    // SpellCaster FinishSpell
+    // =========================================================================
+
+    /// FinishSpell: public wrapper that finishes the cast in the given slot.
+    /// For channeled spells, sends MSG_CHANNEL_UPDATE(0) first.
+    pub async fn finish_spell(
+        &self,
+        caster_guid: ObjectGuid,
+        slot: CurrentSpellType,
+        ok: bool,
+        world: &World,
+    ) -> Result<()> {
+        let spell_info: Option<(u32, bool)> = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                player.spells.get_current_spell(slot).map(|cast| {
+                    (cast.spell_id, cast.is_channeling)
+                })
+            })
+            .flatten();
+
+        if let Some((spell_id, is_channeled)) = spell_info {
+            if is_channeled || slot == CurrentSpellType::Channeled {
+                let mut packet = oxcore_shared::protocol::WorldPacket::new(
+                    oxcore_shared::protocol::Opcode::MSG_CHANNEL_UPDATE,
+                );
+                packet.write_u32(0);
+                self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
+            }
+
+            // Delegate to finish_cast which sends SMSG_CAST_RESULT + SMSG_SPELL_GO + cooldowns
+            let targets: SpellCastTargets = world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(caster_guid, |player| {
+                    player
+                        .spells
+                        .clear_current_spell(slot)
+                        .map(|cast| cast.cast_targets)
+                })
+                .flatten()
+                .unwrap_or_default();
+
+            if ok {
+                self.finish_cast(caster_guid, spell_id, &targets, false, None, world)
+                    .await?;
+            } else {
+                self.send_cast_failure(
+                    caster_guid,
+                    spell_id,
+                    SpellCastError::Interrupted,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // =============================================================================
