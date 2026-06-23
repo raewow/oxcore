@@ -1,11 +1,11 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use tracing::{info, warn};
 
-use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::inventory::types::EquipResult;
+use crate::World;
 use oxcore_shared::game::inventory::{
-    INVENTORY_SLOT_BAG_0, is_bag_pos, is_bank_pos, is_equipment_pos,
+    is_bag_pos, is_bank_pos, is_equipment_pos, INVENTORY_SLOT_BAG_0,
 };
 use oxcore_shared::messages::SmsgReadItemOk;
 use oxcore_shared::protocol::{ObjectGuid, WorldPacket};

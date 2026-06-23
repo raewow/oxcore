@@ -1,12 +1,12 @@
 //! Movement handlers
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use tracing::{debug, info, trace};
 
-use crate::World;
-use crate::core::common::MovementInfo;
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
+use crate::core::common::MovementInfo;
 use crate::core::session::WorldSession;
+use crate::World;
 use oxcore_shared::messages::character::SmsgLogoutCancelAck;
 use oxcore_shared::messages::movement::SmsgForceMoveUnroot;
 use oxcore_shared::messages::social::SmsgStandstateUpdate;
@@ -267,9 +267,7 @@ pub fn verify_movement_info(movement_info: &MovementInfo) -> bool {
     }
 
     if movement_info.flags.has_flag(MoveFlags::ONTRANSPORT) {
-        let t = movement_info
-            .transport_position
-            .unwrap_or_default();
+        let t = movement_info.transport_position.unwrap_or_default();
 
         // Transports are size-limited. Also received at zeppelin/lift leave with
         // absolute continent coords, which can be safely skipped.
@@ -718,7 +716,10 @@ pub async fn handle_movement(
 
     trace!(
         "[MOVEMENT] handle_movement for {}: opcode={:?}, is_rooted={}, unit_flags=0x{:08X}",
-        player_guid, opcode, is_rooted, unit_flags
+        player_guid,
+        opcode,
+        is_rooted,
+        unit_flags
     );
 
     if is_rooted {

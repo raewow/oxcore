@@ -12,8 +12,8 @@
 //! - Physical spells use melee miss table instead
 
 use crate::game::common::creature_flags::CREATURE_STATIC_FLAG_NO_DEFENSE;
-use crate::game::player::spells::caster::get_level_for_target;
 use crate::game::player::skills::{SkillSaveState, SKILL_DEFENSE};
+use crate::game::player::spells::caster::get_level_for_target;
 use crate::World;
 use oxcore_shared::game::inventory::{EquipmentSlot, INVENTORY_SLOT_BAG_0};
 use oxcore_shared::protocol::ObjectGuid;
@@ -294,7 +294,8 @@ fn roll_melee_spell_hit(
             .unwrap_or((60, 0.0))
     };
 
-    let caster_level_for_target = get_level_for_target(caster_guid, Some(target_guid), world) as i32;
+    let caster_level_for_target =
+        get_level_for_target(caster_guid, Some(target_guid), world) as i32;
 
     // Victim level + avoidance (real for players, unmodelled for creatures).
     let victim_level_for_hit = get_level_for_target(target_guid, Some(caster_guid), world) as i32;
@@ -468,7 +469,8 @@ pub fn roll_spell_hit(
             .unwrap_or((60, 0))
     };
 
-    let caster_level_for_target = get_level_for_target(caster_guid, Some(target_guid), world) as i32;
+    let caster_level_for_target =
+        get_level_for_target(caster_guid, Some(target_guid), world) as i32;
 
     // Get target level and resistances
     let target_level = get_level_for_target(target_guid, Some(caster_guid), world) as i32;
@@ -672,8 +674,14 @@ mod tests {
 
     #[test]
     fn weapon_skill_subclass_mapping_matches_weapon_skills() {
-        assert_eq!(weapon_skill_from_subclass(0), Some(crate::game::player::skills::SKILL_AXES));
-        assert_eq!(weapon_skill_from_subclass(19), Some(crate::game::player::skills::SKILL_WANDS));
+        assert_eq!(
+            weapon_skill_from_subclass(0),
+            Some(crate::game::player::skills::SKILL_AXES)
+        );
+        assert_eq!(
+            weapon_skill_from_subclass(19),
+            Some(crate::game::player::skills::SKILL_WANDS)
+        );
         assert_eq!(weapon_skill_from_subclass(99), None);
     }
 

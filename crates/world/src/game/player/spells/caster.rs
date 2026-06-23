@@ -32,7 +32,9 @@ pub fn get_level_for_target(
     if let Some((creature_level, creature_entry)) = world
         .managers
         .creature_mgr
-        .with_creature(source_guid, |creature| (creature.level as u32, creature.entry))
+        .with_creature(source_guid, |creature| {
+            (creature.level as u32, creature.entry)
+        })
     {
         if world
             .managers
@@ -100,8 +102,8 @@ mod tests {
     use oxcore_shared::database::Databases;
     use oxcore_shared::protocol::{ObjectGuid, Position};
     use sqlx::mysql::MySqlPoolOptions;
-    use std::sync::Arc;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn lazy_pool() -> sqlx::MySqlPool {
         MySqlPoolOptions::new()
@@ -266,7 +268,10 @@ mod tests {
         let source = ObjectGuid::new_gameobject(300, 1);
         let target = ObjectGuid::new_player(2);
 
-        world.managers.gameobject_mgr.add_gameobject_for_test(gameobject(source, 12));
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(gameobject(source, 12));
         world
             .managers
             .player_mgr
@@ -274,7 +279,10 @@ mod tests {
 
         assert_eq!(get_level_for_target(source, Some(target), &world), 12);
 
-        world.managers.gameobject_mgr.add_gameobject_for_test(gameobject(source, 0));
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(gameobject(source, 0));
         assert_eq!(get_level_for_target(source, Some(target), &world), 45);
 
         assert_eq!(get_level_for_target(source, None, &world), 60);
@@ -289,8 +297,14 @@ mod tests {
             .player_mgr
             .add_player(Player::new(target, "T".into(), 1, 0, 0, 29, 1, 1, 0), 2);
 
-        assert_eq!(get_level_for_target(ObjectGuid::new_gameobject(999, 1), Some(target), &world), 29);
-        assert_eq!(get_level_for_target(ObjectGuid::new_gameobject(999, 1), None, &world), 60);
+        assert_eq!(
+            get_level_for_target(ObjectGuid::new_gameobject(999, 1), Some(target), &world),
+            29
+        );
+        assert_eq!(
+            get_level_for_target(ObjectGuid::new_gameobject(999, 1), None, &world),
+            60
+        );
     }
 
     #[tokio::test]
@@ -298,7 +312,13 @@ mod tests {
         let world = test_world();
         let player = ObjectGuid::new_player(3);
 
-        assert_eq!(get_melee_damage_school_mask(player, 0, &world), SPELL_SCHOOL_MASK_NORMAL);
-        assert_eq!(get_melee_damage_school_mask(ObjectGuid::new_creature(1, 1), 0, &world), SPELL_SCHOOL_MASK_NORMAL);
+        assert_eq!(
+            get_melee_damage_school_mask(player, 0, &world),
+            SPELL_SCHOOL_MASK_NORMAL
+        );
+        assert_eq!(
+            get_melee_damage_school_mask(ObjectGuid::new_creature(1, 1), 0, &world),
+            SPELL_SCHOOL_MASK_NORMAL
+        );
     }
 }

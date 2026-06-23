@@ -3,14 +3,14 @@
 //! Handles school damage, weapon damage, health leech, environmental damage, and normalized weapon damage.
 //! Formulas ported from old system (world/game/spell/effects/damage.rs).
 
-use crate::game::player::spells::effects::{EffectInput, EffectResult};
 use crate::dbc::structures::SpellEntry;
-use crate::game::player::player::Player;
-use crate::World;
-use anyhow::Result;
 use crate::game::player::auras::effects::{
     AURA_MOD_DAMAGE_PERCENT_DONE, AURA_MOD_DAMAGE_PERCENT_TAKEN,
 };
+use crate::game::player::player::Player;
+use crate::game::player::spells::effects::{EffectInput, EffectResult};
+use crate::World;
+use anyhow::Result;
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
@@ -70,7 +70,9 @@ fn select_weapon_stats(
     spell_entry: Option<&SpellEntry>,
     normalized: bool,
 ) -> (f32, f32, u32) {
-    let attack_type = spell_entry.map(|entry| entry.get_weapon_attack_type()).unwrap_or(0);
+    let attack_type = spell_entry
+        .map(|entry| entry.get_weapon_attack_type())
+        .unwrap_or(0);
 
     let (min_dmg, max_dmg, weapon_speed) = match attack_type {
         1 if player.combat.can_dual_wield => (
@@ -109,7 +111,11 @@ fn spell_school_mask(school: u8) -> u32 {
     1u32.checked_shl(school as u32).unwrap_or(0)
 }
 
-fn apply_damage_percent_modifiers(damage: f32, damage_percent_done: i32, damage_percent_taken: i32) -> f32 {
+fn apply_damage_percent_modifiers(
+    damage: f32,
+    damage_percent_done: i32,
+    damage_percent_taken: i32,
+) -> f32 {
     let modifier = 1.0 + (damage_percent_done + damage_percent_taken) as f32 / 100.0;
     (damage * modifier).max(0.0)
 }
@@ -186,10 +192,7 @@ pub async fn effect_school_damage(input: &EffectInput, world: &World) -> Result<
                 player
                     .auras
                     .container
-                    .get_total_aura_modifier_by_misc_mask(
-                        AURA_MOD_DAMAGE_PERCENT_DONE,
-                        school_mask,
-                    )
+                    .get_total_aura_modifier_by_misc_mask(AURA_MOD_DAMAGE_PERCENT_DONE, school_mask)
             })
             .unwrap_or(0);
 
@@ -198,21 +201,15 @@ pub async fn effect_school_damage(input: &EffectInput, world: &World) -> Result<
             .player
             .manager()
             .with_player(target_guid, |player| {
-                player
-                    .auras
-                    .container
-                    .get_total_aura_modifier_by_misc_mask(
-                        AURA_MOD_DAMAGE_PERCENT_TAKEN,
-                        school_mask,
-                    )
+                player.auras.container.get_total_aura_modifier_by_misc_mask(
+                    AURA_MOD_DAMAGE_PERCENT_TAKEN,
+                    school_mask,
+                )
             })
             .unwrap_or(0);
 
-        final_damage = apply_damage_percent_modifiers(
-            final_damage,
-            caster_damage_bonus,
-            target_damage_taken,
-        );
+        final_damage =
+            apply_damage_percent_modifiers(final_damage, caster_damage_bonus, target_damage_taken);
     }
 
     // Step 4: Roll for crit (spell crit = 150% damage)
@@ -310,11 +307,8 @@ async fn effect_weapon_damage_internal(
         .player
         .manager()
         .with_player(input.caster_guid, |player| {
-            let (min_dmg, max_dmg, ap_speed) = select_weapon_stats(
-                player,
-                spell_entry.as_deref(),
-                normalized,
-            );
+            let (min_dmg, max_dmg, ap_speed) =
+                select_weapon_stats(player, spell_entry.as_deref(), normalized);
 
             (
                 min_dmg,
@@ -478,11 +472,8 @@ pub async fn effect_weapon_percent_damage(
         .player
         .manager()
         .with_player(input.caster_guid, |player| {
-            let (min_dmg, max_dmg, weapon_speed) = select_weapon_stats(
-                player,
-                spell_entry.as_deref(),
-                false,
-            );
+            let (min_dmg, max_dmg, weapon_speed) =
+                select_weapon_stats(player, spell_entry.as_deref(), false);
             (
                 min_dmg,
                 max_dmg,
@@ -763,7 +754,7 @@ async fn apply_damage(
                     0x00000002, // AURA_INTERRUPT_FLAG_DAMAGE (bit 1)
                     world,
                 )
-                    .await;
+                .await;
         }
 
         if damage > 0 && !died {

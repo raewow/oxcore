@@ -36,36 +36,41 @@ pub fn calculate_mana_regen_per_tick(
 /// === RAGE MECHANICS ===
 ///
 /// Rage generation:
-/// - From damage dealt (melee): rage = damage * 7.5 / player_level
-/// - From damage taken: rage = damage * 2.5 / player_level
-/// - Capped at 100
+/// - From damage dealt (melee): rage = damage / conversion * 7.5
+/// - From damage taken: rage = damage / conversion * 2.5
+/// - Stored in tenths: 1000 internal rage is displayed as 100 rage by the client
 ///
 /// Rage decay:
 /// - Out of combat: loses 2 rage per second (4 per 2-second tick)
 
-/// Calculate rage from damage dealt
+fn rage_conversion(level: u8) -> f32 {
+    let level = level as f32;
+    (0.009_110_784 * level * level) + (3.225_598_1 * level) + 4.265_291
+}
+
+/// Calculate internal rage from damage dealt
 pub fn rage_from_damage_dealt(damage: u32, level: u8) -> u32 {
     if level == 0 {
         return 0;
     }
-    let rage = damage as f32 * 7.5 / level as f32;
-    rage.min(100.0) as u32
+    let rage = (damage as f32 / rage_conversion(level)) * 7.5;
+    (rage * 10.0) as u32
 }
 
-/// Calculate rage from damage taken
+/// Calculate internal rage from damage taken
 pub fn rage_from_damage_taken(damage: u32, level: u8) -> u32 {
     if level == 0 {
         return 0;
     }
-    let rage = damage as f32 * 2.5 / level as f32;
-    rage.min(100.0) as u32
+    let rage = (damage as f32 / rage_conversion(level)) * 2.5;
+    (rage * 10.0) as u32
 }
 
-/// Rage decay per 2-second tick (out of combat only)
-pub const RAGE_DECAY_PER_TICK: u32 = 4;
+/// Internal rage decay per 2-second tick (out of combat only)
+pub const RAGE_DECAY_PER_TICK: u32 = 40;
 
-/// Maximum rage value
-pub const MAX_RAGE: u32 = 100;
+/// Maximum internal rage value
+pub const MAX_RAGE: u32 = 1000;
 
 /// === ENERGY MECHANICS ===
 ///
@@ -137,5 +142,23 @@ mod tests {
     #[test]
     fn mana_regen_tick_uses_interrupt_regen_inside_five_second_rule() {
         assert_eq!(calculate_mana_regen_per_tick(12.5, 4.0, false), 8.0);
+    }
+
+    #[test]
+    fn rage_from_damage_dealt_uses_reference_conversion_and_tenths() {
+        // C++ Player::RewardRage: uint32((damage / rageConversion * 7.5) * 10).
+        assert_eq!(rage_from_damage_dealt(100, 60), 256);
+    }
+
+    #[test]
+    fn rage_from_damage_taken_uses_reference_conversion_and_tenths() {
+        // C++ Player::RewardRage: uint32((damage / rageConversion * 2.5) * 10).
+        assert_eq!(rage_from_damage_taken(100, 60), 85);
+    }
+
+    #[test]
+    fn rage_constants_are_internal_tenths_not_display_points() {
+        assert_eq!(MAX_RAGE, 1000);
+        assert_eq!(RAGE_DECAY_PER_TICK, 40);
     }
 }

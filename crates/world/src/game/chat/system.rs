@@ -386,7 +386,12 @@ impl ChatSystem {
                 .flags
                 .set_flag(ChannelMemberFlags::MODERATOR, is_moderator);
 
-            let notify = SmsgChannelNotify::mode_change(channel_name, player_guid, old_flags, member.flags.as_u8());
+            let notify = SmsgChannelNotify::mode_change(
+                channel_name,
+                player_guid,
+                old_flags,
+                member.flags.as_u8(),
+            );
             let packet = notify.to_world_packet();
             let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
             self.broadcast_mgr
@@ -418,7 +423,12 @@ impl ChatSystem {
             }
             member.flags.set_flag(ChannelMemberFlags::MUTED, is_muted);
 
-            let notify = SmsgChannelNotify::mode_change(channel_name, player_guid, old_flags, member.flags.as_u8());
+            let notify = SmsgChannelNotify::mode_change(
+                channel_name,
+                player_guid,
+                old_flags,
+                member.flags.as_u8(),
+            );
             let packet = notify.to_world_packet();
             let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
             self.broadcast_mgr
@@ -537,7 +547,9 @@ impl ChatSystem {
         channel_data.channel.owner_guid = target_guid;
         if let Some(new_owner) = channel_data.members.get_mut(&target_guid) {
             new_owner.flags.set_flag(ChannelMemberFlags::OWNER, true);
-            new_owner.flags.set_flag(ChannelMemberFlags::MODERATOR, true);
+            new_owner
+                .flags
+                .set_flag(ChannelMemberFlags::MODERATOR, true);
         }
 
         let notify = SmsgChannelNotify::owner_changed(channel_name, target_guid);

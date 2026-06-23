@@ -48,7 +48,12 @@ impl FearMovementGenerator {
         }
     }
 
-    pub fn with_timing(mut self, initial_flee_time: u32, force_walking: bool, custom_speed: f32) -> Self {
+    pub fn with_timing(
+        mut self,
+        initial_flee_time: u32,
+        force_walking: bool,
+        custom_speed: f32,
+    ) -> Self {
         self.initial_flee_time = initial_flee_time;
         self.initial_flee_time_remaining = initial_flee_time;
         self.force_walking = force_walking;
@@ -66,7 +71,8 @@ impl FearMovementGenerator {
 
     pub fn on_arrival(&mut self) {
         self.force_update = true;
-        self.next_check_time = rand::thread_rng().gen_range(NEXT_CHECK_TIME_LOWER_BOUND..=NEXT_CHECK_TIME_UPPER_BOUND);
+        self.next_check_time =
+            rand::thread_rng().gen_range(NEXT_CHECK_TIME_LOWER_BOUND..=NEXT_CHECK_TIME_UPPER_BOUND);
     }
 
     fn calculate_initial_point(&self) -> Position {
@@ -82,7 +88,11 @@ impl FearMovementGenerator {
 
         let mut rng = rand::thread_rng();
         let target_dist = rng.gen_range(0.8..1.3) * self.flee_distance;
-        let target_angle = source_angle + rng.gen_range(-std::f32::consts::PI * INIT_FLEE_ANGLE_MULT..std::f32::consts::PI * INIT_FLEE_ANGLE_MULT);
+        let target_angle = source_angle
+            + rng.gen_range(
+                -std::f32::consts::PI * INIT_FLEE_ANGLE_MULT
+                    ..std::f32::consts::PI * INIT_FLEE_ANGLE_MULT,
+            );
 
         Position {
             x: current_pos.x + target_dist * target_angle.cos(),
@@ -140,7 +150,11 @@ impl MovementGenerator for FearMovementGenerator {
 
                 return MovementUpdate::NewDestination {
                     destination: self.calculate_initial_point(),
-                    speed: if self.custom_speed > 0.0 { self.custom_speed } else { 7.0 },
+                    speed: if self.custom_speed > 0.0 {
+                        self.custom_speed
+                    } else {
+                        7.0
+                    },
                     is_walking: self.force_walking,
                 };
             }
@@ -154,7 +168,11 @@ impl MovementGenerator for FearMovementGenerator {
 
             return MovementUpdate::NewDestination {
                 destination: self.calculate_post_init_point(),
-                speed: if self.custom_speed > 0.0 { self.custom_speed } else { 7.0 },
+                speed: if self.custom_speed > 0.0 {
+                    self.custom_speed
+                } else {
+                    7.0
+                },
                 is_walking: self.force_walking,
             };
         }
@@ -204,8 +222,11 @@ impl TimedFearMovementGenerator {
         let initial_flee_time = DEFAULT_INIT_FLEE_TIME + rng.gen_range(0..=extra);
 
         Self {
-            inner: FearMovementGenerator::new(fright_guid, flee_distance)
-                .with_timing(initial_flee_time, true, run_speed),
+            inner: FearMovementGenerator::new(fright_guid, flee_distance).with_timing(
+                initial_flee_time,
+                true,
+                run_speed,
+            ),
             total_flee_time: time,
             time_remaining: time,
         }
@@ -299,7 +320,10 @@ mod tests {
         generator.initialize(creature, pos(10.0, 20.0, 3.0));
 
         assert_eq!(generator.time_remaining, 4_000);
-        assert_eq!(generator.inner.initial_flee_time_remaining, generator.inner.initial_flee_time);
+        assert_eq!(
+            generator.inner.initial_flee_time_remaining,
+            generator.inner.initial_flee_time
+        );
         assert_eq!(generator.inner.creature_position, pos(10.0, 20.0, 3.0));
         assert!(!generator.inner.point_init_done);
         assert!(!generator.inner.force_update);
@@ -331,7 +355,10 @@ mod tests {
             update => panic!("expected initial fear destination, got {update:?}"),
         }
 
-        assert!(matches!(generator.update(creature, 100), MovementUpdate::Continue));
+        assert!(matches!(
+            generator.update(creature, 100),
+            MovementUpdate::Continue
+        ));
     }
 
     #[test]
@@ -367,7 +394,10 @@ mod tests {
         let mut generator = TimedFearMovementGenerator::new(target, 1_000, 30.0, 6.5);
         generator.initialize(creature, pos(10.0, 0.0, 1.0));
 
-        assert!(matches!(generator.update(creature, 1_000), MovementUpdate::Finished));
+        assert!(matches!(
+            generator.update(creature, 1_000),
+            MovementUpdate::Finished
+        ));
         assert!(generator.is_finished());
     }
 }

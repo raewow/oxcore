@@ -4,15 +4,15 @@
 //! to ChatSystem. All business logic, validation, faction filtering, distance
 //! checks, and packet sending happens in the system.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
-use crate::World;
 use crate::core::session::WorldSession;
 use crate::game::chat::commands::ChatCommandContext;
+use crate::World;
 use oxcore_shared::common::AccountType;
 use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language, Team};
-use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::messages::chat::SmsgMessageChat;
+use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 
 /// Handle CMSG_MESSAGECHAT - player sends a chat message

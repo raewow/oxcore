@@ -6,7 +6,6 @@ use anyhow::Result;
 use std::sync::Arc;
 use tracing::debug;
 
-use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
 use crate::game::auction::manager::{AuctionHouseManager, AuctionHouseObject};
@@ -16,10 +15,11 @@ use crate::game::auction::{
     send_auction_removed_notification,
 };
 use crate::game::creature::CreatureManager;
-use crate::game::player::PlayerManager;
 use crate::game::player::auras::effects::AURA_FEIGN_DEATH;
+use crate::game::player::PlayerManager;
+use crate::World;
 use oxcore_shared::game::auction::{AuctionAction, AuctionEntry, AuctionError, AuctionQueryType};
-use oxcore_shared::game::inventory::{InventoryResult, is_bank_pos};
+use oxcore_shared::game::inventory::{is_bank_pos, InventoryResult};
 use oxcore_shared::messages::auction::{
     MsgAuctionHello, SmsgAuctionBidderListResult, SmsgAuctionCommandResult, SmsgAuctionListResult,
     SmsgAuctionOwnerListResult,
@@ -1479,9 +1479,9 @@ mod tests {
     use crate::game::auction::manager::AuctionHouseManager;
     use crate::game::creature::{Creature, CreatureManager, CreatureTemplate};
     use crate::game::items::manager::ItemManager;
-    use crate::game::player::PlayerManager;
     use crate::game::player::auras::aura::{Aura, AuraFlags};
     use crate::game::player::player::Player;
+    use crate::game::player::PlayerManager;
     use oxcore_shared::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
     use oxcore_shared::database::characters::repositories::character_repository::CharacterRepository;
     use oxcore_shared::database::characters::repositories::item_repository::ItemRepository;
@@ -1932,7 +1932,7 @@ mod tests {
         let mut packet = WorldPacket::new(Opcode::CMSG_AUCTION_LIST_ITEMS);
         packet.write_guid(auctioneer_guid);
         packet.write_u32(0); // listfrom
-        // null-terminated search string
+                             // null-terminated search string
         for b in search.as_bytes() {
             packet.write_u8(*b);
         }

@@ -133,7 +133,11 @@ impl MovementPacketSender {
     ) -> bool {
         let opcode = match flag {
             MovementFlagChange::Root => {
-                if apply { Opcode::MSG_MOVE_ROOT } else { Opcode::MSG_MOVE_UNROOT }
+                if apply {
+                    Opcode::MSG_MOVE_ROOT
+                } else {
+                    Opcode::MSG_MOVE_UNROOT
+                }
             }
             MovementFlagChange::WaterWalking => Opcode::MSG_MOVE_WATER_WALK,
             MovementFlagChange::Hover => Opcode::MSG_MOVE_HOVER,
@@ -207,10 +211,19 @@ mod tests {
         ];
 
         for (move_type, opcode) in cases {
-            assert_eq!(MovementPacketSender::opcode_for_move_type(move_type), Some(opcode));
+            assert_eq!(
+                MovementPacketSender::opcode_for_move_type(move_type),
+                Some(opcode)
+            );
         }
 
-        assert_eq!(MovementPacketSender::opcode_for_move_type(MoveType::Flight), None);
-        assert_eq!(MovementPacketSender::opcode_for_move_type(MoveType::FlightBack), None);
+        assert_eq!(
+            MovementPacketSender::opcode_for_move_type(MoveType::Flight),
+            None
+        );
+        assert_eq!(
+            MovementPacketSender::opcode_for_move_type(MoveType::FlightBack),
+            None
+        );
     }
 }

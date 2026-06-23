@@ -45,7 +45,10 @@ impl MovementGenerator for ConfusedMovementGenerator {
     fn initialize(&mut self, creature_guid: ObjectGuid, current_pos: Position) {
         self.origin = current_pos;
         self.has_destination = false;
-        tracing::debug!("[MOVEMENT] Confused generator initialized for {:?}", creature_guid);
+        tracing::debug!(
+            "[MOVEMENT] Confused generator initialized for {:?}",
+            creature_guid
+        );
     }
 
     fn update(&mut self, _creature_guid: ObjectGuid, _diff_ms: u32) -> MovementUpdate {

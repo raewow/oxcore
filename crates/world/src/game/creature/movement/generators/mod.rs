@@ -1,25 +1,25 @@
 //! Movement generators module
 
 mod chase;
-mod fear;
-mod distract;
 mod confused;
-mod follow;
-mod point;
+mod distract;
+mod fear;
 mod flee;
+mod follow;
 mod home;
 mod idle;
+mod point;
 mod random;
 mod waypoint;
 
 pub use chase::ChaseMovementGenerator;
 pub use confused::ConfusedMovementGenerator;
-pub use fear::{FearMovementGenerator, TimedFearMovementGenerator};
 pub use distract::{AssistanceDistractMovementGenerator, DistractMovementGenerator};
-pub use follow::FollowMovementGenerator;
-pub use point::{AssistanceMovementGenerator, PointMovementGenerator};
+pub use fear::{FearMovementGenerator, TimedFearMovementGenerator};
 pub use flee::FleeMovementGenerator;
+pub use follow::FollowMovementGenerator;
 pub use home::HomeMovementGenerator;
 pub use idle::IdleMovementGenerator;
+pub use point::{AssistanceMovementGenerator, PointMovementGenerator};
 pub use random::RandomMovementGenerator;
 pub use waypoint::{Waypoint, WaypointMovementGenerator};

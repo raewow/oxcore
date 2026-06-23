@@ -1137,9 +1137,7 @@ impl SpellSystem {
             return;
         };
 
-        use crate::game::player::auras::proc::{
-            proc_flags_ex, spell_cast_attacker_proc_flag,
-        };
+        use crate::game::player::auras::proc::{proc_flags_ex, spell_cast_attacker_proc_flag};
 
         const SUPPRESS_CASTER_PROCS: u32 = 0x0001_0000; // SPELL_ATTR_EX3_SUPPRESS_CASTER_PROCS
         if entry.attributes_ex3 & SUPPRESS_CASTER_PROCS != 0 {
@@ -1187,9 +1185,7 @@ impl SpellSystem {
             return;
         };
 
-        use crate::game::player::auras::proc::{
-            proc_flags_ex, spell_cast_attacker_proc_flag,
-        };
+        use crate::game::player::auras::proc::{proc_flags_ex, spell_cast_attacker_proc_flag};
 
         const SUPPRESS_CASTER_PROCS: u32 = 0x0001_0000; // SPELL_ATTR_EX3_SUPPRESS_CASTER_PROCS
         if entry.attributes_ex3 & SUPPRESS_CASTER_PROCS != 0 {

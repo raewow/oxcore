@@ -215,12 +215,16 @@ impl ToWorldPacket for SmsgNpcTextUpdate {
         // + emoteDelay2(u32) + emoteId2(u32) + emoteDelay3(u32) + emoteId3(u32)
         // Matches vmangos QueryHandler.cpp::HandleNpcTextQueryOpcode
         for opt in &self.options {
-            let male = if opt.male_text.is_empty() {
+            let male = if opt.male_text.is_empty() && opt.female_text.is_empty() {
+                "Greetings $N"
+            } else if opt.male_text.is_empty() {
                 &opt.female_text
             } else {
                 &opt.male_text
             };
-            let female = if opt.female_text.is_empty() {
+            let female = if opt.male_text.is_empty() && opt.female_text.is_empty() {
+                "Greetings $N"
+            } else if opt.female_text.is_empty() {
                 &opt.male_text
             } else {
                 &opt.female_text

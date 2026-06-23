@@ -7,9 +7,9 @@
 //! describe HOW targets are selected. The client-provided SpellCastTargets
 //! supplies the explicit target (who/where the player clicked).
 
+use crate::game::player::auras::effects::AURA_SPELL_MAGNET;
 use crate::game::player::spells::state::SpellCastTargets;
 use crate::World;
-use crate::game::player::auras::effects::AURA_SPELL_MAGNET;
 use oxcore_shared::protocol::{ObjectGuid, Position};
 use std::collections::HashMap;
 
@@ -225,7 +225,10 @@ pub fn select_magnet_target(
             }
             if found {
                 if depleted {
-                    victim.auras.container.remove_aura(aura_spell_id, aura_effect_index);
+                    victim
+                        .auras
+                        .container
+                        .remove_aura(aura_spell_id, aura_effect_index);
                 }
                 victim.auras.needs_client_update = true;
             }
@@ -308,9 +311,9 @@ pub fn resolve_spell_targets(
 
         // Apply spell magnet redirection once per unique victim for this spell.
         for target in &mut targets {
-            let redirected = *magnet_cache.entry(*target).or_insert_with(|| {
-                select_magnet_target(*target, &spell_entry, world)
-            });
+            let redirected = *magnet_cache
+                .entry(*target)
+                .or_insert_with(|| select_magnet_target(*target, &spell_entry, world));
             *target = redirected;
         }
 
@@ -528,11 +531,11 @@ fn is_hostile(caster_guid: ObjectGuid, target_guid: ObjectGuid, _world: &World) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use crate::dbc::structures::SpellEntry;
     use crate::game::player::auras::aura::{Aura, AuraFlags};
     use crate::game::player::auras::effects::AURA_SPELL_MAGNET;
     use crate::game::player::player::Player;
-    use crate::config::Config;
-    use crate::dbc::structures::SpellEntry;
     use crate::game::player::spells::state::TARGET_FLAG_DEST_LOCATION;
     use crate::World;
     use oxcore_shared::database::Databases;
@@ -670,7 +673,17 @@ mod tests {
     }
 
     fn add_test_player(world: &World, guid: ObjectGuid, map_id: u32, instance_id: u32) {
-        let player = Player::new(guid, format!("P{}", guid.counter()), map_id, instance_id, 0, 60, 1, 1, 0);
+        let player = Player::new(
+            guid,
+            format!("P{}", guid.counter()),
+            map_id,
+            instance_id,
+            0,
+            60,
+            1,
+            1,
+            0,
+        );
         world.managers.player_mgr.add_player(player, guid.counter());
     }
 
@@ -804,6 +817,9 @@ mod tests {
             .manager()
             .with_player(victim, |player| player.auras.container.has_aura(70001))
             .unwrap_or(false);
-        assert!(aura_still_there, "invalid redirect must not consume aura charges");
+        assert!(
+            aura_still_there,
+            "invalid redirect must not consume aura charges"
+        );
     }
 }

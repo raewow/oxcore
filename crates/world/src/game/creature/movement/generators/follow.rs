@@ -20,7 +20,12 @@ pub struct FollowMovementGenerator {
 }
 
 impl FollowMovementGenerator {
-    pub fn new(target: ObjectGuid, follow_distance: f32, follow_angle: f32, walk_speed: f32) -> Self {
+    pub fn new(
+        target: ObjectGuid,
+        follow_distance: f32,
+        follow_angle: f32,
+        walk_speed: f32,
+    ) -> Self {
         Self {
             target,
             target_position: Position::default(),

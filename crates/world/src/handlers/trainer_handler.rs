@@ -3,11 +3,11 @@
 use anyhow::Result;
 use tracing::{info, warn};
 
-use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
 use crate::game::broadcast_mgr::broadcast_around_creature;
 use crate::game::npc::trainer::types::TrainerSpellState;
+use crate::World;
 use oxcore_shared::messages::spells::{SmsgPlaySpellVisual, SmsgSpellGo, SmsgSpellStart};
 use oxcore_shared::messages::trainer::{
     SmsgTrainerBuyFailed, SmsgTrainerBuySucceeded, SmsgTrainerList, TrainerBuyError,

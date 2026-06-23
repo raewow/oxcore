@@ -197,7 +197,10 @@ mod tests {
             update => panic!("expected flee destination, got {update:?}"),
         }
 
-        assert!(matches!(generator.update(creature, 100), MovementUpdate::Continue));
+        assert!(matches!(
+            generator.update(creature, 100),
+            MovementUpdate::Continue
+        ));
     }
 
     #[test]
@@ -227,7 +230,10 @@ mod tests {
         let mut generator = FleeMovementGenerator::new(target, 1_000, 7.0);
         generator.initialize(creature, pos(10.0, 0.0, 1.0));
 
-        assert!(matches!(generator.update(creature, 1_000), MovementUpdate::Finished));
+        assert!(matches!(
+            generator.update(creature, 1_000),
+            MovementUpdate::Finished
+        ));
         assert!(generator.is_finished());
     }
 }

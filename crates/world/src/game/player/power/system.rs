@@ -47,6 +47,33 @@ impl PowerSystem {
         }
     }
 
+    fn apply_damage_dealt_rage(player: &mut Player, damage: u32) -> bool {
+        if player.power.power_type != PowerType::Rage {
+            return false;
+        }
+
+        let rage = regen::rage_from_damage_dealt(damage, player.level);
+        player.power.modify_power(PowerType::Rage, rage as i32) != 0
+    }
+
+    fn apply_damage_taken_rage(player: &mut Player, damage: u32) -> bool {
+        if player.power.power_type != PowerType::Rage {
+            return false;
+        }
+
+        let rage = regen::rage_from_damage_taken(damage, player.level);
+        player.power.modify_power(PowerType::Rage, rage as i32) != 0
+    }
+
+    fn power_value_update_block(
+        player_guid: ObjectGuid,
+        power_type: PowerType,
+        value: u32,
+    ) -> ValuesUpdateBlock {
+        let field_offset = UNIT_FIELD_POWER1 + power_type as u32;
+        ValuesUpdateBlock::new(player_guid, ObjectType::Player).set_field(field_offset, value)
+    }
+
     /// Called every world tick (50ms default)
     /// Handles regeneration for all online players
     pub fn update(&self, diff: Duration, world: &World) -> Result<()> {
@@ -295,14 +322,15 @@ impl PowerSystem {
         world: &World,
     ) -> Result<()> {
         let player_mgr = world.managers.player_mgr.clone();
+        let mut changed = false;
 
         player_mgr.with_player_mut(player_guid, |player| {
-            if player.power.power_type == PowerType::Rage {
-                let rage = regen::rage_from_damage_dealt(damage, player.level);
-                let idx = PowerType::Rage as usize;
-                player.power.current[idx] = (player.power.current[idx] + rage).min(regen::MAX_RAGE);
-            }
+            changed = Self::apply_damage_dealt_rage(player, damage);
         });
+
+        if changed {
+            self.send_power_update(player_guid, PowerType::Rage, world)?;
+        }
         Ok(())
     }
 
@@ -314,14 +342,15 @@ impl PowerSystem {
         world: &World,
     ) -> Result<()> {
         let player_mgr = world.managers.player_mgr.clone();
+        let mut changed = false;
 
         player_mgr.with_player_mut(player_guid, |player| {
-            if player.power.power_type == PowerType::Rage {
-                let rage = regen::rage_from_damage_taken(damage, player.level);
-                let idx = PowerType::Rage as usize;
-                player.power.current[idx] = (player.power.current[idx] + rage).min(regen::MAX_RAGE);
-            }
+            changed = Self::apply_damage_taken_rage(player, damage);
         });
+
+        if changed {
+            self.send_power_update(player_guid, PowerType::Rage, world)?;
+        }
         Ok(())
     }
 
@@ -388,9 +417,7 @@ impl PowerSystem {
         value: u32,
         _world: &World,
     ) {
-        let field_offset = UNIT_FIELD_POWER1 + power_type as u32;
-        let block =
-            ValuesUpdateBlock::new(player_guid, ObjectType::Player).set_field(field_offset, value);
+        let block = Self::power_value_update_block(player_guid, power_type, value);
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
         let packet = update_msg.to_world_packet();
         self.broadcast_mgr
@@ -401,6 +428,7 @@ impl PowerSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::player::power::regen::MAX_RAGE;
 
     #[test]
     fn test_power_type_for_class() {
@@ -431,5 +459,64 @@ mod tests {
         // Restore capped at max
         state.restore(PowerType::Mana, 100);
         assert_eq!(state.current[0], 100);
+    }
+
+    fn warrior(level: u8) -> Player {
+        let mut player = Player::new(
+            ObjectGuid::player(1),
+            "Warrior".to_string(),
+            0,
+            0,
+            0,
+            level,
+            1,
+            1,
+            0,
+        );
+        player.power.power_type = PowerType::Rage;
+        player.power.max[PowerType::Rage as usize] = MAX_RAGE;
+        player
+    }
+
+    #[test]
+    fn damage_dealt_hook_generates_internal_rage_for_warriors() {
+        let mut player = warrior(60);
+
+        assert!(PowerSystem::apply_damage_dealt_rage(&mut player, 100));
+        assert_eq!(player.power.current[PowerType::Rage as usize], 256);
+    }
+
+    #[test]
+    fn damage_taken_hook_generates_internal_rage_for_warriors() {
+        let mut player = warrior(60);
+
+        assert!(PowerSystem::apply_damage_taken_rage(&mut player, 100));
+        assert_eq!(player.power.current[PowerType::Rage as usize], 85);
+    }
+
+    #[test]
+    fn rage_generation_clamps_at_internal_max() {
+        let mut player = warrior(60);
+        player.power.current[PowerType::Rage as usize] = 990;
+
+        assert!(PowerSystem::apply_damage_dealt_rage(&mut player, 100));
+        assert_eq!(player.power.current[PowerType::Rage as usize], MAX_RAGE);
+    }
+
+    #[test]
+    fn non_rage_power_type_does_not_generate_rage() {
+        let mut player = warrior(60);
+        player.power.power_type = PowerType::Mana;
+
+        assert!(!PowerSystem::apply_damage_dealt_rage(&mut player, 100));
+        assert_eq!(player.power.current[PowerType::Rage as usize], 0);
+    }
+
+    #[test]
+    fn rage_power_update_uses_power2_field_for_client_sync() {
+        let block =
+            PowerSystem::power_value_update_block(ObjectGuid::player(1), PowerType::Rage, 256);
+
+        assert_eq!(block.fields, vec![(UNIT_FIELD_POWER1 + 1, 256)]);
     }
 }

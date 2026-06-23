@@ -208,6 +208,51 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Logout every active player during server shutdown, preserving the normal
+    /// logout save path before sessions and sockets are torn down.
+    pub async fn logout_all_players(&self, world: &crate::World) -> anyhow::Result<()> {
+        let sessions: Vec<Arc<WorldSession>> = self
+            .sessions
+            .iter()
+            .map(|entry| Arc::clone(entry.value()))
+            .collect();
+        let mut failures = 0usize;
+
+        info!(
+            "Logging out {} active sessions for shutdown",
+            sessions.len()
+        );
+
+        for session in sessions {
+            let session_id = session.id();
+
+            if let Some(player_guid) = session.player_guid() {
+                info!(
+                    "[SHUTDOWN] Saving player {} from session {}",
+                    player_guid, session_id
+                );
+
+                if let Err(e) =
+                    crate::handlers::character::perform_logout_cleanup(&session, world).await
+                {
+                    failures += 1;
+                    error!(
+                        "[SHUTDOWN] Failed to save/logout player {} from session {}: {}",
+                        player_guid, session_id, e
+                    );
+                }
+            }
+
+            self.remove_session(session_id);
+        }
+
+        if failures > 0 {
+            anyhow::bail!("failed to save/logout {failures} player session(s) during shutdown");
+        }
+
+        Ok(())
+    }
+
     /// Close all active sessions by closing their packet channels
     /// This will cause socket tasks to exit
     pub fn close_all_sessions(&self) {
@@ -220,7 +265,7 @@ impl SessionManager {
                 // The session's packet_tx is dropped when the session is removed
                 drop(session);
             }
-            self.sessions.remove(&session_id);
+            self.remove_session(session_id);
         }
     }
 }

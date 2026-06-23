@@ -6,11 +6,11 @@
 use anyhow::Result;
 use tracing::debug;
 
-use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
 use crate::game::gameobject::GameObjectType;
+use crate::World;
 use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_GAMEOBJ_USE (0x00B1)
@@ -155,12 +155,12 @@ mod tests {
     use crate::game::gameobject::{GameObject, GameObjectTemplate};
     use crate::game::npc::quest::system::QuestSystem;
     use crate::game::npc::quest::types::QuestTemplate;
-    use crate::game::player::Player;
     use crate::game::player::broadcaster::PlayerBroadcaster;
-    use oxcore_shared::database::Databases;
+    use crate::game::player::Player;
     use oxcore_shared::database::characters::repositories::quest_repository::{
         MockQuestRepositoryTrait, QuestRepositoryTrait,
     };
+    use oxcore_shared::database::Databases;
     use oxcore_shared::protocol::{HighGuid, ObjectGuid, Opcode, Position, WorldPacket};
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;

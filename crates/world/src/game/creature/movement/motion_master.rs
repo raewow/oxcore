@@ -107,7 +107,8 @@ impl MotionMaster {
             return true;
         }
 
-        (current_type < MovementGeneratorType::Chase || current_type == MovementGeneratorType::Waypoint)
+        (current_type < MovementGeneratorType::Chase
+            || current_type == MovementGeneratorType::Waypoint)
             && self.generators.len() <= 1
     }
 
@@ -330,7 +331,11 @@ impl MotionMaster {
         expire_time_ms: u32,
         walk_speed: f32,
     ) {
-        let origin = if use_current_position { current_pos } else { home_pos };
+        let origin = if use_current_position {
+            current_pos
+        } else {
+            home_pos
+        };
         let generator = RandomMovementGenerator::new(origin, wander_distance, walk_speed)
             .with_expire_time(expire_time_ms);
         self.add_generator(Box::new(generator), creature_guid, current_pos);
@@ -407,7 +412,8 @@ impl MotionMaster {
         walk_speed: f32,
     ) {
         self.clear(creature_guid);
-        let generator = FollowMovementGenerator::new(target, follow_distance, follow_angle, walk_speed);
+        let generator =
+            FollowMovementGenerator::new(target, follow_distance, follow_angle, walk_speed);
         self.add_generator(Box::new(generator), creature_guid, current_pos);
     }
 
@@ -423,7 +429,8 @@ impl MotionMaster {
         current_pos: Position,
     ) {
         let is_walking = (options & 0x1) != 0;
-        let generator = PointMovementGenerator::new(id, destination, speed, is_walking, final_orientation);
+        let generator =
+            PointMovementGenerator::new(id, destination, speed, is_walking, final_orientation);
         self.add_generator(Box::new(generator), creature_guid, current_pos);
     }
 
@@ -460,7 +467,10 @@ impl MotionMaster {
     pub fn set_next_waypoint(&mut self, point_id: u32) -> bool {
         for generator in self.generators.values_mut().rev() {
             if generator.generator_type() == MovementGeneratorType::Waypoint {
-                if let Some(waypoint) = generator.as_any_mut().downcast_mut::<WaypointMovementGenerator>() {
+                if let Some(waypoint) = generator
+                    .as_any_mut()
+                    .downcast_mut::<WaypointMovementGenerator>()
+                {
                     return waypoint.set_next_waypoint(point_id);
                 }
             }
@@ -473,7 +483,10 @@ impl MotionMaster {
     pub fn get_last_reached_waypoint(&mut self) -> u32 {
         for generator in self.generators.values_mut().rev() {
             if generator.generator_type() == MovementGeneratorType::Waypoint {
-                if let Some(waypoint) = generator.as_any_mut().downcast_mut::<WaypointMovementGenerator>() {
+                if let Some(waypoint) = generator
+                    .as_any_mut()
+                    .downcast_mut::<WaypointMovementGenerator>()
+                {
                     return waypoint.get_last_reached_waypoint();
                 }
             }
@@ -486,7 +499,10 @@ impl MotionMaster {
     pub fn get_waypoint_path_information(&mut self) -> Option<String> {
         for generator in self.generators.values_mut().rev() {
             if generator.generator_type() == MovementGeneratorType::Waypoint {
-                if let Some(waypoint) = generator.as_any_mut().downcast_mut::<WaypointMovementGenerator>() {
+                if let Some(waypoint) = generator
+                    .as_any_mut()
+                    .downcast_mut::<WaypointMovementGenerator>()
+                {
                     return Some(format!(
                         "waypoints={}, last_reached={}",
                         waypoint.waypoint_count(),
@@ -500,11 +516,7 @@ impl MotionMaster {
     }
 
     /// Start confused movement.
-    pub fn move_confused(
-        &mut self,
-        creature_guid: ObjectGuid,
-        current_pos: Position,
-    ) {
+    pub fn move_confused(&mut self, creature_guid: ObjectGuid, current_pos: Position) {
         self.clear(creature_guid);
         self.add_generator(
             Box::new(ConfusedMovementGenerator::new()),
@@ -756,11 +768,16 @@ impl MotionMaster {
                 }
             }
             MovementGeneratorType::Point => {
-                let delay = if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Point) {
+                let delay = if let Some(gen) =
+                    self.generators.get_mut(&MovementGeneratorType::Point)
+                {
                     if let Some(point) = gen.as_any_mut().downcast_mut::<PointMovementGenerator>() {
                         point.on_arrival();
                         point.assistance_delay_ms()
-                    } else if let Some(point) = gen.as_any_mut().downcast_mut::<AssistanceMovementGenerator>() {
+                    } else if let Some(point) = gen
+                        .as_any_mut()
+                        .downcast_mut::<AssistanceMovementGenerator>()
+                    {
                         point.assistance_delay_ms()
                     } else {
                         None
@@ -776,25 +793,35 @@ impl MotionMaster {
             }
             MovementGeneratorType::Fleeing => {
                 if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Fleeing) {
-                    if let Some(fear) = gen.as_any_mut().downcast_mut::<TimedFearMovementGenerator>() {
+                    if let Some(fear) = gen
+                        .as_any_mut()
+                        .downcast_mut::<TimedFearMovementGenerator>()
+                    {
                         fear.on_arrival();
-                    } else if let Some(fear) = gen.as_any_mut().downcast_mut::<FearMovementGenerator>() {
+                    } else if let Some(fear) =
+                        gen.as_any_mut().downcast_mut::<FearMovementGenerator>()
+                    {
                         fear.on_arrival();
-                    } else if let Some(flee) = gen.as_any_mut().downcast_mut::<FleeMovementGenerator>() {
+                    } else if let Some(flee) =
+                        gen.as_any_mut().downcast_mut::<FleeMovementGenerator>()
+                    {
                         flee.on_arrival();
                     }
                 }
             }
             MovementGeneratorType::Follow => {
                 if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Follow) {
-                    if let Some(follow) = gen.as_any_mut().downcast_mut::<FollowMovementGenerator>() {
+                    if let Some(follow) = gen.as_any_mut().downcast_mut::<FollowMovementGenerator>()
+                    {
                         follow.on_arrival();
                     }
                 }
             }
             MovementGeneratorType::Confused => {
                 if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Confused) {
-                    if let Some(confused) = gen.as_any_mut().downcast_mut::<ConfusedMovementGenerator>() {
+                    if let Some(confused) =
+                        gen.as_any_mut().downcast_mut::<ConfusedMovementGenerator>()
+                    {
                         confused.on_arrival();
                     }
                 }
@@ -876,7 +903,10 @@ mod tests {
         ];
 
         for (generator_type, name) in cases {
-            assert_eq!(MotionMaster::get_movement_generator_type_name(generator_type), name);
+            assert_eq!(
+                MotionMaster::get_movement_generator_type_name(generator_type),
+                name
+            );
         }
     }
 

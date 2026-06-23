@@ -1,18 +1,18 @@
 //! Attack Handler - Player attacks on creatures
 
-use crate::World;
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::game::broadcast_mgr::broadcast_around_creature;
 use crate::game::common::update_fields::*;
 use crate::game::creature::combat::{
-    MeleeHitOutcome, apply_hit_outcome, calculate_melee_damage, hit_outcome_to_hit_info,
-    hit_outcome_to_victim_state, roll_melee_hit_outcome,
+    apply_hit_outcome, calculate_melee_damage, hit_outcome_to_hit_info,
+    hit_outcome_to_victim_state, roll_melee_hit_outcome, MeleeHitOutcome,
 };
-use oxcore_shared::messages::ToWorldPacket;
+use crate::World;
 use oxcore_shared::messages::combat::{SmsgAttackStart, SmsgAttackStop, SmsgAttackerStateUpdate};
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
+use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Handle player attack swing (CMSG_ATTACKSWING)
@@ -203,6 +203,13 @@ pub async fn execute_pending_attack_vs_creature(
             is_dead,
         )?;
 
+        reward_attacker_rage_if_actual_damage(actual_damage, |damage| {
+            world
+                .systems
+                .power
+                .on_damage_dealt(attacker_guid, damage, world)
+        })?;
+
         // Send health or death update
         if is_dead {
             target_died = true;
@@ -275,6 +282,16 @@ pub async fn execute_pending_attack_vs_creature(
     Ok(target_died)
 }
 
+fn reward_attacker_rage_if_actual_damage<F>(actual_damage: u32, mut reward: F) -> anyhow::Result<()>
+where
+    F: FnMut(u32) -> anyhow::Result<()>,
+{
+    if actual_damage > 0 {
+        reward(actual_damage)?;
+    }
+    Ok(())
+}
+
 /// Map a melee swing outcome to the proc extra-flag (ProcFlagsEx) describing it.
 fn melee_swing_proc_ex(outcome: &MeleeHitOutcome) -> u32 {
     use crate::game::player::auras::proc::proc_flags_ex;
@@ -329,6 +346,32 @@ mod tests {
             melee_swing_proc_ex(&MeleeHitOutcome::Crushing),
             proc_flags_ex::NORMAL_HIT
         );
+    }
+
+    #[test]
+    fn positive_actual_melee_damage_rewards_attacker_rage() {
+        let mut rewarded_damage = None;
+
+        reward_attacker_rage_if_actual_damage(37, |damage| {
+            rewarded_damage = Some(damage);
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(rewarded_damage, Some(37));
+    }
+
+    #[test]
+    fn zero_actual_melee_damage_does_not_reward_attacker_rage() {
+        let mut called = false;
+
+        reward_attacker_rage_if_actual_damage(0, |_| {
+            called = true;
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(!called);
     }
 }
 

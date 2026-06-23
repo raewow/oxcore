@@ -55,14 +55,23 @@ mod tests {
 
         generator.initialize(creature, Position::default());
         assert_eq!(generator.generator_type(), MovementGeneratorType::Idle);
-        assert!(matches!(generator.update(creature, 1_000), MovementUpdate::Continue));
+        assert!(matches!(
+            generator.update(creature, 1_000),
+            MovementUpdate::Continue
+        ));
         assert!(!generator.is_finished());
 
         generator.reset(creature);
-        assert!(matches!(generator.update(creature, 1_000), MovementUpdate::Continue));
+        assert!(matches!(
+            generator.update(creature, 1_000),
+            MovementUpdate::Continue
+        ));
         assert!(!generator.is_finished());
 
         generator.finalize(creature);
-        assert!(matches!(generator.update(creature, 1_000), MovementUpdate::Continue));
+        assert!(matches!(
+            generator.update(creature, 1_000),
+            MovementUpdate::Continue
+        ));
     }
 }

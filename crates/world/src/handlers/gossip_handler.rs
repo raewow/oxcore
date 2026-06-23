@@ -5,7 +5,6 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
@@ -13,6 +12,7 @@ use crate::game::common::creature_flags::CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS;
 use crate::game::common::player_constants::get_faction_for_race;
 use crate::game::creature::ai::is_hostile_faction;
 use crate::game::player::spells::state::CurrentSpellType;
+use crate::World;
 use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 const NPC_FLAG_BANKER: u32 = 0x00000100;
@@ -234,13 +234,15 @@ pub async fn handle_gossip_hello(
     };
 
     // Check if we should auto-display a single quest.
-    // Conditions: Has exactly 1 quest, is not a vendor, and NPC has no GOSSIP flag.
+    // Conditions: Has exactly 1 quest, is not a vendor, and has no usable gossip menu.
     let has_gossip_flag = (npc_flags & 0x00000001) != 0;
     let has_vendor_flag = (npc_flags & 0x00000080) != 0;
+    let has_gossip_menu = world.systems.gossip.has_gossip_menu(entry);
     let quest_count = quest_data.as_ref().map(|q| q.len()).unwrap_or(0);
 
     // Determine if we should auto-display the quest
-    let should_auto_display = quest_count == 1 && !has_vendor_flag && !has_gossip_flag;
+    let should_auto_display =
+        quest_count == 1 && !has_vendor_flag && (!has_gossip_flag || !has_gossip_menu);
 
     if should_auto_display {
         // Auto-display the single quest directly
@@ -304,8 +306,6 @@ pub async fn handle_gossip_hello(
     // Conditions: NPC is a vendor, has no GOSSIP flag, and has no gossip menu defined
     if has_vendor_flag && !has_gossip_flag {
         // Check if vendor has a gossip menu defined
-        let has_gossip_menu = world.systems.gossip.has_gossip_menu(entry);
-
         if !has_gossip_menu {
             // Open vendor window directly
             info!(

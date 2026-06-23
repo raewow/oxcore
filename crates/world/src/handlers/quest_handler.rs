@@ -5,19 +5,19 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
 use crate::game::common::player_constants::get_faction_for_race;
 use crate::game::creature::ai::{
-    NPC_FLAG_GOSSIP, NPC_FLAG_QUEST_GIVER, NPC_FLAG_VENDOR, is_hostile_faction, is_npc,
+    is_hostile_faction, is_npc, NPC_FLAG_GOSSIP, NPC_FLAG_QUEST_GIVER, NPC_FLAG_VENDOR,
 };
 use crate::game::npc::quest::system::QUEST_SHARE_DISTANCE;
-use crate::game::npc::quest::types::{MAX_QUEST_LOG_SIZE, QuestStatus};
+use crate::game::npc::quest::types::{QuestStatus, MAX_QUEST_LOG_SIZE};
 use crate::game::player::auras::effects::AURA_FEIGN_DEATH;
 use crate::game::player::player::QuestShareInfo;
 use crate::game::player::spells::state::CurrentSpellType;
+use crate::World;
 use oxcore_shared::messages::gossip::SmsgGossipComplete;
 use oxcore_shared::messages::quest::{
     MsgQuestPushResult, QuestObjectiveData, SmsgQuestQueryResponseV2,
@@ -293,12 +293,13 @@ pub async fn handle_questgiver_hello(
         Vec::new()
     };
 
-    // SendPreparedGossip: an NPC without the gossip flag that has quests (and is
-    // not a vendor) opens the quest interface directly instead of a gossip menu.
+    // SendPreparedGossip: an NPC without a usable gossip menu that has quests
+    // (and is not a vendor) opens the quest interface directly.
     let has_gossip_flag = (npc_flags & NPC_FLAG_GOSSIP) != 0;
     let has_vendor_flag = (npc_flags & NPC_FLAG_VENDOR) != 0;
+    let has_gossip_menu = world.systems.gossip.has_gossip_menu(entry);
 
-    if !has_gossip_flag && !has_vendor_flag && !quest_list.is_empty() {
+    if (!has_gossip_flag || !has_gossip_menu) && !has_vendor_flag && !quest_list.is_empty() {
         if quest_list.len() == 1 {
             let quest_id = quest_list[0].quest_id;
             match world.systems.quest.get_quest_status(player_guid, quest_id) {
@@ -983,12 +984,12 @@ mod tests {
     use crate::game::creature::{Creature, CreatureTemplate};
     use crate::game::npc::quest::system::QuestSystem;
     use crate::game::npc::quest::types::{QuestProgress, QuestTemplate};
-    use crate::game::player::Player;
     use crate::game::player::broadcaster::PlayerBroadcaster;
-    use oxcore_shared::database::Databases;
+    use crate::game::player::Player;
     use oxcore_shared::database::characters::repositories::quest_repository::{
         MockQuestRepositoryTrait, QuestRepositoryTrait,
     };
+    use oxcore_shared::database::Databases;
     use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
@@ -1513,9 +1514,9 @@ mod tests {
 
     #[tokio::test]
     async fn questgiver_hello_clears_feign_death() {
-        use crate::game::player::auras::Aura;
         use crate::game::player::auras::aura::AuraFlags;
         use crate::game::player::auras::effects::AURA_FEIGN_DEATH;
+        use crate::game::player::auras::Aura;
 
         let mut world = test_world();
         install_mock_quest_system(&mut world);
@@ -1590,6 +1591,44 @@ mod tests {
         packet.write_guid(npc_guid);
 
         handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        let out = read_packet(&mut rx);
+        assert_eq!(out.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_DETAILS);
+    }
+
+    #[tokio::test]
+    async fn questgiver_hello_gossip_flag_without_menu_sends_quest_details() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let npc_guid = add_creature(&mut world, 100, NPC_FLAG_GOSSIP | NPC_FLAG_QUEST_GIVER);
+        add_quest(&mut world, 1, Some(100));
+
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(npc_guid);
+
+        handle_questgiver_hello(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        let out = read_packet(&mut rx);
+        assert_eq!(out.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_DETAILS);
+    }
+
+    #[tokio::test]
+    async fn gossip_hello_gossip_flag_without_menu_sends_quest_details() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let npc_guid = add_creature(&mut world, 100, NPC_FLAG_GOSSIP | NPC_FLAG_QUEST_GIVER);
+        add_quest(&mut world, 1, Some(100));
+
+        let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::CMSG_GOSSIP_HELLO);
+        packet.write_guid(npc_guid);
+
+        crate::handlers::gossip_handler::handle_gossip_hello(&session, &mut packet, &world)
             .await
             .expect("handler should succeed");
 

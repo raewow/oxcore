@@ -116,17 +116,24 @@ pub fn perform_creature_melee_attack(
     // Apply damage to player
     let mut target_died = false;
     if damage > 0 {
-        let new_health = world
+        let damage_result = world
             .managers
             .player_mgr
             .with_player_mut(target_guid, |player| {
                 let old_health = player.stats.health;
                 let actual = damage.min(old_health);
                 player.stats.health = old_health.saturating_sub(actual);
-                player.stats.health
+                (player.stats.health, actual)
             });
 
-        if let Some(health) = new_health {
+        if let Some((health, actual_damage)) = damage_result {
+            reward_victim_rage_if_actual_damage(actual_damage, |damage| {
+                let _ = world
+                    .systems
+                    .power
+                    .on_damage_taken(target_guid, damage, world);
+            });
+
             if health == 0 {
                 target_died = true;
             }
@@ -167,6 +174,15 @@ pub fn perform_creature_melee_attack(
         {
             tracing::error!("Failed to handle player death from melee attack: {}", e);
         }
+    }
+}
+
+fn reward_victim_rage_if_actual_damage<F>(actual_damage: u32, mut reward: F)
+where
+    F: FnMut(u32),
+{
+    if actual_damage > 0 {
+        reward(actual_damage);
     }
 }
 
@@ -229,4 +245,31 @@ fn handle_creature_kill_cleanup(world: &World, player_guid: ObjectGuid, killer_g
         unk: 0,
     };
     broadcast_around_creature(world, killer_guid, &stop_packet.to_world_packet());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn positive_actual_creature_damage_rewards_victim_rage() {
+        let mut rewarded_damage = None;
+
+        reward_victim_rage_if_actual_damage(42, |damage| {
+            rewarded_damage = Some(damage);
+        });
+
+        assert_eq!(rewarded_damage, Some(42));
+    }
+
+    #[test]
+    fn zero_actual_creature_damage_does_not_reward_victim_rage() {
+        let mut called = false;
+
+        reward_victim_rage_if_actual_damage(0, |_| {
+            called = true;
+        });
+
+        assert!(!called);
+    }
 }

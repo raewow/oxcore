@@ -12,7 +12,6 @@ use super::types::{gossip_option, GossipMenuItem, DEFAULT_GOSSIP_MESSAGE};
 use crate::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::game::creature::CreatureManager;
 use crate::game::player::PlayerManager;
-use oxcore_shared::messages::gossip::{NpcTextOption, SmsgNpcTextUpdate};
 use oxcore_shared::messages::{
     GossipOptionData, SmsgGossipComplete, SmsgGossipMessage, SmsgShowBank,
 };
@@ -150,37 +149,6 @@ impl GossipSystem {
         );
 
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
-
-        // Proactively send SMSG_NPC_TEXT_UPDATE so the client can display the greeting
-        // text without waiting for a separate CMSG_NPC_TEXT_QUERY round-trip.
-        let npc_text_msg = if let Some(npc_text) = self.manager.get_npc_text(text_id) {
-            let options = npc_text.options.map(|opt| {
-                let bct = self.manager.get_broadcast_text(opt.broadcast_text_id);
-                NpcTextOption {
-                    probability: opt.probability,
-                    broadcast_text_id: opt.broadcast_text_id,
-                    male_text: bct
-                        .as_ref()
-                        .map(|b| b.male_text.clone())
-                        .unwrap_or_default(),
-                    female_text: bct
-                        .as_ref()
-                        .map(|b| b.female_text.clone())
-                        .unwrap_or_default(),
-                    language_id: bct.as_ref().map(|b| b.language_id).unwrap_or(0),
-                    emote_delays: bct.as_ref().map(|b| b.emote_delays).unwrap_or([0; 3]),
-                    emote_ids: bct.as_ref().map(|b| b.emote_ids).unwrap_or([0; 3]),
-                }
-            });
-            SmsgNpcTextUpdate { text_id, options }
-        } else {
-            SmsgNpcTextUpdate {
-                text_id,
-                options: std::array::from_fn(|_| NpcTextOption::default()),
-            }
-        };
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, npc_text_msg);
 
         // Track the current gossip menu for this player
         if let Some(mut player) = self.player_mgr.get_player_mut(player_guid) {

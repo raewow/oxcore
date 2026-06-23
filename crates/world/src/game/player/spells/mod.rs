@@ -26,8 +26,8 @@
 //! Apply Cooldown + GCD
 //! ```
 
-pub mod cooldowns;
 pub mod caster;
+pub mod cooldowns;
 pub mod diminishing;
 pub mod effects;
 pub mod hit;

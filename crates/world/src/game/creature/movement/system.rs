@@ -164,10 +164,15 @@ impl MovementSystem {
                             .motion_master
                             .get_generator_mut(MovementGeneratorType::Fleeing)
                         {
-                            if let Some(fear) = gen.as_any_mut().downcast_mut::<TimedFearMovementGenerator>() {
+                            if let Some(fear) = gen
+                                .as_any_mut()
+                                .downcast_mut::<TimedFearMovementGenerator>()
+                            {
                                 fear.update_target_position(target_state.position);
                                 fear.set_creature_position(creature_pos);
-                            } else if let Some(fear) = gen.as_any_mut().downcast_mut::<FearMovementGenerator>() {
+                            } else if let Some(fear) =
+                                gen.as_any_mut().downcast_mut::<FearMovementGenerator>()
+                            {
                                 fear.update_target_position(target_state.position);
                                 fear.set_creature_position(creature_pos);
                             } else if let Some(flee) =
@@ -218,18 +223,23 @@ impl MovementSystem {
                 return;
             };
 
-            let _ = world.managers.creature_mgr.with_creature_mut(guid, |creature| {
-                let creature_pos = creature.position;
-                if let Some(gen) = creature
-                    .motion_master
-                    .get_generator_mut(MovementGeneratorType::Follow)
-                {
-                    if let Some(follow) = gen.as_any_mut().downcast_mut::<FollowMovementGenerator>() {
-                        follow.update_target_position(target_position);
-                        follow.set_creature_position(creature_pos);
+            let _ = world
+                .managers
+                .creature_mgr
+                .with_creature_mut(guid, |creature| {
+                    let creature_pos = creature.position;
+                    if let Some(gen) = creature
+                        .motion_master
+                        .get_generator_mut(MovementGeneratorType::Follow)
+                    {
+                        if let Some(follow) =
+                            gen.as_any_mut().downcast_mut::<FollowMovementGenerator>()
+                        {
+                            follow.update_target_position(target_position);
+                            follow.set_creature_position(creature_pos);
+                        }
                     }
-                }
-            });
+                });
         }
 
         // Get the CURRENT position (after spline update), not the stale snapshot
@@ -309,18 +319,21 @@ impl MovementSystem {
 
                 let final_dest = path_waypoints.last().copied().unwrap_or(destination);
 
-                let _ = world.managers.creature_mgr.with_creature_mut(guid, |creature| {
-                    if let Some(gen) = creature
-                        .motion_master
-                        .get_generator_mut(MovementGeneratorType::Chase)
-                    {
-                        if let Some(chase) =
-                            gen.as_any_mut().downcast_mut::<ChaseMovementGenerator>()
+                let _ = world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(guid, |creature| {
+                        if let Some(gen) = creature
+                            .motion_master
+                            .get_generator_mut(MovementGeneratorType::Chase)
                         {
-                            chase.set_reachable(path_result.is_complete());
+                            if let Some(chase) =
+                                gen.as_any_mut().downcast_mut::<ChaseMovementGenerator>()
+                            {
+                                chase.set_reachable(path_result.is_complete());
+                            }
                         }
-                    }
-                });
+                    });
 
                 if !path_result.is_complete() && path_waypoints.len() <= 1 {
                     // No usable path was found. Don't fake a straight-line chase through walls.
@@ -395,7 +408,9 @@ impl MovementSystem {
                         creature.move_spline.stop();
                         let assistance_delay = creature.motion_master.movement_complete(guid);
                         if let Some(delay) = assistance_delay {
-                            creature.motion_master.move_seek_assistance_distract(guid, delay);
+                            creature
+                                .motion_master
+                                .move_seek_assistance_distract(guid, delay);
                         }
                     });
 

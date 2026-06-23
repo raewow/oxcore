@@ -1,7 +1,7 @@
 //! Movement generator trait
 
-use super::types::MovementGeneratorType;
 use super::motion_master::MotionMaster;
+use super::types::MovementGeneratorType;
 use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Trait for movement generators

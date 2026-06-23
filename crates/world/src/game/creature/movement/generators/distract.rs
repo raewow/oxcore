@@ -127,11 +127,17 @@ mod tests {
         let creature = ObjectGuid::from_raw(1);
         let mut generator = DistractMovementGenerator::new(2_000);
 
-        assert!(matches!(generator.update(creature, 750), MovementUpdate::Continue));
+        assert!(matches!(
+            generator.update(creature, 750),
+            MovementUpdate::Continue
+        ));
         assert_eq!(generator.timer_ms, 1_250);
         assert!(!generator.is_finished());
 
-        assert!(matches!(generator.update(creature, 1_250), MovementUpdate::Finished));
+        assert!(matches!(
+            generator.update(creature, 1_250),
+            MovementUpdate::Finished
+        ));
         assert_eq!(generator.timer_ms, 0);
         assert!(generator.is_finished());
     }
@@ -156,10 +162,16 @@ mod tests {
 
         generator.initialize(creature, Position::default());
         assert_eq!(generator.generator_type(), MovementGeneratorType::Distract);
-        assert!(matches!(generator.update(creature, 499), MovementUpdate::Continue));
+        assert!(matches!(
+            generator.update(creature, 499),
+            MovementUpdate::Continue
+        ));
         assert!(!generator.is_finished());
 
-        assert!(matches!(generator.update(creature, 1), MovementUpdate::Finished));
+        assert!(matches!(
+            generator.update(creature, 1),
+            MovementUpdate::Finished
+        ));
         assert!(generator.is_finished());
 
         generator.finalize(creature);

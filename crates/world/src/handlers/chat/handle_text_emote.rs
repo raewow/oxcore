@@ -1,12 +1,12 @@
 //! CMSG_TEXT_EMOTE handler - player performs a text emote
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
-use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
-use oxcore_shared::messages::ToWorldPacket;
+use crate::World;
 use oxcore_shared::messages::chat::SmsgTextEmote;
+use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_TEXT_EMOTE - player performs a text emote

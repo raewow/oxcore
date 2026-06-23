@@ -1,10 +1,10 @@
 //! Guild system packet handlers
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use tracing::{debug, info};
 
-use crate::World;
 use crate::core::session::WorldSession;
+use crate::World;
 use oxcore_shared::messages::guild::SmsgGuildDecline;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 

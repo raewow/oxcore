@@ -1,16 +1,15 @@
 //! Character handlers - enumeration, login, logout
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::World;
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::core::common::packet_compression::compress_update_packet_if_needed;
 use crate::core::common::position::Position as WorldPosition;
 use crate::core::session::{SessionState, WorldSession};
-use crate::game::common::object_type::ObjectTypeId;
 use crate::game::common::object_type::update_flags;
+use crate::game::common::object_type::ObjectTypeId;
 use crate::game::common::update_fields::{
     OBJECT_FIELD_GUID, OBJECT_FIELD_SCALE_X, OBJECT_FIELD_TYPE, PLAYER_BYTES, PLAYER_BYTES_2,
     PLAYER_FIELD_COINAGE, PLAYER_FIELD_INV_SLOT_HEAD, PLAYER_FIELD_PACK_SLOT_1,
@@ -21,9 +20,9 @@ use crate::game::common::update_fields::{
 };
 use crate::game::player::reputation::FactionEntry;
 use crate::game::player::{Player, PlayerBroadcaster};
+use crate::World;
 use oxcore_shared::database::characters::CharacterDeleteMode;
 use oxcore_shared::database::{CharacterRepository, Databases, ReputationRepository};
-use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::messages::character::{
     SmsgLogoutCancelAck, SmsgLogoutComplete, SmsgLogoutResponse,
 };
@@ -37,6 +36,7 @@ use oxcore_shared::messages::social::SmsgStandstateUpdate;
 use oxcore_shared::messages::update::{
     CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
 };
+use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Handle CMSG_CHAR_ENUM - list characters for this account
@@ -367,8 +367,8 @@ pub async fn handle_player_login_with_guid(
                 player.player_flags |= PLAYER_FLAGS_GHOST_RAW;
                 player.movement.water_walking = true;
                 player.movement.run_speed = 7.0 * 1.5; // ghost speed
-                // Re-apply spell 8326 via the aura container so visibility
-                // rules pick it up on the next tick.
+                                                       // Re-apply spell 8326 via the aura container so visibility
+                                                       // rules pick it up on the next tick.
                 use crate::game::player::auras::aura::{Aura, AuraFlags};
                 use crate::game::player::auras::effects;
                 let flags = AuraFlags {
@@ -424,7 +424,7 @@ pub async fn handle_player_login_with_guid(
 
     // 7.0.0 Initialize rest state from saved data + offline accumulation
     {
-        use crate::game::player::environment::{PLAYER_FLAGS_RESTING, RestType};
+        use crate::game::player::environment::{RestType, PLAYER_FLAGS_RESTING};
 
         // Determine saved rest type from character flags
         let saved_rest_type = if character.character_flags & PLAYER_FLAGS_RESTING != 0 {
@@ -1172,22 +1172,19 @@ pub fn build_player_create_block_for_player(
         max_health
     );
 
-    // Power values from power system
-    let current_mana = player.power.current[0];
-    let max_mana = player.power.max[0];
-
-    let create_block = create_block
-        // Object fields
-        .set_guid_field(OBJECT_FIELD_GUID, world_guid)
-        .set_field(OBJECT_FIELD_TYPE, 0x19) // TYPEMASK_OBJECT | TYPEMASK_UNIT | TYPEMASK_PLAYER
-        .set_float_field(OBJECT_FIELD_SCALE_X, 1.0)
-        // Unit fields
-        .set_field(UNIT_FIELD_HEALTH, current_health)
-        .set_field(UNIT_FIELD_MAXHEALTH, max_health)
-        .set_field(UNIT_FIELD_POWER1, current_mana)
-        .set_field(UNIT_FIELD_MAXPOWER1, max_mana)
-        .set_field(UNIT_FIELD_LEVEL, player.level as u32)
-        .set_field(UNIT_FIELD_FACTIONTEMPLATE, faction);
+    let create_block = add_player_power_create_fields(
+        create_block
+            // Object fields
+            .set_guid_field(OBJECT_FIELD_GUID, world_guid)
+            .set_field(OBJECT_FIELD_TYPE, 0x19) // TYPEMASK_OBJECT | TYPEMASK_UNIT | TYPEMASK_PLAYER
+            .set_float_field(OBJECT_FIELD_SCALE_X, 1.0)
+            // Unit fields
+            .set_field(UNIT_FIELD_HEALTH, current_health)
+            .set_field(UNIT_FIELD_MAXHEALTH, max_health)
+            .set_field(UNIT_FIELD_LEVEL, player.level as u32)
+            .set_field(UNIT_FIELD_FACTIONTEMPLATE, faction),
+        player,
+    );
 
     // UNIT_FIELD_BYTES_0: race | class<<8 | gender<<16 | powerType<<24
     // Using u32 approach like creature code for consistency
@@ -1344,6 +1341,58 @@ pub fn build_player_create_block_for_player(
     }
 
     Ok(create_block)
+}
+
+fn add_player_power_create_fields(
+    mut block: CreateObjectBlock,
+    player: &Player,
+) -> CreateObjectBlock {
+    for power_index in 0..5 {
+        block = block
+            .set_field(
+                UNIT_FIELD_POWER1 + power_index as u32,
+                player.power.current[power_index],
+            )
+            .set_field(
+                UNIT_FIELD_MAXPOWER1 + power_index as u32,
+                player.power.max[power_index],
+            );
+    }
+    block
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_block_includes_rage_current_and_max_power_fields() {
+        let mut player = Player::new(
+            ObjectGuid::player(1),
+            "Warrior".to_string(),
+            0,
+            0,
+            0,
+            60,
+            1,
+            1,
+            0,
+        );
+        player.power.current[1] = 256;
+        player.power.max[1] = 1000;
+
+        let block = add_player_power_create_fields(
+            CreateObjectBlock::new(
+                ObjectGuid::player(1),
+                ObjectTypeId::Player,
+                ObjectType::Player,
+            ),
+            &player,
+        );
+
+        assert!(block.fields.contains(&(UNIT_FIELD_POWER1 + 1, 256)));
+        assert!(block.fields.contains(&(UNIT_FIELD_MAXPOWER1 + 1, 1000)));
+    }
 }
 
 /// Get faction template for race
@@ -1812,7 +1861,7 @@ pub async fn handle_char_create(
     use crate::config::get_config_mgr;
     use crate::game::common::account_result::{char_create, char_name};
     use crate::game::player::name_validation::{
-        NameValidationResult, normalize_character_name, validate_character_name,
+        normalize_character_name, validate_character_name, NameValidationResult,
     };
     use oxcore_shared::database::world::repositories::PlayerCreateInfoRepository;
     use oxcore_shared::game::chat::Team;
@@ -2215,7 +2264,7 @@ pub async fn handle_char_rename(
 ) -> Result<()> {
     use crate::game::common::account_result::{char_name, response};
     use crate::game::player::name_validation::{
-        NameValidationResult, normalize_character_name, validate_character_name,
+        normalize_character_name, validate_character_name, NameValidationResult,
     };
     use oxcore_shared::messages::character::SmsgCharRename;
 
@@ -2448,10 +2497,10 @@ pub async fn handle_zoneupdate(
     if is_capital || current_rest_type == crate::game::player::environment::RestType::InCity {
         if let Some(new_flags) = player_mgr.with_player(player_guid, |p| p.player_flags) {
             use crate::game::common::update_fields::PLAYER_FLAGS;
-            use oxcore_shared::messages::ToWorldPacket;
             use oxcore_shared::messages::update::{
                 ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
             };
+            use oxcore_shared::messages::ToWorldPacket;
 
             let world_guid = crate::core::common::guid::ObjectGuid::from_low(player_guid.counter());
             let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(

@@ -1,7 +1,7 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
-use crate::World;
 use crate::core::session::WorldSession;
+use crate::World;
 use oxcore_shared::game::chat::Team;
 use oxcore_shared::messages::channel::SmsgChannelNotify;
 use oxcore_shared::messages::ToWorldPacket;

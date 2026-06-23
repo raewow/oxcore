@@ -6,18 +6,18 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::World;
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
 use crate::game::area_trigger::{self, AreaTriggerEntry};
 use crate::game::common::update_fields::PLAYER_FLAGS;
 use crate::game::player::environment::RestType;
+use crate::World;
 use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language};
-use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::messages::chat::SmsgMessageChat;
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
+use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Handle CMSG_AREATRIGGER — player enters an area trigger zone.

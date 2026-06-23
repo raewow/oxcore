@@ -6,12 +6,12 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::World;
 use crate::core::session::WorldSession;
 use crate::game::group::{
     ERR_ALREADY_IN_GROUP_S, ERR_BAD_PLAYER_NAME_S, ERR_GROUP_FULL, ERR_IGNORING_YOU_S,
     ERR_NOT_LEADER, ERR_PARTY_RESULT_OK, ERR_PLAYER_WRONG_FACTION, PARTY_OP_INVITE, PARTY_OP_LEAVE,
 };
+use crate::World;
 use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 
 /// Handle CMSG_GROUP_INVITE - player invites someone to group

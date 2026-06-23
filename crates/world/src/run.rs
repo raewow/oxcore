@@ -147,7 +147,9 @@ pub async fn serve(
         info!("world server shutting down...");
         sm_sd.stop();
         world_sd.stop();
-        world_sd.session_mgr.close_all_sessions();
+        if let Err(e) = world_sd.session_mgr.logout_all_players(&world_sd).await {
+            error!("World player logout/save error during shutdown: {}", e);
+        }
         sm_sd.abort_all_connections();
         if let Err(e) = world_sd.shutdown().await {
             error!("World shutdown error: {}", e);

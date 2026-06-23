@@ -2,9 +2,9 @@ use anyhow::Result;
 use std::sync::Arc;
 use tracing::{debug, warn};
 
-use crate::World;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
+use crate::World;
 use oxcore_shared::database::characters::repositories::mail_repository::MailRepository;
 use oxcore_shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
 use oxcore_shared::game::mail::MailMessageType;

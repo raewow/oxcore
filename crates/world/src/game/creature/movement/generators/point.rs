@@ -24,7 +24,10 @@ impl PointMovementGenerator {
     ) -> Self {
         Self {
             id,
-            destination: Position { o: final_orientation, ..destination },
+            destination: Position {
+                o: final_orientation,
+                ..destination
+            },
             speed,
             is_walking,
             has_destination: false,

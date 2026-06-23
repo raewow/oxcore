@@ -1,7 +1,7 @@
 //! Movement state - position, speeds, and movement flags
 
-use oxcore_shared::protocol::Position;
 use oxcore_shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::Position;
 
 /// Per-player movement state
 #[derive(Debug, Clone)]

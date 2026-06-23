@@ -1,7 +1,7 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
-use crate::World;
 use crate::core::session::WorldSession;
+use crate::World;
 use oxcore_shared::game::chat::Team;
 use oxcore_shared::protocol::WorldPacket;
 
@@ -25,10 +25,12 @@ pub async fn handle_channel_invite(
     let channel_name = packet.read_string().unwrap_or_default();
     let target_name = packet.read_string().unwrap_or_default();
 
-    world
-        .systems
-        .chat
-        .invite_player_by_name(player_team, &channel_name, player_guid, &target_name)?;
+    world.systems.chat.invite_player_by_name(
+        player_team,
+        &channel_name,
+        player_guid,
+        &target_name,
+    )?;
 
     Ok(())
 }
