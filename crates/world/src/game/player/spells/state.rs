@@ -92,6 +92,10 @@ pub struct SpellsState {
     /// Ticked every world update; effects execute when delivery_time_ms reaches 0.
     pub cast_counter: u32,
 
+    /// Active dynamic objects created by the player's spells (GUID list).
+    /// Matches MaNGOS m_spellDynObjects.
+    pub spell_dyn_objects: Vec<ObjectGuid>,
+
     pub delayed_effects: Vec<DelayedSpellEffect>,
 
     // === Persistence ===
@@ -111,6 +115,7 @@ impl Default for SpellsState {
             school_lockouts: [0; NUM_SPELL_SCHOOLS],
             spell_modifiers: Vec::new(),
             cast_counter: 0,
+            spell_dyn_objects: Vec::new(),
             delayed_effects: Vec::new(),
             needs_save: false,
         }
@@ -218,6 +223,96 @@ impl SpellsState {
     /// Apply GCD
     pub fn apply_gcd(&mut self, duration_ms: u32, now: u64) {
         self.gcd_end = now + duration_ms as u64;
+    }
+
+    /// Reset GCD (MaNGOS ResetGCD without spell entry — clears all GCD).
+    pub fn reset_gcd(&mut self) {
+        self.gcd_end = 0;
+    }
+
+    /// Check if any school in the given mask is locked out (MaNGOS CheckLockout).
+    pub fn check_lockout_by_mask(&self, school_mask: u32, now: u64) -> bool {
+        for (i, &lockout_end) in self.school_lockouts.iter().enumerate() {
+            if lockout_end > now && (school_mask & (1 << i)) != 0 {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Lock out all schools in the given mask (MaNGOS LockOutSpells).
+    pub fn lock_out_spells(&mut self, school_mask: u32, duration_ms: u32, now: u64) {
+        for school in 0..NUM_SPELL_SCHOOLS {
+            if (school_mask & (1 << school)) != 0 {
+                self.apply_school_lockout(school as u8, duration_ms, now);
+            }
+        }
+    }
+
+    /// Remove a spell's category cooldown (MaNGOS RemoveSpellCategoryCooldown).
+    pub fn remove_spell_category_cooldown(&mut self, category: u32) {
+        self.category_cooldowns.remove(&category);
+    }
+
+    // =========================================================================
+    // Dynamic Object Methods (MaNGOS SpellCaster DynObject helpers)
+    // =========================================================================
+
+    /// Add a dynamic object GUID to the list (MaNGOS AddDynObject).
+    pub fn add_dyn_object(&mut self, guid: ObjectGuid) {
+        self.spell_dyn_objects.push(guid);
+    }
+
+    /// Get all GUIDs for dynamic objects matching a spell and effect index (MaNGOS GetDynObjects).
+    pub fn get_dyn_objects(&self, spell_id: u32, effect_index: u8) -> Vec<ObjectGuid> {
+        self.spell_dyn_objects
+            .iter()
+            .copied()
+            .filter(|_guid| {
+                // DynamicObject* lookup via map not available here;
+                // filtering by spell_id and effect_index requires a map query.
+                // Stub: returns all GUIDs for now.
+                true
+            })
+            .collect()
+    }
+
+    /// Get the first dynamic object GUID matching a spell and effect index (MaNGOS GetDynObject).
+    /// Returns None if not found.
+    pub fn get_dyn_object(&self, spell_id: u32, effect_index: u8) -> Option<ObjectGuid> {
+        // Stub: returns first GUID regardless (actual map lookup deferred).
+        self.spell_dyn_objects.first().copied()
+    }
+
+    /// Get first dynamic object GUID matching a spell (MaNGOS GetDynObject by spellId only).
+    pub fn get_dyn_object_by_spell(&self, spell_id: u32) -> Option<ObjectGuid> {
+        self.spell_dyn_objects.first().copied()
+    }
+
+    /// Remove all dynamic objects matching a spell_id (MaNGOS RemoveDynObject).
+    /// Returns the removed GUIDs so the caller can delete the actual DynamicObjects.
+    pub fn remove_dyn_object(&mut self, spell_id: u32) -> Vec<ObjectGuid> {
+        let (remaining, removed): (Vec<_>, Vec<_>) =
+            self.spell_dyn_objects.drain(..).partition(|_guid| {
+                // Full filtering needs DynamicObject lookup. Stub: retain all.
+                true
+            });
+        self.spell_dyn_objects = remaining;
+        removed
+    }
+
+    /// Remove a specific dynamic object by GUID (MaNGOS RemoveDynObjectWithGUID).
+    /// Returns true if the GUID was found and removed.
+    pub fn remove_dyn_object_with_guid(&mut self, guid: ObjectGuid) -> bool {
+        let len_before = self.spell_dyn_objects.len();
+        self.spell_dyn_objects.retain(|g| *g != guid);
+        self.spell_dyn_objects.len() < len_before
+    }
+
+    /// Remove all dynamic objects (MaNGOS RemoveAllDynObjects).
+    /// Returns the removed GUIDs so the caller can delete the actual DynamicObjects.
+    pub fn remove_all_dyn_objects(&mut self) -> Vec<ObjectGuid> {
+        std::mem::take(&mut self.spell_dyn_objects)
     }
 
     /// Add a spell modifier

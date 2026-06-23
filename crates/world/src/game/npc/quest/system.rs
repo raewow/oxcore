@@ -325,9 +325,10 @@ impl QuestSystem {
                 quest.rew_choice_item_id[idx],
                 quest.rew_choice_item_count[idx],
             ));
+        } else {
+            // No choice rewards exist, so the client should not be providing a choice.
+            return None;
         }
-        // No choice rewards: the client sends reward_choice = 0, which is meaningless
-        // here and must be ignored rather than rejected.
 
         for i in 0..super::types::QUEST_REWARDS_COUNT {
             rewards.push((quest.rew_item_id[i], quest.rew_item_count[i]));

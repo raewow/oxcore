@@ -342,7 +342,6 @@ impl SpellEntry {
         match self.effect[idx] {
             10 | 36 | 37 => true,
             1 => self.effect_implicit_target_a[idx] == 1,
-            38 => false,
             6 => match self.effect_apply_aura_name[idx] {
                 3 | 8 | 62 | 84 | 85 => true,
                 20 | 21 | 33 | 44 | 89 => false,
@@ -352,7 +351,7 @@ impl SpellEntry {
                         || self.effect_implicit_target_b[idx] == 0
                 }
             },
-            _ => self.effect_implicit_target_a[idx] == 1 || self.effect_implicit_target_b[idx] == 0,
+            _ => self.effect_implicit_target_a[idx] == 1,
         }
     }
 

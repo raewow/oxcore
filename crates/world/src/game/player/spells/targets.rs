@@ -732,8 +732,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn magnet_target_redirects_and_consumes_last_charge() {
+    #[tokio::test]
+    async fn magnet_target_redirects_and_consumes_last_charge() {
         let world = test_world();
         let victim = ObjectGuid::new_player(10);
         let magnet = ObjectGuid::new_player(11);
@@ -776,8 +776,8 @@ mod tests {
         assert!(!remaining, "last aura charge should remove the magnet aura");
     }
 
-    #[test]
-    fn magnet_target_stays_on_original_victim_when_invalid() {
+    #[tokio::test]
+    async fn magnet_target_stays_on_original_victim_when_invalid() {
         let world = test_world();
         let victim = ObjectGuid::new_player(20);
         let magnet = ObjectGuid::new_player(21);
