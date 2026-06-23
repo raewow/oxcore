@@ -853,3 +853,78 @@ impl Clone for MotionMaster {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generator_type_name_matches_cpp_names() {
+        let cases = [
+            (MovementGeneratorType::Idle, "IDLE_MOTION_TYPE"),
+            (MovementGeneratorType::Random, "RANDOM_MOTION_TYPE"),
+            (MovementGeneratorType::Waypoint, "WAYPOINT_MOTION_TYPE"),
+            (MovementGeneratorType::Follow, "FOLLOW_MOTION_TYPE"),
+            (MovementGeneratorType::Distract, "DISTRACT_MOTION_TYPE"),
+            (MovementGeneratorType::Point, "POINT_MOTION_TYPE"),
+            (MovementGeneratorType::Confused, "CONFUSED_MOTION_TYPE"),
+            (MovementGeneratorType::Chase, "CHASE_MOTION_TYPE"),
+            (MovementGeneratorType::Fleeing, "FLEEING_MOTION_TYPE"),
+            (MovementGeneratorType::Home, "HOME_MOTION_TYPE"),
+            (MovementGeneratorType::Effect, "EFFECT_MOTION_TYPE"),
+            (MovementGeneratorType::Taxi, "FLIGHT_MOTION_TYPE"),
+        ];
+
+        for (generator_type, name) in cases {
+            assert_eq!(MotionMaster::get_movement_generator_type_name(generator_type), name);
+        }
+    }
+
+    #[test]
+    fn new_motion_master_starts_with_idle_as_current_and_used_generator() {
+        let motion_master = MotionMaster::new();
+
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Idle
+        );
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+        assert!(motion_master.is_using_idle_or_default_movement());
+        assert_eq!(motion_master.get_destination(), None);
+        assert!(!motion_master.is_moving());
+    }
+
+    #[test]
+    fn used_generator_list_reports_inserted_generator_types_in_order() {
+        let mut motion_master = MotionMaster::new();
+        let creature = ObjectGuid::from_raw(1);
+
+        motion_master.move_point(
+            7,
+            Position {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+                o: 4.0,
+            },
+            0,
+            7.0,
+            4.0,
+            creature,
+            Position::default(),
+        );
+
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Point
+        );
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle, MovementGeneratorType::Point]
+        );
+        assert!(!motion_master.is_using_idle_or_default_movement());
+    }
+}
