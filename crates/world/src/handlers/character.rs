@@ -1368,7 +1368,7 @@ mod tests {
     #[test]
     fn create_block_includes_rage_current_and_max_power_fields() {
         let mut player = Player::new(
-            ObjectGuid::player(1),
+            ObjectGuid::new_player(1),
             "Warrior".to_string(),
             0,
             0,
@@ -1383,7 +1383,7 @@ mod tests {
 
         let block = add_player_power_create_fields(
             CreateObjectBlock::new(
-                ObjectGuid::player(1),
+                ObjectGuid::new_player(1),
                 ObjectTypeId::Player,
                 ObjectType::Player,
             ),
@@ -1744,6 +1744,11 @@ pub async fn handle_logout_cancel(
 /// Called either immediately (instant) or after timer expires
 pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Result<()> {
     let session_id = session.id();
+    let save_context = if world.running.load(std::sync::atomic::Ordering::SeqCst) {
+        "LOGOUT"
+    } else {
+        "SHUTDOWN"
+    };
 
     info!(
         "[LOGOUT_TIMER] perform_logout_cleanup called for session {}",
@@ -1801,16 +1806,23 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
     world
         .managers
         .player_mgr
-        .save_all_player_data(player_guid, &world.databases.character)
+        .save_all_player_data_with_context(player_guid, &world.databases.character, save_context)
         .await?;
     info!(
-        "[LOGOUT] Saved all player data (position, XP, health, rest, spells, actions, reputation, skills) for {:?}",
+        "[{save_context}] Saved all player data (position, XP/level, health/power, rest, spells, action bars, reputation, skills) for {:?}",
         player_guid
     );
 
     // Save quest progress to database
+    info!(
+        "[{save_context}] Saving quest progress for {:?}",
+        player_guid
+    );
     world.systems.quest.save_player_quests(player_guid).await?;
-    info!("[LOGOUT] Saved quest progress for {:?}", player_guid);
+    info!(
+        "[{save_context}] Saved quest progress for {:?}",
+        player_guid
+    );
 
     // Notify systems of logout (BEFORE removing from PlayerManager)
     world.systems.on_player_logout(player_guid, world).await?;

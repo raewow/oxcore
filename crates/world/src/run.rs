@@ -145,11 +145,15 @@ pub async fn serve(
     tokio::spawn(async move {
         let _ = shutdown_rx.recv().await;
         info!("world server shutting down...");
+        info!("world shutdown: stopping socket accept loop");
         sm_sd.stop();
+        info!("world shutdown: stopping update loop");
         world_sd.stop();
+        info!("world shutdown: saving active player sessions");
         if let Err(e) = world_sd.session_mgr.logout_all_players(&world_sd).await {
             error!("World player logout/save error during shutdown: {}", e);
         }
+        info!("world shutdown: closing remaining socket connections");
         sm_sd.abort_all_connections();
         if let Err(e) = world_sd.shutdown().await {
             error!("World shutdown error: {}", e);

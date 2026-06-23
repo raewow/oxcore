@@ -147,13 +147,13 @@ mod tests {
     #[test]
     fn rage_from_damage_dealt_uses_reference_conversion_and_tenths() {
         // C++ Player::RewardRage: uint32((damage / rageConversion * 7.5) * 10).
-        assert_eq!(rage_from_damage_dealt(100, 60), 256);
+        assert_eq!(rage_from_damage_dealt(100, 60), 32);
     }
 
     #[test]
     fn rage_from_damage_taken_uses_reference_conversion_and_tenths() {
         // C++ Player::RewardRage: uint32((damage / rageConversion * 2.5) * 10).
-        assert_eq!(rage_from_damage_taken(100, 60), 85);
+        assert_eq!(rage_from_damage_taken(100, 60), 10);
     }
 
     #[test]

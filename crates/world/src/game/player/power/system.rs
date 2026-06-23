@@ -463,7 +463,7 @@ mod tests {
 
     fn warrior(level: u8) -> Player {
         let mut player = Player::new(
-            ObjectGuid::player(1),
+            ObjectGuid::new_player(1),
             "Warrior".to_string(),
             0,
             0,
@@ -483,7 +483,7 @@ mod tests {
         let mut player = warrior(60);
 
         assert!(PowerSystem::apply_damage_dealt_rage(&mut player, 100));
-        assert_eq!(player.power.current[PowerType::Rage as usize], 256);
+        assert_eq!(player.power.current[PowerType::Rage as usize], 32);
     }
 
     #[test]
@@ -491,7 +491,7 @@ mod tests {
         let mut player = warrior(60);
 
         assert!(PowerSystem::apply_damage_taken_rage(&mut player, 100));
-        assert_eq!(player.power.current[PowerType::Rage as usize], 85);
+        assert_eq!(player.power.current[PowerType::Rage as usize], 10);
     }
 
     #[test]
@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn rage_power_update_uses_power2_field_for_client_sync() {
         let block =
-            PowerSystem::power_value_update_block(ObjectGuid::player(1), PowerType::Rage, 256);
+            PowerSystem::power_value_update_block(ObjectGuid::new_player(1), PowerType::Rage, 256);
 
         assert_eq!(block.fields, vec![(UNIT_FIELD_POWER1 + 1, 256)]);
     }

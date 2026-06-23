@@ -756,36 +756,138 @@ impl PlayerManager {
         player_guid: ObjectGuid,
         character_db: &sqlx::MySqlPool,
     ) -> anyhow::Result<()> {
-        // Save all player data in parallel for performance
-        let (
-            pos_result,
-            xp_result,
-            health_result,
-            rest_result,
-            spells_result,
-            actions_result,
-            rep_result,
-            skills_result,
-        ) = tokio::join!(
-            self.save_position(player_guid, character_db),
-            self.save_experience(player_guid, character_db),
-            self.save_health_and_power(player_guid, character_db),
-            self.save_rest_state(player_guid, character_db),
-            self.save_spells(player_guid, character_db),
-            self.save_action_buttons(player_guid, character_db),
-            self.save_reputation(player_guid, character_db),
-            self.save_skills(player_guid, character_db),
-        );
+        self.save_all_player_data_with_context(player_guid, character_db, "SAVE")
+            .await
+    }
 
-        // Check for errors
-        pos_result?;
-        xp_result?;
-        health_result?;
-        rest_result?;
-        spells_result?;
-        actions_result?;
-        rep_result?;
-        skills_result?;
+    /// Save all player data with explicit step logging for graceful logout/shutdown.
+    pub async fn save_all_player_data_with_context(
+        &self,
+        player_guid: ObjectGuid,
+        character_db: &sqlx::MySqlPool,
+        context: &str,
+    ) -> anyhow::Result<()> {
+        if let Some(player) = self.get_player(player_guid) {
+            let spell_count = player.spells.spellbook.len();
+            let action_count = player
+                .settings
+                .action_buttons
+                .iter()
+                .filter(|button| button.is_some())
+                .count();
+            let reputation_count = player.reputation.factions.len();
+            let skill_count = player.skills.skills.len();
+
+            tracing::info!(
+                "[{context}] Saving player {}: map={} instance={} zone={} position=({:.3}, {:.3}, {:.3}, {:.3}) level={} xp={} health={} power={:?} rest_bonus={} flags=0x{:08X} spells={} actions={} reputation={} skills={}",
+                player_guid,
+                player.map_id,
+                player.instance_id,
+                player.zone_id,
+                player.movement.position.x,
+                player.movement.position.y,
+                player.movement.position.z,
+                player.movement.position.o,
+                player.level,
+                player.xp,
+                player.stats.health,
+                player.power.current,
+                player.rest_bonus,
+                player.player_flags,
+                spell_count,
+                action_count,
+                reputation_count,
+                skill_count,
+            );
+        }
+
+        tracing::info!("[{context}] Saving position for player {}", player_guid);
+        if let Err(e) = self.save_position(player_guid, character_db).await {
+            tracing::error!(
+                "[{context}] Failed saving position for player {}: {}",
+                player_guid,
+                e
+            );
+            return Err(e);
+        }
+        tracing::info!("[{context}] Saved position for player {}", player_guid);
+
+        tracing::info!("[{context}] Saving XP/level for player {}", player_guid);
+        if let Err(e) = self.save_experience(player_guid, character_db).await {
+            tracing::error!(
+                "[{context}] Failed saving XP/level for player {}: {}",
+                player_guid,
+                e
+            );
+            return Err(e);
+        }
+        tracing::info!("[{context}] Saved XP/level for player {}", player_guid);
+
+        tracing::info!("[{context}] Saving health/power for player {}", player_guid);
+        if let Err(e) = self.save_health_and_power(player_guid, character_db).await {
+            tracing::error!(
+                "[{context}] Failed saving health/power for player {}: {}",
+                player_guid,
+                e
+            );
+            return Err(e);
+        }
+        tracing::info!("[{context}] Saved health/power for player {}", player_guid);
+
+        tracing::info!("[{context}] Saving rest state for player {}", player_guid);
+        if let Err(e) = self.save_rest_state(player_guid, character_db).await {
+            tracing::error!(
+                "[{context}] Failed saving rest state for player {}: {}",
+                player_guid,
+                e
+            );
+            return Err(e);
+        }
+        tracing::info!("[{context}] Saved rest state for player {}", player_guid);
+
+        tracing::info!("[{context}] Saving spells for player {}", player_guid);
+        if let Err(e) = self.save_spells(player_guid, character_db).await {
+            tracing::error!(
+                "[{context}] Failed saving spells for player {}: {}",
+                player_guid,
+                e
+            );
+            return Err(e);
+        }
+        tracing::info!("[{context}] Saved spells for player {}", player_guid);
+
+        tracing::info!("[{context}] Saving action bars for player {}", player_guid);
+        if let Err(e) = self.save_action_buttons(player_guid, character_db).await {
+            tracing::error!(
+                "[{context}] Failed saving action bars for player {}: {}",
+                player_guid,
+                e
+            );
+            return Err(e);
+        }
+        tracing::info!("[{context}] Saved action bars for player {}", player_guid);
+
+        tracing::info!("[{context}] Saving reputation for player {}", player_guid);
+        if let Err(e) = self.save_reputation(player_guid, character_db).await {
+            tracing::error!(
+                "[{context}] Failed saving reputation for player {}: {}",
+                player_guid,
+                e
+            );
+            return Err(e);
+        }
+        tracing::info!("[{context}] Saved reputation for player {}", player_guid);
+
+        tracing::info!("[{context}] Saving skills for player {}", player_guid);
+        if let Err(e) = self.save_skills(player_guid, character_db).await {
+            tracing::error!(
+                "[{context}] Failed saving skills for player {}: {}",
+                player_guid,
+                e
+            );
+            return Err(e);
+        }
+        tracing::info!("[{context}] Saved skills for player {}", player_guid);
 
         Ok(())
     }

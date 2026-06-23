@@ -5,13 +5,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use crossterm::cursor::MoveTo;
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
     KeyModifiers,
 };
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
@@ -49,7 +50,13 @@ struct TermGuard;
 impl Drop for TermGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(std::io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+        let _ = execute!(
+            std::io::stdout(),
+            DisableMouseCapture,
+            LeaveAlternateScreen,
+            Clear(ClearType::All),
+            MoveTo(0, 0)
+        );
     }
 }
 

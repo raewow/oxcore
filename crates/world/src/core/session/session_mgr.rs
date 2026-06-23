@@ -217,6 +217,8 @@ impl SessionManager {
             .map(|entry| Arc::clone(entry.value()))
             .collect();
         let mut failures = 0usize;
+        let mut saved_players = 0usize;
+        let mut sessions_without_player = 0usize;
 
         info!(
             "Logging out {} active sessions for shutdown",
@@ -240,11 +242,24 @@ impl SessionManager {
                         "[SHUTDOWN] Failed to save/logout player {} from session {}: {}",
                         player_guid, session_id, e
                     );
+                } else {
+                    saved_players += 1;
                 }
+            } else {
+                sessions_without_player += 1;
+                info!(
+                    "[SHUTDOWN] Session {} has no active player; removing without player save",
+                    session_id
+                );
             }
 
             self.remove_session(session_id);
         }
+
+        info!(
+            "[SHUTDOWN] Player session save summary: saved={}, no_player={}, failed={}",
+            saved_players, sessions_without_player, failures
+        );
 
         if failures > 0 {
             anyhow::bail!("failed to save/logout {failures} player session(s) during shutdown");
