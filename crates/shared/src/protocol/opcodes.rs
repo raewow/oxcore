@@ -285,6 +285,7 @@ impl Opcode {
     pub const CMSG_CANCEL_AURA: Opcode = Opcode(0x0136); // 310
     pub const CMSG_CANCEL_GROWTH_AURA: Opcode = Opcode(0x029B); // 667
     pub const CMSG_CANCEL_AUTO_REPEAT_SPELL: Opcode = Opcode(0x026D); // 621
+    pub const SMSG_CANCEL_AUTO_REPEAT: Opcode = Opcode(0x029C); // 668
     pub const CMSG_CANCEL_CHANNELING: Opcode = Opcode(0x013B); // 315
     pub const CMSG_CANCEL_CHANNELLING: Opcode = Opcode(0x013B); // 315 (alias)
     pub const CMSG_USE_ITEM: Opcode = Opcode(0x00AB); // 171

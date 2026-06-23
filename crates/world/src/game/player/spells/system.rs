@@ -1304,6 +1304,54 @@ impl SpellSystem {
         Ok(())
     }
 
+    /// Interrupt all non-melee spells (MaNGOS SpellCaster::InterruptNonMeleeSpells).
+    ///
+    /// Interrupts Generic, Autorepeat, and Channeled slots.
+    /// If `spell_id` is Some(nonzero), only interrupts slots containing that spell.
+    /// Channeled spells are always interrupted (C++ ignores withDelayed for channeled).
+    pub async fn interrupt_non_melee_spells(
+        &self,
+        caster_guid: ObjectGuid,
+        with_delayed: bool,
+        spell_id: Option<u32>,
+        world: &World,
+    ) -> Result<()> {
+        // Snapshot spell IDs in each slot outside the lock
+        let state: [Option<u32>; 4] = world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |player| {
+                let mut ids: [Option<u32>; 4] = [None, None, None, None];
+                for (i, slot) in player.spells.current_spells.iter().enumerate() {
+                    if let Some(active) = slot {
+                        if with_delayed || active.state != SpellState::Delayed {
+                            ids[i] = Some(active.spell_id);
+                        }
+                    }
+                }
+                ids
+            })
+            .unwrap_or([None, None, None, None]);
+
+        let slots = [
+            CurrentSpellType::Generic,
+            CurrentSpellType::Autorepeat,
+            CurrentSpellType::Channeled,
+        ];
+
+        for slot in slots {
+            let sid = state[slot as usize];
+            if let Some(sid) = sid {
+                if spell_id.map_or(true, |filter| sid == filter) {
+                    self.cancel_spell_in_slot(caster_guid, slot, world).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Cancel the spell in a specific slot. Returns true if a spell was cancelled.
     async fn cancel_spell_in_slot(
         &self,
@@ -1348,6 +1396,14 @@ impl SpellSystem {
                     .with_player_mut(caster_guid, |player| {
                         player.spells.gcd_end = now;
                     });
+            }
+
+            // Send SMSG_CANCEL_AUTO_REPEAT for autorepeat spells on players,
+            // matching MaNGOS SpellCaster::InterruptSpell SendAutoRepeatCancel behaviour.
+            if slot == CurrentSpellType::Autorepeat && caster_guid.is_player() {
+                use oxcore_shared::protocol::{Opcode, WorldPacket};
+                self.broadcast_mgr
+                    .send_msg_to_player(caster_guid, WorldPacket::new(Opcode::SMSG_CANCEL_AUTO_REPEAT));
             }
 
             // Broadcast SMSG_SPELL_FAILURE
