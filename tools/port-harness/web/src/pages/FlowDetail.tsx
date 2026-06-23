@@ -1,22 +1,124 @@
 import { Fragment, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type FlowDetailResponse } from "../api/client";
-import { StatusBadge } from "../components/StatusBadge";
+import { api, type FlowDetailResponse, type FlowAuditSummary } from "../api/client";
 import { SourceViewer } from "../components/SourceViewer";
 import { MarkdownContent } from "../components/Markdown";
 
-const NEXT_ACTION_LABELS: Record<string, string> = {
-  audit: "Run audit",
-  plan: "Plan Rust",
-  port: "Port symbol",
-  review: "Mark reviewed",
-  done: "Done",
+type PipelineStage = "audit" | "plan" | "port" | "review" | "done";
+
+const PIPELINE_STAGES: { id: PipelineStage; label: string }[] = [
+  { id: "audit", label: "Audit" },
+  { id: "plan", label: "Plan" },
+  { id: "port", label: "Port" },
+  { id: "review", label: "Review" },
+  { id: "done", label: "Done" },
+];
+
+const STAGE_ACTION_HINT: Record<PipelineStage, string> = {
+  audit: 'Click "Audit implementation" — agent checks which symbols are missing from Rust',
+  plan: 'Click "Plan changes" — agent maps each symbol to its target Rust file',
+  port: 'Click "Port drafts" — agent generates Rust stubs in docs/ports/',
+  review: "Re-run audit to verify the Rust implementation and mark symbols as reviewed",
+  done: "All symbols ported and reviewed",
 };
+
+function StageBadge({ stage }: { stage: PipelineStage }) {
+  return <span className={`flow-stage-badge flow-stage-${stage}`}>{stage}</span>;
+}
+
+function FlowPipelineHeader({
+  tasks,
+  summary,
+}: {
+  tasks: FlowDetailResponse["tasks"];
+  summary: FlowAuditSummary;
+}) {
+  const total = tasks.length;
+  if (total === 0) return null;
+
+  const audited = tasks.filter((t) => t.audit != null).length;
+  const planned = tasks.filter((t) => t.plan != null).length;
+  const ported = tasks.filter((t) => t.port_draft != null).length;
+  const reviewed = summary.reviewed;
+  const done = tasks.filter((t) => t.status === "done" || t.status === "reviewed").length;
+
+  const needsAudit = tasks.filter((t) => t.next_action === "audit").length;
+  const needsPlan = tasks.filter((t) => t.next_action === "plan").length;
+  const needsPort = tasks.filter((t) => t.next_action === "port").length;
+  const needsReview = tasks.filter((t) => t.next_action === "review").length;
+
+  const currentStage: PipelineStage =
+    needsAudit > 0 ? "audit"
+    : needsPlan > 0 ? "plan"
+    : needsPort > 0 ? "port"
+    : needsReview > 0 ? "review"
+    : "done";
+
+  const stageRows: { id: PipelineStage; done: number; needs: number }[] = [
+    { id: "audit", done: audited, needs: needsAudit },
+    { id: "plan", done: planned, needs: needsPlan },
+    { id: "port", done: ported, needs: needsPort },
+    { id: "review", done: reviewed, needs: needsReview },
+    { id: "done", done, needs: 0 },
+  ];
+
+  // weighted progress: each stage adds 20%
+  const score = (audited * 0.2 + planned * 0.4 + ported * 0.6 + reviewed * 0.8 + done * 1.0) / total;
+  const percent = Math.min(100, Math.round(score * 100));
+
+  return (
+    <div className="flow-pipeline">
+      <div className="pipeline-stages">
+        {stageRows.map((s, i) => {
+          const isActive = s.id === currentStage;
+          const isComplete = s.done === total;
+          return (
+            <Fragment key={s.id}>
+              {i > 0 && (
+                <div className={`pipeline-connector${stageRows[i - 1].done === total ? " pipeline-connector-done" : ""}`}>
+                  →
+                </div>
+              )}
+              <div className={`pipeline-stage${isActive ? " pipeline-stage-active" : ""}${isComplete ? " pipeline-stage-complete" : ""}`}>
+                <div className="pipeline-stage-icon">
+                  {isComplete ? "✓" : isActive ? "●" : "○"}
+                </div>
+                <div className="pipeline-stage-label">{PIPELINE_STAGES[i].label}</div>
+                <div className="pipeline-stage-count">
+                  {s.done}/{total}
+                </div>
+                {isActive && s.needs > 0 && (
+                  <div className="pipeline-stage-needs">{s.needs} pending</div>
+                )}
+              </div>
+            </Fragment>
+          );
+        })}
+      </div>
+
+      <div className="pipeline-bar-row">
+        <div className="pipeline-track">
+          <div className="pipeline-fill" style={{ width: `${percent}%` }} />
+        </div>
+        <span className="pipeline-percent">{percent}%</span>
+      </div>
+
+      {currentStage !== "done" && (
+        <div className="pipeline-action-hint">
+          <span className="pipeline-action-stage">
+            <StageBadge stage={currentStage} />
+          </span>
+          <span className="pipeline-action-text">{STAGE_ACTION_HINT[currentStage]}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AuditStatusBadge({ status }: { status: string | null }) {
   if (!status) {
-    return <span className="audit-badge audit-none">not audited</span>;
+    return <span className="audit-badge audit-none">—</span>;
   }
   return <span className={`audit-badge audit-${status}`}>{status}</span>;
 }
@@ -476,9 +578,11 @@ export function FlowDetail() {
     <div>
       <div className="page-header">
         <h2>{flow.flow.name}</h2>
-        <p style={{ color: "#94a3b8" }}>{flow.flow.description}</p>
+        {flow.flow.description && (
+          <p style={{ color: "#94a3b8", marginTop: "0.25rem" }}>{flow.flow.description}</p>
+        )}
         {flow.flow.notes && (
-          <p style={{ color: "#cbd5e1", whiteSpace: "pre-wrap", maxWidth: 900 }}>
+          <p style={{ color: "#cbd5e1", whiteSpace: "pre-wrap", maxWidth: 900, marginTop: "0.35rem", fontSize: "0.9rem" }}>
             {flow.flow.notes}
           </p>
         )}
@@ -488,11 +592,7 @@ export function FlowDetail() {
             className="btn"
             disabled={auditMutation.isPending || flow.tasks.length === 0}
             onClick={() => {
-              if (
-                window.confirm(
-                  `Audit Rust implementation for ${flow.tasks.length} symbol(s)?`,
-                )
-              ) {
+              if (window.confirm(`Audit Rust implementation for ${flow.tasks.length} symbol(s)?`)) {
                 auditMutation.mutate();
               }
             }}
@@ -504,11 +604,7 @@ export function FlowDetail() {
             className="btn btn-secondary"
             disabled={planMutation.isPending || needsPlan === 0}
             onClick={() => {
-              if (
-                window.confirm(
-                  `Plan Rust for ${needsPlan} symbol(s) that need work?`,
-                )
-              ) {
+              if (window.confirm(`Plan Rust for ${needsPlan} symbol(s) that need work?`)) {
                 planMutation.mutate();
               }
             }}
@@ -520,11 +616,7 @@ export function FlowDetail() {
             className="btn btn-secondary"
             disabled={portMutation.isPending || needsPort === 0}
             onClick={() => {
-              if (
-                window.confirm(
-                  `Generate Rust drafts for ${needsPort} planned symbol(s)? Output goes to docs/ports/.`,
-                )
-              ) {
+              if (window.confirm(`Generate Rust drafts for ${needsPort} planned symbol(s)?`)) {
                 portMutation.mutate();
               }
             }}
@@ -536,11 +628,7 @@ export function FlowDetail() {
             className="btn btn-secondary"
             disabled={markDoneMutation.isPending || canMarkDone === 0}
             onClick={() => {
-              if (
-                window.confirm(
-                  `Mark ${canMarkDone} symbol(s) as done? Use this when you've finished the Rust implementation.`,
-                )
-              ) {
+              if (window.confirm(`Mark ${canMarkDone} symbol(s) as done?`)) {
                 markDoneMutation.mutate(undefined);
               }
             }}
@@ -553,30 +641,8 @@ export function FlowDetail() {
         </div>
       </div>
 
-      <div className="summary-cards">
-        <div className="summary-card">
-          <span className="summary-label">Audited</span>
-          <span className="summary-value">
-            {summary.audited}/{summary.total}
-          </span>
-        </div>
-        <div className="summary-card">
-          <span className="summary-label">Missing</span>
-          <span className="summary-value summary-missing">{summary.missing}</span>
-        </div>
-        <div className="summary-card">
-          <span className="summary-label">Partial</span>
-          <span className="summary-value summary-partial">{summary.partial}</span>
-        </div>
-        <div className="summary-card">
-          <span className="summary-label">Complete</span>
-          <span className="summary-value summary-complete">{summary.complete}</span>
-        </div>
-        <div className="summary-card">
-          <span className="summary-label">Passed</span>
-          <span className="summary-value summary-complete">{summary.passed}</span>
-        </div>
-      </div>
+      {/* Pipeline progress header */}
+      <FlowPipelineHeader tasks={flow.tasks} summary={summary} />
 
       {activeJobs.length > 0 && (
         <div className="info-banner" style={{ marginBottom: "1rem" }}>
@@ -593,46 +659,10 @@ export function FlowDetail() {
 
       <JobOutputPanel jobId={selectedJobId} onSelectJob={setSelectedJobId} />
 
-      <div className="next-steps-panel">
-        <h3>What&apos;s next?</h3>
-        <ol>
-          {needsAudit > 0 && (
-            <li>
-              <strong>Audit</strong> — {needsAudit} symbol(s) not audited yet. Click{" "}
-              <em>Audit implementation</em>.
-            </li>
-          )}
-          {needsPlan > 0 && (
-            <li>
-              <strong>Plan</strong> — {needsPlan} symbol(s) are missing or partial. Click{" "}
-              <em>Plan changes</em> to decide target Rust files and types.
-            </li>
-          )}
-          {needsPort > 0 && (
-            <li>
-              <strong>Port</strong> — {needsPort} symbol(s) are planned. Click{" "}
-              <em>Port drafts</em> to generate Rust stubs in <code>docs/ports/</code>.
-            </li>
-          )}
-          {summary.complete > 0 && (
-            <li>
-              <strong>Review</strong> — {summary.complete} symbol(s) look complete in Rust. Audit
-              marks them <code>reviewed</code> when passed.
-            </li>
-          )}
-          {needsAudit === 0 &&
-            needsPlan === 0 &&
-            needsPort === 0 &&
-            summary.audited === summary.total && (
-              <li>All symbols audited — nothing left to do on this flow.</li>
-            )}
-        </ol>
-      </div>
-
       {flow.flow.expected_behaviour && (
         <>
-          <h3 style={{ marginBottom: "0.5rem" }}>Expected Behaviour</h3>
-          <p style={{ marginBottom: "1.5rem" }}>{flow.flow.expected_behaviour}</p>
+          <h3 style={{ margin: "1.5rem 0 0.5rem" }}>Expected Behaviour</h3>
+          <p style={{ marginBottom: "1.5rem", color: "#cbd5e1" }}>{flow.flow.expected_behaviour}</p>
         </>
       )}
 
@@ -675,26 +705,27 @@ export function FlowDetail() {
         </>
       )}
 
-      <h3 style={{ marginBottom: "0.75rem" }}>Symbols ({flow.tasks.length})</h3>
+      <h3 style={{ marginBottom: "0.75rem" }}>
+        Symbols ({flow.tasks.length})
+        {needsAudit > 0 && <span className="symbol-table-hint"> · {needsAudit} need audit</span>}
+        {needsPlan > 0 && <span className="symbol-table-hint"> · {needsPlan} need plan</span>}
+        {needsPort > 0 && <span className="symbol-table-hint"> · {needsPort} need port</span>}
+      </h3>
       <table>
         <thead>
           <tr>
             <th>Symbol</th>
-            <th>Task</th>
-            <th>Audit</th>
-            <th>Plan</th>
-            <th>Draft</th>
+            <th>Stage</th>
+            <th>Audit result</th>
             <th>Coverage</th>
-            <th>Next</th>
-            <th>Action</th>
             <th>Rust target</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody>
           {flow.tasks.map((t) => (
             <Fragment key={t.id}>
               <tr
-                key={t.id}
                 className={expandedTaskId === t.id ? "row-selected" : undefined}
                 onClick={() =>
                   hasSymbolDetail(t) &&
@@ -706,9 +737,14 @@ export function FlowDetail() {
                   <Link to={`/symbols/${t.source_symbol_id}`} onClick={(e) => e.stopPropagation()}>
                     {t.symbol_name}
                   </Link>
+                  {hasSymbolDetail(t) && (
+                    <span className="muted" style={{ marginLeft: "0.4rem", fontSize: "0.72rem" }}>
+                      {expandedTaskId === t.id ? "▲" : "▼"}
+                    </span>
+                  )}
                 </td>
                 <td>
-                  <StatusBadge status={t.status} />
+                  <StageBadge stage={t.next_action as PipelineStage} />
                 </td>
                 <td>
                   <AuditStatusBadge status={t.audit?.implementation_status ?? null} />
@@ -719,25 +755,13 @@ export function FlowDetail() {
                   )}
                 </td>
                 <td style={{ fontSize: "0.85rem" }}>
-                  {t.plan ? (
-                    <span className="artifact-badge artifact-planned">planned</span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td style={{ fontSize: "0.85rem" }}>
-                  {t.port_draft ? (
-                    <span className="artifact-badge artifact-drafted">draft</span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td style={{ fontSize: "0.85rem" }}>
                   {t.audit
                     ? `${t.audit.coverage.claims_covered}/${t.audit.coverage.claims_total}`
                     : "—"}
                 </td>
-                <td style={{ fontSize: "0.85rem" }}>{NEXT_ACTION_LABELS[t.next_action]}</td>
+                <td style={{ fontSize: "0.8rem", color: "#94a3b8", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {t.plan?.target_rust_file ?? t.audit?.rust_locations[0]?.file ?? t.target_rust_file ?? "—"}
+                </td>
                 <td onClick={(e) => e.stopPropagation()}>
                   <div className="flow-row-actions">
                     {t.next_action === "port" && (
@@ -772,13 +796,10 @@ export function FlowDetail() {
                     )}
                   </div>
                 </td>
-                <td style={{ fontSize: "0.8rem" }}>
-                  {t.plan?.target_rust_file ?? t.audit?.rust_locations[0]?.file ?? t.target_rust_file ?? "—"}
-                </td>
               </tr>
               {expandedTaskId === t.id && hasSymbolDetail(t) && (
                 <tr key={`${t.id}-detail`}>
-                  <td colSpan={9} className="audit-detail-cell">
+                  <td colSpan={6} className="audit-detail-cell">
                     <SymbolDetailPanel task={t} defaultTab={defaultDetailTab(t)} />
                   </td>
                 </tr>

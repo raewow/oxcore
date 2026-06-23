@@ -1095,6 +1095,160 @@ summary {
   margin: 1rem 0;
 }
 
+/* Pipeline progress header (FlowDetail) */
+.flow-pipeline {
+  background: #1a1d27;
+  border: 1px solid #2d3348;
+  border-radius: 10px;
+  padding: 1.1rem 1.35rem;
+  margin-bottom: 1.5rem;
+}
+
+.pipeline-stages {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.pipeline-connector {
+  color: #334155;
+  font-size: 1rem;
+  align-self: center;
+  margin: 0 0.35rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.pipeline-connector-done {
+  color: #4ade80;
+}
+
+.pipeline-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 64px;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: background 0.15s;
+}
+
+.pipeline-stage-active {
+  background: #172033;
+  border-color: #2563eb;
+}
+
+.pipeline-stage-complete {
+  opacity: 0.7;
+}
+
+.pipeline-stage-icon {
+  font-size: 1rem;
+  line-height: 1;
+  color: #475569;
+}
+
+.pipeline-stage-active .pipeline-stage-icon {
+  color: #60a5fa;
+}
+
+.pipeline-stage-complete .pipeline-stage-icon {
+  color: #4ade80;
+}
+
+.pipeline-stage-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.pipeline-stage-active .pipeline-stage-label {
+  color: #93c5fd;
+}
+
+.pipeline-stage-complete .pipeline-stage-label {
+  color: #86efac;
+}
+
+.pipeline-stage-count {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.pipeline-stage-active .pipeline-stage-count {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.pipeline-stage-needs {
+  font-size: 0.68rem;
+  color: #fbbf24;
+  margin-top: 0.1rem;
+}
+
+.pipeline-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.pipeline-track {
+  flex: 1;
+  height: 6px;
+  background: #2d3348;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.pipeline-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb 0%, #4ade80 100%);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.pipeline-percent {
+  font-size: 0.82rem;
+  color: #94a3b8;
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pipeline-action-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  background: #0f172a;
+  border-radius: 6px;
+  border: 1px solid #1e3a5f;
+  font-size: 0.83rem;
+  color: #cbd5e1;
+}
+
+.pipeline-action-stage {
+  flex-shrink: 0;
+}
+
+.pipeline-action-text {
+  color: #94a3b8;
+}
+
+.symbol-table-hint {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: #64748b;
+}
+
 /* Settings page */
 .page-content {
   padding: 1.5rem 2rem;

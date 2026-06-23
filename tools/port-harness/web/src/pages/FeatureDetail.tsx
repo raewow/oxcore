@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type DiscoverCandidate, type FeatureInvestigationSummary } from "../api/client";
+import { api, type DiscoverCandidate, type FeatureInvestigationSummary, type FlowSummary } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 
 function formatBytes(n: number): string {
@@ -136,6 +136,14 @@ export function FeatureDetail() {
     queryFn: () => api.getFeature(featureId),
     enabled: featureId > 0,
   });
+
+  const { data: allFlows } = useQuery({
+    queryKey: ["flows"],
+    queryFn: api.getFlows,
+    refetchInterval: 15000,
+  });
+
+  const flowMap = new Map<number, FlowSummary>((allFlows ?? []).map((f) => [f.id, f]));
 
   const { data: investigations, refetch: refetchInvestigations } = useQuery({
     queryKey: ["feature-investigations", featureId],
@@ -309,58 +317,115 @@ export function FeatureDetail() {
 
       {/* Flows — primary work surface */}
       <section className="content-section">
-        <div className="section-title">Flows</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", marginBottom: "0.75rem" }}>
+          <div className="section-title" style={{ marginBottom: 0 }}>Flows ({data.flows.length})</div>
+          {data.flows.length > 0 && (() => {
+            const total = data.flows.reduce((s, f) => s + (flowMap.get(f.id)?.progress.total ?? 0), 0);
+            const done = data.flows.reduce((s, f) => s + (flowMap.get(f.id)?.progress.done ?? 0), 0);
+            const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+            return (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                <div style={{ width: 120 }}>
+                  <div className="job-progress">
+                    <div className="job-progress-bar" style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+                <span className="muted" style={{ fontSize: "0.8rem", whiteSpace: "nowrap" }}>{done}/{total} symbols done · {pct}%</span>
+              </div>
+            );
+          })()}
+        </div>
         {data.flows.length === 0 ? (
           <p className="muted">No linked flows. Assemble flows from the files below, or accept suggestions.</p>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Risk</th>
+                <th>Flow</th>
+                <th>Stage</th>
+                <th>Progress</th>
+                <th>Symbols</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {data.flows.map((flow) => (
-                <tr key={flow.id}>
-                  <td>
-                    <Link to={`/flows/${flow.id}`}>{flow.name}</Link>
-                  </td>
-                  <td>
-                    {flow.risk_level ? (
-                      <span style={{ color: RISK_COLOR[flow.risk_level] ?? "#94a3b8", textTransform: "capitalize", fontSize: "0.8rem" }}>
-                        {flow.risk_level}
-                      </span>
-                    ) : "—"}
-                  </td>
-                  <td>
-                    <div className="action-buttons">
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        disabled={auditFlowMutation.isPending}
-                        onClick={() => auditFlowMutation.mutate(flow.id)}
-                      >
-                        Audit
-                      </button>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        disabled={planFlowMutation.isPending}
-                        onClick={() => planFlowMutation.mutate(flow.id)}
-                      >
-                        Plan
-                      </button>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        disabled={portFlowMutation.isPending}
-                        onClick={() => portFlowMutation.mutate(flow.id)}
-                      >
-                        Port
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {data.flows.map((flow) => {
+                const fp = flowMap.get(flow.id);
+                const p = fp?.progress;
+                const stage = p?.stage ?? null;
+                const pct = p?.percent ?? 0;
+                const STAGE_LABELS: Record<string, string> = {
+                  empty: "No symbols", audit: "Needs audit", plan: "Needs plan",
+                  port: "Needs port", review: "Needs review", done: "Done",
+                };
+                return (
+                  <tr key={flow.id}>
+                    <td>
+                      <div>
+                        <Link to={`/flows/${flow.id}`}>{flow.name}</Link>
+                        {flow.risk_level && (
+                          <span style={{ marginLeft: "0.5rem", color: RISK_COLOR[flow.risk_level] ?? "#94a3b8", fontSize: "0.75rem" }}>
+                            {flow.risk_level}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td style={{ minWidth: 110 }}>
+                      {stage ? (
+                        <span className={`flow-stage-badge flow-stage-${stage}`}>
+                          {STAGE_LABELS[stage] ?? stage}
+                        </span>
+                      ) : <span className="muted">—</span>}
+                    </td>
+                    <td style={{ minWidth: 160 }}>
+                      {p && p.total > 0 ? (
+                        <div className="flow-progress-cell">
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <div className="job-progress" style={{ flex: 1 }}>
+                              <div className="job-progress-bar" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span style={{ fontSize: "0.75rem", color: "#94a3b8", whiteSpace: "nowrap" }}>{pct}%</span>
+                          </div>
+                          <div className="flow-progress-stats">
+                            <span>{p.audited}/{p.total} audited</span>
+                            {p.planned > 0 && <span>{p.planned} planned</span>}
+                            {p.ported > 0 && <span>{p.ported} ported</span>}
+                            {p.done > 0 && <span style={{ color: "#86efac" }}>{p.done} done</span>}
+                          </div>
+                        </div>
+                      ) : <span className="muted" style={{ fontSize: "0.8rem" }}>—</span>}
+                    </td>
+                    <td style={{ fontSize: "0.85rem", color: "#94a3b8" }}>
+                      {p?.total ?? fp?.symbol_count ?? "—"}
+                    </td>
+                    <td>
+                      <div className="action-buttons">
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          disabled={auditFlowMutation.isPending}
+                          onClick={() => auditFlowMutation.mutate(flow.id)}
+                        >
+                          Audit
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          disabled={planFlowMutation.isPending}
+                          onClick={() => planFlowMutation.mutate(flow.id)}
+                        >
+                          Plan
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          disabled={portFlowMutation.isPending}
+                          onClick={() => portFlowMutation.mutate(flow.id)}
+                        >
+                          Port
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -377,13 +442,25 @@ export function FeatureDetail() {
           <div className="value">{data.files.length}</div>
         </div>
         <div className="stat-card">
-          <div className="label">done</div>
-          <div className="value">{data.stats.done}</div>
+          <div className="label">symbols</div>
+          <div className="value">{data.stats.total}</div>
         </div>
         <div className="stat-card">
-          <div className="label">blocked</div>
-          <div className="value">{data.stats.blocked}</div>
+          <div className="label">done</div>
+          <div className="value" style={{ color: "#86efac" }}>{data.stats.done}</div>
         </div>
+        {data.stats.blocked > 0 && (
+          <div className="stat-card">
+            <div className="label">blocked</div>
+            <div className="value" style={{ color: "#f87171" }}>{data.stats.blocked}</div>
+          </div>
+        )}
+        {data.stats.by_status.filter(s => !['done', 'blocked'].includes(s.status) && s.count > 0).map(s => (
+          <div key={s.status} className="stat-card">
+            <div className="label">{s.status.replace(/_/g, " ")}</div>
+            <div className="value" style={{ fontSize: "1.25rem" }}>{s.count}</div>
+          </div>
+        ))}
       </div>
 
       {/* Suggestions */}
