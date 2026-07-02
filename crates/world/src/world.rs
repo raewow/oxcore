@@ -249,6 +249,14 @@ impl World {
             .load(&self.databases.world)
             .await
             .context("Failed to load spells from SQL")?;
+        {
+            let dbc = self.dbc.read();
+            self.managers
+                .spell_mgr
+                .load_spell_chains(&self.databases.world, &dbc)
+                .await
+                .context("Failed to load spell chains")?;
+        }
 
         // Initialize GUID generators from database
         step("Loading items & GUIDs");

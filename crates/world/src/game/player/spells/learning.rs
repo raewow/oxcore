@@ -61,6 +61,13 @@ pub fn is_primary_profession_spell(spell_id: u32, world: &World) -> bool {
     crate::game::player::skills::formulas::is_primary_profession_skill(category_id)
 }
 
+/// Whether `spell_id` is the first (rank 1) spell of a primary profession chain.
+///
+/// Matches C++ `SpellMgr::IsPrimaryProfessionFirstRankSpell`.
+pub fn is_primary_profession_first_rank_spell(spell_id: u32, world: &World) -> bool {
+    is_primary_profession_spell(spell_id, world) && world.managers.spell_mgr.get_spell_rank(spell_id) == 1
+}
+
 /// Get current game time in milliseconds
 fn get_game_time_ms(world: &World) -> u64 {
     std::time::SystemTime::now()
