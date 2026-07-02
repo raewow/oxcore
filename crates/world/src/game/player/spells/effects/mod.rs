@@ -233,12 +233,16 @@ impl EffectsDispatcher {
             target_guid,
             is_triggered,
             None,
+            None,
             world,
         )
         .await
     }
 
     /// Dispatch with pre-resolved targets (used when target resolution already happened).
+    ///
+    /// `custom_base_points`: optional per-effect base point overrides (MaNGOS CastCustomSpell).
+    /// When Some, each Some(v) replaces the DBC effect_base_points value for that effect index.
     pub async fn dispatch_with_targets(
         &self,
         caster_guid: ObjectGuid,
@@ -246,6 +250,7 @@ impl EffectsDispatcher {
         target_guid: Option<ObjectGuid>,
         is_triggered: bool,
         resolved: Option<&crate::game::player::spells::targets::ResolvedTargets>,
+        custom_base_points: Option<[Option<i32>; 3]>,
         world: &World,
     ) -> Result<Vec<EffectResult>> {
         use crate::game::player::spells::hit;
@@ -373,12 +378,15 @@ impl EffectsDispatcher {
                 }
 
                 // Create EffectInput for this target
+                let base_value = custom_base_points
+                    .and_then(|bp| bp[effect_index])
+                    .unwrap_or(spell_entry.effect_base_points[effect_index]);
                 let input = EffectInput {
                     caster_guid,
                     target_guid: Some(*eff_target),
                     spell_id,
                     effect_index: effect_index as u8,
-                    base_value: spell_entry.effect_base_points[effect_index],
+                    base_value,
                     misc_value: spell_entry.effect_misc_value[effect_index],
                     misc_value_b: 0,
                     is_triggered,

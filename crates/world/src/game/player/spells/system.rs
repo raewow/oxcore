@@ -150,6 +150,59 @@ impl SpellSystem {
         ))
     }
 
+    /// Cast a spell with optional per-effect base point overrides.
+    /// Faithful `SpellCaster::CastCustomSpell` port.
+    ///
+    /// Used by proc/trigger systems to cast a spell with custom damage/heal values
+    /// that override the DBC base points (e.g., Ignite, Seal damage procs).
+    /// Always treated as triggered (bypasses GCD and validation checks).
+    ///
+    /// `custom_base_points`: optional override for each effect slot (None = use DBC value).
+    pub async fn cast_custom_spell(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        target_guid: Option<ObjectGuid>,
+        custom_base_points: [Option<i32>; 3],
+        world: &World,
+    ) -> Result<SpellCastResult> {
+        // Validate spell entry exists
+        if world.managers.spell_mgr.get(spell_id).is_none() {
+            tracing::error!(
+                "cast_custom_spell: unknown spell id {} by caster {:?}",
+                spell_id,
+                caster_guid
+            );
+            return Ok(SpellCastResult::Failed(SpellCastError::SpellNotKnown));
+        }
+
+        let cast_targets = SpellCastTargets {
+            unit_target_guid: target_guid,
+            ..Default::default()
+        };
+
+        // Resolve targets and dispatch effects immediately with custom base points.
+        // Custom spells are always triggered and never go through the cast-time pipeline.
+        use crate::game::player::spells::targets;
+        let resolved = targets::resolve_spell_targets(spell_id, &cast_targets, caster_guid, world);
+        self.effects_dispatcher
+            .dispatch_with_targets(
+                caster_guid,
+                spell_id,
+                target_guid,
+                true, // always triggered
+                Some(&resolved),
+                Some(custom_base_points),
+                world,
+            )
+            .await?;
+
+        self.finish_cast(caster_guid, spell_id, &cast_targets, true, None, world)
+            .await?;
+
+        Ok(SpellCastResult::Success)
+    }
+
     async fn cast_spell_inner(
         &self,
         caster_guid: ObjectGuid,
@@ -951,6 +1004,7 @@ impl SpellSystem {
                 target_guid,
                 is_triggered,
                 Some(&resolved),
+                None,
                 world,
             )
             .await?;

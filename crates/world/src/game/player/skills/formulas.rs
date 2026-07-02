@@ -70,6 +70,22 @@ pub fn calculate_skill_gain_chance(
     }
 }
 
+/// Determine whether a skill is a primary profession (SkillLine.dbc category == PROFESSION).
+///
+/// Matches C++ IsPrimaryProfessionSkill().
+pub fn is_primary_profession_skill(category_id: i32) -> bool {
+    category_id == SKILL_CATEGORY_PROFESSION as i32
+}
+
+/// Determine whether a skill is a profession skill (primary profession or a secondary
+/// profession: fishing, cooking, first aid).
+///
+/// Matches C++ IsProfessionSkill().
+pub fn is_profession_skill(skill_id: u16, category_id: i32) -> bool {
+    is_primary_profession_skill(category_id)
+        || matches!(skill_id, SKILL_FISHING | SKILL_COOKING | SKILL_FIRST_AID)
+}
+
 /// Determine whether a skill is a profession or riding skill.
 ///
 /// Matches C++ IsProfessionOrRidingSkill():
@@ -77,15 +93,12 @@ pub fn calculate_skill_gain_chance(
 /// - Secondary: fishing, cooking, first aid
 /// - Riding: any riding skill
 pub fn is_profession_or_riding_skill(skill_id: u16, category_id: i32) -> bool {
-    if category_id == SKILL_CATEGORY_PROFESSION as i32 {
+    if is_profession_skill(skill_id, category_id) {
         return true;
     }
     matches!(
         skill_id,
-        SKILL_FISHING
-            | SKILL_COOKING
-            | SKILL_FIRST_AID
-            | SKILL_RIDING_HORSE
+        SKILL_RIDING_HORSE
             | SKILL_RIDING_WOLF
             | SKILL_RIDING_TIGER
             | SKILL_RIDING_RAM

@@ -12,6 +12,55 @@ use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
+/// SPELL_EFFECT_SKILL numeric id (effect slot index 1, i.e. EFFECT_INDEX_1).
+const SPELL_EFFECT_SKILL: u32 = 118;
+const EFFECT_INDEX_1: usize = 1;
+
+/// Whether casting `spell_id` teaches a profession or riding skill.
+///
+/// Matches C++ `SpellMgr::IsProfessionOrRidingSpell`.
+pub fn is_profession_or_riding_spell(spell_id: u32, world: &World) -> bool {
+    let Some(entry) = world.managers.spell_mgr.get(spell_id) else {
+        return false;
+    };
+    if entry.effect[EFFECT_INDEX_1] != SPELL_EFFECT_SKILL {
+        return false;
+    }
+    let skill = entry.effect_misc_value[EFFECT_INDEX_1] as u32;
+    let category_id = world.dbc.read().get_skill_line(skill).map_or(0, |s| s.category_id);
+    crate::game::player::skills::formulas::is_profession_or_riding_skill(skill as u16, category_id)
+}
+
+/// Whether casting `spell_id` teaches a profession skill (primary or secondary).
+///
+/// Matches C++ `SpellMgr::IsProfessionSpell`.
+pub fn is_profession_spell(spell_id: u32, world: &World) -> bool {
+    let Some(entry) = world.managers.spell_mgr.get(spell_id) else {
+        return false;
+    };
+    if entry.effect[EFFECT_INDEX_1] != SPELL_EFFECT_SKILL {
+        return false;
+    }
+    let skill = entry.effect_misc_value[EFFECT_INDEX_1] as u32;
+    let category_id = world.dbc.read().get_skill_line(skill).map_or(0, |s| s.category_id);
+    crate::game::player::skills::formulas::is_profession_skill(skill as u16, category_id)
+}
+
+/// Whether casting `spell_id` teaches a primary profession skill.
+///
+/// Matches C++ `SpellMgr::IsPrimaryProfessionSpell`.
+pub fn is_primary_profession_spell(spell_id: u32, world: &World) -> bool {
+    let Some(entry) = world.managers.spell_mgr.get(spell_id) else {
+        return false;
+    };
+    if entry.effect[EFFECT_INDEX_1] != SPELL_EFFECT_SKILL {
+        return false;
+    }
+    let skill = entry.effect_misc_value[EFFECT_INDEX_1] as u32;
+    let category_id = world.dbc.read().get_skill_line(skill).map_or(0, |s| s.category_id);
+    crate::game::player::skills::formulas::is_primary_profession_skill(category_id)
+}
+
 /// Get current game time in milliseconds
 fn get_game_time_ms(world: &World) -> u64 {
     std::time::SystemTime::now()

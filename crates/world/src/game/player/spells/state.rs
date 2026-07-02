@@ -248,6 +248,77 @@ impl SpellsState {
         self.gcd_end = 0;
     }
 
+    /// Format all active cooldowns, GCD, and lockouts into human-readable lines.
+    /// Faithful `SpellCaster::PrintCooldownList` port.
+    ///
+    /// Returns a Vec of display strings; callers send them via chat or log.
+    /// Permanent cooldowns are not tracked in the Rust state (permanent_cd_count always 0).
+    pub fn format_cooldown_list(&self, now: u64) -> Vec<String> {
+        const SCHOOL_NAMES: [&str; 7] = [
+            "SPELL_SCHOOL_NORMAL",
+            "SPELL_SCHOOL_HOLY",
+            "SPELL_SCHOOL_FIRE",
+            "SPELL_SCHOOL_NATURE",
+            "SPELL_SCHOOL_FROST",
+            "SPELL_SCHOOL_SHADOW",
+            "SPELL_SCHOOL_ARCANE",
+        ];
+
+        let mut lines = Vec::new();
+        let mut cd_count = 0u32;
+        let perm_cd_count = 0u32;
+
+        // GCD (Rust uses a single gcd_end vs C++ per-category map)
+        if self.gcd_end > now {
+            let remaining_ms = self.gcd_end - now;
+            lines.push(format!("GCD: {}ms remaining", remaining_ms));
+            cd_count += 1;
+        }
+
+        // Per-spell cooldowns
+        for (&spell_id, &cd_end) in &self.cooldowns {
+            if cd_end > now {
+                let remaining_ms = cd_end - now;
+                lines.push(format!("Spell({}) RecTime({}ms)", spell_id, remaining_ms));
+                cd_count += 1;
+            }
+        }
+
+        // Category cooldowns
+        for (&cat_id, &cd_end) in &self.category_cooldowns {
+            if cd_end > now {
+                let remaining_ms = cd_end - now;
+                lines.push(format!("Category({}) CatRecTime({}ms)", cat_id, remaining_ms));
+                cd_count += 1;
+            }
+        }
+
+        // School lockouts
+        for (school, &lockout_end) in self.school_lockouts.iter().enumerate() {
+            if lockout_end > now {
+                let remaining_ms = lockout_end - now;
+                lines.push(format!(
+                    "LOCKOUT for {} with {}ms remaining time cd",
+                    SCHOOL_NAMES[school], remaining_ms
+                ));
+                cd_count += 1;
+            }
+        }
+
+        lines.push(format!(
+            "Found {} cooldown{}.",
+            cd_count,
+            if cd_count != 1 { "s" } else { "" }
+        ));
+        lines.push(format!(
+            "Found {} permanent cooldown{}.",
+            perm_cd_count,
+            if perm_cd_count != 1 { "s" } else { "" }
+        ));
+
+        lines
+    }
+
     /// Check if any school in the given mask is locked out (MaNGOS CheckLockout).
     pub fn check_lockout_by_mask(&self, school_mask: u32, now: u64) -> bool {
         for (i, &lockout_end) in self.school_lockouts.iter().enumerate() {
