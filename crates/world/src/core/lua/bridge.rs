@@ -147,6 +147,7 @@ pub fn map_ai_event_to_callback(event: &AIEvent) -> Option<LuaCallback> {
         AIEvent::SpellHit {
             caster_guid,
             spell_id,
+            ..
         } => Some(LuaCallback::OnSpellHit {
             spell_id: *spell_id,
             caster_guid: *caster_guid,

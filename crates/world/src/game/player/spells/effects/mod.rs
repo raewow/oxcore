@@ -369,6 +369,9 @@ impl EffectsDispatcher {
                                         crate::game::creature::ai::AIEvent::SpellHit {
                                             caster_guid,
                                             spell_id,
+                                            spell_is_positive: spell_entry.is_positive_spell(),
+                                            spell_is_direct_damage: spell_entry
+                                                .is_direct_damage_spell(),
                                         },
                                     );
                                 }

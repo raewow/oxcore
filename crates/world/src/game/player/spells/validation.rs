@@ -1871,6 +1871,84 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
     SpellCastError::None
 }
 
+// ─── PlayerAI::CanCastSpell ──────────────────────────────────────────────────
+//
+// C++ PlayerAI.cpp 39–81. Whether an AI-controlled player may cast `pSpell` at
+// `pTarget`. Pure over pre-resolved caster/target/spell state.
+//
+// Order (mirrors C++):
+//   1. No target → false.
+//   2. Non-triggered gate: react-state, silence/pacify prevention, power.
+//   3. Range: if a range entry exists, out-of-range/too-close (skipped for self)
+//      → false, else true. No range entry → false.
+
+#[derive(Debug, Clone)]
+pub struct PlayerAiCanCastInput {
+    pub target_exists: bool,
+    pub is_triggered: bool,
+    /// checkControlled arg — selects the stricter react-state mask.
+    pub check_controlled: bool,
+    /// HasUnitState(UNIT_STATE_CAN_NOT_REACT).
+    pub caster_cannot_react: bool,
+    /// HasUnitState(UNIT_STATE_CAN_NOT_REACT_OR_LOST_CONTROL).
+    pub caster_cannot_react_or_lost_control: bool,
+    pub spell_prevention_type: u8,
+    pub caster_silenced: bool,
+    pub caster_pacified: bool,
+    pub caster_power: u32,
+    pub spell_mana_cost: u32,
+    pub target_is_self: bool,
+    /// sSpellRangeStore.LookupEntry(rangeIndex) resolved to a range entry.
+    pub has_range_entry: bool,
+    /// GetCombatDistance(pTarget).
+    pub distance: f32,
+    pub max_range: f32,
+    pub min_range: f32,
+}
+
+pub fn player_ai_can_cast_spell(input: &PlayerAiCanCastInput) -> bool {
+    // 1. No target.
+    if !input.target_exists {
+        return false;
+    }
+
+    // 2. Non-triggered checks.
+    if !input.is_triggered {
+        let cannot_react = if input.check_controlled {
+            input.caster_cannot_react_or_lost_control
+        } else {
+            input.caster_cannot_react
+        };
+        if cannot_react {
+            return false;
+        }
+        if input.spell_prevention_type == SPELL_PREVENTION_TYPE_SILENCE && input.caster_silenced {
+            return false;
+        }
+        if input.spell_prevention_type == SPELL_PREVENTION_TYPE_PACIFY && input.caster_pacified {
+            return false;
+        }
+        if input.caster_power < input.spell_mana_cost {
+            return false;
+        }
+    }
+
+    // 3. Range gate — only when the spell has a range entry.
+    if input.has_range_entry {
+        if !input.target_is_self {
+            if input.distance > input.max_range {
+                return false;
+            }
+            if input.min_range > 0.0 && input.distance < input.min_range {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    false
+}
+
 // ─── Spell::CheckPetCast ─────────────────────────────────────────────────────
 //
 // C++ lines 6481–6557. Pet-cast wrapper that validates pet-specific preconditions
@@ -2208,4 +2286,105 @@ pub fn can_open_lock(
     }
 
     Err(SpellCastError::InvalidTarget)
+}
+
+#[cfg(test)]
+mod player_ai_tests {
+    use super::*;
+
+    fn base_input() -> PlayerAiCanCastInput {
+        PlayerAiCanCastInput {
+            target_exists: true,
+            is_triggered: false,
+            check_controlled: false,
+            caster_cannot_react: false,
+            caster_cannot_react_or_lost_control: false,
+            spell_prevention_type: 0,
+            caster_silenced: false,
+            caster_pacified: false,
+            caster_power: 100,
+            spell_mana_cost: 50,
+            target_is_self: false,
+            has_range_entry: true,
+            distance: 10.0,
+            max_range: 30.0,
+            min_range: 0.0,
+        }
+    }
+
+    #[test]
+    fn ok_when_in_range_and_ready() {
+        assert!(player_ai_can_cast_spell(&base_input()));
+    }
+
+    #[test]
+    fn no_target_fails() {
+        let mut i = base_input();
+        i.target_exists = false;
+        assert!(!player_ai_can_cast_spell(&i));
+    }
+
+    #[test]
+    fn no_range_entry_fails_even_when_otherwise_ok() {
+        let mut i = base_input();
+        i.has_range_entry = false;
+        assert!(!player_ai_can_cast_spell(&i));
+    }
+
+    #[test]
+    fn out_of_range_and_too_close_fail() {
+        let mut far = base_input();
+        far.distance = 40.0;
+        assert!(!player_ai_can_cast_spell(&far));
+
+        let mut close = base_input();
+        close.min_range = 5.0;
+        close.distance = 3.0;
+        assert!(!player_ai_can_cast_spell(&close));
+    }
+
+    #[test]
+    fn self_target_skips_range_checks() {
+        let mut i = base_input();
+        i.target_is_self = true;
+        i.distance = 999.0; // ignored for self
+        assert!(player_ai_can_cast_spell(&i));
+    }
+
+    #[test]
+    fn silence_and_pacify_block_matching_prevention_type() {
+        let mut sil = base_input();
+        sil.spell_prevention_type = SPELL_PREVENTION_TYPE_SILENCE;
+        sil.caster_silenced = true;
+        assert!(!player_ai_can_cast_spell(&sil));
+
+        let mut pac = base_input();
+        pac.spell_prevention_type = SPELL_PREVENTION_TYPE_PACIFY;
+        pac.caster_pacified = true;
+        assert!(!player_ai_can_cast_spell(&pac));
+    }
+
+    #[test]
+    fn insufficient_power_fails_unless_triggered() {
+        let mut i = base_input();
+        i.caster_power = 10;
+        i.spell_mana_cost = 50;
+        assert!(!player_ai_can_cast_spell(&i));
+
+        // Triggered casts skip the whole non-triggered gate.
+        i.is_triggered = true;
+        assert!(player_ai_can_cast_spell(&i));
+    }
+
+    #[test]
+    fn check_controlled_uses_stricter_react_state() {
+        let mut i = base_input();
+        i.check_controlled = true;
+        i.caster_cannot_react_or_lost_control = true;
+        assert!(!player_ai_can_cast_spell(&i));
+
+        // Without check_controlled, the lost-control state is ignored.
+        i.check_controlled = false;
+        assert!(player_ai_can_cast_spell(&i));
+    }
 }

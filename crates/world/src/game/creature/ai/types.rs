@@ -120,6 +120,10 @@ pub enum AIEvent {
     SpellHit {
         caster_guid: ObjectGuid,
         spell_id: u32,
+        /// Pre-resolved SpellEntry::is_positive_spell (DBC lookup done by emitter).
+        spell_is_positive: bool,
+        /// Pre-resolved SpellEntry::is_direct_damage_spell.
+        spell_is_direct_damage: bool,
     },
 
     /// A spell we cast hit a target

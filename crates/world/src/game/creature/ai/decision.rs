@@ -22,6 +22,8 @@ const HOME_REACHED_DISTANCE: f32 = 3.0;
 const _MELEE_RANGE: f32 = 5.0;
 /// How often to update AI (milliseconds)
 const AI_UPDATE_INTERVAL: u32 = 500;
+/// Critter flee duration when hit by a hostile non-damage spell (CritterAI ESCAPE_TIMER).
+const ESCAPE_TIMER_MS: u32 = 30000;
 
 /// Main decision entry point
 /// Routes to the appropriate AI type's decision function
@@ -97,6 +99,26 @@ fn decide_critter(input: &AIInput) -> AIDecisionResult {
                         flee_from_guid: *attacker_guid,
                         distance: 20.0,
                         duration_ms: 5000,
+                    });
+                }
+            }
+            AIEvent::SpellHit {
+                caster_guid,
+                spell_is_positive,
+                spell_is_direct_damage,
+                ..
+            } => {
+                // CritterAI::SpellHit — flee from the caster of a hostile,
+                // non-direct-damage spell (aliveness already ensured by decide()).
+                // Direct-damage hostile spells arrive as DamageTaken instead.
+                if !spell_is_positive
+                    && !spell_is_direct_damage
+                    && input.snapshot.ai_state != AIState::Fleeing
+                {
+                    result.actions.push(AIAction::FleeFrom {
+                        flee_from_guid: *caster_guid,
+                        distance: 20.0,
+                        duration_ms: ESCAPE_TIMER_MS,
                     });
                 }
             }

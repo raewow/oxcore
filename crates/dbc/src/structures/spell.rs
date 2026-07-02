@@ -311,6 +311,18 @@ impl SpellEntry {
         self.effect.iter().any(|&e| e == effect_type)
     }
 
+    /// `SpellInternal::IsDirectDamageSpell` — true when any effect deals direct
+    /// (non-periodic) damage. Computed on demand from the effect list rather than
+    /// a precomputed internal flag.
+    pub fn is_direct_damage_spell(&self) -> bool {
+        // INSTAKILL(1), SCHOOL_DAMAGE(2), ENVIRONMENTAL_DAMAGE(7), HEALTH_LEECH(9),
+        // WEAPON_DAMAGE_NOSCHOOL(17), WEAPON_PERCENT_DAMAGE(31), WEAPON_DAMAGE(58),
+        // POWER_BURN(62), NORMALIZED_WEAPON_DMG(121).
+        self.effect
+            .iter()
+            .any(|&e| matches!(e, 1 | 2 | 7 | 9 | 17 | 31 | 58 | 62 | 121))
+    }
+
     /// Check if spell applies an aura
     pub fn is_aura_spell(&self) -> bool {
         self.effect.iter().enumerate().any(|(i, &e)| {
@@ -455,15 +467,30 @@ impl SpellEntry {
             .unwrap_or(0)
     }
 
+    /// `Spells::GetSpellMaxRange` — max range in yards for this spell's range
+    /// index, or 0 when the range entry is missing.
+    pub fn get_spell_max_range(&self, dbc: &DbcManager) -> f32 {
+        dbc.get_spell_range(self.range_index)
+            .map_or(0.0, |range| range.range_max)
+    }
+
+    /// `Spells::GetSpellMinRange` — min range in yards for this spell's range
+    /// index, or 0 when the range entry is missing.
+    pub fn get_spell_min_range(&self, dbc: &DbcManager) -> f32 {
+        dbc.get_spell_range(self.range_index)
+            .map_or(0.0, |range| range.range_min)
+    }
+
     pub fn is_target_in_range(&self, dist: f32, dbc: &DbcManager) -> bool {
         match self.range_index {
             1 => true,
             13 => true,
             2 => dist <= 5.0,
-            _ => dbc
-                .get_spell_range(self.range_index)
-                .map(|range| dist < range.range_max && dist >= range.range_min)
-                .unwrap_or(false),
+            // A missing range entry yields max = min = 0, so `dist < 0` is false —
+            // matching the previous unwrap_or(false) behaviour.
+            _ => {
+                dist < self.get_spell_max_range(dbc) && dist >= self.get_spell_min_range(dbc)
+            }
         }
     }
 
