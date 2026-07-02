@@ -383,9 +383,8 @@ pub fn calculate_modified_gcd(
                     }
                 }
             }
-
-            // Minimum GCD is 1000ms (Vanilla cap)
-            modified = modified.max(1000);
+            // No blanket floor here: the 1000ms cap applies only to the hasted
+            // 1.5s global cooldown, which the caller clamps separately.
         });
 
     modified.max(0) as u32

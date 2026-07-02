@@ -324,22 +324,46 @@ impl SmsgSpellFailure {
 /// Sent to the caster with the result of their cast attempt.
 pub struct SmsgCastResult;
 
+/// SPELL_RESULT_STATUS_OKAY — cast accepted (or failure suppressed).
+pub const SPELL_RESULT_STATUS_OKAY: u8 = 0;
+/// SPELL_RESULT_STATUS_FAIL — cast rejected; a failure reason (and optional args) follow.
+pub const SPELL_RESULT_STATUS_FAIL: u8 = 2;
+
 impl SmsgCastResult {
-    /// Build a success SMSG_CAST_RESULT: spell_id(u32) + status(u8=0)
-    pub fn success(spell_id: u32) -> WorldPacket {
+    /// General builder matching `WorldPackets::Spell::CastResult::AppendBodyTo`:
+    /// `spell_id(u32) + result(u8)`, and on FAIL `failure_reason(u8)` followed by
+    /// `arg1(u32)` when either argument is present, then `arg2(u32)` when present.
+    pub fn build(
+        spell_id: u32,
+        result_status: u8,
+        failure_reason: u8,
+        arg1: Option<u32>,
+        arg2: Option<u32>,
+    ) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CAST_RESULT);
         packet.write_u32(spell_id);
-        packet.write_u8(0); // Success
+        packet.write_u8(result_status);
+        if result_status == SPELL_RESULT_STATUS_FAIL {
+            packet.write_u8(failure_reason);
+            // The client reads a single arg1 if *either* optional is present.
+            if arg1.is_some() || arg2.is_some() {
+                packet.write_u32(arg1.unwrap_or(0));
+            }
+            if let Some(a2) = arg2 {
+                packet.write_u32(a2);
+            }
+        }
         packet
     }
 
-    /// Build a failure SMSG_CAST_RESULT: spell_id(u32) + status(u8=2) + error_code(u8)
+    /// Build a success SMSG_CAST_RESULT: spell_id(u32) + status(u8=0)
+    pub fn success(spell_id: u32) -> WorldPacket {
+        Self::build(spell_id, SPELL_RESULT_STATUS_OKAY, 0, None, None)
+    }
+
+    /// Build a plain failure SMSG_CAST_RESULT with no extra arguments.
     pub fn failure(spell_id: u32, error_code: u8) -> WorldPacket {
-        let mut packet = WorldPacket::new(Opcode::SMSG_CAST_RESULT);
-        packet.write_u32(spell_id);
-        packet.write_u8(2); // Failed
-        packet.write_u8(error_code);
-        packet
+        Self::build(spell_id, SPELL_RESULT_STATUS_FAIL, error_code, None, None)
     }
 }
 

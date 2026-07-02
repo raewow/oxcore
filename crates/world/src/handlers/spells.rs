@@ -128,10 +128,18 @@ pub async fn handle_cast_spell(
         None => return Ok(()),
     };
 
-    // Unknown spell id: silently ignore (matches MaNGOS early return).
+    // Unknown spell id: drop the cast (MaNGOS early return), but loudly — a missing
+    // spell_template row leaves the client waiting on a cast that never starts.
     let spell_entry = match world.managers.spell_mgr.get(spell_id) {
         Some(entry) => entry,
-        None => return Ok(()),
+        None => {
+            tracing::warn!(
+                "CMSG_CAST_SPELL: spell {} not in spell_template, cast by {:?} dropped",
+                spell_id,
+                player_guid
+            );
+            return Ok(());
+        }
     };
 
     // Guard: the player must actually know the spell and it must not be passive.
@@ -171,6 +179,7 @@ pub async fn handle_cast_spell(
             player_guid,
             spell_id,
             crate::game::player::spells::state::SpellCastError::InvalidTarget,
+            world,
         );
         return Ok(());
     }

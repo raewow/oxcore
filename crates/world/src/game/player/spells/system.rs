@@ -18,6 +18,7 @@ use crate::World;
 use anyhow::Result;
 use oxcore_shared::messages::spells::{
     SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailure, SmsgSpellGo, SmsgSpellStart,
+    SPELL_RESULT_STATUS_FAIL, SPELL_RESULT_STATUS_OKAY,
 };
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
@@ -220,7 +221,7 @@ impl SpellSystem {
 
         if validate_result != SpellCastError::None {
             // Send failure to client
-            self.send_cast_failure(caster_guid, spell_id, validate_result)?;
+            self.send_cast_failure(caster_guid, spell_id, validate_result, world)?;
             return Ok(SpellCastResult::Failed(validate_result));
         }
 
@@ -233,20 +234,10 @@ impl SpellSystem {
         let slot = self.get_spell_slot(spell_id, world);
         self.set_current_casted_spell(caster_guid, spell_id, slot, world).await?;
 
-        // Step 4: Consume resources (mana/rage/energy) and apply GCD
+        // Step 4: Apply GCD and cast-start aura interrupts. Power/reagents/cast items
+        // are NOT taken here — Spell::cast takes them at cast completion, so an
+        // interrupted or cancelled cast costs nothing (see take_spell_costs).
         if !is_triggered {
-            self.consume_resources(caster_guid, spell_id, cast_item_guid, world)
-                .await?;
-            self.take_reagents(caster_guid, spell_id, world);
-            if let Some(item_guid) = cast_item_guid {
-                if caster_guid.is_player() {
-                    world
-                        .systems
-                        .inventory
-                        .consume_cast_item(caster_guid, item_guid)
-                        .await;
-                }
-            }
             self.apply_gcd(caster_guid, spell_id, world).await?;
 
             // Remove auras with CASTING interrupt flag
@@ -264,15 +255,17 @@ impl SpellSystem {
         // Check if this is a channeled spell
         let is_channeled = slot == CurrentSpellType::Channeled;
 
-        // Confirm the cast to the caster's client immediately (mirrors MaNGOS Spell::prepare
-        // SendCastResult). Must arrive before SMSG_SPELL_START so the cast bar appears.
-        if !is_triggered {
-            self.broadcast_mgr
-                .send_msg_to_player(caster_guid, SmsgCastResult::success(spell_id));
-        }
+        // Note: the success SMSG_CAST_RESULT is NOT sent at cast start. The client treats
+        // it as "cast executed" and detaches its pending cast, so sending it before
+        // SMSG_SPELL_START suppresses the cast bar. It belongs at cast completion, right
+        // before SMSG_SPELL_GO (Spell::cast: cooldown -> take power -> cast result -> go).
 
         if is_channeled {
-            // Channeled: execute first tick immediately, then channel ticks over time
+            // Channeled: Spell::cast runs at channel start, so costs are taken now
+            if !is_triggered {
+                self.take_spell_costs(caster_guid, spell_id, cast_item_guid, world)
+                    .await?;
+            }
             let channel_duration = self.get_channel_duration(spell_id, world);
             let tick_count = self.get_channel_tick_count(spell_id, world);
             self.start_channel(
@@ -288,6 +281,10 @@ impl SpellSystem {
             .await?;
         } else if cast_time_ms == 0 {
             // Instant cast - execute immediately
+            if !is_triggered {
+                self.take_spell_costs(caster_guid, spell_id, cast_item_guid, world)
+                    .await?;
+            }
             self.execute_spell(caster_guid, spell_id, &cast_targets, is_triggered, world)
                 .await?;
             self.finish_cast(
@@ -315,6 +312,31 @@ impl SpellSystem {
         }
 
         Ok(SpellCastResult::Success)
+    }
+
+    /// Take power, reagents, and the cast item. Runs at cast completion, right before
+    /// effects are handled (Spell::cast: TakePower/TakeReagents), so a cancelled or
+    /// interrupted cast never pays its costs.
+    async fn take_spell_costs(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        cast_item_guid: Option<ObjectGuid>,
+        world: &World,
+    ) -> Result<()> {
+        self.consume_resources(caster_guid, spell_id, cast_item_guid, world)
+            .await?;
+        self.take_reagents(caster_guid, spell_id, world);
+        if let Some(item_guid) = cast_item_guid {
+            if caster_guid.is_player() {
+                world
+                    .systems
+                    .inventory
+                    .consume_cast_item(caster_guid, item_guid)
+                    .await;
+            }
+        }
+        Ok(())
     }
 
     /// Start a cast-time spell. Creates ActiveCast and broadcasts SMSG_SPELL_START.
@@ -426,6 +448,13 @@ impl SpellSystem {
                     .spells
                     .set_current_spell(CurrentSpellType::Channeled, active);
             });
+
+        // A channel executes immediately (Spell::cast runs at channel start), so the
+        // success cast result is sent now, before the channel packets.
+        if !is_triggered && caster_guid.is_player() {
+            self.broadcast_mgr
+                .send_msg_to_player(caster_guid, SmsgCastResult::success(spell_id));
+        }
 
         // Send SMSG_CHANNEL_START
         let mut packet = oxcore_shared::protocol::WorldPacket::new(
@@ -618,8 +647,13 @@ impl SpellSystem {
                         .unwrap_or(SpellCastError::InvalidTarget);
 
                         if revalidate != SpellCastError::None {
-                            self.send_cast_failure(caster_guid, spell_id, revalidate)?;
+                            self.send_cast_failure(caster_guid, spell_id, revalidate, world)?;
                             continue;
+                        }
+
+                        if !is_triggered {
+                            self.take_spell_costs(caster_guid, spell_id, cast_item_guid, world)
+                                .await?;
                         }
 
                         self.execute_spell(
@@ -879,7 +913,7 @@ impl SpellSystem {
 
                     if revalidate != SpellCastError::None {
                         // Cast failed on completion — send failure and skip execution
-                        self.send_cast_failure(player_guid, spell_id, revalidate)?;
+                        self.send_cast_failure(player_guid, spell_id, revalidate, world)?;
                         continue;
                     }
 
@@ -1099,21 +1133,8 @@ impl SpellSystem {
         hit_targets.sort_by_key(|g| g.raw());
         hit_targets.dedup_by_key(|g| g.raw());
 
-        // Broadcast SMSG_SPELL_GO
-        let msg = SmsgSpellGo {
-            caster_guid,
-            caster_guid_pack: caster_guid,
-            spell_id,
-            cast_flags: if is_triggered { 0x0000 } else { 0x0002 },
-            hit_targets,
-            miss_targets: Vec::new(),
-            target_guid,
-            cast_item_guid,
-        };
-        self.broadcast_mgr
-            .send_msg_to_player(caster_guid, msg.to_world_packet());
-
-        // Apply cooldown (if not triggered)
+        // Completion packet order matches Spell::cast: SMSG_SPELL_COOLDOWN, then the
+        // success SMSG_CAST_RESULT, then SMSG_SPELL_GO.
         if !is_triggered {
             cooldowns::apply_cooldown(caster_guid, spell_id, world)?;
 
@@ -1129,7 +1150,26 @@ impl SpellSystem {
                         .send_msg_to_player(caster_guid, msg.to_world_packet());
                 }
             }
+
+            if caster_guid.is_player() {
+                self.broadcast_mgr
+                    .send_msg_to_player(caster_guid, SmsgCastResult::success(spell_id));
+            }
         }
+
+        // Broadcast SMSG_SPELL_GO
+        let msg = SmsgSpellGo {
+            caster_guid,
+            caster_guid_pack: caster_guid,
+            spell_id,
+            cast_flags: if is_triggered { 0x0000 } else { 0x0002 },
+            hit_targets,
+            miss_targets: Vec::new(),
+            target_guid,
+            cast_item_guid,
+        };
+        self.broadcast_mgr
+            .send_msg_to_player(caster_guid, msg.to_world_packet());
 
         // Reset main-hand attack timer after cast-time spells (MaNGOS behavior).
         // Prevents players from getting a free swing immediately after a cast.
@@ -1471,7 +1511,7 @@ impl SpellSystem {
 
             // Also send SMSG_CAST_RESULT(SPELL_FAILED_INTERRUPTED) so the client cast bar clears
             // (MaNGOS Spell::cancel sends SendCastResult on the PREPARING/DELAYED cancel path).
-            self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted)?;
+            self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted, world)?;
 
             // If cancelling a channel, send SMSG_CHANNEL_UPDATE with 0 remaining
             // and remove auras applied by the cancelled channel (MaNGOS RemoveAurasByCasterSpell)
@@ -1956,7 +1996,7 @@ impl SpellSystem {
     // GCD
     // =========================================================================
 
-    /// Apply Global Cooldown after casting.
+    /// Apply Global Cooldown after casting (Player::AddGCD).
     async fn apply_gcd(&self, caster_guid: ObjectGuid, spell_id: u32, world: &World) -> Result<()> {
         // Get spell entry
         let spell_entry = match world.managers.spell_mgr.get(spell_id) {
@@ -1964,29 +2004,56 @@ impl SpellSystem {
             None => return Ok(()), // No GCD if spell not found
         };
 
-        // Use start_recovery_time from spell entry if set, otherwise default 1500ms.
-        // start_recovery_category determines which GCD group this spell belongs to.
-        // Spells with SPELL_ATTR_RANGED (0x00000002) have 0ms GCD.
-        // Spells with start_recovery_time = 0 and start_recovery_category = 0 have no GCD.
-        let base_gcd_ms = if spell_entry.attributes & 0x00000002 != 0 {
-            0 // No GCD for ranged auto-attack spells
-        } else if spell_entry.start_recovery_time > 0 {
-            spell_entry.start_recovery_time // Use spell-specific GCD duration
-        } else if spell_entry.start_recovery_category > 0 {
-            1500 // Has a GCD category but no override duration — use default
-        } else {
-            0 // No GCD category and no recovery time — no GCD
-        };
+        // GCD group category for the standard 1.5s cooldown, plus the attribute
+        // and damage-class values that exempt a spell from haste scaling.
+        const SPELLCATEGORY_GLOBAL: u32 = 133;
+        const SPELL_ATTR_USES_RANGED_SLOT: u32 = 0x0000_0002;
+        const SPELL_ATTR_IS_ABILITY: u32 = 0x0000_0010;
+        const SPELL_DAMAGE_CLASS_MELEE: u32 = 2;
+        const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
 
-        // Apply GCD modifiers
-        let gcd_ms = modifiers::calculate_modified_gcd(
+        // Base GCD comes straight from StartRecoveryTime.
+        let mut gcd_duration = spell_entry.start_recovery_time as i32;
+
+        // No GCD at all when the spell has neither a recovery category nor time.
+        if spell_entry.start_recovery_category == 0 && gcd_duration == 0 {
+            return Ok(());
+        }
+
+        // Apply SPELLMOD_GLOBAL_COOLDOWN modifiers (self-only, player-only mods).
+        gcd_duration = modifiers::calculate_modified_gcd(
             caster_guid,
-            base_gcd_ms,
+            gcd_duration.max(0) as u32,
             spell_entry.spell_family_name,
             spell_entry.spell_family_flags,
             world,
-        );
+        ) as i32;
 
+        // Haste scaling applies only to the standard 1.5s global cooldown on
+        // non-melee/non-ranged, non-ability spells: scale by UNIT_MOD_CAST_SPEED
+        // then clamp to [1000, 1500]. Cast-speed haste is not modelled yet, so the
+        // multiplier defaults to 1.0 (a caster with no haste), leaving 1500 intact.
+        if spell_entry.start_recovery_category == SPELLCATEGORY_GLOBAL
+            && gcd_duration == 1500
+            && spell_entry.dmg_class != SPELL_DAMAGE_CLASS_MELEE
+            && spell_entry.dmg_class != SPELL_DAMAGE_CLASS_RANGED
+            && spell_entry.attributes & SPELL_ATTR_USES_RANGED_SLOT == 0
+            && spell_entry.attributes & SPELL_ATTR_IS_ABILITY == 0
+        {
+            let cast_speed_mult = 1.0_f32; // TODO: UNIT_MOD_CAST_SPEED haste
+            gcd_duration = (gcd_duration as f32 * cast_speed_mult) as i32;
+            gcd_duration = gcd_duration.clamp(1000, 1500);
+        }
+
+        if gcd_duration < 1 {
+            return Ok(());
+        }
+
+        // C++ subtracts CONFIG_UINT32_INTERVAL_MAPUPDATE here because GCD packets
+        // flush on map update; Rust tracks GCD against wall-clock game time, so
+        // there is no batching interval to subtract.
+
+        let gcd_ms = gcd_duration as u32;
         let now = get_game_time_ms();
         world
             .systems
@@ -2135,14 +2202,76 @@ impl SpellSystem {
     // Client Communication
     // =========================================================================
 
+    /// Spell::SendCastResult — build and send SMSG_CAST_RESULT for a cast rejection.
+    ///
+    /// Mirrors the packet-builder overload: passive spells report DONT_REPORT
+    /// instead of the real reason; spells flagged DO_NOT_REPORT_SPELL_FAILURE
+    /// report OKAY; and specific errors carry extra arguments (spell focus,
+    /// equipped-item class/subclass, permanent-cooldown flag).
     fn send_cast_failure(
         &self,
         caster_guid: ObjectGuid,
         spell_id: u32,
         error: SpellCastError,
+        world: &World,
     ) -> Result<()> {
-        let error_code = validation::spell_cast_error_to_u8(error);
-        let packet = SmsgCastResult::failure(spell_id, error_code);
+        const SPELL_ATTR_COOLDOWN_ON_EVENT: u32 = 0x0200_0000;
+        const SPELL_ATTR_EX2_DO_NOT_REPORT_SPELL_FAILURE: u32 = 0x0000_0080;
+
+        let spell_entry = world.managers.spell_mgr.get(spell_id);
+
+        // DO_NOT_REPORT_SPELL_FAILURE spells report OKAY to the client.
+        let suppress = spell_entry
+            .as_ref()
+            .map_or(false, |e| e.attributes_ex2 & SPELL_ATTR_EX2_DO_NOT_REPORT_SPELL_FAILURE != 0);
+
+        if error == SpellCastError::None || suppress {
+            let packet = SmsgCastResult::build(spell_id, SPELL_RESULT_STATUS_OKAY, 0, None, None);
+            self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
+            return Ok(());
+        }
+
+        // Passive spells hide the real failure reason behind DONT_REPORT.
+        let is_passive = spell_entry.as_ref().map_or(false, |e| e.is_passive_spell());
+        let reason_error = if is_passive {
+            SpellCastError::DontReport
+        } else {
+            error
+        };
+        let failure_reason = validation::spell_cast_error_to_u8(reason_error);
+
+        // Optional per-error arguments. Some(_) is written even when the value is
+        // 0 — the C++ optional's presence, not its value, gates serialization.
+        let (arg1, arg2) = if let Some(e) = spell_entry.as_ref() {
+            match error {
+                SpellCastError::NotReady | SpellCastError::SpellOnCooldown => {
+                    if e.attributes & SPELL_ATTR_COOLDOWN_ON_EVENT != 0 {
+                        // Permanent cooldowns are not modelled yet → always 0/false.
+                        (Some(0u32), None)
+                    } else {
+                        (None, None)
+                    }
+                }
+                SpellCastError::RequiresSpellFocus => (Some(e.requires_spell_focus), None),
+                SpellCastError::EquippedItemClass
+                | SpellCastError::EquippedItemClassMainhand
+                | SpellCastError::EquippedItemClassOffhand => (
+                    Some(e.equipped_item_class as u32),
+                    Some(e.equipped_item_sub_class_mask as u32),
+                ),
+                _ => (None, None),
+            }
+        } else {
+            (None, None)
+        };
+
+        let packet = SmsgCastResult::build(
+            spell_id,
+            SPELL_RESULT_STATUS_FAIL,
+            failure_reason,
+            arg1,
+            arg2,
+        );
         self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
 
         Ok(())
@@ -2150,8 +2279,14 @@ impl SpellSystem {
 
     /// Send a SMSG_CAST_RESULT failure to the caster for a pre-pipeline rejection
     /// (e.g. a handler refusing a cast before it reaches `cast_spell`).
-    pub fn send_cast_result(&self, caster_guid: ObjectGuid, spell_id: u32, error: SpellCastError) {
-        let _ = self.send_cast_failure(caster_guid, spell_id, error);
+    pub fn send_cast_result(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        error: SpellCastError,
+        world: &World,
+    ) {
+        let _ = self.send_cast_failure(caster_guid, spell_id, error, world);
     }
 
     // =========================================================================
@@ -2415,6 +2550,7 @@ impl SpellSystem {
                     caster_guid,
                     spell_id,
                     SpellCastError::Interrupted,
+                    world,
                 )?;
             }
         }

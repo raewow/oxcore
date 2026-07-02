@@ -361,7 +361,7 @@ impl SpellManager {
             "SELECT CAST(spell_id AS UNSIGNED) AS spell_id, \
                     CAST(prev_spell AS UNSIGNED) AS prev_spell, \
                     CAST(first_spell AS UNSIGNED) AS first_spell, \
-                    CAST(rank AS UNSIGNED) AS rank, \
+                    CAST(`rank` AS UNSIGNED) AS `rank`, \
                     CAST(req_spell AS UNSIGNED) AS req_spell \
              FROM spell_chain",
         )

@@ -1466,6 +1466,7 @@ pub struct CheckCastInput {
     pub target_tapped_by_others: bool,
     pub spell_only_on_player: bool,
     pub target_is_player: bool,
+    pub spell_is_aoe: bool, // IsAreaOfEffectSpell() — exempts ONLY_ON_PLAYER gate
 
     // Unit target: creature type and targeting mode
     pub target_creature_type_ok: bool, // CheckTargetCreatureType
@@ -1701,8 +1702,7 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
                 if input.strict
                     && input.spell_only_on_player
                     && !input.target_is_player
-                    && !input.spell_is_positive_for_target
-                // proxy for !IsAoE (close enough)
+                    && !input.spell_is_aoe
                 {
                     return SpellCastError::InvalidTarget;
                 }
