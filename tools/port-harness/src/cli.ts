@@ -26,6 +26,8 @@ import * as featureRepo from "./db/repositories/features.js";
 import * as jobsRepo from "./db/repositories/jobs.js";
 import * as investigationRepo from "./db/repositories/investigation.js";
 import * as taskRepo from "./db/repositories/migrationTask.js";
+import * as symbolRepo from "./db/repositories/codeSymbol.js";
+import { TaskStatus } from "./models/index.js";
 import {
   SPELL_FLOW_CATEGORIES_HINT,
   SPELL_FLOW_DEFS,
@@ -640,6 +642,105 @@ program
     const db = getDb(config.database);
     printStatus(db, opts.file);
   });
+
+program
+  .command("set-status")
+  .description("Set a task's porting status, addressed by task ID or symbol name")
+  .option("--task <id>", "Task ID (unambiguous)", parseInt)
+  .option("--symbol <name>", "Qualified symbol name, e.g. 'SpellCaster::AddGCD'")
+  .option("--file <path>", "Disambiguate --symbol by source file (path or basename)")
+  .requiredOption("--status <status>", "New status")
+  .option("--notes <text>", "Optional note stored on the task")
+  .action(
+    async (opts: {
+      task?: number;
+      symbol?: string;
+      file?: string;
+      status: string;
+      notes?: string;
+    }) => {
+      const parsed = TaskStatus.safeParse(opts.status);
+      if (!parsed.success) {
+        console.log({
+          ok: false,
+          error: `Invalid status "${opts.status}". Valid: ${TaskStatus.options.join(", ")}`,
+        });
+        process.exitCode = 1;
+        return;
+      }
+      const status = parsed.data;
+
+      const config = await loadConfig();
+      const db = getDb(config.database);
+
+      // Resolve the target task, either directly by id or via symbol name.
+      let taskId: number;
+      if (opts.task !== undefined) {
+        if (Number.isNaN(opts.task)) {
+          console.log({ ok: false, error: "--task must be a number" });
+          process.exitCode = 1;
+          return;
+        }
+        const task = taskRepo.getTaskById(db, opts.task);
+        if (!task) {
+          console.log({ ok: false, error: `No task with id ${opts.task}` });
+          process.exitCode = 1;
+          return;
+        }
+        taskId = task.id;
+      } else if (opts.symbol) {
+        const matches = symbolRepo
+          .listAllSymbols(db)
+          .filter((s) => s.name === opts.symbol);
+        const filtered = opts.file
+          ? matches.filter((s) => {
+              const norm = s.file.replace(/\\/g, "/");
+              const needle = opts.file!.replace(/\\/g, "/");
+              return norm === needle || norm.endsWith(`/${needle}`) || norm.includes(needle);
+            })
+          : matches;
+
+        if (filtered.length === 0) {
+          console.log({
+            ok: false,
+            error: matches.length
+              ? `No symbol "${opts.symbol}" in file matching "${opts.file}"`
+              : `No symbol named "${opts.symbol}"`,
+          });
+          process.exitCode = 1;
+          return;
+        }
+        if (filtered.length > 1) {
+          console.log({
+            ok: false,
+            error: `Ambiguous symbol "${opts.symbol}" (${filtered.length} matches). Re-run with --task <id> or narrow --file.`,
+            candidates: filtered.map((s) => {
+              const t = taskRepo.getTaskBySymbolId(db, s.id);
+              return {
+                task_id: t?.id ?? null,
+                file: s.file,
+                start_line: s.start_line,
+                status: t?.status ?? "(no task)",
+              };
+            }),
+          });
+          process.exitCode = 1;
+          return;
+        }
+        taskId = taskRepo.upsertTask(db, filtered[0].id, { status });
+      } else {
+        console.log({ ok: false, error: "Provide --task or --symbol" });
+        process.exitCode = 1;
+        return;
+      }
+
+      taskRepo.updateTaskStatus(db, taskId, status);
+      if (opts.notes !== undefined) {
+        taskRepo.bulkUpdateTasks(db, [taskId], { notes: opts.notes });
+      }
+      console.log({ ok: true, task_id: taskId, status });
+    },
+  );
 
 program
   .command("export")
