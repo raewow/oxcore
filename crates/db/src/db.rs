@@ -228,7 +228,7 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
                     eprintln!("      DEBUG first error: {e}\n      stmt head: {}", &stmt[..stmt.len().min(200)]);
                 }
                 failed += 1;
-            }
+            } 
         }
         if failed > 0 {
             let name = path
