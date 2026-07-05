@@ -52,6 +52,36 @@ async fn ensure_database(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// Drop the database (if it exists) and recreate it empty.
+pub async fn reset_database(url: &str) -> Result<()> {
+    let parts = parse_mysql_url(url).context("Invalid MySQL connection URL")?;
+
+    let pool = MySqlPoolOptions::new()
+        .max_connections(1)
+        .connect(&parts.server_url)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to connect to MySQL server at {}",
+                mask(&parts.server_url)
+            )
+        })?;
+
+    let db = parts.database.replace('`', "``");
+    sqlx::query(&format!("DROP DATABASE IF EXISTS `{db}`"))
+        .execute(&pool)
+        .await
+        .with_context(|| format!("Failed to drop database '{}'", parts.database))?;
+    sqlx::query(&format!(
+        "CREATE DATABASE `{db}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    ))
+    .execute(&pool)
+    .await
+    .with_context(|| format!("Failed to create database '{}'", parts.database))?;
+
+    Ok(())
+}
+
 struct MysqlUrlParts {
     server_url: String,
     database: String,
@@ -138,7 +168,7 @@ pub async fn applied_migrations(pool: &MySqlPool) -> Result<Vec<String>> {
 
 pub async fn run_migration(pool: &MySqlPool, id: &str, name: &str, sql: &str) -> Result<()> {
     for stmt in split_statements(sql) {
-        sqlx::query(stmt)
+        sqlx::raw_sql(stmt)
             .execute(pool)
             .await
             .with_context(|| format!("Failed executing: {}...", &stmt[..stmt.len().min(80)]))?;
@@ -168,10 +198,17 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
         return Ok(());
     }
 
+    // SET FOREIGN_KEY_CHECKS/SQL_MODE are session-scoped, so every statement
+    // in this import must run on this same connection rather than `pool`,
+    // which would round-robin across connections that never saw these SETs.
+    let mut conn = pool.acquire().await?;
+
     sqlx::query("SET FOREIGN_KEY_CHECKS = 0")
-        .execute(pool)
+        .execute(&mut *conn)
         .await?;
-    sqlx::query("SET SQL_MODE = ''").execute(pool).await?;
+    sqlx::query("SET SQL_MODE = ''")
+        .execute(&mut *conn)
+        .await?;
 
     let mut files: Vec<_> = std::fs::read_dir(base_dir)?
         .filter_map(|e| e.ok())
@@ -186,7 +223,10 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
             .with_context(|| format!("Failed to read {}", path.display()))?;
         let mut failed = 0usize;
         for stmt in split_statements(&sql) {
-            if sqlx::query(stmt).execute(pool).await.is_err() {
+            if let Err(e) = sqlx::raw_sql(stmt).execute(&mut *conn).await {
+                if std::env::var("DB_DEBUG_ERRORS").is_ok() && failed == 0 {
+                    eprintln!("      DEBUG first error: {e}\n      stmt head: {}", &stmt[..stmt.len().min(200)]);
+                }
                 failed += 1;
             }
         }
@@ -200,7 +240,7 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
     }
 
     sqlx::query("SET FOREIGN_KEY_CHECKS = 1")
-        .execute(pool)
+        .execute(&mut *conn)
         .await?;
     Ok(())
 }

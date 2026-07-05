@@ -36,6 +36,12 @@ enum Command {
         /// Migration name (snake_case description)
         name: String,
     },
+    /// Drop and recreate all databases, then re-run migrate
+    Fresh {
+        /// Skip the confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
 }
 
 #[tokio::main]
@@ -47,6 +53,7 @@ async fn main() -> Result<()> {
         Command::Migrate => commands::migrate::run(&config).await?,
         Command::Status => commands::status::run(&config).await?,
         Command::New { db, name } => commands::new::run(&db, &name, &config.migrations_dir)?,
+        Command::Fresh { yes } => commands::fresh::run(&config, yes).await?,
     }
 
     Ok(())
