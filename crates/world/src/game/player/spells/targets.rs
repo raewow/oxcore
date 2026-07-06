@@ -528,6 +528,124 @@ fn is_hostile(caster_guid: ObjectGuid, target_guid: ObjectGuid, _world: &World) 
     false
 }
 
+/// Grounding Totem aura: a target carrying it always passes the creature-type
+/// check (it soaks the next hostile spell regardless of the caster's mask).
+const AURA_GROUNDING_TOTEM: u32 = 8179;
+/// Curse of Doom: only castable on non-player-controlled creatures; when valid
+/// it is allowed against every creature type.
+const SPELL_CURSE_OF_DOOM: u32 = 603;
+/// Dismiss Pet: bypasses the creature-type restriction entirely.
+const SPELL_DISMISS_PET: u32 = 2641;
+/// Taming Lesson: bypasses the creature-type restriction entirely.
+const SPELL_TAMING_LESSON: u32 = 23356;
+/// Bitmask covering all 11 vanilla creature types (CREATURE_TYPE_BEAST..GAS_CLOUD).
+const CREATURE_TYPE_MASK_ALL: u32 = 0x7FF;
+
+/// Port of `Spell::CheckTargetCreatureType`.
+///
+/// Returns whether `target_guid` satisfies the spell's `TargetCreatureType`
+/// mask, applying the vanilla per-spell special cases. Callers treat `false`
+/// as "invalid / immune target" and drop the candidate.
+pub fn check_target_creature_type(
+    spell_entry: &crate::dbc::structures::SpellEntry,
+    target_guid: ObjectGuid,
+    world: &World,
+) -> bool {
+    // Grounding Totem (aura 8179) makes any target valid.
+    if target_has_aura(target_guid, AURA_GROUNDING_TOTEM, world) {
+        return true;
+    }
+
+    // `GetCharmerOrOwnerPlayerOrPlayerItself() != null` is approximated here as
+    // "is a player or a player pet"; charmed creatures are not tracked yet.
+    let target_is_player_controlled = target_guid.is_player() || target_guid.is_pet();
+
+    let spell_creature_target_mask = match resolve_creature_target_mask(
+        spell_entry.id,
+        spell_entry.target_creature_type,
+        target_is_player_controlled,
+    ) {
+        Some(mask) => mask,
+        // Curse of Doom on a player-controlled target: reject outright.
+        None => return false,
+    };
+
+    if spell_creature_target_mask != 0 {
+        let target_creature_type_mask = creature_type_mask(target_guid, world);
+        return creature_type_allows(spell_creature_target_mask, target_creature_type_mask);
+    }
+
+    true
+}
+
+/// Applies the per-spell overrides that adjust the effective creature-type mask.
+///
+/// Returns `None` when the spell must reject the target regardless of mask
+/// (Curse of Doom against a player-controlled unit), otherwise the effective
+/// mask to test against the target's creature-type bits.
+fn resolve_creature_target_mask(
+    spell_id: u32,
+    base_mask: u32,
+    target_is_player_controlled: bool,
+) -> Option<u32> {
+    match spell_id {
+        SPELL_CURSE_OF_DOOM => {
+            if target_is_player_controlled {
+                None
+            } else {
+                Some(CREATURE_TYPE_MASK_ALL)
+            }
+        }
+        SPELL_DISMISS_PET | SPELL_TAMING_LESSON => Some(0),
+        _ => Some(base_mask),
+    }
+}
+
+/// The creature-type check itself: a zero target mask (e.g. players, which have
+/// no creature type) always passes; otherwise the spell and target bits must
+/// overlap.
+fn creature_type_allows(spell_mask: u32, target_mask: u32) -> bool {
+    target_mask == 0 || (spell_mask & target_mask) != 0
+}
+
+/// `Unit::GetCreatureTypeMask()` — `1 << (creature_type - 1)`, or 0 for players
+/// and unknown/typeless units.
+fn creature_type_mask(guid: ObjectGuid, world: &World) -> u32 {
+    if !guid.is_creature_or_pet() {
+        return 0;
+    }
+    world
+        .managers
+        .creature_mgr
+        .with_creature(guid, |c| {
+            let ct = c.creature_type;
+            if ct > 0 {
+                1u32 << (ct - 1)
+            } else {
+                0
+            }
+        })
+        .unwrap_or(0)
+}
+
+/// `Unit::HasAura(spell_id)` for either a player or a creature target.
+fn target_has_aura(guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
+    if guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(guid, |p| p.auras.container.has_aura(spell_id))
+            .unwrap_or(false)
+    } else {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| c.has_aura(spell_id))
+            .unwrap_or(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -821,5 +939,46 @@ mod tests {
             aura_still_there,
             "invalid redirect must not consume aura charges"
         );
+    }
+
+    #[test]
+    fn creature_type_overlap_rules() {
+        // Target with no creature type (players) always passes a non-zero mask.
+        assert!(creature_type_allows(0x7FF, 0));
+        // Overlapping bits pass.
+        assert!(creature_type_allows(0b0010, 0b0011));
+        // Disjoint bits fail.
+        assert!(!creature_type_allows(0b0100, 0b0011));
+    }
+
+    #[test]
+    fn creature_target_mask_special_cases() {
+        // Ordinary spell keeps its own mask.
+        assert_eq!(resolve_creature_target_mask(12345, 0x40, false), Some(0x40));
+        // Dismiss Pet / Taming Lesson clear the restriction.
+        assert_eq!(resolve_creature_target_mask(SPELL_DISMISS_PET, 0x40, false), Some(0));
+        assert_eq!(resolve_creature_target_mask(SPELL_TAMING_LESSON, 0x40, false), Some(0));
+        // Curse of Doom: all creature types when target is not player-controlled...
+        assert_eq!(
+            resolve_creature_target_mask(SPELL_CURSE_OF_DOOM, 0, false),
+            Some(CREATURE_TYPE_MASK_ALL)
+        );
+        // ...but rejected outright against a player-controlled target.
+        assert_eq!(resolve_creature_target_mask(SPELL_CURSE_OF_DOOM, 0, true), None);
+    }
+
+    #[tokio::test]
+    async fn player_target_passes_creature_type_restricted_spell() {
+        let world = test_world();
+        // Spell restricted to a creature type (e.g. Undead) still allows player
+        // targets, whose creature-type mask is 0.
+        let mut spell = aoe_enemy_spell(50100);
+        spell.target_creature_type = 0x20; // some creature-type bit
+        world.managers.spell_mgr.add_spell(spell.clone());
+
+        let player = ObjectGuid::new_player(30);
+        add_test_player(&world, player, 1, 0);
+
+        assert!(check_target_creature_type(&spell, player, &world));
     }
 }
