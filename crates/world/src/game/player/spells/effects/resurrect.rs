@@ -7,12 +7,21 @@ use crate::World;
 use anyhow::Result;
 use oxcore_shared::protocol::ObjectGuid;
 
+/// Spells with this attribute make SMSG_RESURRECT_REQUEST tell the client to
+/// resurrect instantly instead of honoring the delay from
+/// SMSG_CORPSE_RECLAIM_DELAY.
+const SPELL_ATTR_EX3_NO_RES_TIMER: u32 = 0x0004_0000;
+
 /// SPELL_EFFECT_RESURRECT (18)
 ///
 /// Resurrect a dead player. In vanilla WoW this does NOT directly revive the
 /// target — instead the server sends SMSG_RESURRECT_REQUEST with the caster's
 /// name, and the dead player must accept via CMSG_RESURRECT_RESPONSE. The
 /// actual revive happens in `DeathSystem::handle_resurrect_response`.
+///
+/// The caster is always a player in this pipeline, so the packet's name
+/// field is sent empty — the client resolves the name from the caster GUID
+/// itself, matching the reference client's player-caster branch.
 pub async fn effect_resurrect(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
@@ -38,8 +47,8 @@ pub async fn effect_resurrect(input: &EffectInput, world: &World) -> Result<Effe
         return Ok(EffectResult::empty());
     }
 
-    // Pull caster name, target's max health/mana to compute the snapshot we
-    // want to restore if the offer is accepted. base_value is the spell's
+    // Pull target's max health/mana to compute the snapshot we want to
+    // restore if the offer is accepted. base_value is the spell's
     // health-percentage coefficient.
     let health_pct = input.base_value.max(1).min(100) as u32;
     let caster_guid = input.caster_guid;
@@ -49,17 +58,21 @@ pub async fn effect_resurrect(input: &EffectInput, world: &World) -> Result<Effe
         .player
         .manager()
         .with_player(caster_guid, |player| {
-            (
-                player.name.clone(),
-                player.map_id,
-                player.instance_id,
-                player.movement.position,
-            )
+            (player.map_id, player.instance_id, player.movement.position)
         });
-    let (caster_name, map_id, instance_id, location) = match snapshot {
+    let (map_id, instance_id, location) = match snapshot {
         Some(v) => v,
         None => return Ok(EffectResult::empty()),
     };
+
+    // SPELL_ATTR_EX3_NO_RES_TIMER overrides the corpse-reclaim delay with an
+    // instant resurrection once the offer is accepted.
+    let use_corpse_timer = world
+        .managers
+        .spell_mgr
+        .get(input.spell_id)
+        .map(|entry| entry.attributes_ex3 & SPELL_ATTR_EX3_NO_RES_TIMER == 0)
+        .unwrap_or(true);
 
     let (target_health, target_mana) = world
         .systems

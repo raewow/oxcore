@@ -243,6 +243,11 @@ impl EffectsDispatcher {
     ///
     /// `custom_base_points`: optional per-effect base point overrides (MaNGOS CastCustomSpell).
     /// When Some, each Some(v) replaces the DBC effect_base_points value for that effect index.
+    ///
+    /// Builds one [`crate::game::player::spells::target_info::TargetInfo`] per unique unit
+    /// target (effect mask = which of the 3 effects apply to it) and processes each target
+    /// once via `target_info::apply_target_effects`, matching MaNGOS's per-target
+    /// `DoAllEffectOnTarget` model instead of rolling a fresh hit per effect per target.
     pub async fn dispatch_with_targets(
         &self,
         caster_guid: ObjectGuid,
@@ -253,11 +258,10 @@ impl EffectsDispatcher {
         custom_base_points: Option<[Option<i32>; 3]>,
         world: &World,
     ) -> Result<Vec<EffectResult>> {
-        use crate::game::player::spells::hit;
+        use crate::game::player::spells::target_info::TargetInfo;
 
         let mut results = Vec::new();
 
-        // Look up spell entry
         let spell_entry = match world.managers.spell_mgr.get(spell_id) {
             Some(entry) => entry,
             None => {
@@ -266,159 +270,41 @@ impl EffectsDispatcher {
             }
         };
 
-        // For each of the 3 effects:
-        for effect_index in 0..3 {
-            let effect_type = spell_entry.effect[effect_index];
-            if effect_type == 0 {
-                continue; // SPELL_EFFECT_NONE
+        // Build per-target effect masks: bit i set means effect i targets this unit.
+        let mut order: Vec<ObjectGuid> = Vec::new();
+        let mut masks: std::collections::HashMap<ObjectGuid, u8> = std::collections::HashMap::new();
+
+        for effect_index in 0..3usize {
+            if spell_entry.effect[effect_index] == 0 {
+                continue;
             }
-
-            // Convert effect type to enum
-            let effect_type_enum = match SpellEffectType::from_u32(effect_type) {
-                Some(et) => et,
-                None => {
-                    tracing::warn!("Unknown effect type {} for spell {}", effect_type, spell_id);
-                    continue;
-                }
-            };
-
-            // Get targets for this effect
             let effect_targets: Vec<ObjectGuid> = if let Some(res) = resolved {
                 res.effect_targets[effect_index].clone()
             } else {
-                // Legacy path: use explicit target_guid
                 target_guid.into_iter().collect()
             };
-
-            // Dispatch effect once per target
-            for eff_target in &effect_targets {
-                // Roll hit/miss (skip for self-targeting and triggered spells)
-                if !is_triggered && *eff_target != caster_guid {
-                    let outcome = hit::roll_spell_hit(caster_guid, *eff_target, spell_id, world);
-                    match outcome {
-                        hit::SpellHitOutcome::Miss => {
-                            tracing::debug!(
-                                "[SPELL-HIT] spell {} MISSED target {:?}",
-                                spell_id,
-                                eff_target
-                            );
-                            if effect_index == 0 {
-                                world.systems.spells.send_spell_miss(
-                                    caster_guid,
-                                    *eff_target,
-                                    spell_id,
-                                    hit::SpellMissInfo::Miss,
-                                );
-                            }
-                            continue;
-                        }
-                        hit::SpellHitOutcome::Resist => {
-                            tracing::debug!(
-                                "[SPELL-HIT] spell {} RESISTED by {:?}",
-                                spell_id,
-                                eff_target
-                            );
-                            if effect_index == 0 {
-                                world.systems.spells.send_spell_miss(
-                                    caster_guid,
-                                    *eff_target,
-                                    spell_id,
-                                    hit::SpellMissInfo::Resist,
-                                );
-                            }
-                            continue;
-                        }
-                        hit::SpellHitOutcome::Immune => {
-                            tracing::debug!(
-                                "[SPELL-HIT] spell {} target {:?} IMMUNE",
-                                spell_id,
-                                eff_target
-                            );
-                            if effect_index == 0 {
-                                world.systems.spells.send_spell_miss(
-                                    caster_guid,
-                                    *eff_target,
-                                    spell_id,
-                                    hit::SpellMissInfo::Immune,
-                                );
-                            }
-                            continue;
-                        }
-                        hit::SpellHitOutcome::Reflect => {
-                            tracing::debug!(
-                                "[SPELL-HIT] spell {} REFLECTED by {:?}",
-                                spell_id,
-                                eff_target
-                            );
-                            // TODO: Apply effect to caster instead
-                            continue;
-                        }
-                        hit::SpellHitOutcome::Hit | hit::SpellHitOutcome::PartialResist(_) => {
-                            // Fire SpellHit AI event on the target creature (if it has a Lua AI script).
-                            // Only fire on the first effect (index 0) to avoid duplicate callbacks.
-                            if effect_index == 0 {
-                                let is_creature = world
-                                    .managers
-                                    .creature_mgr
-                                    .with_creature(*eff_target, |_| ())
-                                    .is_some();
-                                if is_creature {
-                                    crate::game::creature::ai::queue_event(
-                                        world,
-                                        *eff_target,
-                                        crate::game::creature::ai::AIEvent::SpellHit {
-                                            caster_guid,
-                                            spell_id,
-                                            spell_is_positive: spell_entry.is_positive_spell(),
-                                            spell_is_direct_damage: spell_entry
-                                                .is_direct_damage_spell(),
-                                        },
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Create EffectInput for this target
-                let base_value = custom_base_points
-                    .and_then(|bp| bp[effect_index])
-                    .unwrap_or(spell_entry.effect_base_points[effect_index]);
-                let input = EffectInput {
-                    caster_guid,
-                    target_guid: Some(*eff_target),
-                    spell_id,
-                    effect_index: effect_index as u8,
-                    base_value,
-                    misc_value: spell_entry.effect_misc_value[effect_index],
-                    misc_value_b: 0,
-                    is_triggered,
-                    die_sides: spell_entry.effect_die_sides[effect_index],
-                    points_per_level: spell_entry.effect_real_points_per_level[effect_index],
-                    spell_coefficient: spell_entry.effect_bonus_coefficient[effect_index],
-                    spell_school: spell_entry.school as u8,
-                    casting_time_ms: world
-                        .dbc
-                        .read()
-                        .get_spell_cast_time(spell_entry.casting_time_index)
-                        .map(|entry| entry.cast_time.max(0) as u32)
-                        .unwrap_or(0),
-                };
-
-                match dispatch_effect(effect_type_enum, &input, world).await {
-                    Ok(result) => results.push(result),
-                    Err(e) => {
-                        tracing::error!(
-                            "Effect {} failed for spell {} target {:?}: {}",
-                            effect_index,
-                            spell_id,
-                            eff_target,
-                            e
-                        );
-                        results.push(EffectResult::empty());
-                    }
-                }
+            for eff_target in effect_targets {
+                let mask = masks.entry(eff_target).or_insert_with(|| {
+                    order.push(eff_target);
+                    0
+                });
+                *mask |= 1 << effect_index;
             }
+        }
+
+        for target_guid in order {
+            let effect_mask = masks[&target_guid];
+            let mut target = TargetInfo::new(target_guid, effect_mask);
+            let mut target_results = crate::game::player::spells::target_info::apply_target_effects(
+                &mut target,
+                caster_guid,
+                spell_id,
+                is_triggered,
+                custom_base_points,
+                world,
+            )
+            .await?;
+            results.append(&mut target_results);
         }
 
         Ok(results)

@@ -524,6 +524,12 @@ impl DeathSystem {
     }
 
     /// Offer a resurrection to a dead player (called by spell system).
+    ///
+    /// `causes_sickness` warns the client that accepting will apply
+    /// resurrection sickness. `use_corpse_timer` mirrors
+    /// `!spellInfo->HasAttribute(SPELL_ATTR_EX3_NO_RES_TIMER)`: when false,
+    /// the client resurrects instantly instead of honoring the delay sent
+    /// via SMSG_CORPSE_RECLAIM_DELAY.
     pub fn offer_resurrection(
         &self,
         target_guid: ObjectGuid,
@@ -534,6 +540,8 @@ impl DeathSystem {
         instance_id: u32,
         health: u32,
         mana: u32,
+        causes_sickness: bool,
+        use_corpse_timer: bool,
         world: &World,
     ) -> Result<()> {
         world
@@ -556,8 +564,8 @@ impl DeathSystem {
         let packet = SmsgResurrectRequest {
             caster_guid,
             caster_name: caster_name.to_string(),
-            causes_sickness: false,
-            use_corpse_timer: true,
+            causes_sickness,
+            use_corpse_timer,
         };
         self.broadcast_mgr
             .send_to_player(target_guid, packet.to_world_packet());

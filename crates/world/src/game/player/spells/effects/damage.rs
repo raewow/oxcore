@@ -11,8 +11,7 @@ use crate::game::player::player::Player;
 use crate::game::player::spells::effects::{EffectInput, EffectResult};
 use crate::World;
 use anyhow::Result;
-use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use oxcore_shared::protocol::ObjectGuid;
 
 /// Environmental damage types (from misc_value)
 #[repr(u32)]
@@ -239,18 +238,26 @@ pub async fn effect_school_damage(input: &EffectInput, world: &World) -> Result<
 
     let damage = damage_after_mitigation.max(0.0) as u32;
 
-    // Apply damage
-    apply_damage(
+    let dmg_class = world
+        .managers
+        .spell_mgr
+        .get(input.spell_id)
+        .map(|e| e.dmg_class)
+        .unwrap_or(0);
+
+    // Apply damage (absorb, health mutation, combat log, procs, death)
+    super::super::caster::deal_damage(
         input.caster_guid,
         target_guid,
         damage,
+        school,
         input.spell_id,
         is_crit,
-        school,
         resisted,
+        dmg_class,
         world,
     )
-    .await?;
+    .await;
 
     Ok(EffectResult::with_damage(damage))
 }
@@ -359,17 +366,20 @@ async fn effect_weapon_damage_internal(
 
     let damage = damage_after_armor as u32;
 
-    apply_damage(
+    let dmg_class = spell_entry.as_ref().map(|e| e.dmg_class).unwrap_or(0);
+
+    super::super::caster::deal_damage(
         input.caster_guid,
         target_guid,
         damage,
+        0,
         input.spell_id,
         is_crit,
-        0,
         armor_resisted,
+        dmg_class,
         world,
     )
-    .await?;
+    .await;
 
     Ok(EffectResult::with_damage(damage))
 }
@@ -421,20 +431,29 @@ pub async fn effect_health_leech(input: &EffectInput, world: &World) -> Result<E
     let damage = damage_after_resist.max(0.0) as u32;
 
     // Damage target
-    apply_damage(
+    super::super::caster::deal_damage(
         input.caster_guid,
         target_guid,
         damage,
+        school,
         input.spell_id,
         false,
-        school,
+        0,
         0,
         world,
     )
-    .await?;
+    .await;
 
     // Heal caster for the same amount
-    heal_target(input.caster_guid, damage, world).await?;
+    super::super::caster::deal_heal(
+        input.caster_guid,
+        input.caster_guid,
+        damage,
+        input.spell_id,
+        false,
+        world,
+    )
+    .await;
 
     Ok(EffectResult {
         damage,
@@ -518,17 +537,20 @@ pub async fn effect_weapon_percent_damage(
 
     let damage = damage_after_armor as u32;
 
-    apply_damage(
+    let dmg_class = spell_entry.as_ref().map(|e| e.dmg_class).unwrap_or(0);
+
+    super::super::caster::deal_damage(
         input.caster_guid,
         target_guid,
         damage,
+        0,
         input.spell_id,
         is_crit,
-        0,
         armor_resisted,
+        dmg_class,
         world,
     )
-    .await?;
+    .await;
 
     Ok(EffectResult::with_damage(damage))
 }
@@ -653,390 +675,3 @@ mod tests {
     }
 }
 
-/// Wake a sitting player when they take damage.
-///
-/// Mirrors the C++ hit-side stand-up behavior in `SpellCaster::ProcDamageAndSpell_real`.
-fn stand_player_up_on_damage(target_guid: ObjectGuid, world: &World) {
-    let should_send = world
-        .systems
-        .player
-        .manager()
-        .with_player_mut(target_guid, |player| {
-            if player.stand_state == 0 {
-                return false;
-            }
-
-            player.stand_state = 0;
-            true
-        })
-        .unwrap_or(false);
-
-    if should_send {
-        let mut packet = WorldPacket::new(Opcode::SMSG_STANDSTATE_UPDATE);
-        packet.write_u8(0);
-        world
-            .managers
-            .broadcast_mgr
-            .send_msg_to_player(target_guid, packet);
-    }
-}
-
-/// Apply damage to a target (player or creature).
-/// Handles combat log packets (P5), creature targeting (P1), death (P6), and cast pushback (P6).
-async fn apply_damage(
-    caster_guid: ObjectGuid,
-    target_guid: ObjectGuid,
-    damage: u32,
-    spell_id: u32,
-    is_crit: bool,
-    school: u8,
-    resisted: u32,
-    world: &World,
-) -> Result<()> {
-    if target_guid.is_player() {
-        // --- Player target ---
-
-        // Process absorb shields before applying damage
-        let (damage_after_absorb, absorbed) = world
-            .systems
-            .auras
-            .absorb_damage(target_guid, damage, school, world)
-            .await?;
-
-        let died = world
-            .systems
-            .player
-            .manager()
-            .with_player_mut(target_guid, |player| {
-                let current_health = player.stats.health;
-                let new_health = current_health.saturating_sub(damage_after_absorb);
-                player.stats.health = new_health;
-                player.stats.dirty = true;
-
-                tracing::debug!(
-                    "Spell damage: {} took {} damage (absorbed={}), health: {} -> {}",
-                    player.name,
-                    damage_after_absorb,
-                    absorbed,
-                    current_health,
-                    new_health
-                );
-
-                new_health == 0 && current_health > 0
-            })
-            .unwrap_or(false);
-
-        // Send SMSG_SPELLNONMELEEDAMAGELOG (report original damage for combat log, absorbed shown separately)
-        send_spell_damage_log(
-            caster_guid,
-            target_guid,
-            spell_id,
-            damage_after_absorb,
-            school,
-            resisted,
-            is_crit,
-            world,
-        );
-
-        // Cast pushback: if target is casting, push back their cast bar
-        // Pushback triggers even if damage was fully absorbed (MaNGOS behavior)
-        if damage > 0 && !died {
-            let _ = world.systems.spells.apply_cast_pushback(target_guid, world);
-        }
-
-        // Interrupt auras with DAMAGE flag on target (triggers even if absorbed)
-        if damage > 0 {
-            let _ = world
-                .systems
-                .auras
-                .remove_auras_with_interrupt_flag(
-                    target_guid,
-                    0x00000002, // AURA_INTERRUPT_FLAG_DAMAGE (bit 1)
-                    world,
-                )
-                .await;
-        }
-
-        if damage > 0 && !died {
-            stand_player_up_on_damage(target_guid, world);
-        }
-
-        // Fire proc checks: caster dealt spell damage, target took spell damage
-        // Use damage (pre-absorb) for proc triggering, damage_after_absorb for amounts
-        if damage > 0 {
-            use crate::game::player::auras::proc::{proc_flags, proc_flags_ex};
-            let proc_ex = if is_crit {
-                proc_flags_ex::CRITICAL_HIT
-            } else {
-                proc_flags_ex::NORMAL_HIT
-            };
-            // Caster: dealt a harmful spell.
-            let _ = world
-                .systems
-                .auras
-                .check_procs(
-                    caster_guid,
-                    proc_flags::DEAL_HARMFUL_SPELL,
-                    proc_ex,
-                    Some(spell_id),
-                    damage_after_absorb,
-                    world,
-                )
-                .await;
-            // Target: took a harmful spell (only if target is a player).
-            if target_guid.is_player() {
-                let _ = world
-                    .systems
-                    .auras
-                    .check_procs(
-                        target_guid,
-                        proc_flags::TAKE_HARMFUL_SPELL | proc_flags::TAKEN_ANY_DAMAGE,
-                        proc_ex,
-                        Some(spell_id),
-                        damage_after_absorb,
-                        world,
-                    )
-                    .await;
-            }
-        }
-
-        // P6: Death handling
-        if died {
-            if let Err(e) =
-                world
-                    .systems
-                    .death
-                    .on_killed(target_guid, Some(caster_guid), Some(spell_id), world)
-            {
-                tracing::error!("Failed to handle player death: {}", e);
-            }
-        }
-    } else if target_guid.is_creature() {
-        // --- Creature target ---
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        let result =
-            world
-                .managers
-                .creature_mgr
-                .apply_damage(target_guid, damage, caster_guid, timestamp);
-
-        if let Some((actual_damage, is_dead)) = result {
-            tracing::info!(
-                "[SPELL_DAMAGE] creature {:?} took {} damage from spell {} (caster {:?}), dead={}",
-                target_guid,
-                actual_damage,
-                spell_id,
-                caster_guid,
-                is_dead
-            );
-
-            // Send SMSG_SPELLNONMELEEDAMAGELOG (works for creature targets too)
-            send_spell_damage_log(
-                caster_guid,
-                target_guid,
-                spell_id,
-                damage,
-                school,
-                resisted,
-                is_crit,
-                world,
-            );
-
-            // Send creature health/death update to nearby players (SMSG_UPDATE_OBJECT)
-            // Without this, the client never sees the health bar change or death animation
-            if is_dead {
-                // Mark dead on server first (snaps position to spline location)
-                let death_info = world
-                    .managers
-                    .creature_mgr
-                    .handle_death(target_guid, Some(caster_guid));
-
-                // Send stop packet BEFORE death VALUES update so client stops
-                // the spline at the correct position before processing death state
-                if let Some(ref info) = death_info {
-                    world.systems.creature_movement.send_stop_packet(
-                        info.guid,
-                        info.position,
-                        world,
-                    );
-                }
-
-                // Now send death VALUES update (health=0, stand state Dead)
-                send_creature_killed_update(caster_guid, target_guid, world);
-
-                crate::game::creature::ai::queue_event(
-                    world,
-                    target_guid,
-                    crate::game::creature::ai::AIEvent::Died {
-                        killer_guid: Some(caster_guid),
-                    },
-                );
-
-                tracing::info!(
-                    "Creature {:?} killed by spell {} from {:?}",
-                    target_guid,
-                    spell_id,
-                    caster_guid
-                );
-            } else if actual_damage > 0 {
-                send_creature_health_update(target_guid, world);
-
-                // Queue AI event so creature enters combat and chases attacker
-                crate::game::creature::ai::queue_event(
-                    world,
-                    target_guid,
-                    crate::game::creature::ai::AIEvent::DamageTaken {
-                        attacker_guid: caster_guid,
-                        damage: actual_damage,
-                        spell_id: Some(spell_id),
-                        school,
-                    },
-                );
-            }
-        } else {
-            tracing::warn!(
-                "[SPELL_DAMAGE] creature {:?} not found for spell {}",
-                target_guid,
-                spell_id
-            );
-        }
-    }
-
-    Ok(())
-}
-
-/// Build and broadcast SMSG_SPELLNONMELEEDAMAGELOG packet (P5).
-fn send_spell_damage_log(
-    caster_guid: ObjectGuid,
-    target_guid: ObjectGuid,
-    spell_id: u32,
-    damage: u32,
-    school: u8,
-    resisted: u32,
-    is_crit: bool,
-    world: &World,
-) {
-    let mut packet = WorldPacket::new(Opcode::SMSG_SPELLNONMELEEDAMAGELOG);
-    packet.write_packed_guid_raw(target_guid.raw());
-    packet.write_packed_guid_raw(caster_guid.raw());
-    packet.write_u32(spell_id);
-    packet.write_u32(damage);
-    packet.write_u8(school); // school index (GetFirstSchoolInMask), not a mask
-    packet.write_u32(0); // absorbed
-    packet.write_u32(resisted);
-    packet.write_u8(0); // periodicLog (0 = not periodic)
-    packet.write_u8(0); // unused
-    packet.write_u32(0); // blocked
-    let mut hit_info = 0u32;
-    if is_crit {
-        hit_info |= 0x02; // HITINFO_CRITICALHIT
-    }
-    packet.write_u32(hit_info);
-    packet.write_u8(0); // debug info flag
-
-    world
-        .managers
-        .broadcast_mgr
-        .broadcast_nearby(caster_guid, &packet, true);
-}
-
-/// Heal a target (player only for now).
-async fn heal_target(target_guid: ObjectGuid, healing: u32, world: &World) -> Result<()> {
-    if target_guid.is_player() {
-        world
-            .systems
-            .player
-            .manager()
-            .with_player_mut(target_guid, |player| {
-                let max_heal = player.stats.max_health.saturating_sub(player.stats.health);
-                let actual_heal = healing.min(max_heal);
-                player.stats.health += actual_heal;
-                player.stats.dirty = true;
-
-                tracing::debug!(
-                    "Spell heal: {} healed for {}, health: {} -> {}",
-                    player.name,
-                    actual_heal,
-                    player.stats.health - actual_heal,
-                    player.stats.health
-                );
-            });
-    }
-
-    Ok(())
-}
-
-/// Send creature health update to nearby players via SMSG_UPDATE_OBJECT.
-/// Mirrors the send_health_update() in creature_combat handler.
-fn send_creature_health_update(creature_guid: ObjectGuid, world: &World) {
-    use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
-    use crate::game::broadcast_mgr::broadcast_around_creature;
-    use crate::game::common::update_fields::{UNIT_FIELD_HEALTH, UNIT_FIELD_MAXHEALTH};
-    use oxcore_shared::messages::{
-        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-    };
-
-    if let Some((current, max)) = world.managers.creature_mgr.get_health(creature_guid) {
-        let world_guid =
-            WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
-        let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
-            ValuesUpdateBlock::new(world_guid, ObjectType::Unit)
-                .set_field(UNIT_FIELD_HEALTH, current)
-                .set_field(UNIT_FIELD_MAXHEALTH, max),
-        ));
-        broadcast_around_creature(world, creature_guid, &update.to_world_packet());
-    }
-}
-
-/// Send creature death update to nearby players via SMSG_UPDATE_OBJECT.
-/// Mirrors send_creature_killed_update() in creature_combat handler.
-fn send_creature_killed_update(caster_guid: ObjectGuid, creature_guid: ObjectGuid, world: &World) {
-    use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
-    use crate::game::broadcast_mgr::broadcast_around_creature;
-    use crate::game::common::update_fields::*;
-    use oxcore_shared::messages::{
-        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
-    };
-
-    let (max_health, unit_flags) = world
-        .managers
-        .creature_mgr
-        .with_creature_mut(creature_guid, |c| (c.max_health, c.unit_flags))
-        .unwrap_or((1, 0));
-
-    // Clear IN_COMBAT from unit flags
-    let cleared_flags = unit_flags & !crate::game::common::unit_flags::IN_COMBAT;
-
-    let world_guid = WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
-    let empty_guid = WorldObjectGuid::from_raw(0);
-    let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
-        ValuesUpdateBlock::new(world_guid, ObjectType::Unit)
-            .set_guid_field(UNIT_FIELD_TARGET, empty_guid)
-            .set_field(UNIT_FIELD_HEALTH, 0u32)
-            .set_field(UNIT_FIELD_MAXHEALTH, max_health)
-            .set_field(UNIT_FIELD_FLAGS, cleared_flags)
-            .set_field(
-                UNIT_DYNAMIC_FLAGS,
-                crate::game::creature::death::UNIT_DYNFLAG_DEAD,
-            )
-            .set_field(UNIT_FIELD_BYTES_1, 7u32) // Stand state Dead
-            .set_field(UNIT_NPC_FLAGS, 0u32),
-    ));
-    broadcast_around_creature(world, creature_guid, &update.to_world_packet());
-
-    // Also send attack stop from both sides
-    let stop_packet = oxcore_shared::messages::combat::SmsgAttackStop {
-        attacker_guid: caster_guid,
-        target_guid: creature_guid,
-        unk: 1, // target is dead
-    };
-    world.managers.broadcast_mgr.broadcast_nearby(
-        caster_guid,
-        &stop_packet.to_world_packet(),
-        true,
-    );
-}

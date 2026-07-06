@@ -35,6 +35,7 @@ pub mod learning;
 pub mod modifiers;
 pub mod state;
 pub mod system;
+pub mod target_info;
 pub mod targets;
 pub mod validation;
 
