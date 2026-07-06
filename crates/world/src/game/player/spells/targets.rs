@@ -552,7 +552,7 @@ pub fn check_target_creature_type(
     world: &World,
 ) -> bool {
     // Grounding Totem (aura 8179) makes any target valid.
-    if target_has_aura(target_guid, AURA_GROUNDING_TOTEM, world) {
+    if unit_has_aura(target_guid, AURA_GROUNDING_TOTEM, world) {
         return true;
     }
 
@@ -628,8 +628,8 @@ fn creature_type_mask(guid: ObjectGuid, world: &World) -> u32 {
         .unwrap_or(0)
 }
 
-/// `Unit::HasAura(spell_id)` for either a player or a creature target.
-fn target_has_aura(guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
+/// `Unit::HasAura(spell_id)` for either a player or a creature/pet unit.
+fn unit_has_aura(guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
     if guid.is_player() {
         world
             .systems
@@ -644,6 +644,103 @@ fn target_has_aura(guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
             .with_creature(guid, |c| c.has_aura(spell_id))
             .unwrap_or(false)
     }
+}
+
+/// `SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED` — casting the spell does not break stealth.
+const SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED: u32 = 0x0002_0000;
+
+// Spell icons whose spells are exempt from breaking the caster's stealth outright.
+const SPELL_ICON_SHADOWMELD: u32 = 103;
+const SPELL_ICON_SAP: u32 = 249;
+const SPELL_ICON_CAMOUFLAGE: u32 = 250;
+const SPELL_ICON_VANISH: u32 = 252;
+
+// Improved Sap ranks give an escalating chance to stay stealthed after Sapping.
+const IMPROVED_SAP_RANK_1: u32 = 14076;
+const IMPROVED_SAP_RANK_2: u32 = 14094;
+const IMPROVED_SAP_RANK_3: u32 = 14095;
+
+/// Port of `Spell::ShouldRemoveStealthAuras`.
+///
+/// Decides whether starting this cast should break the caster's stealth. The
+/// caller passes `!should_remove_stealth_auras(..)` as the `skip_stealth` flag
+/// to the stealth-aura removal — i.e. stealth is removed when this returns
+/// `true`. `is_triggered_spell` mirrors `Spell::m_IsTriggeredSpell`.
+pub fn should_remove_stealth_auras(
+    spell_entry: &crate::dbc::structures::SpellEntry,
+    caster_guid: ObjectGuid,
+    is_triggered_spell: bool,
+    world: &World,
+) -> bool {
+    // No unit caster → nothing to unstealth.
+    if !(caster_guid.is_player() || caster_guid.is_creature_or_pet()) {
+        return false;
+    }
+
+    if !spell_breaks_stealth_by_default(
+        is_triggered_spell,
+        spell_entry.attributes_ex,
+        spell_entry.spell_icon_id,
+    ) {
+        return false;
+    }
+
+    // Default: remove stealth. Sap (from a player) can retain it via Improved Sap.
+    if spell_entry.spell_icon_id == SPELL_ICON_SAP && caster_guid.is_player() {
+        let retain_chance = improved_sap_retain_chance(
+            unit_has_aura(caster_guid, IMPROVED_SAP_RANK_1, world),
+            unit_has_aura(caster_guid, IMPROVED_SAP_RANK_2, world),
+            unit_has_aura(caster_guid, IMPROVED_SAP_RANK_3, world),
+        );
+        if let Some(chance) = retain_chance {
+            // Retain stealth `chance`% of the time, otherwise remove it.
+            return !roll_chance_u(chance);
+        }
+    }
+
+    true
+}
+
+/// The deterministic gate of `ShouldRemoveStealthAuras`: whether a cast enters
+/// the stealth-removal path at all. Triggered spells, spells flagged
+/// `ALLOW_WHILE_STEALTHED`, and the dedicated stealth spells (Shadowmeld,
+/// Camouflage, Vanish) never break stealth. Sap is intentionally not exempt —
+/// it enters the path and is handled by the Improved Sap chance.
+fn spell_breaks_stealth_by_default(
+    is_triggered: bool,
+    attributes_ex: u32,
+    spell_icon_id: u32,
+) -> bool {
+    if is_triggered {
+        return false;
+    }
+    if attributes_ex & SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED != 0 {
+        return false;
+    }
+    !matches!(
+        spell_icon_id,
+        SPELL_ICON_SHADOWMELD | SPELL_ICON_CAMOUFLAGE | SPELL_ICON_VANISH
+    )
+}
+
+/// The chance (in percent) that Improved Sap lets the caster keep stealth,
+/// given which rank aura is present. Ranks are mutually exclusive in practice
+/// and checked rank-1-first, matching the C++ if/else-if chain.
+fn improved_sap_retain_chance(has_rank1: bool, has_rank2: bool, has_rank3: bool) -> Option<u32> {
+    if has_rank1 {
+        Some(30)
+    } else if has_rank2 {
+        Some(60)
+    } else if has_rank3 {
+        Some(90)
+    } else {
+        None
+    }
+}
+
+/// `roll_chance_u(chance)` — true `chance`% of the time (chance in 0..=100).
+fn roll_chance_u(chance: u32) -> bool {
+    chance > rand::random::<u32>() % 100
 }
 
 #[cfg(test)]
@@ -980,5 +1077,67 @@ mod tests {
         add_test_player(&world, player, 1, 0);
 
         assert!(check_target_creature_type(&spell, player, &world));
+    }
+
+    #[test]
+    fn stealth_gate_exemptions() {
+        // A plain non-triggered spell breaks stealth.
+        assert!(spell_breaks_stealth_by_default(false, 0, 0));
+        // Triggered spells never break stealth.
+        assert!(!spell_breaks_stealth_by_default(true, 0, 0));
+        // ALLOW_WHILE_STEALTHED spells never break stealth.
+        assert!(!spell_breaks_stealth_by_default(
+            false,
+            SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED,
+            0
+        ));
+        // The dedicated stealth spells are exempt by icon.
+        assert!(!spell_breaks_stealth_by_default(false, 0, SPELL_ICON_SHADOWMELD));
+        assert!(!spell_breaks_stealth_by_default(false, 0, SPELL_ICON_CAMOUFLAGE));
+        assert!(!spell_breaks_stealth_by_default(false, 0, SPELL_ICON_VANISH));
+        // Sap still enters the removal path (handled by the Improved Sap chance).
+        assert!(spell_breaks_stealth_by_default(false, 0, SPELL_ICON_SAP));
+    }
+
+    #[test]
+    fn improved_sap_rank_chances() {
+        assert_eq!(improved_sap_retain_chance(false, false, false), None);
+        assert_eq!(improved_sap_retain_chance(true, false, false), Some(30));
+        assert_eq!(improved_sap_retain_chance(false, true, false), Some(60));
+        assert_eq!(improved_sap_retain_chance(false, false, true), Some(90));
+        // Rank 1 wins when several are somehow present (matches if/else-if order).
+        assert_eq!(improved_sap_retain_chance(true, true, true), Some(30));
+    }
+
+    #[tokio::test]
+    async fn plain_spell_from_player_removes_stealth() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(40);
+        add_test_player(&world, caster, 1, 0);
+
+        let spell = aoe_enemy_spell(50200); // attributes_ex 0, icon 0
+        assert!(should_remove_stealth_auras(&spell, caster, false, &world));
+        // Triggered variant of the same spell does not break stealth.
+        assert!(!should_remove_stealth_auras(&spell, caster, true, &world));
+    }
+
+    #[tokio::test]
+    async fn sap_without_improved_rank_removes_stealth() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(41);
+        add_test_player(&world, caster, 1, 0);
+
+        let mut sap = aoe_enemy_spell(50201);
+        sap.spell_icon_id = SPELL_ICON_SAP;
+        // No Improved Sap aura → deterministic: stealth is removed.
+        assert!(should_remove_stealth_auras(&sap, caster, false, &world));
+    }
+
+    #[tokio::test]
+    async fn non_unit_caster_never_removes_stealth() {
+        let world = test_world();
+        let go_caster = ObjectGuid::new_gameobject(1, 1);
+        let spell = aoe_enemy_spell(50202);
+        assert!(!should_remove_stealth_auras(&spell, go_caster, false, &world));
     }
 }
