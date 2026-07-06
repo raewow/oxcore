@@ -196,6 +196,159 @@ pub fn spell_cast_attacker_proc_flag(
     }
 }
 
+/// Weapon attack type used to pick the melee swing sub-flag (MaNGOS `WeaponAttackType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WeaponAttackType {
+    Base,
+    Offhand,
+    Ranged,
+}
+
+/// Whether a completed cast may trigger procs at all (MaNGOS `Spell::prepareDataForTriggerSystem`,
+/// the `m_canTrigger` decision chain).
+///
+/// `has_trigger_source` covers both "triggered by an aura" (`m_triggeredByAuraSpell`) and the
+/// `SPELL_EFFECT_TRIGGER_SPELL` case that MaNGOS treats identically for this check.
+///
+/// Approximation: the spell-family/spell-ID exceptions that re-enable proccing for specific
+/// triggered spells (mage/warlock/hunter/paladin/priest class-mask carve-outs, e.g. Holy Shock,
+/// Rain of Fire, hunter traps) are not modeled — `SpellClassMask` bit layouts for those
+/// families aren't available in this codebase, so a wrong guess would silently misfire procs.
+/// Any triggered cast that depends on one of those carve-outs will not proc here.
+pub fn can_trigger_procs(
+    suppresses_both_procs: bool,
+    cast_by_item: bool,
+    is_positive_spell: bool,
+    caster_is_game_object: bool,
+    is_triggered_spell: bool,
+    has_trigger_source: bool,
+    is_not_a_proc: bool,
+) -> bool {
+    if suppresses_both_procs {
+        return false;
+    }
+    if cast_by_item {
+        return !is_positive_spell;
+    }
+    if caster_is_game_object {
+        return false;
+    }
+    if !is_triggered_spell {
+        return true;
+    }
+    if !has_trigger_source {
+        return true;
+    }
+    is_not_a_proc
+}
+
+/// The main-hand/off-hand swing sub-flag ORed into the attacker's melee proc flags
+/// (MaNGOS `PROC_FLAG_MAIN_HAND_WEAPON_SWING` / `PROC_FLAG_OFF_HAND_WEAPON_SWING`).
+fn melee_swing_sub_flag(attack_type: WeaponAttackType) -> u32 {
+    use proc_flags as pf;
+    match attack_type {
+        WeaponAttackType::Base => pf::MAIN_HAND_WEAPON_SWING,
+        WeaponAttackType::Offhand => pf::OFF_HAND_WEAPON_SWING,
+        WeaponAttackType::Ranged => 0,
+    }
+}
+
+/// Full attacker/victim proc-flag pair for a completed cast (MaNGOS `m_procAttacker` /
+/// `m_procVictim`, `Spell::prepareDataForTriggerSystem`). Covers melee/ranged/default
+/// dmg-class branches, the next-melee-swing and auto-repeat special cases, the
+/// periodic-treat-as override, and hunter trap activation ORing.
+///
+/// `is_auto_repeat_ranged` corresponds to `SPELL_ATTR_EX2_AUTO_REPEAT`; `treat_as_periodic`
+/// to `SPELL_ATTR_EX3_TREAT_AS_PERIODIC`; `is_wand_id_2094_or_23577` special-cases the two
+/// legacy wand spell IDs that MaNGOS zeroes out under `SPELL_DAMAGE_CLASS_RANGED`.
+///
+/// Approximation: the hunter-trap `PROC_FLAG_ON_TRAP_ACTIVATION` OR-in (`is_trap_spell`) is
+/// exposed as a plain bool since the CF_HUNTER_* class-mask bit layout isn't available here;
+/// callers that know a spell is a trap-family spell by other means (e.g. spell ID) can still
+/// pass `true`.
+#[allow(clippy::too_many_arguments)]
+pub fn spell_attacker_victim_proc_flags(
+    dmg_class: u32,
+    attack_type: WeaponAttackType,
+    is_next_melee_swing_spell: bool,
+    is_auto_repeat_ranged: bool,
+    is_wand_id_2094_or_23577: bool,
+    is_area_of_effect: bool,
+    is_positive_spell: bool,
+    is_heal_spell: bool,
+    treat_as_periodic: bool,
+    is_trap_spell: bool,
+) -> (u32, u32) {
+    use proc_flags as pf;
+    const SPELL_DAMAGE_CLASS_MAGIC: u32 = 1;
+    const SPELL_DAMAGE_CLASS_MELEE: u32 = 2;
+    const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+    let _ = is_area_of_effect; // reserved: no dmg-class branch below reads it directly
+
+    match dmg_class {
+        SPELL_DAMAGE_CLASS_MELEE => {
+            let mut attacker = pf::DEAL_MELEE_ABILITY | melee_swing_sub_flag(attack_type);
+            let mut victim = pf::TAKE_MELEE_ABILITY;
+            if is_next_melee_swing_spell {
+                attacker |= pf::DEAL_MELEE_SWING;
+                victim |= pf::TAKE_MELEE_SWING;
+            }
+            (attacker, victim)
+        }
+        SPELL_DAMAGE_CLASS_RANGED => {
+            if is_auto_repeat_ranged {
+                (pf::DEAL_RANGED_ATTACK, pf::TAKE_RANGED_ATTACK)
+            } else if is_wand_id_2094_or_23577 {
+                (pf::NONE, pf::NONE)
+            } else {
+                (pf::DEAL_RANGED_ABILITY, pf::TAKE_RANGED_ABILITY)
+            }
+        }
+        _ => {
+            if is_positive_spell {
+                if is_heal_spell {
+                    (pf::DEAL_HELPFUL_SPELL, pf::TAKE_HELPFUL_SPELL)
+                } else {
+                    (pf::DEAL_HELPFUL_ABILITY, pf::TAKE_HELPFUL_ABILITY)
+                }
+            } else if is_auto_repeat_ranged {
+                (pf::DEAL_RANGED_ATTACK, pf::TAKE_RANGED_ATTACK)
+            } else {
+                let (mut attacker, mut victim) = if treat_as_periodic {
+                    (pf::DEAL_HARMFUL_PERIODIC, pf::TAKE_HARMFUL_PERIODIC)
+                } else if dmg_class == SPELL_DAMAGE_CLASS_MAGIC {
+                    (pf::DEAL_HARMFUL_SPELL, pf::TAKE_HARMFUL_SPELL)
+                } else {
+                    (pf::DEAL_HARMFUL_ABILITY, pf::TAKE_HARMFUL_ABILITY)
+                };
+                if is_trap_spell {
+                    attacker |= pf::ON_TRAP_ACTIVATION;
+                }
+                (attacker, victim)
+            }
+        }
+    }
+}
+
+/// Per-effect negative-hit bitmask used to skip harmful procs on positive-only hits
+/// (MaNGOS `m_negativeEffectMask`, built in `Spell::prepareDataForTriggerSystem`).
+///
+/// `is_positive_effect(i)` should be `SpellEntry::IsPositiveEffect`. `is_school_damage_on_caster(i)`
+/// marks effect `i` as `SPELL_EFFECT_SCHOOL_DAMAGE` targeting `TARGET_UNIT_CASTER` (self-damage is
+/// treated as negative for proc filtering even though the effect itself reads as positive).
+pub fn negative_effect_mask<const N: usize>(
+    is_positive_effect: impl Fn(usize) -> bool,
+    is_school_damage_on_caster: impl Fn(usize) -> bool,
+) -> u8 {
+    let mut mask = 0u8;
+    for i in 0..N {
+        if !is_positive_effect(i) || is_school_damage_on_caster(i) {
+            mask |= 1 << i;
+        }
+    }
+    mask
+}
+
 /// Result of dispatching a proc — may request a triggered spell cast.
 pub struct ProcResult {
     /// If set, this spell should be cast as triggered on the player's current target
@@ -565,6 +718,193 @@ mod tests {
         ));
         // ...but NOT on the later damage event (no CAST_END) → no double proc.
         assert!(!can_trigger(Some(&ev), aura, proc_flags_ex::NORMAL_HIT));
+    }
+
+    #[test]
+    fn can_trigger_suppressed_both_procs_wins_first() {
+        // Suppress-both takes priority even over cast-by-item / triggered checks.
+        assert!(!can_trigger_procs(
+            true, true, false, false, false, false, false
+        ));
+    }
+
+    #[test]
+    fn can_trigger_item_cast_gates_on_positivity() {
+        // Negative item-cast spell can trigger; positive item-cast spell cannot.
+        assert!(can_trigger_procs(
+            false, true, false, false, false, false, false
+        ));
+        assert!(!can_trigger_procs(
+            false, true, true, false, false, false, false
+        ));
+    }
+
+    #[test]
+    fn can_trigger_game_object_caster_never_procs() {
+        assert!(!can_trigger_procs(
+            false, false, false, true, false, false, false
+        ));
+    }
+
+    #[test]
+    fn can_trigger_normal_cast_always_procs() {
+        assert!(can_trigger_procs(
+            false, false, false, false, false, false, false
+        ));
+    }
+
+    #[test]
+    fn can_trigger_triggered_without_source_procs() {
+        // Triggered but not via an aura/trigger-spell effect -> still allowed.
+        assert!(can_trigger_procs(
+            false, false, false, false, true, false, false
+        ));
+    }
+
+    #[test]
+    fn can_trigger_triggered_with_source_needs_not_a_proc_attr() {
+        assert!(!can_trigger_procs(
+            false, false, false, false, true, true, false
+        ));
+        assert!(can_trigger_procs(
+            false, false, false, false, true, true, true
+        ));
+    }
+
+    #[test]
+    fn attacker_victim_flags_melee_base_and_offhand() {
+        let (a, v) = spell_attacker_victim_proc_flags(
+            2,
+            WeaponAttackType::Base,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        );
+        assert_eq!(a, proc_flags::DEAL_MELEE_ABILITY | proc_flags::MAIN_HAND_WEAPON_SWING);
+        assert_eq!(v, proc_flags::TAKE_MELEE_ABILITY);
+
+        let (a, _) = spell_attacker_victim_proc_flags(
+            2,
+            WeaponAttackType::Offhand,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        );
+        assert_eq!(a, proc_flags::DEAL_MELEE_ABILITY | proc_flags::OFF_HAND_WEAPON_SWING);
+    }
+
+    #[test]
+    fn attacker_victim_flags_melee_next_swing_adds_swing_flags() {
+        let (a, v) = spell_attacker_victim_proc_flags(
+            2,
+            WeaponAttackType::Ranged,
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        );
+        assert_eq!(a & proc_flags::DEAL_MELEE_SWING, proc_flags::DEAL_MELEE_SWING);
+        assert_eq!(v & proc_flags::TAKE_MELEE_SWING, proc_flags::TAKE_MELEE_SWING);
+    }
+
+    #[test]
+    fn attacker_victim_flags_ranged_auto_repeat_vs_ability() {
+        let (a, v) = spell_attacker_victim_proc_flags(
+            3, WeaponAttackType::Ranged, false, true, false, false, false, false, false, false,
+        );
+        assert_eq!(a, proc_flags::DEAL_RANGED_ATTACK);
+        assert_eq!(v, proc_flags::TAKE_RANGED_ATTACK);
+
+        let (a, v) = spell_attacker_victim_proc_flags(
+            3, WeaponAttackType::Ranged, false, false, false, false, false, false, false, false,
+        );
+        assert_eq!(a, proc_flags::DEAL_RANGED_ABILITY);
+        assert_eq!(v, proc_flags::TAKE_RANGED_ABILITY);
+    }
+
+    #[test]
+    fn attacker_victim_flags_ranged_legacy_wand_ids_zeroed() {
+        let (a, v) = spell_attacker_victim_proc_flags(
+            3, WeaponAttackType::Ranged, false, false, true, false, false, false, false, false,
+        );
+        assert_eq!(a, proc_flags::NONE);
+        assert_eq!(v, proc_flags::NONE);
+    }
+
+    #[test]
+    fn attacker_victim_flags_default_positive_heal_vs_ability() {
+        let (a, v) = spell_attacker_victim_proc_flags(
+            0, WeaponAttackType::Ranged, false, false, false, false, true, true, false, false,
+        );
+        assert_eq!(a, proc_flags::DEAL_HELPFUL_SPELL);
+        assert_eq!(v, proc_flags::TAKE_HELPFUL_SPELL);
+
+        let (a, v) = spell_attacker_victim_proc_flags(
+            0, WeaponAttackType::Ranged, false, false, false, false, true, false, false, false,
+        );
+        assert_eq!(a, proc_flags::DEAL_HELPFUL_ABILITY);
+        assert_eq!(v, proc_flags::TAKE_HELPFUL_ABILITY);
+    }
+
+    #[test]
+    fn attacker_victim_flags_default_negative_periodic_vs_magic_vs_ability() {
+        // Periodic-treat override wins even for magic dmg-class.
+        let (a, v) = spell_attacker_victim_proc_flags(
+            1, WeaponAttackType::Ranged, false, false, false, false, false, false, true, false,
+        );
+        assert_eq!(a, proc_flags::DEAL_HARMFUL_PERIODIC);
+        assert_eq!(v, proc_flags::TAKE_HARMFUL_PERIODIC);
+
+        let (a, v) = spell_attacker_victim_proc_flags(
+            1, WeaponAttackType::Ranged, false, false, false, false, false, false, false, false,
+        );
+        assert_eq!(a, proc_flags::DEAL_HARMFUL_SPELL);
+        assert_eq!(v, proc_flags::TAKE_HARMFUL_SPELL);
+
+        let (a, v) = spell_attacker_victim_proc_flags(
+            0, WeaponAttackType::Ranged, false, false, false, false, false, false, false, false,
+        );
+        assert_eq!(a, proc_flags::DEAL_HARMFUL_ABILITY);
+        assert_eq!(v, proc_flags::TAKE_HARMFUL_ABILITY);
+    }
+
+    #[test]
+    fn attacker_victim_flags_trap_activation_ors_into_attacker_only() {
+        let (a, v) = spell_attacker_victim_proc_flags(
+            0, WeaponAttackType::Ranged, false, false, false, false, false, false, false, true,
+        );
+        assert_eq!(a & proc_flags::ON_TRAP_ACTIVATION, proc_flags::ON_TRAP_ACTIVATION);
+        assert_eq!(v & proc_flags::ON_TRAP_ACTIVATION, 0);
+    }
+
+    #[test]
+    fn negative_effect_mask_flags_non_positive_effects() {
+        // Effect 0 positive, effect 1 negative, effect 2 positive -> only bit 1 set.
+        let positive = [true, false, true];
+        let mask = negative_effect_mask::<3>(|i| positive[i], |_| false);
+        assert_eq!(mask, 0b010);
+    }
+
+    #[test]
+    fn negative_effect_mask_self_school_damage_counts_as_negative() {
+        // All effects read positive, but effect 2 is self-targeted school damage.
+        let self_damage = [false, false, true];
+        let mask = negative_effect_mask::<3>(|_| true, |i| self_damage[i]);
+        assert_eq!(mask, 0b100);
     }
 
     #[test]

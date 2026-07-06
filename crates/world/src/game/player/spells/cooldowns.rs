@@ -5,10 +5,34 @@
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::World;
 use anyhow::Result;
+use oxcore_dbc::structures::spell::SpellEntry;
 use oxcore_shared::messages::spells::{SmsgClearCooldown, SmsgSpellCooldown};
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
+
+/// SPELL_ATTR_COOLDOWN_ON_EVENT — cooldown only starts once the triggering
+/// event fires, so the client is told the spell is on cooldown "forever"
+/// until then.
+const SPELL_ATTR_COOLDOWN_ON_EVENT: u32 = 0x0200_0000;
+
+/// `Spell::SendSpellCooldown` — decide whether a cast should record/announce
+/// a cooldown at all, and whether it should be flagged as event-triggered
+/// (permanent until the triggering event fires).
+///
+/// Passive spells never go on cooldown. The C++ also skips this for casters
+/// with the "no cooldown" cheat option enabled; that cheat flag has no
+/// equivalent in this codebase yet, so it is not modelled here — see the
+/// `blocked` note on the port-harness task.
+pub fn should_apply_spell_cooldown(spell: &SpellEntry) -> bool {
+    !spell.is_passive_spell()
+}
+
+/// Whether the cooldown just applied should be reported as event-triggered
+/// (`SPELL_ATTR_COOLDOWN_ON_EVENT`), i.e. "permanent" until the event fires.
+pub fn is_event_triggered_cooldown(spell: &SpellEntry) -> bool {
+    spell.has_attribute(SPELL_ATTR_COOLDOWN_ON_EVENT)
+}
 
 /// Get current game time in milliseconds
 fn get_game_time_ms(world: &World) -> u64 {
@@ -256,4 +280,121 @@ pub fn save_cooldowns(_player_guid: ObjectGuid, _world: &World) -> Result<()> {
 pub fn load_cooldowns(_player_guid: ObjectGuid, _world: &World) -> Result<()> {
     // TODO: Implement database loading
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_spell_entry(id: u32) -> SpellEntry {
+        SpellEntry {
+            id,
+            name: format!("Spell{}", id),
+            rank_text: String::new(),
+            school: 0,
+            category: 0,
+            dispel: 0,
+            mechanic: 0,
+            attributes: 0,
+            attributes_ex: 0,
+            attributes_ex2: 0,
+            attributes_ex3: 0,
+            attributes_ex4: 0,
+            stances: 0,
+            stances_not: 0,
+            targets: 0,
+            target_creature_type: 0,
+            requires_spell_focus: 0,
+            caster_aura_state: 0,
+            target_aura_state: 0,
+            casting_time_index: 0,
+            recovery_time: 0,
+            category_recovery_time: 0,
+            interrupt_flags: 0,
+            aura_interrupt_flags: 0,
+            channel_interrupt_flags: 0,
+            proc_flags: 0,
+            proc_chance: 0,
+            proc_charges: 0,
+            max_level: 0,
+            base_level: 0,
+            spell_level: 0,
+            duration_index: 0,
+            power_type: 0,
+            mana_cost: 0,
+            mana_cost_per_level: 0,
+            mana_per_second: 0,
+            mana_per_second_per_level: 0,
+            range_index: 0,
+            speed: 0.0,
+            stack_amount: 0,
+            totem: [0; 2],
+            reagent: [0; 8],
+            reagent_count: [0; 8],
+            equipped_item_class: 0,
+            equipped_item_sub_class_mask: 0,
+            equipped_item_inventory_type_mask: 0,
+            effect: [0; 3],
+            effect_die_sides: [0; 3],
+            effect_base_dice: [0; 3],
+            effect_dice_per_level: [0.0; 3],
+            effect_real_points_per_level: [0.0; 3],
+            effect_base_points: [0; 3],
+            effect_bonus_coefficient: [0.0; 3],
+            effect_mechanic: [0; 3],
+            effect_implicit_target_a: [0; 3],
+            effect_implicit_target_b: [0; 3],
+            effect_radius_index: [0; 3],
+            effect_apply_aura_name: [0; 3],
+            effect_amplitude: [0; 3],
+            effect_multiple_value: [0.0; 3],
+            effect_chain_target: [0; 3],
+            effect_item_type: [0; 3],
+            effect_misc_value: [0; 3],
+            effect_trigger_spell: [0; 3],
+            effect_points_per_combo_point: [0.0; 3],
+            spell_visual: 0,
+            spell_icon_id: 0,
+            active_icon_id: 0,
+            spell_priority: 0,
+            min_target_level: 0,
+            mana_cost_percentage: 0,
+            start_recovery_category: 0,
+            start_recovery_time: 0,
+            max_target_level: 0,
+            spell_family_name: 0,
+            spell_family_flags: 0,
+            max_affected_targets: 0,
+            dmg_class: 0,
+            prevention_type: 0,
+            custom: 0,
+            internal: 0,
+            allowed_target_mask: 0,
+            script_id: 0,
+            dmg_multiplier: [1.0; 3],
+        }
+    }
+
+    #[test]
+    fn passive_spells_never_get_a_cooldown() {
+        let mut passive = make_spell_entry(1);
+        passive.attributes = 0x40; // SPELL_ATTR_PASSIVE
+        assert!(!should_apply_spell_cooldown(&passive));
+    }
+
+    #[test]
+    fn non_passive_spells_get_a_cooldown() {
+        let normal = make_spell_entry(2);
+        assert!(should_apply_spell_cooldown(&normal));
+    }
+
+    #[test]
+    fn event_cooldown_attribute_is_detected() {
+        let mut event_cd = make_spell_entry(3);
+        event_cd.attributes = SPELL_ATTR_COOLDOWN_ON_EVENT;
+        assert!(is_event_triggered_cooldown(&event_cd));
+
+        let normal = make_spell_entry(4);
+        assert!(!is_event_triggered_cooldown(&normal));
+    }
 }

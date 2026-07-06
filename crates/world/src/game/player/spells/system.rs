@@ -45,6 +45,30 @@ fn get_game_time_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// `Spell::handle_delayed`'s "earliest still-pending target" scan, factored out of the
+/// per-target bitfield loop so it can run over any set of remaining per-target delays.
+///
+/// Mirrors the C++ `next_time` accumulation: the smallest non-zero delay wins. `None`
+/// means every target has fired (finished — call `_handle_finish_phase` + `finish(true)`);
+/// `Some(t)` means reschedule the delayed tick for `t`.
+fn next_delayed_target_time(remaining_delays: &[u32]) -> Option<u32> {
+    remaining_delays.iter().copied().filter(|&d| d > 0).min()
+}
+
+/// `Spell::_handle_immediate_phase`'s `m_needSpellLog` derivation: starts from
+/// `IsNeedSendToClient()` and is then cleared as soon as any effect slot is plain
+/// school damage (which logs through the damage packet instead of the generic
+/// spell-execute log). The C++ loop `continue`s past `Effect[j] == 0` before ever
+/// reaching the clear check, so an empty effect slot never affects the result here —
+/// see the claim's `danger` note ("the `Effect[j] == 0` disjunct is unreachable").
+fn needs_spell_log(is_need_send_to_client: bool, effects: &[u32; 3]) -> bool {
+    const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
+    if !is_need_send_to_client {
+        return false;
+    }
+    !effects.iter().any(|&e| e == SPELL_EFFECT_SCHOOL_DAMAGE)
+}
+
 /// Stateless spell system - operates on player.spells via PlayerManager.
 ///
 /// Architecture:
@@ -967,6 +991,15 @@ impl SpellSystem {
     /// Uses the target resolution system to determine per-effect targets,
     /// then dispatches effects with hit/miss rolls applied.
     /// If the spell has a projectile speed, effects are deferred for travel time.
+    ///
+    /// This plays the role of MaNGOS `Spell::handle_delayed` for the single-target-per-cast
+    /// model used here: instead of a per-target `timeDelay`/`processed` bitfield list ticked
+    /// down every server update, a projectile spell schedules one `DelayedEffect` event for
+    /// the whole cast and `next_delayed_target_time` collapses to "one timer, fire once it
+    /// elapses". `_handle_immediate_phase`'s one-time setup (threat, item targets, ground
+    /// SEND_EVENT/PERSISTENT_AREA_AURA effects) and `_handle_finish_phase`'s spell-execute
+    /// log both belong in `execute_spell_immediate`, run at the point the (single) delayed
+    /// tick fires — see the notes there for what is and isn't wired up yet.
     async fn execute_spell(
         &self,
         caster_guid: ObjectGuid,
@@ -1018,6 +1051,27 @@ impl SpellSystem {
     }
 
     /// Execute spell effects immediately (no travel time).
+    ///
+    /// Covers the immediate-phase and finish-phase setup that MaNGOS splits into
+    /// `Spell::_handle_immediate_phase` (run once, before target effects) and
+    /// `Spell::_handle_finish_phase` (run once, after target effects):
+    ///
+    /// - Threat from the cast itself (`HandleThreatSpells`) is applied inside
+    ///   `EffectsDispatcher::dispatch_with_targets`, not split out as a separate
+    ///   pre-pass, since there is no per-target incremental loop to run it ahead of here.
+    /// - Diminishing-returns state is tracked per-target on `player.combat.diminishing`
+    ///   (see `diminishing.rs`), not reset per-cast on a `Spell` instance, so there is no
+    ///   `m_diminishLevel`/`m_diminishGroup` reset to port here.
+    /// - Item-target effects (`m_UniqueItemInfo` / `DoAllEffectOnTarget`) and ground-only
+    ///   ground SEND_EVENT/PERSISTENT_AREA_AURA effects (`HandleEffects(null, null, null, ..)`)
+    ///   have no corresponding target-resolution path yet (`resolve_spell_targets` only
+    ///   resolves unit/GO targets) — genuinely unported, not just re-homed.
+    /// - `needs_spell_log` computes the MaNGOS `m_needSpellLog` flag from
+    ///   `IsNeedSendToClient` + effect list, but there is no `SendLogExecute`
+    ///   (`SMSG_SPELLLOGEXECUTE`) builder in this codebase yet, so the flag is logged
+    ///   rather than turned into a packet. `IsNeedSendToClient` itself is unported too, so
+    ///   the input side is approximated as "any real (non-triggered) cast" — see the
+    ///   `Spell::IsNeedSendToClient` tracker entry for the real predicate.
     async fn execute_spell_immediate(
         &self,
         caster_guid: ObjectGuid,
@@ -1042,6 +1096,20 @@ impl SpellSystem {
                 world,
             )
             .await?;
+
+        // `_handle_finish_phase`: emit the spell-execute log when the cast is client-visible
+        // and isn't a plain school-damage nuke (those log via the damage packet instead).
+        // `IsNeedSendToClient` is approximated as "not triggered" until it is ported for real.
+        if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
+            if needs_spell_log(!is_triggered, &entry.effect) {
+                // ... SendLogExecute / SMSG_SPELLLOGEXECUTE has no packet builder yet;
+                // tracked separately so this doesn't silently drop the log.
+                tracing::trace!(
+                    "[SPELL_LOG_EXECUTE] spell={spell_id} caster={caster_guid:?} — \
+                     needs spell-execute log, SMSG_SPELLLOGEXECUTE not yet implemented"
+                );
+            }
+        }
 
         Ok(())
     }
@@ -1136,18 +1204,29 @@ impl SpellSystem {
         // Completion packet order matches Spell::cast: SMSG_SPELL_COOLDOWN, then the
         // success SMSG_CAST_RESULT, then SMSG_SPELL_GO.
         if !is_triggered {
-            cooldowns::apply_cooldown(caster_guid, spell_id, world)?;
+            // Spell::SendSpellCooldown: passive spells never go on cooldown.
+            // (The C++ also skips this for the "no cooldown" cheat option; that
+            // cheat flag isn't modelled in this codebase yet.)
+            let sends_cooldown = world
+                .managers
+                .spell_mgr
+                .get(spell_id)
+                .map_or(false, |e| cooldowns::should_apply_spell_cooldown(&e));
 
-            // Send SMSG_SPELL_COOLDOWN to client with actual cooldown duration
-            if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
-                let cd_ms = entry.recovery_time.max(entry.category_recovery_time);
-                if cd_ms > 0 {
-                    let msg = SmsgSpellCooldown {
-                        caster_guid,
-                        cooldowns: vec![(spell_id, cd_ms)],
-                    };
-                    self.broadcast_mgr
-                        .send_msg_to_player(caster_guid, msg.to_world_packet());
+            if sends_cooldown {
+                cooldowns::apply_cooldown(caster_guid, spell_id, world)?;
+
+                // Send SMSG_SPELL_COOLDOWN to client with actual cooldown duration
+                if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
+                    let cd_ms = entry.recovery_time.max(entry.category_recovery_time);
+                    if cd_ms > 0 {
+                        let msg = SmsgSpellCooldown {
+                            caster_guid,
+                            cooldowns: vec![(spell_id, cd_ms)],
+                        };
+                        self.broadcast_mgr
+                            .send_msg_to_player(caster_guid, msg.to_world_packet());
+                    }
                 }
             }
 
@@ -2868,5 +2947,61 @@ mod tests {
         assert!(!spell_needs_combo_points(0x0020_0000)); // bit 21
         assert!(!spell_needs_combo_points(0x0080_0000)); // bit 23
         assert!(!spell_needs_combo_points(0x0000_0001 | 0x0008_0000));
+    }
+
+    // -- Spell::handle_delayed: next_delayed_target_time --------------------------------
+
+    #[test]
+    fn next_delayed_target_time_picks_smallest_pending_delay() {
+        // Two unit targets and one GO target still pending; earliest wins regardless
+        // of which container it came from (handle_delayed scans both lists uniformly).
+        assert_eq!(next_delayed_target_time(&[300, 150, 500]), Some(150));
+    }
+
+    #[test]
+    fn next_delayed_target_time_ignores_processed_zero_entries() {
+        // 0 stands in for an already-processed / no-delay target; it must never win
+        // as "next time" (the C++ only updates next_time for entries that failed the
+        // t_offset >= timeDelay check, i.e. still-pending ones).
+        assert_eq!(next_delayed_target_time(&[0, 0, 250]), Some(250));
+    }
+
+    #[test]
+    fn next_delayed_target_time_none_when_all_processed() {
+        // next_time stays 0 -> spell is finished: _handle_finish_phase then finish(true).
+        assert_eq!(next_delayed_target_time(&[]), None);
+        assert_eq!(next_delayed_target_time(&[0, 0, 0]), None);
+    }
+
+    // -- Spell::_handle_immediate_phase: needs_spell_log ---------------------------------
+
+    #[test]
+    fn needs_spell_log_false_when_not_client_visible() {
+        // IsNeedSendToClient() == false short-circuits m_needSpellLog to false regardless
+        // of effects.
+        assert!(!needs_spell_log(false, &[10, 0, 0])); // 10 = SPELL_EFFECT_HEAL
+    }
+
+    #[test]
+    fn needs_spell_log_false_for_school_damage() {
+        const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
+        // A pure school-damage nuke (e.g. Fireball) logs via the damage packet, not
+        // SMSG_SPELLLOGEXECUTE.
+        assert!(!needs_spell_log(true, &[SPELL_EFFECT_SCHOOL_DAMAGE, 0, 0]));
+    }
+
+    #[test]
+    fn needs_spell_log_true_for_all_empty_effects() {
+        // Effect[j] == 0 is `continue`d past in the C++ loop before the clear check is
+        // ever reached, so an all-empty effect list leaves m_needSpellLog untouched.
+        assert!(needs_spell_log(true, &[0, 0, 0]));
+    }
+
+    #[test]
+    fn needs_spell_log_true_for_other_client_visible_effects() {
+        // A heal or proc-style effect that isn't plain school damage still needs the
+        // generic spell-execute log entry.
+        assert!(needs_spell_log(true, &[10, 0, 0])); // SPELL_EFFECT_HEAL
+        assert!(needs_spell_log(true, &[6, 10, 0])); // e.g. APPLY_AURA + HEAL
     }
 }

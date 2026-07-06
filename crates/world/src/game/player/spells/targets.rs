@@ -743,6 +743,128 @@ fn roll_chance_u(chance: u32) -> bool {
     chance > rand::random::<u32>() % 100
 }
 
+/// `Spell::IsAreaAuraEffect` — whether a single effect value is one of the five
+/// `SPELL_EFFECT_APPLY_AREA_AURA_*` variants. Used (per effect, not "any effect")
+/// by `FillTargetMap`'s caster pre-registration and target-reuse gating.
+fn is_area_aura_effect(effect: u32) -> bool {
+    matches!(
+        effect,
+        35   // APPLY_AREA_AURA_PARTY
+            | 119  // APPLY_AREA_AURA_PET
+            | 128  // APPLY_AREA_AURA_FRIEND
+            | 129  // APPLY_AREA_AURA_ENEMY
+            | 132 // APPLY_AREA_AURA_RAID
+    )
+}
+
+/// Port of the `Spell::FillTargetMap` caster self-registration gate (chunk_0).
+///
+/// When casting with a unit caster, an effect whose implicit targets don't need
+/// resolving because the caster itself is always the target (area auras) or
+/// where the effect inherently targets the caster's own presence (spawn,
+/// language, quest-complete) is pre-registered immediately, bypassing the
+/// normal `SetTargetMap` dispatch entirely.
+///
+/// `effect` is `m_spellInfo->Effect[i]` for the effect slot being processed.
+pub fn effect_self_registers_caster(effect: u32) -> bool {
+    const SPELL_EFFECT_SPAWN: u32 = 56;
+    const SPELL_EFFECT_LANGUAGE: u32 = 27;
+    const SPELL_EFFECT_QUEST_COMPLETE: u32 = 24;
+    is_area_aura_effect(effect)
+        || matches!(
+            effect,
+            SPELL_EFFECT_SPAWN | SPELL_EFFECT_LANGUAGE | SPELL_EFFECT_QUEST_COMPLETE
+        )
+}
+
+/// One already-resolved effect's implicit target pair and effect value, as
+/// recorded on a prior loop iteration of `FillTargetMap`. Used by
+/// [`can_reuse_targets`] to decide whether effect `i` can copy effect `j`'s
+/// target list instead of recomputing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectTargetShape {
+    pub effect: u32,
+    pub target_a: u32,
+    pub target_b: u32,
+}
+
+/// Port of the `Spell::FillTargetMap` target-reuse gate (chunk_0).
+///
+/// `MaxAffectedTargets > 1` spells try to reuse an earlier effect's resolved
+/// target list instead of re-running implicit-target resolution, provided the
+/// two effects share the same implicit-target pair, effect `j` is a real
+/// effect (not `SPELL_EFFECT_NONE`), and neither effect is an area aura
+/// (area auras always pre-register just the caster, so reuse would be wrong).
+pub fn can_reuse_targets(
+    max_affected_targets: u32,
+    effect_i: EffectTargetShape,
+    effect_j: EffectTargetShape,
+) -> bool {
+    const SPELL_EFFECT_NONE: u32 = 0;
+    max_affected_targets > 1
+        && effect_i.target_a == effect_j.target_a
+        && effect_i.target_b == effect_j.target_b
+        && effect_j.effect != SPELL_EFFECT_NONE
+        && !is_area_aura_effect(effect_i.effect)
+        && !is_area_aura_effect(effect_j.effect)
+}
+
+/// A minimal miss-condition + effect-mask view of one `m_UniqueTargetInfo`
+/// entry, sufficient for the post-loop attribute checks in
+/// `FillTargetMap:chunk_1`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TargetHitInfo {
+    pub target_guid: ObjectGuid,
+    pub miss_condition: crate::game::player::spells::hit::SpellMissInfo,
+}
+
+/// `SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE` — abort the cast if every
+/// registered target was immune.
+const SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE: u32 = 0x0000_0080;
+/// `SPELL_ATTR_EX_REQUIRE_ALL_TARGETS` — abort (silently, effect-mask cleared)
+/// if the explicit unit target missed.
+const SPELL_ATTR_EX_REQUIRE_ALL_TARGETS: u32 = 0x0004_0000;
+
+/// Port of the `SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE` post-loop check in
+/// `Spell::FillTargetMap` (chunk_1).
+///
+/// Returns `true` when the cast must be aborted: the attribute is set, the
+/// target list is non-empty, and every target's miss condition is
+/// `Immune`/`Immune2`.
+pub fn all_targets_immune_should_fail(attributes_ex2: u32, targets: &[TargetHitInfo]) -> bool {
+    use crate::game::player::spells::hit::SpellMissInfo;
+    if attributes_ex2 & SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE == 0 {
+        return false;
+    }
+    !targets.is_empty()
+        && targets
+            .iter()
+            .all(|t| matches!(t.miss_condition, SpellMissInfo::Immune | SpellMissInfo::Immune2))
+}
+
+/// Port of the `SPELL_ATTR_EX_REQUIRE_ALL_TARGETS` post-loop check in
+/// `Spell::FillTargetMap` (chunk_1).
+///
+/// Returns `true` when the cast must silently drop every effect (the caller
+/// zeroes every effect mask and returns early): the attribute is set and the
+/// explicit unit target's own hit entry recorded a non-`None` miss condition.
+pub fn explicit_target_miss_should_clear_all(
+    attributes_ex: u32,
+    explicit_unit_target: Option<ObjectGuid>,
+    targets: &[TargetHitInfo],
+) -> bool {
+    use crate::game::player::spells::hit::SpellMissInfo;
+    if attributes_ex & SPELL_ATTR_EX_REQUIRE_ALL_TARGETS == 0 {
+        return false;
+    }
+    let Some(explicit_guid) = explicit_unit_target else {
+        return false;
+    };
+    targets
+        .iter()
+        .any(|t| t.target_guid == explicit_guid && t.miss_condition != SpellMissInfo::None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1139,5 +1261,127 @@ mod tests {
         let go_caster = ObjectGuid::new_gameobject(1, 1);
         let spell = aoe_enemy_spell(50202);
         assert!(!should_remove_stealth_auras(&spell, go_caster, false, &world));
+    }
+
+    #[test]
+    fn area_aura_effects_are_detected() {
+        assert!(is_area_aura_effect(35)); // PARTY
+        assert!(is_area_aura_effect(119)); // PET
+        assert!(is_area_aura_effect(128)); // FRIEND
+        assert!(is_area_aura_effect(129)); // ENEMY
+        assert!(is_area_aura_effect(132)); // RAID
+        assert!(!is_area_aura_effect(2)); // SCHOOL_DAMAGE
+    }
+
+    #[test]
+    fn caster_self_registration_gate() {
+        // Area auras and spawn/language/quest-complete effects self-register.
+        assert!(effect_self_registers_caster(35));
+        assert!(effect_self_registers_caster(56)); // SPAWN
+        assert!(effect_self_registers_caster(27)); // LANGUAGE
+        assert!(effect_self_registers_caster(24)); // QUEST_COMPLETE
+        // An ordinary damage effect does not.
+        assert!(!effect_self_registers_caster(2));
+    }
+
+    #[test]
+    fn target_reuse_requires_matching_pair_and_no_area_aura() {
+        let base = EffectTargetShape {
+            effect: 2, // SCHOOL_DAMAGE
+            target_a: 6,
+            target_b: 0,
+        };
+        // Identical shape, MaxAffectedTargets > 1: reuse allowed.
+        assert!(can_reuse_targets(3, base, base));
+        // MaxAffectedTargets <= 1: no reuse.
+        assert!(!can_reuse_targets(1, base, base));
+        assert!(!can_reuse_targets(0, base, base));
+        // Mismatched implicit targets: no reuse.
+        let mismatched = EffectTargetShape {
+            target_a: 7,
+            ..base
+        };
+        assert!(!can_reuse_targets(3, base, mismatched));
+        // Effect j is SPELL_EFFECT_NONE: no reuse (nothing to copy).
+        let none_effect = EffectTargetShape { effect: 0, ..base };
+        assert!(!can_reuse_targets(3, base, none_effect));
+        // Either effect being an area aura disables reuse.
+        let area_aura = EffectTargetShape {
+            effect: 129,
+            ..base
+        };
+        assert!(!can_reuse_targets(3, area_aura, base));
+        assert!(!can_reuse_targets(3, base, area_aura));
+    }
+
+    #[test]
+    fn all_targets_immune_gate() {
+        use crate::game::player::spells::hit::SpellMissInfo;
+        let immune_targets = vec![
+            TargetHitInfo {
+                target_guid: ObjectGuid::new_player(1),
+                miss_condition: SpellMissInfo::Immune,
+            },
+            TargetHitInfo {
+                target_guid: ObjectGuid::new_player(2),
+                miss_condition: SpellMissInfo::Immune2,
+            },
+        ];
+        assert!(all_targets_immune_should_fail(
+            SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE,
+            &immune_targets
+        ));
+        // Attribute not set: never fails.
+        assert!(!all_targets_immune_should_fail(0, &immune_targets));
+        // Empty target list: never fails (nothing to be "all immune").
+        assert!(!all_targets_immune_should_fail(
+            SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE,
+            &[]
+        ));
+        // One non-immune target: does not fail.
+        let mixed = vec![
+            immune_targets[0],
+            TargetHitInfo {
+                target_guid: ObjectGuid::new_player(3),
+                miss_condition: SpellMissInfo::None,
+            },
+        ];
+        assert!(!all_targets_immune_should_fail(
+            SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE,
+            &mixed
+        ));
+    }
+
+    #[test]
+    fn require_all_targets_gate() {
+        use crate::game::player::spells::hit::SpellMissInfo;
+        let explicit = ObjectGuid::new_player(5);
+        let missed = vec![TargetHitInfo {
+            target_guid: explicit,
+            miss_condition: SpellMissInfo::Resist,
+        }];
+        assert!(explicit_target_miss_should_clear_all(
+            SPELL_ATTR_EX_REQUIRE_ALL_TARGETS,
+            Some(explicit),
+            &missed
+        ));
+        // Attribute not set: never clears.
+        assert!(!explicit_target_miss_should_clear_all(0, Some(explicit), &missed));
+        // No explicit target: never clears.
+        assert!(!explicit_target_miss_should_clear_all(
+            SPELL_ATTR_EX_REQUIRE_ALL_TARGETS,
+            None,
+            &missed
+        ));
+        // Explicit target actually hit: does not clear.
+        let hit = vec![TargetHitInfo {
+            target_guid: explicit,
+            miss_condition: SpellMissInfo::None,
+        }];
+        assert!(!explicit_target_miss_should_clear_all(
+            SPELL_ATTR_EX_REQUIRE_ALL_TARGETS,
+            Some(explicit),
+            &hit
+        ));
     }
 }
