@@ -86,13 +86,40 @@ pub const AURA_SPLIT_DAMAGE_PCT: u32 = 81; // Split damage with another unit
 // --- Passive / Utility ---
 pub const AURA_MOD_STEALTH: u32 = 16; // Stealth
 pub const AURA_MOD_INVISIBILITY: u32 = 18; // Invisibility
+pub const AURA_MOD_INVISIBILITY_DETECTION: u32 = 19; // Detect invisibility
 pub const AURA_MOUNTED: u32 = 78; // Mount
 pub const AURA_MOD_SHAPESHIFT: u32 = 36; // Shapeshift form
 pub const AURA_WATER_BREATHING: u32 = 82; // Water breathing
+pub const AURA_MOD_WATER_BREATHING: u32 = 155; // Water breathing interval multiplier
 pub const AURA_WATER_WALK: u32 = 104; // Water walking
 pub const AURA_FEATHER_FALL: u32 = 105; // Slow fall
+pub const AURA_HOVER: u32 = 106; // Hover
 pub const AURA_GHOST: u32 = 95; // Ghost (dead state)
 pub const AURA_FEIGN_DEATH: u32 = 66; // Feign Death
+
+// --- Crowd Control (Charm/Possess family) ---
+pub const AURA_BIND_SIGHT: u32 = 1; // Bind Sight (caster views target)
+pub const AURA_MOD_POSSESS: u32 = 2; // Possess (mind control via GM/Eyes)
+pub const AURA_FAR_SIGHT: u32 = 76; // Far Sight (caster views a location/object)
+pub const AURA_MOD_POSSESS_PET: u32 = 128; // Possess pet
+pub const AURA_AOE_CHARM: u32 = 177; // AoE charm
+
+// --- Faction / Reaction ---
+pub const AURA_FORCE_REACTION: u32 = 139; // Forces a specific reputation rank vs a faction
+
+// --- Skill ---
+pub const AURA_MOD_SKILL: u32 = 30; // Temporary skill bonus
+pub const AURA_MOD_SKILL_TALENT: u32 = 98; // Permanent skill bonus (talent)
+
+// --- Item reward on death ---
+pub const AURA_CHANNEL_DEATH_ITEM: u32 = 86; // Soul Shard-style item reward on target's death
+
+// --- Tracking (continued) ---
+pub const AURA_TRACK_STEALTHED: u32 = 151; // Track Stealthed Units (Track Hidden minimap dot)
+pub const AURA_UNTRACKABLE: u32 = 120; // Untrackable (hidden from tracking)
+
+// --- Misc detection ---
+pub const AURA_DETECT_AMORE: u32 = 170; // Love is in the Air trinket detection
 
 // --- Spell Modifiers (Talents/Auras) ---
 pub const AURA_ADD_FLAT_MODIFIER: u32 = 107; // Flat spell modifier (talent: -0.5s cast time)
@@ -140,6 +167,19 @@ pub const AURA_MOD_REGEN: u32 = 84; // Health regen
 pub const AURA_MOD_POWER_REGEN: u32 = 85; // Power regen (MP5)
 pub const AURA_MOD_POWER_REGEN_PERCENT: u32 = 110; // Pct power regen
 pub const AURA_MOD_MANA_REGEN_INTERRUPT: u32 = 134; // Mana regen while casting (Meditation)
+
+// --- Shield Block ---
+pub const AURA_MOD_SHIELD_BLOCKVALUE: u32 = 158; // Flat shield block value
+pub const AURA_MOD_SHIELD_BLOCKVALUE_PCT: u32 = 150; // Pct shield block value
+
+// --- Combo Points ---
+pub const AURA_RETAIN_COMBO_POINTS: u32 = 148; // Retain combo points on aura expire
+
+// --- Misc / Others ---
+pub const AURA_REFLECT_SPELLS_SCHOOL: u32 = 74; // Reflect chance -> SPELLMOD_RESIST_MISS_CHANCE
+pub const AURA_EMPATHY: u32 = 121; // Beast/Humanoid inspect info (UNIT_DYNFLAG_SPECIALINFO)
+pub const AURA_SPIRIT_OF_REDEMPTION: u32 = 176; // Priest: die at aura end, act as spirit healer
+pub const AURA_AURA_SPELL: u32 = 192; // Apply/remove passive aura on target while active
 
 /// Check if an aura type is a spell modifier (ADD_FLAT_MODIFIER / ADD_PCT_MODIFIER).
 /// These create SpellMod entries in `player.spells.spell_modifiers` instead of stat modifiers.
@@ -254,4 +294,98 @@ pub struct StatModifier {
     pub flat_value: f32,
     /// Percentage modifier (+X% to stat, 0.1 = 10%)
     pub pct_value: f32,
+}
+
+// =============================================================================
+// Visibility / Model Byte Flags (Stealth, Invisibility, Detect Amore)
+// =============================================================================
+//
+// Mirrors `Aura::HandleModStealth`, `Aura::HandleInvisibility`,
+// `Aura::HandleInvisibilityDetect`, `Aura::HandleDetectAmore` in SpellAuras.cpp.
+
+/// UNIT_FIELD_BYTES_1 byte offset 3 (vis flag byte). Set while stealthed
+/// (`Aura::HandleModStealth`, `UNIT_BYTES_1_OFFSET_VIS_FLAG`).
+pub const UNIT_VIS_FLAGS_CREEP: u8 = 0x02;
+
+/// PLAYER_FIELD_BYTES2 byte offset 1 (extra flags byte) bits.
+pub const PLAYER_FIELD_BYTE2_DETECT_AMORE: u8 = 0x01; // SPELL_AURA_DETECT_AMORE
+pub const PLAYER_FIELD_BYTE2_STEALTH: u8 = 0x20; // set while SPELL_AURA_MOD_STEALTH active
+pub const PLAYER_FIELD_BYTE2_INVISIBILITY_GLOW: u8 = 0x40; // set while SPELL_AURA_MOD_INVISIBILITY active
+
+/// Recompute the `invisibility_mask` (bit per invisibility type 0-31) from the
+/// set of currently-active `SPELL_AURA_MOD_INVISIBILITY` misc values.
+/// Mirrors the "recalculate value at modifier remove" loop in `Aura::HandleInvisibility`.
+pub fn recompute_invisibility_mask(active_misc_values: impl Iterator<Item = i32>) -> u32 {
+    let mut mask = 0u32;
+    for misc in active_misc_values {
+        if (0..32).contains(&misc) {
+            mask |= 1 << misc;
+        }
+    }
+    mask
+}
+
+/// Recompute the `detect_invisibility_mask` from active `SPELL_AURA_MOD_INVISIBILITY_DETECTION` auras.
+/// Mirrors the same recalculation loop in `Aura::HandleInvisibilityDetect`.
+pub fn recompute_detect_invisibility_mask(active_misc_values: impl Iterator<Item = i32>) -> u32 {
+    recompute_invisibility_mask(active_misc_values)
+}
+
+// =============================================================================
+// Shapeshift Display IDs
+// =============================================================================
+//
+// Mirrors `GetShapeshiftDisplayInfo()` in SpellAuras.cpp. Only forms with a
+// hardcoded display id are covered (the rest keep the unit's native model).
+// `is_alliance` selects the alliance/horde variant where the form differs by faction.
+pub const FORM_CAT: u8 = 1;
+pub const FORM_TREE: u8 = 2;
+pub const FORM_TRAVEL: u8 = 3;
+pub const FORM_AQUA: u8 = 4;
+pub const FORM_BEAR: u8 = 5;
+pub const FORM_AMBIENT: u8 = 6;
+pub const FORM_GHOUL: u8 = 7;
+pub const FORM_DIREBEAR: u8 = 8;
+pub const FORM_CREATUREBEAR: u8 = 16;
+pub const FORM_GHOSTWOLF: u8 = 17;
+pub const FORM_BATTLESTANCE: u8 = 18;
+pub const FORM_DEFENSIVESTANCE: u8 = 19;
+pub const FORM_BERSERKERSTANCE: u8 = 20;
+pub const FORM_MOONKIN: u8 = 27;
+pub const FORM_SPIRITOFREDEMPTION: u8 = 28;
+
+/// Returns `(display_id, scale)` for a shapeshift form, or `(0, 1.0)` if the
+/// form has no hardcoded display (keeps native model). `is_alliance` picks the
+/// faction-specific model variant for forms that differ by team (Cat/Bear/Moonkin/Ghoul).
+pub fn shapeshift_display_info(form: u8, is_alliance: bool) -> (u32, f32) {
+    match form {
+        FORM_CAT => (if is_alliance { 892 } else { 8571 }, 0.80),
+        FORM_TRAVEL => (632, 0.80),
+        FORM_AQUA => (2428, 0.80),
+        FORM_BEAR | FORM_DIREBEAR => (if is_alliance { 2281 } else { 2289 }, 1.0),
+        FORM_GHOUL => {
+            if is_alliance {
+                (10045, 1.0)
+            } else {
+                (0, 1.0)
+            }
+        }
+        FORM_GHOSTWOLF => (4613, 0.80),
+        FORM_MOONKIN => (if is_alliance { 15374 } else { 15375 }, 1.0),
+        FORM_TREE => (864, 1.0),
+        FORM_SPIRITOFREDEMPTION => (16031, 1.0),
+        _ => (0, 1.0),
+    }
+}
+
+/// Power type override while shapeshifted, mirroring `Aura::HandleAuraModShapeshift`'s
+/// `PowerType` switch. Returns `None` when the form keeps the class default (mana).
+pub fn shapeshift_power_type(form: u8) -> Option<crate::game::player::power::PowerType> {
+    use crate::game::player::power::PowerType;
+    match form {
+        FORM_CAT => Some(PowerType::Energy),
+        FORM_BEAR | FORM_DIREBEAR => Some(PowerType::Rage),
+        FORM_BATTLESTANCE | FORM_BERSERKERSTANCE | FORM_DEFENSIVESTANCE => Some(PowerType::Rage),
+        _ => None,
+    }
 }

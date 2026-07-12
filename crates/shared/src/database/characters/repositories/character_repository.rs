@@ -179,6 +179,39 @@ impl CharacterRepository {
         Ok(())
     }
 
+    /// Insert one saved aura holder row for a character.
+    /// Matches vMaNGOS `Player::_SaveAuras` insert statement (one row per spell holder).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_aura(&self, row: &CharacterAuraRow) -> Result<()> {
+        sqlx::query(
+            r#"INSERT INTO character_aura (guid, caster_guid, item_guid, spell, stacks, charges,
+                      base_points0, base_points1, base_points2,
+                      periodic_time0, periodic_time1, periodic_time2,
+                      max_duration, duration, effect_index_mask)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(row.guid)
+        .bind(row.caster_guid)
+        .bind(row.item_guid)
+        .bind(row.spell)
+        .bind(row.stacks)
+        .bind(row.charges)
+        .bind(row.base_points0)
+        .bind(row.base_points1)
+        .bind(row.base_points2)
+        .bind(row.periodic_time0)
+        .bind(row.periodic_time1)
+        .bind(row.periodic_time2)
+        .bind(row.max_duration)
+        .bind(row.duration)
+        .bind(row.effect_index_mask)
+        .execute(&*self.pool)
+        .await
+        .context("Failed to insert character aura")?;
+
+        Ok(())
+    }
+
     // ========== INVENTORY ==========
 
     /// Find equipped items for a character (bag=0/255, slots 0-18).

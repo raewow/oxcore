@@ -28,6 +28,7 @@ pub mod container;
 pub mod effects;
 pub mod interrupt;
 pub mod periodic;
+pub mod persistence;
 pub mod proc;
 pub mod stacking;
 pub mod state;
@@ -36,6 +37,7 @@ pub mod system;
 // Re-exports
 pub use aura::{Aura, AuraFlags, MAX_SPELL_EFFECTS};
 pub use container::AuraContainer;
+pub use persistence::{load_auras, save_auras};
 pub use state::{
     AuraState, MAX_NEGATIVE_AURA_SLOTS, MAX_PASSIVE_AURA_SLOTS, MAX_POSITIVE_AURA_SLOTS,
     MAX_TOTAL_AURA_SLOTS, NEGATIVE_SLOT_END, NEGATIVE_SLOT_START, PASSIVE_SLOT_END,

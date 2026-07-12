@@ -183,6 +183,29 @@ impl AuraContainer {
         removed
     }
 
+    /// Refresh the remaining duration of an already-active aura (any effect of the spell).
+    ///
+    /// Matches C++ `Unit::RefreshAura(spellId, duration)` -> `SpellAuraHolder::SetAuraDuration`:
+    /// only the *current* remaining duration is overwritten, `max_duration_ms` is untouched
+    /// (so a subsequent natural refresh still caps at the original max). A permanent aura
+    /// (`duration_ms == None`) is left untouched, matching `UpdateAuraDuration`'s guard against
+    /// holders with no aura slot / permanent auras.
+    ///
+    /// Returns the slot of the refreshed aura, or `None` if no aura for this spell is active.
+    pub fn refresh_aura(&mut self, spell_id: u32, duration_ms: i32) -> Option<u8> {
+        let mut slot = None;
+        for effect_index in 0..3u8 {
+            let key = (spell_id, effect_index);
+            if let Some(aura) = self.auras.get_mut(&key) {
+                if aura.duration_ms.is_some() {
+                    aura.duration_ms = Some(duration_ms.max(0) as u32);
+                }
+                slot = slot.or_else(|| self.slot_map.get(&key).copied());
+            }
+        }
+        slot
+    }
+
     /// Remove all auras. Returns all removed auras.
     pub fn remove_all(&mut self) -> Vec<Aura> {
         let auras: Vec<Aura> = self.auras.drain().map(|(_, a)| a).collect();
@@ -418,5 +441,93 @@ impl AuraContainer {
 impl Default for AuraContainer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::player::auras::aura::AuraFlags;
+    use oxcore_shared::protocol::ObjectGuid;
+
+    fn test_guid(low: u32) -> ObjectGuid {
+        ObjectGuid::new_player(low)
+    }
+
+    fn make_aura(spell_id: u32, effect_index: u8, caster: ObjectGuid, duration_ms: Option<u32>) -> Aura {
+        Aura::new(
+            spell_id,
+            caster,
+            effect_index,
+            1, // arbitrary aura_type
+            0,
+            10,
+            duration_ms,
+            0,
+            1,
+            0,
+            AuraFlags::default(),
+        )
+    }
+
+    #[test]
+    fn refresh_aura_resets_current_duration_but_not_max() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut aura = make_aura(1000, 0, caster, Some(10_000));
+        aura.duration_ms = Some(2_000); // ticked down from max
+        let slot = container.add_aura(aura).expect("slot allocated");
+
+        let refreshed_slot = container.refresh_aura(1000, 8_000);
+        assert_eq!(refreshed_slot, Some(slot));
+
+        let a = container.get_aura(1000, 0).unwrap();
+        assert_eq!(a.duration_ms, Some(8_000));
+        assert_eq!(a.max_duration_ms, Some(10_000), "max duration must be untouched");
+    }
+
+    #[test]
+    fn refresh_aura_refreshes_all_effects_of_the_spell() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        container.add_aura(make_aura(2000, 0, caster, Some(5_000)));
+        container.add_aura(make_aura(2000, 1, caster, Some(5_000)));
+
+        container.refresh_aura(2000, 1_234);
+
+        assert_eq!(container.get_aura(2000, 0).unwrap().duration_ms, Some(1_234));
+        assert_eq!(container.get_aura(2000, 1).unwrap().duration_ms, Some(1_234));
+    }
+
+    #[test]
+    fn refresh_aura_leaves_permanent_auras_untouched() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        container.add_aura(make_aura(3000, 0, caster, None));
+
+        let slot = container.refresh_aura(3000, 9_999);
+        assert!(slot.is_some(), "still reports the aura's slot");
+        assert_eq!(
+            container.get_aura(3000, 0).unwrap().duration_ms,
+            None,
+            "permanent aura duration must stay None"
+        );
+    }
+
+    #[test]
+    fn refresh_aura_returns_none_when_spell_not_active() {
+        let mut container = AuraContainer::new();
+        assert_eq!(container.refresh_aura(9999, 1_000), None);
+    }
+
+    #[test]
+    fn refresh_aura_clamps_negative_duration_to_zero() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        container.add_aura(make_aura(4000, 0, caster, Some(5_000)));
+
+        container.refresh_aura(4000, -1);
+
+        assert_eq!(container.get_aura(4000, 0).unwrap().duration_ms, Some(0));
     }
 }

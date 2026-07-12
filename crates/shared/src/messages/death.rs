@@ -67,3 +67,45 @@ impl ToWorldPacket for SmsgSpiritHealerConfirm {
         packet
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resurrect_request_encodes_name_and_flag_bytes() {
+        let msg = SmsgResurrectRequest {
+            caster_guid: ObjectGuid::from_raw(0x1234),
+            caster_name: String::new(),
+            causes_sickness: false,
+            use_corpse_timer: true,
+        };
+        let packet = msg.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::SMSG_RESURRECT_REQUEST);
+
+        let bytes = packet.contents();
+        // guid (8) + name len u32 (4) + name (0) + null (1) + sickness (1) + timer (1)
+        assert_eq!(bytes.len(), 8 + 4 + 0 + 1 + 1 + 1);
+        assert_eq!(u64::from_le_bytes(bytes[0..8].try_into().unwrap()), 0x1234);
+        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 1); // empty name -> just null terminator
+        assert_eq!(bytes[12], 0); // null terminator
+        assert_eq!(bytes[13], 0); // causes_sickness = false
+        assert_eq!(bytes[14], 1); // use_corpse_timer = true
+    }
+
+    #[test]
+    fn resurrect_request_sickness_and_timer_bytes_reflect_flags() {
+        let msg = SmsgResurrectRequest {
+            caster_guid: ObjectGuid::from_raw(0),
+            caster_name: "Bob".to_string(),
+            causes_sickness: true,
+            use_corpse_timer: false,
+        };
+        let bytes = msg.to_world_packet().contents().to_vec();
+        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 4); // "Bob" + null
+        assert_eq!(&bytes[12..15], b"Bob");
+        assert_eq!(bytes[15], 0); // null terminator
+        assert_eq!(bytes[16], 1); // causes_sickness = true
+        assert_eq!(bytes[17], 0); // use_corpse_timer = false
+    }
+}

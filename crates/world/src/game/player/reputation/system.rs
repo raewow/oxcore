@@ -407,7 +407,12 @@ impl ReputationSystem {
     }
 
     /// Send SMSG_SET_FORCED_REACTIONS for all forced reaction entries.
-    fn send_forced_reactions(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
+    ///
+    /// Sends unconditionally (even when empty) so that removing the last forced
+    /// reaction (e.g. `Aura::HandleForceReaction` on remove) correctly clears the
+    /// client's cached override — matching the C++ `SendForceReactions()`, which
+    /// always builds and sends the packet.
+    pub fn send_forced_reactions(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         let reactions = world
             .systems
             .player
@@ -422,11 +427,9 @@ impl ReputationSystem {
             })
             .unwrap_or_default();
 
-        if !reactions.is_empty() {
-            let forced_reactions = reactions.into_iter().collect();
-            let msg = SmsgSetForcedReactions { forced_reactions };
-            self.broadcast_mgr.send_msg_to_player(player_guid, msg);
-        }
+        let forced_reactions = reactions.into_iter().collect();
+        let msg = SmsgSetForcedReactions { forced_reactions };
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
         Ok(())
     }

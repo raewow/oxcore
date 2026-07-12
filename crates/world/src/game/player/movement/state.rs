@@ -27,6 +27,10 @@ pub struct MovementState {
     pub last_movement_time: u32,
     /// Water walking enabled (ghost form, Path of Frost, etc.)
     pub water_walking: bool,
+    /// Hover enabled (Levitate-like auras): SPELL_AURA_HOVER
+    pub hover: bool,
+    /// Feather fall enabled (Slow Fall, Levitate): SPELL_AURA_FEATHER_FALL
+    pub feather_fall: bool,
 }
 
 impl Default for MovementState {
@@ -47,6 +51,8 @@ impl Default for MovementState {
             movement_flags: 0,
             last_movement_time: 0,
             water_walking: false,
+            hover: false,
+            feather_fall: false,
         }
     }
 }

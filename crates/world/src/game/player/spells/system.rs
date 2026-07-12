@@ -37,6 +37,42 @@ fn spell_needs_combo_points(attributes_ex: u32) -> bool {
     attributes_ex & (FINISHING_MOVE_DAMAGE | FINISHING_MOVE_DURATION) != 0
 }
 
+/// SPELL_CUSTOM_SEND_CHANNEL_VISUAL — spell periodically re-sends its channel visual kit
+/// while channeling (reference/core SpellDefines.h:975; MaNGOS `Spell::InitializeChanneledVisualTimer`).
+const SPELL_CUSTOM_SEND_CHANNEL_VISUAL: u32 = 0x800;
+
+/// SPELL_CHANNEL_VISUAL_TIMER — fixed refresh interval (ms) for re-sending the channeled
+/// spell's visual kit while it is active (reference/core Spell.cpp:55).
+const SPELL_CHANNEL_VISUAL_TIMER: u32 = 800;
+
+/// Determine the channeled visual kit id and refresh timer for a spell (MaNGOS
+/// `Spell::InitializeChanneledVisualTimer`, reference/core Spell.cpp:4998-5012).
+///
+/// Returns `Some((channel_kit_id, SPELL_CHANNEL_VISUAL_TIMER))` only when all of:
+/// - `custom_flags` has `SPELL_CUSTOM_SEND_CHANNEL_VISUAL` set,
+/// - `spell_visual_id` is non-zero,
+/// - the looked-up `SpellVisual.dbc` entry exists and has a non-zero `channelKit`.
+///
+/// Otherwise returns `None`, matching the early-return branches in the reference
+/// implementation (no assignment to the channel visual kit/timer state).
+fn channeled_visual_kit(
+    custom_flags: u32,
+    spell_visual_id: u32,
+    lookup_channel_kit: impl FnOnce(u32) -> Option<u32>,
+) -> Option<(u32, u32)> {
+    if custom_flags & SPELL_CUSTOM_SEND_CHANNEL_VISUAL == 0 {
+        return None;
+    }
+    if spell_visual_id == 0 {
+        return None;
+    }
+    let channel_kit = lookup_channel_kit(spell_visual_id)?;
+    if channel_kit == 0 {
+        return None;
+    }
+    Some((channel_kit, SPELL_CHANNEL_VISUAL_TIMER))
+}
+
 /// Get current game time in milliseconds
 fn get_game_time_ms() -> u64 {
     std::time::SystemTime::now()
@@ -487,6 +523,21 @@ impl SpellSystem {
         packet.write_u32(spell_id);
         packet.write_u32(duration_ms);
         self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
+
+        // Spell::InitializeChanneledVisualTimer: a handful of channeled spells (Tranquility,
+        // Starshards) periodically re-send their visual kit. Wired against the real spell
+        // entry, but the lookup always misses today because this codebase has no
+        // SpellVisual.dbc store (channelKit column) yet — flagged as follow-up work.
+        if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
+            if let Some((_channel_kit_id, _visual_timer_ms)) =
+                channeled_visual_kit(entry.custom, entry.spell_visual, |_spell_visual_id| {
+                    None::<u32>
+                })
+            {
+                // TODO(SpellVisual.dbc): once the store exists, schedule a periodic
+                // SMSG_PLAY_SPELL_VISUAL resend every `_visual_timer_ms` while channeling.
+            }
+        }
 
         // Schedule channel tick events and channel finish
         let now = get_game_time_ms();
@@ -2947,6 +2998,55 @@ mod tests {
         assert!(!spell_needs_combo_points(0x0020_0000)); // bit 21
         assert!(!spell_needs_combo_points(0x0080_0000)); // bit 23
         assert!(!spell_needs_combo_points(0x0000_0001 | 0x0008_0000));
+    }
+
+    // -- Spell::InitializeChanneledVisualTimer: channeled_visual_kit --------------------
+
+    #[test]
+    fn channel_visual_kit_requires_custom_flag() {
+        assert_eq!(
+            channeled_visual_kit(0, 100, |_| Some(42)),
+            None,
+            "custom flag not set -> no visual kit"
+        );
+    }
+
+    #[test]
+    fn channel_visual_kit_requires_nonzero_spell_visual() {
+        assert_eq!(
+            channeled_visual_kit(SPELL_CUSTOM_SEND_CHANNEL_VISUAL, 0, |_| Some(42)),
+            None,
+            "SpellVisual id of 0 -> no visual kit"
+        );
+    }
+
+    #[test]
+    fn channel_visual_kit_requires_dbc_lookup_hit() {
+        assert_eq!(
+            channeled_visual_kit(SPELL_CUSTOM_SEND_CHANNEL_VISUAL, 100, |_| None),
+            None,
+            "missing SpellVisual.dbc entry -> no visual kit"
+        );
+    }
+
+    #[test]
+    fn channel_visual_kit_requires_nonzero_channel_kit() {
+        assert_eq!(
+            channeled_visual_kit(SPELL_CUSTOM_SEND_CHANNEL_VISUAL, 100, |_| Some(0)),
+            None,
+            "SpellVisualEntry with channelKit == 0 -> no visual kit"
+        );
+    }
+
+    #[test]
+    fn channel_visual_kit_returns_kit_and_fixed_timer() {
+        assert_eq!(
+            channeled_visual_kit(SPELL_CUSTOM_SEND_CHANNEL_VISUAL, 100, |visual_id| {
+                assert_eq!(visual_id, 100);
+                Some(7)
+            }),
+            Some((7, SPELL_CHANNEL_VISUAL_TIMER))
+        );
     }
 
     // -- Spell::handle_delayed: next_delayed_target_time --------------------------------

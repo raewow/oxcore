@@ -225,6 +225,20 @@ impl AuraSystem {
             }
         }
 
+        // Crowd-control / movement / vision / shapeshift special-case effects
+        // (mount, water walk, feather fall, hover, shapeshift, transform, force
+        // reaction, stealth, invisibility, tracking, scale, disarm weapon mods, ...).
+        if assigned_slot.is_some() {
+            self.apply_special_effect(
+                target_guid,
+                spell_id,
+                aura_type_copy,
+                misc_value,
+                base_value,
+                world,
+            );
+        }
+
         // Send aura update to client
         if let Some(slot) = assigned_slot {
             self.send_aura_update(target_guid, slot, world)?;
@@ -312,6 +326,10 @@ impl AuraSystem {
                 self.apply_movement_speed(target_guid, world);
             }
 
+            // Crowd-control / movement / vision / shapeshift special-case cleanup
+            // (mirrors apply_special_effect on the way down).
+            self.remove_special_effect(target_guid, aura.aura_type, aura.misc_value, world);
+
             // Send slot cleared to client
             self.send_aura_slot_cleared(target_guid, slot, world)?;
 
@@ -344,6 +362,35 @@ impl AuraSystem {
                     }
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    /// Refresh the remaining duration of an already-active spell's aura(s), without
+    /// re-triggering apply effects or touching stack count.
+    ///
+    /// Matches C++ `Unit::RefreshAura(spellId, duration)`: looks up the existing holder for
+    /// `spell_id` and overwrites its current duration, then notifies the client via
+    /// SMSG_UPDATE_AURA_DURATION. Does nothing if the spell has no active aura on this unit.
+    pub async fn refresh_aura(
+        &self,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        duration_ms: i32,
+        world: &World,
+    ) -> Result<()> {
+        let slot = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.auras.container.refresh_aura(spell_id, duration_ms)
+            })
+            .flatten();
+
+        if let Some(slot) = slot {
+            self.send_aura_duration(target_guid, slot, world);
         }
 
         Ok(())
@@ -393,7 +440,25 @@ impl AuraSystem {
             if effects::is_spell_modifier_aura(aura.aura_type) {
                 self.remove_spell_modifier(target_guid, aura.spell_id, world)?;
             }
+            self.remove_special_effect(target_guid, aura.aura_type, aura.misc_value, world);
             self.send_aura_slot_cleared(target_guid, *slot, world)?;
+        }
+
+        // Clear any CC unit flags left over from the removed auras (bulk removal skips
+        // the "any other aura of same type" check done in `remove_aura` since all
+        // non-passive auras are gone at once).
+        let cc_flags: u32 = removed
+            .iter()
+            .filter_map(|(aura, _)| effects::cc_aura_unit_flag(aura.aura_type))
+            .fold(0u32, |acc, f| acc | f);
+        if cc_flags != 0 {
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(target_guid, |player| {
+                    player.unit_flags &= !cc_flags;
+                });
         }
 
         // Full stat recalc after bulk removal
@@ -1351,9 +1416,16 @@ impl AuraSystem {
     // =========================================================================
 
     /// Called on login - restore saved auras and send to client.
-    pub async fn on_login(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
-        // TODO: Load saved auras from database (character_auras table)
-        // For now, just reapply passive auras from talents/racials
+    ///
+    /// `offline_secs` is how long the character was logged out (used to debit remaining
+    /// duration on auras with `HasRealTimeDuration()`; pass `0` if unknown).
+    pub async fn on_login(
+        &self,
+        player_guid: ObjectGuid,
+        offline_secs: u32,
+        world: &World,
+    ) -> Result<()> {
+        super::persistence::load_auras(player_guid, offline_secs, world).await?;
 
         self.send_all_auras(player_guid, world)?;
 
@@ -1361,9 +1433,8 @@ impl AuraSystem {
     }
 
     /// Called on logout - save persistent auras to database.
-    pub async fn on_logout(&self, _player_guid: ObjectGuid, _world: &World) -> Result<()> {
-        // TODO: Save non-expired auras with remaining durations to database
-        Ok(())
+    pub async fn on_logout(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
+        super::persistence::save_auras(player_guid, world).await
     }
 
     /// Called on death - remove applicable auras.
@@ -1479,6 +1550,848 @@ impl AuraSystem {
         packet.write_packed_guid_raw(target_guid.raw());
         packet.write_u32(0); // movement counter
         packet.write_f32(new_speed);
+        self.broadcast_mgr.send_to_player(target_guid, packet);
+    }
+
+    // =========================================================================
+    // Crowd-Control / Movement / Vision / Shapeshift special-case effects
+    //
+    // Mirrors the per-aura-type `Aura::Handle*` methods in SpellAuras.cpp for
+    // effects that aren't covered by the generic stat-modifier / CC-unit-flag /
+    // movement-speed paths above. Only player targets are handled (creatures use
+    // the simplified `apply_creature_aura` path in AuraSystem::apply_aura).
+    // =========================================================================
+
+    /// Dispatch on aura apply. Mirrors the "AT APPLY" side of each `Aura::Handle*`.
+    #[allow(clippy::too_many_arguments)]
+    fn apply_special_effect(
+        &self,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        aura_type: u32,
+        misc_value: i32,
+        base_value: i32,
+        world: &World,
+    ) {
+        if !target_guid.is_player() {
+            return;
+        }
+
+        match aura_type {
+            // --- Aura::HandleAuraMounted ---
+            effects::AURA_MOUNTED => {
+                let display_id = misc_value.max(0) as u32;
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.mount_display_id = display_id;
+                    });
+                self.send_mount_field_update(target_guid, display_id, world);
+            }
+
+            // --- Aura::HandleAuraWaterWalk ---
+            effects::AURA_WATER_WALK => {
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.movement.water_walking = true;
+                    });
+                self.send_water_walk(target_guid, true, world);
+            }
+
+            // --- Aura::HandleAuraFeatherFall ---
+            effects::AURA_FEATHER_FALL => {
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.movement.feather_fall = true;
+                    });
+                self.send_feather_fall(target_guid, true, world);
+            }
+
+            // --- Aura::HandleAuraHover ---
+            effects::AURA_HOVER => {
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.movement.hover = true;
+                    });
+                self.send_hover(target_guid, true, world);
+            }
+
+            // --- Aura::HandleAuraModShapeshift ---
+            effects::AURA_MOD_SHAPESHIFT => {
+                self.apply_shapeshift(target_guid, misc_value as u8, world);
+            }
+
+            // --- Aura::HandleAuraTransform ---
+            effects::AURA_TRANSFORM => {
+                self.apply_transform(target_guid, spell_id, misc_value, world);
+            }
+
+            // --- Aura::HandleForceReaction ---
+            effects::AURA_FORCE_REACTION => {
+                self.apply_force_reaction(target_guid, misc_value, base_value, world);
+            }
+
+            // --- Aura::HandleAuraModScale ---
+            effects::AURA_MOD_SCALE => {
+                let pct = base_value as f32 / 100.0;
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.scale *= 1.0 + pct;
+                    });
+            }
+
+            // --- Aura::HandleModStealth ---
+            effects::AURA_MOD_STEALTH => {
+                self.apply_stealth(target_guid, world);
+            }
+
+            // --- Aura::HandleInvisibility ---
+            effects::AURA_MOD_INVISIBILITY => {
+                self.apply_invisibility(target_guid, misc_value, world);
+            }
+
+            // --- Aura::HandleInvisibilityDetect ---
+            effects::AURA_MOD_INVISIBILITY_DETECTION => {
+                self.apply_invisibility_detect(target_guid, misc_value, world);
+            }
+
+            // --- Aura::HandleAuraTrackCreatures ---
+            effects::AURA_TRACK_CREATURES => {
+                if misc_value >= 1 {
+                    let bit = 1u32 << (misc_value - 1);
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.track_creatures_mask |= bit;
+                        });
+                }
+            }
+
+            // --- Aura::HandleAuraTrackResources ---
+            effects::AURA_TRACK_RESOURCES => {
+                if misc_value >= 1 {
+                    let bit = 1u32 << (misc_value - 1);
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.track_resources_mask |= bit;
+                        });
+                }
+            }
+
+            // --- Aura::HandleAuraTrackStealthed ---
+            effects::AURA_TRACK_STEALTHED => {
+                self.set_player_bytes2_flag(target_guid, 0x04, true, world);
+            }
+
+            // --- Aura::HandleDetectAmore ---
+            effects::AURA_DETECT_AMORE => {
+                self.set_player_bytes2_flag(
+                    target_guid,
+                    effects::PLAYER_FIELD_BYTE2_DETECT_AMORE,
+                    true,
+                    world,
+                );
+            }
+
+            // --- Aura::HandleAuraModDisarm ---
+            effects::AURA_MOD_DISARM => {
+                // Unit flag itself is applied generically via cc_aura_unit_flag (system.rs
+                // apply_aura). C++ also resets the swing timer to BASE_ATTACK_TIME and
+                // unapplies weapon-dependent mods (_ApplyWeaponDependentAuraMods) — the
+                // latter has no equivalent hook in the current combat/stats system, so
+                // only the swing-timer reset is mirrored here.
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.combat.main_hand_timer = player.combat.main_hand_speed;
+                    });
+            }
+
+            _ => {}
+        }
+    }
+
+    /// Dispatch on aura remove. Mirrors the "AT REMOVE" side of each `Aura::Handle*`.
+    /// `misc_value` is read from the just-removed `Aura` (container already popped it).
+    fn remove_special_effect(
+        &self,
+        target_guid: ObjectGuid,
+        aura_type: u32,
+        misc_value: i32,
+        world: &World,
+    ) {
+        if !target_guid.is_player() {
+            return;
+        }
+
+        match aura_type {
+            effects::AURA_MOUNTED => {
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.mount_display_id = 0;
+                    });
+                self.send_mount_field_update(target_guid, 0, world);
+            }
+
+            effects::AURA_WATER_WALK => {
+                let has_other = self.player_has_aura_type(target_guid, effects::AURA_WATER_WALK, world);
+                if !has_other {
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.movement.water_walking = false;
+                        });
+                    self.send_water_walk(target_guid, false, world);
+                }
+            }
+
+            effects::AURA_FEATHER_FALL => {
+                let has_other =
+                    self.player_has_aura_type(target_guid, effects::AURA_FEATHER_FALL, world);
+                if !has_other {
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.movement.feather_fall = false;
+                        });
+                    self.send_feather_fall(target_guid, false, world);
+                }
+            }
+
+            effects::AURA_HOVER => {
+                let has_other = self.player_has_aura_type(target_guid, effects::AURA_HOVER, world);
+                if !has_other {
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.movement.hover = false;
+                        });
+                    self.send_hover(target_guid, false, world);
+                }
+            }
+
+            effects::AURA_MOD_SHAPESHIFT => {
+                self.remove_shapeshift(target_guid, world);
+            }
+
+            effects::AURA_TRANSFORM => {
+                self.remove_transform(target_guid, world);
+            }
+
+            effects::AURA_FORCE_REACTION => {
+                self.remove_force_reaction(target_guid, misc_value, world);
+            }
+
+            effects::AURA_MOD_SCALE => {
+                // Recompute from remaining SPELL_AURA_MOD_SCALE auras rather than trying to
+                // invert a single multiplicative step (matches intent, not literal C++ code
+                // which uses an additive ApplyPercentModFloatValue on the raw field).
+                let remaining_pct: i32 = world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player(target_guid, |player| {
+                        player
+                            .auras
+                            .container
+                            .get_auras_by_type(effects::AURA_MOD_SCALE)
+                            .iter()
+                            .map(|a| a.current_value())
+                            .sum()
+                    })
+                    .unwrap_or(0);
+                let scale = 1.0 + remaining_pct as f32 / 100.0;
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.scale = scale.max(0.01);
+                    });
+            }
+
+            effects::AURA_MOD_STEALTH => {
+                self.remove_stealth(target_guid, world);
+            }
+
+            effects::AURA_MOD_INVISIBILITY => {
+                self.remove_invisibility(target_guid, world);
+            }
+
+            effects::AURA_MOD_INVISIBILITY_DETECTION => {
+                self.remove_invisibility_detect(target_guid, world);
+            }
+
+            effects::AURA_TRACK_CREATURES => {
+                if misc_value >= 1 {
+                    let bit = 1u32 << (misc_value - 1);
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.track_creatures_mask &= !bit;
+                        });
+                }
+            }
+
+            effects::AURA_TRACK_RESOURCES => {
+                if misc_value >= 1 {
+                    let bit = 1u32 << (misc_value - 1);
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.track_resources_mask &= !bit;
+                        });
+                }
+            }
+
+            effects::AURA_TRACK_STEALTHED => {
+                self.set_player_bytes2_flag(target_guid, 0x04, false, world);
+            }
+
+            effects::AURA_DETECT_AMORE => {
+                self.set_player_bytes2_flag(
+                    target_guid,
+                    effects::PLAYER_FIELD_BYTE2_DETECT_AMORE,
+                    false,
+                    world,
+                );
+            }
+
+            effects::AURA_MOD_DISARM => {
+                // `remove_aura` clears UNIT_FLAG_DISARMED just before calling us if no
+                // other SPELL_AURA_MOD_DISARM aura remains, so re-reading it here tells
+                // us whether this was the last disarm effect.
+                let still_disarmed = (world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player(target_guid, |player| player.unit_flags)
+                    .unwrap_or(0)
+                    & effects::UNIT_FLAG_DISARMED)
+                    != 0;
+                if !still_disarmed {
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.combat.main_hand_timer = player.combat.main_hand_speed;
+                        });
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    /// True if the player has at least one active aura of `aura_type` (used to gate
+    /// "remove effect only if last aura of this type" like the C++ `HasAuraType` checks).
+    fn player_has_aura_type(&self, target_guid: ObjectGuid, aura_type: u32, world: &World) -> bool {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                !player
+                    .auras
+                    .container
+                    .get_auras_by_type(aura_type)
+                    .is_empty()
+            })
+            .unwrap_or(false)
+    }
+
+    // ---- Mount ----
+
+    fn send_mount_field_update(&self, target_guid: ObjectGuid, display_id: u32, world: &World) {
+        let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
+        block = block.set_field(oxcore_shared::protocol::update_fields::UNIT_FIELD_MOUNTDISPLAYID, display_id);
+        let packet = SmsgUpdateObject::new()
+            .add_block(UpdateBlockData::Values(block))
+            .to_world_packet();
+        self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+    }
+
+    // ---- Water walk / feather fall / hover ----
+
+    fn send_water_walk(&self, target_guid: ObjectGuid, enable: bool, world: &World) {
+        let opcode = if enable {
+            Opcode::SMSG_MOVE_WATER_WALK
+        } else {
+            Opcode::SMSG_MOVE_LAND_WALK
+        };
+        let mut packet = WorldPacket::new(opcode);
+        packet.write_packed_guid_raw(target_guid.raw());
+        packet.write_u32(0); // movement counter
+        self.broadcast_mgr.send_to_player(target_guid, packet);
+        let _ = world;
+    }
+
+    fn send_feather_fall(&self, target_guid: ObjectGuid, enable: bool, world: &World) {
+        let opcode = if enable {
+            Opcode::SMSG_MOVE_FEATHER_FALL
+        } else {
+            Opcode::SMSG_MOVE_NORMAL_FALL
+        };
+        let mut packet = WorldPacket::new(opcode);
+        packet.write_packed_guid_raw(target_guid.raw());
+        packet.write_u32(0);
+        self.broadcast_mgr.send_to_player(target_guid, packet);
+        let _ = world;
+    }
+
+    fn send_hover(&self, target_guid: ObjectGuid, enable: bool, world: &World) {
+        let opcode = if enable {
+            Opcode::SMSG_MOVE_SET_HOVER
+        } else {
+            Opcode::SMSG_MOVE_UNSET_HOVER
+        };
+        let mut packet = WorldPacket::new(opcode);
+        packet.write_packed_guid_raw(target_guid.raw());
+        packet.write_u32(0);
+        self.broadcast_mgr.send_to_player(target_guid, packet);
+        let _ = world;
+    }
+
+    // ---- Shapeshift ----
+
+    /// Mirrors `Aura::HandleAuraModShapeshift` apply side: sets the shapeshift form,
+    /// swaps power type for forms that use rage/energy, and updates the display id
+    /// for forms with a hardcoded model. Does not yet implement `RemoveSpellsCausingAura`
+    /// (removing other shapeshift auras) or `CastSpell(9033)` (root/slow cleanse on
+    /// entering a travel-type form) — those need cross-aura removal / spell-cast hooks
+    /// that aren't wired up from within AuraSystem yet.
+    fn apply_shapeshift(&self, target_guid: ObjectGuid, form: u8, world: &World) {
+        let is_alliance = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |p| {
+                matches!(p.race, 1 | 3 | 4 | 7 | 11) // Human/Dwarf/NightElf/Gnome/Draenei-ish alliance set
+            })
+            .unwrap_or(true);
+
+        let (display_id, _scale) = effects::shapeshift_display_info(form, is_alliance);
+
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.shapeshift_form = form;
+            });
+
+        if let Some(power_type) = effects::shapeshift_power_type(form) {
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(target_guid, |player| {
+                    player.power.power_type = power_type;
+                });
+        }
+
+        // Push UNIT_FIELD_BYTES_1 (shapeshift form byte) + UNIT_FIELD_DISPLAYID if changed.
+        self.send_shapeshift_field_update(target_guid, display_id, world);
+    }
+
+    fn remove_shapeshift(&self, target_guid: ObjectGuid, world: &World) {
+        let (class, native_display_id) = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |p| (p.class, 0u32))
+            .unwrap_or((0, 0));
+
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.shapeshift_form = 0;
+                if class == 11 {
+                    // CLASS_DRUID
+                    player.power.power_type = crate::game::player::power::PowerType::Mana;
+                }
+            });
+
+        self.send_shapeshift_field_update(target_guid, native_display_id, world);
+    }
+
+    fn send_shapeshift_field_update(&self, target_guid: ObjectGuid, display_id: u32, world: &World) {
+        let (shapeshift_form, stand_state) = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |p| (p.shapeshift_form, p.stand_state))
+            .unwrap_or((0, 0));
+
+        let bytes_1 = u32::from_le_bytes([stand_state, 0, shapeshift_form, 0]);
+        let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
+        block = block.set_field(oxcore_shared::protocol::update_fields::UNIT_FIELD_BYTES_1, bytes_1);
+        if display_id != 0 {
+            block = block.set_field(
+                oxcore_shared::protocol::update_fields::UNIT_FIELD_DISPLAYID,
+                display_id,
+            );
+        }
+        let packet = SmsgUpdateObject::new()
+            .add_block(UpdateBlockData::Values(block))
+            .to_world_packet();
+        self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+    }
+
+    // ---- Transform ----
+
+    /// Mirrors `Aura::HandleAuraTransform`. Only the `misc_value != 0` (explicit
+    /// creature-template display id) branch is implemented faithfully; the
+    /// `misc_value == 0` special-cased-by-spell-id branch (e.g. Orb of Deception)
+    /// is not covered (would need a creature-template display-id lookup for the
+    /// generic case and per-race hardcoded ids for the special case).
+    fn apply_transform(&self, target_guid: ObjectGuid, spell_id: u32, misc_value: i32, world: &World) {
+        if misc_value == 0 {
+            tracing::debug!(
+                "[AURA] HandleAuraTransform: spell {} has no creature template id (misc_value=0); \
+                 special-cased transforms (e.g. Orb of Deception) are not implemented",
+                spell_id
+            );
+            return;
+        }
+
+        // misc_value is a creature_template entry. C++ uses `Creature::ChooseDisplayId`
+        // (randomizes gender-variant models); we don't have that helper here, so we
+        // just use the template's primary model id.
+        let display_id = world
+            .managers
+            .creature_mgr
+            .get_template(misc_value as u32)
+            .map(|t| t.model_id_1)
+            .unwrap_or(0);
+
+        if display_id == 0 {
+            return;
+        }
+
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.transform_spell_id = spell_id;
+                player.transform_display_id = display_id;
+            });
+
+        let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
+        block = block.set_field(
+            oxcore_shared::protocol::update_fields::UNIT_FIELD_DISPLAYID,
+            display_id,
+        );
+        let packet = SmsgUpdateObject::new()
+            .add_block(UpdateBlockData::Values(block))
+            .to_world_packet();
+        self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+    }
+
+    fn remove_transform(&self, target_guid: ObjectGuid, world: &World) {
+        let native_display_id = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |p| {
+                crate::game::common::player_constants::get_player_display_id(p.race, p.gender)
+            })
+            .unwrap_or(0);
+
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.transform_spell_id = 0;
+                player.transform_display_id = 0;
+            });
+
+        if native_display_id != 0 {
+            let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
+            block = block.set_field(
+                oxcore_shared::protocol::update_fields::UNIT_FIELD_DISPLAYID,
+                native_display_id,
+            );
+            let packet = SmsgUpdateObject::new()
+                .add_block(UpdateBlockData::Values(block))
+                .to_world_packet();
+            self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+        }
+    }
+
+    // ---- Force Reaction ----
+
+    /// Mirrors `Aura::HandleForceReaction`: overrides the caster's perceived
+    /// reputation rank vs `faction_id` and pushes SMSG_SET_FORCED_REACTIONS.
+    /// Does not implement `StopAttackFaction` (no combat-vs-faction tracking hook
+    /// available from AuraSystem yet).
+    fn apply_force_reaction(&self, target_guid: ObjectGuid, misc_value: i32, base_value: i32, world: &World) {
+        use oxcore_shared::game::reputation::ReputationRank;
+        let faction_id = misc_value.max(0) as u32;
+        // C++ reads m_modifier.m_amount directly as `ReputationRank(uint32(m_amount))` — it's
+        // the 0..7 rank enum value itself, not a reputation point total.
+        let Some(rank) = ReputationRank::from_i32(base_value) else {
+            tracing::warn!(
+                "[AURA] HandleForceReaction: invalid rank value {} for faction {}",
+                base_value,
+                faction_id
+            );
+            return;
+        };
+
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.reputation.forced_reactions.insert(faction_id, rank);
+            });
+
+        let _ = world.systems.reputation.send_forced_reactions(target_guid, world);
+    }
+
+    fn remove_force_reaction(&self, target_guid: ObjectGuid, misc_value: i32, world: &World) {
+        let faction_id = misc_value.max(0) as u32;
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.reputation.forced_reactions.remove(&faction_id);
+            });
+
+        let _ = world.systems.reputation.send_forced_reactions(target_guid, world);
+    }
+
+    // ---- Stealth ----
+
+    /// Mirrors `Aura::HandleModStealth` apply side: sets the stealth visual flags.
+    /// Does not implement `RemoveAurasWithInterruptFlags(AURA_INTERRUPT_STEALTH_INVIS_CANCELS)`
+    /// or `InterruptSpellsCastedOnMe` (need aura-interrupt-flag cross removal + spell
+    /// tracking not available from this call site), nor the real distance/level-based
+    /// stealth detection in the visibility system (VisibilitySubsystem only does
+    /// distance+phase checks today — see crates/world/src/game/player/visibility/system.rs).
+    fn apply_stealth(&self, target_guid: ObjectGuid, world: &World) {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.vis_flags_byte |= effects::UNIT_VIS_FLAGS_CREEP;
+            });
+        self.set_player_bytes2_flag(
+            target_guid,
+            effects::PLAYER_FIELD_BYTE2_STEALTH,
+            true,
+            world,
+        );
+        self.send_vis_flag_update(target_guid, world);
+    }
+
+    fn remove_stealth(&self, target_guid: ObjectGuid, world: &World) {
+        if self.player_has_aura_type(target_guid, effects::AURA_MOD_STEALTH, world) {
+            return; // another stealth aura still active
+        }
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.vis_flags_byte &= !effects::UNIT_VIS_FLAGS_CREEP;
+            });
+        self.set_player_bytes2_flag(
+            target_guid,
+            effects::PLAYER_FIELD_BYTE2_STEALTH,
+            false,
+            world,
+        );
+        self.send_vis_flag_update(target_guid, world);
+    }
+
+    fn send_vis_flag_update(&self, target_guid: ObjectGuid, world: &World) {
+        let vis_flags = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |p| p.vis_flags_byte)
+            .unwrap_or(0);
+
+        let (stand_state, shapeshift_form) = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |p| (p.stand_state, p.shapeshift_form))
+            .unwrap_or((0, 0));
+
+        let bytes_1 = u32::from_le_bytes([stand_state, 0, shapeshift_form, vis_flags]);
+        let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
+        block = block.set_field(oxcore_shared::protocol::update_fields::UNIT_FIELD_BYTES_1, bytes_1);
+        let packet = SmsgUpdateObject::new()
+            .add_block(UpdateBlockData::Values(block))
+            .to_world_packet();
+        self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+    }
+
+    // ---- Invisibility ----
+
+    /// Mirrors `Aura::HandleInvisibility` apply side: sets the invisibility bitmask
+    /// and glow flag. Does not implement the visibility-system integration (client
+    /// still needs a real "invisible unless detected" occlusion rule; see
+    /// VisibilitySubsystem TODO above) — the bitmask is tracked so a future
+    /// visibility pass can consult it.
+    fn apply_invisibility(&self, target_guid: ObjectGuid, misc_value: i32, world: &World) {
+        if (0..32).contains(&misc_value) {
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(target_guid, |player| {
+                    player.invisibility_mask |= 1 << misc_value;
+                });
+        }
+        self.set_player_bytes2_flag(
+            target_guid,
+            effects::PLAYER_FIELD_BYTE2_INVISIBILITY_GLOW,
+            true,
+            world,
+        );
+    }
+
+    fn remove_invisibility(&self, target_guid: ObjectGuid, world: &World) {
+        let remaining_misc: Vec<i32> = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_auras_by_type(effects::AURA_MOD_INVISIBILITY)
+                    .iter()
+                    .map(|a| a.misc_value)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let mask = effects::recompute_invisibility_mask(remaining_misc.into_iter());
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.invisibility_mask = mask;
+            });
+
+        if mask == 0 {
+            self.set_player_bytes2_flag(
+                target_guid,
+                effects::PLAYER_FIELD_BYTE2_INVISIBILITY_GLOW,
+                false,
+                world,
+            );
+        }
+    }
+
+    fn apply_invisibility_detect(&self, target_guid: ObjectGuid, misc_value: i32, world: &World) {
+        if (0..32).contains(&misc_value) {
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(target_guid, |player| {
+                    player.detect_invisibility_mask |= 1 << misc_value;
+                });
+        }
+    }
+
+    fn remove_invisibility_detect(&self, target_guid: ObjectGuid, world: &World) {
+        let remaining_misc: Vec<i32> = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_auras_by_type(effects::AURA_MOD_INVISIBILITY_DETECTION)
+                    .iter()
+                    .map(|a| a.misc_value)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let mask = effects::recompute_detect_invisibility_mask(remaining_misc.into_iter());
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.detect_invisibility_mask = mask;
+            });
+    }
+
+    // ---- PLAYER_FIELD_BYTES2 helper (stealth/invis-glow/detect-amore/track-stealthed) ----
+
+    fn set_player_bytes2_flag(&self, target_guid: ObjectGuid, bit: u8, set: bool, world: &World) {
+        let new_value = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                if set {
+                    player.player_bytes2_flags |= bit;
+                } else {
+                    player.player_bytes2_flags &= !bit;
+                }
+                player.player_bytes2_flags
+            });
+
+        let Some(byte_val) = new_value else { return };
+        let bytes2 = u32::from_le_bytes([0, byte_val, 0, 0]);
+        let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
+        block = block.set_field(oxcore_shared::protocol::update_fields::PLAYER_FIELD_BYTES2, bytes2);
+        let packet = SmsgUpdateObject::new()
+            .add_block(UpdateBlockData::Values(block))
+            .to_world_packet();
         self.broadcast_mgr.send_to_player(target_guid, packet);
     }
 

@@ -37,12 +37,23 @@ pub enum StackAction {
 }
 
 /// Determine the stack action based on existing and new aura data.
+///
+/// The same-caster branch mirrors `SpellAuraHolder::CanBeRefreshedBy` +
+/// `SpellAuraHolder::ModStackAmount` (SpellAuras.cpp:380-394, 6897-6918): a holder can only be
+/// refreshed in place (duration reset, no new stack) when the spell has neither a stack amount
+/// nor proc charges. `existing_max_charges` corresponds to `m_spellProto->procCharges` — a
+/// charge-based aura (e.g. Enrage-style procs with limited charges) must never be silently
+/// refreshed by `CanBeRefreshedBy`, even if it also isn't stackable, since that would reset the
+/// charge count for free. Such auras fall through to plain replacement, same as C++ falling out
+/// of `CanBeRefreshedBy` into the `RemoveSpellAuraHolder` + re-add path.
+#[allow(clippy::too_many_arguments)]
 pub fn determine_stack_action(
     existing_spell_id: u32,
     existing_caster: ObjectGuid,
     existing_value: i32,
     existing_stacks: u8,
     existing_max_stacks: u8,
+    existing_max_charges: u8,
     new_spell_id: u32,
     new_caster: ObjectGuid,
     new_value: i32,
@@ -60,6 +71,11 @@ pub fn determine_stack_action(
         // Same caster, same spell
         if existing_max_stacks > 1 && existing_stacks < existing_max_stacks {
             return StackAction::AddStack;
+        }
+        // CanBeRefreshedBy: a charge-based aura is neither stacked nor plainly refreshed —
+        // refreshing would reset its charge count, so treat it like a replace instead.
+        if existing_max_charges != 0 {
+            return StackAction::Replace;
         }
         return StackAction::RefreshDuration;
     }
@@ -128,4 +144,124 @@ pub fn is_same_spell_different_rank(spell_a: u32, spell_b: u32) -> bool {
     }
 
     false
+}
+
+/// Decide which of two auras competing for a limited visible buff/debuff slot should win,
+/// when the visible-slot cap (31 buffs / 16 debuffs) has been exceeded.
+///
+/// Mirrors `SpellAuraHolder::IsMoreImportantVisualAuraThan` (SpellAuras.cpp:396-403). `self`
+/// wins the slot if `self_score > other_score`; ties are broken by apply time, with the more
+/// recently applied aura winning. `score` corresponds to `m_visibleSlotLimitScore`, computed by
+/// `CalculateForBuffLimit`/`CalculateForDebuffLimit` (out of scope here — no visible-slot-limit
+/// eviction path exists yet in `AuraContainer`, which currently just refuses new auras once all
+/// slots in a category are full instead of evicting a lower-priority one).
+pub fn is_more_important_visual_aura_than(
+    self_score: i32,
+    self_apply_time: u64,
+    other_score: i32,
+    other_apply_time: u64,
+) -> bool {
+    if self_score == other_score {
+        return self_apply_time > other_apply_time;
+    }
+    self_score > other_score
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn guid(low: u32) -> ObjectGuid {
+        ObjectGuid::new_player(low)
+    }
+
+    // --- determine_stack_action: different spell ---
+
+    #[test]
+    fn different_spell_default_adds_new() {
+        let action = determine_stack_action(100, guid(1), 10, 1, 1, 0, 200, guid(1), 10);
+        assert_eq!(action, StackAction::AddNew);
+    }
+
+    #[test]
+    fn different_spell_exclusive_pair_blocked() {
+        // Mortal Strike rank 1 vs Aimed Shot rank 1: mutually exclusive healing-reduce debuffs.
+        let action = determine_stack_action(12294, guid(1), 10, 1, 1, 0, 19434, guid(2), 10);
+        assert_eq!(action, StackAction::Blocked);
+    }
+
+    #[test]
+    fn different_spell_exclusive_pair_same_rank_not_blocked() {
+        // Same spell id never hits the exclusion check (handled by the "same spell" branch).
+        let action = determine_stack_action(12294, guid(1), 10, 1, 1, 0, 12294, guid(1), 10);
+        assert_ne!(action, StackAction::Blocked);
+    }
+
+    // --- determine_stack_action: same spell, same caster (CanBeRefreshedBy / ModStackAmount) ---
+
+    #[test]
+    fn same_caster_non_stackable_no_charges_refreshes() {
+        let action = determine_stack_action(100, guid(1), 10, 1, 1, 0, 100, guid(1), 10);
+        assert_eq!(action, StackAction::RefreshDuration);
+    }
+
+    #[test]
+    fn same_caster_stackable_below_cap_adds_stack() {
+        let action = determine_stack_action(100, guid(1), 10, 2, 5, 0, 100, guid(1), 10);
+        assert_eq!(action, StackAction::AddStack);
+    }
+
+    #[test]
+    fn same_caster_stackable_at_cap_refreshes_instead_of_stacking() {
+        let action = determine_stack_action(100, guid(1), 10, 5, 5, 0, 100, guid(1), 10);
+        assert_eq!(action, StackAction::RefreshDuration);
+    }
+
+    #[test]
+    fn same_caster_charge_based_replaces_instead_of_refreshing() {
+        // CanBeRefreshedBy excludes procCharges auras from plain refresh even when not
+        // stackable, since refreshing would silently reset the remaining charge count.
+        let action = determine_stack_action(100, guid(1), 10, 1, 1, 3, 100, guid(1), 10);
+        assert_eq!(action, StackAction::Replace);
+    }
+
+    // --- determine_stack_action: same spell, different caster ---
+
+    #[test]
+    fn different_caster_stackable_spell_adds_stack() {
+        // Sunder Armor: stacks from any caster.
+        let action = determine_stack_action(7386, guid(1), 10, 1, 5, 0, 7386, guid(2), 10);
+        assert_eq!(action, StackAction::AddStack);
+    }
+
+    #[test]
+    fn different_caster_non_stackable_higher_value_replaces() {
+        let action = determine_stack_action(100, guid(1), 10, 1, 1, 0, 100, guid(2), 20);
+        assert_eq!(action, StackAction::Replace);
+    }
+
+    #[test]
+    fn different_caster_non_stackable_lower_value_ignored() {
+        let action = determine_stack_action(100, guid(1), 20, 1, 1, 0, 100, guid(2), 10);
+        assert_eq!(action, StackAction::Ignore);
+    }
+
+    // --- is_more_important_visual_aura_than: SpellAuraHolder::IsMoreImportantVisualAuraThan ---
+
+    #[test]
+    fn higher_score_wins_regardless_of_apply_time() {
+        assert!(is_more_important_visual_aura_than(5, 100, 3, 999));
+        assert!(!is_more_important_visual_aura_than(3, 999, 5, 100));
+    }
+
+    #[test]
+    fn equal_score_more_recently_applied_wins() {
+        assert!(is_more_important_visual_aura_than(5, 200, 5, 100));
+        assert!(!is_more_important_visual_aura_than(5, 100, 5, 200));
+    }
+
+    #[test]
+    fn equal_score_and_time_is_not_more_important() {
+        assert!(!is_more_important_visual_aura_than(5, 100, 5, 100));
+    }
 }

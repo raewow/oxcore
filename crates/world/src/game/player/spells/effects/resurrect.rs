@@ -85,15 +85,22 @@ pub async fn effect_resurrect(input: &EffectInput, world: &World) -> Result<Effe
         })
         .unwrap_or((1, 0));
 
+    // SendResurrectRequest(pTarget, sickness) passes
+    // `m_casterUnit && m_casterUnit->IsSpiritHealer()` as `sickness` — always
+    // false here since the caster in this pipeline is always a player.
+    let causes_sickness = false;
+
     if let Err(e) = world.systems.death.offer_resurrection(
         target_guid,
         caster_guid,
-        &caster_name,
+        "",
         location,
         map_id,
         instance_id,
         target_health,
         target_mana,
+        causes_sickness,
+        use_corpse_timer,
         world,
     ) {
         tracing::warn!("offer_resurrection failed: {}", e);

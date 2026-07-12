@@ -92,6 +92,26 @@ pub struct Player {
     pub shapeshift_form: u8,
     /// Unit flags (UNIT_FLAG_DISABLE_MOVE, etc.)
     pub unit_flags: u32,
+    /// UNIT_FIELD_BYTES_1 byte offset 3 (vis flag byte): UNIT_VIS_FLAGS_CREEP (0x02) while stealthed.
+    pub vis_flags_byte: u8,
+    /// Bitmask of active SPELL_AURA_MOD_INVISIBILITY types (bit per invisibility type 0-31).
+    pub invisibility_mask: u32,
+    /// Bitmask of active SPELL_AURA_MOD_INVISIBILITY_DETECTION types.
+    pub detect_invisibility_mask: u32,
+    /// Model scale multiplier from SPELL_AURA_MOD_SCALE (1.0 = normal size).
+    pub scale: f32,
+    /// Creature display ID while mounted (0 = not mounted). Drives UNIT_FIELD_MOUNTDISPLAYID.
+    pub mount_display_id: u32,
+    /// Spell ID of the active SPELL_AURA_TRANSFORM aura (0 = not transformed).
+    pub transform_spell_id: u32,
+    /// Display ID applied by the active transform aura (0 = none / use native).
+    pub transform_display_id: u32,
+    /// PLAYER_TRACK_CREATURES bitmask (Track Beasts/Humanoids/etc).
+    pub track_creatures_mask: u32,
+    /// PLAYER_TRACK_RESOURCES bitmask (Track Herbs/Minerals/etc).
+    pub track_resources_mask: u32,
+    /// PLAYER_FIELD_BYTES2 byte offset 1 (extra flags byte): stealth/invis-glow/detect-amore/track-stealthed bits.
+    pub player_bytes2_flags: u8,
     /// Aura state flags (bitmask of AURASTATE_* for spell requirements like Execute < 20% HP)
     pub aura_state_flags: u32,
     /// Active quests (quest log)
@@ -206,6 +226,16 @@ impl Player {
             stand_state: 0,
             shapeshift_form: 0,
             unit_flags: 0,
+            vis_flags_byte: 0,
+            invisibility_mask: 0,
+            detect_invisibility_mask: 0,
+            scale: 1.0,
+            mount_display_id: 0,
+            transform_spell_id: 0,
+            transform_display_id: 0,
+            track_creatures_mask: 0,
+            track_resources_mask: 0,
+            player_bytes2_flags: 0,
             aura_state_flags: 0,
             active_quests: Vec::new(),
             rewarded_quests: HashSet::new(),

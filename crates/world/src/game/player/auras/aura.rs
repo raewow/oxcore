@@ -218,6 +218,50 @@ impl Aura {
         self.periodic_timer_ms = 0;
     }
 
+    /// Refresh this aura using a freshly-cast application of the same spell/effect.
+    ///
+    /// Mirrors `SpellAuraHolder::Refresh` / `Aura::Refresh` (SpellAuras.cpp:311-378): duration
+    /// and max duration are taken from the *new* cast (`reapplied`), not the old aura's stored
+    /// max — a spell recast with a different computed duration (haste change, different rank,
+    /// etc.) must adopt the new duration, not just reset the timer to the previous cap. The
+    /// periodic tick counter and timer restart from zero (`m_periodicTick = 0` +
+    /// `CalculatePeriodic`), and the effect value/misc value are taken over from the new
+    /// application (`m_modifier.m_amount`/`m_miscvalue` copied from `pHolderAura`).
+    pub fn refresh_with(&mut self, reapplied: &Aura) {
+        self.duration_ms = reapplied.duration_ms;
+        self.max_duration_ms = reapplied.max_duration_ms;
+        self.ticks_applied = 0;
+        self.periodic_timer_ms = 0;
+        self.misc_value = reapplied.misc_value;
+        let idx = self.effect_index as usize;
+        if idx < MAX_SPELL_EFFECTS {
+            self.base_values[idx] = reapplied.base_value();
+            self.current_values[idx] = reapplied.base_value() * self.stack_count as i32;
+        }
+    }
+
+    /// Whether this aura can be refreshed-in-place by a new application of the same spell
+    /// from the same caster, rather than being stacked or replaced.
+    ///
+    /// Mirrors `SpellAuraHolder::CanBeRefreshedBy` (SpellAuras.cpp:380-394): requires the same
+    /// caster and same spell id (checked by the caller via the `(spell_id, effect_index)` key
+    /// and `caster_guid` equality — see `AuraContainer::add_aura`), and requires the spell to
+    /// have neither a stack amount nor proc charges (both preclude simple refresh: a stackable
+    /// spell goes through `ModStackAmount`/`add_stack` instead, and a charge-based spell must
+    /// not have its charge count silently reset by a refresh).
+    pub fn can_be_refreshed_by(&self, other_caster_guid: ObjectGuid) -> bool {
+        if self.caster_guid != other_caster_guid {
+            return false;
+        }
+        if self.max_stack_count > 1 {
+            return false;
+        }
+        if self.max_charges != 0 {
+            return false;
+        }
+        true
+    }
+
     /// Increment stack count. Returns true if stack was added.
     pub fn add_stack(&mut self) -> bool {
         if self.stack_count < self.max_stack_count {
@@ -245,5 +289,164 @@ impl Aura {
     /// Get remaining duration in milliseconds (None = permanent)
     pub fn remaining_duration_ms(&self) -> Option<u32> {
         self.duration_ms
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn guid(low: u32) -> ObjectGuid {
+        ObjectGuid::new_player(low)
+    }
+
+    fn make_aura(caster: ObjectGuid, base_value: i32, duration_ms: Option<u32>) -> Aura {
+        Aura::new(
+            1000,
+            caster,
+            0,
+            /* aura_type */ 13,
+            /* misc_value */ 0,
+            base_value,
+            duration_ms,
+            /* periodic_interval_ms */ 0,
+            /* max_stack_count */ 1,
+            /* max_charges */ 0,
+            AuraFlags::default(),
+        )
+    }
+
+    // --- refresh_with: SpellAuraHolder::Refresh / Aura::Refresh (SpellAuras.cpp:311-378) ---
+
+    #[test]
+    fn refresh_with_adopts_new_duration_not_old_max() {
+        // C++: m_duration = m_maxDuration = pRefreshWithHolder->GetAuraDuration()/GetAuraMaxDuration()
+        // i.e. the *new* cast's duration wins, not the existing aura's stored max.
+        let mut existing = make_aura(guid(1), 10, Some(5_000));
+        existing.duration_ms = Some(1_234); // ticked down since it was applied
+        let reapplied = make_aura(guid(1), 10, Some(8_000)); // e.g. recast with more haste/rank
+
+        existing.refresh_with(&reapplied);
+
+        assert_eq!(existing.duration_ms, Some(8_000));
+        assert_eq!(existing.max_duration_ms, Some(8_000));
+    }
+
+    #[test]
+    fn refresh_with_resets_periodic_tick_state() {
+        let mut existing = make_aura(guid(1), 10, Some(5_000));
+        existing.ticks_applied = 3;
+        existing.periodic_timer_ms = 900;
+        let reapplied = make_aura(guid(1), 10, Some(5_000));
+
+        existing.refresh_with(&reapplied);
+
+        assert_eq!(existing.ticks_applied, 0);
+        assert_eq!(existing.periodic_timer_ms, 0);
+    }
+
+    #[test]
+    fn refresh_with_takes_new_effect_value_scaled_by_existing_stacks() {
+        let mut existing = make_aura(guid(1), 10, Some(5_000));
+        existing.stack_count = 3;
+        existing.current_values[0] = 30;
+        let reapplied = make_aura(guid(1), 20, Some(5_000));
+
+        existing.refresh_with(&reapplied);
+
+        assert_eq!(existing.base_value(), 20);
+        assert_eq!(existing.current_value(), 60); // 20 * 3 stacks
+    }
+
+    // --- can_be_refreshed_by: SpellAuraHolder::CanBeRefreshedBy (SpellAuras.cpp:380-394) ---
+
+    #[test]
+    fn can_be_refreshed_by_same_caster_no_stacks_no_charges() {
+        let aura = make_aura(guid(1), 10, Some(5_000));
+        assert!(aura.can_be_refreshed_by(guid(1)));
+    }
+
+    #[test]
+    fn can_be_refreshed_by_false_for_different_caster() {
+        let aura = make_aura(guid(1), 10, Some(5_000));
+        assert!(!aura.can_be_refreshed_by(guid(2)));
+    }
+
+    #[test]
+    fn can_be_refreshed_by_false_when_stackable() {
+        // C++: `if (m_spellProto->StackAmount) return false;` — stackable auras go through
+        // ModStackAmount instead of a plain refresh.
+        let mut aura = make_aura(guid(1), 10, Some(5_000));
+        aura.max_stack_count = 5;
+        assert!(!aura.can_be_refreshed_by(guid(1)));
+    }
+
+    #[test]
+    fn can_be_refreshed_by_false_when_has_charges() {
+        // C++: `if (m_spellProto->procCharges) return false;` — charge-based auras must not
+        // have their charge count reset by a plain refresh.
+        let mut aura = make_aura(guid(1), 10, Some(5_000));
+        aura.max_charges = 3;
+        aura.charges = 3;
+        assert!(!aura.can_be_refreshed_by(guid(1)));
+    }
+
+    // --- refresh_duration (existing helper, same-caster non-stacked refresh path) ---
+
+    #[test]
+    fn refresh_duration_resets_to_stored_max_and_clears_ticks() {
+        let mut aura = make_aura(guid(1), 10, Some(5_000));
+        aura.duration_ms = Some(100);
+        aura.ticks_applied = 2;
+        aura.periodic_timer_ms = 500;
+
+        aura.refresh_duration();
+
+        assert_eq!(aura.duration_ms, Some(5_000));
+        assert_eq!(aura.ticks_applied, 0);
+        assert_eq!(aura.periodic_timer_ms, 0);
+    }
+
+    // --- add_stack / consume_charge / is_expired sanity (existing behavior) ---
+
+    #[test]
+    fn add_stack_caps_at_max_and_scales_current_value() {
+        let mut aura = make_aura(guid(1), 10, Some(5_000));
+        aura.max_stack_count = 2;
+
+        assert!(aura.add_stack());
+        assert_eq!(aura.stack_count, 2);
+        assert_eq!(aura.current_value(), 20);
+
+        assert!(!aura.add_stack()); // already at max
+        assert_eq!(aura.stack_count, 2);
+    }
+
+    #[test]
+    fn consume_charge_unlimited_when_max_charges_zero() {
+        let mut aura = make_aura(guid(1), 10, Some(5_000));
+        assert_eq!(aura.max_charges, 0);
+        assert!(aura.consume_charge());
+        assert!(aura.consume_charge());
+    }
+
+    #[test]
+    fn consume_charge_depletes_and_reports_false_at_zero() {
+        let mut aura = make_aura(guid(1), 10, Some(5_000));
+        aura.max_charges = 2;
+        aura.charges = 2;
+
+        assert!(aura.consume_charge()); // 2 -> 1, charges remain
+        assert!(!aura.consume_charge()); // 1 -> 0, depleted
+    }
+
+    #[test]
+    fn is_expired_only_when_duration_hits_zero() {
+        let mut aura = make_aura(guid(1), 10, Some(5_000));
+        assert!(!aura.is_expired());
+        aura.duration_ms = Some(0);
+        assert!(aura.is_expired());
+        aura.duration_ms = None;
+        assert!(!aura.is_expired()); // permanent never expires
     }
 }

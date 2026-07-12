@@ -721,10 +721,22 @@ pub fn spell_base_damage_bonus_done(school_mask: u32, caster_guid: ObjectGuid, w
         .player
         .manager()
         .with_player(caster_guid, |player| {
-            let mut benefit = player
-                .auras
-                .container
-                .get_total_aura_modifier_by_misc_mask(AURA_MOD_DAMAGE_DONE, school_mask);
+            // Flat damage-done auras matching school mask, excluding wand-only auras
+            // (EquippedItemClass == -1 && EquippedItemInventoryTypeMask == 0), matching
+            // SpellCaster::SpellBaseDamageBonusDone's mDamageDone loop.
+            let mut benefit = 0i32;
+            for aura in player.auras.container.get_auras_by_type(AURA_MOD_DAMAGE_DONE) {
+                if (aura.misc_value as u32 & school_mask) == 0 {
+                    continue;
+                }
+                let aura_spell = world.managers.spell_mgr.get(aura.spell_id);
+                let is_generic_item = aura_spell
+                    .as_deref()
+                    .map_or(true, |s| s.equipped_item_class == -1 && s.equipped_item_inventory_type_mask == 0);
+                if is_generic_item {
+                    benefit += aura.current_value();
+                }
+            }
 
             // Damage bonus from stats (spirit in 1.12)
             let stat_auras = player
@@ -1590,6 +1602,106 @@ fn send_spell_heal_log(
         .managers
         .broadcast_mgr
         .broadcast_nearby(caster_guid, &packet, true);
+}
+
+/// Stochastic rounding of a float to an integer (faithful `rand_dither`).
+///
+/// Preserves fractional expectation: `2.3` rounds down to `2` 70% of the time and up
+/// to `3` 30% of the time, rather than always truncating or always rounding.
+fn rand_dither(v: f32) -> i32 {
+    use rand::Rng;
+    let frac = rand::thread_rng().gen_range(0.0..1.0);
+    let magnitude = (v.abs() + frac).floor();
+    if v < 0.0 {
+        -(magnitude as i32)
+    } else {
+        magnitude as i32
+    }
+}
+
+/// Extra "done" bonus added to a school-absorb shield's magnitude on real apply.
+/// Faithful `Aura::HandleSchoolAbsorb` (apply branch only; the C++ side does nothing
+/// on remove).
+///
+/// Certain absorb shields (Power Word: Shield, Frost/Fire Ward, Shadow Ward) get a
+/// flat 10% bonus from the caster's +healing (PW:S) or +spell damage (wards) for the
+/// aura's school, scaled by the caster's level-downranking penalty and then
+/// stochastically rounded (`rand_dither`) to avoid always favoring one side of the
+/// fraction. Returns 0 for spells that don't match one of the hardcoded family/mask
+/// checks.
+pub fn school_absorb_bonus_done(caster_guid: ObjectGuid, spell_proto: &SpellEntry, world: &World) -> i32 {
+    const CF_PRIEST_POWER_WORD_SHIELD: u64 = 1 << 0;
+    const CF_MAGE_FIRE_WARD: u64 = 1 << 3;
+    const CF_MAGE_FROST_WARD: u64 = 1 << 8;
+    const SPELLFAMILY_PRIEST: u32 = 6;
+    const SPELLFAMILY_WARLOCK: u32 = 5;
+    const SPELL_ICON_SHADOW_WARD: u32 = 207;
+    const CATEGORY_SHADOW_WARD: u32 = 56;
+
+    let school_mask = 1u32 << spell_proto.school;
+
+    let mut done_actual_benefit = if spell_proto.spell_family_name == SPELLFAMILY_PRIEST
+        && (spell_proto.spell_family_flags & CF_PRIEST_POWER_WORD_SHIELD) != 0
+    {
+        // +10% from +healing bonus
+        spell_base_healing_bonus_done(school_mask, caster_guid, world) * 0.1
+    } else if spell_proto.spell_family_name == SPELLFAMILY_MAGE
+        && (spell_proto.spell_family_flags & (CF_MAGE_FIRE_WARD | CF_MAGE_FROST_WARD)) != 0
+    {
+        // +10% from +spell damage bonus
+        spell_base_damage_bonus_done(school_mask, caster_guid, world) as f32 * 0.1
+    } else if spell_proto.spell_family_name == SPELLFAMILY_WARLOCK
+        && spell_proto.spell_icon_id == SPELL_ICON_SHADOW_WARD
+        && spell_proto.category == CATEGORY_SHADOW_WARD
+    {
+        // +10% from +spell damage bonus
+        spell_base_damage_bonus_done(school_mask, caster_guid, world) as f32 * 0.1
+    } else {
+        0.0
+    };
+
+    done_actual_benefit *=
+        crate::game::player::spells::effects::calculate_level_penalty(spell_proto.spell_level);
+
+    rand_dither(done_actual_benefit)
+}
+
+/// Applies the caster's `SPELLMOD_RESIST_MISS_CHANCE` spell modifiers to a reflect
+/// chance value. Faithful `Aura::HandleReflectSpellsSchool` (real apply/remove only).
+///
+/// The C++ version calls `Player::ApplySpellMod` in-place on `m_modifier.m_amount`,
+/// letting talents/items that boost "resist miss chance" scale this aura's own
+/// reflect % up or down. Returns the adjusted amount (base_amount + spellmod delta).
+pub fn reflect_spells_school_bonus(
+    caster_guid: ObjectGuid,
+    spell_id: u32,
+    base_amount: i32,
+    world: &World,
+) -> i32 {
+    if !caster_guid.is_player() {
+        return base_amount;
+    }
+
+    let spell_proto = world.managers.spell_mgr.get(spell_id);
+    let (family_name, family_flags) = spell_proto
+        .as_deref()
+        .map(|s| (s.spell_family_name, s.spell_family_flags))
+        .unwrap_or((0, 0));
+
+    world
+        .systems
+        .player
+        .manager()
+        .with_player(caster_guid, |player| {
+            crate::game::player::spells::modifiers::apply_spell_modifiers_to_value(
+                &player.spells.spell_modifiers,
+                SpellModOp::ResistMissChance,
+                base_amount,
+                family_name,
+                family_flags,
+            )
+        })
+        .unwrap_or(base_amount)
 }
 
 #[cfg(test)]

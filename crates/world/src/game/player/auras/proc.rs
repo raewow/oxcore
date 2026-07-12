@@ -155,6 +155,61 @@ pub fn is_spell_proc_event_can_triggered_by(
     false
 }
 
+/// Whether a single proc-type aura may fire for the given hit (MaNGOS `Aura::CanProcFrom`).
+///
+/// Distinct from [`is_spell_proc_event_can_triggered_by`] (MaNGOS `SpellMgr::IsSpellProcEventCanTriggeredBy`,
+/// which gates the whole holder once); this re-checks per-aura against the *triggering* spell's
+/// class mask, called once per effect index from the proc-processing loop
+/// (MaNGOS `Unit::HandleTriggers`).
+///
+/// - `affect_mask`: `SpellMgr::GetSpellAffectMask(auraSpellId, effIndex)` — the aura's own
+///   effect class mask (`spell_affect` table / `EffectItemType`), falling back to the aura
+///   spell's `spell_proc_event.spellFamilyMask[effIndex]` when the affect mask is zero (the
+///   caller is expected to have already applied that fallback, since neither table is modeled
+///   as a first-class lookup here yet).
+/// - `event_proc_ex`: the *aura's own* configured `spell_proc_event.procEx` (`PROC_EX_NONE` if
+///   the aura has no custom entry) — note this is intentionally NOT the triggering event's
+///   procEx; that's `proc_ex`.
+/// - `proc_ex`: the actual combat event's hit-outcome flags.
+/// - `active`: whether the proc-causing event carried non-zero damage/healing.
+/// - `use_class_mask`: caller's `!spellProcEvent->schoolMask` (i.e. "no school mask defined on
+///   the holder's proc-event entry, so fall through to per-effect class-mask matching").
+/// - `spell_family_flags`: the *triggering* spell's `SpellFamilyFlags`, checked against
+///   `affect_mask` when a class mask is in effect.
+pub fn can_proc_from(
+    affect_mask: u64,
+    event_proc_ex: u32,
+    proc_ex: u32,
+    active: bool,
+    use_class_mask: bool,
+    spell_family_flags: u64,
+) -> bool {
+    use proc_flags_ex as pex;
+
+    if !use_class_mask || affect_mask == 0 {
+        if event_proc_ex & pex::EX_TRIGGER_ALWAYS == 0 {
+            if event_proc_ex == pex::NONE {
+                // No extra req: only for active (damage/healing present) and hit/crit.
+                return (proc_ex & (pex::NORMAL_HIT | pex::CRITICAL_HIT)) != 0 && active;
+            } else {
+                // Passive spells can't trigger if hit required, unless procExtra carries a
+                // non-active (resist/reflect/immune/evade/etc.) outcome too.
+                if (event_proc_ex & (pex::NORMAL_HIT | pex::CRITICAL_HIT) & proc_ex) != 0
+                    && !active
+                    && (event_proc_ex & pex::NO_DAMAGE_MASK & proc_ex) == 0
+                {
+                    return false;
+                }
+            }
+        }
+        true
+    } else {
+        // SpellFamilyName itself is checked once for the whole holder elsewhere
+        // (`is_spell_proc_event_can_triggered_by`); here it's purely the class mask bits.
+        (affect_mask & spell_family_flags) != 0
+    }
+}
+
 /// The caster-side proc flag for completing a spell cast (MaNGOS `m_procAttacker`,
 /// `Spell::prepareDataForTriggerSystem`). Picks by damage class and polarity; the swing/trap/
 /// periodic refinements are omitted (handled where those flags matter).
@@ -915,5 +970,103 @@ mod tests {
         assert!(!can_trigger(Some(&ev), aura, proc_flags_ex::NORMAL_HIT));
         ev.school_mask = 0x04; // now matches
         assert!(can_trigger(Some(&ev), aura, proc_flags_ex::NORMAL_HIT));
+    }
+
+    #[test]
+    fn can_proc_from_no_mask_requires_active_hit_or_crit() {
+        // No class mask, no extra req: needs active + (hit or crit).
+        assert!(can_proc_from(
+            0,
+            proc_flags_ex::NONE,
+            proc_flags_ex::NORMAL_HIT,
+            true,
+            true,
+            0
+        ));
+        assert!(!can_proc_from(
+            0,
+            proc_flags_ex::NONE,
+            proc_flags_ex::NORMAL_HIT,
+            false, // not active -> rejected
+            true,
+            0
+        ));
+        assert!(!can_proc_from(
+            0,
+            proc_flags_ex::NONE,
+            proc_flags_ex::MISS,
+            true,
+            true,
+            0
+        ));
+    }
+
+    #[test]
+    fn can_proc_from_ex_trigger_always_bypasses_active_check() {
+        assert!(can_proc_from(
+            0,
+            proc_flags_ex::EX_TRIGGER_ALWAYS,
+            proc_flags_ex::MISS,
+            false,
+            true,
+            0
+        ));
+    }
+
+    #[test]
+    fn can_proc_from_passive_extra_req_rejects_inactive_hit_without_avoidance() {
+        // event_proc_ex has a custom requirement (CRITICAL_HIT); actual event is a non-active
+        // crit with no avoidance flags set -> passive spell can't trigger.
+        assert!(!can_proc_from(
+            0,
+            proc_flags_ex::CRITICAL_HIT,
+            proc_flags_ex::CRITICAL_HIT,
+            false,
+            true,
+            0
+        ));
+        // Same, but the event also carries a resist flag (non-active avoidance outcome) -> allowed.
+        assert!(can_proc_from(
+            0,
+            proc_flags_ex::CRITICAL_HIT,
+            proc_flags_ex::CRITICAL_HIT | proc_flags_ex::RESIST,
+            false,
+            true,
+            0
+        ));
+    }
+
+    #[test]
+    fn can_proc_from_class_mask_checks_family_flags() {
+        // useClassMask true and a non-zero affect mask -> bitwise AND against SpellFamilyFlags.
+        assert!(can_proc_from(
+            0x4,
+            proc_flags_ex::NONE,
+            proc_flags_ex::NORMAL_HIT,
+            true,
+            true,
+            0x4
+        ));
+        assert!(!can_proc_from(
+            0x4,
+            proc_flags_ex::NONE,
+            proc_flags_ex::NORMAL_HIT,
+            true,
+            true,
+            0x1
+        ));
+    }
+
+    #[test]
+    fn can_proc_from_use_class_mask_false_ignores_mask() {
+        // useClassMask=false always falls into the no-mask branch even with a non-zero mask.
+        assert!(can_proc_from(
+            0x4,
+            proc_flags_ex::NONE,
+            proc_flags_ex::NORMAL_HIT,
+            true,
+            false,
+            0x1 // would fail the class-mask AND, but shouldn't be reached
+        ));
     }
 }
