@@ -26,8 +26,13 @@
 //! Apply Cooldown + GCD
 //! ```
 
+pub mod ammo;
 pub mod caster;
+pub mod channeled_holders;
+pub mod channel_visual;
 pub mod cooldowns;
+pub mod cast_pointers;
+pub mod delayed;
 pub mod diminishing;
 pub mod effects;
 pub mod hit;
@@ -37,6 +42,7 @@ pub mod state;
 pub mod system;
 pub mod target_info;
 pub mod targets;
+pub mod threat_bonus;
 pub mod validation;
 
 // Re-exports for convenience

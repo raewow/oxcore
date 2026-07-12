@@ -1,0 +1,760 @@
+//! Bonus-flat threat application per target (MaNGOS `Spell::HandleThreatSpells`).
+//!
+//! Reads the `spell_threat` flat bonus for the cast spell and, for every hit target
+//! in `m_UniqueTargetInfo`, either distributes that bonus to mobs hostile toward the
+//! target (beneficial spells) or adds it directly to the target's threat list
+//! (harmful spells). The actual threat-system write is deferred (see TODO); this
+//! module resolves the per-target plan faithfully.
+
+use crate::game::player::spells::hit::SpellHitOutcome;
+use crate::game::player::spells::target_info::TargetInfo;
+use crate::game::spell::manager::SpellThreatEntry;
+use crate::World;
+use oxcore_shared::protocol::ObjectGuid;
+
+/// Spell polarity derived from intersecting the negative-effect mask with the
+/// active-effect mask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Polarity {
+    /// No overlap: beneficial spell — bonus threat is distributed to mobs hostile
+    /// toward the target (healing-style assist threat).
+    Positive,
+    /// Negative mask covers every active effect: harmful spell — bonus threat goes
+    /// directly onto the target.
+    Negative,
+    /// Partial overlap only: mixed positive/negative spell — no bonus threat is
+    /// applied to any target.
+    Mixed,
+}
+
+/// `m_spellInfo->Effect[i]`-derived active-effect bitmask: bit `i` set iff
+/// `effects[i] != 0`, for `i` in `0..MAX_EFFECT_INDEX` (3 effects).
+pub fn build_effect_mask(effects: &[u32; 3]) -> u8 {
+    let mut mask = 0u8;
+    for i in 0..3 {
+        if effects[i] != 0 {
+            mask |= 1 << i;
+        }
+    }
+    mask
+}
+
+/// `SpellThreatEntry::CanCauseThreatOnMask(mask)` =
+/// `((~inverseEffectMask) & mask) != 0`. A target's own effect mask qualifies when
+/// at least one of its effect bits is outside the threat entry's inverse mask.
+pub fn can_cause_threat_on_mask(inverse_effect_mask: u32, mask: u8) -> bool {
+    ((!inverse_effect_mask) & (mask as u32)) != 0
+}
+
+/// Decide a spell's threat polarity from the negative-effect mask and the active
+/// effect mask.
+///
+/// - `Negative` when `negative & effect == effect` (the negative mask covers every
+///   active effect);
+/// - `Mixed` when `negative & effect != 0` but does not cover all active effects;
+/// - `Positive` when there is no overlap.
+pub fn spell_polarity(negative_effect_mask: u8, effect_mask: u8) -> Polarity {
+    let overlap = negative_effect_mask & effect_mask;
+    if overlap == 0 {
+        Polarity::Positive
+    } else if overlap == effect_mask {
+        Polarity::Negative
+    } else {
+        Polarity::Mixed
+    }
+}
+
+/// One planned flat-threat application to a single target. The actual write to the
+/// threat system is deferred — see the TODO in [`handle_threat_spells`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThreatApplication {
+    pub target_guid: ObjectGuid,
+    pub amount: f32,
+    pub positive: bool,
+}
+
+/// Resolve a spell's `effect` array from the world's `SpellManager`, defaulting to
+/// an all-zero array when the spell is unknown (matches the C++ reading
+/// `m_spellInfo->Effect[i]` off the loaded spell proto).
+fn spell_effects(spell_id: u32, world: &World) -> [u32; 3] {
+    world
+        .managers
+        .spell_mgr
+        .get(spell_id)
+        .map(|entry| entry.effect)
+        .unwrap_or([0; 3])
+}
+
+/// `m_casterUnit != null` — the caster resolves to a loaded player or creature.
+fn caster_exists(caster_guid: ObjectGuid, world: &World) -> bool {
+    if caster_guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |_| ())
+            .is_some()
+    } else if caster_guid.is_creature() || caster_guid.is_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(caster_guid, |_| ())
+            .is_some()
+    } else {
+        false
+    }
+}
+
+/// Resolve a non-caster target via `ObjectAccessor::GetUnit` — present in the world
+/// as a loaded unit. The caster target is always considered resolved (it is
+/// `m_casterUnit` itself).
+fn target_resolved(target_guid: ObjectGuid, is_caster_self: bool, world: &World) -> bool {
+    if is_caster_self {
+        return true;
+    }
+    if target_guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |_| ())
+            .is_some()
+    } else if target_guid.is_creature() || target_guid.is_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |_| ())
+            .is_some()
+    } else {
+        false
+    }
+}
+
+/// `Unit::CanHaveThreatList()` — only creatures carry a threat list; players never do.
+fn can_have_threat_list(target_guid: ObjectGuid, world: &World) -> bool {
+    target_guid.is_creature()
+        && world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |_| ())
+            .is_some()
+}
+
+/// Faithful port of `Spell::HandleThreatSpells`.
+///
+/// Builds the per-target flat-threat plan for this cast and returns it as a
+/// [`ThreatApplication`] list (positive = assist/threat-distribute path, negative =
+/// direct-add path). The actual write to the threat system is intentionally not
+/// performed here.
+///
+/// `negative_effect_mask` carries `m_negativeEffectMask`; it is not yet a field on
+/// `ActiveCast`/`TargetInfo`, so it is threaded in as a parameter.
+/// `threat_entry`/`inverse_effect_mask` stand in for
+/// `sSpellMgr.GetSpellThreatEntry(id)` and its `inverseEffectMask` member — the
+/// `SpellManager` getter is not exposed yet.
+// TODO: replace the `threat_entry`/`inverse_effect_mask` params with a
+// `world.managers.spell_mgr.get_spell_threat_entry(spell_id)` call once the getter
+// is added (and fold `inverse_effect_mask` onto `SpellThreatEntry`).
+// TODO: wire the returned plan to `ThreatManager::add_threat` (negative path) and
+// `HostileRefManager::threat_assist` (positive path) once those are plumbed through
+// the world/managers.
+#[allow(dead_code)]
+pub fn handle_threat_spells(
+    caster_guid: ObjectGuid,
+    spell_id: u32,
+    negative_effect_mask: u8,
+    targets: &[TargetInfo],
+    threat_entry: Option<&SpellThreatEntry>,
+    inverse_effect_mask: u32,
+    world: &World,
+) -> Vec<ThreatApplication> {
+    if !caster_exists(caster_guid, world) {
+        return Vec::new();
+    }
+    if targets.is_empty() {
+        return Vec::new();
+    }
+
+    let Some(threat_entry) = threat_entry else {
+        return Vec::new();
+    };
+    if threat_entry.flat == 0 {
+        return Vec::new();
+    }
+
+    let threat = threat_entry.flat as f32;
+
+    let effect_mask = build_effect_mask(&spell_effects(spell_id, world));
+    let polarity = spell_polarity(negative_effect_mask, effect_mask);
+    if polarity == Polarity::Mixed {
+        tracing::debug!(
+            target: "spell_cast",
+            spell_id,
+            effect_mask,
+            negative_effect_mask,
+            "HandleThreatSpells: mixed positive/negative spell — skipping bonus threat",
+        );
+        return Vec::new();
+    }
+    let positive = polarity == Polarity::Positive;
+
+    let mut applications = Vec::new();
+    for ihit in targets {
+        if !ihit.miss_condition.is_hit() {
+            continue;
+        }
+        if !can_cause_threat_on_mask(inverse_effect_mask, ihit.effect_mask) {
+            continue;
+        }
+        let is_caster_self = ihit.target_guid == caster_guid;
+        if !target_resolved(ihit.target_guid, is_caster_self, world) {
+            continue;
+        }
+
+        if positive {
+            // Positive path: `GetHostileRefManager().threatAssist(caster, threat, spell)`
+            // distributes the flat bonus to mobs hostile toward the target.
+            applications.push(ThreatApplication {
+                target_guid: ihit.target_guid,
+                amount: threat,
+                positive: true,
+            });
+        } else {
+            // Negative path: skip targets that cannot carry a threat list, then
+            // `AddThreat(caster, threat, false, school_mask, spell)`.
+            if !can_have_threat_list(ihit.target_guid, world) {
+                continue;
+            }
+            applications.push(ThreatApplication {
+                target_guid: ihit.target_guid,
+                amount: threat,
+                positive: false,
+            });
+        }
+    }
+
+    tracing::debug!(
+        target: "spell_cast",
+        spell_id,
+        threat,
+        kind = if positive { "assisting" } else { "harming" },
+        count = applications.len(),
+        "HandleThreatSpells applied flat bonus threat",
+    );
+    applications
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::dbc::structures::SpellEntry;
+    use crate::game::creature::creature::Creature;
+    use crate::game::creature::manager::CreatureTemplate;
+    use crate::game::player::player::Player;
+    use oxcore_shared::database::Databases;
+    use oxcore_shared::protocol::Position;
+    use sqlx::mysql::MySqlPoolOptions;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn lazy_pool() -> sqlx::MySqlPool {
+        MySqlPoolOptions::new()
+            .connect_lazy("mysql://test:test@localhost/test")
+            .expect("lazy pool should be constructible")
+    }
+
+    fn test_world() -> World {
+        let databases = Arc::new(Databases {
+            world: lazy_pool(),
+            character: lazy_pool(),
+            auth: lazy_pool(),
+            logs: lazy_pool(),
+        });
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    fn threat_entry(flat: i32) -> SpellThreatEntry {
+        SpellThreatEntry {
+            flat,
+            pct: 0.0,
+            ap_bonus: 0.0,
+        }
+    }
+
+    fn spell_with_effects(id: u32, effects: [u32; 3]) -> SpellEntry {
+        let mut entry = base_spell(id);
+        entry.effect = effects;
+        entry
+    }
+
+    fn base_spell(id: u32) -> SpellEntry {
+        SpellEntry {
+            id,
+            name: format!("S{id}"),
+            rank_text: String::new(),
+            school: 0,
+            category: 0,
+            dispel: 0,
+            mechanic: 0,
+            attributes: 0,
+            attributes_ex: 0,
+            attributes_ex2: 0,
+            attributes_ex3: 0,
+            attributes_ex4: 0,
+            stances: 0,
+            stances_not: 0,
+            targets: 0,
+            target_creature_type: 0,
+            requires_spell_focus: 0,
+            caster_aura_state: 0,
+            target_aura_state: 0,
+            casting_time_index: 0,
+            recovery_time: 0,
+            category_recovery_time: 0,
+            interrupt_flags: 0,
+            aura_interrupt_flags: 0,
+            channel_interrupt_flags: 0,
+            proc_flags: 0,
+            proc_chance: 0,
+            proc_charges: 0,
+            max_level: 0,
+            base_level: 0,
+            spell_level: 0,
+            duration_index: 0,
+            power_type: 0,
+            mana_cost: 0,
+            mana_cost_per_level: 0,
+            mana_per_second: 0,
+            mana_per_second_per_level: 0,
+            range_index: 0,
+            speed: 0.0,
+            stack_amount: 0,
+            totem: [0; 2],
+            reagent: [0; 8],
+            reagent_count: [0; 8],
+            equipped_item_class: 0,
+            equipped_item_sub_class_mask: 0,
+            equipped_item_inventory_type_mask: 0,
+            effect: [0; 3],
+            effect_die_sides: [0; 3],
+            effect_base_dice: [0; 3],
+            effect_dice_per_level: [0.0; 3],
+            effect_real_points_per_level: [0.0; 3],
+            effect_base_points: [0; 3],
+            effect_bonus_coefficient: [0.0; 3],
+            effect_mechanic: [0; 3],
+            effect_implicit_target_a: [0; 3],
+            effect_implicit_target_b: [0; 3],
+            effect_radius_index: [0; 3],
+            effect_apply_aura_name: [0; 3],
+            effect_amplitude: [0; 3],
+            effect_multiple_value: [0.0; 3],
+            effect_chain_target: [0; 3],
+            effect_item_type: [0; 3],
+            effect_misc_value: [0; 3],
+            effect_trigger_spell: [0; 3],
+            effect_points_per_combo_point: [0.0; 3],
+            spell_visual: 0,
+            spell_icon_id: 0,
+            active_icon_id: 0,
+            spell_priority: 0,
+            min_target_level: 0,
+            mana_cost_percentage: 0,
+            start_recovery_category: 0,
+            start_recovery_time: 0,
+            max_target_level: 0,
+            spell_family_name: 0,
+            spell_family_flags: 0,
+            max_affected_targets: 0,
+            dmg_class: 0,
+            prevention_type: 0,
+            custom: 0,
+            internal: 0,
+            allowed_target_mask: 0,
+            script_id: 0,
+            dmg_multiplier: [1.0; 3],
+        }
+    }
+
+    fn creature_template(entry: u32) -> CreatureTemplate {
+        CreatureTemplate {
+            entry,
+            name: format!("C{entry}"),
+            subname: None,
+            min_level: 50,
+            max_level: 50,
+            faction: 1,
+            model_id_1: 1,
+            model_id_2: 0,
+            model_id_3: 0,
+            model_id_4: 0,
+            scale: 1.0,
+            npc_flags: 0,
+            unit_flags: 0,
+            static_flags1: 0,
+            flags_extra: 0,
+            creature_type: 1,
+            unit_class: 1,
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            damage_variance: 0.0,
+            attack_time: 2000,
+            rank: 0,
+            gossip_menu_id: 0,
+            vendor_id: 0,
+            trainer_id: 0,
+            trainer_type: 0,
+            spells: [0; 4],
+        }
+    }
+
+    fn creature(guid: ObjectGuid, entry: u32) -> Creature {
+        Creature::new(
+            guid,
+            entry,
+            1,
+            Position {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                o: 0.0,
+            },
+            1,
+            0,
+            &creature_template(entry),
+            1,
+            None,
+        )
+    }
+
+    fn add_player(world: &World, guid: ObjectGuid) {
+        world.managers.player_mgr.add_player(
+            Player::new(guid, format!("P{}", guid.counter()), 1, 0, 0, 60, 1, 1, 0),
+            guid.counter(),
+        );
+    }
+
+    fn add_creature(world: &World, guid: ObjectGuid, entry: u32) {
+        world.managers.creature_mgr.add_template(creature_template(entry));
+        world
+            .managers
+            .creature_mgr
+            .add_creature_for_test(creature(guid, entry));
+    }
+
+    fn target_info(guid: ObjectGuid, effect_mask: u8) -> TargetInfo {
+        let mut ti = TargetInfo::new(guid, effect_mask);
+        ti.miss_condition = SpellHitOutcome::Hit;
+        ti
+    }
+
+    // === pure-helper tests (no DB) ===
+
+    #[test]
+    fn build_effect_mask_sets_bit_per_nonzero_effect() {
+        assert_eq!(build_effect_mask(&[0, 0, 0]), 0b000);
+        assert_eq!(build_effect_mask(&[2, 0, 0]), 0b001);
+        assert_eq!(build_effect_mask(&[0, 36, 0]), 0b010);
+        assert_eq!(build_effect_mask(&[0, 0, 6]), 0b100);
+        assert_eq!(build_effect_mask(&[2, 36, 6]), 0b111);
+    }
+
+    #[test]
+    fn can_cause_threat_on_mask_matches_mangos_formula() {
+        // inverse=0 → ~0 is all-ones, any nonzero mask qualifies.
+        assert!(can_cause_threat_on_mask(0, 0b001));
+        assert!(can_cause_threat_on_mask(0, 0b111));
+        // A zero mask never qualifies.
+        assert!(!can_cause_threat_on_mask(0, 0));
+        // inverse covers the mask entirely → disqualified.
+        assert!(!can_cause_threat_on_mask(0b111, 0b111));
+        // Partial inverse: a bit outside the inverse mask still qualifies.
+        assert!(can_cause_threat_on_mask(0b001, 0b010));
+        assert!(can_cause_threat_on_mask(0b001, 0b011));
+        // All of the mask's bits are inside the inverse mask → disqualified.
+        assert!(!can_cause_threat_on_mask(0b011, 0b010));
+    }
+
+    #[test]
+    fn spell_polarity_positive_when_no_overlap() {
+        assert_eq!(spell_polarity(0b000, 0b111), Polarity::Positive);
+        assert_eq!(spell_polarity(0b100, 0b011), Polarity::Positive);
+    }
+
+    #[test]
+    fn spell_polarity_negative_when_full_cover() {
+        assert_eq!(spell_polarity(0b111, 0b111), Polarity::Negative);
+        assert_eq!(spell_polarity(0b011, 0b011), Polarity::Negative);
+        // Extra negative bits beyond the active effects still count as full cover.
+        assert_eq!(spell_polarity(0b111, 0b001), Polarity::Negative);
+    }
+
+    #[test]
+    fn spell_polarity_mixed_when_partial_overlap() {
+        assert_eq!(spell_polarity(0b001, 0b011), Polarity::Mixed);
+        assert_eq!(spell_polarity(0b011, 0b101), Polarity::Mixed);
+    }
+
+    // === world-coupled plan tests (lazy pool, no DB connection) ===
+
+    #[tokio::test]
+    async fn empty_targets_returns_empty() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        let apps = handle_threat_spells(
+            caster,
+            9001,
+            0,
+            &[],
+            Some(&threat_entry(50)),
+            0,
+            &world,
+        );
+        assert!(apps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn caster_null_returns_empty() {
+        let world = test_world();
+        // Caster guid never registered → `m_casterUnit` is null.
+        let caster = ObjectGuid::new_player(99);
+        let target = ObjectGuid::new_creature(1, 1);
+        let apps = handle_threat_spells(
+            caster,
+            9002,
+            0,
+            &[target_info(target, 0b001)],
+            Some(&threat_entry(50)),
+            0,
+            &world,
+        );
+        assert!(apps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_threat_entry_returns_empty() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        let apps = handle_threat_spells(
+            caster,
+            9003,
+            0,
+            &[target_info(ObjectGuid::new_creature(1, 1), 0b001)],
+            None,
+            0,
+            &world,
+        );
+        assert!(apps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn zero_flat_threat_returns_empty() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        let apps = handle_threat_spells(
+            caster,
+            9004,
+            0,
+            &[target_info(ObjectGuid::new_creature(1, 1), 0b001)],
+            Some(&threat_entry(0)),
+            0,
+            &world,
+        );
+        assert!(apps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn mixed_spell_skips_bonus_threat_entirely() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        // Two active effects (bits 0 and 1); only bit 0 is negative → mixed.
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9100, [2, 36, 0]));
+        let t1 = ObjectGuid::new_creature(1, 1);
+        let t2 = ObjectGuid::new_creature(1, 2);
+        add_creature(&world, t1, 1);
+        add_creature(&world, t2, 1);
+
+        let apps = handle_threat_spells(
+            caster,
+            9100,
+            0b001,
+            &[target_info(t1, 0b011), target_info(t2, 0b011)],
+            Some(&threat_entry(50)),
+            0,
+            &world,
+        );
+        assert!(apps.is_empty(), "mixed spell must not apply any bonus threat");
+    }
+
+    #[tokio::test]
+    async fn miss_condition_skip_excludes_target() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9200, [2, 0, 0]));
+        let hit_target = ObjectGuid::new_creature(1, 1);
+        let miss_target = ObjectGuid::new_creature(1, 2);
+        add_creature(&world, hit_target, 1);
+        add_creature(&world, miss_target, 1);
+
+        let mut missed = target_info(miss_target, 0b001);
+        missed.miss_condition = SpellHitOutcome::Miss;
+
+        let apps = handle_threat_spells(
+            caster,
+            9200,
+            0b001,
+            &[target_info(hit_target, 0b001), missed],
+            Some(&threat_entry(50)),
+            0,
+            &world,
+        );
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].target_guid, hit_target);
+        assert!(!apps[0].positive);
+        assert_eq!(apps[0].amount, 50.0);
+    }
+
+    #[tokio::test]
+    async fn negative_path_skips_player_targets_without_threat_list() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9300, [2, 0, 0]));
+        let creature_target = ObjectGuid::new_creature(1, 1);
+        let player_target = ObjectGuid::new_player(2);
+        add_creature(&world, creature_target, 1);
+        add_player(&world, player_target);
+
+        let apps = handle_threat_spells(
+            caster,
+            9300,
+            0b001,
+            &[
+                target_info(creature_target, 0b001),
+                target_info(player_target, 0b001),
+            ],
+            Some(&threat_entry(50)),
+            0,
+            &world,
+        );
+        // Only the creature target can carry a threat list.
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].target_guid, creature_target);
+        assert!(!apps[0].positive);
+    }
+
+    #[tokio::test]
+    async fn positive_path_applies_to_player_and_creature_targets() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        // Healing-style effect (36 = APPLY_AURA) with no negative bits → positive.
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9400, [36, 0, 0]));
+        let player_target = ObjectGuid::new_player(2);
+        let creature_target = ObjectGuid::new_creature(1, 1);
+        add_player(&world, player_target);
+        add_creature(&world, creature_target, 1);
+        // Caster-self is also a valid positive target.
+        let self_target = target_info(caster, 0b001);
+
+        let apps = handle_threat_spells(
+            caster,
+            9400,
+            0,
+            &[
+                target_info(player_target, 0b001),
+                target_info(creature_target, 0b001),
+                self_target,
+            ],
+            Some(&threat_entry(50)),
+            0,
+            &world,
+        );
+        assert_eq!(apps.len(), 3);
+        assert!(apps.iter().all(|a| a.positive && a.amount == 50.0));
+    }
+
+    #[tokio::test]
+    async fn can_cause_threat_on_mask_filter_excludes_disqualified_targets() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9500, [2, 0, 0]));
+        let qualifies = ObjectGuid::new_creature(1, 1);
+        let disqualified = ObjectGuid::new_creature(1, 2);
+        add_creature(&world, qualifies, 1);
+        add_creature(&world, disqualified, 1);
+
+        // inverse_effect_mask = 0b001 → a target whose effect mask is only bit 0 is
+        // fully inside the inverse mask (disqualified); bit 1 alone qualifies.
+        let apps = handle_threat_spells(
+            caster,
+            9500,
+            0b001,
+            &[
+                target_info(qualifies, 0b010),
+                target_info(disqualified, 0b001),
+            ],
+            Some(&threat_entry(50)),
+            0b001,
+            &world,
+        );
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].target_guid, qualifies);
+    }
+
+    #[tokio::test]
+    async fn unresolved_non_caster_target_is_skipped() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9600, [2, 0, 0]));
+        let present = ObjectGuid::new_creature(1, 1);
+        let absent = ObjectGuid::new_creature(1, 2);
+        add_creature(&world, present, 1);
+        // `absent` is never registered → ObjectAccessor::GetUnit returns null.
+
+        let apps = handle_threat_spells(
+            caster,
+            9600,
+            0b001,
+            &[target_info(present, 0b001), target_info(absent, 0b001)],
+            Some(&threat_entry(50)),
+            0,
+            &world,
+        );
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].target_guid, present);
+    }
+}

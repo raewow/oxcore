@@ -196,7 +196,7 @@ pub fn can_proc_from(
                 // non-active (resist/reflect/immune/evade/etc.) outcome too.
                 if (event_proc_ex & (pex::NORMAL_HIT | pex::CRITICAL_HIT) & proc_ex) != 0
                     && !active
-                    && (event_proc_ex & pex::NO_DAMAGE_MASK & proc_ex) == 0
+                    && (proc_ex & pex::NO_DAMAGE_MASK) == 0
                 {
                     return false;
                 }
