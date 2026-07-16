@@ -33,11 +33,10 @@ pub async fn effect_power_drain(input: &EffectInput, world: &World) -> Result<Ef
         .player
         .manager()
         .with_player_mut(target_guid, |player| {
-            let idx = power_type as usize;
-            let current = player.power.current[idx];
-            let drain = drain_amount.min(current);
-            player.power.current[idx] = current - drain;
-            drain
+            player
+                .power
+                .modify_power(power_type, -(drain_amount as i32))
+                .unsigned_abs()
         })
         .unwrap_or(0);
 
@@ -132,12 +131,11 @@ pub async fn effect_power_burn(input: &EffectInput, world: &World) -> Result<Eff
         .player
         .manager()
         .with_player_mut(target_guid, |player| {
-            let idx = power_type as usize;
-            let current = player.power.current[idx];
             // Burn up to the current amount
-            let burned = current;
-            player.power.current[idx] = 0;
-            burned
+            player
+                .power
+                .modify_power(power_type, -i32::MAX)
+                .unsigned_abs()
         })
         .unwrap_or(0);
 

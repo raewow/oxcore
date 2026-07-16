@@ -208,16 +208,19 @@ pub fn armor_from_agility(agility: f32) -> f32 {
 
 // === Mana Regen ===
 
-/// Mana regen per 5 seconds from spirit (class-specific)
+/// Mana regen per 5 seconds from spirit (class-specific).
+///
+/// The reference formulas produce mana per 2-second tick; convert their
+/// per-second result to MP5 because `calculate_mana_regen_rates` takes MP5.
 pub fn mana_regen_from_spirit(class: u8, spirit: f32) -> f32 {
-    match class {
-        CLASS_MAGE | CLASS_PRIEST | CLASS_WARLOCK => (spirit / 4.0 + 12.5).max(0.0),
-        CLASS_DRUID | CLASS_HUNTER | CLASS_PALADIN | CLASS_SHAMAN | CLASS_ROGUE => {
-            (spirit / 5.0 + 15.0).max(0.0)
-        }
-        CLASS_WARRIOR => (spirit * 1.26 - 22.6).max(0.0),
-        _ => 0.0,
-    }
+    let regen_per_two_seconds = match class {
+        CLASS_MAGE | CLASS_PRIEST => spirit / 4.0 + 12.5,
+        CLASS_DRUID | CLASS_HUNTER | CLASS_PALADIN | CLASS_WARLOCK => spirit / 5.0 + 15.0,
+        CLASS_SHAMAN => spirit / 5.0 + 17.0,
+        _ => return 0.0,
+    };
+
+    (regen_per_two_seconds * 2.5).max(0.0)
 }
 
 /// Final mana regeneration rates, expressed as mana per second.
@@ -320,6 +323,23 @@ mod tests {
 
         assert!((full - 17.0).abs() < 0.0001); // (50 * 1.2 / 5) + (25 / 5)
         assert!((interrupt - 8.6).abs() < 0.0001); // (50 * 1.2 / 5 * 0.3) + (25 / 5)
+    }
+
+    #[test]
+    fn test_mana_regen_from_spirit_matches_reference_class_rates() {
+        assert!((mana_regen_from_spirit(CLASS_SHAMAN, 100.0) - 92.5).abs() < 0.0001);
+        assert!((mana_regen_from_spirit(CLASS_WARLOCK, 100.0) - 87.5).abs() < 0.0001);
+        assert_eq!(mana_regen_from_spirit(CLASS_ROGUE, 100.0), 0.0);
+        assert_eq!(mana_regen_from_spirit(CLASS_WARRIOR, 100.0), 0.0);
+    }
+
+    #[test]
+    fn test_mage_mana_regen_from_spirit_is_reference_equivalent_per_second() {
+        let mage_mp5 = mana_regen_from_spirit(CLASS_MAGE, 100.0);
+        let (full_regen, interrupt_regen) = calculate_mana_regen_rates(mage_mp5, 1.0, 0.0, 0.0);
+
+        assert!((full_regen - 18.75).abs() < 0.0001);
+        assert_eq!(interrupt_regen, 0.0);
     }
 
     #[test]

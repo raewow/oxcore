@@ -98,7 +98,7 @@ pub struct SpellManager {
     spell_proc_events: DashMap<u32, SpellProcEventEntry>,
     spell_proc_item_enchant: HashMap<u32, f32>,
     spell_enchant_charges: HashMap<u32, u32>,
-    spell_threats: HashMap<u32, SpellThreatEntry>,
+    spell_threats: DashMap<u32, SpellThreatEntry>,
     spell_elixirs: HashMap<u32, u8>,
     spell_learn_skills: HashMap<u32, SpellLearnSkillNode>,
     spell_learn_spells: HashMap<u32, Vec<SpellLearnSpellNode>>,
@@ -121,7 +121,7 @@ impl SpellManager {
             spell_proc_events: DashMap::new(),
             spell_proc_item_enchant: HashMap::new(),
             spell_enchant_charges: HashMap::new(),
-            spell_threats: HashMap::new(),
+            spell_threats: DashMap::new(),
             spell_elixirs: HashMap::new(),
             spell_learn_skills: HashMap::new(),
             spell_learn_spells: HashMap::new(),
@@ -495,6 +495,17 @@ impl SpellManager {
     /// Get the custom proc-event configuration for a spell (`spell_proc_event` table), if any.
     pub fn get_proc_event(&self, spell_id: u32) -> Option<SpellProcEventEntry> {
         self.spell_proc_events.get(&spell_id).map(|r| r.clone())
+    }
+
+    /// Get the `spell_threat` flat/pct/AP bonus entry for a spell, if any
+    /// (`SpellMgr::GetSpellThreatEntry`). Consumed by `Spell::HandleThreatSpells`.
+    pub fn get_spell_threat_entry(&self, spell_id: u32) -> Option<SpellThreatEntry> {
+        self.spell_threats.get(&spell_id).map(|r| r.clone())
+    }
+
+    /// Insert a `spell_threat` entry (used by the loader and tests).
+    pub fn add_spell_threat(&self, spell_id: u32, entry: SpellThreatEntry) {
+        self.spell_threats.insert(spell_id, entry);
     }
 
     /// Get spell count

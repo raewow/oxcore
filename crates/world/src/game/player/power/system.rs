@@ -4,7 +4,7 @@
 
 use crate::game::broadcast_mgr::BroadcastManagerTrait;
 use crate::game::common::update_fields::*;
-use crate::game::player::auras::effects::AURA_MOD_CONFUSE;
+use crate::game::player::auras::effects::{AURA_MOD_CONFUSE, AURA_MOD_REGEN};
 use crate::game::player::manager::PlayerManager;
 use crate::game::player::Player;
 use crate::World;
@@ -128,7 +128,7 @@ impl PowerSystem {
     /// Process one regen tick for a player
     fn regen_tick(&self, guid: ObjectGuid, player: &mut Player, now: u64) {
         // Sync power max from stats (stats can change from gear/buffs at any time)
-        player.power.max[PowerType::Mana as usize] = player.stats.max_mana;
+        player.power.set_max(PowerType::Mana, player.stats.max_mana);
 
         let power = &mut player.power;
         let stats = &player.stats;
@@ -209,8 +209,18 @@ impl PowerSystem {
                     add_value =
                         regen::calculate_health_regen_per_tick(player.stats.spirit, player.level);
                     // TODO: multiply by MOD_HEALTH_REGEN_PERCENT aura total
-                    // TODO: multiply by 1.5 if not standing (player.stand_state != 0)
-                    // TODO: add MOD_REGEN food flat (scaled by periodictime fraction)
+                    // C++ IsStandingUp is true only for standing and dead units.
+                    if player.stand_state != 0 && player.stand_state != 7 {
+                        add_value *= 1.5;
+                    }
+                    // MOD_REGEN stores health restored per five seconds.
+                    add_value += 2.0
+                        * (player
+                            .auras
+                            .container
+                            .get_total_aura_modifier(AURA_MOD_REGEN)
+                            as f32
+                            / 5.0);
                 }
 
                 // Always-active combat regen bonus (SPELL_AURA_MOD_HEALTH_REGEN_IN_COMBAT).
@@ -537,6 +547,64 @@ mod tests {
         system.regen_tick(player.guid, &mut player, 0);
 
         assert_eq!(player.stats.health, 200);
+    }
+
+    #[test]
+    fn seated_player_gets_fifty_percent_more_spirit_health_regen() {
+        let system = PowerSystem::new(Arc::new(MockBroadcastManagerTrait::new()));
+        let mut player = warrior(60);
+        player.stats.health = 100;
+        player.stats.max_health = 1_000;
+        player.stats.spirit = 100;
+        player.stand_state = 1;
+
+        system.regen_tick(player.guid, &mut player, 0);
+
+        // Level 60: 100 spirit * 0.30 = 30; seated multiplier yields 45.
+        assert_eq!(player.stats.health, 145);
+    }
+
+    #[test]
+    fn flat_health_regen_aura_applies_out_of_combat_with_fractional_carry() {
+        let system = PowerSystem::new(Arc::new(MockBroadcastManagerTrait::new()));
+        let mut player = warrior(60);
+        player.stats.health = 100;
+        player.stats.max_health = 1_000;
+        player.auras.container.add_aura(Aura::new(
+            1,
+            player.guid,
+            0,
+            AURA_MOD_REGEN,
+            0,
+            2,
+            None,
+            0,
+            1,
+            0,
+            AuraFlags::default(),
+        ));
+
+        for _ in 0..5 {
+            system.regen_tick(player.guid, &mut player, 0);
+        }
+
+        // Two HP per five seconds is 0.8 HP per two-second tick, totaling four HP.
+        assert_eq!(player.stats.health, 104);
+    }
+
+    #[test]
+    fn regen_tick_syncs_mana_max_and_clamps_current_power() {
+        let system = PowerSystem::new(Arc::new(MockBroadcastManagerTrait::new()));
+        let mut player = warrior(60);
+        let mana_idx = PowerType::Mana as usize;
+        player.stats.max_mana = 100;
+        player.power.max[mana_idx] = 200;
+        player.power.current[mana_idx] = 150;
+
+        system.regen_tick(player.guid, &mut player, 0);
+
+        assert_eq!(player.power.max[mana_idx], 100);
+        assert_eq!(player.power.current[mana_idx], 100);
     }
 
     #[test]

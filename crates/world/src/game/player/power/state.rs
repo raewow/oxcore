@@ -222,6 +222,7 @@ impl PowerState {
 #[cfg(test)]
 mod tests {
     use super::{PowerState, PowerType};
+    use crate::game::player::power::regen::{MAX_ENERGY, MAX_FOCUS, MAX_HAPPINESS, MAX_RAGE};
 
     fn state(power_type: PowerType, current: u32, max: u32) -> PowerState {
         let mut state = PowerState::default();
@@ -269,5 +270,48 @@ mod tests {
         assert_eq!(state.get_current(PowerType::Energy), 100);
         assert_eq!(state.modify_power(PowerType::Energy, 50), 0);
         assert_eq!(state.get_current(PowerType::Energy), 100);
+    }
+
+    #[test]
+    fn set_power_type_resets_rage_and_energy() {
+        let mut state = PowerState::default();
+        state.current[PowerType::Rage as usize] = 300;
+        state.current[PowerType::Energy as usize] = 70;
+
+        state.set_power_type(PowerType::Rage);
+        assert_eq!(state.power_type, PowerType::Rage);
+        assert_eq!(state.get_max(PowerType::Rage), MAX_RAGE);
+        assert_eq!(state.get_current(PowerType::Rage), 0);
+
+        state.set_power_type(PowerType::Energy);
+        assert_eq!(state.power_type, PowerType::Energy);
+        assert_eq!(state.get_max(PowerType::Energy), MAX_ENERGY);
+        assert_eq!(state.get_current(PowerType::Energy), 0);
+    }
+
+    #[test]
+    fn set_power_type_fills_focus_and_happiness() {
+        let mut state = PowerState::default();
+
+        state.set_power_type(PowerType::Focus);
+        assert_eq!(state.get_max(PowerType::Focus), MAX_FOCUS);
+        assert_eq!(state.get_current(PowerType::Focus), MAX_FOCUS);
+
+        state.set_power_type(PowerType::Happiness);
+        assert_eq!(state.get_max(PowerType::Happiness), MAX_HAPPINESS);
+        assert_eq!(state.get_current(PowerType::Happiness), MAX_HAPPINESS);
+    }
+
+    #[test]
+    fn set_power_type_preserves_mana_values() {
+        let mut state = PowerState::default();
+        state.max[PowerType::Mana as usize] = 500;
+        state.current[PowerType::Mana as usize] = 250;
+
+        state.set_power_type(PowerType::Mana);
+
+        assert_eq!(state.power_type, PowerType::Mana);
+        assert_eq!(state.get_max(PowerType::Mana), 500);
+        assert_eq!(state.get_current(PowerType::Mana), 250);
     }
 }

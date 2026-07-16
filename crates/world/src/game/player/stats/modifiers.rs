@@ -236,7 +236,9 @@ impl Default for UnitModifierGroup {
 
 #[cfg(test)]
 mod tests {
-    use super::{UnitModifierGroup, UnitModifierType, UnitMods};
+    use super::{
+        BaseModGroup, BaseModType, BaseModifierGroup, UnitModifierGroup, UnitModifierType, UnitMods,
+    };
 
     const EPSILON: f32 = 0.0001;
 
@@ -364,6 +366,57 @@ mod tests {
             0.0
         );
     }
+
+    #[test]
+    fn base_percentage_modifiers_compose_and_remove() {
+        let mut modifiers = BaseModifierGroup::new();
+
+        modifiers.handle_base_mod_value(
+            BaseModGroup::ShieldBlockValue,
+            BaseModType::PctMod,
+            10.0,
+            true,
+        );
+        modifiers.handle_base_mod_value(
+            BaseModGroup::ShieldBlockValue,
+            BaseModType::PctMod,
+            10.0,
+            true,
+        );
+
+        assert!(
+            (modifiers.get_modifier_value(BaseModGroup::ShieldBlockValue, BaseModType::PctMod)
+                - 1.21)
+                .abs()
+                < EPSILON
+        );
+
+        modifiers.handle_base_mod_value(
+            BaseModGroup::ShieldBlockValue,
+            BaseModType::PctMod,
+            10.0,
+            false,
+        );
+        assert!(
+            (modifiers.get_modifier_value(BaseModGroup::ShieldBlockValue, BaseModType::PctMod)
+                - 1.1)
+                .abs()
+                < EPSILON
+        );
+
+        modifiers.handle_base_mod_value(
+            BaseModGroup::ShieldBlockValue,
+            BaseModType::PctMod,
+            10.0,
+            false,
+        );
+        assert!(
+            (modifiers.get_modifier_value(BaseModGroup::ShieldBlockValue, BaseModType::PctMod)
+                - 1.0)
+                .abs()
+                < EPSILON
+        );
+    }
 }
 
 // === Base Modifier Group (for crit/dodge/block) ===
@@ -463,7 +516,7 @@ impl BaseModifierGroup {
                 } else {
                     let multiplier = (100.0 + amount) / 100.0;
                     if multiplier != 0.0 {
-                        self.modifiers[group_idx][type_idx] *= 100.0 / multiplier;
+                        self.modifiers[group_idx][type_idx] /= multiplier;
                     }
                 }
             }

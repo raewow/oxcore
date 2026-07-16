@@ -11,7 +11,7 @@ use crate::game::broadcast_mgr::BroadcastManager;
 use crate::game::common::update_fields::*;
 use crate::game::player::auras::aura::{Aura, AuraFlags};
 use crate::game::player::auras::effects;
-use crate::game::player::auras::effects::{ModifierSource, StatModifier};
+use crate::game::player::auras::effects::StatModifier;
 use crate::game::player::auras::periodic;
 use crate::game::player::auras::proc;
 use crate::World;
@@ -284,7 +284,7 @@ impl AuraSystem {
         if let Some((aura, slot)) = removed_aura {
             // Remove stat modifier if applicable
             if effects::is_stat_modifier_aura(aura.aura_type) {
-                self.remove_aura_stat_modifier(target_guid, spell_id, effect_index, world)
+                self.remove_aura_stat_modifier(target_guid, &aura, world)
                     .await?;
             }
 
@@ -429,13 +429,8 @@ impl AuraSystem {
         // Unapply stat modifiers, spell modifiers, and send slot cleared for each
         for (aura, slot) in &removed {
             if effects::is_stat_modifier_aura(aura.aura_type) {
-                self.remove_aura_stat_modifier(
-                    target_guid,
-                    aura.spell_id,
-                    aura.effect_index,
-                    world,
-                )
-                .await?;
+                self.remove_aura_stat_modifier(target_guid, aura, world)
+                    .await?;
             }
             if effects::is_spell_modifier_aura(aura.aura_type) {
                 self.remove_spell_modifier(target_guid, aura.spell_id, world)?;
@@ -686,8 +681,14 @@ impl AuraSystem {
             .flatten();
 
         if let Some((aura_type, value, misc_value)) = modifier_info {
-            let stat_modifier = create_stat_modifier(spell_id, aura_type, value, misc_value);
-            if let Some(modifier) = stat_modifier {
+            if self
+                .modify_max_health_aura(target_guid, aura_type, value, true, world)
+                .await?
+            {
+                return Ok(());
+            }
+
+            if let Some(modifier) = create_stat_modifier(spell_id, aura_type, value, misc_value) {
                 self.apply_modifier(target_guid, modifier, world).await?;
             } else {
                 world.systems.stats.recalculate_all(target_guid);
@@ -697,16 +698,39 @@ impl AuraSystem {
         Ok(())
     }
 
-    /// Remove a stat modifier from an aura via the StatsSystem.
+    /// Remove a stat modifier using the aura data captured before container removal.
+    ///
+    /// Unsupported stat-classified auras retain the previous recalculation-only behavior.
     async fn remove_aura_stat_modifier(
         &self,
         target_guid: ObjectGuid,
-        spell_id: u32,
-        _effect_index: u8,
+        aura: &Aura,
         world: &World,
     ) -> Result<()> {
-        self.remove_modifier(target_guid, ModifierSource::Aura(spell_id), world)
-            .await
+        if self
+            .modify_max_health_aura(
+                target_guid,
+                aura.aura_type,
+                aura.current_value(),
+                false,
+                world,
+            )
+            .await?
+        {
+            return Ok(());
+        }
+
+        if let Some(modifier) = create_stat_modifier(
+            aura.spell_id,
+            aura.aura_type,
+            aura.current_value(),
+            aura.misc_value,
+        ) {
+            self.remove_modifier(target_guid, modifier, world).await
+        } else {
+            world.systems.stats.recalculate_all(target_guid);
+            Ok(())
+        }
     }
 
     // =========================================================================
@@ -911,37 +935,7 @@ impl AuraSystem {
             .manager()
             .with_player_mut(player_guid, |player| {
                 // Apply to unit_mods based on stat type
-                use super::effects::{
-                    STAT_AGILITY, STAT_INTELLECT, STAT_SPIRIT, STAT_STAMINA, STAT_STRENGTH,
-                };
-                use crate::game::player::stats::modifiers::{UnitModifierType, UnitMods};
-
-                let unit_mod = match modifier.stat {
-                    STAT_STRENGTH => UnitMods::StatStrength,
-                    STAT_AGILITY => UnitMods::StatAgility,
-                    STAT_STAMINA => UnitMods::StatStamina,
-                    STAT_INTELLECT => UnitMods::StatIntellect,
-                    STAT_SPIRIT => UnitMods::StatSpirit,
-                    _ => return,
-                };
-
-                if modifier.flat_value != 0.0 {
-                    player.stats.unit_mods.handle_stat_modifier(
-                        unit_mod,
-                        UnitModifierType::TotalValue,
-                        modifier.flat_value,
-                        true,
-                    );
-                }
-
-                if modifier.pct_value != 0.0 {
-                    player.stats.unit_mods.handle_stat_modifier(
-                        unit_mod,
-                        UnitModifierType::TotalPct,
-                        modifier.pct_value * 100.0,
-                        true,
-                    );
-                }
+                apply_primary_stat_modifier(&mut player.stats.unit_mods, &modifier, true);
             });
 
         // Trigger recalculation
@@ -954,23 +948,46 @@ impl AuraSystem {
     async fn remove_modifier(
         &self,
         player_guid: ObjectGuid,
-        source: ModifierSource,
+        modifier: StatModifier,
         world: &World,
     ) -> Result<()> {
-        let _ = world
+        world
             .systems
             .player
             .manager()
-            .with_player_mut(player_guid, |_player| {
-                // TODO: Track which modifiers came from which sources
-                // For now, we just recalc everything
-                let _ = source;
+            .with_player_mut(player_guid, |player| {
+                apply_primary_stat_modifier(&mut player.stats.unit_mods, &modifier, false);
             });
 
         // Trigger recalculation
         world.systems.stats.recalculate_all(player_guid);
 
         Ok(())
+    }
+
+    /// Apply or remove a max-health aura directly from the health modifier group.
+    async fn modify_max_health_aura(
+        &self,
+        player_guid: ObjectGuid,
+        aura_type: u32,
+        value: i32,
+        apply: bool,
+        world: &World,
+    ) -> Result<bool> {
+        let modified = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                apply_max_health_aura_modifier(&mut player.stats.unit_mods, aura_type, value, apply)
+            })
+            .unwrap_or(false);
+
+        if modified {
+            world.systems.stats.recalculate_all(player_guid);
+        }
+
+        Ok(modified)
     }
 
     // =========================================================================
@@ -2020,11 +2037,11 @@ impl AuraSystem {
                 .player
                 .manager()
                 .with_player_mut(target_guid, |player| {
-                    player.power.power_type = power_type;
+                    player.power.set_power_type(power_type);
                 });
         }
 
-        // Push UNIT_FIELD_BYTES_1 (shapeshift form byte) + UNIT_FIELD_DISPLAYID if changed.
+        // Push form/power-type bytes and UNIT_FIELD_DISPLAYID if changed.
         self.send_shapeshift_field_update(target_guid, display_id, world);
     }
 
@@ -2044,7 +2061,10 @@ impl AuraSystem {
                 player.shapeshift_form = 0;
                 if class == 11 {
                     // CLASS_DRUID
-                    player.power.power_type = crate::game::player::power::PowerType::Mana;
+                    player
+                        .power
+                        .set_power_type(crate::game::player::power::PowerType::Mana);
+                    player.power.current[crate::game::player::power::PowerType::Rage as usize] = 0;
                 }
             });
 
@@ -2057,16 +2077,26 @@ impl AuraSystem {
         display_id: u32,
         world: &World,
     ) {
-        let (shapeshift_form, stand_state) = world
+        let (race, class, gender, power_type, shapeshift_form, stand_state) = world
             .systems
             .player
             .manager()
-            .with_player(target_guid, |p| (p.shapeshift_form, p.stand_state))
-            .unwrap_or((0, 0));
+            .with_player(target_guid, |p| {
+                (
+                    p.race,
+                    p.class,
+                    p.gender,
+                    p.power.power_type.as_u8(),
+                    p.shapeshift_form,
+                    p.stand_state,
+                )
+            })
+            .unwrap_or((0, 0, 0, 0, 0, 0));
 
+        let bytes_0 = u32::from_le_bytes([race, class, gender, power_type]);
         let bytes_1 = u32::from_le_bytes([stand_state, 0, shapeshift_form, 0]);
         let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
-        block = block.set_field(
+        block = block.set_field(UNIT_FIELD_BYTES_0, bytes_0).set_field(
             oxcore_shared::protocol::update_fields::UNIT_FIELD_BYTES_1,
             bytes_1,
         );
@@ -2544,7 +2574,9 @@ fn create_stat_modifier(
     value: i32,
     misc_value: i32,
 ) -> Option<StatModifier> {
-    use super::effects::{STAT_AGILITY, STAT_INTELLECT, STAT_SPIRIT, STAT_STAMINA, STAT_STRENGTH};
+    use super::effects::{
+        ModifierSource, STAT_AGILITY, STAT_INTELLECT, STAT_SPIRIT, STAT_STAMINA, STAT_STRENGTH,
+    };
 
     match aura_type {
         effects::AURA_MOD_STAT => {
@@ -2604,12 +2636,68 @@ fn create_stat_modifier(
     }
 }
 
+/// Apply or reverse the primary-stat modifier forms currently supported by `create_stat_modifier`.
+fn apply_primary_stat_modifier(
+    unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
+    modifier: &StatModifier,
+    apply: bool,
+) {
+    use super::effects::{STAT_AGILITY, STAT_INTELLECT, STAT_SPIRIT, STAT_STAMINA, STAT_STRENGTH};
+    use crate::game::player::stats::modifiers::{UnitModifierType, UnitMods};
+
+    let unit_mod = match modifier.stat {
+        STAT_STRENGTH => UnitMods::StatStrength,
+        STAT_AGILITY => UnitMods::StatAgility,
+        STAT_STAMINA => UnitMods::StatStamina,
+        STAT_INTELLECT => UnitMods::StatIntellect,
+        STAT_SPIRIT => UnitMods::StatSpirit,
+        _ => return,
+    };
+
+    if modifier.flat_value != 0.0 {
+        unit_mods.handle_stat_modifier(
+            unit_mod,
+            UnitModifierType::TotalValue,
+            modifier.flat_value,
+            apply,
+        );
+    }
+
+    if modifier.pct_value != 0.0 {
+        unit_mods.handle_stat_modifier(
+            unit_mod,
+            UnitModifierType::TotalPct,
+            modifier.pct_value * 100.0,
+            apply,
+        );
+    }
+}
+
+/// Apply or reverse the max-health aura forms without treating health as a primary stat.
+fn apply_max_health_aura_modifier(
+    unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
+    aura_type: u32,
+    value: i32,
+    apply: bool,
+) -> bool {
+    use crate::game::player::stats::modifiers::{UnitModifierType, UnitMods};
+
+    let modifier_type = match aura_type {
+        effects::AURA_MOD_INCREASE_HEALTH => UnitModifierType::TotalValue,
+        effects::AURA_MOD_INCREASE_HEALTH_PERCENT => UnitModifierType::TotalPct,
+        _ => return false,
+    };
+
+    unit_mods.handle_stat_modifier(UnitMods::Health, modifier_type, value as f32, apply)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::session::SessionManager;
     use crate::game::creature::manager::{CreatureManager, CreatureTemplate};
     use crate::game::creature::Creature;
+    use crate::game::player::stats::modifiers::{UnitModifierGroup, UnitModifierType, UnitMods};
     use crate::game::player::PlayerManager;
     use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
     use std::sync::Arc;
@@ -2685,6 +2773,126 @@ mod tests {
 
         let system = AuraSystem::new(broadcast_mgr);
         (system, creature_mgr)
+    }
+
+    #[test]
+    fn removed_flat_primary_stat_aura_reverses_its_snapshot_value() {
+        let aura = Aura::new(
+            1000,
+            ObjectGuid::new_player(1),
+            0,
+            effects::AURA_MOD_STAT,
+            effects::STAT_STRENGTH as i32,
+            12,
+            Some(30_000),
+            0,
+            1,
+            0,
+            AuraFlags::default(),
+        );
+        let modifier = create_stat_modifier(
+            aura.spell_id,
+            aura.aura_type,
+            aura.current_value(),
+            aura.misc_value,
+        )
+        .expect("flat primary-stat aura is supported");
+        let mut unit_mods = UnitModifierGroup::new();
+
+        apply_primary_stat_modifier(&mut unit_mods, &modifier, true);
+        apply_primary_stat_modifier(&mut unit_mods, &modifier, false);
+
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::StatStrength, UnitModifierType::TotalValue),
+            0.0
+        );
+    }
+
+    #[test]
+    fn removed_percent_primary_stat_aura_reverses_its_snapshot_value() {
+        let aura = Aura::new(
+            1001,
+            ObjectGuid::new_player(1),
+            0,
+            effects::AURA_MOD_PERCENT_STAT,
+            effects::STAT_AGILITY as i32,
+            15,
+            Some(30_000),
+            0,
+            1,
+            0,
+            AuraFlags::default(),
+        );
+        let modifier = create_stat_modifier(
+            aura.spell_id,
+            aura.aura_type,
+            aura.current_value(),
+            aura.misc_value,
+        )
+        .expect("percent primary-stat aura is supported");
+        let mut unit_mods = UnitModifierGroup::new();
+
+        apply_primary_stat_modifier(&mut unit_mods, &modifier, true);
+        apply_primary_stat_modifier(&mut unit_mods, &modifier, false);
+
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::StatAgility, UnitModifierType::TotalPct),
+            1.0
+        );
+    }
+
+    #[test]
+    fn flat_max_health_aura_applies_and_removes() {
+        let mut unit_mods = UnitModifierGroup::new();
+
+        assert!(apply_max_health_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_INCREASE_HEALTH,
+            120,
+            true,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::Health, UnitModifierType::TotalValue),
+            120.0
+        );
+
+        assert!(apply_max_health_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_INCREASE_HEALTH,
+            120,
+            false,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::Health, UnitModifierType::TotalValue),
+            0.0
+        );
+    }
+
+    #[test]
+    fn percent_max_health_aura_applies_and_removes() {
+        let mut unit_mods = UnitModifierGroup::new();
+
+        assert!(apply_max_health_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_INCREASE_HEALTH_PERCENT,
+            10,
+            true,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::Health, UnitModifierType::TotalPct),
+            1.1
+        );
+
+        assert!(apply_max_health_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_INCREASE_HEALTH_PERCENT,
+            10,
+            false,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::Health, UnitModifierType::TotalPct),
+            1.0
+        );
     }
 
     // ── apply_creature_aura ───────────────────────────────────────────────────

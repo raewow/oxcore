@@ -22,6 +22,8 @@ use std::collections::HashMap;
 pub enum ImplicitTarget {
     None = 0,
     Self_ = 1,
+    FriendNearCaster = 3,
+    CasterPet = 5,
     ChainDamage = 6,
     AllEnemyInArea = 15,
     AllEnemyInAreaInstant = 16,
@@ -262,6 +264,25 @@ pub fn resolve_spell_targets(
         None => return resolved,
     };
 
+    // Scalar cast state consumed by `check_target` (Spell::CheckTarget). Some
+    // members are not reachable from this function's inputs and are populated
+    // faithfully-but-conservatively:
+    // - `cast_item_present` (m_CastItem): the launching item isn't threaded into
+    //   target resolution yet; treated as absent. ...
+    // - `is_triggered` (m_IsTriggeredSpell): trigger context isn't available
+    //   here; treated as a non-triggered cast. ...
+    // - `ignore_caster_target_restrictions`
+    //   (IsIgnoringCasterAndTargetRestrictions): not ported on SpellEntry;
+    //   treated as false. ...
+    let check_ctx = CheckTargetContext {
+        caster_guid,
+        caster_is_unit: caster_guid.is_player() || caster_guid.is_creature_or_pet(),
+        cast_item_present: false,
+        is_triggered: false,
+        explicit_unit_target: cast_targets.unit_target(),
+        ignore_caster_target_restrictions: false,
+    };
+
     for effect_idx in 0..3 {
         if spell_entry.effect[effect_idx] == 0 {
             continue;
@@ -309,6 +330,18 @@ pub fn resolve_spell_targets(
         // Deduplicate
         targets.sort_by_key(|g| g.raw());
         targets.dedup_by_key(|g| g.raw());
+
+        // Per-target validity gate: Spell::CheckTarget runs on every candidate
+        // before AddUnitTarget in cmangos. Only Unit candidates (players and
+        // creatures/pets) are filtered; game-object / item GUIDs have no
+        // Unit-level checks and are passed through untouched.
+        targets.retain(|&guid| {
+            if guid.is_player() || guid.is_creature_or_pet() {
+                check_target(&spell_entry, effect_idx, guid, &check_ctx, world)
+            } else {
+                true
+            }
+        });
 
         // Apply spell magnet redirection once per unique victim for this spell.
         for target in &mut targets {
@@ -387,9 +420,21 @@ fn resolve_implicit_target(
         | ImplicitTarget::AllPartyRange
         | ImplicitTarget::AllPartyInArea
         | ImplicitTarget::AoEPartySrc => {
-            // Include self
-            targets.push(caster_guid);
-            // TODO: Add party members in range
+            // Faithful port of Spell::FillRaidOrPartyTargets for the party target
+            // modes. The current ImplicitTarget set has no dedicated raid variant,
+            // so raid=false here; with_pets/with_caster follow the common
+            // party-around-caster call. Pets are not tracked yet, so with_pets
+            // never actually appends. The solo path still yields the caster,
+            // preserving the previous "include self" behaviour. ...
+            let params = RaidPartyFillParams {
+                caster_guid,
+                radius,
+                raid: false,
+                with_pets: true,
+                with_caster: true,
+                spell_level: spell_entry.spell_level,
+            };
+            fill_raid_or_party_targets(caster_guid, &params, world, targets);
         }
 
         ImplicitTarget::AllFriendlyInArea | ImplicitTarget::AllFriendlyAroundCaster => {
@@ -2135,5 +2180,70 @@ mod tests {
         let mut out_raid = Vec::new();
         fill_raid_or_party_targets(leader, &raid, &world, &mut out_raid);
         assert!(out_raid.contains(&other_sub));
+    }
+
+    /// Resolution now runs each resolved candidate through `check_target`: an
+    /// ONLY_ON_PLAYER spell drops a non-player candidate that plain resolution
+    /// would otherwise include.
+    #[tokio::test]
+    async fn resolve_filters_targets_through_check_target() {
+        let world = test_world();
+        // Unregistered player caster → map (0,0), caster position (0,0,0).
+        let caster = ObjectGuid::new_player(90);
+        let creature = ObjectGuid::new_creature(1, 90);
+        let map = world.managers.map_mgr.get_or_create_map(0, 0);
+        map.add_creature(creature, pos(3.0, 0.0));
+
+        // Baseline: a plain enemy AoE resolves the nearby creature.
+        world.managers.spell_mgr.add_spell(aoe_enemy_spell(52000));
+        let resolved = resolve_spell_targets(52000, &SpellCastTargets::default(), caster, &world);
+        assert!(
+            resolved.effect_targets[0].contains(&creature),
+            "baseline enemy AoE should resolve the nearby creature"
+        );
+
+        // ONLY_ON_PLAYER: check_target now rejects the non-player candidate.
+        let mut only_player = aoe_enemy_spell(52001);
+        only_player.attributes_ex3 = SPELL_ATTR_EX3_ONLY_ON_PLAYER;
+        world.managers.spell_mgr.add_spell(only_player);
+        let resolved2 = resolve_spell_targets(52001, &SpellCastTargets::default(), caster, &world);
+        assert!(
+            !resolved2.effect_targets[0].contains(&creature),
+            "check_target must drop the creature for an ONLY_ON_PLAYER spell"
+        );
+    }
+
+    /// A party target mode (TARGET_ALL_PARTY_AROUND_CASTER = 20) now routes
+    /// through `fill_raid_or_party_targets`, gathering the caster's group.
+    #[tokio::test]
+    async fn resolve_party_mode_routes_through_fill_raid_or_party_targets() {
+        use oxcore_shared::game::group::GroupData;
+
+        let world = test_world();
+        let leader = ObjectGuid::new_player(91);
+        let member = ObjectGuid::new_player(92);
+        add_test_player(&world, leader, 1, 0);
+        add_test_player(&world, member, 1, 0);
+
+        let mut group = GroupData::new(600, leader, "Leader".to_string());
+        group.add_member(member, "Member".to_string()).unwrap();
+        world.systems.group.add_group_test(group);
+        world.systems.group.add_player_to_group_test(leader, 600);
+        world.systems.group.add_player_to_group_test(member, 600);
+
+        // Party-targeted spell: TARGET_ALL_PARTY_AROUND_CASTER (20).
+        let mut spell = aoe_enemy_spell(52002);
+        spell.effect_implicit_target_a[0] = 20;
+        world.managers.spell_mgr.add_spell(spell);
+
+        let resolved = resolve_spell_targets(52002, &SpellCastTargets::default(), leader, &world);
+        assert!(
+            resolved.effect_targets[0].contains(&leader),
+            "party mode should include the caster"
+        );
+        assert!(
+            resolved.effect_targets[0].contains(&member),
+            "party target mode must gather group members via fill_raid_or_party_targets"
+        );
     }
 }

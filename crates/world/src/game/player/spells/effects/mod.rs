@@ -292,6 +292,7 @@ impl EffectsDispatcher {
             }
         }
 
+        let mut hit_targets: Vec<TargetInfo> = Vec::with_capacity(order.len());
         for target_guid in order {
             let effect_mask = masks[&target_guid];
             let mut target = TargetInfo::new(target_guid, effect_mask);
@@ -306,7 +307,18 @@ impl EffectsDispatcher {
                 )
                 .await?;
             results.append(&mut target_results);
+            hit_targets.push(target);
         }
+
+        // `Spell::HandleThreatSpells()` — run once per cast after every target's effects
+        // have been applied (not per target), distributing the spell's `spell_threat`
+        // flat bonus across the resolved target set.
+        crate::game::player::spells::threat_bonus::apply_cast_threat(
+            caster_guid,
+            spell_id,
+            &hit_targets,
+            world,
+        );
 
         Ok(results)
     }

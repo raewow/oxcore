@@ -6,11 +6,18 @@
 //! (harmful spells). The bonus is written straight into the affected creatures'
 //! [`ThreatManager`]s; the returned list records what was applied for inspection.
 
+use crate::game::player::auras::proc::negative_effect_mask as build_negative_effect_mask;
 use crate::game::player::spells::hit::SpellHitOutcome;
 use crate::game::player::spells::target_info::TargetInfo;
 use crate::game::spell::manager::SpellThreatEntry;
 use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
+
+/// `SPELL_EFFECT_SCHOOL_DAMAGE` — school-damage effect targeting the caster counts as
+/// negative for `m_negativeEffectMask` even though `IsPositiveEffect` may read positive.
+const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
+/// `TARGET_UNIT_CASTER` implicit-target A value.
+const TARGET_UNIT_CASTER: u32 = 1;
 
 #[cfg(doc)]
 use crate::game::creature::combat::threat::ThreatManager;
@@ -206,10 +213,8 @@ fn apply_assist_threat(
 /// `threat_entry`/`inverse_effect_mask` stand in for
 /// `sSpellMgr.GetSpellThreatEntry(id)` and its `inverseEffectMask` member — the
 /// `SpellManager` getter is not exposed yet.
-// TODO: replace the `threat_entry`/`inverse_effect_mask` params with a
-// `world.managers.spell_mgr.get_spell_threat_entry(spell_id)` call once the getter
-// is added (and fold `inverse_effect_mask` onto `SpellThreatEntry`).
-#[allow(dead_code)]
+// TODO: fold `inverse_effect_mask` onto `SpellThreatEntry` once it is loaded from data,
+// then drop the parameter here and in `apply_cast_threat`.
 pub fn handle_threat_spells(
     caster_guid: ObjectGuid,
     spell_id: u32,
@@ -295,6 +300,54 @@ pub fn handle_threat_spells(
         "HandleThreatSpells applied flat bonus threat",
     );
     applications
+}
+
+/// Once-per-cast entry point that wires [`handle_threat_spells`] into the live effect
+/// pipeline. Called from `EffectsDispatcher::dispatch_with_targets` after every target's
+/// effects have been applied — mirroring `Spell::HandleThreatSpells()` running once at
+/// the tail of `Spell::_handle_immediate_phase`, not per target.
+///
+/// Resolves the `spell_threat` flat bonus from the [`crate::game::spell::manager::SpellManager`]
+/// and derives `m_negativeEffectMask` from the spell proto's per-effect positivity
+/// (school-damage-on-caster effects counting as negative, matching
+/// `Spell::prepareDataForTriggerSystem`). The C++ `SpellThreatEntry::inverseEffectMask`
+/// is not modelled on the Rust [`SpellThreatEntry`] yet, so `0` is passed
+/// (`CanCauseThreatOnMask` then reduces to "any active effect bit set"). If no threat
+/// entry is configured for the spell this returns without touching the threat system.
+pub(crate) fn apply_cast_threat(
+    caster_guid: ObjectGuid,
+    spell_id: u32,
+    targets: &[TargetInfo],
+    world: &World,
+) -> Vec<ThreatApplication> {
+    let Some(threat_entry) = world.managers.spell_mgr.get_spell_threat_entry(spell_id) else {
+        return Vec::new();
+    };
+
+    let negative_effect_mask = world
+        .managers
+        .spell_mgr
+        .get(spell_id)
+        .map(|entry| {
+            build_negative_effect_mask::<3>(
+                |i| entry.is_positive_effect(i),
+                |i| {
+                    entry.effect[i] == SPELL_EFFECT_SCHOOL_DAMAGE
+                        && entry.effect_implicit_target_a[i] == TARGET_UNIT_CASTER
+                },
+            )
+        })
+        .unwrap_or(0);
+
+    handle_threat_spells(
+        caster_guid,
+        spell_id,
+        negative_effect_mask,
+        targets,
+        Some(&threat_entry),
+        0,
+        world,
+    )
 }
 
 #[cfg(test)]
@@ -920,6 +973,65 @@ mod tests {
             .managers
             .creature_mgr
             .with_creature(bystander, |c| c.threat_manager.get_threat(caster))
+            .unwrap();
+        assert_eq!(threat, 0.0);
+    }
+
+    // === once-per-cast wiring (`apply_cast_threat`) ===
+
+    #[tokio::test]
+    async fn apply_cast_threat_writes_threat_after_negative_cast() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        // School-damage effect (2) with default caster target → negative-polarity spell.
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9950, [2, 0, 0]));
+        // A `spell_threat` flat bonus is now configured for this spell in the manager,
+        // so the wired call resolves it without any parameters threaded in.
+        world
+            .managers
+            .spell_mgr
+            .add_spell_threat(9950, threat_entry(50));
+        let target = ObjectGuid::new_creature(1, 1);
+        add_creature(&world, target, 1);
+
+        // Targets as `dispatch_with_targets` hands them over: resolved hit + effect mask.
+        let apps = apply_cast_threat(caster, 9950, &[target_info(target, 0b001)], &world);
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].target_guid, target);
+        assert!(!apps[0].positive);
+
+        // Threat is live on the creature's threat list toward the caster.
+        let threat = world
+            .managers
+            .creature_mgr
+            .with_creature(target, |c| c.threat_manager.get_threat(caster))
+            .unwrap();
+        assert_eq!(threat, 50.0);
+    }
+
+    #[tokio::test]
+    async fn apply_cast_threat_without_entry_writes_nothing() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9960, [2, 0, 0]));
+        // No `spell_threat` entry configured → nothing to distribute.
+        let target = ObjectGuid::new_creature(1, 1);
+        add_creature(&world, target, 1);
+
+        let apps = apply_cast_threat(caster, 9960, &[target_info(target, 0b001)], &world);
+        assert!(apps.is_empty());
+        let threat = world
+            .managers
+            .creature_mgr
+            .with_creature(target, |c| c.threat_manager.get_threat(caster))
             .unwrap();
         assert_eq!(threat, 0.0);
     }

@@ -4,6 +4,7 @@
 //! validate -> start -> timer -> execute -> finish
 
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
+use crate::game::player::spells::cast_pointers;
 use crate::game::player::spells::cooldowns;
 use crate::game::player::spells::effects::EffectsDispatcher;
 use crate::game::player::spells::hit;
@@ -842,30 +843,52 @@ impl SpellSystem {
         Ok(())
     }
 
-    /// Determine which spell slot a spell belongs in (matches MaNGOS GetCurrentContainer).
+    /// Determine which spell slot a spell belongs in.
+    ///
+    /// This decodes the relevant spell-attribute bits and then delegates the
+    /// branch-priority decision to the faithful `Spell::GetCurrentContainer`
+    /// port ([`cast_pointers::current_container`]), which is the source of truth
+    /// for slot routing (melee → auto-repeat → channeled → generic).
+    ///
+    /// Cast-start channeled routing hazard: `current_container`'s channeled
+    /// branch is gated on `(cast_time_ms == 0 || is_triggered || state == Casting)`.
+    /// This helper is called at cast-*start* (from `set_current_casted_spell` in
+    /// the cast pipeline) where the spell state is still `Preparing` and our
+    /// `calculate_cast_time` can report a non-zero value — which would misroute a
+    /// channeled spell to Generic. In C++ the gate passes at prepare-time because
+    /// a channeled spell's `m_casttime` is 0 (a channeled spell channels, it does
+    /// not "cast"). We reproduce that faithful behaviour by passing
+    /// `cast_time_ms = 0`, so a channeled spell always lands in the Channeled
+    /// container here, exactly as the previous implementation did.
     fn get_spell_slot(&self, spell_id: u32, world: &World) -> CurrentSpellType {
         let spell_entry = match world.managers.spell_mgr.get(spell_id) {
             Some(entry) => entry,
             None => return CurrentSpellType::Generic,
         };
 
-        // Channeled spells go to the Channeled slot
-        // SPELL_ATTR_EX_CHANNELED_1 = 0x04, SPELL_ATTR_EX_CHANNELED_2 = 0x40
-        if (spell_entry.attributes_ex & 0x04) != 0 || (spell_entry.attributes_ex & 0x40) != 0 {
-            return CurrentSpellType::Channeled;
-        }
-
-        // Melee spells (on-next-melee): SPELL_ATTR_ON_NEXT_SWING_1 = 0x01, SPELL_ATTR_ON_NEXT_SWING_2 = 0x80000000
-        if (spell_entry.attributes & 0x01) != 0 || (spell_entry.attributes & 0x80000000) != 0 {
-            return CurrentSpellType::Melee;
-        }
+        // Melee spells (on-next-melee): SPELL_ATTR_ON_NEXT_SWING_1 = 0x01,
+        // SPELL_ATTR_ON_NEXT_SWING_2 = 0x80000000
+        let is_next_melee_swing =
+            (spell_entry.attributes & 0x01) != 0 || (spell_entry.attributes & 0x80000000) != 0;
 
         // Auto-repeat spells (Auto-Shot, Wand): SPELL_ATTR_EX2_AUTOREPEAT_FLAG = 0x00000020
-        if (spell_entry.attributes_ex2 & 0x00000020) != 0 {
-            return CurrentSpellType::Autorepeat;
-        }
+        let is_auto_repeat = (spell_entry.attributes_ex2 & 0x00000020) != 0;
 
-        CurrentSpellType::Generic
+        // Channeled spells: SPELL_ATTR_EX_CHANNELED_1 = 0x04, SPELL_ATTR_EX_CHANNELED_2 = 0x40
+        let is_channeled =
+            (spell_entry.attributes_ex & 0x04) != 0 || (spell_entry.attributes_ex & 0x40) != 0;
+
+        cast_pointers::current_container(
+            is_next_melee_swing,
+            is_auto_repeat,
+            is_channeled,
+            // Channeled: C++ m_casttime == 0 at prepare-time — see the doc note above.
+            0,
+            // is_triggered_spell — irrelevant once cast_time_ms is 0.
+            false,
+            // Cast-start state; the channeled sub-gate is already satisfied by cast_time_ms == 0.
+            SpellState::Preparing,
+        )
     }
 
     /// Check if a spell is channeled
@@ -2019,23 +2042,25 @@ impl SpellSystem {
         use crate::game::player::spells::delayed::{delayed, delayed_channel};
 
         // Pick the slot that takes the pushback and read its running hit count.
-        let (slot, mut count) = match world.systems.player.manager().with_player(
-            target_guid,
-            |player| {
-                if let Some(cast) =
-                    player.spells.current_spells[CurrentSpellType::Generic as usize].as_ref()
-                {
-                    Some((CurrentSpellType::Generic, cast.delay_at_damage_count))
-                } else {
-                    player.spells.current_spells[CurrentSpellType::Channeled as usize]
-                        .as_ref()
-                        .map(|cast| (CurrentSpellType::Channeled, cast.delay_at_damage_count))
-                }
-            },
-        ) {
-            Some(Some(pair)) => pair,
-            _ => return Ok(0),
-        };
+        let (slot, mut count) =
+            match world
+                .systems
+                .player
+                .manager()
+                .with_player(target_guid, |player| {
+                    if let Some(cast) =
+                        player.spells.current_spells[CurrentSpellType::Generic as usize].as_ref()
+                    {
+                        Some((CurrentSpellType::Generic, cast.delay_at_damage_count))
+                    } else {
+                        player.spells.current_spells[CurrentSpellType::Channeled as usize]
+                            .as_ref()
+                            .map(|cast| (CurrentSpellType::Channeled, cast.delay_at_damage_count))
+                    }
+                }) {
+                Some(Some(pair)) => pair,
+                _ => return Ok(0),
+            };
 
         // Delegate to the faithful port for that slot. Each re-locks the player,
         // escalates `count`, and mutates the cast timer in place.
@@ -3678,6 +3703,106 @@ mod tests {
         assert!(timer >= UNIT_PVP_COMBAT_TIMER);
     }
 
+    // -- Spell::GetCurrentContainer: get_spell_slot -> current_container -----------------
+    //
+    // These prove that routing get_spell_slot (called at cast-START, spell state
+    // Preparing) through the faithful current_container port preserves the four
+    // slot outcomes — in particular that a channeled spell is NOT misrouted to
+    // Generic even though calculate_cast_time can report a non-zero cast time.
+
+    #[tokio::test]
+    async fn slot_routing_channeled_spell_goes_to_channeled_at_cast_start() {
+        let world = launch_test_world();
+        // SPELL_ATTR_EX_CHANNELED_1 = 0x04
+        let mut spell = charge_spell(50001, [2, 0, 0]);
+        spell.attributes_ex = 0x04;
+        world.managers.spell_mgr.add_spell(spell);
+        assert_eq!(
+            world.systems.spells.get_spell_slot(50001, &world),
+            CurrentSpellType::Channeled,
+            "channeled spell must land in the Channeled slot at cast-start"
+        );
+
+        // SPELL_ATTR_EX_CHANNELED_2 = 0x40 routes identically.
+        let mut spell2 = charge_spell(50002, [2, 0, 0]);
+        spell2.attributes_ex = 0x40;
+        world.managers.spell_mgr.add_spell(spell2);
+        assert_eq!(
+            world.systems.spells.get_spell_slot(50002, &world),
+            CurrentSpellType::Channeled,
+        );
+    }
+
+    #[tokio::test]
+    async fn slot_routing_melee_spell_goes_to_melee() {
+        let world = launch_test_world();
+        // SPELL_ATTR_ON_NEXT_SWING_1 = 0x01
+        let mut spell = charge_spell(50010, [2, 0, 0]);
+        spell.attributes = 0x01;
+        world.managers.spell_mgr.add_spell(spell);
+        assert_eq!(
+            world.systems.spells.get_spell_slot(50010, &world),
+            CurrentSpellType::Melee,
+        );
+
+        // SPELL_ATTR_ON_NEXT_SWING_2 = 0x80000000
+        let mut spell2 = charge_spell(50011, [2, 0, 0]);
+        spell2.attributes = 0x8000_0000;
+        world.managers.spell_mgr.add_spell(spell2);
+        assert_eq!(
+            world.systems.spells.get_spell_slot(50011, &world),
+            CurrentSpellType::Melee,
+        );
+    }
+
+    #[tokio::test]
+    async fn slot_routing_autorepeat_spell_goes_to_autorepeat() {
+        let world = launch_test_world();
+        // SPELL_ATTR_EX2_AUTOREPEAT_FLAG = 0x20
+        let mut spell = charge_spell(50020, [2, 0, 0]);
+        spell.attributes_ex2 = 0x20;
+        world.managers.spell_mgr.add_spell(spell);
+        assert_eq!(
+            world.systems.spells.get_spell_slot(50020, &world),
+            CurrentSpellType::Autorepeat,
+        );
+    }
+
+    #[tokio::test]
+    async fn slot_routing_plain_spell_goes_to_generic() {
+        let world = launch_test_world();
+        let spell = charge_spell(50030, [2, 0, 0]);
+        world.managers.spell_mgr.add_spell(spell);
+        assert_eq!(
+            world.systems.spells.get_spell_slot(50030, &world),
+            CurrentSpellType::Generic,
+        );
+    }
+
+    #[tokio::test]
+    async fn slot_routing_unknown_spell_defaults_to_generic() {
+        let world = launch_test_world();
+        assert_eq!(
+            world.systems.spells.get_spell_slot(999_999, &world),
+            CurrentSpellType::Generic,
+        );
+    }
+
+    #[tokio::test]
+    async fn slot_routing_melee_takes_priority_over_channeled() {
+        // Faithful current_container order is melee -> autorepeat -> channeled ->
+        // generic. A (contrived) spell carrying both bits resolves to Melee.
+        let world = launch_test_world();
+        let mut spell = charge_spell(50040, [2, 0, 0]);
+        spell.attributes = 0x01;
+        spell.attributes_ex = 0x04;
+        world.managers.spell_mgr.add_spell(spell);
+        assert_eq!(
+            world.systems.spells.get_spell_slot(50040, &world),
+            CurrentSpellType::Melee,
+        );
+    }
+
     #[tokio::test]
     async fn on_spell_launch_noop_without_caster_in_world() {
         let world = launch_test_world();
@@ -3697,5 +3822,79 @@ mod tests {
             .player_mgr
             .with_player(caster, |_| ())
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn apply_cast_pushback_escalates_generic_delay_count() {
+        use crate::game::player::spells::state::{ActiveCast, CurrentSpellType};
+
+        let world = launch_test_world();
+        let caster = ObjectGuid::new_player(7);
+        add_launch_player(&world, caster, 0.0);
+
+        // Register a pushback-eligible spell (SPELL_INTERRUPT_FLAG_DAMAGE_PUSHBACK).
+        let mut spell = charge_spell(41000, [0, 0, 0]);
+        spell.interrupt_flags = 0x02;
+        world.managers.spell_mgr.add_spell(spell);
+
+        // Put a preparing (non-channeled) cast in the Generic slot with a
+        // shortened timer so pushback is visible without hitting the cast-time cap.
+        world.managers.player_mgr.with_player_mut(caster, |p| {
+            let mut cast = ActiveCast::new(
+                41000,
+                None,
+                10_000,
+                false,
+                CurrentSpellType::Generic,
+                0.0,
+                0.0,
+                0.0,
+            );
+            cast.cast_time_remaining_ms = 2_000;
+            p.spells.current_spells[CurrentSpellType::Generic as usize] = Some(cast);
+        });
+
+        // No ResistPushback aura → resist chance 0 → pushback always applies.
+        // Hit 1: count 0 → 1000ms delay, timer 2000 → 3000, count → 1.
+        let d1 = world
+            .systems
+            .spells
+            .apply_cast_pushback(caster, &world)
+            .unwrap();
+        assert_eq!(d1, 1000);
+        // Hit 2: count 1 → 800ms delay, timer 3000 → 3800, count → 2.
+        let d2 = world
+            .systems
+            .spells
+            .apply_cast_pushback(caster, &world)
+            .unwrap();
+        assert_eq!(d2, 800);
+
+        let (timer, count) = world
+            .managers
+            .player_mgr
+            .with_player(caster, |p| {
+                let c = p.spells.current_spells[CurrentSpellType::Generic as usize]
+                    .as_ref()
+                    .unwrap();
+                (c.cast_time_remaining_ms, c.delay_at_damage_count)
+            })
+            .unwrap();
+        assert_eq!(timer, 3_800);
+        assert_eq!(count, 2, "hit count must persist across pushback events");
+    }
+
+    #[tokio::test]
+    async fn apply_cast_pushback_noop_without_active_cast() {
+        let world = launch_test_world();
+        let caster = ObjectGuid::new_player(8);
+        add_launch_player(&world, caster, 0.0);
+        // No active cast in any slot → returns 0, no panic.
+        let applied = world
+            .systems
+            .spells
+            .apply_cast_pushback(caster, &world)
+            .unwrap();
+        assert_eq!(applied, 0);
     }
 }
