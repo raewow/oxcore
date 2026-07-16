@@ -140,3 +140,52 @@ impl Default for StatsState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::StatsState;
+
+    fn stats_with_health(health: u32, max_health: u32) -> StatsState {
+        StatsState {
+            health,
+            max_health,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn modify_health_returns_zero_without_a_change() {
+        let mut stats = stats_with_health(40, 100);
+
+        assert_eq!(stats.modify_health(0), 0);
+        assert_eq!(stats.health, 40);
+    }
+
+    #[test]
+    fn modify_health_returns_actual_loss_when_depleted() {
+        let mut stats = stats_with_health(40, 100);
+
+        assert_eq!(stats.modify_health(-50), -40);
+        assert_eq!(stats.health, 0);
+    }
+
+    #[test]
+    fn modify_health_applies_in_range_delta() {
+        let mut stats = stats_with_health(40, 100);
+
+        assert_eq!(stats.modify_health(15), 15);
+        assert_eq!(stats.health, 55);
+        assert_eq!(stats.modify_health(-20), -20);
+        assert_eq!(stats.health, 35);
+    }
+
+    #[test]
+    fn modify_health_caps_gain_and_ignores_healing_at_full_health() {
+        let mut stats = stats_with_health(90, 100);
+
+        assert_eq!(stats.modify_health(50), 10);
+        assert_eq!(stats.health, 100);
+        assert_eq!(stats.modify_health(1), 0);
+        assert_eq!(stats.health, 100);
+    }
+}
