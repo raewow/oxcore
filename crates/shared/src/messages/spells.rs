@@ -284,6 +284,22 @@ mod spell_packet_tests {
             "first GUID must be item GUID when cast from item"
         );
     }
+
+    #[test]
+    fn test_spell_failed_other_contains_caster_and_spell() {
+        let caster = player_guid(10);
+        let packet = SmsgSpellFailedOther {
+            caster_guid: caster,
+            spell_id: 8690,
+        }
+        .to_world_packet();
+
+        assert_eq!(packet.opcode(), Opcode::SMSG_SPELL_FAILED_OTHER);
+        let mut data = packet.data().clone();
+        assert_eq!(data.get_u64_le(), caster.raw());
+        assert_eq!(data.get_u32_le(), 8690);
+        assert!(data.is_empty());
+    }
 }
 
 /// Write the SpellCastTargets section to a spell packet.
@@ -316,6 +332,22 @@ impl SmsgSpellFailure {
         packet.write_guid(self.caster_guid);
         packet.write_u32(self.spell_id);
         packet.write_u8(self.result);
+        packet
+    }
+}
+
+/// SMSG_SPELL_FAILED_OTHER (opcode 0x02A6)
+/// Broadcast when other clients need to stop displaying a caster's spell.
+pub struct SmsgSpellFailedOther {
+    pub caster_guid: ObjectGuid,
+    pub spell_id: u32,
+}
+
+impl SmsgSpellFailedOther {
+    pub fn to_world_packet(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_FAILED_OTHER);
+        packet.write_guid(self.caster_guid);
+        packet.write_u32(self.spell_id);
         packet
     }
 }

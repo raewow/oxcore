@@ -155,3 +155,38 @@ pub fn get_dr_group_for_spell(mechanic: u32, aura_type: u32) -> DRGroup {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_applications_reduce_duration_then_make_target_immune() {
+        let mut state = DiminishingState::default();
+
+        assert_eq!(state.apply_dr(DRGroup::Stun, 1_000), 1.0);
+        assert_eq!(state.apply_dr(DRGroup::Stun, 2_000), 0.5);
+        assert_eq!(state.apply_dr(DRGroup::Stun, 3_000), 0.25);
+        assert_eq!(state.apply_dr(DRGroup::Stun, 4_000), 0.0);
+        assert!(state.is_immune(DRGroup::Stun, 4_000));
+    }
+
+    #[test]
+    fn expired_diminishing_state_restores_full_duration() {
+        let mut state = DiminishingState::default();
+
+        state.apply_dr(DRGroup::Fear, 1_000);
+        state.apply_dr(DRGroup::Fear, 2_000);
+
+        assert_eq!(state.apply_dr(DRGroup::Fear, 17_000), 1.0);
+        assert!(!state.is_immune(DRGroup::Fear, 17_000));
+    }
+
+    #[test]
+    fn no_diminishing_group_never_records_state() {
+        let mut state = DiminishingState::default();
+
+        assert_eq!(state.apply_dr(DRGroup::None, 1_000), 1.0);
+        assert!(state.groups.is_empty());
+    }
+}

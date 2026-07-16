@@ -18,7 +18,7 @@ use crate::game::player::spells::validation;
 use crate::World;
 use anyhow::Result;
 use oxcore_shared::messages::spells::{
-    SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailure, SmsgSpellGo, SmsgSpellStart,
+    SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailedOther, SmsgSpellGo, SmsgSpellStart,
     SPELL_RESULT_STATUS_FAIL, SPELL_RESULT_STATUS_OKAY,
 };
 use oxcore_shared::messages::ToWorldPacket;
@@ -539,8 +539,16 @@ impl SpellSystem {
             )
             .await?;
 
-        self.finish_cast(caster_guid, spell_id, &cast_targets, true, None, world)
-            .await?;
+        self.finish_cast(
+            caster_guid,
+            spell_id,
+            &cast_targets,
+            true,
+            None,
+            None,
+            world,
+        )
+        .await?;
 
         Ok(SpellCastResult::Success)
     }
@@ -630,7 +638,8 @@ impl SpellSystem {
                     .await?;
             }
             on_spell_launch(caster_guid, spell_id, &cast_targets, world);
-            self.execute_spell(caster_guid, spell_id, &cast_targets, is_triggered, world)
+            let resolved_targets = self
+                .execute_spell(caster_guid, spell_id, &cast_targets, is_triggered, world)
                 .await?;
             self.finish_cast(
                 caster_guid,
@@ -638,6 +647,7 @@ impl SpellSystem {
                 &cast_targets,
                 is_triggered,
                 cast_item_guid,
+                resolved_targets.as_ref(),
                 world,
             )
             .await?;
@@ -750,7 +760,7 @@ impl SpellSystem {
             cast_item_guid,
         };
         self.broadcast_mgr
-            .send_msg_to_player(caster_guid, msg.to_world_packet());
+            .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
 
         Ok(())
     }
@@ -877,7 +887,7 @@ impl SpellSystem {
             cast_item_guid,
         };
         self.broadcast_mgr
-            .send_msg_to_player(caster_guid, msg.to_world_packet());
+            .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
 
         Ok(())
     }
@@ -1049,20 +1059,22 @@ impl SpellSystem {
                         }
 
                         on_spell_launch(caster_guid, spell_id, &cast_targets, world);
-                        self.execute_spell(
-                            caster_guid,
-                            spell_id,
-                            &cast_targets,
-                            is_triggered,
-                            world,
-                        )
-                        .await?;
+                        let resolved_targets = self
+                            .execute_spell(
+                                caster_guid,
+                                spell_id,
+                                &cast_targets,
+                                is_triggered,
+                                world,
+                            )
+                            .await?;
                         self.finish_cast(
                             caster_guid,
                             spell_id,
                             &cast_targets,
                             is_triggered,
                             cast_item_guid,
+                            resolved_targets.as_ref(),
                             world,
                         )
                         .await?;
@@ -1133,8 +1145,16 @@ impl SpellSystem {
                                     .spells
                                     .clear_current_spell(CurrentSpellType::Channeled);
                             });
-                        self.finish_cast(caster_guid, spell_id, &cast_targets, false, None, world)
-                            .await?;
+                        self.finish_cast(
+                            caster_guid,
+                            spell_id,
+                            &cast_targets,
+                            false,
+                            None,
+                            None,
+                            world,
+                        )
+                        .await?;
                     }
                 }
                 SpellEventType::DelayedEffect {
@@ -1143,15 +1163,17 @@ impl SpellSystem {
                     target_guid,
                     is_triggered,
                     cast_targets,
+                    resolved_targets,
                 } => {
                     tracing::info!(
                         "[SPELL_PROJECTILE_HIT] spell={spell_id} caster={caster_guid:?} target={target_guid:?} — executing delayed damage"
                     );
-                    self.execute_spell_immediate(
+                    self.execute_spell_immediate_with_targets(
                         caster_guid,
                         spell_id,
                         &cast_targets,
                         is_triggered,
+                        &resolved_targets,
                         world,
                     )
                     .await?;
@@ -1315,7 +1337,8 @@ impl SpellSystem {
                         ..Default::default()
                     };
                     on_spell_launch(player_guid, spell_id, &cast_targets, world);
-                    self.execute_spell(player_guid, spell_id, &cast_targets, is_triggered, world)
+                    let resolved_targets = self
+                        .execute_spell(player_guid, spell_id, &cast_targets, is_triggered, world)
                         .await?;
                     self.finish_cast(
                         player_guid,
@@ -1323,6 +1346,7 @@ impl SpellSystem {
                         &cast_targets,
                         is_triggered,
                         None,
+                        resolved_targets.as_ref(),
                         world,
                     )
                     .await?;
@@ -1347,8 +1371,16 @@ impl SpellSystem {
                         unit_target_guid: target_guid,
                         ..Default::default()
                     };
-                    self.finish_cast(player_guid, spell_id, &cast_targets, false, None, world)
-                        .await?;
+                    self.finish_cast(
+                        player_guid,
+                        spell_id,
+                        &cast_targets,
+                        false,
+                        None,
+                        None,
+                        world,
+                    )
+                    .await?;
                 }
             }
         }
@@ -1377,7 +1409,7 @@ impl SpellSystem {
         cast_targets: &SpellCastTargets,
         is_triggered: bool,
         world: &World,
-    ) -> Result<()> {
+    ) -> Result<Option<crate::game::player::spells::targets::ResolvedTargets>> {
         let target_guid = cast_targets.unit_target();
 
         // Check if spell has projectile travel time
@@ -1389,6 +1421,12 @@ impl SpellSystem {
             .unwrap_or(0.0);
 
         if speed > 0.0 && target_guid.is_some() {
+            let resolved_targets = crate::game::player::spells::targets::resolve_spell_targets(
+                spell_id,
+                cast_targets,
+                caster_guid,
+                world,
+            );
             // Calculate travel time based on distance
             let travel_time_ms =
                 self.calculate_travel_time(caster_guid, target_guid.unwrap(), speed, world);
@@ -1408,16 +1446,18 @@ impl SpellSystem {
                             target_guid,
                             is_triggered,
                             cast_targets: cast_targets.clone(),
+                            resolved_targets: resolved_targets.clone(),
                         },
                     );
                 }
-                return Ok(());
+                return Ok(Some(resolved_targets));
             }
         }
 
         // Immediate execution
         self.execute_spell_immediate(caster_guid, spell_id, cast_targets, is_triggered, world)
-            .await
+            .await?;
+        Ok(None)
     }
 
     /// Execute spell effects immediately (no travel time).
@@ -1453,13 +1493,36 @@ impl SpellSystem {
         let target_guid = cast_targets.unit_target();
         let resolved = targets::resolve_spell_targets(spell_id, cast_targets, caster_guid, world);
 
+        self.execute_spell_immediate_with_targets(
+            caster_guid,
+            spell_id,
+            cast_targets,
+            is_triggered,
+            &resolved,
+            world,
+        )
+        .await
+    }
+
+    /// Dispatch an already resolved target snapshot without consulting current world targets.
+    async fn execute_spell_immediate_with_targets(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        cast_targets: &SpellCastTargets,
+        is_triggered: bool,
+        resolved: &crate::game::player::spells::targets::ResolvedTargets,
+        world: &World,
+    ) -> Result<()> {
+        let target_guid = cast_targets.unit_target();
+
         self.effects_dispatcher
             .dispatch_with_targets(
                 caster_guid,
                 spell_id,
                 target_guid,
                 is_triggered,
-                Some(&resolved),
+                Some(resolved),
                 None,
                 world,
             )
@@ -1552,6 +1615,7 @@ impl SpellSystem {
         // Channel ticks re-execute the spell effects
         self.execute_spell(caster_guid, spell_id, cast_targets, true, world)
             .await
+            .map(|_| ())
     }
 
     /// Finish a spell cast. Broadcasts SMSG_SPELL_GO, applies cooldown.
@@ -1562,14 +1626,20 @@ impl SpellSystem {
         cast_targets: &SpellCastTargets,
         is_triggered: bool,
         cast_item_guid: Option<ObjectGuid>,
+        resolved_targets: Option<&crate::game::player::spells::targets::ResolvedTargets>,
         world: &World,
     ) -> Result<()> {
-        use crate::game::player::spells::targets;
-
         let target_guid = cast_targets.unit_target();
 
         // Resolve targets for SMSG_SPELL_GO hit list
-        let resolved = targets::resolve_spell_targets(spell_id, cast_targets, caster_guid, world);
+        let resolved = resolved_targets.cloned().unwrap_or_else(|| {
+            crate::game::player::spells::targets::resolve_spell_targets(
+                spell_id,
+                cast_targets,
+                caster_guid,
+                world,
+            )
+        });
 
         // Collect all unique hit targets across all effects
         let mut hit_targets: Vec<ObjectGuid> = resolved
@@ -1627,7 +1697,7 @@ impl SpellSystem {
             cast_item_guid,
         };
         self.broadcast_mgr
-            .send_msg_to_player(caster_guid, msg.to_world_packet());
+            .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
 
         // Reset main-hand attack timer after cast-time spells (MaNGOS behavior).
         // Prevents players from getting a free swing immediately after a cast.
@@ -1960,14 +2030,13 @@ impl SpellSystem {
                 );
             }
 
-            // Broadcast SMSG_SPELL_FAILURE
-            let msg = SmsgSpellFailure {
+            // Notify nearby clients that the cast was interrupted.
+            let msg = SmsgSpellFailedOther {
                 caster_guid,
                 spell_id,
-                result: SpellCastError::Interrupted as u8,
             };
             self.broadcast_mgr
-                .send_msg_to_player(caster_guid, msg.to_world_packet());
+                .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
 
             // Also send SMSG_CAST_RESULT(SPELL_FAILED_INTERRUPTED) so the client cast bar clears
             // (MaNGOS Spell::cancel sends SendCastResult on the PREPARING/DELAYED cancel path).
@@ -2049,14 +2118,13 @@ impl SpellSystem {
                 }
             }
 
-            // Broadcast SMSG_SPELL_FAILURE
-            let msg = SmsgSpellFailure {
+            // Notify nearby clients that the cast was interrupted.
+            let msg = SmsgSpellFailedOther {
                 caster_guid: target_guid,
                 spell_id,
-                result: SpellCastError::Interrupted as u8,
             };
             self.broadcast_mgr
-                .send_msg_to_player(target_guid, msg.to_world_packet());
+                .broadcast_nearby(target_guid, &msg.to_world_packet(), true);
 
             tracing::debug!(
                 "Cast interrupted: target={}, interrupter={}, spell={}",
@@ -3020,7 +3088,7 @@ impl SpellSystem {
                 .unwrap_or_default();
 
             if ok {
-                self.finish_cast(caster_guid, spell_id, &targets, false, None, world)
+                self.finish_cast(caster_guid, spell_id, &targets, false, None, None, world)
                     .await?;
             } else {
                 self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted, world)?;

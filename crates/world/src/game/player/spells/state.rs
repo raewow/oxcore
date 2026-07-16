@@ -1110,6 +1110,9 @@ pub enum SpellEventType {
         target_guid: Option<ObjectGuid>,
         is_triggered: bool,
         cast_targets: SpellCastTargets,
+        /// Target/effect-mask source resolved at projectile launch. Impact must
+        /// dispatch this snapshot rather than resolving the world again.
+        resolved_targets: crate::game::player::spells::targets::ResolvedTargets,
     },
     /// Delayed proc resolution — run after the current spell event batch.
     PendingProc {
@@ -1411,12 +1414,47 @@ mod tests {
                 target_guid: None,
                 is_triggered: false,
                 cast_targets: SpellCastTargets::default(),
+                resolved_targets: crate::game::player::spells::targets::ResolvedTargets::default(),
             },
         );
         q.schedule(500, pending_proc(a, 5));
 
         q.cancel_events_for(a, 5);
         assert!(q.is_empty());
+    }
+
+    #[test]
+    fn delayed_event_keeps_launch_target_effect_associations() {
+        let caster = player(1);
+        let first = player(2);
+        let second = player(3);
+        let resolved_targets = crate::game::player::spells::targets::ResolvedTargets {
+            effect_targets: [vec![first], vec![second, first], Vec::new()],
+        };
+        let mut q = SpellEventQueue::new();
+        q.schedule(
+            100,
+            SpellEventType::DelayedEffect {
+                caster_guid: caster,
+                spell_id: 5,
+                target_guid: Some(first),
+                is_triggered: false,
+                cast_targets: SpellCastTargets::default(),
+                resolved_targets,
+            },
+        );
+
+        let ready = q.drain_ready(100);
+        match &ready[0].event_type {
+            SpellEventType::DelayedEffect {
+                resolved_targets, ..
+            } => {
+                assert_eq!(resolved_targets.effect_targets[0], vec![first]);
+                assert_eq!(resolved_targets.effect_targets[1], vec![second, first]);
+                assert!(resolved_targets.effect_targets[2].is_empty());
+            }
+            _ => panic!("wrong event type"),
+        }
     }
 
     #[test]
