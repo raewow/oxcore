@@ -587,6 +587,110 @@ impl SmsgSpellDelayed {
     }
 }
 
+/// Per-effect execute-log data for SMSG_SPELLLOGEXECUTE.
+/// Mirrors MaNGOS `Spell::ExecuteLogInfo` at Spell.h:545-599.
+#[derive(Debug, Clone)]
+pub struct ExecuteLogInfo {
+    pub target_guid: ObjectGuid,
+    pub data: ExecuteLogData,
+}
+
+/// Per-effect-type payload for SMSG_SPELLLOGEXECUTE.
+#[derive(Debug, Clone)]
+pub enum ExecuteLogData {
+    PowerDrain { amount: u32, power: u32, multiplier: f32 },
+    Heal { amount: u32, critical: bool },
+    Energize { amount: u32, power_type: u32 },
+    ExtraAttacks { count: u32 },
+    CreateItem { item_entry: u32 },
+    InterruptCast { spell_id: u32 },
+    FeedPet { item_entry: u32 },
+    DurabilityDamage { item_entry: i32, unk: i32 },
+    TargetOnly,
+}
+
+/// SMSG_SPELLLOGEXECUTE (opcode 0x024C)
+/// Sent after a cast completes when the spell has non-trivial side effects
+/// that the client needs to be told about (summons, dispels, drains, etc.).
+pub struct SmsgSpellLogExecute;
+
+impl SmsgSpellLogExecute {
+    /// Build the packet. Returns `None` when every effect index has an empty log
+    /// (the C++ function returns without sending in that case).
+    pub fn build(
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        effect_types: [u32; 3],
+        execute_log: [&[ExecuteLogInfo]; 3],
+    ) -> Option<WorldPacket> {
+        let effect_count = execute_log.iter().filter(|v| !v.is_empty()).count();
+        if effect_count == 0 {
+            return None;
+        }
+
+        let mut packet = WorldPacket::new(Opcode::SMSG_SPELLLOGEXECUTE);
+        // Vanilla 1.12 > 1.8.4 — uses packed GUIDs
+        packet.write_packed_guid(caster_guid);
+        packet.write_u32(spell_id);
+        packet.write_u32(effect_count as u32);
+
+        for i in 0..3 {
+            let entries = execute_log[i];
+            if entries.is_empty() {
+                continue;
+            }
+
+            packet.write_u32(effect_types[i]);
+            packet.write_u32(entries.len() as u32);
+
+            for info in entries {
+                match &info.data {
+                    ExecuteLogData::PowerDrain { amount, power, multiplier } => {
+                        packet.write_guid(info.target_guid);
+                        packet.write_u32(*amount);
+                        packet.write_u32(*power);
+                        packet.write_f32(*multiplier);
+                    }
+                    ExecuteLogData::Heal { amount, critical } => {
+                        packet.write_guid(info.target_guid);
+                        packet.write_u32(*amount);
+                        packet.write_u8(if *critical { 1 } else { 0 });
+                    }
+                    ExecuteLogData::Energize { amount, power_type } => {
+                        packet.write_guid(info.target_guid);
+                        packet.write_u32(*amount);
+                        packet.write_u32(*power_type);
+                    }
+                    ExecuteLogData::ExtraAttacks { count } => {
+                        packet.write_guid(info.target_guid);
+                        packet.write_u32(*count);
+                    }
+                    ExecuteLogData::CreateItem { item_entry } => {
+                        packet.write_u32(*item_entry);
+                    }
+                    ExecuteLogData::InterruptCast { spell_id } => {
+                        packet.write_guid(info.target_guid);
+                        packet.write_u32(*spell_id);
+                    }
+                    ExecuteLogData::FeedPet { item_entry } => {
+                        packet.write_u32(*item_entry);
+                    }
+                    ExecuteLogData::DurabilityDamage { item_entry, unk } => {
+                        packet.write_guid(info.target_guid);
+                        packet.write_u32(*item_entry as u32);
+                        packet.write_u32(*unk as u32);
+                    }
+                    ExecuteLogData::TargetOnly => {
+                        packet.write_guid(info.target_guid);
+                    }
+                }
+            }
+        }
+
+        Some(packet)
+    }
+}
+
 /// Result of a spell cast attempt (sent to client in SMSG_CAST_RESULT).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -1006,5 +1110,73 @@ pub fn spell_effect_type_from_u32(value: u32) -> Option<SpellEffectType> {
         121 => Some(SpellEffectType::NormalizedWeaponDmg),
         122 => Some(SpellEffectType::NormalizedWeaponDmgPlus),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod smsg_spell_log_execute_tests {
+    use super::*;
+
+    #[test]
+    fn empty_log_returns_none() {
+        let result = SmsgSpellLogExecute::build(
+            ObjectGuid::from_raw(1),
+            1234,
+            [0, 0, 0],
+            [&[], &[], &[]],
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn single_target_only_effect() {
+        let guid = ObjectGuid::from_raw(0xC0_0000_0000_0001);
+        let packet = SmsgSpellLogExecute::build(
+            guid,
+            1234,
+            [64, 0, 0],
+            [&[ExecuteLogInfo { target_guid: guid, data: ExecuteLogData::TargetOnly }], &[], &[]],
+        )
+        .expect("should build");
+        let data = packet.data();
+        let inner = data.as_ref();
+        assert!(!inner.is_empty());
+    }
+
+    #[test]
+    fn heal_log_encodes_correctly() {
+        let caster = ObjectGuid::from_raw(0xC0_00_00_00_00_00_00_01);
+        let target = ObjectGuid::from_raw(0xC0_00_00_00_00_00_00_02);
+        let packet = SmsgSpellLogExecute::build(
+            caster,
+            4321,
+            [8, 0, 0],
+            [&[ExecuteLogInfo { target_guid: target, data: ExecuteLogData::Heal { amount: 500, critical: true } }], &[], &[]],
+        )
+        .expect("should build");
+        let data = packet.data();
+        let inner = data.as_ref();
+        assert!(!inner.is_empty());
+    }
+
+    #[test]
+    fn power_drain_log() {
+        let caster = ObjectGuid::from_raw(1);
+        let target = ObjectGuid::from_raw(2);
+        let packet = SmsgSpellLogExecute::build(
+            caster,
+            42,
+            [32, 0, 0],
+            [&[
+                ExecuteLogInfo {
+                    target_guid: target,
+                    data: ExecuteLogData::PowerDrain { amount: 100, power: 0, multiplier: 1.0 },
+                }
+            ], &[], &[]],
+        )
+        .expect("should build");
+        let inner = packet.data();
+        let inner = inner.as_ref();
+        assert!(!inner.is_empty());
     }
 }

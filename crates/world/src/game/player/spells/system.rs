@@ -18,8 +18,9 @@ use crate::game::player::spells::validation;
 use crate::World;
 use anyhow::Result;
 use oxcore_shared::messages::spells::{
-    MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailedOther, SmsgSpellGo,
-    SmsgSpellStart, SPELL_RESULT_STATUS_FAIL, SPELL_RESULT_STATUS_OKAY,
+    ExecuteLogInfo, MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailedOther,
+    SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellStart, SPELL_RESULT_STATUS_FAIL,
+    SPELL_RESULT_STATUS_OKAY,
 };
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
@@ -1552,12 +1553,20 @@ impl SpellSystem {
                 is_triggered,
             );
             if needs_spell_log(send_to_client, &entry.effect) {
-                // ... SendLogExecute / SMSG_SPELLLOGEXECUTE has no packet builder yet;
-                // tracked separately so this doesn't silently drop the log.
-                tracing::trace!(
-                    "[SPELL_LOG_EXECUTE] spell={spell_id} caster={caster_guid:?} — \
-                     needs spell-execute log, SMSG_SPELLLOGEXECUTE not yet implemented"
-                );
+                // SmsgSpellLogExecute builder exists in shared::messages::spells,
+                // but effects pipeline does not yet collect ExecuteLogInfo entries.
+                // Log entries are currently empty so the builder returns None and no
+                // packet is emitted. Wire AddExecuteLogInfo calls into each effect
+                // handler to populate the log.
+                let empty_log: [&[ExecuteLogInfo]; 3] = [&[], &[], &[]];
+                if let Some(packet) = SmsgSpellLogExecute::build(
+                    caster_guid,
+                    spell_id,
+                    entry.effect,
+                    empty_log,
+                ) {
+                    self.broadcast_mgr.send_to_player(caster_guid, packet);
+                }
             }
         }
 
