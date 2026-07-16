@@ -188,6 +188,19 @@ fn caster_is_in_world(caster_guid: ObjectGuid, world: &World) -> bool {
     }
 }
 
+/// `Spell::SendAllTargetsMiss` only emits its aggregate log when every registered target
+/// missed. `SpellMissInfo::None` is the reference implementation's landed-hit sentinel.
+fn should_send_all_targets_miss(
+    caster_in_world: bool,
+    targets: &[(ObjectGuid, hit::SpellMissInfo)],
+) -> bool {
+    caster_in_world
+        && !targets.is_empty()
+        && targets
+            .iter()
+            .all(|(_, miss_info)| *miss_info != hit::SpellMissInfo::None)
+}
+
 // --- Spell::OnSpellLaunch: launch-time special-case handling ---------------------------
 
 const SPELL_EFFECT_OPEN_LOCK: u32 = 33;
@@ -2306,6 +2319,38 @@ impl SpellSystem {
             .broadcast_nearby(caster_guid, &packet, true);
     }
 
+    /// Broadcast one `SMSG_SPELLLOGMISS` entry when every target of a spell missed.
+    ///
+    /// The current cast pipeline reports misses as each target is resolved, rather than
+    /// retaining a complete per-cast target list, so callers that have that list can use
+    /// this aggregate form directly.
+    pub fn send_all_targets_miss(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        targets: &[(ObjectGuid, hit::SpellMissInfo)],
+        world: &World,
+    ) {
+        if !should_send_all_targets_miss(caster_is_in_world(caster_guid, world), targets) {
+            return;
+        }
+
+        use oxcore_shared::protocol::packet::WorldPacketGuidExt;
+        use oxcore_shared::protocol::{Opcode, WorldPacket};
+
+        let mut packet = WorldPacket::new(Opcode::SMSG_SPELLLOGMISS);
+        packet.write_u32(spell_id);
+        packet.write_guid(caster_guid);
+        packet.write_u8(0); // unk8
+        packet.write_u32(targets.len() as u32);
+        for (target_guid, miss_info) in targets {
+            packet.write_guid(*target_guid);
+            packet.write_u8(*miss_info as u8);
+        }
+        self.broadcast_mgr
+            .broadcast_nearby(caster_guid, &packet, true);
+    }
+
     /// Broadcast `SMSG_PROCRESIST` for a spell resisted by a target
     /// (faithful `SpellCaster::SendSpellDamageResist`).
     pub fn send_spell_damage_resist(
@@ -3320,6 +3365,34 @@ mod tests {
         assert!(!spell_needs_combo_points(0x0000_0001 | 0x0008_0000));
     }
 
+    // -- Spell::SendAllTargetsMiss: should_send_all_targets_miss --------------------------
+
+    #[test]
+    fn all_targets_miss_requires_live_caster_and_at_least_one_target() {
+        let missed = [(ObjectGuid::new_creature(1, 2), hit::SpellMissInfo::Miss)];
+        assert!(!should_send_all_targets_miss(false, &missed));
+        assert!(!should_send_all_targets_miss(true, &[]));
+    }
+
+    #[test]
+    fn all_targets_miss_rejects_any_landed_target() {
+        let targets = [
+            (ObjectGuid::new_creature(1, 2), hit::SpellMissInfo::Miss),
+            (ObjectGuid::new_creature(1, 3), hit::SpellMissInfo::None),
+        ];
+        assert!(!should_send_all_targets_miss(true, &targets));
+    }
+
+    #[test]
+    fn all_targets_miss_accepts_mixed_miss_reasons() {
+        let targets = [
+            (ObjectGuid::new_creature(1, 2), hit::SpellMissInfo::Miss),
+            (ObjectGuid::new_creature(1, 3), hit::SpellMissInfo::Resist),
+            (ObjectGuid::new_creature(1, 4), hit::SpellMissInfo::Immune),
+        ];
+        assert!(should_send_all_targets_miss(true, &targets));
+    }
+
     // -- Spell::InitializeChanneledVisualTimer: channeled_visual_kit --------------------
 
     #[test]
@@ -3700,6 +3773,16 @@ mod tests {
             p.movement.position.y = 0.0;
             p.movement.position.z = 0.0;
         });
+    }
+
+    #[tokio::test]
+    async fn all_targets_miss_uses_world_membership_for_caster() {
+        let world = launch_test_world();
+        let caster = ObjectGuid::new_player(77);
+        assert!(!caster_is_in_world(caster, &world));
+
+        add_launch_player(&world, caster, 0.0);
+        assert!(caster_is_in_world(caster, &world));
     }
 
     #[tokio::test]
