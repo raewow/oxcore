@@ -283,8 +283,8 @@ pub fn fill_area_targets(
         allow_dead_target,
     };
 
-    // Grid visitation: pull every object near the center, then materialize the
-    // Unit candidates the notifier would have seen.
+    // Grid visitation: gather the player and creature entries around the center,
+    // then materialize the Unit candidates the notifier would have seen.
     let map = match unit_map_location(effective_caster, world) {
         Some((map_id, instance_id)) => world
             .managers
@@ -293,12 +293,10 @@ pub fn fill_area_targets(
         None => return,
     };
 
-    let nearby = map.get_objects_in_range(center, radius);
+    let mut nearby = map.get_players_in_range(center, radius);
+    map.get_creatures_in_range(center, radius * radius, &mut nearby);
     let mut candidates = Vec::with_capacity(nearby.len());
     for guid in nearby {
-        if !(guid.is_player() || guid.is_creature_or_pet()) {
-            continue;
-        }
         let (hostile, friendly) = caster_relation(effective_caster, guid);
         candidates.push(AreaCandidate {
             guid,

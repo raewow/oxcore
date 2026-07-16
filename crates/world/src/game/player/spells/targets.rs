@@ -9,6 +9,9 @@
 
 use crate::game::common::unit_flags;
 use crate::game::player::auras::effects::{AURA_MOD_CHARM, AURA_MOD_POSSESS, AURA_SPELL_MAGNET};
+use crate::game::player::spells::area_targets::{
+    fill_area_targets, SpellNotifyPushType, SpellTargets,
+};
 use crate::game::player::spells::state::SpellCastTargets;
 use crate::World;
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -389,23 +392,40 @@ fn resolve_implicit_target(
         | ImplicitTarget::AllEnemyInAreaInstant
         | ImplicitTarget::AllEnemyInAreaChanneled
         | ImplicitTarget::AoETargetEnemy => {
-            // Get center position: destination from cast_targets, or caster position
-            let center = if let Some((x, y, z)) = cast_targets.dst_position {
-                Position { x, y, z, o: 0.0 }
+            let push_type = if cast_targets.dst_position.is_some() {
+                SpellNotifyPushType::DestCenter
             } else {
-                get_unit_position(caster_guid, world)
+                SpellNotifyPushType::SelfCenter
             };
-
-            let nearby = get_units_in_range(caster_guid, center, radius, world);
-            for guid in nearby {
-                if guid != caster_guid && is_hostile(caster_guid, guid, world) {
-                    targets.push(guid);
-                }
-            }
+            fill_area_targets(
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                push_type,
+                SpellTargets::Hostile,
+                None,
+                false,
+                targets,
+            );
         }
 
         // All hostile around caster
-        ImplicitTarget::AllHostileAroundCaster | ImplicitTarget::TargetEnemyNear => {
+        ImplicitTarget::AllHostileAroundCaster => {
+            fill_area_targets(
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                SpellNotifyPushType::SelfCenter,
+                SpellTargets::Hostile,
+                None,
+                false,
+                targets,
+            );
+        }
+
+        ImplicitTarget::TargetEnemyNear => {
             let center = get_unit_position(caster_guid, world);
             let nearby = get_units_in_range(caster_guid, center, radius, world);
             for guid in nearby {
@@ -438,13 +458,17 @@ fn resolve_implicit_target(
         }
 
         ImplicitTarget::AllFriendlyInArea | ImplicitTarget::AllFriendlyAroundCaster => {
-            let center = get_unit_position(caster_guid, world);
-            let nearby = get_units_in_range(caster_guid, center, radius, world);
-            for guid in nearby {
-                if !is_hostile(caster_guid, guid, world) {
-                    targets.push(guid);
-                }
-            }
+            fill_area_targets(
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                SpellNotifyPushType::SelfCenter,
+                SpellTargets::Friendly,
+                None,
+                false,
+                targets,
+            );
         }
 
         // Chain targets
@@ -1356,6 +1380,8 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::dbc::structures::SpellEntry;
+    use crate::game::creature::manager::CreatureTemplate;
+    use crate::game::creature::Creature;
     use crate::game::player::auras::aura::{Aura, AuraFlags};
     use crate::game::player::auras::effects::AURA_SPELL_MAGNET;
     use crate::game::player::player::Player;
@@ -1510,6 +1536,49 @@ mod tests {
         world.managers.player_mgr.add_player(player, guid.counter());
     }
 
+    fn add_test_creature(world: &World, guid: ObjectGuid, position: Position) {
+        let entry = guid.entry();
+        let template = CreatureTemplate {
+            entry,
+            name: format!("Creature {entry}"),
+            subname: None,
+            min_level: 1,
+            max_level: 1,
+            faction: 35,
+            model_id_1: 1,
+            model_id_2: 0,
+            model_id_3: 0,
+            model_id_4: 0,
+            scale: 1.0,
+            npc_flags: 0,
+            unit_flags: 0,
+            static_flags1: 0,
+            flags_extra: 0,
+            creature_type: 0,
+            unit_class: 1,
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            damage_variance: 0.0,
+            attack_time: 2000,
+            rank: 0,
+            gossip_menu_id: 0,
+            vendor_id: 0,
+            trainer_id: 0,
+            trainer_type: 0,
+            spells: [0; 4],
+        };
+        world.managers.creature_mgr.add_creature(Creature::new(
+            guid, entry, 1, position, 0, 0, &template, 1, None,
+        ));
+        world
+            .managers
+            .map_mgr
+            .get_or_create_map(0, 0)
+            .add_creature(guid, position);
+    }
+
     /// Ground-targeted AoE resolves enemies around the destination position, proving the
     /// destination now reaches resolution (the whole point of threading SpellCastTargets).
     #[tokio::test]
@@ -1517,14 +1586,13 @@ mod tests {
         let world = test_world();
         world.managers.spell_mgr.add_spell(aoe_enemy_spell(50000));
 
-        // Unregistered player caster → map (0,0), caster position (0,0,0).
         let caster = ObjectGuid::new_player(1);
+        add_test_player(&world, caster, 0, 0);
         let near_origin = ObjectGuid::new_creature(1, 1); // 3 yds from origin
         let near_dest = ObjectGuid::new_creature(1, 2); // at the destination, 100 yds away
 
-        let map = world.managers.map_mgr.get_or_create_map(0, 0);
-        map.add_creature(near_origin, pos(3.0, 0.0));
-        map.add_creature(near_dest, pos(100.0, 0.0));
+        add_test_creature(&world, near_origin, pos(3.0, 0.0));
+        add_test_creature(&world, near_dest, pos(100.0, 0.0));
 
         // With a destination at (100,0,0): only the creature at the destination is in radius.
         let with_dst = SpellCastTargets {
@@ -2188,11 +2256,10 @@ mod tests {
     #[tokio::test]
     async fn resolve_filters_targets_through_check_target() {
         let world = test_world();
-        // Unregistered player caster → map (0,0), caster position (0,0,0).
         let caster = ObjectGuid::new_player(90);
+        add_test_player(&world, caster, 0, 0);
         let creature = ObjectGuid::new_creature(1, 90);
-        let map = world.managers.map_mgr.get_or_create_map(0, 0);
-        map.add_creature(creature, pos(3.0, 0.0));
+        add_test_creature(&world, creature, pos(3.0, 0.0));
 
         // Baseline: a plain enemy AoE resolves the nearby creature.
         world.managers.spell_mgr.add_spell(aoe_enemy_spell(52000));
