@@ -100,7 +100,7 @@ pub struct SpellManager {
     spell_enchant_charges: HashMap<u32, u32>,
     spell_threats: DashMap<u32, SpellThreatEntry>,
     spell_elixirs: HashMap<u32, u8>,
-    spell_learn_skills: HashMap<u32, SpellLearnSkillNode>,
+    spell_learn_skills: RwLock<HashMap<u32, SpellLearnSkillNode>>,
     spell_learn_spells: HashMap<u32, Vec<SpellLearnSpellNode>>,
     spell_script_targets: HashMap<u32, Vec<SpellTargetEntry>>,
     spell_areas: Vec<SpellArea>,
@@ -123,7 +123,7 @@ impl SpellManager {
             spell_enchant_charges: HashMap::new(),
             spell_threats: DashMap::new(),
             spell_elixirs: HashMap::new(),
-            spell_learn_skills: HashMap::new(),
+            spell_learn_skills: RwLock::new(HashMap::new()),
             spell_learn_spells: HashMap::new(),
             spell_script_targets: HashMap::new(),
             spell_areas: Vec::new(),
@@ -153,6 +153,9 @@ impl SpellManager {
 
         // Load spell_proc_event (custom proc gating)
         self.load_spell_proc_events(world_db).await?;
+
+        // Scan loaded spells for learn-skill entries
+        self.load_spell_learn_skills();
 
         Ok(())
     }
@@ -533,6 +536,47 @@ impl SpellManager {
             .collect();
         results.sort_by_key(|s| s.id);
         results
+    }
+
+    /// Port of `SpellMgr::LoadSpellLearnSkills`.
+    ///
+    /// Scans every loaded spell for `SPELL_EFFECT_SKILL` (118) and populates
+    /// `spell_learn_skills[spell_id]` with the skill, step, and character points
+    /// (1 for ordinary skills, `step * 75` for riding).
+    pub fn load_spell_learn_skills(&self) {
+        const SPELL_EFFECT_SKILL: u32 = 118;
+        const SKILL_RIDING: u32 = 762;
+
+        let mut map = HashMap::new();
+        let mut count = 0u32;
+
+        for entry in self.spells.iter() {
+            let spell_id = entry.id;
+            for (i, &eff) in entry.effect.iter().enumerate() {
+                if eff == SPELL_EFFECT_SKILL {
+                    let skill = entry.effect_misc_value[i] as u32;
+                    let step = entry.effect_base_points[i] as u32;
+                    let char_pts = if skill != SKILL_RIDING {
+                        1
+                    } else {
+                        step * 75
+                    };
+                    map.insert(
+                        spell_id,
+                        SpellLearnSkillNode {
+                            skill_id: skill,
+                            step,
+                            char_pts,
+                        },
+                    );
+                    count += 1;
+                    break;
+                }
+            }
+        }
+
+        *self.spell_learn_skills.write() = map;
+        info!("Loaded {} Spell Learn Skills from templates", count);
     }
 }
 
