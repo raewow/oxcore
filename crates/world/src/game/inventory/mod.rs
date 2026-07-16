@@ -15,6 +15,7 @@ pub mod types;
 mod tests;
 
 pub use cache::{CachedItemInfo, InventoryCache, PendingInventoryOp, PlayerInventoryData};
+pub use can_store::{CanStoreChecker, CanStoreResult};
 pub use oxcore_shared::game::inventory::{
     decode_position, encode_position, is_bag_pos, is_bank_pos, is_equipment_pos, is_inventory_pos,
     EnchantmentOffset, EnchantmentSlot, EquipmentSlot, InventoryResult, ItemLootUpdateState,
@@ -24,6 +25,5 @@ pub use oxcore_shared::game::inventory::{
     INVENTORY_SLOT_ITEM_END, INVENTORY_SLOT_ITEM_START, KEYRING_SLOT_END, KEYRING_SLOT_START,
     MAX_BAG_SIZE, MAX_ENCHANTMENT_OFFSET, MAX_ENCHANTMENT_SLOT, NULL_BAG, NULL_SLOT,
 };
-pub use can_store::{CanStoreChecker, CanStoreResult};
 pub use system::InventorySystem;
 pub use types::*;

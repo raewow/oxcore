@@ -1,10 +1,9 @@
 use oxcore_shared::game::inventory::{
-    bag_family, item_can_go_into_bag, encode_position, InventoryResult,
-    ItemPosCount, ItemPosCountVec, BANK_SLOT_BAG_END, BANK_SLOT_BAG_START,
-    BANK_SLOT_ITEM_END, BANK_SLOT_ITEM_START, BUYBACK_SLOT_END, BUYBACK_SLOT_START,
-    INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START,
-    INVENTORY_SLOT_ITEM_END, INVENTORY_SLOT_ITEM_START, KEYRING_SLOT_END, KEYRING_SLOT_START,
-    NULL_BAG, NULL_SLOT,
+    bag_family, encode_position, item_can_go_into_bag, InventoryResult, ItemPosCount,
+    ItemPosCountVec, BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BANK_SLOT_ITEM_END,
+    BANK_SLOT_ITEM_START, BUYBACK_SLOT_END, BUYBACK_SLOT_START, INVENTORY_SLOT_BAG_0,
+    INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START, INVENTORY_SLOT_ITEM_END,
+    INVENTORY_SLOT_ITEM_START, KEYRING_SLOT_END, KEYRING_SLOT_START, NULL_BAG, NULL_SLOT,
 };
 
 use crate::game::items::manager::ItemTemplate;
@@ -260,9 +259,7 @@ impl<'a> CanStoreChecker<'a> {
                 // item is being placed in a bag (19-22 or 63-68)
                 let pBag_guid = self.resolve_bag_item(bag);
                 if pBag_guid.is_none()
-                    || pSrcItem
-                        .map(|s| pBag_guid == Some(s.guid))
-                        .unwrap_or(false)
+                    || pSrcItem.map(|s| pBag_guid == Some(s.guid)).unwrap_or(false)
                 {
                     *bag_slot = bag;
                     return InventoryResult::IntBagError;
@@ -292,11 +289,7 @@ impl<'a> CanStoreChecker<'a> {
             // non-empty slot, check item type
             if let Some(pItem2_ref) = pItem2 {
                 let pItem2_read = pItem2_ref.read();
-                let res = can_be_merged_partly_with(
-                    pItem2_read.entry,
-                    pItem2_read.count,
-                    proto,
-                );
+                let res = can_be_merged_partly_with(pItem2_read.entry, pItem2_read.count, proto);
                 if res != InventoryResult::Ok {
                     return res;
                 }
@@ -361,8 +354,7 @@ impl<'a> CanStoreChecker<'a> {
 
         // specialized bag mode: non_specialized=false means we want bags that match the item's bag_family.
         // non_specialized=true means we want plain containers (class=container, subclass=container).
-        let is_plain_container =
-            pBagProto.item_class == 1 && pBagProto.item_subclass == 0; // ITEM_CLASS_CONTAINER=1, ITEM_SUBCLASS_CONTAINER=0
+        let is_plain_container = pBagProto.item_class == 1 && pBagProto.item_subclass == 0; // ITEM_CLASS_CONTAINER=1, ITEM_SUBCLASS_CONTAINER=0
 
         if non_specialized != is_plain_container {
             *bag_slot = bag;
@@ -402,11 +394,8 @@ impl<'a> CanStoreChecker<'a> {
             if has_item {
                 if let Some(pItem2) = pItem2_guid.and_then(|g| self.get_item(g)) {
                     let pItem2_read = pItem2.read();
-                    let res = can_be_merged_partly_with(
-                        pItem2_read.entry,
-                        pItem2_read.count,
-                        proto,
-                    );
+                    let res =
+                        can_be_merged_partly_with(pItem2_read.entry, pItem2_read.count, proto);
                     if res != InventoryResult::Ok {
                         continue;
                     }
@@ -474,11 +463,8 @@ impl<'a> CanStoreChecker<'a> {
             if has_item {
                 if let Some(pItem2) = pItem2_guid.and_then(|g| self.get_item(g)) {
                     let pItem2_read = pItem2.read();
-                    let res = can_be_merged_partly_with(
-                        pItem2_read.entry,
-                        pItem2_read.count,
-                        proto,
-                    );
+                    let res =
+                        can_be_merged_partly_with(pItem2_read.entry, pItem2_read.count, proto);
                     if res != InventoryResult::Ok {
                         continue;
                     }
@@ -542,9 +528,7 @@ impl<'a> CanStoreChecker<'a> {
 
         // item used / temp loot
         if let Some(item) = pItem {
-            if item.loot_state
-                != crate::game::items::item::ItemLootUpdateState::None
-            {
+            if item.loot_state != crate::game::items::item::ItemLootUpdateState::None {
                 return CanStoreResult::err(InventoryResult::AlreadyLooted, count, 0);
             }
 
@@ -554,8 +538,7 @@ impl<'a> CanStoreChecker<'a> {
         }
 
         // check count of similar items (unique/quest limits)
-        let (similar_res, no_similar_count) =
-            self.can_take_more_similar_items(entry, count, pItem);
+        let (similar_res, no_similar_count) = self.can_take_more_similar_items(entry, count, pItem);
 
         let mut no_similar: u32 = no_similar_count;
 
@@ -573,19 +556,20 @@ impl<'a> CanStoreChecker<'a> {
         // ── specific bag+slot ──────────────────────────────────────────
         if bag != NULL_BAG && slot != NULL_SLOT {
             let last_item_slot_field = BANK_SLOT_ITEM_END;
-            if bag == INVENTORY_SLOT_BAG_0
-                && (slot as u32) * 2 > last_item_slot_field as u32
-            {
+            if bag == INVENTORY_SLOT_BAG_0 && (slot as u32) * 2 > last_item_slot_field as u32 {
                 let remaining = count + no_similar;
-                return CanStoreResult::err(
-                    InventoryResult::ItemDoesntGoToSlot,
-                    remaining,
-                    0,
-                );
+                return CanStoreResult::err(InventoryResult::ItemDoesntGoToSlot, remaining, 0);
             }
 
             let res = self.can_store_item_in_specific_slot(
-                bag, slot, &mut dest, proto, &mut count, swap, pItem, &mut bag_slot,
+                bag,
+                slot,
+                &mut dest,
+                proto,
+                &mut count,
+                swap,
+                pItem,
+                &mut bag_slot,
             );
             if res != InventoryResult::Ok {
                 let remaining = count + no_similar;
@@ -653,15 +637,30 @@ impl<'a> CanStoreChecker<'a> {
                     }
                 } else {
                     // equipped bag — try specialized then non-specialized
-                    let res =
-                        self.can_store_item_in_bag(
-                            bag, &mut dest, proto, &mut count, true, false,
-                            pItem, NULL_BAG, slot, &mut bag_slot,
-                        );
+                    let res = self.can_store_item_in_bag(
+                        bag,
+                        &mut dest,
+                        proto,
+                        &mut count,
+                        true,
+                        false,
+                        pItem,
+                        NULL_BAG,
+                        slot,
+                        &mut bag_slot,
+                    );
                     if res != InventoryResult::Ok {
                         let res2 = self.can_store_item_in_bag(
-                            bag, &mut dest, proto, &mut count, true, true,
-                            pItem, NULL_BAG, slot, &mut bag_slot,
+                            bag,
+                            &mut dest,
+                            proto,
+                            &mut count,
+                            true,
+                            true,
+                            pItem,
+                            NULL_BAG,
+                            slot,
+                            &mut bag_slot,
                         );
                         if res2 != InventoryResult::Ok {
                             return CanStoreResult::err(res2, count + no_similar, 0);
@@ -713,15 +712,30 @@ impl<'a> CanStoreChecker<'a> {
                     return Self::finish_ok_or_limit(dest, no_similar);
                 }
             } else {
-                let res =
-                    self.can_store_item_in_bag(
-                        bag, &mut dest, proto, &mut count, false, false,
-                        pItem, NULL_BAG, slot, &mut bag_slot,
-                    );
+                let res = self.can_store_item_in_bag(
+                    bag,
+                    &mut dest,
+                    proto,
+                    &mut count,
+                    false,
+                    false,
+                    pItem,
+                    NULL_BAG,
+                    slot,
+                    &mut bag_slot,
+                );
                 if res != InventoryResult::Ok {
                     let res2 = self.can_store_item_in_bag(
-                        bag, &mut dest, proto, &mut count, false, true,
-                        pItem, NULL_BAG, slot, &mut bag_slot,
+                        bag,
+                        &mut dest,
+                        proto,
+                        &mut count,
+                        false,
+                        true,
+                        pItem,
+                        NULL_BAG,
+                        slot,
+                        &mut bag_slot,
                     );
                     if res2 != InventoryResult::Ok {
                         return CanStoreResult::err(res2, count + no_similar, 0);
@@ -777,8 +791,16 @@ impl<'a> CanStoreChecker<'a> {
             if proto.bag_family != bag_family::NONE {
                 for i in INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END {
                     let res = self.can_store_item_in_bag(
-                        i, &mut dest, proto, &mut count, true, false,
-                        pItem, bag, slot, &mut bag_slot,
+                        i,
+                        &mut dest,
+                        proto,
+                        &mut count,
+                        true,
+                        false,
+                        pItem,
+                        bag,
+                        slot,
+                        &mut bag_slot,
                     );
                     if res != InventoryResult::Ok {
                         continue;
@@ -792,8 +814,16 @@ impl<'a> CanStoreChecker<'a> {
             // non-specialized bags
             for i in INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END {
                 let res = self.can_store_item_in_bag(
-                    i, &mut dest, proto, &mut count, true, true,
-                    pItem, bag, slot, &mut bag_slot,
+                    i,
+                    &mut dest,
+                    proto,
+                    &mut count,
+                    true,
+                    true,
+                    pItem,
+                    bag,
+                    slot,
+                    &mut bag_slot,
                 );
                 if res != InventoryResult::Ok {
                     continue;
@@ -828,8 +858,16 @@ impl<'a> CanStoreChecker<'a> {
 
             for i in INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END {
                 let res = self.can_store_item_in_bag(
-                    i, &mut dest, proto, &mut count, false, false,
-                    pItem, bag, slot, &mut bag_slot,
+                    i,
+                    &mut dest,
+                    proto,
+                    &mut count,
+                    false,
+                    false,
+                    pItem,
+                    bag,
+                    slot,
+                    &mut bag_slot,
                 );
                 if res != InventoryResult::Ok {
                     continue;
@@ -875,8 +913,16 @@ impl<'a> CanStoreChecker<'a> {
         // free slot in non-specialized bags
         for i in INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END {
             let res = self.can_store_item_in_bag(
-                i, &mut dest, proto, &mut count, false, true,
-                pItem, bag, slot, &mut bag_slot,
+                i,
+                &mut dest,
+                proto,
+                &mut count,
+                false,
+                true,
+                pItem,
+                bag,
+                slot,
+                &mut bag_slot,
             );
             if res != InventoryResult::Ok {
                 continue;
@@ -890,10 +936,7 @@ impl<'a> CanStoreChecker<'a> {
         CanStoreResult::err(InventoryResult::InventoryFull, count, no_similar)
     }
 
-    fn finish_ok_or_limit(
-        dest: ItemPosCountVec,
-        no_similar: u32,
-    ) -> CanStoreResult {
+    fn finish_ok_or_limit(dest: ItemPosCountVec, no_similar: u32) -> CanStoreResult {
         if no_similar == 0 {
             CanStoreResult {
                 dest,
@@ -962,9 +1005,7 @@ impl<'a> CanStoreChecker<'a> {
                     return CanStoreResult::err(InventoryResult::DontOwnThatItem, 0, 0);
                 }
 
-                if item.loot_state
-                    != crate::game::items::item::ItemLootUpdateState::None
-                {
+                if item.loot_state != crate::game::items::item::ItemLootUpdateState::None {
                     return CanStoreResult::err(InventoryResult::AlreadyLooted, 0, 0);
                 }
 
@@ -1076,12 +1117,12 @@ mod tests {
     fn is_inventory_pos_main_bag_and_bag_slots() {
         assert!(is_inventory_pos(255, 23)); // main bag first slot
         assert!(is_inventory_pos(255, 38)); // main bag last slot
-        assert!(is_inventory_pos(19, 0));   // first bag slot
-        assert!(is_inventory_pos(22, 15));  // last possible bag+slot
+        assert!(is_inventory_pos(19, 0)); // first bag slot
+        assert!(is_inventory_pos(22, 15)); // last possible bag+slot
         assert!(is_inventory_pos(255, 81)); // keyring start
         assert!(is_inventory_pos(255, 96)); // keyring end
         assert!(is_inventory_pos(255, 255)); // null slot
-        assert!(!is_inventory_pos(255, 0));  // equipment slot - not inventory
+        assert!(!is_inventory_pos(255, 0)); // equipment slot - not inventory
         assert!(!is_inventory_pos(255, 39)); // bank slot - not inventory
     }
 }

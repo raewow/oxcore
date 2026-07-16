@@ -628,14 +628,35 @@ pub struct ExecuteLogInfo {
 /// Per-effect-type payload for SMSG_SPELLLOGEXECUTE.
 #[derive(Debug, Clone)]
 pub enum ExecuteLogData {
-    PowerDrain { amount: u32, power: u32, multiplier: f32 },
-    Heal { amount: u32, critical: bool },
-    Energize { amount: u32, power_type: u32 },
-    ExtraAttacks { count: u32 },
-    CreateItem { item_entry: u32 },
-    InterruptCast { spell_id: u32 },
-    FeedPet { item_entry: u32 },
-    DurabilityDamage { item_entry: i32, unk: i32 },
+    PowerDrain {
+        amount: u32,
+        power: u32,
+        multiplier: f32,
+    },
+    Heal {
+        amount: u32,
+        critical: bool,
+    },
+    Energize {
+        amount: u32,
+        power_type: u32,
+    },
+    ExtraAttacks {
+        count: u32,
+    },
+    CreateItem {
+        item_entry: u32,
+    },
+    InterruptCast {
+        spell_id: u32,
+    },
+    FeedPet {
+        item_entry: u32,
+    },
+    DurabilityDamage {
+        item_entry: i32,
+        unk: i32,
+    },
     TargetOnly,
 }
 
@@ -675,7 +696,11 @@ impl SmsgSpellLogExecute {
 
             for info in entries {
                 match &info.data {
-                    ExecuteLogData::PowerDrain { amount, power, multiplier } => {
+                    ExecuteLogData::PowerDrain {
+                        amount,
+                        power,
+                        multiplier,
+                    } => {
                         packet.write_guid(info.target_guid);
                         packet.write_u32(*amount);
                         packet.write_u32(*power);
@@ -1149,12 +1174,8 @@ mod smsg_spell_log_execute_tests {
 
     #[test]
     fn empty_log_returns_none() {
-        let result = SmsgSpellLogExecute::build(
-            ObjectGuid::from_raw(1),
-            1234,
-            [0, 0, 0],
-            [&[], &[], &[]],
-        );
+        let result =
+            SmsgSpellLogExecute::build(ObjectGuid::from_raw(1), 1234, [0, 0, 0], [&[], &[], &[]]);
         assert!(result.is_none());
     }
 
@@ -1165,7 +1186,14 @@ mod smsg_spell_log_execute_tests {
             guid,
             1234,
             [64, 0, 0],
-            [&[ExecuteLogInfo { target_guid: guid, data: ExecuteLogData::TargetOnly }], &[], &[]],
+            [
+                &[ExecuteLogInfo {
+                    target_guid: guid,
+                    data: ExecuteLogData::TargetOnly,
+                }],
+                &[],
+                &[],
+            ],
         )
         .expect("should build");
         let data = packet.data();
@@ -1181,7 +1209,17 @@ mod smsg_spell_log_execute_tests {
             caster,
             4321,
             [8, 0, 0],
-            [&[ExecuteLogInfo { target_guid: target, data: ExecuteLogData::Heal { amount: 500, critical: true } }], &[], &[]],
+            [
+                &[ExecuteLogInfo {
+                    target_guid: target,
+                    data: ExecuteLogData::Heal {
+                        amount: 500,
+                        critical: true,
+                    },
+                }],
+                &[],
+                &[],
+            ],
         )
         .expect("should build");
         let data = packet.data();
@@ -1197,12 +1235,18 @@ mod smsg_spell_log_execute_tests {
             caster,
             42,
             [32, 0, 0],
-            [&[
-                ExecuteLogInfo {
+            [
+                &[ExecuteLogInfo {
                     target_guid: target,
-                    data: ExecuteLogData::PowerDrain { amount: 100, power: 0, multiplier: 1.0 },
-                }
-            ], &[], &[]],
+                    data: ExecuteLogData::PowerDrain {
+                        amount: 100,
+                        power: 0,
+                        multiplier: 1.0,
+                    },
+                }],
+                &[],
+                &[],
+            ],
         )
         .expect("should build");
         let inner = packet.data();

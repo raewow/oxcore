@@ -93,13 +93,14 @@ impl SpellArea {
 
         // quest start check
         if self.quest_start != 0 {
-            let passes = player_active_quests
-                .zip(player_rewarded_quests)
-                .map_or(false, |(active, rewarded)| {
-                    let active_ok = self.quest_start_can_active
-                        && active.contains(&self.quest_start);
+            let passes = player_active_quests.zip(player_rewarded_quests).map_or(
+                false,
+                |(active, rewarded)| {
+                    let active_ok =
+                        self.quest_start_can_active && active.contains(&self.quest_start);
                     active_ok || rewarded.contains(&self.quest_start)
-                });
+                },
+            );
             if !passes {
                 return false;
             }
@@ -594,7 +595,11 @@ impl SpellManager {
     /// `IsExplicitPositiveTarget` and `IsAreaEffectPossitiveTarget` are
     /// ported as `is_explicit_positive_target` / `is_area_positive_target`
     /// checking the same target-mode values.
-    pub fn select_aura_rank_for_level(&self, spell: &SpellEntry, level: u32) -> Option<Arc<SpellEntry>> {
+    pub fn select_aura_rank_for_level(
+        &self,
+        spell: &SpellEntry,
+        level: u32,
+    ) -> Option<Arc<SpellEntry>> {
         // Fast case: target already high enough level
         if level + 10 >= spell.spell_level {
             return self.get(spell.id);
@@ -727,11 +732,7 @@ impl SpellManager {
                 if eff == SPELL_EFFECT_SKILL {
                     let skill = entry.effect_misc_value[i] as u32;
                     let step = entry.effect_base_points[i] as u32;
-                    let char_pts = if skill != SKILL_RIDING {
-                        1
-                    } else {
-                        step * 75
-                    };
+                    let char_pts = if skill != SKILL_RIDING { 1 } else { step * 75 };
                     map.insert(
                         spell_id,
                         SpellLearnSkillNode {
@@ -841,7 +842,9 @@ impl SpellManager {
                     (eff == 6 && spell_entry.effect_apply_aura_name[i] == 45) || eff == 3
                 });
                 if !has_dummy {
-                    warn!("Spell {spell} in spell_pet_auras does not have dummy aura or dummy effect");
+                    warn!(
+                        "Spell {spell} in spell_pet_auras does not have dummy aura or dummy effect"
+                    );
                     continue;
                 }
 
@@ -986,11 +989,10 @@ impl SpellManager {
     /// Populates `existing_spell_ids` with all spell IDs from `spell_template`.
     async fn load_existing_spell_ids(&self, world_db: &MySqlPool) -> Result<()> {
         let mut ids = HashSet::new();
-        if let Ok(rows) = sqlx::query(
-            "SELECT DISTINCT CAST(`entry` AS UNSIGNED) AS entry FROM `spell_template`",
-        )
-        .fetch_all(world_db)
-        .await
+        if let Ok(rows) =
+            sqlx::query("SELECT DISTINCT CAST(`entry` AS UNSIGNED) AS entry FROM `spell_template`")
+                .fetch_all(world_db)
+                .await
         {
             for row in &rows {
                 use sqlx::Row;
@@ -1167,9 +1169,8 @@ impl SpellManager {
             return Ok(());
         }
 
-        let full_query = format!(
-            "SELECT CAST(`spellid` AS UNSIGNED) AS spellid, `Code` FROM `{table}`"
-        );
+        let full_query =
+            format!("SELECT CAST(`spellid` AS UNSIGNED) AS spellid, `Code` FROM `{table}`");
         let rows = match sqlx::query(&full_query).fetch_all(world_db).await {
             Ok(rows) => rows,
             Err(e) => {
@@ -1239,13 +1240,11 @@ impl SpellManager {
                     continue;
                 }
 
-                map.entry(spell_id)
-                    .or_default()
-                    .push(SpellLearnSpellNode {
-                        spell: learned,
-                        active,
-                        autolearned: false,
-                    });
+                map.entry(spell_id).or_default().push(SpellLearnSpellNode {
+                    spell: learned,
+                    active,
+                    autolearned: false,
+                });
                 count += 1;
             }
         }
@@ -1259,9 +1258,9 @@ impl SpellManager {
                     if learned == 0 || self.spells.get(&learned).is_none() {
                         continue;
                     }
-                    let already_present = map.get(&entry.id).map_or(false, |vec| {
-                        vec.iter().any(|n| n.spell == learned)
-                    });
+                    let already_present = map
+                        .get(&entry.id)
+                        .map_or(false, |vec| vec.iter().any(|n| n.spell == learned));
                     if !already_present {
                         let autolearned = entry.effect_implicit_target_a[i] == 5
                             || entry.is_passive_spell()
@@ -1341,13 +1340,11 @@ impl SpellManager {
                 continue;
             }
 
-            map.entry(spell_id)
-                .or_default()
-                .push(SpellTargetEntry {
-                    type_,
-                    target_id: target_entry,
-                    can_focus: false,
-                });
+            map.entry(spell_id).or_default().push(SpellTargetEntry {
+                type_,
+                target_id: target_entry,
+                can_focus: false,
+            });
             count += 1;
         }
 

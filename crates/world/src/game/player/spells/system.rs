@@ -1591,12 +1591,9 @@ impl SpellSystem {
                 // packet is emitted. Wire AddExecuteLogInfo calls into each effect
                 // handler to populate the log.
                 let empty_log: [&[ExecuteLogInfo]; 3] = [&[], &[], &[]];
-                if let Some(packet) = SmsgSpellLogExecute::build(
-                    caster_guid,
-                    spell_id,
-                    entry.effect,
-                    empty_log,
-                ) {
+                if let Some(packet) =
+                    SmsgSpellLogExecute::build(caster_guid, spell_id, entry.effect, empty_log)
+                {
                     self.broadcast_mgr.send_to_player(caster_guid, packet);
                 }
             }
@@ -2895,9 +2892,9 @@ impl SpellSystem {
         let _ = self.send_cast_failure(caster_guid, spell_id, error, world);
     }
 
-// =========================================================================
-// SpellCaster Query Methods
-// =========================================================================
+    // =========================================================================
+    // SpellCaster Query Methods
+    // =========================================================================
 
     /// CheckAndIncreaseCastCounter: limit casts in chain per config.
     pub fn check_and_increase_cast_counter(&self, caster_guid: ObjectGuid, world: &World) -> bool {

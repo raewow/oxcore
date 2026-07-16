@@ -1301,10 +1301,7 @@ pub fn do_spells_list_casts(world: &World, creature_guid: ObjectGuid, diff_ms: u
         .managers
         .creature_mgr
         .with_creature(creature_guid, |c| {
-            (
-                c.ai_state_data.spells_list.clone(),
-                c.combat.attacking,
-            )
+            (c.ai_state_data.spells_list.clone(), c.combat.attacking)
         })
         .unwrap_or_default();
 
@@ -1583,7 +1580,12 @@ mod tests {
             auth: lazy_pool(),
             logs: lazy_pool(),
         });
-        World::new(databases, Arc::new(Config::default()), 50, PathBuf::from("."))
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
     }
 
     fn test_spell(id: u32) -> SpellEntry {
@@ -1788,7 +1790,13 @@ mod tests {
             .add_creature(test_creature(creature_guid));
 
         // First cast succeeds
-        assert!(do_cast_spell_if_can(&world, creature_guid, Some(creature_guid), 201, 0));
+        assert!(do_cast_spell_if_can(
+            &world,
+            creature_guid,
+            Some(creature_guid),
+            201,
+            0
+        ));
 
         // Spell is now on cooldown (set by execute_creature_spell_cast),
         // so second cast should fail immediately.
@@ -1925,12 +1933,11 @@ mod tests {
             .managers
             .creature_mgr
             .with_creature_mut(creature_guid, |c| {
-                c.ai_state_data.set_spells_list(vec![
-                    super::super::types::CreatureSpellsEntry {
+                c.ai_state_data
+                    .set_spells_list(vec![super::super::types::CreatureSpellsEntry {
                         spell_id: 1,
                         ..Default::default()
-                    },
-                ]);
+                    }]);
             });
 
         // Clear with entry=0

@@ -1,9 +1,9 @@
 //! Aura Application Effects
 //!
+use super::super::target_info::TargetInfo;
 /// Applies buff/debuff auras and area auras to targets.
 /// This is the bridge between the spell system and the aura system.
 use super::{EffectInput, EffectResult};
-use super::super::target_info::TargetInfo;
 use crate::dbc::structures::SpellEntry;
 use crate::game::player::auras::AuraFlags;
 use crate::World;
@@ -287,7 +287,8 @@ fn is_affected_on_spell(aura_spell_entry: &SpellEntry, cast_spell_entry: &SpellE
     aura_spell_entry.spell_family_name == 0
         || (aura_spell_entry.spell_family_name == cast_spell_entry.spell_family_name
             && (aura_spell_entry.spell_family_flags == 0
-                || (aura_spell_entry.spell_family_flags & cast_spell_entry.spell_family_flags) != 0))
+                || (aura_spell_entry.spell_family_flags & cast_spell_entry.spell_family_flags)
+                    != 0))
 }
 
 /// Handle SPELL_AURA_ADD_TARGET_TRIGGER auras on the caster.
@@ -415,7 +416,12 @@ mod tests {
             auth: lazy_pool(),
             logs: lazy_pool(),
         });
-        World::new(databases, Arc::new(Config::default()), 50, PathBuf::from("."))
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
     }
 
     fn make_spell_entry(id: u32, family: u32, flags: u64) -> SpellEntry {

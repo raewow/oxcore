@@ -447,9 +447,15 @@ fn resolve_implicit_target(
         | ImplicitTarget::EnemyInCone24
         | ImplicitTarget::EnemyInCone54 => {
             fill_area_targets(
-                world, caster_guid, cast_targets, radius,
-                SpellNotifyPushType::SelfCenter, SpellTargets::Hostile,
-                None, false, targets,
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                SpellNotifyPushType::SelfCenter,
+                SpellTargets::Hostile,
+                None,
+                false,
+                targets,
             );
         }
 
@@ -460,41 +466,71 @@ fn resolve_implicit_target(
                 SpellNotifyPushType::SelfCenter
             };
             fill_area_targets(
-                world, caster_guid, cast_targets, radius,
-                push, SpellTargets::Hostile,
-                None, false, targets,
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                push,
+                SpellTargets::Hostile,
+                None,
+                false,
+                targets,
             );
         }
 
         ImplicitTarget::EnemyWithinCasterRange => {
             fill_area_targets(
-                world, caster_guid, cast_targets, radius,
-                SpellNotifyPushType::SelfCenter, SpellTargets::Hostile,
-                None, false, targets,
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                SpellNotifyPushType::SelfCenter,
+                SpellTargets::Hostile,
+                None,
+                false,
+                targets,
             );
         }
 
         ImplicitTarget::FriendAoeAtSrc => {
             fill_area_targets(
-                world, caster_guid, cast_targets, radius,
-                SpellNotifyPushType::SrcCenter, SpellTargets::Friendly,
-                None, false, targets,
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                SpellNotifyPushType::SrcCenter,
+                SpellTargets::Friendly,
+                None,
+                false,
+                targets,
             );
         }
 
         ImplicitTarget::FriendAoeAtDest => {
             fill_area_targets(
-                world, caster_guid, cast_targets, radius,
-                SpellNotifyPushType::DestCenter, SpellTargets::Friendly,
-                None, false, targets,
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                SpellNotifyPushType::DestCenter,
+                SpellTargets::Friendly,
+                None,
+                false,
+                targets,
             );
         }
 
         ImplicitTarget::FriendInCone | ImplicitTarget::EnemyAoeAtDynobj => {
             fill_area_targets(
-                world, caster_guid, cast_targets, radius,
-                SpellNotifyPushType::SelfCenter, SpellTargets::Friendly,
-                None, false, targets,
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                SpellNotifyPushType::SelfCenter,
+                SpellTargets::Friendly,
+                None,
+                false,
+                targets,
             );
         }
 
@@ -503,43 +539,92 @@ fn resolve_implicit_target(
         | ImplicitTarget::PartyAoeAtDest
         | ImplicitTarget::AllPartyInArea => {
             let params = RaidPartyFillParams {
-                caster_guid, radius, raid: false, with_pets: true,
-                with_caster: true, spell_level: spell_entry.spell_level,
+                caster_guid,
+                radius,
+                raid: false,
+                with_pets: true,
+                with_caster: true,
+                spell_level: spell_entry.spell_level,
             };
             fill_raid_or_party_targets(caster_guid, &params, world, targets);
         }
 
         ImplicitTarget::RaidWithinCasterRange | ImplicitTarget::RaidNearCaster => {
             let params = RaidPartyFillParams {
-                caster_guid, radius, raid: true, with_pets: true,
-                with_caster: false, spell_level: spell_entry.spell_level,
+                caster_guid,
+                radius,
+                raid: true,
+                with_pets: true,
+                with_caster: false,
+                spell_level: spell_entry.spell_level,
             };
             fill_raid_or_party_targets(caster_guid, &params, world, targets);
         }
 
         ImplicitTarget::EnemyNearCaster => {
-            resolve_chain_targets(caster_guid, radius, effect_chain_target,
-                true, false, spell_entry, cast_targets, world, targets);
+            resolve_chain_targets(
+                caster_guid,
+                radius,
+                effect_chain_target,
+                true,
+                false,
+                spell_entry,
+                cast_targets,
+                world,
+                targets,
+            );
         }
 
         ImplicitTarget::FriendNearCaster => {
-            resolve_chain_targets(caster_guid, radius, effect_chain_target,
-                false, false, spell_entry, cast_targets, world, targets);
+            resolve_chain_targets(
+                caster_guid,
+                radius,
+                effect_chain_target,
+                false,
+                false,
+                spell_entry,
+                cast_targets,
+                world,
+                targets,
+            );
         }
 
         ImplicitTarget::UnitNearCaster => {
-            resolve_chain_targets(caster_guid, radius, effect_chain_target,
-                false, false, spell_entry, cast_targets, world, targets);
+            resolve_chain_targets(
+                caster_guid,
+                radius,
+                effect_chain_target,
+                false,
+                false,
+                spell_entry,
+                cast_targets,
+                world,
+                targets,
+            );
         }
 
         ImplicitTarget::SingleEnemy => {
-            resolve_single_enemy_target(effect_chain_target, spell_entry,
-                cast_targets, caster_guid, radius, world, targets);
+            resolve_single_enemy_target(
+                effect_chain_target,
+                spell_entry,
+                cast_targets,
+                caster_guid,
+                radius,
+                world,
+                targets,
+            );
         }
 
         ImplicitTarget::ChainHeal => {
-            resolve_chain_heal(caster_guid, radius, effect_chain_target,
-                cast_targets, spell_entry, world, targets);
+            resolve_chain_heal(
+                caster_guid,
+                radius,
+                effect_chain_target,
+                cast_targets,
+                spell_entry,
+                world,
+                targets,
+            );
         }
 
         ImplicitTarget::CasterPet => {
@@ -579,7 +664,14 @@ fn resolve_implicit_target(
         }
 
         ImplicitTarget::CasterDest => {
-            resolve_caster_dest(spell_entry, effect_idx, caster_guid, cast_targets, world, targets);
+            resolve_caster_dest(
+                spell_entry,
+                effect_idx,
+                caster_guid,
+                cast_targets,
+                world,
+                targets,
+            );
         }
 
         ImplicitTarget::ScriptNearCaster
@@ -594,8 +686,12 @@ fn resolve_implicit_target(
 
         ImplicitTarget::FriendAndParty => {
             let params = RaidPartyFillParams {
-                caster_guid, radius, raid: false, with_pets: true,
-                with_caster: true, spell_level: spell_entry.spell_level,
+                caster_guid,
+                radius,
+                raid: false,
+                with_pets: true,
+                with_caster: true,
+                spell_level: spell_entry.spell_level,
             };
             fill_raid_or_party_targets(caster_guid, &params, world, targets);
         }
@@ -1509,10 +1605,14 @@ fn caster_charm_owner(guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
     if guid.is_player() {
         None
     } else if guid.is_creature_or_pet() {
-        world.managers.creature_mgr.with_creature(guid, |c| {
-            // Charm/owner not tracked yet
-            None::<ObjectGuid>
-        }).flatten()
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| {
+                // Charm/owner not tracked yet
+                None::<ObjectGuid>
+            })
+            .flatten()
     } else {
         None
     }
@@ -1548,9 +1648,15 @@ fn resolve_chain_targets(
     let nearby = get_units_in_range(caster_guid, center, max_range, world);
 
     let mut candidates: Vec<ObjectGuid> = if is_enemy {
-        nearby.into_iter().filter(|g| *g != caster_guid && is_hostile(caster_guid, *g, world)).collect()
+        nearby
+            .into_iter()
+            .filter(|g| *g != caster_guid && is_hostile(caster_guid, *g, world))
+            .collect()
     } else {
-        nearby.into_iter().filter(|g| *g != caster_guid && !is_hostile(caster_guid, *g, world)).collect()
+        nearby
+            .into_iter()
+            .filter(|g| *g != caster_guid && !is_hostile(caster_guid, *g, world))
+            .collect()
     };
 
     candidates.sort_by(|a, b| {
@@ -1559,16 +1665,28 @@ fn resolve_chain_targets(
         da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let primary_idx = candidates.iter().position(|g| dist_between(caster_guid, *g, world) <= radius);
-    let primary = match primary_idx { Some(i) => candidates.remove(i), None => return };
+    let primary_idx = candidates
+        .iter()
+        .position(|g| dist_between(caster_guid, *g, world) <= radius);
+    let primary = match primary_idx {
+        Some(i) => candidates.remove(i),
+        None => return,
+    };
     targets.push(primary);
 
     let mut prev = primary;
     let mut remaining = chains.saturating_sub(1);
     while remaining > 0 {
-        let next_idx = candidates.iter().position(|g| dist_between(prev, *g, world) <= CHAIN_SPELL_JUMP_RADIUS);
+        let next_idx = candidates
+            .iter()
+            .position(|g| dist_between(prev, *g, world) <= CHAIN_SPELL_JUMP_RADIUS);
         match next_idx {
-            Some(i) => { let next = candidates.remove(i); targets.push(next); prev = next; remaining -= 1; }
+            Some(i) => {
+                let next = candidates.remove(i);
+                targets.push(next);
+                prev = next;
+                remaining -= 1;
+            }
             None => break,
         }
     }
@@ -1584,7 +1702,9 @@ fn resolve_single_enemy_target(
     world: &World,
     targets: &mut Vec<ObjectGuid>,
 ) {
-    let Some(unit_target) = cast_targets.unit_target() else { return };
+    let Some(unit_target) = cast_targets.unit_target() else {
+        return;
+    };
     let target = select_magnet_target(unit_target, spell_entry, world);
     if effect_chain_target <= 1 {
         targets.push(target);
@@ -1592,10 +1712,15 @@ fn resolve_single_enemy_target(
     }
 
     let chains = effect_chain_target as usize;
-    let max_range = if spell_entry.dmg_class == 1 { radius } else { radius + chains as f32 * CHAIN_SPELL_JUMP_RADIUS };
+    let max_range = if spell_entry.dmg_class == 1 {
+        radius
+    } else {
+        radius + chains as f32 * CHAIN_SPELL_JUMP_RADIUS
+    };
     let center = get_unit_position(caster_guid, world);
     let nearby = get_units_in_range(caster_guid, center, max_range, world);
-    let mut candidates: Vec<ObjectGuid> = nearby.into_iter()
+    let mut candidates: Vec<ObjectGuid> = nearby
+        .into_iter()
         .filter(|g| *g != caster_guid && *g != target && is_hostile(caster_guid, *g, world))
         .collect();
 
@@ -1603,9 +1728,16 @@ fn resolve_single_enemy_target(
     let mut prev = target;
     let mut remaining = chains.saturating_sub(1);
     while remaining > 0 {
-        let next_idx = candidates.iter().position(|g| dist_between(prev, *g, world) <= CHAIN_SPELL_JUMP_RADIUS);
+        let next_idx = candidates
+            .iter()
+            .position(|g| dist_between(prev, *g, world) <= CHAIN_SPELL_JUMP_RADIUS);
         match next_idx {
-            Some(i) => { let next = candidates.remove(i); targets.push(next); prev = next; remaining -= 1; }
+            Some(i) => {
+                let next = candidates.remove(i);
+                targets.push(next);
+                prev = next;
+                remaining -= 1;
+            }
             None => break,
         }
     }
@@ -1621,24 +1753,36 @@ fn resolve_chain_heal(
     world: &World,
     targets: &mut Vec<ObjectGuid>,
 ) {
-    let Some(primary) = cast_targets.unit_target() else { return };
+    let Some(primary) = cast_targets.unit_target() else {
+        return;
+    };
     targets.push(primary);
-    if effect_chain_target <= 1 { return; }
+    if effect_chain_target <= 1 {
+        return;
+    }
 
     let chains = effect_chain_target as usize;
     let max_range = radius + chains as f32 * CHAIN_SPELL_JUMP_RADIUS;
     let center = get_unit_position(caster_guid, world);
     let nearby = get_units_in_range(caster_guid, center, max_range, world);
-    let mut candidates: Vec<ObjectGuid> = nearby.into_iter()
+    let mut candidates: Vec<ObjectGuid> = nearby
+        .into_iter()
         .filter(|g| *g != caster_guid && *g != primary && !is_hostile(caster_guid, *g, world))
         .collect();
 
     let mut prev = primary;
     let mut remaining = chains.saturating_sub(1);
     while remaining > 0 {
-        let next_idx = candidates.iter().position(|g| dist_between(prev, *g, world) <= CHAIN_SPELL_JUMP_RADIUS);
+        let next_idx = candidates
+            .iter()
+            .position(|g| dist_between(prev, *g, world) <= CHAIN_SPELL_JUMP_RADIUS);
         match next_idx {
-            Some(i) => { let next = candidates.remove(i); targets.push(next); prev = next; remaining -= 1; }
+            Some(i) => {
+                let next = candidates.remove(i);
+                targets.push(next);
+                prev = next;
+                remaining -= 1;
+            }
             None => break,
         }
     }
@@ -1652,11 +1796,18 @@ fn resolve_party_member(
     world: &World,
     targets: &mut Vec<ObjectGuid>,
 ) {
-    let Some(unit_target) = cast_targets.unit_target() else { return };
-    if unit_target == caster_guid { return; }
+    let Some(unit_target) = cast_targets.unit_target() else {
+        return;
+    };
+    if unit_target == caster_guid {
+        return;
+    }
 
     let group = world.systems.group.get_player_group(caster_guid);
-    let same_group = group.as_ref().and_then(|g| g.get_member(unit_target)).is_some();
+    let same_group = group
+        .as_ref()
+        .and_then(|g| g.get_member(unit_target))
+        .is_some();
     if same_group {
         targets.push(unit_target);
     }
@@ -2705,7 +2856,9 @@ pub fn can_auto_cast(input: &CanAutoCastInput) -> bool {
     }
 
     // 2. ATTRIB_CANCELS_AUTO_ATTACK combat victim check
-    if (input.spell_attributes & SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT) != 0 && input.caster_has_victim {
+    if (input.spell_attributes & SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT) != 0
+        && input.caster_has_victim
+    {
         return false;
     }
 
@@ -2729,9 +2882,7 @@ pub fn can_auto_cast(input: &CanAutoCastInput) -> bool {
                         return false;
                     }
                     // Speed aura: don't cast if already in melee
-                    if input.effect_apply_aura_name[j] == 18
-                        && input.caster_in_melee_of_victim
-                    {
+                    if input.effect_apply_aura_name[j] == 18 && input.caster_in_melee_of_victim {
                         return false;
                     }
                     // Stun aura: don't re-stun an already stunned target

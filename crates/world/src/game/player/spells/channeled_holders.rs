@@ -210,7 +210,9 @@ pub fn add_channeled_aura_holder(
     holder_id: Option<AuraHolderId>,
     is_channeled: bool,
 ) -> bool {
-    let Some(id) = holder_id else { return false; };
+    let Some(id) = holder_id else {
+        return false;
+    };
     holders.add_guarded(id, is_channeled)
 }
 
@@ -555,26 +557,43 @@ mod tests {
     #[test]
     fn add_non_channeled_holder_is_noop() {
         let mut holders = ChanneledHolders::new();
-        assert!(!add_channeled_aura_holder(&mut holders, Some((100, 0)), false));
+        assert!(!add_channeled_aura_holder(
+            &mut holders,
+            Some((100, 0)),
+            false
+        ));
         assert!(holders.holders.is_empty());
     }
 
     #[test]
     fn add_channeled_holder_appends_to_list() {
         let mut holders = ChanneledHolders::new();
-        assert!(add_channeled_aura_holder(&mut holders, Some((100, 0)), true));
+        assert!(add_channeled_aura_holder(
+            &mut holders,
+            Some((100, 0)),
+            true
+        ));
         assert_eq!(holders.holders, ids([100]));
     }
 
     #[test]
     fn add_multiple_channeled_holders_appends_in_order() {
         let mut holders = ChanneledHolders::new();
-        assert!(add_channeled_aura_holder(&mut holders, Some((100, 0)), true));
-        assert!(add_channeled_aura_holder(&mut holders, Some((200, 1)), true));
-        assert!(add_channeled_aura_holder(&mut holders, Some((300, 2)), true));
-        assert_eq!(
-            holders.holders,
-            vec![(100, 0), (200, 1), (300, 2)]
-        );
+        assert!(add_channeled_aura_holder(
+            &mut holders,
+            Some((100, 0)),
+            true
+        ));
+        assert!(add_channeled_aura_holder(
+            &mut holders,
+            Some((200, 1)),
+            true
+        ));
+        assert!(add_channeled_aura_holder(
+            &mut holders,
+            Some((300, 2)),
+            true
+        ));
+        assert_eq!(holders.holders, vec![(100, 0), (200, 1), (300, 2)]);
     }
 }

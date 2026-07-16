@@ -607,7 +607,10 @@ impl AIStateData {
 
     /// Set the spell list from DB template entries (CreatureAI::SetSpellsList)
     pub fn set_spells_list(&mut self, entries: Vec<CreatureSpellsEntry>) {
-        self.spells_list = entries.into_iter().map(CreatureAISpellsEntry::new).collect();
+        self.spells_list = entries
+            .into_iter()
+            .map(CreatureAISpellsEntry::new)
+            .collect();
         self.casting_delay = 0;
     }
 

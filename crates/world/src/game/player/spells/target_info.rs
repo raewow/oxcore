@@ -66,7 +66,6 @@ const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
 /// SPELL_AURA_MOD_POSSESS_PET = 128
 const SPELL_AURA_MOD_POSSESS_PET: u32 = 128;
 
-
 /// SPELL_EFFECT_PERSISTENT_AREA_AURA — applied once per aura holder, not per unit target
 /// here, so its bit is always stripped from the effect mask (matches MaNGOS chunk_0).
 const SPELL_EFFECT_PERSISTENT_AREA_AURA: u32 = 27;
@@ -223,11 +222,10 @@ async fn do_spell_hit_on_unit(
         // Stealth/invisibility removal on target (C++ lines 1575-1583)
         // Game-object caster check: if caster_guid is not a player, we approximate
         // as "caster is a game object" — traps etc. do not break stealth.
-        let caster_is_object = !caster_is_player && !target_guid.is_creature()
-            && !target_guid.is_player();
+        let caster_is_object =
+            !caster_is_player && !target_guid.is_creature() && !target_guid.is_player();
 
-        if !caster_is_object && !spell_entry.has_attribute(SPELL_ATTR_EX2_NOT_AN_ACTION)
-        {
+        if !caster_is_object && !spell_entry.has_attribute(SPELL_ATTR_EX2_NOT_AN_ACTION) {
             if !spell_entry.has_attribute(SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED) {
                 remove_aura_type_from_target(target_guid, SPELL_AURA_MOD_STEALTH, world);
             }
@@ -240,8 +238,8 @@ async fn do_spell_hit_on_unit(
         // TODO: `IsVisibleForOrDetect` not ported — skip until it lands.
 
         // Combat/threat entry main gate (C++ lines 1596-1641)
-        let is_sap = spell_entry.spell_family_name == 8
-            && (spell_entry.spell_family_flags & 0x80) != 0; // CF_ROGUE_SAP approximation
+        let is_sap =
+            spell_entry.spell_family_name == 8 && (spell_entry.spell_family_flags & 0x80) != 0; // CF_ROGUE_SAP approximation
         let is_trap = !caster_is_player && target_guid.is_player();
 
         let can_enter_combat = (!spell_entry.is_positive_spell()
@@ -255,12 +253,11 @@ async fn do_spell_hit_on_unit(
 
         if can_enter_combat && caster_visible_to_target {
             // Gate: not (triggered-by-aura without speed/threat)  (C++ lines 1603-1606)
-            let can_threat = (!is_triggered
-                || spell_entry.speed > 0.0
-                || has_direct_threat_effect(spell_entry))
-                && !spell_entry.has_attribute(SPELL_ATTR_EX_NO_THREAT)
-                && !spell_entry.has_attribute(SPELL_ATTR_EX_THREAT_ONLY_ON_MISS)
-                && !spell_entry.has_attribute(SPELL_ATTR_EX2_NO_INITIAL_THREAT);
+            let can_threat =
+                (!is_triggered || spell_entry.speed > 0.0 || has_direct_threat_effect(spell_entry))
+                    && !spell_entry.has_attribute(SPELL_ATTR_EX_NO_THREAT)
+                    && !spell_entry.has_attribute(SPELL_ATTR_EX_THREAT_ONLY_ON_MISS)
+                    && !spell_entry.has_attribute(SPELL_ATTR_EX2_NO_INITIAL_THREAT);
 
             if can_threat {
                 // TODO: caster stealth removal (C++ lines 1609-1615) not ported —
@@ -280,9 +277,9 @@ async fn do_spell_hit_on_unit(
         } else {
             // Fallthrough: spell did not pass the combat-entry gate
             // (C++ lines 1635-1641)
-            let not_only_peaceful =
-                !spell_entry.has_attribute(SPELL_ATTR_NOT_IN_COMBAT_ONLY_PEACEFUL)
-                    || !spell_entry.has_attribute(SPELL_ATTR_EX_ONLY_PEACEFUL_TARGETS);
+            let not_only_peaceful = !spell_entry
+                .has_attribute(SPELL_ATTR_NOT_IN_COMBAT_ONLY_PEACEFUL)
+                || !spell_entry.has_attribute(SPELL_ATTR_EX_ONLY_PEACEFUL_TARGETS);
             if not_only_peaceful {
                 set_out_of_combat(caster_guid, target_guid, world);
             }
@@ -375,16 +372,20 @@ fn is_friendly_target(target_a: u32) -> bool {
             | 45  // TARGET_UNIT_FRIEND_AREA
             | 52  // TARGET_UNIT_FRIEND_AREA
             | 53  // TARGET_UNIT_FRIEND_AREA
-            | 54  // TARGET_UNIT_FRIEND_AREA
+            | 54 // TARGET_UNIT_FRIEND_AREA
     )
 }
 
 /// Remove a specific aura type from a unit target if possible.
 fn remove_aura_type_from_target(target_guid: ObjectGuid, aura_type: u32, world: &World) {
     if target_guid.is_player() {
-        world.systems.player.manager().with_player_mut(target_guid, |p| {
-            p.auras.container.remove_auras_by_type(aura_type);
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |p| {
+                p.auras.container.remove_auras_by_type(aura_type);
+            });
     }
     // Creature aura removal by type is not yet exposed.
 }
@@ -422,7 +423,11 @@ fn enter_combat_on_hit(caster_guid: ObjectGuid, target_guid: ObjectGuid, world: 
 
 /// Flag the caster as being in combat with the victim (MaNGOS:
 /// `pRealUnitCaster->SetInCombatWithVictim(unit)`).
-fn set_caster_in_combat_with_victim(caster_guid: ObjectGuid, _target_guid: ObjectGuid, world: &World) {
+fn set_caster_in_combat_with_victim(
+    caster_guid: ObjectGuid,
+    _target_guid: ObjectGuid,
+    world: &World,
+) {
     if caster_guid.is_creature() {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -746,7 +751,12 @@ mod tests {
             auth: lazy_pool(),
             logs: lazy_pool(),
         });
-        World::new(databases, Arc::new(Config::default()), 50, PathBuf::from("."))
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
     }
 
     /// Create a minimal harmful spell entry with one damage effect.
@@ -845,8 +855,8 @@ mod tests {
 
     #[test]
     fn is_friendly_target_accepts_friend_types() {
-        assert!(is_friendly_target(1));   // TARGET_UNIT_FRIEND
-        assert!(is_friendly_target(11));  // TARGET_UNIT_FRIEND_AREA
+        assert!(is_friendly_target(1)); // TARGET_UNIT_FRIEND
+        assert!(is_friendly_target(11)); // TARGET_UNIT_FRIEND_AREA
         assert!(!is_friendly_target(16)); // TARGET_ENUM_UNITS_ENEMY_AOE_AT_DEST_LOC
         assert!(!is_friendly_target(0));
         assert!(!is_friendly_target(99));
@@ -965,7 +975,10 @@ mod tests {
         )
         .await;
 
-        assert!(!result, "zero mask should abort hit even for positive spells");
+        assert!(
+            !result,
+            "zero mask should abort hit even for positive spells"
+        );
     }
 
     #[tokio::test]
@@ -991,7 +1004,10 @@ mod tests {
         )
         .await;
 
-        assert!(result, "hostile hit should continue with effect application");
+        assert!(
+            result,
+            "hostile hit should continue with effect application"
+        );
         // Stealth removal is called; the player target has no stealth to remove
         // so the call is a no-op but should not panic.
     }
@@ -1103,6 +1119,4 @@ mod tests {
 
         assert!(result, "no-threat hit should still continue with effects");
     }
-
-
 }
