@@ -18,8 +18,8 @@ use crate::game::player::spells::validation;
 use crate::World;
 use anyhow::Result;
 use oxcore_shared::messages::spells::{
-    SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailedOther, SmsgSpellGo, SmsgSpellStart,
-    SPELL_RESULT_STATUS_FAIL, SPELL_RESULT_STATUS_OKAY,
+    MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailedOther, SmsgSpellGo,
+    SmsgSpellStart, SPELL_RESULT_STATUS_FAIL, SPELL_RESULT_STATUS_OKAY,
 };
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
@@ -402,6 +402,12 @@ pub struct SpellSystem {
 }
 
 impl SpellSystem {
+    /// Send the remaining duration for an active channel to its caster.
+    pub fn send_channel_update(&self, caster_guid: ObjectGuid, remaining_ms: u32) {
+        self.broadcast_mgr
+            .send_msg_to_player(caster_guid, MsgChannelUpdate { remaining_ms });
+    }
+
     /// Create a new spell system
     pub fn new(broadcast_mgr: Arc<dyn BroadcastManagerTrait>) -> Self {
         Self {
@@ -1421,12 +1427,6 @@ impl SpellSystem {
             .unwrap_or(0.0);
 
         if speed > 0.0 && target_guid.is_some() {
-            let resolved_targets = crate::game::player::spells::targets::resolve_spell_targets(
-                spell_id,
-                cast_targets,
-                caster_guid,
-                world,
-            );
             // Calculate travel time based on distance
             let travel_time_ms =
                 self.calculate_travel_time(caster_guid, target_guid.unwrap(), speed, world);
@@ -1435,6 +1435,14 @@ impl SpellSystem {
                 target_guid
             );
             if travel_time_ms > 0 {
+                // Target selection (including magnet charge consumption) is a launch-time
+                // operation. The arrival event must use this exact snapshot.
+                let resolved_targets = crate::game::player::spells::targets::resolve_spell_targets(
+                    spell_id,
+                    cast_targets,
+                    caster_guid,
+                    world,
+                );
                 // Schedule delayed effect via event queue
                 let now = get_game_time_ms();
                 if let Ok(mut queue) = self.event_queue.lock() {
@@ -2045,11 +2053,7 @@ impl SpellSystem {
             // If cancelling a channel, send SMSG_CHANNEL_UPDATE with 0 remaining
             // and remove auras applied by the cancelled channel (MaNGOS RemoveAurasByCasterSpell)
             if was_channeling {
-                let mut packet = oxcore_shared::protocol::WorldPacket::new(
-                    oxcore_shared::protocol::Opcode::MSG_CHANNEL_UPDATE,
-                );
-                packet.write_u32(0); // 0 = channel interrupted
-                self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
+                self.send_channel_update(caster_guid, 0);
 
                 // Remove auras applied by this channeled spell on all targets
                 world
@@ -3066,11 +3070,7 @@ impl SpellSystem {
 
         if let Some((spell_id, is_channeled)) = spell_info {
             if is_channeled || slot == CurrentSpellType::Channeled {
-                let mut packet = oxcore_shared::protocol::WorldPacket::new(
-                    oxcore_shared::protocol::Opcode::MSG_CHANNEL_UPDATE,
-                );
-                packet.write_u32(0);
-                self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
+                self.send_channel_update(caster_guid, 0);
             }
 
             // Delegate to finish_cast which sends SMSG_CAST_RESULT + SMSG_SPELL_GO + cooldowns

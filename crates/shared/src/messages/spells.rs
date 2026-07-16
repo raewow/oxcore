@@ -1,3 +1,4 @@
+use crate::messages::ToWorldPacket;
 use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
@@ -44,13 +45,20 @@ pub struct SmsgSpellGo {
     pub spell_id: u32,
     pub cast_flags: u16,
     pub hit_targets: Vec<ObjectGuid>,
-    pub miss_targets: Vec<ObjectGuid>,
+    pub miss_targets: Vec<SpellMissTarget>,
     pub target_guid: Option<ObjectGuid>,
     /// When the spell is cast from an item, this is the item's GUID. The client
     /// expects the item GUID as the first packed GUID and CAST_FLAG_UNKNOWN7
     /// (0x0040) set in cast_flags (MaNGOS: `data << m_CastItem->GetPackGUID()`
     /// and `castFlags |= CAST_FLAG_UNKNOWN7`).
     pub cast_item_guid: Option<ObjectGuid>,
+}
+
+/// A target omitted from the successful-hit list and its spell miss result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpellMissTarget {
+    pub guid: ObjectGuid,
+    pub reason: u8,
 }
 
 // CAST_FLAG_UNKNOWN7: signals that the first packed GUID is a cast item, not
@@ -80,8 +88,8 @@ impl SmsgSpellGo {
         // Miss targets
         packet.write_u8(self.miss_targets.len() as u8);
         for target in &self.miss_targets {
-            packet.write_guid(*target); // Full 8-byte GUID
-            packet.write_u8(0); // Miss reason (0 = MISS_NONE, placeholder)
+            packet.write_guid(target.guid); // Full 8-byte GUID
+            packet.write_u8(target.reason);
         }
 
         // SpellCastTargets section (vanilla 1.12.x requires this)
@@ -234,6 +242,34 @@ mod spell_packet_tests {
         );
     }
 
+    #[test]
+    fn test_spell_go_serializes_each_miss_reason() {
+        let caster = player_guid(10);
+        let missed = player_guid(20);
+        let msg = SmsgSpellGo {
+            caster_guid: caster,
+            caster_guid_pack: caster,
+            spell_id: 1234,
+            cast_flags: 0,
+            hit_targets: vec![],
+            miss_targets: vec![SpellMissTarget {
+                guid: missed,
+                reason: 7,
+            }],
+            target_guid: None,
+            cast_item_guid: None,
+        };
+        let mut data = msg.to_world_packet().data().clone();
+
+        let _ = read_packed_guid(&mut data);
+        let _ = read_packed_guid(&mut data);
+        data.advance(4 + 2);
+        assert_eq!(data.get_u8(), 0); // hit targets
+        assert_eq!(data.get_u8(), 1); // miss targets
+        assert_eq!(data.get_u64_le(), missed.raw());
+        assert_eq!(data.get_u8(), 7);
+    }
+
     // ===== SMSG_SPELL_START tests =====
 
     /// Without an item, SMSG_SPELL_START opens with the caster's packed GUID.
@@ -300,6 +336,15 @@ mod spell_packet_tests {
         assert_eq!(data.get_u32_le(), 8690);
         assert!(data.is_empty());
     }
+
+    #[test]
+    fn test_channel_update_contains_remaining_duration() {
+        let packet = MsgChannelUpdate { remaining_ms: 1200 }.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::MSG_CHANNEL_UPDATE);
+        let mut data = packet.data().clone();
+        assert_eq!(data.get_u32_le(), 1200);
+        assert!(data.is_empty());
+    }
 }
 
 /// Write the SpellCastTargets section to a spell packet.
@@ -341,6 +386,26 @@ impl SmsgSpellFailure {
 pub struct SmsgSpellFailedOther {
     pub caster_guid: ObjectGuid,
     pub spell_id: u32,
+}
+
+/// MSG_CHANNEL_UPDATE (opcode 0x013A)
+/// Updates the remaining duration of a channeled spell; zero interrupts it.
+pub struct MsgChannelUpdate {
+    pub remaining_ms: u32,
+}
+
+impl MsgChannelUpdate {
+    pub fn to_world_packet(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::MSG_CHANNEL_UPDATE);
+        packet.write_u32(self.remaining_ms);
+        packet
+    }
+}
+
+impl ToWorldPacket for MsgChannelUpdate {
+    fn to_world_packet(&self) -> WorldPacket {
+        MsgChannelUpdate::to_world_packet(self)
+    }
 }
 
 impl SmsgSpellFailedOther {

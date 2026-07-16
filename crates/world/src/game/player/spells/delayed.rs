@@ -514,8 +514,8 @@ pub fn delayed_channel(
                 );
 
                 // Not yet wired: DelaySpellAuraHolder per hit target,
-                // DynamicObject::Delay for persistent area auras, SendChannelUpdate
-                // packet, and InterruptSpell(CURRENT_CHANNELED_SPELL) on interrupt.
+                // DynamicObject::Delay for persistent area auras, and
+                // InterruptSpell(CURRENT_CHANNELED_SPELL) on interrupt.
             }
 
             decision
@@ -524,6 +524,12 @@ pub fn delayed_channel(
     match decision {
         Some(d) => {
             *delay_at_damage_count = d.new_count;
+            if d.applied && !d.interrupt {
+                world
+                    .systems
+                    .spells
+                    .send_channel_update(caster_guid, d.new_timer);
+            }
             d
         }
         None => ChannelDelayDecision::passthrough(0, *delay_at_damage_count),
