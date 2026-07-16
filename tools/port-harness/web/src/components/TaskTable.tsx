@@ -1,9 +1,12 @@
 import {
   useReactTable,
   getCoreRowModel,
+  getSortedRowModel,
   flexRender,
   createColumnHelper,
   type RowSelectionState,
+  type SortingState,
+  type ColumnDef,
 } from "@tanstack/react-table";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -14,30 +17,42 @@ const columnHelper = createColumnHelper<TaskWithDetails>();
 
 interface Props {
   tasks: TaskWithDetails[];
-  onSelectionChange: (ids: number[]) => void;
+  onSelectionChange?: (ids: number[]) => void;
+}
+
+function SortIndicator({ sorted, desc }: { sorted: boolean; desc: boolean }) {
+  if (!sorted) return <span className="th-sort" aria-hidden>⇅</span>;
+  return <span className="th-sort th-sort-active" aria-hidden>{desc ? "▼" : "▲"}</span>;
 }
 
 export function TaskTable({ tasks, onSelectionChange }: Props) {
+  const hasSelection = !!onSelectionChange;
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+  const [sorting, setSorting] = useState<SortingState>([]);
 
-  const columns = [
-    columnHelper.display({
-      id: "select",
-      header: ({ table }) => (
-        <input
-          type="checkbox"
-          checked={table.getIsAllRowsSelected()}
-          onChange={table.getToggleAllRowsSelectedHandler()}
-        />
-      ),
-      cell: ({ row }) => (
-        <input
-          type="checkbox"
-          checked={row.getIsSelected()}
-          onChange={row.getToggleSelectedHandler()}
-        />
-      ),
-    }),
+  const columns: ColumnDef<TaskWithDetails, any>[] = [
+    ...(hasSelection
+      ? [
+          columnHelper.display({
+            id: "select",
+            enableSorting: false,
+            header: ({ table }) => (
+              <input
+                type="checkbox"
+                checked={table.getIsAllRowsSelected()}
+                onChange={table.getToggleAllRowsSelectedHandler()}
+              />
+            ),
+            cell: ({ row }) => (
+              <input
+                type="checkbox"
+                checked={row.getIsSelected()}
+                onChange={row.getToggleSelectedHandler()}
+              />
+            ),
+          }),
+        ]
+      : []),
     columnHelper.accessor("symbol_name", {
       header: "Symbol",
       cell: (info) => (
@@ -88,7 +103,8 @@ export function TaskTable({ tasks, onSelectionChange }: Props) {
   const table = useReactTable({
     data: tasks,
     columns,
-    state: { rowSelection },
+    state: { rowSelection, sorting },
+    enableRowSelection: hasSelection,
     onRowSelectionChange: (updater) => {
       const next = typeof updater === "function" ? updater(rowSelection) : updater;
       setRowSelection(next);
@@ -96,9 +112,11 @@ export function TaskTable({ tasks, onSelectionChange }: Props) {
         .filter((k) => next[k])
         .map((k) => tasks[parseInt(k, 10)]?.id)
         .filter((id): id is number => id !== undefined);
-      onSelectionChange(ids);
+      onSelectionChange?.(ids);
     },
+    onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   });
 
   return (
@@ -106,11 +124,23 @@ export function TaskTable({ tasks, onSelectionChange }: Props) {
       <thead>
         {table.getHeaderGroups().map((hg) => (
           <tr key={hg.id}>
-            {hg.headers.map((h) => (
-              <th key={h.id}>
-                {flexRender(h.column.columnDef.header, h.getContext())}
-              </th>
-            ))}
+            {hg.headers.map((h) => {
+              const canSort = h.column.getCanSort();
+              const sortDir = h.column.getIsSorted();
+              return (
+                <th
+                  key={h.id}
+                  className={canSort ? "th-sortable" : undefined}
+                  onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
+                  style={canSort ? { cursor: "pointer", userSelect: "none" } : undefined}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                    {flexRender(h.column.columnDef.header, h.getContext())}
+                    {canSort && <SortIndicator sorted={!!sortDir} desc={sortDir === "desc"} />}
+                  </span>
+                </th>
+              );
+            })}
           </tr>
         ))}
       </thead>

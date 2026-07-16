@@ -1286,3 +1286,78 @@ summary {
   color: #e2e8f0;
   margin-bottom: 0.25rem;
 }
+
+/* Sortable table headers */
+.th-sortable:hover {
+  color: #e2e8f0;
+}
+
+.th-sort {
+  font-size: 0.7rem;
+  color: #475569;
+}
+
+.th-sort-active {
+  color: #60a5fa;
+}
+
+/* Status multiselect dropdown */
+.multiselect {
+  position: relative;
+  display: inline-block;
+}
+
+.multiselect-trigger {
+  display: inline-flex;
+  align-items: center;
+  background: #1a1d27;
+  border: 1px solid #2d3348;
+  color: #e2e8f0;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  min-width: 140px;
+  justify-content: space-between;
+}
+
+.multiselect-trigger:hover {
+  border-color: #475569;
+}
+
+.multiselect-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 200px;
+  background: #1a1d27;
+  border: 1px solid #2d3348;
+  border-radius: 6px;
+  padding: 0.5rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.multiselect-actions {
+  display: flex;
+  gap: 0.4rem;
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid #2d3348;
+}
+
+.multiselect-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.25rem;
+  cursor: pointer;
+}
+
+.multiselect-option:hover {
+  background: #1e293b;
+  border-radius: 4px;
+}

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type DiscoverCandidate, type FeatureInvestigationSummary, type FlowSummary } from "../api/client";
-import { StatusBadge } from "../components/StatusBadge";
+import { TaskTable } from "../components/TaskTable";
+import { StatusMultiSelect } from "../components/StatusMultiSelect";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -130,6 +131,8 @@ export function FeatureDetail() {
   const queryClient = useQueryClient();
   const [discoveryQuery, setDiscoveryQuery] = useState("");
   const [showTasks, setShowTasks] = useState(false);
+  const [taskSearch, setTaskSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["feature", featureId],
@@ -218,6 +221,21 @@ export function FeatureDetail() {
     mutationFn: (path: string) => api.runFilePipeline(path),
     onSuccess: invalidate,
   });
+
+  const filteredTasks = useMemo(() => {
+    if (!data) return [];
+    const q = taskSearch.trim().toLowerCase();
+    return data.tasks.filter((t) => {
+      if (statusFilter.length > 0 && !statusFilter.includes(t.status)) return false;
+      if (!q) return true;
+      return (
+        t.symbol_name.toLowerCase().includes(q) ||
+        t.symbol_file.toLowerCase().includes(q) ||
+        (t.target_rust_file ?? "").toLowerCase().includes(q) ||
+        (t.flow_name ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [data, taskSearch, statusFilter]);
 
   if (isLoading) return <div>Loading feature...</div>;
   if (error) return <div className="warning-banner">{(error as Error).message}</div>;
@@ -658,32 +676,20 @@ export function FeatureDetail() {
         </div>
 
         {showTasks && (
-          <table style={{ marginTop: "0.75rem" }}>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Status</th>
-                <th>File</th>
-                <th>Rust target</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.tasks.map((task) => (
-                <tr key={task.id}>
-                  <td>
-                    <Link to={`/symbols/${task.source_symbol_id}`}>{task.symbol_name}</Link>
-                  </td>
-                  <td>
-                    <StatusBadge status={task.status} />
-                  </td>
-                  <td>
-                    <Link to={`/files/detail?path=${encodeURIComponent(task.symbol_file)}`}>{task.symbol_file}</Link>
-                  </td>
-                  <td>{task.target_rust_file ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div style={{ marginTop: "0.75rem" }}>
+            <div className="filters">
+              <input
+                placeholder="Search symbol, file, flow, rust target..."
+                value={taskSearch}
+                onChange={(e) => setTaskSearch(e.target.value)}
+              />
+              <StatusMultiSelect selected={statusFilter} onChange={setStatusFilter} />
+              <span className="muted" style={{ fontSize: "0.8rem", alignSelf: "center" }}>
+                {filteredTasks.length}/{data.tasks.length} shown
+              </span>
+            </div>
+            <TaskTable tasks={filteredTasks} />
+          </div>
         )}
       </section>
     </div>
