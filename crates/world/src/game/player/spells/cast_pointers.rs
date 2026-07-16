@@ -12,7 +12,7 @@
 
 use crate::game::player::spells::state::{CurrentSpellType, SpellCastTargets, SpellState};
 use crate::World;
-use oxcore_shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 // ─── Per-cast state (input/output) ───────────────────────────────────────────
 
@@ -407,6 +407,18 @@ pub fn get_casting_object(input: &CastPointerInput, world: &World) -> Option<Obj
     }
 }
 
+/// `Spell::UpdateCastStartPosition` — records the caster position at cast start.
+///
+/// When the caster is on a transport (`transport_position` is `Some`), uses
+/// transport-relative offsets (`x/y/z/o`); otherwise uses the world
+/// `position`. Called at `prepare()` time.
+pub fn update_cast_start_position(
+    position: Position,
+    transport_position: Option<Position>,
+) -> Position {
+    transport_position.unwrap_or(position)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,6 +500,23 @@ mod tests {
         go.in_world = true;
         go.created_by = created_by;
         go
+    }
+
+    // ── update_cast_start_position ────────────────────────────────────────
+
+    #[test]
+    fn cast_start_position_without_transport_uses_world_position() {
+        let world_pos = Position::new(10.0, 20.0, 30.0, 1.5);
+        let result = update_cast_start_position(world_pos, None);
+        assert_eq!(result, world_pos);
+    }
+
+    #[test]
+    fn cast_start_position_with_transport_uses_transport_offset() {
+        let world_pos = Position::new(10.0, 20.0, 30.0, 1.5);
+        let transport_pos = Position::new(1.0, 2.0, 3.0, 0.5);
+        let result = update_cast_start_position(world_pos, Some(transport_pos));
+        assert_eq!(result, transport_pos);
     }
 
     // ── Pure branch selection ──────────────────────────────────────────────

@@ -169,9 +169,20 @@ impl ChanneledHolders {
         Self::default()
     }
 
-    /// Add a channeled aura holder (for the future `AddChanneledAuraHolder` port).
+    /// Add a channeled aura holder (superseded by [`add_channeled_aura_holder`]).
     pub fn add(&mut self, holder: AuraHolderId) {
         self.holders.push(holder);
+    }
+
+    /// `Spell::AddChanneledAuraHolder` — adds a channeled aura holder with the
+    /// null/channeled guard. Does not perform `SetInUse(true)` (see the module-level
+    /// function for details).
+    pub fn add_guarded(&mut self, holder_id: AuraHolderId, is_channeled: bool) -> bool {
+        if holder_id.0 == 0 || !is_channeled {
+            return false;
+        }
+        self.holders.push(holder_id);
+        true
     }
 
     /// Remove a channeled aura holder, faithfully replicating the
@@ -184,6 +195,23 @@ impl ChanneledHolders {
         self.holders = list.holders;
         outcome
     }
+}
+
+/// `Spell::AddChanneledAuraHolder` — adds a channeled aura holder to the list.
+///
+/// Returns `false` if the holder was skipped (null spell_id or not channeled),
+/// `true` if it was added to the list.
+///
+/// The C++ `SetInUse(true)` call on the holder is omitted because Rust's borrow
+/// checker prevents the delete-during-iteration problem that `SetInUse` protects
+/// against in C++ (see also `RemoveChanneledAuraHolder`).
+pub fn add_channeled_aura_holder(
+    holders: &mut ChanneledHolders,
+    holder_id: Option<AuraHolderId>,
+    is_channeled: bool,
+) -> bool {
+    let Some(id) = holder_id else { return false; };
+    holders.add_guarded(id, is_channeled)
 }
 
 /// Isolated port of `Spell::RemoveChanneledAuraHolder`.
@@ -513,5 +541,40 @@ mod tests {
         assert_eq!(outcome, RemoveOutcome::NotFound);
         assert!(list.is_empty());
         assert_eq!(cursor, None);
+    }
+
+    // ── add_channeled_aura_holder (Spell::AddChanneledAuraHolder) ───
+
+    #[test]
+    fn add_null_holder_is_noop() {
+        let mut holders = ChanneledHolders::new();
+        assert!(!add_channeled_aura_holder(&mut holders, None, true));
+        assert!(holders.holders.is_empty());
+    }
+
+    #[test]
+    fn add_non_channeled_holder_is_noop() {
+        let mut holders = ChanneledHolders::new();
+        assert!(!add_channeled_aura_holder(&mut holders, Some((100, 0)), false));
+        assert!(holders.holders.is_empty());
+    }
+
+    #[test]
+    fn add_channeled_holder_appends_to_list() {
+        let mut holders = ChanneledHolders::new();
+        assert!(add_channeled_aura_holder(&mut holders, Some((100, 0)), true));
+        assert_eq!(holders.holders, ids([100]));
+    }
+
+    #[test]
+    fn add_multiple_channeled_holders_appends_in_order() {
+        let mut holders = ChanneledHolders::new();
+        assert!(add_channeled_aura_holder(&mut holders, Some((100, 0)), true));
+        assert!(add_channeled_aura_holder(&mut holders, Some((200, 1)), true));
+        assert!(add_channeled_aura_holder(&mut holders, Some((300, 2)), true));
+        assert_eq!(
+            holders.holders,
+            vec![(100, 0), (200, 1), (300, 2)]
+        );
     }
 }

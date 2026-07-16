@@ -1181,6 +1181,57 @@ pub fn execute_creature_spell_cast(
     );
 }
 
+/// ScriptedAI::DoCastSpell - Cast a spell from scripted AI.
+///
+/// If the creature is currently casting a non-melee spell and this is not
+/// a triggered cast, the cast is skipped. (Non-melee spell tracking is not
+/// yet implemented for creatures.)
+pub fn scripted_do_cast_spell(
+    world: &World,
+    creature_guid: ObjectGuid,
+    target_guid: Option<ObjectGuid>,
+    spell_id: u32,
+    triggered: bool,
+) {
+    // ... non-melee spell check skipped — creature casting state not tracked yet
+    execute_creature_spell_cast(world, creature_guid, spell_id, target_guid, triggered);
+}
+
+/// CreatureAI::DoCastSpellIfCan - Cast a spell if cooldown allows.
+///
+/// Checks cooldown via the creature's AI state data, then delegates to
+/// execute_creature_spell_cast. Returns true if the cast was initiated.
+/// The cast_flags parameter follows C++ convention: bit 0 = CF_TRIGGERED.
+/// Other TryToCast checks (LOS, range, movement, immunity) are not yet
+/// implemented for creature casters.
+pub fn do_cast_spell_if_can(
+    world: &World,
+    creature_guid: ObjectGuid,
+    target_guid: Option<ObjectGuid>,
+    spell_id: u32,
+    cast_flags: u32,
+) -> bool {
+    if world.managers.spell_mgr.get(spell_id).is_none() {
+        return false;
+    }
+
+    let ready = world
+        .managers
+        .creature_mgr
+        .with_creature(creature_guid, |creature| {
+            creature.ai_state_data.is_spell_ready(spell_id)
+        })
+        .unwrap_or(false);
+
+    if !ready {
+        return false;
+    }
+
+    let triggered = (cast_flags & 0x1) != 0;
+    execute_creature_spell_cast(world, creature_guid, spell_id, target_guid, triggered);
+    true
+}
+
 /// Apply spell damage from a creature to a target.
 fn apply_creature_spell_damage(
     world: &World,
@@ -1365,4 +1416,282 @@ fn send_display_update(world: &World, creature_guid: ObjectGuid, display_id: u32
             .set_field(UNIT_FIELD_DISPLAYID, display_id),
     ));
     broadcast_around_creature(world, creature_guid, &update.to_world_packet());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::dbc::structures::SpellEntry;
+    use crate::game::creature::ai::types::AIState;
+    use crate::game::creature::Creature;
+    use crate::World;
+    use oxcore_shared::database::Databases;
+    use oxcore_shared::protocol::ObjectGuid;
+    use sqlx::mysql::MySqlPoolOptions;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn lazy_pool() -> sqlx::MySqlPool {
+        MySqlPoolOptions::new()
+            .connect_lazy("mysql://test:test@localhost/test")
+            .expect("lazy pool should be constructible")
+    }
+
+    fn test_world() -> World {
+        let databases = Arc::new(Databases {
+            world: lazy_pool(),
+            character: lazy_pool(),
+            auth: lazy_pool(),
+            logs: lazy_pool(),
+        });
+        World::new(databases, Arc::new(Config::default()), 50, PathBuf::from("."))
+    }
+
+    fn test_spell(id: u32) -> SpellEntry {
+        SpellEntry {
+            id,
+            name: format!("TestSpell{id}"),
+            rank_text: String::new(),
+            school: 0,
+            category: 0,
+            dispel: 0,
+            mechanic: 0,
+            attributes: 0,
+            attributes_ex: 0,
+            attributes_ex2: 0,
+            attributes_ex3: 0,
+            attributes_ex4: 0,
+            stances: 0,
+            stances_not: 0,
+            targets: 0,
+            target_creature_type: 0,
+            requires_spell_focus: 0,
+            caster_aura_state: 0,
+            target_aura_state: 0,
+            casting_time_index: 0,
+            recovery_time: 0,
+            category_recovery_time: 0,
+            interrupt_flags: 0,
+            aura_interrupt_flags: 0,
+            channel_interrupt_flags: 0,
+            proc_flags: 0,
+            proc_chance: 0,
+            proc_charges: 0,
+            max_level: 0,
+            base_level: 0,
+            spell_level: 0,
+            duration_index: 0,
+            power_type: 0,
+            mana_cost: 0,
+            mana_cost_per_level: 0,
+            mana_per_second: 0,
+            mana_per_second_per_level: 0,
+            range_index: 0,
+            speed: 0.0,
+            stack_amount: 0,
+            totem: [0; 2],
+            reagent: [0; 8],
+            reagent_count: [0; 8],
+            equipped_item_class: 0,
+            equipped_item_sub_class_mask: 0,
+            equipped_item_inventory_type_mask: 0,
+            effect: [0; 3],
+            effect_die_sides: [0; 3],
+            effect_base_dice: [0; 3],
+            effect_dice_per_level: [0.0; 3],
+            effect_real_points_per_level: [0.0; 3],
+            effect_base_points: [0; 3],
+            effect_bonus_coefficient: [0.0; 3],
+            effect_mechanic: [0; 3],
+            effect_implicit_target_a: [0; 3],
+            effect_implicit_target_b: [0; 3],
+            effect_radius_index: [0; 3],
+            effect_apply_aura_name: [0; 3],
+            effect_amplitude: [0; 3],
+            effect_multiple_value: [0.0; 3],
+            effect_chain_target: [0; 3],
+            effect_item_type: [0; 3],
+            effect_misc_value: [0; 3],
+            effect_trigger_spell: [0; 3],
+            effect_points_per_combo_point: [0.0; 3],
+            spell_visual: 0,
+            spell_icon_id: 0,
+            active_icon_id: 0,
+            spell_priority: 0,
+            min_target_level: 0,
+            mana_cost_percentage: 0,
+            start_recovery_category: 0,
+            start_recovery_time: 0,
+            max_target_level: 0,
+            spell_family_name: 0,
+            spell_family_flags: 0,
+            max_affected_targets: 0,
+            dmg_class: 0,
+            prevention_type: 0,
+            custom: 0,
+            internal: 0,
+            allowed_target_mask: 0,
+            script_id: 0,
+            dmg_multiplier: [1.0; 3],
+        }
+    }
+
+    fn test_creature(guid: ObjectGuid) -> Creature {
+        Creature {
+            guid,
+            entry: guid.entry(),
+            spawn_id: 1,
+            position: oxcore_shared::protocol::Position::default(),
+            home_position: oxcore_shared::protocol::Position::default(),
+            map_id: 0,
+            instance_id: 0,
+            display_id: 0,
+            native_display_id: 0,
+            scale: 1.0,
+            bounding_radius: 0.5,
+            combat_reach: 1.5,
+            level: 1,
+            max_health: 100,
+            current_health: 100,
+            max_mana: 100,
+            current_mana: 100,
+            faction: 0,
+            unit_flags: 0,
+            dynamic_flags: 0,
+            stand_state: 0,
+            npc_flags: 0,
+            armor: 0,
+            damage_min: 0,
+            damage_max: 0,
+            attack_power: 0,
+            name: String::from("Test Creature"),
+            creature_type: 0,
+            static_flags1: 0,
+            spells: [0; 4],
+            phase_mask: 1,
+            in_world: true,
+            combat: crate::game::creature::combat::CombatState::new(),
+            threat_manager: crate::game::creature::combat::ThreatManager::new(guid),
+            attack_timer: 0,
+            base_attack_time: 2000,
+            regen_timer: 0,
+            death_state: crate::game::creature::death::DeathState::Alive,
+            corpse_decay_timer: 0,
+            respawn_time: 0,
+            loot_recipient: None,
+            has_loot: false,
+            ai_state: AIState::Idle,
+            ai_state_data: crate::game::creature::ai::AIStateData::new(),
+            auras: Vec::new(),
+            motion_master: crate::game::creature::movement::MotionMaster::new(),
+            move_spline: crate::game::creature::movement::MoveSpline::default(),
+            wander_distance: 0.0,
+            speed_walk: 1.0,
+            speed_run: 1.14286,
+            movement_paused: false,
+            transport_guid: None,
+            following_target: None,
+            followers: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn scripted_do_cast_spell_skips_unknown_spell() {
+        let world = test_world();
+        let guid = ObjectGuid::new_creature(1, 1);
+        let target = ObjectGuid::new_player(1);
+
+        scripted_do_cast_spell(&world, guid, Some(target), 99999, false);
+    }
+
+    #[tokio::test]
+    async fn scripted_do_cast_spell_with_known_spell() {
+        let world = test_world();
+        let spell = test_spell(133);
+        world.managers.spell_mgr.add_spell(spell);
+
+        let creature_guid = ObjectGuid::new_creature(1, 1);
+        world
+            .managers
+            .creature_mgr
+            .add_creature(test_creature(creature_guid));
+
+        scripted_do_cast_spell(&world, creature_guid, Some(creature_guid), 133, false);
+    }
+
+    #[tokio::test]
+    async fn do_cast_spell_if_can_returns_true_when_ready() {
+        let world = test_world();
+        let spell = test_spell(200);
+        world.managers.spell_mgr.add_spell(spell);
+
+        let creature_guid = ObjectGuid::new_creature(1, 1);
+        world
+            .managers
+            .creature_mgr
+            .add_creature(test_creature(creature_guid));
+
+        let result = do_cast_spell_if_can(&world, creature_guid, Some(creature_guid), 200, 0);
+        assert!(result, "cast should succeed when spell is ready");
+    }
+
+    #[tokio::test]
+    async fn do_cast_spell_if_can_returns_false_on_cooldown() {
+        let world = test_world();
+        let mut spell = test_spell(201);
+        spell.recovery_time = 5000;
+        world.managers.spell_mgr.add_spell(spell);
+
+        let creature_guid = ObjectGuid::new_creature(1, 1);
+        world
+            .managers
+            .creature_mgr
+            .add_creature(test_creature(creature_guid));
+
+        // First cast succeeds
+        assert!(do_cast_spell_if_can(&world, creature_guid, Some(creature_guid), 201, 0));
+
+        // Spell is now on cooldown (set by execute_creature_spell_cast),
+        // so second cast should fail immediately.
+        let result = do_cast_spell_if_can(&world, creature_guid, Some(creature_guid), 201, 0);
+        assert!(!result, "cast should fail when spell is on cooldown");
+    }
+
+    #[tokio::test]
+    async fn do_cast_spell_if_can_returns_false_for_unknown_spell() {
+        let world = test_world();
+        let creature_guid = ObjectGuid::new_creature(1, 1);
+        world
+            .managers
+            .creature_mgr
+            .add_creature(test_creature(creature_guid));
+
+        let result = do_cast_spell_if_can(&world, creature_guid, Some(creature_guid), 99999, 0);
+        assert!(!result, "cast should fail for unknown spell");
+    }
+
+    #[tokio::test]
+    async fn do_cast_spell_if_can_with_triggered_flag() {
+        let world = test_world();
+        let mut spell = test_spell(202);
+        spell.recovery_time = 5000;
+        world.managers.spell_mgr.add_spell(spell);
+
+        let creature_guid = ObjectGuid::new_creature(1, 1);
+        world
+            .managers
+            .creature_mgr
+            .add_creature(test_creature(creature_guid));
+
+        // Cast with triggered flag succeeds
+        let result = do_cast_spell_if_can(
+            &world,
+            creature_guid,
+            Some(creature_guid),
+            202,
+            0x1, // CF_TRIGGERED
+        );
+        assert!(result, "triggered cast should succeed when ready");
+    }
 }
