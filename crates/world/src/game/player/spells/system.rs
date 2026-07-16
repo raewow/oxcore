@@ -38,6 +38,22 @@ fn spell_needs_combo_points(attributes_ex: u32) -> bool {
     attributes_ex & (FINISHING_MOVE_DAMAGE | FINISHING_MOVE_DURATION) != 0
 }
 
+/// Select the channel object from effect-zero unit targets, falling back to the
+/// explicit game-object target only when no unit targets were registered.
+fn select_channel_target(
+    effect_zero_targets: &[ObjectGuid],
+    caster_guid: ObjectGuid,
+    gameobject_target: Option<ObjectGuid>,
+) -> Option<ObjectGuid> {
+    if !effect_zero_targets.is_empty() {
+        return effect_zero_targets
+            .iter()
+            .copied()
+            .find(|target| *target != caster_guid);
+    }
+    gameobject_target
+}
+
 /// SPELL_CUSTOM_SEND_CHANNEL_VISUAL — spell periodically re-sends its channel visual kit
 /// while channeling (reference/core SpellDefines.h:975; MaNGOS `Spell::InitializeChanneledVisualTimer`).
 const SPELL_CUSTOM_SEND_CHANNEL_VISUAL: u32 = 0x800;
@@ -738,7 +754,17 @@ impl SpellSystem {
         cast_targets: SpellCastTargets,
         world: &World,
     ) -> Result<()> {
-        let target_guid = cast_targets.unit_target();
+        let resolved = crate::game::player::spells::targets::resolve_spell_targets(
+            spell_id,
+            &cast_targets,
+            caster_guid,
+            world,
+        );
+        let target_guid = select_channel_target(
+            &resolved.effect_targets[0],
+            caster_guid,
+            cast_targets.gameobject_target_guid,
+        );
         world
             .systems
             .player
@@ -3240,6 +3266,38 @@ enum CastUpdateInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_target_uses_first_non_caster_effect_zero_target() {
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_creature(1, 2);
+        assert_eq!(
+            select_channel_target(
+                &[caster, target, ObjectGuid::new_creature(1, 3)],
+                caster,
+                Some(ObjectGuid::new_gameobject(1, 4)),
+            ),
+            Some(target)
+        );
+    }
+
+    #[test]
+    fn channel_target_does_not_fall_back_to_gameobject_after_unit_targets() {
+        let caster = ObjectGuid::new_player(1);
+        assert_eq!(
+            select_channel_target(&[caster], caster, Some(ObjectGuid::new_gameobject(1, 4)),),
+            None
+        );
+    }
+
+    #[test]
+    fn channel_target_uses_gameobject_when_no_unit_targets_exist() {
+        let gameobject = ObjectGuid::new_gameobject(1, 4);
+        assert_eq!(
+            select_channel_target(&[], ObjectGuid::new_player(1), Some(gameobject)),
+            Some(gameobject)
+        );
+    }
 
     #[test]
     fn finisher_attributes_need_combo_points() {
