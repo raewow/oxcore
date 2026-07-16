@@ -7,6 +7,7 @@
 //! - Sending inventory items to client
 
 pub mod cache;
+pub mod can_store;
 pub mod system;
 pub mod types;
 
@@ -23,5 +24,6 @@ pub use oxcore_shared::game::inventory::{
     INVENTORY_SLOT_ITEM_END, INVENTORY_SLOT_ITEM_START, KEYRING_SLOT_END, KEYRING_SLOT_START,
     MAX_BAG_SIZE, MAX_ENCHANTMENT_OFFSET, MAX_ENCHANTMENT_SLOT, NULL_BAG, NULL_SLOT,
 };
+pub use can_store::{CanStoreChecker, CanStoreResult};
 pub use system::InventorySystem;
 pub use types::*;

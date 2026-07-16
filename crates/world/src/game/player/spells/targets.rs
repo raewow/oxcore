@@ -2638,3 +2638,230 @@ mod tests {
         );
     }
 }
+
+// ─── Spell::CanAutoCast ─────────────────────────────────────────────────────
+//
+// C++ lines 6800–6868. Decides whether a pet-controlled spell can be auto-cast
+// on `target_guid`. Returns true when the spell would land on the target.
+//
+// Order (mirrors C++):
+//   1. No caster unit → false
+//   2. SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT (0x0000_4000) with active victim → false
+//   3. Imp Fire Shield (family WARLOCK, Imp Buffs family flags, visual 289):
+//      target must have an attacker → false when none
+//   4. Non-damage spells: for each aura-apply effect skip if target already has
+//      the aura (redundant buff), speed aura (SPELL_AURA_MOD_INCREASE_SPEED)
+//      while already in melee range of a victim, or stun aura on already-stunned
+//      target.
+//   5. Full-health heal spell → false
+//   6. CheckPetCast → if OK or just UNIT_NOT_INFRONT, run FillTargetMap and
+//      check whether target_guid appears in the resolved target list.
+
+/// SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT — pet auto-attack should not be
+/// cancelled by auto-cast spells like Prowl.
+pub const SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT: u32 = 0x0000_4000;
+
+/// SPELLFAMILY_WARLOCK
+const SPELLFAMILY_WARLOCK: u32 = 3;
+/// CF_WARLOCK_IMP_BUFFS — family flag used by Fire Shield
+const CF_WARLOCK_IMP_BUFFS: u64 = 0x0000_0080;
+/// SPELL_EFFECT_HEAL
+const SPELL_EFFECT_HEAL: u32 = 8;
+/// SPELL_EFFECT_HEAL_MAX_HEALTH
+const SPELL_EFFECT_HEAL_MAX_HEALTH: u32 = 128;
+
+#[derive(Debug, Clone)]
+pub struct CanAutoCastInput {
+    pub caster_unit_exists: bool,
+    pub caster_has_victim: bool,
+    // Spell entry fields
+    pub spell_attributes: u32,
+    pub spell_family: u32,
+    pub spell_family_flags: u64,
+    pub spell_visual: u32,
+    pub has_school_damage_effect: bool,
+    pub effects: [u32; 3],
+    pub effect_apply_aura_name: [u32; 3],
+    pub stack_amount: u32,
+    pub is_heal_spell: bool,
+    // Per-target pre-resolved checks
+    /// target_has_aura[i] = true when target has an aura for this spell at effect i
+    pub target_has_aura: [bool; 3],
+    pub target_has_aura_area: [bool; 3],
+    pub target_at_full_health: bool,
+    pub target_has_attacker: bool,
+    pub caster_in_melee_of_victim: bool,
+    pub target_is_stunned: bool,
+    // CheckPetCast result
+    pub check_pet_cast_result: u8, // 0 = ok, 1 = UNIT_NOT_INFRONT, other = failure
+    // FillTargetMap result: whether target_guid appears in the resolved set
+    pub target_in_resolved_list: bool,
+}
+
+pub fn can_auto_cast(input: &CanAutoCastInput) -> bool {
+    // 1. No caster unit
+    if !input.caster_unit_exists {
+        return false;
+    }
+
+    // 2. ATTRIB_CANCELS_AUTO_ATTACK combat victim check
+    if (input.spell_attributes & SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT) != 0 && input.caster_has_victim {
+        return false;
+    }
+
+    // 3. Imp Fire Shield
+    if input.spell_family == SPELLFAMILY_WARLOCK
+        && (input.spell_family_flags & CF_WARLOCK_IMP_BUFFS) != 0
+        && input.spell_visual == 289
+    {
+        if !input.target_has_attacker {
+            return false;
+        }
+    }
+
+    // 4. Non-damage spell redundant-aura checks
+    if !input.has_school_damage_effect {
+        for j in 0..3 {
+            if input.effects[j] == 29 {
+                // SPELL_EFFECT_APPLY_AURA
+                if input.stack_amount <= 1 {
+                    if input.target_has_aura[j] {
+                        return false;
+                    }
+                    // Speed aura: don't cast if already in melee
+                    if input.effect_apply_aura_name[j] == 18
+                        && input.caster_in_melee_of_victim
+                    {
+                        return false;
+                    }
+                    // Stun aura: don't re-stun an already stunned target
+                    if input.effect_apply_aura_name[j] == 57 && input.target_is_stunned {
+                        return false;
+                    }
+                }
+            } else if input.effects[j] == 119
+                || input.effects[j] == 128
+                || input.effects[j] == 129
+                || input.effects[j] == 132
+            {
+                // Area aura effects
+                if input.target_has_aura_area[j] {
+                    return false;
+                }
+            }
+        }
+    }
+
+    // 5. Full-health heal spell
+    if input.is_heal_spell && input.target_at_full_health {
+        return false;
+    }
+
+    // 6. CheckPetCast → FillTargetMap
+    if input.check_pet_cast_result == 0 || input.check_pet_cast_result == 1 {
+        if input.target_in_resolved_list {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[cfg(test)]
+mod can_auto_cast_tests {
+    use super::*;
+
+    fn base_input() -> CanAutoCastInput {
+        CanAutoCastInput {
+            caster_unit_exists: true,
+            caster_has_victim: false,
+            spell_attributes: 0,
+            spell_family: 0,
+            spell_family_flags: 0,
+            spell_visual: 0,
+            has_school_damage_effect: false,
+            effects: [0, 0, 0],
+            effect_apply_aura_name: [0, 0, 0],
+            stack_amount: 0,
+            is_heal_spell: false,
+            target_has_aura: [false, false, false],
+            target_has_aura_area: [false, false, false],
+            target_at_full_health: false,
+            target_has_attacker: false,
+            caster_in_melee_of_victim: false,
+            target_is_stunned: false,
+            check_pet_cast_result: 0,
+            target_in_resolved_list: true,
+        }
+    }
+
+    #[test]
+    fn no_caster_unit_fails() {
+        let mut i = base_input();
+        i.caster_unit_exists = false;
+        assert!(!can_auto_cast(&i));
+    }
+
+    #[test]
+    fn cancels_auto_attack_with_victim_fails() {
+        let mut i = base_input();
+        i.spell_attributes = SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT;
+        i.caster_has_victim = true;
+        assert!(!can_auto_cast(&i));
+    }
+
+    #[test]
+    fn cancels_auto_attack_no_victim_passes() {
+        let mut i = base_input();
+        i.spell_attributes = SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT;
+        i.caster_has_victim = false;
+        assert!(can_auto_cast(&i));
+    }
+
+    #[test]
+    fn imp_fire_shield_needs_attacker() {
+        let mut i = base_input();
+        i.spell_family = SPELLFAMILY_WARLOCK;
+        i.spell_family_flags = CF_WARLOCK_IMP_BUFFS;
+        i.spell_visual = 289;
+        i.target_has_attacker = false;
+        assert!(!can_auto_cast(&i));
+
+        i.target_has_attacker = true;
+        assert!(can_auto_cast(&i));
+    }
+
+    #[test]
+    fn redundant_aura_blocks_autocast() {
+        let mut i = base_input();
+        i.effects[0] = 29; // APPLY_AURA
+        i.stack_amount = 1;
+        i.target_has_aura[0] = true;
+        assert!(!can_auto_cast(&i));
+    }
+
+    #[test]
+    fn full_health_heal_skips() {
+        let mut i = base_input();
+        i.is_heal_spell = true;
+        i.target_at_full_health = true;
+        assert!(!can_auto_cast(&i));
+
+        i.target_at_full_health = false;
+        assert!(can_auto_cast(&i));
+    }
+
+    #[test]
+    fn check_pet_cast_failure_blocks() {
+        let mut i = base_input();
+        i.check_pet_cast_result = 2; // arbitrary failure
+        assert!(!can_auto_cast(&i));
+    }
+
+    #[test]
+    fn not_in_resolved_list_blocks() {
+        let mut i = base_input();
+        i.target_in_resolved_list = false;
+        assert!(!can_auto_cast(&i));
+    }
+}

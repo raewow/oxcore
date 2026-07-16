@@ -27,6 +27,7 @@ pub struct ItemTemplate {
     pub buy_count: u32,
     pub buy_price: u32,
     pub sell_price: u32,
+    pub bag_family: u32,
     pub container_slots: u8,
     pub start_quest: u32,
     pub stat_type: [u8; 10],
@@ -51,6 +52,52 @@ pub struct ItemTemplate {
     pub spell_cooldown: [i32; 5],
     pub spell_category: [u32; 5],
     pub spell_category_cooldown: [i32; 5],
+}
+
+impl Default for ItemTemplate {
+    fn default() -> Self {
+        Self {
+            entry: 0,
+            name: String::new(),
+            display_id: 0,
+            quality: 0,
+            item_level: 0,
+            required_level: 0,
+            item_class: 0,
+            item_subclass: 0,
+            inventory_type: 0,
+            max_count: 0,
+            stackable: 1,
+            max_durability: 0,
+            buy_count: 0,
+            buy_price: 0,
+            sell_price: 0,
+            bag_family: 0,
+            container_slots: 0,
+            start_quest: 0,
+            stat_type: [0; 10],
+            stat_value: [0; 10],
+            delay: 0,
+            ammo_type: 0,
+            dmg_min: [0.0; 5],
+            dmg_max: [0.0; 5],
+            dmg_type: [0; 5],
+            block: 0,
+            armor: 0,
+            holy_res: 0,
+            fire_res: 0,
+            nature_res: 0,
+            frost_res: 0,
+            shadow_res: 0,
+            arcane_res: 0,
+            spell_id: [0; 5],
+            spell_trigger: [0; 5],
+            spell_charges: [0; 5],
+            spell_cooldown: [0; 5],
+            spell_category: [0; 5],
+            spell_category_cooldown: [0; 5],
+        }
+    }
 }
 
 impl ItemTemplate {
@@ -367,7 +414,7 @@ impl ItemManager {
         let rows = sqlx::query(
             "SELECT entry, name, display_id, quality, item_level, required_level,
                        inventory_type, `class`, subclass, max_count, stackable, max_durability,
-                     buy_count, buy_price, sell_price, container_slots, start_quest,
+                     buy_count, buy_price, sell_price, container_slots, bag_family, start_quest,
                      stat_type1, stat_type2, stat_type3, stat_type4, stat_type5,
                      stat_type6, stat_type7, stat_type8, stat_type9, stat_type10,
                      stat_value1, stat_value2, stat_value3, stat_value4, stat_value5,
@@ -408,6 +455,7 @@ impl ItemManager {
             let buy_count: u32 = row.try_get("buy_count")?;
             let buy_price: u32 = row.try_get("buy_price")?;
             let sell_price: u32 = row.try_get("sell_price")?;
+            let bag_family: u32 = row.try_get("bag_family")?;
             let container_slots: u8 = row.try_get("container_slots")?;
             let start_quest: u32 = row.try_get("start_quest")?;
             let stat_type = [
@@ -543,6 +591,7 @@ impl ItemManager {
                 buy_count,
                 buy_price,
                 sell_price,
+                bag_family,
                 container_slots,
                 start_quest,
                 stat_type,

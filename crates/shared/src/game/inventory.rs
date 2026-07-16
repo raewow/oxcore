@@ -146,6 +146,25 @@ pub mod item_flags {
     pub const READABLE: u32 = 0x00000200;
 }
 
+/// Bag family constants
+pub mod bag_family {
+    pub const NONE: u32 = 0;
+    pub const ARROWS: u32 = 1;
+    pub const BULLETS: u32 = 2;
+    pub const SOUL_SHARDS: u32 = 3;
+    pub const HERBS: u32 = 6;
+    pub const ENCHANTING_SUPPLIES: u32 = 7;
+    pub const ENGINEERING_SUPPLIES: u32 = 8;
+    pub const KEYS: u32 = 9;
+}
+
+/// Check if a bag item (by its proto bag_family) accepts a given item proto.
+/// A bag with BAG_FAMILY_NONE accepts anything (general container).
+/// Otherwise the item's bag_family must match the bag's bag_family.
+pub fn item_can_go_into_bag(item_bag_family: u32, bag_bag_family: u32) -> bool {
+    bag_bag_family == bag_family::NONE || item_bag_family == bag_bag_family
+}
+
 /// Inventory slot constants
 pub const INVENTORY_SLOT_BAG_0: u8 = 255;
 pub const NULL_BAG: u8 = 0;

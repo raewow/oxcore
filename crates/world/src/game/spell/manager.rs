@@ -74,8 +74,14 @@ pub struct SpellTargetEntry {
     pub can_focus: bool,
 }
 
+/// Pet aura binding: a spell that grants a pet an aura.
+/// Port of MaNGOS `PetAura` (SpellMgr.h).
 #[derive(Debug, Clone, Default)]
-pub struct PetAura;
+pub struct PetAura {
+    pub remove_on_change_pet: bool,
+    pub damage: i32,
+    pub auras: std::collections::HashMap<u32, u32>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SpellGroupStackRule(pub u32);
@@ -90,6 +96,18 @@ pub struct SpellTargetPosition {
     pub orientation: f32,
 }
 
+/// Port of `SpellEntry::IsExplicitPositiveTarget` — target modes where the
+/// spell expects an explicit (client-provided) friendly target.
+fn is_explicit_positive_target(target_a: u32) -> bool {
+    matches!(target_a, 21 | 35 | 45 | 57 | 61)
+}
+
+/// Port of `SpellEntry::IsAreaEffectPossitiveTarget` — target modes that
+/// auto-select friendly units in an area (party, raid, friend-AoE).
+fn is_area_positive_target(target: u32) -> bool {
+    matches!(target, 20 | 30 | 31 | 33 | 34 | 37 | 56 | 61)
+}
+
 pub struct SpellManager {
     spells: DashMap<u32, Arc<SpellEntry>>,
     target_positions: DashMap<u32, SpellTargetPosition>,
@@ -97,14 +115,14 @@ pub struct SpellManager {
     spell_chains_next: RwLock<HashMap<u32, Vec<u32>>>,
     spell_proc_events: DashMap<u32, SpellProcEventEntry>,
     spell_proc_item_enchant: HashMap<u32, f32>,
-    spell_enchant_charges: HashMap<u32, u32>,
+    spell_enchant_charges: RwLock<HashMap<u32, u32>>,
     spell_threats: DashMap<u32, SpellThreatEntry>,
     spell_elixirs: HashMap<u32, u8>,
     spell_learn_skills: RwLock<HashMap<u32, SpellLearnSkillNode>>,
     spell_learn_spells: HashMap<u32, Vec<SpellLearnSpellNode>>,
     spell_script_targets: HashMap<u32, Vec<SpellTargetEntry>>,
     spell_areas: Vec<SpellArea>,
-    spell_pet_auras: HashMap<u16, PetAura>,
+    spell_pet_auras: RwLock<HashMap<u16, PetAura>>,
     spell_groups: HashMap<u32, Vec<u32>>,
     spell_group_stack: HashMap<u32, SpellGroupStackRule>,
     spell_cones: HashMap<u32, f32>,
@@ -120,14 +138,14 @@ impl SpellManager {
             spell_chains_next: RwLock::new(HashMap::new()),
             spell_proc_events: DashMap::new(),
             spell_proc_item_enchant: HashMap::new(),
-            spell_enchant_charges: HashMap::new(),
+            spell_enchant_charges: RwLock::new(HashMap::new()),
             spell_threats: DashMap::new(),
             spell_elixirs: HashMap::new(),
             spell_learn_skills: RwLock::new(HashMap::new()),
             spell_learn_spells: HashMap::new(),
             spell_script_targets: HashMap::new(),
             spell_areas: Vec::new(),
-            spell_pet_auras: HashMap::new(),
+            spell_pet_auras: RwLock::new(HashMap::new()),
             spell_groups: HashMap::new(),
             spell_group_stack: HashMap::new(),
             spell_cones: HashMap::new(),
@@ -156,6 +174,12 @@ impl SpellManager {
 
         // Scan loaded spells for learn-skill entries
         self.load_spell_learn_skills();
+
+        // Load spell_enchant_charges
+        self.load_spell_enchant_charges(world_db).await?;
+
+        // Load spell_pet_auras
+        self.load_spell_pet_auras(world_db).await?;
 
         Ok(())
     }
@@ -470,6 +494,64 @@ impl SpellManager {
         *self.spell_chains_next.write() = next;
     }
 
+    /// Port of `SpellMgr::SelectAuraRankForLevel`.
+    ///
+    /// Selects the appropriate rank of a positive aura spell for a target of
+    /// the given `level`. Falls back down the spell chain (from higher ranks
+    /// to lower) until it finds one the target qualifies for (level + 10 >=
+    /// spellLevel). Returns `None` when no rank in the chain fits.
+    ///
+    /// Approximations: `IsPassiveSpell` uses the `SPELL_ATTR_PASSIVE` bit;
+    /// `IsExplicitPositiveTarget` and `IsAreaEffectPossitiveTarget` are
+    /// ported as `is_explicit_positive_target` / `is_area_positive_target`
+    /// checking the same target-mode values.
+    pub fn select_aura_rank_for_level(&self, spell: &SpellEntry, level: u32) -> Option<Arc<SpellEntry>> {
+        // Fast case: target already high enough level
+        if level + 10 >= spell.spell_level {
+            return self.get(spell.id);
+        }
+
+        // Passive spells are never down-ranked
+        if spell.is_passive_spell() {
+            return self.get(spell.id);
+        }
+
+        // Whether we need rank selection at all (positive aura with explicit
+        // or area-positive target, or area-aura-party effect)
+        let need_rank_selection = spell.effect.iter().enumerate().any(|(i, &eff)| {
+            let target_a = spell.effect_implicit_target_a[i];
+            let positive = spell.is_positive_effect(i);
+            positive
+                && ((eff == 6
+                    && (is_explicit_positive_target(target_a)
+                        || is_area_positive_target(target_a)))
+                    || eff == 35)
+        });
+
+        if !need_rank_selection || self.get_spell_rank(spell.id) == 0 {
+            return self.get(spell.id);
+        }
+
+        // Walk down the spell chain (lower ranks have lower spellLevel)
+        let mut next_id = spell.id;
+        loop {
+            if let Some(next_spell) = self.get(next_id) {
+                if level + 10 >= next_spell.spell_level {
+                    return Some(next_spell);
+                }
+            } else {
+                break;
+            }
+            let node = self.get_spell_chain_node(next_id);
+            next_id = match node {
+                Some(n) if n.prev != 0 => n.prev,
+                _ => break,
+            };
+        }
+
+        None
+    }
+
     /// Get the rank (1-based) of a spell within its spell chain, or 0 if it has no chain data.
     /// Faithful `SpellMgr::GetSpellRank`.
     pub fn get_spell_rank(&self, spell_id: u32) -> u8 {
@@ -577,6 +659,124 @@ impl SpellManager {
 
         *self.spell_learn_skills.write() = map;
         info!("Loaded {} Spell Learn Skills from templates", count);
+    }
+
+    /// Port of `SpellMgr::LoadSpellEnchantCharges`.
+    ///
+    /// Loads `spell_enchant_charges` from the SQL table, validating each spell
+    /// exists in the loaded spell list. Missing spells are logged but not fatal.
+    async fn load_spell_enchant_charges(&self, world_db: &MySqlPool) -> Result<()> {
+        let mut map = HashMap::new();
+        let mut count = 0u32;
+
+        let rows = sqlx::query(
+            "SELECT CAST(`entry` AS UNSIGNED) AS entry, \
+                    CAST(`charges` AS UNSIGNED) AS charges \
+             FROM `spell_enchant_charges`",
+        )
+        .fetch_all(world_db)
+        .await;
+
+        let rows = match rows {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!("spell_enchant_charges table missing or errored: {e}");
+                *self.spell_enchant_charges.write() = map;
+                info!(">> Loaded 0 spell enchant charges");
+                return Ok(());
+            }
+        };
+
+        for row in &rows {
+            use sqlx::Row;
+            let entry: u32 = row.try_get::<u64, _>("entry").unwrap_or(0) as u32;
+            let charges: u32 = row.try_get::<u64, _>("charges").unwrap_or(0) as u32;
+
+            if self.spells.get(&entry).is_none() {
+                if !self.existing_spell_ids.contains(&entry) {
+                    warn!("Spell {entry} in spell_enchant_charges does not exist");
+                }
+                continue;
+            }
+
+            map.insert(entry, charges);
+            count += 1;
+        }
+
+        *self.spell_enchant_charges.write() = map;
+        info!(">> Loaded {count} spell enchant charges");
+        Ok(())
+    }
+
+    /// Port of `SpellMgr::LoadSpellPetAuras`.
+    ///
+    /// Loads `spell_pet_auras` SQL table, validating each spell exists and has
+    /// a dummy aura/effect. Creates `PetAura` entries keyed by spell ID.
+    async fn load_spell_pet_auras(&self, world_db: &MySqlPool) -> Result<()> {
+        let mut map: HashMap<u16, PetAura> = HashMap::new();
+        let mut count = 0u32;
+
+        let rows = match sqlx::query(
+            "SELECT CAST(`spell` AS UNSIGNED) AS spell, \
+                    CAST(`pet` AS UNSIGNED) AS pet, \
+                    CAST(`aura` AS UNSIGNED) AS aura \
+             FROM `spell_pet_auras`",
+        )
+        .fetch_all(world_db)
+        .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!("spell_pet_auras table missing or errored: {e}");
+                info!(">> Loaded 0 spell pet auras");
+                return Ok(());
+            }
+        };
+
+        for row in &rows {
+            use sqlx::Row;
+            let spell: u32 = row.try_get::<u64, _>("spell").unwrap_or(0) as u32;
+            let pet: u32 = row.try_get::<u64, _>("pet").unwrap_or(0) as u32;
+            let aura: u32 = row.try_get::<u64, _>("aura").unwrap_or(0) as u32;
+
+            let Some(spell_entry) = self.get(spell) else {
+                warn!("Spell {spell} in spell_pet_auras does not exist");
+                continue;
+            };
+
+            if let Some(pa) = map.get_mut(&(spell as u16)) {
+                pa.auras.insert(pet, aura);
+            } else {
+                // Validate: spell must have a dummy effect or dummy aura
+                let has_dummy = spell_entry.effect.iter().enumerate().any(|(i, &eff)| {
+                    (eff == 6 && spell_entry.effect_apply_aura_name[i] == 45) || eff == 3
+                });
+                if !has_dummy {
+                    warn!("Spell {spell} in spell_pet_auras does not have dummy aura or dummy effect");
+                    continue;
+                }
+
+                let Some(aura_entry) = self.get(aura) else {
+                    warn!("Aura {aura} in spell_pet_auras does not exist");
+                    continue;
+                };
+                let _ = aura_entry;
+
+                let is_caster_pet_target = spell_entry.effect_implicit_target_a[0] == 5;
+                let damage = spell_entry.effect_base_points[0] as i32;
+
+                let mut pa = PetAura::default();
+                pa.remove_on_change_pet = is_caster_pet_target;
+                pa.damage = damage;
+                pa.auras.insert(pet, aura);
+                map.insert(spell as u16, pa);
+            }
+            count += 1;
+        }
+
+        *self.spell_pet_auras.write() = map;
+        info!(">> Loaded {count} spell pet auras");
+        Ok(())
     }
 }
 

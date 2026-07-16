@@ -34,6 +34,7 @@ fn test_item_template(entry: u32) -> ItemTemplate {
         buy_count: 1,
         buy_price: 0,
         sell_price: 0,
+        bag_family: 0,
         container_slots: 0,
         start_quest: 0,
         stat_type: [0; 10],

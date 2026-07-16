@@ -35,6 +35,7 @@ use oxcore_shared::protocol::{HighGuid, ObjectGuid};
 use tracing::{info, warn};
 
 use super::cache::{CachedItemInfo, InventoryCache, PlayerInventoryData};
+use super::can_store::{CanStoreChecker, CanStoreResult};
 use super::types::*;
 use crate::game::items::{Bag, Item};
 
@@ -597,6 +598,21 @@ impl InventorySystem {
         };
 
         let max_stack = proto.stackable;
+
+        // Validate space BEFORE any DB queries
+        let can_store = self.can_store_item(
+            player_guid,
+            oxcore_shared::game::inventory::NULL_BAG,
+            oxcore_shared::game::inventory::NULL_SLOT,
+            item_id,
+            count,
+            None,
+            false,
+        );
+        if let Some(err) = can_store.error {
+            return AddItemResult::InventoryFull;
+        }
+
         let mut remaining_count = count;
         let mut items_modified = Vec::new();
         let mut items_created = Vec::new();
@@ -1395,6 +1411,24 @@ impl InventorySystem {
 
     pub fn has_free_slots(&self, player_guid: ObjectGuid, count: u32) -> bool {
         self.cache.count_free_inventory_slots(player_guid) >= count
+    }
+
+    /// Check whether `count` of `entry` can be stored, optionally at a specific (bag, slot).
+    ///
+    /// Wraps `CanStoreChecker` for use by handlers and internal operations.
+    /// Returns `CanStoreResult` with destination positions and any error.
+    pub fn can_store_item(
+        &self,
+        player_guid: ObjectGuid,
+        bag: u8,
+        slot: u8,
+        entry: u32,
+        count: u32,
+        p_item: Option<&Item>,
+        swap: bool,
+    ) -> CanStoreResult {
+        let checker = CanStoreChecker::new(&self.cache, &self.item_mgr, player_guid);
+        checker.can_store_item(bag, slot, entry, count, p_item, swap)
     }
 
     /// Transfer an item from one player to another, preserving all properties
