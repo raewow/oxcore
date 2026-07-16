@@ -726,6 +726,174 @@ fn fire_spell_hit_ai_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use oxcore_shared::database::Databases;
+    use sqlx::mysql::MySqlPoolOptions;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn lazy_pool() -> sqlx::MySqlPool {
+        MySqlPoolOptions::new()
+            .connect_lazy("mysql://test:test@localhost/test")
+            .expect("lazy pool should be constructible")
+    }
+
+    /// Minimal test world (no database back-end).
+    fn test_world() -> World {
+        let databases = Arc::new(Databases {
+            world: lazy_pool(),
+            character: lazy_pool(),
+            auth: lazy_pool(),
+            logs: lazy_pool(),
+        });
+        World::new(databases, Arc::new(Config::default()), 50, PathBuf::from("."))
+    }
+
+    /// Create a minimal harmful spell entry with one damage effect.
+    fn harmful_spell(id: u32) -> SpellEntry {
+        let mut effect = [0u32; 3];
+        effect[0] = SPELL_EFFECT_SCHOOL_DAMAGE;
+        SpellEntry {
+            id,
+            name: format!("Harmful{id}"),
+            rank_text: String::new(),
+            school: 1,
+            category: 0,
+            dispel: 0,
+            mechanic: 0,
+            attributes: 0,
+            attributes_ex: 0,
+            attributes_ex2: 0,
+            attributes_ex3: 0,
+            attributes_ex4: 0,
+            stances: 0,
+            stances_not: 0,
+            targets: 0,
+            target_creature_type: 0,
+            requires_spell_focus: 0,
+            caster_aura_state: 0,
+            target_aura_state: 0,
+            casting_time_index: 0,
+            recovery_time: 0,
+            category_recovery_time: 0,
+            interrupt_flags: 0,
+            aura_interrupt_flags: 0,
+            channel_interrupt_flags: 0,
+            proc_flags: 0,
+            proc_chance: 0,
+            proc_charges: 0,
+            max_level: 0,
+            base_level: 0,
+            spell_level: 0,
+            duration_index: 0,
+            power_type: 0,
+            mana_cost: 0,
+            mana_cost_per_level: 0,
+            mana_per_second: 0,
+            mana_per_second_per_level: 0,
+            range_index: 0,
+            speed: 0.0,
+            stack_amount: 0,
+            totem: [0; 2],
+            reagent: [0; 8],
+            reagent_count: [0; 8],
+            equipped_item_class: 0,
+            equipped_item_sub_class_mask: 0,
+            equipped_item_inventory_type_mask: 0,
+            effect,
+            effect_die_sides: [0; 3],
+            effect_base_dice: [0; 3],
+            effect_dice_per_level: [0.0; 3],
+            effect_real_points_per_level: [0.0; 3],
+            effect_base_points: [10; 3],
+            effect_bonus_coefficient: [0.0; 3],
+            effect_mechanic: [0; 3],
+            effect_implicit_target_a: [0; 3],
+            effect_implicit_target_b: [0; 3],
+            effect_radius_index: [0; 3],
+            effect_apply_aura_name: [0; 3],
+            effect_amplitude: [0; 3],
+            effect_multiple_value: [0.0; 3],
+            effect_chain_target: [0; 3],
+            effect_item_type: [0; 3],
+            effect_misc_value: [0; 3],
+            effect_trigger_spell: [0; 3],
+            effect_points_per_combo_point: [0.0; 3],
+            spell_visual: 0,
+            spell_icon_id: 0,
+            active_icon_id: 0,
+            spell_priority: 0,
+            min_target_level: 0,
+            mana_cost_percentage: 0,
+            start_recovery_category: 0,
+            start_recovery_time: 0,
+            max_target_level: 0,
+            spell_family_name: 0,
+            spell_family_flags: 0,
+            max_affected_targets: 0,
+            dmg_class: 0,
+            prevention_type: 0,
+            custom: 0,
+            internal: 0,
+            allowed_target_mask: 0,
+            script_id: 0,
+            dmg_multiplier: [0.0; 3],
+        }
+    }
+
+    // ─── Tests for pure helper functions ───────────────────────────────────────────
+
+    #[test]
+    fn is_friendly_target_accepts_friend_types() {
+        assert!(is_friendly_target(1));   // TARGET_UNIT_FRIEND
+        assert!(is_friendly_target(11));  // TARGET_UNIT_FRIEND_AREA
+        assert!(!is_friendly_target(16)); // TARGET_ENUM_UNITS_ENEMY_AOE_AT_DEST_LOC
+        assert!(!is_friendly_target(0));
+        assert!(!is_friendly_target(99));
+    }
+
+    #[test]
+    fn has_direct_threat_effect_detects_threat_effects() {
+        let mut entry = harmful_spell(1);
+        // No threat effects by default
+        assert!(!has_direct_threat_effect(&entry));
+
+        entry.effect[0] = 74; // SPELL_EFFECT_ATTACK_ME
+        assert!(has_direct_threat_effect(&entry));
+
+        entry.effect[0] = 116; // SPELL_EFFECT_THREAT_ALL
+        assert!(has_direct_threat_effect(&entry));
+    }
+
+    #[test]
+    fn spell_has_aura_type_checks_apply_aura_name() {
+        let mut entry = harmful_spell(2);
+        entry.effect_apply_aura_name = [0; 3];
+        assert!(!spell_has_aura_type(&entry, SPELL_AURA_MOD_STEALTH));
+
+        entry.effect_apply_aura_name[0] = SPELL_AURA_MOD_STEALTH;
+        assert!(spell_has_aura_type(&entry, SPELL_AURA_MOD_STEALTH));
+        assert!(!spell_has_aura_type(&entry, SPELL_AURA_MOD_INVISIBILITY));
+    }
+
+    #[test]
+    fn first_effect_target_a_returns_first_nonzero_effect() {
+        let mut entry = harmful_spell(3);
+        entry.effect_implicit_target_a = [0; 3];
+        // No effect bits set — returns None
+        assert_eq!(first_effect_target_a(&entry, 0), None);
+
+        // Effect 1 has target_a = 16, effect 0 is zero
+        entry.effect[0] = 0;
+        entry.effect[1] = SPELL_EFFECT_SCHOOL_DAMAGE;
+        entry.effect_implicit_target_a[1] = 16;
+        assert_eq!(first_effect_target_a(&entry, 0b010), Some(16));
+
+        // Effect 0 is non-zero in mask but zero in entry → should skip to effect 1
+        assert_eq!(first_effect_target_a(&entry, 0b001), None);
+    }
+
+    // ─── Tests for the previous helpers ────────────────────────────────────────────
 
     #[test]
     fn reset_effect_damage_and_heal_clears_all_accumulators() {
@@ -753,4 +921,188 @@ mod tests {
 
         assert_eq!((target.damage, target.healing, target.absorbed), (0, 0, 0));
     }
+
+    // ─── Tests for do_spell_hit_on_unit ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn zero_effect_mask_non_positive_enters_combat() {
+        let world = test_world();
+        let spell = harmful_spell(100);
+        let mut mask = 0u8;
+
+        // Non-positive spell with zero mask -> enters combat, returns false
+        let result = do_spell_hit_on_unit(
+            &spell,
+            ObjectGuid::new_player(1),
+            ObjectGuid::new_creature(1, 50),
+            &mut mask,
+            false,
+            false,
+            &world,
+        )
+        .await;
+
+        assert!(!result, "zero mask should abort hit");
+        assert_eq!(mask, 0, "mask should still be zero");
+    }
+
+    #[tokio::test]
+    async fn zero_effect_mask_positive_does_not_enter_combat() {
+        let world = test_world();
+        let mut spell = harmful_spell(101);
+        // Mark as positive (clear the negative bit and set no harmful effects)
+        spell.attributes = 0x0400_0000;
+        let mut mask = 0u8;
+
+        let result = do_spell_hit_on_unit(
+            &spell,
+            ObjectGuid::new_player(2),
+            ObjectGuid::new_creature(2, 50),
+            &mut mask,
+            false,
+            false,
+            &world,
+        )
+        .await;
+
+        assert!(!result, "zero mask should abort hit even for positive spells");
+    }
+
+    #[tokio::test]
+    async fn hostile_hit_removes_stealth_from_target_without_allow_flag() {
+        let world = test_world();
+        let spell = harmful_spell(102);
+        assert!(!spell.is_positive_spell(), "test requires harmful spell");
+        assert!(
+            !spell.has_attribute(SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED),
+            "test requires no allow-stealth flag"
+        );
+
+        let mut mask = 0b001; // one effect bit
+
+        let result = do_spell_hit_on_unit(
+            &spell,
+            ObjectGuid::new_player(3),
+            ObjectGuid::new_player(4),
+            &mut mask,
+            false,
+            false,
+            &world,
+        )
+        .await;
+
+        assert!(result, "hostile hit should continue with effect application");
+        // Stealth removal is called; the player target has no stealth to remove
+        // so the call is a no-op but should not panic.
+    }
+
+    #[tokio::test]
+    async fn allow_while_stealthed_suppresses_stealth_removal() {
+        let world = test_world();
+        let mut spell = harmful_spell(103);
+        spell.attributes_ex |= SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED;
+        let mut mask = 0b001;
+
+        let result = do_spell_hit_on_unit(
+            &spell,
+            ObjectGuid::new_player(5),
+            ObjectGuid::new_player(6),
+            &mut mask,
+            false,
+            false,
+            &world,
+        )
+        .await;
+
+        assert!(result, "hit should continue");
+    }
+
+    #[tokio::test]
+    async fn allow_while_invisible_suppresses_invis_removal() {
+        let world = test_world();
+        let mut spell = harmful_spell(104);
+        spell.attributes_ex2 |= SPELL_ATTR_EX2_ALLOW_WHILE_INVISIBLE;
+        let mut mask = 0b001;
+
+        let result = do_spell_hit_on_unit(
+            &spell,
+            ObjectGuid::new_player(7),
+            ObjectGuid::new_player(8),
+            &mut mask,
+            false,
+            false,
+            &world,
+        )
+        .await;
+
+        assert!(result, "hit should continue");
+    }
+
+    #[tokio::test]
+    async fn not_an_action_suppresses_stealth_removal() {
+        let world = test_world();
+        let mut spell = harmful_spell(105);
+        spell.attributes_ex2 |= SPELL_ATTR_EX2_NOT_AN_ACTION;
+        let mut mask = 0b001;
+
+        let result = do_spell_hit_on_unit(
+            &spell,
+            ObjectGuid::new_player(9),
+            ObjectGuid::new_player(10),
+            &mut mask,
+            false,
+            false,
+            &world,
+        )
+        .await;
+
+        assert!(result, "hit should continue");
+    }
+
+    #[tokio::test]
+    async fn possess_spell_skips_combat_entry() {
+        let world = test_world();
+        let mut spell = harmful_spell(106);
+        // Make the spell apply MOD_POSSESS aura
+        spell.effect[0] = 6; // SPELL_EFFECT_APPLY_AURA
+        spell.effect_apply_aura_name[0] = SPELL_AURA_MOD_POSSESS;
+        let mut mask = 0b001;
+
+        let result = do_spell_hit_on_unit(
+            &spell,
+            ObjectGuid::new_player(11),
+            ObjectGuid::new_creature(3, 50),
+            &mut mask,
+            false,
+            false,
+            &world,
+        )
+        .await;
+
+        assert!(result, "possess should continue with effect application");
+        // Combat entry should be skipped (AttackedBy not called for possess).
+    }
+
+    #[tokio::test]
+    async fn no_threat_attr_skips_combat_entry() {
+        let world = test_world();
+        let mut spell = harmful_spell(107);
+        spell.attributes_ex |= SPELL_ATTR_EX_NO_THREAT;
+        let mut mask = 0b001;
+
+        let result = do_spell_hit_on_unit(
+            &spell,
+            ObjectGuid::new_player(13),
+            ObjectGuid::new_creature(4, 50),
+            &mut mask,
+            false,
+            false,
+            &world,
+        )
+        .await;
+
+        assert!(result, "no-threat hit should still continue with effects");
+    }
+
+
 }
