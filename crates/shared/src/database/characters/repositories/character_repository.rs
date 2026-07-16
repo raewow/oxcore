@@ -634,17 +634,13 @@ impl CharacterRepository {
     }
 
     /// Load all character_account_data rows for a character guid (types 1, 3, 5, 6, 7).
-    pub async fn find_character_account_data(
-        &self,
-        guid: u32,
-    ) -> Result<Vec<(u32, u64, Vec<u8>)>> {
-        let rows = sqlx::query(
-            "SELECT `type`, `time`, `data` FROM character_account_data WHERE guid = ?",
-        )
-        .bind(guid)
-        .fetch_all(&*self.pool)
-        .await
-        .context("Failed to fetch character_account_data")?;
+    pub async fn find_character_account_data(&self, guid: u32) -> Result<Vec<(u32, u64, Vec<u8>)>> {
+        let rows =
+            sqlx::query("SELECT `type`, `time`, `data` FROM character_account_data WHERE guid = ?")
+                .bind(guid)
+                .fetch_all(&*self.pool)
+                .await
+                .context("Failed to fetch character_account_data")?;
         rows.into_iter()
             .map(|row| {
                 let data_type: u32 = row.try_get("type")?;

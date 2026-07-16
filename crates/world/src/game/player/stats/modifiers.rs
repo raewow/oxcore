@@ -207,7 +207,7 @@ impl UnitModifierGroup {
                 } else {
                     let multiplier = (100.0 + amount) / 100.0;
                     if multiplier != 0.0 {
-                        self.modifiers[mod_idx][type_idx] *= 100.0 / multiplier;
+                        self.modifiers[mod_idx][type_idx] /= multiplier;
                     }
                 }
             }
@@ -231,6 +231,138 @@ impl UnitModifierGroup {
 impl Default for UnitModifierGroup {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UnitModifierGroup, UnitModifierType, UnitMods};
+
+    const EPSILON: f32 = 0.0001;
+
+    #[test]
+    fn total_value_modifiers_apply_and_remove() {
+        let mut modifiers = UnitModifierGroup::new();
+
+        modifiers.handle_stat_modifier(
+            UnitMods::StatStrength,
+            UnitModifierType::TotalValue,
+            15.0,
+            true,
+        );
+        modifiers.handle_stat_modifier(
+            UnitMods::StatStrength,
+            UnitModifierType::TotalValue,
+            15.0,
+            false,
+        );
+
+        assert!(
+            modifiers
+                .get_modifier_value(UnitMods::StatStrength, UnitModifierType::TotalValue)
+                .abs()
+                < EPSILON
+        );
+    }
+
+    #[test]
+    fn total_percentage_modifiers_compose_and_remove() {
+        let mut modifiers = UnitModifierGroup::new();
+
+        modifiers.handle_stat_modifier(
+            UnitMods::StatStamina,
+            UnitModifierType::TotalPct,
+            10.0,
+            true,
+        );
+        modifiers.handle_stat_modifier(
+            UnitMods::StatStamina,
+            UnitModifierType::TotalPct,
+            10.0,
+            true,
+        );
+
+        assert!(
+            (modifiers.get_modifier_value(UnitMods::StatStamina, UnitModifierType::TotalPct)
+                - 1.21)
+                .abs()
+                < EPSILON
+        );
+
+        modifiers.handle_stat_modifier(
+            UnitMods::StatStamina,
+            UnitModifierType::TotalPct,
+            10.0,
+            false,
+        );
+
+        assert!(
+            (modifiers.get_modifier_value(UnitMods::StatStamina, UnitModifierType::TotalPct) - 1.1)
+                .abs()
+                < EPSILON
+        );
+    }
+
+    #[test]
+    fn negative_hundred_percent_is_kept_nonzero() {
+        let mut modifiers = UnitModifierGroup::new();
+
+        modifiers.handle_stat_modifier(
+            UnitMods::StatIntellect,
+            UnitModifierType::TotalPct,
+            -100.0,
+            true,
+        );
+
+        assert!(
+            (modifiers.get_modifier_value(UnitMods::StatIntellect, UnitModifierType::TotalPct)
+                - 0.0001)
+                .abs()
+                < EPSILON
+        );
+    }
+
+    #[test]
+    fn total_value_and_percentage_use_four_tier_formula() {
+        let mut modifiers = UnitModifierGroup::new();
+        modifiers.handle_stat_modifier(
+            UnitMods::StatAgility,
+            UnitModifierType::TotalValue,
+            5.0,
+            true,
+        );
+        modifiers.handle_stat_modifier(
+            UnitMods::StatAgility,
+            UnitModifierType::TotalPct,
+            10.0,
+            true,
+        );
+
+        assert!(
+            (modifiers.calculate_total_value(UnitMods::StatAgility, 10.0) - 16.5).abs() < EPSILON
+        );
+    }
+
+    #[test]
+    fn get_modifier_value_preserves_values_except_nonpositive_total_percentages() {
+        let mut modifiers = UnitModifierGroup::new();
+        modifiers.set_modifier_value(UnitMods::Health, UnitModifierType::BasePct, 1.5);
+        modifiers.set_modifier_value(UnitMods::Health, UnitModifierType::TotalValue, 25.0);
+        modifiers.set_modifier_value(UnitMods::Health, UnitModifierType::TotalPct, 0.0);
+
+        assert!(
+            (modifiers.get_modifier_value(UnitMods::Health, UnitModifierType::BasePct) - 1.5).abs()
+                < EPSILON
+        );
+        assert!(
+            (modifiers.get_modifier_value(UnitMods::Health, UnitModifierType::TotalValue) - 25.0)
+                .abs()
+                < EPSILON
+        );
+        assert_eq!(
+            modifiers.get_modifier_value(UnitMods::Health, UnitModifierType::TotalPct),
+            0.0
+        );
     }
 }
 

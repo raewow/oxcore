@@ -488,9 +488,7 @@ impl SpellEntry {
             2 => dist <= 5.0,
             // A missing range entry yields max = min = 0, so `dist < 0` is false —
             // matching the previous unwrap_or(false) behaviour.
-            _ => {
-                dist < self.get_spell_max_range(dbc) && dist >= self.get_spell_min_range(dbc)
-            }
+            _ => dist < self.get_spell_max_range(dbc) && dist >= self.get_spell_min_range(dbc),
         }
     }
 

@@ -17,9 +17,10 @@ pub const SPELL_CUSTOM_SEND_CHANNEL_VISUAL: u32 = 0x800;
 pub const SPELL_CHANNEL_VISUAL_TIMER: u32 = 800;
 
 /// Per-cast output of `InitializeChanneledVisualTimer`: the channel kit id to play
-/// and the refresh interval at which to re-send it. Carried out of the cast state
-/// (which does not yet own `channeled_visual_kit`/`channeled_visual_timer` fields)
-/// so the caller can apply it to its own channeled-spell representation.
+/// and the refresh interval at which to re-send it.
+///
+/// Cast state does not yet retain `channeled_visual_kit` or
+/// `channeled_visual_timer`, so this value cannot be applied or scheduled here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChannelVisualConfig {
     /// `m_channeledVisualKit` — the `SpellVisual.dbc` channelKit id to play.
@@ -66,10 +67,10 @@ pub fn compute_channel_visual(
 ///
 /// `lookup` yields the `channelKit` column of the `SpellVisual.dbc` entry for a
 /// `spell_visual` id (i.e. `pSpellVisual->channelKit`), or `None` when the entry is
-/// missing — which the reference code treats identically to a zero `channelKit`.
+/// missing, which the reference code treats identically to a zero `channelKit`.
 ///
-/// // TODO: wire to the real `SpellVisual` DBC store once it exists; until then the
-/// // caller supplies the lookup.
+/// The world crate has no `SpellVisual.dbc` store yet, so callers must supply this
+/// lookup. Persisting the returned configuration also requires cast-state fields.
 pub fn initialize_channeled_visual_timer(
     spell: &SpellEntry,
     lookup: impl Fn(u32) -> Option<u32>,
@@ -110,7 +111,10 @@ mod tests {
 
     #[test]
     fn all_guards_pass_returns_config() {
-        let cfg = compute_channel_visual(FLAG, 100, |_| Some(7));
+        let cfg = compute_channel_visual(FLAG | 0x0000_0400, 100, |visual_id| {
+            assert_eq!(visual_id, 100);
+            Some(7)
+        });
         assert_eq!(
             cfg,
             Some(ChannelVisualConfig {
@@ -128,7 +132,11 @@ mod tests {
             calls.set(calls.get() + 1);
             Some(id)
         });
-        assert_eq!(calls.get(), 0, "second guard must short-circuit before the lookup");
+        assert_eq!(
+            calls.get(),
+            0,
+            "second guard must short-circuit before the lookup"
+        );
         assert_eq!(cfg, None);
     }
 
@@ -140,7 +148,11 @@ mod tests {
             calls.set(calls.get() + 1);
             Some(id)
         });
-        assert_eq!(calls.get(), 0, "first guard must short-circuit before the lookup");
+        assert_eq!(
+            calls.get(),
+            0,
+            "first guard must short-circuit before the lookup"
+        );
         assert_eq!(cfg, None);
     }
 }

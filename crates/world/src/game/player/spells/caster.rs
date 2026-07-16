@@ -1,14 +1,12 @@
 use crate::dbc::structures::SpellEntry;
 use crate::game::player::auras::aura::Aura;
 use crate::game::player::auras::effects::{
-    AURA_MELEE_ATTACK_POWER_ATTACKER_BONUS, AURA_MOD_DAMAGE_DONE,
-    AURA_MOD_DAMAGE_DONE_CREATURE, AURA_MOD_DAMAGE_DONE_VERSUS,
-    AURA_MOD_DAMAGE_PERCENT_DONE, AURA_MOD_FLAT_SPELL_DAMAGE_VERSUS,
-    AURA_MOD_HEALING_DONE, AURA_MOD_HEALING_DONE_PERCENT,
-    AURA_MOD_MELEE_ATTACK_POWER_VERSUS, AURA_MOD_OFFHAND_DAMAGE_PCT,
-    AURA_MOD_RANGED_ATTACK_POWER_VERSUS, AURA_MOD_SPELL_DAMAGE_OF_STAT_PERCENT,
-    AURA_MOD_SPELL_HEALING_OF_STAT_PERCENT, AURA_OVERRIDE_CLASS_SCRIPTS,
-    AURA_RANGED_ATTACK_POWER_ATTACKER_BONUS,
+    AURA_MELEE_ATTACK_POWER_ATTACKER_BONUS, AURA_MOD_DAMAGE_DONE, AURA_MOD_DAMAGE_DONE_CREATURE,
+    AURA_MOD_DAMAGE_DONE_VERSUS, AURA_MOD_DAMAGE_PERCENT_DONE, AURA_MOD_FLAT_SPELL_DAMAGE_VERSUS,
+    AURA_MOD_HEALING_DONE, AURA_MOD_HEALING_DONE_PERCENT, AURA_MOD_MELEE_ATTACK_POWER_VERSUS,
+    AURA_MOD_OFFHAND_DAMAGE_PCT, AURA_MOD_RANGED_ATTACK_POWER_VERSUS,
+    AURA_MOD_SPELL_DAMAGE_OF_STAT_PERCENT, AURA_MOD_SPELL_HEALING_OF_STAT_PERCENT,
+    AURA_OVERRIDE_CLASS_SCRIPTS, AURA_RANGED_ATTACK_POWER_ATTACKER_BONUS,
 };
 use crate::game::player::player::Player;
 use crate::game::player::spells::state::SpellModOp;
@@ -38,8 +36,8 @@ const MELEE_HIT_CRIT: u32 = 1;
 const SPELL_CUSTOM_FIXED_DAMAGE: u32 = 0x0000_0004;
 const SPELLFAMILY_MAGE: u32 = 3;
 const SPELLFAMILY_PALADIN: u32 = 10;
-const CF_MAGE_IGNITE: u64 = 1 << 27;     // 0x0800_0000
-const CF_PALADIN_SEALS: u64 = 1 << 27;   // 0x0800_0000
+const CF_MAGE_IGNITE: u64 = 1 << 27; // 0x0800_0000
+const CF_PALADIN_SEALS: u64 = 1 << 27; // 0x0800_0000
 
 fn get_unit_level(guid: ObjectGuid, world: &World) -> Option<u32> {
     if guid.is_player() {
@@ -131,11 +129,11 @@ pub fn get_melee_damage_school_mask(
 /// Returns configurable multiplier (defaults to 1.0 for all ranks).
 pub fn get_spell_damage_mod(rank: u8, world: &World) -> f32 {
     match rank {
-        0 => 1.0,             // CREATURE_ELITE_NORMAL
-        1 => 1.0,             // CREATURE_ELITE_ELITE
-        2 => 1.0,             // CREATURE_ELITE_RAREELITE
-        3 => 1.0,             // CREATURE_ELITE_WORLDBOSS
-        4 => 1.0,             // CREATURE_ELITE_RARE
+        0 => 1.0, // CREATURE_ELITE_NORMAL
+        1 => 1.0, // CREATURE_ELITE_ELITE
+        2 => 1.0, // CREATURE_ELITE_RAREELITE
+        3 => 1.0, // CREATURE_ELITE_WORLDBOSS
+        4 => 1.0, // CREATURE_ELITE_RARE
         _ => 1.0,
     }
 }
@@ -145,7 +143,13 @@ pub fn get_spell_damage_mod(rank: u8, world: &World) -> f32 {
 ///
 /// `att_type`: 0 = BASE_ATTACK, 1 = OFF_ATTACK, 2 = RANGED_ATTACK
 /// `normalized`: when true uses fixed normalized speeds (dagger=1.7, 1H=2.4, 2H=3.3, ranged=2.8)
-pub fn get_ap_multiplier(att_type: u32, normalized: bool, weapon_speed: f32, inventory_type: u32, weapon_subclass: u32) -> f32 {
+pub fn get_ap_multiplier(
+    att_type: u32,
+    normalized: bool,
+    weapon_speed: f32,
+    inventory_type: u32,
+    weapon_subclass: u32,
+) -> f32 {
     if !normalized {
         return weapon_speed / 1000.0;
     }
@@ -154,11 +158,11 @@ pub fn get_ap_multiplier(att_type: u32, normalized: bool, weapon_speed: f32, inv
         RANGED_ATTACK => 2.8,
         _ => {
             match inventory_type {
-                17 | 15 | 16 if weapon_subclass == 15 => 1.7,  // Dagger in weapon slot
-                17 | 15 | 16 => 2.4,                            // 1H weapon
-                10 | 5 => 2.8,                                   // Ranged/thrown
-                _ if inventory_type == 14 || inventory_type == 19 => 3.3,  // 2H weapon
-                _ => 2.4,                                        // Default (fist weapon, etc.)
+                17 | 15 | 16 if weapon_subclass == 15 => 1.7, // Dagger in weapon slot
+                17 | 15 | 16 => 2.4,                          // 1H weapon
+                10 | 5 => 2.8,                                // Ranged/thrown
+                _ if inventory_type == 14 || inventory_type == 19 => 3.3, // 2H weapon
+                _ => 2.4,                                     // Default (fist weapon, etc.)
             }
         }
     }
@@ -247,7 +251,8 @@ pub fn melee_damage_bonus_done(
     }
 
     // Differentiate weapon-damage-based spells
-    let is_weapon_damage_based = !(spell_proto.is_some_and(|s| damage_type == DOT || s.has_effect(SPELL_EFFECT_SCHOOL_DAMAGE)));
+    let is_weapon_damage_based = !(spell_proto
+        .is_some_and(|s| damage_type == DOT || s.has_effect(SPELL_EFFECT_SCHOOL_DAMAGE)));
 
     // Creature type mask: 1 << (creature_type - 1), 0 if unknown
     let creature_type_mask = world
@@ -255,7 +260,11 @@ pub fn melee_damage_bonus_done(
         .creature_mgr
         .with_creature(victim_guid, |c| {
             let ct = c.creature_type;
-            if ct > 0 { 1u32 << (ct - 1) } else { 0 }
+            if ct > 0 {
+                1u32 << (ct - 1)
+            } else {
+                0
+            }
         })
         .unwrap_or(0);
 
@@ -293,10 +302,10 @@ pub fn melee_damage_bonus_done(
             .player
             .manager()
             .with_player(caster_guid, |player| {
-                player
-                    .auras
-                    .container
-                    .get_total_aura_modifier_by_misc_mask(AURA_MOD_DAMAGE_DONE_CREATURE, creature_type_mask)
+                player.auras.container.get_total_aura_modifier_by_misc_mask(
+                    AURA_MOD_DAMAGE_DONE_CREATURE,
+                    creature_type_mask,
+                )
             })
             .unwrap_or(0);
     }
@@ -323,10 +332,10 @@ pub fn melee_damage_bonus_done(
                 .player
                 .manager()
                 .with_player(caster_guid, |player| {
-                    player
-                        .auras
-                        .container
-                        .get_total_aura_modifier_by_misc_mask(AURA_MOD_RANGED_ATTACK_POWER_VERSUS, creature_type_mask)
+                    player.auras.container.get_total_aura_modifier_by_misc_mask(
+                        AURA_MOD_RANGED_ATTACK_POWER_VERSUS,
+                        creature_type_mask,
+                    )
                 })
                 .unwrap_or(0);
         }
@@ -350,10 +359,10 @@ pub fn melee_damage_bonus_done(
                 .player
                 .manager()
                 .with_player(caster_guid, |player| {
-                    player
-                        .auras
-                        .container
-                        .get_total_aura_modifier_by_misc_mask(AURA_MOD_MELEE_ATTACK_POWER_VERSUS, creature_type_mask)
+                    player.auras.container.get_total_aura_modifier_by_misc_mask(
+                        AURA_MOD_MELEE_ATTACK_POWER_VERSUS,
+                        creature_type_mask,
+                    )
                 })
                 .unwrap_or(0);
         }
@@ -367,7 +376,9 @@ pub fn melee_damage_bonus_done(
         if let Some(template) = world
             .managers
             .creature_mgr
-            .with_creature(caster_guid, |c| world.managers.creature_mgr.get_template(c.entry))
+            .with_creature(caster_guid, |c| {
+                world.managers.creature_mgr.get_template(c.entry)
+            })
             .flatten()
         {
             done_percent *= get_spell_damage_mod(template.rank, world);
@@ -384,7 +395,10 @@ pub fn melee_damage_bonus_done(
                 player
                     .auras
                     .container
-                    .get_total_aura_multiplier_by_misc_mask(AURA_MOD_DAMAGE_PERCENT_DONE, school_mask)
+                    .get_total_aura_multiplier_by_misc_mask(
+                        AURA_MOD_DAMAGE_PERCENT_DONE,
+                        school_mask,
+                    )
             })
             .unwrap_or(1.0);
         done_percent *= pct_done;
@@ -416,7 +430,10 @@ pub fn melee_damage_bonus_done(
                 player
                     .auras
                     .container
-                    .get_total_aura_multiplier_by_misc_mask(AURA_MOD_DAMAGE_DONE_VERSUS, creature_type_mask)
+                    .get_total_aura_multiplier_by_misc_mask(
+                        AURA_MOD_DAMAGE_DONE_VERSUS,
+                        creature_type_mask,
+                    )
             })
             .unwrap_or(1.0);
     }
@@ -438,18 +455,16 @@ pub fn melee_damage_bonus_done(
     }
     // Weapon-damage-based spells
     else if ap_bonus != 0 || done_flat != 0 {
-        let normalized = spell_proto
-            .is_some_and(|s| s.has_effect(SPELL_EFFECT_NORMALIZED_WEAPON_DMG));
+        let normalized =
+            spell_proto.is_some_and(|s| s.has_effect(SPELL_EFFECT_NORMALIZED_WEAPON_DMG));
 
         let weapon_speed = match att_type {
-            OFF_ATTACK => {
-                world
-                    .systems
-                    .player
-                    .manager()
-                    .with_player(caster_guid, |player| player.combat.off_hand_speed)
-                    .unwrap_or(2000)
-            }
+            OFF_ATTACK => world
+                .systems
+                .player
+                .manager()
+                .with_player(caster_guid, |player| player.combat.off_hand_speed)
+                .unwrap_or(2000),
             RANGED_ATTACK => world
                 .systems
                 .player
@@ -489,10 +504,10 @@ pub fn melee_damage_bonus_done(
                 .player
                 .manager()
                 .with_player(caster_guid, |player| {
-                    player
-                        .stats
-                        .unit_mods
-                        .get_modifier_value(unit_mod, crate::game::player::stats::modifiers::UnitModifierType::TotalPct)
+                    player.stats.unit_mods.get_modifier_value(
+                        unit_mod,
+                        crate::game::player::stats::modifiers::UnitModifierType::TotalPct,
+                    )
                 })
                 .unwrap_or(1.0);
         }
@@ -506,7 +521,11 @@ pub fn melee_damage_bonus_done(
 
     // Apply spell mod to done damage
     if spell_proto.is_some() && caster_is_player {
-        let mod_op = if damage_type == DOT { SpellModOp::Dot } else { SpellModOp::Damage };
+        let mod_op = if damage_type == DOT {
+            SpellModOp::Dot
+        } else {
+            SpellModOp::Damage
+        };
         tmp_damage = world
             .systems
             .player
@@ -524,7 +543,11 @@ pub fn melee_damage_bonus_done(
     }
 
     // Clamp negative to zero
-    if tmp_damage > 0.0 { tmp_damage } else { 0.0 }
+    if tmp_damage > 0.0 {
+        tmp_damage
+    } else {
+        0.0
+    }
 }
 
 /// Base healing bonus from +healing gear and stat conversion.
@@ -532,7 +555,11 @@ pub fn melee_damage_bonus_done(
 ///
 /// Sums AURA_MOD_HEALING_DONE values matching school mask,
 /// plus AURA_MOD_SPELL_HEALING_OF_STAT_PERCENT * spirit / 100 for players.
-pub fn spell_base_healing_bonus_done(school_mask: u32, caster_guid: ObjectGuid, world: &World) -> f32 {
+pub fn spell_base_healing_bonus_done(
+    school_mask: u32,
+    caster_guid: ObjectGuid,
+    world: &World,
+) -> f32 {
     let mut advertised_benefit = 0.0f32;
 
     if caster_guid.is_player() {
@@ -645,12 +672,13 @@ pub fn spell_healing_bonus_done(
             if let Some(proto) = spell_proto {
                 // Check IsAffectedOnSpell: look up aura's spell entry to compare family
                 let aura_spell = world.managers.spell_mgr.get(aura.spell_id);
-                let family_match = aura_spell
-                    .as_ref()
-                    .map_or(true, |s| s.spell_family_name == 0 || s.spell_family_name == proto.spell_family_name);
-                let mask_match = aura_spell
-                    .as_ref()
-                    .map_or(true, |s| s.spell_family_flags == 0 || (s.spell_family_flags & proto.spell_family_flags) != 0);
+                let family_match = aura_spell.as_ref().map_or(true, |s| {
+                    s.spell_family_name == 0 || s.spell_family_name == proto.spell_family_name
+                });
+                let mask_match = aura_spell.as_ref().map_or(true, |s| {
+                    s.spell_family_flags == 0
+                        || (s.spell_family_flags & proto.spell_family_flags) != 0
+                });
                 if family_match && mask_match {
                     let amount = aura.current_value() as f32;
                     match misc {
@@ -661,13 +689,10 @@ pub fn spell_healing_bonus_done(
                 }
             }
         }
-
     }
 
     // Base healing bonus from gear (school mask based on spell school)
-    let school_mask = spell_proto
-        .map(|s| 1u32 << s.school)
-        .unwrap_or(1);
+    let school_mask = spell_proto.map(|s| 1u32 << s.school).unwrap_or(1);
     let advertised_benefit = spell_base_healing_bonus_done(school_mask, caster_guid, world);
 
     // Coefficient scaling
@@ -686,7 +711,11 @@ pub fn spell_healing_bonus_done(
 
     // Apply spell mod to done amount
     if spell_proto.is_some() && caster_guid.is_player() {
-        let mod_op = if damage_type == DOT { SpellModOp::Dot } else { SpellModOp::Damage };
+        let mod_op = if damage_type == DOT {
+            SpellModOp::Dot
+        } else {
+            SpellModOp::Damage
+        };
         heal = world
             .systems
             .player
@@ -703,7 +732,11 @@ pub fn spell_healing_bonus_done(
             .unwrap_or(heal);
     }
 
-    if heal < 0.0 { 0.0 } else { heal }
+    if heal < 0.0 {
+        0.0
+    } else {
+        heal
+    }
 }
 
 /// Base damage bonus from +spell damage gear and stat conversion.
@@ -711,7 +744,11 @@ pub fn spell_healing_bonus_done(
 ///
 /// Sums AURA_MOD_DAMAGE_DONE values matching school mask and item class constraints,
 /// plus AURA_MOD_SPELL_DAMAGE_OF_STAT_PERCENT * spirit / 100 for players.
-pub fn spell_base_damage_bonus_done(school_mask: u32, caster_guid: ObjectGuid, world: &World) -> i32 {
+pub fn spell_base_damage_bonus_done(
+    school_mask: u32,
+    caster_guid: ObjectGuid,
+    world: &World,
+) -> i32 {
     if !caster_guid.is_player() {
         return 0;
     }
@@ -725,14 +762,18 @@ pub fn spell_base_damage_bonus_done(school_mask: u32, caster_guid: ObjectGuid, w
             // (EquippedItemClass == -1 && EquippedItemInventoryTypeMask == 0), matching
             // SpellCaster::SpellBaseDamageBonusDone's mDamageDone loop.
             let mut benefit = 0i32;
-            for aura in player.auras.container.get_auras_by_type(AURA_MOD_DAMAGE_DONE) {
+            for aura in player
+                .auras
+                .container
+                .get_auras_by_type(AURA_MOD_DAMAGE_DONE)
+            {
                 if (aura.misc_value as u32 & school_mask) == 0 {
                     continue;
                 }
                 let aura_spell = world.managers.spell_mgr.get(aura.spell_id);
-                let is_generic_item = aura_spell
-                    .as_deref()
-                    .map_or(true, |s| s.equipped_item_class == -1 && s.equipped_item_inventory_type_mask == 0);
+                let is_generic_item = aura_spell.as_deref().map_or(true, |s| {
+                    s.equipped_item_class == -1 && s.equipped_item_inventory_type_mask == 0
+                });
                 if is_generic_item {
                     benefit += aura.current_value();
                 }
@@ -786,7 +827,9 @@ pub fn spell_damage_bonus_done(
         return pdamage;
     }
     // Mage Ignite already includes modifiers
-    if proto.spell_family_name == SPELLFAMILY_MAGE && (proto.spell_family_flags & CF_MAGE_IGNITE) != 0 {
+    if proto.spell_family_name == SPELLFAMILY_MAGE
+        && (proto.spell_family_flags & CF_MAGE_IGNITE) != 0
+    {
         return pdamage;
     }
 
@@ -803,7 +846,9 @@ pub fn spell_damage_bonus_done(
         if let Some(template) = world
             .managers
             .creature_mgr
-            .with_creature(caster_guid, |c| world.managers.creature_mgr.get_template(c.entry))
+            .with_creature(caster_guid, |c| {
+                world.managers.creature_mgr.get_template(c.entry)
+            })
             .flatten()
         {
             done_total_mod *= get_spell_damage_mod(template.rank, world);
@@ -812,7 +857,9 @@ pub fn spell_damage_bonus_done(
 
     // AURA_MOD_DAMAGE_PERCENT_DONE — with item class constraints
     if caster_guid.is_player() {
-        let school_mask = spell_proto.map(|s| 1u32 << s.school).unwrap_or(SPELL_SCHOOL_MASK_NORMAL);
+        let school_mask = spell_proto
+            .map(|s| 1u32 << s.school)
+            .unwrap_or(SPELL_SCHOOL_MASK_NORMAL);
         let pct_auras = world
             .systems
             .player
@@ -859,7 +906,11 @@ pub fn spell_damage_bonus_done(
         .creature_mgr
         .with_creature(victim_guid, |c| {
             let ct = c.creature_type;
-            if ct > 0 { 1u32 << (ct - 1) } else { 0 }
+            if ct > 0 {
+                1u32 << (ct - 1)
+            } else {
+                0
+            }
         })
         .unwrap_or(0);
 
@@ -874,7 +925,10 @@ pub fn spell_damage_bonus_done(
                     player
                         .auras
                         .container
-                        .get_total_aura_multiplier_by_misc_mask(AURA_MOD_DAMAGE_DONE_VERSUS, creature_type_mask)
+                        .get_total_aura_multiplier_by_misc_mask(
+                            AURA_MOD_DAMAGE_DONE_VERSUS,
+                            creature_type_mask,
+                        )
                 })
                 .unwrap_or(1.0);
 
@@ -883,10 +937,10 @@ pub fn spell_damage_bonus_done(
                 .player
                 .manager()
                 .with_player(caster_guid, |player| {
-                    player
-                        .auras
-                        .container
-                        .get_total_aura_modifier_by_misc_mask(AURA_MOD_DAMAGE_DONE_CREATURE, creature_type_mask) as f32
+                    player.auras.container.get_total_aura_modifier_by_misc_mask(
+                        AURA_MOD_DAMAGE_DONE_CREATURE,
+                        creature_type_mask,
+                    ) as f32
                 })
                 .unwrap_or(0.0);
         }
@@ -912,12 +966,12 @@ pub fn spell_damage_bonus_done(
         for aura in &scripts {
             // Check IsAffectedOnSpell
             let aura_spell = world.managers.spell_mgr.get(aura.spell_id);
-            let family_match = aura_spell
-                .as_ref()
-                .map_or(true, |s| s.spell_family_name == 0 || s.spell_family_name == proto.spell_family_name);
-            let mask_match = aura_spell
-                .as_ref()
-                .map_or(true, |s| s.spell_family_flags == 0 || (s.spell_family_flags & proto.spell_family_flags) != 0);
+            let family_match = aura_spell.as_ref().map_or(true, |s| {
+                s.spell_family_name == 0 || s.spell_family_name == proto.spell_family_name
+            });
+            let mask_match = aura_spell.as_ref().map_or(true, |s| {
+                s.spell_family_flags == 0 || (s.spell_family_flags & proto.spell_family_flags) != 0
+            });
             if !family_match || !mask_match {
                 continue;
             }
@@ -956,10 +1010,10 @@ pub fn spell_damage_bonus_done(
             .player
             .manager()
             .with_player(caster_guid, |player| {
-                player
-                    .auras
-                    .container
-                    .get_total_aura_modifier_by_misc_mask(AURA_MOD_FLAT_SPELL_DAMAGE_VERSUS, creature_type_mask)
+                player.auras.container.get_total_aura_modifier_by_misc_mask(
+                    AURA_MOD_FLAT_SPELL_DAMAGE_VERSUS,
+                    creature_type_mask,
+                )
             })
             .unwrap_or(0);
     }
@@ -982,7 +1036,11 @@ pub fn spell_damage_bonus_done(
 
     // Apply spell mod to done damage
     if caster_guid.is_player() {
-        let mod_op = if damage_type == DOT { SpellModOp::Dot } else { SpellModOp::Damage };
+        let mod_op = if damage_type == DOT {
+            SpellModOp::Dot
+        } else {
+            SpellModOp::Damage
+        };
         tmp_damage = world
             .systems
             .player
@@ -999,7 +1057,11 @@ pub fn spell_damage_bonus_done(
             .unwrap_or(tmp_damage);
     }
 
-    if tmp_damage > 0.0 { tmp_damage } else { 0.0 }
+    if tmp_damage > 0.0 {
+        tmp_damage
+    } else {
+        0.0
+    }
 }
 
 /// Deal spell damage wrapper.
@@ -1028,7 +1090,9 @@ pub async fn deal_spell_damage(
     // Taxi flying and evade mode checks are skipped for now (no Unit type).
 
     let is_crit = (hit_info & SPELL_HIT_TYPE_CRIT) != 0;
-    let dmg_class = spell_proto.map(|s| s.dmg_class).unwrap_or(SPELL_DAMAGE_CLASS_NONE);
+    let dmg_class = spell_proto
+        .map(|s| s.dmg_class)
+        .unwrap_or(SPELL_DAMAGE_CLASS_NONE);
 
     deal_damage(
         caster_guid,
@@ -1070,7 +1134,10 @@ fn is_unit_alive(guid: ObjectGuid, world: &World) -> bool {
 /// that vanilla applies to melee/ranged-class spell damage that landed. Non-melee/ranged
 /// spells and creature victims never block.
 fn roll_partial_block(victim_guid: ObjectGuid, damage: u32, dmg_class: u32, world: &World) -> u32 {
-    if !matches!(dmg_class, SPELL_DAMAGE_CLASS_MELEE | SPELL_DAMAGE_CLASS_RANGED) {
+    if !matches!(
+        dmg_class,
+        SPELL_DAMAGE_CLASS_MELEE | SPELL_DAMAGE_CLASS_RANGED
+    ) {
         return 0;
     }
     if !victim_guid.is_player() {
@@ -1287,10 +1354,11 @@ async fn deal_damage_to_creature(
         .unwrap_or_default()
         .as_secs();
 
-    let Some((actual_damage, is_dead)) = world
-        .managers
-        .creature_mgr
-        .apply_damage(target_guid, damage, caster_guid, timestamp)
+    let Some((actual_damage, is_dead)) =
+        world
+            .managers
+            .creature_mgr
+            .apply_damage(target_guid, damage, caster_guid, timestamp)
     else {
         tracing::warn!(
             "[SPELL_DAMAGE] creature {:?} not found for spell {}",
@@ -1539,7 +1607,15 @@ pub async fn deal_heal(
         .unwrap_or(0);
 
     let overheal = heal_amount.saturating_sub(healed);
-    send_spell_heal_log(caster_guid, target_guid, spell_id, healed, overheal, is_crit, world);
+    send_spell_heal_log(
+        caster_guid,
+        target_guid,
+        spell_id,
+        healed,
+        overheal,
+        is_crit,
+        world,
+    );
 
     if healed > 0 {
         use crate::game::player::auras::proc::{proc_flags, proc_flags_ex};
@@ -1629,7 +1705,11 @@ fn rand_dither(v: f32) -> i32 {
 /// stochastically rounded (`rand_dither`) to avoid always favoring one side of the
 /// fraction. Returns 0 for spells that don't match one of the hardcoded family/mask
 /// checks.
-pub fn school_absorb_bonus_done(caster_guid: ObjectGuid, spell_proto: &SpellEntry, world: &World) -> i32 {
+pub fn school_absorb_bonus_done(
+    caster_guid: ObjectGuid,
+    spell_proto: &SpellEntry,
+    world: &World,
+) -> i32 {
     const CF_PRIEST_POWER_WORD_SHIELD: u64 = 1 << 0;
     const CF_MAGE_FIRE_WARD: u64 = 1 << 3;
     const CF_MAGE_FROST_WARD: u64 = 1 << 8;

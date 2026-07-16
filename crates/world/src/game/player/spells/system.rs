@@ -105,6 +105,257 @@ fn needs_spell_log(is_need_send_to_client: bool, effects: &[u32; 3]) -> bool {
     !effects.iter().any(|&e| e == SPELL_EFFECT_SCHOOL_DAMAGE)
 }
 
+/// Clear the cast item and, when it is also the item target, clear that target by GUID identity.
+///
+/// Rust stores item references as GUIDs rather than the C++ `Item*` pointers, so matching GUIDs
+/// are the equivalent identity check.
+fn clear_cast_item(
+    cast_item_guid: Option<ObjectGuid>,
+    item_target_guid: Option<ObjectGuid>,
+) -> (Option<ObjectGuid>, Option<ObjectGuid>) {
+    let item_target_guid = if cast_item_guid == item_target_guid {
+        None
+    } else {
+        item_target_guid
+    };
+    (None, item_target_guid)
+}
+
+/// Whether a cast needs its client-visible spell packet/log handling.
+///
+/// Mirrors MaNGOS `Spell::IsNeedSendToClient`. The caller supplies the instance state so this
+/// remains a pure predicate.
+fn is_need_send_to_client(
+    is_channeling_visual: bool,
+    caster_in_world: bool,
+    spell_visual: u32,
+    is_channeled: bool,
+    speed: f32,
+    is_triggered_by_aura_spell: bool,
+    is_triggered_spell: bool,
+) -> bool {
+    if is_channeling_visual || !caster_in_world {
+        return false;
+    }
+
+    spell_visual != 0
+        || is_channeled
+        || speed > 0.0
+        || (!is_triggered_by_aura_spell && !is_triggered_spell)
+}
+
+/// Whether the caster can still be addressed by the world, matching `IsInWorld()` for the
+/// object kinds supported by this spell pipeline.
+fn caster_is_in_world(caster_guid: ObjectGuid, world: &World) -> bool {
+    if caster_guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |_| ())
+            .is_some()
+    } else if caster_guid.is_creature_or_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(caster_guid, |_| ())
+            .is_some()
+    } else if caster_guid.is_game_object() {
+        world
+            .managers
+            .gameobject_mgr
+            .with_gameobject(caster_guid, |gameobject| gameobject.in_world)
+            .unwrap_or(false)
+    } else {
+        false
+    }
+}
+
+// --- Spell::OnSpellLaunch: launch-time special-case handling ---------------------------
+
+const SPELL_EFFECT_OPEN_LOCK: u32 = 33;
+const SPELL_EFFECT_OPEN_LOCK_ITEM: u32 = 59;
+const SPELL_EFFECT_CHARGE: u32 = 96;
+/// Attribute: the spell stops auto-attack after use (and never begins one).
+const SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT: u32 = 0x0010_0000;
+/// AttributesEx2: caster is flagged in combat on cast at an enemy unit.
+const SPELL_ATTR_EX2_ACTIVE_THREAT: u32 = 0x4000_0000;
+/// Combat-timer length applied to a PvP caster on cast (`UNIT_PVP_COMBAT_TIMER`, 5.5s).
+const UNIT_PVP_COMBAT_TIMER: u32 = 5500;
+
+/// First effect slot carrying `SPELL_EFFECT_CHARGE` (`chargeEffectIndex`), if any.
+fn charge_effect_index(effects: &[u32; 3]) -> Option<usize> {
+    effects.iter().position(|&e| e == SPELL_EFFECT_CHARGE)
+}
+
+/// Whether a GO-target cast opens a lock (any `OPEN_LOCK`/`OPEN_LOCK_ITEM` effect), which
+/// can pull nearby hostiles onto the opener.
+fn opens_lock(effects: &[u32; 3]) -> bool {
+    effects
+        .iter()
+        .any(|&e| e == SPELL_EFFECT_OPEN_LOCK || e == SPELL_EFFECT_OPEN_LOCK_ITEM)
+}
+
+/// `triggerAutoAttack`: a charge into a hostile, non-positive spell that does not itself
+/// cancel auto-attack starts an auto-attack on arrival.
+fn charge_triggers_auto_attack(target_is_caster: bool, is_positive: bool, attributes: u32) -> bool {
+    !target_is_caster && !is_positive && (attributes & SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT) == 0
+}
+
+/// The PvP combat timer starts for `ACTIVE_THREAT` spells unless the caster targets itself
+/// while out of combat.
+fn starts_pvp_combat_timer(
+    has_active_threat: bool,
+    target_is_caster: bool,
+    caster_in_combat: bool,
+) -> bool {
+    has_active_threat && (!target_is_caster || caster_in_combat)
+}
+
+/// Post-charge attack-timer delay, `200 + 40 * distance` ms (truncated to match the C++
+/// float→uint conversion), so the caster doesn't swing the instant it lands.
+fn charge_attack_timer_delay(distance: f32) -> u32 {
+    (200.0 + 40.0 * distance.max(0.0)) as u32
+}
+
+/// World-space position of a unit (player or creature), for the charge distance.
+fn unit_position(guid: ObjectGuid, world: &World) -> Option<(f32, f32, f32)> {
+    if guid.is_player() {
+        world.managers.player_mgr.with_player(guid, |p| {
+            (
+                p.movement.position.x,
+                p.movement.position.y,
+                p.movement.position.z,
+            )
+        })
+    } else if guid.is_creature_or_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| (c.position.x, c.position.y, c.position.z))
+    } else {
+        None
+    }
+}
+
+/// 3D distance between two units, 0 when either position is unavailable.
+fn unit_distance(a: ObjectGuid, b: ObjectGuid, world: &World) -> f32 {
+    match (unit_position(a, world), unit_position(b, world)) {
+        (Some((ax, ay, az)), Some((bx, by, bz))) => {
+            let (dx, dy, dz) = (ax - bx, ay - by, az - bz);
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        }
+        _ => 0.0,
+    }
+}
+
+/// Whether a unit (player or creature) is currently in combat.
+fn unit_in_combat(guid: ObjectGuid, world: &World) -> bool {
+    if guid.is_player() {
+        world
+            .managers
+            .player_mgr
+            .with_player(guid, |p| p.combat.in_combat)
+            .unwrap_or(false)
+    } else if guid.is_creature_or_pet() {
+        world.managers.creature_mgr.is_in_combat(guid)
+    } else {
+        false
+    }
+}
+
+/// `Spell::OnSpellLaunch` — launch-time special-case handling, run once as the cast fires
+/// and before per-target effects. No-ops without a live caster unit; may aggro hostiles
+/// when opening a lock GO, start a PvP combat timer for `ACTIVE_THREAT` spells, and drive
+/// the charge effect (attack-timer delay + charge movement) itself rather than leaving it
+/// to the effect handler.
+fn on_spell_launch(
+    caster_guid: ObjectGuid,
+    spell_id: u32,
+    cast_targets: &SpellCastTargets,
+    world: &World,
+) {
+    // No work unless the caster is a unit that is in world.
+    if !caster_guid.is_unit() || !caster_is_in_world(caster_guid, world) {
+        return;
+    }
+
+    let entry = match world.managers.spell_mgr.get(spell_id) {
+        Some(e) => e,
+        None => return,
+    };
+
+    // Opening a lock game object can pull nearby hostiles onto the opener.
+    if cast_targets.gameobject_target_guid.is_some() && opens_lock(&entry.effect) {
+        // ... GameObject::DoAggroWhenOpening — pulls hostile creatures within 10y that can
+        // reach and validly attack the opener into combat. There is no GO proximity/aggro
+        // search in this codebase yet, so the pull is not applied.
+    }
+
+    let unit_target = match cast_targets.unit_target() {
+        Some(t) => t,
+        None => return,
+    };
+    // Charge/combat logic below is skipped if the unit target is gone or not in world.
+    if !caster_is_in_world(unit_target, world) {
+        return;
+    }
+
+    // ACTIVE_THREAT spells flag the caster in combat with the target on the PvP timer.
+    if starts_pvp_combat_timer(
+        (entry.attributes_ex2 & SPELL_ATTR_EX2_ACTIVE_THREAT) != 0,
+        unit_target == caster_guid,
+        unit_in_combat(caster_guid, world),
+    ) {
+        // Unit::SetInCombatWithVictim(unitTarget, false, UNIT_PVP_COMBAT_TIMER). Approximated
+        // by flagging the caster in combat for 5.5s; the aggressor/threat bookkeeping and the
+        // creature-caster path are not modelled here.
+        if caster_guid.is_player() {
+            world.managers.player_mgr.with_player_mut(caster_guid, |p| {
+                p.combat.in_combat = true;
+                p.combat.combat_timer = p.combat.combat_timer.max(UNIT_PVP_COMBAT_TIMER);
+            });
+        }
+    }
+
+    // Charge is resolved here instead of in EffectCharge; nothing to do without one.
+    let charge_index = match charge_effect_index(&entry.effect) {
+        Some(i) => i,
+        None => return,
+    };
+
+    // Player casters delay their melee swings so they don't swing the instant they arrive.
+    if caster_guid.is_player() {
+        let delay = charge_attack_timer_delay(unit_distance(caster_guid, unit_target, world));
+        world.managers.player_mgr.with_player_mut(caster_guid, |p| {
+            p.combat.main_hand_timer = p.combat.main_hand_timer.saturating_add(delay);
+            p.combat.off_hand_timer = p.combat.off_hand_timer.saturating_add(delay);
+        });
+    }
+
+    let trigger_auto_attack = charge_triggers_auto_attack(
+        unit_target == caster_guid,
+        entry.is_positive_spell(),
+        entry.attributes,
+    );
+
+    // MotionMaster::MoveCharge toward the target. The batching delay
+    // (m_delayed ? GetSpellBatchingEffectDelay(..) : 0) is always 0 here — spell batching is
+    // config-gated and unmodelled. Player charge movement has no MotionMaster path yet, so
+    // only creature casters drive the (currently stubbed) charge generator.
+    let _ = charge_index;
+    if caster_guid.is_creature_or_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(caster_guid, |c| {
+                c.motion_master
+                    .move_charge(unit_target, 0, trigger_auto_attack, false);
+            });
+    }
+    // ... player MotionMaster charge displacement is not modelled yet.
+}
+
 /// Stateless spell system - operates on player.spells via PlayerManager.
 ///
 /// Architecture:
@@ -287,12 +538,15 @@ impl SpellSystem {
 
         // Step 2: Calculate cast time (modified by haste, talents, etc.)
         let cast_time_ms = self.calculate_cast_time(caster_guid, spell_id, world)?;
-        tracing::debug!("[CAST] spell={spell_id} cast_time_ms={cast_time_ms} triggered={is_triggered}");
+        tracing::debug!(
+            "[CAST] spell={spell_id} cast_time_ms={cast_time_ms} triggered={is_triggered}"
+        );
 
         // Step 3: Determine spell slot and handle all interruption logic
         // (MaNGOS SpellCaster::SetCurrentCastedSpell)
         let slot = self.get_spell_slot(spell_id, world);
-        self.set_current_casted_spell(caster_guid, spell_id, slot, world).await?;
+        self.set_current_casted_spell(caster_guid, spell_id, slot, world)
+            .await?;
 
         // Step 4: Apply GCD and cast-start aura interrupts. Power/reagents/cast items
         // are NOT taken here — Spell::cast takes them at cast completion, so an
@@ -345,6 +599,7 @@ impl SpellSystem {
                 self.take_spell_costs(caster_guid, spell_id, cast_item_guid, world)
                     .await?;
             }
+            on_spell_launch(caster_guid, spell_id, &cast_targets, world);
             self.execute_spell(caster_guid, spell_id, &cast_targets, is_triggered, world)
                 .await?;
             self.finish_cast(
@@ -731,6 +986,7 @@ impl SpellSystem {
                                 .await?;
                         }
 
+                        on_spell_launch(caster_guid, spell_id, &cast_targets, world);
                         self.execute_spell(
                             caster_guid,
                             spell_id,
@@ -996,6 +1252,7 @@ impl SpellSystem {
                         unit_target_guid: target_guid,
                         ..Default::default()
                     };
+                    on_spell_launch(player_guid, spell_id, &cast_targets, world);
                     self.execute_spell(player_guid, spell_id, &cast_targets, is_triggered, world)
                         .await?;
                     self.finish_cast(
@@ -1120,9 +1377,7 @@ impl SpellSystem {
     /// - `needs_spell_log` computes the MaNGOS `m_needSpellLog` flag from
     ///   `IsNeedSendToClient` + effect list, but there is no `SendLogExecute`
     ///   (`SMSG_SPELLLOGEXECUTE`) builder in this codebase yet, so the flag is logged
-    ///   rather than turned into a packet. `IsNeedSendToClient` itself is unported too, so
-    ///   the input side is approximated as "any real (non-triggered) cast" — see the
-    ///   `Spell::IsNeedSendToClient` tracker entry for the real predicate.
+    ///   rather than turned into a packet.
     async fn execute_spell_immediate(
         &self,
         caster_guid: ObjectGuid,
@@ -1150,9 +1405,20 @@ impl SpellSystem {
 
         // `_handle_finish_phase`: emit the spell-execute log when the cast is client-visible
         // and isn't a plain school-damage nuke (those log via the damage packet instead).
-        // `IsNeedSendToClient` is approximated as "not triggered" until it is ported for real.
         if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
-            if needs_spell_log(!is_triggered, &entry.effect) {
+            // This pipeline does not retain either the visual-only channel state or aura-origin
+            // metadata; those source-only flags are therefore explicitly bounded to false.
+            let is_channeled = self.is_channeled_spell(spell_id, world);
+            let send_to_client = is_need_send_to_client(
+                false,
+                caster_is_in_world(caster_guid, world),
+                entry.spell_visual,
+                is_channeled,
+                entry.speed,
+                false,
+                is_triggered,
+            );
+            if needs_spell_log(send_to_client, &entry.effect) {
                 // ... SendLogExecute / SMSG_SPELLLOGEXECUTE has no packet builder yet;
                 // tracked separately so this doesn't silently drop the log.
                 tracing::trace!(
@@ -1626,8 +1892,10 @@ impl SpellSystem {
             // matching MaNGOS SpellCaster::InterruptSpell SendAutoRepeatCancel behaviour.
             if slot == CurrentSpellType::Autorepeat && caster_guid.is_player() {
                 use oxcore_shared::protocol::{Opcode, WorldPacket};
-                self.broadcast_mgr
-                    .send_msg_to_player(caster_guid, WorldPacket::new(Opcode::SMSG_CANCEL_AUTO_REPEAT));
+                self.broadcast_mgr.send_msg_to_player(
+                    caster_guid,
+                    WorldPacket::new(Opcode::SMSG_CANCEL_AUTO_REPEAT),
+                );
             }
 
             // Broadcast SMSG_SPELL_FAILURE
@@ -2351,9 +2619,9 @@ impl SpellSystem {
         let spell_entry = world.managers.spell_mgr.get(spell_id);
 
         // DO_NOT_REPORT_SPELL_FAILURE spells report OKAY to the client.
-        let suppress = spell_entry
-            .as_ref()
-            .map_or(false, |e| e.attributes_ex2 & SPELL_ATTR_EX2_DO_NOT_REPORT_SPELL_FAILURE != 0);
+        let suppress = spell_entry.as_ref().map_or(false, |e| {
+            e.attributes_ex2 & SPELL_ATTR_EX2_DO_NOT_REPORT_SPELL_FAILURE != 0
+        });
 
         if error == SpellCastError::None || suppress {
             let packet = SmsgCastResult::build(spell_id, SPELL_RESULT_STATUS_OKAY, 0, None, None);
@@ -2424,11 +2692,7 @@ impl SpellSystem {
     // =========================================================================
 
     /// CheckAndIncreaseCastCounter: limit casts in chain per config.
-    pub fn check_and_increase_cast_counter(
-        &self,
-        caster_guid: ObjectGuid,
-        world: &World,
-    ) -> bool {
+    pub fn check_and_increase_cast_counter(&self, caster_guid: ObjectGuid, world: &World) -> bool {
         let max_casts = 20; // TODO: CONFIG_UINT32_MAX_SPELL_CASTS_IN_CHAIN
         world
             .systems
@@ -2446,11 +2710,7 @@ impl SpellSystem {
     }
 
     /// IsNextSwingSpellCasted: check if the Melee slot holds a next-swing spell.
-    pub fn is_next_swing_spell_casted(
-        &self,
-        caster_guid: ObjectGuid,
-        world: &World,
-    ) -> bool {
+    pub fn is_next_swing_spell_casted(&self, caster_guid: ObjectGuid, world: &World) -> bool {
         world
             .systems
             .player
@@ -2470,11 +2730,7 @@ impl SpellSystem {
     }
 
     /// IsNoMovementSpellCasted: check if a currently casting spell has movement interrupt flags.
-    pub fn is_no_movement_spell_casted(
-        &self,
-        caster_guid: ObjectGuid,
-        world: &World,
-    ) -> bool {
+    pub fn is_no_movement_spell_casted(&self, caster_guid: ObjectGuid, world: &World) -> bool {
         let spell_interrupt_flag_movement: u32 = 0x00000008; // SPELL_INTERRUPT_FLAG_MOVEMENT
         let aura_interrupt_moving_cancels: u32 = 0x00000400; // AURA_INTERRUPT_MOVING_CANCELS
 
@@ -2487,9 +2743,7 @@ impl SpellSystem {
                 if let Some(ref cast) =
                     player.spells.current_spells[CurrentSpellType::Generic as usize]
                 {
-                    if cast.state != SpellState::Finished
-                        && cast.state != SpellState::Delayed
-                    {
+                    if cast.state != SpellState::Finished && cast.state != SpellState::Delayed {
                         if let Some(entry) = world.managers.spell_mgr.get(cast.spell_id) {
                             if (entry.interrupt_flags & spell_interrupt_flag_movement) != 0 {
                                 return true;
@@ -2504,7 +2758,8 @@ impl SpellSystem {
                     if cast.state != SpellState::Finished {
                         if let Some(entry) = world.managers.spell_mgr.get(cast.spell_id) {
                             if (entry.interrupt_flags & spell_interrupt_flag_movement) != 0
-                                || (entry.channel_interrupt_flags & aura_interrupt_moving_cancels) != 0
+                                || (entry.channel_interrupt_flags & aura_interrupt_moving_cancels)
+                                    != 0
                             {
                                 return true;
                             }
@@ -2564,8 +2819,7 @@ impl SpellSystem {
                             if !is_preparing_or_casting {
                                 continue;
                             }
-                            let is_next_swing =
-                                (entry.attributes_ex & 0x0000_0004) != 0;
+                            let is_next_swing = (entry.attributes_ex & 0x0000_0004) != 0;
                             let is_autorepeat = slot == CurrentSpellType::Autorepeat;
                             let is_triggered = cast.is_triggered;
                             if !is_next_swing
@@ -2643,9 +2897,10 @@ impl SpellSystem {
             .player
             .manager()
             .with_player(caster_guid, |player| {
-                player.spells.get_current_spell(slot).map(|cast| {
-                    (cast.spell_id, cast.is_channeling)
-                })
+                player
+                    .spells
+                    .get_current_spell(slot)
+                    .map(|cast| (cast.spell_id, cast.is_channeling))
             })
             .flatten();
 
@@ -2676,12 +2931,7 @@ impl SpellSystem {
                 self.finish_cast(caster_guid, spell_id, &targets, false, None, world)
                     .await?;
             } else {
-                self.send_cast_failure(
-                    caster_guid,
-                    spell_id,
-                    SpellCastError::Interrupted,
-                    world,
-                )?;
+                self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted, world)?;
             }
         }
 
@@ -2712,9 +2962,7 @@ impl SpellSystem {
                     .cloned();
 
                 if let Some(mut cast) = cast {
-                    if let Some(existing) =
-                        state.get_current_spell(CurrentSpellType::Channeled)
-                    {
+                    if let Some(existing) = state.get_current_spell(CurrentSpellType::Channeled) {
                         if existing.spell_id == spell_id {
                             state.clear_current_spell(CurrentSpellType::Channeled);
                         }
@@ -2728,12 +2976,7 @@ impl SpellSystem {
     }
 
     /// IsSpellReady: check if a spell is ready to cast (no cooldown, not locked out by silence).
-    pub fn is_spell_ready(
-        &self,
-        caster_guid: ObjectGuid,
-        spell_id: u32,
-        world: &World,
-    ) -> bool {
+    pub fn is_spell_ready(&self, caster_guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
         let spell_entry = match world.managers.spell_mgr.get(spell_id) {
             Some(e) => e,
             None => return false,
@@ -2808,7 +3051,9 @@ impl SpellSystem {
                 .player
                 .manager()
                 .with_player_mut(caster_guid, |player| {
-                    player.spells.add_cooldown(triggered_spell_id, forced_cooldown, now);
+                    player
+                        .spells
+                        .add_cooldown(triggered_spell_id, forced_cooldown, now);
                 });
         }
 
@@ -2903,12 +3148,8 @@ impl SpellSystem {
             CurrentSpellType::Channeled => {
                 if let Some((_, state)) = snap[CurrentSpellType::Generic as usize] {
                     if state != SpellState::Delayed {
-                        self.cancel_spell_in_slot(
-                            caster_guid,
-                            CurrentSpellType::Generic,
-                            world,
-                        )
-                        .await?;
+                        self.cancel_spell_in_slot(caster_guid, CurrentSpellType::Generic, world)
+                            .await?;
                     }
                 }
 
@@ -3073,6 +3314,70 @@ mod tests {
         assert_eq!(next_delayed_target_time(&[0, 0, 0]), None);
     }
 
+    // -- Spell::IsNeedSendToClient: is_need_send_to_client --------------------------------
+
+    #[test]
+    fn need_send_to_client_short_circuits_channeling_visual() {
+        assert!(!is_need_send_to_client(
+            true, true, 1, true, 1.0, false, false,
+        ));
+    }
+
+    #[test]
+    fn need_send_to_client_short_circuits_out_of_world_caster() {
+        assert!(!is_need_send_to_client(
+            false, false, 1, true, 1.0, false, false,
+        ));
+    }
+
+    #[test]
+    fn need_send_to_client_accepts_nonzero_spell_visual() {
+        assert!(is_need_send_to_client(
+            false, true, 1, false, 0.0, true, true,
+        ));
+    }
+
+    #[test]
+    fn need_send_to_client_accepts_channeled_spell() {
+        assert!(is_need_send_to_client(
+            false, true, 0, true, 0.0, true, true,
+        ));
+    }
+
+    #[test]
+    fn need_send_to_client_accepts_positive_projectile_speed() {
+        assert!(is_need_send_to_client(
+            false, true, 0, false, 0.1, true, true,
+        ));
+    }
+
+    #[test]
+    fn need_send_to_client_accepts_untriggered_cast() {
+        assert!(is_need_send_to_client(
+            false, true, 0, false, 0.0, false, false,
+        ));
+    }
+
+    #[test]
+    fn need_send_to_client_hides_aura_or_explicitly_triggered_cast_without_indicators() {
+        assert!(!is_need_send_to_client(
+            false, true, 0, false, 0.0, true, false,
+        ));
+        assert!(!is_need_send_to_client(
+            false, true, 0, false, 0.0, false, true,
+        ));
+    }
+
+    #[test]
+    fn need_send_to_client_requires_strictly_positive_speed_without_other_indicators() {
+        assert!(!is_need_send_to_client(
+            false, true, 0, false, 0.0, true, true,
+        ));
+        assert!(!is_need_send_to_client(
+            false, true, 0, false, -0.1, true, true,
+        ));
+    }
+
     // -- Spell::_handle_immediate_phase: needs_spell_log ---------------------------------
 
     #[test]
@@ -3103,5 +3408,298 @@ mod tests {
         // generic spell-execute log entry.
         assert!(needs_spell_log(true, &[10, 0, 0])); // SPELL_EFFECT_HEAL
         assert!(needs_spell_log(true, &[6, 10, 0])); // e.g. APPLY_AURA + HEAL
+    }
+
+    // -- Spell::ClearCastItem: clear_cast_item --------------------------------------------
+
+    #[test]
+    fn clear_cast_item_clears_matching_item_target() {
+        let item = ObjectGuid::new_item(1);
+
+        assert_eq!(clear_cast_item(Some(item), Some(item)), (None, None));
+    }
+
+    #[test]
+    fn clear_cast_item_preserves_distinct_item_target() {
+        let cast_item = ObjectGuid::new_item(1);
+        let item_target = ObjectGuid::new_item(2);
+
+        assert_eq!(
+            clear_cast_item(Some(cast_item), Some(item_target)),
+            (None, Some(item_target))
+        );
+    }
+
+    #[test]
+    fn clear_cast_item_always_clears_cast_item() {
+        let item_target = ObjectGuid::new_item(2);
+
+        assert_eq!(
+            clear_cast_item(None, Some(item_target)),
+            (None, Some(item_target))
+        );
+    }
+
+    // -- Spell::OnSpellLaunch --------------------------------------------------------------
+
+    #[test]
+    fn charge_effect_index_finds_first_charge_slot() {
+        assert_eq!(charge_effect_index(&[SPELL_EFFECT_CHARGE, 0, 0]), Some(0));
+        assert_eq!(charge_effect_index(&[0, SPELL_EFFECT_CHARGE, 0]), Some(1));
+        assert_eq!(
+            charge_effect_index(&[2, SPELL_EFFECT_CHARGE, SPELL_EFFECT_CHARGE]),
+            Some(1),
+            "first matching slot wins"
+        );
+        assert_eq!(charge_effect_index(&[2, 3, 0]), None);
+    }
+
+    #[test]
+    fn opens_lock_detects_open_lock_effects() {
+        assert!(opens_lock(&[SPELL_EFFECT_OPEN_LOCK, 0, 0]));
+        assert!(opens_lock(&[0, SPELL_EFFECT_OPEN_LOCK_ITEM, 0]));
+        assert!(!opens_lock(&[2, 96, 0]));
+    }
+
+    #[test]
+    fn charge_auto_attack_requires_hostile_non_positive_non_cancelling() {
+        // Hostile, non-positive, no cancel attribute -> auto-attack fires.
+        assert!(charge_triggers_auto_attack(false, false, 0));
+        // Self-cast never triggers.
+        assert!(!charge_triggers_auto_attack(true, false, 0));
+        // Positive spell never triggers.
+        assert!(!charge_triggers_auto_attack(false, true, 0));
+        // CANCELS_AUTO_ATTACK_COMBAT suppresses the trigger.
+        assert!(!charge_triggers_auto_attack(
+            false,
+            false,
+            SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT
+        ));
+    }
+
+    #[test]
+    fn pvp_combat_timer_gating() {
+        // Without the ACTIVE_THREAT attribute, never starts.
+        assert!(!starts_pvp_combat_timer(false, false, false));
+        assert!(!starts_pvp_combat_timer(false, true, true));
+        // With ACTIVE_THREAT against a different target, always starts.
+        assert!(starts_pvp_combat_timer(true, false, false));
+        // Self-cast starts only when already in combat.
+        assert!(!starts_pvp_combat_timer(true, true, false));
+        assert!(starts_pvp_combat_timer(true, true, true));
+    }
+
+    #[test]
+    fn charge_attack_timer_delay_scales_with_distance() {
+        assert_eq!(charge_attack_timer_delay(0.0), 200);
+        assert_eq!(charge_attack_timer_delay(30.0), 1400); // 200 + 40*30
+        assert_eq!(charge_attack_timer_delay(-5.0), 200); // clamped at 0 distance
+    }
+
+    fn lazy_pool() -> sqlx::MySqlPool {
+        sqlx::mysql::MySqlPoolOptions::new()
+            .connect_lazy("mysql://test:test@localhost/test")
+            .expect("lazy pool should be constructible")
+    }
+
+    fn launch_test_world() -> World {
+        use crate::config::Config;
+        use oxcore_shared::database::Databases;
+        use std::path::PathBuf;
+        let databases = Arc::new(Databases {
+            world: lazy_pool(),
+            character: lazy_pool(),
+            auth: lazy_pool(),
+            logs: lazy_pool(),
+        });
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    fn charge_spell(id: u32, effects: [u32; 3]) -> crate::dbc::structures::SpellEntry {
+        use crate::dbc::structures::SpellEntry;
+        SpellEntry {
+            id,
+            name: format!("S{id}"),
+            rank_text: String::new(),
+            school: 0,
+            category: 0,
+            dispel: 0,
+            mechanic: 0,
+            attributes: 0,
+            attributes_ex: 0,
+            attributes_ex2: 0,
+            attributes_ex3: 0,
+            attributes_ex4: 0,
+            stances: 0,
+            stances_not: 0,
+            targets: 0,
+            target_creature_type: 0,
+            requires_spell_focus: 0,
+            caster_aura_state: 0,
+            target_aura_state: 0,
+            casting_time_index: 0,
+            recovery_time: 0,
+            category_recovery_time: 0,
+            interrupt_flags: 0,
+            aura_interrupt_flags: 0,
+            channel_interrupt_flags: 0,
+            proc_flags: 0,
+            proc_chance: 0,
+            proc_charges: 0,
+            max_level: 0,
+            base_level: 0,
+            spell_level: 0,
+            duration_index: 0,
+            power_type: 0,
+            mana_cost: 0,
+            mana_cost_per_level: 0,
+            mana_per_second: 0,
+            mana_per_second_per_level: 0,
+            range_index: 0,
+            speed: 0.0,
+            stack_amount: 0,
+            totem: [0; 2],
+            reagent: [0; 8],
+            reagent_count: [0; 8],
+            equipped_item_class: 0,
+            equipped_item_sub_class_mask: 0,
+            equipped_item_inventory_type_mask: 0,
+            effect: effects,
+            effect_die_sides: [0; 3],
+            effect_base_dice: [0; 3],
+            effect_dice_per_level: [0.0; 3],
+            effect_real_points_per_level: [0.0; 3],
+            effect_base_points: [0; 3],
+            effect_bonus_coefficient: [0.0; 3],
+            effect_mechanic: [0; 3],
+            effect_implicit_target_a: [0; 3],
+            effect_implicit_target_b: [0; 3],
+            effect_radius_index: [0; 3],
+            effect_apply_aura_name: [0; 3],
+            effect_amplitude: [0; 3],
+            effect_multiple_value: [0.0; 3],
+            effect_chain_target: [0; 3],
+            effect_item_type: [0; 3],
+            effect_misc_value: [0; 3],
+            effect_trigger_spell: [0; 3],
+            effect_points_per_combo_point: [0.0; 3],
+            spell_visual: 0,
+            spell_icon_id: 0,
+            active_icon_id: 0,
+            spell_priority: 0,
+            min_target_level: 0,
+            mana_cost_percentage: 0,
+            start_recovery_category: 0,
+            start_recovery_time: 0,
+            max_target_level: 0,
+            spell_family_name: 0,
+            spell_family_flags: 0,
+            max_affected_targets: 0,
+            dmg_class: 0,
+            prevention_type: 0,
+            custom: 0,
+            internal: 0,
+            allowed_target_mask: 0,
+            script_id: 0,
+            dmg_multiplier: [1.0; 3],
+        }
+    }
+
+    fn add_launch_player(world: &World, guid: ObjectGuid, x: f32) {
+        use crate::game::player::player::Player;
+        world.managers.player_mgr.add_player(
+            Player::new(guid, format!("P{}", guid.counter()), 1, 0, 0, 60, 1, 1, 0),
+            guid.counter(),
+        );
+        world.managers.player_mgr.with_player_mut(guid, |p| {
+            p.movement.position.x = x;
+            p.movement.position.y = 0.0;
+            p.movement.position.z = 0.0;
+        });
+    }
+
+    #[tokio::test]
+    async fn on_spell_launch_charge_delays_player_attack_timers() {
+        let world = launch_test_world();
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_player(2);
+        add_launch_player(&world, caster, 0.0);
+        add_launch_player(&world, target, 30.0);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(charge_spell(40100, [SPELL_EFFECT_CHARGE, 0, 0]));
+
+        let targets = SpellCastTargets {
+            unit_target_guid: Some(target),
+            ..Default::default()
+        };
+        on_spell_launch(caster, 40100, &targets, &world);
+
+        // 200 + 40 * 30 = 1400 ms added to both melee timers.
+        let (main, off) = world
+            .managers
+            .player_mgr
+            .with_player(caster, |p| {
+                (p.combat.main_hand_timer, p.combat.off_hand_timer)
+            })
+            .unwrap();
+        assert_eq!(main, 1400);
+        assert_eq!(off, 1400);
+    }
+
+    #[tokio::test]
+    async fn on_spell_launch_active_threat_flags_caster_in_combat() {
+        let world = launch_test_world();
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_player(2);
+        add_launch_player(&world, caster, 0.0);
+        add_launch_player(&world, target, 5.0);
+        let mut spell = charge_spell(40200, [2, 0, 0]); // school damage, no charge
+        spell.attributes_ex2 = SPELL_ATTR_EX2_ACTIVE_THREAT;
+        world.managers.spell_mgr.add_spell(spell);
+
+        let targets = SpellCastTargets {
+            unit_target_guid: Some(target),
+            ..Default::default()
+        };
+        on_spell_launch(caster, 40200, &targets, &world);
+
+        let (in_combat, timer) = world
+            .managers
+            .player_mgr
+            .with_player(caster, |p| (p.combat.in_combat, p.combat.combat_timer))
+            .unwrap();
+        assert!(
+            in_combat,
+            "ACTIVE_THREAT cast must flag the caster in combat"
+        );
+        assert!(timer >= UNIT_PVP_COMBAT_TIMER);
+    }
+
+    #[tokio::test]
+    async fn on_spell_launch_noop_without_caster_in_world() {
+        let world = launch_test_world();
+        let caster = ObjectGuid::new_player(99);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(charge_spell(40300, [SPELL_EFFECT_CHARGE, 0, 0]));
+        let targets = SpellCastTargets {
+            unit_target_guid: Some(ObjectGuid::new_player(2)),
+            ..Default::default()
+        };
+        // Caster not registered -> must return without panicking or touching state.
+        on_spell_launch(caster, 40300, &targets, &world);
+        assert!(world
+            .managers
+            .player_mgr
+            .with_player(caster, |_| ())
+            .is_none());
     }
 }

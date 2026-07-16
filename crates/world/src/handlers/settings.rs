@@ -61,7 +61,10 @@ pub fn handle_set_action_bar_toggles(
         Some(guid) => guid,
         None => {
             if action_bar != 0 {
-                warn!("CMSG_SET_ACTION_BAR_TOGGLES: no player logged in, value={}", action_bar);
+                warn!(
+                    "CMSG_SET_ACTION_BAR_TOGGLES: no player logged in, value={}",
+                    action_bar
+                );
             }
             return Ok(());
         }

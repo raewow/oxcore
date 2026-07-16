@@ -9,8 +9,8 @@ use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
 use super::state::{
-    AccountDataEntry, SettingsState, ACTION_BUTTON_ITEM, ACTION_BUTTON_MACRO,
-    ACTION_BUTTON_SPELL, MAX_ACTION_BUTTONS, NUM_ACCOUNT_DATA_TYPES,
+    AccountDataEntry, SettingsState, ACTION_BUTTON_ITEM, ACTION_BUTTON_MACRO, ACTION_BUTTON_SPELL,
+    MAX_ACTION_BUTTONS, NUM_ACCOUNT_DATA_TYPES,
 };
 use oxcore_shared::game::account_data::{decompress_account_data, AccountDataType};
 
@@ -103,12 +103,7 @@ impl SettingsSystem {
     }
 
     /// Handle CMSG_SET_ACTION_BAR_TOGGLES: store which extra action bars are shown.
-    pub fn set_action_bar_toggles(
-        &self,
-        player_guid: ObjectGuid,
-        value: u8,
-        world: &World,
-    ) {
+    pub fn set_action_bar_toggles(&self, player_guid: ObjectGuid, value: u8, world: &World) {
         world
             .managers
             .player_mgr

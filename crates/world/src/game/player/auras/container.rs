@@ -454,7 +454,12 @@ mod tests {
         ObjectGuid::new_player(low)
     }
 
-    fn make_aura(spell_id: u32, effect_index: u8, caster: ObjectGuid, duration_ms: Option<u32>) -> Aura {
+    fn make_aura(
+        spell_id: u32,
+        effect_index: u8,
+        caster: ObjectGuid,
+        duration_ms: Option<u32>,
+    ) -> Aura {
         Aura::new(
             spell_id,
             caster,
@@ -483,7 +488,11 @@ mod tests {
 
         let a = container.get_aura(1000, 0).unwrap();
         assert_eq!(a.duration_ms, Some(8_000));
-        assert_eq!(a.max_duration_ms, Some(10_000), "max duration must be untouched");
+        assert_eq!(
+            a.max_duration_ms,
+            Some(10_000),
+            "max duration must be untouched"
+        );
     }
 
     #[test]
@@ -495,8 +504,14 @@ mod tests {
 
         container.refresh_aura(2000, 1_234);
 
-        assert_eq!(container.get_aura(2000, 0).unwrap().duration_ms, Some(1_234));
-        assert_eq!(container.get_aura(2000, 1).unwrap().duration_ms, Some(1_234));
+        assert_eq!(
+            container.get_aura(2000, 0).unwrap().duration_ms,
+            Some(1_234)
+        );
+        assert_eq!(
+            container.get_aura(2000, 1).unwrap().duration_ms,
+            Some(1_234)
+        );
     }
 
     #[test]
@@ -529,5 +544,56 @@ mod tests {
         container.refresh_aura(4000, -1);
 
         assert_eq!(container.get_aura(4000, 0).unwrap().duration_ms, Some(0));
+    }
+
+    #[test]
+    fn total_modifier_by_misc_mask_sums_overlapping_school_masks() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut fire_and_frost = make_aura(5000, 0, caster, None);
+        fire_and_frost.aura_type = 42;
+        fire_and_frost.misc_value = 0b0110;
+        fire_and_frost.current_values[0] = 10;
+        let mut fire_only = make_aura(5001, 0, caster, None);
+        fire_only.aura_type = 42;
+        fire_only.misc_value = 0b0010;
+        fire_only.current_values[0] = 5;
+        let mut shadow_only = make_aura(5002, 0, caster, None);
+        shadow_only.aura_type = 42;
+        shadow_only.misc_value = 0b1000;
+        shadow_only.current_values[0] = 20;
+
+        container.add_aura(fire_and_frost);
+        container.add_aura(fire_only);
+        container.add_aura(shadow_only);
+
+        assert_eq!(
+            container.get_total_aura_modifier_by_misc_mask(42, 0b0010),
+            15
+        );
+        assert_eq!(container.get_total_aura_modifier_by_misc_mask(42, 0), 0);
+    }
+
+    #[test]
+    fn total_modifier_sums_all_values_of_the_requested_aura_type() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut first = make_aura(6000, 0, caster, None);
+        first.aura_type = 7;
+        first.current_values[0] = 12;
+        let mut second = make_aura(6001, 0, caster, None);
+        second.aura_type = 7;
+        second.current_values[0] = -3;
+        let mut other_type = make_aura(6002, 0, caster, None);
+        other_type.aura_type = 8;
+        other_type.current_values[0] = 100;
+
+        container.add_aura(first);
+        container.add_aura(second);
+        container.add_aura(other_type);
+
+        assert_eq!(container.get_total_aura_modifier(7), 9);
+        assert_eq!(container.get_total_aura_modifier(8), 100);
+        assert_eq!(container.get_total_aura_modifier(9), 0);
     }
 }

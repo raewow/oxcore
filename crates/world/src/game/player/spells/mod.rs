@@ -27,11 +27,11 @@
 //! ```
 
 pub mod ammo;
-pub mod caster;
-pub mod channeled_holders;
-pub mod channel_visual;
-pub mod cooldowns;
 pub mod cast_pointers;
+pub mod caster;
+pub mod channel_visual;
+pub mod channeled_holders;
+pub mod cooldowns;
 pub mod delayed;
 pub mod diminishing;
 pub mod effects;

@@ -206,9 +206,7 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
     sqlx::query("SET FOREIGN_KEY_CHECKS = 0")
         .execute(&mut *conn)
         .await?;
-    sqlx::query("SET SQL_MODE = ''")
-        .execute(&mut *conn)
-        .await?;
+    sqlx::query("SET SQL_MODE = ''").execute(&mut *conn).await?;
 
     let mut files: Vec<_> = std::fs::read_dir(base_dir)?
         .filter_map(|e| e.ok())
@@ -225,10 +223,13 @@ pub async fn apply_base(pool: &MySqlPool, base_dir: &std::path::Path) -> Result<
         for stmt in split_statements(&sql) {
             if let Err(e) = sqlx::raw_sql(stmt).execute(&mut *conn).await {
                 if std::env::var("DB_DEBUG_ERRORS").is_ok() && failed == 0 {
-                    eprintln!("      DEBUG first error: {e}\n      stmt head: {}", &stmt[..stmt.len().min(200)]);
+                    eprintln!(
+                        "      DEBUG first error: {e}\n      stmt head: {}",
+                        &stmt[..stmt.len().min(200)]
+                    );
                 }
                 failed += 1;
-            } 
+            }
         }
         if failed > 0 {
             let name = path

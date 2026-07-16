@@ -284,7 +284,8 @@ fn collect_holders_for_save(player_guid: ObjectGuid, world: &World) -> Vec<Holde
                 });
                 let idx = aura.effect_index as usize;
                 if idx < 3 {
-                    entry.effects[idx] = Some((aura.current_value() as f32, aura.periodic_interval_ms));
+                    entry.effects[idx] =
+                        Some((aura.current_value() as f32, aura.periodic_interval_ms));
                 }
             }
 
@@ -301,7 +302,11 @@ fn collect_holders_for_save(player_guid: ObjectGuid, world: &World) -> Vec<Holde
 /// - none of its effects apply a persistable aura type
 ///   (`BIND_SIGHT`/`MOD_POSSESS`/`MOD_CHARM`/`FAR_SIGHT`/`AOE_CHARM` => don't save at all),
 /// - the holder ends up with an empty effect_index_mask.
-fn save_aura(player_guid: ObjectGuid, holder: &HolderSnapshot, world: &World) -> Option<CharacterAuraRow> {
+fn save_aura(
+    player_guid: ObjectGuid,
+    holder: &HolderSnapshot,
+    world: &World,
+) -> Option<CharacterAuraRow> {
     let spell_entry = world.managers.spell_mgr.get(holder.spell_id)?;
 
     if spell_entry.aura_interrupt_flags & AURA_INTERRUPT_LEAVE_OR_ENTER_WORLD_CANCELS != 0 {

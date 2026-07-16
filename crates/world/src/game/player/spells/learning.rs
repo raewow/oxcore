@@ -27,7 +27,11 @@ pub fn is_profession_or_riding_spell(spell_id: u32, world: &World) -> bool {
         return false;
     }
     let skill = entry.effect_misc_value[EFFECT_INDEX_1] as u32;
-    let category_id = world.dbc.read().get_skill_line(skill).map_or(0, |s| s.category_id);
+    let category_id = world
+        .dbc
+        .read()
+        .get_skill_line(skill)
+        .map_or(0, |s| s.category_id);
     crate::game::player::skills::formulas::is_profession_or_riding_skill(skill as u16, category_id)
 }
 
@@ -42,7 +46,11 @@ pub fn is_profession_spell(spell_id: u32, world: &World) -> bool {
         return false;
     }
     let skill = entry.effect_misc_value[EFFECT_INDEX_1] as u32;
-    let category_id = world.dbc.read().get_skill_line(skill).map_or(0, |s| s.category_id);
+    let category_id = world
+        .dbc
+        .read()
+        .get_skill_line(skill)
+        .map_or(0, |s| s.category_id);
     crate::game::player::skills::formulas::is_profession_skill(skill as u16, category_id)
 }
 
@@ -57,7 +65,11 @@ pub fn is_primary_profession_spell(spell_id: u32, world: &World) -> bool {
         return false;
     }
     let skill = entry.effect_misc_value[EFFECT_INDEX_1] as u32;
-    let category_id = world.dbc.read().get_skill_line(skill).map_or(0, |s| s.category_id);
+    let category_id = world
+        .dbc
+        .read()
+        .get_skill_line(skill)
+        .map_or(0, |s| s.category_id);
     crate::game::player::skills::formulas::is_primary_profession_skill(category_id)
 }
 
@@ -65,7 +77,8 @@ pub fn is_primary_profession_spell(spell_id: u32, world: &World) -> bool {
 ///
 /// Matches C++ `SpellMgr::IsPrimaryProfessionFirstRankSpell`.
 pub fn is_primary_profession_first_rank_spell(spell_id: u32, world: &World) -> bool {
-    is_primary_profession_spell(spell_id, world) && world.managers.spell_mgr.get_spell_rank(spell_id) == 1
+    is_primary_profession_spell(spell_id, world)
+        && world.managers.spell_mgr.get_spell_rank(spell_id) == 1
 }
 
 /// Get current game time in milliseconds

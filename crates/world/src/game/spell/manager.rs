@@ -269,7 +269,11 @@ impl SpellManager {
                 chains.insert(
                     spell_id,
                     SpellChainNode {
-                        prev: if j > 0 { talent.rank_spell_ids[j - 1] } else { 0 },
+                        prev: if j > 0 {
+                            talent.rank_spell_ids[j - 1]
+                        } else {
+                            0
+                        },
                         first: talent.rank_spell_ids[0],
                         rank: (j + 1) as u8,
                         req: 0,
@@ -372,7 +376,10 @@ impl SpellManager {
             Ok(rows) => rows,
             Err(e) => {
                 warn!("spell_chain not loaded (table missing or query failed): {e}");
-                info!("Loaded {} spell chain records (from DBC data only)", chains.len());
+                info!(
+                    "Loaded {} spell chain records (from DBC data only)",
+                    chains.len()
+                );
                 self.rebuild_spell_chains_next(&chains);
                 *self.spell_chains.write() = chains;
                 return Ok(());
@@ -395,7 +402,10 @@ impl SpellManager {
             }
 
             if let Some(existing) = chains.get_mut(&spell_id) {
-                if existing.rank != node.rank || existing.prev != node.prev || existing.first != node.first {
+                if existing.rank != node.rank
+                    || existing.prev != node.prev
+                    || existing.first != node.first
+                {
                     warn!("Spell {spell_id} listed in `spell_chain` conflicts with DBC-derived chain data");
                     continue;
                 }
@@ -406,15 +416,24 @@ impl SpellManager {
             }
 
             if node.prev != 0 && self.spells.get(&node.prev).is_none() {
-                warn!("Spell {spell_id} in `spell_chain` has nonexistent previous rank spell {}", node.prev);
+                warn!(
+                    "Spell {spell_id} in `spell_chain` has nonexistent previous rank spell {}",
+                    node.prev
+                );
                 continue;
             }
             if self.spells.get(&node.first).is_none() {
-                warn!("Spell {spell_id} in `spell_chain` has nonexistent first rank spell {}", node.first);
+                warn!(
+                    "Spell {spell_id} in `spell_chain` has nonexistent first rank spell {}",
+                    node.first
+                );
                 continue;
             }
             if node.req != 0 && self.spells.get(&node.req).is_none() {
-                warn!("Spell {spell_id} in `spell_chain` has nonexistent required spell {}", node.req);
+                warn!(
+                    "Spell {spell_id} in `spell_chain` has nonexistent required spell {}",
+                    node.req
+                );
                 continue;
             }
 

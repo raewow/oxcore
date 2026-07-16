@@ -958,7 +958,10 @@ impl PlayerManager {
         }
         tracing::info!("[{context}] Saved skills for player {}", player_guid);
 
-        tracing::info!("[{context}] Saving tutorial flags for player {}", player_guid);
+        tracing::info!(
+            "[{context}] Saving tutorial flags for player {}",
+            player_guid
+        );
         if let Err(e) = self.save_tutorials(player_guid, character_db).await {
             tracing::error!(
                 "[{context}] Failed saving tutorial flags for player {}: {}",
@@ -967,7 +970,10 @@ impl PlayerManager {
             );
             return Err(e);
         }
-        tracing::info!("[{context}] Saved tutorial flags for player {}", player_guid);
+        tracing::info!(
+            "[{context}] Saved tutorial flags for player {}",
+            player_guid
+        );
 
         tracing::info!("[{context}] Saving account data for player {}", player_guid);
         if let Err(e) = self

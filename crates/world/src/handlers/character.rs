@@ -481,7 +481,14 @@ pub async fn handle_player_login_with_guid(
     // 7.0.1 Load player data from database in parallel
     info!("[LOGIN] Loading player data (reputation, skills, actions) in parallel");
 
-    let (reputation_rows, skill_rows, action_rows, active_quests, rewarded_quests, tutorial_flags_opt) = {
+    let (
+        reputation_rows,
+        skill_rows,
+        action_rows,
+        active_quests,
+        rewarded_quests,
+        tutorial_flags_opt,
+    ) = {
         let char_guid = guid.counter();
         let account_id_u64 = session.account_id() as u64;
         let char_db = Arc::new(databases.character.clone());
@@ -541,8 +548,8 @@ pub async fn handle_player_login_with_guid(
 
     // Load account data from database (global + per-character)
     {
-        use oxcore_shared::game::account_data::AccountDataType;
         use crate::game::player::settings::state::AccountDataEntry;
+        use oxcore_shared::game::account_data::AccountDataType;
 
         let char_guid = guid.counter();
         let account_id = session.account_id();
@@ -563,16 +570,20 @@ pub async fn handle_player_login_with_guid(
             for (data_type, time, data) in global_rows {
                 if let Some(t) = AccountDataType::from_u32(data_type) {
                     if t.is_global() && (data_type as usize) < player.settings.account_data.len() {
-                        player.settings.account_data[data_type as usize] =
-                            Some(AccountDataEntry { time: time as u32, data });
+                        player.settings.account_data[data_type as usize] = Some(AccountDataEntry {
+                            time: time as u32,
+                            data,
+                        });
                     }
                 }
             }
             for (data_type, time, data) in char_rows {
                 if let Some(t) = AccountDataType::from_u32(data_type) {
                     if !t.is_global() && (data_type as usize) < player.settings.account_data.len() {
-                        player.settings.account_data[data_type as usize] =
-                            Some(AccountDataEntry { time: time as u32, data });
+                        player.settings.account_data[data_type as usize] = Some(AccountDataEntry {
+                            time: time as u32,
+                            data,
+                        });
                     }
                 }
             }

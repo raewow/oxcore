@@ -295,15 +295,16 @@ impl EffectsDispatcher {
         for target_guid in order {
             let effect_mask = masks[&target_guid];
             let mut target = TargetInfo::new(target_guid, effect_mask);
-            let mut target_results = crate::game::player::spells::target_info::apply_target_effects(
-                &mut target,
-                caster_guid,
-                spell_id,
-                is_triggered,
-                custom_base_points,
-                world,
-            )
-            .await?;
+            let mut target_results =
+                crate::game::player::spells::target_info::apply_target_effects(
+                    &mut target,
+                    caster_guid,
+                    spell_id,
+                    is_triggered,
+                    custom_base_points,
+                    world,
+                )
+                .await?;
             results.append(&mut target_results);
         }
 

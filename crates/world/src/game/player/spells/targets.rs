@@ -7,7 +7,8 @@
 //! describe HOW targets are selected. The client-provided SpellCastTargets
 //! supplies the explicit target (who/where the player clicked).
 
-use crate::game::player::auras::effects::AURA_SPELL_MAGNET;
+use crate::game::common::unit_flags;
+use crate::game::player::auras::effects::{AURA_MOD_CHARM, AURA_MOD_POSSESS, AURA_SPELL_MAGNET};
 use crate::game::player::spells::state::SpellCastTargets;
 use crate::World;
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -818,6 +819,36 @@ pub struct TargetHitInfo {
     pub miss_condition: crate::game::player::spells::hit::SpellMissInfo,
 }
 
+/// The effect-mask and deletion state shared by a resolved unit, game-object,
+/// or item target entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpellEffectTarget {
+    pub effect_mask: u8,
+    pub deleted: bool,
+}
+
+/// Port of `Spell::HaveTargetsForEffect`.
+///
+/// Returns whether any non-deleted entry in the unit, game-object, or item
+/// target lists applies to `effect_index`. Indices outside an eight-bit effect
+/// mask cannot have a matching target.
+pub fn have_targets_for_effect(
+    effect_index: u8,
+    unit_targets: &[SpellEffectTarget],
+    game_object_targets: &[SpellEffectTarget],
+    item_targets: &[SpellEffectTarget],
+) -> bool {
+    let Some(effect_bit) = 1u8.checked_shl(u32::from(effect_index)) else {
+        return false;
+    };
+
+    unit_targets
+        .iter()
+        .chain(game_object_targets)
+        .chain(item_targets)
+        .any(|target| !target.deleted && target.effect_mask & effect_bit != 0)
+}
+
 /// `SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE` — abort the cast if every
 /// registered target was immune.
 const SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE: u32 = 0x0000_0080;
@@ -837,9 +868,12 @@ pub fn all_targets_immune_should_fail(attributes_ex2: u32, targets: &[TargetHitI
         return false;
     }
     !targets.is_empty()
-        && targets
-            .iter()
-            .all(|t| matches!(t.miss_condition, SpellMissInfo::Immune | SpellMissInfo::Immune2))
+        && targets.iter().all(|t| {
+            matches!(
+                t.miss_condition,
+                SpellMissInfo::Immune | SpellMissInfo::Immune2
+            )
+        })
 }
 
 /// Port of the `SPELL_ATTR_EX_REQUIRE_ALL_TARGETS` post-loop check in
@@ -863,6 +897,413 @@ pub fn explicit_target_miss_should_clear_all(
     targets
         .iter()
         .any(|t| t.target_guid == explicit_guid && t.miss_condition != SpellMissInfo::None)
+}
+
+// Implicit target-type ids referenced by `check_target` special-cases.
+/// `TARGET_UNIT_CASTER` — the effect always targets the caster; skips the
+/// creature-type filter and exempts `ONLY_ON_PLAYER`.
+const TARGET_UNIT_CASTER: u32 = 1;
+/// `TARGET_UNIT_SCRIPT_NEAR_CASTER` — script-selected unit target.
+const TARGET_UNIT_SCRIPT_NEAR_CASTER: u32 = 38;
+/// `TARGET_GAMEOBJECT_SCRIPT_NEAR_CASTER` — script-selected gameobject target.
+const TARGET_GAMEOBJECT_SCRIPT_NEAR_CASTER: u32 = 40;
+/// `TARGET_LOCATION_SCRIPT_NEAR_CASTER` — script-selected location target.
+const TARGET_LOCATION_SCRIPT_NEAR_CASTER: u32 = 46;
+
+/// `SPELL_ATTR_EX3_NOT_ON_AOE_IMMUNE` — cannot hit creatures flagged immune to AoE.
+const SPELL_ATTR_EX3_NOT_ON_AOE_IMMUNE: u32 = 0x0000_0200;
+/// `SPELL_ATTR_EX3_ONLY_ON_PLAYER` — the spell may only affect player targets.
+const SPELL_ATTR_EX3_ONLY_ON_PLAYER: u32 = 0x0008_0000;
+
+/// `Spell::IsScriptTarget` — implicit-target ids that are resolved by script and
+/// therefore bypass the `UNIT_FLAG_NOT_SELECTABLE` rejection.
+fn is_script_target(raw_target: u32) -> bool {
+    matches!(
+        raw_target,
+        TARGET_UNIT_SCRIPT_NEAR_CASTER
+            | TARGET_GAMEOBJECT_SCRIPT_NEAR_CASTER
+            | TARGET_LOCATION_SCRIPT_NEAR_CASTER
+    )
+}
+
+/// Whether the per-effect creature-type filter is skipped for this effect: it is
+/// skipped when the effect's implicit target A is `TARGET_UNIT_CASTER`.
+fn creature_type_check_skipped(target_a_raw: u32) -> bool {
+    target_a_raw == TARGET_UNIT_CASTER
+}
+
+/// Pure `UNIT_FLAG_NOT_SELECTABLE` rejection decision from the selectability
+/// block: a not-selectable target is rejected unless the spell is triggered on
+/// its own explicit unit target, or either implicit target is a script target.
+fn not_selectable_rejects(
+    is_triggered: bool,
+    target_is_explicit: bool,
+    has_not_selectable_flag: bool,
+    target_a_raw: u32,
+    target_b_raw: u32,
+) -> bool {
+    (!is_triggered || !target_is_explicit)
+        && has_not_selectable_flag
+        && !is_script_target(target_a_raw)
+        && !is_script_target(target_b_raw)
+}
+
+/// Pure `SPELL_ATTR_EX3_ONLY_ON_PLAYER` rejection decision: a non-player target
+/// is rejected when the attribute is set and the effect's implicit target A is
+/// neither `TARGET_UNIT_SCRIPT_NEAR_CASTER` nor `TARGET_UNIT_CASTER`.
+fn only_on_player_rejects(target_is_player: bool, attributes_ex3: u32, target_a_raw: u32) -> bool {
+    !target_is_player
+        && attributes_ex3 & SPELL_ATTR_EX3_ONLY_ON_PLAYER != 0
+        && target_a_raw != TARGET_UNIT_SCRIPT_NEAR_CASTER
+        && target_a_raw != TARGET_UNIT_CASTER
+}
+
+/// Whether an effect's apply-aura type is a possess/charm effect subject to the
+/// extra self / already-charmed / level-cap rejections.
+fn is_possess_or_charm_aura(aura_name: u32) -> bool {
+    aura_name == AURA_MOD_POSSESS || aura_name == AURA_MOD_CHARM
+}
+
+/// The scalar `Spell` member state that `check_target` reads about the *cast*
+/// (as opposed to the candidate target). Mirrors the `m_*` fields the C++
+/// `Spell::CheckTarget` dereferences.
+#[derive(Debug, Clone, Copy)]
+pub struct CheckTargetContext {
+    /// `m_caster` — the casting object.
+    pub caster_guid: ObjectGuid,
+    /// Whether `m_casterUnit` is non-null (the caster is a Unit, not a pure
+    /// GameObject/DynamicObject caster). Positive-spell and possess/charm blocks
+    /// only run for unit casters.
+    pub caster_is_unit: bool,
+    /// `m_CastItem != nullptr` — the cast was launched from an item.
+    pub cast_item_present: bool,
+    /// `m_IsTriggeredSpell`.
+    pub is_triggered: bool,
+    /// `m_targets.getUnitTarget()` — the explicit unit target from the client.
+    pub explicit_unit_target: Option<ObjectGuid>,
+    /// `m_spellInfo->IsIgnoringCasterAndTargetRestrictions()`.
+    pub ignore_caster_target_restrictions: bool,
+}
+
+/// Read a unit's level (player or creature/pet), or 0 if unknown.
+fn unit_level(guid: ObjectGuid, world: &World) -> u32 {
+    if guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(guid, |p| u32::from(p.level))
+            .unwrap_or(0)
+    } else if guid.is_creature_or_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| u32::from(c.level))
+            .unwrap_or(0)
+    } else {
+        0
+    }
+}
+
+/// Read a unit's `UNIT_FIELD_FLAGS`, or 0 if unknown.
+fn unit_flags_of(guid: ObjectGuid, world: &World) -> u32 {
+    if guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(guid, |p| p.unit_flags)
+            .unwrap_or(0)
+    } else if guid.is_creature_or_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| c.unit_flags)
+            .unwrap_or(0)
+    } else {
+        0
+    }
+}
+
+/// Port of `Spell::CheckTarget(Unit* target, SpellEffectIndex eff)`.
+///
+/// Per-effect Unit filter used while filling the target map: returns `false` to
+/// reject a candidate `target_guid` for effect `eff`, `true` to keep it.
+///
+/// Approximations (infrastructure not yet ported, flagged with `// ...`):
+/// - `SelectAuraRankForLevel` (positive player-buff rank gating) — treated as a
+///   pass; rank selection is not modelled yet.
+/// - Duel opponent restriction — duels are not tracked; the check is skipped.
+/// - GM invisibility (`VISIBILITY_OFF`) and the GM + non-positive rejection —
+///   GM state is not tracked on Player; players are treated as non-GM.
+/// - `GetCharmerGuid` / `GetCharmerOrOwnerGuid` — charm ownership is not tracked;
+///   treated as no charmer/owner.
+/// - `Creature::IsImmuneToAoe` — AoE immunity data is not ported; treated as not
+///   immune.
+/// - `SpellScript::OnCheckTarget` — no script hook system; the default `true`
+///   result is used.
+pub fn check_target(
+    spell_entry: &crate::dbc::structures::SpellEntry,
+    eff: usize,
+    target_guid: ObjectGuid,
+    ctx: &CheckTargetContext,
+    world: &World,
+) -> bool {
+    let target_a_raw = spell_entry.effect_implicit_target_a[eff];
+    let target_b_raw = spell_entry.effect_implicit_target_b[eff];
+    let is_positive = spell_entry.is_positive_spell();
+    let target_is_caster = target_guid == ctx.caster_guid;
+    let target_is_explicit = ctx.explicit_unit_target == Some(target_guid);
+
+    // Positive-spell restriction block: only for a unit caster targeting someone
+    // other than itself with a positive spell.
+    if ctx.caster_is_unit && !target_is_caster && is_positive {
+        // Player buff on a non-explicit target must match the level-appropriate
+        // aura rank (untriggered, non-item casts only).
+        if ctx.caster_guid.is_player()
+            && !ctx.cast_item_present
+            && !ctx.is_triggered
+            && !target_is_explicit
+        {
+            // SelectAuraRankForLevel is not ported; the passed spell is assumed
+            // to already be the correct rank for the target's level. ...
+        }
+
+        // Duel restriction (targetOwner in a duel whose opponent isn't the
+        // caster's owner) is skipped: duels are not tracked. ...
+    }
+
+    // Creature-type filter, unless this effect always targets the caster.
+    if !creature_type_check_skipped(target_a_raw)
+        && !check_target_creature_type(spell_entry, target_guid, world)
+    {
+        return false;
+    }
+
+    // Selectability / spawning block, skipped for the caster itself, for a
+    // target owned/charmed by the caster, and when the spell ignores caster and
+    // target restrictions.
+    let target_owner_is_caster = false; // GetCharmerOrOwnerGuid() == caster: charm ownership not tracked. ...
+    if !target_is_caster && !target_owner_is_caster && !ctx.ignore_caster_target_restrictions {
+        let flags = unit_flags_of(target_guid, world);
+        if flags & unit_flags::SPAWNING != 0 {
+            return false;
+        }
+        if not_selectable_rejects(
+            ctx.is_triggered,
+            target_is_explicit,
+            flags & unit_flags::NOT_SELECTABLE != 0,
+            target_a_raw,
+            target_b_raw,
+        ) {
+            return false;
+        }
+    }
+
+    // Player-target GM / visibility restrictions.
+    if !target_is_caster && target_guid.is_player() {
+        // GM invisibility (VISIBILITY_OFF) and the GM + non-positive rejection
+        // both depend on GM state that is not tracked; players are treated as
+        // visible non-GMs, so neither rejection fires. ...
+    }
+
+    // Possess / charm aura restrictions.
+    if is_possess_or_charm_aura(spell_entry.effect_apply_aura_name[eff]) {
+        if target_is_caster {
+            return false;
+        }
+        // GetCharmerGuid() != 0 rejection: charm state is not tracked. ...
+        let level_cap = spell_entry.effect_base_points[eff];
+        if unit_level(target_guid, world) as i32 > level_cap {
+            return false;
+        }
+    }
+
+    // AoE-immune creatures.
+    if spell_entry.attributes_ex3 & SPELL_ATTR_EX3_NOT_ON_AOE_IMMUNE != 0
+        && target_guid.is_creature()
+    {
+        let immune_to_aoe = false; // Creature::IsImmuneToAoe not ported. ...
+        if immune_to_aoe {
+            return false;
+        }
+    }
+
+    // Player-only spells.
+    if only_on_player_rejects(
+        target_guid.is_player(),
+        spell_entry.attributes_ex3,
+        target_a_raw,
+    ) {
+        return false;
+    }
+
+    // m_spellScript->OnCheckTarget would run here; no script hook system yet, so
+    // the default result stands. ...
+    true
+}
+
+/// The scalar `Spell` / cast parameters read by [`fill_raid_or_party_targets`],
+/// mirroring the C++ arguments plus the `m_caster` / `m_spellInfo->spellLevel`
+/// member state it consults.
+#[derive(Debug, Clone, Copy)]
+pub struct RaidPartyFillParams {
+    /// `m_caster` — used for the hostility and distance gates.
+    pub caster_guid: ObjectGuid,
+    /// Distance limit for the `IsWithinDistInMap` gate on non-caster units.
+    pub radius: f32,
+    /// `raid`: include every subgroup when true; otherwise only the anchor's
+    /// subgroup.
+    pub raid: bool,
+    /// `withPets`: also append each eligible player's pet.
+    pub with_pets: bool,
+    /// `withcaster`: allow the caster itself to be appended without a distance
+    /// check.
+    pub with_caster: bool,
+    /// `m_spellInfo->spellLevel` — the level gate is `level + 10 >= spellLevel`.
+    pub spell_level: u32,
+}
+
+/// Whether a group member passes the group-path eligibility gate: correct
+/// subgroup (or a raid spell), high enough level, and not hostile to the caster.
+fn group_member_eligible(
+    raid: bool,
+    member_subgroup: u8,
+    anchor_subgroup: u8,
+    member_level: u32,
+    spell_level: u32,
+    caster_hostile_to_member: bool,
+) -> bool {
+    (raid || member_subgroup == anchor_subgroup)
+        && member_level + 10 >= spell_level
+        && !caster_hostile_to_member
+}
+
+/// The append decision shared by every unit/pet in both paths: the caster is
+/// added only with `withcaster`; anyone else must be within range.
+fn unit_passes_distance_gate(is_caster: bool, with_caster: bool, within_dist: bool) -> bool {
+    (is_caster && with_caster) || (!is_caster && within_dist)
+}
+
+/// Read a unit's (map_id, instance_id), or `None` if unknown.
+fn unit_map(guid: ObjectGuid, world: &World) -> Option<(u32, u32)> {
+    if guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(guid, |p| (p.map_id, p.instance_id))
+    } else if guid.is_creature_or_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| (c.map_id, c.instance_id))
+    } else {
+        None
+    }
+}
+
+/// `Unit::IsWithinDistInMap` — same map/instance and within `radius` (centre
+/// distance; combat-reach padding is not modelled). ...
+fn is_within_dist_in_map(
+    caster: ObjectGuid,
+    target: ObjectGuid,
+    radius: f32,
+    world: &World,
+) -> bool {
+    match (unit_map(caster, world), unit_map(target, world)) {
+        (Some(a), Some(b)) if a == b => get_unit_position(caster, world)
+            .is_within_range(&get_unit_position(target, world), radius),
+        _ => false,
+    }
+}
+
+/// `Unit::GetCharmerOrOwnerPlayerOrPlayerItself` — a player resolves to itself;
+/// charm/pet ownership is not tracked, so non-players resolve to `None`. ...
+fn charmer_or_owner_player_or_self(guid: ObjectGuid) -> Option<ObjectGuid> {
+    if guid.is_player() {
+        Some(guid)
+    } else {
+        None
+    }
+}
+
+/// `Unit::GetPet` — pets are not tracked yet, so no pet is ever resolved; the
+/// `withPets` branches keep their structure but never append. ...
+fn unit_pet(_owner: ObjectGuid, _world: &World) -> Option<ObjectGuid> {
+    None
+}
+
+/// Port of `Spell::FillRaidOrPartyTargets`.
+///
+/// Appends the caster's party/raid (or, with no group, the solo owner/self
+/// chain) to `out`, applying the subgroup, level, hostility and distance gates.
+///
+/// Approximations (flagged with `// ...`): pet resolution (`GetPet`) and non-player
+/// charm/owner resolution are not tracked; hostility uses the coarse
+/// [`is_hostile`] heuristic (players are never hostile to one another here);
+/// distance is centre-to-centre without combat-reach padding.
+pub fn fill_raid_or_party_targets(
+    anchor_target: ObjectGuid,
+    params: &RaidPartyFillParams,
+    world: &World,
+    out: &mut Vec<ObjectGuid>,
+) {
+    let p_target = charmer_or_owner_player_or_self(anchor_target);
+    let group = p_target.and_then(|g| world.systems.group.get_player_group(g));
+
+    match group {
+        Some(group) => {
+            let anchor_subgroup = p_target
+                .and_then(|g| group.get_member(g).map(|m| m.subgroup))
+                .unwrap_or(0);
+            for member in &group.members {
+                let member_guid = member.guid;
+                let eligible = group_member_eligible(
+                    params.raid,
+                    member.subgroup,
+                    anchor_subgroup,
+                    unit_level(member_guid, world),
+                    params.spell_level,
+                    is_hostile(params.caster_guid, member_guid, world),
+                );
+                if eligible {
+                    push_unit_and_pet(member_guid, params, world, out);
+                }
+            }
+        }
+        None => {
+            // Solo fallback: no subgroup/level/hostility gate, only distance.
+            let owner_or_self = p_target.unwrap_or(anchor_target);
+            push_unit_and_pet(owner_or_self, params, world, out);
+        }
+    }
+}
+
+/// Append `unit` (and, when `withPets`, its pet) to `out` if it passes the
+/// caster/distance gate. Shared by both the group and solo paths.
+fn push_unit_and_pet(
+    unit: ObjectGuid,
+    params: &RaidPartyFillParams,
+    world: &World,
+    out: &mut Vec<ObjectGuid>,
+) {
+    let is_caster = unit == params.caster_guid;
+    let within =
+        !is_caster && is_within_dist_in_map(params.caster_guid, unit, params.radius, world);
+    if unit_passes_distance_gate(is_caster, params.with_caster, within) {
+        out.push(unit);
+    }
+    if params.with_pets {
+        if let Some(pet) = unit_pet(unit, world) {
+            let pet_is_caster = pet == params.caster_guid;
+            let pet_within = !pet_is_caster
+                && is_within_dist_in_map(params.caster_guid, pet, params.radius, world);
+            if unit_passes_distance_gate(pet_is_caster, params.with_caster, pet_within) {
+                out.push(pet);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1175,15 +1616,24 @@ mod tests {
         // Ordinary spell keeps its own mask.
         assert_eq!(resolve_creature_target_mask(12345, 0x40, false), Some(0x40));
         // Dismiss Pet / Taming Lesson clear the restriction.
-        assert_eq!(resolve_creature_target_mask(SPELL_DISMISS_PET, 0x40, false), Some(0));
-        assert_eq!(resolve_creature_target_mask(SPELL_TAMING_LESSON, 0x40, false), Some(0));
+        assert_eq!(
+            resolve_creature_target_mask(SPELL_DISMISS_PET, 0x40, false),
+            Some(0)
+        );
+        assert_eq!(
+            resolve_creature_target_mask(SPELL_TAMING_LESSON, 0x40, false),
+            Some(0)
+        );
         // Curse of Doom: all creature types when target is not player-controlled...
         assert_eq!(
             resolve_creature_target_mask(SPELL_CURSE_OF_DOOM, 0, false),
             Some(CREATURE_TYPE_MASK_ALL)
         );
         // ...but rejected outright against a player-controlled target.
-        assert_eq!(resolve_creature_target_mask(SPELL_CURSE_OF_DOOM, 0, true), None);
+        assert_eq!(
+            resolve_creature_target_mask(SPELL_CURSE_OF_DOOM, 0, true),
+            None
+        );
     }
 
     #[tokio::test]
@@ -1214,9 +1664,21 @@ mod tests {
             0
         ));
         // The dedicated stealth spells are exempt by icon.
-        assert!(!spell_breaks_stealth_by_default(false, 0, SPELL_ICON_SHADOWMELD));
-        assert!(!spell_breaks_stealth_by_default(false, 0, SPELL_ICON_CAMOUFLAGE));
-        assert!(!spell_breaks_stealth_by_default(false, 0, SPELL_ICON_VANISH));
+        assert!(!spell_breaks_stealth_by_default(
+            false,
+            0,
+            SPELL_ICON_SHADOWMELD
+        ));
+        assert!(!spell_breaks_stealth_by_default(
+            false,
+            0,
+            SPELL_ICON_CAMOUFLAGE
+        ));
+        assert!(!spell_breaks_stealth_by_default(
+            false,
+            0,
+            SPELL_ICON_VANISH
+        ));
         // Sap still enters the removal path (handled by the Improved Sap chance).
         assert!(spell_breaks_stealth_by_default(false, 0, SPELL_ICON_SAP));
     }
@@ -1260,7 +1722,9 @@ mod tests {
         let world = test_world();
         let go_caster = ObjectGuid::new_gameobject(1, 1);
         let spell = aoe_enemy_spell(50202);
-        assert!(!should_remove_stealth_auras(&spell, go_caster, false, &world));
+        assert!(!should_remove_stealth_auras(
+            &spell, go_caster, false, &world
+        ));
     }
 
     #[test]
@@ -1280,7 +1744,7 @@ mod tests {
         assert!(effect_self_registers_caster(56)); // SPAWN
         assert!(effect_self_registers_caster(27)); // LANGUAGE
         assert!(effect_self_registers_caster(24)); // QUEST_COMPLETE
-        // An ordinary damage effect does not.
+                                                   // An ordinary damage effect does not.
         assert!(!effect_self_registers_caster(2));
     }
 
@@ -1312,6 +1776,51 @@ mod tests {
         };
         assert!(!can_reuse_targets(3, area_aura, base));
         assert!(!can_reuse_targets(3, base, area_aura));
+    }
+
+    #[test]
+    fn target_lists_are_checked_for_requested_effect() {
+        let matching = SpellEffectTarget {
+            effect_mask: 1 << 1,
+            deleted: false,
+        };
+
+        assert!(have_targets_for_effect(1, &[matching], &[], &[]));
+        assert!(have_targets_for_effect(1, &[], &[matching], &[]));
+        assert!(have_targets_for_effect(1, &[], &[], &[matching]));
+    }
+
+    #[test]
+    fn deleted_or_unmatched_targets_do_not_count() {
+        let deleted_match = SpellEffectTarget {
+            effect_mask: 1 << 2,
+            deleted: true,
+        };
+        let other_effect = SpellEffectTarget {
+            effect_mask: 1 << 1,
+            deleted: false,
+        };
+
+        assert!(!have_targets_for_effect(
+            2,
+            &[deleted_match],
+            &[other_effect],
+            &[deleted_match]
+        ));
+        assert!(!have_targets_for_effect(2, &[], &[], &[]));
+    }
+
+    #[test]
+    fn target_effect_mask_uses_the_requested_index() {
+        let targets = [SpellEffectTarget {
+            effect_mask: (1 << 0) | (1 << 7),
+            deleted: false,
+        }];
+
+        assert!(have_targets_for_effect(0, &targets, &[], &[]));
+        assert!(have_targets_for_effect(7, &targets, &[], &[]));
+        assert!(!have_targets_for_effect(1, &targets, &[], &[]));
+        assert!(!have_targets_for_effect(8, &targets, &[], &[]));
     }
 
     #[test]
@@ -1366,7 +1875,11 @@ mod tests {
             &missed
         ));
         // Attribute not set: never clears.
-        assert!(!explicit_target_miss_should_clear_all(0, Some(explicit), &missed));
+        assert!(!explicit_target_miss_should_clear_all(
+            0,
+            Some(explicit),
+            &missed
+        ));
         // No explicit target: never clears.
         assert!(!explicit_target_miss_should_clear_all(
             SPELL_ATTR_EX_REQUIRE_ALL_TARGETS,
@@ -1383,5 +1896,244 @@ mod tests {
             Some(explicit),
             &hit
         ));
+    }
+
+    fn ctx_for(caster: ObjectGuid) -> CheckTargetContext {
+        CheckTargetContext {
+            caster_guid: caster,
+            caster_is_unit: true,
+            cast_item_present: false,
+            is_triggered: false,
+            explicit_unit_target: None,
+            ignore_caster_target_restrictions: false,
+        }
+    }
+
+    #[test]
+    fn script_target_ids_bypass_not_selectable() {
+        assert!(is_script_target(TARGET_UNIT_SCRIPT_NEAR_CASTER));
+        assert!(is_script_target(TARGET_GAMEOBJECT_SCRIPT_NEAR_CASTER));
+        assert!(is_script_target(TARGET_LOCATION_SCRIPT_NEAR_CASTER));
+        assert!(!is_script_target(TARGET_UNIT_CASTER));
+        assert!(!is_script_target(16));
+    }
+
+    #[test]
+    fn creature_type_filter_is_skipped_only_for_caster_target() {
+        assert!(creature_type_check_skipped(TARGET_UNIT_CASTER));
+        assert!(!creature_type_check_skipped(16));
+    }
+
+    #[test]
+    fn not_selectable_rejection_rules() {
+        // Non-selectable target with a plain (non-script) target: rejected.
+        assert!(not_selectable_rejects(false, false, true, 16, 0));
+        // Not flagged non-selectable: never rejected.
+        assert!(!not_selectable_rejects(false, false, false, 16, 0));
+        // Triggered spell on its own explicit target: allowed through.
+        assert!(!not_selectable_rejects(true, true, true, 16, 0));
+        // Triggered but not the explicit target: still rejected.
+        assert!(not_selectable_rejects(true, false, true, 16, 0));
+        // Script target A or B exempts the rejection.
+        assert!(!not_selectable_rejects(
+            false,
+            false,
+            true,
+            TARGET_UNIT_SCRIPT_NEAR_CASTER,
+            0
+        ));
+        assert!(!not_selectable_rejects(
+            false,
+            false,
+            true,
+            16,
+            TARGET_LOCATION_SCRIPT_NEAR_CASTER
+        ));
+    }
+
+    #[test]
+    fn only_on_player_rejection_rules() {
+        // Non-player target, attribute set, ordinary target A: rejected.
+        assert!(only_on_player_rejects(
+            false,
+            SPELL_ATTR_EX3_ONLY_ON_PLAYER,
+            16
+        ));
+        // Player target: never rejected.
+        assert!(!only_on_player_rejects(
+            true,
+            SPELL_ATTR_EX3_ONLY_ON_PLAYER,
+            16
+        ));
+        // Attribute not set: never rejected.
+        assert!(!only_on_player_rejects(false, 0, 16));
+        // Exempt implicit target ids.
+        assert!(!only_on_player_rejects(
+            false,
+            SPELL_ATTR_EX3_ONLY_ON_PLAYER,
+            TARGET_UNIT_CASTER
+        ));
+        assert!(!only_on_player_rejects(
+            false,
+            SPELL_ATTR_EX3_ONLY_ON_PLAYER,
+            TARGET_UNIT_SCRIPT_NEAR_CASTER
+        ));
+    }
+
+    #[test]
+    fn possess_charm_aura_detection() {
+        assert!(is_possess_or_charm_aura(AURA_MOD_POSSESS));
+        assert!(is_possess_or_charm_aura(AURA_MOD_CHARM));
+        assert!(!is_possess_or_charm_aura(0));
+    }
+
+    #[tokio::test]
+    async fn check_target_accepts_valid_player_target() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(60);
+        let target = ObjectGuid::new_player(61);
+        add_test_player(&world, caster, 1, 0);
+        add_test_player(&world, target, 1, 0);
+
+        let spell = aoe_enemy_spell(51000); // harmful damage spell, target_a = 16
+        assert!(check_target(&spell, 0, target, &ctx_for(caster), &world));
+    }
+
+    #[tokio::test]
+    async fn check_target_rejects_non_player_for_only_on_player_spell() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(62);
+        let creature = ObjectGuid::new_creature(1, 62);
+        add_test_player(&world, caster, 1, 0);
+
+        let mut spell = aoe_enemy_spell(51001);
+        spell.attributes_ex3 = SPELL_ATTR_EX3_ONLY_ON_PLAYER;
+        assert!(!check_target(&spell, 0, creature, &ctx_for(caster), &world));
+    }
+
+    #[tokio::test]
+    async fn check_target_possess_rejects_target_above_level_cap() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(63);
+        let target = ObjectGuid::new_player(64); // level 60 via add_test_player
+        add_test_player(&world, caster, 1, 0);
+        add_test_player(&world, target, 1, 0);
+
+        let mut spell = aoe_enemy_spell(51002);
+        spell.effect_apply_aura_name[0] = AURA_MOD_CHARM;
+        // Cap below the target's level (60): rejected.
+        spell.effect_base_points[0] = 50;
+        assert!(!check_target(&spell, 0, target, &ctx_for(caster), &world));
+        // Cap at/above the target's level: passes the level gate (other checks ok).
+        spell.effect_base_points[0] = 70;
+        assert!(check_target(&spell, 0, target, &ctx_for(caster), &world));
+    }
+
+    #[test]
+    fn group_member_eligibility_rules() {
+        // Same subgroup, adequate level, non-hostile: eligible.
+        assert!(group_member_eligible(false, 0, 0, 60, 10, false));
+        // Wrong subgroup on a party (non-raid) spell: excluded.
+        assert!(!group_member_eligible(false, 1, 0, 60, 10, false));
+        // Raid spell ignores subgroup mismatch.
+        assert!(group_member_eligible(true, 1, 0, 60, 10, false));
+        // Level gate: level + 10 must be >= spellLevel.
+        assert!(group_member_eligible(false, 0, 0, 30, 40, false)); // 40 >= 40
+        assert!(!group_member_eligible(false, 0, 0, 29, 40, false)); // 39 < 40
+                                                                     // Hostile members are excluded.
+        assert!(!group_member_eligible(false, 0, 0, 60, 10, true));
+    }
+
+    #[test]
+    fn distance_gate_rules() {
+        // The caster is added only with `withcaster`, never via distance.
+        assert!(unit_passes_distance_gate(true, true, false));
+        assert!(!unit_passes_distance_gate(true, false, false));
+        // Non-caster units are gated purely on distance.
+        assert!(unit_passes_distance_gate(false, false, true));
+        assert!(!unit_passes_distance_gate(false, true, false));
+    }
+
+    fn raid_params(caster: ObjectGuid) -> RaidPartyFillParams {
+        RaidPartyFillParams {
+            caster_guid: caster,
+            radius: 30.0,
+            raid: false,
+            with_pets: false,
+            with_caster: true,
+            spell_level: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn fill_targets_solo_path_appends_owner_within_range() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(70);
+        let anchor = ObjectGuid::new_player(71);
+        add_test_player(&world, caster, 1, 0);
+        add_test_player(&world, anchor, 1, 0);
+
+        // No group: the anchor (owner/self) is appended when within range.
+        let mut out = Vec::new();
+        fill_raid_or_party_targets(anchor, &raid_params(caster), &world, &mut out);
+        assert_eq!(out, vec![anchor]);
+    }
+
+    #[tokio::test]
+    async fn fill_targets_solo_path_respects_with_caster() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(72);
+        add_test_player(&world, caster, 1, 0);
+
+        // Anchor is the caster itself; without `withcaster` it is dropped.
+        let mut params = raid_params(caster);
+        params.with_caster = false;
+        let mut out = Vec::new();
+        fill_raid_or_party_targets(caster, &params, &world, &mut out);
+        assert!(out.is_empty());
+
+        // With `withcaster` it is added despite the (self) distance being skipped.
+        params.with_caster = true;
+        let mut out2 = Vec::new();
+        fill_raid_or_party_targets(caster, &params, &world, &mut out2);
+        assert_eq!(out2, vec![caster]);
+    }
+
+    #[tokio::test]
+    async fn fill_targets_group_path_filters_by_subgroup() {
+        use oxcore_shared::game::group::GroupData;
+
+        let world = test_world();
+        let leader = ObjectGuid::new_player(80);
+        let same_sub = ObjectGuid::new_player(81);
+        let other_sub = ObjectGuid::new_player(82);
+        add_test_player(&world, leader, 1, 0);
+        add_test_player(&world, same_sub, 1, 0);
+        add_test_player(&world, other_sub, 1, 0);
+
+        let mut group = GroupData::new(500, leader, "Leader".to_string());
+        group.add_member(same_sub, "SameSub".to_string()).unwrap();
+        group.add_member(other_sub, "OtherSub".to_string()).unwrap();
+        group.get_member_mut(other_sub).unwrap().subgroup = 1;
+        world.systems.group.add_group_test(group);
+        world.systems.group.add_player_to_group_test(leader, 500);
+        world.systems.group.add_player_to_group_test(same_sub, 500);
+        world.systems.group.add_player_to_group_test(other_sub, 500);
+
+        // Party (non-raid) spell anchored on the leader (subgroup 0): only the
+        // leader and the same-subgroup member are collected.
+        let mut out = Vec::new();
+        fill_raid_or_party_targets(leader, &raid_params(leader), &world, &mut out);
+        out.sort_by_key(|g| g.raw());
+        assert!(out.contains(&leader));
+        assert!(out.contains(&same_sub));
+        assert!(!out.contains(&other_sub));
+
+        // A raid spell pulls in the other subgroup as well.
+        let mut raid = raid_params(leader);
+        raid.raid = true;
+        let mut out_raid = Vec::new();
+        fill_raid_or_party_targets(leader, &raid, &world, &mut out_raid);
+        assert!(out_raid.contains(&other_sub));
     }
 }

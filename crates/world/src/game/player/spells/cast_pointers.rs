@@ -10,7 +10,7 @@
 //! helpers (no world access) so the full branch matrix is unit-testable without
 //! a DB.
 
-use crate::game::player::spells::state::SpellCastTargets;
+use crate::game::player::spells::state::{CurrentSpellType, SpellCastTargets, SpellState};
 use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
 
@@ -197,6 +197,44 @@ fn is_caster_in_world(caster_guid: ObjectGuid, world: &World) -> bool {
     }
 }
 
+/// Finds a game object through the caster's map. The global manager can retain
+/// objects from other maps and objects no longer placed in the world.
+fn lookup_gameobject_on_caster_map(
+    caster_guid: ObjectGuid,
+    gameobject_guid: ObjectGuid,
+    world: &World,
+) -> Option<ObjectGuid> {
+    let caster_map_id = if caster_guid.is_player() {
+        world
+            .managers
+            .player_mgr
+            .with_player(caster_guid, |player| player.map_id)
+    } else if caster_guid.is_creature_or_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(caster_guid, |creature| creature.map_id)
+    } else if caster_guid.is_game_object() {
+        world
+            .managers
+            .gameobject_mgr
+            .with_gameobject(caster_guid, |gameobject| {
+                gameobject.in_world.then_some(gameobject.map_id)
+            })
+            .flatten()
+    } else {
+        None
+    }?;
+
+    world
+        .managers
+        .gameobject_mgr
+        .with_gameobject(gameobject_guid, |gameobject| {
+            (gameobject.in_world && gameobject.map_id == caster_map_id).then_some(gameobject_guid)
+        })
+        .flatten()
+}
+
 /// `Spell::UpdateOriginalCasterPointer` — world-coupled resolution of the
 /// cached original-caster pointer.
 ///
@@ -238,14 +276,13 @@ fn resolve_unit_target(
     lookup_unit_by_guid(unit_target_guid, world)
 }
 
-/// `m_targets.Update` `m_GOTarget` resolution via the game-object manager
-/// (the stand-in for `m_caster->GetMap()->GetGameObject(guid)`).
-fn resolve_go_target(go_target_guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
-    world
-        .managers
-        .gameobject_mgr
-        .with_gameobject(go_target_guid, |_| ())
-        .map(|()| go_target_guid)
+/// `m_targets.Update` `m_GOTarget` resolution through the caster's map.
+fn resolve_go_target(
+    go_target_guid: ObjectGuid,
+    caster_guid: ObjectGuid,
+    world: &World,
+) -> Option<ObjectGuid> {
+    lookup_gameobject_on_caster_map(caster_guid, go_target_guid, world)
 }
 
 /// `Spell::UpdatePointers` — first refresh the cached original-caster pointer
@@ -270,7 +307,7 @@ pub fn update_pointers(
         .and_then(|g| resolve_unit_target(g, input.caster_guid, world));
     refresh.go_target = snapshot
         .go_target
-        .and_then(|g| resolve_go_target(g, world));
+        .and_then(|g| resolve_go_target(g, input.caster_guid, world));
     if input.caster_guid.is_player() {
         // `m_itemTarget` is only re-resolved when the caster is a Player. The
         // cached item pointer is the stored GUID itself; full item resolution
@@ -279,6 +316,95 @@ pub fn update_pointers(
         refresh.item_target = snapshot.item_target;
     }
     refresh
+}
+
+// ─── `Spell::GetCurrentContainer` ────────────────────────────────────────────
+
+/// Pure classifier for `Spell::GetCurrentContainer` — maps a cast to one of the
+/// four `CurrentSpellTypes` slots via the fixed priority chain
+/// (melee → auto-repeat → channeled → generic).
+///
+/// The three predicate inputs mirror the C++ member reads:
+/// * `is_next_melee_swing` ↔ `m_spellInfo->IsNextMeleeSwingSpell()`
+/// * `is_auto_repeat` ↔ `IsAutoRepeat()`
+/// * `is_channeled` ↔ `m_channeled`, gated by the compound channeled condition
+///   `(!m_casttime || m_IsTriggeredSpell || m_spellState == SPELL_STATE_CASTING)`.
+///
+/// Keeping the attribute-bit interpretation with the caller (where it already
+/// lives) leaves this helper a faithful transcription of the branch order.
+pub fn current_container(
+    is_next_melee_swing: bool,
+    is_auto_repeat: bool,
+    is_channeled: bool,
+    cast_time_ms: u32,
+    is_triggered_spell: bool,
+    spell_state: SpellState,
+) -> CurrentSpellType {
+    if is_next_melee_swing {
+        CurrentSpellType::Melee
+    } else if is_auto_repeat {
+        CurrentSpellType::Autorepeat
+    } else if is_channeled
+        && (cast_time_ms == 0 || is_triggered_spell || spell_state == SpellState::Casting)
+    {
+        CurrentSpellType::Channeled
+    } else {
+        CurrentSpellType::Generic
+    }
+}
+
+// ─── Effective-source accessors ──────────────────────────────────────────────
+
+/// `Spell::GetAffectiveCasterObject` — resolves the effective source of the
+/// cast's *effects* (explicit caster, DoT/HoT applier, GO owner, or wild GO).
+///
+/// * empty `m_originalCasterGUID` → the formal caster (`m_caster`);
+/// * a game-object original caster while the caster is in-world → that GO looked
+///   up on the caster's map;
+/// * otherwise → the cached `m_originalCaster` unit (modelled here by
+///   re-running [`update_original_caster_pointer`], which resolves the same
+///   pointer the C++ `UpdatePointers` would have cached).
+///
+/// `None` mirrors a `nullptr` return (missing GO, unowned / out-of-world owner,
+/// or an original caster no longer in world).
+pub fn get_affective_caster_object(input: &CastPointerInput, world: &World) -> Option<ObjectGuid> {
+    if input.original_caster_guid.is_empty() {
+        return Some(input.caster_guid);
+    }
+    if input.original_caster_guid.is_game_object() && is_caster_in_world(input.caster_guid, world) {
+        return lookup_gameobject_on_caster_map(
+            input.caster_guid,
+            input.original_caster_guid,
+            world,
+        );
+    }
+    update_original_caster_pointer(input, world)
+}
+
+/// `Spell::GetAffectiveObject` — has no distinct definition in the reference
+/// tree (the name only appears in a Doxygen `@param` comment). The live
+/// substitute the notifier actually calls when no explicit original caster is
+/// supplied is `GetAffectiveCasterObject`, so this delegates to it.
+pub fn get_affective_object(input: &CastPointerInput, world: &World) -> Option<ObjectGuid> {
+    get_affective_caster_object(input, world)
+}
+
+/// `Spell::GetCastingObject` — resolves the cast's *visual / casting* object.
+///
+/// When `m_originalCasterGUID` is a game object it returns that GO looked up on
+/// the caster's map (only while the caster is in-world, else `None`); for every
+/// other GUID it returns the formal caster (`m_caster`) unconditionally — the
+/// C++ non-GO path applies no in-world guard.
+pub fn get_casting_object(input: &CastPointerInput, world: &World) -> Option<ObjectGuid> {
+    if input.original_caster_guid.is_game_object() {
+        if is_caster_in_world(input.caster_guid, world) {
+            lookup_gameobject_on_caster_map(input.caster_guid, input.original_caster_guid, world)
+        } else {
+            None
+        }
+    } else {
+        Some(input.caster_guid)
+    }
 }
 
 #[cfg(test)]
@@ -384,10 +510,8 @@ mod tests {
             OriginalCasterResolution::GameObjectLookup(go)
         );
         // Transport guids count as game objects too (they share the GO lookup).
-        let transport = ObjectGuid::new_without_entry(
-            oxcore_shared::protocol::HighGuid::Transport,
-            9,
-        );
+        let transport =
+            ObjectGuid::new_without_entry(oxcore_shared::protocol::HighGuid::Transport, 9);
         assert_eq!(
             resolve_original_caster_branch(transport, caster),
             OriginalCasterResolution::GameObjectLookup(transport)
@@ -485,10 +609,7 @@ mod tests {
             .gameobject_mgr
             .add_gameobject_for_test(make_go(go_guid, 0, owner));
         let input = CastPointerInput::for_unit(caster, go_guid);
-        assert_eq!(
-            update_original_caster_pointer(&input, &world),
-            Some(owner)
-        );
+        assert_eq!(update_original_caster_pointer(&input, &world), Some(owner));
     }
 
     #[tokio::test]
@@ -539,8 +660,14 @@ mod tests {
 
         let refresh = update_pointers(&input, &targets, &world);
 
-        assert!(refresh.original_caster_refreshed, "original-caster step ran");
-        assert!(refresh.targets_refreshed, "targets step ran after original caster");
+        assert!(
+            refresh.original_caster_refreshed,
+            "original-caster step ran"
+        );
+        assert!(
+            refresh.targets_refreshed,
+            "targets step ran after original caster"
+        );
         assert_eq!(refresh.original_caster, Some(caster));
         assert_eq!(refresh.unit_target, Some(caster));
         assert!(refresh.go_target.is_none());
@@ -551,6 +678,7 @@ mod tests {
     async fn update_pointers_resolves_registered_go_target() {
         let world = test_world();
         let caster = ObjectGuid::new_player(30);
+        add_test_player(&world, caster, 0, 0);
         let go_guid = ObjectGuid::new_gameobject(7, 7);
         world
             .managers
@@ -563,6 +691,23 @@ mod tests {
         let refresh = update_pointers(&input, &targets, &world);
         assert_eq!(refresh.go_target, Some(go_guid));
         assert!(refresh.targets_refreshed);
+    }
+
+    #[tokio::test]
+    async fn update_pointers_does_not_resolve_go_target_outside_caster_map() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(31);
+        add_test_player(&world, caster, 1, 0);
+        let go_guid = ObjectGuid::new_gameobject(7, 7);
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(make_go(go_guid, 2, ObjectGuid::empty()));
+        let input = CastPointerInput::for_unit(caster, caster);
+        let mut targets = SpellCastTargets::default();
+        targets.gameobject_target_guid = Some(go_guid);
+
+        assert_eq!(update_pointers(&input, &targets, &world).go_target, None);
     }
 
     #[tokio::test]
@@ -605,5 +750,140 @@ mod tests {
 
         let refresh = update_pointers(&input, &targets, &world);
         assert_eq!(refresh.unit_target, Some(caster));
+    }
+
+    // ── `Spell::GetCurrentContainer` (pure priority chain) ─────────────────
+
+    #[test]
+    fn container_melee_wins_over_everything() {
+        // Even if every other predicate is set, melee has top priority.
+        assert_eq!(
+            current_container(true, true, true, 0, true, SpellState::Casting),
+            CurrentSpellType::Melee
+        );
+    }
+
+    #[test]
+    fn container_auto_repeat_when_not_melee() {
+        assert_eq!(
+            current_container(false, true, true, 0, false, SpellState::Preparing),
+            CurrentSpellType::Autorepeat
+        );
+    }
+
+    #[test]
+    fn container_channeled_requires_compound_condition() {
+        // Channeled + instant (no cast time) → channeled.
+        assert_eq!(
+            current_container(false, false, true, 0, false, SpellState::Preparing),
+            CurrentSpellType::Channeled
+        );
+        // Channeled + triggered → channeled even with a cast time.
+        assert_eq!(
+            current_container(false, false, true, 1500, true, SpellState::Preparing),
+            CurrentSpellType::Channeled
+        );
+        // Channeled + already in the casting state → channeled.
+        assert_eq!(
+            current_container(false, false, true, 1500, false, SpellState::Casting),
+            CurrentSpellType::Channeled
+        );
+    }
+
+    #[test]
+    fn container_channeled_with_cast_time_falls_through_to_generic() {
+        // Channeled but non-instant, not triggered, not yet casting → generic.
+        assert_eq!(
+            current_container(false, false, true, 1500, false, SpellState::Preparing),
+            CurrentSpellType::Generic
+        );
+    }
+
+    #[test]
+    fn container_generic_default() {
+        assert_eq!(
+            current_container(false, false, false, 1500, false, SpellState::Preparing),
+            CurrentSpellType::Generic
+        );
+    }
+
+    // ── Effective-source accessors ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn affective_caster_empty_original_returns_caster() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(70);
+        let input = CastPointerInput {
+            caster_guid: caster,
+            caster_unit_guid: Some(caster),
+            original_caster_guid: ObjectGuid::empty(),
+        };
+        assert_eq!(get_affective_caster_object(&input, &world), Some(caster));
+        // GetAffectiveObject delegates to the same resolution.
+        assert_eq!(get_affective_object(&input, &world), Some(caster));
+    }
+
+    #[tokio::test]
+    async fn affective_caster_go_original_in_world_returns_go() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(71);
+        add_test_player(&world, caster, 0, 0);
+        let go_guid = ObjectGuid::new_gameobject(8, 8);
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(make_go(go_guid, 0, ObjectGuid::empty()));
+        let input = CastPointerInput::for_unit(caster, go_guid);
+        assert_eq!(get_affective_caster_object(&input, &world), Some(go_guid));
+    }
+
+    #[tokio::test]
+    async fn affective_caster_go_original_caster_not_in_world_is_none() {
+        let world = test_world();
+        // Caster not registered → not in world → falls through to m_originalCaster,
+        // which for a GO guid with an out-of-world caster is null.
+        let caster = ObjectGuid::new_player(72);
+        let go_guid = ObjectGuid::new_gameobject(8, 8);
+        let input = CastPointerInput::for_unit(caster, go_guid);
+        assert_eq!(get_affective_caster_object(&input, &world), None);
+    }
+
+    #[tokio::test]
+    async fn affective_caster_unit_original_returns_cached_unit() {
+        let world = test_world();
+        let caster = ObjectGuid::new_creature(1, 5);
+        let original = ObjectGuid::new_player(73);
+        add_test_player(&world, original, 0, 0);
+        let input = CastPointerInput::for_unit(caster, original);
+        assert_eq!(get_affective_caster_object(&input, &world), Some(original));
+    }
+
+    #[tokio::test]
+    async fn casting_object_non_go_returns_caster_without_world_check() {
+        let world = test_world();
+        // Player caster not registered; non-GO original guid → returns caster
+        // unconditionally (no in-world guard on this path).
+        let caster = ObjectGuid::new_player(74);
+        let input = CastPointerInput::for_unit(caster, ObjectGuid::new_player(75));
+        assert_eq!(get_casting_object(&input, &world), Some(caster));
+    }
+
+    #[tokio::test]
+    async fn casting_object_go_in_world_returns_go_else_none() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(76);
+        add_test_player(&world, caster, 0, 0);
+        let go_guid = ObjectGuid::new_gameobject(9, 9);
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(make_go(go_guid, 0, ObjectGuid::empty()));
+        let input = CastPointerInput::for_unit(caster, go_guid);
+        assert_eq!(get_casting_object(&input, &world), Some(go_guid));
+
+        // Same GO original but caster not in world → None.
+        let offline = ObjectGuid::new_player(77);
+        let input2 = CastPointerInput::for_unit(offline, go_guid);
+        assert_eq!(get_casting_object(&input2, &world), None);
     }
 }

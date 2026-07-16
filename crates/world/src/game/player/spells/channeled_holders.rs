@@ -13,9 +13,6 @@
 //! crate yet; they live here as a small self-contained struct so the removal logic
 //! can be ported and unit-tested world-free.
 
-use crate::World;
-use oxcore_shared::protocol::ObjectGuid;
-
 /// Aura-holder identifier matching the aura container's keying: `(spell_id,
 /// effect_index)`. Replaces the C++ `SpellAuraHolder*` pointer used for equality
 /// in `std::find`.
@@ -49,12 +46,8 @@ pub fn should_skip_removal(mode: AuraRemoveMode) -> bool {
 /// single pure proceed/skip decision. Returns `Some(id)` when the removal should
 /// go ahead, `None` when it must early-return (skip mode or null holder).
 ///
-/// Exposed separately from the world-coupled entry so the full early-return table
-/// is unit-testable without a `World`.
-pub fn gate_removal(
-    holder_id: Option<AuraHolderId>,
-    mode: AuraRemoveMode,
-) -> Option<AuraHolderId> {
+/// Kept separate so the full early-return table is unit-testable.
+pub fn gate_removal(holder_id: Option<AuraHolderId>, mode: AuraRemoveMode) -> Option<AuraHolderId> {
     if should_skip_removal(mode) {
         return None;
     }
@@ -193,40 +186,24 @@ impl ChanneledHolders {
     }
 }
 
-/// World-coupled entry: `Spell::RemoveChanneledAuraHolder`.
+/// Isolated port of `Spell::RemoveChanneledAuraHolder`.
 ///
 /// Skips the three mode filters and the null-holder guard via [`gate_removal`],
-/// runs the cursor-aware pure removal, and — on a successful removal — clears the
-/// holder's in-use flag via the auras manager (the `SetInUse(false)` equivalent).
+/// then runs the cursor-aware removal.
+///
+/// `ActiveCast` does not yet own channeled-holder state and Rust aura holders do
+/// not track their C++ `in_use` flag, so this is deliberately not wired into the
+/// live spell/aura path and cannot perform `SetInUse(false)`.
 pub fn remove_channeled_aura_holder(
-    caster_guid: ObjectGuid,
     holders: &mut ChanneledHolders,
     holder_id: Option<AuraHolderId>,
     mode: AuraRemoveMode,
-    world: &World,
 ) -> RemoveOutcome {
     let Some(holder) = gate_removal(holder_id, mode) else {
         return RemoveOutcome::NotFound;
     };
 
-    let outcome = holders.remove(&holder);
-
-    if matches!(outcome, RemoveOutcome::Removed { .. }) {
-        let (spell_id, effect_index) = holder;
-        world
-            .systems
-            .player
-            .manager()
-            .with_player_mut(caster_guid, |player| {
-                if let Some(_aura) =
-                    player.auras.container.get_aura_mut(spell_id, effect_index)
-                {
-                    // TODO: wire SetInUse(false) once aura holder in-use flag is tracked.
-                }
-            });
-    }
-
-    outcome
+    holders.remove(&holder)
 }
 
 #[cfg(test)]
@@ -261,7 +238,52 @@ mod tests {
         assert_eq!(gate_removal(Some((100, 0)), AuraRemoveMode::ByGroup), None);
         assert_eq!(gate_removal(Some((100, 0)), AuraRemoveMode::ByRange), None);
         // real holder + Default → proceed with the id.
-        assert_eq!(gate_removal(Some((100, 0)), AuraRemoveMode::Default), Some((100, 0)));
+        assert_eq!(
+            gate_removal(Some((100, 0)), AuraRemoveMode::Default),
+            Some((100, 0))
+        );
+    }
+
+    #[test]
+    fn entry_point_skips_null_and_skip_modes_without_mutating_the_list() {
+        let mut holders = ChanneledHolders {
+            holders: ids([100, 200]),
+            update_index: Some(0),
+        };
+
+        for (holder, mode) in [
+            (None, AuraRemoveMode::Default),
+            (Some((100, 0)), AuraRemoveMode::ByChannel),
+            (Some((100, 0)), AuraRemoveMode::ByGroup),
+            (Some((100, 0)), AuraRemoveMode::ByRange),
+        ] {
+            assert_eq!(
+                remove_channeled_aura_holder(&mut holders, holder, mode),
+                RemoveOutcome::NotFound
+            );
+            assert_eq!(holders.holders, ids([100, 200]));
+            assert_eq!(holders.update_index, Some(0));
+        }
+    }
+
+    #[test]
+    fn entry_point_removes_default_mode_holder_and_updates_cursor() {
+        let mut holders = ChanneledHolders {
+            holders: ids([100, 200, 300]),
+            update_index: Some(1),
+        };
+
+        let outcome =
+            remove_channeled_aura_holder(&mut holders, Some((200, 0)), AuraRemoveMode::Default);
+
+        assert_eq!(
+            outcome,
+            RemoveOutcome::Removed {
+                advanced_cursor: true
+            }
+        );
+        assert_eq!(holders.holders, ids([100, 300]));
+        assert_eq!(holders.update_index, Some(1));
     }
 
     // --- not-found / null no-op ------------------------------------------------
@@ -451,8 +473,8 @@ mod tests {
         list.remove(&(20, 0), &mut cursor); // cursor stays 1, now (30,0)
         assert_eq!(cursor, Some(1));
         list.remove(&(30, 0), &mut cursor); // cursor was 1 (tail of ([10,30])? now (10,))
-        // after first remove list is [10,30]; cursor 1 → (30,0); removing (30,0)
-        // at idx 1 == cursor 1 → tail removed → None.
+                                            // after first remove list is [10,30]; cursor 1 → (30,0); removing (30,0)
+                                            // at idx 1 == cursor 1 → tail removed → None.
         assert_eq!(cursor, None);
         assert_eq!(list.holders, ids([10]));
     }

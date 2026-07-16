@@ -674,4 +674,3 @@ mod tests {
         assert!((apply_damage_percent_modifiers(100.0, -80, -30) - 0.0).abs() < 0.001);
     }
 }
-

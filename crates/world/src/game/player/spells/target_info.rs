@@ -29,8 +29,8 @@ pub use crate::game::player::auras::proc::proc_flags;
 /// Per-target bookkeeping for one spell cast against one unit target.
 ///
 /// Equivalent of MaNGOS `TargetInfo` plus the `procAttacker`/`procVictim`/`procEx`/
-/// `m_damage`/`m_healing` locals that `Spell::DoAllEffectOnTarget` threads through a
-/// single target's effect processing.
+/// `m_damage`/`m_healing`/`m_absorbed` locals that `Spell::DoAllEffectOnTarget` threads
+/// through a single target's effect processing.
 #[derive(Debug, Clone)]
 pub struct TargetInfo {
     pub target_guid: ObjectGuid,
@@ -49,6 +49,8 @@ pub struct TargetInfo {
     pub damage: u32,
     /// Healing accumulated across this target's effects (`Spell::m_healing` equivalent).
     pub healing: u32,
+    /// Damage absorbed across this target's effects (`Spell::m_absorbed` equivalent).
+    pub absorbed: u32,
 }
 
 impl TargetInfo {
@@ -62,7 +64,15 @@ impl TargetInfo {
             proc_victim: proc_flags::NONE,
             damage: 0,
             healing: 0,
+            absorbed: 0,
         }
+    }
+
+    /// Clear the per-target effect result accumulators before processing this target.
+    pub fn reset_effect_damage_and_heal(&mut self) {
+        self.damage = 0;
+        self.healing = 0;
+        self.absorbed = 0;
     }
 }
 
@@ -95,6 +105,7 @@ pub async fn apply_target_effects(
         return Ok(results);
     }
     target.processed = true;
+    target.reset_effect_damage_and_heal();
 
     let spell_entry = match world.managers.spell_mgr.get(spell_id) {
         Some(entry) => entry,
@@ -131,10 +142,12 @@ pub async fn apply_target_effects(
                 SpellHitOutcome::Immune => hit::SpellMissInfo::Immune,
                 _ => unreachable!(),
             };
-            world
-                .systems
-                .spells
-                .send_spell_miss(caster_guid, target.target_guid, spell_id, miss_info);
+            world.systems.spells.send_spell_miss(
+                caster_guid,
+                target.target_guid,
+                spell_id,
+                miss_info,
+            );
 
             if !spell_entry.is_positive_spell() {
                 enter_combat_on_miss(caster_guid, target.target_guid, world);
@@ -152,7 +165,13 @@ pub async fn apply_target_effects(
             return Ok(results);
         }
         SpellHitOutcome::Hit | SpellHitOutcome::PartialResist(_) => {
-            fire_spell_hit_ai_event(caster_guid, target.target_guid, spell_id, &spell_entry, world);
+            fire_spell_hit_ai_event(
+                caster_guid,
+                target.target_guid,
+                spell_id,
+                &spell_entry,
+                world,
+            );
         }
     }
 
@@ -281,4 +300,36 @@ fn fire_spell_hit_ai_event(
             spell_is_direct_damage: spell_entry.is_direct_damage_spell(),
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_effect_damage_and_heal_clears_all_accumulators() {
+        let mut target = TargetInfo::new(ObjectGuid::empty(), 0);
+        target.damage = 150;
+        target.healing = 75;
+        target.absorbed = 25;
+
+        target.reset_effect_damage_and_heal();
+
+        assert_eq!(target.damage, 0);
+        assert_eq!(target.healing, 0);
+        assert_eq!(target.absorbed, 0);
+    }
+
+    #[test]
+    fn reset_effect_damage_and_heal_is_unconditional() {
+        let mut target = TargetInfo::new(ObjectGuid::empty(), 0);
+        target.processed = true;
+        target.damage = 1;
+        target.healing = 1;
+        target.absorbed = 1;
+
+        target.reset_effect_damage_and_heal();
+
+        assert_eq!((target.damage, target.healing, target.absorbed), (0, 0, 0));
+    }
 }

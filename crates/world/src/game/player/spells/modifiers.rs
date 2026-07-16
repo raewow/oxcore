@@ -179,6 +179,16 @@ pub fn remove_spell_modifier(
     Ok(())
 }
 
+/// Return whether this cast has already applied this exact modifier instance.
+///
+/// Modifier values can be structurally equal while originating from distinct
+/// auras, so membership intentionally uses reference identity.
+pub fn has_modifier_applied(applied_modifiers: &[&SpellMod], modifier: &SpellMod) -> bool {
+    applied_modifiers
+        .iter()
+        .any(|applied| std::ptr::eq(*applied, modifier))
+}
+
 /// Apply all matching spell modifiers to a value.
 ///
 /// Used during spell calculations to get the modified value of a property.
@@ -506,6 +516,33 @@ mod tests {
             source_spell_id: 1,
             source_aura_slot: None,
         }
+    }
+
+    #[test]
+    fn modifier_membership_matches_the_same_modifier_instance() {
+        let modifier = cost_mod(SpellModType::Flat, 10, 3);
+        assert!(has_modifier_applied(&[&modifier], &modifier));
+    }
+
+    #[test]
+    fn modifier_membership_rejects_equal_but_distinct_instances() {
+        let applied = cost_mod(SpellModType::Flat, 10, 3);
+        let modifier = cost_mod(SpellModType::Flat, 10, 3);
+        assert!(!has_modifier_applied(&[&applied], &modifier));
+    }
+
+    #[test]
+    fn modifier_membership_returns_false_when_absent() {
+        let applied = cost_mod(SpellModType::Flat, 10, 3);
+        let modifier = cost_mod(SpellModType::Pct, 20, 3);
+        assert!(!has_modifier_applied(&[&applied], &modifier));
+    }
+
+    #[test]
+    fn modifier_membership_finds_a_later_modifier() {
+        let first = cost_mod(SpellModType::Flat, 10, 3);
+        let modifier = cost_mod(SpellModType::Pct, 20, 3);
+        assert!(has_modifier_applied(&[&first, &modifier], &modifier));
     }
 
     #[test]

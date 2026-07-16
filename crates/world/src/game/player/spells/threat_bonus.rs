@@ -3,14 +3,17 @@
 //! Reads the `spell_threat` flat bonus for the cast spell and, for every hit target
 //! in `m_UniqueTargetInfo`, either distributes that bonus to mobs hostile toward the
 //! target (beneficial spells) or adds it directly to the target's threat list
-//! (harmful spells). The actual threat-system write is deferred (see TODO); this
-//! module resolves the per-target plan faithfully.
+//! (harmful spells). The bonus is written straight into the affected creatures'
+//! [`ThreatManager`]s; the returned list records what was applied for inspection.
 
 use crate::game::player::spells::hit::SpellHitOutcome;
 use crate::game::player::spells::target_info::TargetInfo;
 use crate::game::spell::manager::SpellThreatEntry;
 use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
+
+#[cfg(doc)]
+use crate::game::creature::combat::threat::ThreatManager;
 
 /// Spell polarity derived from intersecting the negative-effect mask with the
 /// active-effect mask.
@@ -64,8 +67,8 @@ pub fn spell_polarity(negative_effect_mask: u8, effect_mask: u8) -> Polarity {
     }
 }
 
-/// One planned flat-threat application to a single target. The actual write to the
-/// threat system is deferred — see the TODO in [`handle_threat_spells`].
+/// One flat-threat application that was applied to a single target. Records the
+/// per-target write [`handle_threat_spells`] made into the threat system.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThreatApplication {
     pub target_guid: ObjectGuid,
@@ -140,12 +143,63 @@ fn can_have_threat_list(target_guid: ObjectGuid, world: &World) -> bool {
             .is_some()
 }
 
+/// Negative path: `target->AddThreat(caster, threat, ...)` — add the flat bonus onto
+/// the hostile creature's threat list toward the caster.
+fn add_direct_threat(caster_guid: ObjectGuid, target_guid: ObjectGuid, threat: f32, world: &World) {
+    world
+        .managers
+        .creature_mgr
+        .with_creature_mut(target_guid, |c| {
+            c.threat_manager.add_threat(caster_guid, threat);
+        });
+}
+
+/// Positive path: `assisted->GetHostileRefManager().threatAssist(caster, threat, spell)`.
+///
+/// The assisted unit's hostile-ref manager holds a reference from every creature that
+/// is threatening it. `threatAssist` splits the flat bonus evenly across those
+/// references and adds each share to the corresponding creature's threat list,
+/// attributed to the caster (the healer/buffer). We model that by scanning for the
+/// creatures that currently have `assisted` on their threat list.
+///
+/// Approximation: the per-ref `ThreatCalcHelper::calcThreat` school/aura scaling is
+/// not applied — only the flat `threat / count` share is distributed.
+fn apply_assist_threat(
+    caster_guid: ObjectGuid,
+    assisted_guid: ObjectGuid,
+    threat: f32,
+    world: &World,
+) {
+    let attackers: Vec<ObjectGuid> = world
+        .managers
+        .creature_mgr
+        .iter_creatures()
+        .filter(|c| c.threat_manager.has_target(assisted_guid))
+        .map(|c| *c.key())
+        .collect();
+
+    let count = attackers.len();
+    if count == 0 {
+        return;
+    }
+    let share = threat / count as f32;
+    for attacker in attackers {
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(attacker, |c| {
+                c.threat_manager.add_threat(caster_guid, share);
+            });
+    }
+}
+
 /// Faithful port of `Spell::HandleThreatSpells`.
 ///
-/// Builds the per-target flat-threat plan for this cast and returns it as a
-/// [`ThreatApplication`] list (positive = assist/threat-distribute path, negative =
-/// direct-add path). The actual write to the threat system is intentionally not
-/// performed here.
+/// Applies the `spell_threat` flat bonus for this cast to every eligible hit target:
+/// the negative path adds threat directly onto a hostile creature's threat list
+/// (`Unit::AddThreat`), while the positive path distributes the bonus to the mobs
+/// fighting the assisted ally (`HostileRefManager::threatAssist`). The returned
+/// [`ThreatApplication`] list records what was applied.
 ///
 /// `negative_effect_mask` carries `m_negativeEffectMask`; it is not yet a field on
 /// `ActiveCast`/`TargetInfo`, so it is threaded in as a parameter.
@@ -155,9 +209,6 @@ fn can_have_threat_list(target_guid: ObjectGuid, world: &World) -> bool {
 // TODO: replace the `threat_entry`/`inverse_effect_mask` params with a
 // `world.managers.spell_mgr.get_spell_threat_entry(spell_id)` call once the getter
 // is added (and fold `inverse_effect_mask` onto `SpellThreatEntry`).
-// TODO: wire the returned plan to `ThreatManager::add_threat` (negative path) and
-// `HostileRefManager::threat_assist` (positive path) once those are plumbed through
-// the world/managers.
 #[allow(dead_code)]
 pub fn handle_threat_spells(
     caster_guid: ObjectGuid,
@@ -214,6 +265,7 @@ pub fn handle_threat_spells(
         if positive {
             // Positive path: `GetHostileRefManager().threatAssist(caster, threat, spell)`
             // distributes the flat bonus to mobs hostile toward the target.
+            apply_assist_threat(caster_guid, ihit.target_guid, threat, world);
             applications.push(ThreatApplication {
                 target_guid: ihit.target_guid,
                 amount: threat,
@@ -225,6 +277,7 @@ pub fn handle_threat_spells(
             if !can_have_threat_list(ihit.target_guid, world) {
                 continue;
             }
+            add_direct_threat(caster_guid, ihit.target_guid, threat, world);
             applications.push(ThreatApplication {
                 target_guid: ihit.target_guid,
                 amount: threat,
@@ -443,7 +496,10 @@ mod tests {
     }
 
     fn add_creature(world: &World, guid: ObjectGuid, entry: u32) {
-        world.managers.creature_mgr.add_template(creature_template(entry));
+        world
+            .managers
+            .creature_mgr
+            .add_template(creature_template(entry));
         world
             .managers
             .creature_mgr
@@ -510,15 +566,7 @@ mod tests {
         let world = test_world();
         let caster = ObjectGuid::new_player(1);
         add_player(&world, caster);
-        let apps = handle_threat_spells(
-            caster,
-            9001,
-            0,
-            &[],
-            Some(&threat_entry(50)),
-            0,
-            &world,
-        );
+        let apps = handle_threat_spells(caster, 9001, 0, &[], Some(&threat_entry(50)), 0, &world);
         assert!(apps.is_empty());
     }
 
@@ -598,7 +646,10 @@ mod tests {
             0,
             &world,
         );
-        assert!(apps.is_empty(), "mixed spell must not apply any bonus threat");
+        assert!(
+            apps.is_empty(),
+            "mixed spell must not apply any bonus threat"
+        );
     }
 
     #[tokio::test]
@@ -756,5 +807,120 @@ mod tests {
         );
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].target_guid, present);
+    }
+
+    // === threat-system write tests (wiring into ThreatManager) ===
+
+    #[tokio::test]
+    async fn negative_path_writes_flat_threat_onto_target() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9700, [2, 0, 0]));
+        let target = ObjectGuid::new_creature(1, 1);
+        add_creature(&world, target, 1);
+
+        let apps = handle_threat_spells(
+            caster,
+            9700,
+            0b001,
+            &[target_info(target, 0b001)],
+            Some(&threat_entry(50)),
+            0,
+            &world,
+        );
+        assert_eq!(apps.len(), 1);
+        // The flat bonus is now live on the target creature's threat list.
+        let threat = world
+            .managers
+            .creature_mgr
+            .with_creature(target, |c| c.threat_manager.get_threat(caster))
+            .unwrap();
+        assert_eq!(threat, 50.0);
+    }
+
+    #[tokio::test]
+    async fn positive_path_distributes_assist_threat_to_attackers() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        // Healing-style effect (36 = APPLY_AURA), no negative bits → positive.
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9800, [36, 0, 0]));
+        let assisted = ObjectGuid::new_player(2);
+        add_player(&world, assisted);
+
+        // Two creatures currently fighting the assisted ally.
+        let attacker_a = ObjectGuid::new_creature(1, 1);
+        let attacker_b = ObjectGuid::new_creature(1, 2);
+        add_creature(&world, attacker_a, 1);
+        add_creature(&world, attacker_b, 1);
+        for atk in [attacker_a, attacker_b] {
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(atk, |c| c.threat_manager.add_threat(assisted, 100.0));
+        }
+
+        let apps = handle_threat_spells(
+            caster,
+            9800,
+            0,
+            &[target_info(assisted, 0b001)],
+            Some(&threat_entry(60)),
+            0,
+            &world,
+        );
+        assert_eq!(apps.len(), 1);
+        assert!(apps[0].positive);
+
+        // Flat bonus (60) split evenly across the two attackers → 30 each, attributed
+        // to the caster.
+        for atk in [attacker_a, attacker_b] {
+            let threat = world
+                .managers
+                .creature_mgr
+                .with_creature(atk, |c| c.threat_manager.get_threat(caster))
+                .unwrap();
+            assert_eq!(threat, 30.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn positive_path_no_attackers_writes_nothing() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_player(&world, caster);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(spell_with_effects(9900, [36, 0, 0]));
+        let assisted = ObjectGuid::new_player(2);
+        add_player(&world, assisted);
+        // A creature exists but is not threatening the assisted ally.
+        let bystander = ObjectGuid::new_creature(1, 1);
+        add_creature(&world, bystander, 1);
+
+        let apps = handle_threat_spells(
+            caster,
+            9900,
+            0,
+            &[target_info(assisted, 0b001)],
+            Some(&threat_entry(60)),
+            0,
+            &world,
+        );
+        assert_eq!(apps.len(), 1);
+        let threat = world
+            .managers
+            .creature_mgr
+            .with_creature(bystander, |c| c.threat_manager.get_threat(caster))
+            .unwrap();
+        assert_eq!(threat, 0.0);
     }
 }

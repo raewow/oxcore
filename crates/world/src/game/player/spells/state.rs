@@ -11,6 +11,31 @@ pub const NUM_SPELL_SCHOOLS: usize = 7;
 /// Number of concurrent spell slots (matches MaNGOS CURRENT_SPELL_TYPES).
 pub const NUM_CURRENT_SPELLS: usize = 4;
 
+/// `SPELL_ATTR_EX3_NOT_A_PROC`: the spell must not be treated as a proc.
+pub const SPELL_ATTR_EX3_NOT_A_PROC: u32 = 0x0000_0200;
+
+/// Whether this cast was triggered by an aura spell that has proc flags.
+pub fn is_triggered_by_proc(
+    spell_attributes_ex3: u32,
+    triggering_aura_proc_flags: Option<u32>,
+) -> bool {
+    spell_attributes_ex3 & SPELL_ATTR_EX3_NOT_A_PROC == 0
+        && triggering_aura_proc_flags.is_some_and(|proc_flags| proc_flags != 0)
+}
+
+/// Whether a triggered cast carries spell-template data that should be ignored by clients.
+pub fn is_triggered_spell_with_redundant_data(
+    triggered_by_aura_spell: bool,
+    triggered_by_spell_info: bool,
+    is_triggered_spell: bool,
+    mana_cost: u32,
+    mana_cost_percentage: u32,
+) -> bool {
+    triggered_by_aura_spell
+        || triggered_by_spell_info
+        || (is_triggered_spell && (mana_cost != 0 || mana_cost_percentage != 0))
+}
+
 /// Which slot a spell occupies. MaNGOS allows concurrent spells in different slots:
 /// e.g., Heroic Strike (Melee) while auto-attacking, Auto-Shot (Autorepeat) while casting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -288,7 +313,10 @@ impl SpellsState {
         for (&cat_id, &cd_end) in &self.category_cooldowns {
             if cd_end > now {
                 let remaining_ms = cd_end - now;
-                lines.push(format!("Category({}) CatRecTime({}ms)", cat_id, remaining_ms));
+                lines.push(format!(
+                    "Category({}) CatRecTime({}ms)",
+                    cat_id, remaining_ms
+                ));
                 cd_count += 1;
             }
         }
@@ -1223,6 +1251,36 @@ mod tests {
 
     fn player(id: u32) -> ObjectGuid {
         ObjectGuid::new_player(id)
+    }
+
+    #[test]
+    fn triggered_by_proc_requires_aura_proc_flags_and_respects_not_a_proc() {
+        assert!(!is_triggered_by_proc(0, None));
+        assert!(!is_triggered_by_proc(0, Some(0)));
+        assert!(is_triggered_by_proc(0, Some(1)));
+        assert!(!is_triggered_by_proc(SPELL_ATTR_EX3_NOT_A_PROC, Some(1)));
+    }
+
+    #[test]
+    fn triggered_spell_redundant_data_matches_all_trigger_sources() {
+        assert!(is_triggered_spell_with_redundant_data(
+            true, false, false, 0, 0
+        ));
+        assert!(is_triggered_spell_with_redundant_data(
+            false, true, false, 0, 0
+        ));
+        assert!(is_triggered_spell_with_redundant_data(
+            false, false, true, 1, 0
+        ));
+        assert!(is_triggered_spell_with_redundant_data(
+            false, false, true, 0, 1
+        ));
+        assert!(!is_triggered_spell_with_redundant_data(
+            false, false, true, 0, 0
+        ));
+        assert!(!is_triggered_spell_with_redundant_data(
+            false, false, false, 1, 1
+        ));
     }
 
     fn cast_finish(caster: ObjectGuid, spell_id: u32) -> SpellEventType {

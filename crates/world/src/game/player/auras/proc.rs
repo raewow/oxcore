@@ -840,7 +840,10 @@ mod tests {
             false,
             false,
         );
-        assert_eq!(a, proc_flags::DEAL_MELEE_ABILITY | proc_flags::MAIN_HAND_WEAPON_SWING);
+        assert_eq!(
+            a,
+            proc_flags::DEAL_MELEE_ABILITY | proc_flags::MAIN_HAND_WEAPON_SWING
+        );
         assert_eq!(v, proc_flags::TAKE_MELEE_ABILITY);
 
         let (a, _) = spell_attacker_victim_proc_flags(
@@ -855,7 +858,10 @@ mod tests {
             false,
             false,
         );
-        assert_eq!(a, proc_flags::DEAL_MELEE_ABILITY | proc_flags::OFF_HAND_WEAPON_SWING);
+        assert_eq!(
+            a,
+            proc_flags::DEAL_MELEE_ABILITY | proc_flags::OFF_HAND_WEAPON_SWING
+        );
     }
 
     #[test]
@@ -872,20 +878,44 @@ mod tests {
             false,
             false,
         );
-        assert_eq!(a & proc_flags::DEAL_MELEE_SWING, proc_flags::DEAL_MELEE_SWING);
-        assert_eq!(v & proc_flags::TAKE_MELEE_SWING, proc_flags::TAKE_MELEE_SWING);
+        assert_eq!(
+            a & proc_flags::DEAL_MELEE_SWING,
+            proc_flags::DEAL_MELEE_SWING
+        );
+        assert_eq!(
+            v & proc_flags::TAKE_MELEE_SWING,
+            proc_flags::TAKE_MELEE_SWING
+        );
     }
 
     #[test]
     fn attacker_victim_flags_ranged_auto_repeat_vs_ability() {
         let (a, v) = spell_attacker_victim_proc_flags(
-            3, WeaponAttackType::Ranged, false, true, false, false, false, false, false, false,
+            3,
+            WeaponAttackType::Ranged,
+            false,
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
         );
         assert_eq!(a, proc_flags::DEAL_RANGED_ATTACK);
         assert_eq!(v, proc_flags::TAKE_RANGED_ATTACK);
 
         let (a, v) = spell_attacker_victim_proc_flags(
-            3, WeaponAttackType::Ranged, false, false, false, false, false, false, false, false,
+            3,
+            WeaponAttackType::Ranged,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
         );
         assert_eq!(a, proc_flags::DEAL_RANGED_ABILITY);
         assert_eq!(v, proc_flags::TAKE_RANGED_ABILITY);
@@ -894,7 +924,16 @@ mod tests {
     #[test]
     fn attacker_victim_flags_ranged_legacy_wand_ids_zeroed() {
         let (a, v) = spell_attacker_victim_proc_flags(
-            3, WeaponAttackType::Ranged, false, false, true, false, false, false, false, false,
+            3,
+            WeaponAttackType::Ranged,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
         );
         assert_eq!(a, proc_flags::NONE);
         assert_eq!(v, proc_flags::NONE);
@@ -903,13 +942,31 @@ mod tests {
     #[test]
     fn attacker_victim_flags_default_positive_heal_vs_ability() {
         let (a, v) = spell_attacker_victim_proc_flags(
-            0, WeaponAttackType::Ranged, false, false, false, false, true, true, false, false,
+            0,
+            WeaponAttackType::Ranged,
+            false,
+            false,
+            false,
+            false,
+            true,
+            true,
+            false,
+            false,
         );
         assert_eq!(a, proc_flags::DEAL_HELPFUL_SPELL);
         assert_eq!(v, proc_flags::TAKE_HELPFUL_SPELL);
 
         let (a, v) = spell_attacker_victim_proc_flags(
-            0, WeaponAttackType::Ranged, false, false, false, false, true, false, false, false,
+            0,
+            WeaponAttackType::Ranged,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
         );
         assert_eq!(a, proc_flags::DEAL_HELPFUL_ABILITY);
         assert_eq!(v, proc_flags::TAKE_HELPFUL_ABILITY);
@@ -919,19 +976,46 @@ mod tests {
     fn attacker_victim_flags_default_negative_periodic_vs_magic_vs_ability() {
         // Periodic-treat override wins even for magic dmg-class.
         let (a, v) = spell_attacker_victim_proc_flags(
-            1, WeaponAttackType::Ranged, false, false, false, false, false, false, true, false,
+            1,
+            WeaponAttackType::Ranged,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
         );
         assert_eq!(a, proc_flags::DEAL_HARMFUL_PERIODIC);
         assert_eq!(v, proc_flags::TAKE_HARMFUL_PERIODIC);
 
         let (a, v) = spell_attacker_victim_proc_flags(
-            1, WeaponAttackType::Ranged, false, false, false, false, false, false, false, false,
+            1,
+            WeaponAttackType::Ranged,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
         );
         assert_eq!(a, proc_flags::DEAL_HARMFUL_SPELL);
         assert_eq!(v, proc_flags::TAKE_HARMFUL_SPELL);
 
         let (a, v) = spell_attacker_victim_proc_flags(
-            0, WeaponAttackType::Ranged, false, false, false, false, false, false, false, false,
+            0,
+            WeaponAttackType::Ranged,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
         );
         assert_eq!(a, proc_flags::DEAL_HARMFUL_ABILITY);
         assert_eq!(v, proc_flags::TAKE_HARMFUL_ABILITY);
@@ -940,9 +1024,21 @@ mod tests {
     #[test]
     fn attacker_victim_flags_trap_activation_ors_into_attacker_only() {
         let (a, v) = spell_attacker_victim_proc_flags(
-            0, WeaponAttackType::Ranged, false, false, false, false, false, false, false, true,
+            0,
+            WeaponAttackType::Ranged,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
         );
-        assert_eq!(a & proc_flags::ON_TRAP_ACTIVATION, proc_flags::ON_TRAP_ACTIVATION);
+        assert_eq!(
+            a & proc_flags::ON_TRAP_ACTIVATION,
+            proc_flags::ON_TRAP_ACTIVATION
+        );
         assert_eq!(v & proc_flags::ON_TRAP_ACTIVATION, 0);
     }
 

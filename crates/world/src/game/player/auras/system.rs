@@ -926,26 +926,20 @@ impl AuraSystem {
                 };
 
                 if modifier.flat_value != 0.0 {
-                    let current = player
-                        .stats
-                        .unit_mods
-                        .get_modifier_value(unit_mod, UnitModifierType::TotalValue);
-                    player.stats.unit_mods.set_modifier_value(
+                    player.stats.unit_mods.handle_stat_modifier(
                         unit_mod,
                         UnitModifierType::TotalValue,
-                        current + modifier.flat_value,
+                        modifier.flat_value,
+                        true,
                     );
                 }
 
                 if modifier.pct_value != 0.0 {
-                    let current = player
-                        .stats
-                        .unit_mods
-                        .get_modifier_value(unit_mod, UnitModifierType::TotalPct);
-                    player.stats.unit_mods.set_modifier_value(
+                    player.stats.unit_mods.handle_stat_modifier(
                         unit_mod,
                         UnitModifierType::TotalPct,
-                        current + modifier.pct_value,
+                        modifier.pct_value * 100.0,
+                        true,
                     );
                 }
             });
@@ -1758,7 +1752,8 @@ impl AuraSystem {
             }
 
             effects::AURA_WATER_WALK => {
-                let has_other = self.player_has_aura_type(target_guid, effects::AURA_WATER_WALK, world);
+                let has_other =
+                    self.player_has_aura_type(target_guid, effects::AURA_WATER_WALK, world);
                 if !has_other {
                     world
                         .systems
@@ -1939,11 +1934,15 @@ impl AuraSystem {
 
     fn send_mount_field_update(&self, target_guid: ObjectGuid, display_id: u32, world: &World) {
         let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
-        block = block.set_field(oxcore_shared::protocol::update_fields::UNIT_FIELD_MOUNTDISPLAYID, display_id);
+        block = block.set_field(
+            oxcore_shared::protocol::update_fields::UNIT_FIELD_MOUNTDISPLAYID,
+            display_id,
+        );
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
             .to_world_packet();
-        self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+        self.broadcast_mgr
+            .broadcast_nearby(target_guid, &packet, true);
     }
 
     // ---- Water walk / feather fall / hover ----
@@ -2052,7 +2051,12 @@ impl AuraSystem {
         self.send_shapeshift_field_update(target_guid, native_display_id, world);
     }
 
-    fn send_shapeshift_field_update(&self, target_guid: ObjectGuid, display_id: u32, world: &World) {
+    fn send_shapeshift_field_update(
+        &self,
+        target_guid: ObjectGuid,
+        display_id: u32,
+        world: &World,
+    ) {
         let (shapeshift_form, stand_state) = world
             .systems
             .player
@@ -2062,7 +2066,10 @@ impl AuraSystem {
 
         let bytes_1 = u32::from_le_bytes([stand_state, 0, shapeshift_form, 0]);
         let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
-        block = block.set_field(oxcore_shared::protocol::update_fields::UNIT_FIELD_BYTES_1, bytes_1);
+        block = block.set_field(
+            oxcore_shared::protocol::update_fields::UNIT_FIELD_BYTES_1,
+            bytes_1,
+        );
         if display_id != 0 {
             block = block.set_field(
                 oxcore_shared::protocol::update_fields::UNIT_FIELD_DISPLAYID,
@@ -2072,7 +2079,8 @@ impl AuraSystem {
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
             .to_world_packet();
-        self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+        self.broadcast_mgr
+            .broadcast_nearby(target_guid, &packet, true);
     }
 
     // ---- Transform ----
@@ -2082,7 +2090,13 @@ impl AuraSystem {
     /// `misc_value == 0` special-cased-by-spell-id branch (e.g. Orb of Deception)
     /// is not covered (would need a creature-template display-id lookup for the
     /// generic case and per-race hardcoded ids for the special case).
-    fn apply_transform(&self, target_guid: ObjectGuid, spell_id: u32, misc_value: i32, world: &World) {
+    fn apply_transform(
+        &self,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        misc_value: i32,
+        world: &World,
+    ) {
         if misc_value == 0 {
             tracing::debug!(
                 "[AURA] HandleAuraTransform: spell {} has no creature template id (misc_value=0); \
@@ -2123,7 +2137,8 @@ impl AuraSystem {
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
             .to_world_packet();
-        self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+        self.broadcast_mgr
+            .broadcast_nearby(target_guid, &packet, true);
     }
 
     fn remove_transform(&self, target_guid: ObjectGuid, world: &World) {
@@ -2154,7 +2169,8 @@ impl AuraSystem {
             let packet = SmsgUpdateObject::new()
                 .add_block(UpdateBlockData::Values(block))
                 .to_world_packet();
-            self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+            self.broadcast_mgr
+                .broadcast_nearby(target_guid, &packet, true);
         }
     }
 
@@ -2164,7 +2180,13 @@ impl AuraSystem {
     /// reputation rank vs `faction_id` and pushes SMSG_SET_FORCED_REACTIONS.
     /// Does not implement `StopAttackFaction` (no combat-vs-faction tracking hook
     /// available from AuraSystem yet).
-    fn apply_force_reaction(&self, target_guid: ObjectGuid, misc_value: i32, base_value: i32, world: &World) {
+    fn apply_force_reaction(
+        &self,
+        target_guid: ObjectGuid,
+        misc_value: i32,
+        base_value: i32,
+        world: &World,
+    ) {
         use oxcore_shared::game::reputation::ReputationRank;
         let faction_id = misc_value.max(0) as u32;
         // C++ reads m_modifier.m_amount directly as `ReputationRank(uint32(m_amount))` — it's
@@ -2186,7 +2208,10 @@ impl AuraSystem {
                 player.reputation.forced_reactions.insert(faction_id, rank);
             });
 
-        let _ = world.systems.reputation.send_forced_reactions(target_guid, world);
+        let _ = world
+            .systems
+            .reputation
+            .send_forced_reactions(target_guid, world);
     }
 
     fn remove_force_reaction(&self, target_guid: ObjectGuid, misc_value: i32, world: &World) {
@@ -2199,7 +2224,10 @@ impl AuraSystem {
                 player.reputation.forced_reactions.remove(&faction_id);
             });
 
-        let _ = world.systems.reputation.send_forced_reactions(target_guid, world);
+        let _ = world
+            .systems
+            .reputation
+            .send_forced_reactions(target_guid, world);
     }
 
     // ---- Stealth ----
@@ -2264,11 +2292,15 @@ impl AuraSystem {
 
         let bytes_1 = u32::from_le_bytes([stand_state, 0, shapeshift_form, vis_flags]);
         let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
-        block = block.set_field(oxcore_shared::protocol::update_fields::UNIT_FIELD_BYTES_1, bytes_1);
+        block = block.set_field(
+            oxcore_shared::protocol::update_fields::UNIT_FIELD_BYTES_1,
+            bytes_1,
+        );
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
             .to_world_packet();
-        self.broadcast_mgr.broadcast_nearby(target_guid, &packet, true);
+        self.broadcast_mgr
+            .broadcast_nearby(target_guid, &packet, true);
     }
 
     // ---- Invisibility ----
@@ -2388,7 +2420,10 @@ impl AuraSystem {
         let Some(byte_val) = new_value else { return };
         let bytes2 = u32::from_le_bytes([0, byte_val, 0, 0]);
         let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
-        block = block.set_field(oxcore_shared::protocol::update_fields::PLAYER_FIELD_BYTES2, bytes2);
+        block = block.set_field(
+            oxcore_shared::protocol::update_fields::PLAYER_FIELD_BYTES2,
+            bytes2,
+        );
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
             .to_world_packet();

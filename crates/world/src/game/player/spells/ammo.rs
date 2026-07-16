@@ -6,9 +6,8 @@
 //! The pure branch cascade is isolated in [`should_consume_ammo`] / [`AmmoAction`]
 //! so it can be exercised without a world. The world-coupled entry point
 //! [`take_ammo`] reads the player's equipped ranged weapon and
-//! [`PLAYER_AMMO_ID`](crate::game::common::update_fields::PLAYER_AMMO_ID) value
-//! and returns the computed action; the actual inventory mutation is deferred
-//! until the inventory manager exposes ammo destruction / durability loss.
+//! [`PLAYER_AMMO_ID`](crate::game::common::update_fields::PLAYER_AMMO_ID) value,
+//! then applies the corresponding inventory mutation.
 
 use crate::World;
 use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
@@ -123,10 +122,13 @@ pub fn should_consume_ammo(input: &AmmoDecisionInput) -> AmmoAction {
 /// World-coupled `Spell::TakeAmmo` entry point.
 ///
 /// Resolves the caster's equipped ranged weapon and `PLAYER_AMMO_ID`, then
-/// delegates the branch cascade to [`should_consume_ammo`]. The computed
-/// [`AmmoAction`] is returned to the caller; the inventory mutation
-/// (`DestroyItemCount`, `DurabilityPointLossForEquipSlot`) is not yet wired.
-pub fn take_ammo(world: &World, caster_guid: ObjectGuid, input: &TakeAmmoInput) -> AmmoAction {
+/// delegates the branch cascade to [`should_consume_ammo`] and applies its
+/// inventory effect. The computed [`AmmoAction`] is returned for observability.
+pub async fn take_ammo(
+    world: &World,
+    caster_guid: ObjectGuid,
+    input: &TakeAmmoInput,
+) -> AmmoAction {
     // 1. Non-player casters never consume ammo.
     if !caster_guid.is_player() {
         return AmmoAction::None;
@@ -143,12 +145,11 @@ pub fn take_ammo(world: &World, caster_guid: ObjectGuid, input: &TakeAmmoInput) 
     }
 
     // 4. Resolve the equipped ranged weapon (`GetWeaponForAttack(RANGED_ATTACK, ..)`).
-    let Some(weapon_guid) = world
-        .systems
-        .inventory
-        .cache()
-        .get_item_at(caster_guid, INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_RANGED)
-    else {
+    let Some(weapon_guid) = world.systems.inventory.cache().get_item_at(
+        caster_guid,
+        INVENTORY_SLOT_BAG_0,
+        EQUIPMENT_SLOT_RANGED,
+    ) else {
         return AmmoAction::None;
     };
 
@@ -185,13 +186,31 @@ pub fn take_ammo(world: &World, caster_guid: ObjectGuid, input: &TakeAmmoInput) 
     match decision {
         AmmoAction::None => {}
         AmmoAction::DurabilityLossRangedSlot => {
-            // TODO: wire to inventory manager once DurabilityPointLossForEquipSlot exists.
+            let durability = world
+                .systems
+                .inventory
+                .cache()
+                .get_item(caster_guid, weapon_guid)
+                .map(|item| item.read().durability);
+            if let Some(durability) = durability {
+                let _ = world
+                    .systems
+                    .inventory
+                    .update_durability(caster_guid, weapon_guid, durability.saturating_sub(1))
+                    .await;
+            }
         }
         AmmoAction::DestroyOneStack => {
-            // TODO: wire to inventory manager once ammo destruction exists.
+            let _ = world
+                .systems
+                .inventory
+                .remove_item(caster_guid, weapon_guid, 1);
         }
-        AmmoAction::ConsumeAmmo(_ammo_entry) => {
-            // TODO: wire to inventory manager once DestroyItemCount exists.
+        AmmoAction::ConsumeAmmo(ammo_entry) => {
+            world
+                .systems
+                .inventory
+                .destroy_item_count(caster_guid, ammo_entry, 1);
         }
     }
 
@@ -283,10 +302,7 @@ mod tests {
     #[test]
     fn bow_with_ammo_consumes_ammo_entry() {
         let input = base_input();
-        assert_eq!(
-            should_consume_ammo(&input),
-            AmmoAction::ConsumeAmmo(12345)
-        );
+        assert_eq!(should_consume_ammo(&input), AmmoAction::ConsumeAmmo(12345));
     }
 
     #[test]
@@ -331,7 +347,12 @@ mod tests {
             auth: pool.clone(),
             logs: pool,
         });
-        World::new(databases, Arc::new(Config::default()), 50, PathBuf::from("."))
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
     }
 
     #[tokio::test]
@@ -343,7 +364,7 @@ mod tests {
             spell_id: 123,
             attack_type: RANGED_ATTACK,
         };
-        assert_eq!(take_ammo(&world, creature, &input), AmmoAction::None);
+        assert_eq!(take_ammo(&world, creature, &input).await, AmmoAction::None);
     }
 
     #[tokio::test]
@@ -358,7 +379,7 @@ mod tests {
             // No player registered -> with_player returns None, but the exempt
             // gate fires first so the action is None regardless.
             assert_eq!(
-                take_ammo(&world, ObjectGuid::new_player(999), &input),
+                take_ammo(&world, ObjectGuid::new_player(999), &input).await,
                 AmmoAction::None
             );
         }
@@ -372,7 +393,7 @@ mod tests {
             attack_type: 0, // BASE_ATTACK
         };
         assert_eq!(
-            take_ammo(&world, ObjectGuid::new_player(1), &input),
+            take_ammo(&world, ObjectGuid::new_player(1), &input).await,
             AmmoAction::None
         );
     }
