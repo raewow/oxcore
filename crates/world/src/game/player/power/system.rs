@@ -4,6 +4,7 @@
 
 use crate::game::broadcast_mgr::BroadcastManagerTrait;
 use crate::game::common::update_fields::*;
+use crate::game::player::auras::effects::AURA_MOD_CONFUSE;
 use crate::game::player::manager::PlayerManager;
 use crate::game::player::Player;
 use crate::World;
@@ -198,9 +199,7 @@ impl PowerSystem {
                 let mut add_value: f32 = 0.0;
 
                 // Polymorph: regen 10% of max health per 2-second tick regardless of combat.
-                // Polymorph is detected via SPELL_AURA_MOD_CONFUSE — not yet available from
-                // the aura system, so this branch is left for future integration.
-                let is_polymorphed = false;
+                let is_polymorphed = player.auras.container.has_aura_type(AURA_MOD_CONFUSE);
 
                 if is_polymorphed {
                     add_value = max_health as f32 / 10.0;
@@ -428,6 +427,8 @@ impl PowerSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::broadcast_mgr::MockBroadcastManagerTrait;
+    use crate::game::player::auras::{Aura, AuraFlags};
     use crate::game::player::power::regen::MAX_RAGE;
 
     #[test]
@@ -510,6 +511,32 @@ mod tests {
 
         assert!(!PowerSystem::apply_damage_dealt_rage(&mut player, 100));
         assert_eq!(player.power.current[PowerType::Rage as usize], 0);
+    }
+
+    #[test]
+    fn polymorphed_player_regenerates_ten_percent_max_health_in_combat() {
+        let system = PowerSystem::new(Arc::new(MockBroadcastManagerTrait::new()));
+        let mut player = warrior(60);
+        player.stats.health = 100;
+        player.stats.max_health = 1_000;
+        player.combat.in_combat = true;
+        player.auras.container.add_aura(Aura::new(
+            118,
+            player.guid,
+            0,
+            AURA_MOD_CONFUSE,
+            0,
+            0,
+            Some(10_000),
+            0,
+            1,
+            0,
+            AuraFlags::default(),
+        ));
+
+        system.regen_tick(player.guid, &mut player, 0);
+
+        assert_eq!(player.stats.health, 200);
     }
 
     #[test]

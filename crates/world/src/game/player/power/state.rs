@@ -218,3 +218,56 @@ impl PowerState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{PowerState, PowerType};
+
+    fn state(power_type: PowerType, current: u32, max: u32) -> PowerState {
+        let mut state = PowerState::default();
+        let idx = power_type as usize;
+        state.current[idx] = current;
+        state.max[idx] = max;
+        state
+    }
+
+    #[test]
+    fn modify_power_zero_delta_is_a_noop() {
+        let mut state = state(PowerType::Mana, 50, 100);
+
+        assert_eq!(state.modify_power(PowerType::Mana, 0), 0);
+        assert_eq!(state.get_current(PowerType::Mana), 50);
+    }
+
+    #[test]
+    fn modify_power_applies_in_range_gain_and_loss() {
+        let mut state = state(PowerType::Mana, 50, 100);
+
+        assert_eq!(state.modify_power(PowerType::Mana, 20), 20);
+        assert_eq!(state.get_current(PowerType::Mana), 70);
+        assert_eq!(state.modify_power(PowerType::Mana, -30), -30);
+        assert_eq!(state.get_current(PowerType::Mana), 40);
+    }
+
+    #[test]
+    fn modify_power_depletes_at_zero_and_returns_actual_loss() {
+        let mut state = state(PowerType::Rage, 50, 100);
+
+        assert_eq!(state.modify_power(PowerType::Rage, -50), -50);
+        assert_eq!(state.get_current(PowerType::Rage), 0);
+
+        state.current[PowerType::Rage as usize] = 50;
+        assert_eq!(state.modify_power(PowerType::Rage, -75), -50);
+        assert_eq!(state.get_current(PowerType::Rage), 0);
+    }
+
+    #[test]
+    fn modify_power_caps_at_max_and_is_a_noop_when_full() {
+        let mut state = state(PowerType::Energy, 70, 100);
+
+        assert_eq!(state.modify_power(PowerType::Energy, 30), 30);
+        assert_eq!(state.get_current(PowerType::Energy), 100);
+        assert_eq!(state.modify_power(PowerType::Energy, 50), 0);
+        assert_eq!(state.get_current(PowerType::Energy), 100);
+    }
+}

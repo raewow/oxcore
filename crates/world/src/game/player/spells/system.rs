@@ -2009,66 +2009,62 @@ impl SpellSystem {
 
     /// Apply cast pushback from taking damage while casting.
     ///
-    /// Vanilla rules:
-    /// - Non-channeled: +0.5s per hit, capped at +1.0s total pushback
-    /// - Channeled: lose 25% of remaining channel time per hit
-    /// - ResistPushback aura (e.g., Concentration Aura) reduces pushback %
+    /// Delegates to the faithful `Spell::Delayed` / `Spell::DelayedChannel` ports
+    /// in [`super::delayed`]: the Generic (non-channeled) slot takes precedence,
+    /// falling back to the Channeled slot. Both apply the resist roll
+    /// (`SPELLMOD_NOT_LOSE_CASTING_TIME` + `SPELL_AURA_RESIST_PUSHBACK`) and the
+    /// escalating per-hit delay driven by the cast's `delay_at_damage_count`.
+    /// Returns the milliseconds of pushback/channel-reduction actually applied.
     pub fn apply_cast_pushback(&self, target_guid: ObjectGuid, world: &World) -> Result<u32> {
-        let mut pushback_applied = 0u32;
-        let mut spell_id_for_reschedule: Option<u32> = None;
+        use crate::game::player::spells::delayed::{delayed, delayed_channel};
 
-        world
-            .systems
-            .player
-            .manager()
-            .with_player_mut(target_guid, |player| {
-                // Apply pushback to Generic slot first, then Channeled
-                let slot_idx =
-                    if player.spells.current_spells[CurrentSpellType::Generic as usize].is_some() {
-                        CurrentSpellType::Generic as usize
-                    } else {
-                        CurrentSpellType::Channeled as usize
-                    };
-
-                if let Some(active) = player.spells.current_spells[slot_idx].as_mut() {
-                    // Check NotLoseCastTime spell modifier (reduces pushback, e.g., Concentration Aura)
-                    let mut pushback_reduction_pct = 0i32;
-                    for modifier in &player.spells.spell_modifiers {
-                        if modifier.op
-                            == crate::game::player::spells::state::SpellModOp::NotLoseCastTime
-                        {
-                            pushback_reduction_pct += modifier.value;
-                        }
-                    }
-
-                    // Vanilla pushback values
-                    let max_pushback = 1000u32; // 1 second max total for non-channeled
-                    let base_pushback = 500u32; // 0.5 second per hit for non-channeled
-
-                    // Apply pushback reduction
-                    let pushback_per_hit = if pushback_reduction_pct > 0 {
-                        let reduction =
-                            (base_pushback as f32 * pushback_reduction_pct as f32 / 100.0) as u32;
-                        base_pushback.saturating_sub(reduction)
-                    } else {
-                        base_pushback
-                    };
-
-                    pushback_applied = active.apply_pushback(pushback_per_hit, max_pushback);
-
-                    if pushback_applied > 0 {
-                        spell_id_for_reschedule = Some(active.spell_id);
-                        tracing::debug!(
-                            "Cast pushback: pushed back {}ms on spell {} (reduction={}%)",
-                            pushback_applied,
-                            active.spell_id,
-                            pushback_reduction_pct
-                        );
-                    }
+        // Pick the slot that takes the pushback and read its running hit count.
+        let (slot, mut count) = match world.systems.player.manager().with_player(
+            target_guid,
+            |player| {
+                if let Some(cast) =
+                    player.spells.current_spells[CurrentSpellType::Generic as usize].as_ref()
+                {
+                    Some((CurrentSpellType::Generic, cast.delay_at_damage_count))
+                } else {
+                    player.spells.current_spells[CurrentSpellType::Channeled as usize]
+                        .as_ref()
+                        .map(|cast| (CurrentSpellType::Channeled, cast.delay_at_damage_count))
                 }
-            });
+            },
+        ) {
+            Some(Some(pair)) => pair,
+            _ => return Ok(0),
+        };
 
-        Ok(pushback_applied)
+        // Delegate to the faithful port for that slot. Each re-locks the player,
+        // escalates `count`, and mutates the cast timer in place.
+        let (applied, delaytime) = match slot {
+            CurrentSpellType::Generic => {
+                let d = delayed(target_guid, &mut count, world);
+                (d.applied, d.delaytime)
+            }
+            _ => {
+                let d = delayed_channel(target_guid, &mut count, world);
+                (d.applied, d.delaytime)
+            }
+        };
+
+        // Persist the escalated hit count so the next hit uses a larger delay
+        // (`Spell::m_delayAtDamageCount`).
+        if applied {
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(target_guid, |player| {
+                    if let Some(cast) = player.spells.current_spells[slot as usize].as_mut() {
+                        cast.delay_at_damage_count = count;
+                    }
+                });
+        }
+
+        Ok(if applied { delaytime } else { 0 })
     }
 
     // =========================================================================

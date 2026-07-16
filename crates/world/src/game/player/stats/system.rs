@@ -228,6 +228,19 @@ impl StatsSystem {
         Some((min + max) / 2.0)
     }
 
+    fn calculate_max_health(
+        base_health: f32,
+        equipped_health: f32,
+        stamina_bonus: f32,
+        base_value: f32,
+        base_pct: f32,
+        total_value: f32,
+        total_pct: f32,
+    ) -> f32 {
+        ((base_health + base_value) * base_pct + equipped_health + total_value + stamina_bonus)
+            * total_pct
+    }
+
     pub fn on_player_login(&self, guid: ObjectGuid) -> Result<()> {
         self.recalculate_all(guid);
         // Set health/mana to max on login (fresh character state)
@@ -321,13 +334,15 @@ impl StatsSystem {
                 .unit_mods
                 .get_modifier_value(UnitMods::Health, UnitModifierType::TotalPct);
 
-            let max_health = ((class_base.base_health as f32
-                + equipped_bonuses.max_health as f32
-                + health_base_value)
-                * health_base_pct
-                + health_total_value
-                + stamina_bonus)
-                * health_total_pct;
+            let max_health = Self::calculate_max_health(
+                class_base.base_health as f32,
+                equipped_bonuses.max_health as f32,
+                stamina_bonus,
+                health_base_value,
+                health_base_pct,
+                health_total_value,
+                health_total_pct,
+            );
             let old_max_health = player.stats.max_health;
             player.stats.max_health = max_health.max(1.0) as u32;
 
@@ -899,6 +914,13 @@ mod tests {
         assert_eq!(bonuses.block_value, 25);
         assert_eq!(bonuses.armor, 50);
         assert_eq!(bonuses.resistances, [50, 1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn max_health_applies_equipped_health_after_base_percentage() {
+        let max_health = StatsSystem::calculate_max_health(100.0, 50.0, 0.0, 20.0, 1.5, 10.0, 1.0);
+
+        assert_eq!(max_health, 240.0);
     }
 
     #[test]

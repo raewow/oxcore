@@ -649,6 +649,10 @@ pub struct ActiveCast {
     /// Total pushback accumulated from damage (capped at original_cast_time * some factor)
     pub total_pushback_ms: u32,
 
+    /// Running count of damage hits that have triggered pushback for this cast
+    /// (`Spell::m_delayAtDamageCount`). Each hit escalates the next pushback delay.
+    pub delay_at_damage_count: u32,
+
     /// Whether this is a channeled spell
     pub is_channeling: bool,
 
@@ -699,6 +703,7 @@ impl ActiveCast {
             cast_time_remaining_ms: cast_time_ms,
             original_cast_time_ms: cast_time_ms,
             total_pushback_ms: 0,
+            delay_at_damage_count: 0,
             is_channeling: false,
             channel_ticks_remaining: 0,
             channel_tick_timer_ms: 0,
@@ -737,6 +742,7 @@ impl ActiveCast {
             cast_time_remaining_ms: total_duration_ms,
             original_cast_time_ms: total_duration_ms,
             total_pushback_ms: 0,
+            delay_at_damage_count: 0,
             is_channeling: true,
             channel_ticks_remaining: tick_count,
             channel_tick_timer_ms: tick_interval,
