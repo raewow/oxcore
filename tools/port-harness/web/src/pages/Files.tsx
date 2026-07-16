@@ -19,11 +19,6 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function progressPct(file: FileListEntry): number {
-  if (!file.symbol_count) return 0;
-  return Math.round((file.documented / file.symbol_count) * 100);
-}
-
 const STATUS_ORDER = [
   "discovered",
   "documented",
@@ -213,6 +208,22 @@ export function Files() {
         </span>
       </div>
 
+      <div className="file-progress-legend">
+        {STATUS_ORDER.map((status) => {
+          const meta = STATUS_META[status];
+          return (
+            <span key={status} className="file-progress-legend-item">
+              <span
+                className="file-progress-legend-swatch"
+                style={{ background: meta.color }}
+              />
+              {meta.label}
+              {meta.portedPlus && <span className="muted" style={{ fontSize: "0.65rem" }}>+</span>}
+            </span>
+          );
+        })}
+      </div>
+
       {isLoading ? (
         <div>Loading files...</div>
       ) : (
@@ -261,17 +272,41 @@ export function Files() {
                     "—"
                   )}
                 </td>
-                <td style={{ minWidth: 120 }}>
+                <td style={{ minWidth: 180 }}>
                   {file.indexed ? (
-                    <>
-                      {progressPct(file)}%
-                      <div className="job-progress">
-                        <div
-                          className="job-progress-bar"
-                          style={{ width: `${progressPct(file)}%` }}
-                        />
+                    <div className="file-progress">
+                      <div className="file-progress-headline">
+                        <span className="file-progress-ported-plus">
+                          {portedPlusPct(file)}%
+                        </span>
+                        <span className="muted" style={{ fontSize: "0.7rem" }}>
+                          ported+
+                        </span>
                       </div>
-                    </>
+                      <div
+                        className="file-status-bar"
+                        role="img"
+                        aria-label={`${file.documented}/${file.symbol_count} documented, ${portedPlusCount(file)} ported+`}
+                      >
+                        {STATUS_ORDER.map((status) => {
+                          const count = file.by_status?.[status] ?? 0;
+                          if (!count) return null;
+                          const meta = STATUS_META[status];
+                          const pct = segPct(file, status);
+                          return (
+                            <div
+                              key={status}
+                              className="file-status-seg"
+                              style={{
+                                width: `${pct}%`,
+                                background: meta.color,
+                              }}
+                              title={`${meta.label}: ${count} (${Math.round(pct)}%)`}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
                   ) : (
                     "—"
                   )}

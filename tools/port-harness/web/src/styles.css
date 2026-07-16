@@ -1121,6 +1121,65 @@ summary {
   background: #60a5fa;
 }
 
+/* Stacked status progress bar (Files list) */
+.file-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.file-progress-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.file-progress-ported-plus {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #a5b4fc;
+}
+
+.file-status-bar {
+  display: flex;
+  height: 8px;
+  width: 100%;
+  background: #2d3348;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.file-status-seg {
+  height: 100%;
+  transition: width 0.3s;
+}
+
+.file-status-seg:not(:last-child) {
+  border-right: 1px solid #0f1117;
+}
+
+.file-progress-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.5rem 0 1rem;
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.file-progress-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.file-progress-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
 /* Pipeline progress header (FlowDetail) */
 .flow-pipeline {
   background: #1a1d27;
