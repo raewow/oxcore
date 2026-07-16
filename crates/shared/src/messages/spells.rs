@@ -15,6 +15,12 @@ pub struct SmsgSpellStart {
     /// expects the item GUID as the first packed GUID in the packet instead of
     /// the caster's GUID (MaNGOS: `data << m_CastItem->GetPackGUID()`).
     pub cast_item_guid: Option<ObjectGuid>,
+    /// Projectile ammo display info: ammoDisplayID from WriteAmmoToPacket.
+    /// 0 = no projectile.
+    pub ammo_display_id: u32,
+    /// Inventory type of the projectile (e.g. INVTYPE_THROWN, INVTYPE_AMMO).
+    /// 0 = no projectile.
+    pub ammo_inventory_type: u32,
 }
 
 impl SmsgSpellStart {
@@ -29,6 +35,10 @@ impl SmsgSpellStart {
 
         // SpellCastTargets section (vanilla 1.12.x requires this)
         write_spell_cast_targets(&mut packet, self.target_guid);
+
+        // Ammo projectile info (MaNGOS WriteAmmoToPacket)
+        packet.write_u32(self.ammo_display_id);
+        packet.write_u32(self.ammo_inventory_type);
 
         tracing::info!("[SPELL_START] spell={} caster={:?} target={:?} cast_flags=0x{:04X} cast_time={} packet_len={} bytes={:02X?}",
             self.spell_id, self.caster_guid, self.target_guid, self.cast_flags, self.cast_time_ms,
@@ -52,6 +62,12 @@ pub struct SmsgSpellGo {
     /// (0x0040) set in cast_flags (MaNGOS: `data << m_CastItem->GetPackGUID()`
     /// and `castFlags |= CAST_FLAG_UNKNOWN7`).
     pub cast_item_guid: Option<ObjectGuid>,
+    /// Projectile ammo display info: ammoDisplayID from WriteAmmoToPacket.
+    /// 0 = no projectile.
+    pub ammo_display_id: u32,
+    /// Inventory type of the projectile (e.g. INVTYPE_THROWN, INVTYPE_AMMO).
+    /// 0 = no projectile.
+    pub ammo_inventory_type: u32,
 }
 
 /// A target omitted from the successful-hit list and its spell miss result.
@@ -94,6 +110,10 @@ impl SmsgSpellGo {
 
         // SpellCastTargets section (vanilla 1.12.x requires this)
         write_spell_cast_targets(&mut packet, self.target_guid);
+
+        // Ammo projectile info (MaNGOS WriteAmmoToPacket)
+        packet.write_u32(self.ammo_display_id);
+        packet.write_u32(self.ammo_inventory_type);
 
         tracing::info!("[SPELL_GO] spell={} caster={:?} item={:?} target={:?} cast_flags=0x{:04X} hits={} misses={} packet_len={} bytes={:02X?}",
             self.spell_id, self.caster_guid, self.cast_item_guid, self.target_guid, cast_flags,
@@ -171,6 +191,8 @@ mod spell_packet_tests {
             miss_targets: vec![],
             target_guid: None,
             cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
         };
         let pkt = msg.to_world_packet();
         let mut data = pkt.data().clone();
@@ -212,6 +234,8 @@ mod spell_packet_tests {
             miss_targets: vec![],
             target_guid: None,
             cast_item_guid: Some(item),
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
         };
         let pkt = msg.to_world_packet();
         let mut data = pkt.data().clone();
@@ -258,6 +282,8 @@ mod spell_packet_tests {
             }],
             target_guid: None,
             cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
         };
         let mut data = msg.to_world_packet().data().clone();
 
@@ -284,6 +310,8 @@ mod spell_packet_tests {
             cast_time_ms: 10000,
             target_guid: None,
             cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
         };
         let pkt = msg.to_world_packet();
         let mut data = pkt.data().clone();
@@ -309,6 +337,8 @@ mod spell_packet_tests {
             cast_time_ms: 10000,
             target_guid: None,
             cast_item_guid: Some(item),
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
         };
         let pkt = msg.to_world_packet();
         let mut data = pkt.data().clone();

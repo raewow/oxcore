@@ -25,36 +25,58 @@ use std::collections::HashMap;
 pub enum ImplicitTarget {
     None = 0,
     Self_ = 1,
+    EnemyNearCaster = 2,
     FriendNearCaster = 3,
+    UnitNearCaster = 4,
     CasterPet = 5,
-    ChainDamage = 6,
-    AllEnemyInArea = 15,
-    AllEnemyInAreaInstant = 16,
-    EffectSelect = 18,
-    AddExtraAttacks = 19,
-    AllPartyAroundCaster = 20,
+    SingleEnemy = 6,
+    ScriptAoeAtSrc = 7,
+    ScriptAoeAtDest = 8,
+    CasterHomeBind = 9,
+    EnemyAoeAtSrc = 15,
+    EnemyAoeAtDest = 16,
+    Database = 17,
+    CasterDest = 18,
+    PartyWithinCasterRange = 20,
     SingleFriend = 21,
-    AllEnemyInAreaChanneled = 22,
-    AoETargetEnemy = 24,
-    GameObjectItem = 26,
-    PetAndSummons = 27,
-    AllFriendlyInArea = 30,
-    SinglePartyMember = 31,
-    AllPartyRange = 33,
-    NatureSummon = 34,
+    CasterSrc = 22,
+    GameObject = 23,
+    EnemyInCone24 = 24,
+    Unit = 25,
+    Locked = 26,
+    CasterMaster = 27,
+    EnemyAoeAtDynobj = 28,
+    FriendAoeAtSrc = 30,
+    FriendAoeAtDest = 31,
+    UnitMinionPosition = 32,
+    PartyAoeAtSrc = 33,
+    PartyAoeAtDest = 34,
     PartyMember = 35,
-    AoEPartySrc = 37,
+    EnemyWithinCasterRange = 36,
+    FriendAndParty = 37,
+    ScriptNearCaster = 38,
+    FishingSpot = 39,
+    GameObjectScriptNearCaster = 40,
+    CasterFrontRight = 41,
+    CasterBackRight = 42,
+    CasterBackLeft = 43,
+    CasterFrontLeft = 44,
     ChainHeal = 45,
-    ScriptTarget = 46,
-    SelfFishing = 47,
-    GameObjectTarget = 48,
-    AllHostileAroundCaster = 52,
-    CurrentSelection = 53,
-    TargetEnemyNear = 54,
-    DynaObjectCoord = 56,
-    AllFriendlyAroundCaster = 57,
+    LocationScriptNearCaster = 46,
+    CasterFront = 47,
+    CasterBack = 48,
+    CasterLeft = 49,
+    CasterRight = 50,
+    GameObjectScriptAoeAtSrc = 51,
+    GameObjectScriptAoeAtDest = 52,
+    CasterTargetPosition = 53,
+    EnemyInCone54 = 54,
+    CasterFrontLeap = 55,
+    RaidWithinCasterRange = 56,
+    SingleRaid = 57,
+    RaidNearCaster = 58,
+    FriendInCone = 59,
     AllPartyInArea = 61,
-    SingleEnemy = 77,
 }
 
 impl ImplicitTarget {
@@ -62,55 +84,77 @@ impl ImplicitTarget {
         match value {
             0 => Self::None,
             1 => Self::Self_,
-            6 => Self::ChainDamage,
-            15 => Self::AllEnemyInArea,
-            16 => Self::AllEnemyInAreaInstant,
-            18 => Self::EffectSelect,
-            19 => Self::AddExtraAttacks,
-            20 => Self::AllPartyAroundCaster,
+            2 => Self::EnemyNearCaster,
+            3 => Self::FriendNearCaster,
+            4 => Self::UnitNearCaster,
+            5 => Self::CasterPet,
+            6 => Self::SingleEnemy,
+            7 => Self::ScriptAoeAtSrc,
+            8 => Self::ScriptAoeAtDest,
+            9 => Self::CasterHomeBind,
+            15 => Self::EnemyAoeAtSrc,
+            16 => Self::EnemyAoeAtDest,
+            17 => Self::Database,
+            18 => Self::CasterDest,
+            20 => Self::PartyWithinCasterRange,
             21 => Self::SingleFriend,
-            22 => Self::AllEnemyInAreaChanneled,
-            24 => Self::AoETargetEnemy,
-            26 => Self::GameObjectItem,
-            27 => Self::PetAndSummons,
-            30 => Self::AllFriendlyInArea,
-            31 => Self::SinglePartyMember,
-            33 => Self::AllPartyRange,
-            34 => Self::NatureSummon,
+            22 => Self::CasterSrc,
+            23 => Self::GameObject,
+            24 => Self::EnemyInCone24,
+            25 => Self::Unit,
+            26 => Self::Locked,
+            27 => Self::CasterMaster,
+            28 => Self::EnemyAoeAtDynobj,
+            30 => Self::FriendAoeAtSrc,
+            31 => Self::FriendAoeAtDest,
+            32 => Self::UnitMinionPosition,
+            33 => Self::PartyAoeAtSrc,
+            34 => Self::PartyAoeAtDest,
             35 => Self::PartyMember,
-            37 => Self::AoEPartySrc,
+            36 => Self::EnemyWithinCasterRange,
+            37 => Self::FriendAndParty,
+            38 => Self::ScriptNearCaster,
+            39 => Self::FishingSpot,
+            40 => Self::GameObjectScriptNearCaster,
+            41 => Self::CasterFrontRight,
+            42 => Self::CasterBackRight,
+            43 => Self::CasterBackLeft,
+            44 => Self::CasterFrontLeft,
             45 => Self::ChainHeal,
-            46 => Self::ScriptTarget,
-            47 => Self::SelfFishing,
-            48 => Self::GameObjectTarget,
-            52 => Self::AllHostileAroundCaster,
-            53 => Self::CurrentSelection,
-            54 => Self::TargetEnemyNear,
-            56 => Self::DynaObjectCoord,
-            57 => Self::AllFriendlyAroundCaster,
+            46 => Self::LocationScriptNearCaster,
+            47 => Self::CasterFront,
+            48 => Self::CasterBack,
+            49 => Self::CasterLeft,
+            50 => Self::CasterRight,
+            51 => Self::GameObjectScriptAoeAtSrc,
+            52 => Self::GameObjectScriptAoeAtDest,
+            53 => Self::CasterTargetPosition,
+            54 => Self::EnemyInCone54,
+            55 => Self::CasterFrontLeap,
+            56 => Self::RaidWithinCasterRange,
+            57 => Self::SingleRaid,
+            58 => Self::RaidNearCaster,
+            59 => Self::FriendInCone,
             61 => Self::AllPartyInArea,
-            77 => Self::SingleEnemy,
             _ => Self::None,
         }
     }
 
     /// Whether this target type resolves to the caster
     fn is_self_target(&self) -> bool {
-        matches!(self, Self::Self_ | Self::SelfFishing)
+        matches!(self, Self::Self_ | Self::FishingSpot)
     }
 
     /// Whether this target type is a single explicit target from the client
     fn is_explicit_target(&self) -> bool {
         matches!(
             self,
-            Self::EffectSelect
-                | Self::SingleEnemy
+            Self::SingleEnemy
                 | Self::SingleFriend
-                | Self::CurrentSelection
-                | Self::SinglePartyMember
+                | Self::Unit
+                | Self::SingleRaid
                 | Self::PartyMember
-                | Self::GameObjectTarget
-                | Self::GameObjectItem
+                | Self::GameObject
         )
     }
 
@@ -118,17 +162,26 @@ impl ImplicitTarget {
     fn is_area_target(&self) -> bool {
         matches!(
             self,
-            Self::AllEnemyInArea
-                | Self::AllEnemyInAreaInstant
-                | Self::AllEnemyInAreaChanneled
-                | Self::AoETargetEnemy
-                | Self::AllHostileAroundCaster
-                | Self::AllPartyAroundCaster
-                | Self::AllFriendlyInArea
-                | Self::AllFriendlyAroundCaster
-                | Self::AllPartyRange
+            Self::EnemyAoeAtSrc
+                | Self::EnemyAoeAtDest
+                | Self::ScriptAoeAtSrc
+                | Self::ScriptAoeAtDest
+                | Self::PartyWithinCasterRange
+                | Self::PartyAoeAtSrc
+                | Self::PartyAoeAtDest
+                | Self::EnemyWithinCasterRange
+                | Self::EnemyAoeAtDynobj
+                | Self::FriendAoeAtSrc
+                | Self::FriendAoeAtDest
+                | Self::EnemyInCone24
+                | Self::EnemyInCone54
+                | Self::RaidWithinCasterRange
+                | Self::RaidNearCaster
+                | Self::FriendInCone
+                | Self::EnemyNearCaster
+                | Self::FriendNearCaster
+                | Self::UnitNearCaster
                 | Self::AllPartyInArea
-                | Self::AoEPartySrc
         )
     }
 }
@@ -295,6 +348,7 @@ pub fn resolve_spell_targets(
         let target_b = ImplicitTarget::from_u32(spell_entry.effect_implicit_target_b[effect_idx]);
 
         let mut targets = Vec::new();
+        let effect_chain_target = spell_entry.effect_chain_target[effect_idx];
 
         // Resolve target_a
         resolve_implicit_target(
@@ -305,6 +359,7 @@ pub fn resolve_spell_targets(
             caster_guid,
             world,
             &mut targets,
+            effect_chain_target,
         );
 
         // Resolve target_b (if different from target_a and not None)
@@ -317,6 +372,7 @@ pub fn resolve_spell_targets(
                 caster_guid,
                 world,
                 &mut targets,
+                effect_chain_target,
             );
         }
 
@@ -369,6 +425,7 @@ fn resolve_implicit_target(
     caster_guid: ObjectGuid,
     world: &World,
     targets: &mut Vec<ObjectGuid>,
+    effect_chain_target: u32,
 ) {
     if target_type.is_self_target() {
         targets.push(caster_guid);
@@ -376,136 +433,195 @@ fn resolve_implicit_target(
     }
 
     if target_type.is_explicit_target() {
-        // Use the explicit target from the client
         if let Some(guid) = cast_targets.unit_target() {
             targets.push(guid);
         }
         return;
     }
 
-    // Get spell radius for area effects
     let radius = get_effect_radius(spell_entry, effect_idx, world);
 
     match target_type {
-        // Area enemy targets
-        ImplicitTarget::AllEnemyInArea
-        | ImplicitTarget::AllEnemyInAreaInstant
-        | ImplicitTarget::AllEnemyInAreaChanneled
-        | ImplicitTarget::AoETargetEnemy => {
-            let push_type = if cast_targets.dst_position.is_some() {
+        ImplicitTarget::EnemyAoeAtSrc
+        | ImplicitTarget::ScriptAoeAtSrc
+        | ImplicitTarget::EnemyInCone24
+        | ImplicitTarget::EnemyInCone54 => {
+            fill_area_targets(
+                world, caster_guid, cast_targets, radius,
+                SpellNotifyPushType::SelfCenter, SpellTargets::Hostile,
+                None, false, targets,
+            );
+        }
+
+        ImplicitTarget::EnemyAoeAtDest | ImplicitTarget::ScriptAoeAtDest => {
+            let push = if cast_targets.dst_position.is_some() {
                 SpellNotifyPushType::DestCenter
             } else {
                 SpellNotifyPushType::SelfCenter
             };
             fill_area_targets(
-                world,
-                caster_guid,
-                cast_targets,
-                radius,
-                push_type,
-                SpellTargets::Hostile,
-                None,
-                false,
-                targets,
+                world, caster_guid, cast_targets, radius,
+                push, SpellTargets::Hostile,
+                None, false, targets,
             );
         }
 
-        // All hostile around caster
-        ImplicitTarget::AllHostileAroundCaster => {
+        ImplicitTarget::EnemyWithinCasterRange => {
             fill_area_targets(
-                world,
-                caster_guid,
-                cast_targets,
-                radius,
-                SpellNotifyPushType::SelfCenter,
-                SpellTargets::Hostile,
-                None,
-                false,
-                targets,
+                world, caster_guid, cast_targets, radius,
+                SpellNotifyPushType::SelfCenter, SpellTargets::Hostile,
+                None, false, targets,
             );
         }
 
-        ImplicitTarget::TargetEnemyNear => {
-            let center = get_unit_position(caster_guid, world);
-            let nearby = get_units_in_range(caster_guid, center, radius, world);
-            for guid in nearby {
-                if guid != caster_guid && is_hostile(caster_guid, guid, world) {
-                    targets.push(guid);
-                }
-            }
+        ImplicitTarget::FriendAoeAtSrc => {
+            fill_area_targets(
+                world, caster_guid, cast_targets, radius,
+                SpellNotifyPushType::SrcCenter, SpellTargets::Friendly,
+                None, false, targets,
+            );
         }
 
-        // Party/friendly area targets
-        ImplicitTarget::AllPartyAroundCaster
-        | ImplicitTarget::AllPartyRange
-        | ImplicitTarget::AllPartyInArea
-        | ImplicitTarget::AoEPartySrc => {
-            // Faithful port of Spell::FillRaidOrPartyTargets for the party target
-            // modes. The current ImplicitTarget set has no dedicated raid variant,
-            // so raid=false here; with_pets/with_caster follow the common
-            // party-around-caster call. Pets are not tracked yet, so with_pets
-            // never actually appends. The solo path still yields the caster,
-            // preserving the previous "include self" behaviour. ...
+        ImplicitTarget::FriendAoeAtDest => {
+            fill_area_targets(
+                world, caster_guid, cast_targets, radius,
+                SpellNotifyPushType::DestCenter, SpellTargets::Friendly,
+                None, false, targets,
+            );
+        }
+
+        ImplicitTarget::FriendInCone | ImplicitTarget::EnemyAoeAtDynobj => {
+            fill_area_targets(
+                world, caster_guid, cast_targets, radius,
+                SpellNotifyPushType::SelfCenter, SpellTargets::Friendly,
+                None, false, targets,
+            );
+        }
+
+        ImplicitTarget::PartyWithinCasterRange
+        | ImplicitTarget::PartyAoeAtSrc
+        | ImplicitTarget::PartyAoeAtDest
+        | ImplicitTarget::AllPartyInArea => {
             let params = RaidPartyFillParams {
-                caster_guid,
-                radius,
-                raid: false,
-                with_pets: true,
-                with_caster: true,
-                spell_level: spell_entry.spell_level,
+                caster_guid, radius, raid: false, with_pets: true,
+                with_caster: true, spell_level: spell_entry.spell_level,
             };
             fill_raid_or_party_targets(caster_guid, &params, world, targets);
         }
 
-        ImplicitTarget::AllFriendlyInArea | ImplicitTarget::AllFriendlyAroundCaster => {
-            fill_area_targets(
-                world,
-                caster_guid,
-                cast_targets,
-                radius,
-                SpellNotifyPushType::SelfCenter,
-                SpellTargets::Friendly,
-                None,
-                false,
-                targets,
-            );
+        ImplicitTarget::RaidWithinCasterRange | ImplicitTarget::RaidNearCaster => {
+            let params = RaidPartyFillParams {
+                caster_guid, radius, raid: true, with_pets: true,
+                with_caster: false, spell_level: spell_entry.spell_level,
+            };
+            fill_raid_or_party_targets(caster_guid, &params, world, targets);
         }
 
-        // Chain targets
-        ImplicitTarget::ChainDamage => {
-            if let Some(primary) = cast_targets.unit_target() {
-                targets.push(primary);
-                // TODO: Chain to additional targets based on effect value
-            }
+        ImplicitTarget::EnemyNearCaster => {
+            resolve_chain_targets(caster_guid, radius, effect_chain_target,
+                true, false, spell_entry, cast_targets, world, targets);
+        }
+
+        ImplicitTarget::FriendNearCaster => {
+            resolve_chain_targets(caster_guid, radius, effect_chain_target,
+                false, false, spell_entry, cast_targets, world, targets);
+        }
+
+        ImplicitTarget::UnitNearCaster => {
+            resolve_chain_targets(caster_guid, radius, effect_chain_target,
+                false, false, spell_entry, cast_targets, world, targets);
+        }
+
+        ImplicitTarget::SingleEnemy => {
+            resolve_single_enemy_target(effect_chain_target, spell_entry,
+                cast_targets, caster_guid, radius, world, targets);
         }
 
         ImplicitTarget::ChainHeal => {
-            if let Some(primary) = cast_targets.unit_target() {
-                targets.push(primary);
-                // TODO: Chain to additional injured friendly targets
+            resolve_chain_heal(caster_guid, radius, effect_chain_target,
+                cast_targets, spell_entry, world, targets);
+        }
+
+        ImplicitTarget::CasterPet => {
+            if let Some(pet_guid) = caster_pet_or_charm(caster_guid, world) {
+                targets.push(pet_guid);
             }
         }
 
-        // Script/special targets
-        ImplicitTarget::ScriptTarget | ImplicitTarget::DynaObjectCoord => {
-            // Use destination position for dynamic object effects
+        ImplicitTarget::CasterMaster => {
+            if let Some(owner) = caster_charm_owner(caster_guid, world) {
+                targets.push(owner);
+            }
+        }
+
+        ImplicitTarget::PartyMember => {
+            resolve_party_member(caster_guid, spell_entry, cast_targets, world, targets);
+        }
+
+        ImplicitTarget::GameObject => {
+            if let Some(go_guid) = cast_targets.gameobject_target_guid {
+                targets.push(go_guid);
+            }
+        }
+
+        ImplicitTarget::Locked => {
+            if let Some(go_guid) = cast_targets.gameobject_target_guid {
+                targets.push(go_guid);
+            }
+        }
+
+        ImplicitTarget::CasterSrc | ImplicitTarget::Database | ImplicitTarget::CasterHomeBind => {}
+
+        ImplicitTarget::CasterTargetPosition => {
+            if let Some(unit_target) = cast_targets.unit_target() {
+                targets.push(unit_target);
+            }
+        }
+
+        ImplicitTarget::CasterDest => {
+            resolve_caster_dest(spell_entry, effect_idx, caster_guid, cast_targets, world, targets);
+        }
+
+        ImplicitTarget::ScriptNearCaster
+        | ImplicitTarget::GameObjectScriptNearCaster
+        | ImplicitTarget::LocationScriptNearCaster => {
             if let Some(guid) = cast_targets.unit_target() {
                 targets.push(guid);
             }
         }
 
-        ImplicitTarget::PetAndSummons => {
-            // TODO: Get player's pet GUID
-            targets.push(caster_guid);
+        ImplicitTarget::GameObjectScriptAoeAtSrc | ImplicitTarget::GameObjectScriptAoeAtDest => {}
+
+        ImplicitTarget::FriendAndParty => {
+            let params = RaidPartyFillParams {
+                caster_guid, radius, raid: false, with_pets: true,
+                with_caster: true, spell_level: spell_entry.spell_level,
+            };
+            fill_raid_or_party_targets(caster_guid, &params, world, targets);
         }
 
-        ImplicitTarget::AddExtraAttacks | ImplicitTarget::NatureSummon => {
-            targets.push(caster_guid);
+        ImplicitTarget::SingleRaid => {
+            if let Some(guid) = cast_targets.unit_target() {
+                targets.push(guid);
+            }
         }
 
-        _ => {
-            // Unknown target type, fall through to explicit target fallback
+        ImplicitTarget::UnitMinionPosition
+        | ImplicitTarget::CasterFrontRight
+        | ImplicitTarget::CasterBackRight
+        | ImplicitTarget::CasterBackLeft
+        | ImplicitTarget::CasterFrontLeft
+        | ImplicitTarget::CasterFront
+        | ImplicitTarget::CasterBack
+        | ImplicitTarget::CasterLeft
+        | ImplicitTarget::CasterRight
+        | ImplicitTarget::CasterFrontLeap => {
+            if let Some(unit_caster) = unit_guid_to_player_or_creature(caster_guid, world) {
+                targets.push(unit_caster);
+            }
         }
+
+        _ => {}
     }
 }
 
@@ -1374,6 +1490,214 @@ fn push_unit_and_pet(
         }
     }
 }
+
+// ─── SetTargetMap helper constants ─────────────────────────────────────────────
+
+/// Maximum distance for a chain spell hop (between targets) from CHAIN_SPELL_JUMP_RADIUS.
+const CHAIN_SPELL_JUMP_RADIUS: f32 = 10.0;
+
+// ─── SetTargetMap new target-mode helpers ─────────────────────────────────────
+
+/// Get a pet or charmed unit GUID for the caster.
+/// Pets are not tracked yet, so returns `None`. ...
+fn caster_pet_or_charm(_caster_guid: ObjectGuid, _world: &World) -> Option<ObjectGuid> {
+    None
+}
+
+/// Get the charmer or owner of a unit.
+fn caster_charm_owner(guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
+    if guid.is_player() {
+        None
+    } else if guid.is_creature_or_pet() {
+        world.managers.creature_mgr.with_creature(guid, |c| {
+            // Charm/owner not tracked yet
+            None::<ObjectGuid>
+        }).flatten()
+    } else {
+        None
+    }
+}
+
+/// Resolve a unit GUID to a player or creature GUID if it exists.
+fn unit_guid_to_player_or_creature(guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
+    if guid.is_player() {
+        world.systems.player.manager().with_player(guid, |_| guid)
+    } else if guid.is_creature_or_pet() {
+        world.managers.creature_mgr.with_creature(guid, |_| guid)
+    } else {
+        None
+    }
+}
+
+/// Chain-target resolution: pick a primary target from those in initial radius,
+/// then chain-hop to additional targets within CHAIN_SPELL_JUMP_RADIUS.
+fn resolve_chain_targets(
+    caster_guid: ObjectGuid,
+    radius: f32,
+    effect_chain_target: u32,
+    is_enemy: bool,
+    _is_chain_heal: bool,
+    _spell_entry: &crate::dbc::structures::SpellEntry,
+    _cast_targets: &SpellCastTargets,
+    world: &World,
+    targets: &mut Vec<ObjectGuid>,
+) {
+    let chains = effect_chain_target.max(1) as usize;
+    let max_range = radius + chains as f32 * CHAIN_SPELL_JUMP_RADIUS;
+    let center = get_unit_position(caster_guid, world);
+    let nearby = get_units_in_range(caster_guid, center, max_range, world);
+
+    let mut candidates: Vec<ObjectGuid> = if is_enemy {
+        nearby.into_iter().filter(|g| *g != caster_guid && is_hostile(caster_guid, *g, world)).collect()
+    } else {
+        nearby.into_iter().filter(|g| *g != caster_guid && !is_hostile(caster_guid, *g, world)).collect()
+    };
+
+    candidates.sort_by(|a, b| {
+        let da = dist_between(caster_guid, *a, world);
+        let db = dist_between(caster_guid, *b, world);
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let primary_idx = candidates.iter().position(|g| dist_between(caster_guid, *g, world) <= radius);
+    let primary = match primary_idx { Some(i) => candidates.remove(i), None => return };
+    targets.push(primary);
+
+    let mut prev = primary;
+    let mut remaining = chains.saturating_sub(1);
+    while remaining > 0 {
+        let next_idx = candidates.iter().position(|g| dist_between(prev, *g, world) <= CHAIN_SPELL_JUMP_RADIUS);
+        match next_idx {
+            Some(i) => { let next = candidates.remove(i); targets.push(next); prev = next; remaining -= 1; }
+            None => break,
+        }
+    }
+}
+
+/// Single enemy target with magnet redirection and optional chain.
+fn resolve_single_enemy_target(
+    effect_chain_target: u32,
+    spell_entry: &crate::dbc::structures::SpellEntry,
+    cast_targets: &SpellCastTargets,
+    caster_guid: ObjectGuid,
+    radius: f32,
+    world: &World,
+    targets: &mut Vec<ObjectGuid>,
+) {
+    let Some(unit_target) = cast_targets.unit_target() else { return };
+    let target = select_magnet_target(unit_target, spell_entry, world);
+    if effect_chain_target <= 1 {
+        targets.push(target);
+        return;
+    }
+
+    let chains = effect_chain_target as usize;
+    let max_range = if spell_entry.dmg_class == 1 { radius } else { radius + chains as f32 * CHAIN_SPELL_JUMP_RADIUS };
+    let center = get_unit_position(caster_guid, world);
+    let nearby = get_units_in_range(caster_guid, center, max_range, world);
+    let mut candidates: Vec<ObjectGuid> = nearby.into_iter()
+        .filter(|g| *g != caster_guid && *g != target && is_hostile(caster_guid, *g, world))
+        .collect();
+
+    targets.push(target);
+    let mut prev = target;
+    let mut remaining = chains.saturating_sub(1);
+    while remaining > 0 {
+        let next_idx = candidates.iter().position(|g| dist_between(prev, *g, world) <= CHAIN_SPELL_JUMP_RADIUS);
+        match next_idx {
+            Some(i) => { let next = candidates.remove(i); targets.push(next); prev = next; remaining -= 1; }
+            None => break,
+        }
+    }
+}
+
+/// Chain heal resolution.
+fn resolve_chain_heal(
+    caster_guid: ObjectGuid,
+    radius: f32,
+    effect_chain_target: u32,
+    cast_targets: &SpellCastTargets,
+    _spell_entry: &crate::dbc::structures::SpellEntry,
+    world: &World,
+    targets: &mut Vec<ObjectGuid>,
+) {
+    let Some(primary) = cast_targets.unit_target() else { return };
+    targets.push(primary);
+    if effect_chain_target <= 1 { return; }
+
+    let chains = effect_chain_target as usize;
+    let max_range = radius + chains as f32 * CHAIN_SPELL_JUMP_RADIUS;
+    let center = get_unit_position(caster_guid, world);
+    let nearby = get_units_in_range(caster_guid, center, max_range, world);
+    let mut candidates: Vec<ObjectGuid> = nearby.into_iter()
+        .filter(|g| *g != caster_guid && *g != primary && !is_hostile(caster_guid, *g, world))
+        .collect();
+
+    let mut prev = primary;
+    let mut remaining = chains.saturating_sub(1);
+    while remaining > 0 {
+        let next_idx = candidates.iter().position(|g| dist_between(prev, *g, world) <= CHAIN_SPELL_JUMP_RADIUS);
+        match next_idx {
+            Some(i) => { let next = candidates.remove(i); targets.push(next); prev = next; remaining -= 1; }
+            None => break,
+        }
+    }
+}
+
+/// Party-member exclusive target (not the caster).
+fn resolve_party_member(
+    caster_guid: ObjectGuid,
+    _spell_entry: &crate::dbc::structures::SpellEntry,
+    cast_targets: &SpellCastTargets,
+    world: &World,
+    targets: &mut Vec<ObjectGuid>,
+) {
+    let Some(unit_target) = cast_targets.unit_target() else { return };
+    if unit_target == caster_guid { return; }
+
+    let group = world.systems.group.get_player_group(caster_guid);
+    let same_group = group.as_ref().and_then(|g| g.get_member(unit_target)).is_some();
+    if same_group {
+        targets.push(unit_target);
+    }
+}
+
+/// Resolve TARGET_LOCATION_CASTER_DEST (18) inner switch.
+fn resolve_caster_dest(
+    spell_entry: &crate::dbc::structures::SpellEntry,
+    effect_idx: usize,
+    caster_guid: ObjectGuid,
+    cast_targets: &SpellCastTargets,
+    _world: &World,
+    targets: &mut Vec<ObjectGuid>,
+) {
+    let effect = spell_entry.effect[effect_idx];
+    match effect {
+        32 | 44 | 36 | 41 | 43 => {
+            if let Some(unit_caster) = unit_guid_to_player_or_creature(caster_guid, _world) {
+                targets.push(unit_caster);
+            }
+        }
+        63 => {}
+        _ => {
+            if let Some(unit_target) = cast_targets.unit_target() {
+                targets.push(unit_target);
+            }
+        }
+    }
+}
+
+/// Euclidean distance between two unit positions.
+fn dist_between(a: ObjectGuid, b: ObjectGuid, world: &World) -> f32 {
+    let pa = get_unit_position(a, world);
+    let pb = get_unit_position(b, world);
+    let dx = pa.x - pb.x;
+    let dy = pa.y - pb.y;
+    let dz = pa.z - pb.z;
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

@@ -1110,6 +1110,8 @@ pub fn execute_creature_spell_cast(
         miss_targets: Vec::new(),
         target_guid,
         cast_item_guid: None,
+        ammo_display_id: 0,
+        ammo_inventory_type: 0,
     };
     broadcast_around_creature(world, creature_guid, &msg.to_world_packet());
 

@@ -432,6 +432,8 @@ pub(crate) fn build_trainer_anim_packets(
         cast_time_ms: 0,
         target_guid: Some(player_guid),
         cast_item_guid: None,
+        ammo_display_id: 0,
+        ammo_inventory_type: 0,
     }
     .to_world_packet();
 
@@ -444,6 +446,8 @@ pub(crate) fn build_trainer_anim_packets(
         miss_targets: vec![],
         target_guid: Some(player_guid),
         cast_item_guid: None,
+        ammo_display_id: 0,
+        ammo_inventory_type: 0,
     }
     .to_world_packet();
 

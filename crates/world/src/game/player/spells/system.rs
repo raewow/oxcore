@@ -402,6 +402,32 @@ pub struct SpellSystem {
     event_queue: Mutex<SpellEventQueue>,
 }
 
+/// Resolve ammo projectile display info for SMSG_SPELL_START / SMSG_SPELL_GO.
+///
+/// Returns `(ammo_display_id, ammo_inventory_type)`. Zero values mean no
+/// projectile (wand spell, no ranged weapon, or no ammo equipped).
+/// Mirrors MaNGOS `Spell::WriteAmmoToPacket` (Spell.cpp:4528-4594).
+fn resolve_ammo_for_caster(caster_guid: ObjectGuid, world: &World) -> (u32, u32) {
+    const INVTYPE_AMMO: u8 = 26;
+
+    let ammo_id = world
+        .systems
+        .player
+        .manager()
+        .with_player(caster_guid, |p| p.ammo_id)
+        .unwrap_or(0);
+
+    if ammo_id == 0 {
+        return (0, 0);
+    }
+
+    if let Some(template) = world.managers.item_mgr.get_template(ammo_id) {
+        return (template.display_id, INVTYPE_AMMO as u32);
+    }
+
+    (0, 0)
+}
+
 impl SpellSystem {
     /// Send the remaining duration for an active channel to its caster.
     pub fn send_channel_update(&self, caster_guid: ObjectGuid, remaining_ms: u32) {
@@ -757,6 +783,7 @@ impl SpellSystem {
         }
 
         // Broadcast SMSG_SPELL_START to nearby players
+        let (ammo_display_id, ammo_inventory_type) = resolve_ammo_for_caster(caster_guid, world);
         let msg = SmsgSpellStart {
             caster_guid,
             caster_guid_pack: caster_guid,
@@ -765,6 +792,8 @@ impl SpellSystem {
             cast_time_ms,
             target_guid,
             cast_item_guid,
+            ammo_display_id,
+            ammo_inventory_type,
         };
         self.broadcast_mgr
             .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
@@ -883,6 +912,7 @@ impl SpellSystem {
         }
 
         // Broadcast SMSG_SPELL_GO to show the channel began
+        let (ammo_display_id, ammo_inventory_type) = resolve_ammo_for_caster(caster_guid, world);
         let msg = SmsgSpellGo {
             caster_guid,
             caster_guid_pack: caster_guid,
@@ -892,6 +922,8 @@ impl SpellSystem {
             miss_targets: Vec::new(),
             target_guid,
             cast_item_guid,
+            ammo_display_id,
+            ammo_inventory_type,
         };
         self.broadcast_mgr
             .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
@@ -1703,6 +1735,7 @@ impl SpellSystem {
         }
 
         // Broadcast SMSG_SPELL_GO
+        let (ammo_display_id, ammo_inventory_type) = resolve_ammo_for_caster(caster_guid, world);
         let msg = SmsgSpellGo {
             caster_guid,
             caster_guid_pack: caster_guid,
@@ -1712,6 +1745,8 @@ impl SpellSystem {
             miss_targets: Vec::new(),
             target_guid,
             cast_item_guid,
+            ammo_display_id,
+            ammo_inventory_type,
         };
         self.broadcast_mgr
             .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
@@ -2860,9 +2895,9 @@ impl SpellSystem {
         let _ = self.send_cast_failure(caster_guid, spell_id, error, world);
     }
 
-    // =========================================================================
-    // SpellCaster Query Methods
-    // =========================================================================
+// =========================================================================
+// SpellCaster Query Methods
+// =========================================================================
 
     /// CheckAndIncreaseCastCounter: limit casts in chain per config.
     pub fn check_and_increase_cast_counter(&self, caster_guid: ObjectGuid, world: &World) -> bool {
