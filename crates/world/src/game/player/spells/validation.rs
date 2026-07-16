@@ -448,6 +448,8 @@ pub fn spell_cast_error_to_u8(error: SpellCastError) -> u8 {
         TargetsDead => 0x65,           // SPELL_FAILED_TARGETS_DEAD
         DamageImmune => 0x22,          // SPELL_FAILED_IMMUNE (closest mapping)
         AlreadyBeingTamed => 0x03,     // SPELL_FAILED_ALREADY_BEING_TAMED
+        RequiresArea => 0x54,          // SPELL_FAILED_REQUIRES_AREA
+        OnlyBattlegrounds => 0x53,     // SPELL_FAILED_ONLY_BATTLEGROUNDS
     }
 }
 

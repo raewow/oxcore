@@ -297,9 +297,77 @@ pub fn is_skill_bonus_spell(spell_id: u32, dbc: &DbcManager) -> bool {
         .entries()
         .filter(|(_, ability)| ability.spell_id == spell_id)
         .any(|(_, ability)| {
+
             ability.learn_on_get_skill == ABILITY_LEARNED_ON_GET_PROFESSION_SKILL
-                && ability.req_skill_value > 0
         })
+}
+
+/// Port of `SpellInternal::IsSpellWithDelayableEffects` (SpellMgr.cpp:3294).
+/// Returns true when every effect in the spell can be delayed (batched). CC
+/// spells, channeled, next-melee-swing and ranged spells are handled specially.
+pub fn is_spell_with_delayable_effects(spell: &SpellEntry) -> bool {
+    // CC spells are always delayable
+    if spell.effect_apply_aura_name.iter().any(|&aura| {
+        matches!(
+            aura,
+            4 | 7 | 9 | 11 | 12 | 16 | 17 | 18 | 22 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31
+                | 32 | 33 | 35 | 37 | 39 | 40 | 44 | 46 | 52 | 53 | 54 | 55 | 56 | 57 | 59 | 64
+                | 65 | 67 | 68 | 69 | 70 | 74 | 75 | 76 | 78 | 79 | 80 | 81 | 82 | 83 | 91 | 92
+                | 95 | 96 | 98 | 102 | 104 | 105 | 106
+        )
+    }) {
+        return true;
+    }
+
+    // Flash of Light (Paladin, SpellIconID 242)
+    if spell.spell_family_name == 10 && spell.spell_icon_id == 242 {
+        return true;
+    }
+
+    // Demonic Sacrifice (18788)
+    if spell.id == 18788 {
+        return true;
+    }
+
+    // Execute (Warrior, spell family mask CF_WARRIOR_EXECUTE)
+    if spell.spell_family_name == 4 && (spell.spell_family_flags & 0x2000_0000) != 0 {
+        return true;
+    }
+
+    // Channeled, next-melee-swing, or ranged spells are never delayable
+    if (spell.channel_interrupt_flags != 0)
+        || (spell.attributes & 0x0000_0002) != 0
+        || (spell.attributes & 0x0000_0004) != 0
+    {
+        return false;
+    }
+
+    // If any effect is NOT delayable, the whole spell is NOT delayable
+    for i in 0..spell.effect.len() {
+        if spell.effect[i] != 0 && !is_delayable_effect(spell.effect[i]) {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Returns true when the given effect type can be delayed (batched).
+/// Mirrors `SpellEntry::IsDelayableEffect` from MaNGOS.
+fn is_delayable_effect(effect: u32) -> bool {
+    matches!(
+        effect,
+        1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19
+            | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35
+            | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47 | 48 | 49 | 50 | 51
+            | 52 | 53 | 54 | 55 | 56 | 57 | 58 | 59 | 60 | 61 | 62 | 63 | 64 | 65 | 66 | 67
+            | 68 | 69 | 70 | 71 | 72 | 73 | 74 | 75 | 76 | 77 | 78 | 79 | 80 | 81 | 82 | 83
+            | 84 | 85 | 86 | 87 | 88 | 89 | 90 | 91 | 92 | 93 | 94 | 95 | 96 | 97 | 98 | 99
+            | 100 | 101 | 102 | 103 | 104 | 105 | 106 | 107 | 108 | 109 | 110 | 111 | 112 | 113
+            | 114 | 115 | 116 | 117 | 118 | 119 | 120 | 121 | 122 | 123 | 124 | 125 | 126 | 127
+            | 128 | 129 | 130 | 131 | 132 | 133 | 134 | 135 | 136 | 137 | 138 | 139 | 140 | 141
+            | 142
+    )
 }
 
 #[cfg(test)]
@@ -593,5 +661,106 @@ mod tests {
             },
         );
         assert!(!is_skill_bonus_spell(100, &dbc));
+    }
+
+    #[test]
+    fn is_spell_with_delayable_effects_works() {
+        use crate::dbc::structures::SpellEntry;
+
+        fn base_entry(id: u32) -> SpellEntry {
+            SpellEntry {
+                id,
+                name: String::new(),
+                rank_text: String::new(),
+                school: 0,
+                category: 0,
+                dispel: 0,
+                mechanic: 0,
+                attributes: 0,
+                attributes_ex: 0,
+                attributes_ex2: 0,
+                attributes_ex3: 0,
+                attributes_ex4: 0,
+                stances: 0,
+                stances_not: 0,
+                targets: 0,
+                target_creature_type: 0,
+                requires_spell_focus: 0,
+                caster_aura_state: 0,
+                target_aura_state: 0,
+                casting_time_index: 0,
+                recovery_time: 0,
+                category_recovery_time: 0,
+                interrupt_flags: 0,
+                aura_interrupt_flags: 0,
+                channel_interrupt_flags: 0,
+                proc_flags: 0,
+                proc_chance: 0,
+                proc_charges: 0,
+                max_level: 0,
+                base_level: 0,
+                spell_level: 0,
+                duration_index: 0,
+                power_type: 0,
+                mana_cost: 0,
+                mana_cost_per_level: 0,
+                mana_per_second: 0,
+                mana_per_second_per_level: 0,
+                range_index: 0,
+                speed: 0.0,
+                stack_amount: 0,
+                totem: [0; 2],
+                reagent: [0; 8],
+                reagent_count: [0; 8],
+                equipped_item_class: 0,
+                equipped_item_sub_class_mask: 0,
+                equipped_item_inventory_type_mask: 0,
+                effect: [0; 3],
+                effect_die_sides: [0; 3],
+                effect_base_dice: [0; 3],
+                effect_dice_per_level: [0.0; 3],
+                effect_real_points_per_level: [0.0; 3],
+                effect_base_points: [0; 3],
+                effect_bonus_coefficient: [0.0; 3],
+                effect_mechanic: [0; 3],
+                effect_implicit_target_a: [0; 3],
+                effect_implicit_target_b: [0; 3],
+                effect_radius_index: [0; 3],
+                effect_apply_aura_name: [0; 3],
+                effect_amplitude: [0; 3],
+                effect_multiple_value: [0.0; 3],
+                effect_chain_target: [0; 3],
+                effect_item_type: [0; 3],
+                effect_misc_value: [0; 3],
+                effect_trigger_spell: [0; 3],
+                effect_points_per_combo_point: [0.0; 3],
+                spell_visual: 0,
+                spell_icon_id: 0,
+                active_icon_id: 0,
+                spell_priority: 0,
+                min_target_level: 0,
+                mana_cost_percentage: 0,
+                start_recovery_category: 0,
+                start_recovery_time: 0,
+                max_target_level: 0,
+                spell_family_name: 0,
+                spell_family_flags: 0,
+                max_affected_targets: 0,
+                dmg_class: 0,
+                prevention_type: 0,
+                custom: 0,
+                internal: 0,
+                allowed_target_mask: 0,
+                script_id: 0,
+                dmg_multiplier: [1.0; 3],
+            }
+        }
+
+        let mut fear = base_entry(5782);
+        fear.effect_apply_aura_name = [10, 0, 0]; // SPELL_AURA_MOD_FEAR
+        assert!(is_spell_with_delayable_effects(&fear));
+
+        let empty = base_entry(0);
+        assert!(!is_spell_with_delayable_effects(&empty));
     }
 }

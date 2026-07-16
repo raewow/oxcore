@@ -1011,6 +1011,10 @@ pub enum SpellCastError {
     NotTradeable,
     RequiresSpellFocus,
     TargetNotPlayer,
+    /// Spell can only be used in a specific area (SPELL_FAILED_REQUIRES_AREA)
+    RequiresArea,
+    /// Spell can only be used in battlegrounds (SPELL_FAILED_ONLY_BATTLEGROUNDS)
+    OnlyBattlegrounds,
 }
 
 /// Result of a spell cast attempt
