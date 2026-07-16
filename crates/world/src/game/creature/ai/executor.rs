@@ -7,6 +7,7 @@ use super::types::{AIAction, AIState, AIType};
 use crate::game::broadcast_mgr::broadcast_around_creature;
 use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
+use rand::Rng;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Execute a batch of AI actions for a creature
@@ -1232,6 +1233,141 @@ pub fn do_cast_spell_if_can(
     true
 }
 
+/// CreatureAI::SetSpellsList(uint32 entry) — load a creature_spells template by ID.
+///
+/// Clears the list when entry is 0. Otherwise logs a warning — loading from the
+/// creature_spells DB table is not yet implemented (no Rust repository exists).
+/// Callers that have a pre-loaded list can use `set_spells_list` on AIStateData directly.
+pub fn set_spells_list_from_db(world: &World, creature_guid: ObjectGuid, entry: u32) {
+    if entry == 0 {
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(creature_guid, |c| {
+                c.ai_state_data.clear_spells_list();
+            });
+        return;
+    }
+    // ... CreatureSpellsList loading from DB not yet implemented
+    tracing::warn!(
+        "[AI] Creature {:?} tried to load creature_spells entry {} — not yet implemented",
+        creature_guid,
+        entry
+    );
+}
+
+/// CreatureAI::UpdateSpellsList — ticks the casting delay and fires DoSpellsListCasts
+/// when the delay expires. Matches the 1.2s research-based update interval.
+pub fn update_spells_list(world: &World, creature_guid: ObjectGuid, diff_ms: u32) {
+    const CREATURE_CASTING_DELAY: u32 = 1200;
+
+    let should_cast = world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |c| {
+            let data = &mut c.ai_state_data;
+            if data.casting_delay <= diff_ms {
+                let desync = diff_ms - data.casting_delay;
+                data.casting_delay = if desync < CREATURE_CASTING_DELAY {
+                    CREATURE_CASTING_DELAY - desync
+                } else {
+                    0
+                };
+                true
+            } else {
+                data.casting_delay -= diff_ms;
+                false
+            }
+        })
+        .unwrap_or(false);
+
+    if should_cast {
+        do_spells_list_casts(world, creature_guid, CREATURE_CASTING_DELAY);
+    }
+}
+
+/// CreatureAI::DoSpellsListCasts — iterate the creature's spell list, decrement
+/// cooldowns, and cast spells whose cooldown has expired.
+///
+/// Casting result handling is approximated: only SPELL_CAST_OK resets the cooldown;
+/// other results (fleeing, in-progress, try-again, etc.) leave cooldown at 0 to
+/// retry next tick. Target resolution via castTarget/GetTargetByType is not yet
+/// implemented — uses the creature's current attack target.
+pub fn do_spells_list_casts(world: &World, creature_guid: ObjectGuid, diff_ms: u32) {
+    // Gather the spells list and current attack target
+    let (spells, attack_target) = world
+        .managers
+        .creature_mgr
+        .with_creature(creature_guid, |c| {
+            (
+                c.ai_state_data.spells_list.clone(),
+                c.combat.attacking,
+            )
+        })
+        .unwrap_or_default();
+
+    if spells.is_empty() {
+        return;
+    }
+
+    let mut spells_to_update: Vec<(usize, u32)> = Vec::new();
+    let mut dont_cast = false;
+
+    for (idx, spell) in spells.iter().enumerate() {
+        if spell.cooldown <= diff_ms {
+            // Cooldown expired
+            let cooldown = 0u32;
+
+            // Skip non-triggered spells if already cast this tick or creature is casting
+            let is_triggered = (spell.inner.cast_flags & 0x2) != 0;
+            let interrupt_prev = (spell.inner.cast_flags & 0x1) != 0;
+            if !(is_triggered || interrupt_prev) {
+                if dont_cast {
+                    spells_to_update.push((idx, spell.cooldown.saturating_sub(diff_ms)));
+                    continue;
+                }
+                // ... IsNonMeleeSpellCasted check skipped — not tracked for creatures yet
+            }
+
+            let target = attack_target;
+            let spell_id = spell.inner.spell_id as u32;
+
+            // Attempt cast via execute_creature_spell_cast
+            // ... TryToCast result handling approximated (only OK resets cooldown)
+            let triggered = is_triggered;
+            if world.managers.spell_mgr.get(spell_id).is_some() {
+                execute_creature_spell_cast(world, creature_guid, spell_id, target, triggered);
+                // Cast succeeded
+                dont_cast = !triggered;
+                let new_cooldown = if spell.inner.delay_repeat_max > spell.inner.delay_repeat_min {
+                    rand::thread_rng()
+                        .gen_range(spell.inner.delay_repeat_min..=spell.inner.delay_repeat_max)
+                } else {
+                    spell.inner.delay_repeat_min
+                };
+                spells_to_update.push((idx, new_cooldown));
+            } else {
+                // Unknown spell — keep cooldown at 0 for next tick
+                spells_to_update.push((idx, 0));
+            }
+        } else {
+            spells_to_update.push((idx, spell.cooldown.saturating_sub(diff_ms)));
+        }
+    }
+
+    // Apply cooldown updates
+    world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |c| {
+            for (idx, cd) in spells_to_update {
+                if let Some(entry) = c.ai_state_data.spells_list.get_mut(idx) {
+                    entry.cooldown = cd;
+                }
+            }
+        });
+}
+
 /// Apply spell damage from a creature to a target.
 fn apply_creature_spell_damage(
     world: &World,
@@ -1693,5 +1829,116 @@ mod tests {
             0x1, // CF_TRIGGERED
         );
         assert!(result, "triggered cast should succeed when ready");
+    }
+
+    // ── CreatureAI spell list helpers ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn update_spells_list_ticks_delay_and_fires_casts() {
+        let world = test_world();
+        let spell_entry = test_spell(300);
+        world.managers.spell_mgr.add_spell(spell_entry);
+
+        let creature_guid = ObjectGuid::new_creature(1, 1);
+        world
+            .managers
+            .creature_mgr
+            .add_creature(test_creature(creature_guid));
+
+        // Set a spell list with one entry
+        let db_entry = super::super::types::CreatureSpellsEntry {
+            spell_id: 300,
+            probability: 100,
+            cast_target: 0,
+            target_param1: 0,
+            target_param2: 0,
+            cast_flags: 0,
+            delay_initial_min: 0,
+            delay_initial_max: 0,
+            delay_repeat_min: 1000,
+            delay_repeat_max: 1000,
+            script_id: 0,
+        };
+
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(creature_guid, |c| {
+                c.ai_state_data.set_spells_list(vec![db_entry]);
+            });
+
+        // First update should tick delay and cast (initial delay is 0)
+        update_spells_list(&world, creature_guid, 1200);
+
+        // After casting, cooldown should be reset to delay_repeat_min
+        let spell_cd = world
+            .managers
+            .creature_mgr
+            .with_creature(creature_guid, |c| {
+                c.ai_state_data.spells_list.first().map(|s| s.cooldown)
+            })
+            .flatten();
+        assert_eq!(spell_cd, Some(1000), "cooldown should be reset after cast");
+    }
+
+    #[tokio::test]
+    async fn update_spells_list_does_not_cast_before_delay_expires() {
+        let world = test_world();
+        let creature_guid = ObjectGuid::new_creature(1, 1);
+        world
+            .managers
+            .creature_mgr
+            .add_creature(test_creature(creature_guid));
+
+        // Set a high casting delay
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(creature_guid, |c| {
+                c.ai_state_data.casting_delay = 5000;
+            });
+
+        // Update with a small diff — delay should decrease but not fire
+        update_spells_list(&world, creature_guid, 100);
+
+        let delay = world
+            .managers
+            .creature_mgr
+            .with_creature(creature_guid, |c| c.ai_state_data.casting_delay)
+            .unwrap_or(0);
+        assert_eq!(delay, 4900, "casting delay should decrease by diff");
+    }
+
+    #[tokio::test]
+    async fn set_spells_list_from_db_clears_on_zero_entry() {
+        let world = test_world();
+        let creature_guid = ObjectGuid::new_creature(1, 1);
+        world
+            .managers
+            .creature_mgr
+            .add_creature(test_creature(creature_guid));
+
+        // First set some spells
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(creature_guid, |c| {
+                c.ai_state_data.set_spells_list(vec![
+                    super::super::types::CreatureSpellsEntry {
+                        spell_id: 1,
+                        ..Default::default()
+                    },
+                ]);
+            });
+
+        // Clear with entry=0
+        set_spells_list_from_db(&world, creature_guid, 0);
+
+        let len = world
+            .managers
+            .creature_mgr
+            .with_creature(creature_guid, |c| c.ai_state_data.spells_list.len())
+            .unwrap_or(0);
+        assert_eq!(len, 0, "spells list should be cleared");
     }
 }

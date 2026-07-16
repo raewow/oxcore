@@ -348,10 +348,6 @@ pub async fn handle_add_target_trigger_auras(
         };
 
         for target_info in targets {
-            if target_info.processed {
-                continue;
-            }
-
             let target_guid = target_info.target_guid;
 
             let is_hit = matches!(

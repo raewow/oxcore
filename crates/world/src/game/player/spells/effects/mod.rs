@@ -320,6 +320,19 @@ impl EffectsDispatcher {
             world,
         );
 
+        // `Spell::HandleAddTargetTriggerAuras` — run once per cast after every target's
+        // effects have been applied, checking for SPELL_AURA_ADD_TARGET_TRIGGER auras on
+        // the caster that may cast additional spells on the hit targets.
+        if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
+            let _ = crate::game::player::spells::effects::aura::handle_add_target_trigger_auras(
+                caster_guid,
+                &entry,
+                &hit_targets,
+                world,
+            )
+            .await;
+        }
+
         Ok(results)
     }
 }

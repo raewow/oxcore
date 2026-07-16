@@ -9,6 +9,7 @@
 //! Following world patterns: Pure data, no side effects.
 
 use oxcore_shared::protocol::{ObjectGuid, Position};
+use rand::Rng;
 use std::collections::HashMap;
 
 /// AI state machine states
@@ -503,6 +504,43 @@ pub enum ReactState {
     Aggressive,
 }
 
+/// DB-loaded entry from creature_spells table. Immutable per-template data.
+#[derive(Debug, Clone, Default)]
+pub struct CreatureSpellsEntry {
+    pub spell_id: u16,
+    pub probability: u8,
+    pub cast_target: u8,
+    pub target_param1: u32,
+    pub target_param2: u32,
+    pub cast_flags: u16,
+    pub delay_initial_min: u32,
+    pub delay_initial_max: u32,
+    pub delay_repeat_min: u32,
+    pub delay_repeat_max: u32,
+    pub script_id: u32,
+}
+
+/// Runtime entry wrapping CreatureSpellsEntry with a mutable cooldown timer.
+#[derive(Debug, Clone)]
+pub struct CreatureAISpellsEntry {
+    pub inner: CreatureSpellsEntry,
+    pub cooldown: u32,
+}
+
+impl CreatureAISpellsEntry {
+    pub fn new(entry: CreatureSpellsEntry) -> Self {
+        let cooldown = if entry.delay_initial_max > entry.delay_initial_min {
+            rand::thread_rng().gen_range(entry.delay_initial_min..=entry.delay_initial_max)
+        } else {
+            entry.delay_initial_min
+        };
+        Self {
+            inner: entry,
+            cooldown,
+        }
+    }
+}
+
 /// AI state data - persisted across updates
 #[derive(Debug, Clone, Default)]
 pub struct AIStateData {
@@ -514,6 +552,10 @@ pub struct AIStateData {
     pub melee_enabled: bool,
     /// Whether combat movement (chasing) is enabled
     pub combat_movement_enabled: bool,
+    /// Creature spell list from creature_spells table (CreatureAI::m_CreatureSpells)
+    pub spells_list: Vec<CreatureAISpellsEntry>,
+    /// Delay before next spell list update (CreatureAI::m_uiCastingDelay)
+    pub casting_delay: u32,
 }
 
 impl AIStateData {
@@ -524,6 +566,8 @@ impl AIStateData {
             timers: HashMap::new(),
             melee_enabled: true,
             combat_movement_enabled: true,
+            spells_list: Vec::new(),
+            casting_delay: 0,
         }
     }
 
@@ -559,6 +603,18 @@ impl AIStateData {
     /// Clear all cooldowns (called on evade)
     pub fn reset_cooldowns(&mut self) {
         self.spell_cooldowns.clear();
+    }
+
+    /// Set the spell list from DB template entries (CreatureAI::SetSpellsList)
+    pub fn set_spells_list(&mut self, entries: Vec<CreatureSpellsEntry>) {
+        self.spells_list = entries.into_iter().map(CreatureAISpellsEntry::new).collect();
+        self.casting_delay = 0;
+    }
+
+    /// Clear the spell list (entry == 0 branch)
+    pub fn clear_spells_list(&mut self) {
+        self.spells_list.clear();
+        self.casting_delay = 0;
     }
 }
 

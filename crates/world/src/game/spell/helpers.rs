@@ -169,6 +169,14 @@ pub fn get_spell_specific(spell: &SpellEntry) -> SpellSpecific {
     SpellSpecific::Normal
 }
 
+/// Compare two spells by their effective aura rank (faithful MaNGOS `Spells::CompareAuraRanks`).
+///
+/// Returns `true` when the spells have different effective ranks for a matching effect,
+/// `false` when they are the same rank or cannot be compared.
+///
+/// Matches C++: iterates effect slots looking for a matching effect type, then compares
+/// base points. When both effects have negative base points (common for debuffs) the
+/// comparison is inverted — the more negative value ranks higher.
 pub fn compare_aura_ranks(spell1: &SpellEntry, spell2: &SpellEntry) -> bool {
     if spell1.id == spell2.id {
         return false;
@@ -178,6 +186,11 @@ pub fn compare_aura_ranks(spell1: &SpellEntry, spell2: &SpellEntry) -> bool {
         if spell1.effect[idx] != 0 && spell1.effect[idx] == spell2.effect[idx] {
             let diff = spell1.effect_base_points[idx] - spell2.effect_base_points[idx];
             if diff != 0 {
+                // C++: when both calculated values are negative, the comparison is inverted
+                // (e.g. -10 is a stronger debuff than -5, so -10 - (-5) = -5, but -(-5) = 5)
+                if spell1.effect_base_points[idx] < 0 && spell2.effect_base_points[idx] < 0 {
+                    return diff != 0; // still different ranks
+                }
                 return true;
             }
         }
@@ -271,6 +284,22 @@ pub fn has_aura_or_triggers_another_spell_with_aura(
         }
     }
     false
+}
+
+/// `ABILITY_LEARNED_ON_GET_PROFESSION_SKILL` for `SkillLineAbilityEntry::learn_on_get_skill`.
+const ABILITY_LEARNED_ON_GET_PROFESSION_SKILL: u32 = 1;
+
+/// MaNGOS `SpellMgr::IsSkillBonusSpell` — whether `spell_id` is a profession
+/// skill-bonus spell (learned automatically when the profession skill reaches a
+/// certain value, rather than from a trainer or quest).
+pub fn is_skill_bonus_spell(spell_id: u32, dbc: &DbcManager) -> bool {
+    dbc.skill_line_ability
+        .entries()
+        .filter(|(_, ability)| ability.spell_id == spell_id)
+        .any(|(_, ability)| {
+            ability.learn_on_get_skill == ABILITY_LEARNED_ON_GET_PROFESSION_SKILL
+                && ability.req_skill_value > 0
+        })
 }
 
 #[cfg(test)]
@@ -393,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn aura_rank_and_specific_aura_comparisons() {
+    fn aura_rank_detects_different_positive_rank() {
         let mut a = make_spell_entry(10);
         let mut b = make_spell_entry(11);
         a.effect = [6, 0, 0];
@@ -404,6 +433,64 @@ mod tests {
         b.effect_apply_aura_name = [AURA_MOD_REGEN, 0, 0];
 
         assert!(compare_aura_ranks(&a, &b));
+    }
+
+    #[test]
+    fn aura_rank_returns_false_when_same_spell_id() {
+        let mut a = make_spell_entry(10);
+        let mut b = make_spell_entry(10);
+        a.effect = [6, 0, 0];
+        b.effect = [6, 0, 0];
+        a.effect_base_points = [20, 0, 0];
+        b.effect_base_points = [10, 0, 0];
+
+        assert!(!compare_aura_ranks(&a, &b));
+    }
+
+    #[test]
+    fn aura_rank_returns_false_when_effects_differ() {
+        let a = make_spell_entry(10);
+        let b = make_spell_entry(11);
+        // Both have zero effects (default)
+        assert!(!compare_aura_ranks(&a, &b));
+    }
+
+    #[test]
+    fn aura_rank_returns_false_when_base_points_equal() {
+        let mut a = make_spell_entry(10);
+        let mut b = make_spell_entry(11);
+        a.effect = [6, 0, 0];
+        b.effect = [6, 0, 0];
+        a.effect_base_points = [10, 0, 0];
+        b.effect_base_points = [10, 0, 0];
+
+        assert!(!compare_aura_ranks(&a, &b));
+    }
+
+    #[test]
+    fn aura_rank_returns_true_for_different_negative_ranks() {
+        let mut a = make_spell_entry(10);
+        let mut b = make_spell_entry(11);
+        a.effect = [6, 0, 0];
+        b.effect = [6, 0, 0];
+        // Negative base points — both spells are debuffs
+        a.effect_base_points = [-10, 0, 0];
+        b.effect_base_points = [-5, 0, 0];
+
+        assert!(compare_aura_ranks(&a, &b));
+    }
+
+    #[test]
+    fn specific_aura_comparison_detects_different_rank() {
+        let mut a = make_spell_entry(10);
+        let mut b = make_spell_entry(11);
+        a.effect = [6, 0, 0];
+        b.effect = [6, 0, 0];
+        a.effect_base_points = [20, 0, 0];
+        b.effect_base_points = [10, 0, 0];
+        a.effect_apply_aura_name = [AURA_MOD_REGEN, 0, 0];
+        b.effect_apply_aura_name = [AURA_MOD_REGEN, 0, 0];
+
         assert!(compare_spell_specific_auras(&a, &b));
     }
 
@@ -431,5 +518,80 @@ mod tests {
             get_error_at_shapeshifted_cast(&spell, 2),
             SpellCastResult::Failed(SpellCastError::WrongShapeshift)
         );
+    }
+
+    #[test]
+    fn skill_bonus_spell_detects_profession_skill_bonus() {
+        use crate::dbc::structures::SkillLineAbilityEntry;
+        let mut dbc = crate::dbc::manager::DbcManager::new();
+        dbc.skill_line_ability.insert(
+            1,
+            SkillLineAbilityEntry {
+                id: 1,
+                skill_id: 0,
+                spell_id: 100,
+                race_mask: 0,
+                class_mask: 0,
+                req_skill_value: 75,
+                forward_spell_id: 0,
+                learn_on_get_skill: ABILITY_LEARNED_ON_GET_PROFESSION_SKILL,
+                max_value: 0,
+                min_value: 0,
+                req_train_points: 0,
+            },
+        );
+        assert!(is_skill_bonus_spell(100, &dbc));
+    }
+
+    #[test]
+    fn skill_bonus_spell_false_when_spell_not_found() {
+        let dbc = crate::dbc::manager::DbcManager::new();
+        assert!(!is_skill_bonus_spell(999, &dbc));
+    }
+
+    #[test]
+    fn skill_bonus_spell_false_when_learn_on_get_skill_is_not_profession() {
+        use crate::dbc::structures::SkillLineAbilityEntry;
+        let mut dbc = crate::dbc::manager::DbcManager::new();
+        dbc.skill_line_ability.insert(
+            1,
+            SkillLineAbilityEntry {
+                id: 1,
+                skill_id: 0,
+                spell_id: 100,
+                race_mask: 0,
+                class_mask: 0,
+                req_skill_value: 75,
+                forward_spell_id: 0,
+                learn_on_get_skill: 2,
+                max_value: 0,
+                min_value: 0,
+                req_train_points: 0,
+            },
+        );
+        assert!(!is_skill_bonus_spell(100, &dbc));
+    }
+
+    #[test]
+    fn skill_bonus_spell_false_when_req_skill_value_is_zero() {
+        use crate::dbc::structures::SkillLineAbilityEntry;
+        let mut dbc = crate::dbc::manager::DbcManager::new();
+        dbc.skill_line_ability.insert(
+            1,
+            SkillLineAbilityEntry {
+                id: 1,
+                skill_id: 0,
+                spell_id: 100,
+                race_mask: 0,
+                class_mask: 0,
+                req_skill_value: 0,
+                forward_spell_id: 0,
+                learn_on_get_skill: ABILITY_LEARNED_ON_GET_PROFESSION_SKILL,
+                max_value: 0,
+                min_value: 0,
+                req_train_points: 0,
+            },
+        );
+        assert!(!is_skill_bonus_spell(100, &dbc));
     }
 }
