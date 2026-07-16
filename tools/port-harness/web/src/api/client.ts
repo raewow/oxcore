@@ -9,6 +9,7 @@ export interface FileListEntry {
   documented: number;
   blocked: number;
   flow_count: number;
+  by_status: Record<string, number>;
 }
 
 export interface TaskWithDetails {

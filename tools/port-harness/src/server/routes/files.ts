@@ -23,6 +23,7 @@ export interface FileListEntry {
   documented: number;
   blocked: number;
   flow_count: number;
+  by_status: Record<string, number>;
 }
 
 function buildFileList(db: Database.Database, config: HarnessConfig, q?: string): FileListEntry[] {
@@ -42,6 +43,7 @@ function buildFileList(db: Database.Database, config: HarnessConfig, q?: string)
       documented: stats?.documented ?? 0,
       blocked: stats?.blocked ?? 0,
       flow_count: stats?.flow_count ?? 0,
+      by_status: stats?.by_status ?? {},
     };
   });
 

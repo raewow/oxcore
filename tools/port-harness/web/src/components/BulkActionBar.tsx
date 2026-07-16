@@ -19,9 +19,7 @@ export function BulkActionBar({ selectedCount, onSetStatus, onQueueJob, onClear 
         defaultValue=""
       >
         <option value="">Set status...</option>
-        <option value="reviewed">reviewed</option>
         <option value="blocked">blocked</option>
-        <option value="done">done</option>
       </select>
       <button className="btn btn-secondary" onClick={() => onQueueJob("extract")}>
         Queue Extract

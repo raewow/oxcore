@@ -55,6 +55,16 @@ export function createTasksRoutes(db: Database.Database): Hono {
       return c.json({ error: "ids required" }, 400);
     }
 
+    if (body.status) {
+      for (const id of body.ids) {
+        const task = taskRepo.getTaskById(db, id);
+        if (!task) return c.json({ error: `Task ${id} not found` }, 404);
+        if (!taskRepo.canManuallyTransitionStatus(task.status, body.status)) {
+          return c.json({ error: `Cannot change task ${id} from ${task.status} to ${body.status}; record port or review evidence instead` }, 400);
+        }
+      }
+    }
+
     taskRepo.bulkUpdateTasks(db, body.ids, {
       status: body.status,
       notes: body.notes,
@@ -70,6 +80,11 @@ export function createTasksRoutes(db: Database.Database): Hono {
     const body = await c.req.json<{ status?: TaskStatus; notes?: string }>();
 
     if (body.status) {
+      const task = taskRepo.getTaskById(db, id);
+      if (!task) return c.json({ error: "Not found" }, 404);
+      if (!taskRepo.canManuallyTransitionStatus(task.status, body.status)) {
+        return c.json({ error: `Cannot change task from ${task.status} to ${body.status}; record port or review evidence instead` }, 400);
+      }
       taskRepo.updateTaskStatus(db, id, body.status);
     }
     if (body.notes !== undefined) {

@@ -567,9 +567,7 @@ export function FlowDetail() {
   const needsPlan = flow.tasks.filter((t) => t.next_action === "plan").length;
   const needsAudit = flow.tasks.filter((t) => t.next_action === "audit").length;
   const needsPort = flow.tasks.filter((t) => t.next_action === "port").length;
-  const canMarkDone = flow.tasks.filter(
-    (t) => t.status !== "done" && t.status !== "reviewed",
-  ).length;
+  const canMarkDone = flow.tasks.filter((t) => t.status === "reviewed").length;
   const activeJobs = flow.pipeline_jobs.filter(
     (j) => j.status === "running" || j.status === "queued" || j.display_status === "pausing",
   );
@@ -778,13 +776,13 @@ export function FlowDetail() {
                         Port
                       </button>
                     )}
-                    {t.status !== "done" && t.status !== "reviewed" ? (
+                    {t.status === "reviewed" ? (
                       <button
                         type="button"
                         className="btn btn-sm btn-secondary"
                         disabled={markDoneMutation.isPending}
                         onClick={() => {
-                          if (window.confirm(`Mark ${t.symbol_name} as done?`)) {
+                            if (window.confirm(`Mark reviewed symbol ${t.symbol_name} as done?`)) {
                             markDoneMutation.mutate([t.id]);
                           }
                         }}
@@ -792,7 +790,9 @@ export function FlowDetail() {
                         Done
                       </button>
                     ) : (
-                      <span style={{ color: "#86efac", fontSize: "0.8rem" }}>✓</span>
+                      <span style={{ color: t.status === "done" ? "#86efac" : "#94a3b8", fontSize: "0.8rem" }}>
+                        {t.status === "done" ? "✓" : "Review required"}
+                      </span>
                     )}
                   </div>
                 </td>

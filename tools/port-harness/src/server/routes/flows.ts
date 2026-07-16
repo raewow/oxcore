@@ -25,6 +25,8 @@ import {
 } from "../../db/repositories/flowArtifacts.js";
 import type { JobQueues } from "../jobQueue.js";
 
+type FlowRecord = { id: number; name: string };
+
 function getFlowJobsForTasks(
   db: Database.Database,
   taskIds: number[],
@@ -74,7 +76,7 @@ export function createFlowsRoutes(
 
   app.get("/:id", (c) => {
     const id = parseInt(c.req.param("id"), 10);
-    const flow = flowRepo.getFlowById(db, id);
+    const flow = flowRepo.getFlowById(db, id) as FlowRecord | undefined;
     if (!flow) return c.json({ error: "Not found" }, 404);
 
     const branches = flowRepo.getBranchesForFlow(db, id);
@@ -139,7 +141,7 @@ export function createFlowsRoutes(
 
   app.post("/:id/port", (c) => {
     const id = parseInt(c.req.param("id"), 10);
-    const flow = flowRepo.getFlowById(db, id);
+    const flow = flowRepo.getFlowById(db, id) as FlowRecord | undefined;
     if (!flow) return c.json({ error: "Not found" }, 404);
 
     const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000, flow: flow.name });
@@ -165,7 +167,7 @@ export function createFlowsRoutes(
 
   app.post("/:id/plan", (c) => {
     const id = parseInt(c.req.param("id"), 10);
-    const flow = flowRepo.getFlowById(db, id);
+    const flow = flowRepo.getFlowById(db, id) as FlowRecord | undefined;
     if (!flow) return c.json({ error: "Not found" }, 404);
 
     const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000, flow: flow.name });
@@ -194,7 +196,7 @@ export function createFlowsRoutes(
 
   app.post("/:id/audit", (c) => {
     const id = parseInt(c.req.param("id"), 10);
-    const flow = flowRepo.getFlowById(db, id);
+    const flow = flowRepo.getFlowById(db, id) as FlowRecord | undefined;
     if (!flow) return c.json({ error: "Not found" }, 404);
 
     const { tasks } = taskRepo.listTasksWithDetails(db, { limit: 10000, flow: flow.name });
@@ -222,7 +224,7 @@ export function createFlowsRoutes(
 
   app.post("/:id/done", async (c) => {
     const id = parseInt(c.req.param("id"), 10);
-    const flow = flowRepo.getFlowById(db, id);
+    const flow = flowRepo.getFlowById(db, id) as FlowRecord | undefined;
     if (!flow) return c.json({ error: "Not found" }, 404);
 
     const body = (await c.req.json<{ taskIds?: number[] }>().catch(() => ({}))) as {
@@ -235,12 +237,20 @@ export function createFlowsRoutes(
     let taskIds = body.taskIds?.filter((taskId) => flowTasks.some((t) => t.id === taskId));
     if (!taskIds?.length) {
       taskIds = flowTasks
-        .filter((t) => t.status !== "done" && t.status !== "reviewed")
+        .filter((t) => t.status === "reviewed")
         .map((t) => t.id);
     }
 
     if (!taskIds.length) {
-      return c.json({ error: "No symbols to mark done" }, 400);
+      return c.json({ error: "No reviewed symbols to mark done" }, 400);
+    }
+
+    const unreviewed = taskIds.filter((taskId) => {
+      const task = flowTasks.find((candidate) => candidate.id === taskId)!;
+      return !taskRepo.canMarkTaskDone(task.status);
+    });
+    if (unreviewed.length) {
+      return c.json({ error: "Only reviewed symbols can be marked done", taskIds: unreviewed }, 400);
     }
 
     taskRepo.bulkUpdateTasks(db, taskIds, { status: "done" });

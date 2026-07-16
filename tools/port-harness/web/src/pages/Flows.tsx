@@ -193,9 +193,7 @@ export function Flows() {
           </thead>
           <tbody>
             {flows.map((f) => {
-              const remaining = f.progress.total - f.progress.done;
-              const canMarkDone =
-                f.progress.total > 0 && f.progress.stage !== "done" && remaining > 0;
+               const canMarkDone = f.progress.reviewed > 0;
 
               return (
               <tr key={f.id}>
@@ -230,7 +228,7 @@ export function Flows() {
                       onClick={() => {
                         if (
                           window.confirm(
-                            `Mark all incomplete symbols in "${f.name}" as done?`,
+                             `Mark all reviewed symbols in "${f.name}" as done?`,
                           )
                         ) {
                           markDoneMutation.mutate(f.id);

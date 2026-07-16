@@ -2,6 +2,26 @@ import type Database from "better-sqlite3";
 import type { MigrationTask, TaskStatus, TaskWithDetails } from "../../models/index.js";
 import * as claimRepo from "./behaviourClaim.js";
 
+const MANUAL_STATUS_TRANSITIONS: Partial<Record<TaskStatus, TaskStatus[]>> = {
+  discovered: ["documented", "blocked"],
+  documented: ["fixture_defined", "rust_planned", "rust_ported", "blocked"],
+  fixture_defined: ["rust_planned", "rust_ported", "blocked"],
+  rust_planned: ["rust_ported", "blocked"],
+  rust_ported: ["rust_compiled", "blocked"],
+  rust_compiled: ["blocked"],
+  verified: ["blocked"],
+  reviewed: ["done", "blocked"],
+  blocked: ["discovered", "documented", "fixture_defined", "rust_planned", "rust_ported", "rust_compiled", "verified", "reviewed"],
+};
+
+export function canManuallyTransitionStatus(from: TaskStatus, to: TaskStatus): boolean {
+  return MANUAL_STATUS_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+export function canMarkTaskDone(status: TaskStatus): boolean {
+  return status === "reviewed";
+}
+
 export function upsertTask(
   db: Database.Database,
   sourceSymbolId: number,

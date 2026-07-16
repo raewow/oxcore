@@ -727,13 +727,27 @@ program
           process.exitCode = 1;
           return;
         }
-        taskId = taskRepo.upsertTask(db, filtered[0].id, { status });
+        taskId = taskRepo.upsertTask(db, filtered[0].id);
       } else {
         console.log({ ok: false, error: "Provide --task or --symbol" });
         process.exitCode = 1;
         return;
       }
 
+      const task = taskRepo.getTaskById(db, taskId);
+      if (!task) {
+        console.log({ ok: false, error: `Task ${taskId} not found` });
+        process.exitCode = 1;
+        return;
+      }
+      if (!taskRepo.canManuallyTransitionStatus(task.status, status)) {
+        console.log({
+          ok: false,
+          error: `Cannot change task ${taskId} from ${task.status} to ${status}; record port or review evidence instead`,
+        });
+        process.exitCode = 1;
+        return;
+      }
       taskRepo.updateTaskStatus(db, taskId, status);
       if (opts.notes !== undefined) {
         taskRepo.bulkUpdateTasks(db, [taskId], { notes: opts.notes });

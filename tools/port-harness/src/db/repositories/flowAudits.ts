@@ -40,14 +40,14 @@ export function getLatestAuditsForTasks(
   const rows = db
     .prepare(
       `SELECT ar.task_id, ar.created_at, ar.output_json
-       FROM agent_run ar
-       INNER JOIN (
-         SELECT task_id, MAX(created_at) AS max_created
-         FROM agent_run
-         WHERE stage = 'audit-rust' AND task_id IN (${placeholders})
-         GROUP BY task_id
-       ) latest ON ar.task_id = latest.task_id AND ar.created_at = latest.max_created
-       WHERE ar.stage = 'audit-rust'`,
+        FROM agent_run ar
+        INNER JOIN (
+          SELECT task_id, MAX(id) AS latest_id
+          FROM agent_run
+          WHERE stage = 'audit-rust' AND task_id IN (${placeholders})
+          GROUP BY task_id
+        ) latest ON ar.id = latest.latest_id
+        WHERE ar.stage = 'audit-rust'`,
     )
     .all(...taskIds) as { task_id: number; created_at: string; output_json: string }[];
 

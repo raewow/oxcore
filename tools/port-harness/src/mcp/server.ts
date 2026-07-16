@@ -32,6 +32,26 @@ function err(message: string) {
   return { isError: true, content: [{ type: "text" as const, text: message }] };
 }
 
+function validateClaimCoverage(symbolId: number, covered: number, total: number): string | null {
+  const actual = claimRepo.countClaimsForSymbol(db, symbolId);
+  if (total !== actual) return `claims_total must equal the ${actual} documented claims for this symbol`;
+  if (covered > total) return "claims_covered cannot exceed claims_total";
+  return null;
+}
+
+function insertEvidenceRun(
+  stage: "port-evidence" | "audit-rust",
+  symbolId: number,
+  taskId: number,
+  output: unknown,
+): void {
+  const promptHash = Buffer.from(`manual:${stage}:${symbolId}:${Date.now()}`).toString("base64").slice(0, 16);
+  db.prepare(
+    `INSERT INTO agent_run (stage, provider, model, prompt_hash, output_json, symbol_id, task_id)
+     VALUES (?, 'mcp-agent', 'manual', ?, ?, ?, ?)`,
+  ).run(stage, promptHash, JSON.stringify(output), symbolId, taskId);
+}
+
 function resolveFeature(db: Database.Database, ref: string) {
   const byName = featureRepo.getFeatureByName(db, ref);
   if (byName) return byName;
@@ -178,10 +198,15 @@ server.registerTool(
     const incomplete = tasks
       .filter((t) => !["verified", "reviewed", "done"].includes(t.status))
       .map((t) => ({ symbol: t.symbol_name, file: t.symbol_file, status: t.status }));
+    const mapped = tasks.filter((t) => t.claim_count > 0).length;
+    const implemented = tasks.filter((t) => ["rust_ported", "rust_compiled", "verified", "reviewed", "done"].includes(t.status)).length;
+    const verified = tasks.filter((t) => ["verified", "reviewed", "done"].includes(t.status)).length;
+    const reviewed = tasks.filter((t) => ["reviewed", "done"].includes(t.status)).length;
     return json({
       feature: f.name,
       total_tasks: stats.total,
       by_status: stats.by_status,
+      evidence: { mapped, implemented, verified, reviewed },
       blocking_count: incomplete.length,
       blocking: incomplete.slice(0, 100),
     });
@@ -260,7 +285,7 @@ server.registerTool(
   {
     title: "Next tasks",
     description:
-      "The next symbols to work on for a feature, ordered by how early they are in the porting ladder (discovered first). Optionally filter to symbols at a specific status.",
+      "The next symbols to work on for a feature. Without a status filter, returns the most actionable work first: landed work needing evidence, then documented symbols with the strongest specifications, then discovery backlog.",
     inputSchema: {
       feature: z.string().describe("Feature name or id"),
       status: TaskStatus.optional().describe("Only return tasks at this status"),
@@ -270,23 +295,13 @@ server.registerTool(
   async ({ feature, status, limit }) => {
     const f = resolveFeature(db, feature);
     if (!f) return err(`No feature "${feature}"`);
-    const order = [
-      "discovered",
-      "documented",
-      "fixture_defined",
-      "rust_planned",
-      "rust_ported",
-      "rust_compiled",
-      "verified",
-      "reviewed",
-      "done",
-      "blocked",
-    ];
+    const order = ["rust_ported", "rust_compiled", "verified", "rust_planned", "fixture_defined", "documented", "discovered", "blocked", "reviewed", "done"];
     let tasks = featureRepo.getFeatureTasks(db, f.id);
     if (status) tasks = tasks.filter((t) => t.status === status);
     tasks.sort(
       (a, b) =>
         order.indexOf(a.status) - order.indexOf(b.status) ||
+        b.claim_count - a.claim_count ||
         a.symbol_file.localeCompare(b.symbol_file),
     );
     return json(
@@ -301,6 +316,12 @@ server.registerTool(
         target_rust_file: t.target_rust_file,
         rust_symbol_name: t.rust_symbol_name,
         claim_count: t.claim_count,
+        recommended_action:
+          t.status === "rust_ported" ? "record focused test evidence" :
+          t.status === "rust_compiled" ? "record full claim coverage" :
+          t.status === "verified" ? "review against claims" :
+          t.status === "documented" || t.status === "fixture_defined" || t.status === "rust_planned" ? "implement or audit existing Rust" :
+          t.status === "discovered" ? "extract behaviour claims" : "resolve blocker",
       })),
     );
   },
@@ -321,8 +342,70 @@ server.registerTool(
   async ({ symbol, status, notes }) => {
     const sym = symbolRepo.listAllSymbols(db).find((s) => s.name === symbol);
     if (!sym) return err(`No exact symbol "${symbol}". Use find_symbol to get the precise name.`);
+    const task = taskRepo.getTaskBySymbolId(db, sym.id);
+    if (!task) return err(`No task found for symbol "${symbol}"`);
+    if (!taskRepo.canManuallyTransitionStatus(task.status, status)) {
+      return err(
+        `Cannot change ${symbol} from ${task.status} to ${status}. Use record_port for implementation/test evidence, set_task_audit for review evidence, and only mark reviewed tasks done.`,
+      );
+    }
     const taskId = taskRepo.upsertTask(db, sym.id, notes !== undefined ? { status, notes } : { status });
     return json({ ok: true, symbol: sym.name, task_id: taskId, status });
+  },
+);
+
+server.registerTool(
+  "record_port",
+  {
+    title: "Record landed Rust port",
+    description:
+      "Record the landed Rust implementation, claim coverage, and focused test evidence for a C++ symbol. This is the only MCP write that can advance a task to rust_compiled or verified.",
+    inputSchema: {
+      symbol: z.string().describe("Exact qualified C++ symbol name"),
+      rust_locations: z.array(
+        z.object({
+          file: z.string(),
+          symbol: z.string(),
+          start_line: z.number().int().positive().optional(),
+          end_line: z.number().int().positive().optional(),
+        }),
+      ).min(1),
+      claims_covered: z.number().int().min(0),
+      claims_total: z.number().int().min(0),
+      test_command: z.string().min(1),
+      tests_passed: z.boolean(),
+      test_summary: z.string().min(1),
+      live_call_path: z.boolean().describe("Whether the landed implementation is wired into its live Rust call path"),
+      notes: z.string().optional(),
+    },
+  },
+  async ({ symbol, rust_locations, claims_covered, claims_total, test_command, tests_passed, test_summary, live_call_path, notes }) => {
+    const sym = symbolRepo.listAllSymbols(db).find((s) => s.name === symbol);
+    if (!sym) return err(`No exact symbol "${symbol}". Use find_symbol to get the precise name.`);
+    const task = taskRepo.getTaskBySymbolId(db, sym.id);
+    if (!task) return err(`No task found for symbol "${symbol}"`);
+    const coverageError = validateClaimCoverage(sym.id, claims_covered, claims_total);
+    if (coverageError) return err(coverageError);
+
+    const fullyCovered = claims_covered === claims_total;
+    const status = tests_passed && fullyCovered && live_call_path ? "verified" : tests_passed ? "rust_compiled" : "rust_ported";
+    const primary = rust_locations[0]!;
+    const output = {
+      rust_locations,
+      coverage: { claims_covered, claims_total },
+      tests: { command: test_command, passed: tests_passed, summary: test_summary },
+      live_call_path,
+      notes: notes ?? null,
+    };
+
+    taskRepo.upsertTask(db, sym.id, {
+      target_rust_file: primary.file,
+      rust_symbol_name: primary.symbol,
+      notes: notes ?? task.notes ?? undefined,
+      status,
+    });
+    insertEvidenceRun("port-evidence", sym.id, task.id, output);
+    return json({ ok: true, symbol: sym.name, task_id: task.id, status, fully_covered: fullyCovered });
   },
 );
 
@@ -364,36 +447,42 @@ server.registerTool(
         .array(z.string())
         .optional()
         .describe("Behaviour claims not yet implemented"),
+      claims_covered: z.number().int().min(0).describe("Number of documented C++ claims covered"),
+      claims_total: z.number().int().min(0).describe("Total documented C++ claims"),
+      test_command: z.string().min(1).describe("Focused test command used for this review"),
+      tests_passed: z.boolean().describe("Whether the focused test command passed"),
     },
   },
-  async ({ symbol, implementation_status, passed, summary, rust_locations, issues, missing_behaviours }) => {
+  async ({ symbol, implementation_status, passed, summary, rust_locations, issues, missing_behaviours, claims_covered, claims_total, test_command, tests_passed }) => {
     const sym = symbolRepo.listAllSymbols(db).find((s) => s.name === symbol);
     if (!sym) return err(`No exact symbol "${symbol}". Use find_symbol to get the precise name.`);
 
     const task = db
-      .prepare(`SELECT id FROM migration_task WHERE source_symbol_id = ?`)
-      .get(sym.id) as { id: number } | undefined;
+      .prepare(`SELECT id, status FROM migration_task WHERE source_symbol_id = ?`)
+      .get(sym.id) as { id: number; status: string } | undefined;
     if (!task) return err(`No task found for symbol "${symbol}". Run set_task_status first.`);
+
+    const coverageError = validateClaimCoverage(sym.id, claims_covered, claims_total);
+    if (coverageError) return err(coverageError);
+    if (passed && (!tests_passed || implementation_status !== "complete" || claims_covered !== claims_total)) {
+      return err("A passing review requires complete claim coverage and passing focused tests");
+    }
 
     const outputJson = JSON.stringify({
       implementation_status,
       passed,
       summary,
-      coverage: { claims_covered: 0, claims_total: 0 },
+      coverage: { claims_covered, claims_total },
       rust_locations: rust_locations ?? [],
       issues: issues ?? [],
       missing_behaviours: missing_behaviours ?? [],
       planning_notes: [],
+      tests: { command: test_command, passed: tests_passed },
     });
+    insertEvidenceRun("audit-rust", sym.id, task.id, JSON.parse(outputJson));
+    if (passed) taskRepo.updateTaskStatus(db, task.id, "reviewed");
 
-    const promptHash = Buffer.from(`manual:${sym.id}:${Date.now()}`).toString("base64").slice(0, 16);
-
-    db.prepare(
-      `INSERT INTO agent_run (stage, provider, model, prompt_hash, output_json, symbol_id, task_id)
-       VALUES ('audit-rust', 'claude-code', 'manual', ?, ?, ?, ?)`,
-    ).run(promptHash, outputJson, sym.id, task.id);
-
-    return json({ ok: true, symbol: sym.name, task_id: task.id, implementation_status, passed });
+    return json({ ok: true, symbol: sym.name, task_id: task.id, implementation_status, passed, status: passed ? "reviewed" : task.status });
   },
 );
 
