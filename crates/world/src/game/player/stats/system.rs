@@ -126,6 +126,15 @@ pub struct StatsSystem {
     base_stats: OnceLock<BaseStatsData>,
 }
 
+/// Combine an attack-power base (formula + equipped) with aura modifiers.
+///
+/// Mirrors MaNGOS `HandleAttackPowerModifier`: flat AP mods (positive/negative) add to the base
+/// total, then the percent mods apply a multiplier — final = `(base + flat) * (1 + pct/100)`,
+/// clamped to non-negative. Used for both melee and ranged attack power.
+fn combine_attack_power(base: f32, flat: i32, pct: i32) -> i32 {
+    ((base + flat as f32) * (1.0 + pct as f32 / 100.0)).max(0.0) as i32
+}
+
 impl StatsSystem {
     pub fn new(
         broadcast_mgr: Arc<BroadcastManager>,
@@ -401,13 +410,41 @@ impl StatsSystem {
             }
 
             // 5. Attack power
-            let melee_ap = derived::calculate_melee_ap(class, level, strength, agility);
-            player.stats.melee_attack_power =
-                (melee_ap + equipped_bonuses.melee_attack_power as f32).max(0.0) as i32;
+            // Aura AP: flat mods add to the base + equipped total, then the percent mods
+            // apply a multiplier (matches MaNGOS HandleAttackPowerModifier flat vs AP_MOD_PCT
+            // buckets — final = (base + flat) * (1 + pct/100)).
+            {
+                use crate::game::player::auras::effects::{
+                    AURA_MOD_ATTACK_POWER, AURA_MOD_ATTACK_POWER_PCT, AURA_MOD_RANGED_ATTACK_POWER,
+                    AURA_MOD_RANGED_ATTACK_POWER_PCT,
+                };
 
-            let ranged_ap = derived::calculate_ranged_ap(class, level, agility);
-            player.stats.ranged_attack_power =
-                (ranged_ap + equipped_bonuses.ranged_attack_power as f32).max(0.0) as i32;
+                let melee_ap = derived::calculate_melee_ap(class, level, strength, agility);
+                let melee_flat = player
+                    .auras
+                    .container
+                    .get_total_aura_modifier(AURA_MOD_ATTACK_POWER);
+                let melee_pct = player
+                    .auras
+                    .container
+                    .get_total_aura_modifier(AURA_MOD_ATTACK_POWER_PCT);
+                let melee_base = melee_ap + equipped_bonuses.melee_attack_power as f32;
+                player.stats.melee_attack_power =
+                    combine_attack_power(melee_base, melee_flat, melee_pct);
+
+                let ranged_ap = derived::calculate_ranged_ap(class, level, agility);
+                let ranged_flat = player
+                    .auras
+                    .container
+                    .get_total_aura_modifier(AURA_MOD_RANGED_ATTACK_POWER);
+                let ranged_pct = player
+                    .auras
+                    .container
+                    .get_total_aura_modifier(AURA_MOD_RANGED_ATTACK_POWER_PCT);
+                let ranged_base = ranged_ap + equipped_bonuses.ranged_attack_power as f32;
+                player.stats.ranged_attack_power =
+                    combine_attack_power(ranged_base, ranged_flat, ranged_pct);
+            }
 
             // 6. Armor: agility bonus + equipment (via UnitMods::Armor)
             let agi_armor = derived::armor_from_agility(agility);
@@ -857,6 +894,37 @@ impl StatsSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── combine_attack_power (MaNGOS HandleAttackPowerModifier buckets) ───────
+
+    #[test]
+    fn combine_attack_power_flat_only() {
+        // Battle Shout: +140 flat AP on a 200 base.
+        assert_eq!(combine_attack_power(200.0, 140, 0), 340);
+    }
+
+    #[test]
+    fn combine_attack_power_percent_applies_after_flat() {
+        // (200 + 100) * (1 + 0.10) = 330.
+        assert_eq!(combine_attack_power(200.0, 100, 10), 330);
+    }
+
+    #[test]
+    fn combine_attack_power_negative_flat_and_clamped_at_zero() {
+        // Curse of Weakness: negative flat AP; result never goes below zero.
+        assert_eq!(combine_attack_power(50.0, -80, 0), 0);
+    }
+
+    #[test]
+    fn combine_attack_power_negative_percent() {
+        // Demoralizing Shout: -10% AP → (300) * 0.9 = 270.
+        assert_eq!(combine_attack_power(300.0, 0, -10), 270);
+    }
+
+    #[test]
+    fn combine_attack_power_no_mods_is_base() {
+        assert_eq!(combine_attack_power(250.0, 0, 0), 250);
+    }
 
     fn item_template_with_bonuses() -> ItemTemplate {
         ItemTemplate {

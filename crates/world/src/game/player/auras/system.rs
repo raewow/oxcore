@@ -695,6 +695,13 @@ impl AuraSystem {
                 return Ok(());
             }
 
+            if self
+                .modify_primary_stat_aura(target_guid, aura_type, misc_value, value, true, world)
+                .await?
+            {
+                return Ok(());
+            }
+
             if let Some(modifier) = create_stat_modifier(spell_id, aura_type, value, misc_value) {
                 self.apply_modifier(target_guid, modifier, world).await?;
             } else {
@@ -729,6 +736,20 @@ impl AuraSystem {
 
         if self
             .modify_resistance_aura(
+                target_guid,
+                aura.aura_type,
+                aura.misc_value,
+                aura.current_value(),
+                false,
+                world,
+            )
+            .await?
+        {
+            return Ok(());
+        }
+
+        if self
+            .modify_primary_stat_aura(
                 target_guid,
                 aura.aura_type,
                 aura.misc_value,
@@ -1028,6 +1049,39 @@ impl AuraSystem {
             .manager()
             .with_player_mut(player_guid, |player| {
                 apply_resistance_aura_modifier(
+                    &mut player.stats.unit_mods,
+                    aura_type,
+                    misc_value,
+                    amount,
+                    apply,
+                )
+            })
+            .unwrap_or(false);
+
+        if handled {
+            world.systems.stats.recalculate_all(player_guid);
+        }
+
+        Ok(handled)
+    }
+
+    /// Apply or reverse a primary-stat aura (flat/percent, base/total) across the stat(s) it
+    /// names, then recalculate. Returns `true` if the aura was one of the primary-stat forms.
+    async fn modify_primary_stat_aura(
+        &self,
+        player_guid: ObjectGuid,
+        aura_type: u32,
+        misc_value: i32,
+        amount: i32,
+        apply: bool,
+        world: &World,
+    ) -> Result<bool> {
+        let handled = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                apply_primary_stat_aura_modifier(
                     &mut player.stats.unit_mods,
                     aura_type,
                     misc_value,
@@ -2628,42 +2682,12 @@ fn create_stat_modifier(
     value: i32,
     misc_value: i32,
 ) -> Option<StatModifier> {
-    use super::effects::{
-        ModifierSource, STAT_AGILITY, STAT_INTELLECT, STAT_SPIRIT, STAT_STAMINA, STAT_STRENGTH,
-    };
+    use super::effects::{ModifierSource, STAT_STRENGTH};
 
+    // Primary-stat auras (AURA_MOD_STAT / AURA_MOD_PERCENT_STAT /
+    // AURA_MOD_TOTAL_STAT_PERCENTAGE) are handled per-stat by
+    // apply_primary_stat_aura_modifier before this function is reached.
     match aura_type {
-        effects::AURA_MOD_STAT => {
-            // misc_value = stat index (0=Str, 1=Agi, 2=Sta, 3=Int, 4=Spi)
-            // -1 = all stats
-            let stat = if misc_value == -1 {
-                // Apply to all stats - caller should call this 5 times
-                // For simplicity, we apply to Strength here; full implementation
-                // would loop over all stats
-                STAT_STRENGTH
-            } else {
-                misc_value as usize
-            };
-            Some(StatModifier {
-                source: ModifierSource::Aura(spell_id),
-                stat,
-                flat_value: value as f32,
-                pct_value: 0.0,
-            })
-        }
-        effects::AURA_MOD_PERCENT_STAT => {
-            let stat = if misc_value == -1 {
-                STAT_STRENGTH
-            } else {
-                misc_value as usize
-            };
-            Some(StatModifier {
-                source: ModifierSource::Aura(spell_id),
-                stat,
-                flat_value: 0.0,
-                pct_value: value as f32 / 100.0,
-            })
-        }
         effects::AURA_MOD_ATTACK_POWER => {
             // Map to melee AP - stored as stat modifier with a custom stat index
             // In practice, AP is a derived stat, so we store it as a flat modifier
@@ -2785,6 +2809,56 @@ fn apply_resistance_aura_modifier(
     true
 }
 
+/// Apply or reverse a primary-stat aura across the stat(s) named by `misc_value`.
+///
+/// Mirrors MaNGOS `Aura::HandleAuraModStat` / `HandleModPercentStat` /
+/// `HandleModTotalPercentStat`. `misc_value` is a stat index (0=STR, 1=AGI, 2=STA, 3=INT, 4=SPI);
+/// a negative value means "all stats" (C++ accepts -1, and -2 for AURA_MOD_STAT), so each of the
+/// five stats gets a `HandleStatModifier(UNIT_MOD_STAT_START + i, <type>, amount, apply)` call. The
+/// three aura types differ only in which `UnitModifierType` they target:
+/// - `AURA_MOD_STAT`             → `TotalValue` (flat)
+/// - `AURA_MOD_PERCENT_STAT`     → `BasePct`   (C++ uses BASE_PCT, not total)
+/// - `AURA_MOD_TOTAL_STAT_PERCENTAGE` → `TotalPct`
+///
+/// Returns `true` if `aura_type` is one of the three primary-stat forms (and was handled). Out-of
+/// range `misc_value` (matching the C++ validity guards) is reported handled but applies nothing.
+/// The player-only `ApplyStatBuffMod` / `ApplyStatPercentBuffMod` UI hooks and the Stamina-driven
+/// current-HP rescale on `HandleModTotalPercentStat` are client-facing / derived-stat concerns and
+/// are handled by the stats recalculation, not modeled here.
+fn apply_primary_stat_aura_modifier(
+    unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
+    aura_type: u32,
+    misc_value: i32,
+    amount: i32,
+    apply: bool,
+) -> bool {
+    use crate::game::player::stats::modifiers::{UnitModifierType, UnitMods};
+
+    // Lowest misc_value that still means "all stats" — AURA_MOD_STAT also accepts -2.
+    let (modifier_type, min_misc) = match aura_type {
+        effects::AURA_MOD_STAT => (UnitModifierType::TotalValue, -2),
+        effects::AURA_MOD_PERCENT_STAT => (UnitModifierType::BasePct, -1),
+        effects::AURA_MOD_TOTAL_STAT_PERCENTAGE => (UnitModifierType::TotalPct, -1),
+        _ => return false,
+    };
+
+    // C++ guards: reject misc values below the all-stats sentinel or above the last stat (SPI=4).
+    if misc_value < min_misc || misc_value > 4 {
+        return true;
+    }
+
+    for stat in 0u8..5 {
+        // Negative misc_value = all stats; otherwise only the matching stat index.
+        if misc_value < 0 || misc_value == stat as i32 {
+            if let Some(unit_mod) = UnitMods::from_stat(stat) {
+                unit_mods.handle_stat_modifier(unit_mod, modifier_type, amount as f32, apply);
+            }
+        }
+    }
+
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2869,33 +2943,36 @@ mod tests {
         (system, creature_mgr)
     }
 
+    // ── apply_primary_stat_aura_modifier (Aura::HandleAuraModStat family) ─────
+
     #[test]
-    fn removed_flat_primary_stat_aura_reverses_its_snapshot_value() {
-        let aura = Aura::new(
-            1000,
-            ObjectGuid::new_player(1),
-            0,
+    fn flat_primary_stat_aura_applies_single_stat_and_reverses() {
+        let mut unit_mods = UnitModifierGroup::new();
+
+        assert!(apply_primary_stat_aura_modifier(
+            &mut unit_mods,
             effects::AURA_MOD_STAT,
             effects::STAT_STRENGTH as i32,
             12,
-            Some(30_000),
-            0,
-            1,
-            0,
-            AuraFlags::default(),
+            true,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::StatStrength, UnitModifierType::TotalValue),
+            12.0
         );
-        let modifier = create_stat_modifier(
-            aura.spell_id,
-            aura.aura_type,
-            aura.current_value(),
-            aura.misc_value,
-        )
-        .expect("flat primary-stat aura is supported");
-        let mut unit_mods = UnitModifierGroup::new();
+        // Other stats untouched.
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::StatAgility, UnitModifierType::TotalValue),
+            0.0
+        );
 
-        apply_primary_stat_modifier(&mut unit_mods, &modifier, true);
-        apply_primary_stat_modifier(&mut unit_mods, &modifier, false);
-
+        assert!(apply_primary_stat_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_STAT,
+            effects::STAT_STRENGTH as i32,
+            12,
+            false,
+        ));
         assert_eq!(
             unit_mods.get_modifier_value(UnitMods::StatStrength, UnitModifierType::TotalValue),
             0.0
@@ -2903,36 +2980,100 @@ mod tests {
     }
 
     #[test]
-    fn removed_percent_primary_stat_aura_reverses_its_snapshot_value() {
-        let aura = Aura::new(
-            1001,
-            ObjectGuid::new_player(1),
-            0,
-            effects::AURA_MOD_PERCENT_STAT,
-            effects::STAT_AGILITY as i32,
-            15,
-            Some(30_000),
-            0,
-            1,
-            0,
-            AuraFlags::default(),
-        );
-        let modifier = create_stat_modifier(
-            aura.spell_id,
-            aura.aura_type,
-            aura.current_value(),
-            aura.misc_value,
-        )
-        .expect("percent primary-stat aura is supported");
+    fn flat_primary_stat_aura_all_stats_applies_to_every_stat() {
+        // misc_value = -1 → all five stats (the old create_stat_modifier only did Strength).
         let mut unit_mods = UnitModifierGroup::new();
 
-        apply_primary_stat_modifier(&mut unit_mods, &modifier, true);
-        apply_primary_stat_modifier(&mut unit_mods, &modifier, false);
+        assert!(apply_primary_stat_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_STAT,
+            -1,
+            8,
+            true,
+        ));
 
+        for stat in 0u8..5 {
+            let unit_mod = UnitMods::from_stat(stat).unwrap();
+            assert_eq!(
+                unit_mods.get_modifier_value(unit_mod, UnitModifierType::TotalValue),
+                8.0,
+                "stat {stat} not modified",
+            );
+        }
+    }
+
+    #[test]
+    fn percent_primary_stat_aura_targets_base_pct() {
+        // C++ HandleModPercentStat uses BASE_PCT (not total) — regression guard.
+        let mut unit_mods = UnitModifierGroup::new();
+
+        assert!(apply_primary_stat_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_PERCENT_STAT,
+            effects::STAT_AGILITY as i32,
+            10,
+            true,
+        ));
+        assert!(
+            (unit_mods.get_modifier_value(UnitMods::StatAgility, UnitModifierType::BasePct) - 1.1)
+                .abs()
+                < f32::EPSILON
+        );
+        // Total pct must be left alone.
         assert_eq!(
             unit_mods.get_modifier_value(UnitMods::StatAgility, UnitModifierType::TotalPct),
             1.0
         );
+    }
+
+    #[test]
+    fn total_percent_stat_aura_targets_total_pct() {
+        let mut unit_mods = UnitModifierGroup::new();
+
+        assert!(apply_primary_stat_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_TOTAL_STAT_PERCENTAGE,
+            effects::STAT_STAMINA as i32,
+            10,
+            true,
+        ));
+        assert!(
+            (unit_mods.get_modifier_value(UnitMods::StatStamina, UnitModifierType::TotalPct) - 1.1)
+                .abs()
+                < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn primary_stat_aura_out_of_range_misc_is_handled_noop() {
+        let mut unit_mods = UnitModifierGroup::new();
+        // misc_value 5 is past SPI (4); C++ logs an error and returns without applying.
+        assert!(apply_primary_stat_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_STAT,
+            5,
+            12,
+            true,
+        ));
+        for stat in 0u8..5 {
+            let unit_mod = UnitMods::from_stat(stat).unwrap();
+            assert_eq!(
+                unit_mods.get_modifier_value(unit_mod, UnitModifierType::TotalValue),
+                0.0
+            );
+        }
+    }
+
+    #[test]
+    fn non_primary_stat_aura_is_not_handled() {
+        let mut unit_mods = UnitModifierGroup::new();
+        assert!(!apply_primary_stat_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_RESISTANCE,
+            0,
+            12,
+            true,
+        ));
     }
 
     #[test]
