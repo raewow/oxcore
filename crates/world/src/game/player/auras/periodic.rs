@@ -462,6 +462,207 @@ fn handle_obs_mod_mana(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::game::player::player::Player;
+    use crate::World;
+    use oxcore_shared::database::Databases;
+    use oxcore_shared::protocol::ObjectGuid;
+    use sqlx::mysql::MySqlPoolOptions;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn lazy_pool() -> sqlx::MySqlPool {
+        MySqlPoolOptions::new()
+            .connect_lazy("mysql://test:test@localhost/test")
+            .expect("lazy pool should be constructible")
+    }
+
+    fn test_world() -> World {
+        let databases = Arc::new(Databases {
+            world: lazy_pool(),
+            character: lazy_pool(),
+            auth: lazy_pool(),
+            logs: lazy_pool(),
+        });
+        World::new(databases, Arc::new(Config::default()), 50, PathBuf::from("."))
+    }
+
+    fn add_player_with_health(world: &World, guid: ObjectGuid, health: u32, max_health: u32) {
+        let player = Player::new(
+            guid,
+            format!("P{}", guid.counter()),
+            0,
+            0,
+            0,
+            60,
+            1,
+            1,
+            0,
+        );
+        world.managers.player_mgr.add_player(player, guid.counter());
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(guid, |p| {
+                p.stats.health = health;
+                p.stats.max_health = max_health;
+            });
+    }
+
+    fn health_of(world: &World, guid: ObjectGuid) -> u32 {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(guid, |p| p.stats.health)
+            .unwrap_or(0)
+    }
+
+    fn snapshot(caster: ObjectGuid, aura_type: u32, current_value: i32) -> AuraTickSnapshot {
+        AuraTickSnapshot {
+            spell_id: 1000,
+            caster_guid: caster,
+            aura_type,
+            current_value,
+            misc_value: 0,
+        }
+    }
+
+    // ── update_periodic_timer (MaNGOS Aura::UpdatePeriodicTimer) ─────────────
+
+    #[test]
+    fn update_periodic_timer_non_positive_interval_returns_duration() {
+        assert_eq!(update_periodic_timer(5000, 0), 5000);
+        assert_eq!(update_periodic_timer(5000, -1), 5000);
+    }
+
+    #[test]
+    fn update_periodic_timer_wraps_into_one_period() {
+        // 7000 ms into a 3000 ms period → 1000 ms until the next tick.
+        assert_eq!(update_periodic_timer(7000, 3000), 1000);
+    }
+
+    #[test]
+    fn update_periodic_timer_even_division_is_a_full_period_not_instant() {
+        // A duration that divides evenly must not schedule an instant (0 ms) tick.
+        assert_eq!(update_periodic_timer(6000, 3000), 3000);
+        // Duration within a single period is returned as-is.
+        assert_eq!(update_periodic_timer(2000, 3000), 2000);
+    }
+
+    // ── periodic tick handlers (Aura::PeriodicTick cases) ────────────────────
+
+    #[tokio::test]
+    async fn periodic_damage_reduces_target_health() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_player(2);
+        add_player_with_health(&world, target, 1000, 1000);
+        let bc = Arc::clone(&world.managers.broadcast_mgr);
+
+        handle_periodic_damage(
+            target,
+            &snapshot(caster, AURA_PERIODIC_DAMAGE, 150),
+            &world,
+            &bc,
+        )
+        .unwrap();
+
+        assert_eq!(health_of(&world, target), 850);
+    }
+
+    #[tokio::test]
+    async fn periodic_damage_zero_value_is_a_noop() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_player(2);
+        add_player_with_health(&world, target, 1000, 1000);
+        let bc = Arc::clone(&world.managers.broadcast_mgr);
+
+        handle_periodic_damage(target, &snapshot(caster, AURA_PERIODIC_DAMAGE, 0), &world, &bc)
+            .unwrap();
+
+        assert_eq!(health_of(&world, target), 1000);
+    }
+
+    #[tokio::test]
+    async fn periodic_heal_caps_at_max_health() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_player(2);
+        add_player_with_health(&world, target, 500, 1000);
+        let bc = Arc::clone(&world.managers.broadcast_mgr);
+
+        // Partial heal.
+        handle_periodic_heal(target, &snapshot(caster, AURA_PERIODIC_HEAL, 200), &world, &bc)
+            .unwrap();
+        assert_eq!(health_of(&world, target), 700);
+
+        // Overheal is clamped to max health.
+        handle_periodic_heal(
+            target,
+            &snapshot(caster, AURA_PERIODIC_HEAL, 10_000),
+            &world,
+            &bc,
+        )
+        .unwrap();
+        assert_eq!(health_of(&world, target), 1000);
+    }
+
+    #[tokio::test]
+    async fn periodic_leech_damages_target_and_heals_caster() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_player(2);
+        add_player_with_health(&world, target, 1000, 1000);
+        add_player_with_health(&world, caster, 500, 1000);
+
+        handle_periodic_leech(target, &snapshot(caster, AURA_PERIODIC_LEECH, 100), &world).unwrap();
+
+        assert_eq!(health_of(&world, target), 900);
+        assert_eq!(health_of(&world, caster), 600);
+    }
+
+    #[tokio::test]
+    async fn periodic_leech_caster_heal_capped_at_max() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_player(2);
+        add_player_with_health(&world, target, 1000, 1000);
+        add_player_with_health(&world, caster, 990, 1000);
+
+        handle_periodic_leech(target, &snapshot(caster, AURA_PERIODIC_LEECH, 100), &world).unwrap();
+
+        // Target takes the full 100; caster heal is clamped to the 10 missing health.
+        assert_eq!(health_of(&world, target), 900);
+        assert_eq!(health_of(&world, caster), 1000);
+    }
+
+    #[tokio::test]
+    async fn periodic_damage_percent_deals_pct_of_max_health() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_player(2);
+        add_player_with_health(&world, target, 1000, 1000);
+
+        // Handler treats current_value/100 as the fraction of max health, so 10 = 10%
+        // of 1000 max health = 100 damage.
+        handle_periodic_damage_percent(
+            target,
+            &snapshot(caster, AURA_PERIODIC_DAMAGE_PERCENT, 10),
+            &world,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(health_of(&world, target), 900);
+    }
+}
+
 /// Handle periodic damage percent.
 ///
 /// Deals X% of max health per tick.
