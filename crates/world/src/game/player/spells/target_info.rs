@@ -652,6 +652,9 @@ pub async fn apply_target_effects(
 
         match dispatch_effect(effect_type_enum, &input, world).await {
             Ok(result) => {
+                let mut result = result;
+                result.target_guid = Some(target.target_guid);
+                result.effect_index = effect_index as u8;
                 target.damage = target.damage.saturating_add(result.damage);
                 target.healing = target.healing.saturating_add(result.healing);
                 results.push(result);

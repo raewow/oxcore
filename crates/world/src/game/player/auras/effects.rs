@@ -204,6 +204,7 @@ pub fn is_stat_modifier_aura(aura_type: u32) -> bool {
             | AURA_MOD_RANGED_ATTACK_POWER_PCT
             | AURA_MOD_DAMAGE_DONE
             | AURA_MOD_DAMAGE_PERCENT_DONE
+            | AURA_MOD_OFFHAND_DAMAGE_PCT
             | AURA_MOD_HEALING_DONE
             | AURA_MOD_HEALING_DONE_PERCENT
             | AURA_MOD_CRIT_PERCENT

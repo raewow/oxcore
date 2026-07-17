@@ -702,6 +702,13 @@ impl AuraSystem {
                 return Ok(());
             }
 
+            if self
+                .modify_damage_done_aura(target_guid, aura_type, misc_value, value, true, world)
+                .await?
+            {
+                return Ok(());
+            }
+
             if let Some(modifier) = create_stat_modifier(spell_id, aura_type, value, misc_value) {
                 self.apply_modifier(target_guid, modifier, world).await?;
             } else {
@@ -750,6 +757,20 @@ impl AuraSystem {
 
         if self
             .modify_primary_stat_aura(
+                target_guid,
+                aura.aura_type,
+                aura.misc_value,
+                aura.current_value(),
+                false,
+                world,
+            )
+            .await?
+        {
+            return Ok(());
+        }
+
+        if self
+            .modify_damage_done_aura(
                 target_guid,
                 aura.aura_type,
                 aura.misc_value,
@@ -1082,6 +1103,39 @@ impl AuraSystem {
             .manager()
             .with_player_mut(player_guid, |player| {
                 apply_primary_stat_aura_modifier(
+                    &mut player.stats.unit_mods,
+                    aura_type,
+                    misc_value,
+                    amount,
+                    apply,
+                )
+            })
+            .unwrap_or(false);
+
+        if handled {
+            world.systems.stats.recalculate_all(player_guid);
+        }
+
+        Ok(handled)
+    }
+
+    /// Apply or reverse a physical damage-done percent aura on the weapon-damage modifiers, then
+    /// recalculate. Returns `true` if the aura was one of the damage-done percent forms.
+    async fn modify_damage_done_aura(
+        &self,
+        player_guid: ObjectGuid,
+        aura_type: u32,
+        misc_value: i32,
+        amount: i32,
+        apply: bool,
+        world: &World,
+    ) -> Result<bool> {
+        let handled = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                apply_damage_done_aura_modifier(
                     &mut player.stats.unit_mods,
                     aura_type,
                     misc_value,
@@ -2859,6 +2913,62 @@ fn apply_primary_stat_aura_modifier(
     true
 }
 
+/// Apply or reverse a physical damage-done percent aura on the weapon-damage modifiers.
+///
+/// Mirrors MaNGOS `Aura::HandleModDamagePercentDone` and `HandleModOffhandDamagePercent`:
+/// - `AURA_MOD_DAMAGE_PERCENT_DONE` with the physical school bit set (`SPELL_SCHOOL_MASK_NORMAL`,
+///   bit 0) applies a `TOTAL_PCT` modifier to main-hand, off-hand and ranged weapon damage.
+/// - `AURA_MOD_OFFHAND_DAMAGE_PCT` applies a `TOTAL_PCT` modifier to off-hand damage only.
+///
+/// Returns `true` if `aura_type` is one of those forms. The magic-school portion of
+/// `HandleModDamagePercentDone` is client-display only in C++ (the real magic bonus lives in
+/// `SpellDamageBonusDone`), so only the physical/weapon side is modeled here. The
+/// `_ApplyWeaponDependentAuraDamageMod` per-equipped-weapon path (spells that restrict to an item
+/// class) is not modeled — the percent applies to all weapon slots regardless of the spell's
+/// equipped-item requirement.
+fn apply_damage_done_aura_modifier(
+    unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
+    aura_type: u32,
+    misc_value: i32,
+    amount: i32,
+    apply: bool,
+) -> bool {
+    use crate::game::player::stats::modifiers::{UnitModifierType, UnitMods};
+
+    // SPELL_SCHOOL_MASK_NORMAL — the physical damage school bit.
+    const SCHOOL_MASK_NORMAL: i32 = 1;
+
+    match aura_type {
+        effects::AURA_MOD_DAMAGE_PERCENT_DONE => {
+            if misc_value & SCHOOL_MASK_NORMAL != 0 {
+                for unit_mod in [
+                    UnitMods::DamageMainhand,
+                    UnitMods::DamageOffhand,
+                    UnitMods::DamageRanged,
+                ] {
+                    unit_mods.handle_stat_modifier(
+                        unit_mod,
+                        UnitModifierType::TotalPct,
+                        amount as f32,
+                        apply,
+                    );
+                }
+            }
+            true
+        }
+        effects::AURA_MOD_OFFHAND_DAMAGE_PCT => {
+            unit_mods.handle_stat_modifier(
+                UnitMods::DamageOffhand,
+                UnitModifierType::TotalPct,
+                amount as f32,
+                apply,
+            );
+            true
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3072,6 +3182,103 @@ mod tests {
             effects::AURA_MOD_RESISTANCE,
             0,
             12,
+            true,
+        ));
+    }
+
+    // ── apply_damage_done_aura_modifier (HandleModDamagePercentDone family) ───
+
+    #[test]
+    fn physical_damage_percent_done_applies_to_all_weapon_slots() {
+        let mut unit_mods = UnitModifierGroup::new();
+        // +10% physical damage done (school mask has the physical bit).
+        assert!(apply_damage_done_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_DAMAGE_PERCENT_DONE,
+            1,
+            10,
+            true,
+        ));
+
+        // Main-hand and ranged start at a 1.0 multiplier → 1.1 after +10%.
+        for unit_mod in [UnitMods::DamageMainhand, UnitMods::DamageRanged] {
+            assert!(
+                (unit_mods.get_modifier_value(unit_mod, UnitModifierType::TotalPct) - 1.1).abs()
+                    < f32::EPSILON,
+                "{unit_mod:?} not scaled",
+            );
+        }
+        // Off-hand carries the inherent 0.5 penalty multiplier → 0.5 * 1.1 = 0.55.
+        assert!(
+            (unit_mods.get_modifier_value(UnitMods::DamageOffhand, UnitModifierType::TotalPct)
+                - 0.55)
+                .abs()
+                < f32::EPSILON
+        );
+
+        // Reverse restores the main-hand multiplier to 1.0.
+        assert!(apply_damage_done_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_DAMAGE_PERCENT_DONE,
+            1,
+            10,
+            false,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::DamageMainhand, UnitModifierType::TotalPct),
+            1.0
+        );
+    }
+
+    #[test]
+    fn magic_only_damage_percent_done_does_not_touch_weapon_damage() {
+        let mut unit_mods = UnitModifierGroup::new();
+        // Fire-only mask (bit 2), no physical bit → weapon damage untouched but still "handled".
+        assert!(apply_damage_done_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_DAMAGE_PERCENT_DONE,
+            1 << 2,
+            10,
+            true,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::DamageMainhand, UnitModifierType::TotalPct),
+            1.0
+        );
+    }
+
+    #[test]
+    fn offhand_damage_percent_applies_to_offhand_only() {
+        let mut unit_mods = UnitModifierGroup::new();
+        // Off-hand penalty: -50% on top of the inherent 0.5 penalty → 0.5 * 0.5 = 0.25.
+        assert!(apply_damage_done_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_OFFHAND_DAMAGE_PCT,
+            0,
+            -50,
+            true,
+        ));
+        assert!(
+            (unit_mods.get_modifier_value(UnitMods::DamageOffhand, UnitModifierType::TotalPct)
+                - 0.25)
+                .abs()
+                < f32::EPSILON
+        );
+        // Main-hand and ranged untouched.
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::DamageMainhand, UnitModifierType::TotalPct),
+            1.0
+        );
+    }
+
+    #[test]
+    fn non_damage_done_aura_is_not_handled() {
+        let mut unit_mods = UnitModifierGroup::new();
+        assert!(!apply_damage_done_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_STAT,
+            1,
+            10,
             true,
         ));
     }

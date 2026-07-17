@@ -39,6 +39,20 @@ fn spell_needs_combo_points(attributes_ex: u32) -> bool {
     attributes_ex & (FINISHING_MOVE_DAMAGE | FINISHING_MOVE_DURATION) != 0
 }
 
+fn collect_execute_log_entries(
+    results: Vec<crate::game::player::spells::effects::EffectResult>,
+) -> [Vec<ExecuteLogInfo>; 3] {
+    let mut entries = std::array::from_fn(|_| Vec::new());
+    for result in results {
+        if let (Some(target_guid), Some(data)) = (result.target_guid, result.execute_log) {
+            if let Some(slot) = entries.get_mut(result.effect_index as usize) {
+                slot.push(ExecuteLogInfo { target_guid, data });
+            }
+        }
+    }
+    entries
+}
+
 /// Select the channel object from effect-zero unit targets, falling back to the
 /// explicit game-object target only when no unit targets were registered.
 fn select_channel_target(
@@ -1557,7 +1571,8 @@ impl SpellSystem {
     ) -> Result<()> {
         let target_guid = cast_targets.unit_target();
 
-        self.effects_dispatcher
+        let effect_results = self
+            .effects_dispatcher
             .dispatch_with_targets(
                 caster_guid,
                 spell_id,
@@ -1585,15 +1600,18 @@ impl SpellSystem {
                 is_triggered,
             );
             if needs_spell_log(send_to_client, &entry.effect) {
-                // SmsgSpellLogExecute builder exists in shared::messages::spells,
-                // but effects pipeline does not yet collect ExecuteLogInfo entries.
-                // Log entries are currently empty so the builder returns None and no
-                // packet is emitted. Wire AddExecuteLogInfo calls into each effect
-                // handler to populate the log.
-                let empty_log: [&[ExecuteLogInfo]; 3] = [&[], &[], &[]];
-                if let Some(packet) =
-                    SmsgSpellLogExecute::build(caster_guid, spell_id, entry.effect, empty_log)
-                {
+                let execute_log = collect_execute_log_entries(effect_results);
+                let execute_log_refs = [
+                    execute_log[0].as_slice(),
+                    execute_log[1].as_slice(),
+                    execute_log[2].as_slice(),
+                ];
+                if let Some(packet) = SmsgSpellLogExecute::build(
+                    caster_guid,
+                    spell_id,
+                    entry.effect,
+                    execute_log_refs,
+                ) {
                     self.broadcast_mgr.send_to_player(caster_guid, packet);
                 }
             }
@@ -3669,6 +3687,30 @@ mod tests {
         // generic spell-execute log entry.
         assert!(needs_spell_log(true, &[10, 0, 0])); // SPELL_EFFECT_HEAL
         assert!(needs_spell_log(true, &[6, 10, 0])); // e.g. APPLY_AURA + HEAL
+    }
+
+    #[test]
+    fn execute_log_entries_keep_target_and_effect_slot() {
+        let target = ObjectGuid::new_player(7);
+        let entries = collect_execute_log_entries(vec![
+            crate::game::player::spells::effects::EffectResult {
+                damage: 0,
+                healing: 250,
+                success: true,
+                target_guid: Some(target),
+                effect_index: 1,
+                execute_log: Some(oxcore_shared::messages::spells::ExecuteLogData::Heal {
+                    amount: 250,
+                    critical: true,
+                }),
+            },
+            crate::game::player::spells::effects::EffectResult::empty(),
+        ]);
+
+        assert!(entries[0].is_empty());
+        assert_eq!(entries[1].len(), 1);
+        assert_eq!(entries[1][0].target_guid, target);
+        assert!(entries[2].is_empty());
     }
 
     // -- Spell::ClearCastItem: clear_cast_item --------------------------------------------

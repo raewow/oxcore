@@ -459,6 +459,9 @@ pub async fn effect_health_leech(input: &EffectInput, world: &World) -> Result<E
         damage,
         healing: damage,
         success: true,
+        target_guid: None,
+        effect_index: 0,
+        execute_log: None,
     })
 }
 

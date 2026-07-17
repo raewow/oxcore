@@ -6,6 +6,7 @@
 use super::{EffectInput, EffectResult};
 use crate::World;
 use anyhow::Result;
+use oxcore_shared::messages::spells::ExecuteLogData;
 use oxcore_shared::protocol::{Opcode, WorldPacket};
 
 /// Apply a critical-heal bonus to a heal amount (faithful `SpellCaster::SpellCriticalHealingBonus`).
@@ -165,7 +166,12 @@ pub async fn effect_heal(input: &EffectInput, world: &World) -> Result<EffectRes
         }
     }
 
-    Ok(EffectResult::with_healing(healed))
+    let mut result = EffectResult::with_healing(healed);
+    result.execute_log = Some(ExecuteLogData::Heal {
+        amount: healed,
+        critical: is_crit,
+    });
+    Ok(result)
 }
 
 /// SPELL_EFFECT_HEAL_MAX_HEALTH (67)

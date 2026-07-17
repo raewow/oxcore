@@ -27,6 +27,7 @@ pub mod teleport;
 
 use crate::World;
 use anyhow::Result;
+use oxcore_shared::messages::spells::ExecuteLogData;
 use oxcore_shared::protocol::ObjectGuid;
 
 /// Input data for a single spell effect.
@@ -172,6 +173,10 @@ pub struct EffectResult {
     pub healing: u32,
     /// Whether the effect succeeded
     pub success: bool,
+    /// Target and effect slot retained for the cast-completion execute log.
+    pub target_guid: Option<ObjectGuid>,
+    pub effect_index: u8,
+    pub execute_log: Option<ExecuteLogData>,
 }
 
 impl EffectResult {
@@ -180,6 +185,9 @@ impl EffectResult {
             damage: 0,
             healing: 0,
             success: true,
+            target_guid: None,
+            effect_index: 0,
+            execute_log: None,
         }
     }
 
@@ -188,6 +196,9 @@ impl EffectResult {
             damage,
             healing: 0,
             success: true,
+            target_guid: None,
+            effect_index: 0,
+            execute_log: None,
         }
     }
 
@@ -196,6 +207,9 @@ impl EffectResult {
             damage: 0,
             healing,
             success: true,
+            target_guid: None,
+            effect_index: 0,
+            execute_log: None,
         }
     }
 }
