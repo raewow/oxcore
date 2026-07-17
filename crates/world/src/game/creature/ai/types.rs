@@ -665,7 +665,7 @@ impl AIEventQueue {
 
 #[cfg(test)]
 mod tests {
-    use super::{CreatureAISpellsEntry, CreatureSpellsEntry};
+    use super::{AIStateData, CreatureAISpellsEntry, CreatureSpellsEntry};
 
     #[test]
     fn creature_ai_spell_entry_copies_definition_and_uses_fixed_initial_delay() {
@@ -694,6 +694,33 @@ mod tests {
             let runtime = CreatureAISpellsEntry::new(entry.clone());
             assert!((100..=200).contains(&runtime.cooldown));
         }
+    }
+
+    #[test]
+    fn set_spells_list_replaces_entries_and_resets_casting_delay() {
+        let mut state = AIStateData::new();
+        state.casting_delay = 500;
+        state.set_spells_list(vec![
+            CreatureSpellsEntry {
+                spell_id: 10,
+                delay_initial_min: 100,
+                delay_initial_max: 100,
+                ..Default::default()
+            },
+            CreatureSpellsEntry {
+                spell_id: 20,
+                delay_initial_min: 200,
+                delay_initial_max: 200,
+                ..Default::default()
+            },
+        ]);
+
+        assert_eq!(state.casting_delay, 0);
+        assert_eq!(state.spells_list.len(), 2);
+        assert_eq!(state.spells_list[0].inner.spell_id, 10);
+        assert_eq!(state.spells_list[0].cooldown, 100);
+        assert_eq!(state.spells_list[1].inner.spell_id, 20);
+        assert_eq!(state.spells_list[1].cooldown, 200);
     }
 }
 
