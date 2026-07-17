@@ -688,6 +688,13 @@ impl AuraSystem {
                 return Ok(());
             }
 
+            if self
+                .modify_resistance_aura(target_guid, aura_type, misc_value, value, true, world)
+                .await?
+            {
+                return Ok(());
+            }
+
             if let Some(modifier) = create_stat_modifier(spell_id, aura_type, value, misc_value) {
                 self.apply_modifier(target_guid, modifier, world).await?;
             } else {
@@ -711,6 +718,20 @@ impl AuraSystem {
             .modify_max_health_aura(
                 target_guid,
                 aura.aura_type,
+                aura.current_value(),
+                false,
+                world,
+            )
+            .await?
+        {
+            return Ok(());
+        }
+
+        if self
+            .modify_resistance_aura(
+                target_guid,
+                aura.aura_type,
+                aura.misc_value,
                 aura.current_value(),
                 false,
                 world,
@@ -988,6 +1009,39 @@ impl AuraSystem {
         }
 
         Ok(modified)
+    }
+
+    /// Apply or reverse a school-resistance aura (flat/percent, base/total) across its school
+    /// bitmask, then recalculate. Returns `true` if the aura was one of the resistance forms.
+    async fn modify_resistance_aura(
+        &self,
+        player_guid: ObjectGuid,
+        aura_type: u32,
+        misc_value: i32,
+        amount: i32,
+        apply: bool,
+        world: &World,
+    ) -> Result<bool> {
+        let handled = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                apply_resistance_aura_modifier(
+                    &mut player.stats.unit_mods,
+                    aura_type,
+                    misc_value,
+                    amount,
+                    apply,
+                )
+            })
+            .unwrap_or(false);
+
+        if handled {
+            world.systems.stats.recalculate_all(player_guid);
+        }
+
+        Ok(handled)
     }
 
     // =========================================================================
@@ -2621,16 +2675,8 @@ fn create_stat_modifier(
                 pct_value: 0.0,
             })
         }
-        effects::AURA_MOD_RESISTANCE => {
-            // misc_value = school bitmask
-            // This is handled by the stats system as a resistance modifier
-            Some(StatModifier {
-                source: ModifierSource::Aura(spell_id),
-                stat: STAT_STAMINA, // Resistance uses a different path
-                flat_value: 0.0,
-                pct_value: 0.0,
-            })
-        }
+        // Resistance auras (flat/percent, base/total) are handled per-school by
+        // apply_resistance_aura_modifier before this function is reached.
         // Additional aura types would be mapped here
         _ => None,
     }
@@ -2689,6 +2735,54 @@ fn apply_max_health_aura_modifier(
     };
 
     unit_mods.handle_stat_modifier(UnitMods::Health, modifier_type, value as f32, apply)
+}
+
+/// Apply or reverse a school-resistance aura across every school in its bitmask.
+///
+/// Mirrors MaNGOS `Aura::HandleAuraModResistance` / `HandleModResistancePercent` /
+/// `HandleModBaseResistance` / `HandleAuraModBaseResistancePercent`: `misc_value` is a spell
+/// school bitmask (bit `i` → school `i`, where 0 = physical/armor), and each set school gets a
+/// `HandleStatModifier(UNIT_MOD_RESISTANCE_START + i, <type>, amount, apply)` call. The four aura
+/// types differ only in which `UnitModifierType` they target (base vs total, flat vs percent).
+///
+/// Returns `true` if `aura_type` is one of the four resistance forms (and was handled), `false`
+/// otherwise. Like the C++ handlers, a zero amount is a no-op. The player-only
+/// `ApplyResistanceBuffModsMod` UI hook and the Faerie Fire dispel-immunity side effect on
+/// `HandleAuraModResistance` are client-facing / dispel-system concerns and are not modeled here.
+fn apply_resistance_aura_modifier(
+    unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
+    aura_type: u32,
+    misc_value: i32,
+    amount: i32,
+    apply: bool,
+) -> bool {
+    use crate::game::player::stats::modifiers::{UnitModifierType, UnitMods};
+
+    let modifier_type = match aura_type {
+        effects::AURA_MOD_RESISTANCE => UnitModifierType::TotalValue,
+        effects::AURA_MOD_RESISTANCE_PCT => UnitModifierType::TotalPct,
+        effects::AURA_MOD_BASE_RESISTANCE => UnitModifierType::BaseValue,
+        effects::AURA_MOD_BASE_RESISTANCE_PCT => UnitModifierType::BasePct,
+        _ => return false,
+    };
+
+    // Zero-amount resistance auras are a no-op in C++ (`if (!m_modifier.m_amount) return;`) but
+    // still "belong" to the resistance path, so report handled to skip the stat fallback.
+    if amount == 0 {
+        return true;
+    }
+
+    let school_mask = misc_value as u32;
+    // Schools 0..=6 map to Armor..ResistanceArcane (see UnitMods::from_resistance).
+    for school in 0u8..7 {
+        if school_mask & (1 << school) != 0 {
+            if let Some(unit_mod) = UnitMods::from_resistance(school) {
+                unit_mods.handle_stat_modifier(unit_mod, modifier_type, amount as f32, apply);
+            }
+        }
+    }
+
+    true
 }
 
 #[cfg(test)]
@@ -2866,6 +2960,135 @@ mod tests {
             unit_mods.get_modifier_value(UnitMods::Health, UnitModifierType::TotalValue),
             0.0
         );
+    }
+
+    // ── apply_resistance_aura_modifier (Aura::HandleAuraModResistance family) ──
+
+    #[test]
+    fn flat_resistance_aura_applies_per_school_and_reverses() {
+        let mut unit_mods = UnitModifierGroup::new();
+        // Fire (school 2) resistance, +50 flat.
+        let mask = 1 << 2;
+
+        assert!(apply_resistance_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_RESISTANCE,
+            mask,
+            50,
+            true,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::ResistanceFire, UnitModifierType::TotalValue),
+            50.0
+        );
+        // Only the masked school is touched.
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::ResistanceFrost, UnitModifierType::TotalValue),
+            0.0
+        );
+
+        assert!(apply_resistance_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_RESISTANCE,
+            mask,
+            50,
+            false,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::ResistanceFire, UnitModifierType::TotalValue),
+            0.0
+        );
+    }
+
+    #[test]
+    fn flat_resistance_aura_applies_to_every_masked_school() {
+        let mut unit_mods = UnitModifierGroup::new();
+        // All-school mask (physical..arcane): bits 0..=6.
+        let mask = 0x7F;
+
+        assert!(apply_resistance_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_RESISTANCE,
+            mask,
+            25,
+            true,
+        ));
+
+        for school in 0u8..7 {
+            let unit_mod = UnitMods::from_resistance(school).unwrap();
+            assert_eq!(
+                unit_mods.get_modifier_value(unit_mod, UnitModifierType::TotalValue),
+                25.0,
+                "school {school} not modified",
+            );
+        }
+    }
+
+    #[test]
+    fn base_resistance_aura_targets_base_value() {
+        let mut unit_mods = UnitModifierGroup::new();
+        let mask = 1 << 5; // Shadow
+
+        assert!(apply_resistance_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_BASE_RESISTANCE,
+            mask,
+            30,
+            true,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::ResistanceShadow, UnitModifierType::BaseValue),
+            30.0
+        );
+    }
+
+    #[test]
+    fn percent_resistance_aura_multiplies_total_pct() {
+        let mut unit_mods = UnitModifierGroup::new();
+        let mask = 1 << 4; // Frost, +10%
+
+        assert!(apply_resistance_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_RESISTANCE_PCT,
+            mask,
+            10,
+            true,
+        ));
+        assert!(
+            (unit_mods.get_modifier_value(UnitMods::ResistanceFrost, UnitModifierType::TotalPct)
+                - 1.1)
+                .abs()
+                < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn zero_amount_resistance_aura_is_handled_noop() {
+        let mut unit_mods = UnitModifierGroup::new();
+        // Handled (returns true, skips stat fallback) but changes nothing.
+        assert!(apply_resistance_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_RESISTANCE,
+            1 << 2,
+            0,
+            true,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::ResistanceFire, UnitModifierType::TotalValue),
+            0.0
+        );
+    }
+
+    #[test]
+    fn non_resistance_aura_is_not_handled() {
+        let mut unit_mods = UnitModifierGroup::new();
+        assert!(!apply_resistance_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_STAT,
+            1 << 2,
+            50,
+            true,
+        ));
     }
 
     #[test]
