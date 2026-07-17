@@ -6,9 +6,11 @@ use std::time::Duration;
 use crate::core::common::{MoveFlags, MovementInfo};
 use crate::World;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
+use oxcore_shared::messages::movement::{spline_flags, SmsgMonsterMove};
 
 use super::validator;
 use super::state::PendingKnockback;
+use super::state::PendingSpline;
 
 /// Movement system (stateless - operates on Player.movement via PlayerManager)
 pub struct MovementSystem;
@@ -58,6 +60,55 @@ impl MovementSystem {
         packet.write_f32(pending.horizontal_speed);
         packet.write_f32(pending.vertical_speed);
         session.send_packet(packet)
+    }
+
+    /// Start a server-scripted player spline and await its exact completion ID.
+    pub fn launch_spline(
+        &self,
+        player_guid: ObjectGuid,
+        destination: Position,
+        speed: f32,
+        is_walking: bool,
+        world: &World,
+    ) -> Result<u32> {
+        let (origin, spline_id) = world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                let spline_id = player.movement.movement_counter.wrapping_add(1);
+                player.movement.movement_counter = spline_id;
+                player.movement.pending_spline = Some(PendingSpline {
+                    id: spline_id,
+                    destination,
+                });
+                (player.movement.position, spline_id)
+            })
+            .ok_or_else(|| anyhow!("Player not found"))?;
+        let distance = ((destination.x - origin.x).powi(2)
+            + (destination.y - origin.y).powi(2)
+            + (destination.z - origin.z).powi(2))
+        .sqrt();
+        let packet = SmsgMonsterMove {
+            guid: player_guid,
+            position: origin,
+            spline_id,
+            move_type: 0,
+            facing_target: None,
+            facing_angle: None,
+            spline_flags: if is_walking {
+                spline_flags::WALKMODE
+            } else {
+                spline_flags::RUNMODE
+            },
+            duration: ((distance / speed.max(f32::EPSILON)) * 1000.0) as u32,
+            waypoints: vec![destination],
+        };
+        let session = world
+            .session_mgr
+            .get_session_by_player(player_guid)
+            .ok_or_else(|| anyhow!("Player has no active session"))?;
+        session.send_msg(packet)?;
+        Ok(spline_id)
     }
 
     /// Event-driven update from movement packet
@@ -269,6 +320,15 @@ impl MovementSystem {
         // Write movement info (with server time and current position)
         // This properly handles all conditional fields (transport, fall/jump, spline)
         broadcast_movement_info.write_to_packet(&mut packet);
+
+        // Knockback observers receive the acknowledged launch vector after the
+        // movement block, matching MSG_MOVE_KNOCK_BACK in the reference core.
+        if opcode == Opcode::MSG_MOVE_KNOCK_BACK {
+            packet.write_f32(broadcast_movement_info.jump_cos_angle.unwrap_or(0.0));
+            packet.write_f32(broadcast_movement_info.jump_sin_angle.unwrap_or(0.0));
+            packet.write_f32(broadcast_movement_info.jump_xy_speed.unwrap_or(0.0));
+            packet.write_f32(broadcast_movement_info.jump_velocity.unwrap_or(0.0));
+        }
 
         // Safety check: Ensure broadcaster exists before broadcasting
         // This prevents crashes during login or when player is in an invalid state

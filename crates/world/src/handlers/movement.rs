@@ -415,6 +415,100 @@ pub fn handle_move_root_ack(
     Ok(())
 }
 
+/// Handle CMSG_MOVE_KNOCK_BACK_ACK for a server-initiated player knockback.
+pub async fn handle_move_knock_back_ack(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+    let guid_raw = packet
+        .read_packed_guid_raw()
+        .ok_or_else(|| anyhow!("KnockBackAck: missing guid"))?;
+    let counter = packet
+        .read_u32()
+        .ok_or_else(|| anyhow!("KnockBackAck: missing counter"))?;
+    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+
+    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
+    if session.get_mover_from_guid(mover) != Some(player_guid) {
+        return Ok(());
+    }
+
+    let pending = world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| match player.movement.pending_knockback {
+            Some(pending) if pending.counter == counter => {
+                player.movement.pending_knockback = None;
+                Some(pending)
+            }
+            _ => None,
+        })
+        .flatten();
+    let Some(pending) = pending else {
+        return Ok(());
+    };
+
+    if !verify_movement_info(&movement_info) {
+        return Ok(());
+    }
+
+    movement_info.mover_guid = player_guid;
+    movement_info.jump_cos_angle = Some(pending.cos_angle);
+    movement_info.jump_sin_angle = Some(pending.sin_angle);
+    movement_info.jump_xy_speed = Some(pending.horizontal_speed);
+    movement_info.jump_velocity = Some(pending.vertical_speed);
+    world
+        .systems
+        .player
+        .movement()
+        .handle_move(player_guid, Opcode::MSG_MOVE_KNOCK_BACK, movement_info, world)
+        .await
+}
+
+/// Handle CMSG_MOVE_SPLINE_DONE for a server-scripted player spline.
+pub async fn handle_move_spline_done(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+    let spline_id = packet
+        .read_u32()
+        .ok_or_else(|| anyhow!("MoveSplineDone: missing spline id"))?;
+    let _facing = packet.read_f32();
+
+    let matched = world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| match player.movement.pending_spline {
+            Some(pending) if pending.id == spline_id => {
+                player.movement.pending_spline = None;
+                true
+            }
+            _ => false,
+        })
+        .unwrap_or(false);
+    if !matched || !verify_movement_info(&movement_info) {
+        return Ok(());
+    }
+
+    movement_info.mover_guid = player_guid;
+    let opcode = rebroadcast_opcode(&movement_info);
+    world
+        .systems
+        .player
+        .movement()
+        .handle_move(player_guid, opcode, movement_info, world)
+        .await
+}
+
 /// Handle CMSG_MOUNTSPECIAL_ANIM (`WorldSession::HandleMountSpecialAnimOpcode`).
 ///
 /// Broadcasts SMSG_MOUNTSPECIAL_ANIM (the mount's special animation) to nearby

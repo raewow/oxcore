@@ -215,6 +215,7 @@ impl Opcode {
     pub const SMSG_MOVE_FEATHER_FALL: Opcode = Opcode(0x00F2); // 242
     pub const SMSG_MOVE_NORMAL_FALL: Opcode = Opcode(0x00F3); // 243
     pub const SMSG_MOVE_KNOCK_BACK: Opcode = Opcode(0x00EF); // 239
+    pub const CMSG_MOVE_KNOCK_BACK_ACK: Opcode = Opcode(0x00F0); // 240
 
     // ============================================================================
     // Movement - Flags (Spline - server-controlled units)

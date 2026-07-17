@@ -710,6 +710,12 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_FORCE_MOVE_ROOT_ACK => {
                     movement::handle_move_root_ack(session, packet, world)?;
                 }
+                Opcode::CMSG_MOVE_KNOCK_BACK_ACK => {
+                    movement::handle_move_knock_back_ack(session, packet, world).await?;
+                }
+                Opcode::CMSG_MOVE_SPLINE_DONE => {
+                    movement::handle_move_spline_done(session, packet, world).await?;
+                }
                 Opcode::CMSG_FORCE_RUN_SPEED_CHANGE_ACK
                 | Opcode::CMSG_FORCE_RUN_BACK_SPEED_CHANGE_ACK
                 | Opcode::CMSG_FORCE_SWIM_SPEED_CHANGE_ACK

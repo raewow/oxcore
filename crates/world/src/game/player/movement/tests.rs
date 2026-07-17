@@ -154,6 +154,9 @@ fn test_movement_state_default_values() {
     assert_eq!(state.run_speed, 7.0);
     assert_eq!(state.swim_speed, 4.7222);
     assert!((state.turn_rate - 3.14159).abs() < 0.001);
+    assert_eq!(state.movement_counter, 0);
+    assert!(state.pending_knockback.is_none());
+    assert!(state.pending_spline.is_none());
 }
 
 #[test]
