@@ -3,6 +3,23 @@
 use oxcore_shared::protocol::ObjectGuid;
 use oxcore_shared::protocol::Position;
 
+/// Server-forced knockback awaiting the controller's acknowledgement.
+#[derive(Debug, Clone, Copy)]
+pub struct PendingKnockback {
+    pub counter: u32,
+    pub cos_angle: f32,
+    pub sin_angle: f32,
+    pub horizontal_speed: f32,
+    pub vertical_speed: f32,
+}
+
+/// A scripted player spline which must be acknowledged with its exact ID.
+#[derive(Debug, Clone, Copy)]
+pub struct PendingSpline {
+    pub id: u32,
+    pub destination: Position,
+}
+
 /// Per-player movement state
 #[derive(Debug, Clone)]
 pub struct MovementState {
@@ -31,6 +48,10 @@ pub struct MovementState {
     pub hover: bool,
     /// Feather fall enabled (Slow Fall, Levitate): SPELL_AURA_FEATHER_FALL
     pub feather_fall: bool,
+    /// Counter assigned to controller-bound forced movement packets.
+    pub movement_counter: u32,
+    pub pending_knockback: Option<PendingKnockback>,
+    pub pending_spline: Option<PendingSpline>,
 }
 
 impl Default for MovementState {
@@ -53,6 +74,9 @@ impl Default for MovementState {
             water_walking: false,
             hover: false,
             feather_fall: false,
+            movement_counter: 0,
+            pending_knockback: None,
+            pending_spline: None,
         }
     }
 }
