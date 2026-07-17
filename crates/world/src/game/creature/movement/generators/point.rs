@@ -147,3 +147,39 @@ impl MovementGenerator for AssistanceMovementGenerator {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assistance_initialize_emits_walking_destination_and_finalize_preserves_state() {
+        let creature = ObjectGuid::from_raw(1);
+        let destination = Position {
+            x: 10.0,
+            y: 20.0,
+            z: 30.0,
+            o: 0.0,
+        };
+        let mut generator = AssistanceMovementGenerator::new(7, destination, 3.5, 1_000);
+
+        generator.initialize(creature, Position::default());
+        assert_eq!(generator.generator_type(), MovementGeneratorType::Point);
+        assert_eq!(generator.assistance_delay_ms(), Some(1_000));
+        assert!(matches!(
+            generator.update(creature, 0),
+            MovementUpdate::NewDestination {
+                destination: actual,
+                speed: 3.5,
+                is_walking: true,
+            } if actual == Position { o: -8.0, ..destination }
+        ));
+
+        generator.finalize(creature);
+        generator.reset(creature);
+        assert!(matches!(
+            generator.update(creature, 0),
+            MovementUpdate::NewDestination { .. }
+        ));
+    }
+}
