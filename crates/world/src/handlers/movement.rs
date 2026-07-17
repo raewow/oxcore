@@ -843,4 +843,39 @@ mod tests {
         handle_set_active_mover(&session, &mut release_packet, &world).unwrap();
         assert_eq!(session.client_mover_guid(), Some(player_guid));
     }
+
+    #[test]
+    fn forced_movement_ack_opcodes_map_to_their_observer_messages() {
+        let speed_cases = [
+            (
+                Opcode::CMSG_FORCE_RUN_SPEED_CHANGE_ACK,
+                Opcode::MSG_MOVE_SET_RUN_SPEED,
+            ),
+            (
+                Opcode::CMSG_FORCE_WALK_SPEED_CHANGE_ACK,
+                Opcode::MSG_MOVE_SET_WALK_SPEED,
+            ),
+            (
+                Opcode::CMSG_FORCE_TURN_RATE_CHANGE_ACK,
+                Opcode::MSG_MOVE_SET_TURN_RATE,
+            ),
+        ];
+        for (ack, observer) in speed_cases {
+            assert_eq!(
+                SpeedMoveType::from_ack_opcode(ack).map(SpeedMoveType::observer_opcode),
+                Some(observer)
+            );
+        }
+
+        assert_eq!(
+            FlagChange::from_ack_opcode(Opcode::CMSG_MOVE_WATER_WALK_ACK)
+                .map(FlagChange::observer_opcode),
+            Some(Opcode::MSG_MOVE_WATER_WALK)
+        );
+        assert_eq!(
+            FlagChange::from_ack_opcode(Opcode::CMSG_MOVE_FEATHER_FALL_ACK)
+                .map(FlagChange::observer_opcode),
+            Some(Opcode::MSG_MOVE_FEATHER_FALL)
+        );
+    }
 }
