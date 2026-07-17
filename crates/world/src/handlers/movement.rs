@@ -787,3 +787,60 @@ pub async fn handle_movement(
         .handle_move(player_guid, opcode, movement_info, world)
         .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use oxcore_shared::database::Databases;
+    use oxcore_shared::protocol::{HighGuid, ObjectGuid};
+    use sqlx::mysql::MySqlPoolOptions;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+
+    fn test_world() -> World {
+        let pool = || {
+            MySqlPoolOptions::new()
+                .connect_lazy("mysql://test:test@localhost/test")
+                .expect("lazy pool should be constructible")
+        };
+        let databases = Arc::new(Databases {
+            world: pool(),
+            character: pool(),
+            auth: pool(),
+            logs: pool(),
+        });
+
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    #[tokio::test]
+    async fn set_active_mover_accepts_the_player_and_corrects_other_movers() {
+        let world = test_world();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let session = WorldSession::new(1, 1, "Tester".to_string(), 0, tx);
+        let player_guid = ObjectGuid::new_without_entry(HighGuid::Player, 42);
+        session.set_player_guid(Some(player_guid));
+
+        let mut player_packet = WorldPacket::new(Opcode::CMSG_SET_ACTIVE_MOVER);
+        player_packet.write_guid_raw(player_guid.raw());
+        handle_set_active_mover(&session, &mut player_packet, &world).unwrap();
+        assert_eq!(session.client_mover_guid(), Some(player_guid));
+
+        let mut other_packet = WorldPacket::new(Opcode::CMSG_SET_ACTIVE_MOVER);
+        other_packet.write_guid_raw(ObjectGuid::new_without_entry(HighGuid::Player, 7).raw());
+        handle_set_active_mover(&session, &mut other_packet, &world).unwrap();
+        assert_eq!(session.client_mover_guid(), Some(player_guid));
+
+        let mut release_packet = WorldPacket::new(Opcode::CMSG_SET_ACTIVE_MOVER);
+        release_packet.write_guid_raw(0);
+        handle_set_active_mover(&session, &mut release_packet, &world).unwrap();
+        assert_eq!(session.client_mover_guid(), Some(player_guid));
+    }
+}
