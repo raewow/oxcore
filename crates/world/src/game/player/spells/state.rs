@@ -618,6 +618,53 @@ impl SpellCastTargets {
     pub fn unit_target(&self) -> Option<ObjectGuid> {
         self.unit_target_guid
     }
+
+    /// Set the unit target and flag `TARGET_FLAG_UNIT`.
+    ///
+    /// Mirrors MaNGOS `SpellCastTargets::setUnitTarget`, which also copies the
+    /// target's position into the destination. In the GUID-based model there is
+    /// no live `Unit` pointer, so the caller supplies the target's position.
+    pub fn set_unit_target(&mut self, guid: ObjectGuid, x: f32, y: f32, z: f32) {
+        self.dst_position = Some((x, y, z));
+        self.unit_target_guid = Some(guid);
+        self.target_flags |= TARGET_FLAG_UNIT;
+    }
+
+    /// Set the destination location and flag `TARGET_FLAG_DEST_LOCATION`.
+    pub fn set_destination(&mut self, x: f32, y: f32, z: f32) {
+        self.dst_position = Some((x, y, z));
+        self.target_flags |= TARGET_FLAG_DEST_LOCATION;
+    }
+
+    /// Set the source location and flag `TARGET_FLAG_SOURCE_LOCATION`.
+    pub fn set_source(&mut self, x: f32, y: f32, z: f32) {
+        self.src_position = Some((x, y, z));
+        self.target_flags |= TARGET_FLAG_SOURCE_LOCATION;
+    }
+
+    /// Set the GameObject target GUID.
+    ///
+    /// Mirrors MaNGOS `setGOTarget`, which deliberately leaves the target mask
+    /// untouched (the `TARGET_FLAG_GAMEOBJECT` bit is commented out upstream).
+    pub fn set_go_target(&mut self, guid: ObjectGuid) {
+        self.gameobject_target_guid = Some(guid);
+    }
+
+    /// Set the item target GUID and flag `TARGET_FLAG_ITEM`.
+    ///
+    /// MaNGOS also caches the item entry (`m_itemTargetEntry`); here the entry is
+    /// resolved from the item when the effect runs, so only the GUID is stored.
+    pub fn set_item_target(&mut self, guid: ObjectGuid) {
+        self.item_target_guid = Some(guid);
+        self.target_flags |= TARGET_FLAG_ITEM;
+    }
+
+    /// Set the corpse target GUID.
+    ///
+    /// Mirrors MaNGOS `setCorpseTarget`, which sets no target mask flag.
+    pub fn set_corpse_target(&mut self, guid: ObjectGuid) {
+        self.corpse_target_guid = Some(guid);
+    }
 }
 
 /// An in-progress spell cast.
@@ -1728,5 +1775,78 @@ mod tests {
         let cast = ActiveCast::new(1, None, 0, false, CurrentSpellType::Melee, 0.0, 0.0, 0.0);
         state.set_current_spell(CurrentSpellType::Melee, cast);
         assert!(!state.is_casting());
+    }
+
+    // ===== SpellCastTargets setters (mirror MaNGOS SpellCastTargets::set*) =====
+
+    #[test]
+    fn test_default_cast_targets_is_empty() {
+        // Mirrors the MaNGOS constructor: no flags, no targets, no positions.
+        let t = SpellCastTargets::default();
+        assert_eq!(t.target_flags, TARGET_FLAG_SELF);
+        assert_eq!(t.unit_target_guid, None);
+        assert_eq!(t.gameobject_target_guid, None);
+        assert_eq!(t.item_target_guid, None);
+        assert_eq!(t.corpse_target_guid, None);
+        assert_eq!(t.src_position, None);
+        assert_eq!(t.dst_position, None);
+    }
+
+    #[test]
+    fn test_set_unit_target_sets_dest_and_flag() {
+        let mut t = SpellCastTargets::default();
+        t.set_unit_target(player(7), 1.0, 2.0, 3.0);
+        assert_eq!(t.unit_target_guid, Some(player(7)));
+        assert_eq!(t.dst_position, Some((1.0, 2.0, 3.0)));
+        assert_eq!(t.target_flags & TARGET_FLAG_UNIT, TARGET_FLAG_UNIT);
+    }
+
+    #[test]
+    fn test_set_destination_and_source_are_independent_flags() {
+        let mut t = SpellCastTargets::default();
+        t.set_destination(10.0, 20.0, 30.0);
+        t.set_source(40.0, 50.0, 60.0);
+        assert_eq!(t.dst_position, Some((10.0, 20.0, 30.0)));
+        assert_eq!(t.src_position, Some((40.0, 50.0, 60.0)));
+        assert_eq!(t.target_flags & TARGET_FLAG_DEST_LOCATION, TARGET_FLAG_DEST_LOCATION);
+        assert_eq!(t.target_flags & TARGET_FLAG_SOURCE_LOCATION, TARGET_FLAG_SOURCE_LOCATION);
+    }
+
+    #[test]
+    fn test_set_go_target_leaves_mask_untouched() {
+        // MaNGOS setGOTarget stores the GUID but sets no mask flag.
+        let mut t = SpellCastTargets::default();
+        t.set_go_target(player(99));
+        assert_eq!(t.gameobject_target_guid, Some(player(99)));
+        assert_eq!(t.target_flags, TARGET_FLAG_SELF);
+    }
+
+    #[test]
+    fn test_set_item_target_sets_flag() {
+        let mut t = SpellCastTargets::default();
+        t.set_item_target(player(3));
+        assert_eq!(t.item_target_guid, Some(player(3)));
+        assert_eq!(t.target_flags & TARGET_FLAG_ITEM, TARGET_FLAG_ITEM);
+    }
+
+    #[test]
+    fn test_set_corpse_target_leaves_mask_untouched() {
+        let mut t = SpellCastTargets::default();
+        t.set_corpse_target(player(5));
+        assert_eq!(t.corpse_target_guid, Some(player(5)));
+        assert_eq!(t.target_flags, TARGET_FLAG_SELF);
+    }
+
+    #[test]
+    fn test_setters_accumulate_flags() {
+        // Multiple setters OR their flags together, matching the C++ |= semantics.
+        let mut t = SpellCastTargets::default();
+        t.set_unit_target(player(1), 0.0, 0.0, 0.0);
+        t.set_item_target(player(2));
+        t.set_destination(1.0, 1.0, 1.0);
+        assert_eq!(
+            t.target_flags,
+            TARGET_FLAG_UNIT | TARGET_FLAG_ITEM | TARGET_FLAG_DEST_LOCATION
+        );
     }
 }
