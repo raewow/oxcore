@@ -663,6 +663,40 @@ impl AIEventQueue {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{CreatureAISpellsEntry, CreatureSpellsEntry};
+
+    #[test]
+    fn creature_ai_spell_entry_copies_definition_and_uses_fixed_initial_delay() {
+        let entry = CreatureSpellsEntry {
+            spell_id: 42,
+            delay_initial_min: 1_200,
+            delay_initial_max: 1_200,
+            ..Default::default()
+        };
+
+        let runtime = CreatureAISpellsEntry::new(entry);
+
+        assert_eq!(runtime.inner.spell_id, 42);
+        assert_eq!(runtime.cooldown, 1_200);
+    }
+
+    #[test]
+    fn creature_ai_spell_entry_initial_delay_stays_within_inclusive_bounds() {
+        let entry = CreatureSpellsEntry {
+            delay_initial_min: 100,
+            delay_initial_max: 200,
+            ..Default::default()
+        };
+
+        for _ in 0..32 {
+            let runtime = CreatureAISpellsEntry::new(entry.clone());
+            assert!((100..=200).contains(&runtime.cooldown));
+        }
+    }
+}
+
 impl Default for AIEventQueue {
     fn default() -> Self {
         Self::new()
