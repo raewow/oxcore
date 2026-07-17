@@ -8,6 +8,7 @@ use crate::World;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 use super::validator;
+use super::state::PendingKnockback;
 
 /// Movement system (stateless - operates on Player.movement via PlayerManager)
 pub struct MovementSystem;
@@ -15,6 +16,48 @@ pub struct MovementSystem;
 impl MovementSystem {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Launch a player away from a source and wait for the matching client ACK.
+    pub fn launch_knockback(
+        &self,
+        player_guid: ObjectGuid,
+        cos_angle: f32,
+        sin_angle: f32,
+        horizontal_speed: f32,
+        vertical_speed: f32,
+        world: &World,
+    ) -> Result<()> {
+        let pending = world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                let counter = player.movement.movement_counter.wrapping_add(1);
+                player.movement.movement_counter = counter;
+                let pending = PendingKnockback {
+                    counter,
+                    cos_angle,
+                    sin_angle,
+                    horizontal_speed,
+                    vertical_speed,
+                };
+                player.movement.pending_knockback = Some(pending);
+                pending
+            })
+            .ok_or_else(|| anyhow!("Player not found"))?;
+
+        let session = world
+            .session_mgr
+            .get_session_by_player(player_guid)
+            .ok_or_else(|| anyhow!("Player has no active session"))?;
+        let mut packet = WorldPacket::new(Opcode::SMSG_MOVE_KNOCK_BACK);
+        packet.write_packed_guid_raw(player_guid.raw());
+        packet.write_u32(pending.counter);
+        packet.write_f32(pending.cos_angle);
+        packet.write_f32(pending.sin_angle);
+        packet.write_f32(pending.horizontal_speed);
+        packet.write_f32(pending.vertical_speed);
+        session.send_packet(packet)
     }
 
     /// Event-driven update from movement packet

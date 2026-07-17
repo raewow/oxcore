@@ -36,19 +36,27 @@ pub async fn effect_charge(input: &EffectInput, _world: &World) -> Result<Effect
 /// SPELL_EFFECT_KNOCK_BACK (98)
 ///
 /// Knock the target back (Thunderfury proc, etc.)
-pub async fn effect_knock_back(input: &EffectInput, _world: &World) -> Result<EffectResult> {
-    // TODO: Implement knockback
-    // This requires physics/movement integration
-
+pub async fn effect_knock_back(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
         None => return Ok(EffectResult::empty()),
     };
 
-    // base_value typically contains knockback distance
-    // misc_value typically contains knockback speed
-    let _distance = input.base_value.max(0) as f32;
-    let _speed = input.misc_value.max(0) as f32;
+    let horizontal_speed = input.base_value.max(0) as f32 / 10.0;
+    let vertical_speed = input.misc_value.max(0) as f32 / 10.0;
+
+    let Some(target_position) = world.managers.player_mgr.get_position(target_guid) else {
+        // Creature knockback needs a separate controller/movement owner.
+        return Ok(EffectResult::empty());
+    };
+    let caster_position = world
+        .managers
+        .player_mgr
+        .get_position(input.caster_guid)
+        .or_else(|| world.managers.creature_mgr.get_position(input.caster_guid));
+    let angle = caster_position.map_or(target_position.o + std::f32::consts::PI, |caster| {
+        (target_position.y - caster.y).atan2(target_position.x - caster.x)
+    });
 
     tracing::debug!(
         "Knockback effect: target {} knocked back by caster {}",
@@ -56,10 +64,14 @@ pub async fn effect_knock_back(input: &EffectInput, _world: &World) -> Result<Ef
         input.caster_guid
     );
 
-    // TODO:
-    // 1. Calculate knockback direction (away from caster)
-    // 2. Apply knockback movement to target
-    // 3. Interrupt any casting
+    world.systems.player.movement().launch_knockback(
+        target_guid,
+        angle.cos(),
+        angle.sin(),
+        horizontal_speed,
+        vertical_speed,
+        world,
+    )?;
 
     Ok(EffectResult::empty())
 }
