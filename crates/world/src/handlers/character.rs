@@ -1620,6 +1620,7 @@ pub async fn handle_logout_request(
             let world_guid = WorldObjectGuid::from_raw(player_guid.raw());
             let root_msg = SmsgForceMoveRoot { guid: world_guid };
             session.send_msg(root_msg)?;
+            session.set_pending_root_ack(true);
 
             // Set server-side state: sit and root
             const STAND_STATE_SIT: u8 = 1;

@@ -38,6 +38,8 @@ pub struct WorldSession {
     client_mover_guid: RwLock<Option<ObjectGuid>>,
     /// Server time (ms) before which movement packets are rejected (`m_moveRejectTime`).
     move_reject_time: AtomicU32,
+    /// The logout flow has sent SMSG_FORCE_MOVE_ROOT and awaits its client ACK.
+    pending_root_ack: AtomicBool,
 }
 
 impl WorldSession {
@@ -63,6 +65,7 @@ impl WorldSession {
             pending_teleport: Arc::new(RwLock::new(None)),
             client_mover_guid: RwLock::new(None),
             move_reject_time: AtomicU32::new(0),
+            pending_root_ack: AtomicBool::new(false),
         }
     }
 
@@ -115,6 +118,16 @@ impl WorldSession {
         if self.move_reject_time() < timeout {
             self.set_move_reject_time(timeout);
         }
+    }
+
+    /// Record that the logout root packet awaits its movement acknowledgement.
+    pub fn set_pending_root_ack(&self, pending: bool) {
+        self.pending_root_ack.store(pending, Ordering::Relaxed);
+    }
+
+    /// Consume a pending logout root acknowledgement.
+    pub fn take_pending_root_ack(&self) -> bool {
+        self.pending_root_ack.swap(false, Ordering::Relaxed)
     }
 
     /// Get session ID

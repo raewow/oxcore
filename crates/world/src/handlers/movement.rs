@@ -386,6 +386,35 @@ pub async fn handle_move_not_active_mover(
         .await
 }
 
+/// Handle the logout flow's CMSG_FORCE_MOVE_ROOT_ACK.
+///
+/// Generic forced-root changes still require the movement-controller queue. The
+/// existing logout path sends a counter-zero root packet, which can be tracked
+/// safely on the session and acknowledged independently.
+pub fn handle_move_root_ack(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    _world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+    let guid_raw = packet
+        .read_packed_guid_raw()
+        .ok_or_else(|| anyhow!("MoveRootAck: missing guid"))?;
+    let counter = packet
+        .read_u32()
+        .ok_or_else(|| anyhow!("MoveRootAck: missing counter"))?;
+
+    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
+    if counter != 0 || session.get_mover_from_guid(mover) != Some(player_guid) {
+        return Ok(());
+    }
+
+    session.take_pending_root_ack();
+    Ok(())
+}
+
 /// Handle CMSG_MOUNTSPECIAL_ANIM (`WorldSession::HandleMountSpecialAnimOpcode`).
 ///
 /// Broadcasts SMSG_MOUNTSPECIAL_ANIM (the mount's special animation) to nearby
@@ -842,6 +871,13 @@ mod tests {
         release_packet.write_guid_raw(0);
         handle_set_active_mover(&session, &mut release_packet, &world).unwrap();
         assert_eq!(session.client_mover_guid(), Some(player_guid));
+
+        session.set_pending_root_ack(true);
+        let mut root_ack = WorldPacket::new(Opcode::CMSG_FORCE_MOVE_ROOT_ACK);
+        root_ack.write_packed_guid_raw(player_guid.raw());
+        root_ack.write_u32(0);
+        handle_move_root_ack(&session, &mut root_ack, &world).unwrap();
+        assert!(!session.take_pending_root_ack());
     }
 
     #[test]

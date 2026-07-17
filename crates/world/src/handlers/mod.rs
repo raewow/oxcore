@@ -708,7 +708,7 @@ pub async fn dispatch_packet(
                     movement::handle_mount_special_anim(session, packet, world)?;
                 }
                 Opcode::CMSG_FORCE_MOVE_ROOT_ACK => {
-                    // Client acknowledges being rooted (e.g. during logout)
+                    movement::handle_move_root_ack(session, packet, world)?;
                 }
                 Opcode::CMSG_FORCE_RUN_SPEED_CHANGE_ACK
                 | Opcode::CMSG_FORCE_RUN_BACK_SPEED_CHANGE_ACK
