@@ -206,6 +206,59 @@ impl WaypointManager {
         })
         .unwrap_or(false)
     }
+
+    /// Set the orientation a creature faces at a node.
+    ///
+    /// [`NO_ORIENTATION`] clears the override, the same value the DB uses to mean "no
+    /// forced facing here".
+    pub fn set_node_orientation(
+        &self,
+        origin: WaypointPathOrigin,
+        key: u32,
+        point: u32,
+        orientation: f32,
+    ) -> bool {
+        self.edit_path(origin, key, |nodes| {
+            match nodes.iter_mut().find(|node| node.point_id == point) {
+                Some(node) => {
+                    if orientation == NO_ORIENTATION {
+                        node.orientation = None;
+                    } else {
+                        node.orientation = Some(orientation);
+                        node.position.o = orientation;
+                    }
+                    true
+                }
+                None => false,
+            }
+        })
+        .unwrap_or(false)
+    }
+
+    /// Attach a movement script to a node.
+    ///
+    /// Returns whether the node was found. The C++ counterpart instead returns whether
+    /// the script id is a known `creature_movement_scripts` entry; there is no such
+    /// registry in this port, so that validity check is not modeled. The persisting
+    /// UPDATE remains the repository's job.
+    pub fn set_node_script_id(
+        &self,
+        origin: WaypointPathOrigin,
+        key: u32,
+        point: u32,
+        script_id: u32,
+    ) -> bool {
+        self.edit_path(origin, key, |nodes| {
+            match nodes.iter_mut().find(|node| node.point_id == point) {
+                Some(node) => {
+                    node.script_id = script_id;
+                    true
+                }
+                None => false,
+            }
+        })
+        .unwrap_or(false)
+    }
 }
 
 impl Default for WaypointManager {
@@ -320,6 +373,36 @@ mod tests {
         assert_eq!(path[0].wait_time, 0);
 
         assert!(!manager.set_node_waittime(WaypointPathOrigin::Guid, 7, 99, 1));
+    }
+
+    #[test]
+    fn set_node_orientation_sets_and_clears_the_facing_override() {
+        let manager = manager_with_path();
+
+        assert!(manager.set_node_orientation(WaypointPathOrigin::Guid, 7, 2, 1.5));
+        let path = manager.get_waypoints(7, 0).unwrap();
+        assert_eq!(path[1].orientation, Some(1.5));
+        assert_eq!(path[1].position.o, 1.5);
+        // Untouched node keeps its lack of override.
+        assert_eq!(path[0].orientation, None);
+
+        // The sentinel clears the override again.
+        assert!(manager.set_node_orientation(WaypointPathOrigin::Guid, 7, 2, NO_ORIENTATION));
+        assert_eq!(manager.get_waypoints(7, 0).unwrap()[1].orientation, None);
+
+        assert!(!manager.set_node_orientation(WaypointPathOrigin::Guid, 7, 99, 1.0));
+    }
+
+    #[test]
+    fn set_node_script_id_attaches_the_script_to_the_named_point() {
+        let manager = manager_with_path();
+
+        assert!(manager.set_node_script_id(WaypointPathOrigin::Guid, 7, 3, 555));
+        let path = manager.get_waypoints(7, 0).unwrap();
+        assert_eq!(path[2].script_id, 555);
+        assert_eq!(path[0].script_id, 0);
+
+        assert!(!manager.set_node_script_id(WaypointPathOrigin::Guid, 7, 99, 1));
     }
 
     #[test]
