@@ -19,7 +19,7 @@ use crate::World;
 use anyhow::Result;
 use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
 use oxcore_shared::messages::spells::{
-    ExecuteLogInfo, MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailedOther,
+    ExecuteLogInfo, MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailure,
     SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellStart, SPELL_RESULT_STATUS_FAIL,
     SPELL_RESULT_STATUS_OKAY,
 };
@@ -2126,9 +2126,10 @@ impl SpellSystem {
             }
 
             // Notify nearby clients that the cast was interrupted.
-            let msg = SmsgSpellFailedOther {
+            let msg = SmsgSpellFailure {
                 caster_guid,
                 spell_id,
+                result: validation::spell_cast_error_to_u8(SpellCastError::Interrupted),
             };
             self.broadcast_mgr
                 .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
@@ -2210,9 +2211,10 @@ impl SpellSystem {
             }
 
             // Notify nearby clients that the cast was interrupted.
-            let msg = SmsgSpellFailedOther {
+            let msg = SmsgSpellFailure {
                 caster_guid: target_guid,
                 spell_id,
+                result: validation::spell_cast_error_to_u8(SpellCastError::Interrupted),
             };
             self.broadcast_mgr
                 .broadcast_nearby(target_guid, &msg.to_world_packet(), true);

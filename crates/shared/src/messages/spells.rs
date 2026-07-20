@@ -368,6 +368,24 @@ mod spell_packet_tests {
     }
 
     #[test]
+    fn test_spell_failure_contains_interrupted_result() {
+        let caster = player_guid(10);
+        let packet = SmsgSpellFailure {
+            caster_guid: caster,
+            spell_id: 8690,
+            result: 0x23,
+        }
+        .to_world_packet();
+
+        assert_eq!(packet.opcode(), Opcode::SMSG_SPELL_FAILURE);
+        let mut data = packet.data().clone();
+        assert_eq!(data.get_u64_le(), caster.raw());
+        assert_eq!(data.get_u32_le(), 8690);
+        assert_eq!(data.get_u8(), 0x23);
+        assert!(data.is_empty());
+    }
+
+    #[test]
     fn test_channel_update_contains_remaining_duration() {
         let packet = MsgChannelUpdate { remaining_ms: 1200 }.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::MSG_CHANNEL_UPDATE);
