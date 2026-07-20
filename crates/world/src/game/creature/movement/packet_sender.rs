@@ -49,6 +49,22 @@ impl MovementPacketSender {
         }
     }
 
+    /// Unmodified base speed for a move type, in yards/sec.
+    ///
+    /// Speed changes travel the wire as an absolute speed, so the rate the server tracks is
+    /// multiplied by this before being sent. Flight speeds have no entry in 1.12.
+    fn base_move_speed(move_type: MoveType) -> Option<f32> {
+        match move_type {
+            MoveType::Walk => Some(2.5),
+            MoveType::Run => Some(7.0),
+            MoveType::RunBack => Some(4.5),
+            MoveType::Swim => Some(4.722222),
+            MoveType::SwimBack => Some(2.5),
+            MoveType::TurnRate => Some(3.141594),
+            MoveType::Flight | MoveType::FlightBack => None,
+        }
+    }
+
     fn opcode_for_move_type(move_type: MoveType) -> Option<Opcode> {
         match move_type {
             MoveType::Walk => Some(Opcode::SMSG_SPLINE_SET_WALK_SPEED),
@@ -61,37 +77,38 @@ impl MovementPacketSender {
         }
     }
 
-    pub fn send_speed_change_to_observers(
-        world: &World,
-        creature_guid: ObjectGuid,
-        move_type: MoveType,
-        new_speed: f32,
-    ) -> bool {
-        Self::send_speed_change_to_all(world, creature_guid, move_type, new_speed)
+    fn creature_exists(world: &World, creature_guid: ObjectGuid) -> bool {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(creature_guid, |_| ())
+            .is_some()
     }
 
+    /// Broadcast a speed change for a server-controlled unit.
+    ///
+    /// `new_rate` is the speed multiplier the server tracks; the wire carries the resulting
+    /// absolute speed.
     pub fn send_speed_change_to_all(
         world: &World,
         creature_guid: ObjectGuid,
         move_type: MoveType,
-        new_speed: f32,
+        new_rate: f32,
     ) -> bool {
-        let Some(opcode) = Self::opcode_for_move_type(move_type) else {
+        let (Some(opcode), Some(base_speed)) = (
+            Self::opcode_for_move_type(move_type),
+            Self::base_move_speed(move_type),
+        ) else {
             return false;
         };
 
-        let creature_info = world
-            .managers
-            .creature_mgr
-            .with_creature(creature_guid, |c| (c.position, c.map_id, c.instance_id));
-
-        let Some((position, _, _)) = creature_info else {
+        if !Self::creature_exists(world, creature_guid) {
             return false;
-        };
+        }
 
         let mut packet = WorldPacket::new(opcode);
         packet.write_packed_guid_raw(creature_guid.raw());
-        packet.write_f32(new_speed);
+        packet.write_f32(new_rate * base_speed);
 
         broadcast_around_creature(world, creature_guid, &packet);
         true
@@ -104,25 +121,47 @@ impl MovementPacketSender {
             Opcode::SMSG_SPLINE_MOVE_SET_WALK_MODE
         };
 
-        if let Some((position, _, _)) = world
-            .managers
-            .creature_mgr
-            .with_creature(creature_guid, |c| (c.position, c.map_id, c.instance_id))
-        {
-            let mut packet = WorldPacket::new(opcode);
-            packet.write_packed_guid_raw(creature_guid.raw());
-            broadcast_around_creature(world, creature_guid, &packet);
-            let _ = position;
+        if !Self::creature_exists(world, creature_guid) {
+            return;
         }
+
+        let mut packet = WorldPacket::new(opcode);
+        packet.write_packed_guid_raw(creature_guid.raw());
+        broadcast_around_creature(world, creature_guid, &packet);
     }
 
-    pub fn send_movement_flag_change_to_observers(
-        world: &World,
-        creature_guid: ObjectGuid,
-        flag: MovementFlagChange,
-        apply: bool,
-    ) -> bool {
-        Self::send_movement_flag_change_to_all(world, creature_guid, flag, apply)
+    /// Opcode carrying a movement flag change for a server-controlled unit.
+    fn flag_change_broadcast_opcode(flag: MovementFlagChange, apply: bool) -> Opcode {
+        match flag {
+            MovementFlagChange::Root => {
+                if apply {
+                    Opcode::SMSG_SPLINE_MOVE_ROOT
+                } else {
+                    Opcode::SMSG_SPLINE_MOVE_UNROOT
+                }
+            }
+            MovementFlagChange::WaterWalking => {
+                if apply {
+                    Opcode::SMSG_SPLINE_MOVE_WATER_WALK
+                } else {
+                    Opcode::SMSG_SPLINE_MOVE_LAND_WALK
+                }
+            }
+            MovementFlagChange::Hover => {
+                if apply {
+                    Opcode::SMSG_SPLINE_MOVE_SET_HOVER
+                } else {
+                    Opcode::SMSG_SPLINE_MOVE_UNSET_HOVER
+                }
+            }
+            MovementFlagChange::SafeFall => {
+                if apply {
+                    Opcode::SMSG_SPLINE_MOVE_FEATHER_FALL
+                } else {
+                    Opcode::SMSG_SPLINE_MOVE_NORMAL_FALL
+                }
+            }
+        }
     }
 
     pub fn send_movement_flag_change_to_all(
@@ -131,31 +170,13 @@ impl MovementPacketSender {
         flag: MovementFlagChange,
         apply: bool,
     ) -> bool {
-        let opcode = match flag {
-            MovementFlagChange::Root => {
-                if apply {
-                    Opcode::MSG_MOVE_ROOT
-                } else {
-                    Opcode::MSG_MOVE_UNROOT
-                }
-            }
-            MovementFlagChange::WaterWalking => Opcode::MSG_MOVE_WATER_WALK,
-            MovementFlagChange::Hover => Opcode::MSG_MOVE_HOVER,
-            MovementFlagChange::SafeFall => Opcode::MSG_MOVE_FEATHER_FALL,
-        };
-
-        let Some((position, _, _)) = world
-            .managers
-            .creature_mgr
-            .with_creature(creature_guid, |c| (c.position, c.map_id, c.instance_id))
-        else {
+        if !Self::creature_exists(world, creature_guid) {
             return false;
-        };
+        }
 
-        let mut packet = WorldPacket::new(opcode);
+        let mut packet = WorldPacket::new(Self::flag_change_broadcast_opcode(flag, apply));
         packet.write_packed_guid_raw(creature_guid.raw());
         broadcast_around_creature(world, creature_guid, &packet);
-        let _ = position;
         true
     }
 }
@@ -225,5 +246,69 @@ mod tests {
             MovementPacketSender::opcode_for_move_type(MoveType::FlightBack),
             None
         );
+    }
+
+    #[test]
+    fn base_move_speeds_match_the_client_defaults() {
+        assert_eq!(MovementPacketSender::base_move_speed(MoveType::Walk), Some(2.5));
+        assert_eq!(MovementPacketSender::base_move_speed(MoveType::Run), Some(7.0));
+        assert_eq!(
+            MovementPacketSender::base_move_speed(MoveType::RunBack),
+            Some(4.5)
+        );
+        assert_eq!(
+            MovementPacketSender::base_move_speed(MoveType::Swim),
+            Some(4.722222)
+        );
+        assert_eq!(
+            MovementPacketSender::base_move_speed(MoveType::SwimBack),
+            Some(2.5)
+        );
+        assert_eq!(
+            MovementPacketSender::base_move_speed(MoveType::TurnRate),
+            Some(3.141594)
+        );
+        assert_eq!(MovementPacketSender::base_move_speed(MoveType::Flight), None);
+        assert_eq!(
+            MovementPacketSender::base_move_speed(MoveType::FlightBack),
+            None
+        );
+    }
+
+    #[test]
+    fn flag_change_broadcast_uses_paired_spline_opcodes() {
+        let cases = [
+            (
+                MovementFlagChange::Root,
+                Opcode::SMSG_SPLINE_MOVE_ROOT,
+                Opcode::SMSG_SPLINE_MOVE_UNROOT,
+            ),
+            (
+                MovementFlagChange::WaterWalking,
+                Opcode::SMSG_SPLINE_MOVE_WATER_WALK,
+                Opcode::SMSG_SPLINE_MOVE_LAND_WALK,
+            ),
+            (
+                MovementFlagChange::Hover,
+                Opcode::SMSG_SPLINE_MOVE_SET_HOVER,
+                Opcode::SMSG_SPLINE_MOVE_UNSET_HOVER,
+            ),
+            (
+                MovementFlagChange::SafeFall,
+                Opcode::SMSG_SPLINE_MOVE_FEATHER_FALL,
+                Opcode::SMSG_SPLINE_MOVE_NORMAL_FALL,
+            ),
+        ];
+
+        for (flag, on, off) in cases {
+            assert_eq!(
+                MovementPacketSender::flag_change_broadcast_opcode(flag, true),
+                on
+            );
+            assert_eq!(
+                MovementPacketSender::flag_change_broadcast_opcode(flag, false),
+                off
+            );
+        }
     }
 }
