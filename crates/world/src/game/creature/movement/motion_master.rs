@@ -132,25 +132,59 @@ impl MotionMaster {
     }
 
     /// Update final distance to the target on the active generator, if supported.
-    pub fn update_final_distance_to_target(&mut self, _distance: f32) {}
-
-    /// Remove all generators of the specified type.
-    pub fn clear_type(&mut self, move_type: MovementGeneratorType, creature_guid: ObjectGuid) {
-        let types: Vec<_> = self
-            .generators
-            .iter()
-            .filter_map(|(ty, _)| if *ty == move_type { Some(*ty) } else { None })
-            .collect();
-
-        for ty in types {
-            self.remove_generator(ty, creature_guid);
+    pub fn update_final_distance_to_target(&mut self, distance: f32) {
+        if let Some(top) = self.top_generator_mut() {
+            top.update_final_distance(distance);
         }
     }
 
+    /// Remove all generators of the specified type.
+    pub fn clear_type(&mut self, move_type: MovementGeneratorType, creature_guid: ObjectGuid) {
+        if let Some(mut generator) = self.generators.remove(&move_type) {
+            generator.finalize(creature_guid);
+        }
+
+        self.update_active(creature_guid);
+    }
+
     /// Reinitialize the active patrol movement if one exists.
+    ///
+    /// Patrol paths have no dedicated generator type here, so the waypoint generator is the
+    /// one restarted.
     pub fn reinitialize_patrol_movement(&mut self, creature_guid: ObjectGuid) {
         if let Some(generator) = self.generators.get_mut(&MovementGeneratorType::Waypoint) {
             generator.reset(creature_guid);
+        }
+    }
+
+    /// Extend the pause before the next leg of out-of-combat movement.
+    ///
+    /// Only random and waypoint movement can be paused this way; anything else ignores it.
+    /// Never shortens an existing pause.
+    pub fn add_pause_time(&mut self, pause_time_ms: u32) -> bool {
+        match self.top_type() {
+            Some(MovementGeneratorType::Random) => self
+                .generators
+                .get_mut(&MovementGeneratorType::Random)
+                .and_then(|gen| gen.as_any_mut().downcast_mut::<RandomMovementGenerator>())
+                .map(|random| {
+                    random.add_pause_time(pause_time_ms);
+                    true
+                })
+                .unwrap_or(false),
+            Some(MovementGeneratorType::Waypoint) => self
+                .generators
+                .get_mut(&MovementGeneratorType::Waypoint)
+                .and_then(|gen| {
+                    gen.as_any_mut()
+                        .downcast_mut::<WaypointMovementGenerator>()
+                })
+                .map(|waypoint| {
+                    waypoint.add_pause_time(pause_time_ms);
+                    true
+                })
+                .unwrap_or(false),
+            _ => false,
         }
     }
 
@@ -714,6 +748,9 @@ impl MotionMaster {
             "[MOTION] creature attempted taxi flight (path {path} node {pathnode})"
         );
     }
+
+    /// Jump movement does not exist in 1.12 - the C++ body is commented out for this core.
+    pub fn move_jump(&mut self) {}
 
     /// Charge movement is not fully modeled yet in the Rust creature MotionMaster.
     pub fn move_charge(
@@ -1687,6 +1724,89 @@ mod tests {
             MovementGeneratorType::Idle
         );
         assert!(!motion_master.is_moving());
+    }
+
+    #[test]
+    fn add_pause_time_extends_random_and_waypoint_movement_only() {
+        let guid = creature();
+
+        let mut random = MotionMaster::new();
+        random.random_wander(Position::default(), 5.0, guid, Position::default(), 2.5);
+        assert!(random.add_pause_time(60_000));
+
+        let mut patrol = MotionMaster::new();
+        patrol.move_waypoint(waypoints(), guid, Position::default(), 2.5);
+        assert!(patrol.add_pause_time(60_000));
+
+        // Anything else - here a chase - cannot be paused this way.
+        let mut chasing = MotionMaster::new();
+        chasing.chase(ObjectGuid::from_raw(2), guid, Position::default(), 1.0, 7.0);
+        assert!(!chasing.add_pause_time(60_000));
+
+        // Idle only, nothing to pause.
+        assert!(!MotionMaster::new().add_pause_time(60_000));
+    }
+
+    #[test]
+    fn paused_random_movement_waits_out_the_added_time() {
+        let guid = creature();
+        let mut motion_master = MotionMaster::new();
+        motion_master.random_wander(Position::default(), 5.0, guid, Position::default(), 2.5);
+
+        motion_master.add_pause_time(60_000);
+
+        // The initial 1s wander delay is replaced by the much longer pause.
+        assert!(matches!(
+            motion_master.update_motion(guid, Position::default(), 1_000),
+            Some(MovementUpdate::Continue)
+        ));
+    }
+
+    #[test]
+    fn clear_type_removes_just_that_generator() {
+        let mut motion_master = stacked_motion_master();
+
+        motion_master.clear_type(MovementGeneratorType::Chase, creature());
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle, MovementGeneratorType::Random]
+        );
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Random
+        );
+    }
+
+    #[test]
+    fn set_next_waypoint_and_last_reached_report_from_the_waypoint_generator() {
+        let guid = creature();
+        let mut motion_master = MotionMaster::new();
+
+        // No waypoint generator on the stack yet.
+        assert!(!motion_master.set_next_waypoint(1));
+        assert_eq!(motion_master.get_last_reached_waypoint(), 0);
+        assert_eq!(motion_master.get_waypoint_path_information(), None);
+
+        motion_master.move_waypoint(waypoints(), guid, Position::default(), 2.5);
+
+        assert!(motion_master.set_next_waypoint(1));
+        assert!(!motion_master.set_next_waypoint(99));
+        assert_eq!(motion_master.get_last_reached_waypoint(), 0);
+    }
+
+    #[test]
+    fn propagate_speed_change_and_final_distance_reach_the_stack_without_panicking() {
+        let guid = creature();
+        let mut motion_master = stacked_motion_master();
+
+        motion_master.propagate_speed_change();
+        motion_master.update_final_distance_to_target(12.5);
+
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Chase
+        );
     }
 
     #[test]

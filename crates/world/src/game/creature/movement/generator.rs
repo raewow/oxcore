@@ -41,6 +41,11 @@ pub trait MovementGenerator: Send + Sync {
     /// Notify generator that unit speed changed.
     fn unit_speed_changed(&mut self) {}
 
+    /// Report the final distance to the generator's target.
+    ///
+    /// Only targeted generators care; the rest ignore it.
+    fn update_final_distance(&mut self, _distance: f32) {}
+
     /// Check whether this generator is the active top-of-stack generator.
     fn is_active(&self, motion_master: &MotionMaster) -> bool
     where

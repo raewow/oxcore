@@ -10,6 +10,9 @@ use super::movement::{MotionMaster, MoveSpline};
 use oxcore_shared::protocol::{ObjectGuid, Position};
 use rand::Rng;
 
+/// Default pause applied to out-of-combat movement on player interaction (ms).
+pub const NPC_MOVEMENT_PAUSE_TIME: u32 = 180_000;
+
 /// Slim creature object
 #[derive(Debug, Clone)]
 pub struct Creature {
@@ -291,6 +294,23 @@ impl Creature {
     /// Pause out-of-combat movement when a player interacts with us
     /// (matches vmangos Creature::PauseOutOfCombatMovement behaviour)
     pub fn pause_out_of_combat_movement(&mut self) {
+        self.pause_out_of_combat_movement_for(NPC_MOVEMENT_PAUSE_TIME);
+    }
+
+    /// Pause out-of-combat movement for a specific duration.
+    ///
+    /// Creatures in combat ignore this, and only random or waypoint movement can be paused.
+    /// The paused flag is a local addition on top of the C++ behaviour: it also gates the
+    /// interaction flows that read [`Self::movement_paused`].
+    pub fn pause_out_of_combat_movement_for(&mut self, pause_time_ms: u32) {
+        if self.combat.in_combat {
+            return;
+        }
+
+        // Only random and waypoint movement carries a pause timer; the flag below still
+        // applies to any generator, since the interaction flows depend on it.
+        self.motion_master.add_pause_time(pause_time_ms);
+
         self.movement_paused = true;
         self.motion_master.flags.insert(2); // MotionMasterFlags::PAUSED = 0x02
     }

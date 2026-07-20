@@ -104,6 +104,15 @@ impl WaypointMovementGenerator {
         }
     }
 
+    /// Extend the wait at the current waypoint, never shortening an existing one.
+    pub fn add_pause_time(&mut self, pause_ms: u32) {
+        if self.wait_timer < pause_ms {
+            self.wait_timer = pause_ms;
+            self.is_waiting = true;
+            self.is_moving = false;
+        }
+    }
+
     pub fn set_next_waypoint(&mut self, point_id: u32) -> bool {
         if let Some((idx, _)) = self
             .waypoints
@@ -245,5 +254,44 @@ impl MovementGenerator for WaypointMovementGenerator {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn generator() -> WaypointMovementGenerator {
+        let waypoints = vec![Waypoint {
+            point_id: 1,
+            position: Position::default(),
+            wait_time: 5_000,
+            wander_distance: 0.0,
+            script_id: 0,
+            orientation: None,
+        }];
+
+        WaypointMovementGenerator::new(waypoints, true, 2.5)
+    }
+
+    #[test]
+    fn add_pause_time_extends_the_wait_and_holds_the_creature() {
+        let mut gen = generator();
+
+        gen.add_pause_time(60_000);
+
+        assert_eq!(gen.wait_timer, 60_000);
+        assert!(gen.is_waiting);
+        assert!(!gen.is_moving);
+    }
+
+    #[test]
+    fn add_pause_time_never_shortens_an_existing_wait() {
+        let mut gen = generator();
+        gen.add_pause_time(60_000);
+
+        gen.add_pause_time(1_000);
+
+        assert_eq!(gen.wait_timer, 60_000);
     }
 }
