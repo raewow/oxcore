@@ -52,6 +52,13 @@ pub struct MotionMaster {
     moving: bool,
     /// Whether an async update has been requested
     needs_async_update: bool,
+    /// Generators retired by a delayed clean/expire, dropped on the next update.
+    ///
+    /// `Some` (even when empty) marks that a delayed operation ran this tick, which is
+    /// what drives the post-update re-initialize and reset in [`Self::update_motion`].
+    expire_list: Option<Vec<Box<dyn MovementGenerator>>>,
+    /// A delayed clean/expire asked for the new top generator to be reset.
+    pending_reset: bool,
     /// State flags (updating, paused, etc.)
     pub flags: MotionMasterFlags,
 }
@@ -154,6 +161,8 @@ impl MotionMaster {
             current_destination: None,
             moving: false,
             needs_async_update: false,
+            expire_list: None,
+            pending_reset: false,
             flags: MotionMasterFlags::new(), // Initialize flags
         };
 
@@ -176,31 +185,114 @@ impl MotionMaster {
         self.moving
     }
 
-    /// Initialize motion state and ensure an idle generator exists.
-    pub fn initialize(&mut self, creature_guid: ObjectGuid) {
-        self.clear(creature_guid);
+    /// Type of the top (highest priority) generator, if any.
+    fn top_type(&self) -> Option<MovementGeneratorType> {
+        self.generators.keys().next_back().copied()
+    }
 
-        if self.generators.is_empty() {
-            self.generators.insert(
-                MovementGeneratorType::Idle,
-                Box::new(IdleMovementGenerator::new()),
-            );
+    /// Remove and return the top generator.
+    fn pop_top(&mut self) -> Option<(MovementGeneratorType, Box<dyn MovementGenerator>)> {
+        let gen_type = self.top_type()?;
+        self.generators.remove(&gen_type).map(|gen| (gen_type, gen))
+    }
+
+    fn top_generator_mut(&mut self) -> Option<&mut Box<dyn MovementGenerator>> {
+        let gen_type = self.top_type()?;
+        self.generators.get_mut(&gen_type)
+    }
+
+    /// The idle generator is a shared static in C++ and is never retired.
+    fn is_static(gen_type: MovementGeneratorType) -> bool {
+        gen_type == MovementGeneratorType::Idle
+    }
+
+    /// Drop every generator, including the default one, without finalizing.
+    fn drop_all_generators(&mut self, creature_guid: ObjectGuid) {
+        let mut retired: Vec<_> = std::mem::take(&mut self.generators).into_values().collect();
+        for gen in retired.iter_mut() {
+            gen.finalize(creature_guid);
         }
+    }
+
+    /// Initialize motion state and ensure an idle generator exists.
+    ///
+    /// Stopping the current spline and picking the creature's default generator via the
+    /// factory selector belong to the caller, which owns creature state; here the stack is
+    /// rebuilt with idle as the default.
+    pub fn initialize(&mut self, creature_guid: ObjectGuid) {
+        self.drop_all_generators(creature_guid);
+
+        self.generators.insert(
+            MovementGeneratorType::Idle,
+            Box::new(IdleMovementGenerator::new()),
+        );
 
         self.active_type = MovementGeneratorType::Idle;
         self.moving = false;
         self.current_destination = None;
         self.needs_async_update = false;
+        self.expire_list = None;
+        self.pending_reset = false;
         self.flags = MotionMasterFlags::new();
     }
 
-    /// Re-evaluate the default motion generator without disturbing the active one.
-    pub fn initialize_new_default(&mut self, creature_guid: ObjectGuid, always_replace: bool) {
-        if always_replace {
+    /// Swap in a new default movement generator without interrupting the active one.
+    ///
+    /// `new_default` is the generator the caller's factory selected; `None` falls back to
+    /// idle. The currently active generator is popped, everything else is cleared, and the
+    /// active generator is restored on top unless it is already the new default.
+    pub fn initialize_new_default(
+        &mut self,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        new_default: Option<Box<dyn MovementGenerator>>,
+        always_replace: bool,
+    ) {
+        if self.generators.is_empty() {
             self.initialize(creature_guid);
-        } else {
-            self.update_active(creature_guid);
+            return;
         }
+
+        let new_default_type = new_default
+            .as_ref()
+            .map_or(MovementGeneratorType::Idle, |gen| gen.generator_type());
+
+        // Already using the same motion type as default
+        if !always_replace
+            && self.generators.len() == 1
+            && self.top_type() == Some(new_default_type)
+        {
+            return;
+        }
+
+        let Some((curr_type, mut curr)) = self.pop_top() else {
+            return;
+        };
+
+        // Clear ALL other movement generators
+        self.drop_all_generators(creature_guid);
+
+        if always_replace || curr_type != new_default_type {
+            let mut default_gen =
+                new_default.unwrap_or_else(|| Box::new(IdleMovementGenerator::new()));
+            default_gen.initialize(creature_guid, current_pos);
+            self.generators.insert(new_default_type, default_gen);
+
+            if curr_type != new_default_type {
+                // Restore the previous current generator on top of the new default
+                self.generators.insert(curr_type, curr);
+            } else {
+                // Same as the new default, so it can be retired
+                curr.finalize(creature_guid);
+                if !Self::is_static(curr_type) {
+                    self.expire_list.get_or_insert_with(Vec::new).push(curr);
+                }
+            }
+        } else {
+            self.generators.insert(curr_type, curr);
+        }
+
+        self.update_active(creature_guid);
     }
 
     /// Add a movement generator
@@ -599,34 +691,159 @@ impl MotionMaster {
         );
     }
 
-    /// Clean motion generators immediately.
-    pub fn direct_clean(&mut self, creature_guid: ObjectGuid, reset: bool, all: bool) {
-        if all {
-            self.clear(creature_guid);
+    /// Pop the generators a clean would retire: everything, or everything above the default.
+    fn take_generators_for_clean(
+        &mut self,
+        all: bool,
+    ) -> Vec<(MovementGeneratorType, Box<dyn MovementGenerator>)> {
+        let mut retired = Vec::new();
+        while if all {
+            !self.generators.is_empty()
         } else {
-            self.clear(creature_guid);
-            if reset {
-                self.initialize(creature_guid);
+            self.generators.len() > 1
+        } {
+            match self.pop_top() {
+                Some(entry) => retired.push(entry),
+                None => break,
             }
         }
+        retired
     }
 
-    /// Deferred clean in the current model maps to the immediate clean path.
+    /// Pop the chase/follow generators parked beneath an expiring generator.
+    ///
+    /// The C++ guard also skips this when the expiring generator is a distancing one; that
+    /// type has no equivalent here, so the guard is always satisfied.
+    fn take_stored_targeted_generators(
+        &mut self,
+    ) -> Vec<(MovementGeneratorType, Box<dyn MovementGenerator>)> {
+        let mut retired = Vec::new();
+        while matches!(
+            self.top_type(),
+            Some(MovementGeneratorType::Chase | MovementGeneratorType::Follow)
+        ) {
+            match self.pop_top() {
+                Some(entry) => retired.push(entry),
+                None => break,
+            }
+        }
+        retired
+    }
+
+    /// Clean motion generators immediately.
+    ///
+    /// Generators are finalized only after the stack has been rebuilt, because finalizing
+    /// can push new movement (via movement-inform callbacks in the C++ AI).
+    pub fn direct_clean(&mut self, creature_guid: ObjectGuid, reset: bool, all: bool) {
+        let mut retired = self.take_generators_for_clean(all);
+
+        if !all && reset {
+            if self.generators.is_empty() {
+                self.initialize(creature_guid);
+            }
+            if let Some(top) = self.top_generator_mut() {
+                top.reset(creature_guid);
+            }
+        }
+
+        for (_, gen) in retired.iter_mut() {
+            gen.finalize(creature_guid);
+        }
+
+        self.moving = false;
+        self.current_destination = None;
+        self.update_active(creature_guid);
+    }
+
+    /// Clean motion generators, deferring their disposal to the next update.
     pub fn delayed_clean(&mut self, creature_guid: ObjectGuid, reset: bool, all: bool) {
-        self.direct_clean(creature_guid, reset, all);
+        self.pending_reset = reset;
+
+        if self.generators.is_empty() || (!all && self.generators.len() == 1) {
+            return;
+        }
+
+        let mut retired = self.take_generators_for_clean(all);
+        for (_, gen) in retired.iter_mut() {
+            gen.finalize(creature_guid);
+        }
+
+        let expire_list = self.expire_list.get_or_insert_with(Vec::new);
+        expire_list.extend(
+            retired
+                .into_iter()
+                .filter(|(gen_type, _)| !Self::is_static(*gen_type))
+                .map(|(_, gen)| gen),
+        );
+
+        self.moving = false;
+        self.current_destination = None;
+        self.update_active(creature_guid);
     }
 
-    /// Expire the current movement generator and optionally reset.
+    /// Expire the current movement generator and optionally reset the one beneath it.
     pub fn direct_expire(&mut self, creature_guid: ObjectGuid, reset: bool) {
-        self.clear(creature_guid);
-        if reset {
+        if self.generators.len() <= 1 {
+            return;
+        }
+
+        let Some((_, mut curr)) = self.pop_top() else {
+            return;
+        };
+
+        let mut retired = self.take_stored_targeted_generators();
+        for (_, gen) in retired.iter_mut() {
+            gen.finalize(creature_guid);
+        }
+
+        // Remember the top before finalizing, since finalizing may push new movement.
+        let now_top = self.top_type();
+        curr.finalize(creature_guid);
+        drop(curr);
+
+        if self.generators.is_empty() {
             self.initialize(creature_guid);
         }
+
+        // Don't reset a generator that finalization just pushed.
+        if reset && self.top_type() == now_top {
+            if let Some(top) = self.top_generator_mut() {
+                top.reset(creature_guid);
+            }
+        }
+
+        self.moving = false;
+        self.current_destination = None;
+        self.update_active(creature_guid);
     }
 
-    /// Deferred expire in the current model maps to the immediate expire path.
+    /// Expire the current movement generator, deferring disposal to the next update.
     pub fn delayed_expire(&mut self, creature_guid: ObjectGuid, reset: bool) {
-        self.direct_expire(creature_guid, reset);
+        self.pending_reset = reset;
+
+        if self.generators.len() <= 1 {
+            return;
+        }
+
+        let Some((curr_type, mut curr)) = self.pop_top() else {
+            return;
+        };
+
+        let mut retired = self.take_stored_targeted_generators();
+        for (_, gen) in retired.iter_mut() {
+            gen.finalize(creature_guid);
+        }
+        curr.finalize(creature_guid);
+
+        let expire_list = self.expire_list.get_or_insert_with(Vec::new);
+        expire_list.extend(retired.into_iter().map(|(_, gen)| gen));
+        if !Self::is_static(curr_type) {
+            expire_list.push(curr);
+        }
+
+        self.moving = false;
+        self.current_destination = None;
+        self.update_active(creature_guid);
     }
 
     /// Ensure the idle generator is the active fallback.
@@ -722,6 +939,23 @@ impl MotionMaster {
 
         // Clear updating flag
         self.flags.remove(MotionMasterFlags::UPDATING);
+
+        // Dispose of anything a delayed clean/expire retired this tick, then honour the
+        // reset it deferred.
+        if let Some(expire_list) = self.expire_list.take() {
+            drop(expire_list);
+
+            if self.generators.is_empty() {
+                self.initialize(creature_guid);
+            }
+
+            if self.pending_reset {
+                if let Some(top) = self.top_generator_mut() {
+                    top.reset(creature_guid);
+                }
+                self.pending_reset = false;
+            }
+        }
 
         Some(update)
     }
@@ -862,7 +1096,10 @@ impl MotionMaster {
 
 impl Drop for MotionMaster {
     fn drop(&mut self) {
+        // Deallocate generators without finalizing them: finalization reaches back into the
+        // owner, which is already going away.
         self.generators.clear();
+        self.expire_list = None;
     }
 }
 
@@ -956,5 +1193,255 @@ mod tests {
             vec![MovementGeneratorType::Idle, MovementGeneratorType::Point]
         );
         assert!(!motion_master.is_using_idle_or_default_movement());
+    }
+
+    fn creature() -> ObjectGuid {
+        ObjectGuid::from_raw(1)
+    }
+
+    /// Idle (default) + Random + Chase, with Chase on top.
+    fn stacked_motion_master() -> MotionMaster {
+        let mut motion_master = MotionMaster::new();
+        let guid = creature();
+
+        motion_master.random_wander(Position::default(), 5.0, guid, Position::default(), 2.5);
+        motion_master.chase(
+            ObjectGuid::from_raw(2),
+            guid,
+            Position::default(),
+            1.0,
+            7.0,
+        );
+
+        motion_master
+    }
+
+    #[test]
+    fn direct_clean_keeps_the_default_generator_unless_all_is_requested() {
+        let mut motion_master = stacked_motion_master();
+
+        motion_master.direct_clean(creature(), true, false);
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Idle
+        );
+        assert!(!motion_master.is_moving());
+    }
+
+    #[test]
+    fn direct_clean_with_all_reinstates_idle_only_through_initialize() {
+        let mut motion_master = stacked_motion_master();
+
+        motion_master.direct_clean(creature(), false, true);
+
+        assert!(motion_master.generators.is_empty());
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Idle
+        );
+    }
+
+    #[test]
+    fn delayed_clean_parks_generators_until_the_next_update() {
+        let mut motion_master = stacked_motion_master();
+
+        motion_master.delayed_clean(creature(), true, false);
+
+        assert_eq!(motion_master.expire_list.as_ref().map(Vec::len), Some(2));
+        assert!(motion_master.pending_reset);
+
+        motion_master.update_motion(creature(), Position::default(), 100);
+
+        assert!(motion_master.expire_list.is_none());
+        assert!(!motion_master.pending_reset);
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+    }
+
+    #[test]
+    fn delayed_clean_on_a_single_generator_only_records_the_reset_request() {
+        let mut motion_master = MotionMaster::new();
+
+        motion_master.delayed_clean(creature(), true, false);
+
+        assert!(motion_master.expire_list.is_none());
+        assert!(motion_master.pending_reset);
+    }
+
+    #[test]
+    fn direct_expire_pops_only_the_top_generator() {
+        let mut motion_master = stacked_motion_master();
+
+        motion_master.direct_expire(creature(), true);
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle, MovementGeneratorType::Random]
+        );
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Random
+        );
+    }
+
+    #[test]
+    fn direct_expire_also_drops_targeted_generators_stored_underneath() {
+        let mut motion_master = MotionMaster::new();
+        let guid = creature();
+
+        motion_master.chase(ObjectGuid::from_raw(2), guid, Position::default(), 1.0, 7.0);
+        motion_master.fear(
+            ObjectGuid::from_raw(3),
+            5_000,
+            20.0,
+            guid,
+            Position::default(),
+            7.0,
+        );
+
+        // Fleeing sits above Chase, so expiring it takes the parked chase with it.
+        motion_master.direct_expire(guid, true);
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+    }
+
+    #[test]
+    fn expire_is_a_no_op_with_only_the_default_generator() {
+        let mut motion_master = MotionMaster::new();
+
+        motion_master.direct_expire(creature(), true);
+        motion_master.delayed_expire(creature(), true);
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+        assert!(motion_master.expire_list.is_none());
+    }
+
+    #[test]
+    fn delayed_expire_defers_disposal_to_the_next_update() {
+        let mut motion_master = stacked_motion_master();
+
+        motion_master.delayed_expire(creature(), false);
+
+        assert_eq!(motion_master.expire_list.as_ref().map(Vec::len), Some(1));
+        assert!(!motion_master.pending_reset);
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Random
+        );
+
+        motion_master.update_motion(creature(), Position::default(), 100);
+
+        assert!(motion_master.expire_list.is_none());
+    }
+
+    #[test]
+    fn initialize_new_default_on_an_empty_stack_falls_back_to_initialize() {
+        let mut motion_master = MotionMaster::new();
+        motion_master.direct_clean(creature(), false, true);
+        assert!(motion_master.generators.is_empty());
+
+        motion_master.initialize_new_default(creature(), Position::default(), None, false);
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+    }
+
+    #[test]
+    fn initialize_new_default_keeps_a_stack_already_on_the_new_default() {
+        let mut motion_master = MotionMaster::new();
+
+        motion_master.initialize_new_default(
+            creature(),
+            Position::default(),
+            Some(Box::new(IdleMovementGenerator::new())),
+            false,
+        );
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+        assert!(motion_master.expire_list.is_none());
+    }
+
+    #[test]
+    fn initialize_new_default_swaps_the_default_and_restores_the_active_generator() {
+        let mut motion_master = stacked_motion_master();
+
+        let new_default = RandomMovementGenerator::new(Position::default(), 3.0, 2.5);
+        motion_master.initialize_new_default(
+            creature(),
+            Position::default(),
+            Some(Box::new(new_default)),
+            false,
+        );
+
+        // Random becomes the default, Chase stays on top, everything else is gone.
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Random, MovementGeneratorType::Chase]
+        );
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Chase
+        );
+    }
+
+    #[test]
+    fn initialize_new_default_retires_an_active_generator_equal_to_the_new_default() {
+        let mut motion_master = MotionMaster::new();
+        let guid = creature();
+        motion_master.random_wander(Position::default(), 5.0, guid, Position::default(), 2.5);
+
+        motion_master.initialize_new_default(
+            guid,
+            Position::default(),
+            Some(Box::new(RandomMovementGenerator::new(
+                Position::default(),
+                3.0,
+                2.5,
+            ))),
+            true,
+        );
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Random]
+        );
+        assert_eq!(motion_master.expire_list.as_ref().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn initialize_rebuilds_the_stack_and_clears_pending_state() {
+        let mut motion_master = stacked_motion_master();
+        motion_master.delayed_clean(creature(), true, false);
+        motion_master.flags.insert(MotionMasterFlags::PAUSED);
+
+        motion_master.initialize(creature());
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+        assert!(motion_master.expire_list.is_none());
+        assert!(!motion_master.pending_reset);
+        assert!(!motion_master.flags.contains(MotionMasterFlags::PAUSED));
+        assert!(!motion_master.is_moving());
+        assert_eq!(motion_master.get_destination(), None);
     }
 }
