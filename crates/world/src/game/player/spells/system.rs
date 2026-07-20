@@ -1561,9 +1561,8 @@ impl SpellSystem {
     ///   have no corresponding target-resolution path yet (`resolve_spell_targets` only
     ///   resolves unit/GO targets) — genuinely unported, not just re-homed.
     /// - `needs_spell_log` computes the MaNGOS `m_needSpellLog` flag from
-    ///   `IsNeedSendToClient` + effect list, but there is no `SendLogExecute`
-    ///   (`SMSG_SPELLLOGEXECUTE`) builder in this codebase yet, so the flag is logged
-    ///   rather than turned into a packet.
+    ///   `IsNeedSendToClient` + effect list, then the finish phase builds and sends
+    ///   `SMSG_SPELLLOGEXECUTE` when that flag is set.
     async fn execute_spell_immediate(
         &self,
         caster_guid: ObjectGuid,
