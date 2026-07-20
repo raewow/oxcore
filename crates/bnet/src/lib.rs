@@ -7,6 +7,7 @@ pub mod certs;
 pub mod config;
 pub mod gen_certs;
 pub mod rest;
+pub mod srp6v2;
 pub mod run;
 pub mod server;
 pub mod tls;
