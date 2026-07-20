@@ -187,8 +187,8 @@ impl PowerSystem {
         }
 
         // Health regen (Player::RegenerateHealth). Skipped when at max health.
-        // Full implementation requires MOD_HEALTH_REGEN_PERCENT,
-        // MOD_REGEN_DURING_COMBAT, MOD_HEALTH_REGEN_IN_COMBAT, and polymorph detection.
+        // Full implementation also requires MOD_REGEN_DURING_COMBAT and
+        // MOD_HEALTH_REGEN_IN_COMBAT aura totals.
         {
             let cur_health = player.stats.health;
             let max_health = player.stats.max_health;
@@ -206,7 +206,7 @@ impl PowerSystem {
                     // is omitted until aura totals are wired in).
                     add_value =
                         regen::calculate_health_regen_per_tick(player.stats.spirit, player.level);
-                    // TODO: multiply by MOD_HEALTH_REGEN_PERCENT aura total
+                    add_value *= player.power.health_regen_multiplier;
                     // C++ IsStandingUp is true only for standing and dead units.
                     if player.stand_state != 0 && player.stand_state != 7 {
                         add_value *= 1.5;
@@ -571,6 +571,22 @@ mod tests {
         // Two HP per five seconds is 0.8 HP per two-second tick, totaling four HP.
         assert_eq!(player.stats.health, 104);
         assert_eq!(player.power.carry_health_regen, 0.0);
+    }
+
+    #[test]
+    fn percent_health_regen_scales_spirit_but_not_flat_hp5() {
+        let system = PowerSystem::new(Arc::new(MockBroadcastManagerTrait::new()));
+        let mut player = warrior(60);
+        player.stats.health = 100;
+        player.stats.max_health = 1_000;
+        player.stats.spirit = 100;
+        player.power.health_regen_multiplier = 1.5;
+        player.power.health_regen_per_5 = 5.0;
+
+        system.regen_tick(player.guid, &mut player, 0);
+
+        // Spirit regen is 30 * 1.5; the unscaled 5 HP5 contributes 2 per tick.
+        assert_eq!(player.stats.health, 147);
     }
 
     #[test]

@@ -675,12 +675,30 @@ impl AuraSystem {
             .player
             .manager()
             .with_player_mut(player_guid, |player| {
-                apply_flat_health_regen_aura_modifier(
-                    &mut player.power,
-                    aura_type,
-                    value,
-                    apply,
-                )
+                apply_flat_health_regen_aura_modifier(&mut player.power, aura_type, value, apply)
+            })
+            .unwrap_or(false))
+    }
+
+    /// Rebuild the health-regen-percent multiplier after its aura set changes.
+    async fn modify_health_regen_percent_aura(
+        &self,
+        player_guid: ObjectGuid,
+        aura_type: u32,
+        world: &World,
+    ) -> Result<bool> {
+        if aura_type != effects::AURA_MOD_HEALTH_REGEN_PERCENT {
+            return Ok(false);
+        }
+
+        Ok(world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                let auras = player.auras.container.get_auras_by_type(aura_type);
+                let values = auras.iter().map(|aura| aura.current_value());
+                apply_health_regen_percent_aura_modifier(&mut player.power, aura_type, values)
             })
             .unwrap_or(false))
     }
@@ -710,6 +728,13 @@ impl AuraSystem {
         if let Some((aura_type, value, misc_value)) = modifier_info {
             if self
                 .modify_flat_health_regen_aura(target_guid, aura_type, value, true, world)
+                .await?
+            {
+                return Ok(());
+            }
+
+            if self
+                .modify_health_regen_percent_aura(target_guid, aura_type, world)
                 .await?
             {
                 return Ok(());
@@ -777,6 +802,13 @@ impl AuraSystem {
                 false,
                 world,
             )
+            .await?
+        {
+            return Ok(());
+        }
+
+        if self
+            .modify_health_regen_percent_aura(target_guid, aura.aura_type, world)
             .await?
         {
             return Ok(());
@@ -2936,6 +2968,25 @@ fn apply_flat_health_regen_aura_modifier(
     true
 }
 
+/// Rebuild the multiplier used for spirit-based health regeneration.
+///
+/// C++ applies each `AURA_MOD_HEALTH_REGEN_PERCENT` aura successively, rather
+/// than summing their percentages, so retain that multiplicative behavior.
+fn apply_health_regen_percent_aura_modifier(
+    power: &mut crate::game::player::power::PowerState,
+    aura_type: u32,
+    values: impl Iterator<Item = i32>,
+) -> bool {
+    if aura_type != effects::AURA_MOD_HEALTH_REGEN_PERCENT {
+        return false;
+    }
+
+    power.health_regen_multiplier = values.fold(1.0, |multiplier, value| {
+        multiplier * (100.0 + value as f32) / 100.0
+    });
+    true
+}
+
 /// Apply or reverse a max-power aura for the power type in `misc_value`.
 fn apply_max_power_aura_modifier(
     unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
@@ -3232,6 +3283,25 @@ mod tests {
             false,
         ));
         assert_eq!(power.health_regen_per_5, 0.0);
+    }
+
+    #[test]
+    fn percent_health_regen_aura_applies_and_removes_multiplier() {
+        let mut power = crate::game::player::power::PowerState::default();
+
+        assert!(apply_health_regen_percent_aura_modifier(
+            &mut power,
+            effects::AURA_MOD_HEALTH_REGEN_PERCENT,
+            [50, 20].into_iter(),
+        ));
+        assert_eq!(power.health_regen_multiplier, 1.8);
+
+        assert!(apply_health_regen_percent_aura_modifier(
+            &mut power,
+            effects::AURA_MOD_HEALTH_REGEN_PERCENT,
+            std::iter::empty(),
+        ));
+        assert_eq!(power.health_regen_multiplier, 1.0);
     }
 
     #[test]

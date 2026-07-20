@@ -75,6 +75,9 @@ pub struct PowerState {
     /// Flat health regeneration from auras, in health per five seconds.
     pub health_regen_per_5: f32,
 
+    /// Combined multiplier from health-regen-percent auras.
+    pub health_regen_multiplier: f32,
+
     /// Percentage of spirit regen that works while casting
     /// From talents/auras like Meditation, Arcane Meditation
     pub casting_regen_pct: f32,
@@ -97,6 +100,7 @@ impl Default for PowerState {
             is_drinking: false,
             mp5_from_gear: 0.0,
             health_regen_per_5: 0.0,
+            health_regen_multiplier: 1.0,
             casting_regen_pct: 0.0,
             carry_health_regen: 0.0,
         }

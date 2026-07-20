@@ -27,11 +27,10 @@ impl AuraInterruptFlags {
     pub const UNUSED16: Self = Self(0x00010000);
     pub const MOUNT: Self = Self(0x00020000); // Bit 17: Mounting
     pub const STANDING_CANCELS: Self = Self(0x00040000); // Bit 18: Stand up (food/drink/sleep)
-    pub const LEAVE_AREA: Self = Self(0x00080000); // Bit 19: Leaving area
-    pub const INVULNERABILITY_BUFF: Self = Self(0x00100000); // Bit 20: Invulnerability
-    pub const STEALTH: Self = Self(0x00200000); // Bit 21: Stealth
-    pub const CAST: Self = Self(0x00400000); // Bit 22: Casting a spell
-    pub const LANDING: Self = Self(0x00800000); // Bit 23: Landing from flight
+    pub const LEAVE_WORLD_CANCELS: Self = Self(0x00080000); // Bit 19: Leaving the world
+    pub const STEALTH_INVIS_CANCELS: Self = Self(0x00100000); // Bit 20: Stealth / invisibility
+    pub const INVULNERABILITY_BUFF_CANCELS: Self = Self(0x00200000); // Bit 21: Invulnerability
+    pub const ENTER_WORLD_CANCELS: Self = Self(0x00400000); // Bit 22: Entering the world
 
     pub fn contains(&self, flag: Self) -> bool {
         (self.0 & flag.0) != 0

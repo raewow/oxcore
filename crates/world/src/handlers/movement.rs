@@ -11,7 +11,46 @@ use crate::World;
 use oxcore_shared::messages::character::SmsgLogoutCancelAck;
 use oxcore_shared::messages::movement::SmsgForceMoveUnroot;
 use oxcore_shared::messages::social::SmsgStandstateUpdate;
-use oxcore_shared::protocol::{Opcode, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
+
+/// Restart a far teleport towards the player's homebind (`Player::TeleportToHomebind`).
+///
+/// Used when a teleport destination turns out to be unusable: the current teleport is
+/// abandoned and a fresh one to the bind point is queued for the next worldport ack.
+fn teleport_to_homebind(
+    session: &WorldSession,
+    player_guid: ObjectGuid,
+    world: &World,
+) -> Result<()> {
+    let Some((map_id, position)) = world.managers.player_mgr.with_player(player_guid, |player| {
+        (
+            player.homebind_map,
+            Position {
+                x: player.homebind_x,
+                y: player.homebind_y,
+                z: player.homebind_z,
+                o: 0.0,
+            },
+        )
+    }) else {
+        return Ok(());
+    };
+
+    let mut transfer = WorldPacket::new(Opcode::SMSG_TRANSFER_PENDING);
+    transfer.write_u32(map_id);
+    session.send_packet(transfer)?;
+
+    let mut new_world = WorldPacket::new(Opcode::SMSG_NEW_WORLD);
+    new_world.write_u32(map_id);
+    new_world.write_f32(position.x);
+    new_world.write_f32(position.y);
+    new_world.write_f32(position.z);
+    new_world.write_f32(position.o);
+    session.send_packet(new_world)?;
+
+    session.set_pending_teleport(Some((map_id, 0, position)));
+    Ok(())
+}
 
 /// Handle MSG_MOVE_WORLDPORT_ACK - acknowledge far teleport
 ///
@@ -39,8 +78,26 @@ pub async fn handle_worldport_ack(
     let pending = session.get_pending_teleport();
     info!("[WORLDPORT-ACK] Pending teleport: {:?}", pending);
 
-    let (dest_map, dest_instance_id, dest_pos) =
-        pending.ok_or_else(|| anyhow!("No pending teleport"))?;
+    // Ignore unexpected far teleport acks rather than treating them as an error.
+    let Some((dest_map, dest_instance_id, dest_pos)) = pending else {
+        return Ok(());
+    };
+
+    // A destination outside the map is only reachable by a bad teleport or a cheat.
+    // Stop the teleport (so it isn't retried forever) and send the player home instead.
+    if !is_valid_map_coord(dest_pos.x, dest_pos.y, dest_pos.z, dest_pos.o) {
+        tracing::error!(
+            "[WORLDPORT-ACK] Teleport destination is not a valid location (map {}, {} {} {}); \
+             porting to homebind instead",
+            dest_map,
+            dest_pos.x,
+            dest_pos.y,
+            dest_pos.z
+        );
+        session.clear_pending_teleport();
+        teleport_to_homebind(session, player_guid, world)?;
+        return Ok(());
+    }
 
     info!(
         "[WORLDPORT-ACK] Destination: map={} instance={} pos=({},{},{},{})",
@@ -239,6 +296,17 @@ pub async fn handle_worldport_ack(
     } else {
         info!("[WORLDPORT-ACK] ⚠ No visibility update (grids may not be loaded yet)");
     }
+
+    // Auras that don't survive a world change (AURA_INTERRUPT_ENTER_WORLD_CANCELS).
+    world
+        .systems
+        .auras
+        .remove_auras_with_interrupt_flag(
+            player_guid,
+            crate::game::player::auras::interrupt::AuraInterruptFlags::ENTER_WORLD_CANCELS.0,
+            world,
+        )
+        .await?;
 
     info!("========================================");
     info!(
@@ -1188,6 +1256,60 @@ mod tests {
             .unwrap();
         assert_eq!(run_speed, 14.0);
         assert!(!still_pending);
+    }
+
+    #[tokio::test]
+    async fn worldport_ack_without_a_pending_teleport_is_ignored() {
+        let mut world = test_world();
+        let (session, _rx) = add_test_player(&mut world);
+
+        let mut packet = WorldPacket::new(Opcode::MSG_MOVE_WORLDPORT_ACK);
+        // An unexpected ack is dropped, not treated as an error.
+        handle_worldport_ack(&session, &mut packet, &world)
+            .await
+            .unwrap();
+        assert!(session.get_pending_teleport().is_none());
+    }
+
+    #[tokio::test]
+    async fn worldport_ack_to_an_invalid_destination_redirects_to_homebind() {
+        let mut world = test_world();
+        let (session, _rx) = add_test_player(&mut world);
+        let player_guid = session.player_guid().expect("player guid");
+
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.homebind_map = 0;
+                player.homebind_x = -8_900.0;
+                player.homebind_y = -200.0;
+                player.homebind_z = 80.0;
+            });
+
+        // Destination well outside the map: only reachable via a bad teleport or a cheat.
+        session.set_pending_teleport(Some((
+            1,
+            0,
+            Position {
+                x: 500_000.0,
+                y: 0.0,
+                z: 0.0,
+                o: 0.0,
+            },
+        )));
+
+        let mut packet = WorldPacket::new(Opcode::MSG_MOVE_WORLDPORT_ACK);
+        handle_worldport_ack(&session, &mut packet, &world)
+            .await
+            .unwrap();
+
+        // The bad teleport is abandoned and replaced by one to the bind point.
+        let pending = session.get_pending_teleport().expect("homebind teleport");
+        assert_eq!(pending.0, 0);
+        assert_eq!(pending.2.x, -8_900.0);
+        assert_eq!(pending.2.y, -200.0);
+        assert_eq!(pending.2.z, 80.0);
     }
 
     #[tokio::test]

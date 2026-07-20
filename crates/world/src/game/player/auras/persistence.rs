@@ -39,10 +39,10 @@ const SPELL_AURA_FAR_SIGHT: u32 = 76;
 const SPELL_AURA_AOE_CHARM: u32 = 177;
 
 /// AURA_INTERRUPT_LEAVE_WORLD_CANCELS (bit 19) | AURA_INTERRUPT_ENTER_WORLD_CANCELS (bit 22),
-/// from vMaNGOS `SpellAuraInterruptFlags`. Kept as raw bits here (rather than reusing
-/// `AuraInterruptFlags::LEAVE_AREA`/`CAST`, whose *names* don't match these C++ semantics)
-/// to avoid misleading call sites.
-const AURA_INTERRUPT_LEAVE_OR_ENTER_WORLD_CANCELS: u32 = 0x0008_0000 | 0x0040_0000;
+/// from vMaNGOS `SpellAuraInterruptFlags`.
+const AURA_INTERRUPT_LEAVE_OR_ENTER_WORLD_CANCELS: u32 =
+    crate::game::player::auras::interrupt::AuraInterruptFlags::LEAVE_WORLD_CANCELS.0
+        | crate::game::player::auras::interrupt::AuraInterruptFlags::ENTER_WORLD_CANCELS.0;
 
 /// CLASS_WARRIOR
 const CLASS_WARRIOR: u8 = 1;

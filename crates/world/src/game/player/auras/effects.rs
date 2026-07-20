@@ -165,6 +165,7 @@ pub const AURA_MOD_UNATTACKABLE: u32 = 17; // Vanish / Ice Block unattackable
 // --- Power Regen ---
 pub const AURA_MOD_REGEN: u32 = 84; // Health regen
 pub const AURA_MOD_POWER_REGEN: u32 = 85; // Power regen (MP5)
+pub const AURA_MOD_HEALTH_REGEN_PERCENT: u32 = 88; // Pct health regen
 pub const AURA_MOD_POWER_REGEN_PERCENT: u32 = 110; // Pct power regen
 pub const AURA_MOD_MANA_REGEN_INTERRUPT: u32 = 134; // Mana regen while casting (Meditation)
 
@@ -222,6 +223,7 @@ pub fn is_stat_modifier_aura(aura_type: u32) -> bool {
             | AURA_MOD_RANGED_HASTE
             | AURA_MOD_POWER_REGEN
             | AURA_MOD_REGEN
+            | AURA_MOD_HEALTH_REGEN_PERCENT
             | AURA_MOD_POWER_REGEN_PERCENT
             | AURA_MOD_MANA_REGEN_INTERRUPT
             | AURA_MOD_DAMAGE_PERCENT_TAKEN
