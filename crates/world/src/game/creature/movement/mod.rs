@@ -8,6 +8,7 @@ pub mod packet_sender;
 pub mod move_spline;
 mod spline;
 pub mod spline_base;
+pub mod spline_packet_builder;
 mod system;
 mod types;
 pub mod waypoint_manager;

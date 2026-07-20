@@ -278,6 +278,32 @@ impl MoveSpline {
         self.spline.point(self.spline.last()).unwrap_or_default()
     }
 
+    pub fn facing(&self) -> SplineFacing {
+        self.facing
+    }
+
+    /// First point of the curve, where the unit started.
+    pub fn start_point(&self) -> Option<Vec3> {
+        self.spline.point(self.spline.first())
+    }
+
+    /// Every point held by the curve, including the virtual ones.
+    pub fn curve_points(&self) -> &[Vec3] {
+        self.spline.base().points()
+    }
+
+    /// The path the caller supplied, without the leading virtual point.
+    ///
+    /// Linear splines keep one virtual point at the front; the packet builder walks
+    /// this slice when packing intermediate offsets.
+    pub fn real_path(&self) -> &[Vec3] {
+        let points = self.curve_points();
+        if points.len() <= 1 {
+            return &[];
+        }
+        &points[1..]
+    }
+
     /// Start a new spline from `args`, replacing any current one.
     pub fn initialize(&mut self, args: &MoveSplineInitArgs) {
         self.flags = args.flags;
