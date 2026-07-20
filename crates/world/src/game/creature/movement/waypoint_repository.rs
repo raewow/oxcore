@@ -5,6 +5,7 @@
 //! - creature_movement_template: Per-entry waypoints (FromEntry)
 
 use super::generators::Waypoint;
+use super::waypoint_manager;
 use oxcore_shared::protocol::Position;
 use sqlx::MySqlPool;
 use std::collections::HashMap;
@@ -67,22 +68,52 @@ impl WaypointRepository {
         let mut grouped: HashMap<u32, Vec<Waypoint>> = HashMap::new();
 
         for row in rows {
-            grouped.entry(row.id).or_default().push(Waypoint {
-                point_id: row.point,
-                position: Position {
-                    x: row.position_x,
-                    y: row.position_y,
-                    z: row.position_z,
-                    o: row.orientation.unwrap_or(0.0),
-                },
-                wait_time: row.waittime.unwrap_or(0),
-                wander_distance: row.wander_distance.unwrap_or(0.0),
-                script_id: row.script_id.unwrap_or(0),
-                orientation: row.orientation,
-            });
+            grouped
+                .entry(row.id)
+                .or_default()
+                .push(Self::build_waypoint(row));
         }
 
         grouped
+    }
+
+    /// Convert one DB row into a waypoint, normalizing bad data the way the C++
+    /// loader does.
+    fn build_waypoint(row: WaypointRow) -> Waypoint {
+        // The DB stores 100 to mean "no orientation override at this node".
+        let orientation = row
+            .orientation
+            .filter(|value| *value != waypoint_manager::NO_ORIENTATION);
+
+        let mut x = row.position_x;
+        let mut y = row.position_y;
+        let z = row.position_z;
+
+        if !waypoint_manager::is_valid_map_coord(x, y, z, orientation.unwrap_or(0.0)) {
+            tracing::error!(
+                "Waypoint path {} point {} has invalid coordinates (X: {}, Y: {})",
+                row.id,
+                row.point,
+                x,
+                y
+            );
+            x = waypoint_manager::normalize_map_coord(x);
+            y = waypoint_manager::normalize_map_coord(y);
+        }
+
+        Waypoint {
+            point_id: row.point,
+            position: Position {
+                x,
+                y,
+                z,
+                o: orientation.unwrap_or(0.0),
+            },
+            wait_time: row.waittime.unwrap_or(0),
+            wander_distance: row.wander_distance.unwrap_or(0.0),
+            script_id: row.script_id.unwrap_or(0),
+            orientation,
+        }
     }
 }
 
