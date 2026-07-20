@@ -9,13 +9,13 @@
 
 use crate::game::broadcast_mgr::BroadcastManager;
 use crate::game::common::update_fields::*;
+use crate::game::creature::movement::packet_sender::MovementFlagChange;
+use crate::game::creature::movement::MoveType;
 use crate::game::player::auras::aura::{Aura, AuraFlags};
 use crate::game::player::auras::effects;
 use crate::game::player::auras::effects::StatModifier;
 use crate::game::player::auras::periodic;
 use crate::game::player::auras::proc;
-use crate::game::creature::movement::packet_sender::MovementFlagChange;
-use crate::game::creature::movement::MoveType;
 use crate::game::player::movement::MovementControllerSender;
 use crate::World;
 use oxcore_shared::messages::auras::SmsgUpdateAuraDuration;
@@ -128,7 +128,7 @@ impl AuraSystem {
             duration_ms
         };
 
-        let aura = Aura::new(
+        let mut aura = Aura::new(
             spell_id,
             caster_guid,
             effect_index,
@@ -141,6 +141,25 @@ impl AuraSystem {
             max_charges,
             flags,
         );
+
+        // School-absorb auras receive their caster's applicable +healing or
+        // +spell-damage bonus once, when the shield is created.
+        if aura_type == effects::AURA_SCHOOL_ABSORB {
+            if let Some(spell_proto) = world.managers.spell_mgr.get(spell_id) {
+                let bonus = crate::game::player::spells::caster::school_absorb_bonus_done(
+                    caster_guid,
+                    &spell_proto,
+                    world,
+                );
+                let value = aura.current_value().saturating_add(bonus);
+                if let Some(base_value) = aura.base_values.get_mut(effect_index as usize) {
+                    *base_value = value;
+                }
+                if let Some(current_value) = aura.current_values.get_mut(effect_index as usize) {
+                    *current_value = value;
+                }
+            }
+        }
 
         // Store aura_type and slot for later use after lock release
         let aura_type_copy = aura_type;
