@@ -5,6 +5,7 @@ mod generator;
 pub mod generators;
 mod motion_master;
 pub mod packet_sender;
+pub mod move_spline;
 mod spline;
 pub mod spline_base;
 mod system;

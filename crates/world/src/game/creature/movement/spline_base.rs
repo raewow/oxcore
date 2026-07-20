@@ -406,6 +406,158 @@ impl SplineBase {
     }
 }
 
+/// A [`SplineBase`] with a cumulative length (or time) recorded at each index.
+///
+/// The C++ core parameterizes this on the length type; only the `int32` instantiation is
+/// used, where the "lengths" are actually millisecond timestamps.
+#[derive(Debug, Default, Clone)]
+pub struct Spline {
+    base: SplineBase,
+    lengths: Vec<i32>,
+}
+
+impl Spline {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn base(&self) -> &SplineBase {
+        &self.base
+    }
+
+    pub fn first(&self) -> usize {
+        self.base.index_lo
+    }
+
+    pub fn last(&self) -> usize {
+        self.base.index_hi
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.base.index_lo == self.base.index_hi
+    }
+
+    pub fn is_cyclic(&self) -> bool {
+        self.base.cyclic
+    }
+
+    pub fn point(&self, index: usize) -> Option<Vec3> {
+        self.base.points.get(index).copied()
+    }
+
+    pub fn point_count(&self) -> usize {
+        self.base.points.len()
+    }
+
+    pub fn init_spline(&mut self, controls: &[Vec3], mode: EvaluationMode) {
+        self.base.init_spline(controls, mode);
+    }
+
+    pub fn init_cyclic_spline(
+        &mut self,
+        controls: &[Vec3],
+        mode: EvaluationMode,
+        cyclic_point: usize,
+    ) {
+        self.base.init_cyclic_spline(controls, mode, cyclic_point);
+    }
+
+    /// Record cumulative lengths using the geometric segment lengths.
+    pub fn init_lengths(&mut self) {
+        self.init_lengths_with(|spline, index| {
+            spline.base.seg_length(index).unwrap_or(0.0) as i32
+        });
+    }
+
+    /// Record cumulative lengths using a caller-supplied per-segment cost.
+    ///
+    /// The value returned must never decrease; a negative value means the accumulator
+    /// overflowed and saturates, as it does in C++.
+    pub fn init_lengths_with<F>(&mut self, mut cost: F)
+    where
+        F: FnMut(&Self, usize) -> i32,
+    {
+        self.lengths = vec![0; self.base.index_hi + 1];
+
+        let mut index = self.base.index_lo;
+        while index < self.base.index_hi {
+            let mut new_length = cost(self, index);
+            if new_length < 0 {
+                new_length = i32::MAX;
+            }
+            index += 1;
+            self.lengths[index] = new_length;
+        }
+    }
+
+    /// Total length of the spline.
+    pub fn length(&self) -> i32 {
+        self.lengths.get(self.base.index_hi).copied().unwrap_or(0)
+    }
+
+    /// Cumulative length at `index`.
+    pub fn length_at(&self, index: usize) -> i32 {
+        self.lengths.get(index).copied().unwrap_or(0)
+    }
+
+    /// Length between two indices.
+    pub fn length_between(&self, first: usize, last: usize) -> i32 {
+        self.length_at(last) - self.length_at(first)
+    }
+
+    pub fn set_length(&mut self, index: usize, length: i32) {
+        if let Some(slot) = self.lengths.get_mut(index) {
+            *slot = length;
+        }
+    }
+
+    /// First segment whose span contains `length`.
+    pub fn compute_index_in_bounds(&self, length: i32) -> usize {
+        let mut index = self.base.index_lo;
+        while index + 1 < self.base.index_hi && self.length_at(index + 1) < length {
+            index += 1;
+        }
+        index
+    }
+
+    /// Segment index and in-segment percentage for a percentage of the whole spline.
+    pub fn compute_index(&self, t: f32) -> (usize, f32) {
+        let t = t.clamp(0.0, 1.0);
+        let length = (t * self.length() as f32) as i32;
+        let index = self.compute_index_in_bounds(length);
+        let segment = self.length_between(index, index + 1);
+
+        let u = if segment > 0 {
+            (length - self.length_at(index)) as f32 / segment as f32
+        } else {
+            0.0
+        };
+
+        (index, u)
+    }
+
+    /// Position at a percentage of the whole spline.
+    pub fn evaluate_percent(&self, t: f32) -> Option<Vec3> {
+        let (index, u) = self.compute_index(t);
+        self.base.evaluate(index, u)
+    }
+
+    /// Position within a single segment.
+    pub fn evaluate_percent_in_segment(&self, index: usize, u: f32) -> Option<Vec3> {
+        self.base.evaluate(index, u)
+    }
+
+    /// Tangent within a single segment.
+    pub fn evaluate_derivative_in_segment(&self, index: usize, u: f32) -> Option<Vec3> {
+        self.base.evaluate_derivative(index, u)
+    }
+
+    pub fn clear(&mut self) {
+        self.base.clear();
+        self.lengths.clear();
+    }
+}
+
 impl fmt::Display for SplineBase {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "mode: {}", self.mode)?;
