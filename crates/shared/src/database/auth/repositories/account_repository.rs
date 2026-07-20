@@ -142,7 +142,10 @@ impl AccountRepository {
 
     // ========== COMMAND METHODS (Write Operations) ==========
 
-    /// Create a new account with SRP6 credentials.
+    /// Create a new account, computing credentials for both clients: the vanilla SRP6 verifier
+    /// (`v`/`s`, SHA-1) for the 1.12 client and the Battle.net SRP6v2 verifier
+    /// (`bnet_verifier`/`bnet_salt`, SHA-256) for the 1.14.x client. A single password sets
+    /// both, so the account works from either client.
     pub async fn create_account(&self, username: &str, password: &str) -> Result<u32> {
         let username_norm =
             NormalizedString::new(username).map_err(|e| anyhow!("Invalid username: {}", e))?;
@@ -158,15 +161,47 @@ impl AccountRepository {
         let salt_hex = hex::encode_upper(verifier.salt());
         let v_hex = hex::encode_upper(verifier.password_verifier());
 
-        let result = sqlx::query("INSERT INTO `account` (`username`, `v`, `s`) VALUES (?, ?, ?)")
-            .bind(&stored_username)
-            .bind(&v_hex)
-            .bind(&salt_hex)
-            .execute(&*self.pool)
-            .await
-            .context("Failed to create account")?;
+        // Bnet identity is the account username; register() applies HEX(SHA256(UPPER(..))).
+        let bnet = crate::crypto::srp6v2::register(&stored_username, password);
+        let bnet_salt_hex = hex::encode_upper(bnet.salt);
+        let bnet_verifier_hex = hex::encode_upper(&bnet.verifier);
+
+        let result = sqlx::query(
+            "INSERT INTO `account` (`username`, `v`, `s`, `bnet_srp_version`, `bnet_salt`, \
+             `bnet_verifier`) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&stored_username)
+        .bind(&v_hex)
+        .bind(&salt_hex)
+        .bind(crate::crypto::srp6v2::SRP_VERSION as u8)
+        .bind(&bnet_salt_hex)
+        .bind(&bnet_verifier_hex)
+        .execute(&*self.pool)
+        .await
+        .context("Failed to create account")?;
 
         Ok(result.last_insert_id() as u32)
+    }
+
+    /// Update the Battle.net (SRP6v2) credentials for an existing account, e.g. after a
+    /// password change. The vanilla `v`/`s` are updated separately by the caller.
+    pub async fn set_bnet_credentials(&self, username: &str, password: &str) -> Result<()> {
+        let stored_username = username.to_uppercase();
+        let bnet = crate::crypto::srp6v2::register(&stored_username, password);
+
+        sqlx::query(
+            "UPDATE `account` SET `bnet_srp_version` = ?, `bnet_salt` = ?, `bnet_verifier` = ? \
+             WHERE `username` = ?",
+        )
+        .bind(crate::crypto::srp6v2::SRP_VERSION as u8)
+        .bind(hex::encode_upper(bnet.salt))
+        .bind(hex::encode_upper(&bnet.verifier))
+        .bind(&stored_username)
+        .execute(&*self.pool)
+        .await
+        .context("Failed to update bnet credentials")?;
+
+        Ok(())
     }
 
     /// Set the gmlevel column on an account.

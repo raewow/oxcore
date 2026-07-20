@@ -1,5 +1,8 @@
 //! Blizzard's SRP6v2, as the modern (1.14.x) client runs it over the REST login service.
 //!
+//! Lives in `oxcore-shared` so both the bnet login server and the account repository
+//! (`create_account`) can compute verifiers from one implementation.
+//!
 //! This is a faithful port of TrinityCore's `BnetSRP6v2<SHA256>`
 //! (`src/common/Cryptography/Authentication/SRP6.{h,cpp}`). It shares nothing with the vanilla
 //! SRP in `crates/auth` beyond the acronym: different prime, different generator handling,

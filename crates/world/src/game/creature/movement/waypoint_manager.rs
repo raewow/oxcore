@@ -24,6 +24,19 @@ pub enum WaypointPathOrigin {
     Entry,
 }
 
+impl std::fmt::Display for WaypointPathOrigin {
+    /// Human-readable origin (`WaypointManager::GetOriginString`).
+    ///
+    /// The C++ enum also has `<no path>` and `special` variants; neither is modeled here,
+    /// since the manager only accepts guid and entry paths.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            WaypointPathOrigin::Guid => "guid",
+            WaypointPathOrigin::Entry => "entry",
+        })
+    }
+}
+
 /// Waypoint data manager - state only, no database
 pub struct WaypointManager {
     /// Waypoints by creature spawn GUID
@@ -391,6 +404,12 @@ mod tests {
         assert_eq!(manager.get_waypoints(7, 0).unwrap()[1].orientation, None);
 
         assert!(!manager.set_node_orientation(WaypointPathOrigin::Guid, 7, 99, 1.0));
+    }
+
+    #[test]
+    fn origin_renders_the_table_name() {
+        assert_eq!(WaypointPathOrigin::Guid.to_string(), "guid");
+        assert_eq!(WaypointPathOrigin::Entry.to_string(), "entry");
     }
 
     #[test]

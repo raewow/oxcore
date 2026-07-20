@@ -49,9 +49,15 @@ CREATE TABLE `account` (
   `nostalrius_reason` text,
   `geolock_pin` int DEFAULT '0',
   `totp_secret` varchar(255) DEFAULT NULL COMMENT 'TOTP secret for 2FA',
+  `bnet_srp_version` tinyint unsigned NOT NULL DEFAULT '2' COMMENT 'Blizzard SRP version for the bnet verifier (2 = SHA-256)',
+  `bnet_salt` varchar(64) DEFAULT NULL COMMENT 'Bnet SRP6v2 salt, 32 bytes as uppercase hex',
+  `bnet_verifier` varchar(512) DEFAULT NULL COMMENT 'Bnet SRP6v2 verifier, uppercase hex',
+  `bnet_login_ticket` varchar(64) DEFAULT NULL COMMENT 'Active bnet login ticket (OX-<40 hex>), issued by the REST login',
+  `bnet_login_ticket_expiry` bigint NOT NULL DEFAULT '0' COMMENT 'Unix time the login ticket expires',
   PRIMARY KEY (`id`),
   UNIQUE KEY `idx_username` (`username`),
-  KEY `idx_gmlevel` (`gmlevel`)
+  KEY `idx_gmlevel` (`gmlevel`),
+  KEY `idx_bnet_login_ticket` (`bnet_login_ticket`)
 ) ENGINE=InnoDB AUTO_INCREMENT=31 DEFAULT CHARSET=utf8mb3 ROW_FORMAT=DYNAMIC COMMENT='Account System';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
