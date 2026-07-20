@@ -199,6 +199,7 @@ pub fn is_stat_modifier_aura(aura_type: u32) -> bool {
             | AURA_MOD_RESISTANCE
             | AURA_MOD_BASE_RESISTANCE
             | AURA_MOD_RESISTANCE_PCT
+            | AURA_MOD_SHIELD_BLOCKVALUE
             | AURA_MOD_BASE_RESISTANCE_PCT
             | AURA_MOD_RESISTANCE_OF_STAT_PERCENT
             | AURA_MOD_ATTACK_POWER

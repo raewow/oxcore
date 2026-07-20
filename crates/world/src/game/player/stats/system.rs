@@ -605,8 +605,13 @@ impl StatsSystem {
                 .stats
                 .base_mods
                 .get_total_base_mod_value(BaseModGroup::ShieldBlockValue);
-            player.stats.block_value =
-                (equipped_bonuses.block_value as f32 + base_block_value).max(0.0) as u32;
+            let aura_block_value = player.auras.container.get_total_aura_modifier(
+                crate::game::player::auras::effects::AURA_MOD_SHIELD_BLOCKVALUE,
+            ) as f32;
+            player.stats.block_value = (equipped_bonuses.block_value as f32
+                + base_block_value
+                + aura_block_value)
+                .max(0.0) as u32;
 
             // 12. Damage ranges
             let default_speed_ms: u32 = 2000;
