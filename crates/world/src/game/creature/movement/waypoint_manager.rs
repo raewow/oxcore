@@ -10,36 +10,10 @@ use dashmap::DashMap;
 use oxcore_shared::protocol::Position;
 use std::sync::Arc;
 
-/// Half the width of a map, in yards (64 grids of 533.33333).
-const MAP_HALFSIZE: f32 = 533.333_3 * 64.0 / 2.0;
-
-/// Largest coordinate a map position may hold.
-const MAX_MAP_COORD: f32 = MAP_HALFSIZE - 0.5;
+pub use crate::core::common::position::{is_valid_map_coord, normalize_map_coord};
 
 /// Orientation value the DB uses to mean "no orientation override at this node".
 pub const NO_ORIENTATION: f32 = 100.0;
-
-/// Clamp a coordinate into the map bounds (`MaNGOS::NormalizeMapCoord`).
-pub fn normalize_map_coord(coord: f32) -> f32 {
-    coord.clamp(-MAX_MAP_COORD, MAX_MAP_COORD)
-}
-
-/// Whether a waypoint position is usable (`MaNGOS::IsValidMapCoord`).
-///
-/// X/Y must sit inside the map, Z within the much wider height bound, and the
-/// orientation must be finite and within 4π.
-pub fn is_valid_map_coord(x: f32, y: f32, z: f32, orientation: f32) -> bool {
-    const MAX_Z_COORD: f32 = 400_000.0;
-
-    x.is_finite()
-        && y.is_finite()
-        && x.abs() <= MAX_MAP_COORD
-        && y.abs() <= MAX_MAP_COORD
-        && z.is_finite()
-        && z.abs() <= MAX_Z_COORD
-        && orientation.is_finite()
-        && orientation.abs() <= 4.0 * std::f32::consts::PI
-}
 
 /// Which table a path came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,27 +250,6 @@ mod tests {
             .iter()
             .map(|node| (node.point_id, node.position.x))
             .collect()
-    }
-
-    #[test]
-    fn normalize_map_coord_clamps_to_the_map_bounds() {
-        assert_eq!(normalize_map_coord(0.0), 0.0);
-        assert_eq!(normalize_map_coord(100.0), 100.0);
-        assert_eq!(normalize_map_coord(50_000.0), MAX_MAP_COORD);
-        assert_eq!(normalize_map_coord(-50_000.0), -MAX_MAP_COORD);
-    }
-
-    #[test]
-    fn map_coord_validity_covers_bounds_orientation_and_non_finites() {
-        assert!(is_valid_map_coord(100.0, -200.0, 50.0, 1.5));
-        // Z gets the much wider height bound, not the map bound.
-        assert!(is_valid_map_coord(0.0, 0.0, 20_000.0, 0.0));
-
-        assert!(!is_valid_map_coord(50_000.0, 0.0, 0.0, 0.0));
-        assert!(!is_valid_map_coord(0.0, 0.0, 500_000.0, 0.0));
-        assert!(!is_valid_map_coord(0.0, 0.0, 0.0, 100.0));
-        assert!(!is_valid_map_coord(f32::NAN, 0.0, 0.0, 0.0));
-        assert!(!is_valid_map_coord(0.0, f32::INFINITY, 0.0, 0.0));
     }
 
     #[test]
