@@ -14,6 +14,7 @@ use crate::game::common::update_fields::*;
 use crate::game::inventory::InventorySystem;
 use crate::game::items::manager::ItemTemplate;
 use crate::game::items::ItemManager;
+use crate::game::player::power::PowerType;
 use crate::game::player::skills::{
     get_skill_max_for_level, SkillSaveState, SKILL_2H_AXES, SKILL_2H_MACES, SKILL_2H_SWORDS,
     SKILL_AXES, SKILL_BOWS, SKILL_CROSSBOWS, SKILL_DAGGERS, SKILL_DEFENSE, SKILL_FIST_WEAPONS,
@@ -133,6 +134,15 @@ pub struct StatsSystem {
 /// clamped to non-negative. Used for both melee and ranged attack power.
 fn combine_attack_power(base: f32, flat: i32, pct: i32) -> i32 {
     ((base + flat as f32) * (1.0 + pct as f32 / 100.0)).max(0.0) as i32
+}
+
+fn calculate_non_mana_max_power(unit_mods: &super::modifiers::UnitModifierGroup, power: u8) -> u32 {
+    unit_mods
+        .calculate_total_value(
+            UnitMods::from_power(power).unwrap(),
+            derived::base_max_power(power) as f32,
+        )
+        .max(0.0) as u32
 }
 
 impl StatsSystem {
@@ -393,20 +403,21 @@ impl StatsSystem {
                     + mana_total_value
                     + int_bonus)
                     * mana_total_pct;
-                let old_max_mana = player.stats.max_mana;
                 player.stats.max_mana = max_mana.max(0.0) as u32;
+            }
 
-                if old_max_mana > 0 && player.stats.mana > 0 {
-                    let ratio = player.stats.mana as f32 / old_max_mana as f32;
-                    player.stats.mana = (player.stats.max_mana as f32 * ratio).max(0.0) as u32;
-                }
-                if player.stats.mana > player.stats.max_mana {
-                    player.stats.mana = player.stats.max_mana;
-                }
-            } else {
-                // Non-mana class (rage/energy)
-                player.stats.max_mana = derived::base_max_power(power_type);
-                // Don't touch current value for rage/energy
+            // Every power type has a UnitMods slot. Mana retains its class/intellect formula above;
+            // non-mana powers start at their expected fixed maximum and use the common modifier
+            // formula. Do not rescale current power here: aura handlers apply the max delta via
+            // ModifyPower after this recalculation.
+            for power in 0u8..5 {
+                let power_type = PowerType::from_u8(power).unwrap();
+                let max_power = if power_type == PowerType::Mana {
+                    player.stats.max_mana
+                } else {
+                    calculate_non_mana_max_power(&player.stats.unit_mods, power)
+                };
+                player.power.max[power as usize] = max_power;
             }
 
             // 5. Attack power
@@ -990,6 +1001,18 @@ mod tests {
         let max_health = StatsSystem::calculate_max_health(100.0, 50.0, 0.0, 20.0, 1.5, 10.0, 1.0);
 
         assert_eq!(max_health, 240.0);
+    }
+
+    #[test]
+    fn non_mana_power_max_uses_unit_modifiers_and_base_values() {
+        let mut unit_mods = super::super::modifiers::UnitModifierGroup::new();
+        unit_mods.handle_stat_modifier(UnitMods::Energy, UnitModifierType::TotalValue, 20.0, true);
+        unit_mods.handle_stat_modifier(UnitMods::Energy, UnitModifierType::TotalPct, 10.0, true);
+
+        assert_eq!(calculate_non_mana_max_power(&unit_mods, 1), 1000);
+        assert_eq!(calculate_non_mana_max_power(&unit_mods, 2), 100);
+        assert_eq!(calculate_non_mana_max_power(&unit_mods, 3), 132);
+        assert_eq!(calculate_non_mana_max_power(&unit_mods, 4), 1_050_000);
     }
 
     #[test]

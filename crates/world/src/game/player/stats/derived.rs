@@ -257,9 +257,11 @@ pub fn power_type_for_class(class: u8) -> u8 {
 /// Get default max power for non-mana power types
 pub fn base_max_power(power_type: u8) -> u32 {
     match power_type {
-        1 => 1000, // Rage (displayed as 100 in client, stored as 1000)
-        3 => 100,  // Energy
-        _ => 0,    // Mana comes from intellect
+        1 => 1000,    // Rage (displayed as 100 in client, stored as 1000)
+        2 => 100,     // Focus
+        3 => 100,     // Energy
+        4 => 1050000, // Happiness
+        _ => 0,       // Mana comes from intellect
     }
 }
 

@@ -14,6 +14,9 @@ use crate::game::player::auras::effects;
 use crate::game::player::auras::effects::StatModifier;
 use crate::game::player::auras::periodic;
 use crate::game::player::auras::proc;
+use crate::game::creature::movement::packet_sender::MovementFlagChange;
+use crate::game::creature::movement::MoveType;
+use crate::game::player::movement::MovementControllerSender;
 use crate::World;
 use oxcore_shared::messages::auras::SmsgUpdateAuraDuration;
 use oxcore_shared::messages::update::{
@@ -689,6 +692,13 @@ impl AuraSystem {
             }
 
             if self
+                .modify_max_power_aura(target_guid, aura_type, misc_value, value, true, world)
+                .await?
+            {
+                return Ok(());
+            }
+
+            if self
                 .modify_resistance_aura(target_guid, aura_type, misc_value, value, true, world)
                 .await?
             {
@@ -732,6 +742,20 @@ impl AuraSystem {
             .modify_max_health_aura(
                 target_guid,
                 aura.aura_type,
+                aura.current_value(),
+                false,
+                world,
+            )
+            .await?
+        {
+            return Ok(());
+        }
+
+        if self
+            .modify_max_power_aura(
+                target_guid,
+                aura.aura_type,
+                aura.misc_value,
                 aura.current_value(),
                 false,
                 world,
@@ -1051,6 +1075,60 @@ impl AuraSystem {
         }
 
         Ok(modified)
+    }
+
+    /// Apply or remove a max-power aura, then grant or drain the matching max delta.
+    async fn modify_max_power_aura(
+        &self,
+        player_guid: ObjectGuid,
+        aura_type: u32,
+        misc_value: i32,
+        value: i32,
+        apply: bool,
+        world: &World,
+    ) -> Result<bool> {
+        let power_type = match aura_type {
+            effects::AURA_MOD_INCREASE_ENERGY | effects::AURA_MOD_INCREASE_ENERGY_PERCENT => {
+                crate::game::player::power::PowerType::from_u8(misc_value as u8)
+                    .filter(|_| (0..5).contains(&misc_value))
+            }
+            _ => return Ok(false),
+        };
+
+        let Some(power_type) = power_type else {
+            return Ok(true);
+        };
+
+        let old_max = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                apply_max_power_aura_modifier(
+                    &mut player.stats.unit_mods,
+                    aura_type,
+                    misc_value,
+                    value,
+                    apply,
+                );
+                player.power.get_max(power_type)
+            });
+
+        let Some(old_max) = old_max else {
+            return Ok(true);
+        };
+
+        world.systems.stats.recalculate_all(player_guid);
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                let delta = player.power.get_max(power_type) as i64 - old_max as i64;
+                player.power.modify_power(power_type, delta as i32);
+            });
+
+        Ok(true)
     }
 
     /// Apply or reverse a school-resistance aura (flat/percent, base/total) across its school
@@ -1681,10 +1759,11 @@ impl AuraSystem {
     /// Recalculate and broadcast the player's run speed based on active speed auras.
     ///
     /// Sums all AURA_MOD_INCREASE_SPEED / AURA_MOD_DECREASE_SPEED percentage modifiers
-    /// (positive = faster, negative = slower), applies them to the base run speed (7.0
-    /// yards/sec), stores the result, and sends SMSG_FORCE_RUN_SPEED_CHANGE.
+    /// (positive = faster, negative = slower) and forces the resulting rate on the
+    /// controlling client. The authoritative speed is stored when the client acks.
     fn apply_movement_speed(&self, target_guid: ObjectGuid, world: &World) {
-        const BASE_RUN_SPEED: f32 = 7.0;
+        // Keeps the old floor of 0.1 yards/sec, expressed as a rate off the 7.0 base.
+        const MIN_SPEED_RATE: f32 = 0.1 / 7.0;
 
         // Sum percentage modifiers from all active speed auras
         let total_pct: i32 = world
@@ -1707,23 +1786,14 @@ impl AuraSystem {
             })
             .unwrap_or(0);
 
-        let new_speed = (BASE_RUN_SPEED * (1.0 + total_pct as f32 / 100.0)).max(0.1);
+        let new_rate = (1.0 + total_pct as f32 / 100.0).max(MIN_SPEED_RATE);
 
-        // Persist updated speed on player
-        world
-            .systems
-            .player
-            .manager()
-            .with_player_mut(target_guid, |player| {
-                player.movement.run_speed = new_speed;
-            });
-
-        // Send SMSG_FORCE_RUN_SPEED_CHANGE to the target player
-        let mut packet = WorldPacket::new(Opcode::SMSG_FORCE_RUN_SPEED_CHANGE);
-        packet.write_packed_guid_raw(target_guid.raw());
-        packet.write_u32(0); // movement counter
-        packet.write_f32(new_speed);
-        self.broadcast_mgr.send_to_player(target_guid, packet);
+        MovementControllerSender::add_speed_change_to_controller(
+            world,
+            target_guid,
+            MoveType::Run,
+            new_rate,
+        );
     }
 
     // =========================================================================
@@ -2127,42 +2197,30 @@ impl AuraSystem {
     // ---- Water walk / feather fall / hover ----
 
     fn send_water_walk(&self, target_guid: ObjectGuid, enable: bool, world: &World) {
-        let opcode = if enable {
-            Opcode::SMSG_MOVE_WATER_WALK
-        } else {
-            Opcode::SMSG_MOVE_LAND_WALK
-        };
-        let mut packet = WorldPacket::new(opcode);
-        packet.write_packed_guid_raw(target_guid.raw());
-        packet.write_u32(0); // movement counter
-        self.broadcast_mgr.send_to_player(target_guid, packet);
-        let _ = world;
+        MovementControllerSender::add_movement_flag_change_to_controller(
+            world,
+            target_guid,
+            MovementFlagChange::WaterWalking,
+            enable,
+        );
     }
 
     fn send_feather_fall(&self, target_guid: ObjectGuid, enable: bool, world: &World) {
-        let opcode = if enable {
-            Opcode::SMSG_MOVE_FEATHER_FALL
-        } else {
-            Opcode::SMSG_MOVE_NORMAL_FALL
-        };
-        let mut packet = WorldPacket::new(opcode);
-        packet.write_packed_guid_raw(target_guid.raw());
-        packet.write_u32(0);
-        self.broadcast_mgr.send_to_player(target_guid, packet);
-        let _ = world;
+        MovementControllerSender::add_movement_flag_change_to_controller(
+            world,
+            target_guid,
+            MovementFlagChange::SafeFall,
+            enable,
+        );
     }
 
     fn send_hover(&self, target_guid: ObjectGuid, enable: bool, world: &World) {
-        let opcode = if enable {
-            Opcode::SMSG_MOVE_SET_HOVER
-        } else {
-            Opcode::SMSG_MOVE_UNSET_HOVER
-        };
-        let mut packet = WorldPacket::new(opcode);
-        packet.write_packed_guid_raw(target_guid.raw());
-        packet.write_u32(0);
-        self.broadcast_mgr.send_to_player(target_guid, packet);
-        let _ = world;
+        MovementControllerSender::add_movement_flag_change_to_controller(
+            world,
+            target_guid,
+            MovementFlagChange::Hover,
+            enable,
+        );
     }
 
     // ---- Shapeshift ----
@@ -2815,6 +2873,43 @@ fn apply_max_health_aura_modifier(
     unit_mods.handle_stat_modifier(UnitMods::Health, modifier_type, value as f32, apply)
 }
 
+/// Apply or reverse a max-power aura for the power type in `misc_value`.
+fn apply_max_power_aura_modifier(
+    unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
+    aura_type: u32,
+    misc_value: i32,
+    value: i32,
+    apply: bool,
+) -> bool {
+    use crate::game::player::stats::modifiers::{UnitModifierType, UnitMods};
+
+    let modifier_type = match aura_type {
+        effects::AURA_MOD_INCREASE_ENERGY => UnitModifierType::TotalValue,
+        effects::AURA_MOD_INCREASE_ENERGY_PERCENT => UnitModifierType::TotalPct,
+        _ => return false,
+    };
+
+    if !(0..5).contains(&misc_value) {
+        return true;
+    }
+
+    unit_mods.handle_stat_modifier(
+        UnitMods::from_power(misc_value as u8).unwrap(),
+        modifier_type,
+        value as f32,
+        apply,
+    )
+}
+
+fn modify_current_power_for_max_delta(
+    power: &mut crate::game::player::power::PowerState,
+    power_type: crate::game::player::power::PowerType,
+    old_max: u32,
+) {
+    let delta = power.get_max(power_type) as i64 - old_max as i64;
+    power.modify_power(power_type, delta as i32);
+}
+
 /// Apply or reverse a school-resistance aura across every school in its bitmask.
 ///
 /// Mirrors MaNGOS `Aura::HandleAuraModResistance` / `HandleModResistancePercent` /
@@ -3308,6 +3403,86 @@ mod tests {
             unit_mods.get_modifier_value(UnitMods::Health, UnitModifierType::TotalValue),
             0.0
         );
+    }
+
+    #[test]
+    fn flat_max_power_aura_applies_to_misc_power_and_removes() {
+        let mut unit_mods = UnitModifierGroup::new();
+
+        assert!(apply_max_power_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_INCREASE_ENERGY,
+            3,
+            20,
+            true,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::Energy, UnitModifierType::TotalValue),
+            20.0
+        );
+
+        assert!(apply_max_power_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_INCREASE_ENERGY,
+            3,
+            20,
+            false,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::Energy, UnitModifierType::TotalValue),
+            0.0
+        );
+    }
+
+    #[test]
+    fn percent_max_power_aura_applies_to_misc_power_and_removes() {
+        let mut unit_mods = UnitModifierGroup::new();
+
+        assert!(apply_max_power_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_INCREASE_ENERGY_PERCENT,
+            1,
+            10,
+            true,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::Rage, UnitModifierType::TotalPct),
+            1.1
+        );
+
+        assert!(apply_max_power_aura_modifier(
+            &mut unit_mods,
+            effects::AURA_MOD_INCREASE_ENERGY_PERCENT,
+            1,
+            10,
+            false,
+        ));
+        assert_eq!(
+            unit_mods.get_modifier_value(UnitMods::Rage, UnitModifierType::TotalPct),
+            1.0
+        );
+    }
+
+    #[test]
+    fn max_power_change_adjusts_current_by_max_delta() {
+        let mut power = crate::game::player::power::PowerState::default();
+        power.max[3] = 120;
+        power.current[3] = 50;
+
+        modify_current_power_for_max_delta(
+            &mut power,
+            crate::game::player::power::PowerType::Energy,
+            100,
+        );
+        assert_eq!(power.current[3], 70);
+
+        power.max[3] = 100;
+        modify_current_power_for_max_delta(
+            &mut power,
+            crate::game::player::power::PowerType::Energy,
+            120,
+        );
+        assert_eq!(power.current[3], 50);
     }
 
     // ── apply_resistance_aura_modifier (Aura::HandleAuraModResistance family) ──

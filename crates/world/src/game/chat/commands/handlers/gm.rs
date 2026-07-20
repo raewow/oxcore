@@ -6,6 +6,8 @@ use anyhow::Result;
 use sqlx::Row;
 
 use crate::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
+use crate::game::creature::movement::MoveType;
+use crate::game::player::movement::MovementControllerSender;
 use oxcore_shared::common::AccountType;
 use oxcore_shared::protocol::ObjectGuid;
 use oxcore_shared::protocol::{Opcode, Position, WorldPacket};
@@ -42,27 +44,19 @@ pub async fn cmd_mod(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String>
 /// Modify player run speed
 async fn mod_speed(ctx: &ChatCommandContext<'_>, rate: f32) -> Result<String> {
     let rate = rate.max(0.0);
-    let new_speed = rate * BASE_RUN_SPEED;
 
-    // Build SMSG_FORCE_RUN_SPEED_CHANGE packet
-    let mut packet = WorldPacket::new(Opcode::SMSG_FORCE_RUN_SPEED_CHANGE);
-
-    // Write packed GUID
-    let guid_raw = ctx.player_guid.raw();
-    packet.write_packed_guid_raw(guid_raw);
-
-    // Write movement counter (use 0 for GM commands)
-    packet.write_u32(0);
-
-    // Write new speed
-    packet.write_f32(new_speed);
-
-    // Send packet to player
-    ctx.session.send_packet(packet)?;
+    // Queued as a forced change so the client's ack applies it server-side.
+    MovementControllerSender::add_speed_change_to_controller(
+        ctx.world,
+        ctx.player_guid,
+        MoveType::Run,
+        rate,
+    );
 
     Ok(format!(
         "Set run speed to {}x ({:.2} yards/sec)",
-        rate, new_speed
+        rate,
+        rate * BASE_RUN_SPEED
     ))
 }
 

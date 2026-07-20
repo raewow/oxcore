@@ -1,5 +1,6 @@
 //! Movement state - position, speeds, and movement flags
 
+use crate::game::creature::movement::packet_sender::{MovementChangeType, MovementFlagChange};
 use oxcore_shared::protocol::ObjectGuid;
 use oxcore_shared::protocol::Position;
 
@@ -18,6 +19,24 @@ pub struct PendingKnockback {
 pub struct PendingSpline {
     pub id: u32,
     pub destination: Position,
+}
+
+/// What a server-forced movement change altered, used to match the client's ack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingChangeKind {
+    Speed(MovementChangeType),
+    Flag(MovementFlagChange),
+}
+
+/// A server-forced movement change awaiting the controller's acknowledgement.
+#[derive(Debug, Clone, Copy)]
+pub struct PendingMovementChange {
+    pub counter: u32,
+    pub kind: PendingChangeKind,
+    /// Absolute speed for speed changes, unused for flag toggles.
+    pub new_value: f32,
+    /// Whether the flag is being applied or removed.
+    pub apply: bool,
 }
 
 /// Per-player movement state
@@ -52,6 +71,8 @@ pub struct MovementState {
     pub movement_counter: u32,
     pub pending_knockback: Option<PendingKnockback>,
     pub pending_spline: Option<PendingSpline>,
+    /// Server-forced speed and flag changes the client has not acknowledged yet.
+    pub pending_changes: Vec<PendingMovementChange>,
 }
 
 impl Default for MovementState {
@@ -77,6 +98,68 @@ impl Default for MovementState {
             movement_counter: 0,
             pending_knockback: None,
             pending_spline: None,
+            pending_changes: Vec::new(),
         }
+    }
+}
+
+impl MovementState {
+    /// Allocate the counter for the next server-forced movement change.
+    ///
+    /// Counter 0 is never handed out: it is the sentinel for packets sent outside the
+    /// controller queue (the logout root, for one).
+    pub fn next_movement_counter(&mut self) -> u32 {
+        self.movement_counter = self.movement_counter.wrapping_add(1);
+        if self.movement_counter == 0 {
+            self.movement_counter = 1;
+        }
+        self.movement_counter
+    }
+
+    /// Queue a change the client must acknowledge.
+    pub fn push_pending_change(&mut self, change: PendingMovementChange) {
+        self.pending_changes.push(change);
+    }
+
+    /// Whether any forced change is still awaiting an ack.
+    pub fn has_pending_movement_change(&self) -> bool {
+        !self.pending_changes.is_empty()
+    }
+
+    /// Consume the queued speed change matching this ack, if any.
+    ///
+    /// Speeds are compared with the same 0.01 tolerance the C++ core uses.
+    pub fn find_pending_speed_change(
+        &mut self,
+        speed_received: f32,
+        counter: u32,
+        change_type: MovementChangeType,
+    ) -> bool {
+        let found = self.pending_changes.iter().position(|change| {
+            change.counter == counter
+                && change.kind == PendingChangeKind::Speed(change_type)
+                && (change.new_value - speed_received).abs() <= 0.01
+        });
+
+        match found {
+            Some(index) => {
+                self.pending_changes.remove(index);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Consume the queued flag change matching this ack, returning whether it applied it.
+    pub fn find_pending_flag_change(
+        &mut self,
+        counter: u32,
+        flag: MovementFlagChange,
+    ) -> Option<bool> {
+        let index = self.pending_changes.iter().position(|change| {
+            change.counter == counter && change.kind == PendingChangeKind::Flag(flag)
+        })?;
+
+        Some(self.pending_changes.remove(index).apply)
     }
 }

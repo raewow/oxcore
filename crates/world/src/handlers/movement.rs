@@ -6,6 +6,7 @@ use tracing::{debug, info, trace};
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::core::common::MovementInfo;
 use crate::core::session::WorldSession;
+use crate::game::creature::movement::packet_sender::{MovementChangeType, MovementFlagChange};
 use crate::World;
 use oxcore_shared::messages::character::SmsgLogoutCancelAck;
 use oxcore_shared::messages::movement::SmsgForceMoveUnroot;
@@ -595,6 +596,18 @@ impl SpeedMoveType {
         })
     }
 
+    /// The pending-change type this move type is queued under.
+    fn change_type(self) -> Option<MovementChangeType> {
+        Some(match self {
+            Self::Walk => MovementChangeType::SpeedChangeWalk,
+            Self::Run => MovementChangeType::SpeedChangeRun,
+            Self::RunBack => MovementChangeType::SpeedChangeRunBack,
+            Self::Swim => MovementChangeType::SpeedChangeSwim,
+            Self::SwimBack => MovementChangeType::SpeedChangeSwimBack,
+            Self::TurnRate => MovementChangeType::RateChangeTurn,
+        })
+    }
+
     /// The MSG_MOVE_SET_* opcode used to inform observers of the new value.
     fn observer_opcode(self) -> Opcode {
         match self {
@@ -611,14 +624,12 @@ impl SpeedMoveType {
 /// Handle the `CMSG_FORCE_*_CHANGE_ACK` family
 /// (`WorldSession::HandleForceSpeedChangeAckOpcodes`).
 ///
-/// The client acknowledges a server-forced speed/turn-rate change. We apply the
-/// authoritative value server-side (for the move types rcore tracks) and inform
-/// nearby observers via the matching MSG_MOVE_SET_* opcode.
+/// The client acknowledges a server-forced speed/turn-rate change. The ack must match
+/// a change this server actually queued — same counter, same move type, same speed
+/// (within 0.01) — otherwise it is dropped. Only then is the authoritative value
+/// applied and nearby observers informed via the matching MSG_MOVE_SET_* opcode.
 ///
-/// Note: the pending-movement-change controller queue (`HasPendingMovementChange`
-/// / `FindPendingMovementSpeedChange`) and anticheat tests are not ported yet, so
-/// the ack is accepted unconditionally — the server only emits these forced
-/// changes deliberately (e.g. the GM `.speed` command).
+/// Not ported: the anticheat `OnWrongAckData` reporting on a mismatched ack.
 pub fn handle_force_speed_change_ack(
     session: &WorldSession,
     opcode: Opcode,
@@ -637,7 +648,7 @@ pub fn handle_force_speed_change_ack(
     let guid_raw = packet
         .read_packed_guid_raw()
         .ok_or_else(|| anyhow!("SpeedChangeAck: missing guid"))?;
-    let _movement_counter = packet
+    let movement_counter = packet
         .read_u32()
         .ok_or_else(|| anyhow!("SpeedChangeAck: missing counter"))?;
     let mut movement_info = MovementInfo::read_from_packet(packet)?;
@@ -650,6 +661,32 @@ pub fn handle_force_speed_change_ack(
     // Only the player is a valid mover (no pet/possession).
     let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
     if session.get_mover_from_guid(mover).is_none() {
+        return Ok(());
+    }
+
+    // Verify the client is replying with a change this server actually sent.
+    let Some(change_type) = move_type.change_type() else {
+        return Ok(());
+    };
+    let matched = world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            player.movement.find_pending_speed_change(
+                new_speed,
+                movement_counter,
+                change_type,
+            )
+        })
+        .unwrap_or(false);
+
+    if !matched {
+        tracing::warn!(
+            "[MOVEMENT] {:?} sent {:?} with counter {} that matches no pending change",
+            player_guid,
+            opcode,
+            movement_counter
+        );
         return Ok(());
     }
 
@@ -715,18 +752,24 @@ impl FlagChange {
             Self::FeatherFall => Opcode::MSG_MOVE_FEATHER_FALL,
         }
     }
+
+    /// The pending-change flag this toggle is queued under.
+    fn pending_flag(self) -> MovementFlagChange {
+        match self {
+            Self::WaterWalk => MovementFlagChange::WaterWalking,
+            Self::FeatherFall => MovementFlagChange::SafeFall,
+        }
+    }
 }
 
 /// Handle the `CMSG_MOVE_*_ACK` flag-toggle family
 /// (`WorldSession::HandleMovementFlagChangeToggleAck`).
 ///
-/// The client acknowledges a server-forced water-walk / feather-fall toggle. We
-/// apply the authoritative flag (for the ones rcore tracks) and notify observers
-/// with the matching MSG_MOVE_* opcode.
+/// The client acknowledges a server-forced water-walk / feather-fall toggle. The ack
+/// must match a change this server queued (same counter, same flag) or it is dropped;
+/// the authoritative flag comes from the queued change, not from the client's payload.
 ///
-/// Not ported: the pending-change controller queue, anticheat tests, and hover
-/// (rcore never emits SMSG_MOVE_SET_HOVER). Ack accepted unconditionally since the
-/// server only emits these toggles deliberately (e.g. ghost-form water walking).
+/// Not ported: anticheat tests, and the hover ack (the client has no hover ack opcode).
 pub fn handle_movement_flag_change_ack(
     session: &WorldSession,
     opcode: Opcode,
@@ -745,11 +788,11 @@ pub fn handle_movement_flag_change_ack(
     let guid_raw = packet
         .read_packed_guid_raw()
         .ok_or_else(|| anyhow!("FlagChangeAck: missing guid"))?;
-    let _movement_counter = packet
+    let movement_counter = packet
         .read_u32()
         .ok_or_else(|| anyhow!("FlagChangeAck: missing counter"))?;
     let mut movement_info = MovementInfo::read_from_packet(packet)?;
-    let apply = packet.read_u32().unwrap_or(0) != 0;
+    let _client_apply = packet.read_u32().unwrap_or(0) != 0;
 
     movement_info.mover_guid = player_guid;
 
@@ -757,6 +800,28 @@ pub fn handle_movement_flag_change_ack(
     if session.get_mover_from_guid(mover).is_none() {
         return Ok(());
     }
+
+    // Verify the client is replying with a toggle this server actually sent, and take
+    // the applied value from the queued change rather than trusting the client's byte.
+    let apply = world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            player
+                .movement
+                .find_pending_flag_change(movement_counter, change.pending_flag())
+        })
+        .flatten();
+
+    let Some(apply) = apply else {
+        tracing::warn!(
+            "[MOVEMENT] {:?} sent {:?} with counter {} that matches no pending change",
+            player_guid,
+            opcode,
+            movement_counter
+        );
+        return Ok(());
+    };
 
     let position_valid =
         movement_info.time > session.move_reject_time() && verify_movement_info(&movement_info);
@@ -915,6 +980,8 @@ pub async fn handle_movement(
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::game::creature::movement::MoveType;
+    use crate::game::player::movement::MovementControllerSender;
     use oxcore_shared::database::Databases;
     use oxcore_shared::protocol::{HighGuid, ObjectGuid};
     use sqlx::mysql::MySqlPoolOptions;
@@ -941,6 +1008,30 @@ mod tests {
             50,
             PathBuf::from("."),
         )
+    }
+
+    /// Register a session-backed player so handlers can look it up.
+    fn add_test_player(
+        world: &mut World,
+    ) -> (Arc<WorldSession>, mpsc::UnboundedReceiver<WorldPacket>) {
+        use crate::game::player::player::Player;
+        use crate::game::player::PlayerBroadcaster;
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        let session = Arc::new(WorldSession::new(1, 1, "Tester".to_string(), 0, tx));
+        let player_guid = ObjectGuid::new_without_entry(HighGuid::Player, 1);
+        session.set_player_guid(Some(player_guid));
+        world.session_mgr.add_session(Arc::clone(&session));
+        world.session_mgr.register_player(session.id(), player_guid);
+        session.set_client_mover_guid(Some(player_guid));
+
+        let mut player = Player::new(player_guid, "Tester".to_string(), 0, 0, 0, 10, 1, 1, 0);
+        player.set_broadcaster(Arc::new(PlayerBroadcaster::new(
+            session.packet_tx(),
+            player_guid,
+        )));
+        world.managers.player_mgr.add_player(player, 1);
+        (session, rx)
     }
 
     #[tokio::test]
@@ -1007,5 +1098,129 @@ mod tests {
                 .map(FlagChange::observer_opcode),
             Some(Opcode::MSG_MOVE_FEATHER_FALL)
         );
+    }
+
+    /// Movement-info body as the client sends it: no leading guid, unlike
+    /// `MovementInfo::write_to_packet`, which prefixes the packed mover guid.
+    fn write_client_movement_info(packet: &mut WorldPacket) {
+        packet.write_u32(0); // flags
+        packet.write_u32(1); // client timestamp
+        packet.write_f32(0.0); // x
+        packet.write_f32(0.0); // y
+        packet.write_f32(0.0); // z
+        packet.write_f32(0.0); // orientation
+        packet.write_u32(0); // fall time
+    }
+
+    /// Build a speed ack packet the way the 1.12 client lays it out.
+    fn speed_ack_packet(player_guid: ObjectGuid, counter: u32, speed: f32) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::CMSG_FORCE_RUN_SPEED_CHANGE_ACK);
+        packet.write_packed_guid_raw(player_guid.raw());
+        packet.write_u32(counter);
+        write_client_movement_info(&mut packet);
+        packet.write_f32(speed);
+        packet
+    }
+
+    #[tokio::test]
+    async fn speed_ack_is_dropped_unless_it_matches_a_queued_change() {
+        let mut world = test_world();
+        let (session, _rx) = add_test_player(&mut world);
+        let player_guid = session.player_guid().expect("player guid");
+
+        // Queue a forced run-speed change of 2x (14.0 yards/sec).
+        assert!(MovementControllerSender::add_speed_change_to_controller(
+            &world,
+            player_guid,
+            MoveType::Run,
+            2.0,
+        ));
+        let counter = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |p| p.movement.movement_counter)
+            .expect("player");
+
+        // An ack with a counter we never issued changes nothing and leaves the
+        // pending change queued.
+        let mut wrong = speed_ack_packet(player_guid, counter + 99, 14.0);
+        handle_force_speed_change_ack(
+            &session,
+            Opcode::CMSG_FORCE_RUN_SPEED_CHANGE_ACK,
+            &mut wrong,
+            &world,
+        )
+        .unwrap();
+        assert!(world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |p| p.movement.has_pending_movement_change())
+            .unwrap());
+
+        // The matching ack applies the speed and clears the queue.
+        let mut correct = speed_ack_packet(player_guid, counter, 14.0);
+        handle_force_speed_change_ack(
+            &session,
+            Opcode::CMSG_FORCE_RUN_SPEED_CHANGE_ACK,
+            &mut correct,
+            &world,
+        )
+        .unwrap();
+
+        let (run_speed, still_pending) = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |p| {
+                (
+                    p.movement.run_speed,
+                    p.movement.has_pending_movement_change(),
+                )
+            })
+            .unwrap();
+        assert_eq!(run_speed, 14.0);
+        assert!(!still_pending);
+    }
+
+    #[tokio::test]
+    async fn flag_ack_takes_the_applied_value_from_the_queued_change() {
+        let mut world = test_world();
+        let (session, _rx) = add_test_player(&mut world);
+        let player_guid = session.player_guid().expect("player guid");
+
+        assert!(
+            MovementControllerSender::add_movement_flag_change_to_controller(
+                &world,
+                player_guid,
+                MovementFlagChange::WaterWalking,
+                true,
+            )
+        );
+        let counter = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |p| p.movement.movement_counter)
+            .expect("player");
+
+        // Client claims the flag was cleared; the queued change says applied, and the
+        // server trusts its own record.
+        let mut packet = WorldPacket::new(Opcode::CMSG_MOVE_WATER_WALK_ACK);
+        packet.write_packed_guid_raw(player_guid.raw());
+        packet.write_u32(counter);
+        write_client_movement_info(&mut packet);
+        packet.write_u32(0);
+
+        handle_movement_flag_change_ack(
+            &session,
+            Opcode::CMSG_MOVE_WATER_WALK_ACK,
+            &mut packet,
+            &world,
+        )
+        .unwrap();
+
+        assert!(world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |p| p.movement.water_walking)
+            .unwrap());
     }
 }

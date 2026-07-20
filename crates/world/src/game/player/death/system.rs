@@ -14,6 +14,8 @@ use super::state::{DeathState, DeathSystemState};
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::dbc::DbcManager;
 use crate::game::broadcast_mgr::BroadcastManagerTrait;
+use crate::game::creature::movement::packet_sender::MovementFlagChange;
+use crate::game::player::movement::MovementControllerSender;
 use crate::World;
 use anyhow::Result;
 use oxcore_shared::messages::death::{SmsgCorpseReclaimDelay, SmsgResurrectRequest};
@@ -1415,18 +1417,14 @@ impl DeathSystem {
             .broadcast_nearby(player_guid, &packet, true);
     }
 
-    /// Send SMSG_MOVE_WATER_WALK / SMSG_MOVE_LAND_WALK to let the client
-    /// render water-walking. Uses packed GUID + counter 0.
-    fn send_water_walk(&self, player_guid: ObjectGuid, enable: bool, _world: &World) {
-        let opcode = if enable {
-            Opcode::SMSG_MOVE_WATER_WALK
-        } else {
-            Opcode::SMSG_MOVE_LAND_WALK
-        };
-        let mut packet = WorldPacket::new(opcode);
-        packet.write_packed_guid_raw(player_guid.raw());
-        packet.write_u32(0); // counter
-        self.broadcast_mgr.send_to_player(player_guid, packet);
+    /// Force water-walking on the ghost's client, queued for its acknowledgement.
+    fn send_water_walk(&self, player_guid: ObjectGuid, enable: bool, world: &World) {
+        MovementControllerSender::add_movement_flag_change_to_controller(
+            world,
+            player_guid,
+            MovementFlagChange::WaterWalking,
+            enable,
+        );
     }
 
     /// Apply 10% durability loss on death to all equipped items.
