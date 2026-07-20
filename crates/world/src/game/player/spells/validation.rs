@@ -796,7 +796,7 @@ pub struct CasterAuraCheckInput {
 const UNIT_FLAG_STUNNED: u32 = 0x00040000;
 const UNIT_FLAG_CONFUSED: u32 = 0x00000004;
 const UNIT_FLAG_FLEEING: u32 = 0x00000800;
-const UNIT_FLAG_SILENCED: u32 = 0x00000200;
+const UNIT_FLAG_SILENCED: u32 = 0x00002000;
 const UNIT_FLAG_PACIFIED: u32 = 0x00020000;
 
 // MECHANIC bit positions (1-indexed in C++: 1 << (MECHANIC_X - 1))
