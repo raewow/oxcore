@@ -6,6 +6,7 @@ pub mod generators;
 mod motion_master;
 pub mod packet_sender;
 mod spline;
+pub mod spline_base;
 mod system;
 mod types;
 pub mod waypoint_manager;
