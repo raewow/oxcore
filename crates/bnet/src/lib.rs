@@ -3,7 +3,9 @@
 //! Runs alongside — not instead of — `oxcore-auth`, which continues to serve the 1.12 realmd
 //! protocol. The two share only the account database.
 
+pub mod certs;
 pub mod config;
+pub mod gen_certs;
 pub mod rest;
 pub mod run;
 pub mod server;

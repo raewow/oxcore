@@ -4,7 +4,7 @@
 //! signatures all assume fixed offsets, so nothing may grow or shrink the file — replacements
 //! that are shorter than the region they overwrite are NUL-padded instead.
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::patterns;
 use crate::scan::find_unique;
@@ -96,6 +96,66 @@ pub fn signature_modulus(data: &[u8], modulus: &[u8]) -> Result<Patch> {
     })
 }
 
+/// Replace the embedded certificate bundle with our signed one.
+///
+/// The client stores the bundle as a JSON document (`{"Created":...}`) immediately followed by
+/// its RSA signature, occupying a fixed region of the executable. We locate that region by its
+/// `{"Created":` marker and by brace-matching the JSON, then overwrite it with our own
+/// `JSON || signature` blob, NUL-padding the remainder.
+///
+/// Blizzard's original bundle lists many certificates and is far larger than ours, so our blob
+/// virtually always fits; if it somehow does not, this errors rather than overrun into
+/// neighbouring data.
+pub fn cert_bundle(data: &[u8], bundle_blob: &[u8]) -> Result<Patch> {
+    let offset = find_unique(data, patterns::CERT_BUNDLE, "cert bundle")?;
+
+    let json_len = json_object_len(&data[offset..]).context(
+        "could not find the end of the embedded certificate bundle JSON — the file may be \
+         compressed or the format has changed",
+    )?;
+
+    // The original region is the JSON plus its trailing signature; that whole span is ours to
+    // overwrite.
+    let region_len = json_len + patterns::MODULUS_LEN;
+    if offset + region_len > data.len() {
+        bail!("certificate bundle at 0x{offset:08x} runs past the end of the file");
+    }
+
+    let bytes = replace_padded(offset, bundle_blob, region_len)?;
+
+    Ok(Patch {
+        name: "cert bundle",
+        offset,
+        bytes,
+    })
+}
+
+/// Length of the JSON object beginning at `data[0]`, found by brace matching.
+///
+/// The bundle's string values are hex hashes and base64 PEM, none of which contain braces, so
+/// a plain depth counter is sufficient and avoids a JSON parser over a partially-binary buffer.
+/// Returns `None` if the braces never balance before the buffer ends.
+fn json_object_len(data: &[u8]) -> Option<usize> {
+    if data.first() != Some(&b'{') {
+        return None;
+    }
+
+    let mut depth = 0u32;
+    for (i, &byte) in data.iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Apply patches in place. Offsets are absolute file offsets.
 pub fn apply(data: &mut [u8], patches: &[Patch]) -> Result<()> {
     for patch in patches {
@@ -117,6 +177,12 @@ mod tests {
     use super::*;
 
     /// A synthetic executable containing each pattern exactly once at a known offset.
+    /// A large stand-in for Blizzard's original embedded bundle: a JSON object followed by a
+    /// 256-byte signature. Deliberately bigger than anything `gen-certs` produces.
+    fn original_bundle_json() -> &'static [u8] {
+        br#"{"Created":1600000000,"Certificates":[{"Uri":"*.*","ShaHashPublicKeyInfo":"AA"},{"Uri":"*.*","ShaHashPublicKeyInfo":"BB"}],"PublicKeys":[],"SigningCertificates":[]}"#
+    }
+
     fn fixture() -> Vec<u8> {
         let mut data = vec![0xCC; 64];
         data.extend_from_slice(patterns::PORTAL);
@@ -125,7 +191,19 @@ mod tests {
         // The remaining 248 bytes of the 256-byte modulus.
         data.extend_from_slice(&[0xAB; patterns::MODULUS_LEN - patterns::SIGNATURE_MODULUS.len()]);
         data.extend_from_slice(&[0xCC; 64]);
+        // Embedded certificate bundle: JSON, then its 256-byte signature.
+        data.extend_from_slice(original_bundle_json());
+        data.extend_from_slice(&[0x99; patterns::MODULUS_LEN]);
+        // Neighbouring data that must survive patching.
+        data.extend_from_slice(&[0x77; 32]);
         data
+    }
+
+    /// A minimal signed bundle blob: small JSON + a 256-byte signature.
+    fn small_bundle_blob() -> Vec<u8> {
+        let mut blob = br#"{"Created":1,"Certificates":[],"PublicKeys":[],"SigningCertificates":[]}"#.to_vec();
+        blob.extend_from_slice(&[0x42; patterns::MODULUS_LEN]);
+        blob
     }
 
     #[test]
@@ -208,5 +286,51 @@ mod tests {
 
         let err = portal(&data, ".localhost").unwrap_err();
         assert!(err.to_string().contains("matched 2 times"));
+    }
+
+    #[test]
+    fn json_object_len_matches_the_balanced_brace() {
+        let json = original_bundle_json();
+        // The whole fixture region begins with the JSON, so measuring from there must return
+        // exactly the JSON length regardless of what follows.
+        let mut buf = json.to_vec();
+        buf.extend_from_slice(&[0x99; 300]);
+        assert_eq!(json_object_len(&buf), Some(json.len()));
+    }
+
+    #[test]
+    fn cert_bundle_patch_covers_json_plus_signature_and_is_nul_padded() {
+        let data = fixture();
+        let blob = small_bundle_blob();
+        let patch = cert_bundle(&data, &blob).unwrap();
+
+        let region_len = original_bundle_json().len() + patterns::MODULUS_LEN;
+        assert_eq!(patch.bytes.len(), region_len);
+        assert_eq!(&patch.bytes[..blob.len()], &blob[..]);
+        assert!(patch.bytes[blob.len()..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn cert_bundle_patch_preserves_neighbouring_bytes() {
+        let mut data = fixture();
+        let original_len = data.len();
+        let trailing = &data[data.len() - 32..].to_vec();
+
+        let patch = cert_bundle(&data, &small_bundle_blob()).unwrap();
+        apply(&mut data, &[patch]).unwrap();
+
+        assert_eq!(data.len(), original_len);
+        // The 32 bytes of neighbour data past the bundle region are untouched.
+        assert_eq!(&data[data.len() - 32..], &trailing[..]);
+    }
+
+    #[test]
+    fn cert_bundle_patch_rejects_a_blob_bigger_than_the_region() {
+        let data = fixture();
+        let region_len = original_bundle_json().len() + patterns::MODULUS_LEN;
+        let oversized = vec![0x42; region_len + 1];
+
+        let err = cert_bundle(&data, &oversized).unwrap_err();
+        assert!(err.to_string().contains("use a shorter value"));
     }
 }

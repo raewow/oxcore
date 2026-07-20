@@ -21,6 +21,13 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // `gen-certs` is a one-shot tool that needs no config or logging setup; handle it before
+    // the server bootstrap so it works on a fresh checkout with no config.toml.
+    let mut raw = std::env::args().skip(1);
+    if raw.next().as_deref() == Some("gen-certs") {
+        return run_gen_certs(raw.collect());
+    }
+
     let args = parse_args();
 
     let config_path = args
@@ -80,4 +87,36 @@ fn resolve_log_file(logs_dir: &Path, log_file: &str) -> PathBuf {
     } else {
         logs_dir.join(log_file)
     }
+}
+
+/// `bnet gen-certs [--out <dir>] [--host <name>]...`
+///
+/// Defaults: output to `./certs`, hostnames `localhost` and `127.0.0.1`. Pass `--host` once
+/// per name the patched client will resolve — these must match the client's `portal` value
+/// plus the patched suffix, and must be hostnames the certificate covers.
+fn run_gen_certs(args: Vec<String>) -> Result<()> {
+    let mut out_dir = PathBuf::from("./certs");
+    let mut hosts: Vec<String> = Vec::new();
+
+    let mut it = args.into_iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--out" | "-o" => {
+                out_dir = PathBuf::from(
+                    it.next()
+                        .context("--out requires a directory argument")?,
+                );
+            }
+            "--host" | "-h" => {
+                hosts.push(it.next().context("--host requires a hostname argument")?);
+            }
+            other => anyhow::bail!("unknown gen-certs argument: {other}"),
+        }
+    }
+
+    if hosts.is_empty() {
+        hosts = vec!["localhost".to_string(), "127.0.0.1".to_string()];
+    }
+
+    oxcore_bnet::gen_certs::run(&out_dir, &hosts)
 }

@@ -26,8 +26,14 @@ struct Args {
     portal: String,
 
     /// Path to the 256-byte RSA modulus used to sign the certificate bundle, as raw bytes.
+    /// Produced by `bnet gen-certs` as signature_modulus.bin.
     #[arg(long)]
     modulus: Option<PathBuf>,
+
+    /// Path to the signed certificate bundle blob to embed. Produced by `bnet gen-certs` as
+    /// cert_bundle.bin.
+    #[arg(long)]
+    cert_bundle: Option<PathBuf>,
 
     /// Report what would change without writing anything.
     #[arg(long)]
@@ -60,6 +66,23 @@ fn main() -> Result<()> {
             bail!(
                 "--modulus is required: without replacing the signature modulus the client \
                  cannot trust your server's certificate"
+            );
+        }
+    }
+
+    match &args.cert_bundle {
+        Some(path) => {
+            let blob = std::fs::read(path)
+                .with_context(|| format!("failed to read cert bundle from {}", path.display()))?;
+            patches.push(patch::cert_bundle(&data, &blob)?);
+        }
+        None => {
+            // The modulus alone makes the client verify bundles against our key, but the bundle
+            // it verifies still lists Blizzard's certificates, not ours. Both patches are
+            // needed together.
+            bail!(
+                "--cert-bundle is required: replacing the modulus without replacing the bundle \
+                 leaves the client trusting Blizzard's certificates instead of yours"
             );
         }
     }
