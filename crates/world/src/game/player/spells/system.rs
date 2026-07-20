@@ -825,21 +825,37 @@ impl SpellSystem {
             );
         }
 
-        // Broadcast SMSG_SPELL_START to nearby players
-        let (ammo_display_id, ammo_inventory_type) = resolve_ammo_for_caster(caster_guid, world);
-        let msg = SmsgSpellStart {
-            caster_guid,
-            caster_guid_pack: caster_guid,
-            spell_id,
-            cast_flags: if is_triggered { 0x0000 } else { 0x0002 },
-            cast_time_ms,
-            target_guid,
-            cast_item_guid,
-            ammo_display_id,
-            ammo_inventory_type,
-        };
-        self.broadcast_mgr
-            .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
+        // Triggered casts do not send SMSG_SPELL_START.
+        if !is_triggered {
+            const CAST_FLAG_UNKNOWN2: u16 = 0x0002;
+            const CAST_FLAG_AMMO: u16 = 0x0020;
+            const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+
+            let is_ranged = world
+                .managers
+                .spell_mgr
+                .get(spell_id)
+                .is_some_and(|entry| entry.dmg_class == SPELL_DAMAGE_CLASS_RANGED);
+            let cast_flags = CAST_FLAG_UNKNOWN2 | if is_ranged { CAST_FLAG_AMMO } else { 0 };
+            let (ammo_display_id, ammo_inventory_type) = if is_ranged {
+                resolve_ammo_for_caster(caster_guid, world)
+            } else {
+                (0, 0)
+            };
+            let msg = SmsgSpellStart {
+                caster_guid,
+                caster_guid_pack: caster_guid,
+                spell_id,
+                cast_flags,
+                cast_time_ms,
+                target_guid,
+                cast_item_guid,
+                ammo_display_id,
+                ammo_inventory_type,
+            };
+            self.broadcast_mgr
+                .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
+        }
 
         Ok(())
     }
