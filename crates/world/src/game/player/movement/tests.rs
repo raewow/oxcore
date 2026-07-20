@@ -820,3 +820,44 @@ async fn test_multiple_position_updates_in_sequence() {
     let state = player_mgr.get_movement_state(guid).unwrap();
     assert_eq!(state.timestamp, 500);
 }
+
+// ========== ROOT FLAG PRESERVATION ==========
+
+/// A rooted client must not be able to clear its own root by omitting the flag.
+#[tokio::test]
+async fn rooted_player_keeps_root_when_the_client_omits_the_flag() {
+    let player_mgr = PlayerManager::new();
+    let guid = test_player_guid(1);
+    create_test_player(&player_mgr, guid, test_position(0.0, 0.0, 0.0), 0);
+
+    player_mgr.with_player_mut(guid, |player| {
+        player.movement.movement_flags = MoveFlags::ROOT.value();
+    });
+
+    let mut info = MovementInfo::new();
+    info.flags = MoveFlags::from(MoveFlags::FORWARD.value());
+
+    player_mgr.with_player(guid, |player| {
+        super::system::preserve_root_flag(player, &mut info);
+    });
+
+    assert!(info.flags.has_flag(MoveFlags::ROOT));
+    assert!(info.flags.has_flag(MoveFlags::FORWARD));
+}
+
+/// An unrooted player's flags are passed through untouched.
+#[tokio::test]
+async fn unrooted_player_flags_are_left_alone() {
+    let player_mgr = PlayerManager::new();
+    let guid = test_player_guid(1);
+    create_test_player(&player_mgr, guid, test_position(0.0, 0.0, 0.0), 0);
+
+    let mut info = MovementInfo::new();
+    info.flags = MoveFlags::from(MoveFlags::FORWARD.value());
+
+    player_mgr.with_player(guid, |player| {
+        super::system::preserve_root_flag(player, &mut info);
+    });
+
+    assert_eq!(info.flags.value(), MoveFlags::FORWARD.value());
+}

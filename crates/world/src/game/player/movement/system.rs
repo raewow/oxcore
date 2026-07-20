@@ -12,6 +12,21 @@ use super::validator;
 use super::state::PendingKnockback;
 use super::state::PendingSpline;
 
+/// Re-apply the root flag when the client omits it.
+///
+/// A rooted client that sends a movement packet without MOVEFLAG_ROOT would otherwise
+/// clear its own root server-side, since incoming flags are stored verbatim.
+pub(super) fn preserve_root_flag(
+    player: &crate::game::player::player::Player,
+    info: &mut MovementInfo,
+) {
+    let was_rooted = MoveFlags::from(player.movement.movement_flags).has_flag(MoveFlags::ROOT);
+
+    if was_rooted && !info.flags.has_flag(MoveFlags::ROOT) {
+        info.flags.set_flag(MoveFlags::ROOT);
+    }
+}
+
 /// Movement system (stateless - operates on Player.movement via PlayerManager)
 pub struct MovementSystem;
 
@@ -116,7 +131,7 @@ impl MovementSystem {
         &self,
         player_guid: ObjectGuid,
         opcode: Opcode,
-        movement_info: MovementInfo,
+        mut movement_info: MovementInfo,
         world: &World,
     ) -> Result<()> {
         // Batch all player state access into a single DashMap lookup for performance
@@ -127,6 +142,9 @@ impl MovementSystem {
             .with_player_mut(player_guid, |player| {
                 // 1. Get old position for validation and map relocation
                 let old_pos = player.movement.position;
+
+                // 1.5. Prevent the client from clearing its own root by omitting the flag
+                preserve_root_flag(player, &mut movement_info);
 
                 // 2. Validate movement
                 validator::validate_movement(player_guid, &movement_info, &old_pos)?;
@@ -228,7 +246,7 @@ impl MovementSystem {
         &self,
         player_guid: ObjectGuid,
         opcode: Opcode,
-        movement_info: MovementInfo,
+        mut movement_info: MovementInfo,
         world: &World,
     ) -> Result<()> {
         let (old_pos, map_id, instance_id) = world
@@ -236,6 +254,7 @@ impl MovementSystem {
             .player_mgr
             .with_player_mut(player_guid, |player| {
                 let old_pos = player.movement.position;
+                preserve_root_flag(player, &mut movement_info);
                 validator::validate_movement(player_guid, &movement_info, &old_pos)?;
                 player.movement.position = movement_info.position;
                 player.movement.flags = movement_info.flags.value();
@@ -294,6 +313,13 @@ impl MovementSystem {
         movement_info: MovementInfo,
         world: &World,
     ) -> Result<()> {
+        // The client has no handler for this opcode, so observers must not receive it.
+        // It is sent when a jump clips something on the way up, cutting the ascent short;
+        // the relocation above still applies.
+        if opcode == Opcode::CMSG_MOVE_FALL_RESET {
+            return Ok(());
+        }
+
         // Get current player position from PlayerManager (sole authority for position)
         let current_position = world
             .managers

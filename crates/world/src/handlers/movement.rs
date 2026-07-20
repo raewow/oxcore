@@ -520,8 +520,9 @@ pub fn handle_mount_special_anim(
 
 /// Handle CMSG_MOVE_TIME_SKIPPED (`WorldSession::HandleMoveTimeSkippedOpcode`).
 ///
-/// The client reports it skipped `lag` ms of movement time. We rebroadcast the
-/// skip to observers so their extrapolation of this mover stays in sync.
+/// The client reports it skipped `lag` ms of movement time. The mover's stored
+/// timestamps advance by the same amount so later packets aren't judged against a
+/// stale clock, and the skip is rebroadcast so observers' extrapolation stays in sync.
 pub fn handle_move_time_skipped(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -544,6 +545,18 @@ pub fn handle_move_time_skipped(
     if session.get_mover_from_guid(mover).is_none() {
         return Ok(());
     }
+
+    // Only advance a clock that has actually been set by a movement packet.
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            if player.movement.timestamp != 0 {
+                player.movement.timestamp = player.movement.timestamp.wrapping_add(lag);
+                player.movement.last_movement_time =
+                    player.movement.last_movement_time.wrapping_add(lag);
+            }
+        });
 
     let mut data = WorldPacket::new(Opcode::MSG_MOVE_TIME_SKIPPED);
     data.write_packed_guid_raw(player_guid.counter() as u64);
@@ -939,6 +952,17 @@ pub async fn handle_movement(
         return Ok(());
     }
 
+    // The unit is being moved by the server: ignore the client's view until the spline
+    // finishes and its completion is acknowledged.
+    let spline_in_progress = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| player.movement.pending_spline.is_some())
+        .unwrap_or(false);
+    if spline_in_progress {
+        return Ok(());
+    }
+
     // Reject physically impossible / out-of-bounds movement info.
     if !verify_movement_info(&movement_info) {
         return Ok(());
@@ -1164,6 +1188,59 @@ mod tests {
             .unwrap();
         assert_eq!(run_speed, 14.0);
         assert!(!still_pending);
+    }
+
+    #[tokio::test]
+    async fn move_time_skipped_advances_the_movers_clock_and_notifies_observers() {
+        let mut world = test_world();
+        let (session, mut rx) = add_test_player(&mut world);
+        let player_guid = session.player_guid().expect("player guid");
+
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.movement.timestamp = 1_000;
+                player.movement.last_movement_time = 1_000;
+            });
+
+        let mut packet = WorldPacket::new(Opcode::CMSG_MOVE_TIME_SKIPPED);
+        packet.write_guid_raw(player_guid.raw());
+        packet.write_u32(250);
+        handle_move_time_skipped(&session, &mut packet, &world).unwrap();
+
+        let (timestamp, last) = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |p| {
+                (p.movement.timestamp, p.movement.last_movement_time)
+            })
+            .unwrap();
+        assert_eq!(timestamp, 1_250);
+        assert_eq!(last, 1_250);
+
+        // A clock that was never set stays at zero.
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.movement.timestamp = 0;
+                player.movement.last_movement_time = 0;
+            });
+        let mut packet = WorldPacket::new(Opcode::CMSG_MOVE_TIME_SKIPPED);
+        packet.write_guid_raw(player_guid.raw());
+        packet.write_u32(250);
+        handle_move_time_skipped(&session, &mut packet, &world).unwrap();
+        assert_eq!(
+            world
+                .managers
+                .player_mgr
+                .with_player(player_guid, |p| p.movement.timestamp)
+                .unwrap(),
+            0
+        );
+
+        rx.close();
     }
 
     #[tokio::test]
