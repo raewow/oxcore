@@ -163,47 +163,6 @@ pub async fn handle_use_item(
         )
         .await?;
 
-    // Handle spell charges per MaNGOS TakeCastItem logic:
-    // - spell_charges < 0: expendable (item destroyed when charges hit 0)
-    // - spell_charges > 0: tracked charges, item NOT destroyed
-    // - spell_charges == 0: no charge tracking (hearthstone, most items)
-    let template_charges = template.spell_charges[spell_slot as usize];
-    info!(
-        "CMSG_USE_ITEM: item {} spell_slot={} template_charges={} — charge path {}",
-        item_entry,
-        spell_slot,
-        template_charges,
-        if template_charges != 0 {
-            "ACTIVE"
-        } else {
-            "skipped (0)"
-        }
-    );
-    if template_charges != 0 {
-        use crate::game::inventory::types::ChargeResult;
-        let result = world
-            .systems
-            .inventory
-            .consume_charge(player_guid, item_guid, spell_slot)
-            .await;
-        match result {
-            ChargeResult::Success { remaining } if remaining == 0 && template_charges < 0 => {
-                // Expendable item (negative charges) exhausted — destroy it
-                let _ = world
-                    .systems
-                    .inventory
-                    .remove_item(player_guid, item_guid, 1);
-            }
-            ChargeResult::Success { .. } => {}
-            ChargeResult::NoCharges => {
-                warn!("Item {} has no charges left but was used", item_entry);
-            }
-            other => {
-                warn!("consume_charge failed for item {}: {:?}", item_entry, other);
-            }
-        }
-    }
-
     Ok(())
 }
 
