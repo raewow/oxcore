@@ -1,7 +1,7 @@
 # Virtual workspace manifest. Each server lives in its own crate under crates/.
 # The `world` binary is provided by the oxcore-world crate (crates/world/src/bin/world.rs).
 [workspace]
-members = ["crates/auth", "crates/db", "crates/dbc", "crates/map", "crates/shared", "crates/tui", "crates/world", "crates/runtime"]
+members = ["crates/auth", "crates/bnet", "crates/db", "crates/dbc", "crates/map", "crates/patcher", "crates/shared", "crates/tui", "crates/world", "crates/runtime"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -11,6 +11,7 @@ oxcore-map = { path = "crates/map" }
 oxcore-tui = { path = "crates/tui" }
 oxcore-world = { path = "crates/world" }
 oxcore-auth = { path = "crates/auth" }
+oxcore-bnet = { path = "crates/bnet" }
 
 [profile.dev]
 opt-level = 1

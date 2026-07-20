@@ -1,0 +1,15 @@
+[package]
+name = "oxcore-patcher"
+version = "0.1.0"
+edition = "2021"
+description = "Patches a World of Warcraft 1.14.x client to connect to an oxcore server"
+
+[[bin]]
+name = "oxcore-patcher"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
