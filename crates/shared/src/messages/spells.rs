@@ -87,6 +87,7 @@ const CAST_FLAG_ITEM_CAST: u16 = 0x0040;
 
 impl SmsgSpellGo {
     pub fn to_world_packet(&self) -> WorldPacket {
+        const CAST_FLAG_AMMO: u16 = 0x0020;
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_GO);
         // First packed GUID: item GUID if cast from an item, else caster GUID
         packet.write_packed_guid(self.cast_item_guid.unwrap_or(self.caster_guid));
@@ -115,9 +116,11 @@ impl SmsgSpellGo {
         // SpellCastTargets section (vanilla 1.12.x requires this)
         write_spell_cast_targets(&mut packet, self.target_guid);
 
-        // Ammo projectile info (MaNGOS WriteAmmoToPacket)
-        packet.write_u32(self.ammo_display_id);
-        packet.write_u32(self.ammo_inventory_type);
+        // Ammo projectile info is present only for ranged casts.
+        if cast_flags & CAST_FLAG_AMMO != 0 {
+            packet.write_u32(self.ammo_display_id);
+            packet.write_u32(self.ammo_inventory_type);
+        }
 
         tracing::info!("[SPELL_GO] spell={} caster={:?} item={:?} target={:?} cast_flags=0x{:04X} hits={} misses={} packet_len={} bytes={:02X?}",
             self.spell_id, self.caster_guid, self.cast_item_guid, self.target_guid, cast_flags,
@@ -298,6 +301,28 @@ mod spell_packet_tests {
         assert_eq!(data.get_u8(), 1); // miss targets
         assert_eq!(data.get_u64_le(), missed.raw());
         assert_eq!(data.get_u8(), 7);
+    }
+
+    #[test]
+    fn test_spell_go_writes_ammo_only_with_ammo_flag() {
+        let caster = player_guid(10);
+        let go = |cast_flags| SmsgSpellGo {
+            caster_guid: caster,
+            caster_guid_pack: caster,
+            spell_id: 8690,
+            cast_flags,
+            hit_targets: vec![],
+            miss_targets: vec![],
+            target_guid: None,
+            cast_item_guid: None,
+            ammo_display_id: 123,
+            ammo_inventory_type: 26,
+        };
+
+        let without_ammo = go(0x0002).to_world_packet();
+        let with_ammo = go(0x0022).to_world_packet();
+
+        assert_eq!(with_ammo.data().len(), without_ammo.data().len() + 8);
     }
 
     // ===== SMSG_SPELL_START tests =====

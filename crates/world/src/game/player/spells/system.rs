@@ -971,12 +971,23 @@ impl SpellSystem {
         }
 
         // Broadcast SMSG_SPELL_GO to show the channel began
-        let (ammo_display_id, ammo_inventory_type) = resolve_ammo_for_caster(caster_guid, world);
+        const CAST_FLAG_AMMO: u16 = 0x0020;
+        const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+        let is_ranged = world
+            .managers
+            .spell_mgr
+            .get(spell_id)
+            .is_some_and(|entry| entry.dmg_class == SPELL_DAMAGE_CLASS_RANGED);
+        let (ammo_display_id, ammo_inventory_type) = if is_ranged {
+            resolve_ammo_for_caster(caster_guid, world)
+        } else {
+            (0, 0)
+        };
         let msg = SmsgSpellGo {
             caster_guid,
             caster_guid_pack: caster_guid,
             spell_id,
-            cast_flags: 0x0000,
+            cast_flags: if is_ranged { CAST_FLAG_AMMO } else { 0 },
             hit_targets: target_guid.into_iter().collect(),
             miss_targets: Vec::new(),
             target_guid,
@@ -1794,12 +1805,24 @@ impl SpellSystem {
         }
 
         // Broadcast SMSG_SPELL_GO
-        let (ammo_display_id, ammo_inventory_type) = resolve_ammo_for_caster(caster_guid, world);
+        const CAST_FLAG_AMMO: u16 = 0x0020;
+        const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+        let is_ranged = world
+            .managers
+            .spell_mgr
+            .get(spell_id)
+            .is_some_and(|entry| entry.dmg_class == SPELL_DAMAGE_CLASS_RANGED);
+        let (ammo_display_id, ammo_inventory_type) = if is_ranged {
+            resolve_ammo_for_caster(caster_guid, world)
+        } else {
+            (0, 0)
+        };
         let msg = SmsgSpellGo {
             caster_guid,
             caster_guid_pack: caster_guid,
             spell_id,
-            cast_flags: if is_triggered { 0x0000 } else { 0x0002 },
+            cast_flags: (if is_triggered { 0x0000 } else { 0x0002 })
+                | if is_ranged { CAST_FLAG_AMMO } else { 0 },
             hit_targets,
             miss_targets: Vec::new(),
             target_guid,
