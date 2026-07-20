@@ -4,6 +4,7 @@ mod chase;
 mod confused;
 mod distract;
 mod fear;
+pub mod flight_path;
 mod flee;
 mod follow;
 mod home;
