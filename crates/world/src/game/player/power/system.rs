@@ -4,7 +4,7 @@
 
 use crate::game::broadcast_mgr::BroadcastManagerTrait;
 use crate::game::common::update_fields::*;
-use crate::game::player::auras::effects::{AURA_MOD_CONFUSE, AURA_MOD_REGEN};
+use crate::game::player::auras::effects::AURA_MOD_CONFUSE;
 use crate::game::player::manager::PlayerManager;
 use crate::game::player::Player;
 use crate::World;
@@ -187,10 +187,8 @@ impl PowerSystem {
         }
 
         // Health regen (Player::RegenerateHealth). Skipped when at max health.
-        // Full implementation requires aura system (MOD_HEALTH_REGEN_PERCENT,
-        // MOD_REGEN food flat, MOD_REGEN_DURING_COMBAT, MOD_HEALTH_REGEN_IN_COMBAT)
-        // and polymorph detection. Those modifiers default to zero here until
-        // the aura system exposes them on PowerState/StatsState.
+        // Full implementation requires MOD_HEALTH_REGEN_PERCENT,
+        // MOD_REGEN_DURING_COMBAT, MOD_HEALTH_REGEN_IN_COMBAT, and polymorph detection.
         {
             let cur_health = player.stats.health;
             let max_health = player.stats.max_health;
@@ -214,13 +212,7 @@ impl PowerSystem {
                         add_value *= 1.5;
                     }
                     // MOD_REGEN stores health restored per five seconds.
-                    add_value += 2.0
-                        * (player
-                            .auras
-                            .container
-                            .get_total_aura_modifier(AURA_MOD_REGEN)
-                            as f32
-                            / 5.0);
+                    add_value += 2.0 * (player.power.health_regen_per_5 / 5.0);
                 }
 
                 // Always-active combat regen bonus (SPELL_AURA_MOD_HEALTH_REGEN_IN_COMBAT).
@@ -570,19 +562,7 @@ mod tests {
         let mut player = warrior(60);
         player.stats.health = 100;
         player.stats.max_health = 1_000;
-        player.auras.container.add_aura(Aura::new(
-            1,
-            player.guid,
-            0,
-            AURA_MOD_REGEN,
-            0,
-            2,
-            None,
-            0,
-            1,
-            0,
-            AuraFlags::default(),
-        ));
+        player.power.health_regen_per_5 = 2.0;
 
         for _ in 0..5 {
             system.regen_tick(player.guid, &mut player, 0);
@@ -590,6 +570,20 @@ mod tests {
 
         // Two HP per five seconds is 0.8 HP per two-second tick, totaling four HP.
         assert_eq!(player.stats.health, 104);
+        assert_eq!(player.power.carry_health_regen, 0.0);
+    }
+
+    #[test]
+    fn flat_health_regen_aura_clamps_at_max_health() {
+        let system = PowerSystem::new(Arc::new(MockBroadcastManagerTrait::new()));
+        let mut player = warrior(60);
+        player.stats.health = 998;
+        player.stats.max_health = 1_000;
+        player.power.health_regen_per_5 = 10.0;
+
+        system.regen_tick(player.guid, &mut player, 0);
+
+        assert_eq!(player.stats.health, 1_000);
     }
 
     #[test]

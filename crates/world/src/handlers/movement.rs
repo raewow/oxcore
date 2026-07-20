@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use tracing::{debug, info, trace};
 
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
-use crate::core::common::MovementInfo;
+use crate::core::common::{is_valid_map_coord, MovementInfo};
 use crate::core::session::WorldSession;
 use crate::game::creature::movement::packet_sender::{MovementChangeType, MovementFlagChange};
 use crate::World;
@@ -287,21 +287,6 @@ pub fn verify_movement_info(movement_info: &MovementInfo) -> bool {
     }
 
     true
-}
-
-/// Equivalent of `MaNGOS::IsValidMapCoord` for a single coordinate set.
-///
-/// Coordinates must be finite and within the map coordinate bound (MAX_MAP_COORD
-/// is ~64*533.33 ≈ 17066.666); orientation must be finite.
-fn is_valid_map_coord(x: f32, y: f32, z: f32, o: f32) -> bool {
-    const MAX_MAP_COORD: f32 = 64.0 * 533.3333_f32;
-    x.is_finite()
-        && y.is_finite()
-        && z.is_finite()
-        && o.is_finite()
-        && x.abs() <= MAX_MAP_COORD
-        && y.abs() <= MAX_MAP_COORD
-        && z.abs() <= MAX_MAP_COORD
 }
 
 /// Handle CMSG_SET_ACTIVE_MOVER (`WorldSession::HandleSetActiveMoverOpcode`).

@@ -661,6 +661,30 @@ impl AuraSystem {
     // Stat Modifier Integration
     // =========================================================================
 
+    /// Apply or remove the flat health-per-five-seconds modifier from MOD_REGEN.
+    async fn modify_flat_health_regen_aura(
+        &self,
+        player_guid: ObjectGuid,
+        aura_type: u32,
+        value: i32,
+        apply: bool,
+        world: &World,
+    ) -> Result<bool> {
+        Ok(world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                apply_flat_health_regen_aura_modifier(
+                    &mut player.power,
+                    aura_type,
+                    value,
+                    apply,
+                )
+            })
+            .unwrap_or(false))
+    }
+
     /// Apply a stat modifier from an aura to the StatsSystem.
     async fn apply_aura_stat_modifier(
         &self,
@@ -684,6 +708,13 @@ impl AuraSystem {
             .flatten();
 
         if let Some((aura_type, value, misc_value)) = modifier_info {
+            if self
+                .modify_flat_health_regen_aura(target_guid, aura_type, value, true, world)
+                .await?
+            {
+                return Ok(());
+            }
+
             if self
                 .modify_max_health_aura(target_guid, aura_type, value, true, world)
                 .await?
@@ -738,6 +769,19 @@ impl AuraSystem {
         aura: &Aura,
         world: &World,
     ) -> Result<()> {
+        if self
+            .modify_flat_health_regen_aura(
+                target_guid,
+                aura.aura_type,
+                aura.current_value(),
+                false,
+                world,
+            )
+            .await?
+        {
+            return Ok(());
+        }
+
         if self
             .modify_max_health_aura(
                 target_guid,
@@ -2873,6 +2917,25 @@ fn apply_max_health_aura_modifier(
     unit_mods.handle_stat_modifier(UnitMods::Health, modifier_type, value as f32, apply)
 }
 
+/// Apply or reverse a flat health-regeneration aura.
+///
+/// `AURA_MOD_REGEN` stores health restored per five seconds, matching
+/// `Aura::HandleModRegen` and `Player::RegenerateHealth` in C++.
+fn apply_flat_health_regen_aura_modifier(
+    power: &mut crate::game::player::power::PowerState,
+    aura_type: u32,
+    value: i32,
+    apply: bool,
+) -> bool {
+    if aura_type != effects::AURA_MOD_REGEN {
+        return false;
+    }
+
+    let value = value as f32;
+    power.health_regen_per_5 += if apply { value } else { -value };
+    true
+}
+
 /// Apply or reverse a max-power aura for the power type in `misc_value`.
 fn apply_max_power_aura_modifier(
     unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
@@ -3149,6 +3212,27 @@ mod tests {
     }
 
     // ── apply_primary_stat_aura_modifier (Aura::HandleAuraModStat family) ─────
+
+    #[test]
+    fn flat_health_regen_aura_applies_and_reverses_hp5() {
+        let mut power = crate::game::player::power::PowerState::default();
+
+        assert!(apply_flat_health_regen_aura_modifier(
+            &mut power,
+            effects::AURA_MOD_REGEN,
+            12,
+            true,
+        ));
+        assert_eq!(power.health_regen_per_5, 12.0);
+
+        assert!(apply_flat_health_regen_aura_modifier(
+            &mut power,
+            effects::AURA_MOD_REGEN,
+            12,
+            false,
+        ));
+        assert_eq!(power.health_regen_per_5, 0.0);
+    }
 
     #[test]
     fn flat_primary_stat_aura_applies_single_stat_and_reverses() {
