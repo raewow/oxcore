@@ -14,6 +14,7 @@ pub const AURA_MOD_RESISTANCE: u32 = 22; // Flat resistance (+50 Fire Resist)
 pub const AURA_MOD_BASE_RESISTANCE: u32 = 83; // Base resistance (before multipliers)
 pub const AURA_MOD_RESISTANCE_PCT: u32 = 101; // Pct resistance (+10% Shadow Resist)
 pub const AURA_MOD_BASE_RESISTANCE_PCT: u32 = 142; // Pct base resistance
+pub const AURA_MOD_RESISTANCE_OF_STAT_PERCENT: u32 = 182; // Armor % of Intellect
 pub const AURA_MOD_ATTACK_POWER: u32 = 99; // Flat AP (+140 AP from Battle Shout)
 pub const AURA_MOD_ATTACK_POWER_PCT: u32 = 166; // Pct AP
 pub const AURA_MOD_RANGED_ATTACK_POWER: u32 = 124; // Flat RAP
@@ -199,6 +200,7 @@ pub fn is_stat_modifier_aura(aura_type: u32) -> bool {
             | AURA_MOD_BASE_RESISTANCE
             | AURA_MOD_RESISTANCE_PCT
             | AURA_MOD_BASE_RESISTANCE_PCT
+            | AURA_MOD_RESISTANCE_OF_STAT_PERCENT
             | AURA_MOD_ATTACK_POWER
             | AURA_MOD_ATTACK_POWER_PCT
             | AURA_MOD_RANGED_ATTACK_POWER

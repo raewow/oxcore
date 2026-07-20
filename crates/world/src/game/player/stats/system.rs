@@ -145,6 +145,37 @@ fn calculate_non_mana_max_power(unit_mods: &super::modifiers::UnitModifierGroup,
         .max(0.0) as u32
 }
 
+/// Armor added by `AURA_MOD_RESISTANCE_OF_STAT_PERCENT` auras.
+///
+/// In the reference core this currently supports only physical resistance (armor) and derives the
+/// bonus from Intellect. The active auras are read during recalculation, so applying/removing one
+/// needs no persistent unit-modifier entry.
+fn resistance_of_stat_armor_bonus(intellect: f32, auras: impl Iterator<Item = (i32, i32)>) -> f32 {
+    const SCHOOL_MASK_NORMAL: i32 = 1;
+
+    auras
+        .filter(|(school_mask, _)| school_mask & SCHOOL_MASK_NORMAL != 0)
+        .map(|(_, amount)| intellect * amount as f32 / 100.0)
+        .sum()
+}
+
+fn calculate_armor(
+    unit_mods: &super::modifiers::UnitModifierGroup,
+    equipped_armor: i32,
+    agility: f32,
+    intellect: f32,
+    resistance_of_stat_auras: impl Iterator<Item = (i32, i32)>,
+) -> u32 {
+    let agi_armor = derived::armor_from_agility(agility);
+    let stat_armor = resistance_of_stat_armor_bonus(intellect, resistance_of_stat_auras);
+    let armor_total = unit_mods.calculate_total_value(UnitMods::Armor, 0.0)
+        + equipped_armor as f32
+        + agi_armor
+        + stat_armor;
+
+    armor_total.max(0.0) as u32
+}
+
 impl StatsSystem {
     pub fn new(
         broadcast_mgr: Arc<BroadcastManager>,
@@ -457,15 +488,22 @@ impl StatsSystem {
                     combine_attack_power(ranged_base, ranged_flat, ranged_pct);
             }
 
-            // 6. Armor: agility bonus + equipment (via UnitMods::Armor)
-            let agi_armor = derived::armor_from_agility(agility);
-            let armor_total = player
-                .stats
-                .unit_mods
-                .calculate_total_value(UnitMods::Armor, 0.0)
-                + equipped_bonuses.armor as f32
-                + agi_armor;
-            player.stats.armor = armor_total.max(0.0) as u32;
+            // 6. Armor: agility bonus, equipment, and Intellect-derived armor auras.
+            let resistance_of_stat_auras = player
+                .auras
+                .container
+                .get_auras_by_type(
+                    crate::game::player::auras::effects::AURA_MOD_RESISTANCE_OF_STAT_PERCENT,
+                )
+                .into_iter()
+                .map(|aura| (aura.misc_value, aura.current_value()));
+            player.stats.armor = calculate_armor(
+                &player.stats.unit_mods,
+                equipped_bonuses.armor,
+                agility,
+                intellect,
+                resistance_of_stat_auras,
+            );
             player.stats.resistances[0] = player.stats.armor;
 
             // 7. Resistances (schools 1-6)
@@ -935,6 +973,38 @@ mod tests {
     #[test]
     fn combine_attack_power_no_mods_is_base() {
         assert_eq!(combine_attack_power(250.0, 0, 0), 250);
+    }
+
+    #[test]
+    fn resistance_of_stat_aura_apply_and_remove_changes_final_armor() {
+        let unit_mods = super::super::modifiers::UnitModifierGroup::new();
+        let intellect = 120.0;
+        let active_auras = [(1, 10)]; // Physical resistance: +10% of Intellect.
+
+        assert!(crate::game::player::auras::effects::is_stat_modifier_aura(
+            crate::game::player::auras::effects::AURA_MOD_RESISTANCE_OF_STAT_PERCENT,
+        ));
+
+        assert_eq!(
+            calculate_armor(&unit_mods, 50, 30.0, intellect, active_auras.into_iter()),
+            122
+        );
+
+        // Removing the aura from its container removes its derived armor on the next recalc.
+        assert_eq!(
+            calculate_armor(&unit_mods, 50, 30.0, intellect, std::iter::empty()),
+            110
+        );
+    }
+
+    #[test]
+    fn resistance_of_stat_aura_ignores_non_physical_school_masks() {
+        let unit_mods = super::super::modifiers::UnitModifierGroup::new();
+
+        assert_eq!(
+            calculate_armor(&unit_mods, 50, 30.0, 120.0, [(1 << 2, 10)].into_iter()),
+            110
+        );
     }
 
     fn item_template_with_bonuses() -> ItemTemplate {
