@@ -92,6 +92,10 @@ pub struct SpellsState {
     /// Per-spell cooldowns: spell_id -> cooldown_end_time_ms (game time)
     pub cooldowns: HashMap<u32, u64>,
 
+    /// Event-triggered cooldowns that do not expire until their triggering
+    /// event or an explicit reset clears them.
+    pub permanent_cooldowns: HashSet<u32>,
+
     /// Category cooldowns: category_id -> cooldown_end_time_ms (game time)
     /// Spells in the same category share a cooldown (e.g., Health Potion + Mana Potion)
     pub category_cooldowns: HashMap<u32, u64>,
@@ -135,6 +139,7 @@ impl Default for SpellsState {
             spellbook: Vec::new(),
             current_spells: [None, None, None, None],
             cooldowns: HashMap::new(),
+            permanent_cooldowns: HashSet::new(),
             category_cooldowns: HashMap::new(),
             gcd_end: 0,
             school_lockouts: [0; NUM_SPELL_SCHOOLS],
@@ -155,6 +160,9 @@ impl SpellsState {
 
     /// Check if a spell is on cooldown
     pub fn is_on_cooldown(&self, spell_id: u32, now: u64) -> bool {
+        if self.permanent_cooldowns.contains(&spell_id) {
+            return true;
+        }
         if let Some(&cd_end) = self.cooldowns.get(&spell_id) {
             if cd_end > now {
                 return true;
@@ -179,6 +187,9 @@ impl SpellsState {
 
     /// Get remaining cooldown for a spell in milliseconds
     pub fn get_cooldown_remaining(&self, spell_id: u32, now: u64) -> u32 {
+        if self.permanent_cooldowns.contains(&spell_id) {
+            return u32::MAX;
+        }
         if let Some(&cd_end) = self.cooldowns.get(&spell_id) {
             if cd_end > now {
                 return (cd_end - now) as u32;
@@ -188,7 +199,7 @@ impl SpellsState {
     }
 
     /// GetExpireTime: returns the later of spell-level and category-level cooldown expire times.
-    /// Returns None if neither cooldown is active. Permanent CDs are not tracked (stub).
+    /// Permanent cooldowns have no expiry, so they return `None` here.
     pub fn get_expire_time(&self, spell_id: u32, category: u32, now: u64) -> Option<u64> {
         let spell_cd = self.cooldowns.get(&spell_id).copied();
         let cat_cd = if category > 0 {
@@ -241,14 +252,21 @@ impl SpellsState {
         }
     }
 
+    /// Add a cooldown that remains active until explicitly reset.
+    pub fn add_permanent_cooldown(&mut self, spell_id: u32) {
+        self.permanent_cooldowns.insert(spell_id);
+    }
+
     /// Reset a spell's cooldown
     pub fn reset_cooldown(&mut self, spell_id: u32) {
         self.cooldowns.remove(&spell_id);
+        self.permanent_cooldowns.remove(&spell_id);
     }
 
     /// Reset all cooldowns
     pub fn reset_all_cooldowns(&mut self) {
         self.cooldowns.clear();
+        self.permanent_cooldowns.clear();
         self.category_cooldowns.clear();
     }
 
@@ -277,7 +295,6 @@ impl SpellsState {
     /// Faithful `SpellCaster::PrintCooldownList` port.
     ///
     /// Returns a Vec of display strings; callers send them via chat or log.
-    /// Permanent cooldowns are not tracked in the Rust state (permanent_cd_count always 0).
     pub fn format_cooldown_list(&self, now: u64) -> Vec<String> {
         const SCHOOL_NAMES: [&str; 7] = [
             "SPELL_SCHOOL_NORMAL",
@@ -291,7 +308,7 @@ impl SpellsState {
 
         let mut lines = Vec::new();
         let mut cd_count = 0u32;
-        let perm_cd_count = 0u32;
+        let perm_cd_count = self.permanent_cooldowns.len() as u32;
 
         // GCD (Rust uses a single gcd_end vs C++ per-category map)
         if self.gcd_end > now {
@@ -307,6 +324,10 @@ impl SpellsState {
                 lines.push(format!("Spell({}) RecTime({}ms)", spell_id, remaining_ms));
                 cd_count += 1;
             }
+        }
+
+        for spell_id in &self.permanent_cooldowns {
+            lines.push(format!("Spell({}) permanent cooldown", spell_id));
         }
 
         // Category cooldowns
@@ -1683,6 +1704,18 @@ mod tests {
     }
 
     #[test]
+    fn permanent_cooldown_stays_active_until_reset() {
+        let mut state = SpellsState::default();
+        state.add_permanent_cooldown(101);
+
+        assert!(state.is_on_cooldown(101, u64::MAX));
+        assert_eq!(state.get_cooldown_remaining(101, u64::MAX), u32::MAX);
+
+        state.reset_cooldown(101);
+        assert!(!state.is_on_cooldown(101, 0));
+    }
+
+    #[test]
     fn test_gcd_active_and_expired() {
         let mut state = SpellsState::default();
         state.apply_gcd(1500, 0);
@@ -1808,8 +1841,14 @@ mod tests {
         t.set_source(40.0, 50.0, 60.0);
         assert_eq!(t.dst_position, Some((10.0, 20.0, 30.0)));
         assert_eq!(t.src_position, Some((40.0, 50.0, 60.0)));
-        assert_eq!(t.target_flags & TARGET_FLAG_DEST_LOCATION, TARGET_FLAG_DEST_LOCATION);
-        assert_eq!(t.target_flags & TARGET_FLAG_SOURCE_LOCATION, TARGET_FLAG_SOURCE_LOCATION);
+        assert_eq!(
+            t.target_flags & TARGET_FLAG_DEST_LOCATION,
+            TARGET_FLAG_DEST_LOCATION
+        );
+        assert_eq!(
+            t.target_flags & TARGET_FLAG_SOURCE_LOCATION,
+            TARGET_FLAG_SOURCE_LOCATION
+        );
     }
 
     #[test]

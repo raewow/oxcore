@@ -55,14 +55,15 @@ pub fn apply_cooldown(caster_guid: ObjectGuid, spell_id: u32, world: &World) -> 
     let now = get_game_time_ms(world);
 
     // Read cooldown values from spell entry
-    let (spell_cooldown_ms, category_cooldown_ms, category_id) =
+    let (spell_cooldown_ms, category_cooldown_ms, category_id, permanent) =
         match world.managers.spell_mgr.get(spell_id) {
             Some(entry) => (
                 entry.recovery_time,
                 entry.category_recovery_time,
                 entry.category,
+                is_event_triggered_cooldown(&entry),
             ),
-            None => (0, 0, 0),
+            None => (0, 0, 0, false),
         };
 
     world
@@ -70,6 +71,10 @@ pub fn apply_cooldown(caster_guid: ObjectGuid, spell_id: u32, world: &World) -> 
         .player
         .manager()
         .with_player_mut(caster_guid, |player| {
+            if permanent {
+                player.spells.add_permanent_cooldown(spell_id);
+            }
+
             // Set per-spell cooldown
             if spell_cooldown_ms > 0 {
                 player.spells.add_cooldown(spell_id, spell_cooldown_ms, now);
