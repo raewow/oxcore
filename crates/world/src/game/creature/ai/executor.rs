@@ -1263,7 +1263,7 @@ pub fn set_spells_list_from_db(world: &World, creature_guid: ObjectGuid, entry: 
 pub fn update_spells_list(world: &World, creature_guid: ObjectGuid, diff_ms: u32) {
     const CREATURE_CASTING_DELAY: u32 = 1200;
 
-    let should_cast = world
+    let cast_elapsed_ms = world
         .managers
         .creature_mgr
         .with_creature_mut(creature_guid, |c| {
@@ -1275,16 +1275,16 @@ pub fn update_spells_list(world: &World, creature_guid: ObjectGuid, diff_ms: u32
                 } else {
                     0
                 };
-                true
+                Some(CREATURE_CASTING_DELAY.saturating_add(desync))
             } else {
                 data.casting_delay -= diff_ms;
-                false
+                None
             }
         })
-        .unwrap_or(false);
+        .flatten();
 
-    if should_cast {
-        do_spells_list_casts(world, creature_guid, CREATURE_CASTING_DELAY);
+    if let Some(elapsed_ms) = cast_elapsed_ms {
+        do_spells_list_casts(world, creature_guid, elapsed_ms);
     }
 }
 
@@ -1917,6 +1917,39 @@ mod tests {
             .with_creature(creature_guid, |c| c.ai_state_data.casting_delay)
             .unwrap_or(0);
         assert_eq!(delay, 4900, "casting delay should decrease by diff");
+    }
+
+    #[tokio::test]
+    async fn update_spells_list_includes_desync_when_ticking_spell_cooldowns() {
+        let world = test_world();
+        let creature_guid = ObjectGuid::new_creature(1, 1);
+        world
+            .managers
+            .creature_mgr
+            .add_creature(test_creature(creature_guid));
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(creature_guid, |c| {
+                c.ai_state_data
+                    .set_spells_list(vec![super::super::types::CreatureSpellsEntry {
+                        spell_id: 999,
+                        delay_initial_min: 2_000,
+                        delay_initial_max: 2_000,
+                        ..Default::default()
+                    }]);
+                c.ai_state_data.casting_delay = 100;
+            });
+
+        // The 300ms update exceeds the 100ms delay by 200ms, so the spell-list
+        // cooldown sees the normal 1200ms interval plus the 200ms desync.
+        update_spells_list(&world, creature_guid, 300);
+
+        let cooldown = world
+            .managers
+            .creature_mgr
+            .with_creature(creature_guid, |c| c.ai_state_data.spells_list[0].cooldown);
+        assert_eq!(cooldown, Some(600));
     }
 
     #[tokio::test]

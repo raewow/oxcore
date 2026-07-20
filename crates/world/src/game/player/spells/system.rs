@@ -17,6 +17,7 @@ use crate::game::player::spells::state::{
 use crate::game::player::spells::validation;
 use crate::World;
 use anyhow::Result;
+use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
 use oxcore_shared::messages::spells::{
     ExecuteLogInfo, MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailedOther,
     SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellStart, SPELL_RESULT_STATUS_FAIL,
@@ -418,11 +419,25 @@ pub struct SpellSystem {
 
 /// Resolve ammo projectile display info for SMSG_SPELL_START / SMSG_SPELL_GO.
 ///
-/// Returns `(ammo_display_id, ammo_inventory_type)`. Zero values mean no
-/// projectile (wand spell, no ranged weapon, or no ammo equipped).
+/// Returns `(ammo_display_id, ammo_inventory_type)`. A missing ammo template
+/// retains the equipped weapon's inventory type, as required by the client.
 /// Mirrors MaNGOS `Spell::WriteAmmoToPacket` (Spell.cpp:4528-4594).
 fn resolve_ammo_for_caster(caster_guid: ObjectGuid, world: &World) -> (u32, u32) {
-    const INVTYPE_AMMO: u8 = 26;
+    const EQUIPMENT_SLOT_RANGED: u8 = 17;
+
+    if !caster_guid.is_player() {
+        // Creature virtual equipment is not modelled yet.
+        return (0, 0);
+    }
+
+    let ranged_weapon = world
+        .systems
+        .inventory
+        .cache()
+        .get_item_at(caster_guid, INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_RANGED)
+        .and_then(|guid| world.systems.inventory.cache().get_item(caster_guid, guid))
+        .and_then(|item| world.managers.item_mgr.get_template(item.read().entry))
+        .map(|template| (template.display_id, template.inventory_type));
 
     let ammo_id = world
         .systems
@@ -431,15 +446,29 @@ fn resolve_ammo_for_caster(caster_guid: ObjectGuid, world: &World) -> (u32, u32)
         .with_player(caster_guid, |p| p.ammo_id)
         .unwrap_or(0);
 
-    if ammo_id == 0 {
+    let ammo = world
+        .managers
+        .item_mgr
+        .get_template(ammo_id)
+        .map(|template| (template.display_id, template.inventory_type));
+
+    ammo_packet_values(ranged_weapon, ammo)
+}
+
+/// Resolve the player-specific `WriteAmmoToPacket` branches without world state.
+fn ammo_packet_values(ranged_weapon: Option<(u32, u8)>, ammo: Option<(u32, u8)>) -> (u32, u32) {
+    const INVTYPE_THROWN: u8 = 25;
+
+    let Some((weapon_display_id, weapon_inventory_type)) = ranged_weapon else {
         return (0, 0);
+    };
+
+    if weapon_inventory_type == INVTYPE_THROWN {
+        return (weapon_display_id, weapon_inventory_type as u32);
     }
 
-    if let Some(template) = world.managers.item_mgr.get_template(ammo_id) {
-        return (template.display_id, INVTYPE_AMMO as u32);
-    }
-
-    (0, 0)
+    ammo.map(|(display_id, inventory_type)| (display_id, inventory_type as u32))
+        .unwrap_or((0, weapon_inventory_type as u32))
 }
 
 impl SpellSystem {
@@ -3438,6 +3467,32 @@ enum CastUpdateInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ammo_packet_uses_zeroes_without_ranged_weapon() {
+        assert_eq!(ammo_packet_values(None, Some((101, 26))), (0, 0));
+    }
+
+    #[test]
+    fn ammo_packet_uses_thrown_weapon_display_and_type() {
+        assert_eq!(
+            ammo_packet_values(Some((102, 25)), Some((103, 26))),
+            (102, 25)
+        );
+    }
+
+    #[test]
+    fn ammo_packet_uses_ammo_template_display_and_type() {
+        assert_eq!(
+            ammo_packet_values(Some((104, 15)), Some((105, 26))),
+            (105, 26)
+        );
+    }
+
+    #[test]
+    fn ammo_packet_keeps_weapon_type_when_ammo_is_missing() {
+        assert_eq!(ammo_packet_values(Some((106, 15)), None), (0, 15));
+    }
 
     #[test]
     fn channel_target_uses_first_non_caster_effect_zero_target() {
