@@ -325,13 +325,43 @@ impl MotionMaster {
     }
 
     /// Replace current motion with a new generator using MotionMaster mutation semantics.
+    ///
+    /// Chase, home and distract movement is dropped rather than parked beneath the new
+    /// generator; anything else is interrupted and kept.
     pub fn mutate(
         &mut self,
         generator: Box<dyn MovementGenerator>,
         creature_guid: ObjectGuid,
         current_pos: Position,
     ) {
-        self.add_generator(generator, creature_guid, current_pos);
+        let gen_type = generator.generator_type();
+
+        if !self.generators.is_empty() {
+            if matches!(
+                self.top_type(),
+                Some(
+                    MovementGeneratorType::Chase
+                        | MovementGeneratorType::Home
+                        | MovementGeneratorType::Distract
+                )
+            ) {
+                self.delayed_expire(creature_guid, false);
+            }
+
+            if let Some(top) = self.top_generator_mut() {
+                top.interrupt(creature_guid);
+            }
+        }
+
+        if let Some(mut old) = self.generators.remove(&gen_type) {
+            old.finalize(creature_guid);
+        }
+
+        let mut generator = generator;
+        generator.initialize(creature_guid, current_pos);
+        self.generators.insert(gen_type, generator);
+
+        self.update_active(creature_guid);
     }
 
     /// Remove a generator by type
@@ -372,7 +402,13 @@ impl MotionMaster {
         creature_combat_reach: f32,
         run_speed: f32,
     ) {
-        // Don't recreate if already chasing same target
+        // Ignore the request if the target does not exist
+        if target.is_empty() {
+            return;
+        }
+
+        // Don't recreate if already chasing same target - the C++ generator is rebuilt on
+        // every call, which would reset chase state on each AI tick here.
         if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Chase) {
             if let Some(chase) = gen.as_any_mut().downcast_mut::<ChaseMovementGenerator>() {
                 if chase.target == target {
@@ -381,10 +417,14 @@ impl MotionMaster {
             }
         }
         let generator = ChaseMovementGenerator::new(target, creature_combat_reach, run_speed);
-        self.add_generator(Box::new(generator), creature_guid, current_pos);
+        self.mutate(Box::new(generator), creature_guid, current_pos);
     }
 
-    /// Start returning home
+    /// Start returning home.
+    ///
+    /// This is the uncharmed branch of the C++ targeted-home flow. The LOST_CONTROL guard
+    /// and the charmed branches (stay put, or follow the owner) need charm state the caller
+    /// owns, so they route through [`Self::move_idle`] / [`Self::move_follow`] instead.
     pub fn return_home(
         &mut self,
         home_pos: Position,
@@ -392,11 +432,10 @@ impl MotionMaster {
         current_pos: Position,
         run_speed: f32,
     ) {
-        // Match the C++ targeted-home flow by dropping any stale movement stack
-        // before we push the home generator.
+        // Clear(false): drop the stack down to the default generator
         self.clear(creature_guid);
         let generator = HomeMovementGenerator::new(home_pos, run_speed);
-        self.add_generator(Box::new(generator), creature_guid, current_pos);
+        self.mutate(Box::new(generator), creature_guid, current_pos);
     }
 
     /// Start random wandering around a position
@@ -409,7 +448,7 @@ impl MotionMaster {
         walk_speed: f32,
     ) {
         let generator = RandomMovementGenerator::new(home_pos, wander_distance, walk_speed);
-        self.add_generator(Box::new(generator), creature_guid, current_pos);
+        self.mutate(Box::new(generator), creature_guid, current_pos);
     }
 
     /// Start random wandering using the MotionMaster command shape.
@@ -430,7 +469,7 @@ impl MotionMaster {
         };
         let generator = RandomMovementGenerator::new(origin, wander_distance, walk_speed)
             .with_expire_time(expire_time_ms);
-        self.add_generator(Box::new(generator), creature_guid, current_pos);
+        self.mutate(Box::new(generator), creature_guid, current_pos);
     }
 
     /// Start waypoint movement (patrol path)
@@ -443,10 +482,13 @@ impl MotionMaster {
         walk_speed: f32,
     ) {
         let generator = WaypointMovementGenerator::new(waypoints, repeating, walk_speed);
-        self.add_generator(Box::new(generator), creature_guid, current_pos);
+        self.mutate(Box::new(generator), creature_guid, current_pos);
     }
 
     /// Start waypoint movement as the creature's default path.
+    ///
+    /// Unlike [`Self::move_waypoint`] this installs the path *beneath* the active
+    /// generator, which keeps running until it finishes.
     pub fn move_waypoint_as_default(
         &mut self,
         waypoints: Vec<Waypoint>,
@@ -454,8 +496,36 @@ impl MotionMaster {
         current_pos: Position,
         walk_speed: f32,
     ) {
-        self.clear(creature_guid);
-        self.waypoint(waypoints, true, creature_guid, current_pos, walk_speed);
+        if self.get_current_movement_generator_type() == MovementGeneratorType::Waypoint {
+            tracing::error!(
+                "[MOTION] {:?} attempted move_waypoint_as_default while already on a waypoint path",
+                creature_guid
+            );
+            return;
+        }
+
+        let mut generator: Box<dyn MovementGenerator> =
+            Box::new(WaypointMovementGenerator::new(waypoints, true, walk_speed));
+
+        if self.generators.len() > 1 {
+            // Eject the active generator, wipe the rest, then rebuild with the path as the
+            // new default and the active generator back on top.
+            let curr = self.pop_top();
+            self.drop_all_generators(creature_guid);
+            generator.initialize(creature_guid, current_pos);
+            self.generators
+                .insert(MovementGeneratorType::Waypoint, generator);
+            if let Some((curr_type, curr)) = curr {
+                self.generators.insert(curr_type, curr);
+            }
+        } else {
+            self.drop_all_generators(creature_guid);
+            generator.initialize(creature_guid, current_pos);
+            self.generators
+                .insert(MovementGeneratorType::Waypoint, generator);
+        }
+
+        self.update_active(creature_guid);
     }
 
     /// Start waypoint movement.
@@ -466,10 +536,21 @@ impl MotionMaster {
         current_pos: Position,
         walk_speed: f32,
     ) {
+        if self.get_current_movement_generator_type() == MovementGeneratorType::Waypoint {
+            tracing::error!(
+                "[MOTION] {:?} attempted move_waypoint while already on a waypoint path",
+                creature_guid
+            );
+            return;
+        }
+
         self.waypoint(waypoints, true, creature_guid, current_pos, walk_speed);
     }
 
     /// Start cyclic waypoint movement.
+    ///
+    /// Cyclic paths have no dedicated generator type here, so they run as a repeating
+    /// waypoint path and share its already-patrolling guard.
     pub fn move_cyclic_waypoint(
         &mut self,
         waypoints: Vec<Waypoint>,
@@ -477,7 +558,7 @@ impl MotionMaster {
         current_pos: Position,
         walk_speed: f32,
     ) {
-        self.waypoint(waypoints, true, creature_guid, current_pos, walk_speed);
+        self.move_waypoint(waypoints, creature_guid, current_pos, walk_speed);
     }
 
     /// Start fleeing from a target
@@ -489,8 +570,13 @@ impl MotionMaster {
         current_pos: Position,
         run_speed: f32,
     ) {
+        // Ignore the request if the enemy does not exist
+        if flee_from.is_empty() {
+            return;
+        }
+
         let generator = FleeMovementGenerator::new(flee_from, flee_time_ms, run_speed);
-        self.add_generator(Box::new(generator), creature_guid, current_pos);
+        self.mutate(Box::new(generator), creature_guid, current_pos);
     }
 
     /// Start following a target at an offset.
@@ -503,10 +589,16 @@ impl MotionMaster {
         current_pos: Position,
         walk_speed: f32,
     ) {
+        // The stack is dropped even when the target turns out to be invalid.
         self.clear(creature_guid);
+
+        if target.is_empty() {
+            return;
+        }
+
         let generator =
             FollowMovementGenerator::new(target, follow_distance, follow_angle, walk_speed);
-        self.add_generator(Box::new(generator), creature_guid, current_pos);
+        self.mutate(Box::new(generator), creature_guid, current_pos);
     }
 
     /// Start a one-shot movement to a specific point.
@@ -523,7 +615,7 @@ impl MotionMaster {
         let is_walking = (options & 0x1) != 0;
         let generator =
             PointMovementGenerator::new(id, destination, speed, is_walking, final_orientation);
-        self.add_generator(Box::new(generator), creature_guid, current_pos);
+        self.mutate(Box::new(generator), creature_guid, current_pos);
     }
 
     /// Start a one-shot point movement that should call for help on arrival.
@@ -536,12 +628,12 @@ impl MotionMaster {
         speed: f32,
     ) {
         let generator = AssistanceMovementGenerator::new(0, destination, speed, delay_ms);
-        self.add_generator(Box::new(generator), creature_guid, current_pos);
+        self.mutate(Box::new(generator), creature_guid, current_pos);
     }
 
     /// Start the post-assistance distraction timer.
     pub fn move_seek_assistance_distract(&mut self, creature_guid: ObjectGuid, timer_ms: u32) {
-        self.add_generator(
+        self.mutate(
             Box::new(AssistanceDistractMovementGenerator::new(timer_ms)),
             creature_guid,
             Position::default(),
@@ -609,16 +701,19 @@ impl MotionMaster {
 
     /// Start confused movement.
     pub fn move_confused(&mut self, creature_guid: ObjectGuid, current_pos: Position) {
-        self.clear(creature_guid);
-        self.add_generator(
+        self.mutate(
             Box::new(ConfusedMovementGenerator::new()),
             creature_guid,
             current_pos,
         );
     }
 
-    /// Taxi flight is handled on the player movement side in this Rust port.
-    pub fn move_taxi_flight(&mut self, _path: u32, _pathnode: u32) {}
+    /// Taxi flight is player-only; creatures have no flight path generator.
+    pub fn move_taxi_flight(&mut self, path: u32, pathnode: u32) {
+        tracing::error!(
+            "[MOTION] creature attempted taxi flight (path {path} node {pathnode})"
+        );
+    }
 
     /// Charge movement is not fully modeled yet in the Rust creature MotionMaster.
     pub fn move_charge(
@@ -645,8 +740,13 @@ impl MotionMaster {
         current_pos: Position,
         run_speed: f32,
     ) {
+        // Ignore the request if the enemy does not exist
+        if fright.is_empty() {
+            return;
+        }
+
         if duration_ms > 0 {
-            self.add_generator(
+            self.mutate(
                 Box::new(TimedFearMovementGenerator::new(
                     fright,
                     duration_ms,
@@ -657,7 +757,7 @@ impl MotionMaster {
                 current_pos,
             );
         } else {
-            self.add_generator(
+            self.mutate(
                 Box::new(
                     FearMovementGenerator::new(fright, flee_distance)
                         .with_timing(2000, false, run_speed),
@@ -675,7 +775,7 @@ impl MotionMaster {
 
     /// Start a short distraction movement.
     pub fn move_distract(&mut self, creature_guid: ObjectGuid, timer_ms: u32) {
-        self.add_generator(
+        self.mutate(
             Box::new(DistractMovementGenerator::new(timer_ms)),
             creature_guid,
             Position::default(),
@@ -846,14 +946,18 @@ impl MotionMaster {
         self.update_active(creature_guid);
     }
 
-    /// Ensure the idle generator is the active fallback.
-    pub fn move_idle(&mut self) {
-        if self.generators.is_empty() {
-            self.generators.insert(
-                MovementGeneratorType::Idle,
-                Box::new(IdleMovementGenerator::new()),
-            );
+    /// Make idle the active movement.
+    ///
+    /// C++ pushes the shared idle generator on top of the stack; idle is the lowest
+    /// priority in this type-keyed model, so the equivalent is to drop everything above it.
+    pub fn move_idle(&mut self, creature_guid: ObjectGuid) {
+        if self.top_type() != Some(MovementGeneratorType::Idle) {
+            self.drop_all_generators(creature_guid);
         }
+
+        self.generators
+            .entry(MovementGeneratorType::Idle)
+            .or_insert_with(|| Box::new(IdleMovementGenerator::new()));
 
         self.active_type = MovementGeneratorType::Idle;
         self.moving = false;
@@ -1424,6 +1528,165 @@ mod tests {
             vec![MovementGeneratorType::Random]
         );
         assert_eq!(motion_master.expire_list.as_ref().map(Vec::len), Some(1));
+    }
+
+    fn waypoints() -> Vec<Waypoint> {
+        vec![Waypoint {
+            point_id: 1,
+            position: Position::default(),
+            wait_time: 0,
+            wander_distance: 0.0,
+            script_id: 0,
+            orientation: None,
+        }]
+    }
+
+    #[test]
+    fn mutate_drops_a_home_generator_instead_of_parking_it() {
+        let mut motion_master = MotionMaster::new();
+        let guid = creature();
+        motion_master.return_home(Position::default(), guid, Position::default(), 7.0);
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Home
+        );
+
+        motion_master.random_wander(Position::default(), 5.0, guid, Position::default(), 2.5);
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle, MovementGeneratorType::Random]
+        );
+        assert_eq!(motion_master.expire_list.as_ref().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn mutate_drops_a_distract_generator_instead_of_parking_it() {
+        let mut motion_master = MotionMaster::new();
+        let guid = creature();
+        motion_master.move_distract(guid, 3_000);
+
+        motion_master.move_point(7, Position::default(), 0, 7.0, 0.0, guid, Position::default());
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle, MovementGeneratorType::Point]
+        );
+    }
+
+    #[test]
+    fn mutate_parks_generators_that_are_not_chase_home_or_distract() {
+        let mut motion_master = MotionMaster::new();
+        let guid = creature();
+        motion_master.random_wander(Position::default(), 5.0, guid, Position::default(), 2.5);
+
+        motion_master.move_confused(guid, Position::default());
+
+        // Random survives beneath the confused movement rather than being cleared.
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![
+                MovementGeneratorType::Idle,
+                MovementGeneratorType::Random,
+                MovementGeneratorType::Confused
+            ]
+        );
+        assert!(motion_master.expire_list.is_none());
+    }
+
+    #[test]
+    fn move_commands_ignore_a_missing_target() {
+        let mut motion_master = MotionMaster::new();
+        let guid = creature();
+
+        motion_master.chase(ObjectGuid::default(), guid, Position::default(), 1.0, 7.0);
+        motion_master.flee(ObjectGuid::default(), 5_000, guid, Position::default(), 7.0);
+        motion_master.fear(
+            ObjectGuid::default(),
+            5_000,
+            20.0,
+            guid,
+            Position::default(),
+            7.0,
+        );
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+    }
+
+    #[test]
+    fn move_follow_clears_the_stack_even_when_the_target_is_missing() {
+        let mut motion_master = stacked_motion_master();
+
+        motion_master.move_follow(
+            ObjectGuid::default(),
+            2.0,
+            0.0,
+            creature(),
+            Position::default(),
+            2.5,
+        );
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+    }
+
+    #[test]
+    fn move_waypoint_refuses_to_restart_an_active_patrol() {
+        let mut motion_master = MotionMaster::new();
+        let guid = creature();
+        motion_master.move_waypoint(waypoints(), guid, Position::default(), 2.5);
+
+        let path = motion_master.get_waypoint_path_information();
+        assert_eq!(path.as_deref(), Some("waypoints=1, last_reached=0"));
+
+        // A second call while the patrol is active is rejected, leaving the path in place.
+        motion_master.move_waypoint(Vec::new(), guid, Position::default(), 2.5);
+
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Waypoint
+        );
+        assert_eq!(motion_master.get_waypoint_path_information(), path);
+    }
+
+    #[test]
+    fn move_waypoint_as_default_installs_the_path_beneath_the_active_generator() {
+        let mut motion_master = MotionMaster::new();
+        let guid = creature();
+        motion_master.chase(ObjectGuid::from_raw(2), guid, Position::default(), 1.0, 7.0);
+
+        motion_master.move_waypoint_as_default(waypoints(), guid, Position::default(), 2.5);
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Waypoint, MovementGeneratorType::Chase]
+        );
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Chase
+        );
+    }
+
+    #[test]
+    fn move_idle_drops_everything_above_the_idle_generator() {
+        let mut motion_master = stacked_motion_master();
+
+        motion_master.move_idle(creature());
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Idle
+        );
+        assert!(!motion_master.is_moving());
     }
 
     #[test]
