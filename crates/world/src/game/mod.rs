@@ -23,6 +23,7 @@ pub mod spell;
 pub mod system_mgr;
 pub mod ticket;
 pub mod trade;
+pub mod transport;
 pub mod visibility;
 
 pub use auction::{AuctionHouseManager, AuctionHouseObject};
