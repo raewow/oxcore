@@ -5,8 +5,10 @@
 
 pub mod certs;
 pub mod config;
+pub mod database;
 pub mod gen_certs;
 pub mod rest;
+pub mod rpc;
 
 /// SRP6v2 lives in `oxcore-shared` (the account repository needs it too); re-exported here so
 /// `crate::srp6v2` continues to resolve within this crate.

@@ -15,7 +15,46 @@ impl AccountRepository {
         Self { pool }
     }
 
+    /// The underlying connection pool, for callers that need raw queries against the same auth
+    /// database (e.g. integration tests).
+    pub fn pool(&self) -> &MySqlPool {
+        &self.pool
+    }
+
     // ========== QUERY METHODS (Read Operations) ==========
+
+    /// Look up the Battle.net (SRP6v2) credentials for a login. Returns the account id, the
+    /// canonical (uppercased) username, and the stored salt/verifier bytes, or `None` if the
+    /// account does not exist or has no bnet credentials set.
+    pub async fn find_bnet_credentials(&self, login: &str) -> Result<Option<BnetCredentials>> {
+        let username = login.to_uppercase();
+        let row: Option<(u32, String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT `id`, `username`, `bnet_salt`, `bnet_verifier` FROM `account` \
+             WHERE `username` = ?",
+        )
+        .bind(&username)
+        .fetch_optional(&*self.pool)
+        .await
+        .context("Failed to look up bnet credentials")?;
+
+        let Some((id, username, Some(salt_hex), Some(verifier_hex))) = row else {
+            return Ok(None);
+        };
+
+        let salt_vec = hex::decode(&salt_hex).context("stored bnet_salt is not valid hex")?;
+        let salt: [u8; 32] = salt_vec
+            .try_into()
+            .map_err(|_| anyhow!("stored bnet_salt is not 32 bytes"))?;
+        let verifier =
+            hex::decode(&verifier_hex).context("stored bnet_verifier is not valid hex")?;
+
+        Ok(Some(BnetCredentials {
+            id,
+            username,
+            salt,
+            verifier,
+        }))
+    }
 
     /// Find account by username (for authentication)
     pub async fn find_by_username(&self, username: &str) -> Result<Option<AccountRow>> {
@@ -200,6 +239,27 @@ impl AccountRepository {
         .execute(&*self.pool)
         .await
         .context("Failed to update bnet credentials")?;
+
+        Ok(())
+    }
+
+    /// Store a freshly issued login ticket and its expiry (unix seconds) for an account.
+    pub async fn store_bnet_login_ticket(
+        &self,
+        account_id: u32,
+        ticket: &str,
+        expiry_unix: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE `account` SET `bnet_login_ticket` = ?, `bnet_login_ticket_expiry` = ? \
+             WHERE `id` = ?",
+        )
+        .bind(ticket)
+        .bind(expiry_unix)
+        .bind(account_id)
+        .execute(&*self.pool)
+        .await
+        .context("Failed to store bnet login ticket")?;
 
         Ok(())
     }

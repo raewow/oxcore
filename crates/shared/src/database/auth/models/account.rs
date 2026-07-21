@@ -1,6 +1,16 @@
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::FromRow;
 
+/// Battle.net (SRP6v2) credentials for a login, decoded from the account row.
+#[derive(Debug, Clone)]
+pub struct BnetCredentials {
+    pub id: u32,
+    /// Canonical (uppercased) account username.
+    pub username: String,
+    pub salt: [u8; 32],
+    pub verifier: Vec<u8>,
+}
+
 /// Represents a row from the `account` table in auth database.
 /// Contains all account authentication and metadata.
 #[derive(FromRow, Debug, Clone)]

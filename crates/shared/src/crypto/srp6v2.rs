@@ -266,6 +266,86 @@ impl SrpServer {
     }
 }
 
+/// The client's response to a challenge: what it POSTs plus what it expects back.
+#[derive(Debug, Clone)]
+pub struct ClientProof {
+    /// Client public key `A`, uppercase hex — sent as `public_A`.
+    pub public_a: String,
+    /// Client evidence `M1`, uppercase hex — sent as `client_evidence_M1`.
+    pub client_m1: String,
+    /// The `M2` the server should return if authentication succeeds.
+    pub expected_m2: String,
+    /// The session key `S` both sides derive, big-endian.
+    pub session_key: Vec<u8>,
+}
+
+/// Client side of the exchange. This is the peer of [`SrpServer`] implementing the same spec —
+/// used by tests and by interop/diagnostic tooling to drive a real login without a WoW client.
+pub struct SrpClient {
+    n: BigUint,
+    g: BigUint,
+    k: BigUint,
+}
+
+impl Default for SrpClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SrpClient {
+    pub fn new() -> Self {
+        let n = prime_n();
+        let g = generator();
+        let k = compute_k(&n, &g);
+        Self { n, g, k }
+    }
+
+    /// Given a `password` and a received [`Challenge`], produce the values to send and the
+    /// `M2`/session key to expect. The challenge already carries the SRP username, so the
+    /// password is the only secret needed here.
+    pub fn prove(&self, password: &str, challenge: &Challenge) -> ClientProof {
+        let salt = hex::decode(&challenge.salt).expect("challenge salt is hex");
+        let b_pub = parse_hex_biguint(&challenge.public_b).expect("challenge B is hex");
+
+        let x = compute_x(&challenge.username, password, &salt, &self.n);
+
+        // Ephemeral a, A = g^a mod N.
+        let a_priv = {
+            use rand::RngCore;
+            let mut buf = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut buf);
+            BigUint::from_bytes_be(&buf) % (&self.n - 1u32)
+        };
+        let a_pub = self.g.modpow(&a_priv, &self.n);
+
+        let u = compute_u(&a_pub, &b_pub);
+
+        // S = (B - k*g^x)^(a + u*x) mod N, subtraction done signed then reduced.
+        let g_x = self.g.modpow(&x, &self.n);
+        let base = {
+            let b = BigInt::from_biguint(Sign::Plus, b_pub.clone());
+            let kv = BigInt::from_biguint(Sign::Plus, (&self.k * &g_x) % &self.n);
+            let n = BigInt::from_biguint(Sign::Plus, self.n.clone());
+            (((b - kv) % &n) + &n) % &n
+        }
+        .to_biguint()
+        .expect("reduced base is non-negative");
+        let exp = &a_priv + &u * &x;
+        let s = base.modpow(&exp, &self.n);
+
+        let m1 = evidence(&[&a_pub, &b_pub, &s]);
+        let m2 = evidence(&[&a_pub, &m1, &s]);
+
+        ClientProof {
+            public_a: hex::encode_upper(a_pub.to_bytes_be()),
+            client_m1: hex::encode_upper(m1.to_bytes_be()),
+            expected_m2: hex::encode_upper(m2.to_bytes_be()),
+            session_key: s.to_bytes_be(),
+        }
+    }
+}
+
 /// A random private exponent `b`: `N.bits()` random bits reduced mod `N-1`.
 fn random_private_b(n: &BigUint) -> BigUint {
     use rand::RngCore;
@@ -283,70 +363,6 @@ fn parse_hex_biguint(s: &str) -> Option<BigUint> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A test-only SRP client, implementing the peer side of the exact same spec, so a full
-    /// exchange can be driven end to end without a real WoW client.
-    struct TestClient {
-        n: BigUint,
-        g: BigUint,
-        k: BigUint,
-    }
-
-    impl TestClient {
-        fn new() -> Self {
-            let n = prime_n();
-            let g = generator();
-            let k = compute_k(&n, &g);
-            Self { n, g, k }
-        }
-
-        /// Produce `(A_hex, M1_hex, expected_M2, expected_S)` for a login/password against a
-        /// received challenge.
-        fn prove(
-            &self,
-            password: &str,
-            challenge: &Challenge,
-        ) -> (String, String, String, Vec<u8>) {
-            let salt = hex::decode(&challenge.salt).unwrap();
-            let b_pub = parse_hex_biguint(&challenge.public_b).unwrap();
-
-            let x = compute_x(&challenge.username, password, &salt, &self.n);
-
-            // a random, A = g^a mod N
-            let a_priv = {
-                use rand::RngCore;
-                let mut buf = [0u8; 32];
-                rand::thread_rng().fill_bytes(&mut buf);
-                BigUint::from_bytes_be(&buf) % (&self.n - 1u32)
-            };
-            let a_pub = self.g.modpow(&a_priv, &self.n);
-
-            let u = compute_u(&a_pub, &b_pub);
-
-            // S = (B - k*g^x)^(a + u*x) mod N, with the subtraction done signed then reduced.
-            let g_x = self.g.modpow(&x, &self.n);
-            let base = {
-                let b = BigInt::from_biguint(Sign::Plus, b_pub.clone());
-                let kv = BigInt::from_biguint(Sign::Plus, (&self.k * &g_x) % &self.n);
-                let n = BigInt::from_biguint(Sign::Plus, self.n.clone());
-                (((b - kv) % &n) + &n) % &n
-            }
-            .to_biguint()
-            .unwrap();
-            let exp = &a_priv + &u * &x;
-            let s = base.modpow(&exp, &self.n);
-
-            let m1 = evidence(&[&a_pub, &b_pub, &s]);
-            let m2 = evidence(&[&a_pub, &m1, &s]);
-
-            (
-                hex::encode_upper(a_pub.to_bytes_be()),
-                hex::encode_upper(m1.to_bytes_be()),
-                hex::encode_upper(m2.to_bytes_be()),
-                s.to_bytes_be(),
-            )
-        }
-    }
 
     #[test]
     fn n_is_the_rfc5054_2048_bit_prime() {
@@ -386,12 +402,13 @@ mod tests {
         );
         let challenge = server.challenge();
 
-        let client = TestClient::new();
-        let (a_hex, m1_hex, expected_m2, expected_s) = client.prove("hunter2", &challenge);
+        let proof = SrpClient::new().prove("hunter2", &challenge);
 
-        let verified = server.verify(&a_hex, &m1_hex).expect("correct password verifies");
-        assert_eq!(verified.server_m2, expected_m2, "M2 must match the client's");
-        assert_eq!(verified.session_key, expected_s, "both sides derive the same S");
+        let verified = server
+            .verify(&proof.public_a, &proof.client_m1)
+            .expect("correct password verifies");
+        assert_eq!(verified.server_m2, proof.expected_m2, "M2 must match the client's");
+        assert_eq!(verified.session_key, proof.session_key, "both sides derive the same S");
     }
 
     #[test]
@@ -404,10 +421,9 @@ mod tests {
         );
         let challenge = server.challenge();
 
-        let client = TestClient::new();
-        let (a_hex, m1_hex, _, _) = client.prove("wrong-password", &challenge);
+        let proof = SrpClient::new().prove("wrong-password", &challenge);
 
-        assert!(server.verify(&a_hex, &m1_hex).is_none());
+        assert!(server.verify(&proof.public_a, &proof.client_m1).is_none());
     }
 
     #[test]

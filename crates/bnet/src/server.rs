@@ -10,7 +10,7 @@ use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio_rustls::TlsAcceptor;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Serve the REST login router over TLS until `shutdown` fires.
 pub async fn serve_rest(
@@ -101,8 +101,11 @@ pub async fn serve_bnet(
         let acceptor = acceptor.clone();
         tokio::spawn(async move {
             match acceptor.accept(stream).await {
-                Ok(_session) => {
-                    error!(%peer, "BGS session handling is not implemented yet (M3)");
+                Ok(session) => {
+                    debug!(%peer, "BGS RPC session established");
+                    if let Err(e) = crate::rpc::session::run(session).await {
+                        debug!(%peer, "BGS session ended: {e}");
+                    }
                 }
                 Err(e) => debug!(%peer, "TLS handshake failed: {e}"),
             }

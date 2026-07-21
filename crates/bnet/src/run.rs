@@ -11,6 +11,7 @@ use tokio::sync::broadcast;
 use tracing::error;
 
 use crate::config::Config;
+use crate::database::Database;
 use crate::rest::{self, RestState};
 use crate::server::{serve_bnet, serve_rest};
 use crate::tls::build_acceptor;
@@ -21,6 +22,7 @@ pub struct BnetServer {
 
 pub async fn serve(config: Config, shutdown_tx: broadcast::Sender<()>) -> Result<Arc<BnetServer>> {
     let acceptor = build_acceptor(&config.cert_file, &config.key_file)?;
+    let db = Database::connect(&config.login_database_url).await?;
 
     let rest_addr = format!("{}:{}", config.bind_ip, config.login_port)
         .parse()
@@ -39,9 +41,7 @@ pub async fn serve(config: Config, shutdown_tx: broadcast::Sender<()>) -> Result
             )
         })?;
 
-    let router = rest::router(Arc::new(RestState {
-        config: config.clone(),
-    }));
+    let router = rest::router(Arc::new(RestState::new(config.clone(), db)));
 
     let rest_acceptor = acceptor.clone();
     let rest_shutdown = shutdown_tx.subscribe();

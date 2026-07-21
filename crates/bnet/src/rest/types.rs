@@ -84,6 +84,27 @@ pub struct SrpLoginChallenge {
     pub public_B: String,
 }
 
+impl From<oxcore_shared::crypto::srp6v2::Challenge> for SrpLoginChallenge {
+    fn from(c: oxcore_shared::crypto::srp6v2::Challenge) -> Self {
+        Self {
+            version: c.version,
+            iterations: c.iterations,
+            modulus: c.modulus,
+            generator: c.generator,
+            hash_function: c.hash_function,
+            username: c.username,
+            salt: c.salt,
+            public_B: c.public_b,
+        }
+    }
+}
+
+/// A pre-SRP failure (bad request, unknown account) returned from the challenge endpoint. The
+/// client renders `error_message` back on the login form.
+pub fn login_error(error_code: &str, error_message: &str) -> axum::Json<LoginResult> {
+    axum::Json(LoginResult::rejected(error_code, error_message))
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 #[allow(non_snake_case)] // field names are fixed by the proto/JSON contract
 pub struct LoginResult {
