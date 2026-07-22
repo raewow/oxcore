@@ -294,6 +294,13 @@ impl AuraContainer {
             .any(|&(id, index)| id == spell_id && index != effect_index)
     }
 
+    /// Whether any active effect for a spell is positive.
+    pub fn is_spell_positive(&self, spell_id: u32) -> bool {
+        self.auras
+            .values()
+            .any(|aura| aura.spell_id == spell_id && aura.is_positive())
+    }
+
     /// Check if any aura of a given aura_type is active.
     pub fn has_aura_type(&self, aura_type: u32) -> bool {
         self.auras.values().any(|a| a.aura_type == aura_type)
@@ -601,6 +608,22 @@ mod tests {
             container.get_total_aura_modifier(super::super::effects::AURA_SAFE_FALL),
             10
         );
+    }
+
+    #[test]
+    fn spell_is_positive_when_any_effect_is_positive() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut negative = make_aura(3900, 0, caster, None);
+        negative.flags.is_negative = true;
+        container.add_aura(negative);
+        assert!(!container.is_spell_positive(3900));
+
+        let mut positive = make_aura(3900, 1, caster, None);
+        positive.flags.is_positive = true;
+        container.add_aura(positive);
+        assert!(container.is_spell_positive(3900));
+        assert!(!container.is_spell_positive(3901));
     }
 
     #[test]
