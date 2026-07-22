@@ -230,6 +230,30 @@ pub fn auth_response_success(info: &AuthResponseSuccess) -> Vec<u8> {
     w.into_bytes()
 }
 
+// ---- CMSG_PING / SMSG_PONG ----
+
+/// The client's latency ping: an echo serial and its measured latency (ms).
+#[derive(Debug, Clone)]
+pub struct Ping {
+    pub serial: u32,
+    pub latency: u32,
+}
+
+impl Ping {
+    pub fn parse(body: &[u8]) -> Result<Self> {
+        let mut r = Reader::new(body);
+        Ok(Self {
+            serial: r.u32()?,
+            latency: r.u32()?,
+        })
+    }
+}
+
+/// The `SMSG_PONG` body: echoes the ping's serial.
+pub fn pong_body(serial: u32) -> Vec<u8> {
+    serial.to_le_bytes().to_vec()
+}
+
 // ---- small byte reader ----
 
 struct Reader<'a> {
@@ -358,6 +382,16 @@ mod tests {
     #[test]
     fn auth_session_parse_rejects_a_truncated_body() {
         assert!(AuthSession::parse(&[0u8; 10]).is_err());
+    }
+
+    #[test]
+    fn ping_parses_and_pong_echoes_the_serial() {
+        let mut body = 0x1234_5678u32.to_le_bytes().to_vec();
+        body.extend_from_slice(&42u32.to_le_bytes());
+        let ping = Ping::parse(&body).unwrap();
+        assert_eq!(ping.serial, 0x1234_5678);
+        assert_eq!(ping.latency, 42);
+        assert_eq!(pong_body(ping.serial), 0x1234_5678u32.to_le_bytes());
     }
 
     struct CapturingSigner {

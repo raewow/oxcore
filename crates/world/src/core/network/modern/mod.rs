@@ -19,12 +19,15 @@ pub mod handshake;
 pub mod opcodes;
 pub mod packets;
 pub mod rsa_signer;
+pub mod server;
 
 pub use auth_crypto::{derive_keys, verify_digest, DerivedKeys};
 pub use crypt::WorldCrypt;
 pub use driver::{
-    run_auth, AccountSessionKeys, AuthedConnection, ModernAuthContext, SessionKeyProvider,
+    run_auth, run_connection, serve_connection, AccountSessionKeys, AuthedConnection,
+    ModernAuthContext, SessionKeyProvider,
 };
+pub use server::{serve_modern, ModernServerConfig};
 pub use framing::{
     decode, decode_plaintext, encode, encode_plaintext, ModernPacket, CONNECTION_INITIALIZE_CLIENT,
     CONNECTION_INITIALIZE_SERVER, HEADER_SIZE,

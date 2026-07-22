@@ -203,13 +203,21 @@ doing once a 1.14 client actually reaches gameplay opcodes.
   after it. 2 end-to-end tests over a `tokio::io::duplex` with a fully simulated client: a correct
   client completes and gets a decryptable `SMSG_AUTH_RESPONSE`; a wrong session key aborts before
   encrypted mode. 44 modern tests pass; world builds clean.
-- **C5b — accept-loop binding + gameplay.** What's left to run against a real client: a
-  `TcpListener` that hands modern connections to `run_auth` and then to a gameplay opcode loop
-  (modern char-enum + a `SMSG_CONNECT_TO` stub), wired alongside the vanilla listener with build/OS
-  sourced from the session. Thin glue over `run_auth` for the accept side; the opcode loop is the
-  larger part.
-- **C6 (separate) — `to_vanilla`/`to_classic` split** so gameplay messages serialize correctly for
-  each client.
+- **C5b — accept loop + encrypted post-auth loop. ✅ Done.** `modern/driver.rs` gained
+  `run_connection` (the post-auth **encrypted** read/dispatch loop) and `serve_connection`
+  (`run_auth` then `run_connection`); `CMSG_PING` is answered with `SMSG_PONG`, unknown opcodes are
+  logged and skipped. `modern/server.rs`: `serve_modern` — a `TcpListener` accept loop that runs the
+  full lifecycle per connection (mirrors bnet's `serve_bnet`), plus `ModernServerConfig` (build/OS,
+  virtual-realm address, expansion levels). Account lookup uses the production `AccountSessionKeys`.
+  Test: an encrypted `CMSG_PING` over a duplex gets an encrypted `SMSG_PONG` echoing the serial.
+  46 modern tests pass; world builds clean. **Not yet wired into the world bootstrap** — the caller
+  must load `world.signing.key.pem` into an `RsaSigner`, source the realm build/OS, pick the port,
+  and call `serve_modern` (a config step).
+- **C6 — modern gameplay opcodes.** The first real gameplay exchange: `CMSG_ENUM_CHARACTERS` →
+  `SMSG_ENUM_CHARACTERS_RESULT` (an empty list reaches the character screen; a populated one needs
+  the modern character serialization) and `SMSG_CONNECT_TO` for instance redirects. This is where
+  the **`to_vanilla`/`to_classic` message split** becomes unavoidable — every gameplay packet must
+  serialize in the client's format.
 
 ---
 

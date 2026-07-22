@@ -27,8 +27,8 @@ use super::auth_seeds;
 use super::crypt::WorldCrypt;
 use super::framing::{self, ModernPacket, CONNECTION_INITIALIZE_CLIENT, CONNECTION_INITIALIZE_SERVER};
 use super::handshake::{auth_response_frame, HandshakeServer};
-use super::opcodes::{CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK};
-use super::packets::{AuthResponseSuccess, AuthSession, EnterEncryptedModeSigner};
+use super::opcodes::{CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK, CMSG_PING, SMSG_PONG};
+use super::packets::{pong_body, AuthResponseSuccess, AuthSession, EnterEncryptedModeSigner, Ping};
 
 /// Resolves a realm-join ticket (a game-account name) to that account's 64-byte bnet session key.
 /// The real implementation reads `account.sessionkey`; tests use an in-memory map.
@@ -163,6 +163,60 @@ where
         account: session.realm_join_ticket,
         session_key40: keys.session_key,
     })
+}
+
+/// Run the auth handshake and then the post-auth (encrypted) packet loop over one stream.
+pub async fn serve_connection<S, P>(
+    mut stream: S,
+    ctx: &ModernAuthContext<'_, P>,
+) -> Result<()>
+where
+    S: AsyncReadExt + AsyncWriteExt + Unpin,
+    P: SessionKeyProvider,
+{
+    let conn = run_auth(&mut stream, ctx).await?;
+    run_connection(stream, conn).await
+}
+
+/// The post-auth loop: read **encrypted** frames off the stream and dispatch them. Only the
+/// keep-alive `CMSG_PING` is answered so far (with `SMSG_PONG`); the gameplay opcodes — starting
+/// with character enumeration — are the next milestone. Unknown opcodes are logged and skipped so
+/// one unhandled packet does not drop the connection.
+pub async fn run_connection<S>(mut stream: S, mut conn: AuthedConnection) -> Result<()>
+where
+    S: AsyncReadExt + AsyncWriteExt + Unpin,
+{
+    let mut buf: Vec<u8> = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+
+    loop {
+        // Drain every complete, decryptable frame currently buffered.
+        while let Some((packet, consumed)) = framing::decode(&mut conn.crypt, &buf)? {
+            buf.drain(..consumed);
+            match packet.opcode {
+                CMSG_PING => {
+                    let ping = Ping::parse(&packet.body)?;
+                    let pong = framing::encode(&mut conn.crypt, SMSG_PONG, &pong_body(ping.serial));
+                    stream.write_all(&pong).await?;
+                }
+                other => {
+                    debug!(
+                        account = %conn.account,
+                        opcode = format!("0x{other:04X}"),
+                        "unhandled modern opcode"
+                    );
+                }
+            }
+        }
+        stream.flush().await?;
+
+        let n = stream.read(&mut chunk).await?;
+        if n == 0 {
+            debug!(account = %conn.account, "modern connection closed");
+            return Ok(());
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
 }
 
 /// Read and validate the client's connection-init greeting (`<string>\n`).
@@ -344,6 +398,45 @@ mod tests {
 
         let outcome = server_task.await.unwrap().unwrap();
         assert_eq!(outcome.account, TICKET);
+    }
+
+    #[tokio::test]
+    async fn the_encrypted_loop_answers_a_ping_with_a_pong() {
+        use crate::core::network::modern::framing::encode;
+        use crate::core::network::modern::opcodes::{CMSG_PING, SMSG_PONG};
+
+        let key = [0x33u8; 16];
+        let (mut client, server) = tokio::io::duplex(4096);
+
+        let conn = AuthedConnection {
+            crypt: WorldCrypt::server(&key),
+            account: "PLAYER#1".to_string(),
+            session_key40: [0u8; 40],
+        };
+        let task = tokio::spawn(run_connection(server, conn));
+
+        let mut client_crypt = WorldCrypt::client(&key);
+        let mut ping_body = 7u32.to_le_bytes().to_vec();
+        ping_body.extend_from_slice(&123u32.to_le_bytes()); // latency
+        let frame = encode(&mut client_crypt, CMSG_PING, &ping_body);
+        client.write_all(&frame).await.unwrap();
+
+        // Read the encrypted pong back.
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 256];
+        let pong = loop {
+            if let Some((p, _)) = framing::decode(&mut client_crypt, &buf).unwrap() {
+                break p;
+            }
+            let n = client.read(&mut chunk).await.unwrap();
+            assert!(n > 0, "server closed without a pong");
+            buf.extend_from_slice(&chunk[..n]);
+        };
+        assert_eq!(pong.opcode, SMSG_PONG);
+        assert_eq!(&pong.body, &7u32.to_le_bytes()); // echoed serial
+
+        drop(client);
+        let _ = task.await;
     }
 
     #[tokio::test]

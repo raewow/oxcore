@@ -310,7 +310,7 @@ mod tests {
         let offset = Position::new(1.0, 2.0, 3.0, 0.5);
 
         info.set_transport_data(transport, offset);
-        info.set_flag(MoveFlags::ONTRANSPORT);
+        info.flags.set_flag(MoveFlags::ONTRANSPORT);
 
         assert_eq!(info.transport_guid, Some(transport));
         assert_eq!(info.transport_position, Some(offset));
