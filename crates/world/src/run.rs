@@ -11,11 +11,14 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use oxcore_shared::console::ConsoleCommand;
-use oxcore_shared::database::{DatabaseUrls, Databases};
+use oxcore_shared::database::{AccountRepository, DatabaseUrls, Databases};
 use tokio::sync::{broadcast, mpsc};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::config::{initialize_config_mgr, Config};
+use crate::core::network::modern::{
+    serve_modern, EnterEncryptedModeSigner, ModernServerConfig, RsaSigner,
+};
 use crate::core::network::socket_mgr::WorldSocketMgr;
 use crate::World;
 
@@ -53,6 +56,13 @@ fn build_world_config(config: &Config) -> Config {
     world_config.realm_id = config.realm_id;
     world_config.realm_name = config.realm_name.clone();
     world_config
+}
+
+/// Load the modern world server's RSA signing key (PKCS#1 PEM) into a shareable signer.
+fn load_modern_signer(path: &std::path::Path) -> Result<Arc<dyn EnterEncryptedModeSigner>> {
+    let pem = std::fs::read_to_string(path).context("cannot read world signing key")?;
+    let signer = RsaSigner::from_pkcs1_pem(&pem)?;
+    Ok(Arc::new(signer))
 }
 
 /// Set up and start the world server. Returns the live `Arc<World>` immediately; the
@@ -121,6 +131,42 @@ pub async fn serve(
     );
     socket_mgr.start().await?;
     let socket_mgr = Arc::new(socket_mgr);
+
+    // 4b. Modern (1.14.x) world listener (opt-in), running alongside the vanilla one.
+    if config.modern_world_enabled {
+        match load_modern_signer(&config.modern_world_signing_key) {
+            Ok(signer) => {
+                let modern_addr: SocketAddr =
+                    format!("{}:{}", config.bind_ip, config.modern_world_port)
+                        .parse()
+                        .context("Invalid modern world bind address")?;
+                let accounts = AccountRepository::new(Arc::new(databases.auth.clone()));
+                let modern_config = Arc::new(ModernServerConfig {
+                    build: config.modern_world_build,
+                    os: config.modern_world_os.clone(),
+                    // Same region/site scheme the bnet realm-list uses: region<<24 | site<<16 | id.
+                    virtual_realm_address: 0x0101_0000 | (realm_id as u32 & 0xFFFF),
+                    active_expansion: 0,
+                    account_expansion: 0,
+                });
+                let modern_shutdown = shutdown_rx.resubscribe();
+                info!("Modern (1.14.x) world listener enabled on {}", modern_addr);
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        serve_modern(modern_addr, accounts, signer, modern_config, modern_shutdown)
+                            .await
+                    {
+                        error!("Modern world listener error: {}", e);
+                    }
+                });
+            }
+            Err(e) => warn!(
+                "Modern world listener disabled: {} (from {})",
+                e,
+                config.modern_world_signing_key.display()
+            ),
+        }
+    }
 
     // 5. Update loop
     let world_run = world.clone();

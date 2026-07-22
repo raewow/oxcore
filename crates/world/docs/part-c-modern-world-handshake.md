@@ -210,9 +210,17 @@ doing once a 1.14 client actually reaches gameplay opcodes.
   full lifecycle per connection (mirrors bnet's `serve_bnet`), plus `ModernServerConfig` (build/OS,
   virtual-realm address, expansion levels). Account lookup uses the production `AccountSessionKeys`.
   Test: an encrypted `CMSG_PING` over a duplex gets an encrypted `SMSG_PONG` echoing the serial.
-  46 modern tests pass; world builds clean. **Not yet wired into the world bootstrap** — the caller
-  must load `world.signing.key.pem` into an `RsaSigner`, source the realm build/OS, pick the port,
-  and call `serve_modern` (a config step).
+  46 modern tests pass; world builds clean.
+- **C5c — bootstrap wiring. ✅ Done.** The world `Config` gained opt-in fields (`modern_world_enabled`
+  default false, `modern_world_port` 8086, `modern_world_build` 41794, `modern_world_os` `Wn64`,
+  `modern_world_signing_key` `./certs/world.signing.key.pem`). `run::serve`, when enabled, loads the
+  `RsaSigner` from that PEM, builds a `ModernServerConfig` (build/OS + `virtual_realm_address =
+  0x0101_0000 | realm_id`), and spawns `serve_modern` alongside the vanilla listener on the shared
+  shutdown broadcast — failing soft (warn + skip) if the key is missing. The whole workspace builds.
+  **A live 1.14 client can now actually reach the world server for the first time** — the point every
+  prior "unverified" caveat becomes testable. Note the build/opcode-table mismatch to watch: opcodes
+  were transcribed from build 40688 but the default seed is build 41794 (`build` must match the real
+  client and have a seed entry).
 - **C6 — modern gameplay opcodes.** The first real gameplay exchange: `CMSG_ENUM_CHARACTERS` →
   `SMSG_ENUM_CHARACTERS_RESULT` (an empty list reaches the character screen; a populated one needs
   the modern character serialization) and `SMSG_CONNECT_TO` for instance redirects. This is where

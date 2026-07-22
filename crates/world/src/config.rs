@@ -15,6 +15,24 @@ pub struct Config {
     pub world_server_port: u16,
     pub bind_ip: String,
 
+    // Modern (1.14.x) world listener — opt-in, runs alongside the vanilla listener. Disabled by
+    // default because the modern handshake is not yet verified against a live client.
+    #[serde(default)]
+    pub modern_world_enabled: bool,
+    #[serde(default = "default_modern_world_port")]
+    pub modern_world_port: u16,
+    /// The client build the realm serves — must match the connecting client AND have an entry in
+    /// the auth-seed table (`core::network::modern::auth_seeds`). 41794 = 1.14.1 Windows x64.
+    #[serde(default = "default_modern_world_build")]
+    pub modern_world_build: u32,
+    /// The client OS string selecting the auth seed: `Wn64`, `Mc64`, `MacA`.
+    #[serde(default = "default_modern_world_os")]
+    pub modern_world_os: String,
+    /// RSA key that signs `SMSG_ENTER_ENCRYPTED_MODE`; pairs with `connect_to_modulus.bin` in the
+    /// patched client. Produced by `bnet gen-certs` as `world.signing.key.pem`.
+    #[serde(default = "default_modern_world_signing_key")]
+    pub modern_world_signing_key: std::path::PathBuf,
+
     // Directories
     #[serde(default = "default_data_dir")]
     pub data_dir: std::path::PathBuf,
@@ -268,6 +286,22 @@ fn default_realm_name() -> String {
     "oxcore".to_string()
 }
 
+fn default_modern_world_port() -> u16 {
+    8086
+}
+
+fn default_modern_world_build() -> u32 {
+    41794 // 1.14.1 Windows x64 — has an auth-seed entry.
+}
+
+fn default_modern_world_os() -> String {
+    "Wn64".to_string()
+}
+
+fn default_modern_world_signing_key() -> std::path::PathBuf {
+    std::path::PathBuf::from("./certs/world.signing.key.pem")
+}
+
 fn default_logout_timer() -> u32 {
     20 // Blizzlike 20 seconds, set to 0 for instant logout
 }
@@ -486,6 +520,11 @@ impl Default for Config {
             logs_database_url: String::new(),
             world_server_port: 8085,
             bind_ip: "0.0.0.0".to_string(),
+            modern_world_enabled: false,
+            modern_world_port: default_modern_world_port(),
+            modern_world_build: default_modern_world_build(),
+            modern_world_os: default_modern_world_os(),
+            modern_world_signing_key: default_modern_world_signing_key(),
             data_dir: default_data_dir(),
             world_update_interval: default_world_update_interval(),
             realm_id: default_realm_id(),
