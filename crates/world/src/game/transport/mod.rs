@@ -9,7 +9,7 @@ pub mod passenger;
 pub mod schedule;
 pub mod segment;
 
-pub use animation::{TransportAnimation, TransportAnimationEntry};
+pub use animation::{TransportAnimation, TransportAnimationEntry, TransportAnimationManager};
 pub use passenger::{normalize_orientation, TransportFrame};
 pub use schedule::{compute_schedule, KeyFrame, ScheduleProfile};
 pub use segment::{calculate_segment_pos, MotionProfile, SegmentFrame};

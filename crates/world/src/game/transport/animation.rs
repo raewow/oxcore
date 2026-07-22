@@ -26,12 +26,21 @@ impl TransportAnimation {
         Self::default()
     }
 
-    /// Add a keyframe, keeping the path sorted by time.
+    /// Add a keyframe, keeping the path sorted by time and `total_time` at the latest.
+    ///
+    /// The C++ path is a `map` keyed by time, so a keyframe at a time already present
+    /// replaces the existing one rather than being inserted alongside it.
     pub fn add_frame(&mut self, entry: TransportAnimationEntry) {
-        let insert_at = self
+        if entry.time_seg > self.total_time {
+            self.total_time = entry.time_seg;
+        }
+        match self
             .path
-            .partition_point(|frame| frame.time_seg < entry.time_seg);
-        self.path.insert(insert_at, entry);
+            .binary_search_by(|frame| frame.time_seg.cmp(&entry.time_seg))
+        {
+            Ok(existing) => self.path[existing] = entry,
+            Err(insert_at) => self.path.insert(insert_at, entry),
+        }
     }
 
     pub fn frames(&self) -> &[TransportAnimationEntry] {
@@ -64,6 +73,36 @@ impl TransportAnimation {
     }
 }
 
+/// The loaded animation paths of every transport, keyed by transport entry
+/// (`TransportMgr::m_transportAnimations`).
+#[derive(Debug, Default, Clone)]
+pub struct TransportAnimationManager {
+    animations: std::collections::HashMap<u32, TransportAnimation>,
+}
+
+impl TransportAnimationManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record one keyframe of a transport's animation, creating the transport's path on
+    /// first sight (`TransportMgr::AddPathNodeToTransport`).
+    ///
+    /// The keyframe's own `time_seg` is its key, so re-adding a node at a time already
+    /// present replaces it, and `total_time` tracks the latest keyframe added.
+    pub fn add_path_node(&mut self, transport_entry: u32, node: TransportAnimationEntry) {
+        self.animations
+            .entry(transport_entry)
+            .or_default()
+            .add_frame(node);
+    }
+
+    /// The animation path loaded for `transport_entry`, if any (`GetTransportAnimInfo`).
+    pub fn animation(&self, transport_entry: u32) -> Option<&TransportAnimation> {
+        self.animations.get(&transport_entry)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,8 +122,35 @@ mod tests {
         anim.add_frame(frame(2000, 20.0));
         anim.add_frame(frame(0, 0.0));
         anim.add_frame(frame(1000, 10.0));
-        anim.total_time = 2000;
         anim
+    }
+
+    #[test]
+    fn add_frame_tracks_the_latest_time_and_replaces_duplicates() {
+        let mut anim = animation();
+        // The latest keyframe added set total_time.
+        assert_eq!(anim.total_time, 2000);
+
+        // Re-adding at an existing time overwrites rather than duplicating.
+        anim.add_frame(frame(1000, 99.0));
+        assert_eq!(anim.frames().len(), 3);
+        assert_eq!(anim.next_anim_node(1000).unwrap().x, 99.0);
+    }
+
+    #[test]
+    fn manager_keys_animations_by_transport_entry() {
+        let mut mgr = TransportAnimationManager::new();
+        mgr.add_path_node(176231, frame(0, 0.0));
+        mgr.add_path_node(176231, frame(1000, 10.0));
+        mgr.add_path_node(164871, frame(0, 5.0));
+
+        // Each transport keeps its own path and total_time.
+        let boat = mgr.animation(176231).unwrap();
+        assert_eq!(boat.total_time, 1000);
+        assert_eq!(boat.frames().len(), 2);
+        assert_eq!(mgr.animation(164871).unwrap().frames().len(), 1);
+        // An unknown transport has no animation loaded.
+        assert!(mgr.animation(1).is_none());
     }
 
     #[test]
