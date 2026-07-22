@@ -94,6 +94,7 @@ pub const AURA_WATER_BREATHING: u32 = 82; // Water breathing
 pub const AURA_MOD_WATER_BREATHING: u32 = 155; // Water breathing interval multiplier
 pub const AURA_WATER_WALK: u32 = 104; // Water walking
 pub const AURA_FEATHER_FALL: u32 = 105; // Slow fall
+pub const AURA_SAFE_FALL: u32 = 144; // Extra safe fall distance
 pub const AURA_HOVER: u32 = 106; // Hover
 pub const AURA_GHOST: u32 = 95; // Ghost (dead state)
 pub const AURA_FEIGN_DEATH: u32 = 66; // Feign Death

@@ -142,9 +142,16 @@ doing once a 1.14 client actually reaches gameplay opcodes.
   out-of-order rejection, streaming/partial/concatenated decode, header layout. Added `aes-gcm`
   dep. **Not yet wired into the accept loop** — transport primitives only. The real socket type +
   init exchange land with C3 when there is a handshake to drive them.
-- **C2 — key derivation + digest verify.** Port the SHA-256/HMAC chain and `SessionKeyGenerator`;
-  unit-test against a known `(sessionKey, challenges) → aesKey/digest` vector reconstructed from a
-  reference. Add the account-by-ticket + session-key lookup.
+- **C2 — key derivation + digest verify. ✅ Done.** `modern/auth_crypto.rs`: the four seed
+  constants, `expected_digest`/`verify_digest` (constant-time), `derive_keys` (→ 40-byte
+  continued-session key + 16-byte AES key), and the `SessionKeyGenerator` 32-byte-block expansion,
+  all transcribed verbatim from HermesProxy `WorldSocket.cs`/`SessionKeyGeneration.cs` — including
+  the challenge orderings that differ between the three HMACs. 6 tests: digest self-consistency,
+  wrong-key rejection, challenge-order sensitivity, derivation determinism, and the generator's
+  behaviour across the 32-byte block boundary (+ a pinned block-1 regression snapshot). The
+  account-by-ticket lookup reuses the existing `AccountRepository::find_session_key(username)`
+  (username = the join ticket's `gameAccount`), so no new DB code. **Still unverified against a live
+  client** — the digest match is the thing only a real client can confirm.
 - **C3 — auth handshake.** `SMSG_AUTH_CHALLENGE` → `CMSG_AUTH_SESSION` verify → `ENTER_ENCRYPTED_MODE`
   (incl. the RSA-signed key and the new patcher patch) → `SMSG_AUTH_RESPONSE`. Target: the client
   accepts encrypted mode and requests the character list.

@@ -270,7 +270,11 @@ impl EnvironmentSystem {
             let is_game_master = false; // TODO: Add GM check
             let has_fly_aura = false; // TODO: Check auras
             let max_health = player.stats.max_health;
-            let safe_fall_bonus = 0.0f32; // TODO: Get from Safe Fall aura
+            let safe_fall_bonus = player
+                .auras
+                .container
+                .get_total_aura_modifier(crate::game::player::auras::effects::AURA_SAFE_FALL)
+                .max(0) as f32;
 
             damage = fall::handle_fall_landing(
                 is_alive,

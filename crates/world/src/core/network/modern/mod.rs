@@ -9,9 +9,11 @@
 //! [`framing`] (the header codec + connection-init strings). Auth, key derivation, and opcode
 //! handling follow in later milestones. Nothing here is wired into the accept loop yet.
 
+pub mod auth_crypto;
 pub mod crypt;
 pub mod framing;
 
+pub use auth_crypto::{derive_keys, verify_digest, DerivedKeys};
 pub use crypt::WorldCrypt;
 pub use framing::{
     decode, encode, ModernPacket, CONNECTION_INITIALIZE_CLIENT, CONNECTION_INITIALIZE_SERVER,

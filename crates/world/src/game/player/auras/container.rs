@@ -589,6 +589,21 @@ mod tests {
     }
 
     #[test]
+    fn safe_fall_modifier_is_available_from_active_auras() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut aura = make_aura(3800, 0, caster, None);
+        aura.aura_type = super::super::effects::AURA_SAFE_FALL;
+        aura.current_values[0] = 10;
+        container.add_aura(aura);
+
+        assert_eq!(
+            container.get_total_aura_modifier(super::super::effects::AURA_SAFE_FALL),
+            10
+        );
+    }
+
+    #[test]
     fn refresh_aura_clamps_negative_duration_to_zero() {
         let mut container = AuraContainer::new();
         let caster = test_guid(1);
