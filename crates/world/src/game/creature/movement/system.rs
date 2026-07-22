@@ -142,7 +142,7 @@ impl MovementSystem {
                     .with_creature_mut(guid, |creature| {
                         let creature_pos = creature.position;
                         let transport_mismatch = target_state.transport_guid.is_some()
-                            && creature.transport_guid != target_state.transport_guid;
+                            && creature.movement_info.transport_guid != target_state.transport_guid;
 
                         // Update chase generator target + creature position
                         if let Some(gen) = creature
@@ -211,7 +211,7 @@ impl MovementSystem {
                     .managers
                     .creature_mgr
                     .with_creature_mut(follow_target, |target| {
-                        (target.position, target.transport_guid)
+                        (target.position, target.movement_info.transport_guid)
                     })
             };
 

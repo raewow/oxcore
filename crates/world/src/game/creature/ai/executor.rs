@@ -1730,7 +1730,7 @@ mod tests {
             speed_walk: 1.0,
             speed_run: 1.14286,
             movement_paused: false,
-            transport_guid: None,
+            movement_info: crate::core::common::movement::MovementInfo::new(),
             following_target: None,
             followers: Vec::new(),
         }

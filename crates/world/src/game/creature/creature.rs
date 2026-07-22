@@ -7,6 +7,7 @@ use super::combat::{CombatState, ThreatManager};
 use super::death::DeathState;
 use super::manager::{ClassLevelStats, CreatureTemplate};
 use super::movement::{MotionMaster, MoveSpline};
+use crate::core::common::movement::MovementInfo;
 use oxcore_shared::protocol::{ObjectGuid, Position};
 use rand::Rng;
 
@@ -147,8 +148,8 @@ pub struct Creature {
     pub speed_run: f32,
     /// Whether out-of-combat movement has been paused (player interaction)
     pub movement_paused: bool,
-    /// Transport GUID if the creature is currently on a transport
-    pub transport_guid: Option<ObjectGuid>,
+    /// Movement and transport state (flags, transport GUID and local offset when riding one)
+    pub movement_info: MovementInfo,
     /// Current unit this creature is following, if any
     pub following_target: Option<ObjectGuid>,
     /// Units currently following this creature
@@ -258,7 +259,7 @@ impl Creature {
             speed_walk: 1.0,    // Default rate, overridden by model_info
             speed_run: 1.14286, // Default rate (vmangos DEFAULT_NPC_RUN_SPEED_RATE)
             movement_paused: false,
-            transport_guid: None,
+            movement_info: MovementInfo::new(),
             following_target: None,
             followers: Vec::new(),
         }

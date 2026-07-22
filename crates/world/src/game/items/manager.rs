@@ -455,7 +455,8 @@ impl ItemManager {
             let buy_count: u32 = row.try_get("buy_count")?;
             let buy_price: u32 = row.try_get("buy_price")?;
             let sell_price: u32 = row.try_get("sell_price")?;
-            let bag_family: u32 = row.try_get("bag_family")?;
+            let bag_family = u32::try_from(row.try_get::<i32, _>("bag_family")?)
+                .context("item_template.bag_family must not be negative")?;
             let container_slots: u8 = row.try_get("container_slots")?;
             let start_quest: u32 = row.try_get("start_quest")?;
             let stat_type = [

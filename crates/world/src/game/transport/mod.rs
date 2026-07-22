@@ -10,6 +10,7 @@
 pub mod animation;
 pub mod elevator;
 pub mod generic;
+pub mod manager;
 pub mod object;
 pub mod passenger;
 pub mod schedule;
@@ -18,6 +19,7 @@ pub mod segment;
 pub use animation::{TransportAnimation, TransportAnimationEntry, TransportAnimationManager};
 pub use elevator::{interpolate_local_position, path_progress};
 pub use generic::time_since_creation;
+pub use manager::{TransportManager, TransportPassenger};
 pub use object::Transport;
 pub use passenger::{normalize_orientation, TransportFrame};
 pub use schedule::{compute_schedule, KeyFrame, ScheduleProfile};
