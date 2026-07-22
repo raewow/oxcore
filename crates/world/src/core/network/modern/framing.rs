@@ -81,11 +81,58 @@ pub fn decode(crypt: &mut WorldCrypt, buf: &[u8]) -> Result<Option<(ModernPacket
     Ok(Some((ModernPacket { opcode, body }, end)))
 }
 
+/// Frame a packet **before encryption is enabled**. The header is the same 16 bytes, but the
+/// crypt is a no-op: the tag is all zeros and the `opcode ‖ body` is plaintext. This is how the
+/// auth challenge and session are exchanged before `SMSG_ENTER_ENCRYPTED_MODE`.
+pub fn encode_plaintext(opcode: u16, body: &[u8]) -> Vec<u8> {
+    let size = (2 + body.len()) as u32;
+    let mut out = Vec::with_capacity(HEADER_SIZE + 2 + body.len());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&[0u8; TAG_SIZE]); // zero tag: no authentication before encryption
+    out.extend_from_slice(&opcode.to_le_bytes());
+    out.extend_from_slice(body);
+    out
+}
+
+/// Decode a pre-encryption frame written by [`encode_plaintext`]: the 16-byte header is skipped
+/// (the tag is ignored) and the `opcode ‖ body` is read as plaintext.
+pub fn decode_plaintext(buf: &[u8]) -> Result<Option<(ModernPacket, usize)>> {
+    if buf.len() < HEADER_SIZE {
+        return Ok(None);
+    }
+    let size = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let end = HEADER_SIZE + size;
+    if buf.len() < end {
+        return Ok(None);
+    }
+    let data = &buf[HEADER_SIZE..end];
+    if data.len() < 2 {
+        bail!("plaintext packet too small to hold an opcode ({} bytes)", data.len());
+    }
+    let opcode = u16::from_le_bytes([data[0], data[1]]);
+    let body = data[2..].to_vec();
+    Ok(Some((ModernPacket { opcode, body }, end)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const KEY: [u8; 16] = [7u8; 16];
+
+    #[test]
+    fn plaintext_frame_round_trips_without_a_key() {
+        let frame = encode_plaintext(0x3048, b"challenge bytes");
+        // Header size counts opcode + body; the 12 tag bytes are zero.
+        let size = u32::from_le_bytes([frame[0], frame[1], frame[2], frame[3]]) as usize;
+        assert_eq!(size, 2 + b"challenge bytes".len());
+        assert_eq!(&frame[4..HEADER_SIZE], &[0u8; TAG_SIZE]);
+
+        let (packet, consumed) = decode_plaintext(&frame).unwrap().unwrap();
+        assert_eq!(consumed, frame.len());
+        assert_eq!(packet.opcode, 0x3048);
+        assert_eq!(packet.body, b"challenge bytes");
+    }
 
     #[test]
     fn init_strings_are_the_v2_greetings() {

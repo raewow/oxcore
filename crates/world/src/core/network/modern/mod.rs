@@ -12,10 +12,15 @@
 pub mod auth_crypto;
 pub mod crypt;
 pub mod framing;
+pub mod handshake;
+pub mod opcodes;
+pub mod packets;
 
 pub use auth_crypto::{derive_keys, verify_digest, DerivedKeys};
 pub use crypt::WorldCrypt;
 pub use framing::{
-    decode, encode, ModernPacket, CONNECTION_INITIALIZE_CLIENT, CONNECTION_INITIALIZE_SERVER,
-    HEADER_SIZE,
+    decode, decode_plaintext, encode, encode_plaintext, ModernPacket, CONNECTION_INITIALIZE_CLIENT,
+    CONNECTION_INITIALIZE_SERVER, HEADER_SIZE,
 };
+pub use handshake::HandshakeServer;
+pub use packets::{AuthChallenge, AuthSession, EnterEncryptedModeSigner};

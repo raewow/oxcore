@@ -63,6 +63,10 @@ pub fn expected_digest(
 }
 
 /// Constant-time check of the client's digest against the value derived from `seed`.
+///
+/// The client sends a **truncated** digest (24 bytes in 1.14.x — see `CMSG_AUTH_SESSION`), so we
+/// compare it against the leading bytes of our full 32-byte HMAC. A client digest longer than the
+/// HMAC (or empty) never matches.
 pub fn verify_digest(
     session_key: &[u8],
     seed: &[u8],
@@ -70,8 +74,11 @@ pub fn verify_digest(
     server_challenge: &[u8],
     client_digest: &[u8],
 ) -> bool {
+    if client_digest.is_empty() || client_digest.len() > 32 {
+        return false;
+    }
     let expected = expected_digest(session_key, seed, local_challenge, server_challenge);
-    constant_time_eq(&expected, client_digest)
+    constant_time_eq(&expected[..client_digest.len()], client_digest)
 }
 
 /// The session key derived after a successful auth: the 40-byte continued-session key and the
@@ -176,6 +183,21 @@ mod tests {
             &SERVER_CHALLENGE,
             &digest
         ));
+    }
+
+    #[test]
+    fn a_truncated_24_byte_digest_verifies_against_the_hmac_prefix() {
+        // The 1.14.x client sends only the first 24 bytes of the HMAC.
+        let full = expected_digest(&session_key(), &SEED, &LOCAL_CHALLENGE, &SERVER_CHALLENGE);
+        assert!(verify_digest(
+            &session_key(),
+            &SEED,
+            &LOCAL_CHALLENGE,
+            &SERVER_CHALLENGE,
+            &full[..24]
+        ));
+        // A wrong-length or empty digest is rejected.
+        assert!(!verify_digest(&session_key(), &SEED, &LOCAL_CHALLENGE, &SERVER_CHALLENGE, &[]));
     }
 
     #[test]

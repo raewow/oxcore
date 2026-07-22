@@ -152,9 +152,23 @@ doing once a 1.14 client actually reaches gameplay opcodes.
   account-by-ticket lookup reuses the existing `AccountRepository::find_session_key(username)`
   (username = the join ticket's `gameAccount`), so no new DB code. **Still unverified against a live
   client** — the digest match is the thing only a real client can confirm.
-- **C3 — auth handshake.** `SMSG_AUTH_CHALLENGE` → `CMSG_AUTH_SESSION` verify → `ENTER_ENCRYPTED_MODE`
-  (incl. the RSA-signed key and the new patcher patch) → `SMSG_AUTH_RESPONSE`. Target: the client
-  accepts encrypted mode and requests the character list.
+- **C3 — auth handshake packets + encrypted-mode handoff. ✅ Done (crypto/packets), C3b/C4 remaining.**
+  `modern/opcodes.rs` (1.14.1/40688 handshake opcodes: `SMSG_AUTH_CHALLENGE=0x3048`,
+  `CMSG_AUTH_SESSION=0x3765`, `SMSG_ENTER_ENCRYPTED_MODE=0x3049`, `…ACK=0x3767`,
+  `SMSG_AUTH_RESPONSE=0x256D`, …). `modern/packets.rs`: `AuthChallenge` encode (DosChallenge[32] ‖
+  Challenge[16] ‖ DosZeroBits), `AuthSession` parse (incl. the 24-byte truncated digest, the
+  bit-flushed `UseIPv6`, and JSON `gameAccount` extraction from the realm-join ticket), and
+  `SMSG_ENTER_ENCRYPTED_MODE` = `HMAC-SHA256(aes_key; [enabled]‖EnableEncryptionSeed)` signed then a
+  flushed enabled-bit — with the RSA behind an `EnterEncryptedModeSigner` trait. `framing.rs` gained
+  `encode/decode_plaintext` (the pre-encryption framing: 16-byte header, zero tag, plaintext).
+  `modern/handshake.rs`: an I/O-free `HandshakeServer` composing challenge → verify_session (digest
+  vs persisted session key) → derive keys → enter-encrypted-mode, with an end-to-end test that
+  simulates a correct client and asserts both sides derive the same AES key. Fixed `verify_digest`
+  to compare the client's 24-byte digest against the HMAC prefix. 28 modern tests pass.
+  **Remaining before a client connects (C3b/C4):** `SMSG_AUTH_RESPONSE` (the bit-packed success
+  body), the real RSA `EnterEncryptedModeSigner` + the patcher `CONNECT_TO_MODULUS` patch + a
+  gen-certs keypair, the plaintext connection-init exchange, wiring into the accept loop, and the
+  per-build/OS auth-seed table.
 - **C4 — reach character select.** Modern char-enum opcodes; stub `SMSG_CONNECT_TO`. Target: the
   patched client shows an (empty) character list — the concrete "it works" milestone.
 - **C5 (separate) — `to_vanilla`/`to_classic` split** so gameplay messages serialize correctly for
