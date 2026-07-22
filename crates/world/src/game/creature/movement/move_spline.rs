@@ -134,6 +134,34 @@ impl fmt::Display for MoveSplineFlags {
     }
 }
 
+/// Names of the 32 raw spline flag bits, indexed by bit position (`g_SplineFlag_names`).
+///
+/// Bits with no defined meaning keep their `Unknown<n>` label so the rendered string still
+/// accounts for every set bit, exactly as the C++ debug output does.
+const SPLINE_FLAG_NAMES: [&str; 32] = [
+    "Done", "Falling", "Unknown3", "Unknown4", "Unknown5", "Unknown6", "Unknown7", "Unknown8",
+    "Runmode", "Flying", "No_Spline", "Unknown12", "Unknown13", "Unknown14", "Unknown15",
+    "Unknown16", "Final_Point", "Final_Target", "Final_Angle", "Unknown19", "Cyclic",
+    "Enter_Cycle", "Frozen", "Unknown23", "Unknown24", "Unknown25", "Unknown26", "Unknown27",
+    "Unknown28", "Unknown29", "Unknown30", "Unknown31",
+];
+
+/// Render the raw spline flag word as its set bit names (`MoveSplineFlag::ToString`).
+///
+/// Each set bit contributes a leading space then its name, low bit first, so the result is
+/// `" Done Falling"` for the two lowest bits and empty when nothing is set - matching the
+/// C++ `print_flags` output byte for byte.
+pub fn format_move_spline_flags(raw: u32) -> String {
+    let mut out = String::new();
+    for (bit, name) in SPLINE_FLAG_NAMES.iter().enumerate() {
+        if raw & (1 << bit) != 0 {
+            out.push(' ');
+            out.push_str(name);
+        }
+    }
+    out
+}
+
 /// Everything needed to start a spline.
 #[derive(Debug, Default, Clone)]
 pub struct MoveSplineInitArgs {
@@ -537,6 +565,20 @@ mod tests {
 
     fn v(x: f32, y: f32, z: f32) -> Vec3 {
         Vec3::new(x, y, z)
+    }
+
+    #[test]
+    fn raw_spline_flags_render_low_bit_first_with_a_leading_space() {
+        // Done (bit 0) and Falling (bit 1).
+        assert_eq!(format_move_spline_flags(0x3), " Done Falling");
+        // A single high bit: Cyclic is bit 20 (0x00100000).
+        assert_eq!(format_move_spline_flags(0x0010_0000), " Cyclic");
+        // Runmode (bit 8) and Flying (bit 9), rendered in bit order.
+        assert_eq!(format_move_spline_flags(0x0000_0300), " Runmode Flying");
+        // Reserved bits still account for themselves so nothing is silently dropped.
+        assert_eq!(format_move_spline_flags(0x4), " Unknown3");
+        // No bits set renders empty, not "None".
+        assert_eq!(format_move_spline_flags(0), "");
     }
 
     /// A straight 30-yard path at 10 yards/sec: 3 seconds end to end.
