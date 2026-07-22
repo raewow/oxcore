@@ -7,5 +7,6 @@
 
 pub mod framing;
 pub mod proto;
+pub mod realmlist;
 pub mod services;
 pub mod session;

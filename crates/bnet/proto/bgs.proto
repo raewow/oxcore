@@ -123,3 +123,42 @@ message ChallengeExternalRequest {
     optional string payload_type = 2;
     optional bytes payload = 3;
 }
+
+// bgs.protocol.Variant — a tagged value carried by an Attribute. We only read/write blob, string,
+// int and uint values; the rest are modelled for correct decoding. Field numbers from
+// attribute_types.pb.h.
+message Variant {
+    optional bool bool_value = 2;
+    optional int64 int_value = 3;
+    optional double float_value = 4;
+    optional string string_value = 5;
+    optional bytes blob_value = 6;
+    optional bytes message_value = 7;
+    optional string fourcc_value = 8;
+    optional uint64 uint_value = 9;
+    optional EntityId entity_id_value = 10;
+}
+
+// bgs.protocol.Attribute — a named Variant. The realm-list protocol is entirely carried as lists
+// of these.
+message Attribute {
+    optional string name = 1;
+    optional Variant value = 2;
+}
+
+// game_utilities.v1.ClientRequest / ClientResponse — GameUtilities.ProcessClientRequest ferries a
+// list of attributes each way. The command and its parameters are attributes on the request; the
+// results are attributes on the response.
+message ClientRequest {
+    repeated Attribute attribute = 1;
+}
+
+message ClientResponse {
+    repeated Attribute attribute = 1;
+}
+
+// game_utilities.v1.GetAllValuesForAttributeResponse — the client asks for the legal values of an
+// attribute (e.g. the list of realm sub-regions); we answer with a list of Variants.
+message GetAllValuesForAttributeResponse {
+    repeated Variant attribute_value = 1;
+}

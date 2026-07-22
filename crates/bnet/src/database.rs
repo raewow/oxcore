@@ -7,12 +7,13 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use oxcore_shared::database::auth::repositories::AccountRepository;
+use oxcore_shared::database::auth::repositories::{AccountRepository, RealmRepository};
 use sqlx::MySqlPool;
 
 #[derive(Clone)]
 pub struct Database {
     pub accounts: AccountRepository,
+    pub realms: RealmRepository,
 }
 
 impl Database {
@@ -22,9 +23,7 @@ impl Database {
                 .await
                 .context("Failed to connect to auth database")?,
         );
-        Ok(Self {
-            accounts: AccountRepository::new(pool),
-        })
+        Ok(Self::from_pool(pool))
     }
 
     /// Build a database handle whose pool connects on first use rather than up front. Used by
@@ -34,8 +33,13 @@ impl Database {
             MySqlPool::connect_lazy(login_database_url)
                 .context("Failed to prepare lazy auth database pool")?,
         );
-        Ok(Self {
-            accounts: AccountRepository::new(pool),
-        })
+        Ok(Self::from_pool(pool))
+    }
+
+    fn from_pool(pool: Arc<MySqlPool>) -> Self {
+        Self {
+            accounts: AccountRepository::new(pool.clone()),
+            realms: RealmRepository::new(pool),
+        }
     }
 }
