@@ -115,7 +115,7 @@ fn extract_game_account(raw: &str) -> String {
 /// SHA-256 with the signature bytes **reversed**, using a key whose public modulus is patched into
 /// the client (`CONNECT_TO_MODULUS`); that lands with the patcher work. Behind a trait so the
 /// packet layer composes and tests without the keypair.
-pub trait EnterEncryptedModeSigner {
+pub trait EnterEncryptedModeSigner: Send + Sync {
     /// Return the signature bytes exactly as they go on the wire (already reversed for the
     /// RSA implementation).
     fn sign(&self, hash: &[u8; 32]) -> Vec<u8>;
@@ -361,11 +361,11 @@ mod tests {
     }
 
     struct CapturingSigner {
-        captured: std::cell::RefCell<Option<[u8; 32]>>,
+        captured: std::sync::Mutex<Option<[u8; 32]>>,
     }
     impl EnterEncryptedModeSigner for CapturingSigner {
         fn sign(&self, hash: &[u8; 32]) -> Vec<u8> {
-            *self.captured.borrow_mut() = Some(*hash);
+            *self.captured.lock().unwrap() = Some(*hash);
             vec![0x5A; 256] // stand-in for a 256-byte RSA signature
         }
     }
@@ -374,13 +374,13 @@ mod tests {
     fn enter_encrypted_mode_signs_the_expected_hash_and_appends_the_enabled_bit() {
         let aes_key = [0x11u8; 16];
         let signer = CapturingSigner {
-            captured: std::cell::RefCell::new(None),
+            captured: std::sync::Mutex::new(None),
         };
         let body = enter_encrypted_mode(&aes_key, true, &signer);
 
         // The signer saw exactly HMAC(aes_key, [1] ‖ EnableEncryptionSeed).
         assert_eq!(
-            signer.captured.borrow().unwrap(),
+            signer.captured.lock().unwrap().unwrap(),
             enter_encrypted_mode_hash(&aes_key, true)
         );
         // Body = 256-byte signature then a flush byte with the enabled bit set.

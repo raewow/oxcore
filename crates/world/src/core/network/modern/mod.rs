@@ -13,6 +13,7 @@ pub mod auth_crypto;
 pub mod auth_seeds;
 pub mod bitbuf;
 pub mod crypt;
+pub mod driver;
 pub mod framing;
 pub mod handshake;
 pub mod opcodes;
@@ -21,6 +22,9 @@ pub mod rsa_signer;
 
 pub use auth_crypto::{derive_keys, verify_digest, DerivedKeys};
 pub use crypt::WorldCrypt;
+pub use driver::{
+    run_auth, AccountSessionKeys, AuthedConnection, ModernAuthContext, SessionKeyProvider,
+};
 pub use framing::{
     decode, decode_plaintext, encode, encode_plaintext, ModernPacket, CONNECTION_INITIALIZE_CLIENT,
     CONNECTION_INITIALIZE_SERVER, HEADER_SIZE,

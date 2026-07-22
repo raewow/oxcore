@@ -191,12 +191,23 @@ doing once a 1.14 client actually reaches gameplay opcodes.
   Windows/Mac) with a compile-time hex decoder and `lookup(build, os)`. `handshake::auth_response_frame`
   frames it **encrypted** via `WorldCrypt`. Full-flow test: challenge → session verify → derive keys
   → encrypt SMSG_AUTH_RESPONSE with the derived key → a client-role crypt decodes it. 12 new tests.
-- **C5 — live socket assembly.** The remaining integration a client actually exercises: a tokio
-  modern socket doing the plaintext connection-init exchange, running the handshake, switching
-  `WorldCrypt` on after the encrypted-mode ack, sending the auth response, and then the modern
-  char-enum opcodes + a `SMSG_CONNECT_TO` stub — wired into the world accept loop, with the build/OS
-  sourced from the session. This is the concrete "patched client shows a character list" milestone
-  and the point a live client first judges the whole chain.
+- **C5 — auth driver (full handshake over a stream). ✅ Done.** `modern/driver.rs`: `run_auth`
+  drives the entire pre-gameplay handshake over any `AsyncRead + AsyncWrite` — the plaintext
+  connection-init exchange (server greets first, `\n`-terminated), `SMSG_AUTH_CHALLENGE`, parse +
+  verify `CMSG_AUTH_SESSION` (session-key lookup by ticket + `auth_seeds` lookup by build/OS),
+  `SMSG_ENTER_ENCRYPTED_MODE`, the **plaintext** ack, then flips `WorldCrypt` on and sends the
+  encrypted `SMSG_AUTH_RESPONSE` — returning an `AuthedConnection` (live cipher, account,
+  40-byte continued-session key). Account lookup is behind a `SessionKeyProvider` trait
+  (`Send` future); the production `AccountSessionKeys` impl reads `account.sessionkey` via the
+  shared repo. Timing confirmed from HermesProxy: the ack is plaintext and encryption enables only
+  after it. 2 end-to-end tests over a `tokio::io::duplex` with a fully simulated client: a correct
+  client completes and gets a decryptable `SMSG_AUTH_RESPONSE`; a wrong session key aborts before
+  encrypted mode. 44 modern tests pass; world builds clean.
+- **C5b — accept-loop binding + gameplay.** What's left to run against a real client: a
+  `TcpListener` that hands modern connections to `run_auth` and then to a gameplay opcode loop
+  (modern char-enum + a `SMSG_CONNECT_TO` stub), wired alongside the vanilla listener with build/OS
+  sourced from the session. Thin glue over `run_auth` for the accept side; the opcode loop is the
+  larger part.
 - **C6 (separate) — `to_vanilla`/`to_classic` split** so gameplay messages serialize correctly for
   each client.
 
