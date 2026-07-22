@@ -1,6 +1,7 @@
 //! Network layer - TCP, packet framing, encryption
 
 pub mod crypt;
+pub mod modern;
 pub mod movement_buffer;
 pub mod player_handler;
 pub mod protocol;

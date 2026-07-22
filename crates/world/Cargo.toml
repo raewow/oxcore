@@ -42,6 +42,8 @@ base32 = "0.4"
 rand = "0.8"
 hex = "0.4"
 wow_srp = "0.7"
+# Modern (1.14.x) world packet header encryption — AES-128-GCM with a 12-byte tag.
+aes-gcm = "0.10"
 
 # Configuration
 toml = "0.8"
