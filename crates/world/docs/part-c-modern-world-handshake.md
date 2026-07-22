@@ -182,9 +182,22 @@ doing once a 1.14 client actually reaches gameplay opcodes.
   modulus, wrong-size rejection, and the little-endian modulus export. READMEs updated (six
   gen-certs files, the new flag). **Still unverified against a live client**: the signature reversal
   and modulus byte order are faithful to the reference but confirmed only by a real client.
-- **C4 — reach character select.** Modern char-enum opcodes; stub `SMSG_CONNECT_TO`. Target: the
-  patched client shows an (empty) character list — the concrete "it works" milestone.
-- **C5 (separate) — `to_vanilla`/`to_classic` split** so gameplay messages serialize correctly for
+- **C4 — auth-response body + bit writer + auth seeds. ✅ Done (serialization/data), live wiring in C5.**
+  `modern/bitbuf.rs`: the bit-packed `BitWriter` (MSB-first bits, byte writes auto-flush pending
+  bits) matching CypherCore's `ByteBuffer`. `modern/packets.rs`: `auth_response_success` — the
+  minimal `SMSG_AUTH_RESPONSE` success body (result Ok, no queue/realms/templates, optional
+  race/class availability), field order + bit-packing per HermesProxy `AuthResponse.Write`.
+  `modern/auth_seeds.rs`: the per-(build, OS) digest seeds from `BuildAuthSeeds.csv` (1.14.0/1/2,
+  Windows/Mac) with a compile-time hex decoder and `lookup(build, os)`. `handshake::auth_response_frame`
+  frames it **encrypted** via `WorldCrypt`. Full-flow test: challenge → session verify → derive keys
+  → encrypt SMSG_AUTH_RESPONSE with the derived key → a client-role crypt decodes it. 12 new tests.
+- **C5 — live socket assembly.** The remaining integration a client actually exercises: a tokio
+  modern socket doing the plaintext connection-init exchange, running the handshake, switching
+  `WorldCrypt` on after the encrypted-mode ack, sending the auth response, and then the modern
+  char-enum opcodes + a `SMSG_CONNECT_TO` stub — wired into the world accept loop, with the build/OS
+  sourced from the session. This is the concrete "patched client shows a character list" milestone
+  and the point a live client first judges the whole chain.
+- **C6 (separate) — `to_vanilla`/`to_classic` split** so gameplay messages serialize correctly for
   each client.
 
 ---

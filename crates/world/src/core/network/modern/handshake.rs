@@ -14,9 +14,13 @@
 //! client.**
 
 use super::auth_crypto::{derive_keys, verify_digest, DerivedKeys};
+use super::crypt::WorldCrypt;
 use super::framing;
-use super::opcodes::{SMSG_AUTH_CHALLENGE, SMSG_ENTER_ENCRYPTED_MODE};
-use super::packets::{enter_encrypted_mode, AuthChallenge, AuthSession, EnterEncryptedModeSigner};
+use super::opcodes::{SMSG_AUTH_CHALLENGE, SMSG_AUTH_RESPONSE, SMSG_ENTER_ENCRYPTED_MODE};
+use super::packets::{
+    auth_response_success, enter_encrypted_mode, AuthChallenge, AuthResponseSuccess, AuthSession,
+    EnterEncryptedModeSigner,
+};
 
 /// Server-side handshake state: the challenges we generated for this connection.
 pub struct HandshakeServer {
@@ -97,6 +101,13 @@ impl HandshakeServer {
         let body = enter_encrypted_mode(&keys.aes_key, true, signer);
         framing::encode_plaintext(SMSG_ENTER_ENCRYPTED_MODE, &body)
     }
+}
+
+/// The `SMSG_AUTH_RESPONSE` frame — the first **encrypted** packet, sent once the client has
+/// acked encrypted mode and the socket has switched `crypt` on (keyed by `DerivedKeys::aes_key`).
+pub fn auth_response_frame(crypt: &mut WorldCrypt, info: &AuthResponseSuccess) -> Vec<u8> {
+    let body = auth_response_success(info);
+    framing::encode(crypt, SMSG_AUTH_RESPONSE, &body)
 }
 
 impl Default for HandshakeServer {
@@ -183,6 +194,39 @@ mod tests {
         fn sign(&self, _hash: &[u8; 32]) -> Vec<u8> {
             vec![0u8; 256]
         }
+    }
+
+    #[test]
+    fn full_flow_the_encrypted_auth_response_decodes_on_the_client() {
+        use crate::core::network::modern::crypt::WorldCrypt;
+        use crate::core::network::modern::framing::decode;
+        use crate::core::network::modern::opcodes::SMSG_AUTH_RESPONSE;
+        use crate::core::network::modern::packets::AuthResponseSuccess;
+
+        let server = HandshakeServer::with_challenges([0x11; 16], [0x22; 32]);
+        let frame = client_session_frame(server.server_challenge(), [0x42; 16]);
+        let (packet, _) = decode_plaintext(&frame).unwrap().unwrap();
+        let session = AuthSession::parse(&packet.body).unwrap();
+        let keys = server.verify_session(&session, &session_key(), &SEED).unwrap();
+
+        // Encryption turns on with the derived AES key. The server sends SMSG_AUTH_RESPONSE
+        // encrypted; a client crypt keyed the same way decodes it.
+        let mut server_crypt = WorldCrypt::server(&keys.aes_key);
+        let mut client_crypt = WorldCrypt::client(&keys.aes_key);
+
+        let info = AuthResponseSuccess {
+            virtual_realm_address: 0x0101_0001,
+            active_expansion: 0,
+            account_expansion: 0,
+            time: 42,
+            available_classes: Vec::new(),
+        };
+        let response = auth_response_frame(&mut server_crypt, &info);
+
+        let (decoded, consumed) = decode(&mut client_crypt, &response).unwrap().unwrap();
+        assert_eq!(consumed, response.len());
+        assert_eq!(decoded.opcode, SMSG_AUTH_RESPONSE);
+        assert_eq!(&decoded.body[..4], &[0, 0, 0, 0]); // Result = Ok
     }
 
     #[test]

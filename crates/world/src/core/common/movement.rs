@@ -126,6 +126,25 @@ impl MovementInfo {
         }
     }
 
+    /// Record that the unit is riding a transport at the given local offset
+    /// (`MovementInfo::SetTransportData`).
+    ///
+    /// The `ONTRANSPORT` movement flag is set separately by the boarding code, matching the
+    /// C++ split between `SetTransportData` and `AddMovementFlag`.
+    pub fn set_transport_data(&mut self, transport: ObjectGuid, offset: Position) {
+        self.transport_guid = Some(transport);
+        self.transport_position = Some(offset);
+    }
+
+    /// Clear the unit's transport ride (`MovementInfo::ClearTransportData`).
+    ///
+    /// Drops the transport GUID and local offset; the C++ leaves the transport time and the
+    /// `ONTRANSPORT` flag to the caller, so those are untouched here.
+    pub fn clear_transport_data(&mut self) {
+        self.transport_guid = None;
+        self.transport_position = None;
+    }
+
     /// Read movement info from a packet
     /// Note: mover_guid must be set separately (it's derived from the session, not the packet)
     pub fn read_from_packet(packet: &mut WorldPacket) -> Result<Self> {
@@ -277,5 +296,35 @@ impl MovementInfo {
 impl Default for MovementInfo {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boarding_a_transport_records_guid_offset_and_flag() {
+        let mut info = MovementInfo::new();
+        let transport = ObjectGuid::new_gameobject(176231, 1);
+        let offset = Position::new(1.0, 2.0, 3.0, 0.5);
+
+        info.set_transport_data(transport, offset);
+        info.set_flag(MoveFlags::ONTRANSPORT);
+
+        assert_eq!(info.transport_guid, Some(transport));
+        assert_eq!(info.transport_position, Some(offset));
+        assert!(info.flags.has_flag(MoveFlags::ONTRANSPORT));
+    }
+
+    #[test]
+    fn leaving_a_transport_clears_the_guid_and_offset() {
+        let mut info = MovementInfo::new();
+        info.set_transport_data(ObjectGuid::new_gameobject(176231, 1), Position::new(1.0, 2.0, 3.0, 0.5));
+
+        info.clear_transport_data();
+
+        assert_eq!(info.transport_guid, None);
+        assert_eq!(info.transport_position, None);
     }
 }

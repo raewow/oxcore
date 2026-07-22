@@ -12,6 +12,8 @@ use anyhow::{bail, Result};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
+use super::bitbuf::BitWriter;
+
 type HmacSha256 = Hmac<Sha256>;
 
 /// The 16-byte seed mixed into the `SMSG_ENTER_ENCRYPTED_MODE` signature
@@ -142,6 +144,90 @@ pub fn enter_encrypted_mode_hash(aes_key: &[u8; 16], enabled: bool) -> [u8; 32] 
     mac.update(&[enabled as u8]);
     mac.update(&ENABLE_ENCRYPTION_SEED);
     mac.finalize().into_bytes().into()
+}
+
+// ---- SMSG_AUTH_RESPONSE (server -> client) ----
+
+/// `BattlenetRpcErrorCode::Ok`, the success result for `SMSG_AUTH_RESPONSE`.
+pub const AUTH_RESPONSE_OK: u32 = 0;
+
+/// One class a race may create, with the expansion levels gating it.
+#[derive(Debug, Clone)]
+pub struct ClassAvailability {
+    pub class_id: u8,
+    pub active_expansion: u8,
+    pub account_expansion: u8,
+}
+
+/// The classes available to one race.
+#[derive(Debug, Clone)]
+pub struct RaceClassAvailability {
+    pub race_id: u8,
+    pub classes: Vec<ClassAvailability>,
+}
+
+/// The fields of a successful `SMSG_AUTH_RESPONSE` we populate. This is the minimal success body
+/// that gets the client to the character-select screen: no login queue, no virtual realms, no
+/// character templates, no optional player counts.
+#[derive(Debug, Clone)]
+pub struct AuthResponseSuccess {
+    pub virtual_realm_address: u32,
+    pub active_expansion: u8,
+    pub account_expansion: u8,
+    pub time: i64,
+    /// Which race/class combinations the client may create. May be empty to reach an existing
+    /// character list; a real create screen needs the era's full table.
+    pub available_classes: Vec<RaceClassAvailability>,
+}
+
+/// Serialize a successful `SMSG_AUTH_RESPONSE` body. Field order and bit-packing follow
+/// HermesProxy's `AuthResponse.Write` for the success path.
+pub fn auth_response_success(info: &AuthResponseSuccess) -> Vec<u8> {
+    let mut w = BitWriter::new();
+    w.write_u32(AUTH_RESPONSE_OK);
+    w.write_bit(true); // SuccessInfo present
+    w.write_bit(false); // WaitInfo absent
+    w.flush_bits();
+
+    w.write_u32(info.virtual_realm_address);
+    w.write_i32(0); // VirtualRealms.Count
+    w.write_u32(0); // TimeRested
+    w.write_u8(info.active_expansion);
+    w.write_u8(info.account_expansion);
+    w.write_u32(0); // TimeSecondsUntilPCKick
+    w.write_i32(info.available_classes.len() as i32);
+    w.write_i32(0); // Templates.Count
+    w.write_u32(0); // CurrencyID
+    w.write_i64(info.time);
+
+    for race in &info.available_classes {
+        w.write_u8(race.race_id);
+        w.write_i32(race.classes.len() as i32);
+        for class in &race.classes {
+            w.write_u8(class.class_id);
+            w.write_u8(class.active_expansion);
+            w.write_u8(class.account_expansion);
+        }
+    }
+
+    // Five presence/flag bits, all clear: IsExpansionTrial, ForceCharacterTemplate,
+    // NumPlayersHorde, NumPlayersAlliance, ExpansionTrialExpiration.
+    for _ in 0..5 {
+        w.write_bit(false);
+    }
+    w.flush_bits();
+
+    // GameTime block: billing plan / remaining time (all zero) then three InGameRoom bits.
+    w.write_u32(0);
+    w.write_u32(0);
+    w.write_u32(0);
+    for _ in 0..3 {
+        w.write_bit(false);
+    }
+    w.flush_bits();
+
+    // No optional player counts / trial expiration, no virtual realms, no templates.
+    w.into_bytes()
 }
 
 // ---- small byte reader ----
@@ -310,5 +396,58 @@ mod tests {
             enter_encrypted_mode_hash(&key, true),
             enter_encrypted_mode_hash(&key, false)
         );
+    }
+
+    #[test]
+    fn auth_response_success_lays_out_the_fixed_prefix() {
+        let info = AuthResponseSuccess {
+            virtual_realm_address: 0x0101_0001,
+            active_expansion: 2,
+            account_expansion: 3,
+            time: 0x1122_3344,
+            available_classes: Vec::new(),
+        };
+        let body = auth_response_success(&info);
+
+        assert_eq!(&body[0..4], &[0, 0, 0, 0]); // Result = Ok
+        assert_eq!(body[4], 0x80); // SuccessInfo bit set, WaitInfo clear
+        assert_eq!(&body[5..9], &0x0101_0001u32.to_le_bytes()); // VirtualRealmAddress
+        assert_eq!(&body[9..13], &0i32.to_le_bytes()); // VirtualRealms.Count
+        assert_eq!(&body[13..17], &0u32.to_le_bytes()); // TimeRested
+        assert_eq!(body[17], 2); // ActiveExpansionLevel
+        assert_eq!(body[18], 3); // AccountExpansionLevel
+        assert_eq!(&body[19..23], &0u32.to_le_bytes()); // TimeSecondsUntilPCKick
+        assert_eq!(&body[23..27], &0i32.to_le_bytes()); // AvailableClasses.Count = 0
+        assert_eq!(&body[27..31], &0i32.to_le_bytes()); // Templates.Count
+        assert_eq!(&body[31..35], &0u32.to_le_bytes()); // CurrencyID
+        assert_eq!(&body[35..43], &0x1122_3344i64.to_le_bytes()); // Time
+
+        // Then a 5-bit flush byte, the 12-byte GameTime block, and a 3-bit flush byte.
+        assert_eq!(body.len(), 43 + 1 + 12 + 1);
+    }
+
+    #[test]
+    fn auth_response_success_writes_the_class_availability_count_and_rows() {
+        let info = AuthResponseSuccess {
+            virtual_realm_address: 1,
+            active_expansion: 0,
+            account_expansion: 0,
+            time: 0,
+            available_classes: vec![RaceClassAvailability {
+                race_id: 1,
+                classes: vec![ClassAvailability {
+                    class_id: 1,
+                    active_expansion: 0,
+                    account_expansion: 0,
+                }],
+            }],
+        };
+        let body = auth_response_success(&info);
+        // AvailableClasses.Count is 1 now.
+        assert_eq!(&body[23..27], &1i32.to_le_bytes());
+        // Race row begins right after Time (byte 43): race_id, class count (i32), then the class.
+        assert_eq!(body[43], 1); // RaceID
+        assert_eq!(&body[44..48], &1i32.to_le_bytes()); // Classes.Count
+        assert_eq!(&body[48..51], &[1, 0, 0]); // ClassID, active, account
     }
 }

@@ -10,6 +10,8 @@
 //! handling follow in later milestones. Nothing here is wired into the accept loop yet.
 
 pub mod auth_crypto;
+pub mod auth_seeds;
+pub mod bitbuf;
 pub mod crypt;
 pub mod framing;
 pub mod handshake;
@@ -24,5 +26,8 @@ pub use framing::{
     CONNECTION_INITIALIZE_SERVER, HEADER_SIZE,
 };
 pub use handshake::HandshakeServer;
-pub use packets::{AuthChallenge, AuthSession, EnterEncryptedModeSigner};
+pub use packets::{
+    auth_response_success, AuthChallenge, AuthResponseSuccess, AuthSession, ClassAvailability,
+    EnterEncryptedModeSigner, RaceClassAvailability,
+};
 pub use rsa_signer::RsaSigner;
