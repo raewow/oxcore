@@ -53,6 +53,19 @@ pub fn response_header(request: &Header, status: u32) -> Header {
     }
 }
 
+/// Build the header for a *server-initiated* request (a listener callback): `service_id = 0`, the
+/// target `service_hash` + `method_id`, and a server-chosen `token`. Mirrors CypherCore's
+/// `SendRequest`. `size` is filled in by [`encode`].
+pub fn request_header(service_hash: u32, method_id: u32, token: u32) -> Header {
+    Header {
+        service_id: Some(0),
+        service_hash: Some(service_hash),
+        method_id: Some(method_id),
+        token: Some(token),
+        ..Default::default()
+    }
+}
+
 /// Try to decode a single frame from the front of `buf`.
 ///
 /// Returns `Ok(Some((frame, consumed)))` when a whole frame is present, or `Ok(None)` when more

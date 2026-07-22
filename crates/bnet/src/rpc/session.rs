@@ -7,15 +7,16 @@ use anyhow::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, trace};
 
-use super::framing::{self};
-use super::services::{self, Action};
+use super::framing;
+use super::services::Services;
 
 /// Cap on the buffered-but-undecoded bytes, so a malicious client cannot make us buffer without
 /// bound while withholding the end of a frame.
 const MAX_BUFFER: usize = 1024 * 1024;
 
-/// Run the RPC loop over one connection until it closes or errors.
-pub async fn run<S>(mut stream: S) -> Result<()>
+/// Run the RPC loop over one connection until it closes or errors. `services` carries this
+/// connection's per-session state (auth status, callback tokens) and the shared database handle.
+pub async fn run<S>(mut services: Services, mut stream: S) -> Result<()>
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
 {
@@ -34,20 +35,16 @@ where
                 "request"
             );
 
-            let action = services::dispatch(&frame)?;
+            let outcome = services.dispatch(&frame).await?;
             buf.drain(..consumed);
 
-            match action {
-                Action::Reply(bytes) => stream.write_all(&bytes).await?,
-                Action::None => {}
-                Action::Disconnect(maybe) => {
-                    if let Some(bytes) = maybe {
-                        stream.write_all(&bytes).await?;
-                    }
-                    stream.flush().await?;
-                    debug!("closing connection at handler request");
-                    return Ok(());
-                }
+            for bytes in &outcome.frames {
+                stream.write_all(bytes).await?;
+            }
+            if outcome.disconnect {
+                stream.flush().await?;
+                debug!("closing connection at handler request");
+                return Ok(());
             }
         }
         stream.flush().await?;
@@ -68,7 +65,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::Database;
     use crate::rpc::proto::{ConnectRequest, ConnectResponse, Header, ProcessId};
+    use crate::rpc::services;
     use prost::Message;
     use tokio::io::duplex;
 
@@ -77,7 +76,10 @@ mod tests {
     async fn session_answers_a_connect_over_a_pipe() {
         let (mut client, server) = duplex(8192);
 
-        let server_task = tokio::spawn(async move { run(server).await });
+        // Connect never touches the database, so a lazy pool is enough.
+        let db = Database::connect_lazy("mysql://user:pass@127.0.0.1/oxcore_auth").unwrap();
+        let svc = Services::new(db, "https://localhost:8081/bnetserver/login/".to_string());
+        let server_task = tokio::spawn(async move { run(svc, server).await });
 
         // Send a Connect request frame.
         let payload = ConnectRequest {

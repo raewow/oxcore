@@ -11,6 +11,15 @@ pub struct BnetCredentials {
     pub verifier: Vec<u8>,
 }
 
+/// The account behind a still-valid Battle.net login ticket, resolved during BGS
+/// `VerifyWebCredentials`.
+#[derive(Debug, Clone)]
+pub struct BnetTicketAccount {
+    pub id: u32,
+    /// Canonical (uppercased) account username.
+    pub username: String,
+}
+
 /// Represents a row from the `account` table in auth database.
 /// Contains all account authentication and metadata.
 #[derive(FromRow, Debug, Clone)]

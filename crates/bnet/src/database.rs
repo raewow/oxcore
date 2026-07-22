@@ -26,4 +26,16 @@ impl Database {
             accounts: AccountRepository::new(pool),
         })
     }
+
+    /// Build a database handle whose pool connects on first use rather than up front. Used by
+    /// tests and by handlers that may never touch the database on a given connection.
+    pub fn connect_lazy(login_database_url: &str) -> Result<Self> {
+        let pool = Arc::new(
+            MySqlPool::connect_lazy(login_database_url)
+                .context("Failed to prepare lazy auth database pool")?,
+        );
+        Ok(Self {
+            accounts: AccountRepository::new(pool),
+        })
+    }
 }

@@ -41,7 +41,8 @@ pub async fn serve(config: Config, shutdown_tx: broadcast::Sender<()>) -> Result
             )
         })?;
 
-    let router = rest::router(Arc::new(RestState::new(config.clone(), db)));
+    let web_auth_url = config.login_base_url();
+    let router = rest::router(Arc::new(RestState::new(config.clone(), db.clone())));
 
     let rest_acceptor = acceptor.clone();
     let rest_shutdown = shutdown_tx.subscribe();
@@ -53,7 +54,7 @@ pub async fn serve(config: Config, shutdown_tx: broadcast::Sender<()>) -> Result
 
     let bnet_shutdown = shutdown_tx.subscribe();
     tokio::spawn(async move {
-        if let Err(e) = serve_bnet(bnet_addr, acceptor, bnet_shutdown).await {
+        if let Err(e) = serve_bnet(bnet_addr, acceptor, db, web_auth_url, bnet_shutdown).await {
             error!("BGS RPC channel error: {e}");
         }
     });

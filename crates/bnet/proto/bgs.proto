@@ -69,3 +69,57 @@ message DisconnectNotification {
     optional uint32 error_code = 1;
     optional string reason = 2;
 }
+
+// A 128-bit account/game-account identity (bgs.protocol.EntityId). Both halves are fixed64 on
+// the wire; the high bits encode the entity kind/region, the low bits the account id.
+message EntityId {
+    optional fixed64 high = 1;
+    optional fixed64 low = 2;
+}
+
+// authentication.v1.LogonRequest — the client's opening call on the AuthenticationService. We
+// only read program/platform/locale; the rest are modelled so tolerant decoding does not choke
+// and so their field numbers are documented, but are otherwise ignored.
+message LogonRequest {
+    optional string program = 1;
+    optional string platform = 2;
+    optional string locale = 3;
+    optional string email = 4;
+    optional string version = 5;
+    optional int32 application_version = 6;
+    optional bool public_computer = 7;
+    optional bool allow_logon_queue_notifications = 10;
+    optional bytes cached_web_credentials = 12;
+    optional string user_agent = 14;
+    optional string device_id = 15;
+}
+
+// authentication.v1.VerifyWebCredentialsRequest — carries the login ticket the client obtained
+// from the REST web-auth flow, as raw bytes (we treat them as the UTF-8 ticket string).
+message VerifyWebCredentialsRequest {
+    optional bytes web_credentials = 1;
+}
+
+// authentication.v1.LogonResult — pushed to the client via AuthenticationListener.OnLogonComplete
+// once the web credentials verify. `error_code` 0 means success.
+message LogonResult {
+    optional uint32 error_code = 1;
+    optional EntityId account_id = 2;
+    repeated EntityId game_account_id = 3;
+    optional string email = 4;
+    repeated uint32 available_region = 5;
+    optional uint32 connected_region = 6;
+    optional string battle_tag = 7;
+    optional string geoip_country = 8;
+    optional bytes session_key = 9;
+    optional bool restricted_mode = 10;
+    optional string client_id = 11;
+}
+
+// challenge.v1.ChallengeExternalRequest — pushed to the client via ChallengeListener.OnExternalChallenge
+// to point its embedded browser at our web-auth URL (`payload_type = "web_auth_url"`).
+message ChallengeExternalRequest {
+    optional string request_token = 1;
+    optional string payload_type = 2;
+    optional bytes payload = 3;
+}

@@ -12,6 +12,9 @@ use tokio::sync::broadcast;
 use tokio_rustls::TlsAcceptor;
 use tracing::{debug, info, warn};
 
+use crate::database::Database;
+use crate::rpc::services::Services;
+
 /// Serve the REST login router over TLS until `shutdown` fires.
 pub async fn serve_rest(
     addr: SocketAddr,
@@ -68,13 +71,14 @@ pub async fn serve_rest(
     }
 }
 
-/// Serve the BGS protobuf-RPC channel until `shutdown` fires.
-///
-/// M3 replaces the placeholder body with the framing codec and service dispatch; for now this
-/// binds the port and closes connections so the listener address can be verified end to end.
+/// Serve the BGS protobuf-RPC channel until `shutdown` fires. Each accepted connection gets its
+/// own [`Services`] carrying the shared database handle and the web-auth URL handed to the client
+/// during `Logon`.
 pub async fn serve_bnet(
     addr: SocketAddr,
     acceptor: TlsAcceptor,
+    db: Database,
+    web_auth_url: String,
     mut shutdown: broadcast::Receiver<()>,
 ) -> Result<()> {
     let listener = TcpListener::bind(addr)
@@ -99,11 +103,12 @@ pub async fn serve_bnet(
         };
 
         let acceptor = acceptor.clone();
+        let services = Services::new(db.clone(), web_auth_url.clone());
         tokio::spawn(async move {
             match acceptor.accept(stream).await {
                 Ok(session) => {
                     debug!(%peer, "BGS RPC session established");
-                    if let Err(e) = crate::rpc::session::run(session).await {
+                    if let Err(e) = crate::rpc::session::run(services, session).await {
                         debug!(%peer, "BGS session ended: {e}");
                     }
                 }
