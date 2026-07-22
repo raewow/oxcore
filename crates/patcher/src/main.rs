@@ -35,6 +35,13 @@ struct Args {
     #[arg(long)]
     cert_bundle: Option<PathBuf>,
 
+    /// Path to the 256-byte RSA modulus the client verifies the modern world server's signatures
+    /// with (SMSG_ENTER_ENCRYPTED_MODE / SMSG_CONNECT_TO), as raw bytes. Produced by
+    /// `bnet gen-certs` as connect_to_modulus.bin. Required to reach the world server; omit it if
+    /// you are only testing the bnet login flow.
+    #[arg(long)]
+    connect_to_modulus: Option<PathBuf>,
+
     /// Report what would change without writing anything.
     #[arg(long)]
     dry_run: bool,
@@ -85,6 +92,14 @@ fn main() -> Result<()> {
                  leaves the client trusting Blizzard's certificates instead of yours"
             );
         }
+    }
+
+    // The connect-to modulus is optional: it is only needed to reach the world server, not for
+    // the bnet login flow, so a login-only test can leave it off.
+    if let Some(path) = &args.connect_to_modulus {
+        let modulus = std::fs::read(path)
+            .with_context(|| format!("failed to read connect-to modulus from {}", path.display()))?;
+        patches.push(patch::connect_to_modulus(&data, &modulus)?);
     }
 
     for p in &patches {

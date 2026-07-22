@@ -169,6 +169,19 @@ doing once a 1.14 client actually reaches gameplay opcodes.
   body), the real RSA `EnterEncryptedModeSigner` + the patcher `CONNECT_TO_MODULUS` patch + a
   gen-certs keypair, the plaintext connection-init exchange, wiring into the accept loop, and the
   per-build/OS auth-seed table.
+- **C3b — RSA signer + patcher connect-to modulus. ✅ Done.** `modern/rsa_signer.rs`: `RsaSigner`
+  (impl `EnterEncryptedModeSigner`) signs the pre-hash with RSA-PKCS1-v1.5/SHA-256 then **reverses
+  the bytes** (little-endian, per HermesProxy `.Reverse()`); loads from a PKCS#1 PEM. Patcher gained
+  `patch::connect_to_modulus` (mirrors `signature_modulus`, uses the `CONNECT_TO_MODULUS` prefix)
+  and the optional `--connect-to-modulus` flag. `bnet gen-certs` now also mints a **separate** world
+  RSA key: `certs::generate_world_signing_key()` writes `world.signing.key.pem` (for the world
+  server) and `connect_to_modulus.bin` (the little-endian modulus for the patcher) — the two are
+  generated together so the client modulus and the server key cannot drift. Tests: RSA
+  sign→reverse→un-reverse→verify (and that the as-sent bytes do *not* verify directly, proving the
+  reversal), PEM round-trip, patcher fixture patches at a distinct offset from the signature
+  modulus, wrong-size rejection, and the little-endian modulus export. READMEs updated (six
+  gen-certs files, the new flag). **Still unverified against a live client**: the signature reversal
+  and modulus byte order are faithful to the reference but confirmed only by a real client.
 - **C4 — reach character select.** Modern char-enum opcodes; stub `SMSG_CONNECT_TO`. Target: the
   patched client shows an (empty) character list — the concrete "it works" milestone.
 - **C5 (separate) — `to_vanilla`/`to_classic` split** so gameplay messages serialize correctly for

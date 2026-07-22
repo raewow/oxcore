@@ -15,6 +15,7 @@ pub mod framing;
 pub mod handshake;
 pub mod opcodes;
 pub mod packets;
+pub mod rsa_signer;
 
 pub use auth_crypto::{derive_keys, verify_digest, DerivedKeys};
 pub use crypt::WorldCrypt;
@@ -24,3 +25,4 @@ pub use framing::{
 };
 pub use handshake::HandshakeServer;
 pub use packets::{AuthChallenge, AuthSession, EnterEncryptedModeSigner};
+pub use rsa_signer::RsaSigner;

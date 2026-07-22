@@ -2026,6 +2026,7 @@ dependencies = [
  "oxcore-tui",
  "parking_lot",
  "rand",
+ "rsa",
  "rustrict",
  "serde",
  "serde_json",

@@ -65,16 +65,19 @@ Pick the host the client will resolve — here `oxcore.localhost`:
 cargo run -p oxcore-bnet --bin bnet -- gen-certs --out ./certs --host oxcore.localhost
 ```
 
-This writes four files to `./certs`:
+This writes six files to `./certs`:
 
 | File | Used by | Purpose |
 |------|---------|---------|
-| `bnet.cert.pem` | server | TLS certificate served on both ports |
-| `bnet.key.pem` | server | TLS private key |
+| `bnet.cert.pem` | bnet server | TLS certificate served on both ports |
+| `bnet.key.pem` | bnet server | TLS private key |
 | `signature_modulus.bin` | patcher `--modulus` | replaces the client's bundle-verify modulus |
 | `cert_bundle.bin` | patcher `--cert-bundle` | the signed bundle that trusts `bnet.cert.pem` |
+| `connect_to_modulus.bin` | patcher `--connect-to-modulus` | replaces the client's world-signature modulus |
+| `world.signing.key.pem` | world server | RSA key that signs the modern world handshake |
 
-Regenerating replaces all four as a matched set — never mix files from different runs.
+Regenerating replaces all six as a matched set — never mix files from different runs. The last two
+are for the modern **world** handshake (Part C); a login-only test needs only the first four.
 
 ### 3. Configure and run the server
 
@@ -118,7 +121,8 @@ curl --cacert ./certs/bnet.cert.pem https://oxcore.localhost:8081/bnetserver/por
    ```sh
    oxcore-patcher -i WowClassic.exe \
      --modulus ./certs/signature_modulus.bin \
-     --cert-bundle ./certs/cert_bundle.bin
+     --cert-bundle ./certs/cert_bundle.bin \
+     --connect-to-modulus ./certs/connect_to_modulus.bin   # for the world handshake; omit for login-only
    # writes WowClassic.exe.patched
    ```
 

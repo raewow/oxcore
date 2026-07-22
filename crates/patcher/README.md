@@ -15,6 +15,7 @@ documents the tool itself.
 | **portal suffix** | rewrites `.actual.battle.net` → your suffix (default `.localhost`), NUL-padded | `--portal` |
 | **signature modulus** | replaces the 256-byte RSA modulus the client verifies the cert bundle with | `--modulus` (required) |
 | **cert bundle** | replaces the embedded JSON bundle so it lists *your* certificate | `--cert-bundle` (required) |
+| **connect-to modulus** | replaces the modulus the client verifies the modern world handshake with | `--connect-to-modulus` (optional) |
 
 All three replacements are **length-preserving** (NUL-padded), so no offsets shift. Every pattern
 must match **exactly once** or the run aborts — a silent zero- or multi-match is how a patcher
@@ -47,6 +48,7 @@ oxcore-patcher -i WowClassic.exe \
 | `--portal` | `.localhost` | suffix that replaces `.actual.battle.net`; must be **≤** its length and start with a dot |
 | `--modulus` | *(required)* | `signature_modulus.bin` from `bnet gen-certs` |
 | `--cert-bundle` | *(required)* | `cert_bundle.bin` from `bnet gen-certs` |
+| `--connect-to-modulus` | *(optional)* | `connect_to_modulus.bin` from `bnet gen-certs`; needed only to reach the world server |
 | `--dry-run` | off | list matches and offsets, write nothing |
 
 ## After patching

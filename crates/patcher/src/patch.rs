@@ -96,6 +96,36 @@ pub fn signature_modulus(data: &[u8], modulus: &[u8]) -> Result<Patch> {
     })
 }
 
+/// Replace the RSA modulus the client uses to verify the modern world server's signatures
+/// (`SMSG_ENTER_ENCRYPTED_MODE` and `SMSG_CONNECT_TO`).
+///
+/// Without this the client rejects the server's request to switch to encrypted mode. `modulus`
+/// must be exactly [`patterns::MODULUS_LEN`] bytes, in the byte order the client stores it — the
+/// world server reverses its signatures to match, so this is the little-endian modulus produced by
+/// `bnet gen-certs` (`connect_to_modulus.bin`). Paired with the world server's private key.
+pub fn connect_to_modulus(data: &[u8], modulus: &[u8]) -> Result<Patch> {
+    if modulus.len() != patterns::MODULUS_LEN {
+        bail!(
+            "connect-to modulus must be exactly {} bytes, got {}",
+            patterns::MODULUS_LEN,
+            modulus.len()
+        );
+    }
+
+    let offset = find_unique(data, patterns::CONNECT_TO_MODULUS, "connect-to modulus")?;
+
+    // As with the signature modulus, the searched prefix is the start of the 256-byte modulus.
+    if offset + patterns::MODULUS_LEN > data.len() {
+        bail!("connect-to modulus at 0x{offset:08x} runs past the end of the file");
+    }
+
+    Ok(Patch {
+        name: "connect-to modulus",
+        offset,
+        bytes: modulus.to_vec(),
+    })
+}
+
 /// Replace the embedded certificate bundle with our signed one.
 ///
 /// The client stores the bundle as a JSON document (`{"Created":...}`) immediately followed by
@@ -191,12 +221,22 @@ mod tests {
         // The remaining 248 bytes of the 256-byte modulus.
         data.extend_from_slice(&[0xAB; patterns::MODULUS_LEN - patterns::SIGNATURE_MODULUS.len()]);
         data.extend_from_slice(&[0xCC; 64]);
+        // Connect-to modulus: its 8-byte prefix then the remaining 248 bytes.
+        data.extend_from_slice(patterns::CONNECT_TO_MODULUS);
+        data.extend_from_slice(
+            &[0xCD; patterns::MODULUS_LEN - patterns::CONNECT_TO_MODULUS.len()],
+        );
+        data.extend_from_slice(&[0xCC; 64]);
         // Embedded certificate bundle: JSON, then its 256-byte signature.
         data.extend_from_slice(original_bundle_json());
         data.extend_from_slice(&[0x99; patterns::MODULUS_LEN]);
         // Neighbouring data that must survive patching.
         data.extend_from_slice(&[0x77; 32]);
         data
+    }
+
+    fn connect_to_offset() -> usize {
+        64 + patterns::PORTAL.len() + 64 + patterns::MODULUS_LEN + 64
     }
 
     /// A minimal signed bundle blob: small JSON + a 256-byte signature.
@@ -245,6 +285,32 @@ mod tests {
         let data = fixture();
         let err = signature_modulus(&data, &[0x42; 128]).unwrap_err();
         assert!(err.to_string().contains("exactly 256 bytes"));
+    }
+
+    #[test]
+    fn connect_to_patch_rewrites_the_full_modulus() {
+        let data = fixture();
+        let modulus = vec![0x24; patterns::MODULUS_LEN];
+        let patch = connect_to_modulus(&data, &modulus).unwrap();
+
+        assert_eq!(patch.offset, connect_to_offset());
+        assert_eq!(patch.bytes.len(), patterns::MODULUS_LEN);
+        assert!(patch.bytes.iter().all(|&b| b == 0x24));
+    }
+
+    #[test]
+    fn connect_to_patch_rejects_a_wrong_sized_modulus() {
+        let data = fixture();
+        let err = connect_to_modulus(&data, &[0x24; 200]).unwrap_err();
+        assert!(err.to_string().contains("exactly 256 bytes"));
+    }
+
+    #[test]
+    fn connect_to_and_signature_moduli_land_at_distinct_offsets() {
+        let data = fixture();
+        let sig = signature_modulus(&data, &[0x42; patterns::MODULUS_LEN]).unwrap();
+        let con = connect_to_modulus(&data, &[0x24; patterns::MODULUS_LEN]).unwrap();
+        assert_ne!(sig.offset, con.offset);
     }
 
     #[test]

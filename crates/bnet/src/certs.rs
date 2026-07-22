@@ -161,6 +161,41 @@ pub fn generate(spki_der: &[u8], created: i64) -> Result<Artifacts> {
     })
 }
 
+/// A world-server RSA signing key plus the modulus the client must be patched with.
+pub struct WorldSigningArtifacts {
+    /// The RSA private key, PKCS#1 PEM. The world server signs `SMSG_ENTER_ENCRYPTED_MODE` /
+    /// `SMSG_CONNECT_TO` with this; keep it with the world server config.
+    pub signing_key_pem: String,
+    /// The 256-byte **little-endian** RSA modulus to patch into the client's connect-to slot. The
+    /// world server reverses its signatures to match this byte order.
+    pub modulus_le: Vec<u8>,
+}
+
+/// Generate the RSA keypair the modern world server uses to sign its encrypted-mode / connect-to
+/// messages, returning the private key and the little-endian modulus for the patcher. This is a
+/// *separate* key from the certificate-bundle signing key: it lands in a different slot in the
+/// client and is verified by different code.
+pub fn generate_world_signing_key() -> Result<WorldSigningArtifacts> {
+    let mut rng = rand::thread_rng();
+    let key = RsaPrivateKey::new(&mut rng, SIGNING_KEY_BITS)
+        .context("failed to generate world signing key")?;
+
+    // The client stores this modulus little-endian (it reverses signatures), so ship it reversed
+    // from the big-endian encoding.
+    let mut modulus_le = modulus_bytes(&key);
+    modulus_le.reverse();
+
+    let signing_key_pem = key
+        .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
+        .context("failed to encode world signing key")?
+        .to_string();
+
+    Ok(WorldSigningArtifacts {
+        signing_key_pem,
+        modulus_le,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,5 +255,18 @@ mod tests {
         assert_eq!(artifacts.modulus.len(), MODULUS_LEN);
         assert!(artifacts.signing_key_pem.contains("RSA PRIVATE KEY"));
         assert!(artifacts.signed_bundle.len() > MODULUS_LEN);
+    }
+
+    #[test]
+    fn world_signing_key_modulus_is_256_bytes_and_little_endian() {
+        let artifacts = generate_world_signing_key().unwrap();
+        assert_eq!(artifacts.modulus_le.len(), MODULUS_LEN);
+        assert!(artifacts.signing_key_pem.contains("RSA PRIVATE KEY"));
+
+        // Little-endian: reversing recovers a big-endian modulus whose top byte is non-zero (a
+        // proper 2048-bit key has its high bit set).
+        let mut big_endian = artifacts.modulus_le.clone();
+        big_endian.reverse();
+        assert_ne!(big_endian[0], 0);
     }
 }
