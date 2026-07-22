@@ -41,6 +41,11 @@ impl AuraContainer {
         }
     }
 
+    /// Whether no aura effects are active.
+    pub fn is_empty(&self) -> bool {
+        self.auras.is_empty()
+    }
+
     // =========================================================================
     // Slot Management
     // =========================================================================
@@ -279,6 +284,14 @@ impl AuraContainer {
     /// Check if an aura exists for a given spell_id and effect_index.
     pub fn has_aura_effect(&self, spell_id: u32, effect_index: u8) -> bool {
         self.auras.contains_key(&(spell_id, effect_index))
+    }
+
+    /// Whether this is the only remaining effect for its spell.
+    pub fn is_last_aura_effect(&self, spell_id: u32, effect_index: u8) -> bool {
+        !self
+            .auras
+            .keys()
+            .any(|&(id, index)| id == spell_id && index != effect_index)
     }
 
     /// Check if any aura of a given aura_type is active.
@@ -533,6 +546,46 @@ mod tests {
     fn refresh_aura_returns_none_when_spell_not_active() {
         let mut container = AuraContainer::new();
         assert_eq!(container.refresh_aura(9999, 1_000), None);
+    }
+
+    #[test]
+    fn last_aura_effect_requires_no_other_effect_for_the_spell() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        container.add_aura(make_aura(3500, 0, caster, None));
+        assert!(container.is_last_aura_effect(3500, 0));
+
+        container.add_aura(make_aura(3500, 1, caster, None));
+        assert!(!container.is_last_aura_effect(3500, 0));
+        assert!(!container.is_last_aura_effect(3500, 1));
+
+        container.remove_aura(3500, 1);
+        assert!(container.is_last_aura_effect(3500, 0));
+    }
+
+    #[test]
+    fn has_aura_type_matches_any_active_effect() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut aura = make_aura(3600, 0, caster, None);
+        aura.aura_type = 42;
+        container.add_aura(aura);
+
+        assert!(container.has_aura_type(42));
+        assert!(!container.has_aura_type(43));
+    }
+
+    #[test]
+    fn empty_tracks_aura_insertion_and_removal() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        assert!(container.is_empty());
+
+        container.add_aura(make_aura(3700, 0, caster, None));
+        assert!(!container.is_empty());
+
+        container.remove_aura(3700, 0);
+        assert!(container.is_empty());
     }
 
     #[test]
