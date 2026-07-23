@@ -60,6 +60,22 @@ pub struct KeyFrame {
     pub departure_time: u32,
     /// The following keyframe's `arrive_time` (this keyframe's `NextArriveTime`).
     pub next_arrive_time: u32,
+
+    /// Whether the path teleports away from this keyframe rather than moving on (`Teleport`).
+    pub teleport: bool,
+    /// Whether the client must be sent a fresh create block here (`Update`).
+    pub update: bool,
+    /// Facing the transport holds at this node, from the orientation spline
+    /// (`InitialOrientation`).
+    pub initial_orientation: f32,
+    /// 1-based index of this keyframe within its spline segment (`Index`).
+    pub index: u32,
+    /// Map this keyframe's node is on.
+    pub map_id: u32,
+    /// World position of this keyframe's node, used as a teleport target.
+    pub node_x: f32,
+    pub node_y: f32,
+    pub node_z: f32,
 }
 
 impl KeyFrame {
@@ -77,6 +93,14 @@ impl KeyFrame {
             arrive_time: 0,
             departure_time: 0,
             next_arrive_time: 0,
+            teleport: false,
+            update: false,
+            initial_orientation: 0.0,
+            index: 0,
+            map_id: 0,
+            node_x: 0.0,
+            node_y: 0.0,
+            node_z: 0.0,
         }
     }
 }

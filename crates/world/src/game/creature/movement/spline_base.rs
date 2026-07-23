@@ -325,6 +325,21 @@ impl SplineBase {
         self.init_points(controls, cyclic_point);
     }
 
+    /// Build a Catmull-Rom spline directly from points that already include their guard
+    /// points, with valid segments `[1, len-2)` (the C++ `SplineRawInitializer`).
+    ///
+    /// Unlike [`Self::init_spline`], this does not synthesize the leading and trailing guard
+    /// points - the caller has already prepended and appended them, as the transport
+    /// orientation spline does with its own lerp'd control points.
+    pub fn init_raw_catmull_rom(&mut self, points: Vec<Vec3>) {
+        self.mode = EvaluationMode::CatmullRom;
+        self.cyclic = false;
+        let len = points.len();
+        self.points = points;
+        self.index_lo = 1;
+        self.index_hi = len.saturating_sub(2);
+    }
+
     fn init_points(&mut self, controls: &[Vec3], cyclic_point: usize) {
         match self.mode {
             EvaluationMode::Linear => self.init_linear(controls, cyclic_point),
