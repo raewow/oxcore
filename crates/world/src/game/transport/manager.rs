@@ -12,10 +12,26 @@ use std::collections::HashMap;
 use oxcore_shared::protocol::{ObjectGuid, Position};
 
 use crate::core::common::movement::MoveFlags;
+use crate::core::common::position::is_valid_map_coord;
 use crate::game::creature::creature::Creature;
 use crate::game::player::player::Player;
 
 use super::object::Transport;
+
+/// What happened when repositioning a passenger against its transport.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RepositionOutcome {
+    /// The passenger was moved to this world position.
+    Repositioned(Position),
+    /// The passenger is on a different map than its transport (mid-teleport); skipped.
+    DifferentMap,
+    /// The computed world position is off the map; the passenger was left where it was.
+    InvalidPosition,
+    /// The passenger has no transport offset recorded, so there is nothing to place.
+    NotAboard,
+    /// No such transport is registered.
+    UnknownTransport,
+}
 
 /// A unit that can ride a transport, seen uniformly regardless of how it stores its state.
 ///
@@ -26,8 +42,18 @@ pub trait TransportPassenger {
     /// The rider's object GUID, its key in the transport's passenger set.
     fn passenger_guid(&self) -> ObjectGuid;
 
+    /// The map the rider is on, to detect a rider that has not yet followed a teleporting
+    /// transport across maps.
+    fn map_id(&self) -> u32;
+
     /// The rider's current world position.
     fn world_position(&self) -> Position;
+
+    /// Move the rider to a new world position (the `Relocate` in `UpdatePassengerPosition`).
+    ///
+    /// This sets the rider's stored coordinates; the grid-cell move and visibility broadcast
+    /// that a full `Map` relocation performs are the map layer's job.
+    fn set_world_position(&mut self, position: Position);
 
     /// The transport the rider is currently on, if any.
     fn current_transport(&self) -> Option<ObjectGuid>;
@@ -48,8 +74,16 @@ impl TransportPassenger for Creature {
         self.guid
     }
 
+    fn map_id(&self) -> u32 {
+        self.map_id
+    }
+
     fn world_position(&self) -> Position {
         self.position
+    }
+
+    fn set_world_position(&mut self, position: Position) {
+        self.position = position;
     }
 
     fn current_transport(&self) -> Option<ObjectGuid> {
@@ -76,8 +110,16 @@ impl TransportPassenger for Player {
         self.guid
     }
 
+    fn map_id(&self) -> u32 {
+        self.map_id
+    }
+
     fn world_position(&self) -> Position {
         self.movement.position
+    }
+
+    fn set_world_position(&mut self, position: Position) {
+        self.movement.position = position;
     }
 
     fn current_transport(&self) -> Option<ObjectGuid> {
@@ -188,6 +230,87 @@ impl TransportManager {
         }
         removed
     }
+
+    /// Board a follower alongside the unit it is following (`AddFollowerToTransport`).
+    ///
+    /// A follower (a pet, a summoned guardian) does not compute its own offset: it inherits
+    /// the leader's transport offset and is teleported onto the leader's world position, so it
+    /// rides in the same spot. Returns whether the transport exists.
+    ///
+    /// The C++ splits the teleport by rider type (a creature `NearTeleportTo`, a player
+    /// `Relocate` + `SendHeartBeat`); both set the follower's position, which is what is done
+    /// here - the heartbeat/broadcast is the map/network layer's job.
+    pub fn board_follower<L: TransportPassenger, F: TransportPassenger>(
+        &mut self,
+        transport_guid: ObjectGuid,
+        leader: &L,
+        follower: &mut F,
+    ) -> bool {
+        if !self.transports.contains_key(&transport_guid) {
+            return false;
+        }
+
+        // AddPassenger(follower); the offset it would compute is overwritten below, matching
+        // the C++ order, so coordinate adjustment is skipped here.
+        self.board(transport_guid, follower, false);
+
+        // The follower rides in the leader's slot and stands on the leader's position; done
+        // unconditionally, as the C++ does after AddPassenger even for an already-aboard unit.
+        let leader_offset = leader.transport_offset().unwrap_or_default();
+        follower.set_transport_ride(transport_guid, leader_offset);
+        follower.set_world_position(leader.world_position());
+        true
+    }
+
+    /// Remove a follower and return it to its leader (`RemoveFollowerFromTransport`).
+    ///
+    /// Takes the follower off the transport and teleports it onto the leader's world position.
+    /// Returns whether the follower was aboard.
+    pub fn unboard_follower<L: TransportPassenger, F: TransportPassenger>(
+        &mut self,
+        transport_guid: ObjectGuid,
+        leader: &L,
+        follower: &mut F,
+    ) -> bool {
+        let removed = self.unboard(transport_guid, follower);
+        // The follower is teleported to the leader regardless of whether it was aboard,
+        // matching the C++ which relocates after RemovePassenger unconditionally.
+        follower.set_world_position(leader.world_position());
+        removed
+    }
+
+    /// Place one passenger in the world from its transport-local offset
+    /// (`GenericTransport::UpdatePassengerPosition`).
+    ///
+    /// Transforms the rider's stored offset into world coordinates against the transport,
+    /// skipping a rider that is mid-teleport onto a different map and refusing a position that
+    /// falls off the map (the rider stays put rather than being flung to bad coordinates).
+    /// On success the rider's stored coordinates are updated; the grid-cell move and
+    /// visibility broadcast a full `Map::CreatureRelocation`/`PlayerRelocation` performs, and
+    /// the `ctime` reset, belong to the map layer and are not done here.
+    pub fn reposition_passenger<P: TransportPassenger>(
+        &self,
+        transport_guid: ObjectGuid,
+        passenger: &mut P,
+    ) -> RepositionOutcome {
+        let Some(transport) = self.transports.get(&transport_guid) else {
+            return RepositionOutcome::UnknownTransport;
+        };
+        if passenger.map_id() != transport.map_id {
+            return RepositionOutcome::DifferentMap;
+        }
+        let Some(offset) = passenger.transport_offset() else {
+            return RepositionOutcome::NotAboard;
+        };
+
+        let world = transport.calculate_passenger_position(offset);
+        if !is_valid_map_coord(world.x, world.y, world.z, world.o) {
+            return RepositionOutcome::InvalidPosition;
+        }
+
+        passenger.set_world_position(world);
+        RepositionOutcome::Repositioned(world)
+    }
 }
 
 #[cfg(test)]
@@ -198,6 +321,7 @@ mod tests {
     /// orchestration without constructing a full entity.
     struct TestRider {
         guid: ObjectGuid,
+        map_id: u32,
         position: Position,
         transport_guid: Option<ObjectGuid>,
         transport_offset: Option<Position>,
@@ -208,6 +332,7 @@ mod tests {
         fn at(guid: ObjectGuid, position: Position) -> Self {
             Self {
                 guid,
+                map_id: 0,
                 position,
                 transport_guid: None,
                 transport_offset: None,
@@ -220,8 +345,14 @@ mod tests {
         fn passenger_guid(&self) -> ObjectGuid {
             self.guid
         }
+        fn map_id(&self) -> u32 {
+            self.map_id
+        }
         fn world_position(&self) -> Position {
             self.position
+        }
+        fn set_world_position(&mut self, position: Position) {
+            self.position = position;
         }
         fn current_transport(&self) -> Option<ObjectGuid> {
             self.transport_guid
@@ -304,6 +435,122 @@ mod tests {
         // Already aboard: the second board is a no-op that reports false.
         assert!(!mgr.board(transport_guid(), &mut rider, true));
         assert_eq!(mgr.get(transport_guid()).unwrap().passenger_count(), 1);
+    }
+
+    #[test]
+    fn a_follower_rides_in_its_leaders_slot() {
+        let mut mgr = manager_with_transport();
+        let mut leader = rider();
+        mgr.board(transport_guid(), &mut leader, true);
+
+        // A pet at some unrelated spot follows its owner aboard.
+        let mut follower = TestRider::at(ObjectGuid::new_pet(2000, 9), Position::new(-500.0, -500.0, 0.0, 0.0));
+        assert!(mgr.board_follower(transport_guid(), &leader, &mut follower));
+
+        // Follower shares the leader's offset and stands on the leader's world position.
+        assert_eq!(follower.transport_offset, leader.transport_offset);
+        assert_eq!(follower.transport_guid, Some(transport_guid()));
+        assert!(follower.on_transport_flag);
+        assert_eq!(follower.position, leader.position);
+        // Both are aboard.
+        assert_eq!(mgr.get(transport_guid()).unwrap().passenger_count(), 2);
+    }
+
+    #[test]
+    fn removing_a_follower_returns_it_to_its_leader() {
+        let mut mgr = manager_with_transport();
+        let mut leader = rider();
+        mgr.board(transport_guid(), &mut leader, true);
+        let mut follower = TestRider::at(ObjectGuid::new_pet(2000, 9), Position::new(-500.0, -500.0, 0.0, 0.0));
+        mgr.board_follower(transport_guid(), &leader, &mut follower);
+
+        assert!(mgr.unboard_follower(transport_guid(), &leader, &mut follower));
+        // Off the transport, its ride cleared, and standing on the leader.
+        assert_eq!(follower.transport_guid, None);
+        assert!(!follower.on_transport_flag);
+        assert_eq!(follower.position, leader.position);
+        assert_eq!(mgr.get(transport_guid()).unwrap().passenger_count(), 1);
+    }
+
+    #[test]
+    fn boarding_a_follower_onto_an_unknown_transport_does_nothing() {
+        let mut mgr = TransportManager::new();
+        let leader = rider();
+        let mut follower = TestRider::at(ObjectGuid::new_pet(2000, 9), Position::new(-500.0, -500.0, 0.0, 0.0));
+        assert!(!mgr.board_follower(transport_guid(), &leader, &mut follower));
+        assert_eq!(follower.transport_guid, None);
+    }
+
+    #[test]
+    fn repositioning_moves_a_rider_with_its_transport() {
+        let mut mgr = manager_with_transport();
+        let mut rider = rider();
+        // Board to record the rider's offset (5 yards ahead of the transport).
+        mgr.board(transport_guid(), &mut rider, true);
+
+        // The transport turns 90 degrees in place; the rider must swing to its new side.
+        mgr.get_mut(transport_guid())
+            .unwrap()
+            .relocate(100.0, 200.0, 50.0, std::f32::consts::FRAC_PI_2);
+        let outcome = mgr.reposition_passenger(transport_guid(), &mut rider);
+
+        match outcome {
+            RepositionOutcome::Repositioned(world) => {
+                // 5 yards along the transport's new +y facing: (100, 205).
+                assert!((world.x - 100.0).abs() < 1e-3 && (world.y - 205.0).abs() < 1e-3, "got {world:?}");
+                assert_eq!(rider.position, world);
+            }
+            other => panic!("expected Repositioned, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn repositioning_round_trips_through_the_offset() {
+        let mut mgr = manager_with_transport();
+        let mut rider = rider();
+        let original = rider.position;
+        mgr.board(transport_guid(), &mut rider, true);
+
+        // Without moving the transport, placing the rider from its offset recovers exactly
+        // where it boarded.
+        mgr.reposition_passenger(transport_guid(), &mut rider);
+        assert!(
+            (rider.position.x - original.x).abs() < 1e-3
+                && (rider.position.y - original.y).abs() < 1e-3
+                && (rider.position.z - original.z).abs() < 1e-3
+        );
+    }
+
+    #[test]
+    fn a_rider_on_another_map_is_left_alone() {
+        let mut mgr = manager_with_transport();
+        let mut rider = rider();
+        mgr.board(transport_guid(), &mut rider, true);
+        let before = rider.position;
+
+        // Rider has not yet followed the transport across a map teleport.
+        rider.map_id = 1;
+        assert_eq!(
+            mgr.reposition_passenger(transport_guid(), &mut rider),
+            RepositionOutcome::DifferentMap
+        );
+        assert_eq!(rider.position, before);
+    }
+
+    #[test]
+    fn an_off_map_position_leaves_the_rider_put() {
+        let mut mgr = manager_with_transport();
+        let mut rider = rider();
+        mgr.board(transport_guid(), &mut rider, true);
+        let before = rider.position;
+
+        // Corrupt the stored offset so the computed world position lands off the map.
+        rider.transport_offset = Some(Position::new(1.0e9, 0.0, 0.0, 0.0));
+        assert_eq!(
+            mgr.reposition_passenger(transport_guid(), &mut rider),
+            RepositionOutcome::InvalidPosition
+        );
+        assert_eq!(rider.position, before);
     }
 
     #[test]
