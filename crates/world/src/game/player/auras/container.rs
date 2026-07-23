@@ -1,6 +1,7 @@
 //! AuraContainer - manages all active auras on a player
 
 use super::aura::Aura;
+use super::stacking::{exclusive_aura_can_apply, ExclusiveAuraAction};
 use super::state::*;
 use std::collections::HashMap;
 
@@ -131,6 +132,27 @@ impl AuraContainer {
                 // Otherwise keep existing (higher value wins)
             }
             return self.slot_map.get(&key).copied();
+        }
+
+        let mut replaced = Vec::new();
+        for (&existing_key, existing) in &self.auras {
+            match exclusive_aura_can_apply(
+                existing.is_passive(),
+                existing.aura_type,
+                existing.misc_value,
+                existing.current_value(),
+                aura.is_passive(),
+                aura.aura_type,
+                aura.misc_value,
+                aura.current_value(),
+            ) {
+                ExclusiveAuraAction::Coexist => {}
+                ExclusiveAuraAction::Reject => return None,
+                ExclusiveAuraAction::ReplaceExisting => replaced.push(existing_key),
+            }
+        }
+        for (spell_id, effect_index) in replaced {
+            self.remove_aura(spell_id, effect_index);
         }
 
         // Check if another effect of the same spell already has a visible slot.
@@ -624,6 +646,35 @@ mod tests {
         container.add_aura(positive);
         assert!(container.is_spell_positive(3900));
         assert!(!container.is_spell_positive(3901));
+    }
+
+    #[test]
+    fn stronger_exclusive_passive_aura_replaces_weaker_one() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut weaker = make_aura(4000, 0, caster, None);
+        weaker.flags.is_passive = true;
+        weaker.aura_type = super::super::effects::AURA_MOD_RESISTANCE_EXCLUSIVE;
+        weaker.misc_value = 4;
+        weaker.current_values[0] = 10;
+        container.add_aura(weaker);
+
+        let mut stronger = make_aura(4001, 0, caster, None);
+        stronger.flags.is_passive = true;
+        stronger.aura_type = super::super::effects::AURA_MOD_RESISTANCE_EXCLUSIVE;
+        stronger.misc_value = 4;
+        stronger.current_values[0] = 15;
+        assert!(container.add_aura(stronger).is_some());
+        assert!(!container.has_aura(4000));
+        assert!(container.has_aura(4001));
+
+        let mut weaker_again = make_aura(4002, 0, caster, None);
+        weaker_again.flags.is_passive = true;
+        weaker_again.aura_type = super::super::effects::AURA_MOD_RESISTANCE_EXCLUSIVE;
+        weaker_again.misc_value = 4;
+        weaker_again.current_values[0] = 10;
+        assert!(container.add_aura(weaker_again).is_none());
+        assert!(container.has_aura(4001));
     }
 
     #[test]

@@ -4,6 +4,8 @@
 
 use oxcore_shared::protocol::ObjectGuid;
 
+use super::effects::AURA_MOD_RESISTANCE_EXCLUSIVE;
+
 /// Stacking rules for Vanilla 1.12.
 ///
 /// General principles:
@@ -34,6 +36,62 @@ pub enum StackAction {
     Ignore,
     /// Cannot apply (exclusion rule, e.g., Weakened Soul)
     Blocked,
+}
+
+/// Resolution for passive exclusive aura effects in the same modifier domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExclusiveAuraAction {
+    Coexist,
+    Reject,
+    ReplaceExisting,
+}
+
+/// Whether an effect participates in the explicit passive exclusive-resistance domain.
+pub fn compute_exclusive(is_passive: bool, aura_type: u32) -> bool {
+    is_passive && aura_type == AURA_MOD_RESISTANCE_EXCLUSIVE
+}
+
+/// Whether two exclusive effects compete for the same modifier domain.
+pub fn check_exclusive_with(
+    first_passive: bool,
+    first_aura_type: u32,
+    first_misc_value: i32,
+    second_passive: bool,
+    second_aura_type: u32,
+    second_misc_value: i32,
+) -> bool {
+    compute_exclusive(first_passive, first_aura_type)
+        && compute_exclusive(second_passive, second_aura_type)
+        && first_misc_value == second_misc_value
+}
+
+/// Decide whether a new exclusive effect may apply beside an existing effect.
+pub fn exclusive_aura_can_apply(
+    existing_passive: bool,
+    existing_aura_type: u32,
+    existing_misc_value: i32,
+    existing_value: i32,
+    new_passive: bool,
+    new_aura_type: u32,
+    new_misc_value: i32,
+    new_value: i32,
+) -> ExclusiveAuraAction {
+    if !check_exclusive_with(
+        existing_passive,
+        existing_aura_type,
+        existing_misc_value,
+        new_passive,
+        new_aura_type,
+        new_misc_value,
+    ) {
+        return ExclusiveAuraAction::Coexist;
+    }
+
+    if new_value > existing_value {
+        ExclusiveAuraAction::ReplaceExisting
+    } else {
+        ExclusiveAuraAction::Reject
+    }
 }
 
 /// Determine the stack action based on existing and new aura data.
@@ -244,6 +302,52 @@ mod tests {
     fn different_caster_non_stackable_lower_value_ignored() {
         let action = determine_stack_action(100, guid(1), 20, 1, 1, 0, 100, guid(2), 10);
         assert_eq!(action, StackAction::Ignore);
+    }
+
+    #[test]
+    fn exclusive_passive_effects_compete_only_in_the_same_domain() {
+        assert!(compute_exclusive(true, AURA_MOD_RESISTANCE_EXCLUSIVE));
+        assert!(!compute_exclusive(false, AURA_MOD_RESISTANCE_EXCLUSIVE));
+
+        assert_eq!(
+            exclusive_aura_can_apply(
+                true,
+                AURA_MOD_RESISTANCE_EXCLUSIVE,
+                4,
+                10,
+                true,
+                AURA_MOD_RESISTANCE_EXCLUSIVE,
+                4,
+                15,
+            ),
+            ExclusiveAuraAction::ReplaceExisting
+        );
+        assert_eq!(
+            exclusive_aura_can_apply(
+                true,
+                AURA_MOD_RESISTANCE_EXCLUSIVE,
+                4,
+                10,
+                true,
+                AURA_MOD_RESISTANCE_EXCLUSIVE,
+                4,
+                10,
+            ),
+            ExclusiveAuraAction::Reject
+        );
+        assert_eq!(
+            exclusive_aura_can_apply(
+                true,
+                AURA_MOD_RESISTANCE_EXCLUSIVE,
+                4,
+                10,
+                true,
+                AURA_MOD_RESISTANCE_EXCLUSIVE,
+                5,
+                15,
+            ),
+            ExclusiveAuraAction::Coexist
+        );
     }
 
     // --- is_more_important_visual_aura_than: SpellAuraHolder::IsMoreImportantVisualAuraThan ---
