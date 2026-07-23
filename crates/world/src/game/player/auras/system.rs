@@ -222,6 +222,19 @@ impl AuraSystem {
             }
         }
 
+        if aura_type_copy == effects::AURA_AURA_SPELL && assigned_slot.is_some() {
+            let trigger_spell_id = world
+                .managers
+                .spell_mgr
+                .get(spell_id)
+                .map(|entry| entry.effect_trigger_spell[effect_index as usize])
+                .unwrap_or(0);
+            if trigger_spell_id != 0 && trigger_spell_id != spell_id {
+                self.apply_trigger_aura_spell(target_guid, caster_guid, trigger_spell_id, world)
+                    .await?;
+            }
+        }
+
         // Apply CC unit flags (stun, root, silence, etc.)
         if let Some(flag) = effects::cc_aura_unit_flag(aura_type_copy) {
             if assigned_slot.is_some() {
@@ -304,6 +317,18 @@ impl AuraSystem {
             .flatten();
 
         if let Some((aura, slot)) = removed_aura {
+            if aura.aura_type == effects::AURA_AURA_SPELL {
+                let trigger_spell_id = world
+                    .managers
+                    .spell_mgr
+                    .get(spell_id)
+                    .map(|entry| entry.effect_trigger_spell[aura.effect_index as usize])
+                    .unwrap_or(0);
+                if trigger_spell_id != 0 && trigger_spell_id != spell_id {
+                    Box::pin(self.remove_spell_auras(target_guid, trigger_spell_id, world)).await?;
+                }
+            }
+
             // Remove stat modifier if applicable
             if effects::is_stat_modifier_aura(aura.aura_type) {
                 self.remove_aura_stat_modifier(target_guid, &aura, world)
@@ -384,6 +409,63 @@ impl AuraSystem {
                     }
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    async fn apply_trigger_aura_spell(
+        &self,
+        target_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
+        trigger_spell_id: u32,
+        world: &World,
+    ) -> Result<()> {
+        let Some(entry) = world.managers.spell_mgr.get(trigger_spell_id) else {
+            tracing::warn!("[AURA] trigger aura spell {} not found", trigger_spell_id);
+            return Ok(());
+        };
+
+        let duration_ms = if entry.duration_index > 0 {
+            world
+                .dbc
+                .read()
+                .get_spell_duration(entry.duration_index)
+                .map(|duration| duration.duration as u32)
+        } else {
+            None
+        };
+        let is_positive = (entry.attributes_ex & 0x8000_0000) == 0;
+        let flags = AuraFlags {
+            is_positive,
+            is_negative: !is_positive,
+            is_passive: false,
+            can_be_cancelled: is_positive,
+            is_hidden: false,
+            is_permanent: duration_ms.is_none(),
+        };
+
+        for effect_index in 0..3usize {
+            let aura_type = entry.effect_apply_aura_name[effect_index];
+            if aura_type == 0 {
+                continue;
+            }
+            Box::pin(self.apply_aura(
+                target_guid,
+                caster_guid,
+                trigger_spell_id,
+                effect_index as u8,
+                aura_type,
+                entry.effect_misc_value[effect_index],
+                entry.effect_base_points[effect_index],
+                duration_ms,
+                entry.effect_amplitude[effect_index],
+                entry.stack_amount.max(1) as u8,
+                entry.proc_charges as u8,
+                flags,
+                world,
+            ))
+            .await?;
         }
 
         Ok(())
