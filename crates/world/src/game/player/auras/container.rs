@@ -30,6 +30,10 @@ pub struct AuraContainer {
 
     /// Occupied slot bitmask for fast free-slot search (64 bits for 64 slots)
     occupied_slots: u64,
+
+    /// Weaker exclusive effects displaced by a stronger active effect. They are
+    /// restored if that replacement is later removed.
+    displaced_exclusive: HashMap<(u32, u8), Vec<Aura>>,
 }
 
 impl AuraContainer {
@@ -39,6 +43,7 @@ impl AuraContainer {
             slot_map: HashMap::new(),
             reverse_slot_map: HashMap::new(),
             occupied_slots: 0,
+            displaced_exclusive: HashMap::new(),
         }
     }
 
@@ -151,8 +156,11 @@ impl AuraContainer {
                 ExclusiveAuraAction::ReplaceExisting => replaced.push(existing_key),
             }
         }
+        let mut displaced = Vec::with_capacity(replaced.len());
         for (spell_id, effect_index) in replaced {
-            self.remove_aura(spell_id, effect_index);
+            if let Some((removed, _)) = self.remove_aura_inner(spell_id, effect_index, false) {
+                displaced.push(removed);
+            }
         }
 
         // Check if another effect of the same spell already has a visible slot.
@@ -172,6 +180,9 @@ impl AuraContainer {
 
         aura.slot = Some(slot);
         self.auras.insert(key, aura);
+        if !displaced.is_empty() {
+            self.displaced_exclusive.insert(key, displaced);
+        }
         Some(slot)
     }
 
@@ -188,10 +199,27 @@ impl AuraContainer {
     /// Remove an aura by spell_id and effect_index.
     /// Returns the removed aura and its slot, or None if not found.
     pub fn remove_aura(&mut self, spell_id: u32, effect_index: u8) -> Option<(Aura, u8)> {
+        self.remove_aura_inner(spell_id, effect_index, true)
+    }
+
+    fn remove_aura_inner(
+        &mut self,
+        spell_id: u32,
+        effect_index: u8,
+        restore_displaced: bool,
+    ) -> Option<(Aura, u8)> {
         let key = (spell_id, effect_index);
         if let Some(aura) = self.auras.remove(&key) {
             let slot = self.slot_map.get(&key).copied().unwrap_or(0);
             self.free_slot(key);
+            if restore_displaced {
+                if let Some(mut displaced) = self.displaced_exclusive.remove(&key) {
+                    displaced.sort_by_key(|aura| aura.current_value());
+                    for aura in displaced.into_iter().rev() {
+                        let _ = self.add_aura(aura);
+                    }
+                }
+            }
             Some((aura, slot))
         } else {
             None
@@ -675,6 +703,10 @@ mod tests {
         weaker_again.current_values[0] = 10;
         assert!(container.add_aura(weaker_again).is_none());
         assert!(container.has_aura(4001));
+
+        container.remove_aura(4001, 0);
+        assert!(container.has_aura(4000));
+        assert!(!container.has_aura(4001));
     }
 
     #[test]
