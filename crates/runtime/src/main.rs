@@ -1,7 +1,7 @@
 //! Unified oxcore runtime.
 //!
-//! Runs the auth and world servers in a single process behind a shared ratatui TUI
-//! (tabs: Both / Auth / World / Performance). With `--headless` (or when stdout is not a
+//! Runs the auth, bnet, and world servers in a single process behind a shared ratatui TUI
+//! (tabs: All / Auth / BNet / World / Performance). With `--headless` (or when stdout is not a
 //! TTY) it falls back to plain stderr/file logging for systemd/CI/piped use.
 
 use std::io::IsTerminal;
@@ -11,7 +11,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use oxcore_shared::config::{find_config_file, load_toml};
-use oxcore_tui::{LoadUpdate, LogControl, LogSettings, LogStore, Progress, ServerPane};
+use oxcore_tui::{
+    LoadUpdate, LogControl, LogSettings, LogSource, LogStore, MetricsSnapshot, MetricsSource,
+    Progress, ServerPane,
+};
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info};
@@ -19,6 +22,7 @@ use tracing::{error, info};
 #[derive(Debug, Deserialize)]
 struct RootConfig {
     auth: Option<oxcore_auth::config::Config>,
+    bnet: Option<oxcore_bnet::config::Config>,
     world: Option<oxcore_world::config::Config>,
 }
 
@@ -35,10 +39,18 @@ struct Args {
     only: RunMode,
 }
 
+struct BnetMetrics;
+
+impl MetricsSource for BnetMetrics {
+    fn snapshot(&self) -> MetricsSnapshot {
+        MetricsSnapshot::default()
+    }
+}
+
 fn parse_args() -> Args {
     let matches = clap::Command::new("oxcore")
         .version("0.1.0")
-        .about("Unified oxcore runtime (auth + world) with a shared TUI")
+        .about("Unified oxcore runtime (auth + bnet + world) with a shared TUI")
         .arg(
             clap::Arg::new("config")
                 .short('c')
@@ -57,7 +69,7 @@ fn parse_args() -> Args {
                 .long("only")
                 .value_name("SERVER")
                 .value_parser(["auth", "world", "both"])
-                .help("Run only one server (auth|world) instead of both"),
+                .help("Run auth or world only; by default runs auth, bnet, and world"),
         )
         .get_matches();
 
@@ -89,6 +101,14 @@ fn log_settings(root: &RootConfig) -> LogSettings {
             console_level: a.log_level,
             file_level: a.log_file_level,
             log_file: resolve_log_file(&a.logs_dir, &a.log_file),
+            wipe: false,
+        };
+    }
+    if let Some(b) = &root.bnet {
+        return LogSettings {
+            console_level: b.log_level,
+            file_level: b.log_file_level,
+            log_file: resolve_log_file(&b.logs_dir, &b.log_file),
             wipe: false,
         };
     }
@@ -154,9 +174,11 @@ async fn main() -> Result<()> {
         let (load_tx, load_rx) = mpsc::channel(16);
         let only = args.only;
         let auth_cfg = root.auth.clone();
+        let bnet_cfg = root.bnet.clone();
         let world_cfg = root.world.clone();
         let shutdown_task = shutdown_tx.clone();
         let progress_task = progress.clone();
+        let bnet_log_store = store.clone();
 
         tokio::spawn(async move {
             let mut panes: Vec<ServerPane> = Vec::new();
@@ -198,6 +220,54 @@ async fn main() -> Result<()> {
                             .await;
                         return;
                     }
+                }
+            }
+
+            if matches!(only, RunMode::Both) {
+                let _ = load_tx
+                    .send(LoadUpdate::Status("starting bnet server".to_string()))
+                    .await;
+                if let Some(config) = bnet_cfg {
+                    match oxcore_bnet::serve(config, shutdown_task.clone()).await {
+                        Ok(server) => {
+                            info!(
+                                portal = %server.config.portal_address(),
+                                "bnet server ready"
+                            );
+                            let _ = load_tx
+                                .send(LoadUpdate::Status("bnet ready".to_string()))
+                                .await;
+                            let (tx, mut rx) = mpsc::channel(100);
+                            let store = bnet_log_store.clone();
+                            tokio::spawn(async move {
+                                while rx.recv().await.is_some() {
+                                    store.push_synthetic(
+                                        LogSource::Bnet,
+                                        tracing::Level::WARN,
+                                        "bnet does not support console commands".to_string(),
+                                    );
+                                }
+                            });
+                            panes.push(ServerPane {
+                                name: "BNet".to_string(),
+                                source: LogSource::Bnet,
+                                metrics: Box::new(BnetMetrics),
+                                cmd_tx: tx,
+                                commands: Vec::new(),
+                            });
+                        }
+                        Err(e) => {
+                            let _ = load_tx
+                                .send(LoadUpdate::Failed(format!("bnet: {}", e)))
+                                .await;
+                            return;
+                        }
+                    }
+                } else {
+                    info!("[bnet] config section missing; skipping bnet server");
+                    let _ = load_tx
+                        .send(LoadUpdate::Status("bnet disabled".to_string()))
+                        .await;
                 }
             }
 
@@ -258,6 +328,14 @@ async fn main() -> Result<()> {
             let metrics = Arc::new(oxcore_auth::metrics::Metrics::new());
             let (_tx, rx) = mpsc::channel(100);
             oxcore_auth::serve(config, metrics, shutdown_tx.clone(), rx).await?;
+        }
+        if matches!(args.only, RunMode::Both) {
+            if let Some(config) = root.bnet.clone() {
+                let server = oxcore_bnet::serve(config, shutdown_tx.clone()).await?;
+                info!(portal = %server.config.portal_address(), "bnet server ready");
+            } else {
+                info!("[bnet] config section missing; skipping bnet server");
+            }
         }
         if matches!(args.only, RunMode::Both | RunMode::World) {
             let config = root

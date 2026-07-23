@@ -224,6 +224,7 @@ fn level_style(level: Level) -> Style {
 fn source_style(source: LogSource) -> Style {
     let color = match source {
         LogSource::Auth => Color::LightBlue,
+        LogSource::Bnet => Color::LightYellow,
         LogSource::World => Color::LightGreen,
         LogSource::Other => Color::LightMagenta,
     };

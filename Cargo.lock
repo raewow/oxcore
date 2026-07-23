@@ -1940,6 +1940,7 @@ dependencies = [
  "anyhow",
  "clap",
  "oxcore-auth",
+ "oxcore-bnet",
  "oxcore-shared",
  "oxcore-tui",
  "oxcore-world",

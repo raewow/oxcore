@@ -2,7 +2,7 @@
 name = "oxcore-runtime"
 version = "0.1.0"
 edition = "2021"
-description = "Unified oxcore runtime: runs auth and world servers in one process with a shared TUI"
+description = "Unified oxcore runtime: runs auth, bnet, and world servers in one process with a shared TUI"
 
 [[bin]]
 name = "oxcore"
@@ -12,6 +12,7 @@ path = "src/main.rs"
 oxcore-shared.workspace = true
 oxcore-tui.workspace = true
 oxcore-auth.workspace = true
+oxcore-bnet.workspace = true
 oxcore-world.workspace = true
 
 anyhow = "1.0"

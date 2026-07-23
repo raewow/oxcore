@@ -39,6 +39,21 @@ max_count = 0
 ban_time = 600
 ban_type = 0
 
+[bnet]
+# Battle.net services for patched 1.14.x clients. Generate the TLS files with:
+#   cargo run -p oxcore-bnet -- gen-certs --out ./certs --host localhost
+login_database_url = "mysql://root:root@127.0.0.1:3306/auth"
+bind_ip = "0.0.0.0"
+bnet_port = 1119
+login_port = 8081
+external_hostname = "localhost"
+cert_file = "./certs/bnet.cert.pem"
+key_file = "./certs/bnet.key.pem"
+logs_dir = ""
+log_level = 2
+log_file = "bnet.log"
+log_file_level = 0
+
 [world]
 # Realm ID — must match the `id` column in auth.realmlist for this world server
 realm_id = 1

@@ -18,6 +18,7 @@ use tracing_subscriber::Layer;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LogSource {
     Auth,
+    Bnet,
     World,
     /// Shared/runtime/other crates.
     Other,
@@ -27,6 +28,7 @@ impl LogSource {
     pub fn tag(&self) -> &'static str {
         match self {
             LogSource::Auth => "auth",
+            LogSource::Bnet => "bnet",
             LogSource::World => "world",
             LogSource::Other => "core",
         }
@@ -145,6 +147,8 @@ fn level_value(level: &Level) -> u8 {
 fn source_for_target(target: &str) -> LogSource {
     if target.starts_with("oxcore_auth") {
         LogSource::Auth
+    } else if target.starts_with("oxcore_bnet") {
+        LogSource::Bnet
     } else if target.starts_with("oxcore_world") {
         LogSource::World
     } else {
