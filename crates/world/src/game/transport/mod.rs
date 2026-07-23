@@ -15,6 +15,7 @@ pub mod object;
 pub mod passenger;
 pub mod schedule;
 pub mod segment;
+pub mod ship;
 
 pub use animation::{TransportAnimation, TransportAnimationEntry, TransportAnimationManager};
 pub use elevator::{interpolate_local_position, path_progress};
@@ -22,5 +23,6 @@ pub use generic::time_since_creation;
 pub use manager::{TransportManager, TransportPassenger};
 pub use object::Transport;
 pub use passenger::{normalize_orientation, TransportFrame};
+pub use ship::{advance_to_current_frame, classify_frame, FramePhase, ShipFrameState};
 pub use schedule::{compute_schedule, KeyFrame, ScheduleProfile};
 pub use segment::{calculate_segment_pos, MotionProfile, SegmentFrame};
