@@ -26,21 +26,19 @@ pub fn run(out_dir: &Path, hostnames: &[String]) -> Result<()> {
     std::fs::create_dir_all(out_dir)
         .with_context(|| format!("failed to create output directory {}", out_dir.display()))?;
 
-    // The TLS certificate the server presents. Its public key is what the client pins.
-    let tls = rcgen::generate_simple_self_signed(hostnames.to_vec())
-        .context("failed to generate TLS certificate")?;
-
-    let spki_der = tls.key_pair.public_key_der();
+    // Generate the CA + leaf TLS cert, the bundle-signing key, and the signed bundle as one set.
+    // The server presents the leaf chain; the client trusts it via the CA hash in the bundle.
     let created = chrono::Utc::now().timestamp();
-    let artifacts = crate::certs::generate(&spki_der, created)?;
+    let artifacts = crate::certs::generate(hostnames, created)?;
 
     // The modern world server's signing key (separate from the bundle key) and the matching
     // little-endian modulus the client is patched with.
     let world = crate::certs::generate_world_signing_key()?;
 
-    write(out_dir, "bnet.cert.pem", tls.cert.pem().as_bytes())?;
-    write(out_dir, "bnet.key.pem", tls.key_pair.serialize_pem().as_bytes())?;
-    write(out_dir, "signature_modulus.bin", &artifacts.modulus)?;
+    write(out_dir, "bnet.cert.pem", artifacts.leaf_chain_pem.as_bytes())?;
+    write(out_dir, "bnet.key.pem", artifacts.leaf_key_pem.as_bytes())?;
+    write(out_dir, "ca.pem", artifacts.ca_pem.as_bytes())?;
+    write(out_dir, "signature_modulus.bin", &artifacts.modulus_le)?;
     write(out_dir, "cert_bundle.bin", &artifacts.signed_bundle)?;
     write(out_dir, "connect_to_modulus.bin", &world.modulus_le)?;
     write(out_dir, "world.signing.key.pem", world.signing_key_pem.as_bytes())?;

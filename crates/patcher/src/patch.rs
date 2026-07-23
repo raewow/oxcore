@@ -144,9 +144,9 @@ pub fn cert_bundle(data: &[u8], bundle_blob: &[u8]) -> Result<Patch> {
          compressed or the format has changed",
     )?;
 
-    // The original region is the JSON plus its trailing signature; that whole span is ours to
-    // overwrite.
-    let region_len = json_len + patterns::MODULUS_LEN;
+    // The original region is the JSON, the 4-byte "NGIS" magic, then the 256-byte signature; that
+    // whole span is ours to overwrite.
+    let region_len = json_len + 4 + patterns::MODULUS_LEN;
     if offset + region_len > data.len() {
         bail!("certificate bundle at 0x{offset:08x} runs past the end of the file");
     }
@@ -227,8 +227,9 @@ mod tests {
             &[0xCD; patterns::MODULUS_LEN - patterns::CONNECT_TO_MODULUS.len()],
         );
         data.extend_from_slice(&[0xCC; 64]);
-        // Embedded certificate bundle: JSON, then its 256-byte signature.
+        // Embedded certificate bundle: JSON, the "NGIS" magic, then its 256-byte signature.
         data.extend_from_slice(original_bundle_json());
+        data.extend_from_slice(b"NGIS");
         data.extend_from_slice(&[0x99; patterns::MODULUS_LEN]);
         // Neighbouring data that must survive patching.
         data.extend_from_slice(&[0x77; 32]);
@@ -370,7 +371,7 @@ mod tests {
         let blob = small_bundle_blob();
         let patch = cert_bundle(&data, &blob).unwrap();
 
-        let region_len = original_bundle_json().len() + patterns::MODULUS_LEN;
+        let region_len = original_bundle_json().len() + 4 + patterns::MODULUS_LEN;
         assert_eq!(patch.bytes.len(), region_len);
         assert_eq!(&patch.bytes[..blob.len()], &blob[..]);
         assert!(patch.bytes[blob.len()..].iter().all(|&b| b == 0));
@@ -393,7 +394,7 @@ mod tests {
     #[test]
     fn cert_bundle_patch_rejects_a_blob_bigger_than_the_region() {
         let data = fixture();
-        let region_len = original_bundle_json().len() + patterns::MODULUS_LEN;
+        let region_len = original_bundle_json().len() + 4 + patterns::MODULUS_LEN;
         let oversized = vec![0x42; region_len + 1];
 
         let err = cert_bundle(&data, &oversized).unwrap_err();

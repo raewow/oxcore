@@ -1,35 +1,41 @@
-//! Certificate bundle generation and signing.
+//! Certificate bundle generation and signing — the **verified** Blizzard format.
 //!
-//! Modern clients pin the bnet TLS connection against a *certificate bundle* baked into the
-//! executable. The bundle is a JSON document listing the SHA-256 of each trusted certificate's
-//! `SubjectPublicKeyInfo`, followed by an RSA signature the client verifies against a 256-byte
-//! modulus that is *also* baked into the executable.
+//! Rewritten to match the format `wowemulation-dev/wow-patcher` documents and verifies against
+//! real 1.14.x / 2.5.3 clients (`scripts/gen-cert-bundle.py`). The earlier version got five things
+//! wrong (direct-cert pinning, missing `RootCAPublicKeys`/`SigningCertificates.RawData`, no
+//! `"Blizzard Certificate Bundle"` sign context, no `NGIS` magic, big-endian modulus); all are
+//! corrected here.
 //!
-//! To connect a modern client to a server we control we therefore need to replace both pieces:
+//! ## Trust architecture (two keys, CA-based)
 //!
-//! - the **signature modulus** — so the client verifies bundles against *our* key, and
-//! - the **bundle** — so it lists *our* TLS certificate as trusted.
+//! * **TLS CA** — a self-signed root. The bnet server presents a **leaf** cert signed by it; the
+//!   client trusts the leaf because the CA's SPKI SHA-256 is listed in the bundle's
+//!   `RootCAPublicKeys`. The CA is *not* patched into the client; it rides inside the bundle JSON
+//!   as `SigningCertificates[0].RawData`.
+//! * **Bundle-signing key** (RSA-2048) — signs the bundle JSON. Its **little-endian** modulus is
+//!   patched into the client, which verifies the bundle's signature against it.
 //!
-//! Both are produced together by [`generate`] from a single freshly minted signing key, and
-//! written out as opaque files the patcher embeds into the client (see `crates/patcher`). The
-//! server keeps the matching TLS certificate. Because both artifacts come from one generation
-//! step, the modulus in the client and the signature on the bundle can never drift apart.
+//! ## Bundle wire format
 //!
-//! ## Bundle schema
+//! ```text
+//! [ compact JSON (UTF-8) ][ "NGIS" (4 bytes) ][ 256-byte signature, byte-reversed ]
+//! ```
 //!
-//! The top-level keys and per-entry keys mirror Blizzard's format (as reproduced by
-//! TrinityCore's connection patcher): `Created`, `Certificates`, `PublicKeys`,
-//! `SigningCertificates`, each entry carrying a `Uri` and a `ShaHashPublicKeyInfo`.
+//! where the signature is RSA-2048 PKCS#1 v1.5 over `SHA-256(JSON ‖ "Blizzard Certificate
+//! Bundle")`, reversed to little-endian (Blizzard's BigNumber representation).
 //!
-//! ## Unverified against a live client
+//! ## Still unverified: 1.15.x
 //!
-//! The bundle *structure* is confirmed, but the exact signature scheme the 1.14.x client
-//! applies (hash + padding) is not verified end to end here — that needs a real client, which
-//! is the documented stopping point for this work. The scheme lives in one place
-//! ([`sign_bundle`]) so it can be corrected in isolation once observed. We sign with
-//! RSA-2048 PKCS#1 v1.5 over SHA-256, which is the scheme these clients are documented to use.
+//! This is the **RSA / embedded-or-nydus** format used through ~2.5.3 and 1.14.x. The live 1.15.x
+//! client dropped the RSA modulus entirely and verifies a *downloaded* bundle with **Ed25519** —
+//! a format not documented or implemented anywhere public yet. That path is not handled here.
+
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use anyhow::{Context, Result};
+use rcgen::{
+    BasicConstraints, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose, SanType,
+};
 use rsa::pkcs1::EncodeRsaPrivateKey;
 use rsa::signature::{SignatureEncoding, Signer};
 use rsa::sha2::Sha256;
@@ -42,84 +48,104 @@ pub const SIGNING_KEY_BITS: usize = 2048;
 /// Length of the RSA modulus and signature, in bytes.
 pub const MODULUS_LEN: usize = SIGNING_KEY_BITS / 8;
 
-/// One trusted certificate or key, identified by the hash of its public key info.
+/// The context string appended to the JSON before hashing/signing.
+const SIGN_CONTEXT: &[u8] = b"Blizzard Certificate Bundle";
+/// Magic marking the start of the signature after the JSON.
+const NGIS_MAGIC: &[u8] = b"NGIS";
+/// Hostname pattern the bundle pins. `*.*` matches every host the client may dial, matching
+/// Arctium's and wow-patcher's approach.
+const PINNED_URI: &str = "*.*";
+
+/// One `Certificates`/`PublicKeys` entry: a host pattern and the trusted CA's SPKI hash.
 #[derive(Debug, Clone, Serialize)]
-pub struct BundleEntry {
-    /// URI pattern the entry applies to. `*.*` matches any host, which is what we want for a
-    /// self-hosted server reachable under an arbitrary patched hostname.
+struct BundleEntry {
     #[serde(rename = "Uri")]
-    pub uri: String,
-    /// Uppercase hex SHA-256 of the certificate's DER `SubjectPublicKeyInfo`.
+    uri: String,
     #[serde(rename = "ShaHashPublicKeyInfo")]
-    pub sha_hash_public_key_info: String,
+    sha_hash_public_key_info: String,
 }
 
-/// The certificate bundle, before signing.
+/// The `SigningCertificates` entry carrying the CA certificate itself.
 #[derive(Debug, Clone, Serialize)]
-pub struct CertBundle {
-    #[serde(rename = "Created")]
-    pub created: i64,
-    #[serde(rename = "Certificates")]
-    pub certificates: Vec<BundleEntry>,
-    #[serde(rename = "PublicKeys")]
-    pub public_keys: Vec<BundleEntry>,
-    #[serde(rename = "SigningCertificates")]
-    pub signing_certificates: Vec<BundleEntry>,
+struct SigningCertificate {
+    #[serde(rename = "RawData")]
+    raw_data: String,
 }
 
-impl CertBundle {
-    /// Build a bundle trusting a single TLS certificate, identified by the DER encoding of its
-    /// `SubjectPublicKeyInfo` (what `rcgen`'s `KeyPair::public_key_der` returns, and what a
-    /// server presents at handshake time).
-    pub fn trusting(spki_der: &[u8], created: i64) -> Self {
-        let entry = BundleEntry {
-            uri: "*.*".to_string(),
-            sha_hash_public_key_info: spki_sha256_hex(spki_der),
-        };
-        // Blizzard lists the pinned server certs under both Certificates and PublicKeys; the
-        // client checks the presented cert's public-key hash against these, so listing our one
-        // cert in both is enough. SigningCertificates is for a different chain we don't use.
-        Self {
-            created,
-            certificates: vec![entry.clone()],
-            public_keys: vec![entry],
-            signing_certificates: Vec::new(),
-        }
-    }
-
-    /// Canonical JSON bytes that get signed. Serialization must be deterministic, so this is
-    /// the single serialization used for both signing and embedding.
-    pub fn to_json_bytes(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(self).context("failed to serialize certificate bundle")
-    }
+/// The bundle JSON, in Blizzard's field order (the signature covers these exact bytes).
+#[derive(Debug, Clone, Serialize)]
+struct CertBundle {
+    #[serde(rename = "Created")]
+    created: i64,
+    #[serde(rename = "Certificates")]
+    certificates: Vec<BundleEntry>,
+    #[serde(rename = "PublicKeys")]
+    public_keys: Vec<BundleEntry>,
+    #[serde(rename = "SigningCertificates")]
+    signing_certificates: Vec<SigningCertificate>,
+    #[serde(rename = "RootCAPublicKeys")]
+    root_ca_public_keys: Vec<String>,
 }
 
 /// Uppercase-hex SHA-256 of a DER `SubjectPublicKeyInfo`.
 pub fn spki_sha256_hex(spki_der: &[u8]) -> String {
-    let digest = sha2::Sha256::digest(spki_der);
-    hex::encode_upper(digest)
+    hex::encode_upper(sha2::Sha256::digest(spki_der))
 }
 
-/// A freshly generated bundle-signing key plus everything derived from it.
+/// Everything a server + patcher need, all minted together so nothing can drift.
 pub struct Artifacts {
-    /// The signing key, PEM (PKCS#1). Keep this secret; it is not needed at runtime.
+    /// The self-signed CA certificate, PEM.
+    pub ca_pem: String,
+    /// The TLS chain the bnet server presents (leaf ‖ CA), PEM.
+    pub leaf_chain_pem: String,
+    /// The leaf certificate's private key, PEM.
+    pub leaf_key_pem: String,
+    /// The bundle-signing key, PKCS#1 PEM. Secret; not needed at runtime.
     pub signing_key_pem: String,
-    /// The 256-byte big-endian RSA modulus to patch into the client.
-    pub modulus: Vec<u8>,
-    /// The signed bundle blob (`JSON || signature`) to embed into the client.
+    /// The 256-byte **little-endian** RSA modulus to patch into the client.
+    pub modulus_le: Vec<u8>,
+    /// The signed bundle blob (`JSON ‖ NGIS ‖ reversed-signature`) to embed or serve.
     pub signed_bundle: Vec<u8>,
 }
 
-/// Sign a bundle: `JSON || signature`, where the signature is RSA PKCS#1 v1.5 over SHA-256 of
-/// the JSON. The signature is a fixed [`MODULUS_LEN`] bytes appended after the JSON.
-pub fn sign_bundle(bundle: &CertBundle, key: &RsaPrivateKey) -> Result<Vec<u8>> {
-    let json = bundle.to_json_bytes()?;
+/// Build the bundle JSON bytes trusting a CA identified by its PEM and SPKI hash.
+fn build_bundle_json(ca_pem: &str, ca_spki_hash: &str, created: i64) -> Result<Vec<u8>> {
+    // RawData is the CA PEM as a single line (newlines stripped), matching the reference.
+    let raw_data: String = ca_pem.chars().filter(|&c| c != '\n' && c != '\r').collect();
+    let entry = BundleEntry {
+        uri: PINNED_URI.to_string(),
+        sha_hash_public_key_info: ca_spki_hash.to_string(),
+    };
+    let bundle = CertBundle {
+        created,
+        certificates: vec![entry.clone()],
+        public_keys: vec![entry],
+        signing_certificates: vec![SigningCertificate { raw_data }],
+        root_ca_public_keys: vec![ca_spki_hash.to_string()],
+    };
+    // Compact separators (no spaces), matching `json.dumps(separators=(",", ":"))`.
+    serde_json::to_vec(&bundle).context("failed to serialize certificate bundle")
+}
 
+/// Sign the JSON and assemble the blob: `JSON ‖ "NGIS" ‖ reverse(sig)`, where
+/// `sig = RSA-2048 PKCS#1 v1.5 over SHA-256(JSON ‖ "Blizzard Certificate Bundle")`.
+pub fn sign_bundle(json_bytes: &[u8], key: &RsaPrivateKey) -> Result<Vec<u8>> {
     let signing_key = rsa::pkcs1v15::SigningKey::<Sha256>::new(key.clone());
-    let signature = signing_key.sign(&json);
 
-    let mut blob = json;
-    blob.extend_from_slice(&signature.to_bytes());
+    let mut message = json_bytes.to_vec();
+    message.extend_from_slice(SIGN_CONTEXT);
+    let signature = signing_key.sign(&message);
+    let mut sig_bytes = signature.to_bytes().to_vec(); // big-endian
+    anyhow::ensure!(
+        sig_bytes.len() == MODULUS_LEN,
+        "signature length {} != {MODULUS_LEN}",
+        sig_bytes.len()
+    );
+    sig_bytes.reverse(); // little-endian, matching the client's BigNumber
+
+    let mut blob = json_bytes.to_vec();
+    blob.extend_from_slice(NGIS_MAGIC);
+    blob.extend_from_slice(&sig_bytes);
     Ok(blob)
 }
 
@@ -127,8 +153,6 @@ pub fn sign_bundle(bundle: &CertBundle, key: &RsaPrivateKey) -> Result<Vec<u8>> 
 pub fn modulus_bytes(key: &RsaPrivateKey) -> Vec<u8> {
     use rsa::traits::PublicKeyParts;
     let raw = key.n().to_bytes_be();
-    // A proper 2048-bit key has its top bit set, so this is normally already 256 bytes; pad
-    // defensively in case the high byte happened to be zero.
     if raw.len() >= MODULUS_LEN {
         raw
     } else {
@@ -138,58 +162,91 @@ pub fn modulus_bytes(key: &RsaPrivateKey) -> Vec<u8> {
     }
 }
 
-/// Generate a signing key and everything derived from it, for a server whose TLS certificate
-/// has the given DER `SubjectPublicKeyInfo`.
-pub fn generate(spki_der: &[u8], created: i64) -> Result<Artifacts> {
+/// Generate the full trust set for a server whose leaf certificate covers `leaf_dns_names`.
+pub fn generate(leaf_dns_names: &[String], created: i64) -> Result<Artifacts> {
+    // --- TLS CA (self-signed root) ---
+    let ca_key = KeyPair::generate().context("failed to generate CA key")?;
+    let mut ca_params = CertificateParams::new(Vec::<String>::new())
+        .context("failed to build CA params")?;
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    ca_params
+        .distinguished_name
+        .push(DnType::CommonName, "oxcore Battle.net Root CA");
+    ca_params.key_usages = vec![
+        KeyUsagePurpose::KeyCertSign,
+        KeyUsagePurpose::CrlSign,
+        KeyUsagePurpose::DigitalSignature,
+    ];
+    let ca_cert = ca_params
+        .self_signed(&ca_key)
+        .context("failed to self-sign CA")?;
+    let ca_pem = ca_cert.pem();
+    let ca_spki_hash = spki_sha256_hex(ca_key.public_key_der().as_ref());
+
+    // --- Leaf (server) cert signed by the CA ---
+    let leaf_key = KeyPair::generate().context("failed to generate leaf key")?;
+    let mut leaf_params =
+        CertificateParams::new(leaf_dns_names.to_vec()).context("failed to build leaf params")?;
+    // Always cover loopback so a localhost test works regardless of the --host list.
+    leaf_params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    leaf_params
+        .subject_alt_names
+        .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    if let Some(first) = leaf_dns_names.first() {
+        leaf_params.distinguished_name.push(DnType::CommonName, first);
+    }
+    let leaf_cert = leaf_params
+        .signed_by(&leaf_key, &ca_cert, &ca_key)
+        .context("failed to sign leaf with CA")?;
+    let leaf_chain_pem = format!("{}{}", leaf_cert.pem(), ca_pem);
+    let leaf_key_pem = leaf_key.serialize_pem();
+
+    // --- Bundle-signing key + signed bundle + LE modulus ---
     let mut rng = rand::thread_rng();
-    let key = RsaPrivateKey::new(&mut rng, SIGNING_KEY_BITS)
-        .context("failed to generate bundle signing key")?;
+    let signing_key =
+        RsaPrivateKey::new(&mut rng, SIGNING_KEY_BITS).context("failed to generate signing key")?;
+    let json_bytes = build_bundle_json(&ca_pem, &ca_spki_hash, created)?;
+    let signed_bundle = sign_bundle(&json_bytes, &signing_key)?;
 
-    let bundle = CertBundle::trusting(spki_der, created);
-    let signed_bundle = sign_bundle(&bundle, &key)?;
-    let modulus = modulus_bytes(&key);
+    let mut modulus_le = modulus_bytes(&signing_key);
+    modulus_le.reverse();
 
-    let signing_key_pem = key
+    let signing_key_pem = signing_key
         .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
         .context("failed to encode signing key")?
         .to_string();
 
     Ok(Artifacts {
+        ca_pem,
+        leaf_chain_pem,
+        leaf_key_pem,
         signing_key_pem,
-        modulus,
+        modulus_le,
         signed_bundle,
     })
 }
 
 /// A world-server RSA signing key plus the modulus the client must be patched with.
 pub struct WorldSigningArtifacts {
-    /// The RSA private key, PKCS#1 PEM. The world server signs `SMSG_ENTER_ENCRYPTED_MODE` /
-    /// `SMSG_CONNECT_TO` with this; keep it with the world server config.
     pub signing_key_pem: String,
-    /// The 256-byte **little-endian** RSA modulus to patch into the client's connect-to slot. The
-    /// world server reverses its signatures to match this byte order.
+    /// 256-byte little-endian modulus for the patcher.
     pub modulus_le: Vec<u8>,
 }
 
 /// Generate the RSA keypair the modern world server uses to sign its encrypted-mode / connect-to
-/// messages, returning the private key and the little-endian modulus for the patcher. This is a
-/// *separate* key from the certificate-bundle signing key: it lands in a different slot in the
-/// client and is verified by different code.
+/// messages (separate from the bundle-signing key).
 pub fn generate_world_signing_key() -> Result<WorldSigningArtifacts> {
     let mut rng = rand::thread_rng();
     let key = RsaPrivateKey::new(&mut rng, SIGNING_KEY_BITS)
         .context("failed to generate world signing key")?;
-
-    // The client stores this modulus little-endian (it reverses signatures), so ship it reversed
-    // from the big-endian encoding.
     let mut modulus_le = modulus_bytes(&key);
     modulus_le.reverse();
-
     let signing_key_pem = key
         .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
         .context("failed to encode world signing key")?
         .to_string();
-
     Ok(WorldSigningArtifacts {
         signing_key_pem,
         modulus_le,
@@ -203,70 +260,88 @@ mod tests {
     use rsa::signature::Verifier;
     use rsa::RsaPublicKey;
 
-    fn sample_spki() -> Vec<u8> {
-        // Any bytes work as a stand-in for a DER SPKI here; the hash is over raw bytes.
-        b"a-sample-subject-public-key-info".to_vec()
+    fn sample_hosts() -> Vec<String> {
+        vec!["oxcore.localhost".to_string()]
     }
 
     #[test]
     fn spki_hash_is_64_uppercase_hex_chars() {
-        let hash = spki_sha256_hex(&sample_spki());
+        let hash = spki_sha256_hex(b"a-sample-subject-public-key-info");
         assert_eq!(hash.len(), 64);
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_lowercase()));
     }
 
     #[test]
-    fn bundle_serializes_with_blizzard_field_names() {
-        let bundle = CertBundle::trusting(&sample_spki(), 1_600_000_000);
-        let json: serde_json::Value = serde_json::from_slice(&bundle.to_json_bytes().unwrap()).unwrap();
+    fn bundle_json_has_the_verified_schema() {
+        let json = build_bundle_json("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n", "DEADBEEF", 42).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
 
-        assert_eq!(json["Created"], 1_600_000_000);
-        assert_eq!(json["Certificates"][0]["Uri"], "*.*");
-        assert_eq!(json["Certificates"][0]["ShaHashPublicKeyInfo"].as_str().unwrap().len(), 64);
-        assert!(json["PublicKeys"].is_array());
-        assert!(json["SigningCertificates"].is_array());
+        assert_eq!(value["Created"], 42);
+        assert_eq!(value["Certificates"][0]["Uri"], "*.*");
+        assert_eq!(value["Certificates"][0]["ShaHashPublicKeyInfo"], "DEADBEEF");
+        assert_eq!(value["RootCAPublicKeys"][0], "DEADBEEF");
+        // RawData is the CA PEM with newlines stripped.
+        let raw = value["SigningCertificates"][0]["RawData"].as_str().unwrap();
+        assert!(!raw.contains('\n'));
+        assert!(raw.starts_with("-----BEGIN CERTIFICATE-----"));
     }
 
     #[test]
-    fn signed_bundle_is_json_followed_by_a_verifiable_signature() {
+    fn bundle_json_is_compact_no_spaces() {
+        let json = build_bundle_json("X", "H", 1).unwrap();
+        let text = String::from_utf8(json).unwrap();
+        assert!(!text.contains(", "));
+        assert!(!text.contains(": "));
+    }
+
+    #[test]
+    fn signed_bundle_has_ngis_magic_and_a_verifiable_reversed_signature() {
         let mut rng = rand::thread_rng();
-        // 1024 bits keeps the test fast; the scheme is identical at 2048.
-        let key = RsaPrivateKey::new(&mut rng, 1024).unwrap();
+        let key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let json = build_bundle_json("CAPEM", "HASH", 7).unwrap();
+        let blob = sign_bundle(&json, &key).unwrap();
 
-        let bundle = CertBundle::trusting(&sample_spki(), 42);
-        let json = bundle.to_json_bytes().unwrap();
-        let blob = sign_bundle(&bundle, &key).unwrap();
+        // Layout: JSON, then NGIS, then 256-byte signature.
+        assert_eq!(blob.len(), json.len() + 4 + MODULUS_LEN);
+        assert_eq!(&blob[json.len()..json.len() + 4], NGIS_MAGIC);
 
-        let sig_len = 1024 / 8;
-        assert_eq!(blob.len(), json.len() + sig_len);
-        assert_eq!(&blob[..json.len()], &json[..]);
+        // Un-reverse the signature and verify it over SHA-256(JSON ‖ context).
+        let mut sig_be = blob[json.len() + 4..].to_vec();
+        sig_be.reverse();
+        let mut message = json.clone();
+        message.extend_from_slice(SIGN_CONTEXT);
 
-        // The appended signature verifies against the public key over the JSON.
         let verifying = VerifyingKey::<Sha256>::new(RsaPublicKey::from(&key));
-        let signature = rsa::pkcs1v15::Signature::try_from(&blob[json.len()..]).unwrap();
+        let signature = rsa::pkcs1v15::Signature::try_from(sig_be.as_slice()).unwrap();
         verifying
-            .verify(&json, &signature)
-            .expect("appended signature must verify");
+            .verify(&message, &signature)
+            .expect("reversed signature must verify once un-reversed, over JSON ‖ context");
     }
 
     #[test]
-    fn generated_modulus_is_256_bytes() {
-        let artifacts = generate(&sample_spki(), 1).unwrap();
-        assert_eq!(artifacts.modulus.len(), MODULUS_LEN);
+    fn generate_produces_a_ca_backed_chain_and_le_modulus() {
+        let artifacts = generate(&sample_hosts(), 1).unwrap();
+
+        assert!(artifacts.ca_pem.contains("BEGIN CERTIFICATE"));
+        // The chain is leaf then CA (two certs).
+        assert_eq!(artifacts.leaf_chain_pem.matches("BEGIN CERTIFICATE").count(), 2);
+        assert!(artifacts.leaf_key_pem.contains("PRIVATE KEY"));
         assert!(artifacts.signing_key_pem.contains("RSA PRIVATE KEY"));
-        assert!(artifacts.signed_bundle.len() > MODULUS_LEN);
-    }
 
-    #[test]
-    fn world_signing_key_modulus_is_256_bytes_and_little_endian() {
-        let artifacts = generate_world_signing_key().unwrap();
         assert_eq!(artifacts.modulus_le.len(), MODULUS_LEN);
-        assert!(artifacts.signing_key_pem.contains("RSA PRIVATE KEY"));
+        // Little-endian: reversing recovers a BE modulus with a non-zero top byte.
+        let mut be = artifacts.modulus_le.clone();
+        be.reverse();
+        assert_ne!(be[0], 0);
 
-        // Little-endian: reversing recovers a big-endian modulus whose top byte is non-zero (a
-        // proper 2048-bit key has its high bit set).
-        let mut big_endian = artifacts.modulus_le.clone();
-        big_endian.reverse();
-        assert_ne!(big_endian[0], 0);
+        // The bundle carries the CA's SPKI hash in RootCAPublicKeys.
+        let json_end = artifacts
+            .signed_bundle
+            .windows(4)
+            .position(|w| w == NGIS_MAGIC)
+            .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&artifacts.signed_bundle[..json_end]).unwrap();
+        assert_eq!(value["RootCAPublicKeys"][0].as_str().unwrap().len(), 64);
     }
 }

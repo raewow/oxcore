@@ -17,3 +17,5 @@ log.txt
 CLAUDE.md
 /reference/
 .cursor/
+# Generated TLS certs, keys, and patch artifacts (bnet gen-certs) — never commit; contains private keys
+/certs/
