@@ -1003,7 +1003,7 @@ fn find_script_target(
                     let matches_life_state = if entry.type_ == 1 {
                         target.current_health > 0
                     } else {
-                        target.current_health == 0
+                        target.death_state.is_corpse()
                     };
                     if target.entry != entry.target_id
                         || !matches_life_state
@@ -1138,7 +1138,7 @@ fn script_entry_matches_unit(
                 .managers
                 .creature_mgr
                 .with_creature(guid, |creature| {
-                    creature.entry == entry.target_id && creature.current_health == 0
+                    creature.entry == entry.target_id && creature.death_state.is_corpse()
                 })
                 .unwrap_or(false),
             3 => {
@@ -2659,6 +2659,50 @@ mod tests {
             caster,
             &world,
         ));
+    }
+
+    #[tokio::test]
+    async fn dead_script_target_requires_visible_creature_corpse() {
+        let world = test_world();
+        let spell_id = 50010;
+        let caster = ObjectGuid::new_player(1);
+        let corpse = ObjectGuid::new_creature(9007, 1);
+        let removed_dead = ObjectGuid::new_creature(9007, 2);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(script_near_caster_spell(spell_id));
+        world.managers.spell_mgr.set_spell_script_targets_for_test(
+            spell_id,
+            vec![SpellTargetEntry {
+                type_: 2, // SPELL_TARGET_TYPE_DEAD
+                target_id: 9007,
+                condition_id: 0,
+                can_focus: false,
+                inverse_effect_mask: 0,
+            }],
+        );
+        add_test_player(&world, caster, 0, 0);
+        add_test_creature(&world, corpse, pos(3.0, 0.0));
+        add_test_creature(&world, removed_dead, pos(2.0, 0.0));
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(corpse, |creature| {
+                creature.current_health = 0;
+                creature.death_state = crate::game::creature::death::DeathState::Corpse;
+            });
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(removed_dead, |creature| {
+                creature.current_health = 0;
+                creature.death_state = crate::game::creature::death::DeathState::Dead;
+            });
+
+        let resolved =
+            resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
+        assert_eq!(resolved.effect_targets[0], vec![corpse]);
     }
 
     #[tokio::test]

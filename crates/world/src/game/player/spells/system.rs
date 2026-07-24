@@ -218,6 +218,14 @@ fn should_send_all_targets_miss(
             .all(|(_, miss_info)| *miss_info != hit::SpellMissInfo::None)
 }
 
+fn missing_script_target_error(is_triggered: bool) -> SpellCastError {
+    if is_triggered {
+        SpellCastError::DontReport
+    } else {
+        SpellCastError::InvalidTarget
+    }
+}
+
 // --- Spell::OnSpellLaunch: launch-time special-case handling ---------------------------
 
 const SPELL_EFFECT_OPEN_LOCK: u32 = 33;
@@ -701,8 +709,11 @@ impl SpellSystem {
             caster_guid,
             world,
         ) {
-            self.send_cast_failure(caster_guid, spell_id, SpellCastError::InvalidTarget, world)?;
-            return Ok(SpellCastResult::Failed(SpellCastError::InvalidTarget));
+            let error = missing_script_target_error(is_triggered);
+            if error != SpellCastError::DontReport {
+                self.send_cast_failure(caster_guid, spell_id, error, world)?;
+            }
+            return Ok(SpellCastResult::Failed(error));
         }
 
         // Step 2: Calculate cast time (modified by haste, talents, etc.)
@@ -3599,6 +3610,18 @@ enum CastUpdateInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_script_target_is_silent_only_when_triggered() {
+        assert_eq!(
+            missing_script_target_error(false),
+            SpellCastError::InvalidTarget
+        );
+        assert_eq!(
+            missing_script_target_error(true),
+            SpellCastError::DontReport
+        );
+    }
 
     #[test]
     fn ammo_packet_uses_zeroes_without_ranged_weapon() {
