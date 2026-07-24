@@ -240,7 +240,6 @@ pub async fn auto_learn_for_level(
 }
 
 /// Load learned spells from database on login.
-#[allow(dead_code)]
 pub fn load_from_db(_player_guid: ObjectGuid, _world: &World) -> Result<()> {
     // TODO: Query character_spells table
     // SELECT spell_id FROM character_spells WHERE guid = ?
@@ -256,7 +255,6 @@ pub fn load_from_db(_player_guid: ObjectGuid, _world: &World) -> Result<()> {
 }
 
 /// Save learned spells to database on logout.
-#[allow(dead_code)]
 pub fn save_to_db(_player_guid: ObjectGuid, _world: &World) -> Result<()> {
     // TODO: Implement database persistence
     // Only save if needs_save is true

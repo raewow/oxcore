@@ -34,6 +34,9 @@ pub struct Aura {
     /// Maximum duration in milliseconds (for refresh capping)
     pub max_duration_ms: Option<u32>,
 
+    /// Spell.dbc duration record used to distinguish passive zero-duration spells.
+    pub duration_index: u32,
+
     /// Accumulated time since last periodic tick (for DoT/HoT)
     pub periodic_timer_ms: u32,
 
@@ -156,6 +159,7 @@ impl Aura {
             slot: None,
             duration_ms,
             max_duration_ms: duration_ms,
+            duration_index: 0,
             periodic_timer_ms: 0,
             periodic_interval_ms,
             ticks_applied: 0,
@@ -216,6 +220,37 @@ impl Aura {
         self.duration_ms = self.max_duration_ms;
         self.ticks_applied = 0;
         self.periodic_timer_ms = 0;
+    }
+
+    /// Mirror `SpellAuraHolder::SetAuraMaxDuration` for this effect of a holder.
+    pub fn set_max_duration(&mut self, duration_ms: i32) {
+        self.max_duration_ms = (duration_ms >= 0).then_some(duration_ms as u32);
+
+        // A passive spell with no SpellDuration record remains permanent even if a caller
+        // supplies a positive cap. This is the C++ DurationIndex == 0 exception.
+        if duration_ms > 0 && !(self.is_passive() && self.duration_index == 0) {
+            self.flags.is_permanent = false;
+        }
+    }
+
+    /// Align the elapsed periodic timer with a holder duration change.
+    pub fn refresh_periodic_timer(&mut self, duration_ms: i32) {
+        if !self.is_periodic() {
+            return;
+        }
+
+        let duration_ms = if duration_ms > 0 {
+            duration_ms
+        } else {
+            self.duration_ms.unwrap_or(0) as i32
+        };
+        let until_next =
+            super::periodic::update_periodic_timer(duration_ms, self.periodic_interval_ms as i32)
+                as u32;
+
+        // C++ stores time until the next tick; Rust stores elapsed time since the last one.
+        // A full interval remaining maps to zero elapsed, not to a complete interval elapsed.
+        self.periodic_timer_ms = self.periodic_interval_ms.saturating_sub(until_next);
     }
 
     /// Refresh this aura using a freshly-cast application of the same spell/effect.
@@ -405,6 +440,53 @@ mod tests {
         assert_eq!(aura.duration_ms, Some(5_000));
         assert_eq!(aura.ticks_applied, 0);
         assert_eq!(aura.periodic_timer_ms, 0);
+    }
+
+    #[test]
+    fn set_max_duration_keeps_passive_zero_duration_spell_permanent() {
+        let mut aura = make_aura(guid(1), 10, None);
+        aura.flags.is_passive = true;
+        aura.flags.is_permanent = true;
+        aura.duration_index = 0;
+
+        aura.set_max_duration(5_000);
+
+        assert_eq!(aura.max_duration_ms, Some(5_000));
+        assert!(aura.flags.is_permanent);
+    }
+
+    #[test]
+    fn set_max_duration_makes_other_positive_duration_auras_non_permanent() {
+        let mut aura = make_aura(guid(1), 10, None);
+        aura.flags.is_passive = true;
+        aura.flags.is_permanent = true;
+        aura.duration_index = 1;
+
+        aura.set_max_duration(5_000);
+
+        assert!(!aura.flags.is_permanent);
+    }
+
+    #[test]
+    fn refresh_periodic_timer_translates_until_next_to_elapsed_time() {
+        let mut aura = Aura::new(
+            1000,
+            guid(1),
+            0,
+            3,
+            0,
+            10,
+            Some(7_000),
+            3_000,
+            1,
+            0,
+            AuraFlags::default(),
+        );
+
+        aura.refresh_periodic_timer(7_000);
+
+        // C++ computes 1000 ms until the next tick; elapsed storage is 2000 ms.
+        assert_eq!(aura.periodic_timer_ms, 2_000);
     }
 
     // --- add_stack / consume_charge / is_expired sanity (existing behavior) ---

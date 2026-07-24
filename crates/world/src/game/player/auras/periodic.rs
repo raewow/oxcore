@@ -487,30 +487,21 @@ mod tests {
             auth: lazy_pool(),
             logs: lazy_pool(),
         });
-        World::new(databases, Arc::new(Config::default()), 50, PathBuf::from("."))
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
     }
 
     fn add_player_with_health(world: &World, guid: ObjectGuid, health: u32, max_health: u32) {
-        let player = Player::new(
-            guid,
-            format!("P{}", guid.counter()),
-            0,
-            0,
-            0,
-            60,
-            1,
-            1,
-            0,
-        );
+        let player = Player::new(guid, format!("P{}", guid.counter()), 0, 0, 0, 60, 1, 1, 0);
         world.managers.player_mgr.add_player(player, guid.counter());
-        world
-            .systems
-            .player
-            .manager()
-            .with_player_mut(guid, |p| {
-                p.stats.health = health;
-                p.stats.max_health = max_health;
-            });
+        world.systems.player.manager().with_player_mut(guid, |p| {
+            p.stats.health = health;
+            p.stats.max_health = max_health;
+        });
     }
 
     fn health_of(world: &World, guid: ObjectGuid) -> u32 {
@@ -583,8 +574,13 @@ mod tests {
         add_player_with_health(&world, target, 1000, 1000);
         let bc = Arc::clone(&world.managers.broadcast_mgr);
 
-        handle_periodic_damage(target, &snapshot(caster, AURA_PERIODIC_DAMAGE, 0), &world, &bc)
-            .unwrap();
+        handle_periodic_damage(
+            target,
+            &snapshot(caster, AURA_PERIODIC_DAMAGE, 0),
+            &world,
+            &bc,
+        )
+        .unwrap();
 
         assert_eq!(health_of(&world, target), 1000);
     }
@@ -598,8 +594,13 @@ mod tests {
         let bc = Arc::clone(&world.managers.broadcast_mgr);
 
         // Partial heal.
-        handle_periodic_heal(target, &snapshot(caster, AURA_PERIODIC_HEAL, 200), &world, &bc)
-            .unwrap();
+        handle_periodic_heal(
+            target,
+            &snapshot(caster, AURA_PERIODIC_HEAL, 200),
+            &world,
+            &bc,
+        )
+        .unwrap();
         assert_eq!(health_of(&world, target), 700);
 
         // Overheal is clamped to max health.

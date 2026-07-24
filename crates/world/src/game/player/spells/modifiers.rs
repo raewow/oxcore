@@ -126,7 +126,7 @@ pub fn calculate_power_cost(
 /// - `spell_family_mask`: Which spells are affected (from spell DBC spell_family_flags)
 /// - `spell_family_name`: Which spell family (from spell DBC spell_family_name)
 /// - `source_spell_id`: The talent/aura spell providing this modifier
-#[allow(dead_code)]
+/// - `source_aura_slot`: The aura slot for removal tracking
 pub fn add_spell_modifier(
     player_guid: ObjectGuid,
     op: SpellModOp,
@@ -194,7 +194,6 @@ pub fn has_modifier_applied(applied_modifiers: &[&SpellMod], modifier: &SpellMod
 /// Used during spell calculations to get the modified value of a property.
 /// For example, to get modified damage:
 ///   let damage = apply_spell_modifiers(player, SpellModOp::Damage, base_damage, spell_entry);
-#[allow(dead_code)]
 pub fn apply_spell_modifiers_to_value(
     modifiers: &[SpellMod],
     op: SpellModOp,
@@ -290,111 +289,90 @@ fn does_modifier_apply(
 
 /// Calculate modified cast time for a spell.
 ///
-/// Applies haste and talent modifiers to base cast time.
-#[allow(dead_code)]
+/// Applies SPELLMOD_CASTTIME flat/percentage modifiers from talents and auras,
+/// respecting the spell family name/flags filter.
 pub fn calculate_modified_cast_time(
     player_guid: ObjectGuid,
     base_cast_time_ms: u32,
-    _spell_family_name: u32,
-    _spell_family_flags: u64,
+    spell_family_name: u32,
+    spell_family_flags: u64,
     world: &World,
 ) -> u32 {
     let mut modified = base_cast_time_ms as i32;
 
-    // Apply cast time modifiers from talents/auras (SpellModOp::CastTime)
     world
         .systems
         .player
         .manager()
-        .with_player_mut(player_guid, |player| {
-            for spell_mod in &player.spells.spell_modifiers {
-                if spell_mod.op == SpellModOp::CastTime {
-                    // TODO: Check spell_family_mask matches
-                    match spell_mod.mod_type {
-                        SpellModType::Flat => {
-                            modified += spell_mod.value;
-                        }
-                        SpellModType::Pct => {
-                            modified =
-                                (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0)) as i32;
-                        }
-                    }
-                }
-            }
+        .with_player(player_guid, |player| {
+            modified = apply_spell_modifiers_to_value(
+                &player.spells.spell_modifiers,
+                SpellModOp::CastTime,
+                modified,
+                spell_family_name,
+                spell_family_flags,
+            );
         });
 
     modified.max(0) as u32
 }
 
 /// Calculate modified cooldown for a spell.
-#[allow(dead_code)]
+///
+/// Applies SPELLMOD_COOLDOWN flat/percentage modifiers from talents and auras,
+/// respecting the spell family name/flags filter.
 pub fn calculate_modified_cooldown(
     player_guid: ObjectGuid,
     base_cooldown_ms: u32,
-    _spell_family_name: u32,
-    _spell_family_flags: u64,
+    spell_family_name: u32,
+    spell_family_flags: u64,
     world: &World,
 ) -> u32 {
     let mut modified = base_cooldown_ms as i32;
 
-    // Apply cooldown modifiers from talents/auras (SpellModOp::Cooldown)
     world
         .systems
         .player
         .manager()
-        .with_player_mut(player_guid, |player| {
-            for spell_mod in &player.spells.spell_modifiers {
-                if spell_mod.op == SpellModOp::Cooldown {
-                    // TODO: Check spell_family_mask matches
-                    match spell_mod.mod_type {
-                        SpellModType::Flat => {
-                            modified += spell_mod.value;
-                        }
-                        SpellModType::Pct => {
-                            modified =
-                                (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0)) as i32;
-                        }
-                    }
-                }
-            }
+        .with_player(player_guid, |player| {
+            modified = apply_spell_modifiers_to_value(
+                &player.spells.spell_modifiers,
+                SpellModOp::Cooldown,
+                modified,
+                spell_family_name,
+                spell_family_flags,
+            );
         });
 
     modified.max(0) as u32
 }
 
 /// Calculate modified GCD for a spell.
-#[allow(dead_code)]
+///
+/// Applies SPELLMOD_GLOBAL_COOLDOWN flat/percentage modifiers from talents and
+/// auras, respecting the spell family name/flags filter. The caller clamps the
+/// hasted 1.5s GCD to [1000, 1500] separately.
 pub fn calculate_modified_gcd(
     player_guid: ObjectGuid,
     base_gcd_ms: u32,
-    _spell_family_name: u32,
-    _spell_family_flags: u64,
+    spell_family_name: u32,
+    spell_family_flags: u64,
     world: &World,
 ) -> u32 {
     let mut modified = base_gcd_ms as i32;
 
-    // Apply GCD modifiers from talents/auras (SpellModOp::GlobalCooldown)
     world
         .systems
         .player
         .manager()
-        .with_player_mut(player_guid, |player| {
-            for spell_mod in &player.spells.spell_modifiers {
-                if spell_mod.op == SpellModOp::GlobalCooldown {
-                    // TODO: Check spell_family_mask matches
-                    match spell_mod.mod_type {
-                        SpellModType::Flat => {
-                            modified += spell_mod.value;
-                        }
-                        SpellModType::Pct => {
-                            modified =
-                                (modified as f32 * (1.0 + spell_mod.value as f32 / 100.0)) as i32;
-                        }
-                    }
-                }
-            }
-            // No blanket floor here: the 1000ms cap applies only to the hasted
-            // 1.5s global cooldown, which the caller clamps separately.
+        .with_player(player_guid, |player| {
+            modified = apply_spell_modifiers_to_value(
+                &player.spells.spell_modifiers,
+                SpellModOp::GlobalCooldown,
+                modified,
+                spell_family_name,
+                spell_family_flags,
+            );
         });
 
     modified.max(0) as u32
@@ -651,5 +629,104 @@ mod tests {
         let expected = (100.0_f32 / (1.117_f32 * 30.0 / 60.0 - 0.1327_f32)) as i32 as u32;
         assert_eq!(calculate_power_cost(&spell, &c, false, &[]), expected);
         assert!(calculate_power_cost(&spell, &c, false, &[]) > 100);
+    }
+
+    #[test]
+    fn cooldown_modifier_respects_family_match() {
+        // Matching family: flat -500ms + pct -50% halves and subtracts.
+        let mods = vec![
+            SpellMod {
+                op: SpellModOp::Cooldown,
+                mod_type: SpellModType::Flat,
+                value: -500,
+                spell_family_mask: 0,
+                spell_family_name: 3,
+                source_spell_id: 1,
+                source_aura_slot: None,
+            },
+            SpellMod {
+                op: SpellModOp::Cooldown,
+                mod_type: SpellModType::Pct,
+                value: -50,
+                spell_family_mask: 0,
+                spell_family_name: 3,
+                source_spell_id: 2,
+                source_aura_slot: None,
+            },
+        ];
+        // (2000 - 500) * 0.5 = 750
+        assert_eq!(
+            apply_spell_modifiers_to_value(&mods, SpellModOp::Cooldown, 2000, 3, 0),
+            750
+        );
+
+        // Wrong family name: no modifier applies.
+        assert_eq!(
+            apply_spell_modifiers_to_value(&mods, SpellModOp::Cooldown, 2000, 7, 0),
+            2000
+        );
+    }
+
+    #[tokio::test]
+    async fn calculate_modified_cooldown_wired_to_player_modifiers() {
+        let world = test_world();
+        let guid = ObjectGuid::new_player(1);
+        add_player(&world, guid);
+
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(guid, |player| {
+                player.spells.spell_modifiers.push(SpellMod {
+                    op: SpellModOp::Cooldown,
+                    mod_type: SpellModType::Flat,
+                    value: -1000,
+                    spell_family_mask: 0,
+                    spell_family_name: 3,
+                    source_spell_id: 1,
+                    source_aura_slot: None,
+                });
+            });
+
+        assert_eq!(
+            calculate_modified_cooldown(guid, 3000, 3, 0, &world),
+            2000
+        );
+
+        // Wrong family name returns the base value unchanged.
+        assert_eq!(calculate_modified_cooldown(guid, 3000, 7, 0, &world), 3000);
+    }
+
+    fn test_world() -> World {
+        use crate::config::Config;
+        use oxcore_shared::database::Databases;
+        use sqlx::mysql::MySqlPoolOptions;
+        use std::path::PathBuf;
+        use std::sync::Arc;
+
+        let pool = MySqlPoolOptions::new()
+            .connect_lazy("mysql://test:test@localhost/test")
+            .expect("lazy pool should be constructible");
+        let databases = Arc::new(Databases {
+            world: pool.clone(),
+            character: pool.clone(),
+            auth: pool.clone(),
+            logs: pool,
+        });
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    fn add_player(world: &World, guid: ObjectGuid) {
+        use crate::game::player::Player;
+        world.managers.player_mgr.add_player(
+            Player::new(guid, format!("P{}", guid.counter()), 1, 0, 0, 60, 1, 1, 0),
+            guid.counter(),
+        );
     }
 }

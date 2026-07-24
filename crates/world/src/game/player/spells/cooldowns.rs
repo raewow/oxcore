@@ -3,6 +3,7 @@
 //! Handles per-spell cooldowns, category cooldowns, GCD, and persistence.
 
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
+use crate::game::player::spells::modifiers;
 use crate::World;
 use anyhow::Result;
 use oxcore_dbc::structures::spell::SpellEntry;
@@ -45,26 +46,33 @@ fn get_game_time_ms(world: &World) -> u64 {
 /// Apply a cooldown for a spell after casting.
 ///
 /// Cooldown sources:
-/// 1. Per-spell cooldown (from Spell.dbc RecoveryTime field)
+/// 1. Per-spell cooldown (from Spell.dbc RecoveryTime field), modified by
+///    active SPELLMOD_COOLDOWN talents/auras.
 /// 2. Category cooldown (from Spell.dbc CategoryRecoveryTime field)
 ///    - Spells in the same category share a cooldown
 ///    - Example: Health Potion and Mana Potion share the "Potion" category
 /// 3. GCD is handled separately in SpellSystem
-#[allow(dead_code)]
-pub fn apply_cooldown(caster_guid: ObjectGuid, spell_id: u32, world: &World) -> Result<()> {
+///
+/// Returns the actual `(spell_cooldown_ms, category_cooldown_ms)` applied so
+/// the caller can mirror the same duration in SMSG_SPELL_COOLDOWN.
+pub fn apply_cooldown(caster_guid: ObjectGuid, spell_id: u32, world: &World) -> Result<(u32, u32)> {
     let now = get_game_time_ms(world);
 
-    // Read cooldown values from spell entry
-    let (spell_cooldown_ms, category_cooldown_ms, category_id, permanent) =
-        match world.managers.spell_mgr.get(spell_id) {
-            Some(entry) => (
-                entry.recovery_time,
-                entry.category_recovery_time,
-                entry.category,
-                is_event_triggered_cooldown(&entry),
-            ),
-            None => (0, 0, 0, false),
-        };
+    let Some(entry) = world.managers.spell_mgr.get(spell_id) else {
+        return Ok((0, 0));
+    };
+
+    // Apply SPELLMOD_COOLDOWN flat/percentage modifiers.
+    let spell_cooldown_ms = modifiers::calculate_modified_cooldown(
+        caster_guid,
+        entry.recovery_time,
+        entry.spell_family_name,
+        entry.spell_family_flags,
+        world,
+    );
+    let category_cooldown_ms = entry.category_recovery_time;
+    let category_id = entry.category;
+    let permanent = is_event_triggered_cooldown(&entry);
 
     world
         .systems
@@ -89,7 +97,7 @@ pub fn apply_cooldown(caster_guid: ObjectGuid, spell_id: u32, world: &World) -> 
             }
         });
 
-    Ok(())
+    Ok((spell_cooldown_ms, category_cooldown_ms))
 }
 
 /// Apply a cooldown with specific duration (for spell modifiers that change cooldown)
@@ -271,7 +279,6 @@ pub fn send_cooldowns_on_login(
 }
 
 /// Save cooldowns to database for persistence across logout/login.
-#[allow(dead_code)]
 pub fn save_cooldowns(_player_guid: ObjectGuid, _world: &World) -> Result<()> {
     // TODO: Implement database persistence
     // Only save cooldowns longer than 30 seconds

@@ -200,6 +200,7 @@ async fn load_aura(player_guid: ObjectGuid, row: &CharacterAuraRow, timediff: u3
             spell_entry.proc_charges.max(charges) as u8,
             flags,
         );
+        aura.duration_index = spell_entry.duration_index;
         aura.max_duration_ms = max_duration_ms;
         aura.stack_count = stacks.max(1) as u8;
         aura.charges = charges as u8;

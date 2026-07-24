@@ -84,6 +84,10 @@ impl AuraSystem {
         flags: AuraFlags,
         world: &World,
     ) -> Result<Option<u8>> {
+        if target_guid.is_creature() && aura_type == effects::AURA_AOE_CHARM {
+            anyhow::bail!("AURA_AOE_CHARM creature targets are unsupported");
+        }
+
         // Creature targets: use simplified aura tracking + speed modifier
         if target_guid.is_creature() {
             self.apply_creature_aura(
@@ -182,6 +186,12 @@ impl AuraSystem {
             max_charges,
             flags,
         );
+        aura.duration_index = world
+            .managers
+            .spell_mgr
+            .get(spell_id)
+            .map(|entry| entry.duration_index)
+            .unwrap_or(0);
 
         // School-absorb auras receive their caster's applicable +healing or
         // +spell-damage bonus once, when the shield is created.
@@ -376,6 +386,9 @@ impl AuraSystem {
                 .get(spell_id)
                 .map(|entry| entry.effect_apply_aura_name[effect_index as usize])
                 .unwrap_or(0);
+            if aura_type == effects::AURA_AOE_CHARM {
+                anyhow::bail!("AURA_AOE_CHARM creature targets are unsupported");
+            }
             self.remove_creature_aura(target_guid, spell_id, aura_type, world);
             return Ok(());
         }
@@ -493,7 +506,14 @@ impl AuraSystem {
 
             // Crowd-control / movement / vision / shapeshift special-case cleanup
             // (mirrors apply_special_effect on the way down).
-            self.remove_special_effect(target_guid, aura.aura_type, aura.misc_value, world);
+            self.remove_special_effect(
+                target_guid,
+                aura.caster_guid,
+                spell_id,
+                aura.aura_type,
+                aura.misc_value,
+                world,
+            );
 
             // Send slot cleared to client
             self.send_aura_slot_cleared(target_guid, slot, world)?;
@@ -657,7 +677,14 @@ impl AuraSystem {
             if effects::is_spell_modifier_aura(aura.aura_type) {
                 self.remove_spell_modifier(target_guid, aura.spell_id, world)?;
             }
-            self.remove_special_effect(target_guid, aura.aura_type, aura.misc_value, world);
+            self.remove_special_effect(
+                target_guid,
+                aura.caster_guid,
+                aura.spell_id,
+                aura.aura_type,
+                aura.misc_value,
+                world,
+            );
             self.send_aura_slot_cleared(target_guid, *slot, world)?;
         }
 
@@ -2123,6 +2150,11 @@ impl AuraSystem {
         }
 
         match aura_type {
+            // Chains of Kel'Thuzad (28410) is a creature charm applied to players.
+            effects::AURA_AOE_CHARM if spell_id == 28410 => {
+                self.apply_chains_of_kelthuzad_charm(target_guid, caster_guid, world);
+            }
+
             // --- Aura::HandleAuraMounted ---
             effects::AURA_MOUNTED => {
                 let display_id = misc_value.max(0) as u32;
@@ -2311,11 +2343,117 @@ impl AuraSystem {
         }
     }
 
+    fn apply_chains_of_kelthuzad_charm(
+        &self,
+        target_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
+        world: &World,
+    ) {
+        if target_guid == caster_guid || !caster_guid.is_creature() {
+            tracing::warn!(
+                "[AURA] Chains of Kel'Thuzad requires a distinct creature caster: target={:?} caster={:?}",
+                target_guid,
+                caster_guid
+            );
+            return;
+        }
+
+        let Some((faction, is_already_charming)) = world
+            .managers
+            .creature_mgr
+            .with_creature(caster_guid, |creature| {
+                (creature.faction, creature.charm_guid.is_some())
+            })
+        else {
+            tracing::warn!(
+                "[AURA] Chains of Kel'Thuzad caster {:?} is missing",
+                caster_guid
+            );
+            return;
+        };
+        if is_already_charming {
+            tracing::warn!(
+                "[AURA] Chains of Kel'Thuzad caster {:?} already has a charm target",
+                caster_guid
+            );
+            return;
+        }
+
+        let applied = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.apply_creature_charm(caster_guid, faction)
+            })
+            .unwrap_or(false);
+        if !applied {
+            tracing::warn!(
+                "[AURA] Chains of Kel'Thuzad target {:?} is missing, self-charmed, or already charmed",
+                target_guid
+            );
+            return;
+        }
+
+        let linked = world
+            .managers
+            .creature_mgr
+            .with_creature_mut(caster_guid, |creature| {
+                if creature.charm_guid.is_some() {
+                    false
+                } else {
+                    creature.charm_guid = Some(target_guid);
+                    true
+                }
+            })
+            .unwrap_or(false);
+        if !linked {
+            // The creature disappeared or acquired another target between validation and linking.
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(target_guid, |player| {
+                    player.remove_creature_charm(caster_guid);
+                });
+        }
+    }
+
+    fn remove_chains_of_kelthuzad_charm(
+        &self,
+        target_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
+        world: &World,
+    ) {
+        let removed = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.remove_creature_charm(caster_guid)
+            })
+            .unwrap_or(false);
+        if !removed {
+            return;
+        }
+
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(caster_guid, |creature| {
+                if creature.charm_guid == Some(target_guid) {
+                    creature.charm_guid = None;
+                }
+            });
+    }
+
     /// Dispatch on aura remove. Mirrors the "AT REMOVE" side of each `Aura::Handle*`.
     /// `misc_value` is read from the just-removed `Aura` (container already popped it).
     fn remove_special_effect(
         &self,
         target_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
         aura_type: u32,
         misc_value: i32,
         world: &World,
@@ -2325,6 +2463,10 @@ impl AuraSystem {
         }
 
         match aura_type {
+            effects::AURA_AOE_CHARM if spell_id == 28410 => {
+                self.remove_chains_of_kelthuzad_charm(target_guid, caster_guid, world);
+            }
+
             effects::AURA_MOUNTED => {
                 world
                     .systems
@@ -4387,6 +4529,49 @@ mod tests {
 
         set_dynamic_flag(&mut player.dynamic_flags, special_info, false);
         assert_eq!(player.dynamic_flags, 0x0001);
+    }
+
+    #[test]
+    fn chains_charm_sets_player_control_and_stops_player_combat() {
+        let player_guid = ObjectGuid::new_player(1);
+        let charmer_guid = test_creature_guid(15990, 1);
+        let attacker_guid = ObjectGuid::new_player(2);
+        let mut player = Player::new(player_guid, "TestPlayer".into(), 0, 0, 0, 1, 1, 1, 0);
+        let race_faction = player.faction_template();
+        player.combat.enter_combat(attacker_guid);
+        player.combat.start_attack(attacker_guid);
+        player.combat.start_shoot(attacker_guid);
+
+        assert!(player.apply_creature_charm(charmer_guid, 14));
+        assert_eq!(player.charmer_guid, Some(charmer_guid));
+        assert_eq!(player.controller_guid, Some(charmer_guid));
+        assert_eq!(player.faction_override, Some(14));
+        assert_eq!(player.faction_template(), 14);
+        assert!(!player.combat.in_combat);
+        assert!(player.combat.attackers.is_empty());
+        assert!(!player.combat.is_auto_attacking);
+        assert!(!player.combat.is_auto_shooting);
+
+        assert!(player.remove_creature_charm(charmer_guid));
+        assert_eq!(player.charmer_guid, None);
+        assert_eq!(player.controller_guid, None);
+        assert_eq!(player.faction_override, None);
+        assert_eq!(player.faction_template(), race_faction);
+    }
+
+    #[test]
+    fn chains_charm_rejects_self_or_existing_charm_and_requires_matching_removal() {
+        let player_guid = ObjectGuid::new_player(1);
+        let charmer_guid = test_creature_guid(15990, 1);
+        let other_charmer_guid = test_creature_guid(15990, 2);
+        let mut player = Player::new(player_guid, "TestPlayer".into(), 0, 0, 0, 1, 1, 1, 0);
+
+        assert!(!player.apply_creature_charm(player_guid, 14));
+        assert!(player.apply_creature_charm(charmer_guid, 14));
+        assert!(!player.apply_creature_charm(other_charmer_guid, 15));
+        assert!(!player.remove_creature_charm(other_charmer_guid));
+        assert_eq!(player.charmer_guid, Some(charmer_guid));
+        assert_eq!(player.faction_template(), 14);
     }
 
     #[tokio::test]

@@ -1782,19 +1782,18 @@ impl SpellSystem {
                 .map_or(false, |e| cooldowns::should_apply_spell_cooldown(&e));
 
             if sends_cooldown {
-                cooldowns::apply_cooldown(caster_guid, spell_id, world)?;
+                let (spell_cd_ms, category_cd_ms) =
+                    cooldowns::apply_cooldown(caster_guid, spell_id, world)?;
 
                 // Send SMSG_SPELL_COOLDOWN to client with actual cooldown duration
-                if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
-                    let cd_ms = entry.recovery_time.max(entry.category_recovery_time);
-                    if cd_ms > 0 {
-                        let msg = SmsgSpellCooldown {
-                            caster_guid,
-                            cooldowns: vec![(spell_id, cd_ms)],
-                        };
-                        self.broadcast_mgr
-                            .send_msg_to_player(caster_guid, msg.to_world_packet());
-                    }
+                let cd_ms = spell_cd_ms.max(category_cd_ms);
+                if cd_ms > 0 {
+                    let msg = SmsgSpellCooldown {
+                        caster_guid,
+                        cooldowns: vec![(spell_id, cd_ms)],
+                    };
+                    self.broadcast_mgr
+                        .send_msg_to_player(caster_guid, msg.to_world_packet());
                 }
             }
 

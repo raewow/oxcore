@@ -48,6 +48,12 @@ pub struct Player {
     pub power: PowerState,
     /// Combat state (timers, targets, weapon info)
     pub combat: CombatState,
+    /// Creature currently charming this player.
+    pub charmer_guid: Option<ObjectGuid>,
+    /// Faction template temporarily inherited from the charmer.
+    pub faction_override: Option<u32>,
+    /// Unit currently controlling this player while charmed.
+    pub controller_guid: Option<ObjectGuid>,
     /// Aura state (buffs/debuffs, slot management)
     pub auras: AuraState,
     /// Death state (death/resurrection state machine)
@@ -206,6 +212,9 @@ impl Player {
             stats: StatsState::default(),
             power: PowerState::default(),
             combat: CombatState::default(),
+            charmer_guid: None,
+            faction_override: None,
+            controller_guid: None,
             auras: AuraState::default(),
             death: DeathSystemState::default(),
             spells: SpellsState::default(),
@@ -266,6 +275,42 @@ impl Player {
 
     pub fn get_item_set_effect(&self, set_id: u32) -> Option<&ItemSetEffect> {
         self.item_set_effects.get(&set_id)
+    }
+
+    /// Apply creature charm state after the aura has successfully been added.
+    pub fn apply_creature_charm(&mut self, charmer_guid: ObjectGuid, faction: u32) -> bool {
+        if self.guid == charmer_guid || self.charmer_guid.is_some() {
+            return false;
+        }
+
+        self.charmer_guid = Some(charmer_guid);
+        self.faction_override = Some(faction);
+        self.controller_guid = Some(charmer_guid);
+        self.combat.in_combat = false;
+        self.combat.combat_timer = 0;
+        self.combat.attackers.clear();
+        self.combat.stop_attack();
+        self.combat.stop_shoot();
+        true
+    }
+
+    /// Remove charm state only when it belongs to the given charmer.
+    pub fn remove_creature_charm(&mut self, charmer_guid: ObjectGuid) -> bool {
+        if self.charmer_guid != Some(charmer_guid) {
+            return false;
+        }
+
+        self.charmer_guid = None;
+        self.faction_override = None;
+        self.controller_guid = None;
+        true
+    }
+
+    /// Current faction template, including a temporary charm override.
+    pub fn faction_template(&self) -> u32 {
+        self.faction_override.unwrap_or_else(|| {
+            crate::game::common::player_constants::get_faction_for_race(self.race)
+        })
     }
 
     pub fn add_item_set_effect(&mut self, set_id: u32) -> &mut ItemSetEffect {

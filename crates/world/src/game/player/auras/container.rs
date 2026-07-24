@@ -261,6 +261,24 @@ impl AuraContainer {
         slot
     }
 
+    /// Mirrors `SpellAuraHolder::RefreshAuraPeriodicTimers` for every effect in a spell holder.
+    pub fn refresh_aura_periodic_timers(&mut self, spell_id: u32, duration_ms: i32) {
+        for effect_index in 0..3u8 {
+            if let Some(aura) = self.auras.get_mut(&(spell_id, effect_index)) {
+                aura.refresh_periodic_timer(duration_ms);
+            }
+        }
+    }
+
+    /// Mirrors `SpellAuraHolder::SetAuraMaxDuration` for every effect in a spell holder.
+    pub fn set_aura_max_duration(&mut self, spell_id: u32, duration_ms: i32) {
+        for effect_index in 0..3u8 {
+            if let Some(aura) = self.auras.get_mut(&(spell_id, effect_index)) {
+                aura.set_max_duration(duration_ms);
+            }
+        }
+    }
+
     /// Remove all auras. Returns all removed auras.
     pub fn remove_all(&mut self) -> Vec<Aura> {
         let auras: Vec<Aura> = self.auras.drain().map(|(_, a)| a).collect();
@@ -596,6 +614,29 @@ mod tests {
             container.get_aura(3000, 0).unwrap().duration_ms,
             None,
             "permanent aura duration must stay None"
+        );
+    }
+
+    #[test]
+    fn refresh_aura_periodic_timers_updates_all_periodic_effects() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut first = make_aura(4000, 0, caster, Some(7_000));
+        first.periodic_interval_ms = 3_000;
+        let mut second = make_aura(4000, 1, caster, Some(7_000));
+        second.periodic_interval_ms = 3_000;
+        container.add_aura(first);
+        container.add_aura(second);
+
+        container.refresh_aura_periodic_timers(4000, 7_000);
+
+        assert_eq!(
+            container.get_aura(4000, 0).unwrap().periodic_timer_ms,
+            2_000
+        );
+        assert_eq!(
+            container.get_aura(4000, 1).unwrap().periodic_timer_ms,
+            2_000
         );
     }
 

@@ -296,13 +296,22 @@ pub fn is_skill_bonus_spell(spell_id: u32, dbc: &DbcManager) -> bool {
     dbc.skill_line_ability
         .entries()
         .filter(|(_, ability)| ability.spell_id == spell_id)
-        .any(|(_, ability)| ability.learn_on_get_skill == ABILITY_LEARNED_ON_GET_PROFESSION_SKILL)
+        .any(|(_, ability)| {
+            ability.learn_on_get_skill == ABILITY_LEARNED_ON_GET_PROFESSION_SKILL
+                && ability.req_skill_value > 0
+        })
 }
 
 /// Port of `SpellInternal::IsSpellWithDelayableEffects` (SpellMgr.cpp:3294).
 /// Returns true when every effect in the spell can be delayed (batched). CC
 /// spells, channeled, next-melee-swing and ranged spells are handled specially.
 pub fn is_spell_with_delayable_effects(spell: &SpellEntry) -> bool {
+    if spell.effect.iter().all(|&effect| effect == 0)
+        && spell.effect_apply_aura_name.iter().all(|&aura| aura == 0)
+    {
+        return false;
+    }
+
     // CC spells are always delayable
     if spell.effect_apply_aura_name.iter().any(|&aura| {
         matches!(
