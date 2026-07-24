@@ -281,7 +281,7 @@ impl AuraSystem {
                 .map(|entry| entry.effect_trigger_spell[effect_index as usize])
                 .unwrap_or(0);
             if trigger_spell_id != 0 && trigger_spell_id != spell_id {
-                self.apply_trigger_aura_spell(target_guid, caster_guid, trigger_spell_id, world)
+                self.apply_trigger_aura_spell(target_guid, target_guid, trigger_spell_id, world)
                     .await?;
             }
         }

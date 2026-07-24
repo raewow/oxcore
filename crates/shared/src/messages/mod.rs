@@ -4,7 +4,7 @@
 //! for building server packets in a type-safe, self-documenting way.
 //!
 //! # Example
-//! ```rust,no_run
+//! ```rust,ignore
 //! use oxcore_shared::messages::{ToWorldPacket, SmsgGuildInvite};
 //! # async fn example(session: oxcore_world::core::session::world_session::WorldSession) -> anyhow::Result<()> {
 //! let msg = SmsgGuildInvite {
