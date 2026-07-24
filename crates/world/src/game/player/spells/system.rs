@@ -695,6 +695,16 @@ impl SpellSystem {
             return Ok(SpellCastResult::Failed(validate_result));
         }
 
+        if !crate::game::player::spells::targets::required_script_targets_resolve(
+            spell_id,
+            &cast_targets,
+            caster_guid,
+            world,
+        ) {
+            self.send_cast_failure(caster_guid, spell_id, SpellCastError::InvalidTarget, world)?;
+            return Ok(SpellCastResult::Failed(SpellCastError::InvalidTarget));
+        }
+
         // Step 2: Calculate cast time (modified by haste, talents, etc.)
         let cast_time_ms = self.calculate_cast_time(caster_guid, spell_id, world)?;
         tracing::debug!(
@@ -760,7 +770,14 @@ impl SpellSystem {
             }
             on_spell_launch(caster_guid, spell_id, &cast_targets, world);
             let resolved_targets = self
-                .execute_spell(caster_guid, cast_item_guid, spell_id, &cast_targets, is_triggered, world)
+                .execute_spell(
+                    caster_guid,
+                    cast_item_guid,
+                    spell_id,
+                    &cast_targets,
+                    is_triggered,
+                    world,
+                )
                 .await?;
             self.finish_cast(
                 caster_guid,
@@ -1214,10 +1231,10 @@ impl SpellSystem {
 
                         on_spell_launch(caster_guid, spell_id, &cast_targets, world);
                         let resolved_targets = self
-                        .execute_spell(
-                            caster_guid,
-                            cast_item_guid,
-                            spell_id,
+                            .execute_spell(
+                                caster_guid,
+                                cast_item_guid,
+                                spell_id,
                                 &cast_targets,
                                 is_triggered,
                                 world,
@@ -1496,7 +1513,14 @@ impl SpellSystem {
                     };
                     on_spell_launch(player_guid, spell_id, &cast_targets, world);
                     let resolved_targets = self
-                        .execute_spell(player_guid, None, spell_id, &cast_targets, is_triggered, world)
+                        .execute_spell(
+                            player_guid,
+                            None,
+                            spell_id,
+                            &cast_targets,
+                            is_triggered,
+                            world,
+                        )
                         .await?;
                     self.finish_cast(
                         player_guid,
@@ -1617,8 +1641,15 @@ impl SpellSystem {
         }
 
         // Immediate execution
-        self.execute_spell_immediate(caster_guid, cast_item_guid, spell_id, cast_targets, is_triggered, world)
-            .await?;
+        self.execute_spell_immediate(
+            caster_guid,
+            cast_item_guid,
+            spell_id,
+            cast_targets,
+            is_triggered,
+            world,
+        )
+        .await?;
         Ok(None)
     }
 

@@ -329,6 +329,45 @@ pub fn resolve_spell_targets(
     caster_guid: ObjectGuid,
     world: &World,
 ) -> ResolvedTargets {
+    resolve_spell_targets_inner(spell_id, cast_targets, caster_guid, world, true)
+}
+
+/// Read-only target resolution for cast validation. It deliberately avoids
+/// consuming spell-magnet charges before a cast is accepted.
+pub fn required_script_targets_resolve(
+    spell_id: u32,
+    cast_targets: &SpellCastTargets,
+    caster_guid: ObjectGuid,
+    world: &World,
+) -> bool {
+    let resolved = resolve_spell_targets_inner(spell_id, cast_targets, caster_guid, world, false);
+    let Some(spell) = world.managers.spell_mgr.get(spell_id) else {
+        return false;
+    };
+    (0..3).all(|effect_idx| {
+        if spell.effect[effect_idx] == 0 {
+            return true;
+        }
+        let requires_target = matches!(
+            ImplicitTarget::from_u32(spell.effect_implicit_target_a[effect_idx]),
+            ImplicitTarget::ScriptNearCaster | ImplicitTarget::LocationScriptNearCaster
+        ) || matches!(
+            ImplicitTarget::from_u32(spell.effect_implicit_target_b[effect_idx]),
+            ImplicitTarget::ScriptNearCaster | ImplicitTarget::LocationScriptNearCaster
+        );
+        !requires_target
+            || !resolved.effect_targets[effect_idx].is_empty()
+            || resolved.destination.is_some()
+    })
+}
+
+fn resolve_spell_targets_inner(
+    spell_id: u32,
+    cast_targets: &SpellCastTargets,
+    caster_guid: ObjectGuid,
+    world: &World,
+    apply_magnets: bool,
+) -> ResolvedTargets {
     let mut resolved = ResolvedTargets::default();
     let mut magnet_cache: HashMap<ObjectGuid, ObjectGuid> = HashMap::new();
     let mut effective_cast_targets = cast_targets.clone();
@@ -423,11 +462,13 @@ pub fn resolve_spell_targets(
         });
 
         // Apply spell magnet redirection once per unique victim for this spell.
-        for target in &mut targets {
-            let redirected = *magnet_cache
-                .entry(*target)
-                .or_insert_with(|| select_magnet_target(*target, &spell_entry, world));
-            *target = redirected;
+        if apply_magnets {
+            for target in &mut targets {
+                let redirected = *magnet_cache
+                    .entry(*target)
+                    .or_insert_with(|| select_magnet_target(*target, &spell_entry, world));
+                *target = redirected;
+            }
         }
 
         resolved.effect_targets[effect_idx] = targets;
@@ -2599,6 +2640,25 @@ mod tests {
             &world,
         );
         assert_eq!(resolved.effect_targets[0], vec![explicit]);
+    }
+
+    #[tokio::test]
+    async fn required_script_target_preflight_rejects_missing_candidate() {
+        let world = test_world();
+        let spell_id = 50009;
+        let caster = ObjectGuid::new_player(1);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(script_near_caster_spell(spell_id));
+        add_test_player(&world, caster, 0, 0);
+
+        assert!(!required_script_targets_resolve(
+            spell_id,
+            &SpellCastTargets::default(),
+            caster,
+            &world,
+        ));
     }
 
     #[tokio::test]

@@ -359,6 +359,12 @@ impl AuraSystem {
                 base_value,
                 world,
             );
+            if effect_index == 0 {
+                Box::pin(self.apply_holder_specific_boosts(
+                    target_guid, caster_guid, spell_id, world,
+                ))
+                .await;
+            }
 
             if aura_type_copy == effects::AURA_MOD_SHAPESHIFT {
                 Box::pin(self.apply_shapeshift_boosts(target_guid, misc_value as u8, world)).await;
@@ -545,6 +551,12 @@ impl AuraSystem {
                 aura.misc_value,
                 world,
             );
+            if effect_index == 0 {
+                Box::pin(self.remove_holder_specific_boosts(
+                    target_guid, aura.caster_guid, spell_id, world,
+                ))
+                .await;
+            }
 
             if aura.aura_type == effects::AURA_MOD_SHAPESHIFT {
                 self.remove_shapeshift_boosts(target_guid, aura.misc_value as u8, world)
@@ -714,6 +726,37 @@ impl AuraSystem {
         Ok(())
     }
 
+    /// Remove a spell's effects only if they were applied by `caster_guid`.
+    pub async fn remove_spell_auras_by_caster(
+        &self,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        caster_guid: ObjectGuid,
+        world: &World,
+    ) -> Result<()> {
+        let effect_indices: Vec<u8> = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                (0..3u8)
+                    .filter(|&index| {
+                        player
+                            .auras
+                            .container
+                            .get_aura(spell_id, index)
+                            .is_some_and(|aura| aura.caster_guid == caster_guid)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for effect_index in effect_indices {
+            self.remove_aura(target_guid, spell_id, effect_index, world)
+                .await?;
+        }
+        Ok(())
+    }
+
     /// Remove all non-passive auras (e.g., on death).
     pub async fn remove_all_auras(&self, target_guid: ObjectGuid, world: &World) -> Result<()> {
         let removed: Vec<(Aura, u8)> = world
@@ -855,6 +898,43 @@ impl AuraSystem {
             .managers
             .broadcast_mgr
             .send_msg_to_player(player_guid, packet);
+    }
+
+    // =========================================================================
+
+    async fn apply_holder_specific_boosts(
+        &self,
+        target_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        world: &World,
+    ) {
+        if spell_id == 2645 {
+            let _ = self.remove_spell_auras_by_caster(caster_guid, 546, caster_guid, world).await;
+        }
+        if spell_id == 19574 {
+            for trigger_spell_id in [24395, 24396, 24397, 26592] {
+                let _ = world.systems.spells.cast_spell(
+                    target_guid, trigger_spell_id, Some(target_guid), true, world,
+                ).await;
+            }
+        }
+    }
+
+    async fn remove_holder_specific_boosts(
+        &self,
+        target_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        world: &World,
+    ) {
+        if spell_id == 19574 {
+            for trigger_spell_id in [24395, 24396, 24397, 26592] {
+                let _ = self.remove_spell_auras_by_caster(
+                    target_guid, trigger_spell_id, caster_guid, world,
+                ).await;
+            }
+        }
     }
 
     // =========================================================================
