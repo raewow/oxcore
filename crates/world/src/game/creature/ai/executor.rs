@@ -1724,7 +1724,7 @@ mod tests {
             has_loot: false,
             ai_state: AIState::Idle,
             ai_state_data: crate::game::creature::ai::AIStateData::new(),
-            auras: Vec::new(),
+            auras: crate::game::player::auras::AuraContainer::new(),
             motion_master: crate::game::creature::movement::MotionMaster::new(),
             move_spline: crate::game::creature::movement::MoveSpline::default(),
             wander_distance: 0.0,

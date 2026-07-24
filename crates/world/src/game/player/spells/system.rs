@@ -4064,6 +4064,106 @@ mod tests {
         });
     }
 
+    fn launch_creature_template(entry: u32, faction: u32) -> crate::game::creature::CreatureTemplate {
+        crate::game::creature::CreatureTemplate {
+            entry,
+            name: format!("Creature{entry}"),
+            subname: None,
+            min_level: 10,
+            max_level: 10,
+            faction,
+            model_id_1: 1,
+            model_id_2: 0,
+            model_id_3: 0,
+            model_id_4: 0,
+            scale: 1.0,
+            npc_flags: 0,
+            unit_flags: 0,
+            static_flags1: 0,
+            flags_extra: 0,
+            creature_type: 1,
+            unit_class: 1,
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            damage_variance: 0.0,
+            attack_time: 2000,
+            rank: 0,
+            gossip_menu_id: 0,
+            vendor_id: 0,
+            trainer_id: 0,
+            trainer_type: 0,
+            spells: [0; 4],
+        }
+    }
+
+    fn add_launch_creature(
+        world: &World,
+        guid: ObjectGuid,
+        entry: u32,
+        faction: u32,
+        x: f32,
+    ) {
+        use crate::game::creature::Creature;
+        use oxcore_shared::protocol::Position;
+        world
+            .managers
+            .creature_mgr
+            .add_template(launch_creature_template(entry, faction));
+        world.managers.creature_mgr.add_creature_for_test(Creature::new(
+            guid,
+            entry,
+            1,
+            Position {
+                x,
+                y: 0.0,
+                z: 0.0,
+                o: 0.0,
+            },
+            1,
+            0,
+            &launch_creature_template(entry, faction),
+            1,
+            None,
+        ));
+    }
+
+    fn add_launch_gameobject(world: &World, guid: ObjectGuid, entry: u32) {
+        use crate::game::gameobject::{GameObject, GameObjectTemplate};
+        use oxcore_shared::protocol::Position;
+        let template = GameObjectTemplate {
+            entry,
+            go_type: crate::game::gameobject::GameObjectType::Chest as u32,
+            display_id: 1,
+            name: format!("GO{entry}"),
+            icon_name: String::new(),
+            cast_bar_caption: String::new(),
+            faction: 0,
+            flags: 0,
+            size: 1.0,
+            data: [0; 24],
+        };
+        world
+            .managers
+            .gameobject_mgr
+            .add_template_for_test(template.clone());
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(GameObject::new(
+                guid,
+                entry,
+                1,
+                Position::default(),
+                1,
+                &template,
+                [0.0; 4],
+                0,
+                100,
+            ));
+    }
+
     #[tokio::test]
     async fn all_targets_miss_uses_world_membership_for_caster() {
         let world = launch_test_world();
@@ -4131,6 +4231,96 @@ mod tests {
             "ACTIVE_THREAT cast must flag the caster in combat"
         );
         assert!(timer >= UNIT_PVP_COMBAT_TIMER);
+    }
+
+    #[tokio::test]
+    async fn on_spell_launch_open_lock_pulls_nearby_hostile_creatures() {
+        let world = launch_test_world();
+        let caster = ObjectGuid::new_player(1);
+        let go = ObjectGuid::new_gameobject(1000, 1);
+        let hostile = ObjectGuid::new_creature(14, 1); // faction 14 = Monster
+        let far_away = ObjectGuid::new_creature(14, 2);
+
+        add_launch_player(&world, caster, 0.0);
+        add_launch_gameobject(&world, go, 1000);
+        add_launch_creature(&world, hostile, 14, 14, 3.0); // within 10y aggro range
+        add_launch_creature(&world, far_away, 14, 14, 50.0); // outside aggro range
+
+        let mut spell = charge_spell(40400, [SPELL_EFFECT_OPEN_LOCK, 0, 0]);
+        spell.attributes_ex2 = SPELL_ATTR_EX2_ACTIVE_THREAT;
+        world.managers.spell_mgr.add_spell(spell);
+
+        let targets = SpellCastTargets {
+            gameobject_target_guid: Some(go),
+            ..Default::default()
+        };
+        on_spell_launch(caster, 40400, &targets, &world);
+
+        assert!(
+            world.managers.creature_mgr.is_in_combat(hostile),
+            "nearby hostile creature must aggro when opener opens a lock GO"
+        );
+        assert!(
+            !world.managers.creature_mgr.is_in_combat(far_away),
+            "distant hostile creature must not aggro"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_spell_launch_creature_caster_issues_charge_movement() {
+        let world = launch_test_world();
+        let caster = ObjectGuid::new_creature(14, 1);
+        let target = ObjectGuid::new_player(1);
+
+        add_launch_creature(&world, caster, 14, 14, 0.0);
+        add_launch_player(&world, target, 30.0);
+        world
+            .managers
+            .spell_mgr
+            .add_spell(charge_spell(40500, [SPELL_EFFECT_CHARGE, 0, 0]));
+
+        let targets = SpellCastTargets {
+            unit_target_guid: Some(target),
+            ..Default::default()
+        };
+        on_spell_launch(caster, 40500, &targets, &world);
+
+        let active = world
+            .managers
+            .creature_mgr
+            .with_creature(caster, |c| {
+                c.motion_master.active_generator()
+            })
+            .unwrap();
+        assert_eq!(
+            active,
+            crate::game::creature::movement::MovementGeneratorType::Charge,
+            "creature caster must start charge movement"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_spell_launch_active_threat_creature_caster_enters_combat() {
+        let world = launch_test_world();
+        let caster = ObjectGuid::new_creature(14, 1);
+        let target = ObjectGuid::new_player(1);
+
+        add_launch_creature(&world, caster, 14, 14, 0.0);
+        add_launch_player(&world, target, 5.0);
+        let mut spell = charge_spell(40600, [2, 0, 0]);
+        spell.attributes_ex2 = SPELL_ATTR_EX2_ACTIVE_THREAT;
+        world.managers.spell_mgr.add_spell(spell);
+
+        let targets = SpellCastTargets {
+            unit_target_guid: Some(target),
+            ..Default::default()
+        };
+        on_spell_launch(caster, 40600, &targets, &world);
+
+        assert!(
+            world.managers.creature_mgr.is_in_combat(caster),
+            "ACTIVE_THREAT cast must flag a creature caster in combat"
+        );
     }
 
     // -- Spell::GetCurrentContainer: get_spell_slot -> current_container -----------------

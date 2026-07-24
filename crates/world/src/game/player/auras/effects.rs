@@ -40,6 +40,7 @@ pub const AURA_MOD_DECREASE_SPEED: u32 = 33; // Movement speed decrease (snares)
 pub const AURA_MOD_INCREASE_MOUNTED_SPEED: u32 = 32; // Mounted speed
 pub const AURA_MOD_MELEE_HASTE: u32 = 138; // Melee haste
 pub const AURA_MOD_RANGED_HASTE: u32 = 140; // Ranged haste
+pub const AURA_MOD_RANGED_AMMO_HASTE: u32 = 141; // Ranged haste for ammo-requiring weapons
 
 // --- Observation/Regen Effects (Food/Drink) ---
 // These auras restore a percentage of max health/mana per tick.
@@ -245,6 +246,7 @@ pub fn is_stat_modifier_aura(aura_type: u32) -> bool {
             | AURA_MOD_INCREASE_ENERGY_PERCENT
             | AURA_MOD_MELEE_HASTE
             | AURA_MOD_RANGED_HASTE
+            | AURA_MOD_RANGED_AMMO_HASTE
             | AURA_MOD_POWER_REGEN
             | AURA_MOD_REGEN
             | AURA_MOD_HEALTH_REGEN_PERCENT

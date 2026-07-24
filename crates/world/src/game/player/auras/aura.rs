@@ -81,6 +81,12 @@ pub struct Aura {
 
     /// Aura flags
     pub flags: AuraFlags,
+
+    /// Whether this effect changed target state when it was applied.
+    ///
+    /// `AURA_MOD_RANGED_AMMO_HASTE` remains stored when no ammo-requiring ranged weapon is
+    /// equipped, but its removal must not adjust attack time.
+    pub is_applied: bool,
 }
 
 /// Aura classification flags
@@ -173,6 +179,7 @@ impl Aura {
             aura_type,
             misc_value,
             flags,
+            is_applied: true,
         }
     }
 

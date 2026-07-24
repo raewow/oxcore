@@ -1006,28 +1006,50 @@ impl AuraSystem {
     async fn modify_attack_haste_aura(
         &self,
         player_guid: ObjectGuid,
+        spell_id: u32,
+        effect_index: u8,
         aura_type: u32,
         amount: i32,
         apply: bool,
+        effect_was_applied: bool,
         world: &World,
     ) -> Result<bool> {
         if !matches!(
             aura_type,
-            effects::AURA_MOD_MELEE_HASTE | effects::AURA_MOD_RANGED_HASTE
+            effects::AURA_MOD_MELEE_HASTE
+                | effects::AURA_MOD_RANGED_HASTE
+                | effects::AURA_MOD_RANGED_AMMO_HASTE
         ) {
             return Ok(false);
         }
+
+        let ammo_haste_can_apply = aura_type != effects::AURA_MOD_RANGED_AMMO_HASTE
+            || AuraSystem::ranged_weapon_requires_ammo(player_guid, world);
 
         Ok(world
             .systems
             .player
             .manager()
             .with_player_mut(player_guid, |player| {
+                if aura_type == effects::AURA_MOD_RANGED_AMMO_HASTE {
+                    if apply && !ammo_haste_can_apply {
+                        if let Some(aura) = player.auras.container.get_aura_mut(spell_id, effect_index)
+                        {
+                            aura.is_applied = false;
+                        }
+                        return true;
+                    }
+                    if !apply && !effect_was_applied {
+                        return true;
+                    }
+                }
+
                 let total_haste = player
                     .auras
                     .container
                     .get_auras_by_type(aura_type)
                     .iter()
+                    .filter(|aura| aura.is_applied)
                     .fold(0i32, |total, aura| {
                         total.saturating_add(aura.current_value())
                     });
@@ -1089,7 +1111,16 @@ impl AuraSystem {
 
         if let Some((aura_type, value, misc_value)) = modifier_info {
             if self
-                .modify_attack_haste_aura(target_guid, aura_type, value, true, world)
+                .modify_attack_haste_aura(
+                    target_guid,
+                    spell_id,
+                    effect_index,
+                    aura_type,
+                    value,
+                    true,
+                    true,
+                    world,
+                )
                 .await?
             {
                 return Ok(());
@@ -1166,9 +1197,12 @@ impl AuraSystem {
         if self
             .modify_attack_haste_aura(
                 target_guid,
+                aura.spell_id,
+                aura.effect_index,
                 aura.aura_type,
                 aura.current_value(),
                 false,
+                aura.is_applied,
                 world,
             )
             .await?
@@ -3644,6 +3678,31 @@ fn apply_primary_stat_modifier(
     }
 }
 
+fn ranged_weapon_requires_ammo(player_guid: ObjectGuid, world: &World) -> bool {
+    const EQUIPMENT_SLOT_RANGED: u8 = 17;
+    use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
+
+    world
+        .systems
+        .inventory
+        .cache()
+        .get_item_at(player_guid, INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_RANGED)
+        .and_then(|weapon_guid| {
+            world
+                .systems
+                .inventory
+                .cache()
+                .get_item(player_guid, weapon_guid)
+        })
+        .and_then(|item| world.managers.item_mgr.get_template(item.read().entry))
+        .map(|template| template.ammo_type)
+        .is_some_and(ranged_ammo_haste_applies)
+}
+
+fn ranged_ammo_haste_applies(ammo_type: u8) -> bool {
+    ammo_type != 0
+}
+
 /// Recalculate an attack speed after the combined melee-haste percentage changes.
 ///
 /// `current_speed_ms` already includes `previous_haste`, so reconstruct the base speed before
@@ -4012,6 +4071,12 @@ mod tests {
         let hasted = recalculate_attack_haste_speed(2_800, 0, 40);
         assert_eq!(hasted, 2_000);
         assert_eq!(recalculate_attack_haste_speed(hasted, 40, 0), 2_800);
+    }
+
+    #[test]
+    fn ranged_ammo_haste_requires_an_ammo_weapon() {
+        assert!(!ranged_ammo_haste_applies(0));
+        assert!(ranged_ammo_haste_applies(1));
     }
 
     // ── apply_primary_stat_aura_modifier (Aura::HandleAuraModStat family) ─────

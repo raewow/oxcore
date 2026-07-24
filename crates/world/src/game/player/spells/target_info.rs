@@ -386,8 +386,14 @@ fn remove_aura_type_from_target(target_guid: ObjectGuid, aura_type: u32, world: 
             .with_player_mut(target_guid, |p| {
                 p.auras.container.remove_auras_by_type(aura_type);
             });
+    } else if target_guid.is_creature() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(target_guid, |creature| {
+                creature.auras.remove_auras_by_type(aura_type);
+            });
     }
-    // Creature aura removal by type is not yet exposed.
 }
 
 /// Enter combat for a landed hit (MaNGOS: `unit->AttackedBy(pRealUnitCaster)`,

@@ -306,7 +306,17 @@ fn capture_snapshot(world: &World, guid: ObjectGuid) -> Option<CreatureSnapshot>
                 max_mana: creature.max_mana,
                 level: creature.level,
                 unit_class: 0, // TODO: cache unit_class on Creature from template
-                auras: creature.auras.clone(),
+                auras: creature
+                    .auras
+                    .all_auras()
+                    .map(|aura| {
+                        (
+                            aura.spell_id,
+                            aura.remaining_duration_ms().unwrap_or(0),
+                            aura.stack_count,
+                        )
+                    })
+                    .collect(),
             }
         })
 }

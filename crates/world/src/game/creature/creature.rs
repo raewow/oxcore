@@ -8,6 +8,7 @@ use super::death::DeathState;
 use super::manager::{ClassLevelStats, CreatureTemplate};
 use super::movement::{MotionMaster, MoveSpline};
 use crate::core::common::movement::MovementInfo;
+use crate::game::player::auras::{Aura, AuraContainer};
 use oxcore_shared::protocol::{ObjectGuid, Position};
 use rand::Rng;
 
@@ -133,10 +134,12 @@ pub struct Creature {
     /// AI state data (cooldowns, timers, etc.)
     pub ai_state_data: AIStateData,
 
-    // ========== Auras (simplified for AI scripting) ==========
-    /// Active auras on this creature: (spell_id, remaining_ms, stacks)
-    /// 0 remaining = permanent. Updated by aura apply/remove calls.
-    pub auras: Vec<(u32, u32, u8)>,
+    // ========== Auras ==========
+    /// Active aura effects on this creature.
+    ///
+    /// Creatures do not use player-visible slots, but they share the same storage
+    /// so spell logic can retain caster, effect, duration, stack, and type data.
+    pub auras: AuraContainer,
 
     // ========== Movement ==========
     /// MotionMaster for movement generator stack
@@ -256,7 +259,7 @@ impl Creature {
             ai_state_data: AIStateData::new(),
 
             // Movement
-            auras: Vec::new(),
+            auras: AuraContainer::new(),
             motion_master: MotionMaster::new(),
             move_spline: MoveSpline::default(),
             wander_distance: 0.0,
@@ -513,39 +516,26 @@ impl Creature {
 
     /// Check if creature has a specific aura by spell ID
     pub fn has_aura(&self, spell_id: u32) -> bool {
-        self.auras.iter().any(|(id, _, _)| *id == spell_id)
+        self.auras.has_aura(spell_id)
     }
 
-    /// Add an aura to the creature (simplified tracking for AI scripting)
-    pub fn add_aura(&mut self, spell_id: u32, duration_ms: u32, stacks: u8) {
-        // Update existing aura if present
-        if let Some(existing) = self.auras.iter_mut().find(|(id, _, _)| *id == spell_id) {
-            existing.1 = duration_ms;
-            existing.2 = stacks;
-        } else {
-            self.auras.push((spell_id, duration_ms, stacks));
-        }
+    /// Add or refresh a creature aura effect.
+    pub fn add_aura(&mut self, aura: Aura) -> Option<u8> {
+        self.auras.add_aura(aura)
     }
 
-    /// Remove an aura by spell ID
-    pub fn remove_aura(&mut self, spell_id: u32) {
-        self.auras.retain(|(id, _, _)| *id != spell_id);
+    /// Remove all effects belonging to a spell.
+    pub fn remove_aura(&mut self, spell_id: u32) -> Vec<(Aura, u8)> {
+        self.auras.remove_spell_auras(spell_id)
     }
 
-    /// Update aura durations, removing expired ones
-    pub fn update_auras(&mut self, diff_ms: u32) {
-        for aura in &mut self.auras {
-            if aura.1 > 0 {
-                aura.1 = aura.1.saturating_sub(diff_ms);
-            }
-        }
-        // Remove expired non-permanent auras (duration was >0 and is now 0)
-        // Permanent auras have duration 0 from the start (tracked via initial value)
-        self.auras.retain(|(_, dur, _)| *dur > 0);
+    /// Advance aura durations and return expired effect keys for AuraSystem cleanup.
+    pub fn update_auras(&mut self, diff_ms: u32) -> Vec<(u32, u8)> {
+        self.auras.tick_durations(diff_ms)
     }
 
     /// Clear all auras (e.g., on death)
     pub fn clear_auras(&mut self) {
-        self.auras.clear();
+        self.auras.remove_all();
     }
 }
