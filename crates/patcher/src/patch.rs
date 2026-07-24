@@ -7,7 +7,7 @@
 use anyhow::{bail, Context, Result};
 
 use crate::patterns;
-use crate::scan::find_unique;
+use crate::scan::{find_all, find_unique, find_unique_outside};
 
 /// A single planned modification, resolved but not yet applied.
 #[derive(Debug, Clone)]
@@ -58,7 +58,10 @@ pub fn portal(data: &[u8], suffix: &str) -> Result<Patch> {
         bail!("portal suffix must start with a dot, got '{suffix}'");
     }
 
-    let offset = find_unique(data, patterns::PORTAL, "portal")?;
+    // The portal string also appears many times inside the embedded cert bundle (as
+    // `us.actual.battle.net` etc.). That whole region is replaced by the cert-bundle patch, so
+    // exclude it and patch only the standalone portal template.
+    let offset = find_unique_outside(data, patterns::PORTAL, "portal", cert_bundle_region(data))?;
     let bytes = replace_padded(offset, suffix.as_bytes(), patterns::PORTAL.len())?;
 
     Ok(Patch {
@@ -137,27 +140,34 @@ pub fn connect_to_modulus(data: &[u8], modulus: &[u8]) -> Result<Patch> {
 /// virtually always fits; if it somehow does not, this errors rather than overrun into
 /// neighbouring data.
 pub fn cert_bundle(data: &[u8], bundle_blob: &[u8]) -> Result<Patch> {
-    let offset = find_unique(data, patterns::CERT_BUNDLE, "cert bundle")?;
+    // find_unique gives the "already patched / unsupported" diagnostics for a missing marker.
+    find_unique(data, patterns::CERT_BUNDLE, "cert bundle")?;
 
-    let json_len = json_object_len(&data[offset..]).context(
+    let region = cert_bundle_region(data).context(
         "could not find the end of the embedded certificate bundle JSON — the file may be \
          compressed or the format has changed",
     )?;
 
-    // The original region is the JSON, the 4-byte "NGIS" magic, then the 256-byte signature; that
-    // whole span is ours to overwrite.
-    let region_len = json_len + 4 + patterns::MODULUS_LEN;
-    if offset + region_len > data.len() {
-        bail!("certificate bundle at 0x{offset:08x} runs past the end of the file");
-    }
-
-    let bytes = replace_padded(offset, bundle_blob, region_len)?;
+    let bytes = replace_padded(region.start, bundle_blob, region.len())?;
 
     Ok(Patch {
         name: "cert bundle",
-        offset,
+        offset: region.start,
         bytes,
     })
+}
+
+/// The embedded cert-bundle region `[start, end)` — the JSON, the 4-byte `NGIS` magic, then the
+/// 256-byte signature — or `None` if this build ships no embedded bundle. The whole span is what a
+/// cert-bundle patch overwrites, and what the portal patch excludes from its search.
+fn cert_bundle_region(data: &[u8]) -> Option<std::ops::Range<usize>> {
+    let offset = find_all(data, patterns::CERT_BUNDLE).into_iter().next()?;
+    let json_len = json_object_len(&data[offset..])?;
+    let end = offset.checked_add(json_len + 4 + patterns::MODULUS_LEN)?;
+    if end > data.len() {
+        return None;
+    }
+    Some(offset..end)
 }
 
 /// Length of the JSON object beginning at `data[0]`, found by brace matching.
@@ -223,9 +233,7 @@ mod tests {
         data.extend_from_slice(&[0xCC; 64]);
         // Connect-to modulus: its 8-byte prefix then the remaining 248 bytes.
         data.extend_from_slice(patterns::CONNECT_TO_MODULUS);
-        data.extend_from_slice(
-            &[0xCD; patterns::MODULUS_LEN - patterns::CONNECT_TO_MODULUS.len()],
-        );
+        data.extend_from_slice(&[0xCD; patterns::MODULUS_LEN - patterns::CONNECT_TO_MODULUS.len()]);
         data.extend_from_slice(&[0xCC; 64]);
         // Embedded certificate bundle: JSON, the "NGIS" magic, then its 256-byte signature.
         data.extend_from_slice(original_bundle_json());
@@ -242,7 +250,8 @@ mod tests {
 
     /// A minimal signed bundle blob: small JSON + a 256-byte signature.
     fn small_bundle_blob() -> Vec<u8> {
-        let mut blob = br#"{"Created":1,"Certificates":[],"PublicKeys":[],"SigningCertificates":[]}"#.to_vec();
+        let mut blob =
+            br#"{"Created":1,"Certificates":[],"PublicKeys":[],"SigningCertificates":[]}"#.to_vec();
         blob.extend_from_slice(&[0x42; patterns::MODULUS_LEN]);
         blob
     }
@@ -269,6 +278,25 @@ mod tests {
     fn portal_patch_requires_a_leading_dot() {
         let data = fixture();
         assert!(portal(&data, "localhost").is_err());
+    }
+
+    #[test]
+    fn portal_ignores_occurrences_inside_the_cert_bundle() {
+        // The portal string appears once standalone and again inside the bundle JSON (as
+        // `us.actual.battle.net`), exactly as in a real 1.14.2 client.
+        let mut data = vec![0xCC; 32];
+        data.extend_from_slice(patterns::PORTAL); // standalone at offset 32
+        data.extend_from_slice(&[0xCC; 16]);
+        data.extend_from_slice(
+            br#"{"Created":1,"Certificates":[{"Uri":"us.actual.battle.net","ShaHashPublicKeyInfo":"AA"}]}"#,
+        );
+        data.extend_from_slice(b"NGIS");
+        data.extend_from_slice(&[0x99; patterns::MODULUS_LEN]);
+
+        // Two matches total, but only the standalone one is outside the bundle region.
+        assert_eq!(find_all(&data, patterns::PORTAL).len(), 2);
+        let patch = portal(&data, ".localhost").unwrap();
+        assert_eq!(patch.offset, 32);
     }
 
     #[test]
@@ -327,7 +355,9 @@ mod tests {
 
         assert_eq!(data.len(), original_len);
         assert_eq!(&data[64..74], b".localhost");
-        assert!(data[74..64 + patterns::PORTAL.len()].iter().all(|&b| b == 0));
+        assert!(data[74..64 + patterns::PORTAL.len()]
+            .iter()
+            .all(|&b| b == 0));
 
         let mod_offset = 64 + patterns::PORTAL.len() + 64;
         assert!(data[mod_offset..mod_offset + patterns::MODULUS_LEN]

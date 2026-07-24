@@ -97,8 +97,9 @@ fn main() -> Result<()> {
     // The connect-to modulus is optional: it is only needed to reach the world server, not for
     // the bnet login flow, so a login-only test can leave it off.
     if let Some(path) = &args.connect_to_modulus {
-        let modulus = std::fs::read(path)
-            .with_context(|| format!("failed to read connect-to modulus from {}", path.display()))?;
+        let modulus = std::fs::read(path).with_context(|| {
+            format!("failed to read connect-to modulus from {}", path.display())
+        })?;
         patches.push(patch::connect_to_modulus(&data, &modulus)?);
     }
 

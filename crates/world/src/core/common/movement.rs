@@ -320,7 +320,10 @@ mod tests {
     #[test]
     fn leaving_a_transport_clears_the_guid_and_offset() {
         let mut info = MovementInfo::new();
-        info.set_transport_data(ObjectGuid::new_gameobject(176231, 1), Position::new(1.0, 2.0, 3.0, 0.5));
+        info.set_transport_data(
+            ObjectGuid::new_gameobject(176231, 1),
+            Position::new(1.0, 2.0, 3.0, 0.5),
+        );
 
         info.clear_transport_data();
 

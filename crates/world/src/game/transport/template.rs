@@ -13,8 +13,8 @@ use std::collections::{BTreeSet, HashMap};
 use crate::game::creature::movement::spline_base::SplineBase;
 
 use super::schedule::KeyFrame;
-use super::waypoints::{generate_waypoints, TaxiPathNode, TransportPath};
 use super::schedule::ScheduleProfile;
+use super::waypoints::{generate_waypoints, TaxiPathNode, TransportPath};
 
 /// One transport's built path and motion constants (`TransportTemplate`).
 #[derive(Debug, Clone)]
@@ -104,10 +104,16 @@ impl TransportTemplateStore {
     ///
     /// Returns whether a template was produced; a path that fails to generate is skipped,
     /// mirroring the C++ `m_transportTemplates.erase(entry)`.
-    pub fn load_template(&mut self, entry: u32, nodes: &[TaxiPathNode], profile: &ScheduleProfile) -> bool {
+    pub fn load_template(
+        &mut self,
+        entry: u32,
+        nodes: &[TaxiPathNode],
+        profile: &ScheduleProfile,
+    ) -> bool {
         match generate_waypoints(nodes, profile) {
             Some(path) => {
-                self.templates.insert(entry, TransportTemplate::from_path(entry, path));
+                self.templates
+                    .insert(entry, TransportTemplate::from_path(entry, path));
                 true
             }
             None => false,
@@ -146,11 +152,21 @@ mod tests {
     use super::*;
 
     fn profile() -> ScheduleProfile {
-        ScheduleProfile { speed: 10.0, accel: 5.0 }
+        ScheduleProfile {
+            speed: 10.0,
+            accel: 5.0,
+        }
     }
 
     fn node(map_id: u32, x: f32) -> TaxiPathNode {
-        TaxiPathNode { map_id, x, y: 0.0, z: 0.0, action_flag: 0, delay: 0 }
+        TaxiPathNode {
+            map_id,
+            x,
+            y: 0.0,
+            z: 0.0,
+            action_flag: 0,
+            delay: 0,
+        }
     }
 
     /// A five-node straight path on the given map.

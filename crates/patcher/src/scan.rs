@@ -22,7 +22,24 @@ pub fn find_all(haystack: &[u8], pattern: &[u8]) -> Vec<usize> {
 
 /// The single offset at which `pattern` occurs, or an error naming the problem.
 pub fn find_unique(haystack: &[u8], pattern: &[u8], name: &str) -> Result<usize> {
-    let matches = find_all(haystack, pattern);
+    find_unique_outside(haystack, pattern, name, None)
+}
+
+/// Like [`find_unique`], but ignoring any match that starts within `exclude`.
+///
+/// Used for the portal string, which appears once as a standalone template *and* many times inside
+/// the embedded cert bundle (as `us.actual.battle.net` etc.). The bundle region is replaced
+/// wholesale by its own patch, so excluding it leaves the single standalone occurrence.
+pub fn find_unique_outside(
+    haystack: &[u8],
+    pattern: &[u8],
+    name: &str,
+    exclude: Option<std::ops::Range<usize>>,
+) -> Result<usize> {
+    let matches: Vec<usize> = find_all(haystack, pattern)
+        .into_iter()
+        .filter(|&off| exclude.as_ref().is_none_or(|r| !r.contains(&off)))
+        .collect();
 
     match matches.len() {
         1 => Ok(matches[0]),

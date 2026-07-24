@@ -1,7 +1,7 @@
 pub mod common;
 pub mod config;
-pub mod crypto;
 pub mod console;
+pub mod crypto;
 pub mod database;
 pub mod game;
 pub mod messages;

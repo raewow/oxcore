@@ -197,7 +197,13 @@ mod tests {
             &full[..24]
         ));
         // A wrong-length or empty digest is rejected.
-        assert!(!verify_digest(&session_key(), &SEED, &LOCAL_CHALLENGE, &SERVER_CHALLENGE, &[]));
+        assert!(!verify_digest(
+            &session_key(),
+            &SEED,
+            &LOCAL_CHALLENGE,
+            &SERVER_CHALLENGE,
+            &[]
+        ));
     }
 
     #[test]

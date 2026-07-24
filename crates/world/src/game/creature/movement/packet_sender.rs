@@ -250,8 +250,14 @@ mod tests {
 
     #[test]
     fn base_move_speeds_match_the_client_defaults() {
-        assert_eq!(MovementPacketSender::base_move_speed(MoveType::Walk), Some(2.5));
-        assert_eq!(MovementPacketSender::base_move_speed(MoveType::Run), Some(7.0));
+        assert_eq!(
+            MovementPacketSender::base_move_speed(MoveType::Walk),
+            Some(2.5)
+        );
+        assert_eq!(
+            MovementPacketSender::base_move_speed(MoveType::Run),
+            Some(7.0)
+        );
         assert_eq!(
             MovementPacketSender::base_move_speed(MoveType::RunBack),
             Some(4.5)
@@ -268,7 +274,10 @@ mod tests {
             MovementPacketSender::base_move_speed(MoveType::TurnRate),
             Some(3.141594)
         );
-        assert_eq!(MovementPacketSender::base_move_speed(MoveType::Flight), None);
+        assert_eq!(
+            MovementPacketSender::base_move_speed(MoveType::Flight),
+            None
+        );
         assert_eq!(
             MovementPacketSender::base_move_speed(MoveType::FlightBack),
             None

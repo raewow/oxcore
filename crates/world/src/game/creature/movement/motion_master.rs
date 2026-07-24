@@ -175,10 +175,7 @@ impl MotionMaster {
             Some(MovementGeneratorType::Waypoint) => self
                 .generators
                 .get_mut(&MovementGeneratorType::Waypoint)
-                .and_then(|gen| {
-                    gen.as_any_mut()
-                        .downcast_mut::<WaypointMovementGenerator>()
-                })
+                .and_then(|gen| gen.as_any_mut().downcast_mut::<WaypointMovementGenerator>())
                 .map(|waypoint| {
                     waypoint.add_pause_time(pause_time_ms);
                     true
@@ -744,9 +741,7 @@ impl MotionMaster {
 
     /// Taxi flight is player-only; creatures have no flight path generator.
     pub fn move_taxi_flight(&mut self, path: u32, pathnode: u32) {
-        tracing::error!(
-            "[MOTION] creature attempted taxi flight (path {path} node {pathnode})"
-        );
+        tracing::error!("[MOTION] creature attempted taxi flight (path {path} node {pathnode})");
     }
 
     /// Jump movement does not exist in 1.12 - the C++ body is commented out for this core.
@@ -1346,13 +1341,7 @@ mod tests {
         let guid = creature();
 
         motion_master.random_wander(Position::default(), 5.0, guid, Position::default(), 2.5);
-        motion_master.chase(
-            ObjectGuid::from_raw(2),
-            guid,
-            Position::default(),
-            1.0,
-            7.0,
-        );
+        motion_master.chase(ObjectGuid::from_raw(2), guid, Position::default(), 1.0, 7.0);
 
         motion_master
     }
@@ -1603,7 +1592,15 @@ mod tests {
         let guid = creature();
         motion_master.move_distract(guid, 3_000);
 
-        motion_master.move_point(7, Position::default(), 0, 7.0, 0.0, guid, Position::default());
+        motion_master.move_point(
+            7,
+            Position::default(),
+            0,
+            7.0,
+            0.0,
+            guid,
+            Position::default(),
+        );
 
         assert_eq!(
             motion_master.get_used_movement_generators_list(),
@@ -1701,7 +1698,10 @@ mod tests {
 
         assert_eq!(
             motion_master.get_used_movement_generators_list(),
-            vec![MovementGeneratorType::Waypoint, MovementGeneratorType::Chase]
+            vec![
+                MovementGeneratorType::Waypoint,
+                MovementGeneratorType::Chase
+            ]
         );
         assert_eq!(
             motion_master.get_current_movement_generator_type(),

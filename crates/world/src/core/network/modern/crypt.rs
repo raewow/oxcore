@@ -46,8 +46,7 @@ impl WorldCrypt {
     }
 
     fn with_roles(key: &[u8; 16], out_tag: u32, in_tag: u32) -> Self {
-        let cipher = Aes128Gcm12::new_from_slice(key)
-            .expect("AES-128 key is always 16 bytes here");
+        let cipher = Aes128Gcm12::new_from_slice(key).expect("AES-128 key is always 16 bytes here");
         Self {
             cipher,
             out_tag,

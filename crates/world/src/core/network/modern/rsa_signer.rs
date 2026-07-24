@@ -88,7 +88,10 @@ mod tests {
         use rsa::pkcs1::EncodeRsaPrivateKey;
         let mut rng = rand::thread_rng();
         let key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
-        let pem = key.to_pkcs1_pem(rsa::pkcs1::LineEnding::LF).unwrap().to_string();
+        let pem = key
+            .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
+            .unwrap()
+            .to_string();
 
         let signer = RsaSigner::from_pkcs1_pem(&pem).unwrap();
         let sig = signer.sign(&[1u8; 32]);

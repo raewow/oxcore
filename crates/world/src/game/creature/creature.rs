@@ -100,6 +100,9 @@ pub struct Creature {
     /// Threat manager for sophisticated threat handling (Phase 5)
     pub threat_manager: ThreatManager,
 
+    /// Player currently charmed by this creature.
+    pub charm_guid: Option<ObjectGuid>,
+
     /// Attack timer for auto-attack (milliseconds until next attack)
     /// Counts down each update, when reaches 0 → attack ready
     /// Reset to base_attack_time after each attack
@@ -234,6 +237,7 @@ impl Creature {
             // Combat
             combat: CombatState::new(),
             threat_manager: ThreatManager::new(guid),
+            charm_guid: None,
             attack_timer: 0,
             base_attack_time: template.attack_time,
 

@@ -106,7 +106,9 @@ fn combine(vertices: &[Vec3], tvec: &[f32; 4], coeffs: &[[f32; 4]; 4]) -> Vec3 {
     let mut result = Vec3::default();
 
     for (column, vertex) in vertices.iter().enumerate().take(4) {
-        let weight = (0..4).map(|row| tvec[row] * coeffs[row][column]).sum::<f32>();
+        let weight = (0..4)
+            .map(|row| tvec[row] * coeffs[row][column])
+            .sum::<f32>();
         result = result.add(vertex.scale(weight));
     }
 
@@ -479,9 +481,7 @@ impl Spline {
 
     /// Record cumulative lengths using the geometric segment lengths.
     pub fn init_lengths(&mut self) {
-        self.init_lengths_with(|spline, index| {
-            spline.base.seg_length(index).unwrap_or(0.0) as i32
-        });
+        self.init_lengths_with(|spline, index| spline.base.seg_length(index).unwrap_or(0.0) as i32);
     }
 
     /// Record cumulative lengths using a caller-supplied per-segment cost.
@@ -651,7 +651,10 @@ mod tests {
     fn linear_derivative_is_the_segment_vector_and_length_its_magnitude() {
         let spline = line();
 
-        assert_close(spline.evaluate_derivative(0, 0.7).unwrap(), v(10.0, 0.0, 0.0));
+        assert_close(
+            spline.evaluate_derivative(0, 0.7).unwrap(),
+            v(10.0, 0.0, 0.0),
+        );
         assert_eq!(spline.seg_length(0).unwrap(), 10.0);
         assert_eq!(spline.seg_length(1).unwrap(), 10.0);
     }

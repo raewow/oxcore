@@ -36,6 +36,16 @@ pub fn classify_frame(frame: &KeyFrame, path_progress: u32) -> FramePhase {
     }
 }
 
+/// Advance the keyframe cursor one step along the cyclic path (`ShipTransport::MoveToNextWayPoint`).
+///
+/// The path loops, so stepping off the last keyframe wraps back to the first.
+pub fn move_to_next_waypoint(cursor: usize, keyframe_count: usize) -> usize {
+    if keyframe_count == 0 {
+        return cursor;
+    }
+    (cursor + 1) % keyframe_count
+}
+
 /// The ship's keyframe cursor after advancing it for a path progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShipFrameState {
@@ -52,22 +62,42 @@ pub struct ShipFrameState {
 /// path loops - until it lands on the stop frame it is waiting at or the segment it is
 /// travelling. Bounded by the keyframe count so a progress value that matches no window (a
 /// malformed schedule) terminates instead of spinning.
-pub fn advance_to_current_frame(keyframes: &[KeyFrame], cursor: usize, path_progress: u32) -> ShipFrameState {
+pub fn advance_to_current_frame(
+    keyframes: &[KeyFrame],
+    cursor: usize,
+    path_progress: u32,
+) -> ShipFrameState {
     let n = keyframes.len();
     if n == 0 {
-        return ShipFrameState { cursor, moving: false };
+        return ShipFrameState {
+            cursor,
+            moving: false,
+        };
     }
 
     let mut cursor = cursor % n;
     // One extra step of slack so a cursor starting just past its frame can still wrap around.
     for _ in 0..=n {
         match classify_frame(&keyframes[cursor], path_progress) {
-            FramePhase::WaitingHere => return ShipFrameState { cursor, moving: false },
-            FramePhase::MovingHere => return ShipFrameState { cursor, moving: true },
-            FramePhase::PastThisFrame => cursor = (cursor + 1) % n,
+            FramePhase::WaitingHere => {
+                return ShipFrameState {
+                    cursor,
+                    moving: false,
+                }
+            }
+            FramePhase::MovingHere => {
+                return ShipFrameState {
+                    cursor,
+                    moving: true,
+                }
+            }
+            FramePhase::PastThisFrame => cursor = move_to_next_waypoint(cursor, n),
         }
     }
-    ShipFrameState { cursor, moving: true }
+    ShipFrameState {
+        cursor,
+        moving: true,
+    }
 }
 
 /// The ship's world position and facing at a moment it is moving, plus the keyframe cursor
@@ -115,7 +145,11 @@ pub fn ship_position(
     let direction = spline.evaluate_derivative(frame.index as usize, t)?;
     let orientation = direction.y.atan2(direction.x) + std::f32::consts::PI;
 
-    Some(ShipMotion { cursor: state.cursor, position, orientation })
+    Some(ShipMotion {
+        cursor: state.cursor,
+        position,
+        orientation,
+    })
 }
 
 #[cfg(test)]
@@ -125,7 +159,10 @@ mod tests {
     use super::*;
 
     fn profile() -> ScheduleProfile {
-        ScheduleProfile { speed: 10.0, accel: 5.0 }
+        ScheduleProfile {
+            speed: 10.0,
+            accel: 5.0,
+        }
     }
 
     /// A two-stop path: stop at frame 0, run out to frame 2, stop there, run back.
@@ -147,9 +184,15 @@ mod tests {
         let f0 = &kf[0];
         assert_eq!(classify_frame(f0, f0.arrive_time), FramePhase::WaitingHere);
         // Once past its departure it is being travelled (moving into the next segment).
-        assert_eq!(classify_frame(f0, f0.departure_time), FramePhase::MovingHere);
+        assert_eq!(
+            classify_frame(f0, f0.departure_time),
+            FramePhase::MovingHere
+        );
         // Far past its whole window it is behind us.
-        assert_eq!(classify_frame(f0, f0.next_arrive_time), FramePhase::PastThisFrame);
+        assert_eq!(
+            classify_frame(f0, f0.next_arrive_time),
+            FramePhase::PastThisFrame
+        );
     }
 
     #[test]
@@ -157,7 +200,13 @@ mod tests {
         let kf = scheduled_path();
         // During frame 0's dwell (it departs at 2000ms) the ship is stopped there.
         let state = advance_to_current_frame(&kf, 0, kf[0].arrive_time);
-        assert_eq!(state, ShipFrameState { cursor: 0, moving: false });
+        assert_eq!(
+            state,
+            ShipFrameState {
+                cursor: 0,
+                moving: false
+            }
+        );
     }
 
     #[test]
@@ -180,7 +229,13 @@ mod tests {
         // Starting the cursor on the last frame with progress back at the start wraps it
         // around to the first stop rather than spinning forever.
         let state = advance_to_current_frame(&kf, kf.len() - 1, kf[0].arrive_time);
-        assert_eq!(state, ShipFrameState { cursor: 0, moving: false });
+        assert_eq!(
+            state,
+            ShipFrameState {
+                cursor: 0,
+                moving: false
+            }
+        );
     }
 
     #[test]
@@ -189,13 +244,37 @@ mod tests {
         assert!(!state.moving);
     }
 
+    #[test]
+    fn the_waypoint_cursor_steps_and_wraps() {
+        // Four keyframes: stepping advances, and the last wraps back to the first.
+        assert_eq!(move_to_next_waypoint(0, 4), 1);
+        assert_eq!(move_to_next_waypoint(2, 4), 3);
+        assert_eq!(move_to_next_waypoint(3, 4), 0);
+        // An empty path has nowhere to step.
+        assert_eq!(move_to_next_waypoint(0, 0), 0);
+    }
+
     /// A generated straight-line path (7 nodes along +x, spaced 10 yards) and its motion
     /// profile, for driving the runtime position.
     fn straight_transport() -> (Vec<KeyFrame>, Vec<SplineBase>, MotionProfile) {
         let nodes: Vec<TaxiPathNode> = (0..7)
-            .map(|i| TaxiPathNode { map_id: 0, x: i as f32 * 10.0, y: 0.0, z: 0.0, action_flag: 0, delay: 0 })
+            .map(|i| TaxiPathNode {
+                map_id: 0,
+                x: i as f32 * 10.0,
+                y: 0.0,
+                z: 0.0,
+                action_flag: 0,
+                delay: 0,
+            })
             .collect();
-        let path = generate_waypoints(&nodes, &ScheduleProfile { speed: 10.0, accel: 5.0 }).unwrap();
+        let path = generate_waypoints(
+            &nodes,
+            &ScheduleProfile {
+                speed: 10.0,
+                accel: 5.0,
+            },
+        )
+        .unwrap();
         let profile = MotionProfile {
             speed: path.speed,
             accel: path.accel,
@@ -219,11 +298,23 @@ mod tests {
         // stay zero and x lies within the interior node span the keyframes cover.
         let mid = kf.last().unwrap().departure_time / 2;
         let motion = ship_position(&kf, &splines, &profile, 0, mid).expect("moving mid-path");
-        assert!(motion.position.y.abs() < 1e-2, "off the line: {:?}", motion.position);
+        assert!(
+            motion.position.y.abs() < 1e-2,
+            "off the line: {:?}",
+            motion.position
+        );
         assert!(motion.position.z.abs() < 1e-2);
-        assert!(motion.position.x > 5.0 && motion.position.x < 55.0, "x out of span: {}", motion.position.x);
+        assert!(
+            motion.position.x > 5.0 && motion.position.x < 55.0,
+            "x out of span: {}",
+            motion.position.x
+        );
         // Travelling +x, the facing is atan2(0, +) + PI = PI.
-        assert!((motion.orientation - std::f32::consts::PI).abs() < 1e-2, "got {}", motion.orientation);
+        assert!(
+            (motion.orientation - std::f32::consts::PI).abs() < 1e-2,
+            "got {}",
+            motion.orientation
+        );
     }
 
     #[test]
@@ -233,6 +324,11 @@ mod tests {
         // Earlier in the run the ship is further back along +x than later in the run.
         let early = ship_position(&kf, &splines, &profile, 0, period / 4).expect("moving");
         let late = ship_position(&kf, &splines, &profile, 0, period / 2).expect("moving");
-        assert!(late.position.x > early.position.x, "did not advance: {} -> {}", early.position.x, late.position.x);
+        assert!(
+            late.position.x > early.position.x,
+            "did not advance: {} -> {}",
+            early.position.x,
+            late.position.x
+        );
     }
 }

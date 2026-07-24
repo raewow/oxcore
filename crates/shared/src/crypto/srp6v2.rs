@@ -137,7 +137,9 @@ fn compute_x(srp_username: &str, password: &str, salt: &[u8], n: &BigUint) -> Bi
     let n_minus_1 = BigInt::from_biguint(Sign::Plus, n - 1u32);
     // Euclidean remainder: non-negative even when x went negative from the MSB fix.
     let reduced = ((&x % &n_minus_1) + &n_minus_1) % &n_minus_1;
-    reduced.to_biguint().expect("euclidean remainder is non-negative")
+    reduced
+        .to_biguint()
+        .expect("euclidean remainder is non-negative")
 }
 
 /// Salt and verifier stored for an account, both big-endian bytes.
@@ -374,10 +376,15 @@ mod tests {
     #[test]
     fn srp_username_is_uppercase_sha256_hex_of_uppercased_login() {
         // Case-insensitive in the login: two casings hash identically.
-        assert_eq!(srp_username("Player@Example.com"), srp_username("PLAYER@EXAMPLE.COM"));
+        assert_eq!(
+            srp_username("Player@Example.com"),
+            srp_username("PLAYER@EXAMPLE.COM")
+        );
         let u = srp_username("player");
         assert_eq!(u.len(), 64);
-        assert!(u.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_lowercase()));
+        assert!(u
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_lowercase()));
     }
 
     #[test]
@@ -407,8 +414,14 @@ mod tests {
         let verified = server
             .verify(&proof.public_a, &proof.client_m1)
             .expect("correct password verifies");
-        assert_eq!(verified.server_m2, proof.expected_m2, "M2 must match the client's");
-        assert_eq!(verified.session_key, proof.session_key, "both sides derive the same S");
+        assert_eq!(
+            verified.server_m2, proof.expected_m2,
+            "M2 must match the client's"
+        );
+        assert_eq!(
+            verified.session_key, proof.session_key,
+            "both sides derive the same S"
+        );
     }
 
     #[test]

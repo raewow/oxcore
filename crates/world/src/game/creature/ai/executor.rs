@@ -1713,6 +1713,7 @@ mod tests {
             in_world: true,
             combat: crate::game::creature::combat::CombatState::new(),
             threat_manager: crate::game::creature::combat::ThreatManager::new(guid),
+            charm_guid: None,
             attack_timer: 0,
             base_attack_time: 2000,
             regen_timer: 0,

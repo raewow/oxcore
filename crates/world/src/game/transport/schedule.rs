@@ -159,7 +159,13 @@ pub fn compute_schedule(profile: &ScheduleProfile, keyframes: &mut [KeyFrame]) -
     let speed = profile.speed;
     let accel_dist = profile.accel_dist();
     for k in keyframes.iter_mut() {
-        k.time_to = time_to(k.dist_since_stop, k.dist_until_stop, speed, accel, accel_dist);
+        k.time_to = time_to(
+            k.dist_since_stop,
+            k.dist_until_stop,
+            speed,
+            accel,
+            accel_dist,
+        );
     }
 
     // timeFrom is measured forward from the previous stop, so it needs the leg's total time.
@@ -207,7 +213,13 @@ fn find_stops(keyframes: &[KeyFrame]) -> (usize, usize) {
 /// Seconds to travel from a keyframe to the next stop, given how far it lies between the
 /// bracketing stops. Splits into whether the segment is too short to reach cruise speed and
 /// which side of it the keyframe is on.
-fn time_to(dist_since_stop: f32, dist_until_stop: f32, speed: f32, accel: f32, accel_dist: f32) -> f32 {
+fn time_to(
+    dist_since_stop: f32,
+    dist_until_stop: f32,
+    speed: f32,
+    accel: f32,
+    accel_dist: f32,
+) -> f32 {
     let total_dist = dist_since_stop + dist_until_stop;
     if total_dist < 2.0 * accel_dist {
         // Too short to reach full speed: accelerate then brake, no cruise.
@@ -268,7 +280,10 @@ mod tests {
 
     /// Cruise 10 yd/s, accel 5 yd/s^2, so accel_dist 10 yd over accel_time 2 s.
     fn profile() -> ScheduleProfile {
-        ScheduleProfile { speed: 10.0, accel: 5.0 }
+        ScheduleProfile {
+            speed: 10.0,
+            accel: 5.0,
+        }
     }
 
     /// A single-stop cyclic path: keyframe 0 is the stop, three pass-through nodes each

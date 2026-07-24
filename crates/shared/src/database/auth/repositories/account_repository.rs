@@ -59,10 +59,7 @@ impl AccountRepository {
     /// Resolve a Battle.net login ticket to its account, rejecting tickets that are unknown or
     /// past their stored expiry. Used by BGS `VerifyWebCredentials` to consume the ticket the
     /// client obtained from the REST web-auth flow.
-    pub async fn find_by_login_ticket(
-        &self,
-        ticket: &str,
-    ) -> Result<Option<BnetTicketAccount>> {
+    pub async fn find_by_login_ticket(&self, ticket: &str) -> Result<Option<BnetTicketAccount>> {
         let now = chrono::Utc::now().timestamp();
         let row: Option<(u32, String)> = sqlx::query_as(
             "SELECT `id`, `username` FROM `account` \

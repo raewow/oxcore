@@ -139,11 +139,38 @@ impl fmt::Display for MoveSplineFlags {
 /// Bits with no defined meaning keep their `Unknown<n>` label so the rendered string still
 /// accounts for every set bit, exactly as the C++ debug output does.
 const SPLINE_FLAG_NAMES: [&str; 32] = [
-    "Done", "Falling", "Unknown3", "Unknown4", "Unknown5", "Unknown6", "Unknown7", "Unknown8",
-    "Runmode", "Flying", "No_Spline", "Unknown12", "Unknown13", "Unknown14", "Unknown15",
-    "Unknown16", "Final_Point", "Final_Target", "Final_Angle", "Unknown19", "Cyclic",
-    "Enter_Cycle", "Frozen", "Unknown23", "Unknown24", "Unknown25", "Unknown26", "Unknown27",
-    "Unknown28", "Unknown29", "Unknown30", "Unknown31",
+    "Done",
+    "Falling",
+    "Unknown3",
+    "Unknown4",
+    "Unknown5",
+    "Unknown6",
+    "Unknown7",
+    "Unknown8",
+    "Runmode",
+    "Flying",
+    "No_Spline",
+    "Unknown12",
+    "Unknown13",
+    "Unknown14",
+    "Unknown15",
+    "Unknown16",
+    "Final_Point",
+    "Final_Target",
+    "Final_Angle",
+    "Unknown19",
+    "Cyclic",
+    "Enter_Cycle",
+    "Frozen",
+    "Unknown23",
+    "Unknown24",
+    "Unknown25",
+    "Unknown26",
+    "Unknown27",
+    "Unknown28",
+    "Unknown29",
+    "Unknown30",
+    "Unknown31",
 ];
 
 /// Render the raw spline flag word as its set bit names (`MoveSplineFlag::ToString`).
@@ -359,11 +386,7 @@ impl MoveSpline {
 
         if self.flags.falling {
             // Falling splines are timed by gravity rather than by velocity.
-            let start_elevation = self
-                .spline
-                .point(self.spline.first())
-                .unwrap_or_default()
-                .z;
+            let start_elevation = self.spline.point(self.spline.first()).unwrap_or_default().z;
             self.spline.init_lengths_with(|spline, index| {
                 let target_z = spline.point(index + 1).unwrap_or_default().z;
                 (compute_fall_time(start_elevation - target_z, false) * 1000.0) as i32
@@ -464,11 +487,7 @@ impl MoveSpline {
 
     /// Height of a falling unit, floored at the destination height.
     fn compute_fall_elevation_at(&self, current_z: f32) -> f32 {
-        let start_z = self
-            .spline
-            .point(self.spline.first())
-            .unwrap_or_default()
-            .z;
+        let start_z = self.spline.point(self.spline.first()).unwrap_or_default().z;
         let fallen = compute_fall_elevation(self.time_passed as f32 / 1000.0, false, 0.0);
         let z_now = start_z - fallen;
         let final_z = self.final_destination().z;

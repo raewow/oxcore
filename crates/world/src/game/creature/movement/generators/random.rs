@@ -372,7 +372,10 @@ mod tests {
         let _ = gen.update(creature, INITIAL_MOVE_DELAY_MS);
 
         gen.set_movement_blocked(true);
-        assert!(matches!(gen.update(creature, 100), MovementUpdate::Continue));
+        assert!(matches!(
+            gen.update(creature, 100),
+            MovementUpdate::Continue
+        ));
         assert!(gen.destination.is_none());
         assert_eq!(gen.next_wander_time, 0);
 

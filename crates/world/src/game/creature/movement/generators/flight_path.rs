@@ -111,12 +111,7 @@ mod tests {
 
     /// A route that starts on map 0 and crosses onto map 1 at index 2.
     fn cross_map_route() -> Vec<TaxiNode> {
-        vec![
-            node(0, 0.0),
-            node(0, 10.0),
-            node(1, 20.0),
-            node(1, 30.0),
-        ]
+        vec![node(0, 0.0), node(0, 10.0), node(1, 20.0), node(1, 30.0)]
     }
 
     #[test]

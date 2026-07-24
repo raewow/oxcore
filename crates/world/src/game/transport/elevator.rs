@@ -60,7 +60,12 @@ mod tests {
     use super::*;
 
     fn frame(time_seg: u32, x: f32, z: f32) -> TransportAnimationEntry {
-        TransportAnimationEntry { time_seg, x, y: 0.0, z }
+        TransportAnimationEntry {
+            time_seg,
+            x,
+            y: 0.0,
+            z,
+        }
     }
 
     /// A lift that rises from z=0 to z=10 over the first 2s, then holds there to 4s.

@@ -25,7 +25,9 @@ use tracing::debug;
 
 use super::auth_seeds;
 use super::crypt::WorldCrypt;
-use super::framing::{self, ModernPacket, CONNECTION_INITIALIZE_CLIENT, CONNECTION_INITIALIZE_SERVER};
+use super::framing::{
+    self, ModernPacket, CONNECTION_INITIALIZE_CLIENT, CONNECTION_INITIALIZE_SERVER,
+};
 use super::handshake::{auth_response_frame, HandshakeServer};
 use super::opcodes::{CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK, CMSG_PING, SMSG_PONG};
 use super::packets::{pong_body, AuthResponseSuccess, AuthSession, EnterEncryptedModeSigner, Ping};
@@ -166,10 +168,7 @@ where
 }
 
 /// Run the auth handshake and then the post-auth (encrypted) packet loop over one stream.
-pub async fn serve_connection<S, P>(
-    mut stream: S,
-    ctx: &ModernAuthContext<'_, P>,
-) -> Result<()>
+pub async fn serve_connection<S, P>(mut stream: S, ctx: &ModernAuthContext<'_, P>) -> Result<()>
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
     P: SessionKeyProvider,
@@ -334,7 +333,10 @@ mod tests {
         // 1. read server greeting.
         let mut greeting = vec![0u8; CONNECTION_INITIALIZE_SERVER.len() + 1];
         client.read_exact(&mut greeting).await.unwrap();
-        assert_eq!(&greeting[..greeting.len() - 1], CONNECTION_INITIALIZE_SERVER.as_bytes());
+        assert_eq!(
+            &greeting[..greeting.len() - 1],
+            CONNECTION_INITIALIZE_SERVER.as_bytes()
+        );
         assert_eq!(*greeting.last().unwrap(), b'\n');
 
         // 2. send client greeting.

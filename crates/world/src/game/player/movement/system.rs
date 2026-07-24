@@ -5,12 +5,12 @@ use std::time::Duration;
 
 use crate::core::common::{MoveFlags, MovementInfo};
 use crate::World;
-use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 use oxcore_shared::messages::movement::{spline_flags, SmsgMonsterMove};
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
-use super::validator;
 use super::state::PendingKnockback;
 use super::state::PendingSpline;
+use super::validator;
 
 /// Re-apply the root flag when the client omits it.
 ///

@@ -73,7 +73,10 @@ pub fn decode(crypt: &mut WorldCrypt, buf: &[u8]) -> Result<Option<(ModernPacket
     crypt.decrypt(&mut data, &tag)?;
 
     if data.len() < 2 {
-        bail!("decrypted packet too small to hold an opcode ({} bytes)", data.len());
+        bail!(
+            "decrypted packet too small to hold an opcode ({} bytes)",
+            data.len()
+        );
     }
     let opcode = u16::from_le_bytes([data[0], data[1]]);
     let body = data[2..].to_vec();
@@ -107,7 +110,10 @@ pub fn decode_plaintext(buf: &[u8]) -> Result<Option<(ModernPacket, usize)>> {
     }
     let data = &buf[HEADER_SIZE..end];
     if data.len() < 2 {
-        bail!("plaintext packet too small to hold an opcode ({} bytes)", data.len());
+        bail!(
+            "plaintext packet too small to hold an opcode ({} bytes)",
+            data.len()
+        );
     }
     let opcode = u16::from_le_bytes([data[0], data[1]]);
     let body = data[2..].to_vec();
@@ -170,8 +176,12 @@ mod tests {
         let mut client = WorldCrypt::client(&KEY);
 
         let frame = encode(&mut server, 1, b"abcdef");
-        assert!(decode(&mut client, &frame[..HEADER_SIZE - 1]).unwrap().is_none());
-        assert!(decode(&mut client, &frame[..frame.len() - 1]).unwrap().is_none());
+        assert!(decode(&mut client, &frame[..HEADER_SIZE - 1])
+            .unwrap()
+            .is_none());
+        assert!(decode(&mut client, &frame[..frame.len() - 1])
+            .unwrap()
+            .is_none());
         assert!(decode(&mut client, &frame).unwrap().is_some());
     }
 

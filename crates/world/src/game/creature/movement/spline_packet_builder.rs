@@ -260,7 +260,7 @@ pub fn spline_mode(spline: &MoveSpline) -> EvaluationMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::creature::movement::move_spline::{MoveSplineInitArgs, MoveSplineFlags};
+    use crate::game::creature::movement::move_spline::{MoveSplineFlags, MoveSplineInitArgs};
     use oxcore_shared::protocol::Opcode;
 
     fn v(x: f32, y: f32, z: f32) -> Vec3 {

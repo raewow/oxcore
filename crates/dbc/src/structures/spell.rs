@@ -46,7 +46,7 @@ impl DbcEntry for SpellCastTimeEntry {
 /// SpellDuration DBC entry
 /// Format: "niii" (4 fields: ID, Duration, DurationPerLevel, MaxDuration)
 /// Duration values are in milliseconds
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SpellDurationEntry {
     pub id: u32,
     /// Base duration in milliseconds

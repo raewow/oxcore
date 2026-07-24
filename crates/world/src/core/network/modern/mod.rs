@@ -27,7 +27,6 @@ pub use driver::{
     run_auth, run_connection, serve_connection, AccountSessionKeys, AuthedConnection,
     ModernAuthContext, SessionKeyProvider,
 };
-pub use server::{serve_modern, ModernServerConfig};
 pub use framing::{
     decode, decode_plaintext, encode, encode_plaintext, ModernPacket, CONNECTION_INITIALIZE_CLIENT,
     CONNECTION_INITIALIZE_SERVER, HEADER_SIZE,
@@ -38,3 +37,4 @@ pub use packets::{
     EnterEncryptedModeSigner, RaceClassAvailability,
 };
 pub use rsa_signer::RsaSigner;
+pub use server::{serve_modern, ModernServerConfig};

@@ -22,17 +22,21 @@ fn teleport_to_homebind(
     player_guid: ObjectGuid,
     world: &World,
 ) -> Result<()> {
-    let Some((map_id, position)) = world.managers.player_mgr.with_player(player_guid, |player| {
-        (
-            player.homebind_map,
-            Position {
-                x: player.homebind_x,
-                y: player.homebind_y,
-                z: player.homebind_z,
-                o: 0.0,
-            },
-        )
-    }) else {
+    let Some((map_id, position)) = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| {
+            (
+                player.homebind_map,
+                Position {
+                    x: player.homebind_x,
+                    y: player.homebind_y,
+                    z: player.homebind_z,
+                    o: 0.0,
+                },
+            )
+        })
+    else {
         return Ok(());
     };
 
@@ -494,12 +498,14 @@ pub async fn handle_move_knock_back_ack(
     let pending = world
         .managers
         .player_mgr
-        .with_player_mut(player_guid, |player| match player.movement.pending_knockback {
-            Some(pending) if pending.counter == counter => {
-                player.movement.pending_knockback = None;
-                Some(pending)
+        .with_player_mut(player_guid, |player| {
+            match player.movement.pending_knockback {
+                Some(pending) if pending.counter == counter => {
+                    player.movement.pending_knockback = None;
+                    Some(pending)
+                }
+                _ => None,
             }
-            _ => None,
         })
         .flatten();
     let Some(pending) = pending else {
@@ -519,7 +525,12 @@ pub async fn handle_move_knock_back_ack(
         .systems
         .player
         .movement()
-        .handle_move(player_guid, Opcode::MSG_MOVE_KNOCK_BACK, movement_info, world)
+        .handle_move(
+            player_guid,
+            Opcode::MSG_MOVE_KNOCK_BACK,
+            movement_info,
+            world,
+        )
         .await
 }
 
@@ -738,11 +749,9 @@ pub fn handle_force_speed_change_ack(
         .managers
         .player_mgr
         .with_player_mut(player_guid, |player| {
-            player.movement.find_pending_speed_change(
-                new_speed,
-                movement_counter,
-                change_type,
-            )
+            player
+                .movement
+                .find_pending_speed_change(new_speed, movement_counter, change_type)
         })
         .unwrap_or(false);
 
@@ -1025,7 +1034,9 @@ pub async fn handle_movement(
     let spline_in_progress = world
         .managers
         .player_mgr
-        .with_player(player_guid, |player| player.movement.pending_spline.is_some())
+        .with_player(player_guid, |player| {
+            player.movement.pending_spline.is_some()
+        })
         .unwrap_or(false);
     if spline_in_progress {
         return Ok(());

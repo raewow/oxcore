@@ -326,7 +326,9 @@ mod tests {
         init.set_facing(-std::f32::consts::FRAC_PI_2);
         match init.args.facing {
             SplineFacing::Angle(angle) => {
-                assert!((angle - (std::f32::consts::TAU - std::f32::consts::FRAC_PI_2)).abs() < 1e-5)
+                assert!(
+                    (angle - (std::f32::consts::TAU - std::f32::consts::FRAC_PI_2)).abs() < 1e-5
+                )
             }
             other => panic!("expected an angle, got {other:?}"),
         }

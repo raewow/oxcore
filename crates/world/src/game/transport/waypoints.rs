@@ -74,7 +74,10 @@ pub struct TransportPath {
 /// mid-course `Update` refresh the C++ also sets are runtime/DBC concerns not reproduced
 /// here; the instanceable/`inInstance` decision needs map data and is left to the caller,
 /// which gets the visited maps in `maps_used`.
-pub fn generate_waypoints(nodes: &[TaxiPathNode], profile: &ScheduleProfile) -> Option<TransportPath> {
+pub fn generate_waypoints(
+    nodes: &[TaxiPathNode],
+    profile: &ScheduleProfile,
+) -> Option<TransportPath> {
     if nodes.len() < 3 {
         // The path is walked over its interior (index 1..len-1), so it needs at least one
         // interior node to yield a keyframe.
@@ -220,11 +223,21 @@ mod tests {
     use super::*;
 
     fn profile() -> ScheduleProfile {
-        ScheduleProfile { speed: 10.0, accel: 5.0 }
+        ScheduleProfile {
+            speed: 10.0,
+            accel: 5.0,
+        }
     }
 
     fn node(x: f32, action_flag: u8, delay: u32) -> TaxiPathNode {
-        TaxiPathNode { map_id: 0, x, y: 0.0, z: 0.0, action_flag, delay }
+        TaxiPathNode {
+            map_id: 0,
+            x,
+            y: 0.0,
+            z: 0.0,
+            action_flag,
+            delay,
+        }
     }
 
     /// Five colinear nodes 10 yards apart along +x. The interior three become keyframes.
@@ -267,7 +280,11 @@ mod tests {
         let path = generate_waypoints(&straight_line(), &profile()).unwrap();
         // Travelling +x, the tangent is +x; the C++ formula atan2(0, +) + PI gives PI.
         for k in &path.keyframes {
-            assert!((k.initial_orientation - std::f32::consts::PI).abs() < 1e-3, "got {}", k.initial_orientation);
+            assert!(
+                (k.initial_orientation - std::f32::consts::PI).abs() < 1e-3,
+                "got {}",
+                k.initial_orientation
+            );
         }
     }
 
@@ -290,7 +307,11 @@ mod tests {
         nodes[2].delay = 3;
         let path = generate_waypoints(&nodes, &profile()).unwrap();
 
-        let stop = path.keyframes.iter().find(|k| k.is_stop_frame).expect("a stop frame");
+        let stop = path
+            .keyframes
+            .iter()
+            .find(|k| k.is_stop_frame)
+            .expect("a stop frame");
         assert_eq!(stop.delay_secs, 3);
         // A dwell delays the arrivals after it: the path takes longer than the stopless one.
         let stopless = generate_waypoints(&straight_line(), &profile()).unwrap();

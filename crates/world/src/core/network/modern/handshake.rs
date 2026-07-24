@@ -207,7 +207,9 @@ mod tests {
         let frame = client_session_frame(server.server_challenge(), [0x42; 16]);
         let (packet, _) = decode_plaintext(&frame).unwrap().unwrap();
         let session = AuthSession::parse(&packet.body).unwrap();
-        let keys = server.verify_session(&session, &session_key(), &SEED).unwrap();
+        let keys = server
+            .verify_session(&session, &session_key(), &SEED)
+            .unwrap();
 
         // Encryption turns on with the derived AES key. The server sends SMSG_AUTH_RESPONSE
         // encrypted; a client crypt keyed the same way decodes it.
@@ -235,7 +237,9 @@ mod tests {
         let frame = client_session_frame(server.server_challenge(), [0x42; 16]);
         let (packet, _) = decode_plaintext(&frame).unwrap().unwrap();
         let session = AuthSession::parse(&packet.body).unwrap();
-        let keys = server.verify_session(&session, &session_key(), &SEED).unwrap();
+        let keys = server
+            .verify_session(&session, &session_key(), &SEED)
+            .unwrap();
 
         let eem = server.enter_encrypted_mode_frame(&keys, &StubSigner);
         let (packet, consumed) = decode_plaintext(&eem).unwrap().unwrap();

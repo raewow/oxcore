@@ -204,7 +204,12 @@ impl TransportManager {
         now_ms: u32,
     ) -> Option<ObjectGuid> {
         let start = template.start_frame_on_map(map_id)?;
-        let position = Position::new(start.node_x, start.node_y, start.node_z, start.initial_orientation);
+        let position = Position::new(
+            start.node_x,
+            start.node_y,
+            start.node_z,
+            start.initial_orientation,
+        );
         if !is_valid_map_coord(position.x, position.y, position.z, position.o) {
             return None;
         }
@@ -512,7 +517,10 @@ mod tests {
     }
 
     fn rider() -> TestRider {
-        TestRider::at(ObjectGuid::new_player(7), Position::new(105.0, 200.0, 50.0, 0.0))
+        TestRider::at(
+            ObjectGuid::new_player(7),
+            Position::new(105.0, 200.0, 50.0, 0.0),
+        )
     }
 
     /// A template store holding one straight-line transport whose path runs on `map_id`.
@@ -521,10 +529,24 @@ mod tests {
         use super::super::waypoints::TaxiPathNode;
 
         let nodes: Vec<TaxiPathNode> = (0..5)
-            .map(|i| TaxiPathNode { map_id, x: i as f32 * 10.0, y: 0.0, z: 0.0, action_flag: 0, delay: 0 })
+            .map(|i| TaxiPathNode {
+                map_id,
+                x: i as f32 * 10.0,
+                y: 0.0,
+                z: 0.0,
+                action_flag: 0,
+                delay: 0,
+            })
             .collect();
         let mut store = TransportTemplateStore::new();
-        store.load_template(entry, &nodes, &ScheduleProfile { speed: 10.0, accel: 5.0 });
+        store.load_template(
+            entry,
+            &nodes,
+            &ScheduleProfile {
+                speed: 10.0,
+                accel: 5.0,
+            },
+        );
         store
     }
 
@@ -534,14 +556,18 @@ mod tests {
         let template = store.get(176231).unwrap();
         let mut mgr = TransportManager::new();
 
-        let guid = mgr.create_transport(template, 0, 5_000).expect("created on its map");
+        let guid = mgr
+            .create_transport(template, 0, 5_000)
+            .expect("created on its map");
         // A ship is a mobile-transport object keyed by its template entry.
         assert!(guid.is_mo_transport());
         let transport = mgr.get(guid).unwrap();
         assert_eq!(transport.entry, 176231);
         assert_eq!(transport.map_id, 0);
         // Positioned at a keyframe of the path (x is one of the interior node xs, 10/20/30).
-        assert!([10.0, 20.0, 30.0].iter().any(|&x| (transport.position.x - x).abs() < 1e-3));
+        assert!([10.0, 20.0, 30.0]
+            .iter()
+            .any(|&x| (transport.position.x - x).abs() < 1e-3));
         assert_eq!(mgr.count(), 1);
     }
 
@@ -577,10 +603,24 @@ mod tests {
 
         // A longer straight path so there is clear travel to observe.
         let nodes: Vec<TaxiPathNode> = (0..7)
-            .map(|i| TaxiPathNode { map_id: 0, x: i as f32 * 10.0, y: 0.0, z: 0.0, action_flag: 0, delay: 0 })
+            .map(|i| TaxiPathNode {
+                map_id: 0,
+                x: i as f32 * 10.0,
+                y: 0.0,
+                z: 0.0,
+                action_flag: 0,
+                delay: 0,
+            })
             .collect();
         let mut store = TransportTemplateStore::new();
-        store.load_template(500, &nodes, &ScheduleProfile { speed: 10.0, accel: 5.0 });
+        store.load_template(
+            500,
+            &nodes,
+            &ScheduleProfile {
+                speed: 10.0,
+                accel: 5.0,
+            },
+        );
         let template = store.get(500).unwrap().clone();
 
         let mut mgr = TransportManager::new();
@@ -591,11 +631,23 @@ mod tests {
         // line (y, z ~ 0).
         let quarter = template.path_time / 4;
         let half = template.path_time / 2;
-        let early = mgr.tick_ship_movement(guid, &template, quarter).expect("moving");
-        let late = mgr.tick_ship_movement(guid, &template, half).expect("moving");
+        let early = mgr
+            .tick_ship_movement(guid, &template, quarter)
+            .expect("moving");
+        let late = mgr
+            .tick_ship_movement(guid, &template, half)
+            .expect("moving");
 
-        assert!(early.y.abs() < 1e-2 && early.z.abs() < 1e-2, "off the line: {early:?}");
-        assert!(late.x > early.x, "did not advance: {} -> {}", early.x, late.x);
+        assert!(
+            early.y.abs() < 1e-2 && early.z.abs() < 1e-2,
+            "off the line: {early:?}"
+        );
+        assert!(
+            late.x > early.x,
+            "did not advance: {} -> {}",
+            early.x,
+            late.x
+        );
         // The manager's stored transport reflects the latest position.
         assert_eq!(mgr.get(guid).unwrap().position, late);
     }
@@ -634,7 +686,10 @@ mod tests {
         assert_eq!(rider.transport_guid, Some(transport_guid()));
         assert!(rider.on_transport_flag);
         let offset = rider.transport_offset.unwrap();
-        assert!((offset.x - 5.0).abs() < 1e-4 && offset.y.abs() < 1e-4, "got {offset:?}");
+        assert!(
+            (offset.x - 5.0).abs() < 1e-4 && offset.y.abs() < 1e-4,
+            "got {offset:?}"
+        );
     }
 
     #[test]
@@ -662,7 +717,10 @@ mod tests {
         mgr.board(transport_guid(), &mut leader, true);
 
         // A pet at some unrelated spot follows its owner aboard.
-        let mut follower = TestRider::at(ObjectGuid::new_pet(2000, 9), Position::new(-500.0, -500.0, 0.0, 0.0));
+        let mut follower = TestRider::at(
+            ObjectGuid::new_pet(2000, 9),
+            Position::new(-500.0, -500.0, 0.0, 0.0),
+        );
         assert!(mgr.board_follower(transport_guid(), &leader, &mut follower));
 
         // Follower shares the leader's offset and stands on the leader's world position.
@@ -679,7 +737,10 @@ mod tests {
         let mut mgr = manager_with_transport();
         let mut leader = rider();
         mgr.board(transport_guid(), &mut leader, true);
-        let mut follower = TestRider::at(ObjectGuid::new_pet(2000, 9), Position::new(-500.0, -500.0, 0.0, 0.0));
+        let mut follower = TestRider::at(
+            ObjectGuid::new_pet(2000, 9),
+            Position::new(-500.0, -500.0, 0.0, 0.0),
+        );
         mgr.board_follower(transport_guid(), &leader, &mut follower);
 
         assert!(mgr.unboard_follower(transport_guid(), &leader, &mut follower));
@@ -694,7 +755,10 @@ mod tests {
     fn boarding_a_follower_onto_an_unknown_transport_does_nothing() {
         let mut mgr = TransportManager::new();
         let leader = rider();
-        let mut follower = TestRider::at(ObjectGuid::new_pet(2000, 9), Position::new(-500.0, -500.0, 0.0, 0.0));
+        let mut follower = TestRider::at(
+            ObjectGuid::new_pet(2000, 9),
+            Position::new(-500.0, -500.0, 0.0, 0.0),
+        );
         assert!(!mgr.board_follower(transport_guid(), &leader, &mut follower));
         assert_eq!(follower.transport_guid, None);
     }
@@ -707,15 +771,21 @@ mod tests {
         mgr.board(transport_guid(), &mut rider, true);
 
         // The transport turns 90 degrees in place; the rider must swing to its new side.
-        mgr.get_mut(transport_guid())
-            .unwrap()
-            .relocate(100.0, 200.0, 50.0, std::f32::consts::FRAC_PI_2);
+        mgr.get_mut(transport_guid()).unwrap().relocate(
+            100.0,
+            200.0,
+            50.0,
+            std::f32::consts::FRAC_PI_2,
+        );
         let outcome = mgr.reposition_passenger(transport_guid(), &mut rider);
 
         match outcome {
             RepositionOutcome::Repositioned(world) => {
                 // 5 yards along the transport's new +y facing: (100, 205).
-                assert!((world.x - 100.0).abs() < 1e-3 && (world.y - 205.0).abs() < 1e-3, "got {world:?}");
+                assert!(
+                    (world.x - 100.0).abs() < 1e-3 && (world.y - 205.0).abs() < 1e-3,
+                    "got {world:?}"
+                );
                 assert_eq!(rider.position, world);
             }
             other => panic!("expected Repositioned, got {other:?}"),
