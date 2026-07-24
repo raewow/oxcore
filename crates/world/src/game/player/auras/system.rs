@@ -34,6 +34,21 @@ pub struct AuraSystem {
     broadcast_mgr: Arc<BroadcastManager>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuraRemoveMode {
+    Default,
+    Expire,
+    Dispel,
+}
+
+fn removal_trigger_spell(spell_id: u32, mode: AuraRemoveMode) -> Option<u32> {
+    match (spell_id, mode) {
+        (26180, AuraRemoveMode::Dispel) => Some(26233),
+        (24002 | 24003, AuraRemoveMode::Expire) => Some(24004),
+        _ => None,
+    }
+}
+
 impl AuraSystem {
     pub fn new(broadcast_mgr: Arc<BroadcastManager>) -> Self {
         Self { broadcast_mgr }
@@ -322,6 +337,24 @@ impl AuraSystem {
         effect_index: u8,
         world: &World,
     ) -> Result<()> {
+        self.remove_aura_with_mode(
+            target_guid,
+            spell_id,
+            effect_index,
+            AuraRemoveMode::Default,
+            world,
+        )
+        .await
+    }
+
+    pub async fn remove_aura_with_mode(
+        &self,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        effect_index: u8,
+        remove_mode: AuraRemoveMode,
+        world: &World,
+    ) -> Result<()> {
         // Creature targets: simplified removal
         if target_guid.is_creature() {
             self.remove_creature_aura(target_guid, spell_id, world);
@@ -342,6 +375,24 @@ impl AuraSystem {
             .flatten();
 
         if let Some((aura, slot)) = removed_aura {
+            if let Some(trigger_spell_id) = removal_trigger_spell(spell_id, remove_mode) {
+                let caster_guid = if aura.caster_guid.is_empty() {
+                    target_guid
+                } else {
+                    aura.caster_guid
+                };
+                let _ = world
+                    .systems
+                    .spells
+                    .trigger_procced_spell(
+                        caster_guid,
+                        Some(target_guid),
+                        trigger_spell_id,
+                        0,
+                        world,
+                    )
+                    .await;
+            }
             if aura.aura_type == effects::AURA_AURA_SPELL {
                 let trigger_spell_id = world
                     .managers
@@ -736,8 +787,14 @@ impl AuraSystem {
 
         // Phase 3: Remove expired auras
         for (spell_id, effect_index) in expired_keys {
-            self.remove_aura(player_guid, spell_id, effect_index, world)
-                .await?;
+            self.remove_aura_with_mode(
+                player_guid,
+                spell_id,
+                effect_index,
+                AuraRemoveMode::Expire,
+                world,
+            )
+            .await?;
         }
 
         Ok(())
