@@ -275,6 +275,17 @@ impl AuraSystem {
             }
         }
 
+        if aura_type_copy == effects::AURA_MOD_UNATTACKABLE && assigned_slot.is_some() {
+            world
+                .systems
+                .player
+                .manager()
+                .with_player_mut(target_guid, |player| {
+                    player.combat.in_combat = false;
+                    player.unit_flags |= crate::game::common::unit_flags::NON_ATTACKABLE_2;
+                });
+        }
+
         // Apply CC unit flags (stun, root, silence, etc.)
         if let Some(flag) = effects::cc_aura_unit_flag(aura_type_copy) {
             if assigned_slot.is_some() {
@@ -435,6 +446,29 @@ impl AuraSystem {
                         .manager()
                         .with_player_mut(target_guid, |player| {
                             player.unit_flags &= !flag;
+                        });
+                }
+            }
+
+            if aura.aura_type == effects::AURA_MOD_UNATTACKABLE {
+                let has_other = world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player(target_guid, |player| {
+                        player
+                            .auras
+                            .container
+                            .has_aura_type(effects::AURA_MOD_UNATTACKABLE)
+                    })
+                    .unwrap_or(false);
+                if !has_other {
+                    world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.unit_flags &= !crate::game::common::unit_flags::NON_ATTACKABLE_2;
                         });
                 }
             }

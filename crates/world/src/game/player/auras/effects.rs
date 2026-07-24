@@ -181,7 +181,7 @@ pub const AURA_MOD_MECHANIC_RESISTANCE: u32 = 117; // Resist mechanic chance
 // --- Visual / Transform ---
 pub const AURA_MOD_SCALE: u32 = 61; // Size change
 pub const AURA_TRANSFORM: u32 = 56; // Polymorph visual model change
-pub const AURA_MOD_UNATTACKABLE: u32 = 17; // Vanish / Ice Block unattackable
+pub const AURA_MOD_UNATTACKABLE: u32 = 93; // Vanish / Ice Block unattackable
 
 // --- Power Regen ---
 pub const AURA_MOD_REGEN: u32 = 84; // Health regen
