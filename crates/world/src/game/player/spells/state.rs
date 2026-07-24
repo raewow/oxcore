@@ -1483,6 +1483,7 @@ mod tests {
             400,
             SpellEventType::DelayedEffect {
                 caster_guid: a,
+                cast_item_guid: None,
                 spell_id: 5,
                 target_guid: None,
                 is_triggered: false,
@@ -1510,6 +1511,7 @@ mod tests {
             100,
             SpellEventType::DelayedEffect {
                 caster_guid: caster,
+                cast_item_guid: None,
                 spell_id: 5,
                 target_guid: Some(first),
                 is_triggered: false,

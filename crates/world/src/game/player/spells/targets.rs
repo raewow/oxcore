@@ -501,6 +501,20 @@ fn resolve_implicit_target(
 
         ImplicitTarget::ScriptAoeAtSrc | ImplicitTarget::ScriptAoeAtDest => {
             let at_source = target_type == ImplicitTarget::ScriptAoeAtSrc;
+            if !at_source {
+                match spell_entry.effect[effect_idx] {
+                    // Persistent-area auras create their dynamic target instead
+                    // of registering units from the destination area.
+                    27 => return,
+                    // Summon effects use the caster while retaining destination
+                    // coordinates for the summoned object's placement.
+                    28 | 41 | 76 => {
+                        targets.push(caster_guid);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
             let push = if at_source {
                 SpellNotifyPushType::SrcCenter
             } else {
@@ -2635,8 +2649,8 @@ mod tests {
         assert_eq!(resolved.effect_targets[0], vec![gameobject_guid]);
     }
 
-    #[test]
-    fn active_matching_spell_focus_is_found_in_range() {
+    #[tokio::test]
+    async fn active_matching_spell_focus_is_found_in_range() {
         let world = test_world();
         let caster = ObjectGuid::new_player(1);
         let gameobject_guid = ObjectGuid::new_gameobject(8001, 1);
