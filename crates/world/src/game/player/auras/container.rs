@@ -687,6 +687,20 @@ mod tests {
     }
 
     #[test]
+    fn remove_aura_only_removes_the_requested_effect() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        container.add_aura(make_aura(3750, 0, caster, None));
+        container.add_aura(make_aura(3750, 1, caster, None));
+
+        let removed = container.remove_aura(3750, 0);
+
+        assert!(removed.is_some());
+        assert!(container.get_aura(3750, 0).is_none());
+        assert!(container.get_aura(3750, 1).is_some());
+    }
+
+    #[test]
     fn safe_fall_modifier_is_available_from_active_auras() {
         let mut container = AuraContainer::new();
         let caster = test_guid(1);
