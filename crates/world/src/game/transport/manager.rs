@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use oxcore_shared::protocol::{ObjectGuid, Position};
+use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
 
 use crate::core::common::movement::MoveFlags;
 use crate::core::common::position::is_valid_map_coord;
@@ -17,6 +17,7 @@ use crate::game::creature::creature::Creature;
 use crate::game::player::player::Player;
 
 use super::object::Transport;
+use super::template::{TransportTemplate, TransportTemplateStore};
 
 /// What happened when repositioning a passenger against its transport.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -179,6 +180,75 @@ impl TransportManager {
     /// The transports currently on `map_id`.
     pub fn transports_on_map(&self, map_id: u32) -> impl Iterator<Item = &Transport> {
         self.transports.values().filter(move |t| t.map_id == map_id)
+    }
+
+    /// Create a transport from its template and register it on `map_id`
+    /// (`TransportMgr::CreateTransport` + `ShipTransport::Create`).
+    ///
+    /// The transport spawns at the first keyframe of its path that lies on this map, facing
+    /// that keyframe's orientation, with its path cursor set to that keyframe's arrival so the
+    /// tick picks up where the schedule places it. Its GUID is a mobile-transport GUID keyed
+    /// by the template entry, as ships are single, shared objects. Returns `None` if the path
+    /// never visits this map, or if the start position is off the map (`IsPositionValid`).
+    /// `now_ms` is the current server clock, for the transport's creation time. Instance
+    /// placement (`GetContinentInstanceId`, the instanceable guard) is the map layer's
+    /// concern; like the creature spawner this uses the continent path. The game-object
+    /// template fields (scale, faction, flags, display) stay in the template, per the slim
+    /// object model this codebase uses.
+    pub fn create_transport(
+        &mut self,
+        template: &TransportTemplate,
+        map_id: u32,
+        now_ms: u32,
+    ) -> Option<ObjectGuid> {
+        let start = template.start_frame_on_map(map_id)?;
+        let position = Position::new(start.node_x, start.node_y, start.node_z, start.initial_orientation);
+        if !is_valid_map_coord(position.x, position.y, position.z, position.o) {
+            return None;
+        }
+
+        // A mobile transport's GUID is HIGHGUID_MO_TRANSPORT with the template entry as its
+        // low part (Object::_Create(entry, HIGHGUID_MO_TRANSPORT)).
+        let guid = ObjectGuid::new_without_entry(HighGuid::MoTransport, template.entry);
+
+        let mut transport = Transport::new(guid, template.entry, map_id, position, now_ms);
+        transport.set_path_progress(start.arrive_time);
+        self.transports.insert(guid, transport);
+        Some(guid)
+    }
+
+    /// Spawn every template's transport that belongs on `map_id`
+    /// (`TransportMgr::SpawnTransportsOnMap`).
+    ///
+    /// Skips continent transports already spawned elsewhere (they are shared across continent
+    /// instances), creates the rest, and marks each created template spawned. Returns the
+    /// GUIDs created.
+    pub fn spawn_transports_on_map(
+        &mut self,
+        store: &mut TransportTemplateStore,
+        map_id: u32,
+        now_ms: u32,
+    ) -> Vec<ObjectGuid> {
+        let to_spawn: Vec<u32> = store
+            .templates_on_map(map_id)
+            .filter(|t| !(t.spawned && !t.in_instance))
+            .map(|t| t.entry)
+            .collect();
+
+        let mut spawned = Vec::new();
+        for entry in to_spawn {
+            let created = match store.get(entry) {
+                Some(template) => self.create_transport(template, map_id, now_ms),
+                None => None,
+            };
+            if let Some(guid) = created {
+                spawned.push(guid);
+                if let Some(template) = store.get_mut(entry) {
+                    template.spawned = true;
+                }
+            }
+        }
+        spawned
     }
 
     /// Board a passenger onto a transport (`GenericTransport::AddPassenger`).
@@ -390,6 +460,71 @@ mod tests {
 
     fn rider() -> TestRider {
         TestRider::at(ObjectGuid::new_player(7), Position::new(105.0, 200.0, 50.0, 0.0))
+    }
+
+    /// A template store holding one straight-line transport whose path runs on `map_id`.
+    fn store_with_template(entry: u32, map_id: u32) -> TransportTemplateStore {
+        use super::super::schedule::ScheduleProfile;
+        use super::super::waypoints::TaxiPathNode;
+
+        let nodes: Vec<TaxiPathNode> = (0..5)
+            .map(|i| TaxiPathNode { map_id, x: i as f32 * 10.0, y: 0.0, z: 0.0, action_flag: 0, delay: 0 })
+            .collect();
+        let mut store = TransportTemplateStore::new();
+        store.load_template(entry, &nodes, &ScheduleProfile { speed: 10.0, accel: 5.0 });
+        store
+    }
+
+    #[test]
+    fn creating_a_transport_places_it_at_its_start_frame() {
+        let store = store_with_template(176231, 0);
+        let template = store.get(176231).unwrap();
+        let mut mgr = TransportManager::new();
+
+        let guid = mgr.create_transport(template, 0, 5_000).expect("created on its map");
+        // A ship is a mobile-transport object keyed by its template entry.
+        assert!(guid.is_mo_transport());
+        let transport = mgr.get(guid).unwrap();
+        assert_eq!(transport.entry, 176231);
+        assert_eq!(transport.map_id, 0);
+        // Positioned at a keyframe of the path (x is one of the interior node xs, 10/20/30).
+        assert!([10.0, 20.0, 30.0].iter().any(|&x| (transport.position.x - x).abs() < 1e-3));
+        assert_eq!(mgr.count(), 1);
+    }
+
+    #[test]
+    fn a_transport_is_not_created_on_a_map_its_path_avoids() {
+        let store = store_with_template(176231, 0);
+        let template = store.get(176231).unwrap();
+        let mut mgr = TransportManager::new();
+        // The path only runs on map 0.
+        assert!(mgr.create_transport(template, 571, 5_000).is_none());
+        assert_eq!(mgr.count(), 0);
+    }
+
+    #[test]
+    fn spawning_a_map_creates_its_transports_once() {
+        let mut store = store_with_template(176231, 0);
+        let mut mgr = TransportManager::new();
+
+        let spawned = mgr.spawn_transports_on_map(&mut store, 0, 5_000);
+        assert_eq!(spawned.len(), 1);
+        assert!(store.get(176231).unwrap().spawned);
+
+        // Spawning the same continent map again does not re-create the already-spawned one.
+        let again = mgr.spawn_transports_on_map(&mut store, 0, 6_000);
+        assert!(again.is_empty());
+        assert_eq!(mgr.count(), 1);
+    }
+
+    #[test]
+    fn spawning_skips_maps_the_transport_does_not_visit() {
+        let mut store = store_with_template(176231, 0);
+        let mut mgr = TransportManager::new();
+        // No template's path runs on map 1.
+        assert!(mgr.spawn_transports_on_map(&mut store, 1, 5_000).is_empty());
+        assert_eq!(mgr.count(), 0);
+        assert!(!store.get(176231).unwrap().spawned);
     }
 
     #[test]
