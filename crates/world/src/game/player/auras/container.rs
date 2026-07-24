@@ -392,6 +392,18 @@ impl AuraContainer {
         self.auras.values_mut()
     }
 
+    /// Compatibility iterator returning `(spell_id, remaining_ms, stack_count)` tuples.
+    /// Remaining duration is `0` for permanent auras.
+    pub fn iter(&self) -> impl Iterator<Item = (u32, u32, u8)> + '_ {
+        self.auras.values().map(|aura| {
+            (
+                aura.spell_id,
+                aura.duration_ms.unwrap_or(0),
+                aura.stack_count,
+            )
+        })
+    }
+
     /// Get the aura slot for a given key.
     pub fn get_slot(&self, spell_id: u32, effect_index: u8) -> Option<u8> {
         self.slot_map.get(&(spell_id, effect_index)).copied()

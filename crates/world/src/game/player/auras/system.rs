@@ -88,17 +88,29 @@ impl AuraSystem {
             anyhow::bail!("AURA_AOE_CHARM creature targets are unsupported");
         }
 
-        // Creature targets: use simplified aura tracking + speed modifier
+        // Creature targets share AuraContainer storage with players, but their
+        // gameplay modifier handling remains limited to supported creature effects.
         if target_guid.is_creature() {
-            self.apply_creature_aura(
-                target_guid,
-                caster_guid,
+            let mut aura = Aura::new(
                 spell_id,
+                caster_guid,
+                effect_index,
                 aura_type,
+                misc_value,
                 base_value,
                 duration_ms,
-                world,
+                periodic_interval_ms,
+                max_stacks,
+                max_charges,
+                flags,
             );
+            aura.duration_index = world
+                .managers
+                .spell_mgr
+                .get(spell_id)
+                .map(|entry| entry.duration_index)
+                .unwrap_or(0);
+            self.apply_creature_aura(target_guid, caster_guid, aura, world);
             return Ok(None);
         }
 
@@ -389,7 +401,7 @@ impl AuraSystem {
             if aura_type == effects::AURA_AOE_CHARM {
                 anyhow::bail!("AURA_AOE_CHARM creature targets are unsupported");
             }
-            self.remove_creature_aura(target_guid, spell_id, aura_type, world);
+            self.remove_creature_aura(target_guid, spell_id, effect_index, world);
             return Ok(());
         }
 
@@ -805,7 +817,43 @@ impl AuraSystem {
         for guid in guids {
             self.update_auras(guid, diff, world).await?;
         }
+        self.update_creature_auras(diff, world);
         Ok(())
+    }
+
+    /// Expire creature aura effects through the same removal path used for an
+    /// explicit removal, so supported creature modifiers are reversed.
+    fn update_creature_auras(&self, diff: Duration, world: &World) {
+        let diff_ms = diff.as_millis() as u32;
+        if diff_ms == 0 {
+            return;
+        }
+
+        let creature_guids: Vec<ObjectGuid> = world
+            .managers
+            .creature_mgr
+            .iter_creatures()
+            .map(|entry| *entry.key())
+            .collect();
+        let expired: Vec<(ObjectGuid, Vec<(u32, u8)>)> = creature_guids
+            .into_iter()
+            .filter_map(|guid| {
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(guid, |creature| {
+                        let expired = creature.update_auras(diff_ms);
+                        (!expired.is_empty()).then_some((guid, expired))
+                    })
+                    .flatten()
+            })
+            .collect();
+
+        for (guid, effects) in expired {
+            for (spell_id, effect_index) in effects {
+                self.remove_creature_aura(guid, spell_id, effect_index, world);
+            }
+        }
     }
 
     /// Update all auras for a player. Called every world tick (50ms).
@@ -955,6 +1003,56 @@ impl AuraSystem {
             .unwrap_or(false))
     }
 
+    async fn modify_melee_haste_aura(
+        &self,
+        player_guid: ObjectGuid,
+        aura_type: u32,
+        amount: i32,
+        apply: bool,
+        world: &World,
+    ) -> Result<bool> {
+        if aura_type != effects::AURA_MOD_MELEE_HASTE {
+            return Ok(false);
+        }
+
+        Ok(world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(player_guid, |player| {
+                let total_haste = player
+                    .auras
+                    .container
+                    .get_auras_by_type(aura_type)
+                    .iter()
+                    .fold(0i32, |total, aura| {
+                        total.saturating_add(aura.current_value())
+                    });
+                let previous_haste = if apply {
+                    total_haste.saturating_sub(amount)
+                } else {
+                    total_haste.saturating_add(amount)
+                };
+
+                use crate::game::combat::{adjust_attack_speed, AttackHand};
+
+                let main_hand_speed = recalculate_melee_haste_speed(
+                    player.combat.main_hand_speed,
+                    previous_haste,
+                    total_haste,
+                );
+                let off_hand_speed = recalculate_melee_haste_speed(
+                    player.combat.off_hand_speed,
+                    previous_haste,
+                    total_haste,
+                );
+                adjust_attack_speed(&mut player.combat, AttackHand::MainHand, main_hand_speed);
+                adjust_attack_speed(&mut player.combat, AttackHand::OffHand, off_hand_speed);
+                true
+            })
+            .unwrap_or(false))
+    }
+
     /// Apply a stat modifier from an aura to the StatsSystem.
     async fn apply_aura_stat_modifier(
         &self,
@@ -978,6 +1076,13 @@ impl AuraSystem {
             .flatten();
 
         if let Some((aura_type, value, misc_value)) = modifier_info {
+            if self
+                .modify_melee_haste_aura(target_guid, aura_type, value, true, world)
+                .await?
+            {
+                return Ok(());
+            }
+
             if self
                 .modify_flat_health_regen_aura(target_guid, aura_type, value, true, world)
                 .await?
@@ -1046,6 +1151,19 @@ impl AuraSystem {
         aura: &Aura,
         world: &World,
     ) -> Result<()> {
+        if self
+            .modify_melee_haste_aura(
+                target_guid,
+                aura.aura_type,
+                aura.current_value(),
+                false,
+                world,
+            )
+            .await?
+        {
+            return Ok(());
+        }
+
         if self
             .modify_flat_health_regen_aura(
                 target_guid,
@@ -3210,22 +3328,20 @@ impl AuraSystem {
         &self,
         creature_guid: ObjectGuid,
         caster_guid: ObjectGuid,
-        spell_id: u32,
-        aura_type: u32,
-        base_value: i32,
-        duration_ms: Option<u32>,
+        aura: Aura,
         world: &World,
     ) {
-        self.apply_creature_aura_with_mgr(
-            creature_guid,
-            spell_id,
-            aura_type,
-            base_value,
-            duration_ms,
-            &world.managers.creature_mgr,
-        );
+        self.apply_creature_aura_record_with_mgr(creature_guid, aura, &world.managers.creature_mgr);
 
-        if aura_type == effects::AURA_EMPATHY && caster_guid.is_player() {
+        if world
+            .managers
+            .creature_mgr
+            .with_creature(creature_guid, |creature| {
+                creature.auras.has_aura_type(effects::AURA_EMPATHY)
+            })
+            .unwrap_or(false)
+            && caster_guid.is_player()
+        {
             if let Some(dynamic_flags) = world
                 .managers
                 .creature_mgr
@@ -3251,19 +3367,46 @@ impl AuraSystem {
         duration_ms: Option<u32>,
         creature_mgr: &crate::game::creature::CreatureManager,
     ) {
-        let duration = duration_ms.unwrap_or(0);
+        let aura = Aura::new(
+            spell_id,
+            ObjectGuid::empty(),
+            0,
+            aura_type,
+            0,
+            base_value,
+            duration_ms,
+            0,
+            1,
+            0,
+            AuraFlags::default(),
+        );
+        self.apply_creature_aura_record_with_mgr(creature_guid, aura, creature_mgr);
+    }
+
+    /// Store the full aura record before applying supported creature modifiers.
+    fn apply_creature_aura_record_with_mgr(
+        &self,
+        creature_guid: ObjectGuid,
+        aura: Aura,
+        creature_mgr: &crate::game::creature::CreatureManager,
+    ) {
+        let aura_type = aura.aura_type;
+        let base_value = aura.base_value();
         creature_mgr.with_creature_mut(creature_guid, |creature| {
-            // Only add if not already present for this spell
-            if !creature.auras.iter().any(|(id, _, _)| *id == spell_id) {
-                creature.auras.push((spell_id, duration, 1));
-            }
+            let _ = creature.add_aura(aura);
 
             // Apply movement speed modifier
             // base_value for MOD_DECREASE_SPEED is negative (e.g. -40 = 40% slow)
             if aura_type == effects::AURA_MOD_DECREASE_SPEED
                 || aura_type == effects::AURA_MOD_INCREASE_SPEED
             {
-                let new_rate = (1.0 + base_value as f32 / 100.0).max(0.1);
+                let total_pct = creature
+                    .auras
+                    .get_total_aura_modifier(effects::AURA_MOD_DECREASE_SPEED)
+                    + creature
+                        .auras
+                        .get_total_aura_modifier(effects::AURA_MOD_INCREASE_SPEED);
+                let new_rate = (1.0 + total_pct as f32 / 100.0).max(0.1);
                 creature.speed_run = new_rate;
                 tracing::debug!(
                     "[AURA] Creature {:?} speed_run set to {} (base_value={})",
@@ -3303,13 +3446,13 @@ impl AuraSystem {
         &self,
         creature_guid: ObjectGuid,
         spell_id: u32,
-        aura_type: u32,
+        effect_index: u8,
         world: &World,
     ) {
-        self.remove_creature_aura_with_mgr(
+        self.remove_creature_aura_effect_with_mgr(
             creature_guid,
             spell_id,
-            aura_type,
+            effect_index,
             &world.managers.creature_mgr,
         );
     }
@@ -3322,31 +3465,74 @@ impl AuraSystem {
         aura_type: u32,
         creature_mgr: &crate::game::creature::CreatureManager,
     ) {
+        let removed = creature_mgr.with_creature_mut(creature_guid, |creature| {
+            creature
+                .auras
+                .get_auras_by_type(aura_type)
+                .into_iter()
+                .filter(|aura| aura.spell_id == spell_id)
+                .map(|aura| aura.effect_index)
+                .collect::<Vec<_>>()
+        });
+
+        for effect_index in removed.unwrap_or_default() {
+            self.remove_creature_aura_effect_with_mgr(
+                creature_guid,
+                spell_id,
+                effect_index,
+                creature_mgr,
+            );
+        }
+    }
+
+    /// Core creature aura removal, preserving all other effects of the spell.
+    fn remove_creature_aura_effect_with_mgr(
+        &self,
+        creature_guid: ObjectGuid,
+        spell_id: u32,
+        effect_index: u8,
+        creature_mgr: &crate::game::creature::CreatureManager,
+    ) {
+        let mut removed_speed_aura = false;
         creature_mgr.with_creature_mut(creature_guid, |creature| {
-            creature.auras.retain(|(id, _, _)| *id != spell_id);
-            if aura_type == effects::AURA_EMPATHY {
+            let Some((aura, _)) = creature.auras.remove_aura(spell_id, effect_index) else {
+                return;
+            };
+
+            if aura.aura_type == effects::AURA_EMPATHY
+                && !creature.auras.has_aura_type(effects::AURA_EMPATHY)
+            {
                 set_dynamic_flag(
                     &mut creature.dynamic_flags,
                     effects::UNIT_DYNFLAG_SPECIALINFO,
                     false,
                 );
             }
-            if aura_type == effects::AURA_MOD_DECREASE_SPEED
-                || aura_type == effects::AURA_MOD_INCREASE_SPEED
+            if aura.aura_type == effects::AURA_MOD_DECREASE_SPEED
+                || aura.aura_type == effects::AURA_MOD_INCREASE_SPEED
             {
-                // Restore base run speed (VMaNGOS DEFAULT_NPC_RUN_SPEED_RATE)
-                // TODO: re-sum remaining speed auras if multiple snares can stack
-                creature.speed_run = 1.14286;
+                let total_pct = creature
+                    .auras
+                    .get_total_aura_modifier(effects::AURA_MOD_DECREASE_SPEED)
+                    + creature
+                        .auras
+                        .get_total_aura_modifier(effects::AURA_MOD_INCREASE_SPEED);
+                creature.speed_run = if total_pct == 0 {
+                    1.14286
+                } else {
+                    (1.0 + total_pct as f32 / 100.0).max(0.1)
+                };
+                removed_speed_aura = true;
             }
         });
 
-        if aura_type == effects::AURA_MOD_DECREASE_SPEED
-            || aura_type == effects::AURA_MOD_INCREASE_SPEED
-        {
-            // Broadcast restored speed (1.14286 * 7.0 = ~8.0 yds/sec, VMaNGOS default NPC run)
+        if removed_speed_aura {
+            let rate = creature_mgr
+                .with_creature(creature_guid, |creature| creature.speed_run)
+                .unwrap_or(1.14286);
             let mut packet = WorldPacket::new(Opcode::SMSG_SPLINE_SET_RUN_SPEED);
             packet.write_packed_guid_raw(creature_guid.raw());
-            packet.write_f32(1.14286 * 7.0);
+            packet.write_f32(rate * 7.0);
             self.broadcast_mgr
                 .broadcast_nearby(creature_guid, &packet, true);
         }
@@ -3444,6 +3630,23 @@ fn apply_primary_stat_modifier(
             apply,
         );
     }
+}
+
+/// Recalculate an attack speed after the combined melee-haste percentage changes.
+///
+/// `current_speed_ms` already includes `previous_haste`, so reconstruct the base speed before
+/// applying the new total. This keeps stacked aura application and removal reversible while
+/// preserving `adjust_attack_speed`'s in-progress swing-timer handling.
+fn recalculate_melee_haste_speed(
+    current_speed_ms: u32,
+    previous_haste: i32,
+    total_haste: i32,
+) -> u32 {
+    let previous_multiplier = (100i64 + previous_haste as i64).max(1);
+    let total_multiplier = (100i64 + total_haste as i64).max(1);
+    let base_speed = current_speed_ms as i64 * previous_multiplier;
+
+    ((base_speed + total_multiplier / 2) / total_multiplier).max(1) as u32
 }
 
 /// Apply or reverse the max-health aura forms without treating health as a primary stat.
@@ -3775,6 +3978,21 @@ mod tests {
 
         let system = AuraSystem::new(broadcast_mgr);
         (system, creature_mgr)
+    }
+
+    #[test]
+    fn melee_haste_reduces_and_restores_attack_speed() {
+        let hasted = recalculate_melee_haste_speed(2_000, 0, 50);
+        assert_eq!(hasted, 1_333);
+        assert_eq!(recalculate_melee_haste_speed(hasted, 50, 0), 2_000);
+    }
+
+    #[test]
+    fn stacked_melee_haste_recalculates_from_active_total() {
+        let once_hasted = recalculate_melee_haste_speed(2_000, 0, 50);
+        let twice_hasted = recalculate_melee_haste_speed(once_hasted, 50, 100);
+        assert_eq!(twice_hasted, 1_000);
+        assert_eq!(recalculate_melee_haste_speed(twice_hasted, 100, 50), 1_333);
     }
 
     // ── apply_primary_stat_aura_modifier (Aura::HandleAuraModStat family) ─────
@@ -4351,7 +4569,7 @@ mod tests {
         );
 
         let has_aura = creature_mgr
-            .with_creature(guid, |c| c.auras.iter().any(|(id, _, _)| *id == 116))
+            .with_creature(guid, |c| c.auras.has_aura(116))
             .unwrap();
         assert!(
             has_aura,
@@ -4383,7 +4601,10 @@ mod tests {
 
         let count = creature_mgr
             .with_creature(guid, |c| {
-                c.auras.iter().filter(|(id, _, _)| *id == 116).count()
+                c.auras
+                    .all_auras()
+                    .filter(|aura| aura.spell_id == 116)
+                    .count()
             })
             .unwrap();
         assert_eq!(count, 1, "Same spell should not be added twice");
@@ -4438,7 +4659,7 @@ mod tests {
         );
 
         let has_aura = creature_mgr
-            .with_creature(guid, |c| c.auras.iter().any(|(id, _, _)| *id == 116))
+            .with_creature(guid, |c| c.auras.has_aura(116))
             .unwrap();
         assert!(
             !has_aura,
@@ -4506,6 +4727,81 @@ mod tests {
             "Speed should not go below minimum 0.1, got {}",
             speed
         );
+    }
+
+    #[tokio::test]
+    async fn creature_aura_preserves_full_effect_metadata_and_permanent_duration() {
+        let (system, creature_mgr) = make_aura_system();
+        let guid = add_test_creature(&creature_mgr, 100, 10);
+        let caster = ObjectGuid::new_player(42);
+        let aura = Aura::new(
+            1234,
+            caster,
+            1,
+            effects::AURA_MOD_STAT,
+            3,
+            25,
+            None,
+            0,
+            1,
+            0,
+            AuraFlags::default(),
+        );
+
+        system.apply_creature_aura_record_with_mgr(guid, aura, &creature_mgr);
+        creature_mgr.with_creature_mut(guid, |creature| {
+            assert!(creature.update_auras(60_000).is_empty());
+        });
+
+        let stored = creature_mgr
+            .with_creature(guid, |creature| creature.auras.get_aura(1234, 1).cloned())
+            .flatten()
+            .expect("permanent creature aura remains active");
+        assert_eq!(stored.caster_guid, caster);
+        assert_eq!(stored.aura_type, effects::AURA_MOD_STAT);
+        assert_eq!(stored.misc_value, 3);
+        assert_eq!(stored.current_value(), 25);
+        assert_eq!(stored.remaining_duration_ms(), None);
+    }
+
+    #[tokio::test]
+    async fn removing_one_creature_slow_keeps_remaining_speed_modifier() {
+        let (system, creature_mgr) = make_aura_system();
+        let guid = add_test_creature(&creature_mgr, 100, 11);
+
+        system.apply_creature_aura_with_mgr(
+            guid,
+            116,
+            effects::AURA_MOD_DECREASE_SPEED,
+            -40,
+            Some(10_000),
+            &creature_mgr,
+        );
+        system.apply_creature_aura_with_mgr(
+            guid,
+            1715,
+            effects::AURA_MOD_DECREASE_SPEED,
+            -20,
+            Some(10_000),
+            &creature_mgr,
+        );
+        system.remove_creature_aura_with_mgr(
+            guid,
+            116,
+            effects::AURA_MOD_DECREASE_SPEED,
+            &creature_mgr,
+        );
+
+        let speed = creature_mgr
+            .with_creature(guid, |creature| creature.speed_run)
+            .unwrap();
+        assert!(
+            (speed - 0.8).abs() < 0.001,
+            "remaining slow must still apply"
+        );
+        assert!(creature_mgr
+            .with_creature(guid, |creature| creature.auras.has_aura(1715))
+            .unwrap());
     }
 
     #[test]
