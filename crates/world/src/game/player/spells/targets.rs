@@ -76,6 +76,7 @@ pub enum ImplicitTarget {
     SingleRaid = 57,
     RaidNearCaster = 58,
     FriendInCone = 59,
+    ScriptInCone60 = 60,
     AllPartyInArea = 61,
 }
 
@@ -135,6 +136,7 @@ impl ImplicitTarget {
             57 => Self::SingleRaid,
             58 => Self::RaidNearCaster,
             59 => Self::FriendInCone,
+            60 => Self::ScriptInCone60,
             61 => Self::AllPartyInArea,
             _ => Self::None,
         }
@@ -166,6 +168,7 @@ impl ImplicitTarget {
                 | Self::LocationScriptNearCaster
                 | Self::GameObjectScriptAoeAtSrc
                 | Self::GameObjectScriptAoeAtDest
+                | Self::ScriptInCone60
         )
     }
 
@@ -522,6 +525,42 @@ fn resolve_implicit_target(
                 targets,
                 world,
             );
+        }
+
+        ImplicitTarget::ScriptInCone60 => {
+            let has_script_targets = !world
+                .managers
+                .spell_mgr
+                .get_spell_script_targets(spell_entry.id)
+                .is_empty();
+            let selection = if has_script_targets || spell_entry.effect[effect_idx] == 77 {
+                SpellTargets::All
+            } else {
+                SpellTargets::AoeDamage
+            };
+            fill_area_targets(
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                SpellNotifyPushType::Cone,
+                selection,
+                None,
+                true,
+                targets,
+            );
+            if has_script_targets {
+                filter_script_area_units(
+                    spell_entry.id,
+                    effect_idx,
+                    caster_guid,
+                    true,
+                    targets,
+                    world,
+                );
+            } else {
+                targets.retain(|guid| *guid != caster_guid);
+            }
         }
 
         ImplicitTarget::EnemyWithinCasterRange => {
@@ -2367,6 +2406,12 @@ mod tests {
         spell
     }
 
+    fn script_cone_spell(id: u32) -> SpellEntry {
+        let mut spell = aoe_enemy_spell(id);
+        spell.effect_implicit_target_a[0] = 60; // TARGET_ENUM_UNITS_SCRIPT_IN_CONE_60
+        spell
+    }
+
     fn add_test_player(world: &World, guid: ObjectGuid, map_id: u32, instance_id: u32) {
         let player = Player::new(
             guid,
@@ -2482,6 +2527,7 @@ mod tests {
             vec![SpellTargetEntry {
                 type_: 1, // SPELL_TARGET_TYPE_CREATURE
                 target_id: 9000,
+                condition_id: 0,
                 can_focus: false,
                 inverse_effect_mask: 0,
             }],
@@ -2524,6 +2570,7 @@ mod tests {
             vec![SpellTargetEntry {
                 type_: 0, // SPELL_TARGET_TYPE_GAMEOBJECT
                 target_id: entry,
+                condition_id: 0,
                 can_focus: false,
                 inverse_effect_mask: 0,
             }],
@@ -2577,6 +2624,7 @@ mod tests {
             vec![SpellTargetEntry {
                 type_: 1, // SPELL_TARGET_TYPE_CREATURE
                 target_id: 9001,
+                condition_id: 0,
                 can_focus: false,
                 inverse_effect_mask: 0,
             }],
@@ -2606,6 +2654,7 @@ mod tests {
             vec![SpellTargetEntry {
                 type_: 1, // SPELL_TARGET_TYPE_CREATURE
                 target_id: 9002,
+                condition_id: 0,
                 can_focus: false,
                 inverse_effect_mask: 0,
             }],
@@ -2614,6 +2663,37 @@ mod tests {
         let caster = ObjectGuid::new_player(1);
         let matching = ObjectGuid::new_creature(9002, 1);
         let non_matching = ObjectGuid::new_creature(9003, 1);
+        add_test_player(&world, caster, 0, 0);
+        add_test_creature(&world, matching, pos(2.0, 0.0));
+        add_test_creature(&world, non_matching, pos(3.0, 0.0));
+
+        let resolved =
+            resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
+        assert_eq!(resolved.effect_targets[0], vec![matching]);
+    }
+
+    #[tokio::test]
+    async fn script_cone_filters_to_configured_entries() {
+        let world = test_world();
+        let spell_id = 50005;
+        world
+            .managers
+            .spell_mgr
+            .add_spell(script_cone_spell(spell_id));
+        world.managers.spell_mgr.set_spell_script_targets_for_test(
+            spell_id,
+            vec![SpellTargetEntry {
+                type_: 1, // SPELL_TARGET_TYPE_CREATURE
+                target_id: 9004,
+                condition_id: 0,
+                can_focus: false,
+                inverse_effect_mask: 0,
+            }],
+        );
+
+        let caster = ObjectGuid::new_player(1);
+        let matching = ObjectGuid::new_creature(9004, 1);
+        let non_matching = ObjectGuid::new_creature(9005, 1);
         add_test_player(&world, caster, 0, 0);
         add_test_creature(&world, matching, pos(2.0, 0.0));
         add_test_creature(&world, non_matching, pos(3.0, 0.0));

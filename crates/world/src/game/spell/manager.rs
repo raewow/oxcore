@@ -146,6 +146,8 @@ pub struct SpellArea {
 pub struct SpellTargetEntry {
     pub type_: u32,
     pub target_id: u32,
+    /// `conditions.condition_entry`; evaluation awaits the shared condition system.
+    pub condition_id: u32,
     pub can_focus: bool,
     pub inverse_effect_mask: u32,
 }
@@ -1358,6 +1360,7 @@ impl SpellManager {
             map.entry(spell_id).or_default().push(SpellTargetEntry {
                 type_,
                 target_id: target_entry,
+                condition_id: row.try_get::<u64, _>("condition_id").unwrap_or(0) as u32,
                 can_focus: false,
                 inverse_effect_mask: row.try_get::<u64, _>("effect_mask").unwrap_or(0) as u32,
             });
