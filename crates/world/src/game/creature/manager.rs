@@ -291,6 +291,56 @@ impl CreatureManager {
         self.creatures.remove(&guid)
     }
 
+    /// Aggro nearby hostile creatures when the opener interacts with a lock game object
+    /// (chest, door, etc.). Mirrors `GameObject::DoAggroWhenOpening` from the C++ core.
+    pub fn do_aggro_when_opening(
+        &self,
+        opener_guid: ObjectGuid,
+        opener_position: Position,
+        opener_level: u8,
+        opener_faction: u32,
+        opener_is_alive: bool,
+    ) {
+        use crate::game::creature::ai::{
+            calculate_aggro_range, is_valid_aggro_target, should_aggro_creature,
+        };
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        for entry in self.iter_creatures() {
+            let creature_guid = *entry.key();
+            let should_aggro = {
+                let creature = entry.value();
+
+                // Must be alive and within the level-scaled aggro range of the opener.
+                let aggro_range = calculate_aggro_range(creature.level, opener_level);
+                if !creature.position.is_within_range(&opener_position, aggro_range) {
+                    false
+                } else if !should_aggro_creature(
+                    creature.faction,
+                    creature.unit_flags,
+                    opener_faction,
+                    true,
+                ) {
+                    false
+                } else {
+                    is_valid_aggro_target(opener_guid, 0, opener_is_alive)
+                }
+            };
+
+            if should_aggro {
+                self.with_creature_mut(creature_guid, |c| {
+                    c.combat.enter_combat(opener_guid, timestamp);
+                    c.threat_manager.add_threat(opener_guid, 1.0);
+                    c.combat.attacking = Some(opener_guid);
+                });
+            }
+        }
+    }
+
     /// Check if a spawn is already active
     pub fn has_spawn(&self, spawn_id: u32) -> bool {
         self.spawn_states

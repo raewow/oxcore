@@ -10,6 +10,7 @@ use crate::game::player::spells::effects::EffectsDispatcher;
 use crate::game::player::spells::hit;
 use crate::game::player::spells::learning;
 use crate::game::player::spells::modifiers;
+use crate::game::player::spells::target_info::set_caster_in_combat_with_victim;
 use crate::game::player::spells::state::{
     ActiveCast, CurrentSpellType, SpellCastError, SpellCastResult, SpellCastTargets,
     SpellEventQueue, SpellEventType, SpellModOp, SpellModType, SpellState, SpellsState,
@@ -310,6 +311,41 @@ fn unit_in_combat(guid: ObjectGuid, world: &World) -> bool {
     }
 }
 
+/// Level of a unit, used for `DoAggroWhenOpening` range scaling.
+fn unit_level(guid: ObjectGuid, world: &World) -> u8 {
+    if guid.is_player() {
+        world
+            .managers
+            .player_mgr
+            .with_player(guid, |p| p.level)
+            .unwrap_or(1)
+    } else if guid.is_creature_or_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| c.level)
+            .unwrap_or(1)
+    } else {
+        1
+    }
+}
+
+/// Faction template ID of a unit, used for `DoAggroWhenOpening` hostility checks.
+fn unit_faction(guid: ObjectGuid, world: &World) -> u32 {
+    if guid.is_player() {
+        // Player races are not yet modelled; faction 1 is the generic player faction.
+        1
+    } else if guid.is_creature_or_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| c.faction)
+            .unwrap_or(1)
+    } else {
+        1
+    }
+}
+
 /// `Spell::OnSpellLaunch` — launch-time special-case handling, run once as the cast fires
 /// and before per-target effects. No-ops without a live caster unit; may aggro hostiles
 /// when opening a lock GO, start a PvP combat timer for `ACTIVE_THREAT` spells, and drive
@@ -333,9 +369,17 @@ fn on_spell_launch(
 
     // Opening a lock game object can pull nearby hostiles onto the opener.
     if cast_targets.gameobject_target_guid.is_some() && opens_lock(&entry.effect) {
-        // ... GameObject::DoAggroWhenOpening — pulls hostile creatures within 10y that can
-        // reach and validly attack the opener into combat. There is no GO proximity/aggro
-        // search in this codebase yet, so the pull is not applied.
+        if let Some(caster_position) = unit_position(caster_guid, world) {
+            let (x, y, z) = caster_position;
+            let caster_pos = oxcore_shared::protocol::Position::xyz(x, y, z);
+            world.managers.creature_mgr.do_aggro_when_opening(
+                caster_guid,
+                caster_pos,
+                unit_level(caster_guid, world),
+                unit_faction(caster_guid, world),
+                true,
+            );
+        }
     }
 
     let unit_target = match cast_targets.unit_target() {
@@ -353,15 +397,8 @@ fn on_spell_launch(
         unit_target == caster_guid,
         unit_in_combat(caster_guid, world),
     ) {
-        // Unit::SetInCombatWithVictim(unitTarget, false, UNIT_PVP_COMBAT_TIMER). Approximated
-        // by flagging the caster in combat for 5.5s; the aggressor/threat bookkeeping and the
-        // creature-caster path are not modelled here.
-        if caster_guid.is_player() {
-            world.managers.player_mgr.with_player_mut(caster_guid, |p| {
-                p.combat.in_combat = true;
-                p.combat.combat_timer = p.combat.combat_timer.max(UNIT_PVP_COMBAT_TIMER);
-            });
-        }
+        // Unit::SetInCombatWithVictim(unitTarget, false, UNIT_PVP_COMBAT_TIMER).
+        set_caster_in_combat_with_victim(caster_guid, unit_target, world);
     }
 
     // Charge is resolved here instead of in EffectCharge; nothing to do without one.
@@ -388,16 +425,23 @@ fn on_spell_launch(
     // MotionMaster::MoveCharge toward the target. The batching delay
     // (m_delayed ? GetSpellBatchingEffectDelay(..) : 0) is always 0 here — spell batching is
     // config-gated and unmodelled. Player charge movement has no MotionMaster path yet, so
-    // only creature casters drive the (currently stubbed) charge generator.
+    // only creature casters drive the charge generator.
     let _ = charge_index;
     if caster_guid.is_creature_or_pet() {
         world
             .managers
-            .creature_mgr
-            .with_creature_mut(caster_guid, |c| {
-                c.motion_master
-                    .move_charge(unit_target, 0, trigger_auto_attack, false);
-            });
+                .creature_mgr
+                .with_creature_mut(caster_guid, |c| {
+                    c.motion_master.move_charge(
+                        unit_target,
+                        0,
+                        trigger_auto_attack,
+                        false,
+                        caster_guid,
+                        c.position,
+                        c.run_speed(),
+                    );
+                });
     }
     // ... player MotionMaster charge displacement is not modelled yet.
 }

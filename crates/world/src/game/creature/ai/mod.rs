@@ -26,8 +26,9 @@ mod types;
 
 // Public exports
 pub use aggro::{
-    is_hostile_faction, is_npc, is_valid_aggro_target, should_aggro_creature, NPC_FLAG_GOSSIP,
-    NPC_FLAG_QUEST_GIVER, NPC_FLAG_TRAINER, NPC_FLAG_VENDOR,
+    calculate_aggro_range, is_hostile_faction, is_npc, is_valid_aggro_target,
+    should_aggro_creature, NPC_FLAG_GOSSIP, NPC_FLAG_QUEST_GIVER, NPC_FLAG_TRAINER,
+    NPC_FLAG_VENDOR,
 };
 pub use aggro_scan::scan_for_aggro;
 pub use snapshot::{AIDecisionResult, AIInput, CreatureSnapshot, TargetSnapshot, ThreatEntry};

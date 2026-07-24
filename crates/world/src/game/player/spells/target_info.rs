@@ -423,7 +423,7 @@ fn enter_combat_on_hit(caster_guid: ObjectGuid, target_guid: ObjectGuid, world: 
 
 /// Flag the caster as being in combat with the victim (MaNGOS:
 /// `pRealUnitCaster->SetInCombatWithVictim(unit)`).
-fn set_caster_in_combat_with_victim(
+pub(crate) fn set_caster_in_combat_with_victim(
     caster_guid: ObjectGuid,
     _target_guid: ObjectGuid,
     world: &World,
