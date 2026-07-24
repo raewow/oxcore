@@ -164,4 +164,38 @@ mod tests {
             .unwrap();
         assert!(follower_has_target);
     }
+
+    #[tokio::test]
+    async fn target_object_destroy_link_removes_follower_from_target() {
+        let world = test_world();
+        let target_guid = add_test_creature(&world, 1, 1);
+        let follower_guid = add_test_creature(&world, 1, 2);
+
+        FollowerReference::target_object_build_link(&world, target_guid, follower_guid);
+        FollowerReference::target_object_destroy_link(&world, target_guid, follower_guid);
+
+        let target_no_longer_has_follower = world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |target| !target.followers.contains(&follower_guid))
+            .unwrap();
+        assert!(target_no_longer_has_follower);
+    }
+
+    #[tokio::test]
+    async fn source_object_destroy_link_clears_follower_target() {
+        let world = test_world();
+        let target_guid = add_test_creature(&world, 1, 1);
+        let follower_guid = add_test_creature(&world, 1, 2);
+
+        FollowerReference::target_object_build_link(&world, target_guid, follower_guid);
+        FollowerReference::source_object_destroy_link(&world, follower_guid);
+
+        let follower_no_longer_following = world
+            .managers
+            .creature_mgr
+            .with_creature(follower_guid, |follower| follower.following_target.is_none())
+            .unwrap();
+        assert!(follower_no_longer_following);
+    }
 }
