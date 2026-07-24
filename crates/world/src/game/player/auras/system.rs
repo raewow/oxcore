@@ -128,6 +128,31 @@ impl AuraSystem {
             duration_ms
         };
 
+        let periodic_interval_ms = if effects::is_periodic_aura_type(aura_type) {
+            if caster_guid.is_player() {
+                world
+                    .managers
+                    .spell_mgr
+                    .get(spell_id)
+                    .and_then(|spell| {
+                        world.systems.player.manager().with_player(caster_guid, |player| {
+                            crate::game::player::spells::modifiers::apply_spell_modifiers_to_value(
+                                &player.spells.spell_modifiers,
+                                crate::game::player::spells::state::SpellModOp::ActivationTime,
+                                periodic_interval_ms as i32,
+                                spell.spell_family_name,
+                                spell.spell_family_flags,
+                            ) as u32
+                        })
+                    })
+                    .unwrap_or(periodic_interval_ms)
+            } else {
+                periodic_interval_ms
+            }
+        } else {
+            0
+        };
+
         let mut aura = Aura::new(
             spell_id,
             caster_guid,

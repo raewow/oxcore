@@ -57,6 +57,24 @@ pub const AURA_PERIODIC_LEECH: u32 = 53; // Drain Life
 pub const AURA_PERIODIC_MANA_LEECH: u32 = 64; // Mana drain
 pub const AURA_PERIODIC_TRIGGER_SPELL: u32 = 23; // Trigger spell every tick
 pub const AURA_PERIODIC_DAMAGE_PERCENT: u32 = 89; // % health DoT
+pub const AURA_PERIODIC_HEALTH_FUNNEL: u32 = 62; // Transfer caster health periodically
+pub const AURA_POWER_BURN_MANA: u32 = 162; // Periodic mana burn
+
+pub fn is_periodic_aura_type(aura_type: u32) -> bool {
+    matches!(
+        aura_type,
+        AURA_PERIODIC_DAMAGE
+            | AURA_PERIODIC_HEAL
+            | AURA_PERIODIC_ENERGIZE
+            | AURA_OBS_MOD_HEALTH
+            | AURA_PERIODIC_LEECH
+            | AURA_PERIODIC_HEALTH_FUNNEL
+            | AURA_PERIODIC_MANA_LEECH
+            | AURA_PERIODIC_DAMAGE_PERCENT
+            | AURA_POWER_BURN_MANA
+            | AURA_PERIODIC_TRIGGER_SPELL
+    )
+}
 
 // --- Proc Effects ---
 // These auras trigger when specific combat events occur.
