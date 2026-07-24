@@ -607,6 +607,21 @@ mod tests {
     }
 
     #[test]
+    fn effects_of_one_spell_share_the_holder_slot() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let first_slot = container
+            .add_aura(make_aura(1500, 0, caster, None))
+            .expect("first effect gets a slot");
+        let second_slot = container
+            .add_aura(make_aura(1500, 1, caster, None))
+            .expect("second effect reuses the holder slot");
+
+        assert_eq!(first_slot, second_slot);
+        assert_eq!(container.count(), 2);
+    }
+
+    #[test]
     fn refresh_aura_refreshes_all_effects_of_the_spell() {
         let mut container = AuraContainer::new();
         let caster = test_guid(1);

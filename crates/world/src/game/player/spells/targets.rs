@@ -462,7 +462,6 @@ fn resolve_implicit_target(
 
     match target_type {
         ImplicitTarget::EnemyAoeAtSrc
-        | ImplicitTarget::ScriptAoeAtSrc
         | ImplicitTarget::EnemyInCone24
         | ImplicitTarget::EnemyInCone54 => {
             fill_area_targets(
@@ -478,7 +477,7 @@ fn resolve_implicit_target(
             );
         }
 
-        ImplicitTarget::EnemyAoeAtDest | ImplicitTarget::ScriptAoeAtDest => {
+        ImplicitTarget::EnemyAoeAtDest => {
             let push = if cast_targets.dst_position.is_some() {
                 SpellNotifyPushType::DestCenter
             } else {
@@ -494,6 +493,34 @@ fn resolve_implicit_target(
                 None,
                 false,
                 targets,
+            );
+        }
+
+        ImplicitTarget::ScriptAoeAtSrc | ImplicitTarget::ScriptAoeAtDest => {
+            let at_source = target_type == ImplicitTarget::ScriptAoeAtSrc;
+            let push = if at_source {
+                SpellNotifyPushType::SrcCenter
+            } else {
+                SpellNotifyPushType::DestCenter
+            };
+            fill_area_targets(
+                world,
+                caster_guid,
+                cast_targets,
+                radius,
+                push,
+                SpellTargets::All,
+                None,
+                true,
+                targets,
+            );
+            filter_script_area_units(
+                spell_entry.id,
+                effect_idx,
+                caster_guid,
+                at_source,
+                targets,
+                world,
             );
         }
 
@@ -748,7 +775,18 @@ fn resolve_implicit_target(
             }
         }
 
-        ImplicitTarget::GameObjectScriptAoeAtSrc | ImplicitTarget::GameObjectScriptAoeAtDest => {}
+        ImplicitTarget::GameObjectScriptAoeAtSrc | ImplicitTarget::GameObjectScriptAoeAtDest => {
+            resolve_script_area_gameobjects(
+                spell_entry.id,
+                effect_idx,
+                caster_guid,
+                cast_targets,
+                radius,
+                target_type == ImplicitTarget::GameObjectScriptAoeAtSrc,
+                targets,
+                world,
+            );
+        }
 
         ImplicitTarget::FriendAndParty => {
             let params = RaidPartyFillParams {
@@ -912,6 +950,75 @@ fn find_script_target(
     }
 
     closest.map(|(guid, _)| guid)
+}
+
+fn filter_script_area_units(
+    spell_id: u32,
+    effect_idx: usize,
+    caster_guid: ObjectGuid,
+    at_source: bool,
+    targets: &mut Vec<ObjectGuid>,
+    world: &World,
+) {
+    let entries = world.managers.spell_mgr.get_spell_script_targets(spell_id);
+    if !entries.is_empty() {
+        let effect_mask = 1u32 << effect_idx;
+        targets.retain(|guid| {
+            entries.iter().any(|entry| {
+                entry.inverse_effect_mask & effect_mask == 0
+                    && script_entry_matches_unit(entry, *guid, world)
+            })
+        });
+    }
+    if at_source {
+        targets.retain(|guid| *guid != caster_guid);
+    }
+}
+
+fn resolve_script_area_gameobjects(
+    spell_id: u32,
+    effect_idx: usize,
+    caster_guid: ObjectGuid,
+    cast_targets: &SpellCastTargets,
+    radius: f32,
+    at_source: bool,
+    targets: &mut Vec<ObjectGuid>,
+    world: &World,
+) {
+    let Some((caster_map, _, caster_phase, caster_position)) =
+        unit_world_context(caster_guid, world)
+    else {
+        return;
+    };
+    let center = if at_source {
+        cast_targets
+            .src_position
+            .map(|(x, y, z)| Position::xyz(x, y, z))
+            .unwrap_or(caster_position)
+    } else {
+        let Some((x, y, z)) = cast_targets.dst_position else {
+            return;
+        };
+        Position::xyz(x, y, z)
+    };
+    let effect_mask = 1u32 << effect_idx;
+    let entries = world.managers.spell_mgr.get_spell_script_targets(spell_id);
+
+    for entry in entries {
+        if entry.type_ != 0 || entry.inverse_effect_mask & effect_mask != 0 {
+            continue;
+        }
+        for gameobject in world.managers.gameobject_mgr.iter_gameobjects() {
+            let target = gameobject.value();
+            if target.entry == entry.target_id
+                && target.map_id == caster_map
+                && target.phase_mask & caster_phase != 0
+                && center.is_within_range(&target.position, radius)
+            {
+                targets.push(target.guid);
+            }
+        }
+    }
 }
 
 fn script_entry_matches_unit(
@@ -2254,6 +2361,12 @@ mod tests {
         spell
     }
 
+    fn script_aoe_at_source_spell(id: u32) -> SpellEntry {
+        let mut spell = aoe_enemy_spell(id);
+        spell.effect_implicit_target_a[0] = 7; // TARGET_ENUM_UNITS_SCRIPT_AOE_AT_SRC_LOC
+        spell
+    }
+
     fn add_test_player(world: &World, guid: ObjectGuid, map_id: u32, instance_id: u32) {
         let player = Player::new(
             guid,
@@ -2478,6 +2591,36 @@ mod tests {
             resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
         assert_eq!(resolved.destination, Some((4.0, 5.0, 0.0)));
         assert_eq!(resolved.effect_targets[0], vec![target]);
+    }
+
+    #[tokio::test]
+    async fn script_aoe_at_source_filters_to_configured_entries_and_excludes_caster() {
+        let world = test_world();
+        let spell_id = 50004;
+        world
+            .managers
+            .spell_mgr
+            .add_spell(script_aoe_at_source_spell(spell_id));
+        world.managers.spell_mgr.set_spell_script_targets_for_test(
+            spell_id,
+            vec![SpellTargetEntry {
+                type_: 1, // SPELL_TARGET_TYPE_CREATURE
+                target_id: 9002,
+                can_focus: false,
+                inverse_effect_mask: 0,
+            }],
+        );
+
+        let caster = ObjectGuid::new_player(1);
+        let matching = ObjectGuid::new_creature(9002, 1);
+        let non_matching = ObjectGuid::new_creature(9003, 1);
+        add_test_player(&world, caster, 0, 0);
+        add_test_creature(&world, matching, pos(2.0, 0.0));
+        add_test_creature(&world, non_matching, pos(3.0, 0.0));
+
+        let resolved =
+            resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
+        assert_eq!(resolved.effect_targets[0], vec![matching]);
     }
 
     #[tokio::test]
