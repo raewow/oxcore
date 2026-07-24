@@ -72,6 +72,7 @@ impl AuraSystem {
         &self,
         target_guid: ObjectGuid,
         caster_guid: ObjectGuid,
+        cast_item_guid: Option<ObjectGuid>,
         spell_id: u32,
         effect_index: u8,
         aura_type: u32,
@@ -104,6 +105,7 @@ impl AuraSystem {
                 max_charges,
                 flags,
             );
+            aura.cast_item_guid = cast_item_guid;
             aura.duration_index = world
                 .managers
                 .spell_mgr
@@ -198,6 +200,7 @@ impl AuraSystem {
             max_charges,
             flags,
         );
+        aura.cast_item_guid = cast_item_guid;
         aura.duration_index = world
             .managers
             .spell_mgr
@@ -539,17 +542,29 @@ impl AuraSystem {
                     .await;
             }
             if aura.aura_type == effects::AURA_SPIRIT_OF_REDEMPTION {
-                world.systems.player.manager().with_player_mut(target_guid, |player| {
-                    player.unit_flags |= effects::UNIT_FLAG_STUNNED;
-                    player.invincibility_hp_threshold = 0;
-                });
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.unit_flags |= effects::UNIT_FLAG_STUNNED;
+                        player.invincibility_hp_threshold = 0;
+                    });
                 let _ = Box::pin(world.systems.spells.cast_spell(
-                    target_guid, 27965, Some(target_guid), true, world,
+                    target_guid,
+                    27965,
+                    Some(target_guid),
+                    true,
+                    world,
                 ))
                 .await;
-                world.systems.player.manager().with_player_mut(target_guid, |player| {
-                    player.unit_flags &= !effects::UNIT_FLAG_STUNNED;
-                });
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.unit_flags &= !effects::UNIT_FLAG_STUNNED;
+                    });
             }
 
             // Send slot cleared to client
@@ -628,6 +643,7 @@ impl AuraSystem {
             Box::pin(self.apply_aura(
                 target_guid,
                 caster_guid,
+                None,
                 trigger_spell_id,
                 effect_index as u8,
                 aura_type,
@@ -1058,7 +1074,8 @@ impl AuraSystem {
             .with_player_mut(player_guid, |player| {
                 if aura_type == effects::AURA_MOD_RANGED_AMMO_HASTE {
                     if apply && !ammo_haste_can_apply {
-                        if let Some(aura) = player.auras.container.get_aura_mut(spell_id, effect_index)
+                        if let Some(aura) =
+                            player.auras.container.get_aura_mut(spell_id, effect_index)
                         {
                             aura.is_applied = false;
                         }
@@ -2985,16 +3002,24 @@ impl AuraSystem {
     }
 
     async fn apply_spirit_of_redemption(&self, target_guid: ObjectGuid, world: &World) {
-        world.systems.player.manager().with_player_mut(target_guid, |player| {
-            player.stand_state = 0;
-            player.stats.health = player.stats.max_health;
-            let mana = crate::game::player::power::PowerType::Mana as usize;
-            player.power.current[mana] = player.power.max[mana];
-            player.invincibility_hp_threshold = player.stats.max_health;
-            player.stats.dirty = true;
-        });
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                player.stand_state = 0;
+                player.stats.health = player.stats.max_health;
+                let mana = crate::game::player::power::PowerType::Mana as usize;
+                player.power.current[mana] = player.power.max[mana];
+                player.invincibility_hp_threshold = player.stats.max_health;
+                player.stats.dirty = true;
+            });
         let _ = Box::pin(world.systems.spells.cast_spell(
-            target_guid, 25100, Some(target_guid), true, world,
+            target_guid,
+            25100,
+            Some(target_guid),
+            true,
+            world,
         ))
         .await;
     }
@@ -3005,30 +3030,32 @@ impl AuraSystem {
             .player
             .manager()
             .with_player(target_guid, |player| {
-                let heart_of_the_wild = player
-                    .auras
-                    .container
-                    .all_auras()
-                    .find_map(|aura| {
-                        let entry = world.managers.spell_mgr.get(aura.spell_id)?;
-                        (entry.spell_icon_id == 240 && aura.misc_value == 3)
-                            .then_some(aura.current_value())
-                    });
+                let heart_of_the_wild = player.auras.container.all_auras().find_map(|aura| {
+                    let entry = world.managers.spell_mgr.get(aura.spell_id)?;
+                    (entry.spell_icon_id == 240 && aura.misc_value == 3)
+                        .then_some(aura.current_value())
+                });
                 (
                     shapeshift_boost_spells(form),
-                    player.spells.learned_spells.iter().copied().collect::<Vec<_>>(),
+                    player
+                        .spells
+                        .learned_spells
+                        .iter()
+                        .copied()
+                        .collect::<Vec<_>>(),
                     heart_of_the_wild,
                 )
             })
             .unwrap_or(([0; 2], Vec::new(), None));
 
         for spell_id in boost_spells.into_iter().filter(|spell_id| *spell_id != 0) {
-            let _ = Box::pin(
-                world
-                    .systems
-                    .spells
-                    .cast_spell(target_guid, spell_id, Some(target_guid), true, world),
-            )
+            let _ = Box::pin(world.systems.spells.cast_spell(
+                target_guid,
+                spell_id,
+                Some(target_guid),
+                true,
+                world,
+            ))
             .await;
         }
 
@@ -3039,26 +3066,26 @@ impl AuraSystem {
             {
                 continue;
             }
-            let _ = Box::pin(
-                world
-                    .systems
-                    .spells
-                    .cast_spell(target_guid, spell_id, Some(target_guid), true, world),
-            )
+            let _ = Box::pin(world.systems.spells.cast_spell(
+                target_guid,
+                spell_id,
+                Some(target_guid),
+                true,
+                world,
+            ))
             .await;
         }
 
         if form == effects::FORM_CAT || form == effects::FORM_BEAR || form == effects::FORM_DIREBEAR
         {
-            if learned_spells.contains(&17007)
-                && spell_supports_form(24932, form_mask, world)
-            {
-                let _ = Box::pin(
-                    world
-                        .systems
-                        .spells
-                        .cast_spell(target_guid, 24932, Some(target_guid), true, world),
-                )
+            if learned_spells.contains(&17007) && spell_supports_form(24932, form_mask, world) {
+                let _ = Box::pin(world.systems.spells.cast_spell(
+                    target_guid,
+                    24932,
+                    Some(target_guid),
+                    true,
+                    world,
+                ))
                 .await;
             }
 
@@ -3094,7 +3121,8 @@ impl AuraSystem {
                     .container
                     .all_auras()
                     .filter_map(|aura| {
-                        spell_is_removed_on_shape_lost(aura.spell_id, world).then_some(aura.spell_id)
+                        spell_is_removed_on_shape_lost(aura.spell_id, world)
+                            .then_some(aura.spell_id)
                     })
                     .collect::<std::collections::HashSet<_>>()
             })
@@ -3114,18 +3142,18 @@ impl AuraSystem {
                     .iter()
                     .flatten()
                     .filter_map(|cast| {
-                        spell_is_removed_on_shape_lost(cast.spell_id, world).then_some(cast.spell_id)
+                        spell_is_removed_on_shape_lost(cast.spell_id, world)
+                            .then_some(cast.spell_id)
                     })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
         for spell_id in interrupted_spells {
-            let _ = Box::pin(
-                world
-                    .systems
-                    .spells
-                    .cancel_cast_by_spell_id(target_guid, spell_id, world),
-            )
+            let _ = Box::pin(world.systems.spells.cancel_cast_by_spell_id(
+                target_guid,
+                spell_id,
+                world,
+            ))
             .await;
         }
     }
@@ -3806,7 +3834,9 @@ fn shapeshift_hotw_spell(form: u8) -> Option<u32> {
 }
 
 fn shapeshift_form_mask(form: u8) -> u32 {
-    form.checked_sub(1).and_then(|form| 1u32.checked_shl(form as u32)).unwrap_or(0)
+    form.checked_sub(1)
+        .and_then(|form| 1u32.checked_shl(form as u32))
+        .unwrap_or(0)
 }
 
 fn spell_needs_cast_at_form_apply(spell_id: u32, form_mask: u32, world: &World) -> bool {

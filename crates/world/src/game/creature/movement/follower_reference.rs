@@ -151,7 +151,9 @@ mod tests {
         let target_has_follower = world
             .managers
             .creature_mgr
-            .with_creature(target_guid, |target| target.followers.contains(&follower_guid))
+            .with_creature(target_guid, |target| {
+                target.followers.contains(&follower_guid)
+            })
             .unwrap();
         assert!(target_has_follower);
 
@@ -177,7 +179,9 @@ mod tests {
         let target_no_longer_has_follower = world
             .managers
             .creature_mgr
-            .with_creature(target_guid, |target| !target.followers.contains(&follower_guid))
+            .with_creature(target_guid, |target| {
+                !target.followers.contains(&follower_guid)
+            })
             .unwrap();
         assert!(target_no_longer_has_follower);
     }
@@ -194,7 +198,9 @@ mod tests {
         let follower_no_longer_following = world
             .managers
             .creature_mgr
-            .with_creature(follower_guid, |follower| follower.following_target.is_none())
+            .with_creature(follower_guid, |follower| {
+                follower.following_target.is_none()
+            })
             .unwrap();
         assert!(follower_no_longer_following);
     }

@@ -37,6 +37,7 @@ use oxcore_shared::protocol::ObjectGuid;
 #[derive(Debug, Clone)]
 pub struct EffectInput {
     pub caster_guid: ObjectGuid,
+    pub cast_item_guid: Option<ObjectGuid>,
     pub target_guid: Option<ObjectGuid>,
     pub spell_id: u32,
     pub effect_index: u8,
@@ -65,6 +66,7 @@ impl EffectInput {
     ) -> Self {
         Self {
             caster_guid,
+            cast_item_guid: None,
             target_guid,
             spell_id,
             effect_index,
@@ -243,6 +245,7 @@ impl EffectsDispatcher {
     ) -> Result<Vec<EffectResult>> {
         self.dispatch_with_targets(
             caster_guid,
+            None,
             spell_id,
             target_guid,
             is_triggered,
@@ -265,6 +268,7 @@ impl EffectsDispatcher {
     pub async fn dispatch_with_targets(
         &self,
         caster_guid: ObjectGuid,
+        cast_item_guid: Option<ObjectGuid>,
         spell_id: u32,
         target_guid: Option<ObjectGuid>,
         is_triggered: bool,
@@ -314,6 +318,7 @@ impl EffectsDispatcher {
                 crate::game::player::spells::target_info::apply_target_effects(
                     &mut target,
                     caster_guid,
+                    cast_item_guid,
                     spell_id,
                     is_triggered,
                     custom_base_points,

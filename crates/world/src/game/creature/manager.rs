@@ -317,11 +317,18 @@ impl CreatureManager {
             .filter_map(|entry| {
                 let creature = entry.value();
                 let aggro_range = calculate_aggro_range(creature.level, opener_level);
-                if !creature.position.is_within_range(&opener_position, aggro_range) {
+                if !creature
+                    .position
+                    .is_within_range(&opener_position, aggro_range)
+                {
                     return None;
                 }
-                if !should_aggro_creature(creature.faction, creature.unit_flags, opener_faction, true)
-                {
+                if !should_aggro_creature(
+                    creature.faction,
+                    creature.unit_flags,
+                    opener_faction,
+                    true,
+                ) {
                     return None;
                 }
                 if !is_valid_aggro_target(opener_guid, 0, opener_is_alive) {

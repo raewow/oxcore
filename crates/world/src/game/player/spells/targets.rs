@@ -906,7 +906,7 @@ fn find_script_target(
         if let Some(guid) = explicit_unit {
             if entries
                 .iter()
-                .any(|entry| script_entry_matches_unit(entry, guid, world))
+                .any(|entry| script_entry_matches_unit(entry, guid, caster_guid, world))
                 && unit_world_context(guid, world).is_some_and(
                     |(map, instance, phase, position)| {
                         map == caster_map
@@ -931,6 +931,7 @@ fn find_script_target(
                     if go.entry != entry.target_id
                         || go.map_id != caster_map
                         || go.phase_mask & caster_phase == 0
+                        || !script_condition_matches(entry, go.guid, caster_guid, world)
                     {
                         continue;
                     }
@@ -954,6 +955,7 @@ fn find_script_target(
                         || target.map_id != caster_map
                         || target.instance_id != caster_instance
                         || target.phase_mask & caster_phase == 0
+                        || !script_condition_matches(entry, target.guid, caster_guid, world)
                     {
                         continue;
                     }
@@ -975,6 +977,7 @@ fn find_script_target(
                         || instance != caster_instance
                         || phase & caster_phase == 0
                         || !world.managers.player_mgr.is_player_alive(guid)
+                        || !script_condition_matches(entry, guid, caster_guid, world)
                     {
                         continue;
                     }
@@ -1005,7 +1008,7 @@ fn filter_script_area_units(
         targets.retain(|guid| {
             entries.iter().any(|entry| {
                 entry.inverse_effect_mask & effect_mask == 0
-                    && script_entry_matches_unit(entry, *guid, world)
+                    && script_entry_matches_unit(entry, *guid, caster_guid, world)
             })
         });
     }
@@ -1053,6 +1056,7 @@ fn resolve_script_area_gameobjects(
                 && target.map_id == caster_map
                 && target.phase_mask & caster_phase != 0
                 && center.is_within_range(&target.position, radius)
+                && script_condition_matches(&entry, target.guid, caster_guid, world)
             {
                 targets.push(target.guid);
             }
@@ -1063,30 +1067,49 @@ fn resolve_script_area_gameobjects(
 fn script_entry_matches_unit(
     entry: &crate::game::spell::manager::SpellTargetEntry,
     guid: ObjectGuid,
+    caster_guid: ObjectGuid,
     world: &World,
 ) -> bool {
-    match entry.type_ {
-        1 => world
-            .managers
-            .creature_mgr
-            .with_creature(guid, |creature| {
-                creature.entry == entry.target_id && creature.current_health > 0
-            })
-            .unwrap_or(false),
-        2 => world
-            .managers
-            .creature_mgr
-            .with_creature(guid, |creature| {
-                creature.entry == entry.target_id && creature.current_health == 0
-            })
-            .unwrap_or(false),
-        3 => {
-            guid.is_player()
-                && entry.target_id == 0
-                && world.managers.player_mgr.is_player_alive(guid)
+    script_condition_matches(entry, guid, caster_guid, world)
+        && match entry.type_ {
+            1 => world
+                .managers
+                .creature_mgr
+                .with_creature(guid, |creature| {
+                    creature.entry == entry.target_id && creature.current_health > 0
+                })
+                .unwrap_or(false),
+            2 => world
+                .managers
+                .creature_mgr
+                .with_creature(guid, |creature| {
+                    creature.entry == entry.target_id && creature.current_health == 0
+                })
+                .unwrap_or(false),
+            3 => {
+                guid.is_player()
+                    && entry.target_id == 0
+                    && world.managers.player_mgr.is_player_alive(guid)
+            }
+            _ => false,
         }
-        _ => false,
-    }
+}
+
+fn script_condition_matches(
+    entry: &crate::game::spell::manager::SpellTargetEntry,
+    target: ObjectGuid,
+    caster: ObjectGuid,
+    world: &World,
+) -> bool {
+    entry.condition_id == 0
+        || world.managers.condition_mgr.is_satisfied(
+            entry.condition_id,
+            crate::game::conditions::ConditionContext {
+                target,
+                source: caster,
+            },
+            world,
+        )
 }
 
 fn unit_world_context(guid: ObjectGuid, world: &World) -> Option<(u32, u32, u32, Position)> {
@@ -2239,6 +2262,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::dbc::structures::SpellEntry;
+    use crate::game::conditions::ConditionEntry;
     use crate::game::creature::manager::CreatureTemplate;
     use crate::game::creature::Creature;
     use crate::game::gameobject::{GameObject, GameObjectTemplate};
@@ -2701,6 +2725,52 @@ mod tests {
         let resolved =
             resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
         assert_eq!(resolved.effect_targets[0], vec![matching]);
+    }
+
+    #[tokio::test]
+    async fn script_target_condition_skips_ineligible_nearest_candidate() {
+        let world = test_world();
+        let spell_id = 50006;
+        world
+            .managers
+            .spell_mgr
+            .add_spell(script_near_caster_spell(spell_id));
+        world.managers.condition_mgr.add_for_test(
+            1,
+            ConditionEntry {
+                kind: 41,             // CONDITION_HEALTH_PERCENT
+                values: [5, 2, 0, 0], // <= 5%
+                flags: 0,
+            },
+        );
+        world.managers.spell_mgr.set_spell_script_targets_for_test(
+            spell_id,
+            vec![SpellTargetEntry {
+                type_: 1,
+                target_id: 9006,
+                condition_id: 1,
+                can_focus: false,
+                inverse_effect_mask: 0,
+            }],
+        );
+
+        let caster = ObjectGuid::new_player(1);
+        let ineligible_nearest = ObjectGuid::new_creature(9006, 1);
+        let eligible_farther = ObjectGuid::new_creature(9006, 2);
+        add_test_player(&world, caster, 0, 0);
+        add_test_creature(&world, ineligible_nearest, pos(2.0, 0.0));
+        add_test_creature(&world, eligible_farther, pos(8.0, 0.0));
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(eligible_farther, |creature| {
+                creature.current_health = 5;
+                creature.max_health = 100;
+            });
+
+        let resolved =
+            resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
+        assert_eq!(resolved.effect_targets[0], vec![eligible_farther]);
     }
 
     #[tokio::test]

@@ -508,6 +508,7 @@ fn assisted_combat(caster_guid: ObjectGuid, _target_guid: ObjectGuid, world: &Wo
 pub async fn apply_target_effects(
     target: &mut TargetInfo,
     caster_guid: ObjectGuid,
+    cast_item_guid: Option<ObjectGuid>,
     spell_id: u32,
     is_triggered: bool,
     custom_base_points: Option<[Option<i32>; 3]>,
@@ -637,6 +638,7 @@ pub async fn apply_target_effects(
             .unwrap_or(spell_entry.effect_base_points[effect_index]);
         let input = EffectInput {
             caster_guid,
+            cast_item_guid,
             target_guid: Some(target.target_guid),
             spell_id,
             effect_index: effect_index as u8,

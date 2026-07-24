@@ -720,10 +720,7 @@ mod tests {
                 });
             });
 
-        assert_eq!(
-            calculate_modified_cooldown(guid, 3000, 3, 0, &world),
-            2000
-        );
+        assert_eq!(calculate_modified_cooldown(guid, 3000, 3, 0, &world), 2000);
 
         // Wrong family name returns the base value unchanged.
         assert_eq!(calculate_modified_cooldown(guid, 3000, 7, 0, &world), 3000);

@@ -178,7 +178,9 @@ impl Transport {
             let Some(offset) = world
                 .managers
                 .creature_mgr
-                .with_creature(passenger, |creature| creature.movement_info.transport_position)
+                .with_creature(passenger, |creature| {
+                    creature.movement_info.transport_position
+                })
                 .flatten()
             else {
                 continue;
@@ -292,10 +294,10 @@ mod tests {
     #[tokio::test]
     async fn update_passenger_positions_moves_boarded_creatures() {
         use crate::config::Config;
+        use crate::core::common::movement::MoveFlags;
         use crate::game::creature::{Creature, CreatureTemplate};
         use crate::World;
         use oxcore_shared::database::Databases;
-        use crate::core::common::movement::MoveFlags;
         use oxcore_shared::protocol::{ObjectGuid, Position};
         use sqlx::mysql::MySqlPoolOptions;
         use std::path::PathBuf;
@@ -394,8 +396,12 @@ mod tests {
                 creature
                     .movement_info
                     .set_transport_data(transport.guid, Position::new(5.0, 0.0, 0.0, 0.0));
-                creature.movement_info.flags.set_flag(MoveFlags::ONTRANSPORT);
-                creature.position = transport.calculate_passenger_position(Position::new(5.0, 0.0, 0.0, 0.0));
+                creature
+                    .movement_info
+                    .flags
+                    .set_flag(MoveFlags::ONTRANSPORT);
+                creature.position =
+                    transport.calculate_passenger_position(Position::new(5.0, 0.0, 0.0, 0.0));
             });
         transport.add_passenger(passenger);
 

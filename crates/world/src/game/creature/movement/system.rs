@@ -461,7 +461,8 @@ impl MovementSystem {
                     .managers
                     .creature_mgr
                     .with_creature_mut(guid, |creature| {
-                        if creature.motion_master.active_generator() == MovementGeneratorType::Charge
+                        if creature.motion_master.active_generator()
+                            == MovementGeneratorType::Charge
                         {
                             if let Some(gen) = creature
                                 .motion_master

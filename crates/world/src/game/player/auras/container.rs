@@ -625,7 +625,9 @@ mod tests {
     fn shared_holder_slot_frees_only_after_the_final_effect_is_removed() {
         let mut container = AuraContainer::new();
         let caster = test_guid(1);
-        let slot = container.add_aura(make_aura(1600, 0, caster, None)).unwrap();
+        let slot = container
+            .add_aura(make_aura(1600, 0, caster, None))
+            .unwrap();
         container.add_aura(make_aura(1600, 1, caster, None));
 
         container.remove_aura(1600, 0);

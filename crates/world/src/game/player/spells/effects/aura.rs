@@ -103,6 +103,7 @@ pub async fn effect_apply_aura(input: &EffectInput, world: &World) -> Result<Eff
         .apply_aura(
             target_guid,
             input.caster_guid,
+            input.cast_item_guid,
             input.spell_id,
             input.effect_index,
             aura_type,
@@ -264,6 +265,7 @@ async fn apply_area_aura(
         .apply_aura(
             target_guid,
             input.caster_guid,
+            input.cast_item_guid,
             input.spell_id,
             input.effect_index,
             aura_type,

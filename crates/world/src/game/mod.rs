@@ -4,6 +4,7 @@ pub mod broadcast_mgr;
 pub mod chat;
 pub mod combat;
 pub mod common;
+pub mod conditions;
 pub mod coordination;
 pub mod corpse;
 pub mod creature;
@@ -28,6 +29,7 @@ pub mod visibility;
 
 pub use auction::{AuctionHouseManager, AuctionHouseObject};
 pub use broadcast_mgr::BroadcastManager;
+pub use conditions::ConditionManager;
 pub use creature::CreatureManager;
 pub use gameobject::GameObjectManager;
 pub use items::ItemManager;

@@ -10,11 +10,11 @@ use crate::game::player::spells::effects::EffectsDispatcher;
 use crate::game::player::spells::hit;
 use crate::game::player::spells::learning;
 use crate::game::player::spells::modifiers;
-use crate::game::player::spells::target_info::set_caster_in_combat_with_victim;
 use crate::game::player::spells::state::{
     ActiveCast, CurrentSpellType, SpellCastError, SpellCastResult, SpellCastTargets,
     SpellEventQueue, SpellEventType, SpellModOp, SpellModType, SpellState, SpellsState,
 };
+use crate::game::player::spells::target_info::set_caster_in_combat_with_victim;
 use crate::game::player::spells::validation;
 use crate::World;
 use anyhow::Result;
@@ -430,18 +430,18 @@ fn on_spell_launch(
     if caster_guid.is_creature_or_pet() {
         world
             .managers
-                .creature_mgr
-                .with_creature_mut(caster_guid, |c| {
-                    c.motion_master.move_charge(
-                        unit_target,
-                        0,
-                        trigger_auto_attack,
-                        false,
-                        caster_guid,
-                        c.position,
-                        c.run_speed(),
-                    );
-                });
+            .creature_mgr
+            .with_creature_mut(caster_guid, |c| {
+                c.motion_master.move_charge(
+                    unit_target,
+                    0,
+                    trigger_auto_attack,
+                    false,
+                    caster_guid,
+                    c.position,
+                    c.run_speed(),
+                );
+            });
     }
     // ... player MotionMaster charge displacement is not modelled yet.
 }
@@ -650,6 +650,7 @@ impl SpellSystem {
         self.effects_dispatcher
             .dispatch_with_targets(
                 caster_guid,
+                None,
                 spell_id,
                 target_guid,
                 true, // always triggered
@@ -1213,9 +1214,10 @@ impl SpellSystem {
 
                         on_spell_launch(caster_guid, spell_id, &cast_targets, world);
                         let resolved_targets = self
-                            .execute_spell(
-                                caster_guid,
-                                spell_id,
+                        .execute_spell(
+                            caster_guid,
+                            cast_item_guid,
+                            spell_id,
                                 &cast_targets,
                                 is_triggered,
                                 world,
@@ -1312,6 +1314,7 @@ impl SpellSystem {
                 }
                 SpellEventType::DelayedEffect {
                     caster_guid,
+                    cast_item_guid,
                     spell_id,
                     target_guid,
                     is_triggered,
@@ -1323,6 +1326,7 @@ impl SpellSystem {
                     );
                     self.execute_spell_immediate_with_targets(
                         caster_guid,
+                        cast_item_guid,
                         spell_id,
                         &cast_targets,
                         is_triggered,
@@ -1558,6 +1562,7 @@ impl SpellSystem {
     async fn execute_spell(
         &self,
         caster_guid: ObjectGuid,
+        cast_item_guid: Option<ObjectGuid>,
         spell_id: u32,
         cast_targets: &SpellCastTargets,
         is_triggered: bool,
@@ -1597,6 +1602,7 @@ impl SpellSystem {
                         now + travel_time_ms as u64,
                         SpellEventType::DelayedEffect {
                             caster_guid,
+                            cast_item_guid,
                             spell_id,
                             target_guid,
                             is_triggered,
@@ -1610,7 +1616,7 @@ impl SpellSystem {
         }
 
         // Immediate execution
-        self.execute_spell_immediate(caster_guid, spell_id, cast_targets, is_triggered, world)
+        self.execute_spell_immediate(caster_guid, cast_item_guid, spell_id, cast_targets, is_triggered, world)
             .await?;
         Ok(None)
     }
@@ -1637,6 +1643,7 @@ impl SpellSystem {
     async fn execute_spell_immediate(
         &self,
         caster_guid: ObjectGuid,
+        cast_item_guid: Option<ObjectGuid>,
         spell_id: u32,
         cast_targets: &SpellCastTargets,
         is_triggered: bool,
@@ -1649,6 +1656,7 @@ impl SpellSystem {
 
         self.execute_spell_immediate_with_targets(
             caster_guid,
+            cast_item_guid,
             spell_id,
             cast_targets,
             is_triggered,
@@ -1662,6 +1670,7 @@ impl SpellSystem {
     async fn execute_spell_immediate_with_targets(
         &self,
         caster_guid: ObjectGuid,
+        cast_item_guid: Option<ObjectGuid>,
         spell_id: u32,
         cast_targets: &SpellCastTargets,
         is_triggered: bool,
@@ -1674,6 +1683,7 @@ impl SpellSystem {
             .effects_dispatcher
             .dispatch_with_targets(
                 caster_guid,
+                cast_item_guid,
                 spell_id,
                 target_guid,
                 is_triggered,
@@ -2676,13 +2686,10 @@ impl SpellSystem {
                 };
 
                 let school_mask = 1u32 << spell_entry.school;
-                let school_cost_pct = player
-                    .auras
-                    .container
-                    .get_total_aura_modifier_by_misc_mask(
-                        crate::game::player::auras::effects::AURA_MOD_POWER_COST_PCT,
-                        school_mask,
-                    );
+                let school_cost_pct = player.auras.container.get_total_aura_modifier_by_misc_mask(
+                    crate::game::player::auras::effects::AURA_MOD_POWER_COST_PCT,
+                    school_mask,
+                );
 
                 modifiers::calculate_power_cost_with_school_multiplier(
                     spell_entry,
@@ -4074,7 +4081,10 @@ mod tests {
         });
     }
 
-    fn launch_creature_template(entry: u32, faction: u32) -> crate::game::creature::CreatureTemplate {
+    fn launch_creature_template(
+        entry: u32,
+        faction: u32,
+    ) -> crate::game::creature::CreatureTemplate {
         crate::game::creature::CreatureTemplate {
             entry,
             name: format!("Creature{entry}"),
@@ -4108,35 +4118,32 @@ mod tests {
         }
     }
 
-    fn add_launch_creature(
-        world: &World,
-        guid: ObjectGuid,
-        entry: u32,
-        faction: u32,
-        x: f32,
-    ) {
+    fn add_launch_creature(world: &World, guid: ObjectGuid, entry: u32, faction: u32, x: f32) {
         use crate::game::creature::Creature;
         use oxcore_shared::protocol::Position;
         world
             .managers
             .creature_mgr
             .add_template(launch_creature_template(entry, faction));
-        world.managers.creature_mgr.add_creature_for_test(Creature::new(
-            guid,
-            entry,
-            1,
-            Position {
-                x,
-                y: 0.0,
-                z: 0.0,
-                o: 0.0,
-            },
-            1,
-            0,
-            &launch_creature_template(entry, faction),
-            1,
-            None,
-        ));
+        world
+            .managers
+            .creature_mgr
+            .add_creature_for_test(Creature::new(
+                guid,
+                entry,
+                1,
+                Position {
+                    x,
+                    y: 0.0,
+                    z: 0.0,
+                    o: 0.0,
+                },
+                1,
+                0,
+                &launch_creature_template(entry, faction),
+                1,
+                None,
+            ));
     }
 
     fn add_launch_gameobject(world: &World, guid: ObjectGuid, entry: u32) {
@@ -4298,9 +4305,7 @@ mod tests {
         let active = world
             .managers
             .creature_mgr
-            .with_creature(caster, |c| {
-                c.motion_master.active_generator()
-            })
+            .with_creature(caster, |c| c.motion_master.active_generator())
             .unwrap();
         assert_eq!(
             active,

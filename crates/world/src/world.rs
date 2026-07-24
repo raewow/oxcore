@@ -11,6 +11,7 @@ use crate::dbc::DbcManager;
 use crate::game::area_trigger::AreaTriggerManager;
 use crate::game::auction::AuctionHouseManager;
 use crate::game::broadcast_mgr::BroadcastManager;
+use crate::game::conditions::ConditionManager;
 use crate::game::coordination::{LinkingManager, PoolManager};
 use crate::game::corpse::CorpseManager;
 use crate::game::creature::{AddonManager, CreatureManager, WaypointManager};
@@ -62,6 +63,7 @@ pub struct Managers {
     pub pathfinder: Arc<PathFinder>,
     pub waypoint_mgr: Arc<WaypointManager>,
     pub area_trigger_mgr: Arc<AreaTriggerManager>,
+    pub condition_mgr: Arc<ConditionManager>,
     pub instance_mgr: Arc<crate::game::instance::InstanceMgr>,
     pub spell_mgr: Arc<SpellManager>,
     pub lua_mgr: Arc<LuaScriptManager>,
@@ -140,6 +142,7 @@ impl World {
         let addon_mgr = Arc::new(AddonManager::new());
         let waypoint_mgr = Arc::new(WaypointManager::new());
         let area_trigger_mgr = Arc::new(AreaTriggerManager::new(Arc::new(databases.world.clone())));
+        let condition_mgr = Arc::new(ConditionManager::new());
         let instance_mgr = Arc::new(crate::game::instance::InstanceMgr::new());
 
         // Initialize Lua scripting system
@@ -196,6 +199,7 @@ impl World {
                 pathfinder,
                 waypoint_mgr,
                 area_trigger_mgr,
+                condition_mgr,
                 instance_mgr,
                 spell_mgr: Arc::new(SpellManager::new()),
                 lua_mgr,
@@ -243,6 +247,11 @@ impl World {
                 .context("Failed to load DBC files")?;
         }
         // Load spells from SQL (DBC field offsets are unreliable for vanilla 1.12.1)
+        self.managers
+            .condition_mgr
+            .load(&self.databases.world)
+            .await
+            .context("Failed to load conditions")?;
         step("Loading spells");
         self.managers
             .spell_mgr
@@ -825,6 +834,7 @@ impl Clone for World {
                 pathfinder: Arc::clone(&self.managers.pathfinder),
                 waypoint_mgr: Arc::clone(&self.managers.waypoint_mgr),
                 area_trigger_mgr: Arc::clone(&self.managers.area_trigger_mgr),
+                condition_mgr: Arc::clone(&self.managers.condition_mgr),
                 instance_mgr: Arc::clone(&self.managers.instance_mgr),
                 spell_mgr: Arc::clone(&self.managers.spell_mgr),
                 lua_mgr: Arc::clone(&self.managers.lua_mgr),

@@ -1178,6 +1178,7 @@ pub enum SpellEventType {
     /// Delayed spell effect — projectile arrived
     DelayedEffect {
         caster_guid: ObjectGuid,
+        cast_item_guid: Option<ObjectGuid>,
         spell_id: u32,
         target_guid: Option<ObjectGuid>,
         is_triggered: bool,
