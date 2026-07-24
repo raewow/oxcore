@@ -3,6 +3,7 @@
 use super::aura::Aura;
 use super::stacking::{exclusive_aura_can_apply, ExclusiveAuraAction};
 use super::state::*;
+use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashMap;
 
 /// AuraContainer - manages all active auras on a player.
@@ -243,6 +244,24 @@ impl AuraContainer {
             }
         }
         removed
+    }
+
+    /// Remove effects of a spell only when they originated from the given caster.
+    pub fn remove_spell_auras_by_caster(
+        &mut self,
+        spell_id: u32,
+        caster_guid: ObjectGuid,
+    ) -> Vec<(Aura, u8)> {
+        let keys: Vec<_> = self
+            .auras
+            .iter()
+            .filter_map(|(&key, aura)| {
+                (key.0 == spell_id && aura.caster_guid == caster_guid).then_some(key)
+            })
+            .collect();
+        keys.into_iter()
+            .filter_map(|(spell_id, effect_index)| self.remove_aura(spell_id, effect_index))
+            .collect()
     }
 
     /// Refresh the remaining duration of an already-active aura (any effect of the spell).
