@@ -86,8 +86,11 @@ impl WaypointManager {
         self.guid_waypoints.contains_key(&spawn_id) || self.template_waypoints.contains_key(&entry)
     }
 
-    /// Drop every loaded path.
-    pub fn unload(&self) {
+    /// Drop every loaded path (`WaypointManager::Cleanup`).
+    ///
+    /// The C++ cleanup also issues database deletes; in this port the manager is
+    /// state-only, so persisting the deletion is the repository's responsibility.
+    pub fn cleanup(&self) {
         self.guid_waypoints.clear();
         self.template_waypoints.clear();
     }
@@ -436,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_path_and_unload_drop_the_paths() {
+    fn delete_path_and_cleanup_drop_the_paths() {
         let manager = manager_with_path();
 
         assert!(manager.delete_path(WaypointPathOrigin::Guid, 7));
@@ -444,7 +447,7 @@ mod tests {
         assert!(!manager.has_waypoints(7, 0));
 
         let manager = manager_with_path();
-        manager.unload();
+        manager.cleanup();
         assert!(!manager.has_waypoints(7, 0));
     }
 }
