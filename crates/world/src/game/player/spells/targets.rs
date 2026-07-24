@@ -2635,6 +2635,67 @@ mod tests {
         assert_eq!(resolved.effect_targets[0], vec![gameobject_guid]);
     }
 
+    #[test]
+    fn active_matching_spell_focus_is_found_in_range() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        let gameobject_guid = ObjectGuid::new_gameobject(8001, 1);
+        add_test_player(&world, caster, 0, 0);
+        let template = GameObjectTemplate {
+            entry: 8001,
+            go_type: 8, // GAMEOBJECT_TYPE_SPELL_FOCUS
+            display_id: 0,
+            name: "Focus".to_string(),
+            icon_name: String::new(),
+            cast_bar_caption: String::new(),
+            faction: 0,
+            flags: 0,
+            size: 1.0,
+            data: [
+                42, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+        };
+        world
+            .managers
+            .gameobject_mgr
+            .add_template_for_test(template.clone());
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(GameObject::new(
+                gameobject_guid,
+                template.entry,
+                1,
+                pos(3.0, 0.0),
+                0,
+                &template,
+                [0.0; 4],
+                0,
+                0,
+            ));
+        world
+            .managers
+            .gameobject_mgr
+            .with_gameobject_mut(gameobject_guid, |gameobject| gameobject.in_world = true);
+
+        assert!(crate::game::player::spells::validation::has_spell_focus(
+            caster,
+            0,
+            1,
+            pos(0.0, 0.0),
+            42,
+            &world,
+        ));
+        assert!(!crate::game::player::spells::validation::has_spell_focus(
+            caster,
+            0,
+            1,
+            pos(0.0, 0.0),
+            43,
+            &world,
+        ));
+    }
+
     #[tokio::test]
     async fn location_script_near_caster_sets_resolved_destination() {
         let world = test_world();

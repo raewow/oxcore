@@ -53,6 +53,7 @@ pub fn validate_cast(
         stances_not: u32,
         caster_aura_state: u32,
         target_aura_state: u32,
+        requires_spell_focus: u32,
     }
 
     let spell_data = match world.managers.spell_mgr.get(spell_id) {
@@ -85,6 +86,7 @@ pub fn validate_cast(
                 stances_not: s.stances_not,
                 caster_aura_state: s.caster_aura_state,
                 target_aura_state: s.target_aura_state,
+                requires_spell_focus: s.requires_spell_focus,
             }
         }
         None => SpellData {
@@ -99,6 +101,7 @@ pub fn validate_cast(
             stances_not: 0,
             caster_aura_state: 0,
             target_aura_state: 0,
+            requires_spell_focus: 0,
         },
     };
 
@@ -233,6 +236,23 @@ pub fn validate_cast(
             }
         }
 
+        // 7b. Spell focus objects are active, matching spell-focus gameobjects
+        // on the caster's map and phase. GameObjectTemplate data0/data1 carry
+        // the focus ID and permitted distance respectively.
+        if spell_data.requires_spell_focus != 0
+            && !has_spell_focus(
+                caster_guid,
+                player.map_id,
+                player.phase_mask,
+                player.movement.position,
+                spell_data.requires_spell_focus,
+                world,
+            )
+        {
+            error = SpellCastError::RequiresSpellFocus;
+            return;
+        }
+
         // 8. Check not already casting in Generic/Channeled slot (skip for triggered)
         if !is_triggered && player.spells.is_casting() {
             error = SpellCastError::AlreadyCasting;
@@ -355,6 +375,37 @@ pub fn validate_cast(
     }
 
     Ok(error)
+}
+
+pub(crate) fn has_spell_focus(
+    caster_guid: ObjectGuid,
+    caster_map: u32,
+    caster_phase: u32,
+    caster_position: oxcore_shared::protocol::Position,
+    focus_id: u32,
+    world: &World,
+) -> bool {
+    use crate::game::gameobject::types::GameObjectType;
+
+    world
+        .managers
+        .gameobject_mgr
+        .iter_gameobjects()
+        .any(|entry| {
+            let gameobject = entry.value();
+            let Some(template) = world.managers.gameobject_mgr.get_template(gameobject.entry)
+            else {
+                return false;
+            };
+            gameobject.guid != caster_guid
+                && gameobject.go_type == GameObjectType::SpellFocus
+                && gameobject.in_world
+                && gameobject.map_id == caster_map
+                && gameobject.phase_mask & caster_phase != 0
+                && template.data[0] == focus_id as i32
+                && caster_position
+                    .is_within_range(&gameobject.position, template.data[1].max(0) as f32)
+        })
 }
 
 /// Check if a spell can be cast while moving.

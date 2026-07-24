@@ -19,6 +19,9 @@ pub struct Aura {
     /// GUID of the item that cast this aura (if from Use effect)
     pub cast_item_guid: Option<ObjectGuid>,
 
+    /// Equipped weapon slot that originated this aura (15 main-hand, 16 off-hand).
+    pub weapon_buff_slot: Option<u8>,
+
     /// Which effect index of the spell created this aura (0, 1, or 2)
     pub effect_index: u8,
 
@@ -161,6 +164,7 @@ impl Aura {
             spell_id,
             caster_guid,
             cast_item_guid: None,
+            weapon_buff_slot: None,
             effect_index,
             slot: None,
             duration_ms,

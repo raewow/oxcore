@@ -141,6 +141,13 @@ impl AuraContainer {
 
         let mut replaced = Vec::new();
         for (&existing_key, existing) in &self.auras {
+            // Weapon enchants from separately equipped hands are independent effects.
+            if existing.weapon_buff_slot.is_some()
+                && aura.weapon_buff_slot.is_some()
+                && existing.weapon_buff_slot != aura.weapon_buff_slot
+            {
+                continue;
+            }
             match exclusive_aura_can_apply(
                 existing.is_passive(),
                 existing.aura_type,

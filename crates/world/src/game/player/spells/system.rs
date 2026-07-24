@@ -760,7 +760,7 @@ impl SpellSystem {
             }
             on_spell_launch(caster_guid, spell_id, &cast_targets, world);
             let resolved_targets = self
-                .execute_spell(caster_guid, spell_id, &cast_targets, is_triggered, world)
+                .execute_spell(caster_guid, cast_item_guid, spell_id, &cast_targets, is_triggered, world)
                 .await?;
             self.finish_cast(
                 caster_guid,
@@ -1389,6 +1389,7 @@ impl SpellSystem {
             };
             self.execute_spell_immediate(
                 effect.caster_guid,
+                None,
                 effect.spell_id,
                 &cast_targets,
                 effect.is_triggered,
@@ -1495,7 +1496,7 @@ impl SpellSystem {
                     };
                     on_spell_launch(player_guid, spell_id, &cast_targets, world);
                     let resolved_targets = self
-                        .execute_spell(player_guid, spell_id, &cast_targets, is_triggered, world)
+                        .execute_spell(player_guid, None, spell_id, &cast_targets, is_triggered, world)
                         .await?;
                     self.finish_cast(
                         player_guid,
@@ -1786,7 +1787,7 @@ impl SpellSystem {
         world: &World,
     ) -> Result<()> {
         // Channel ticks re-execute the spell effects
-        self.execute_spell(caster_guid, spell_id, cast_targets, true, world)
+        self.execute_spell(caster_guid, None, spell_id, cast_targets, true, world)
             .await
             .map(|_| ())
     }

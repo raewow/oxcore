@@ -201,6 +201,15 @@ impl AuraSystem {
             flags,
         );
         aura.cast_item_guid = cast_item_guid;
+        if let Some(item_guid) = cast_item_guid {
+            const MAIN_HAND: u8 = 15;
+            const OFF_HAND: u8 = 16;
+            let inventory = &world.systems.inventory;
+            aura.weapon_buff_slot = [MAIN_HAND, OFF_HAND].into_iter().find(|&slot| {
+                inventory.get_item_at(target_guid, oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0, slot)
+                    == Some(item_guid)
+            });
+        }
         aura.duration_index = world
             .managers
             .spell_mgr
