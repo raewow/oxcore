@@ -310,34 +310,33 @@ impl CreatureManager {
             .unwrap_or_default()
             .as_secs();
 
-        for entry in self.iter_creatures() {
-            let creature_guid = *entry.key();
-            let should_aggro = {
+        // Collect qualifying creature GUIDs first to avoid holding an iterator read-lock
+        // while acquiring per-creature write-locks (potential DashMap shard deadlock).
+        let to_aggro: Vec<ObjectGuid> = self
+            .iter_creatures()
+            .filter_map(|entry| {
                 let creature = entry.value();
-
-                // Must be alive and within the level-scaled aggro range of the opener.
                 let aggro_range = calculate_aggro_range(creature.level, opener_level);
                 if !creature.position.is_within_range(&opener_position, aggro_range) {
-                    false
-                } else if !should_aggro_creature(
-                    creature.faction,
-                    creature.unit_flags,
-                    opener_faction,
-                    true,
-                ) {
-                    false
-                } else {
-                    is_valid_aggro_target(opener_guid, 0, opener_is_alive)
+                    return None;
                 }
-            };
+                if !should_aggro_creature(creature.faction, creature.unit_flags, opener_faction, true)
+                {
+                    return None;
+                }
+                if !is_valid_aggro_target(opener_guid, 0, opener_is_alive) {
+                    return None;
+                }
+                Some(*entry.key())
+            })
+            .collect();
 
-            if should_aggro {
-                self.with_creature_mut(creature_guid, |c| {
-                    c.combat.enter_combat(opener_guid, timestamp);
-                    c.threat_manager.add_threat(opener_guid, 1.0);
-                    c.combat.attacking = Some(opener_guid);
-                });
-            }
+        for creature_guid in to_aggro {
+            self.with_creature_mut(creature_guid, |c| {
+                c.combat.enter_combat(opener_guid, timestamp);
+                c.threat_manager.add_threat(opener_guid, 1.0);
+                c.combat.attacking = Some(opener_guid);
+            });
         }
     }
 

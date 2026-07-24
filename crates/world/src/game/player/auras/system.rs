@@ -1024,7 +1024,7 @@ impl AuraSystem {
         }
 
         let ammo_haste_can_apply = aura_type != effects::AURA_MOD_RANGED_AMMO_HASTE
-            || AuraSystem::ranged_weapon_requires_ammo(player_guid, world);
+            || crate::game::player::auras::system::ranged_weapon_requires_ammo(player_guid, world);
 
         Ok(world
             .systems

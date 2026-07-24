@@ -47,15 +47,24 @@ pub struct PowerCostContext {
 /// always costs no power. `cost_modifiers` are the caster's active spell modifiers,
 /// from which `SpellModOp::Cost` entries are applied (`SPELLMOD_COST`).
 ///
-/// Deferred vs C++: the school-indexed `UNIT_FIELD_POWER_COST_MODIFIER` (flat) and
-/// `UNIT_FIELD_POWER_COST_MULTIPLIER` (pct) aura unit-fields are not yet tracked, so
-/// they default to the no-aura state (0 flat, x1.0). They only become non-zero with
-/// specific gear/auras.
+/// The school-indexed percentage multiplier defaults to zero and is supplied by
+/// [`calculate_power_cost_with_school_multiplier`] when active auras affect the spell school.
 pub fn calculate_power_cost(
     spell: &SpellEntry,
     ctx: &PowerCostContext,
     is_item_cast: bool,
     cost_modifiers: &[SpellMod],
+) -> u32 {
+    calculate_power_cost_with_school_multiplier(spell, ctx, is_item_cast, cost_modifiers, 0)
+}
+
+/// Calculate spell cost with the total `AURA_MOD_POWER_COST_PCT` amount for its school.
+pub fn calculate_power_cost_with_school_multiplier(
+    spell: &SpellEntry,
+    ctx: &PowerCostContext,
+    is_item_cast: bool,
+    cost_modifiers: &[SpellMod],
+    school_cost_pct: i32,
 ) -> u32 {
     // Item casts use no power.
     if is_item_cast {
@@ -109,7 +118,9 @@ pub fn calculate_power_cost(
         }
     }
 
-    // (School-indexed pct unit-mod multiplier deferred — x1.0 with no auras.)
+    // `UNIT_FIELD_POWER_COST_MULTIPLIER` stores the active aura total divided by 100;
+    // Spell::CalculatePowerCost applies it as `1 + multiplier`.
+    power_cost = (power_cost as f32 * (1.0 + school_cost_pct as f32 / 100.0)) as i32;
 
     power_cost.max(0) as u32
 }
@@ -607,6 +618,26 @@ mod tests {
         ];
         // (100 - 20) * (1 - 0.5) = 40
         assert_eq!(calculate_power_cost(&spell, &ctx(), false, &mods), 40);
+    }
+
+    #[test]
+    fn school_power_cost_aura_percentage_applies_after_spell_modifiers() {
+        let mut spell = make_spell_entry();
+        spell.mana_cost = 100;
+        assert_eq!(
+            calculate_power_cost_with_school_multiplier(&spell, &ctx(), false, &[], -20),
+            80
+        );
+    }
+
+    #[test]
+    fn school_power_cost_aura_percentage_clamps_negative_cost() {
+        let mut spell = make_spell_entry();
+        spell.mana_cost = 100;
+        assert_eq!(
+            calculate_power_cost_with_school_multiplier(&spell, &ctx(), false, &[], -200),
+            0
+        );
     }
 
     #[test]

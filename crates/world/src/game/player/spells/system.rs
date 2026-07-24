@@ -2675,11 +2675,21 @@ impl SpellSystem {
                     spell_rank,
                 };
 
-                modifiers::calculate_power_cost(
+                let school_mask = 1u32 << spell_entry.school;
+                let school_cost_pct = player
+                    .auras
+                    .container
+                    .get_total_aura_modifier_by_misc_mask(
+                        crate::game::player::auras::effects::AURA_MOD_POWER_COST_PCT,
+                        school_mask,
+                    );
+
+                modifiers::calculate_power_cost_with_school_multiplier(
                     spell_entry,
                     &ctx,
                     false,
                     &player.spells.spell_modifiers,
+                    school_cost_pct,
                 )
             })
             .unwrap_or(0);
