@@ -1003,7 +1003,7 @@ impl AuraSystem {
             .unwrap_or(false))
     }
 
-    async fn modify_melee_haste_aura(
+    async fn modify_attack_haste_aura(
         &self,
         player_guid: ObjectGuid,
         aura_type: u32,
@@ -1011,7 +1011,10 @@ impl AuraSystem {
         apply: bool,
         world: &World,
     ) -> Result<bool> {
-        if aura_type != effects::AURA_MOD_MELEE_HASTE {
+        if !matches!(
+            aura_type,
+            effects::AURA_MOD_MELEE_HASTE | effects::AURA_MOD_RANGED_HASTE
+        ) {
             return Ok(false);
         }
 
@@ -1036,18 +1039,27 @@ impl AuraSystem {
 
                 use crate::game::combat::{adjust_attack_speed, AttackHand};
 
-                let main_hand_speed = recalculate_melee_haste_speed(
-                    player.combat.main_hand_speed,
-                    previous_haste,
-                    total_haste,
-                );
-                let off_hand_speed = recalculate_melee_haste_speed(
-                    player.combat.off_hand_speed,
-                    previous_haste,
-                    total_haste,
-                );
-                adjust_attack_speed(&mut player.combat, AttackHand::MainHand, main_hand_speed);
-                adjust_attack_speed(&mut player.combat, AttackHand::OffHand, off_hand_speed);
+                if aura_type == effects::AURA_MOD_MELEE_HASTE {
+                    let main_hand_speed = recalculate_attack_haste_speed(
+                        player.combat.main_hand_speed,
+                        previous_haste,
+                        total_haste,
+                    );
+                    let off_hand_speed = recalculate_attack_haste_speed(
+                        player.combat.off_hand_speed,
+                        previous_haste,
+                        total_haste,
+                    );
+                    adjust_attack_speed(&mut player.combat, AttackHand::MainHand, main_hand_speed);
+                    adjust_attack_speed(&mut player.combat, AttackHand::OffHand, off_hand_speed);
+                } else {
+                    let ranged_speed = recalculate_attack_haste_speed(
+                        player.combat.ranged_speed,
+                        previous_haste,
+                        total_haste,
+                    );
+                    adjust_attack_speed(&mut player.combat, AttackHand::Ranged, ranged_speed);
+                }
                 true
             })
             .unwrap_or(false))
@@ -1077,7 +1089,7 @@ impl AuraSystem {
 
         if let Some((aura_type, value, misc_value)) = modifier_info {
             if self
-                .modify_melee_haste_aura(target_guid, aura_type, value, true, world)
+                .modify_attack_haste_aura(target_guid, aura_type, value, true, world)
                 .await?
             {
                 return Ok(());
@@ -1152,7 +1164,7 @@ impl AuraSystem {
         world: &World,
     ) -> Result<()> {
         if self
-            .modify_melee_haste_aura(
+            .modify_attack_haste_aura(
                 target_guid,
                 aura.aura_type,
                 aura.current_value(),
@@ -3637,7 +3649,7 @@ fn apply_primary_stat_modifier(
 /// `current_speed_ms` already includes `previous_haste`, so reconstruct the base speed before
 /// applying the new total. This keeps stacked aura application and removal reversible while
 /// preserving `adjust_attack_speed`'s in-progress swing-timer handling.
-fn recalculate_melee_haste_speed(
+fn recalculate_attack_haste_speed(
     current_speed_ms: u32,
     previous_haste: i32,
     total_haste: i32,
@@ -3982,17 +3994,24 @@ mod tests {
 
     #[test]
     fn melee_haste_reduces_and_restores_attack_speed() {
-        let hasted = recalculate_melee_haste_speed(2_000, 0, 50);
+        let hasted = recalculate_attack_haste_speed(2_000, 0, 50);
         assert_eq!(hasted, 1_333);
-        assert_eq!(recalculate_melee_haste_speed(hasted, 50, 0), 2_000);
+        assert_eq!(recalculate_attack_haste_speed(hasted, 50, 0), 2_000);
     }
 
     #[test]
     fn stacked_melee_haste_recalculates_from_active_total() {
-        let once_hasted = recalculate_melee_haste_speed(2_000, 0, 50);
-        let twice_hasted = recalculate_melee_haste_speed(once_hasted, 50, 100);
+        let once_hasted = recalculate_attack_haste_speed(2_000, 0, 50);
+        let twice_hasted = recalculate_attack_haste_speed(once_hasted, 50, 100);
         assert_eq!(twice_hasted, 1_000);
-        assert_eq!(recalculate_melee_haste_speed(twice_hasted, 100, 50), 1_333);
+        assert_eq!(recalculate_attack_haste_speed(twice_hasted, 100, 50), 1_333);
+    }
+
+    #[test]
+    fn ranged_haste_reduces_and_restores_ranged_attack_speed() {
+        let hasted = recalculate_attack_haste_speed(2_800, 0, 40);
+        assert_eq!(hasted, 2_000);
+        assert_eq!(recalculate_attack_haste_speed(hasted, 40, 0), 2_800);
     }
 
     // ── apply_primary_stat_aura_modifier (Aura::HandleAuraModStat family) ─────
