@@ -17,6 +17,8 @@ use crate::game::creature::creature::Creature;
 use crate::game::player::player::Player;
 
 use super::object::Transport;
+use super::segment::MotionProfile;
+use super::ship::ship_position;
 use super::template::{TransportTemplate, TransportTemplateStore};
 
 /// What happened when repositioning a passenger against its transport.
@@ -213,8 +215,59 @@ impl TransportManager {
 
         let mut transport = Transport::new(guid, template.entry, map_id, position, now_ms);
         transport.set_path_progress(start.arrive_time);
+        transport.set_start_progress(start.arrive_time);
         self.transports.insert(guid, transport);
         Some(guid)
+    }
+
+    /// Advance a ship transport's position for the current time (the movement path of
+    /// `ShipTransport::Update`).
+    ///
+    /// Recomputes path progress from how long the transport has existed plus its start
+    /// progress, wrapped over the path period, then places the transport at the spline point
+    /// that progress maps to and carries the keyframe cursor forward. Returns the new position
+    /// when the transport moved, or `None` when it is paused at a stop or the path has no
+    /// period. The cross-map teleport branch (a teleport keyframe -> `TeleportTransport`) and
+    /// the passenger-reposition loop are handled separately; this is the on-map motion.
+    pub fn tick_ship_movement(
+        &mut self,
+        transport_guid: ObjectGuid,
+        template: &TransportTemplate,
+        now_ms: u32,
+    ) -> Option<Position> {
+        if template.path_time == 0 {
+            return None;
+        }
+        let transport = self.transports.get_mut(&transport_guid)?;
+
+        let current = transport
+            .time_since_creation(now_ms)
+            .wrapping_add(transport.start_progress());
+        transport.set_path_progress(current);
+        let path_progress = current % template.path_time;
+
+        let profile = MotionProfile {
+            speed: template.speed,
+            accel: template.accel,
+            accel_time: template.accel_time,
+            accel_dist: template.accel_dist,
+        };
+        let motion = ship_position(
+            &template.keyframes,
+            &template.segment_splines,
+            &profile,
+            transport.frame_cursor(),
+            path_progress,
+        )?;
+
+        transport.set_frame_cursor(motion.cursor);
+        transport.relocate(
+            motion.position.x,
+            motion.position.y,
+            motion.position.z,
+            motion.orientation,
+        );
+        Some(transport.position)
     }
 
     /// Spawn every template's transport that belongs on `map_id`
@@ -515,6 +568,36 @@ mod tests {
         let again = mgr.spawn_transports_on_map(&mut store, 0, 6_000);
         assert!(again.is_empty());
         assert_eq!(mgr.count(), 1);
+    }
+
+    #[test]
+    fn a_spawned_transport_moves_along_its_path_over_time() {
+        use super::super::schedule::ScheduleProfile;
+        use super::super::waypoints::TaxiPathNode;
+
+        // A longer straight path so there is clear travel to observe.
+        let nodes: Vec<TaxiPathNode> = (0..7)
+            .map(|i| TaxiPathNode { map_id: 0, x: i as f32 * 10.0, y: 0.0, z: 0.0, action_flag: 0, delay: 0 })
+            .collect();
+        let mut store = TransportTemplateStore::new();
+        store.load_template(500, &nodes, &ScheduleProfile { speed: 10.0, accel: 5.0 });
+        let template = store.get(500).unwrap().clone();
+
+        let mut mgr = TransportManager::new();
+        // Create at server clock 0 so time_since_creation is just the tick clock.
+        let guid = mgr.create_transport(&template, 0, 0).unwrap();
+
+        // Tick partway and later along the run; the transport should advance and stay on the
+        // line (y, z ~ 0).
+        let quarter = template.path_time / 4;
+        let half = template.path_time / 2;
+        let early = mgr.tick_ship_movement(guid, &template, quarter).expect("moving");
+        let late = mgr.tick_ship_movement(guid, &template, half).expect("moving");
+
+        assert!(early.y.abs() < 1e-2 && early.z.abs() < 1e-2, "off the line: {early:?}");
+        assert!(late.x > early.x, "did not advance: {} -> {}", early.x, late.x);
+        // The manager's stored transport reflects the latest position.
+        assert_eq!(mgr.get(guid).unwrap().position, late);
     }
 
     #[test]

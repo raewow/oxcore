@@ -8,7 +8,10 @@
 //! `ShipTransport::Update` also does need the spline geometry and Map subsystems and stay in
 //! the (blocked) full update.
 
+use crate::game::creature::movement::spline_base::{SplineBase, Vec3};
+
 use super::schedule::KeyFrame;
+use super::segment::{calculate_segment_pos, MotionProfile, SegmentFrame};
 
 /// Where a given path progress falls relative to one keyframe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,9 +70,58 @@ pub fn advance_to_current_frame(keyframes: &[KeyFrame], cursor: usize, path_prog
     ShipFrameState { cursor, moving: true }
 }
 
+/// The ship's world position and facing at a moment it is moving, plus the keyframe cursor
+/// it resolved to.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShipMotion {
+    pub cursor: usize,
+    pub position: Vec3,
+    pub orientation: f32,
+}
+
+/// Where the ship is along its path at `path_progress` (ms within the period), evaluating the
+/// current segment's spline (the position block of `ShipTransport::Update`).
+///
+/// Advances the keyframe cursor to the current frame, then - only while moving, as the C++
+/// guards with `IsMoving() && pathProgress` - finds how far along the segment the ship is via
+/// [`calculate_segment_pos`](super::segment::calculate_segment_pos) and reads the position and
+/// tangent off that segment's spline, facing `atan2(dir.y, dir.x) + PI`. Returns `None` when
+/// the ship is paused at a stop (its position is unchanged) or the spline cannot be evaluated.
+pub fn ship_position(
+    keyframes: &[KeyFrame],
+    splines: &[SplineBase],
+    profile: &MotionProfile,
+    cursor: usize,
+    path_progress: u32,
+) -> Option<ShipMotion> {
+    let state = advance_to_current_frame(keyframes, cursor, path_progress);
+    if !state.moving || path_progress == 0 {
+        return None;
+    }
+
+    let frame = &keyframes[state.cursor];
+    let segment = SegmentFrame {
+        time_from: frame.time_from,
+        time_to: frame.time_to,
+        dist_since_stop: frame.dist_since_stop,
+        dist_until_stop: frame.dist_until_stop,
+        next_dist_from_prev: frame.next_dist_from_prev,
+        departure_time_ms: frame.departure_time,
+    };
+    let t = calculate_segment_pos(profile, &segment, path_progress as f32 / 1000.0);
+
+    let spline = splines.get(frame.spline_id)?;
+    let position = spline.evaluate(frame.index as usize, t)?;
+    let direction = spline.evaluate_derivative(frame.index as usize, t)?;
+    let orientation = direction.y.atan2(direction.x) + std::f32::consts::PI;
+
+    Some(ShipMotion { cursor: state.cursor, position, orientation })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::schedule::{compute_schedule, KeyFrame, ScheduleProfile};
+    use super::super::waypoints::{generate_waypoints, TaxiPathNode};
     use super::*;
 
     fn profile() -> ScheduleProfile {
@@ -135,5 +187,52 @@ mod tests {
     fn an_empty_schedule_does_not_spin() {
         let state = advance_to_current_frame(&[], 0, 1234);
         assert!(!state.moving);
+    }
+
+    /// A generated straight-line path (7 nodes along +x, spaced 10 yards) and its motion
+    /// profile, for driving the runtime position.
+    fn straight_transport() -> (Vec<KeyFrame>, Vec<SplineBase>, MotionProfile) {
+        let nodes: Vec<TaxiPathNode> = (0..7)
+            .map(|i| TaxiPathNode { map_id: 0, x: i as f32 * 10.0, y: 0.0, z: 0.0, action_flag: 0, delay: 0 })
+            .collect();
+        let path = generate_waypoints(&nodes, &ScheduleProfile { speed: 10.0, accel: 5.0 }).unwrap();
+        let profile = MotionProfile {
+            speed: path.speed,
+            accel: path.accel,
+            accel_time: path.accel_time,
+            accel_dist: path.accel_dist,
+        };
+        (path.keyframes, path.segment_splines, profile)
+    }
+
+    #[test]
+    fn a_paused_or_zero_progress_ship_reports_no_motion() {
+        let (kf, splines, profile) = straight_transport();
+        // At the very start of the cycle there is no motion to report.
+        assert!(ship_position(&kf, &splines, &profile, 0, 0).is_none());
+    }
+
+    #[test]
+    fn a_moving_ship_sits_on_its_path() {
+        let (kf, splines, profile) = straight_transport();
+        // Part way along the path the ship is moving and sits on the straight line: y and z
+        // stay zero and x lies within the interior node span the keyframes cover.
+        let mid = kf.last().unwrap().departure_time / 2;
+        let motion = ship_position(&kf, &splines, &profile, 0, mid).expect("moving mid-path");
+        assert!(motion.position.y.abs() < 1e-2, "off the line: {:?}", motion.position);
+        assert!(motion.position.z.abs() < 1e-2);
+        assert!(motion.position.x > 5.0 && motion.position.x < 55.0, "x out of span: {}", motion.position.x);
+        // Travelling +x, the facing is atan2(0, +) + PI = PI.
+        assert!((motion.orientation - std::f32::consts::PI).abs() < 1e-2, "got {}", motion.orientation);
+    }
+
+    #[test]
+    fn the_ship_advances_along_the_line_over_time() {
+        let (kf, splines, profile) = straight_transport();
+        let period = kf.last().unwrap().departure_time;
+        // Earlier in the run the ship is further back along +x than later in the run.
+        let early = ship_position(&kf, &splines, &profile, 0, period / 4).expect("moving");
+        let late = ship_position(&kf, &splines, &profile, 0, period / 2).expect("moving");
+        assert!(late.position.x > early.position.x, "did not advance: {} -> {}", early.position.x, late.position.x);
     }
 }

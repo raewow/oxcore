@@ -10,6 +10,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 
+use crate::game::creature::movement::spline_base::SplineBase;
+
 use super::schedule::KeyFrame;
 use super::waypoints::{generate_waypoints, TaxiPathNode, TransportPath};
 use super::schedule::ScheduleProfile;
@@ -19,6 +21,11 @@ use super::schedule::ScheduleProfile;
 pub struct TransportTemplate {
     pub entry: u32,
     pub keyframes: Vec<KeyFrame>,
+    /// Per-segment splines the keyframe legs are evaluated on (indexed by `KeyFrame::spline_id`).
+    pub segment_splines: Vec<SplineBase>,
+    /// Cruise speed and acceleration, for the runtime segment-position kinematics.
+    pub speed: f32,
+    pub accel: f32,
     pub accel_time: f32,
     pub accel_dist: f32,
     /// Total traversal time in milliseconds, possibly overridden from the DB.
@@ -35,6 +42,9 @@ impl TransportTemplate {
         Self {
             entry,
             keyframes: path.keyframes,
+            segment_splines: path.segment_splines,
+            speed: path.speed,
+            accel: path.accel,
             accel_time: path.accel_time,
             accel_dist: path.accel_dist,
             path_time: path.path_time,

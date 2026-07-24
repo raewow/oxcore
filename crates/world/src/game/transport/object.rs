@@ -35,6 +35,11 @@ pub struct Transport {
     /// Progress along the path; full time since start for MO transports, or time within the
     /// cycle for looping ones (`m_pathProgress`).
     path_progress: u32,
+    /// The path progress the transport started at, added to `time_since_creation` each tick
+    /// (`m_startProgress`).
+    start_progress: u32,
+    /// The keyframe the transport is currently on, carried across ticks (`m_currentFrame`).
+    frame_cursor: usize,
     /// GUIDs of the units currently aboard (`m_passengers`), kept ordered like `std::set`.
     passengers: BTreeSet<ObjectGuid>,
 }
@@ -55,6 +60,8 @@ impl Transport {
             position,
             creation_time_ms,
             path_progress: 0,
+            start_progress: 0,
+            frame_cursor: 0,
             passengers: BTreeSet::new(),
         }
     }
@@ -98,6 +105,26 @@ impl Transport {
     /// Set the path progress (the transport's `Update` advances this).
     pub fn set_path_progress(&mut self, progress: u32) {
         self.path_progress = progress;
+    }
+
+    /// The path progress the transport started at (`m_startProgress`).
+    pub fn start_progress(&self) -> u32 {
+        self.start_progress
+    }
+
+    /// Set the starting path progress (fixed at creation).
+    pub fn set_start_progress(&mut self, progress: u32) {
+        self.start_progress = progress;
+    }
+
+    /// The keyframe cursor carried across ticks (`m_currentFrame`).
+    pub fn frame_cursor(&self) -> usize {
+        self.frame_cursor
+    }
+
+    /// Set the keyframe cursor (the tick advances this).
+    pub fn set_frame_cursor(&mut self, cursor: usize) {
+        self.frame_cursor = cursor;
     }
 
     /// Move the transport itself to a new position and facing (the `Relocate` in

@@ -70,6 +70,9 @@ pub struct KeyFrame {
     pub initial_orientation: f32,
     /// 1-based index of this keyframe within its spline segment (`Index`).
     pub index: u32,
+    /// Which segment spline this keyframe's leg is evaluated on (the C++ `Spline` pointer,
+    /// as an index into the path's segment splines).
+    pub spline_id: usize,
     /// Map this keyframe's node is on.
     pub map_id: u32,
     /// World position of this keyframe's node, used as a teleport target.
@@ -97,6 +100,7 @@ impl KeyFrame {
             update: false,
             initial_orientation: 0.0,
             index: 0,
+            spline_id: 0,
             map_id: 0,
             node_x: 0.0,
             node_y: 0.0,

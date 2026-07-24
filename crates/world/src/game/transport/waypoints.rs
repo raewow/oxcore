@@ -49,6 +49,13 @@ impl TaxiPathNode {
 pub struct TransportPath {
     /// The keyframes, with distances, timing and facings filled in.
     pub keyframes: Vec<KeyFrame>,
+    /// The per-segment Catmull-Rom splines the keyframes' legs are evaluated on, indexed by
+    /// each keyframe's `spline_id` (the C++ per-keyframe `Spline` pointers).
+    pub segment_splines: Vec<SplineBase>,
+    /// Cruise speed in yards/sec (`goInfo->moTransport.moveSpeed`).
+    pub speed: f32,
+    /// Acceleration in yards/sec^2 (`goInfo->moTransport.accelRate`).
+    pub accel: f32,
     /// Time to accelerate from a stop to cruise (`transportTemplate.accelTime`).
     pub accel_time: f32,
     /// Distance covered while accelerating (`transportTemplate.accelDist`).
@@ -127,12 +134,15 @@ pub fn generate_waypoints(nodes: &[TaxiPathNode], profile: &ScheduleProfile) -> 
     keyframes[0].dist_from_prev = 0.0;
     keyframes[0].index = 1;
 
-    measure_segment_distances(&mut keyframes, &spline_path);
+    let segment_splines = measure_segment_distances(&mut keyframes, &spline_path);
 
     let path_time = compute_schedule(profile, &mut keyframes);
 
     Some(TransportPath {
         keyframes,
+        segment_splines,
+        speed: profile.speed,
+        accel: profile.accel,
         accel_time: profile.accel_time(),
         accel_dist: profile.accel_dist(),
         path_time,
@@ -167,8 +177,9 @@ fn build_orientation_spline(nodes: &[TaxiPathNode]) -> SplineBase {
 /// The path is cut into segments at teleport frames; each segment gets its own spline, and a
 /// keyframe's distance is the spline arc length of the leg leaving it. Ports the segment loop
 /// of `GenerateWaypoints`.
-fn measure_segment_distances(keyframes: &mut [KeyFrame], spline_path: &[Vec3]) {
+fn measure_segment_distances(keyframes: &mut [KeyFrame], spline_path: &[Vec3]) -> Vec<SplineBase> {
     let count = keyframes.len();
+    let mut splines: Vec<SplineBase> = Vec::new();
     let mut start = 0usize;
 
     for i in 1..count {
@@ -180,10 +191,12 @@ fn measure_segment_distances(keyframes: &mut [KeyFrame], spline_path: &[Vec3]) {
         let extra = if !keyframes[i - 1].teleport { 1 } else { 0 };
         let mut spline = SplineBase::new();
         spline.init_spline(&spline_path[start..i + extra], EvaluationMode::CatmullRom);
+        let spline_id = splines.len();
 
         for j in start..i + extra {
             let local = j - start;
             keyframes[j].index = (local + 1) as u32;
+            keyframes[j].spline_id = spline_id;
             // Arc length of the leg from this node to the next; the terminal node of the
             // segment has no next leg, so its distance stays zero.
             keyframes[j].dist_from_prev = spline.seg_length(local + 1).unwrap_or(0.0);
@@ -191,11 +204,15 @@ fn measure_segment_distances(keyframes: &mut [KeyFrame], spline_path: &[Vec3]) {
 
         if keyframes[i - 1].teleport {
             keyframes[i].index = (i - start + 1) as u32;
+            keyframes[i].spline_id = spline_id;
             keyframes[i].dist_from_prev = 0.0;
         }
 
+        splines.push(spline);
         start = i;
     }
+
+    splines
 }
 
 #[cfg(test)]
