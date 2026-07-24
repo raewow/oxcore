@@ -92,6 +92,8 @@ pub struct Player {
     pub shapeshift_form: u8,
     /// Unit flags (UNIT_FLAG_DISABLE_MOVE, etc.)
     pub unit_flags: u32,
+    /// Dynamic unit flags (UNIT_DYNFLAG_SPECIALINFO, etc.)
+    pub dynamic_flags: u32,
     /// UNIT_FIELD_BYTES_1 byte offset 3 (vis flag byte): UNIT_VIS_FLAGS_CREEP (0x02) while stealthed.
     pub vis_flags_byte: u8,
     /// Bitmask of active SPELL_AURA_MOD_INVISIBILITY types (bit per invisibility type 0-31).
@@ -226,6 +228,7 @@ impl Player {
             stand_state: 0,
             shapeshift_form: 0,
             unit_flags: 0,
+            dynamic_flags: 0,
             vis_flags_byte: 0,
             invisibility_mask: 0,
             detect_invisibility_mask: 0,

@@ -423,6 +423,7 @@ impl PlayerManager {
                 [player.stand_state, 0, player.shapeshift_form, 0],
             )
             .set_field(UNIT_FIELD_FLAGS, player.unit_flags | 0x00000008_u32) // PLAYER_CONTROLLED
+            .set_field(UNIT_DYNAMIC_FLAGS, player.dynamic_flags)
             // Player fields
             .set_required(PLAYER_FLAGS, player.player_flags)
             .set_bytes_field(

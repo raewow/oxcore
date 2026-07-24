@@ -88,6 +88,7 @@ impl AuraSystem {
         if target_guid.is_creature() {
             self.apply_creature_aura(
                 target_guid,
+                caster_guid,
                 spell_id,
                 aura_type,
                 base_value,
@@ -317,6 +318,7 @@ impl AuraSystem {
         if assigned_slot.is_some() {
             self.apply_special_effect(
                 target_guid,
+                caster_guid,
                 spell_id,
                 aura_type_copy,
                 misc_value,
@@ -368,7 +370,13 @@ impl AuraSystem {
     ) -> Result<()> {
         // Creature targets: simplified removal
         if target_guid.is_creature() {
-            self.remove_creature_aura(target_guid, spell_id, world);
+            let aura_type = world
+                .managers
+                .spell_mgr
+                .get(spell_id)
+                .map(|entry| entry.effect_apply_aura_name[effect_index as usize])
+                .unwrap_or(0);
+            self.remove_creature_aura(target_guid, spell_id, aura_type, world);
             return Ok(());
         }
 
@@ -2103,6 +2111,7 @@ impl AuraSystem {
     fn apply_special_effect(
         &self,
         target_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
         spell_id: u32,
         aura_type: u32,
         misc_value: i32,
@@ -2245,6 +2254,31 @@ impl AuraSystem {
                     true,
                     world,
                 );
+            }
+
+            // --- Aura::HandleAuraEmpathy ---
+            effects::AURA_EMPATHY => {
+                let dynamic_flags = world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        set_dynamic_flag(
+                            &mut player.dynamic_flags,
+                            effects::UNIT_DYNFLAG_SPECIALINFO,
+                            true,
+                        );
+                        player.dynamic_flags
+                    })
+                    .unwrap_or(0);
+                if caster_guid.is_player() {
+                    self.send_dynamic_flags_update(
+                        caster_guid,
+                        target_guid,
+                        ObjectType::Player,
+                        dynamic_flags,
+                    );
+                }
             }
 
             // --- Aura::HandleDetectAmore ---
@@ -2437,6 +2471,21 @@ impl AuraSystem {
                         world,
                     );
                 }
+            }
+
+            // --- Aura::HandleAuraEmpathy ---
+            effects::AURA_EMPATHY => {
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        set_dynamic_flag(
+                            &mut player.dynamic_flags,
+                            effects::UNIT_DYNFLAG_SPECIALINFO,
+                            false,
+                        );
+                    });
             }
 
             effects::AURA_DETECT_AMORE => {
@@ -3014,11 +3063,11 @@ impl AuraSystem {
 
     /// Apply a simplified aura to a creature target.
     ///
-    /// Tracks the aura in the creature's aura vec and applies movement speed
-    /// modifiers (snares/slows) immediately via SMSG_SPLINE_SET_RUN_SPEED.
+    /// Tracks the aura in the creature's aura vec and applies its target state.
     fn apply_creature_aura(
         &self,
         creature_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
         spell_id: u32,
         aura_type: u32,
         base_value: i32,
@@ -3033,6 +3082,21 @@ impl AuraSystem {
             duration_ms,
             &world.managers.creature_mgr,
         );
+
+        if aura_type == effects::AURA_EMPATHY && caster_guid.is_player() {
+            if let Some(dynamic_flags) = world
+                .managers
+                .creature_mgr
+                .with_creature(creature_guid, |creature| creature.dynamic_flags)
+            {
+                self.send_dynamic_flags_update(
+                    caster_guid,
+                    creature_guid,
+                    ObjectType::Unit,
+                    dynamic_flags,
+                );
+            }
+        }
     }
 
     /// Core creature aura logic, taking CreatureManager directly for testability.
@@ -3066,6 +3130,13 @@ impl AuraSystem {
                     base_value
                 );
             }
+            if aura_type == effects::AURA_EMPATHY {
+                set_dynamic_flag(
+                    &mut creature.dynamic_flags,
+                    effects::UNIT_DYNFLAG_SPECIALINFO,
+                    true,
+                );
+            }
         });
 
         // Broadcast SMSG_SPLINE_SET_RUN_SPEED to nearby players for creature speed change
@@ -3085,10 +3156,20 @@ impl AuraSystem {
 
     /// Remove a simplified aura from a creature target.
     ///
-    /// Removes the spell from the creature's aura vec and restores movement speed
-    /// if it was a speed modifier aura.
-    fn remove_creature_aura(&self, creature_guid: ObjectGuid, spell_id: u32, world: &World) {
-        self.remove_creature_aura_with_mgr(creature_guid, spell_id, &world.managers.creature_mgr);
+    /// Removes the spell from the creature's aura vec and reverses its target state.
+    fn remove_creature_aura(
+        &self,
+        creature_guid: ObjectGuid,
+        spell_id: u32,
+        aura_type: u32,
+        world: &World,
+    ) {
+        self.remove_creature_aura_with_mgr(
+            creature_guid,
+            spell_id,
+            aura_type,
+            &world.managers.creature_mgr,
+        );
     }
 
     /// Core creature aura removal logic, taking CreatureManager directly for testability.
@@ -3096,21 +3177,61 @@ impl AuraSystem {
         &self,
         creature_guid: ObjectGuid,
         spell_id: u32,
+        aura_type: u32,
         creature_mgr: &crate::game::creature::CreatureManager,
     ) {
         creature_mgr.with_creature_mut(creature_guid, |creature| {
             creature.auras.retain(|(id, _, _)| *id != spell_id);
-            // Restore base run speed (VMaNGOS DEFAULT_NPC_RUN_SPEED_RATE)
-            // TODO: re-sum remaining speed auras if multiple snares can stack
-            creature.speed_run = 1.14286;
+            if aura_type == effects::AURA_EMPATHY {
+                set_dynamic_flag(
+                    &mut creature.dynamic_flags,
+                    effects::UNIT_DYNFLAG_SPECIALINFO,
+                    false,
+                );
+            }
+            if aura_type == effects::AURA_MOD_DECREASE_SPEED
+                || aura_type == effects::AURA_MOD_INCREASE_SPEED
+            {
+                // Restore base run speed (VMaNGOS DEFAULT_NPC_RUN_SPEED_RATE)
+                // TODO: re-sum remaining speed auras if multiple snares can stack
+                creature.speed_run = 1.14286;
+            }
         });
 
-        // Broadcast restored speed (1.14286 * 7.0 = ~8.0 yds/sec, VMaNGOS default NPC run)
-        let mut packet = WorldPacket::new(Opcode::SMSG_SPLINE_SET_RUN_SPEED);
-        packet.write_packed_guid_raw(creature_guid.raw());
-        packet.write_f32(1.14286 * 7.0);
-        self.broadcast_mgr
-            .broadcast_nearby(creature_guid, &packet, true);
+        if aura_type == effects::AURA_MOD_DECREASE_SPEED
+            || aura_type == effects::AURA_MOD_INCREASE_SPEED
+        {
+            // Broadcast restored speed (1.14286 * 7.0 = ~8.0 yds/sec, VMaNGOS default NPC run)
+            let mut packet = WorldPacket::new(Opcode::SMSG_SPLINE_SET_RUN_SPEED);
+            packet.write_packed_guid_raw(creature_guid.raw());
+            packet.write_f32(1.14286 * 7.0);
+            self.broadcast_mgr
+                .broadcast_nearby(creature_guid, &packet, true);
+        }
+    }
+
+    /// C++ sends the empathy field update directly to the player caster when applying.
+    fn send_dynamic_flags_update(
+        &self,
+        recipient_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        object_type: ObjectType,
+        dynamic_flags: u32,
+    ) {
+        let mut block = ValuesUpdateBlock::new(target_guid, object_type);
+        block = block.set_field(UNIT_DYNAMIC_FLAGS, dynamic_flags);
+        let packet = SmsgUpdateObject::new()
+            .add_block(UpdateBlockData::Values(block))
+            .to_world_packet();
+        self.broadcast_mgr.send_to_player(recipient_guid, packet);
+    }
+}
+
+fn set_dynamic_flag(flags: &mut u32, flag: u32, apply: bool) {
+    if apply {
+        *flags |= flag;
+    } else {
+        *flags &= !flag;
     }
 }
 
@@ -3437,7 +3558,7 @@ mod tests {
     use crate::game::creature::manager::{CreatureManager, CreatureTemplate};
     use crate::game::creature::Creature;
     use crate::game::player::stats::modifiers::{UnitModifierGroup, UnitModifierType, UnitMods};
-    use crate::game::player::PlayerManager;
+    use crate::game::player::{Player, PlayerManager};
     use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
     use std::sync::Arc;
 
@@ -4139,7 +4260,12 @@ mod tests {
             Some(10_000),
             &creature_mgr,
         );
-        system.remove_creature_aura_with_mgr(guid, 116, &creature_mgr);
+        system.remove_creature_aura_with_mgr(
+            guid,
+            116,
+            effects::AURA_MOD_DECREASE_SPEED,
+            &creature_mgr,
+        );
 
         let speed = creature_mgr.with_creature(guid, |c| c.speed_run).unwrap();
         assert!(
@@ -4162,7 +4288,12 @@ mod tests {
             Some(10_000),
             &creature_mgr,
         );
-        system.remove_creature_aura_with_mgr(guid, 116, &creature_mgr);
+        system.remove_creature_aura_with_mgr(
+            guid,
+            116,
+            effects::AURA_MOD_DECREASE_SPEED,
+            &creature_mgr,
+        );
 
         let has_aura = creature_mgr
             .with_creature(guid, |c| c.auras.iter().any(|(id, _, _)| *id == 116))
@@ -4232,6 +4363,62 @@ mod tests {
             speed >= 0.1,
             "Speed should not go below minimum 0.1, got {}",
             speed
+        );
+    }
+
+    #[test]
+    fn empathy_dynamic_flag_preserves_other_player_flags_on_apply_and_remove() {
+        let special_info = effects::UNIT_DYNFLAG_SPECIALINFO;
+        let mut player = Player::new(
+            ObjectGuid::new_player(1),
+            "TestPlayer".into(),
+            0,
+            0,
+            0,
+            1,
+            1,
+            1,
+            0,
+        );
+        player.dynamic_flags = 0x0001;
+
+        set_dynamic_flag(&mut player.dynamic_flags, special_info, true);
+        assert_eq!(player.dynamic_flags, 0x0001 | special_info);
+
+        set_dynamic_flag(&mut player.dynamic_flags, special_info, false);
+        assert_eq!(player.dynamic_flags, 0x0001);
+    }
+
+    #[tokio::test]
+    async fn creature_empathy_sets_and_clears_special_info_flag() {
+        let (system, creature_mgr) = make_aura_system();
+        let guid = add_test_creature(&creature_mgr, 100, 9);
+        let special_info = effects::UNIT_DYNFLAG_SPECIALINFO;
+
+        creature_mgr.with_creature_mut(guid, |creature| {
+            creature.dynamic_flags = 0x0001;
+        });
+        system.apply_creature_aura_with_mgr(
+            guid,
+            2052,
+            effects::AURA_EMPATHY,
+            0,
+            None,
+            &creature_mgr,
+        );
+        assert_eq!(
+            creature_mgr
+                .with_creature(guid, |creature| creature.dynamic_flags)
+                .unwrap(),
+            0x0001 | special_info
+        );
+
+        system.remove_creature_aura_with_mgr(guid, 2052, effects::AURA_EMPATHY, &creature_mgr);
+        assert_eq!(
+            creature_mgr
+                .with_creature(guid, |creature| creature.dynamic_flags)
+                .unwrap(),
+            0x0001
         );
     }
 }

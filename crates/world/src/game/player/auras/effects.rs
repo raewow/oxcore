@@ -200,6 +200,7 @@ pub const AURA_RETAIN_COMBO_POINTS: u32 = 148; // Retain combo points on aura ex
 // --- Misc / Others ---
 pub const AURA_REFLECT_SPELLS_SCHOOL: u32 = 74; // Reflect chance -> SPELLMOD_RESIST_MISS_CHANCE
 pub const AURA_EMPATHY: u32 = 121; // Beast/Humanoid inspect info (UNIT_DYNFLAG_SPECIALINFO)
+pub const UNIT_DYNFLAG_SPECIALINFO: u32 = 0x0010;
 pub const AURA_SPIRIT_OF_REDEMPTION: u32 = 176; // Priest: die at aura end, act as spirit healer
 pub const AURA_AURA_SPELL: u32 = 192; // Apply/remove passive aura on target while active
 
