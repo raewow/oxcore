@@ -2444,6 +2444,13 @@ mod tests {
         spell
     }
 
+    fn script_aoe_at_destination_spell(id: u32, effect: u32) -> SpellEntry {
+        let mut spell = aoe_enemy_spell(id);
+        spell.effect[0] = effect;
+        spell.effect_implicit_target_a[0] = 8; // TARGET_ENUM_UNITS_SCRIPT_AOE_AT_DEST_LOC
+        spell
+    }
+
     fn script_cone_spell(id: u32) -> SpellEntry {
         let mut spell = aoe_enemy_spell(id);
         spell.effect_implicit_target_a[0] = 60; // TARGET_ENUM_UNITS_SCRIPT_IN_CONE_60
@@ -2769,6 +2776,43 @@ mod tests {
         let resolved =
             resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
         assert_eq!(resolved.effect_targets[0], vec![matching]);
+    }
+
+    #[tokio::test]
+    async fn script_destination_aoe_uses_persistent_and_summon_exceptions() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        add_test_player(&world, caster, 0, 0);
+
+        world
+            .managers
+            .spell_mgr
+            .add_spell(script_aoe_at_destination_spell(50007, 27));
+        let persistent = resolve_spell_targets(
+            50007,
+            &SpellCastTargets {
+                dst_position: Some((1.0, 0.0, 0.0)),
+                ..Default::default()
+            },
+            caster,
+            &world,
+        );
+        assert!(persistent.effect_targets[0].is_empty());
+
+        world
+            .managers
+            .spell_mgr
+            .add_spell(script_aoe_at_destination_spell(50008, 28));
+        let summon = resolve_spell_targets(
+            50008,
+            &SpellCastTargets {
+                dst_position: Some((1.0, 0.0, 0.0)),
+                ..Default::default()
+            },
+            caster,
+            &world,
+        );
+        assert_eq!(summon.effect_targets[0], vec![caster]);
     }
 
     #[tokio::test]
