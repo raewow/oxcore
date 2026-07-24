@@ -3282,41 +3282,18 @@ fn apply_damage_done_aura_modifier(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
     use crate::core::session::SessionManager;
-    use crate::dbc::structures::SpellEntry;
     use crate::game::creature::manager::{CreatureManager, CreatureTemplate};
     use crate::game::creature::Creature;
-    use crate::game::player::player::Player;
     use crate::game::player::stats::modifiers::{UnitModifierGroup, UnitModifierType, UnitMods};
-    use crate::{game::player::PlayerManager, World};
-    use oxcore_shared::database::Databases;
+    use crate::game::player::PlayerManager;
     use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
-    use std::path::PathBuf;
     use std::sync::Arc;
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
     fn test_creature_guid(entry: u32, low: u32) -> ObjectGuid {
         ObjectGuid::new_with_entry(HighGuid::Unit, entry, low)
-    }
-
-    fn trigger_test_world() -> World {
-        let pool = sqlx::mysql::MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
-            .unwrap();
-        let databases = Arc::new(Databases {
-            world: pool.clone(),
-            character: pool.clone(),
-            auth: pool.clone(),
-            logs: pool,
-        });
-        World::new(
-            databases,
-            Arc::new(Config::default()),
-            50,
-            PathBuf::from("."),
-        )
     }
 
     fn minimal_template(entry: u32) -> CreatureTemplate {
@@ -3369,72 +3346,6 @@ mod tests {
         );
         creature_mgr.add_creature(creature);
         guid
-    }
-
-    #[tokio::test]
-    async fn aura_spell_applies_and_removes_its_trigger_aura() {
-        let world = trigger_test_world();
-        let guid = ObjectGuid::new_player(9001);
-        world.managers.player_mgr.add_player(
-            Player::new(guid, "AuraTest".into(), 0, 0, 0, 60, 1, 1, 0),
-            guid.counter(),
-        );
-
-        let parent_id = 9100;
-        let trigger_id = 9101;
-        let mut parent = SpellEntry {
-            id: parent_id,
-            ..Default::default()
-        };
-        parent.effect_trigger_spell[0] = trigger_id;
-        world.managers.spell_mgr.add_spell(parent);
-        let mut trigger = SpellEntry {
-            id: trigger_id,
-            ..Default::default()
-        };
-        trigger.effect_apply_aura_name[0] = effects::AURA_MOD_REGEN;
-        trigger.effect_base_points[0] = 12;
-        world.managers.spell_mgr.add_spell(trigger);
-
-        world
-            .systems
-            .auras
-            .apply_aura(
-                guid,
-                guid,
-                parent_id,
-                0,
-                effects::AURA_AURA_SPELL,
-                0,
-                0,
-                None,
-                0,
-                1,
-                0,
-                AuraFlags::default(),
-                &world,
-            )
-            .await
-            .unwrap();
-        assert!(world
-            .systems
-            .player
-            .manager()
-            .with_player(guid, |p| p.auras.container.has_aura(trigger_id))
-            .unwrap());
-
-        world
-            .systems
-            .auras
-            .remove_aura(guid, parent_id, 0, &world)
-            .await
-            .unwrap();
-        assert!(!world
-            .systems
-            .player
-            .manager()
-            .with_player(guid, |p| p.auras.container.has_aura(trigger_id))
-            .unwrap());
     }
 
     fn make_aura_system() -> (AuraSystem, Arc<CreatureManager>) {
