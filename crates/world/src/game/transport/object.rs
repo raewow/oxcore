@@ -127,13 +127,17 @@ impl Transport {
         self.frame_cursor = cursor;
     }
 
-    /// Move the transport itself to a new position and facing (the `Relocate` in
-    /// `GenericTransport::UpdatePosition`).
+    /// Move the transport itself to a new position and facing (`GenericTransport::UpdatePosition`).
     ///
     /// Refreshing the collision model and repositioning passengers additionally need the Map
     /// and the Unit, so they are the caller's job for now.
-    pub fn relocate(&mut self, x: f32, y: f32, z: f32, orientation: f32) {
+    pub fn update_position(&mut self, x: f32, y: f32, z: f32, orientation: f32) {
         self.position = Position::new(x, y, z, orientation);
+    }
+
+    /// Alias for [`Self::update_position`] kept for callers that name the action `relocate`.
+    pub fn relocate(&mut self, x: f32, y: f32, z: f32, orientation: f32) {
+        self.update_position(x, y, z, orientation);
     }
 
     /// Milliseconds since the transport was created (`GetTimeSinceCreation`), given the
@@ -216,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn relocating_moves_the_frame_the_transforms_use() {
+    fn update_position_moves_the_frame_the_transforms_use() {
         let mut t = transport();
         // A passenger 5 yards ahead (local +x) sits at world (105, 200) with zero facing.
         let ahead = Position::new(5.0, 0.0, 0.0, 0.0);
@@ -224,9 +228,16 @@ mod tests {
         assert!((before.x - 105.0).abs() < 1e-4 && (before.y - 200.0).abs() < 1e-4);
 
         // After a quarter turn the same local offset points along world +y instead.
-        t.relocate(100.0, 200.0, 50.0, std::f32::consts::FRAC_PI_2);
+        t.update_position(100.0, 200.0, 50.0, std::f32::consts::FRAC_PI_2);
         let after = t.calculate_passenger_position(ahead);
         assert!((after.x - 100.0).abs() < 1e-4 && (after.y - 205.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn relocate_alias_calls_update_position() {
+        let mut t = transport();
+        t.relocate(1.0, 2.0, 3.0, 0.5);
+        assert_eq!(t.position, Position::new(1.0, 2.0, 3.0, 0.5));
     }
 
     #[test]
