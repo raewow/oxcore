@@ -596,6 +596,17 @@ mod tests {
     }
 
     #[test]
+    fn new_container_has_no_active_effects_or_allocated_slots() {
+        let container = AuraContainer::new();
+
+        assert!(container.is_empty());
+        assert_eq!(container.count(), 0);
+        assert_eq!(container.occupied_slots, 0);
+        assert!(container.slot_map.is_empty());
+        assert!(container.displaced_exclusive.is_empty());
+    }
+
+    #[test]
     fn refresh_aura_refreshes_all_effects_of_the_spell() {
         let mut container = AuraContainer::new();
         let caster = test_guid(1);
