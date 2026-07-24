@@ -1,5 +1,6 @@
 //! Movement generators module
 
+mod charge;
 mod chase;
 mod confused;
 mod distract;
@@ -13,6 +14,7 @@ mod point;
 mod random;
 mod waypoint;
 
+pub use charge::ChargeMovementGenerator;
 pub use chase::ChaseMovementGenerator;
 pub use confused::ConfusedMovementGenerator;
 pub use distract::{AssistanceDistractMovementGenerator, DistractMovementGenerator};

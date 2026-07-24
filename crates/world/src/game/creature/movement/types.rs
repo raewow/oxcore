@@ -15,6 +15,7 @@ pub enum MovementGeneratorType {
     Home = 10,
     Effect = 11,
     Taxi = 12,
+    Charge = 13,
 }
 
 /// Movement state for packet generation

@@ -2,8 +2,8 @@
 
 use super::generator::MovementUpdate;
 use super::generators::{
-    ChaseMovementGenerator, FearMovementGenerator, FleeMovementGenerator, FollowMovementGenerator,
-    TimedFearMovementGenerator,
+    ChargeMovementGenerator, ChaseMovementGenerator, FearMovementGenerator, FleeMovementGenerator,
+    FollowMovementGenerator, TimedFearMovementGenerator,
 };
 use super::spline::MoveSpline;
 use super::types::MovementGeneratorType;
@@ -242,6 +242,62 @@ impl MovementSystem {
                 });
         }
 
+        // Update charge generator target position from the current world state.
+        let charge_target = world
+            .managers
+            .creature_mgr
+            .with_creature_mut(guid, |creature| {
+                if creature.motion_master.active_generator() == MovementGeneratorType::Charge {
+                    if let Some(gen) = creature
+                        .motion_master
+                        .get_generator_mut(MovementGeneratorType::Charge)
+                    {
+                        if let Some(charge) =
+                            gen.as_any_mut().downcast_mut::<ChargeMovementGenerator>()
+                        {
+                            return Some(charge.target);
+                        }
+                    }
+                }
+                None
+            })
+            .flatten();
+
+        if let Some(charge_target) = charge_target {
+            let target_position = if charge_target.is_player() {
+                world
+                    .managers
+                    .player_mgr
+                    .get_movement_state(charge_target)
+                    .map(|s| s.position)
+            } else {
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(charge_target, |target| target.position)
+            };
+
+            if let Some(target_position) = target_position {
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(guid, |creature| {
+                        let creature_pos = creature.position;
+                        if let Some(gen) = creature
+                            .motion_master
+                            .get_generator_mut(MovementGeneratorType::Charge)
+                        {
+                            if let Some(charge) =
+                                gen.as_any_mut().downcast_mut::<ChargeMovementGenerator>()
+                            {
+                                charge.update_target_position(target_position);
+                                charge.set_creature_position(creature_pos);
+                            }
+                        }
+                    });
+            }
+        }
+
         // Get the CURRENT position (after spline update), not the stale snapshot
         // from the start of the tick. This ensures motion_master decisions and
         // SMSG_MONSTER_MOVE packets use the correct creature position.
@@ -399,6 +455,41 @@ impl MovementSystem {
                         creature.motion_master.active_generator() == MovementGeneratorType::Follow
                     })
                     .unwrap_or(false);
+
+                // Charge arrival: begin auto-attacking the charge target if requested.
+                let charge_attack = world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(guid, |creature| {
+                        if creature.motion_master.active_generator() == MovementGeneratorType::Charge
+                        {
+                            if let Some(gen) = creature
+                                .motion_master
+                                .get_generator_mut(MovementGeneratorType::Charge)
+                            {
+                                if let Some(charge) =
+                                    gen.as_any_mut().downcast_mut::<ChargeMovementGenerator>()
+                                {
+                                    if charge.trigger_auto_attack {
+                                        return Some(charge.target);
+                                    }
+                                }
+                            }
+                        }
+                        None
+                    })
+                    .flatten();
+
+                if let Some(attack_target) = charge_attack {
+                    world
+                        .managers
+                        .creature_mgr
+                        .with_creature_mut(guid, |creature| {
+                            creature.combat.attacking = Some(attack_target);
+                            creature.combat.enter_combat(attack_target, 0);
+                            creature.threat_manager.add_threat(attack_target, 1.0);
+                        });
+                }
 
                 // Stop the active spline and notify motion master
                 world

@@ -2,11 +2,11 @@
 
 use super::generator::{MovementGenerator, MovementUpdate};
 use super::generators::{
-    AssistanceDistractMovementGenerator, AssistanceMovementGenerator, ChaseMovementGenerator,
-    ConfusedMovementGenerator, DistractMovementGenerator, FearMovementGenerator,
-    FleeMovementGenerator, FollowMovementGenerator, HomeMovementGenerator, IdleMovementGenerator,
-    PointMovementGenerator, RandomMovementGenerator, TimedFearMovementGenerator, Waypoint,
-    WaypointMovementGenerator,
+    AssistanceDistractMovementGenerator, AssistanceMovementGenerator, ChargeMovementGenerator,
+    ChaseMovementGenerator, ConfusedMovementGenerator, DistractMovementGenerator,
+    FearMovementGenerator, FleeMovementGenerator, FollowMovementGenerator, HomeMovementGenerator,
+    IdleMovementGenerator, PointMovementGenerator, RandomMovementGenerator,
+    TimedFearMovementGenerator, Waypoint, WaypointMovementGenerator,
 };
 use super::types::MovementGeneratorType;
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -91,6 +91,7 @@ impl MotionMaster {
             MovementGeneratorType::Home => "HOME_MOTION_TYPE",
             MovementGeneratorType::Effect => "EFFECT_MOTION_TYPE",
             MovementGeneratorType::Taxi => "FLIGHT_MOTION_TYPE",
+            MovementGeneratorType::Charge => "CHARGE_MOTION_TYPE",
         }
     }
 
@@ -747,14 +748,26 @@ impl MotionMaster {
     /// Jump movement does not exist in 1.12 - the C++ body is commented out for this core.
     pub fn move_jump(&mut self) {}
 
-    /// Charge movement is not fully modeled yet in the Rust creature MotionMaster.
+    /// Charge movement toward a target unit, used by SPELL_EFFECT_CHARGE.
+    ///
+    /// `delay` is a spell-batching arrival delay (ms); it is currently unmodelled.
+    /// `trigger_auto_attack` flags the creature to begin attacking the target on arrival.
+    /// `use_combat_reach` is preserved for parity with the C++ signature but ignored here.
     pub fn move_charge(
         &mut self,
-        _target: ObjectGuid,
+        target: ObjectGuid,
         _delay: u32,
-        _trigger_auto_attack: bool,
+        trigger_auto_attack: bool,
         _use_combat_reach: bool,
+        creature_guid: ObjectGuid,
+        current_pos: Position,
+        run_speed: f32,
     ) {
+        if target.is_empty() {
+            return;
+        }
+        let generator = ChargeMovementGenerator::new(target, trigger_auto_attack, run_speed);
+        self.mutate(Box::new(generator), creature_guid, current_pos);
     }
 
     /// Distance-based movement is not fully modeled yet in the Rust creature MotionMaster.
