@@ -1247,9 +1247,8 @@ async fn deal_damage_to_player(
         .manager()
         .with_player_mut(target_guid, |player| {
             let current_health = player.stats.health;
-            let new_health = current_health.saturating_sub(damage_after_absorb);
-            player.stats.health = new_health;
-            player.stats.dirty = true;
+            player.apply_damage(damage_after_absorb);
+            let new_health = player.stats.health;
             new_health == 0 && current_health > 0
         })
         .unwrap_or(false);

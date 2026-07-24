@@ -207,7 +207,7 @@ impl CombatSystem {
     ) -> Result<()> {
         player_mgr.with_player_mut(target, |player| {
             let current_health = player.stats.health;
-            let loss = player.stats.modify_health(-(damage as i32));
+            let loss = -(player.apply_damage(damage) as i32);
             let new_health = player.stats.health;
 
             // Enter combat

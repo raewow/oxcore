@@ -44,6 +44,8 @@ pub struct Player {
     pub visibility: VisibilityState,
     /// Stats state (base + derived + modifier groups)
     pub stats: StatsState,
+    /// Health floor enforced by temporary invulnerability effects such as Spirit of Redemption.
+    pub invincibility_hp_threshold: u32,
     /// Power state (mana/rage/energy current/max + regen)
     pub power: PowerState,
     /// Combat state (timers, targets, weapon info)
@@ -210,6 +212,7 @@ impl Player {
             movement: MovementState::default(),
             visibility: VisibilityState::default(),
             stats: StatsState::default(),
+            invincibility_hp_threshold: 0,
             power: PowerState::default(),
             combat: CombatState::default(),
             charmer_guid: None,
@@ -271,6 +274,18 @@ impl Player {
             quest_share_info: None,
             item_set_effects: HashMap::new(),
         }
+    }
+
+    /// Apply health damage while respecting a temporary invincibility floor.
+    /// Returns the actual health lost.
+    pub fn apply_damage(&mut self, damage: u32) -> u32 {
+        let old_health = self.stats.health;
+        let new_health = old_health
+            .saturating_sub(damage)
+            .max(self.invincibility_hp_threshold.min(old_health));
+        self.stats.health = new_health;
+        self.stats.dirty = true;
+        old_health - new_health
     }
 
     pub fn get_item_set_effect(&self, set_id: u32) -> Option<&ItemSetEffect> {

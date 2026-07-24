@@ -95,9 +95,8 @@ fn handle_periodic_damage(
             .manager()
             .with_player_mut(target_guid, |player| {
                 let current_health = player.stats.health;
-                let new_health = current_health.saturating_sub(damage);
-                player.stats.health = new_health;
-                player.stats.dirty = true;
+                player.apply_damage(damage);
+                let new_health = player.stats.health;
 
                 tracing::debug!(
                     "Periodic damage: {} took {} damage from spell {}, health: {} -> {}",

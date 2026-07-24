@@ -167,6 +167,32 @@ impl Transport {
     pub fn calculate_passenger_offset(&self, world: Position) -> Position {
         self.frame().passenger_offset(world)
     }
+
+    /// Recalculate the world position of every boarded creature (`GenericTransport::UpdatePassengerPositions`).
+    ///
+    /// Player passengers are not handled yet; the Rust `Player` does not expose transport offset
+    /// state in the same way `Creature` does via `MovementInfo`.
+    pub fn update_passenger_positions(&self, world: &crate::World) {
+        let passengers: Vec<ObjectGuid> = self.passengers.iter().copied().collect();
+        for passenger in passengers {
+            let Some(offset) = world
+                .managers
+                .creature_mgr
+                .with_creature(passenger, |creature| creature.movement_info.transport_position)
+                .flatten()
+            else {
+                continue;
+            };
+
+            let new_position = self.calculate_passenger_position(offset);
+            let _ = world
+                .managers
+                .creature_mgr
+                .with_creature_mut(passenger, |creature| {
+                    creature.position = new_position;
+                });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -261,5 +287,128 @@ mod tests {
         assert_eq!(t.path_progress(), 4_200);
         // Created at clock 1000, now 5000 -> 4000 ms alive.
         assert_eq!(t.time_since_creation(5_000), 4_000);
+    }
+
+    #[tokio::test]
+    async fn update_passenger_positions_moves_boarded_creatures() {
+        use crate::config::Config;
+        use crate::game::creature::{Creature, CreatureTemplate};
+        use crate::World;
+        use oxcore_shared::database::Databases;
+        use crate::core::common::movement::MoveFlags;
+        use oxcore_shared::protocol::{ObjectGuid, Position};
+        use sqlx::mysql::MySqlPoolOptions;
+        use std::path::PathBuf;
+        use std::sync::Arc;
+
+        fn test_world() -> World {
+            let pool = || {
+                MySqlPoolOptions::new()
+                    .connect_lazy("mysql://test:test@localhost/test")
+                    .expect("lazy pool should be constructible")
+            };
+            let databases = Arc::new(Databases {
+                world: pool(),
+                character: pool(),
+                auth: pool(),
+                logs: pool(),
+            });
+
+            World::new(
+                databases,
+                Arc::new(Config::default()),
+                50,
+                PathBuf::from("."),
+            )
+        }
+
+        fn test_creature_template(entry: u32) -> CreatureTemplate {
+            CreatureTemplate {
+                entry,
+                name: format!("Creature {entry}"),
+                subname: None,
+                min_level: 1,
+                max_level: 1,
+                faction: 35,
+                model_id_1: 1,
+                model_id_2: 0,
+                model_id_3: 0,
+                model_id_4: 0,
+                scale: 1.0,
+                npc_flags: 0,
+                unit_flags: 0,
+                static_flags1: 0,
+                flags_extra: 0,
+                creature_type: 7,
+                unit_class: 1,
+                health_multiplier: 1.0,
+                power_multiplier: 1.0,
+                armor_multiplier: 1.0,
+                damage_multiplier: 1.0,
+                damage_variance: 0.0,
+                attack_time: 2000,
+                rank: 0,
+                gossip_menu_id: 0,
+                vendor_id: 0,
+                trainer_id: 0,
+                trainer_type: 0,
+                spells: [0; 4],
+            }
+        }
+
+        fn add_test_creature(world: &World, entry: u32, counter: u32) -> ObjectGuid {
+            let guid = ObjectGuid::new_creature(entry, counter);
+            let template = test_creature_template(entry);
+            world
+                .managers
+                .creature_mgr
+                .add_creature_for_test(Creature::new(
+                    guid,
+                    entry,
+                    1,
+                    Position::default(),
+                    0,
+                    0,
+                    &template,
+                    1,
+                    None,
+                ));
+            guid
+        }
+
+        let world = test_world();
+        let mut transport = Transport::new(
+            ObjectGuid::new_gameobject(176231, 1),
+            176231,
+            0,
+            Position::new(100.0, 200.0, 50.0, 0.0),
+            1_000,
+        );
+
+        let passenger = add_test_creature(&world, 1, 1);
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(passenger, |creature| {
+                // Board the creature 5 yards ahead of the transport.
+                creature
+                    .movement_info
+                    .set_transport_data(transport.guid, Position::new(5.0, 0.0, 0.0, 0.0));
+                creature.movement_info.flags.set_flag(MoveFlags::ONTRANSPORT);
+                creature.position = transport.calculate_passenger_position(Position::new(5.0, 0.0, 0.0, 0.0));
+            });
+        transport.add_passenger(passenger);
+
+        // Move the transport and update passenger positions.
+        transport.update_position(110.0, 220.0, 50.0, 0.0);
+        transport.update_passenger_positions(&world);
+
+        let new_position = world
+            .managers
+            .creature_mgr
+            .with_creature(passenger, |creature| creature.position)
+            .unwrap();
+        assert!((new_position.x - 115.0).abs() < 1e-4);
+        assert!((new_position.y - 220.0).abs() < 1e-4);
     }
 }

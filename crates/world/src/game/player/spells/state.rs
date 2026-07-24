@@ -1502,6 +1502,7 @@ mod tests {
         let second = player(3);
         let resolved_targets = crate::game::player::spells::targets::ResolvedTargets {
             effect_targets: [vec![first], vec![second, first], Vec::new()],
+            destination: None,
         };
         let mut q = SpellEventQueue::new();
         q.schedule(

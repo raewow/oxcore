@@ -203,12 +203,15 @@ impl ImplicitTarget {
 pub struct ResolvedTargets {
     /// Target list per effect index (0, 1, 2)
     pub effect_targets: [Vec<ObjectGuid>; 3],
+    /// Destination selected during implicit target resolution.
+    pub destination: Option<(f32, f32, f32)>,
 }
 
 impl Default for ResolvedTargets {
     fn default() -> Self {
         Self {
             effect_targets: [Vec::new(), Vec::new(), Vec::new()],
+            destination: None,
         }
     }
 }
@@ -325,6 +328,7 @@ pub fn resolve_spell_targets(
 ) -> ResolvedTargets {
     let mut resolved = ResolvedTargets::default();
     let mut magnet_cache: HashMap<ObjectGuid, ObjectGuid> = HashMap::new();
+    let mut effective_cast_targets = cast_targets.clone();
 
     let spell_entry = match world.managers.spell_mgr.get(spell_id) {
         Some(entry) => entry,
@@ -366,11 +370,12 @@ pub fn resolve_spell_targets(
             target_a,
             &spell_entry,
             effect_idx,
-            cast_targets,
+            &mut effective_cast_targets,
             caster_guid,
             world,
             &mut targets,
             effect_chain_target,
+            true,
         );
 
         // Resolve target_b (if different from target_a and not None)
@@ -379,17 +384,18 @@ pub fn resolve_spell_targets(
                 target_b,
                 &spell_entry,
                 effect_idx,
-                cast_targets,
+                &mut effective_cast_targets,
                 caster_guid,
                 world,
                 &mut targets,
                 effect_chain_target,
+                false,
             );
         }
 
         // Fallback: if no targets resolved but we have an explicit target, use it
         if targets.is_empty() && !target_a.is_script_target() && !target_b.is_script_target() {
-            if let Some(unit_target) = cast_targets.unit_target() {
+            if let Some(unit_target) = effective_cast_targets.unit_target() {
                 targets.push(unit_target);
             } else if target_a == ImplicitTarget::None && target_b == ImplicitTarget::None {
                 // No implicit targets and no explicit target = self-cast
@@ -424,6 +430,7 @@ pub fn resolve_spell_targets(
         resolved.effect_targets[effect_idx] = targets;
     }
 
+    resolved.destination = effective_cast_targets.dst_position;
     resolved
 }
 
@@ -432,11 +439,12 @@ fn resolve_implicit_target(
     target_type: ImplicitTarget,
     spell_entry: &crate::dbc::structures::SpellEntry,
     effect_idx: usize,
-    cast_targets: &SpellCastTargets,
+    cast_targets: &mut SpellCastTargets,
     caster_guid: ObjectGuid,
     world: &World,
     targets: &mut Vec<ObjectGuid>,
     effect_chain_target: u32,
+    is_primary_target: bool,
 ) {
     if target_type.is_self_target() {
         targets.push(caster_guid);
@@ -718,7 +726,27 @@ fn resolve_implicit_target(
         // Location script targets must update the cast destination, which is not
         // mutable in this resolution API yet. Do not substitute an unrelated
         // explicit unit target while that cast-state plumbing is pending.
-        ImplicitTarget::LocationScriptNearCaster => {}
+        ImplicitTarget::LocationScriptNearCaster => {
+            if let Some(guid) = find_script_target(
+                spell_entry.id,
+                effect_idx,
+                caster_guid,
+                cast_targets.unit_target(),
+                radius,
+                true,
+                true,
+                world,
+            ) {
+                if let Some(position) = world_object_position(guid, world) {
+                    cast_targets.set_destination(position.x, position.y, position.z);
+                    // A location target on target A also registers the selected
+                    // object unless this is a persistent-area-aura effect.
+                    if is_primary_target && spell_entry.effect[effect_idx] != 27 {
+                        targets.push(guid);
+                    }
+                }
+            }
+        }
 
         ImplicitTarget::GameObjectScriptAoeAtSrc | ImplicitTarget::GameObjectScriptAoeAtDest => {}
 
@@ -934,6 +962,16 @@ fn unit_world_context(guid: ObjectGuid, world: &World) -> Option<(u32, u32, u32,
                 creature.position,
             )
         })
+    } else {
+        None
+    }
+}
+
+fn world_object_position(guid: ObjectGuid, world: &World) -> Option<Position> {
+    if guid.is_player() || guid.is_creature_or_pet() {
+        unit_world_context(guid, world).map(|(_, _, _, position)| position)
+    } else if guid.is_game_object() {
+        world.managers.gameobject_mgr.get_position(guid)
     } else {
         None
     }
@@ -2210,6 +2248,12 @@ mod tests {
         spell
     }
 
+    fn location_script_near_caster_spell(id: u32) -> SpellEntry {
+        let mut spell = script_near_caster_spell(id);
+        spell.effect_implicit_target_a[0] = 46; // TARGET_LOCATION_SCRIPT_NEAR_CASTER
+        spell
+    }
+
     fn add_test_player(world: &World, guid: ObjectGuid, map_id: u32, instance_id: u32) {
         let player = Player::new(
             guid,
@@ -2405,6 +2449,35 @@ mod tests {
         let resolved =
             resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
         assert_eq!(resolved.effect_targets[0], vec![gameobject_guid]);
+    }
+
+    #[tokio::test]
+    async fn location_script_near_caster_sets_resolved_destination() {
+        let world = test_world();
+        let spell_id = 50003;
+        world
+            .managers
+            .spell_mgr
+            .add_spell(location_script_near_caster_spell(spell_id));
+        world.managers.spell_mgr.set_spell_script_targets_for_test(
+            spell_id,
+            vec![SpellTargetEntry {
+                type_: 1, // SPELL_TARGET_TYPE_CREATURE
+                target_id: 9001,
+                can_focus: false,
+                inverse_effect_mask: 0,
+            }],
+        );
+
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_creature(9001, 1);
+        add_test_player(&world, caster, 0, 0);
+        add_test_creature(&world, target, pos(4.0, 5.0));
+
+        let resolved =
+            resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
+        assert_eq!(resolved.destination, Some((4.0, 5.0, 0.0)));
+        assert_eq!(resolved.effect_targets[0], vec![target]);
     }
 
     #[tokio::test]

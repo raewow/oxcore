@@ -351,6 +351,9 @@ impl AuraSystem {
             if aura_type_copy == effects::AURA_MOD_SHAPESHIFT {
                 Box::pin(self.apply_shapeshift_boosts(target_guid, misc_value as u8, world)).await;
             }
+            if aura_type_copy == effects::AURA_SPIRIT_OF_REDEMPTION {
+                Box::pin(self.apply_spirit_of_redemption(target_guid, world)).await;
+            }
         }
 
         // Send aura update to client
@@ -534,6 +537,19 @@ impl AuraSystem {
             if aura.aura_type == effects::AURA_MOD_SHAPESHIFT {
                 self.remove_shapeshift_boosts(target_guid, aura.misc_value as u8, world)
                     .await;
+            }
+            if aura.aura_type == effects::AURA_SPIRIT_OF_REDEMPTION {
+                world.systems.player.manager().with_player_mut(target_guid, |player| {
+                    player.unit_flags |= effects::UNIT_FLAG_STUNNED;
+                    player.invincibility_hp_threshold = 0;
+                });
+                let _ = Box::pin(world.systems.spells.cast_spell(
+                    target_guid, 27965, Some(target_guid), true, world,
+                ))
+                .await;
+                world.systems.player.manager().with_player_mut(target_guid, |player| {
+                    player.unit_flags &= !effects::UNIT_FLAG_STUNNED;
+                });
             }
 
             // Send slot cleared to client
@@ -2966,6 +2982,21 @@ impl AuraSystem {
             });
 
         self.send_shapeshift_field_update(target_guid, native_display_id, world);
+    }
+
+    async fn apply_spirit_of_redemption(&self, target_guid: ObjectGuid, world: &World) {
+        world.systems.player.manager().with_player_mut(target_guid, |player| {
+            player.stand_state = 0;
+            player.stats.health = player.stats.max_health;
+            let mana = crate::game::player::power::PowerType::Mana as usize;
+            player.power.current[mana] = player.power.max[mana];
+            player.invincibility_hp_threshold = player.stats.max_health;
+            player.stats.dirty = true;
+        });
+        let _ = Box::pin(world.systems.spells.cast_spell(
+            target_guid, 25100, Some(target_guid), true, world,
+        ))
+        .await;
     }
 
     async fn apply_shapeshift_boosts(&self, target_guid: ObjectGuid, form: u8, world: &World) {

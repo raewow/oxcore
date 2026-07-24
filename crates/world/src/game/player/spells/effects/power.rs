@@ -150,8 +150,8 @@ pub async fn effect_power_burn(input: &EffectInput, world: &World) -> Result<Eff
             .manager()
             .with_player_mut(target_guid, |player| {
                 let current_health = player.stats.health;
-                let new_health = current_health.saturating_sub(damage);
-                player.stats.health = new_health;
+                player.apply_damage(damage);
+                let new_health = player.stats.health;
 
                 tracing::debug!(
                     "Power Burn: {} took {} damage, health: {} -> {}",
