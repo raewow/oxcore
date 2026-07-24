@@ -28,6 +28,7 @@
 
 pub mod ammo;
 pub mod area_targets;
+pub mod batching;
 pub mod cast_pointers;
 pub mod caster;
 pub mod channel_visual;

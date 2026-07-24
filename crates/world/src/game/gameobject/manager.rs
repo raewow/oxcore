@@ -78,6 +78,11 @@ impl GameObjectManager {
         self.gameobjects.get(&guid)
     }
 
+    /// Iterate over all active gameobjects.
+    pub fn iter_gameobjects(&self) -> dashmap::iter::Iter<'_, ObjectGuid, GameObject> {
+        self.gameobjects.iter()
+    }
+
     #[cfg(test)]
     pub fn add_template_for_test(&self, template: GameObjectTemplate) {
         self.templates.insert(template.entry, Arc::new(template));

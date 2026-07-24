@@ -347,6 +347,10 @@ impl AuraSystem {
                 base_value,
                 world,
             );
+
+            if aura_type_copy == effects::AURA_MOD_SHAPESHIFT {
+                Box::pin(self.apply_shapeshift_boosts(target_guid, misc_value as u8, world)).await;
+            }
         }
 
         // Send aura update to client
@@ -526,6 +530,11 @@ impl AuraSystem {
                 aura.misc_value,
                 world,
             );
+
+            if aura.aura_type == effects::AURA_MOD_SHAPESHIFT {
+                self.remove_shapeshift_boosts(target_guid, aura.misc_value as u8, world)
+                    .await;
+            }
 
             // Send slot cleared to client
             self.send_aura_slot_cleared(target_guid, slot, world)?;
@@ -2959,6 +2968,137 @@ impl AuraSystem {
         self.send_shapeshift_field_update(target_guid, native_display_id, world);
     }
 
+    async fn apply_shapeshift_boosts(&self, target_guid: ObjectGuid, form: u8, world: &World) {
+        let (boost_spells, learned_spells, heart_of_the_wild) = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                let heart_of_the_wild = player
+                    .auras
+                    .container
+                    .all_auras()
+                    .find_map(|aura| {
+                        let entry = world.managers.spell_mgr.get(aura.spell_id)?;
+                        (entry.spell_icon_id == 240 && aura.misc_value == 3)
+                            .then_some(aura.current_value())
+                    });
+                (
+                    shapeshift_boost_spells(form),
+                    player.spells.learned_spells.iter().copied().collect::<Vec<_>>(),
+                    heart_of_the_wild,
+                )
+            })
+            .unwrap_or(([0; 2], Vec::new(), None));
+
+        for spell_id in boost_spells.into_iter().filter(|spell_id| *spell_id != 0) {
+            let _ = Box::pin(
+                world
+                    .systems
+                    .spells
+                    .cast_spell(target_guid, spell_id, Some(target_guid), true, world),
+            )
+            .await;
+        }
+
+        let form_mask = shapeshift_form_mask(form);
+        for &spell_id in &learned_spells {
+            if boost_spells.contains(&spell_id)
+                || !spell_needs_cast_at_form_apply(spell_id, form_mask, world)
+            {
+                continue;
+            }
+            let _ = Box::pin(
+                world
+                    .systems
+                    .spells
+                    .cast_spell(target_guid, spell_id, Some(target_guid), true, world),
+            )
+            .await;
+        }
+
+        if form == effects::FORM_CAT || form == effects::FORM_BEAR || form == effects::FORM_DIREBEAR
+        {
+            if learned_spells.contains(&17007)
+                && spell_supports_form(24932, form_mask, world)
+            {
+                let _ = Box::pin(
+                    world
+                        .systems
+                        .spells
+                        .cast_spell(target_guid, 24932, Some(target_guid), true, world),
+                )
+                .await;
+            }
+
+            if let (Some(spell_id), Some(amount)) = (shapeshift_hotw_spell(form), heart_of_the_wild)
+            {
+                let _ = Box::pin(world.systems.spells.cast_custom_spell(
+                    target_guid,
+                    spell_id,
+                    Some(target_guid),
+                    [Some(amount), None, None],
+                    world,
+                ))
+                .await;
+            }
+        }
+    }
+
+    async fn remove_shapeshift_boosts(&self, target_guid: ObjectGuid, form: u8, world: &World) {
+        for spell_id in shapeshift_boost_spells(form)
+            .into_iter()
+            .filter(|spell_id| *spell_id != 0)
+        {
+            let _ = Box::pin(self.remove_spell_auras(target_guid, spell_id, world)).await;
+        }
+
+        let removable_auras = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .all_auras()
+                    .filter_map(|aura| {
+                        spell_is_removed_on_shape_lost(aura.spell_id, world).then_some(aura.spell_id)
+                    })
+                    .collect::<std::collections::HashSet<_>>()
+            })
+            .unwrap_or_default();
+        for spell_id in removable_auras {
+            let _ = Box::pin(self.remove_spell_auras(target_guid, spell_id, world)).await;
+        }
+
+        let interrupted_spells = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                player
+                    .spells
+                    .current_spells
+                    .iter()
+                    .flatten()
+                    .filter_map(|cast| {
+                        spell_is_removed_on_shape_lost(cast.spell_id, world).then_some(cast.spell_id)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for spell_id in interrupted_spells {
+            let _ = Box::pin(
+                world
+                    .systems
+                    .spells
+                    .cancel_cast_by_spell_id(target_guid, spell_id, world),
+            )
+            .await;
+        }
+    }
+
     fn send_shapeshift_field_update(
         &self,
         target_guid: ObjectGuid,
@@ -3609,6 +3749,67 @@ fn set_dynamic_flag(flags: &mut u32, flag: u32, apply: bool) {
     }
 }
 
+fn shapeshift_boost_spells(form: u8) -> [u32; 2] {
+    match form {
+        effects::FORM_CAT => [3025, 0],
+        effects::FORM_TREE => [5420, 0],
+        effects::FORM_TRAVEL => [5419, 0],
+        effects::FORM_AQUA => [5421, 0],
+        effects::FORM_BEAR => [1178, 21178],
+        effects::FORM_DIREBEAR => [9635, 21178],
+        effects::FORM_BATTLESTANCE => [21156, 0],
+        effects::FORM_DEFENSIVESTANCE => [7376, 0],
+        effects::FORM_BERSERKERSTANCE => [7381, 0],
+        effects::FORM_MOONKIN => [24905, 0],
+        effects::FORM_SPIRITOFREDEMPTION => [27792, 27795],
+        _ => [0, 0],
+    }
+}
+
+fn shapeshift_hotw_spell(form: u8) -> Option<u32> {
+    match form {
+        effects::FORM_CAT => Some(24900),
+        effects::FORM_BEAR | effects::FORM_DIREBEAR => Some(24899),
+        _ => None,
+    }
+}
+
+fn shapeshift_form_mask(form: u8) -> u32 {
+    form.checked_sub(1).and_then(|form| 1u32.checked_shl(form as u32)).unwrap_or(0)
+}
+
+fn spell_needs_cast_at_form_apply(spell_id: u32, form_mask: u32, world: &World) -> bool {
+    const SPELL_ATTR_PASSIVE: u32 = 0x40;
+    const SPELL_ATTR_DO_NOT_DISPLAY: u32 = 0x80;
+    const SPELL_ATTR_EX2_ALLOW_WHILE_NOT_SHAPESHIFTED: u32 = 0x0008_0000;
+
+    world.managers.spell_mgr.get(spell_id).is_some_and(|spell| {
+        form_mask != 0
+            && spell.attributes & (SPELL_ATTR_PASSIVE | SPELL_ATTR_DO_NOT_DISPLAY) != 0
+            && spell.stances & form_mask != 0
+            && spell.attributes_ex2 & SPELL_ATTR_EX2_ALLOW_WHILE_NOT_SHAPESHIFTED == 0
+    })
+}
+
+fn spell_supports_form(spell_id: u32, form_mask: u32, world: &World) -> bool {
+    world
+        .managers
+        .spell_mgr
+        .get(spell_id)
+        .is_some_and(|spell| spell.stances & form_mask != 0)
+}
+
+fn spell_is_removed_on_shape_lost(spell_id: u32, world: &World) -> bool {
+    const SPELL_ATTR_NOT_SHAPESHIFT: u32 = 0x0001_0000;
+    const SPELL_ATTR_EX2_ALLOW_WHILE_NOT_SHAPESHIFTED: u32 = 0x0008_0000;
+
+    world.managers.spell_mgr.get(spell_id).is_some_and(|spell| {
+        (spell.stances != 0 || spell_id == 24864)
+            && spell.attributes_ex2 & SPELL_ATTR_EX2_ALLOW_WHILE_NOT_SHAPESHIFTED == 0
+            && spell.attributes & SPELL_ATTR_NOT_SHAPESHIFT == 0
+    })
+}
+
 /// Create a StatModifier from aura data.
 /// Returns None if the aura type doesn't map to a stat modifier.
 fn create_stat_modifier(
@@ -4077,6 +4278,24 @@ mod tests {
     fn ranged_ammo_haste_requires_an_ammo_weapon() {
         assert!(!ranged_ammo_haste_applies(0));
         assert!(ranged_ammo_haste_applies(1));
+    }
+
+    #[test]
+    fn shapeshift_boost_spells_match_each_supported_form() {
+        assert_eq!(shapeshift_boost_spells(effects::FORM_CAT), [3025, 0]);
+        assert_eq!(shapeshift_boost_spells(effects::FORM_BEAR), [1178, 21178]);
+        assert_eq!(
+            shapeshift_boost_spells(effects::FORM_SPIRITOFREDEMPTION),
+            [27792, 27795]
+        );
+        assert_eq!(shapeshift_boost_spells(effects::FORM_GHOSTWOLF), [0, 0]);
+    }
+
+    #[test]
+    fn shapeshift_form_masks_follow_the_reference_bit_layout() {
+        assert_eq!(shapeshift_form_mask(effects::FORM_CAT), 0x1);
+        assert_eq!(shapeshift_form_mask(effects::FORM_BEAR), 0x10);
+        assert_eq!(shapeshift_form_mask(0), 0);
     }
 
     // ── apply_primary_stat_aura_modifier (Aura::HandleAuraModStat family) ─────

@@ -41,6 +41,10 @@ pub struct Config {
     #[serde(default = "default_world_update_interval")]
     pub world_update_interval: u32, // milliseconds (default: 50ms)
 
+    // Spell Batching Settings
+    #[serde(default = "default_spell_effect_delay_ms")]
+    pub spell_effect_delay_ms: u32, // Spell.EffectDelay: ms interval for batched spell effects (default: 400ms, 0 = disabled)
+
     // Realm Settings
     #[serde(default = "default_realm_id")]
     pub realm_id: i32, // Realm ID (default: 1, -1 means all realms)
@@ -276,6 +280,10 @@ fn default_data_dir() -> std::path::PathBuf {
 
 fn default_world_update_interval() -> u32 {
     50 // 50ms
+}
+
+fn default_spell_effect_delay_ms() -> u32 {
+    400 // MaNGOS Spell.EffectDelay default
 }
 
 fn default_realm_id() -> i32 {
@@ -527,6 +535,7 @@ impl Default for Config {
             modern_world_signing_key: default_modern_world_signing_key(),
             data_dir: default_data_dir(),
             world_update_interval: default_world_update_interval(),
+            spell_effect_delay_ms: default_spell_effect_delay_ms(),
             realm_id: default_realm_id(),
             realm_name: default_realm_name(),
             logout_timer: default_logout_timer(),

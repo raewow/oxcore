@@ -147,6 +147,7 @@ pub struct SpellTargetEntry {
     pub type_: u32,
     pub target_id: u32,
     pub can_focus: bool,
+    pub inverse_effect_mask: u32,
 }
 
 /// Pet aura binding: a spell that grants a pet an aura.
@@ -700,6 +701,20 @@ impl SpellManager {
     /// Insert a spell entry (used by tests)
     pub fn add_spell(&self, entry: SpellEntry) {
         self.spells.insert(entry.id, Arc::new(entry));
+    }
+
+    /// Return the script-target records configured for a spell.
+    pub fn get_spell_script_targets(&self, spell_id: u32) -> Vec<SpellTargetEntry> {
+        self.spell_script_targets
+            .read()
+            .get(&spell_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub fn set_spell_script_targets_for_test(&self, spell_id: u32, targets: Vec<SpellTargetEntry>) {
+        self.spell_script_targets.write().insert(spell_id, targets);
     }
 
     pub fn search_by_name(&self, search: &str) -> Vec<Arc<SpellEntry>> {
@@ -1344,6 +1359,7 @@ impl SpellManager {
                 type_,
                 target_id: target_entry,
                 can_focus: false,
+                inverse_effect_mask: row.try_get::<u64, _>("effect_mask").unwrap_or(0) as u32,
             });
             count += 1;
         }

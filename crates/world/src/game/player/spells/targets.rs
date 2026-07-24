@@ -158,6 +158,17 @@ impl ImplicitTarget {
         )
     }
 
+    fn is_script_target(&self) -> bool {
+        matches!(
+            self,
+            Self::ScriptNearCaster
+                | Self::GameObjectScriptNearCaster
+                | Self::LocationScriptNearCaster
+                | Self::GameObjectScriptAoeAtSrc
+                | Self::GameObjectScriptAoeAtDest
+        )
+    }
+
     /// Whether this is an area target
     fn is_area_target(&self) -> bool {
         matches!(
@@ -377,7 +388,7 @@ pub fn resolve_spell_targets(
         }
 
         // Fallback: if no targets resolved but we have an explicit target, use it
-        if targets.is_empty() {
+        if targets.is_empty() && !target_a.is_script_target() && !target_b.is_script_target() {
             if let Some(unit_target) = cast_targets.unit_target() {
                 targets.push(unit_target);
             } else if target_a == ImplicitTarget::None && target_b == ImplicitTarget::None {
@@ -674,13 +685,40 @@ fn resolve_implicit_target(
             );
         }
 
-        ImplicitTarget::ScriptNearCaster
-        | ImplicitTarget::GameObjectScriptNearCaster
-        | ImplicitTarget::LocationScriptNearCaster => {
-            if let Some(guid) = cast_targets.unit_target() {
+        ImplicitTarget::ScriptNearCaster => {
+            if let Some(guid) = find_script_target(
+                spell_entry.id,
+                effect_idx,
+                caster_guid,
+                cast_targets.unit_target(),
+                radius,
+                true,
+                false,
+                world,
+            ) {
                 targets.push(guid);
             }
         }
+
+        ImplicitTarget::GameObjectScriptNearCaster => {
+            if let Some(guid) = find_script_target(
+                spell_entry.id,
+                effect_idx,
+                caster_guid,
+                None,
+                radius,
+                false,
+                true,
+                world,
+            ) {
+                targets.push(guid);
+            }
+        }
+
+        // Location script targets must update the cast destination, which is not
+        // mutable in this resolution API yet. Do not substitute an unrelated
+        // explicit unit target while that cast-state plumbing is pending.
+        ImplicitTarget::LocationScriptNearCaster => {}
 
         ImplicitTarget::GameObjectScriptAoeAtSrc | ImplicitTarget::GameObjectScriptAoeAtDest => {}
 
@@ -738,7 +776,169 @@ fn get_effect_radius(
     10.0
 }
 
-/// Get a unit's position (player or creature).
+/// Find the closest configured script target in the caster's map and phase.
+/// A valid explicit unit target takes precedence, matching `CheckScriptTargeting`.
+fn find_script_target(
+    spell_id: u32,
+    effect_idx: usize,
+    caster_guid: ObjectGuid,
+    explicit_unit: Option<ObjectGuid>,
+    radius: f32,
+    allow_units: bool,
+    allow_gameobjects: bool,
+    world: &World,
+) -> Option<ObjectGuid> {
+    let entries = world.managers.spell_mgr.get_spell_script_targets(spell_id);
+    let (caster_map, caster_instance, caster_phase, caster_position) =
+        unit_world_context(caster_guid, world)?;
+    let effect_mask = 1u32 << effect_idx;
+    let entries: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.inverse_effect_mask & effect_mask == 0)
+        .collect();
+
+    if allow_units {
+        if let Some(guid) = explicit_unit {
+            if entries
+                .iter()
+                .any(|entry| script_entry_matches_unit(entry, guid, world))
+                && unit_world_context(guid, world).is_some_and(
+                    |(map, instance, phase, position)| {
+                        map == caster_map
+                            && instance == caster_instance
+                            && phase & caster_phase != 0
+                            && caster_position.is_within_range(&position, radius)
+                    },
+                )
+            {
+                return Some(guid);
+            }
+        }
+    }
+
+    let mut closest: Option<(ObjectGuid, f32)> = None;
+    for entry in entries {
+        match entry.type_ {
+            // SPELL_TARGET_TYPE_GAMEOBJECT
+            0 if allow_gameobjects => {
+                for gameobject in world.managers.gameobject_mgr.iter_gameobjects() {
+                    let go = gameobject.value();
+                    if go.entry != entry.target_id
+                        || go.map_id != caster_map
+                        || go.phase_mask & caster_phase == 0
+                    {
+                        continue;
+                    }
+                    let distance = caster_position.distance_to(&go.position);
+                    if distance <= radius && closest.is_none_or(|(_, best)| distance < best) {
+                        closest = Some((go.guid, distance));
+                    }
+                }
+            }
+            // SPELL_TARGET_TYPE_CREATURE and SPELL_TARGET_TYPE_DEAD
+            1 | 2 if allow_units => {
+                for creature in world.managers.creature_mgr.iter_creatures() {
+                    let target = creature.value();
+                    let matches_life_state = if entry.type_ == 1 {
+                        target.current_health > 0
+                    } else {
+                        target.current_health == 0
+                    };
+                    if target.entry != entry.target_id
+                        || !matches_life_state
+                        || target.map_id != caster_map
+                        || target.instance_id != caster_instance
+                        || target.phase_mask & caster_phase == 0
+                    {
+                        continue;
+                    }
+                    let distance = caster_position.distance_to(&target.position);
+                    if distance <= radius && closest.is_none_or(|(_, best)| distance < best) {
+                        closest = Some((target.guid, distance));
+                    }
+                }
+            }
+            // SPELL_TARGET_TYPE_PLAYER has no template entry. The source core
+            // uses entry zero for players, so reject malformed nonzero records.
+            3 if allow_units && entry.target_id == 0 => {
+                for guid in world.managers.player_mgr.collect_online_guids() {
+                    let Some((map, instance, phase, position)) = unit_world_context(guid, world)
+                    else {
+                        continue;
+                    };
+                    if map != caster_map
+                        || instance != caster_instance
+                        || phase & caster_phase == 0
+                        || !world.managers.player_mgr.is_player_alive(guid)
+                    {
+                        continue;
+                    }
+                    let distance = caster_position.distance_to(&position);
+                    if distance <= radius && closest.is_none_or(|(_, best)| distance < best) {
+                        closest = Some((guid, distance));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    closest.map(|(guid, _)| guid)
+}
+
+fn script_entry_matches_unit(
+    entry: &crate::game::spell::manager::SpellTargetEntry,
+    guid: ObjectGuid,
+    world: &World,
+) -> bool {
+    match entry.type_ {
+        1 => world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |creature| {
+                creature.entry == entry.target_id && creature.current_health > 0
+            })
+            .unwrap_or(false),
+        2 => world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |creature| {
+                creature.entry == entry.target_id && creature.current_health == 0
+            })
+            .unwrap_or(false),
+        3 => {
+            guid.is_player()
+                && entry.target_id == 0
+                && world.managers.player_mgr.is_player_alive(guid)
+        }
+        _ => false,
+    }
+}
+
+fn unit_world_context(guid: ObjectGuid, world: &World) -> Option<(u32, u32, u32, Position)> {
+    if guid.is_player() {
+        world.managers.player_mgr.with_player(guid, |player| {
+            (
+                player.map_id,
+                player.instance_id,
+                player.phase_mask,
+                player.movement.position,
+            )
+        })
+    } else if guid.is_creature_or_pet() {
+        world.managers.creature_mgr.with_creature(guid, |creature| {
+            (
+                creature.map_id,
+                creature.instance_id,
+                creature.phase_mask,
+                creature.position,
+            )
+        })
+    } else {
+        None
+    }
+}
+
 fn get_unit_position(guid: ObjectGuid, world: &World) -> Position {
     if guid.is_player() {
         world
@@ -1857,10 +2057,12 @@ mod tests {
     use crate::dbc::structures::SpellEntry;
     use crate::game::creature::manager::CreatureTemplate;
     use crate::game::creature::Creature;
+    use crate::game::gameobject::{GameObject, GameObjectTemplate};
     use crate::game::player::auras::aura::{Aura, AuraFlags};
     use crate::game::player::auras::effects::AURA_SPELL_MAGNET;
     use crate::game::player::player::Player;
     use crate::game::player::spells::state::TARGET_FLAG_DEST_LOCATION;
+    use crate::game::spell::manager::SpellTargetEntry;
     use crate::World;
     use oxcore_shared::database::Databases;
     use sqlx::mysql::MySqlPoolOptions;
@@ -1996,6 +2198,18 @@ mod tests {
         aoe_enemy_spell(id)
     }
 
+    fn script_near_caster_spell(id: u32) -> SpellEntry {
+        let mut spell = aoe_enemy_spell(id);
+        spell.effect_implicit_target_a[0] = 38; // TARGET_UNIT_SCRIPT_NEAR_CASTER
+        spell
+    }
+
+    fn gameobject_script_near_caster_spell(id: u32) -> SpellEntry {
+        let mut spell = script_near_caster_spell(id);
+        spell.effect_implicit_target_a[0] = 40; // TARGET_GAMEOBJECT_SCRIPT_NEAR_CASTER
+        spell
+    }
+
     fn add_test_player(world: &World, guid: ObjectGuid, map_id: u32, instance_id: u32) {
         let player = Player::new(
             guid,
@@ -2096,6 +2310,101 @@ mod tests {
             !resolved2.effect_targets[0].contains(&near_dest),
             "origin-centered AoE should not hit the distant creature"
         );
+    }
+
+    #[tokio::test]
+    async fn script_near_caster_uses_nearest_match_or_valid_explicit_target() {
+        let world = test_world();
+        let spell_id = 50001;
+        world
+            .managers
+            .spell_mgr
+            .add_spell(script_near_caster_spell(spell_id));
+        world.managers.spell_mgr.set_spell_script_targets_for_test(
+            spell_id,
+            vec![SpellTargetEntry {
+                type_: 1, // SPELL_TARGET_TYPE_CREATURE
+                target_id: 9000,
+                can_focus: false,
+                inverse_effect_mask: 0,
+            }],
+        );
+
+        let caster = ObjectGuid::new_player(1);
+        let nearest = ObjectGuid::new_creature(9000, 1);
+        let explicit = ObjectGuid::new_creature(9000, 2);
+        add_test_player(&world, caster, 0, 0);
+        add_test_creature(&world, nearest, pos(2.0, 0.0));
+        add_test_creature(&world, explicit, pos(8.0, 0.0));
+
+        let resolved =
+            resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
+        assert_eq!(resolved.effect_targets[0], vec![nearest]);
+
+        let resolved = resolve_spell_targets(
+            spell_id,
+            &SpellCastTargets {
+                unit_target_guid: Some(explicit),
+                ..Default::default()
+            },
+            caster,
+            &world,
+        );
+        assert_eq!(resolved.effect_targets[0], vec![explicit]);
+    }
+
+    #[tokio::test]
+    async fn gameobject_script_near_caster_selects_matching_gameobject() {
+        let world = test_world();
+        let spell_id = 50002;
+        let entry = 8000;
+        world
+            .managers
+            .spell_mgr
+            .add_spell(gameobject_script_near_caster_spell(spell_id));
+        world.managers.spell_mgr.set_spell_script_targets_for_test(
+            spell_id,
+            vec![SpellTargetEntry {
+                type_: 0, // SPELL_TARGET_TYPE_GAMEOBJECT
+                target_id: entry,
+                can_focus: false,
+                inverse_effect_mask: 0,
+            }],
+        );
+
+        let caster = ObjectGuid::new_player(1);
+        let gameobject_guid = ObjectGuid::new_gameobject(entry, 1);
+        add_test_player(&world, caster, 0, 0);
+        let template = GameObjectTemplate {
+            entry,
+            go_type: 0,
+            display_id: 0,
+            name: "Script target".to_string(),
+            icon_name: String::new(),
+            cast_bar_caption: String::new(),
+            faction: 0,
+            flags: 0,
+            size: 1.0,
+            data: [0; 24],
+        };
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(GameObject::new(
+                gameobject_guid,
+                entry,
+                1,
+                pos(3.0, 0.0),
+                0,
+                &template,
+                [0.0; 4],
+                0,
+                0,
+            ));
+
+        let resolved =
+            resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
+        assert_eq!(resolved.effect_targets[0], vec![gameobject_guid]);
     }
 
     #[tokio::test]
