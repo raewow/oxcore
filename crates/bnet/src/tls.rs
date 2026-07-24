@@ -21,10 +21,37 @@ pub fn build_acceptor(cert_file: &Path, key_file: &Path) -> Result<TlsAcceptor> 
     let certs = load_certs(cert_file)?;
     let key = load_key(key_file)?;
 
-    let config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .context("certificate and private key do not match")?;
+    // Force TLS 1.2. The modern BGS client (like real Battle.net) expects TLS 1.2 on this channel;
+    // if the server negotiates TLS 1.3 the client completes the handshake and then silently drops
+    // the connection without sending a single BGS frame. HermesProxy pins Tls12 for the same reason.
+    let builder = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS12])
+        .with_no_client_auth();
+
+    // The client's ClientHello sends `status_request` (OCSP). Real Battle.net staples an OCSP
+    // response; staple ours if `ocsp.der` sits next to the cert, in case the client requires it.
+    let ocsp = cert_file
+        .parent()
+        .map(|dir| dir.join("ocsp.der"))
+        .filter(|p| p.exists())
+        .map(std::fs::read)
+        .transpose()
+        .context("failed to read OCSP staple")?;
+
+    let mut config = match ocsp {
+        Some(ocsp) => {
+            tracing::info!("stapling OCSP response ({} bytes)", ocsp.len());
+            builder.with_single_cert_with_ocsp(certs, key, ocsp)
+        }
+        None => builder.with_single_cert(certs, key),
+    }
+    .context("certificate and private key do not match")?;
+
+    // The client offers the `session_ticket` extension; schannel-based clients (like WoW) expect
+    // the server to issue TLS 1.2 session tickets, which rustls omits by default. Enable them.
+    if let Ok(ticketer) = rustls::crypto::ring::Ticketer::new() {
+        config.ticketer = ticketer;
+        tracing::info!("TLS 1.2 session tickets enabled");
+    }
 
     Ok(TlsAcceptor::from(Arc::new(config)))
 }

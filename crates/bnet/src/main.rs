@@ -102,10 +102,7 @@ fn run_gen_certs(args: Vec<String>) -> Result<()> {
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--out" | "-o" => {
-                out_dir = PathBuf::from(
-                    it.next()
-                        .context("--out requires a directory argument")?,
-                );
+                out_dir = PathBuf::from(it.next().context("--out requires a directory argument")?);
             }
             "--host" | "-h" => {
                 hosts.push(it.next().context("--host requires a hostname argument")?);

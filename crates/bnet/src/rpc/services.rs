@@ -230,7 +230,10 @@ impl Services {
         let program = request.program.as_deref().unwrap_or_default();
         if program != "WoW" {
             warn!(%program, "rejecting logon for unexpected program");
-            return Ok(Outcome::send(vec![reply(&frame.header, ERROR_BAD_PROGRAM)?]));
+            return Ok(Outcome::send(vec![reply(
+                &frame.header,
+                ERROR_BAD_PROGRAM,
+            )?]));
         }
         debug!(
             platform = request.platform.as_deref().unwrap_or_default(),
@@ -251,7 +254,10 @@ impl Services {
 
         // Callback first (mirrors CypherCore, which sends the request inside the handler body and
         // the OK response only after the handler returns).
-        Ok(Outcome::send(vec![callback, reply(&frame.header, ERROR_OK)?]))
+        Ok(Outcome::send(vec![
+            callback,
+            reply(&frame.header, ERROR_OK)?,
+        ]))
     }
 
     /// AuthenticationService.VerifyWebCredentials — the client presents the login ticket it earned
@@ -320,7 +326,10 @@ impl Services {
             name: account.username,
         });
 
-        Ok(Outcome::send(vec![callback, reply(&frame.header, ERROR_OK)?]))
+        Ok(Outcome::send(vec![
+            callback,
+            reply(&frame.header, ERROR_OK)?,
+        ]))
     }
 
     async fn dispatch_game_utilities(&mut self, method_id: u32, frame: &Frame) -> Result<Outcome> {
@@ -468,7 +477,10 @@ impl Services {
     /// `Command_RealmJoinRequest_v1` — mint the world session key (`client_secret ++ server_secret`),
     /// persist it for the world server to validate, and return the world address plus the server
     /// half of the key (`Param_JoinSecret`).
-    async fn cmd_realm_join(&mut self, realm_address: Option<u64>) -> Result<(u32, Vec<Attribute>)> {
+    async fn cmd_realm_join(
+        &mut self,
+        realm_address: Option<u64>,
+    ) -> Result<(u32, Vec<Attribute>)> {
         let Some(realm_address) = realm_address else {
             return Ok((ERROR_UTIL_SERVER_UNKNOWN_REALM, Vec::new()));
         };
@@ -505,8 +517,8 @@ impl Services {
                 }
             };
         let (platform, arch, ty) = self.build_variant;
-        let join_ticket = realmlist::build_join_ticket(&account.name, platform, arch, ty)
-            .unwrap_or_default();
+        let join_ticket =
+            realmlist::build_join_ticket(&account.name, platform, arch, ty).unwrap_or_default();
 
         debug!(realm = %realm.name, account = %account.name, "realm join granted");
         Ok((
@@ -720,7 +732,12 @@ mod tests {
     async fn request_disconnect_asks_to_close() {
         let mut svc = services();
         let out = svc
-            .dispatch(&frame(CONNECTION_SERVICE, METHOD_REQUEST_DISCONNECT, 1, vec![]))
+            .dispatch(&frame(
+                CONNECTION_SERVICE,
+                METHOD_REQUEST_DISCONNECT,
+                1,
+                vec![],
+            ))
             .await
             .unwrap();
         assert!(out.disconnect);
@@ -729,7 +746,10 @@ mod tests {
     #[tokio::test]
     async fn unknown_service_replies_with_invalid_service() {
         let mut svc = services();
-        let out = svc.dispatch(&frame(0xDEAD_BEEF, 1, 1, vec![])).await.unwrap();
+        let out = svc
+            .dispatch(&frame(0xDEAD_BEEF, 1, 1, vec![]))
+            .await
+            .unwrap();
         let (resp, _) = framing::decode(&out.frames[0]).unwrap().unwrap();
         assert_eq!(resp.header.status, Some(ERROR_RPC_INVALID_SERVICE));
     }
@@ -755,7 +775,10 @@ mod tests {
         let (callback, _) = framing::decode(&out.frames[0]).unwrap().unwrap();
         assert_eq!(callback.header.service_id, Some(0));
         assert_eq!(callback.header.service_hash, Some(CHALLENGE_LISTENER));
-        assert_eq!(callback.header.method_id, Some(METHOD_ON_EXTERNAL_CHALLENGE));
+        assert_eq!(
+            callback.header.method_id,
+            Some(METHOD_ON_EXTERNAL_CHALLENGE)
+        );
         let ext = ChallengeExternalRequest::decode(callback.payload.as_slice()).unwrap();
         assert_eq!(ext.payload_type.as_deref(), Some("web_auth_url"));
         assert_eq!(
@@ -791,7 +814,9 @@ mod tests {
     async fn server_request_uses_incrementing_tokens_and_service_id_zero() {
         let mut svc = services();
         let a = svc.server_request(CHALLENGE_LISTENER, 3, b"x").unwrap();
-        let b = svc.server_request(AUTHENTICATION_LISTENER, 5, b"y").unwrap();
+        let b = svc
+            .server_request(AUTHENTICATION_LISTENER, 5, b"y")
+            .unwrap();
         let (fa, _) = framing::decode(&a).unwrap().unwrap();
         let (fb, _) = framing::decode(&b).unwrap().unwrap();
         assert_eq!(fa.header.service_id, Some(0));

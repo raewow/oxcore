@@ -58,6 +58,13 @@ where
             debug!("client closed the connection");
             return Ok(());
         }
+        // Temporary live-client diagnostic: log the first bytes of every read so we can see the
+        // exact BGS frame the client sends, even if our framing fails to decode it.
+        debug!(
+            n,
+            rx = %hex::encode(&chunk[..n.min(64)]),
+            "bgs rx"
+        );
         buf.extend_from_slice(&chunk[..n]);
     }
 }

@@ -33,12 +33,10 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use anyhow::{Context, Result};
-use rcgen::{
-    BasicConstraints, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose, SanType,
-};
+use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose, SanType};
 use rsa::pkcs1::EncodeRsaPrivateKey;
-use rsa::signature::{SignatureEncoding, Signer};
 use rsa::sha2::Sha256;
+use rsa::signature::{SignatureEncoding, Signer};
 use rsa::RsaPrivateKey;
 use serde::Serialize;
 use sha2::Digest;
@@ -166,8 +164,8 @@ pub fn modulus_bytes(key: &RsaPrivateKey) -> Vec<u8> {
 pub fn generate(leaf_dns_names: &[String], created: i64) -> Result<Artifacts> {
     // --- TLS CA (self-signed root) ---
     let ca_key = KeyPair::generate().context("failed to generate CA key")?;
-    let mut ca_params = CertificateParams::new(Vec::<String>::new())
-        .context("failed to build CA params")?;
+    let mut ca_params =
+        CertificateParams::new(Vec::<String>::new()).context("failed to build CA params")?;
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     ca_params
         .distinguished_name
@@ -195,7 +193,9 @@ pub fn generate(leaf_dns_names: &[String], created: i64) -> Result<Artifacts> {
         .subject_alt_names
         .push(SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)));
     if let Some(first) = leaf_dns_names.first() {
-        leaf_params.distinguished_name.push(DnType::CommonName, first);
+        leaf_params
+            .distinguished_name
+            .push(DnType::CommonName, first);
     }
     let leaf_cert = leaf_params
         .signed_by(&leaf_key, &ca_cert, &ca_key)
@@ -268,12 +268,19 @@ mod tests {
     fn spki_hash_is_64_uppercase_hex_chars() {
         let hash = spki_sha256_hex(b"a-sample-subject-public-key-info");
         assert_eq!(hash.len(), 64);
-        assert!(hash.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_lowercase()));
+        assert!(hash
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_lowercase()));
     }
 
     #[test]
     fn bundle_json_has_the_verified_schema() {
-        let json = build_bundle_json("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n", "DEADBEEF", 42).unwrap();
+        let json = build_bundle_json(
+            "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n",
+            "DEADBEEF",
+            42,
+        )
+        .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
 
         assert_eq!(value["Created"], 42);
@@ -324,7 +331,13 @@ mod tests {
 
         assert!(artifacts.ca_pem.contains("BEGIN CERTIFICATE"));
         // The chain is leaf then CA (two certs).
-        assert_eq!(artifacts.leaf_chain_pem.matches("BEGIN CERTIFICATE").count(), 2);
+        assert_eq!(
+            artifacts
+                .leaf_chain_pem
+                .matches("BEGIN CERTIFICATE")
+                .count(),
+            2
+        );
         assert!(artifacts.leaf_key_pem.contains("PRIVATE KEY"));
         assert!(artifacts.signing_key_pem.contains("RSA PRIVATE KEY"));
 

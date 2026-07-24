@@ -31,19 +31,30 @@ pub fn run(out_dir: &Path, hostnames: &[String]) -> Result<()> {
     let created = chrono::Utc::now().timestamp();
     let artifacts = crate::certs::generate(hostnames, created)?;
 
-    // The modern world server's signing key (separate from the bundle key) and the matching
-    // little-endian modulus the client is patched with.
-    let world = crate::certs::generate_world_signing_key()?;
-
-    write(out_dir, "bnet.cert.pem", artifacts.leaf_chain_pem.as_bytes())?;
+    // ONE RSA key signs the bundle AND (later) the modern world messages. The 1.14.x client
+    // verifies the cert bundle against the ConnectTo-modulus location (per wow-patcher's RSA
+    // patch), so both `signature_modulus.bin` and `connect_to_modulus.bin` carry this same
+    // bundle-signing modulus, and `world.signing.key.pem` is this same key.
+    write(
+        out_dir,
+        "bnet.cert.pem",
+        artifacts.leaf_chain_pem.as_bytes(),
+    )?;
     write(out_dir, "bnet.key.pem", artifacts.leaf_key_pem.as_bytes())?;
     write(out_dir, "ca.pem", artifacts.ca_pem.as_bytes())?;
     write(out_dir, "signature_modulus.bin", &artifacts.modulus_le)?;
     write(out_dir, "cert_bundle.bin", &artifacts.signed_bundle)?;
-    write(out_dir, "connect_to_modulus.bin", &world.modulus_le)?;
-    write(out_dir, "world.signing.key.pem", world.signing_key_pem.as_bytes())?;
+    write(out_dir, "connect_to_modulus.bin", &artifacts.modulus_le)?;
+    write(
+        out_dir,
+        "world.signing.key.pem",
+        artifacts.signing_key_pem.as_bytes(),
+    )?;
 
-    eprintln!("generated certificate and patch artifacts in {}", out_dir.display());
+    eprintln!(
+        "generated certificate and patch artifacts in {}",
+        out_dir.display()
+    );
     eprintln!("  bnet server: point cert_file/key_file at bnet.cert.pem / bnet.key.pem");
     eprintln!("  world server: point its modern signing key at world.signing.key.pem");
     eprintln!(

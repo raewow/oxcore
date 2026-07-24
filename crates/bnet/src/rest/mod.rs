@@ -63,7 +63,10 @@ pub fn router(state: Arc<RestState>) -> Router {
         .route("/bnetserver/login/", get(get_login_form).post(post_login))
         .route("/bnetserver/login/srp/", post(post_login_srp))
         .route("/bnetserver/gameAccounts/", get(get_game_accounts))
-        .route("/bnetserver/refreshLoginTicket/", post(refresh_login_ticket))
+        .route(
+            "/bnetserver/refreshLoginTicket/",
+            post(refresh_login_ticket),
+        )
         .with_state(state)
 }
 
@@ -172,8 +175,11 @@ async fn post_login(
         Ok(Some(creds)) => creds.id,
         _ => {
             warn!(account = %account_name, "account vanished between challenge and login");
-            return Json(types::LoginResult::rejected("SERVER_ERROR", "Internal error"))
-                .into_response();
+            return Json(types::LoginResult::rejected(
+                "SERVER_ERROR",
+                "Internal error",
+            ))
+            .into_response();
         }
     };
 
@@ -186,8 +192,11 @@ async fn post_login(
         .await
     {
         warn!("failed to store login ticket: {e}");
-        return Json(types::LoginResult::rejected("SERVER_ERROR", "Internal error"))
-            .into_response();
+        return Json(types::LoginResult::rejected(
+            "SERVER_ERROR",
+            "Internal error",
+        ))
+        .into_response();
     }
 
     debug!(account = %account_name, "login succeeded, ticket issued");

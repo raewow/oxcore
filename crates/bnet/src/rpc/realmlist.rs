@@ -92,7 +92,9 @@ pub fn compress_json(prefixed: &str) -> Result<Vec<u8>> {
     encoder
         .write_all(&data)
         .context("zlib write for realm-list payload")?;
-    let compressed = encoder.finish().context("zlib finish for realm-list payload")?;
+    let compressed = encoder
+        .finish()
+        .context("zlib finish for realm-list payload")?;
 
     let mut out = Vec::with_capacity(4 + compressed.len());
     out.extend_from_slice(&uncompressed_len.to_le_bytes());
@@ -242,7 +244,11 @@ mod tests {
         let mut decoder = ZlibDecoder::new(&blob[4..]);
         let mut out = Vec::new();
         decoder.read_to_end(&mut out).unwrap();
-        assert_eq!(out.len(), declared, "declared length includes the trailing NUL");
+        assert_eq!(
+            out.len(),
+            declared,
+            "declared length includes the trailing NUL"
+        );
         assert_eq!(out.last(), Some(&0u8), "payload ends with a NUL");
         String::from_utf8(out[..out.len() - 1].to_vec()).unwrap()
     }
@@ -274,7 +280,8 @@ mod tests {
         let text = decompress(&blob);
         assert!(text.starts_with("JSONRealmListUpdates:"));
 
-        let value: serde_json::Value = serde_json::from_str(&text["JSONRealmListUpdates:".len()..]).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&text["JSONRealmListUpdates:".len()..]).unwrap();
         let update = &value["updates"][0];
         assert_eq!(update["deleting"], json!(false));
         assert_eq!(update["update"]["name"], json!("Oxcore"));
@@ -301,7 +308,10 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(&text["JSONRealmListServerIPAddresses:".len()..]).unwrap();
         assert_eq!(value["families"][0]["family"], json!(1));
-        assert_eq!(value["families"][0]["addresses"][0]["ip"], json!("192.0.2.10"));
+        assert_eq!(
+            value["families"][0]["addresses"][0]["ip"],
+            json!("192.0.2.10")
+        );
         assert_eq!(value["families"][0]["addresses"][0]["port"], json!(8085));
     }
 

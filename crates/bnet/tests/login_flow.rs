@@ -80,8 +80,12 @@ async fn full_rest_srp_login() {
     let app = router(Arc::new(RestState::new(test_config(), db.clone())));
 
     // Step 1: challenge.
-    let (status, challenge_json) =
-        post(&app, "/bnetserver/login/srp/", login_form(&[("account_name", USER)])).await;
+    let (status, challenge_json) = post(
+        &app,
+        "/bnetserver/login/srp/",
+        login_form(&[("account_name", USER)]),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(challenge_json["version"], 2);
     let challenge = challenge_from_json(&challenge_json);
@@ -101,8 +105,14 @@ async fn full_rest_srp_login() {
     assert_eq!(status, StatusCode::OK);
 
     let ticket = result["login_ticket"].as_str().expect("a login ticket");
-    assert_eq!(result["server_evidence_M2"].as_str().unwrap(), proof.expected_m2);
-    assert!(ticket.starts_with("OX-") && ticket.len() == 43, "ticket shape: {ticket}");
+    assert_eq!(
+        result["server_evidence_M2"].as_str().unwrap(),
+        proof.expected_m2
+    );
+    assert!(
+        ticket.starts_with("OX-") && ticket.len() == 43,
+        "ticket shape: {ticket}"
+    );
 
     // Ticket persisted.
     let stored: (Option<String>, i64) = sqlx::query_as(
@@ -116,8 +126,12 @@ async fn full_rest_srp_login() {
     assert!(stored.1 > chrono::Utc::now().timestamp());
 
     // Wrong password is rejected, and no new ticket is issued.
-    let (_, challenge2) =
-        post(&app, "/bnetserver/login/srp/", login_form(&[("account_name", USER)])).await;
+    let (_, challenge2) = post(
+        &app,
+        "/bnetserver/login/srp/",
+        login_form(&[("account_name", USER)]),
+    )
+    .await;
     let bad = SrpClient::new().prove("wrong", &challenge_from_json(&challenge2));
     let (_, rejected) = post(
         &app,

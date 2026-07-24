@@ -105,6 +105,12 @@ pub async fn serve_bnet(
         let acceptor = acceptor.clone();
         let services = Services::new(db.clone(), web_auth_url.clone());
         tokio::spawn(async move {
+            // Temporary diagnostic: peek the raw ClientHello (without consuming it) so we can see
+            // the TLS extensions the client offers — ALPN in particular.
+            let mut hello = [0u8; 512];
+            if let Ok(n) = stream.peek(&mut hello).await {
+                debug!(%peer, n, hello = %hex::encode(&hello[..n.min(400)]), "raw client hello");
+            }
             match acceptor.accept(stream).await {
                 Ok(session) => {
                     debug!(%peer, "BGS RPC session established");
