@@ -2238,6 +2238,15 @@ impl AuraSystem {
                 self.set_player_bytes2_flag(target_guid, 0x04, true, world);
             }
 
+            effects::AURA_UNTRACKABLE => {
+                self.set_visibility_flag(
+                    target_guid,
+                    effects::UNIT_VIS_FLAGS_UNTRACKABLE,
+                    true,
+                    world,
+                );
+            }
+
             // --- Aura::HandleDetectAmore ---
             effects::AURA_DETECT_AMORE => {
                 self.set_player_bytes2_flag(
@@ -2417,6 +2426,17 @@ impl AuraSystem {
 
             effects::AURA_TRACK_STEALTHED => {
                 self.set_player_bytes2_flag(target_guid, 0x04, false, world);
+            }
+
+            effects::AURA_UNTRACKABLE => {
+                if !self.player_has_aura_type(target_guid, effects::AURA_UNTRACKABLE, world) {
+                    self.set_visibility_flag(
+                        target_guid,
+                        effects::UNIT_VIS_FLAGS_UNTRACKABLE,
+                        false,
+                        world,
+                    );
+                }
             }
 
             effects::AURA_DETECT_AMORE => {
@@ -2795,6 +2815,21 @@ impl AuraSystem {
             true,
             world,
         );
+        self.send_vis_flag_update(target_guid, world);
+    }
+
+    fn set_visibility_flag(&self, target_guid: ObjectGuid, flag: u8, apply: bool, world: &World) {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| {
+                if apply {
+                    player.vis_flags_byte |= flag;
+                } else {
+                    player.vis_flags_byte &= !flag;
+                }
+            });
         self.send_vis_flag_update(target_guid, world);
     }
 

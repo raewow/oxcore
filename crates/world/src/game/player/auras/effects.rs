@@ -333,6 +333,7 @@ pub struct StatModifier {
 /// UNIT_FIELD_BYTES_1 byte offset 3 (vis flag byte). Set while stealthed
 /// (`Aura::HandleModStealth`, `UNIT_BYTES_1_OFFSET_VIS_FLAG`).
 pub const UNIT_VIS_FLAGS_CREEP: u8 = 0x02;
+pub const UNIT_VIS_FLAGS_UNTRACKABLE: u8 = 0x04;
 
 /// PLAYER_FIELD_BYTES2 byte offset 1 (extra flags byte) bits.
 pub const PLAYER_FIELD_BYTE2_DETECT_AMORE: u8 = 0x01; // SPELL_AURA_DETECT_AMORE
