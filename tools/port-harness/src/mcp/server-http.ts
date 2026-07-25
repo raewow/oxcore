@@ -197,12 +197,26 @@ function buildServer() {
 
   server.registerTool("set_task_status", {
     title: "Set task status",
-    description: "Advance a symbol along the porting ladder.",
-    inputSchema: { symbol: z.string(), status: TaskStatus.describe("New status"), notes: z.string().optional() },
-  }, async ({ symbol, status, notes }) => {
-    log(`set_task_status symbol="${symbol}" status="${status}"`);
-    const sym = symbolRepo.listAllSymbols(db).find((s) => s.name === symbol);
-    if (!sym) return err(`No exact symbol "${symbol}". Use find_symbol to get the precise name.`);
+    description: "Advance a symbol along the porting ladder. Supply source_file when a symbol name exists in multiple C++ files.",
+    inputSchema: {
+      symbol: z.string(),
+      source_file: z.string().optional(),
+      status: TaskStatus.describe("New status"),
+      notes: z.string().optional(),
+    },
+  }, async ({ symbol, source_file, status, notes }) => {
+    log(`set_task_status symbol="${symbol}" source_file=${source_file ?? "<none>"} status="${status}"`);
+    const matches = symbolRepo.listAllSymbols(db).filter((s) => s.name === symbol);
+    const symbols = source_file ? matches.filter((s) => s.file === source_file) : matches;
+    if (symbols.length === 0) {
+      return err(source_file
+        ? `No exact symbol "${symbol}" in source file "${source_file}".`
+        : `No exact symbol "${symbol}". Use find_symbol to get the precise name.`);
+    }
+    if (symbols.length > 1) {
+      return err(`Symbol "${symbol}" is ambiguous. Supply source_file; matches: ${symbols.map((s) => s.file).join(", ")}`);
+    }
+    const sym = symbols[0]!;
     const taskId = taskRepo.upsertTask(db, sym.id, notes !== undefined ? { status, notes } : { status });
     return json({ ok: true, symbol: sym.name, task_id: taskId, status });
   });

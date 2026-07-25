@@ -332,16 +332,26 @@ server.registerTool(
   {
     title: "Set task status",
     description:
-      "Advance a symbol along the porting ladder (discovered → documented → fixture_defined → rust_planned → rust_ported → rust_compiled → verified → reviewed → done; or 'blocked'). This is the tracking write — call it as you finish each stage.",
+      "Advance a symbol along the porting ladder (discovered → documented → fixture_defined → rust_planned → rust_ported → rust_compiled → verified → reviewed → done; or 'blocked'). Supply source_file when a symbol name exists in multiple C++ files. This is the tracking write — call it as you finish each stage.",
     inputSchema: {
       symbol: z.string().describe("Qualified symbol name, e.g. 'Spell::cast'"),
+      source_file: z.string().optional().describe("Exact indexed C++ source file, required when the symbol name is ambiguous"),
       status: TaskStatus.describe("New status"),
       notes: z.string().optional().describe("Optional note stored on the task"),
     },
   },
-  async ({ symbol, status, notes }) => {
-    const sym = symbolRepo.listAllSymbols(db).find((s) => s.name === symbol);
-    if (!sym) return err(`No exact symbol "${symbol}". Use find_symbol to get the precise name.`);
+  async ({ symbol, source_file, status, notes }) => {
+    const matches = symbolRepo.listAllSymbols(db).filter((s) => s.name === symbol);
+    const symbols = source_file ? matches.filter((s) => s.file === source_file) : matches;
+    if (symbols.length === 0) {
+      return err(source_file
+        ? `No exact symbol "${symbol}" in source file "${source_file}".`
+        : `No exact symbol "${symbol}". Use find_symbol to get the precise name.`);
+    }
+    if (symbols.length > 1) {
+      return err(`Symbol "${symbol}" is ambiguous. Supply source_file; matches: ${symbols.map((s) => s.file).join(", ")}`);
+    }
+    const sym = symbols[0]!;
     const task = taskRepo.getTaskBySymbolId(db, sym.id);
     if (!task) return err(`No task found for symbol "${symbol}"`);
     if (!taskRepo.canManuallyTransitionStatus(task.status, status)) {
