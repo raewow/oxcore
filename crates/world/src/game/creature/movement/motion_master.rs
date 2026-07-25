@@ -1665,6 +1665,45 @@ mod tests {
     }
 
     #[test]
+    fn move_charge_ignores_an_empty_target_and_installs_charge_for_a_unit() {
+        let mut motion_master = MotionMaster::new();
+        let guid = creature();
+
+        motion_master.move_charge(
+            ObjectGuid::default(),
+            0,
+            false,
+            true,
+            guid,
+            Position::default(),
+            7.0,
+        );
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle]
+        );
+
+        motion_master.move_charge(
+            ObjectGuid::from_raw(2),
+            0,
+            true,
+            true,
+            guid,
+            Position::default(),
+            7.0,
+        );
+
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Charge
+        );
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![MovementGeneratorType::Idle, MovementGeneratorType::Charge]
+        );
+    }
+
+    #[test]
     fn move_follow_clears_the_stack_even_when_the_target_is_missing() {
         let mut motion_master = stacked_motion_master();
 
