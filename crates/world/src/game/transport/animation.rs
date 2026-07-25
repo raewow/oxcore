@@ -97,6 +97,20 @@ impl TransportAnimationManager {
             .add_frame(node);
     }
 
+    /// Load all animation rows from the transport-animation store
+    /// (`TransportMgr::LoadTransportAnimationAndRotation`).
+    ///
+    /// Database/DBC decoding remains outside this state-only manager; callers supply the
+    /// validated `(transport entry, animation row)` pairs from their chosen data source.
+    pub fn load_path_nodes(
+        &mut self,
+        nodes: impl IntoIterator<Item = (u32, TransportAnimationEntry)>,
+    ) {
+        for (transport_entry, node) in nodes {
+            self.add_path_node(transport_entry, node);
+        }
+    }
+
     /// The animation path loaded for `transport_entry`, if any (`GetTransportAnimInfo`).
     pub fn animation(&self, transport_entry: u32) -> Option<&TransportAnimation> {
         self.animations.get(&transport_entry)
@@ -140,9 +154,11 @@ mod tests {
     #[test]
     fn manager_keys_animations_by_transport_entry() {
         let mut mgr = TransportAnimationManager::new();
-        mgr.add_path_node(176231, frame(0, 0.0));
-        mgr.add_path_node(176231, frame(1000, 10.0));
-        mgr.add_path_node(164871, frame(0, 5.0));
+        mgr.load_path_nodes([
+            (176231, frame(0, 0.0)),
+            (176231, frame(1000, 10.0)),
+            (164871, frame(0, 5.0)),
+        ]);
 
         // Each transport keeps its own path and total_time.
         let boat = mgr.animation(176231).unwrap();
