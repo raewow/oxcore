@@ -30,6 +30,9 @@ pub struct Aura {
     /// Slots 0-31: positive, 32-47: negative, 48-63: passive
     pub slot: Option<u8>,
 
+    /// Whether this aura is subject to the visible buff/debuff slot limit.
+    pub affected_by_visible_slot_limit: bool,
+
     // === Timing ===
     /// Remaining duration in milliseconds. None = permanent (passive/talent).
     pub duration_ms: Option<u32>,
@@ -167,6 +170,7 @@ impl Aura {
             weapon_buff_slot: None,
             effect_index,
             slot: None,
+            affected_by_visible_slot_limit: false,
             duration_ms,
             max_duration_ms: duration_ms,
             duration_index: 0,
@@ -214,6 +218,11 @@ impl Aura {
     /// Check if this aura is passive (talent/racial)
     pub fn is_passive(&self) -> bool {
         self.flags.is_passive
+    }
+
+    /// Mark this aura as subject to the visible buff/debuff slot limit.
+    pub fn set_affected_by_visible_slot_limit(&mut self) {
+        self.affected_by_visible_slot_limit = true;
     }
 
     /// Get the current effect value for this aura's effect index
@@ -435,6 +444,16 @@ mod tests {
         aura.max_charges = 3;
         aura.charges = 3;
         assert!(!aura.can_be_refreshed_by(guid(1)));
+    }
+
+    #[test]
+    fn set_affected_by_visible_slot_limit_marks_aura() {
+        let mut aura = make_aura(guid(1), 10, Some(5_000));
+        assert!(!aura.affected_by_visible_slot_limit);
+
+        aura.set_affected_by_visible_slot_limit();
+
+        assert!(aura.affected_by_visible_slot_limit);
     }
 
     // --- refresh_duration (existing helper, same-caster non-stacked refresh path) ---
