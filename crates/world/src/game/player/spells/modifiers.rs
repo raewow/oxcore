@@ -285,8 +285,8 @@ fn does_modifier_apply(
     spell_family_name: u32,
     spell_family_flags: u64,
 ) -> bool {
-    // Must match spell family name
-    if spell_mod.spell_family_name != 0 && spell_mod.spell_family_name != spell_family_name {
+    // A zero family is the generic family, not a wildcard.
+    if spell_mod.spell_family_name != spell_family_name {
         return false;
     }
 
@@ -532,6 +532,26 @@ mod tests {
         let first = cost_mod(SpellModType::Flat, 10, 3);
         let modifier = cost_mod(SpellModType::Pct, 20, 3);
         assert!(has_modifier_applied(&[&first, &modifier], &modifier));
+    }
+
+    #[test]
+    fn spell_modifier_requires_an_exact_family_match() {
+        let modifier = cost_mod(SpellModType::Flat, 10, 0);
+        assert!(!does_modifier_apply(&modifier, 3, 0));
+    }
+
+    #[test]
+    fn spell_modifier_with_zero_mask_affects_its_entire_family() {
+        let modifier = cost_mod(SpellModType::Flat, 10, 3);
+        assert!(does_modifier_apply(&modifier, 3, 0x400));
+    }
+
+    #[test]
+    fn spell_modifier_mask_must_overlap_spell_flags() {
+        let mut modifier = cost_mod(SpellModType::Flat, 10, 3);
+        modifier.spell_family_mask = 0x200;
+        assert!(does_modifier_apply(&modifier, 3, 0x200));
+        assert!(!does_modifier_apply(&modifier, 3, 0x100));
     }
 
     #[test]
