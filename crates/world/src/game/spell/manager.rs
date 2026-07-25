@@ -1475,4 +1475,42 @@ mod tests {
         assert_eq!(mgr.get_required_area_for_spell(23335), 3277);
         assert_eq!(mgr.get_required_area_for_spell(1), 0);
     }
+
+    #[test]
+    fn spell_area_requirement_checks_player_and_location_data() {
+        let area = SpellArea {
+            spell: 1,
+            area_id: 42,
+            quest_start: 100,
+            quest_end: 200,
+            aura_spell: -300,
+            racemask: 0b10,
+            gender: 1,
+            quest_start_can_active: true,
+            autocast: false,
+        };
+        let rewarded = HashSet::new();
+        let has_aura = |spell| spell == 300;
+
+        assert!(!area.is_fit_to_requirements(
+            Some(1),
+            Some(0b10),
+            Some(&[100]),
+            Some(&rewarded),
+            Some(&has_aura),
+            42,
+            0,
+        ));
+
+        let no_aura = |_| false;
+        assert!(area.is_fit_to_requirements(
+            Some(1),
+            Some(0b10),
+            Some(&[100]),
+            Some(&rewarded),
+            Some(&no_aura),
+            0,
+            42,
+        ));
+    }
 }
