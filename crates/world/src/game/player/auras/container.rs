@@ -870,6 +870,39 @@ mod tests {
     }
 
     #[test]
+    fn tick_durations_updates_all_holder_effects_and_preserves_permanent_auras() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        container.add_aura(make_aura(4100, 0, caster, Some(100)));
+        container.add_aura(make_aura(4100, 1, caster, Some(100)));
+        container.add_aura(make_aura(4101, 0, caster, None));
+
+        assert!(container.tick_durations(40).is_empty());
+        assert_eq!(container.get_aura(4100, 0).unwrap().duration_ms, Some(60));
+        assert_eq!(container.get_aura(4100, 1).unwrap().duration_ms, Some(60));
+        assert_eq!(container.get_aura(4101, 0).unwrap().duration_ms, None);
+
+        let mut expired = container.tick_durations(60);
+        expired.sort_unstable();
+        assert_eq!(expired, vec![(4100, 0), (4100, 1)]);
+    }
+
+    #[test]
+    fn tick_periodic_updates_each_active_effect() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut aura = make_aura(4200, 0, caster, Some(5_000));
+        aura.periodic_interval_ms = 500;
+        container.add_aura(aura);
+
+        assert_eq!(
+            container.tick_periodic(1_500),
+            vec![(4200, 0), (4200, 0), (4200, 0)]
+        );
+        assert_eq!(container.get_aura(4200, 0).unwrap().ticks_applied, 3);
+    }
+
+    #[test]
     fn total_modifier_by_misc_mask_sums_overlapping_school_masks() {
         let mut container = AuraContainer::new();
         let caster = test_guid(1);
@@ -895,6 +928,42 @@ mod tests {
             15
         );
         assert_eq!(container.get_total_aura_modifier_by_misc_mask(42, 0), 0);
+    }
+
+    #[test]
+    fn effect_immunity_obeys_effect_kind_and_polarity() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut immunity = make_aura(5000, 0, caster, None);
+        immunity.aura_type = super::super::effects::AURA_EFFECT_IMMUNITY;
+        immunity.misc_value = 2;
+        immunity.flags.is_positive = true;
+        container.add_aura(immunity);
+
+        assert!(container.is_immune_to_spell_effect(2, 0, 0, false));
+        assert!(!container.is_immune_to_spell_effect(3, 0, 0, false));
+        assert!(!container.is_immune_to_spell_effect(2, 0, 0, true));
+    }
+
+    #[test]
+    fn mechanic_and_state_immunity_match_their_respective_values() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut mechanic = make_aura(5001, 0, caster, None);
+        mechanic.aura_type = super::super::effects::AURA_MECHANIC_IMMUNITY;
+        mechanic.misc_value = 1 << (5 - 1);
+        mechanic.flags.is_positive = true;
+        container.add_aura(mechanic);
+        let mut state = make_aura(5002, 0, caster, None);
+        state.aura_type = super::super::effects::AURA_STATE_IMMUNITY;
+        state.misc_value = 17;
+        state.flags.is_positive = true;
+        container.add_aura(state);
+
+        assert!(container.is_immune_to_spell_effect(0, 5, 0, false));
+        assert!(container.is_immune_to_spell_effect(0, 0, 17, false));
+        assert!(!container.is_immune_to_spell_effect(0, 4, 0, false));
+        assert!(!container.is_immune_to_spell_effect(0, 0, 18, false));
     }
 
     #[test]
