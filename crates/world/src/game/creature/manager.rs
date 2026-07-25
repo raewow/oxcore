@@ -640,6 +640,46 @@ impl CreatureManager {
         Some(guid)
     }
 
+    /// Spawn a transient player pet. Pets do not participate in DB spawn or
+    /// respawn tracking; their lifecycle belongs to the pet system.
+    pub fn spawn_pet(
+        &self,
+        entry: u32,
+        owner_guid: ObjectGuid,
+        position: Position,
+        map_id: u32,
+        instance_id: u32,
+        phase_mask: u32,
+        faction: u32,
+    ) -> Option<ObjectGuid> {
+        let template = self.get_template(entry)?;
+        let class_stats = self.get_class_level_stats(template.unit_class, template.min_level);
+        let counter = self.next_guid.fetch_add(1, Ordering::Relaxed);
+        let guid = ObjectGuid::new_pet(entry, counter as u32);
+        let mut pet = Creature::new(
+            guid,
+            entry,
+            0,
+            position,
+            map_id,
+            instance_id,
+            &template,
+            phase_mask,
+            class_stats.as_ref(),
+        );
+        if let Some(model_info) = self.get_model_info(pet.display_id) {
+            pet.bounding_radius = model_info.bounding_radius;
+            pet.combat_reach = model_info.combat_reach;
+            pet.speed_walk = model_info.speed_walk;
+            pet.speed_run = model_info.speed_run;
+        }
+        pet.owner_guid = Some(owner_guid);
+        pet.faction = faction;
+        pet.in_world = true;
+        self.creatures.insert(guid, pet);
+        Some(guid)
+    }
+
     /// Initialize default movement for a spawned creature based on spawn data
     ///
     /// Called after spawn_creature() to set up random/waypoint movement.

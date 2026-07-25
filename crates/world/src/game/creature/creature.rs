@@ -103,6 +103,8 @@ pub struct Creature {
 
     /// Player currently charmed by this creature.
     pub charm_guid: Option<ObjectGuid>,
+    /// Player that owns this creature when it is a runtime pet.
+    pub owner_guid: Option<ObjectGuid>,
 
     /// Attack timer for auto-attack (milliseconds until next attack)
     /// Counts down each update, when reaches 0 → attack ready
@@ -241,6 +243,7 @@ impl Creature {
             combat: CombatState::new(),
             threat_manager: ThreatManager::new(guid),
             charm_guid: None,
+            owner_guid: None,
             attack_timer: 0,
             base_attack_time: template.attack_time,
 

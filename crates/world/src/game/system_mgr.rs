@@ -20,6 +20,7 @@ use crate::game::npc::{
     GossipManager, GossipSystem, QuestManager, QuestSystem, TrainerManager, VendorManager,
     VendorSystem,
 };
+use crate::game::pet::PetSystem;
 use crate::game::player::auras::AuraSystem;
 use crate::game::player::death::DeathSystem;
 use crate::game::player::environment::EnvironmentSystem;
@@ -76,6 +77,8 @@ pub struct SystemManager {
     pub talents: Arc<TalentSystem>,
     pub death: Arc<DeathSystem>,
     pub environment: Arc<EnvironmentSystem>,
+    /// Runtime pet ownership and lifecycle.
+    pub pet: Arc<PetSystem>,
     pub honor: Arc<crate::game::player::honor::HonorSystem>,
     /// AI event queue for creature AI events
     pub ai_event_queue: Arc<AIEventQueue>,
@@ -108,6 +111,7 @@ impl SystemManager {
         addon_mgr: Arc<AddonManager>,
     ) -> Self {
         let player_mgr = player_system.manager();
+        let pet = Arc::new(PetSystem::new(player_mgr.clone(), creature_mgr.clone()));
         let inventory_repo = Arc::new(InventoryRepository::new(character_pool.clone()));
         let social_repo = Arc::new(SocialRepository::new(character_pool.clone()));
         let guild_repo = Arc::new(GuildRepository::new(character_pool.clone()));
@@ -293,6 +297,7 @@ impl SystemManager {
             talents,
             death,
             environment,
+            pet,
             honor,
             ai_event_queue,
             creature_respawn,
@@ -421,6 +426,7 @@ impl SystemManager {
     pub async fn on_player_logout(&self, guid: ObjectGuid, world: &World) -> Result<()> {
         let player_mgr = self.player.manager();
         self.player.on_player_logout(guid, world).await?;
+        self.pet.on_player_logout(guid, world);
         self.trade.on_player_logout(guid)?;
         self.visibility.on_player_logout(guid)?;
         self.combat.on_player_logout(guid, &player_mgr)?;

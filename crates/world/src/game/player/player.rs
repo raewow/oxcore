@@ -56,6 +56,8 @@ pub struct Player {
     pub faction_override: Option<u32>,
     /// Unit currently controlling this player while charmed.
     pub controller_guid: Option<ObjectGuid>,
+    /// Active controlled runtime pet.
+    pub active_pet: Option<ObjectGuid>,
     /// Aura state (buffs/debuffs, slot management)
     pub auras: AuraState,
     /// Death state (death/resurrection state machine)
@@ -218,6 +220,7 @@ impl Player {
             charmer_guid: None,
             faction_override: None,
             controller_guid: None,
+            active_pet: None,
             auras: AuraState::default(),
             death: DeathSystemState::default(),
             spells: SpellsState::default(),
