@@ -1005,7 +1005,7 @@ impl SpellManager {
     /// Port of `SpellMgr::LoadExistingSpellIds` (SpellMgr.cpp:3103).
     /// Populates `existing_spell_ids` with all spell IDs from `spell_template`.
     async fn load_existing_spell_ids(&self, world_db: &MySqlPool) -> Result<()> {
-        let mut ids = HashSet::new();
+        let mut ids = Vec::new();
         if let Ok(rows) =
             sqlx::query("SELECT DISTINCT CAST(`entry` AS UNSIGNED) AS entry FROM `spell_template`")
                 .fetch_all(world_db)
@@ -1014,15 +1014,17 @@ impl SpellManager {
             for row in &rows {
                 use sqlx::Row;
                 let id: u32 = row.try_get::<u64, _>("entry").unwrap_or(0) as u32;
-                if id != 0 {
-                    ids.insert(id);
-                }
+                ids.push(id);
             }
         }
-        *self.existing_spell_ids.write() = ids;
+        self.replace_existing_spell_ids(ids);
         let count = self.existing_spell_ids.read().len();
         info!(">> Loaded {count} existing spell ids");
         Ok(())
+    }
+
+    fn replace_existing_spell_ids(&self, ids: impl IntoIterator<Item = u32>) {
+        *self.existing_spell_ids.write() = ids.into_iter().collect();
     }
 
     /// Port of `SpellMgr::IsSpellValid` (SpellMgr.cpp:2289).
@@ -1443,5 +1445,14 @@ mod tests {
         let result = mgr.load_spell_chains(&lazy_pool(), &dbc).await;
         assert!(result.is_ok());
         assert_eq!(mgr.get_spell_rank(1), 0);
+    }
+
+    #[test]
+    fn existing_spell_ids_are_replaced_and_keep_zero() {
+        let mgr = SpellManager::new();
+        mgr.replace_existing_spell_ids([1, 1, 2]);
+        mgr.replace_existing_spell_ids([0, 3]);
+
+        assert_eq!(*mgr.existing_spell_ids.read(), HashSet::from([0, 3]));
     }
 }
