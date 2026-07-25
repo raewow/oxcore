@@ -142,4 +142,119 @@ impl GameObjectTemplate {
             _ => 0,
         }
     }
+
+    /// Whether this object is explicitly marked as not blocking line of sight.
+    ///
+    /// Set on buttons and goobers that should be shootable/targetable through.
+    /// Ported from the `losOK` fields of `GameObjectInfo`.
+    pub fn is_los_ok(&self) -> bool {
+        match GameObjectType::from(self.go_type) {
+            GameObjectType::Button => self.data[8] != 0,
+            GameObjectType::Goober => self.data[16] != 0,
+            _ => false,
+        }
+    }
+
+    /// Whether this object exists only server-side and is never sent to clients.
+    ///
+    /// Invisible triggers and spell focus markers must not block anything.
+    /// Ported from `GameObjectInfo::IsServerOnly`.
+    pub fn is_server_only(&self) -> bool {
+        match GameObjectType::from(self.go_type) {
+            GameObjectType::Generic => self.data[2] != 0,
+            GameObjectType::Trap => self.data[8] != 0,
+            GameObjectType::SpellFocus => self.data[3] != 0,
+            GameObjectType::AuraGenerator => self.data[6] != 0,
+            _ => false,
+        }
+    }
+
+    /// Whether this object blocks line of sight even as an M2 doodad.
+    ///
+    /// Doors and generic objects are solid regardless of model kind; other M2
+    /// models are skipped by LoS checks that ignore doodads.
+    /// Ported from `GameObjectInfo::CanAlwaysBreakLoS`.
+    pub fn can_always_break_los(&self) -> bool {
+        matches!(
+            GameObjectType::from(self.go_type),
+            GameObjectType::Door | GameObjectType::Generic
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn template(go_type: GameObjectType, data: [i32; 24]) -> GameObjectTemplate {
+        GameObjectTemplate {
+            entry: 1,
+            go_type: go_type as u32,
+            display_id: 1,
+            name: String::new(),
+            icon_name: String::new(),
+            cast_bar_caption: String::new(),
+            faction: 0,
+            flags: 0,
+            size: 1.0,
+            data,
+        }
+    }
+
+    fn with_data(go_type: GameObjectType, index: usize, value: i32) -> GameObjectTemplate {
+        let mut data = [0; 24];
+        data[index] = value;
+        template(go_type, data)
+    }
+
+    #[test]
+    fn button_los_ok_comes_from_data_8() {
+        assert!(with_data(GameObjectType::Button, 8, 1).is_los_ok());
+        assert!(!with_data(GameObjectType::Button, 8, 0).is_los_ok());
+        // Same index means something else on another type.
+        assert!(!with_data(GameObjectType::Chest, 8, 1).is_los_ok());
+    }
+
+    #[test]
+    fn goober_los_ok_comes_from_data_16() {
+        assert!(with_data(GameObjectType::Goober, 16, 1).is_los_ok());
+        assert!(!with_data(GameObjectType::Goober, 16, 0).is_los_ok());
+    }
+
+    #[test]
+    fn server_only_flag_is_read_per_type() {
+        assert!(with_data(GameObjectType::Generic, 2, 1).is_server_only());
+        assert!(with_data(GameObjectType::Trap, 8, 1).is_server_only());
+        assert!(with_data(GameObjectType::SpellFocus, 3, 1).is_server_only());
+        assert!(with_data(GameObjectType::AuraGenerator, 6, 1).is_server_only());
+
+        // Wrong index for the type must not be misread as server-only.
+        assert!(!with_data(GameObjectType::Generic, 8, 1).is_server_only());
+        assert!(!with_data(GameObjectType::Door, 2, 1).is_server_only());
+    }
+
+    #[test]
+    fn doors_and_generics_always_break_los() {
+        assert!(template(GameObjectType::Door, [0; 24]).can_always_break_los());
+        assert!(template(GameObjectType::Generic, [0; 24]).can_always_break_los());
+        assert!(!template(GameObjectType::Chest, [0; 24]).can_always_break_los());
+        assert!(!template(GameObjectType::Button, [0; 24]).can_always_break_los());
+    }
+
+    #[test]
+    fn auto_close_time_only_applies_to_doors_and_buttons() {
+        assert_eq!(
+            with_data(GameObjectType::Door, 1, 5000).auto_close_time(),
+            5000
+        );
+        assert_eq!(
+            with_data(GameObjectType::Button, 1, 5000).auto_close_time(),
+            5000
+        );
+        assert_eq!(
+            with_data(GameObjectType::Chest, 1, 5000).auto_close_time(),
+            0
+        );
+        assert_eq!(with_data(GameObjectType::Door, 1, -1).auto_close_time(), 0);
+    }
 }

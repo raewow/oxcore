@@ -8,7 +8,8 @@ use super::error::{LuaError, LuaResult};
 use super::loader::{default_scripts_path, load_all_scripts, LoadResult};
 use super::scripts::{
     InstanceScriptState, LuaAreaTriggerScript, LuaCreatureAI, LuaEffectDummyScript,
-    LuaGameObjectScript, LuaGossipScript, LuaInstanceAI, LuaProcessEventScript,
+    LuaGameObjectScript, LuaGossipScript, LuaInstanceAI, LuaProcessEventScript, LuaZoneScript,
+    ZoneScriptState,
 };
 use dashmap::DashMap;
 use mlua::Lua;
@@ -31,6 +32,8 @@ pub struct LuaScriptManager {
     initialized: RwLock<bool>,
     /// Per-instance state storage, keyed by (map_id, instance_id).
     instance_states: DashMap<(u32, u32), InstanceScriptState>,
+    /// Per-zone state storage, keyed by zone_id.
+    zone_states: DashMap<u32, ZoneScriptState>,
 }
 
 impl LuaScriptManager {
@@ -46,6 +49,7 @@ impl LuaScriptManager {
             scripts_dir,
             initialized: RwLock::new(false),
             instance_states: DashMap::new(),
+            zone_states: DashMap::new(),
         }
     }
 
@@ -57,6 +61,7 @@ impl LuaScriptManager {
             scripts_dir,
             initialized: RwLock::new(false),
             instance_states: DashMap::new(),
+            zone_states: DashMap::new(),
         }
     }
 
@@ -206,6 +211,77 @@ impl LuaScriptManager {
     /// Check if a zone script exists for the given zone ID.
     pub fn has_zone_script(&self, zone_id: u32) -> bool {
         self.registry.zone.read().contains_key(&zone_id)
+    }
+
+    /// Get a zone script handler.
+    pub fn get_zone_script(&self, zone_id: u32) -> Option<LuaZoneScript> {
+        if self.has_zone_script(zone_id) {
+            Some(LuaZoneScript::new(zone_id))
+        } else {
+            None
+        }
+    }
+
+    /// Get (a copy of) the state for a zone, creating it if absent.
+    pub fn get_zone_state(&self, zone_id: u32) -> ZoneScriptState {
+        self.zone_states
+            .entry(zone_id)
+            .or_insert_with(ZoneScriptState::new)
+            .clone()
+    }
+
+    /// Mutate a zone's state in place.
+    ///
+    /// Preferred over `get_zone_state` + `set_zone_state` because it holds the
+    /// entry lock across the change, so concurrent zone transitions cannot lose
+    /// each other's updates.
+    pub fn with_zone_state_mut<F, R>(&self, zone_id: u32, f: F) -> R
+    where
+        F: FnOnce(&mut ZoneScriptState) -> R,
+    {
+        let mut entry = self
+            .zone_states
+            .entry(zone_id)
+            .or_insert_with(ZoneScriptState::new);
+        f(entry.value_mut())
+    }
+
+    /// Replace a zone's state.
+    pub fn set_zone_state(&self, zone_id: u32, state: ZoneScriptState) {
+        self.zone_states.insert(zone_id, state);
+    }
+
+    /// Set a zone data value.
+    pub fn set_zone_data(&self, zone_id: u32, data_id: u32, value: u32) {
+        self.with_zone_state_mut(zone_id, |state| state.set_data(data_id, value));
+    }
+
+    /// Get a zone data value (0 when unset).
+    pub fn get_zone_data(&self, zone_id: u32, data_id: u32) -> u32 {
+        self.zone_states
+            .get(&zone_id)
+            .map(|s| s.get_data(data_id))
+            .unwrap_or(0)
+    }
+
+    /// Zone ids that currently have tracked state, i.e. the zones worth ticking.
+    pub fn active_zone_states(&self) -> Vec<u32> {
+        self.zone_states.iter().map(|e| *e.key()).collect()
+    }
+
+    /// Register a zone script table directly (used by tests).
+    /// This is the Rust equivalent of calling `RegisterZoneScript(zone_id, script_table)` in Lua.
+    pub fn register_zone_script_table(&self, zone_id: u32, script_table: mlua::Table) {
+        let key = format!("zone_{}", zone_id);
+        let lua = self.lua.read();
+        let _ = lua.set_named_registry_value(&key, script_table);
+        self.registry.zone.write().insert(
+            zone_id,
+            super::api::ScriptEntry {
+                name: key,
+                file_path: String::new(),
+            },
+        );
     }
 
     /// Check if a gossip script exists for the given entry.

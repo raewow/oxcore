@@ -6,6 +6,7 @@
 //! - Environmental damage (drowning, lava, slime, fall damage)
 
 pub mod fall;
+pub mod liquid;
 pub mod mirror_timers;
 pub mod rest;
 pub mod state;
@@ -13,6 +14,8 @@ pub mod system;
 
 // Re-export commonly used types
 pub use fall::{calculate_fall_damage, handle_fall_landing, SAFE_FALL_DISTANCE};
+pub use liquid::{query_liquid_status, update_player_liquid_status};
+// Re-exported so callers can build a LiquidStatus without depending on oxcore-map.
 pub use mirror_timers::{
     get_max_duration, get_water_breathing_interval, on_mirror_timer_expiration_pulse,
     should_activate_breath, should_activate_environmental, should_activate_fatigue,
@@ -20,6 +23,7 @@ pub use mirror_timers::{
     BREATH_MAX_SECONDS, ENVIRONMENTAL_DAMAGE_MAX, ENVIRONMENTAL_DAMAGE_MIN,
     ENVIRONMENTAL_MAX_SECONDS, FATIGUE_MAX_SECONDS,
 };
+pub use oxcore_map::terrain::{LiquidData, LiquidStatusFlags};
 pub use rest::{
     apply_rest_bonus, calculate_offline_rest, on_player_login as on_rest_login, set_rest_type,
     update_rest_bonus, PLAYER_FLAGS_RESTING, REST_RATE_PER_SECOND,
@@ -28,4 +32,6 @@ pub use state::{
     EnvironmentFlags, EnvironmentState, EnvironmentalDamageType, MirrorTimer, MirrorTimerStatus,
     MirrorTimerType, RestType, MIRROR_TIMER_PULSE_INTERVAL, NUM_CLIENT_TIMERS, NUM_TIMERS,
 };
-pub use system::{update_environment_flags_internal, EnvironmentSystem, LiquidStatus, LiquidType};
+pub use system::{
+    update_environment_flags_internal, EnvironmentSystem, LiquidStatus, DEFAULT_COLLISION_HEIGHT,
+};

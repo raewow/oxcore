@@ -49,6 +49,36 @@ pub struct LiquidLevel {
     pub liquid_type: u32,
 }
 
+/// Liquid found inside a WMO volume.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WmoLiquidInfo {
+    /// Z of the liquid surface.
+    pub level: f32,
+    /// Z of the WMO floor beneath the liquid.
+    pub floor: f32,
+    /// Raw WMO liquid type index (not a bitmask).
+    pub liquid_type: u32,
+    /// `MAP_LIQUID_TYPE_*` bitmask derived from `liquid_type`.
+    pub type_flags: u32,
+}
+
+/// Convert a raw WMO liquid type index into a `MAP_LIQUID_TYPE_*` bitmask.
+///
+/// WMO groups store a liquid type *index*, not a flag, so it must be mapped
+/// before it can be tested against a request mask. Ported from
+/// `VMAP::GetLiquidMask`.
+pub fn wmo_liquid_type_mask(liquid_type: u32) -> u32 {
+    use crate::terrain::defines::*;
+
+    match liquid_type {
+        1 | 41 | 61 => MAP_LIQUID_TYPE_WATER,
+        2 => MAP_LIQUID_TYPE_OCEAN,
+        3 => MAP_LIQUID_TYPE_MAGMA,
+        4 | 21 => MAP_LIQUID_TYPE_SLIME,
+        _ => MAP_LIQUID_TYPE_NO_WATER,
+    }
+}
+
 /// Model type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelType {

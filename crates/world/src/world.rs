@@ -23,6 +23,7 @@ use crate::game::SystemManager;
 use crate::map::manager::MapManager;
 use crate::map::pathfinding::vmap::{VMapConfig, VMapManager};
 use crate::map::pathfinding::{MMapManager, PathFinder};
+use crate::map::terrain::TerrainManager;
 use oxcore_shared::console::{CommandRegistry, ConsoleCommand};
 use oxcore_shared::database::characters::repositories::{
     AuctionRepository, AuctionRepositoryTrait, CharacterRepository, ItemRepository,
@@ -60,6 +61,7 @@ pub struct Managers {
     pub addon_mgr: Arc<AddonManager>,
     pub vmap_mgr: Arc<VMapManager>,
     pub mmap_mgr: Arc<MMapManager>,
+    pub terrain_mgr: Arc<TerrainManager>,
     pub pathfinder: Arc<PathFinder>,
     pub waypoint_mgr: Arc<WaypointManager>,
     pub area_trigger_mgr: Arc<AreaTriggerManager>,
@@ -123,6 +125,9 @@ impl World {
             enable_indoor_check: config.vmap_enable_indoor_check,
         };
         let vmap_mgr = Arc::new(VMapManager::new(&data_dir, vmap_config));
+
+        // Terrain (.map) data: area ids, height mesh, and the liquid layer
+        let terrain_mgr = Arc::new(TerrainManager::new(&data_dir));
 
         // Create MMap manager for navigation mesh pathfinding
         let mmap_mgr = Arc::new(MMapManager::new(&data_dir, Arc::clone(&vmap_mgr)));
@@ -195,6 +200,7 @@ impl World {
                 linking_mgr,
                 addon_mgr,
                 vmap_mgr,
+                terrain_mgr,
                 mmap_mgr,
                 pathfinder,
                 waypoint_mgr,
@@ -499,6 +505,11 @@ impl World {
 
         // Update aura durations and periodic effects for all players
         self.systems.auras.update_all_auras(diff, self).await?;
+
+        // Tick Lua zone scripts (world events, outdoor PvP objectives)
+        if let Err(e) = crate::core::lua::update_zone_scripts(diff, self).await {
+            tracing::error!("Zone script update error: {}", e);
+        }
         let systems_ms = phase_systems.elapsed().as_secs_f64() * 1000.0;
 
         // --- Phase: creatures (deaths/respawn/combat/ai/regen) ---
@@ -829,6 +840,7 @@ impl Clone for World {
                 linking_mgr: Arc::clone(&self.managers.linking_mgr),
                 addon_mgr: Arc::clone(&self.managers.addon_mgr),
                 vmap_mgr: Arc::clone(&self.managers.vmap_mgr),
+                terrain_mgr: Arc::clone(&self.managers.terrain_mgr),
                 mmap_mgr: Arc::clone(&self.managers.mmap_mgr),
                 pathfinder: Arc::clone(&self.managers.pathfinder),
                 waypoint_mgr: Arc::clone(&self.managers.waypoint_mgr),

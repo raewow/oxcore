@@ -3,7 +3,7 @@
 //! This module provides hot-reloadable Lua scripting support for:
 //! - Creature AI (boss fights, mob behavior)
 //! - Instance scripts (dungeon/raid logic) [planned]
-//! - Zone scripts (world events) [planned]
+//! - Zone scripts (world events)
 //! - Gossip scripts (NPC dialogue) [planned]
 //!
 //! Scripts are auto-discovered from the `/scripts/` directory and self-register
@@ -30,6 +30,7 @@ pub mod loader;
 pub mod manager;
 pub mod scripts;
 pub mod snapshot;
+pub mod zone_executor;
 
 pub use actions::{LuaAction, ReactState, SpellTarget, SummonType};
 pub use error::{LuaError, LuaResult};
@@ -38,8 +39,11 @@ pub use loader::LoadResult;
 pub use manager::LuaScriptManager;
 pub use scripts::{
     CreatureScriptState, LuaAreaTriggerScript, LuaCreatureAI, LuaEffectDummyScript,
-    LuaGameObjectScript, LuaGossipScript, LuaProcessEventScript,
+    LuaGameObjectScript, LuaGossipScript, LuaProcessEventScript, LuaZoneScript, ZoneScriptState,
 };
 pub use snapshot::{
-    AIEvent, LuaCreatureSnapshot, LuaGuid, LuaSnapshot, PlayerSnapshot, ThreatEntry,
+    AIEvent, LuaCreatureSnapshot, LuaGuid, LuaSnapshot, PlayerSnapshot, ThreatEntry, ZoneSnapshot,
+};
+pub use zone_executor::{
+    on_player_enter_zone, on_player_leave_zone, on_player_zone_change, update_zone_scripts,
 };

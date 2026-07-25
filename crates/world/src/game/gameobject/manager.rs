@@ -8,8 +8,10 @@ use std::sync::Arc;
 
 use super::gameobject::{GameObject, GameObjectTemplate};
 use super::spawn::GameObjectSpawnData;
+use super::types::{GOState, GameObjectType, LootState};
 use crate::core::common::compress_update_packet_if_needed;
 use crate::map::grid_coords::world_to_grid;
+use crate::map::pathfinding::vmap::{GameObjectModelSpawn, VMapManager};
 use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Tracks spawn state for grid loading
@@ -135,6 +137,101 @@ impl GameObjectManager {
             }
         }
         self.gameobjects.remove(&guid)
+    }
+
+    // ==================== VMap collision ====================
+
+    /// Add a gameobject's collision model to the map's dynamic VMap tree.
+    ///
+    /// Called when the object enters the world, so line of sight, pathfinding,
+    /// and height queries account for doors, gates, and bridges. Returns whether
+    /// a model was inserted — most gameobjects have no collision geometry.
+    ///
+    /// Ported from `GameObject::AddToWorld` → `Map::InsertGameObjectModel`.
+    pub fn add_collision_model(&self, guid: ObjectGuid, vmap_mgr: &VMapManager) -> bool {
+        let Some((map_id, spawn, collides)) = self.with_gameobject(guid, |go| {
+            (
+                go.map_id,
+                self.collision_model_spawn(go),
+                Self::collision_enabled(go),
+            )
+        }) else {
+            return false;
+        };
+
+        let Some(spawn) = spawn else {
+            return false;
+        };
+
+        vmap_mgr.insert_gameobject_model(map_id, guid.raw(), spawn, collides)
+    }
+
+    /// Remove a gameobject's collision model from the dynamic VMap tree.
+    ///
+    /// Ported from `GameObject::RemoveFromWorld` → `Map::RemoveGameObjectModel`.
+    pub fn remove_collision_model(&self, guid: ObjectGuid, vmap_mgr: &VMapManager) -> bool {
+        // The object may already be gone from the map, so fall back to its GUID's
+        // map id via the tracked entry when available.
+        let map_id = self.with_gameobject(guid, |go| go.map_id);
+
+        match map_id {
+            Some(map_id) => vmap_mgr.remove_gameobject_model(map_id, guid.raw()),
+            None => false,
+        }
+    }
+
+    /// Sync a gameobject's collision with its current state.
+    ///
+    /// Call after changing `go_state` or `loot_state`: an open door must stop
+    /// blocking line of sight, and a looted chest stops being solid.
+    ///
+    /// Ported from `GameObject::UpdateCollisionState`.
+    pub fn update_collision_state(&self, guid: ObjectGuid, vmap_mgr: &VMapManager) -> bool {
+        let Some((map_id, enabled)) =
+            self.with_gameobject(guid, |go| (go.map_id, Self::collision_enabled(go)))
+        else {
+            return false;
+        };
+
+        vmap_mgr.set_gameobject_model_enabled(map_id, guid.raw(), enabled)
+    }
+
+    /// Rebuild a gameobject's collision model after its display id changed.
+    ///
+    /// Ported from `GameObject::UpdateModel`.
+    pub fn update_collision_model(&self, guid: ObjectGuid, vmap_mgr: &VMapManager) -> bool {
+        self.remove_collision_model(guid, vmap_mgr);
+        self.add_collision_model(guid, vmap_mgr)
+    }
+
+    /// Whether this object should currently collide.
+    ///
+    /// Chests are solid until looted; everything else is solid while closed.
+    fn collision_enabled(go: &GameObject) -> bool {
+        match go.go_type {
+            GameObjectType::Chest => go.loot_state == LootState::Ready,
+            _ => go.go_state == GOState::Ready,
+        }
+    }
+
+    /// Describe a gameobject's collision model, or `None` when it should not
+    /// have one.
+    ///
+    /// Ported from `GameObjectModel::construct`: objects flagged line-of-sight
+    /// safe and server-only objects (invisible triggers) get no collision.
+    fn collision_model_spawn(&self, go: &GameObject) -> Option<GameObjectModelSpawn> {
+        let template = self.get_template(go.entry)?;
+
+        if template.is_los_ok() || template.is_server_only() {
+            return None;
+        }
+
+        Some(GameObjectModelSpawn {
+            display_id: go.display_id,
+            position: go.position,
+            scale: go.scale,
+            always_break_los: template.can_always_break_los(),
+        })
     }
 
     /// Load gameobject templates from database

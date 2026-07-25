@@ -667,6 +667,34 @@ impl DeathSystem {
         Ok(())
     }
 
+    /// Move a ghost to the nearest graveyard from where they currently stand.
+    ///
+    /// Used when a ghost cannot stay where they are — a corpse run that drifts
+    /// into the deep-sea fatigue zone, for instance. Unlike
+    /// `handle_release_spirit` this does not change the player's death state; it
+    /// only relocates them.
+    pub fn repop_at_graveyard(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
+        let player_data = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                (
+                    player.race,
+                    player.map_id,
+                    player.movement.position,
+                    player.zone_id,
+                )
+            });
+
+        let Some((race, map_id, pos, zone_id)) = player_data else {
+            warn!("Player {:?} not found for graveyard repop", player_guid);
+            return Ok(());
+        };
+
+        self.teleport_to_graveyard(player_guid, pos, map_id, zone_id, race, world)
+    }
+
     /// Teleport player to nearest graveyard
     fn teleport_to_graveyard(
         &self,

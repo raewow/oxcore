@@ -224,6 +224,14 @@ impl MovementSystem {
             .visibility()
             .check_cell_crossing(player_guid, old_pos, new_pos, world);
 
+        // 7.1. Update liquid status from terrain data (swimming, breath, lava, etc.)
+        crate::game::player::environment::liquid::update_player_liquid_status(
+            player_guid,
+            world,
+            map_id,
+            new_pos,
+        );
+
         // 7.5. Check if movement should interrupt auras (food/drink)
         // Only check if player actually moved (not just turned)
         if (old_pos.x - new_pos.x).abs() > 0.01
@@ -316,6 +324,14 @@ impl MovementSystem {
             .player
             .visibility()
             .check_cell_crossing(player_guid, old_pos, new_pos, world);
+
+        // Update liquid status from terrain data (swimming, breath, lava, etc.)
+        crate::game::player::environment::liquid::update_player_liquid_status(
+            player_guid,
+            world,
+            map_id,
+            new_pos,
+        );
 
         self.broadcast_movement(player_guid, opcode, movement_info, world)?;
 

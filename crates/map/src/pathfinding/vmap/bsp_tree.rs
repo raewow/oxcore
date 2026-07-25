@@ -488,11 +488,14 @@ impl BSPTree {
         }
     }
 
-    /// Get liquid level at position
+    /// Get liquid level at position.
+    ///
+    /// `req_liquid_type_mask` is a `MAP_LIQUID_TYPE_*` bitmask; pass 0 to accept
+    /// any liquid kind.
     pub fn get_liquid_level(
         &self,
         pos: &Position,
-        req_liquid_type_mask: u8,
+        req_liquid_type_mask: u32,
     ) -> Option<LiquidLevel> {
         if let Some(ref root) = self.root {
             self.get_liquid_level_node(root, pos, req_liquid_type_mask)
@@ -505,7 +508,7 @@ impl BSPTree {
         &self,
         node: &BSPNode,
         pos: &Position,
-        req_liquid_type_mask: u8,
+        req_liquid_type_mask: u32,
     ) -> Option<LiquidLevel> {
         match node {
             BSPNode::Internal {
@@ -530,8 +533,10 @@ impl BSPTree {
                 for model in models {
                     if model.bounding_box.contains(pos) {
                         if let Some(ref liquid) = model.liquid_data {
-                            let liquid_type_u8 = (liquid.liquid_type & 0xFF) as u8;
-                            if (liquid_type_u8 & req_liquid_type_mask) != 0 {
+                            // The stored type is a WMO liquid *index*, so map it
+                            // to a MAP_LIQUID_TYPE_* flag before comparing.
+                            let mask = super::types::wmo_liquid_type_mask(liquid.liquid_type);
+                            if req_liquid_type_mask == 0 || (mask & req_liquid_type_mask) != 0 {
                                 return Some(liquid.clone());
                             }
                         }

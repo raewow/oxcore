@@ -425,6 +425,18 @@ impl SystemManager {
     /// Notify all systems of player logout
     pub async fn on_player_logout(&self, guid: ObjectGuid, world: &World) -> Result<()> {
         let player_mgr = self.player.manager();
+
+        // Zone scripts first, while the player record still knows their zone.
+        let zone_id = player_mgr.with_player(guid, |p| p.zone_id).unwrap_or(0);
+        if let Err(e) = crate::core::lua::on_player_leave_zone(guid, zone_id, world).await {
+            tracing::warn!(
+                "Zone script OnPlayerLeave failed for {:?} in zone {}: {}",
+                guid,
+                zone_id,
+                e
+            );
+        }
+
         self.player.on_player_logout(guid, world).await?;
         self.pet.on_player_logout(guid, world);
         self.trade.on_player_logout(guid)?;

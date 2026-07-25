@@ -11,6 +11,7 @@ mod game_object;
 mod gossip;
 mod instance;
 mod process_event;
+mod zone;
 
 pub use area_trigger::LuaAreaTriggerScript;
 pub use creature_ai::{CreatureScriptState, LuaCreatureAI};
@@ -19,3 +20,4 @@ pub use game_object::LuaGameObjectScript;
 pub use gossip::LuaGossipScript;
 pub use instance::{InstanceScriptState, LuaInstanceAI};
 pub use process_event::LuaProcessEventScript;
+pub use zone::{LuaZoneScript, ZoneScriptState};

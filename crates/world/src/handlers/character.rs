@@ -442,8 +442,28 @@ pub async fn handle_player_login_with_guid(
             character.rest_bonus,
             saved_rest_type,
             character.logout_time,
+            world,
             &world.managers.player_mgr,
         )?;
+
+        // Seed liquid state from the login position, so a character that logged
+        // out underwater resumes drowning instead of waiting for a movement
+        // packet to notice.
+        if let Some((map_id, pos)) = world
+            .managers
+            .player_mgr
+            .with_player(guid, |p| (p.map_id, p.movement.position))
+        {
+            crate::game::player::environment::update_player_liquid_status(guid, world, map_id, pos);
+        }
+
+        // Zone scripts: entering the world counts as entering the login zone.
+        if let Err(e) = crate::core::lua::on_player_enter_zone(guid, character.zone, world).await {
+            warn!(
+                "Zone script OnPlayerEnter failed for {:?} in zone {}: {}",
+                guid, character.zone, e
+            );
+        }
 
         // Check if login zone is a capital city and set rest state
         const AREA_FLAG_CAPITAL: u32 = 0x100;
@@ -2501,7 +2521,7 @@ pub async fn handle_zoneupdate(
     );
 
     // Update zone and read current rest state (single lock scope)
-    let (changed, current_rest_type) = {
+    let (changed, current_rest_type, old_zone) = {
         match world.managers.player_mgr.get_player_mut(player_guid) {
             Some(mut player) => {
                 let old_zone = player.zone_id;
@@ -2514,7 +2534,7 @@ pub async fn handle_zoneupdate(
                     "CMSG_ZONEUPDATE: Updated zone from {} to {}",
                     old_zone, zone_id
                 );
-                (true, player.environment.rest_type)
+                (true, player.environment.rest_type, old_zone)
             }
             None => return Ok(()),
         }
@@ -2523,6 +2543,16 @@ pub async fn handle_zoneupdate(
 
     if !changed {
         return Ok(());
+    }
+
+    // --- Zone scripts: OnPlayerLeave for the old zone, OnPlayerEnter for the new ---
+    if let Err(e) =
+        crate::core::lua::on_player_zone_change(player_guid, old_zone, zone_id, world).await
+    {
+        warn!(
+            "Zone script error on {} -> {} for {:?}: {}",
+            old_zone, zone_id, player_guid, e
+        );
     }
 
     // --- Update rest state based on zone flags (MaNGOS Player.cpp:6737-6741) ---
@@ -2606,7 +2636,6 @@ pub async fn handle_zoneupdate(
     // TODO: Handle other zone-specific effects:
     // - Check for exploration quest objectives
     // - Update PvP flags based on zone type
-    // - Trigger zone-specific scripts
     // - Send zone-specific packets (weather, music)
 
     Ok(())

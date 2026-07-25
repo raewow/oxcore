@@ -241,11 +241,20 @@ impl GridSystem {
             }
 
             if let Some(guid) = world.managers.gameobject_mgr.spawn_gameobject(&go_spawn) {
-                let grid_mgr = map.grid_manager();
-                let mut grid_mgr = grid_mgr.write();
+                {
+                    let grid_mgr = map.grid_manager();
+                    let mut grid_mgr = grid_mgr.write();
 
-                map.add_gameobject_with_grid_manager(guid, go_spawn.position, &mut grid_mgr);
-                grid_mgr.register_gameobject(guid, go_spawn.position.x, go_spawn.position.y);
+                    map.add_gameobject_with_grid_manager(guid, go_spawn.position, &mut grid_mgr);
+                    grid_mgr.register_gameobject(guid, go_spawn.position.x, go_spawn.position.y);
+                }
+
+                // Register collision so LoS, pathfinding, and height queries see
+                // this object (closed doors, drawbridges, ...).
+                world
+                    .managers
+                    .gameobject_mgr
+                    .add_collision_model(guid, &world.managers.vmap_mgr);
             }
         }
 
@@ -312,8 +321,13 @@ impl GridSystem {
             world.managers.creature_mgr.remove_creature(guid);
         }
 
-        // Despawn gameobjects
+        // Despawn gameobjects. Drop collision first — it is looked up through the
+        // object, which `remove_gameobject` is about to discard.
         for guid in gameobjects {
+            world
+                .managers
+                .gameobject_mgr
+                .remove_collision_model(guid, &world.managers.vmap_mgr);
             world.managers.gameobject_mgr.remove_gameobject(guid);
         }
 

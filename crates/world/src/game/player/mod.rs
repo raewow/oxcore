@@ -55,10 +55,11 @@ pub use environment::{
     apply_rest_bonus, calculate_fall_damage, calculate_offline_rest,
     on_mirror_timer_expiration_pulse, on_rest_login, set_rest_type,
     update_environment_flags_internal, update_mirror_timers, update_rest_bonus, EnvironmentFlags,
-    EnvironmentState, EnvironmentSystem, LiquidStatus, LiquidType, MirrorTimer, MirrorTimerAction,
-    MirrorTimerEvent, MirrorTimerStatus, MirrorTimerType, RestType, BREATH_MAX_SECONDS,
-    ENVIRONMENTAL_DAMAGE_MAX, ENVIRONMENTAL_DAMAGE_MIN, ENVIRONMENTAL_MAX_SECONDS,
-    FATIGUE_MAX_SECONDS, PLAYER_FLAGS_RESTING, REST_RATE_PER_SECOND, SAFE_FALL_DISTANCE,
+    EnvironmentState, EnvironmentSystem, LiquidData, LiquidStatus, LiquidStatusFlags, MirrorTimer,
+    MirrorTimerAction, MirrorTimerEvent, MirrorTimerStatus, MirrorTimerType, RestType,
+    BREATH_MAX_SECONDS, ENVIRONMENTAL_DAMAGE_MAX, ENVIRONMENTAL_DAMAGE_MIN,
+    ENVIRONMENTAL_MAX_SECONDS, FATIGUE_MAX_SECONDS, PLAYER_FLAGS_RESTING, REST_RATE_PER_SECOND,
+    SAFE_FALL_DISTANCE,
 };
 pub use experience::ExperienceSystem;
 pub use manager::PlayerManager;
