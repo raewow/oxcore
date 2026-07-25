@@ -1576,6 +1576,42 @@ mod tests {
     // === ActiveCast ===
 
     #[test]
+    fn active_cast_constructor_preserves_cast_inputs_and_initializes_preparing_state() {
+        let target = player(2);
+        let cast = ActiveCast::new(
+            123,
+            Some(target),
+            1500,
+            true,
+            CurrentSpellType::Generic,
+            1.0,
+            2.0,
+            3.0,
+        );
+
+        assert_eq!(cast.spell_id, 123);
+        assert_eq!(cast.target_guid, Some(target));
+        assert_eq!(cast.state, SpellState::Preparing);
+        assert_eq!(cast.slot, CurrentSpellType::Generic);
+        assert_eq!(cast.cast_time_remaining_ms, 1500);
+        assert_eq!(cast.original_cast_time_ms, 1500);
+        assert!(cast.is_triggered);
+        assert!(!cast.is_client_started);
+        assert_eq!(
+            (cast.start_position_x, cast.start_position_y, cast.start_position_z),
+            (1.0, 2.0, 3.0)
+        );
+        assert_eq!(cast.cast_targets.target_flags, TARGET_FLAG_SELF);
+        assert_eq!(cast.cast_targets.unit_target_guid, None);
+        assert_eq!(cast.cast_targets.gameobject_target_guid, None);
+        assert_eq!(cast.cast_targets.item_target_guid, None);
+        assert_eq!(cast.cast_targets.corpse_target_guid, None);
+        assert_eq!(cast.cast_targets.src_position, None);
+        assert_eq!(cast.cast_targets.dst_position, None);
+        assert_eq!(cast.cast_targets.str_target, None);
+    }
+
+    #[test]
     fn test_active_cast_tick_completes_at_zero() {
         let mut cast = ActiveCast::new(
             1,
