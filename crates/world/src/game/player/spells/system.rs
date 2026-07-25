@@ -4,6 +4,7 @@
 //! validate -> start -> timer -> execute -> finish
 
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
+use crate::game::common::update_fields::{UNIT_CHANNEL_SPELL, UNIT_FIELD_CHANNEL_OBJECT};
 use crate::game::player::spells::channel_visual::initialize_channeled_visual_timer;
 use crate::game::player::spells::cooldowns;
 use crate::game::player::spells::effects::{EffectDispatchResult, EffectsDispatcher};
@@ -26,6 +27,7 @@ use oxcore_shared::messages::spells::{
     SpellMissTarget, SPELL_RESULT_STATUS_FAIL,
     SPELL_RESULT_STATUS_OKAY,
 };
+use oxcore_shared::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashMap;
@@ -102,6 +104,22 @@ fn select_channel_target(
             .find(|target| *target != caster_guid);
     }
     gameobject_target
+}
+
+const SPELL_EFFECT_PERSISTENT_AREA_AURA: u32 = 27;
+
+/// Build the player update that drives the channel beam and spell visual for observers.
+fn channel_state_update_block(
+    caster_guid: ObjectGuid,
+    channel_object: Option<ObjectGuid>,
+    spell_id: u32,
+) -> ValuesUpdateBlock {
+    ValuesUpdateBlock::new(caster_guid, ObjectType::Player)
+        .set_guid_field(
+            UNIT_FIELD_CHANNEL_OBJECT,
+            channel_object.unwrap_or_else(ObjectGuid::empty),
+        )
+        .set_field(UNIT_CHANNEL_SPELL, spell_id)
 }
 
 /// Get current game time in milliseconds
@@ -524,6 +542,23 @@ fn ammo_packet_values(ranged_weapon: Option<(u32, u8)>, ammo: Option<(u32, u8)>)
 }
 
 impl SpellSystem {
+    fn send_channel_state_update(
+        &self,
+        caster_guid: ObjectGuid,
+        channel_object: Option<ObjectGuid>,
+        spell_id: u32,
+    ) {
+        let packet = SmsgUpdateObject::new()
+            .add_block(UpdateBlockData::Values(channel_state_update_block(
+                caster_guid,
+                channel_object,
+                spell_id,
+            )))
+            .to_world_packet();
+        self.broadcast_mgr
+            .broadcast_nearby(caster_guid, &packet, true);
+    }
+
     /// Send the remaining duration for an active channel to its caster.
     pub fn send_channel_update(&self, caster_guid: ObjectGuid, remaining_ms: u32) {
         self.broadcast_mgr
@@ -967,11 +1002,27 @@ impl SpellSystem {
             caster_guid,
             world,
         );
-        let target_guid = select_channel_target(
-            &resolved.effect_targets[0],
-            caster_guid,
-            cast_targets.gameobject_target_guid,
-        );
+        let target_guid = if world
+            .managers
+            .spell_mgr
+            .get(spell_id)
+            .is_some_and(|entry| entry.effect[0] == SPELL_EFFECT_PERSISTENT_AREA_AURA)
+        {
+            world
+                .systems
+                .player
+                .manager()
+                .with_player(caster_guid, |player| {
+                    player.spells.get_dyn_object_by_spell(spell_id)
+                })
+                .flatten()
+        } else {
+            select_channel_target(
+                &resolved.effect_targets[0],
+                caster_guid,
+                cast_targets.gameobject_target_guid,
+            )
+        };
         world
             .systems
             .player
@@ -1027,6 +1078,8 @@ impl SpellSystem {
             self.broadcast_mgr
                 .broadcast_nearby(caster_guid, &packet.to_world_packet(), true);
         }
+
+        self.send_channel_state_update(caster_guid, target_guid, spell_id);
 
         // Spell::InitializeChanneledVisualTimer: a handful of channeled spells (Tranquility,
         // Starshards) periodically re-send their visual kit. Wired against the real spell
@@ -1357,6 +1410,7 @@ impl SpellSystem {
                                     .spells
                                     .clear_current_spell(CurrentSpellType::Channeled);
                             });
+                        self.send_channel_state_update(caster_guid, None, 0);
                         self.finish_cast(
                             caster_guid,
                             spell_id,
@@ -2333,6 +2387,7 @@ impl SpellSystem {
             // and remove auras applied by the cancelled channel (MaNGOS RemoveAurasByCasterSpell)
             if was_channeling {
                 self.send_channel_update(caster_guid, 0);
+                self.send_channel_state_update(caster_guid, None, 0);
 
                 // Remove auras applied by this channeled spell on all targets
                 world
@@ -2359,7 +2414,7 @@ impl SpellSystem {
         world: &World,
     ) -> Result<()> {
         // Interrupt Generic first, then Channeled
-        let interrupted_info: Option<(u32, u32)> = world
+        let interrupted_info: Option<(u32, u32, bool)> = world
             .systems
             .player
             .manager()
@@ -2368,16 +2423,20 @@ impl SpellSystem {
                 let cast = player
                     .spells
                     .clear_current_spell(CurrentSpellType::Generic)
+                    .map(|active| (active, false))
                     .or_else(|| {
                         player
                             .spells
                             .clear_current_spell(CurrentSpellType::Channeled)
+                            .map(|active| (active, true))
                     });
-                cast.map(|active| (active.spell_id, active.spell_id))
+                cast.map(|(active, was_channeling)| {
+                    (active.spell_id, active.spell_id, was_channeling)
+                })
             })
             .flatten();
 
-        if let Some((spell_id, interrupted_spell_id)) = interrupted_info {
+        if let Some((spell_id, interrupted_spell_id, was_channeling)) = interrupted_info {
             // Apply school lockout if specified
             if lockout_duration_ms > 0 {
                 // Get spell school from spell entry
@@ -2409,6 +2468,10 @@ impl SpellSystem {
             };
             self.broadcast_mgr
                 .broadcast_nearby(target_guid, &msg.to_world_packet(), true);
+
+            if was_channeling {
+                self.send_channel_state_update(target_guid, None, 0);
+            }
 
             tracing::debug!(
                 "Cast interrupted: target={}, interrupter={}, spell={}",
@@ -3734,6 +3797,36 @@ mod tests {
         assert_eq!(
             select_channel_target(&[], ObjectGuid::new_player(1), Some(gameobject)),
             Some(gameobject)
+        );
+    }
+
+    #[test]
+    fn channel_state_update_sets_channel_object_and_spell() {
+        let caster = ObjectGuid::new_player(1);
+        let target = ObjectGuid::new_gameobject(1, 4);
+        let block = channel_state_update_block(caster, Some(target), 1234);
+
+        assert_eq!(
+            block.fields,
+            vec![
+                (UNIT_FIELD_CHANNEL_OBJECT, target.raw() as u32),
+                (UNIT_FIELD_CHANNEL_OBJECT + 1, (target.raw() >> 32) as u32),
+                (UNIT_CHANNEL_SPELL, 1234),
+            ]
+        );
+    }
+
+    #[test]
+    fn channel_state_update_clears_channel_object_and_spell() {
+        let block = channel_state_update_block(ObjectGuid::new_player(1), None, 0);
+
+        assert_eq!(
+            block.fields,
+            vec![
+                (UNIT_FIELD_CHANNEL_OBJECT, 0),
+                (UNIT_FIELD_CHANNEL_OBJECT + 1, 0),
+                (UNIT_CHANNEL_SPELL, 0),
+            ]
         );
     }
 

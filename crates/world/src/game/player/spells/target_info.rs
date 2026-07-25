@@ -203,10 +203,18 @@ async fn do_spell_hit_on_unit(
     }
 
     // ── Step 4.  Per-effect mechanic resistance ───────────────────────────────
-    // (C++ lines 1547-1554)
-    // TODO: MaNGOS `Unit::IsEffectResist(m_spellInfo, eff)` not yet ported.
-    // When it lands, iterate 0..3, clear bit `eff` from `*effect_mask` when the
-    // target resists that effect's mechanic, and return false if mask becomes 0.
+    // An effect-specific mechanic may be resisted independently of its sibling
+    // effects when it differs from the spell-level mechanic.
+    for effect_index in 0..3 {
+        if *effect_mask & (1 << effect_index) != 0
+            && target_resists_effect_mechanic(target_guid, spell_entry, effect_index, world)
+        {
+            *effect_mask &= !(1 << effect_index);
+        }
+    }
+    if *effect_mask == 0 {
+        return false;
+    }
 
     if target_is_immune_to_school(target_guid, spell_entry, *effect_mask, world) {
         *effect_mask = 0;
@@ -465,6 +473,56 @@ fn target_is_immune_to_spell_effect(
     } else {
         false
     }
+}
+
+fn target_resists_effect_mechanic(
+    target_guid: ObjectGuid,
+    spell: &SpellEntry,
+    effect_index: usize,
+    world: &World,
+) -> bool {
+    use crate::game::player::auras::effects::AURA_MOD_MECHANIC_RESISTANCE;
+
+    let mechanic = spell.effect_mechanic[effect_index];
+    if mechanic == 0 || mechanic == spell.mechanic {
+        return false;
+    }
+
+    let resistance = if target_guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                player
+                    .auras
+                    .container
+                    .get_total_aura_modifier_by_misc(AURA_MOD_MECHANIC_RESISTANCE, mechanic as i32)
+            })
+            .unwrap_or(0)
+    } else if target_guid.is_creature() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |creature| {
+                creature
+                    .auras
+                    .get_total_aura_modifier_by_misc(AURA_MOD_MECHANIC_RESISTANCE, mechanic as i32)
+            })
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    if resistance <= 0 {
+        return false;
+    }
+    if resistance >= 100 {
+        return true;
+    }
+
+    use rand::Rng;
+    rand::thread_rng().gen_range(0..100) < resistance
 }
 
 fn target_is_immune_to_school(
@@ -1210,6 +1268,45 @@ mod tests {
 
         let mut spell = harmful_spell(109);
         spell.school = 2;
+        let mut mask = 0b001;
+        assert!(
+            !do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, &world).await
+        );
+        assert_eq!(mask, 0);
+    }
+
+    #[tokio::test]
+    async fn mechanic_resistance_removes_only_the_matching_live_effect() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(34);
+        let target = ObjectGuid::new_player(35);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target, |player| {
+                player.auras.container.add_aura(Aura::new(
+                    9002,
+                    caster,
+                    0,
+                    crate::game::player::auras::effects::AURA_MOD_MECHANIC_RESISTANCE,
+                    5,
+                    100,
+                    None,
+                    0,
+                    1,
+                    0,
+                    AuraFlags {
+                        is_positive: true,
+                        ..AuraFlags::default()
+                    },
+                ));
+            });
+
+        let mut spell = harmful_spell(110);
+        spell.effect_mechanic[0] = 5;
         let mut mask = 0b001;
         assert!(
             !do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, &world).await
