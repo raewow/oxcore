@@ -1,6 +1,7 @@
 //! AuraContainer - manages all active auras on a player
 
 use super::aura::Aura;
+use super::effects::{AURA_EFFECT_IMMUNITY, AURA_MECHANIC_IMMUNITY, AURA_STATE_IMMUNITY};
 use super::stacking::{exclusive_aura_can_apply, ExclusiveAuraAction};
 use super::state::*;
 use oxcore_shared::protocol::ObjectGuid;
@@ -406,6 +407,37 @@ impl AuraContainer {
             .values()
             .filter(|a| a.aura_type == aura_type)
             .collect()
+    }
+
+    /// Whether an active immunity aura rejects one spell effect.
+    ///
+    /// Immunities only reject effects with opposite polarity, matching the
+    /// reference rule that a friendly immunity aura does not block friendly
+    /// effects (and vice versa).
+    pub fn is_immune_to_spell_effect(
+        &self,
+        effect: u32,
+        mechanic: u32,
+        applied_aura: u32,
+        effect_is_positive: bool,
+        immunity_affects_all_polarities: impl Fn(u32) -> bool,
+    ) -> bool {
+        self.auras.values().any(|aura| {
+            if aura.is_positive() == effect_is_positive
+                && !immunity_affects_all_polarities(aura.spell_id)
+            {
+                return false;
+            }
+
+            match aura.aura_type {
+                AURA_EFFECT_IMMUNITY => aura.misc_value as u32 == effect,
+                AURA_STATE_IMMUNITY => applied_aura != 0 && aura.misc_value as u32 == applied_aura,
+                AURA_MECHANIC_IMMUNITY => {
+                    mechanic != 0 && (aura.misc_value as u32 & (1 << (mechanic - 1))) != 0
+                }
+                _ => false,
+            }
+        })
     }
 
     /// Get all active auras (immutable).
@@ -940,9 +972,10 @@ mod tests {
         immunity.flags.is_positive = true;
         container.add_aura(immunity);
 
-        assert!(container.is_immune_to_spell_effect(2, 0, 0, false));
-        assert!(!container.is_immune_to_spell_effect(3, 0, 0, false));
-        assert!(!container.is_immune_to_spell_effect(2, 0, 0, true));
+        assert!(container.is_immune_to_spell_effect(2, 0, 0, false, |_| false));
+        assert!(!container.is_immune_to_spell_effect(3, 0, 0, false, |_| false));
+        assert!(!container.is_immune_to_spell_effect(2, 0, 0, true, |_| false));
+        assert!(container.is_immune_to_spell_effect(2, 0, 0, true, |id| id == 5000));
     }
 
     #[test]
@@ -960,10 +993,10 @@ mod tests {
         state.flags.is_positive = true;
         container.add_aura(state);
 
-        assert!(container.is_immune_to_spell_effect(0, 5, 0, false));
-        assert!(container.is_immune_to_spell_effect(0, 0, 17, false));
-        assert!(!container.is_immune_to_spell_effect(0, 4, 0, false));
-        assert!(!container.is_immune_to_spell_effect(0, 0, 18, false));
+        assert!(container.is_immune_to_spell_effect(0, 5, 0, false, |_| false));
+        assert!(container.is_immune_to_spell_effect(0, 0, 17, false, |_| false));
+        assert!(!container.is_immune_to_spell_effect(0, 4, 0, false, |_| false));
+        assert!(!container.is_immune_to_spell_effect(0, 0, 18, false, |_| false));
     }
 
     #[test]

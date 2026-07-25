@@ -204,11 +204,19 @@ async fn do_spell_hit_on_unit(
     // When it lands, iterate 0..3, clear bit `eff` from `*effect_mask` when the
     // target resists that effect's mechanic, and return false if mask becomes 0.
 
-    // ── Step 5.  Delayed-spell immunity re-check ──────────────────────────────
-    // (C++ lines 1556-1566)
-    // TODO: `IsImmuneToDamage` / `IsImmuneToSpell` not ported.  When they land,
-    // check: if caster != target && spell.speed > 0 && (immunity), send miss and
-    // return false.
+    // ── Step 5.  Per-effect immunity re-check ─────────────────────────────────
+    // Apply the common Unit aura immunity rules before dispatch, including for
+    // delayed casts whose target state changed after target registration.
+    for effect_index in 0..3 {
+        if *effect_mask & (1 << effect_index) != 0
+            && target_is_immune_to_spell_effect(target_guid, spell_entry, effect_index, world)
+        {
+            *effect_mask &= !(1 << effect_index);
+        }
+    }
+    if *effect_mask == 0 {
+        return false;
+    }
 
     // ── Step 6a.  Hostile-side side effects ────────────────────────────────────
     // (C++ lines 1568-1641)
@@ -393,6 +401,60 @@ fn remove_aura_type_from_target(target_guid: ObjectGuid, aura_type: u32, world: 
             .with_creature_mut(target_guid, |creature| {
                 creature.auras.remove_auras_by_type(aura_type);
             });
+    }
+}
+
+fn target_is_immune_to_spell_effect(
+    target_guid: ObjectGuid,
+    spell: &SpellEntry,
+    effect_index: usize,
+    world: &World,
+) -> bool {
+    const SPELL_ATTR_EX_IGNORE_CASTER_AND_TARGET_RESTRICTIONS: u32 = 0x0080_0000;
+    const SPELL_ATTR_EX3_IGNORE_CASTER_AND_TARGET_RESTRICTIONS: u32 = 0x1000_0000;
+    const SPELL_ATTR_EX_IMMUNITY_TO_HOSTILE_AND_FRIENDLY_EFFECTS: u32 = 0x0001_0000;
+
+    if spell.attributes_ex & SPELL_ATTR_EX_IGNORE_CASTER_AND_TARGET_RESTRICTIONS != 0
+        || spell.attributes_ex3 & SPELL_ATTR_EX3_IGNORE_CASTER_AND_TARGET_RESTRICTIONS != 0
+    {
+        return false;
+    }
+
+    let is_immune = |auras: &crate::game::player::auras::AuraContainer| {
+        auras.is_immune_to_spell_effect(
+            spell.effect[effect_index],
+            spell.effect_mechanic[effect_index],
+            spell.effect_apply_aura_name[effect_index],
+            spell.is_positive_effect(effect_index),
+            |immunity_spell_id| {
+                world
+                    .managers
+                    .spell_mgr
+                    .get(immunity_spell_id)
+                    .is_some_and(|immunity_spell| {
+                        immunity_spell.attributes_ex
+                            & SPELL_ATTR_EX_IMMUNITY_TO_HOSTILE_AND_FRIENDLY_EFFECTS
+                            != 0
+                    })
+            },
+        )
+    };
+
+    if target_guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| is_immune(&player.auras.container))
+            .unwrap_or(false)
+    } else if target_guid.is_creature() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |creature| is_immune(&creature.auras))
+            .unwrap_or(false)
+    } else {
+        false
     }
 }
 
@@ -743,6 +805,8 @@ fn fire_spell_hit_ai_event(
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::game::player::auras::{Aura, AuraFlags};
+    use crate::game::player::Player;
     use oxcore_shared::database::Databases;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
@@ -768,6 +832,11 @@ mod tests {
             50,
             PathBuf::from("."),
         )
+    }
+
+    fn add_test_player(world: &World, guid: ObjectGuid) {
+        let player = Player::new(guid, format!("P{}", guid.counter()), 0, 0, 0, 60, 1, 1, 0);
+        world.managers.player_mgr.add_player(player, guid.counter());
     }
 
     /// Create a minimal harmful spell entry with one damage effect.
@@ -990,6 +1059,46 @@ mod tests {
             !result,
             "zero mask should abort hit even for positive spells"
         );
+    }
+
+    #[tokio::test]
+    async fn effect_immunity_removes_only_the_matching_effect_from_live_target() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(30);
+        let target = ObjectGuid::new_player(31);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target, |player| {
+                let mut immunity = Aura::new(
+                    9000,
+                    caster,
+                    0,
+                    crate::game::player::auras::effects::AURA_EFFECT_IMMUNITY,
+                    SPELL_EFFECT_SCHOOL_DAMAGE as i32,
+                    0,
+                    None,
+                    0,
+                    1,
+                    0,
+                    AuraFlags {
+                        is_positive: true,
+                        ..AuraFlags::default()
+                    },
+                );
+                immunity.flags.is_positive = true;
+                player.auras.container.add_aura(immunity);
+            });
+
+        let spell = harmful_spell(108);
+        let mut mask = 0b001;
+        assert!(
+            !do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, &world).await
+        );
+        assert_eq!(mask, 0);
     }
 
     #[tokio::test]

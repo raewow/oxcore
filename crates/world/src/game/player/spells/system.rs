@@ -4,7 +4,6 @@
 //! validate -> start -> timer -> execute -> finish
 
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
-use crate::game::player::spells::cast_pointers;
 use crate::game::player::spells::channel_visual::initialize_channeled_visual_timer;
 use crate::game::player::spells::cooldowns;
 use crate::game::player::spells::effects::EffectsDispatcher;
@@ -17,6 +16,7 @@ use crate::game::player::spells::state::{
 };
 use crate::game::player::spells::target_info::set_caster_in_combat_with_victim;
 use crate::game::player::spells::validation;
+use crate::game::player::spells::{ammo, cast_pointers};
 use crate::World;
 use anyhow::Result;
 use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
@@ -796,6 +796,20 @@ impl SpellSystem {
         self.consume_resources(caster_guid, spell_id, cast_item_guid, world)
             .await?;
         self.take_reagents(caster_guid, spell_id, world);
+        let attack_type = world
+            .managers
+            .spell_mgr
+            .get(spell_id)
+            .map_or(0, |spell| spell.get_weapon_attack_type());
+        ammo::take_ammo(
+            world,
+            caster_guid,
+            &ammo::TakeAmmoInput {
+                spell_id,
+                attack_type,
+            },
+        )
+        .await;
         if let Some(item_guid) = cast_item_guid {
             if caster_guid.is_player() {
                 world
