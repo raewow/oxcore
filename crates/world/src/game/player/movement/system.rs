@@ -30,6 +30,19 @@ pub(super) fn preserve_root_flag(
 /// Movement system (stateless - operates on Player.movement via PlayerManager)
 pub struct MovementSystem;
 
+fn knockback_observer_packet(
+    movement_info: &MovementInfo,
+    pending: PendingKnockback,
+) -> WorldPacket {
+    let mut packet = WorldPacket::new(Opcode::MSG_MOVE_KNOCK_BACK);
+    movement_info.write_to_packet(&mut packet);
+    packet.write_f32(pending.cos_angle);
+    packet.write_f32(pending.sin_angle);
+    packet.write_f32(pending.horizontal_speed);
+    packet.write_f32(pending.vertical_speed);
+    packet
+}
+
 impl MovementSystem {
     pub fn new() -> Self {
         Self
@@ -45,7 +58,7 @@ impl MovementSystem {
         vertical_speed: f32,
         world: &World,
     ) -> Result<()> {
-        let pending = world
+        let (pending, movement_info) = world
             .managers
             .player_mgr
             .with_player_mut(player_guid, |player| {
@@ -59,7 +72,16 @@ impl MovementSystem {
                     vertical_speed,
                 };
                 player.movement.pending_knockback = Some(pending);
-                pending
+                let mut movement_info = MovementInfo::new();
+                movement_info.mover_guid = player_guid;
+                movement_info.flags = MoveFlags::from(player.movement.flags);
+                movement_info.position = player.movement.position;
+                movement_info.transport_guid = player.movement.transport_guid;
+                movement_info.transport_position = player.movement.transport_position;
+                movement_info.transport_time = player.movement.transport_time;
+                movement_info.fall_time = Some(player.movement.fall_time);
+                movement_info.time = player.movement.timestamp;
+                (pending, movement_info)
             })
             .ok_or_else(|| anyhow!("Player not found"))?;
 
@@ -74,7 +96,14 @@ impl MovementSystem {
         packet.write_f32(pending.sin_angle);
         packet.write_f32(pending.horizontal_speed);
         packet.write_f32(pending.vertical_speed);
-        session.send_packet(packet)
+        session.send_packet(packet)?;
+
+        let observer_packet = knockback_observer_packet(&movement_info, pending);
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_nearby_exclude_self(player_guid, &observer_packet);
+        Ok(())
     }
 
     /// Start a server-scripted player spline and await its exact completion ID.
@@ -382,6 +411,46 @@ impl MovementSystem {
             .broadcast_nearby_exclude_self(player_guid, &packet);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxcore_shared::protocol::{HighGuid, Position};
+
+    #[test]
+    fn knockback_observer_packet_preserves_movement_info_and_velocity() {
+        let guid = ObjectGuid::new_without_entry(HighGuid::Player, 7);
+        let mut movement_info = MovementInfo::new();
+        movement_info.mover_guid = guid;
+        movement_info.flags = MoveFlags::FORWARD;
+        movement_info.position = Position::new(1.0, 2.0, 3.0, 0.5);
+        movement_info.time = 42;
+        movement_info.fall_time = Some(9);
+        let pending = PendingKnockback {
+            counter: 3,
+            cos_angle: 0.25,
+            sin_angle: 0.75,
+            horizontal_speed: 12.0,
+            vertical_speed: 4.0,
+        };
+
+        let mut packet = knockback_observer_packet(&movement_info, pending);
+
+        assert_eq!(packet.opcode(), Opcode::MSG_MOVE_KNOCK_BACK);
+        assert_eq!(packet.read_packed_guid_raw(), Some(guid.raw()));
+        assert_eq!(packet.read_u32(), Some(MoveFlags::FORWARD.value()));
+        assert_eq!(packet.read_u32(), Some(42));
+        assert_eq!(packet.read_f32(), Some(1.0));
+        assert_eq!(packet.read_f32(), Some(2.0));
+        assert_eq!(packet.read_f32(), Some(3.0));
+        assert_eq!(packet.read_f32(), Some(0.5));
+        assert_eq!(packet.read_u32(), Some(9));
+        assert_eq!(packet.read_f32(), Some(0.25));
+        assert_eq!(packet.read_f32(), Some(0.75));
+        assert_eq!(packet.read_f32(), Some(12.0));
+        assert_eq!(packet.read_f32(), Some(4.0));
     }
 }
 
