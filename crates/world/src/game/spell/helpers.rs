@@ -306,12 +306,6 @@ pub fn is_skill_bonus_spell(spell_id: u32, dbc: &DbcManager) -> bool {
 /// Returns true when every effect in the spell can be delayed (batched). CC
 /// spells, channeled, next-melee-swing and ranged spells are handled specially.
 pub fn is_spell_with_delayable_effects(spell: &SpellEntry) -> bool {
-    if spell.effect.iter().all(|&effect| effect == 0)
-        && spell.effect_apply_aura_name.iter().all(|&aura| aura == 0)
-    {
-        return false;
-    }
-
     // CC spells are always delayable
     if spell.effect_apply_aura_name.iter().any(|&aura| {
         matches!(
@@ -949,6 +943,6 @@ mod tests {
         assert!(is_spell_with_delayable_effects(&fear));
 
         let empty = base_entry(0);
-        assert!(!is_spell_with_delayable_effects(&empty));
+        assert!(is_spell_with_delayable_effects(&empty));
     }
 }
