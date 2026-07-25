@@ -18,21 +18,25 @@ pub const NO_ORIENTATION: f32 = 100.0;
 /// Which table a path came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaypointPathOrigin {
+    /// No path is assigned to the creature.
+    NoPath,
     /// `creature_movement`, keyed by creature spawn guid
     Guid,
     /// `creature_movement_template`, keyed by creature entry
     Entry,
+    /// A path provided by a script rather than either waypoint table.
+    Special,
 }
 
 impl std::fmt::Display for WaypointPathOrigin {
     /// Human-readable origin (`WaypointManager::GetOriginString`).
     ///
-    /// The C++ enum also has `<no path>` and `special` variants; neither is modeled here,
-    /// since the manager only accepts guid and entry paths.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            WaypointPathOrigin::NoPath => "<no path>",
             WaypointPathOrigin::Guid => "guid",
             WaypointPathOrigin::Entry => "entry",
+            WaypointPathOrigin::Special => "special",
         })
     }
 }
@@ -95,11 +99,12 @@ impl WaypointManager {
         self.template_waypoints.clear();
     }
 
-    fn paths(&self, origin: WaypointPathOrigin) -> &DashMap<u32, Arc<Vec<Waypoint>>> {
-        match origin {
+    fn paths(&self, origin: WaypointPathOrigin) -> Option<&DashMap<u32, Arc<Vec<Waypoint>>>> {
+        Some(match origin {
             WaypointPathOrigin::Guid => &self.guid_waypoints,
             WaypointPathOrigin::Entry => &self.template_waypoints,
-        }
+            WaypointPathOrigin::NoPath | WaypointPathOrigin::Special => return None,
+        })
     }
 
     /// Fetch a path for editing.
@@ -111,7 +116,7 @@ impl WaypointManager {
     where
         F: FnOnce(&mut Vec<Waypoint>) -> R,
     {
-        let paths = self.paths(origin);
+        let paths = self.paths(origin)?;
         let mut nodes = paths.get(&key).map(|path| path.as_ref().clone())?;
         let result = edit(&mut nodes);
         paths.insert(key, Arc::new(nodes));
@@ -178,7 +183,9 @@ impl WaypointManager {
     /// C++ only clears the node map, keeping the (now empty) entry alive because the
     /// generators hold raw pointers into it. `Arc` makes removal safe here.
     pub fn delete_path(&self, origin: WaypointPathOrigin, key: u32) -> bool {
-        self.paths(origin).remove(&key).is_some()
+        self.paths(origin)
+            .and_then(|paths| paths.remove(&key))
+            .is_some()
     }
 
     /// Move a node.
@@ -411,8 +418,10 @@ mod tests {
 
     #[test]
     fn origin_renders_the_table_name() {
+        assert_eq!(WaypointPathOrigin::NoPath.to_string(), "<no path>");
         assert_eq!(WaypointPathOrigin::Guid.to_string(), "guid");
         assert_eq!(WaypointPathOrigin::Entry.to_string(), "entry");
+        assert_eq!(WaypointPathOrigin::Special.to_string(), "special");
     }
 
     #[test]
