@@ -186,6 +186,12 @@ fn is_area_positive_target(target: u32) -> bool {
     matches!(target, 20 | 30 | 31 | 33 | 34 | 37 | 56 | 61)
 }
 
+fn spell_cone_angle(degrees: i16) -> Option<f32> {
+    (-360..=360)
+        .contains(&degrees)
+        .then(|| degrees as f32 * std::f32::consts::PI / 180.0)
+}
+
 pub struct SpellManager {
     spells: DashMap<u32, Arc<SpellEntry>>,
     target_positions: DashMap<u32, SpellTargetPosition>,
@@ -918,7 +924,7 @@ impl SpellManager {
         for row in &rows {
             use sqlx::Row;
             let entry: u32 = row.try_get::<u64, _>("entry").unwrap_or(0) as u32;
-            let degrees: f64 = row.try_get("cone_degrees").unwrap_or(0.0);
+            let degrees: i16 = row.try_get("cone_degrees").unwrap_or(0);
 
             if self.spells.get(&entry).is_none() {
                 if !self.existing_spell_ids.read().contains(&entry) {
@@ -926,12 +932,11 @@ impl SpellManager {
                 }
                 continue;
             }
-            if degrees < -360.0 || degrees > 360.0 {
+            let Some(angle) = spell_cone_angle(degrees) else {
                 warn!("Spell {entry} in spell_cone has incorrect angle {degrees} outside of valid range");
                 continue;
-            }
+            };
 
-            let angle = (degrees * std::f64::consts::PI / 180.0) as f32;
             cones.insert(entry, angle);
             count += 1;
         }
@@ -1522,5 +1527,13 @@ mod tests {
 
         assert!(!mgr.is_learned_spell_valid(0, false));
         assert!(!mgr.is_learned_spell_valid(42, false));
+    }
+
+    #[test]
+    fn spell_cone_angles_enforce_source_range() {
+        assert_eq!(spell_cone_angle(-361), None);
+        assert_eq!(spell_cone_angle(361), None);
+        assert_eq!(spell_cone_angle(0), Some(0.0));
+        assert!((spell_cone_angle(180).unwrap() - std::f32::consts::PI).abs() < f32::EPSILON);
     }
 }
