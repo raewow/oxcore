@@ -77,6 +77,10 @@ impl MovementPacketSender {
         }
     }
 
+    fn absolute_speed(move_type: MoveType, rate: f32) -> Option<f32> {
+        Self::base_move_speed(move_type).map(|base_speed| rate * base_speed)
+    }
+
     fn creature_exists(world: &World, creature_guid: ObjectGuid) -> bool {
         world
             .managers
@@ -95,9 +99,9 @@ impl MovementPacketSender {
         move_type: MoveType,
         new_rate: f32,
     ) -> bool {
-        let (Some(opcode), Some(base_speed)) = (
+        let (Some(opcode), Some(speed)) = (
             Self::opcode_for_move_type(move_type),
-            Self::base_move_speed(move_type),
+            Self::absolute_speed(move_type, new_rate),
         ) else {
             return false;
         };
@@ -108,7 +112,7 @@ impl MovementPacketSender {
 
         let mut packet = WorldPacket::new(opcode);
         packet.write_packed_guid_raw(creature_guid.raw());
-        packet.write_f32(new_rate * base_speed);
+        packet.write_f32(speed);
 
         broadcast_around_creature(world, creature_guid, &packet);
         true
@@ -284,6 +288,18 @@ mod tests {
         );
         assert_eq!(
             MovementPacketSender::base_move_speed(MoveType::FlightBack),
+            None
+        );
+    }
+
+    #[test]
+    fn speed_broadcast_uses_an_absolute_speed() {
+        assert_eq!(
+            MovementPacketSender::absolute_speed(MoveType::Run, 1.5),
+            Some(10.5)
+        );
+        assert_eq!(
+            MovementPacketSender::absolute_speed(MoveType::Flight, 1.5),
             None
         );
     }
