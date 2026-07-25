@@ -11,6 +11,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{info, warn};
 
+const CLASSIC_CLIENT_BUILD: u32 = 5875;
+
 /// Faithful `SpellChainNode` (MaNGOS `SpellMgr.h`): prev/first/req + 1-based rank.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpellChainNode {
@@ -190,6 +192,11 @@ fn spell_cone_angle(degrees: i16) -> Option<f32> {
     (-360..=360)
         .contains(&degrees)
         .then(|| degrees as f32 * std::f32::consts::PI / 180.0)
+}
+
+#[cfg(test)]
+fn is_spell_learn_build_supported(build_min: u32, build_max: u32) -> bool {
+    build_min <= CLASSIC_CLIENT_BUILD && CLASSIC_CLIENT_BUILD <= build_max
 }
 
 pub struct SpellManager {
@@ -1248,8 +1255,11 @@ impl SpellManager {
             "SELECT CAST(`entry` AS UNSIGNED) AS entry, \
                     CAST(`SpellID` AS UNSIGNED) AS spell_id, \
                     `Active` \
-             FROM `spell_learn_spell`",
+             FROM `spell_learn_spell` \
+             WHERE `build_min` <= ? AND `build_max` >= ?",
         )
+        .bind(CLASSIC_CLIENT_BUILD)
+        .bind(CLASSIC_CLIENT_BUILD)
         .fetch_all(world_db)
         .await;
 
@@ -1559,5 +1569,13 @@ mod tests {
 
         assert!(mgr.has_spell_area_restriction(10));
         assert!(!mgr.has_spell_area_restriction(11));
+    }
+
+    #[test]
+    fn spell_learn_rows_use_inclusive_classic_build_range() {
+        assert!(is_spell_learn_build_supported(5875, 5875));
+        assert!(is_spell_learn_build_supported(1, 6000));
+        assert!(!is_spell_learn_build_supported(5876, 6000));
+        assert!(!is_spell_learn_build_supported(1, 5874));
     }
 }
