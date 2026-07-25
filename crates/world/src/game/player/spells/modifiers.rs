@@ -138,6 +138,9 @@ pub fn calculate_power_cost_with_school_multiplier(
 /// - `spell_family_name`: Which spell family (from spell DBC spell_family_name)
 /// - `source_spell_id`: The talent/aura spell providing this modifier
 /// - `source_aura_slot`: The aura slot for removal tracking
+///
+/// `spell_family_mask` is the source spell effect's class mask
+/// (`EffectItemType[effect_index]`), matching `SpellModifier` construction.
 pub fn add_spell_modifier(
     player_guid: ObjectGuid,
     op: SpellModOp,
@@ -188,6 +191,13 @@ pub fn remove_spell_modifier(
         });
 
     Ok(())
+}
+
+pub fn spell_affect_mask(effect_item_types: &[u64; 3], effect_index: u8) -> u64 {
+    effect_item_types
+        .get(effect_index as usize)
+        .copied()
+        .unwrap_or(0)
 }
 
 /// Return whether this cast has already applied this exact modifier instance.
@@ -552,6 +562,13 @@ mod tests {
         modifier.spell_family_mask = 0x200;
         assert!(does_modifier_apply(&modifier, 3, 0x200));
         assert!(!does_modifier_apply(&modifier, 3, 0x100));
+    }
+
+    #[test]
+    fn spell_affect_mask_uses_the_source_effect_index() {
+        let masks = [0x10, 0x20, 0x40];
+        assert_eq!(spell_affect_mask(&masks, 1), 0x20);
+        assert_eq!(spell_affect_mask(&masks, 3), 0);
     }
 
     #[test]

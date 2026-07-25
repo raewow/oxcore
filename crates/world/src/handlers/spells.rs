@@ -367,7 +367,7 @@ fn aura_caster_is_self(player_guid: ObjectGuid, spell_id: u32, world: &World) ->
 
 /// CMSG_CANCEL_GROWTH_AURA (opcode 0x029B)
 ///
-/// Growth aura cancellation is intentionally handled elsewhere.
+/// The Vanilla server intentionally treats this opcode as a no-op.
 pub async fn handle_cancel_growth_aura(
     _session: &WorldSession,
     _packet: &mut WorldPacket,

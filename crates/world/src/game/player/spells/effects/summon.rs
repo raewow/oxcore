@@ -11,12 +11,13 @@ use anyhow::Result;
 ///
 /// Summon a creature at the target location.
 /// Used for warlock pets, elementals, and temporary summons.
-pub async fn effect_summon(_input: &EffectInput, _world: &World) -> Result<EffectResult> {
-    // TODO: Implement creature spawning system
-    // - Get creature entry from misc_value
-    // - Get summon location (target or caster position)
-    // - Spawn creature with owner = caster
-    // - Set duration from base_value
+pub async fn effect_summon(input: &EffectInput, world: &World) -> Result<EffectResult> {
+    if input.misc_value > 0 {
+        world
+            .systems
+            .pet
+            .summon(input.caster_guid, input.misc_value as u32, world)?;
+    }
     Ok(EffectResult::empty())
 }
 
@@ -39,16 +40,47 @@ pub async fn effect_summon_guardian(_input: &EffectInput, _world: &World) -> Res
 /// SPELL_EFFECT_TAME_CREATURE (55)
 ///
 /// Attempt to tame a beast creature.
-pub async fn effect_tame_creature(_input: &EffectInput, _world: &World) -> Result<EffectResult> {
-    // TODO: Implement pet taming system
+pub async fn effect_tame_creature(input: &EffectInput, world: &World) -> Result<EffectResult> {
+    let Some(target_guid) = input.target_guid else {
+        return Ok(EffectResult::empty());
+    };
+    let Some(entry) = world
+        .managers
+        .creature_mgr
+        .with_creature(target_guid, |creature| creature.entry)
+    else {
+        return Ok(EffectResult::empty());
+    };
+    world.systems.pet.summon(input.caster_guid, entry, world)?;
+    if let Some((_, creature)) = world.managers.creature_mgr.remove_creature(target_guid) {
+        if let Some(map) = world
+            .managers
+            .map_mgr
+            .get_map(creature.map_id, creature.instance_id)
+        {
+            map.remove_creature(target_guid, creature.position);
+        }
+    }
     Ok(EffectResult::empty())
 }
 
 /// SPELL_EFFECT_SUMMON_PET (56)
 ///
 /// Summon the caster's active pet.
-pub async fn effect_summon_pet(_input: &EffectInput, _world: &World) -> Result<EffectResult> {
-    // TODO: Get player's active pet and summon it
+pub async fn effect_summon_pet(input: &EffectInput, world: &World) -> Result<EffectResult> {
+    if input.misc_value > 0
+        && world
+            .systems
+            .player
+            .manager()
+            .with_player(input.caster_guid, |player| player.active_pet.is_none())
+            .unwrap_or(false)
+    {
+        world
+            .systems
+            .pet
+            .summon(input.caster_guid, input.misc_value as u32, world)?;
+    }
     Ok(EffectResult::empty())
 }
 
@@ -92,8 +124,22 @@ pub async fn effect_summon_critter(_input: &EffectInput, _world: &World) -> Resu
 /// SPELL_EFFECT_SUMMON_DEAD_PET (109)
 ///
 /// Resurrect and summon the caster's dead pet.
-pub async fn effect_summon_dead_pet(_input: &EffectInput, _world: &World) -> Result<EffectResult> {
-    // TODO: Resurrect and summon dead pet
+pub async fn effect_summon_dead_pet(input: &EffectInput, world: &World) -> Result<EffectResult> {
+    if let Some(pet_guid) = world
+        .systems
+        .player
+        .manager()
+        .with_player(input.caster_guid, |player| player.active_pet)
+        .flatten()
+    {
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(pet_guid, |pet| {
+                pet.current_health = pet.max_health;
+                pet.respawn();
+            });
+    }
     Ok(EffectResult::empty())
 }
 

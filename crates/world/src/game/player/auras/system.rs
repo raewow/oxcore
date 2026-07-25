@@ -1587,12 +1587,20 @@ impl AuraSystem {
             }
         };
 
-        // Look up spell_family_name and spell_family_flags from the source spell
-        let (family_name, family_flags) = world
+        // SpellModifier stores the source effect's class mask, not the spell-wide family flags.
+        let (family_name, affect_mask) = world
             .managers
             .spell_mgr
             .get(spell_id)
-            .map(|s| (s.spell_family_name, s.spell_family_flags))
+            .map(|s| {
+                (
+                    s.spell_family_name,
+                    super::super::spells::modifiers::spell_affect_mask(
+                        &s.effect_item_type,
+                        effect_index,
+                    ),
+                )
+            })
             .unwrap_or((0, 0));
 
         // Read assigned slot from aura container
@@ -1614,7 +1622,7 @@ impl AuraSystem {
             op,
             mod_type,
             base_value,
-            family_flags,
+            affect_mask,
             family_name,
             spell_id,
             aura_slot,
@@ -1628,7 +1636,7 @@ impl AuraSystem {
             mod_type,
             base_value,
             family_name,
-            family_flags
+            affect_mask
         );
 
         Ok(())
@@ -1924,6 +1932,7 @@ impl AuraSystem {
                     if aura.aura_type != effects::AURA_PROC_TRIGGER_SPELL
                         && aura.aura_type != effects::AURA_PROC_TRIGGER_DAMAGE
                         && aura.aura_type != effects::AURA_DUMMY
+                        && aura.aura_type != effects::AURA_MOD_MELEE_HASTE
                     {
                         continue;
                     }
@@ -1990,6 +1999,7 @@ impl AuraSystem {
 
         // Process each proc candidate, collecting triggered spell casts
         let mut triggered_casts: Vec<u32> = Vec::new();
+        let mut charge_consumption = Vec::new();
         for candidate in &procable_auras {
             let result = proc::dispatch_proc(
                 player_guid,
@@ -2004,6 +2014,7 @@ impl AuraSystem {
             if let Some(trigger_id) = result.trigger_spell_id {
                 triggered_casts.push(trigger_id);
             }
+            charge_consumption.push(result.consume_charge);
         }
 
         // Consume charges for procs that fired
@@ -2013,8 +2024,10 @@ impl AuraSystem {
                 .player
                 .manager()
                 .with_player_mut(player_guid, |player| {
-                    for candidate in &procable_auras {
-                        if candidate.charges > 0 {
+                    for (candidate, consume_charge) in
+                        procable_auras.iter().zip(&charge_consumption)
+                    {
+                        if *consume_charge && candidate.charges > 0 {
                             // Decrement charge on the aura
                             if let Some(aura) = player
                                 .auras
@@ -2030,8 +2043,8 @@ impl AuraSystem {
                 });
 
             // Remove auras with 0 charges remaining
-            for candidate in &procable_auras {
-                if candidate.charges == 1 {
+            for (candidate, consume_charge) in procable_auras.iter().zip(&charge_consumption) {
+                if *consume_charge && candidate.charges == 1 {
                     // Was 1, now 0 after decrement — remove it
                     let _ = self
                         .remove_aura(

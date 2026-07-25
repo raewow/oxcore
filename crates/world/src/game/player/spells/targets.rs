@@ -1961,20 +1961,27 @@ fn is_within_dist_in_map(
     }
 }
 
-/// `Unit::GetCharmerOrOwnerPlayerOrPlayerItself` — a player resolves to itself;
-/// charm/pet ownership is not tracked, so non-players resolve to `None`. ...
-fn charmer_or_owner_player_or_self(guid: ObjectGuid) -> Option<ObjectGuid> {
+/// `Unit::GetCharmerOrOwnerPlayerOrPlayerItself`.
+fn charmer_or_owner_player_or_self(guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
     if guid.is_player() {
         Some(guid)
     } else {
-        None
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |creature| creature.owner_guid)
+            .flatten()
     }
 }
 
-/// `Unit::GetPet` — pets are not tracked yet, so no pet is ever resolved; the
-/// `withPets` branches keep their structure but never append. ...
-fn unit_pet(_owner: ObjectGuid, _world: &World) -> Option<ObjectGuid> {
-    None
+/// `Unit::GetPet` for player-owned runtime pets.
+fn unit_pet(owner: ObjectGuid, world: &World) -> Option<ObjectGuid> {
+    world
+        .systems
+        .player
+        .manager()
+        .with_player(owner, |player| player.active_pet)
+        .flatten()
 }
 
 /// Port of `Spell::FillRaidOrPartyTargets`.
@@ -1992,7 +1999,7 @@ pub fn fill_raid_or_party_targets(
     world: &World,
     out: &mut Vec<ObjectGuid>,
 ) {
-    let p_target = charmer_or_owner_player_or_self(anchor_target);
+    let p_target = charmer_or_owner_player_or_self(anchor_target, world);
     let group = p_target.and_then(|g| world.systems.group.get_player_group(g));
 
     match group {
@@ -2057,9 +2064,8 @@ const CHAIN_SPELL_JUMP_RADIUS: f32 = 10.0;
 // ─── SetTargetMap new target-mode helpers ─────────────────────────────────────
 
 /// Get a pet or charmed unit GUID for the caster.
-/// Pets are not tracked yet, so returns `None`. ...
-fn caster_pet_or_charm(_caster_guid: ObjectGuid, _world: &World) -> Option<ObjectGuid> {
-    None
+fn caster_pet_or_charm(caster_guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
+    unit_pet(caster_guid, world)
 }
 
 /// Get the charmer or owner of a unit.
@@ -2070,10 +2076,7 @@ fn caster_charm_owner(guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
         world
             .managers
             .creature_mgr
-            .with_creature(guid, |c| {
-                // Charm/owner not tracked yet
-                None::<ObjectGuid>
-            })
+            .with_creature(guid, |c| c.owner_guid)
             .flatten()
     } else {
         None
@@ -2554,6 +2557,28 @@ mod tests {
             .map_mgr
             .get_or_create_map(0, 0)
             .add_creature(guid, position);
+    }
+
+    #[tokio::test]
+    async fn runtime_pet_resolves_to_its_owner_and_back() {
+        let world = test_world();
+        let owner = ObjectGuid::new_player(1);
+        let pet = ObjectGuid::new_pet(1, 1);
+        add_test_player(&world, owner, 0, 0);
+        add_test_creature(&world, pet, Position::default());
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(pet, |creature| creature.owner_guid = Some(owner));
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(owner, |player| player.active_pet = Some(pet));
+
+        assert_eq!(charmer_or_owner_player_or_self(pet, &world), Some(owner));
+        assert_eq!(unit_pet(owner, &world), Some(pet));
+        assert_eq!(caster_pet_or_charm(owner, &world), Some(pet));
+        assert_eq!(caster_charm_owner(pet, &world), Some(owner));
     }
 
     /// Ground-targeted AoE resolves enemies around the destination position, proving the

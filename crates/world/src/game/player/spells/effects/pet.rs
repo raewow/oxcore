@@ -27,9 +27,7 @@ pub async fn effect_learn_pet_spell(input: &EffectInput, world: &World) -> Resul
 ///
 /// Dismiss the caster's pet.
 pub async fn effect_dismiss_pet(input: &EffectInput, world: &World) -> Result<EffectResult> {
-    // TODO: Dismiss the active pet
-
-    tracing::debug!("Dismiss pet: caster={:?}", input.caster_guid);
+    world.systems.pet.dismiss(input.caster_guid, world);
 
     Ok(EffectResult::empty())
 }

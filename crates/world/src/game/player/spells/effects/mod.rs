@@ -23,6 +23,7 @@ pub mod pvp;
 pub mod quest;
 pub mod resurrect;
 pub mod script;
+pub mod summon;
 pub mod teleport;
 
 use crate::World;
@@ -759,10 +760,14 @@ pub async fn dispatch_effect(
         Pull => movement::effect_pull(input, world).await,
         Charge2 => movement::effect_charge(input, world).await, // Same as Charge
         // --- Stub effects for MaNGOS parity ---
-        SummonType | SummonPet | SummonDeadPet | TameCreature => {
+        SummonPet => summon::effect_summon_pet(input, world).await,
+        SummonDeadPet => summon::effect_summon_dead_pet(input, world).await,
+        TameCreature => summon::effect_tame_creature(input, world).await,
+        // Generic summons include guardians, totems, and wild creatures. Route
+        // only explicit pet effect types through the controlled-pet system.
+        SummonType => {
             tracing::debug!(
-                "[SPELL-EFFECT] Unimplemented summon effect {:?} for spell {}",
-                effect_type,
+                "[SPELL-EFFECT] Unimplemented generic summon for spell {}",
                 input.spell_id
             );
             Ok(EffectResult::empty())

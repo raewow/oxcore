@@ -408,6 +408,20 @@ pub fn negative_effect_mask<const N: usize>(
 pub struct ProcResult {
     /// If set, this spell should be cast as triggered on the player's current target
     pub trigger_spell_id: Option<u32>,
+    /// Whether post-processing should consume one aura charge.
+    pub consume_charge: bool,
+}
+
+fn should_consume_haste_proc_charge(
+    spell_icon_id: u32,
+    spell_visual: u32,
+    charges: u8,
+    proc_ex: u32,
+) -> bool {
+    !(spell_icon_id == 108
+        && spell_visual == 2759
+        && charges <= 1
+        && proc_ex & proc_flags_ex::CRITICAL_HIT != 0)
 }
 
 /// Dispatch a proc event for a single aura candidate.
@@ -416,7 +430,7 @@ pub fn dispatch_proc(
     player_guid: ObjectGuid,
     candidate: &ProcCandidate,
     _proc_flags: u32,
-    _proc_ex: u32,
+    proc_ex: u32,
     proc_spell_id: Option<u32>,
     damage: u32,
     world: &World,
@@ -430,6 +444,7 @@ pub fn dispatch_proc(
             handle_proc_trigger_damage(player_guid, candidate, damage, world, broadcast_mgr)?;
             Ok(ProcResult {
                 trigger_spell_id: None,
+                consume_charge: true,
             })
         }
         AURA_DUMMY => {
@@ -443,6 +458,26 @@ pub fn dispatch_proc(
             )?;
             Ok(ProcResult {
                 trigger_spell_id: None,
+                consume_charge: true,
+            })
+        }
+        AURA_MOD_MELEE_HASTE => {
+            let consume_charge = world
+                .managers
+                .spell_mgr
+                .get(candidate.spell_id)
+                .map(|spell| {
+                    should_consume_haste_proc_charge(
+                        spell.spell_icon_id,
+                        spell.spell_visual,
+                        candidate.charges,
+                        proc_ex,
+                    )
+                })
+                .unwrap_or(true);
+            Ok(ProcResult {
+                trigger_spell_id: None,
+                consume_charge,
             })
         }
         _ => {
@@ -453,6 +488,7 @@ pub fn dispatch_proc(
             );
             Ok(ProcResult {
                 trigger_spell_id: None,
+                consume_charge: true,
             })
         }
     }
@@ -479,6 +515,7 @@ fn handle_proc_trigger_spell(
         );
         return Ok(ProcResult {
             trigger_spell_id: None,
+            consume_charge: true,
         });
     }
 
@@ -491,6 +528,7 @@ fn handle_proc_trigger_spell(
         );
         return Ok(ProcResult {
             trigger_spell_id: None,
+            consume_charge: true,
         });
     }
 
@@ -504,6 +542,7 @@ fn handle_proc_trigger_spell(
     // Return the triggered spell ID so check_procs can cast it asynchronously
     Ok(ProcResult {
         trigger_spell_id: Some(trigger_spell_id),
+        consume_charge: true,
     })
 }
 
@@ -1163,6 +1202,28 @@ mod tests {
             true,
             false,
             0x1 // would fail the class-mask AND, but shouldn't be reached
+        ));
+    }
+
+    #[test]
+    fn flurry_last_charge_critical_preserves_the_aura_charge() {
+        assert!(!should_consume_haste_proc_charge(
+            108,
+            2759,
+            1,
+            proc_flags_ex::CRITICAL_HIT,
+        ));
+        assert!(should_consume_haste_proc_charge(
+            108,
+            2759,
+            2,
+            proc_flags_ex::CRITICAL_HIT,
+        ));
+        assert!(should_consume_haste_proc_charge(
+            108,
+            2759,
+            1,
+            proc_flags_ex::NORMAL_HIT
         ));
     }
 }
