@@ -1156,11 +1156,9 @@ impl SpellManager {
         }
 
         // SpellArea map check
-        let areas = self.spell_areas.read();
-        let has_area_restriction = areas
-            .iter()
-            .any(|sa| sa.spell == spell_info.id && sa.area_id != 0);
+        let has_area_restriction = self.has_spell_area_restriction(spell_info.id);
         if has_area_restriction {
+            let areas = self.spell_areas.read();
             for sa in areas.iter() {
                 if sa.spell == spell_info.id
                     && sa.is_fit_to_requirements(
@@ -1180,6 +1178,13 @@ impl SpellManager {
         }
 
         SpellCastResult::Success
+    }
+
+    fn has_spell_area_restriction(&self, spell_id: u32) -> bool {
+        self.spell_areas
+            .read()
+            .iter()
+            .any(|sa| sa.spell == spell_id)
     }
 
     /// Port of `SpellMgr::CheckUsedSpells` (SpellMgr.cpp:2797).
@@ -1535,5 +1540,24 @@ mod tests {
         assert_eq!(spell_cone_angle(361), None);
         assert_eq!(spell_cone_angle(0), Some(0.0));
         assert!((spell_cone_angle(180).unwrap() - std::f32::consts::PI).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn spell_area_restriction_includes_quest_or_aura_only_rows() {
+        let mgr = SpellManager::new();
+        mgr.spell_areas.write().push(SpellArea {
+            spell: 10,
+            area_id: 0,
+            quest_start: 100,
+            quest_end: 0,
+            aura_spell: 0,
+            racemask: 0,
+            gender: 2,
+            quest_start_can_active: false,
+            autocast: false,
+        });
+
+        assert!(mgr.has_spell_area_restriction(10));
+        assert!(!mgr.has_spell_area_restriction(11));
     }
 }
