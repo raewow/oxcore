@@ -1050,12 +1050,8 @@ impl SpellManager {
                 // SPELL_EFFECT_LEARN_SPELL
                 36 => {
                     let trigger = spell.effect_trigger_spell[i];
-                    if trigger != 0 {
-                        if let Some(entry) = self.spells.get(&trigger) {
-                            if !self.is_spell_valid(Some(&entry), _msg) {
-                                return false;
-                            }
-                        }
+                    if !self.is_learned_spell_valid(trigger, _msg) {
+                        return false;
                     }
                 }
                 _ => {}
@@ -1071,6 +1067,12 @@ impl SpellManager {
         }
 
         true
+    }
+
+    fn is_learned_spell_valid(&self, spell_id: u32, msg: bool) -> bool {
+        self.spells
+            .get(&spell_id)
+            .is_some_and(|spell| self.is_spell_valid(Some(&spell), msg))
     }
 
     /// Port of `SpellMgr::GetRequiredAreaForSpell` (SpellMgr.cpp:2706).
@@ -1512,5 +1514,13 @@ mod tests {
             0,
             42,
         ));
+    }
+
+    #[test]
+    fn learned_spell_validation_rejects_missing_spell() {
+        let mgr = SpellManager::new();
+
+        assert!(!mgr.is_learned_spell_valid(0, false));
+        assert!(!mgr.is_learned_spell_valid(42, false));
     }
 }
