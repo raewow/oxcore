@@ -606,6 +606,9 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_CANCEL_AURA => {
                     spells::handle_cancel_aura(session, packet, world).await?;
                 }
+                Opcode::CMSG_PET_CANCEL_AURA => {
+                    spells::handle_pet_cancel_aura(session, packet, world).await?;
+                }
                 Opcode::CMSG_CANCEL_GROWTH_AURA => {
                     spells::handle_cancel_growth_aura(session, packet, world).await?;
                 }

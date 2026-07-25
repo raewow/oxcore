@@ -1933,6 +1933,8 @@ impl AuraSystem {
                         && aura.aura_type != effects::AURA_PROC_TRIGGER_DAMAGE
                         && aura.aura_type != effects::AURA_DUMMY
                         && aura.aura_type != effects::AURA_MOD_MELEE_HASTE
+                        && aura.aura_type != effects::AURA_MOD_CASTING_SPEED_NOT_STACK
+                        && aura.aura_type != effects::AURA_REFLECT_SPELLS_SCHOOL
                     {
                         continue;
                     }
@@ -1988,6 +1990,7 @@ impl AuraSystem {
                         effect_index: aura.effect_index,
                         aura_type: aura.aura_type,
                         current_value: aura.current_value(),
+                        misc_value: aura.misc_value,
                         caster_guid: aura.caster_guid,
                         trigger_spell_id,
                         charges: aura.charges,
@@ -2371,6 +2374,7 @@ pub struct ProcCandidate {
     pub effect_index: u8,
     pub aura_type: u32,
     pub current_value: i32,
+    pub misc_value: i32,
     pub caster_guid: ObjectGuid,
     /// The spell to cast when AURA_PROC_TRIGGER_SPELL fires (from effect_trigger_spell)
     pub trigger_spell_id: u32,

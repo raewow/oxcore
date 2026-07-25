@@ -424,6 +424,14 @@ fn should_consume_haste_proc_charge(
         && proc_ex & proc_flags_ex::CRITICAL_HIT != 0)
 }
 
+fn is_noninstant_proc_spell(cast_time: Option<i32>) -> bool {
+    cast_time.unwrap_or(0) > 0
+}
+
+fn is_proc_spell_in_school_mask(school: Option<u32>, mask: i32) -> bool {
+    school.is_some_and(|school| (mask as u32 & (1 << (school & 0x07))) != 0)
+}
+
 /// Dispatch a proc event for a single aura candidate.
 /// Returns a ProcResult indicating if a triggered spell cast is needed.
 pub fn dispatch_proc(
@@ -480,6 +488,30 @@ pub fn dispatch_proc(
                 consume_charge,
             })
         }
+        AURA_MOD_CASTING_SPEED_NOT_STACK => {
+            let cast_time = proc_spell_id
+                .and_then(|id| world.managers.spell_mgr.get(id))
+                .and_then(|spell| {
+                    world
+                        .dbc
+                        .read()
+                        .get_spell_cast_time(spell.casting_time_index)
+                        .map(|entry| entry.cast_time)
+                });
+            Ok(ProcResult {
+                trigger_spell_id: None,
+                consume_charge: is_noninstant_proc_spell(cast_time),
+            })
+        }
+        AURA_REFLECT_SPELLS_SCHOOL => Ok(ProcResult {
+            trigger_spell_id: None,
+            consume_charge: is_proc_spell_in_school_mask(
+                proc_spell_id
+                    .and_then(|id| world.managers.spell_mgr.get(id))
+                    .map(|spell| spell.school),
+                candidate.misc_value,
+            ),
+        }),
         _ => {
             tracing::debug!(
                 "Unhandled proc aura type {} for spell {}",
@@ -1225,5 +1257,19 @@ mod tests {
             1,
             proc_flags_ex::NORMAL_HIT
         ));
+    }
+
+    #[test]
+    fn casting_speed_proc_only_consumes_for_noninstant_spells() {
+        assert!(!is_noninstant_proc_spell(None));
+        assert!(!is_noninstant_proc_spell(Some(0)));
+        assert!(is_noninstant_proc_spell(Some(1500)));
+    }
+
+    #[test]
+    fn reflect_school_proc_requires_matching_school() {
+        assert!(is_proc_spell_in_school_mask(Some(2), 1 << 2));
+        assert!(!is_proc_spell_in_school_mask(Some(2), 1 << 1));
+        assert!(!is_proc_spell_in_school_mask(None, 1 << 2));
     }
 }

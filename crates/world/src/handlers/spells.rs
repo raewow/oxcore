@@ -332,6 +332,71 @@ pub async fn handle_cancel_aura(
     Ok(())
 }
 
+/// CMSG_PET_CANCEL_AURA (opcode 0x026B)
+///
+/// Sent when the player right-clicks a removable aura on their active pet.
+pub async fn handle_pet_cancel_aura(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let Some(pet_guid) = packet.read_guid_raw().map(ObjectGuid::from_raw) else {
+        return Ok(());
+    };
+    let Some(spell_id) = packet.read_u32() else {
+        return Ok(());
+    };
+    let Some(player_guid) = session.player_guid() else {
+        return Ok(());
+    };
+
+    let active_pet = world
+        .systems
+        .player
+        .manager()
+        .with_player(player_guid, |player| player.active_pet)
+        .flatten();
+    if !is_active_pet_aura_request(
+        session.client_mover_guid(),
+        player_guid,
+        active_pet,
+        pet_guid,
+    ) || world.managers.spell_mgr.get(spell_id).is_none()
+    {
+        return Ok(());
+    }
+
+    if !world.managers.creature_mgr.is_alive(pet_guid) {
+        const PET_FEEDBACK_PET_DEAD: u8 = 1;
+        let mut feedback = WorldPacket::new(Opcode::SMSG_PET_ACTION_FEEDBACK);
+        feedback.write_u8(PET_FEEDBACK_PET_DEAD);
+        world
+            .managers
+            .broadcast_mgr
+            .send_msg_to_player(player_guid, feedback);
+        return Ok(());
+    }
+
+    world
+        .systems
+        .auras
+        .remove_spell_auras(pet_guid, spell_id, world)
+        .await
+}
+
+fn is_active_pet_aura_request(
+    mover_guid: Option<ObjectGuid>,
+    player_guid: ObjectGuid,
+    active_pet: Option<ObjectGuid>,
+    requested_pet: ObjectGuid,
+) -> bool {
+    mover_guid == Some(player_guid) && active_pet == Some(requested_pet)
+}
+
+fn is_player_mover(mover_guid: Option<ObjectGuid>, player_guid: ObjectGuid) -> bool {
+    mover_guid == Some(player_guid)
+}
+
 /// Whether any of a spell's effects is an area-aura effect (MaNGOS `IsAreaAuraEffect`).
 fn spell_has_area_aura_effect(effects: &[u32; 3]) -> bool {
     effects.iter().any(|&e| {
@@ -389,6 +454,10 @@ pub async fn handle_cancel_auto_repeat_spell(
         None => return Ok(()),
     };
 
+    if !is_player_mover(session.client_mover_guid(), player_guid) {
+        return Ok(());
+    }
+
     world
         .systems
         .spells
@@ -441,5 +510,41 @@ mod tests {
         // APPLY_AURA (6), SCHOOL_DAMAGE (2), HEAL (10), none (0).
         assert!(!spell_has_area_aura_effect(&[0, 0, 0]));
         assert!(!spell_has_area_aura_effect(&[6, 2, 10]));
+    }
+
+    #[test]
+    fn pet_aura_cancellation_requires_self_mover_and_active_pet() {
+        let player = ObjectGuid::new_player(1);
+        let pet = ObjectGuid::new_pet(100, 2);
+        let other_pet = ObjectGuid::new_pet(100, 3);
+
+        assert!(is_active_pet_aura_request(
+            Some(player),
+            player,
+            Some(pet),
+            pet
+        ));
+        assert!(!is_active_pet_aura_request(
+            Some(other_pet),
+            player,
+            Some(pet),
+            pet
+        ));
+        assert!(!is_active_pet_aura_request(
+            Some(player),
+            player,
+            Some(pet),
+            other_pet
+        ));
+    }
+
+    #[test]
+    fn auto_repeat_cancellation_requires_the_player_mover() {
+        let player = ObjectGuid::new_player(1);
+        let pet = ObjectGuid::new_pet(100, 2);
+
+        assert!(is_player_mover(Some(player), player));
+        assert!(!is_player_mover(Some(pet), player));
+        assert!(!is_player_mover(None, player));
     }
 }
