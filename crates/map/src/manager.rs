@@ -1,10 +1,30 @@
 //! Map Manager - manages all map instances
 
 use dashmap::DashMap;
+use parking_lot::RwLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use crate::map::MapConfig;
 use crate::Map;
+
+/// Supplies the tuning for a map the first time it is created.
+///
+/// Maps are created lazily from dozens of call sites that have no access to DBC
+/// or server config, so rather than threading a `MapConfig` through all of them
+/// the world layer installs a resolver once at startup.
+pub trait MapConfigProvider: Send + Sync {
+    fn config_for(&self, map_id: u32, instance_id: u32) -> MapConfig;
+}
+
+impl<F> MapConfigProvider for F
+where
+    F: Fn(u32, u32) -> MapConfig + Send + Sync,
+{
+    fn config_for(&self, map_id: u32, instance_id: u32) -> MapConfig {
+        self(map_id, instance_id)
+    }
+}
 
 /// Manages all map instances
 pub struct MapManager {
@@ -12,6 +32,8 @@ pub struct MapManager {
     maps: DashMap<(u32, u32), Arc<Map>>,
     /// Current tick counter for visibility throttling
     current_tick: AtomicU32,
+    /// Resolves the config for a map on first creation.
+    config_provider: RwLock<Option<Arc<dyn MapConfigProvider>>>,
 }
 
 impl MapManager {
@@ -19,6 +41,27 @@ impl MapManager {
         Self {
             maps: DashMap::new(),
             current_tick: AtomicU32::new(0),
+            config_provider: RwLock::new(None),
+        }
+    }
+
+    /// Install the resolver used for maps created from here on.
+    pub fn set_config_provider(&self, provider: Arc<dyn MapConfigProvider>) {
+        *self.config_provider.write() = Some(provider);
+    }
+
+    /// Tuning for a map, or the default when no resolver is installed.
+    fn config_for(&self, map_id: u32, instance_id: u32) -> MapConfig {
+        match self.config_provider.read().as_ref() {
+            Some(provider) => provider.config_for(map_id, instance_id),
+            None => {
+                tracing::debug!(
+                    "MapManager: no config provider installed; map {}:{} uses defaults",
+                    map_id,
+                    instance_id
+                );
+                MapConfig::default()
+            }
         }
     }
 
@@ -40,9 +83,16 @@ impl MapManager {
             return Arc::clone(&map);
         }
 
-        let map = Arc::new(Map::new(map_id, instance_id));
-        self.maps.insert(key, Arc::clone(&map));
-        map
+        // Resolve the config outside the entry lock: the provider is world-side
+        // code and must not run while a map shard is held.
+        let config = self.config_for(map_id, instance_id);
+
+        Arc::clone(
+            self.maps
+                .entry(key)
+                .or_insert_with(|| Arc::new(Map::with_config(map_id, instance_id, config)))
+                .value(),
+        )
     }
 
     /// Get a map if it exists

@@ -14,6 +14,8 @@ pub mod terrain;
 
 pub use self::pathfinding::{GamePathFinder, MMapManager, PathFinder, PathResult, VMapManager};
 pub use grid_coords::{CellPair, GridPair};
-pub use manager::MapManager;
-pub use map::Map;
+pub use manager::{MapConfigProvider, MapManager};
+pub use map::{
+    GridStatePass, Map, MapConfig, MapKind, ObjectKind, RelocateResult, UnloadedObjects,
+};
 pub use terrain::{LiquidData, LiquidStatusFlags, TerrainInfo, TerrainManager};

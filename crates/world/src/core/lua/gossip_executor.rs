@@ -245,10 +245,14 @@ pub async fn execute_gossip_actions(
                     Position { x, y, z, o },
                     0,
                 );
+                let map = world
+                    .managers
+                    .map_mgr
+                    .get_or_create_map(map_id, instance_id);
                 if world
                     .managers
                     .creature_mgr
-                    .spawn_creature(&spawn, instance_id)
+                    .spawn_into_map(&spawn, &map, Some(&world.managers.waypoint_mgr))
                     .is_none()
                 {
                     // Spawn failed (likely no template) — log and continue
@@ -274,10 +278,14 @@ pub async fn execute_gossip_actions(
                     let spawn = crate::game::creature::spawn::CreatureSpawnData::new(
                         0, entry, map_id, pos, 0,
                     );
+                    let map = world
+                        .managers
+                        .map_mgr
+                        .get_or_create_map(map_id, instance_id);
                     if world
                         .managers
                         .creature_mgr
-                        .spawn_creature(&spawn, instance_id)
+                        .spawn_into_map(&spawn, &map, Some(&world.managers.waypoint_mgr))
                         .is_none()
                     {
                         debug!(

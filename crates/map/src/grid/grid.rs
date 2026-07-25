@@ -2,7 +2,7 @@
 
 use smallvec::SmallVec;
 use std::collections::HashSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::grid::Cell;
 use crate::grid::GridState;
@@ -15,8 +15,9 @@ pub const MAX_GRIDS: usize = 64;
 /// Number of cells per grid side (16x16 = 256 cells per grid)
 pub const CELLS_PER_GRID: usize = 16;
 
-/// Grid idle timeout before unloading (5 minutes in milliseconds)
-pub const GRID_IDLE_TIMEOUT_MS: u128 = 300_000;
+/// Default idle time before a grid may be unloaded. Overridable per map via
+/// `MapConfig::grid_unload_delay`.
+pub const DEFAULT_GRID_UNLOAD_DELAY: Duration = Duration::from_secs(300);
 
 /// A single grid (533.33 x 533.33 units) with state machine
 pub struct Grid {
@@ -26,18 +27,26 @@ pub struct Grid {
     state: GridState,
     /// 16x16 cells
     cells: Box<[[Cell; CELLS_PER_GRID]; CELLS_PER_GRID]>,
-    /// All objects in this grid (for fast iteration)
+    /// All objects in this grid (for fast iteration).
+    ///
+    /// This is the single source of truth for grid membership: it is what range
+    /// queries read and what unload drains. There is deliberately no separate
+    /// per-type roster — one existed and silently desynced from this list on
+    /// every relocation, so creatures were despawned by grids they had left.
     objects: SmallVec<[ObjectGuid; 16]>,
-    /// Creatures spawned in this grid (for unload tracking)
-    creatures: SmallVec<[ObjectGuid; 8]>,
-    /// GameObjects spawned in this grid (for unload tracking)
-    gameobjects: SmallVec<[ObjectGuid; 8]>,
     /// Player count (for unload decisions)
     player_count: u32,
     /// When grid became idle (for timeout)
     idle_since: Option<Instant>,
     /// Loading priority (higher = load first)
     loading_priority: u8,
+    /// Manual pin, e.g. a grid holding objects that must never despawn.
+    /// `GridInfo::i_unloadExplicitLock` (NGrid.h:55).
+    unload_explicit_lock: bool,
+    /// Number of active objects whose spawn point is in this grid. Keeps the
+    /// grid loaded so reloading it cannot clone them.
+    /// `GridInfo::i_unloadActiveLockCount` (NGrid.h:56).
+    unload_active_lock: u16,
 }
 
 impl Grid {
@@ -67,11 +76,11 @@ impl Grid {
                 state: GridState::Invalid,
                 cells,
                 objects: SmallVec::new(),
-                creatures: SmallVec::new(),
-                gameobjects: SmallVec::new(),
                 player_count: 0,
                 idle_since: None,
                 loading_priority: 0,
+                unload_explicit_lock: false,
+                unload_active_lock: 0,
             }
         }
     }
@@ -185,55 +194,58 @@ impl Grid {
         self.player_count
     }
 
-    /// Register a spawned creature
-    pub fn register_creature(&mut self, guid: ObjectGuid) {
-        if !self.creatures.contains(&guid) {
-            self.creatures.push(guid);
+    /// Whether anything is pinning this grid against unload.
+    pub fn unload_locked(&self) -> bool {
+        self.unload_explicit_lock || self.unload_active_lock > 0
+    }
+
+    /// Pin or unpin the grid manually.
+    pub fn set_unload_explicit_lock(&mut self, on: bool) {
+        self.unload_explicit_lock = on;
+    }
+
+    /// Register an active object whose spawn point is in this grid.
+    pub fn inc_unload_active_lock(&mut self) {
+        self.unload_active_lock = self.unload_active_lock.saturating_add(1);
+    }
+
+    /// Drop one active-object pin.
+    pub fn dec_unload_active_lock(&mut self) {
+        self.unload_active_lock = self.unload_active_lock.saturating_sub(1);
+    }
+
+    /// Restart the idle countdown, keeping a grid alive while it is being used.
+    ///
+    /// `Map::ResetGridExpiry` (Map.cpp:403-406).
+    pub fn reset_idle_timer(&mut self) {
+        if self.idle_since.is_some() {
+            self.idle_since = Some(Instant::now());
         }
     }
 
-    /// Get all creatures in this grid
-    pub fn creatures(&self) -> &[ObjectGuid] {
-        &self.creatures
-    }
-
-    /// Clear all creatures (for unloading)
-    pub fn clear_creatures(&mut self) -> SmallVec<[ObjectGuid; 8]> {
-        std::mem::take(&mut self.creatures)
-    }
-
-    /// Drop a single creature (despawned while the grid stays loaded)
-    pub fn unregister_creature(&mut self, guid: ObjectGuid) {
-        self.creatures.retain(|g| *g != guid);
-    }
-
-    /// Register a spawned gameobject
-    pub fn register_gameobject(&mut self, guid: ObjectGuid) {
-        if !self.gameobjects.contains(&guid) {
-            self.gameobjects.push(guid);
+    /// Take every object out of the grid, clearing all cells with it.
+    ///
+    /// Used by `Map::unload_grid`, which is responsible for deciding what
+    /// happens to each returned GUID and for putting back anything that stays.
+    pub fn take_objects(&mut self) -> SmallVec<[ObjectGuid; 16]> {
+        for row in self.cells.iter_mut() {
+            for cell in row.iter_mut() {
+                cell.clear();
+            }
         }
+        self.player_count = 0;
+        std::mem::take(&mut self.objects)
     }
 
-    /// Clear all gameobjects (for unloading)
-    pub fn clear_gameobjects(&mut self) -> SmallVec<[ObjectGuid; 8]> {
-        std::mem::take(&mut self.gameobjects)
-    }
-
-    /// Drop a single gameobject (despawned while the grid stays loaded)
-    pub fn unregister_gameobject(&mut self, guid: ObjectGuid) {
-        self.gameobjects.retain(|g| *g != guid);
-    }
-
-    /// Check if grid should be unloaded (idle timeout expired)
-    pub fn should_unload(&self) -> bool {
+    /// Check if grid should be unloaded (idle for longer than `delay`)
+    pub fn should_unload(&self, delay: Duration) -> bool {
         if self.state != GridState::Idle {
             return false;
         }
 
-        if let Some(idle_since) = self.idle_since {
-            idle_since.elapsed().as_millis() > GRID_IDLE_TIMEOUT_MS
-        } else {
-            false
+        match self.idle_since {
+            Some(idle_since) => idle_since.elapsed() > delay,
+            None => false,
         }
     }
 
@@ -424,13 +436,14 @@ impl GridManager {
 
         for gx in min_grid_x..=max_grid_x {
             for gy in min_grid_y..=max_grid_y {
+                // No state filter: an object is in this list only because it was
+                // explicitly added, so anything here is live regardless of whether
+                // the grid's spawn data is loaded. Filtering on state hid objects
+                // during the load window (spawns are inserted while the grid is
+                // still `Loading`) and hid players left standing in a grid that
+                // was unloaded around them.
                 if let Some(grid) = self.get_grid(gx, gy) {
-                    // Only include objects from loaded grids
-                    if grid.state().is_loaded() {
-                        for &guid in grid.objects() {
-                            result.insert(guid);
-                        }
-                    }
+                    result.extend(grid.objects().iter().copied());
                 }
             }
         }
@@ -456,12 +469,12 @@ impl GridManager {
         result.into_iter().map(|(gx, gy, _)| (gx, gy)).collect()
     }
 
-    /// Get grids that should be unloaded (idle timeout expired)
-    pub fn get_grids_to_unload(&self) -> Vec<(u8, u8)> {
+    /// Get grids that have been idle for longer than `delay`
+    pub fn get_grids_to_unload(&self, delay: Duration) -> Vec<(u8, u8)> {
         let mut result = Vec::new();
         for &(gx, gy) in &self.active_grids {
             if let Some(grid) = self.get_grid(gx, gy) {
-                if grid.should_unload() {
+                if grid.should_unload(delay) {
                     result.push((gx, gy));
                 }
             }
@@ -476,57 +489,19 @@ impl GridManager {
         }
     }
 
-    /// Unload a grid and return creatures and gameobjects to despawn
-    pub fn unload_grid(
-        &mut self,
-        grid_x: u8,
-        grid_y: u8,
-    ) -> (SmallVec<[ObjectGuid; 8]>, SmallVec<[ObjectGuid; 8]>) {
-        if let Some(grid) = self.get_grid_mut(grid_x, grid_y) {
-            grid.set_state(GridState::Removal);
-            let creatures = grid.clear_creatures();
-            let gameobjects = grid.clear_gameobjects();
-            grid.set_state(GridState::Invalid);
-            (creatures, gameobjects)
-        } else {
-            (SmallVec::new(), SmallVec::new())
-        }
-    }
+    /// Drain a grid's objects and reset it to `Invalid`.
+    ///
+    /// Callers must go through `Map::unload_grid`, which also clears the map's
+    /// object registries and decides what happens to each returned GUID.
+    pub(crate) fn drain_grid(&mut self, grid_x: u8, grid_y: u8) -> SmallVec<[ObjectGuid; 16]> {
+        let Some(grid) = self.get_grid_mut(grid_x, grid_y) else {
+            return SmallVec::new();
+        };
 
-    /// Register a creature in a grid
-    pub fn register_creature(&mut self, guid: ObjectGuid, x: f32, y: f32) {
-        let (grid_x, grid_y) = world_to_grid(x, y);
-
-        if let Some(grid) = self.get_grid_mut(grid_x, grid_y) {
-            grid.register_creature(guid);
-        }
-    }
-
-    /// Register a gameobject in a grid
-    pub fn register_gameobject(&mut self, guid: ObjectGuid, x: f32, y: f32) {
-        let (grid_x, grid_y) = world_to_grid(x, y);
-
-        if let Some(grid) = self.get_grid_mut(grid_x, grid_y) {
-            grid.register_gameobject(guid);
-        }
-    }
-
-    /// Drop a single creature from its grid (pool replacement, scripted despawn)
-    pub fn unregister_creature(&mut self, guid: ObjectGuid, x: f32, y: f32) {
-        let (grid_x, grid_y) = world_to_grid(x, y);
-
-        if let Some(grid) = self.get_grid_mut(grid_x, grid_y) {
-            grid.unregister_creature(guid);
-        }
-    }
-
-    /// Drop a single gameobject from its grid (pool replacement, scripted despawn)
-    pub fn unregister_gameobject(&mut self, guid: ObjectGuid, x: f32, y: f32) {
-        let (grid_x, grid_y) = world_to_grid(x, y);
-
-        if let Some(grid) = self.get_grid_mut(grid_x, grid_y) {
-            grid.unregister_gameobject(guid);
-        }
+        grid.set_state(GridState::Removal);
+        let objects = grid.take_objects();
+        grid.set_state(GridState::Invalid);
+        objects
     }
 
     /// Number of active grids

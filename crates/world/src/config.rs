@@ -130,6 +130,23 @@ pub struct Config {
     #[serde(default)]
     pub chat_strict_link_checking_kick: bool, // Kick player for invalid links (default: false)
 
+    // Visibility Settings
+    // How far objects are shown to a player, per map kind. Raising these costs
+    // create/destroy packet volume and spawned creature count roughly with the
+    // square of the distance. 533 restores the pre-MapConfig behaviour.
+    #[serde(default = "default_visibility_continents")]
+    pub visibility_distance_continents: f32,
+    #[serde(default = "default_visibility_instances")]
+    pub visibility_distance_instances: f32,
+    #[serde(default = "default_visibility_bg")]
+    pub visibility_distance_bg: f32,
+    /// Floor the continent ramp will not shrink past when ticks run long.
+    #[serde(default = "default_visibility_min")]
+    pub visibility_distance_min: f32,
+    /// Seconds a grid stays idle before it may be unloaded.
+    #[serde(default = "default_grid_unload_delay_secs")]
+    pub grid_unload_delay_secs: u64,
+
     // VMap Settings
     #[serde(default = "default_true")]
     pub vmap_enable_los: bool, // Enable line of sight checks
@@ -376,6 +393,26 @@ fn default_true() -> bool {
     true
 }
 
+fn default_visibility_continents() -> f32 {
+    oxcore_map::map::DEFAULT_VISIBILITY_DISTANCE
+}
+
+fn default_visibility_instances() -> f32 {
+    oxcore_map::map::DEFAULT_VISIBILITY_INSTANCE
+}
+
+fn default_visibility_bg() -> f32 {
+    oxcore_map::map::DEFAULT_VISIBILITY_BG
+}
+
+fn default_visibility_min() -> f32 {
+    45.0
+}
+
+fn default_grid_unload_delay_secs() -> u64 {
+    300
+}
+
 fn default_motd() -> String {
     "Welcome to oxcore!".to_string()
 }
@@ -589,6 +626,11 @@ impl Default for Config {
             chat_flood_protection_window: default_chat_flood_protection_window(),
             chat_flood_mute_time: default_chat_flood_mute_time(),
             chat_strict_link_checking_kick: false,
+            visibility_distance_continents: default_visibility_continents(),
+            visibility_distance_instances: default_visibility_instances(),
+            visibility_distance_bg: default_visibility_bg(),
+            visibility_distance_min: default_visibility_min(),
+            grid_unload_delay_secs: default_grid_unload_delay_secs(),
             vmap_enable_los: default_true(),
             vmap_enable_height: default_true(),
             vmap_enable_indoor_check: default_true(),

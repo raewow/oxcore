@@ -8,6 +8,7 @@ use super::generators::{
 use super::spline::MoveSpline;
 use super::types::MovementGeneratorType;
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
+use crate::map::map::RelocateResult;
 use crate::World;
 use oxcore_shared::messages::movement::SmsgMonsterMove;
 use oxcore_shared::messages::ToWorldPacket;
@@ -40,6 +41,43 @@ impl MovementSystem {
         }
 
         Ok(())
+    }
+
+    /// Teleport a creature back to its spawn point after a refused relocation.
+    ///
+    /// Port of `Map::CreatureRespawnRelocation` (Map.cpp:1510-1535): stop moving,
+    /// snap to the respawn coordinates, and re-seat it in the grid there. Unlike
+    /// evade this does not *walk* home — the creature is standing in unloaded
+    /// space, so nothing would drive the movement.
+    fn relocate_to_home(
+        guid: ObjectGuid,
+        current_pos: Position,
+        map: &Arc<crate::map::Map>,
+        world: &World,
+    ) {
+        let home = world
+            .managers
+            .creature_mgr
+            .with_creature_mut(guid, |c| {
+                c.motion_master.stop(guid);
+                c.move_spline.stop();
+                c.position = c.home_position;
+                c.home_position
+            });
+
+        let Some(home) = home else { return };
+
+        // Force the move: `relocate` would refuse this too, and the reference
+        // loads the destination grid rather than leaving the creature adrift.
+        map.remove_creature(guid, current_pos);
+        map.add_creature(guid, home);
+
+        tracing::debug!(
+            "[MOVEMENT] Creature {:?} tried to enter an unloaded grid; returned to spawn at ({:.1}, {:.1})",
+            guid,
+            home.x,
+            home.y
+        );
     }
 
     /// Update a single creature's movement
@@ -123,7 +161,13 @@ impl MovementSystem {
                     .managers
                     .map_mgr
                     .get_or_create_map(map_id, instance_id);
-                map.relocate_creature(guid, current_pos, new_pos);
+
+                // A creature may not wander into an unloaded grid — nothing there
+                // would ever tick or unload it. Send it home instead, as
+                // CreatureRespawnRelocation does (Map.cpp:1510-1535).
+                if map.relocate_creature(guid, current_pos, new_pos) == RelocateResult::Refused {
+                    Self::relocate_to_home(guid, current_pos, &map, world);
+                }
             }
         }
 

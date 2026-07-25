@@ -40,6 +40,12 @@ impl Cell {
         }
     }
 
+    /// Remove every object from the cell
+    pub fn clear(&mut self) {
+        self.objects.clear();
+        self.players.clear();
+    }
+
     /// Get all objects in cell
     pub fn objects(&self) -> &[ObjectGuid] {
         &self.objects

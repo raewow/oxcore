@@ -252,6 +252,8 @@ impl World {
             dbc.load_all(dbc_path.to_str().unwrap())
                 .context("Failed to load DBC files")?;
         }
+
+        self.install_map_config_provider();
         // Load spells from SQL (DBC field offsets are unreliable for vanilla 1.12.1)
         self.managers
             .condition_mgr
@@ -658,6 +660,57 @@ impl World {
         tokio::time::sleep(tokio::time::Duration::from_millis(100));
 
         Ok(())
+    }
+
+    /// Teach the map manager what kind of map each id is, and how far players see
+    /// on it.
+    ///
+    /// Maps are created lazily from dozens of call sites with no access to DBC or
+    /// config, so the kind table is snapshotted once here and moved into the
+    /// resolver. Capturing the DBC handle instead would mean taking its lock
+    /// during map creation — which can happen while DBC is already write-locked.
+    fn install_map_config_provider(&self) {
+        use crate::map::{MapConfig, MapKind};
+        use std::collections::HashMap;
+
+        let kinds: HashMap<u32, MapKind> = {
+            let dbc = self.dbc.read();
+            dbc.map
+                .entries()
+                .map(|(id, entry)| (*id, MapKind::from_dbc_map_type(entry.map_type)))
+                .collect()
+        };
+
+        let continents = self.config.visibility_distance_continents;
+        let instances = self.config.visibility_distance_instances;
+        let battlegrounds = self.config.visibility_distance_bg;
+        let min_distance = self.config.visibility_distance_min;
+        let unload_delay = std::time::Duration::from_secs(self.config.grid_unload_delay_secs);
+
+        tracing::info!(
+            "Map visibility: continents {:.0}y, instances {:.0}y, battlegrounds {:.0}y ({} maps known)",
+            continents,
+            instances,
+            battlegrounds,
+            kinds.len()
+        );
+
+        self.managers
+            .map_mgr
+            .set_config_provider(std::sync::Arc::new(move |map_id: u32, _instance: u32| {
+                let kind = kinds.get(&map_id).copied().unwrap_or(MapKind::Continent);
+                let distance = match kind {
+                    MapKind::Continent => continents,
+                    MapKind::Dungeon | MapKind::Raid => instances,
+                    MapKind::BattleGround => battlegrounds,
+                };
+
+                let mut config = MapConfig::for_kind(kind).with_visibility_distance(distance);
+                config.min_visibility_distance = min_distance.min(distance);
+                config.min_grid_activation_distance = min_distance.min(distance);
+                config.grid_unload_delay = unload_delay;
+                config
+            }));
     }
 
     pub fn setup_logging(&self, config: &crate::config::Config) -> Result<()> {

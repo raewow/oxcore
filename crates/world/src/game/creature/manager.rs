@@ -11,6 +11,7 @@ use super::movement::generators::{RandomMovementGenerator, WaypointMovementGener
 use super::movement::WaypointManager;
 use super::{Creature, CreatureSpawnData};
 use crate::core::common::compress_update_packet_if_needed;
+use crate::game::common::spawn_index::{build_grid_index, SpawnGridIndex};
 use crate::map::grid_coords::world_to_grid;
 use oxcore_shared::database::world::repositories::CreatureRepository;
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -151,6 +152,9 @@ pub struct CreatureManager {
     creatures: DashMap<ObjectGuid, Creature>,
     /// Spawn data by map_id -> list of spawns
     spawns_by_map: DashMap<u32, Vec<CreatureSpawnData>>,
+    /// map_id -> grid -> indices into `spawns_by_map[map_id]`. Built once by
+    /// `load_spawns`; `spawns_by_map` is append-only afterwards.
+    spawn_grid_index: DashMap<u32, SpawnGridIndex>,
     /// Track spawn states by spawn_id
     spawn_states: DashMap<u32, SpawnState>,
     /// Track which creature GUID belongs to which spawn_id
@@ -172,6 +176,7 @@ impl CreatureManager {
             templates: DashMap::new(),
             creatures: DashMap::new(),
             spawns_by_map: DashMap::new(),
+            spawn_grid_index: DashMap::new(),
             spawn_states: DashMap::new(),
             guid_to_spawn: DashMap::new(),
             next_guid: AtomicU64::new(1),
@@ -547,6 +552,8 @@ impl CreatureManager {
                 .push(spawn);
         }
 
+        self.rebuild_spawn_grid_index();
+
         let total: usize = self.spawns_by_map.iter().map(|e| e.value().len()).sum();
         tracing::info!(
             "Loaded {} creature spawns across {} maps (skipped {} for patch)",
@@ -558,6 +565,15 @@ impl CreatureManager {
         Ok(())
     }
 
+    /// Rebuild the grid index from `spawns_by_map`. Call after any bulk change.
+    fn rebuild_spawn_grid_index(&self) {
+        self.spawn_grid_index.clear();
+        for entry in self.spawns_by_map.iter() {
+            let index = build_grid_index(entry.value(), |s| s.position);
+            self.spawn_grid_index.insert(*entry.key(), index);
+        }
+    }
+
     /// Get spawns for a specific grid on a map
     pub fn get_spawns_for_grid(
         &self,
@@ -565,27 +581,72 @@ impl CreatureManager {
         grid_x: u8,
         grid_y: u8,
     ) -> Vec<CreatureSpawnData> {
-        let mut result = Vec::new();
+        let Some(spawns) = self.spawns_by_map.get(&map_id) else {
+            return Vec::new();
+        };
+        let Some(index) = self.spawn_grid_index.get(&map_id) else {
+            // Index not built (spawns added outside load_spawns) — fall back to a
+            // scan rather than silently spawning nothing.
+            tracing::warn!("Creature spawn grid index missing for map {}", map_id);
+            return spawns
+                .iter()
+                .filter(|s| world_to_grid(s.position.x, s.position.y) == (grid_x, grid_y))
+                .cloned()
+                .collect();
+        };
 
-        if let Some(spawns) = self.spawns_by_map.get(&map_id) {
-            for spawn in spawns.iter() {
-                let (spawn_gx, spawn_gy) = world_to_grid(spawn.position.x, spawn.position.y);
-                if spawn_gx == grid_x && spawn_gy == grid_y {
-                    result.push(spawn.clone());
-                }
-            }
-        }
+        debug_assert_eq!(
+            index.values().map(Vec::len).sum::<usize>(),
+            spawns.len(),
+            "creature spawn grid index is stale for map {map_id}"
+        );
 
-        result
+        index
+            .get(&(grid_x, grid_y))
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|&i| spawns.get(i as usize).cloned())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Spawn a single creature from spawn data
     /// Returns the GUID of the spawned creature, or None if failed
-    pub fn spawn_creature(
+    /// Spawn a creature and place it into the world.
+    ///
+    /// This is the entry point every spawn path must use. `spawn_creature` alone
+    /// only creates the registry entry — a creature that never reaches the `Map`
+    /// is invisible to every range query while still being ticked by the
+    /// per-creature update loops, which is exactly the bug this funnel prevents.
+    ///
+    /// Takes the map's grid lock internally, briefly. Callers must not hold it —
+    /// this also touches creature state, and nesting the two would fix a lock
+    /// order that the rest of the code does not observe.
+    pub fn spawn_into_map(
         &self,
         spawn: &CreatureSpawnData,
-        instance_id: u32,
+        map: &crate::map::Map,
+        waypoints: Option<&WaypointManager>,
     ) -> Option<ObjectGuid> {
+        let guid = self.spawn_creature(spawn, map.instance_id())?;
+
+        map.add_creature(guid, spawn.position);
+
+        self.with_creature_mut(guid, |c| {
+            c.in_world = true;
+        });
+
+        self.initialize_creature_movement(guid, spawn, waypoints);
+
+        Some(guid)
+    }
+
+    /// Create the creature registry entry only.
+    ///
+    /// Private on purpose: a creature that is not also placed on a `Map` is
+    /// invisible to range queries. Go through [`Self::spawn_into_map`].
+    fn spawn_creature(&self, spawn: &CreatureSpawnData, instance_id: u32) -> Option<ObjectGuid> {
         // spawn_id == 0 means a transient script-created summon — no dedup check.
         // For DB spawns (spawn_id > 0) skip if already spawned.
         if spawn.spawn_id != 0 && self.has_spawn(spawn.spawn_id) {
@@ -742,72 +803,6 @@ impl CreatureManager {
                     Some(std::time::Instant::now() + std::time::Duration::from_secs(300));
             }
         }
-    }
-
-    /// Spawn all creatures for a given map (legacy method for initial load)
-    /// DEPRECATED: Use grid-based loading instead
-    pub fn spawn_creatures_for_map(&self, map_id: u32) -> Vec<ObjectGuid> {
-        let mut spawned = Vec::new();
-
-        if let Some(spawns) = self.spawns_by_map.get(&map_id) {
-            for spawn in spawns.iter() {
-                let Some(template) = self.get_template(spawn.entry) else {
-                    tracing::warn!(
-                        "Skipping spawn {}: template {} not found",
-                        spawn.spawn_id,
-                        spawn.entry
-                    );
-                    continue;
-                };
-
-                let class_stats =
-                    self.get_class_level_stats(template.unit_class, template.min_level);
-                let counter = self.next_guid.fetch_add(1, Ordering::Relaxed);
-                let guid = ObjectGuid::new_creature(spawn.entry, counter as u32);
-
-                let mut creature = Creature::new(
-                    guid,
-                    spawn.entry,
-                    spawn.spawn_id,
-                    spawn.position,
-                    spawn.map_id,
-                    0, // instance_id = 0 for continents (legacy method)
-                    &template,
-                    spawn.phase_mask,
-                    class_stats.as_ref(),
-                );
-
-                // Apply model info (bounding_radius, combat_reach, speeds) from creature_display_info_addon
-                if let Some(model_info) = self.get_model_info(creature.display_id) {
-                    creature.bounding_radius = model_info.bounding_radius;
-                    creature.combat_reach = model_info.combat_reach;
-                    creature.speed_walk = model_info.speed_walk;
-                    creature.speed_run = model_info.speed_run;
-                }
-
-                self.creatures.insert(guid, creature);
-
-                // Track spawn state
-                self.spawn_states.insert(
-                    spawn.spawn_id,
-                    SpawnState {
-                        spawned: true,
-                        respawn_time: None,
-                    },
-                );
-                self.guid_to_spawn.insert(guid, spawn.spawn_id);
-
-                spawned.push(guid);
-            }
-        }
-
-        tracing::info!(
-            "Spawned {} creatures for map {} (legacy method)",
-            spawned.len(),
-            map_id
-        );
-
-        spawned
     }
 
     /// Get creature position

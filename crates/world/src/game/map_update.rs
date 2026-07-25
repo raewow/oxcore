@@ -48,7 +48,13 @@ pub async fn update_all_maps(
     let current_tick = map_mgr.increment_tick();
 
     for map in map_mgr.active_maps() {
+        let started = std::time::Instant::now();
         update_map(&map, diff, current_tick, world).await?;
+
+        // Shed load by shrinking how far players see and how far grids stay
+        // active when a map's tick gets expensive; grow back when it is cheap.
+        // Port of the ramp at the tail of `Map::Update` (Map.cpp:1052-1081).
+        map.tune_distances(started.elapsed());
     }
 
     Ok(())

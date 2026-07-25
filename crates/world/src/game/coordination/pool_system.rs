@@ -191,27 +191,11 @@ impl PoolSystem {
             .managers
             .map_mgr
             .get_or_create_map(spawn.map_id, instance_id);
-        let guid = world
-            .managers
-            .creature_mgr
-            .spawn_creature(&spawn, instance_id)?;
-
-        {
-            let grid_mgr = map.grid_manager();
-            let mut grid_mgr = grid_mgr.write();
-            map.add_creature_with_grid_manager(guid, spawn.position, &mut grid_mgr);
-            grid_mgr.register_creature(guid, spawn.position.x, spawn.position.y);
-        }
-
-        world.managers.creature_mgr.with_creature_mut(guid, |c| {
-            c.in_world = true;
-        });
-
-        world.managers.creature_mgr.initialize_creature_movement(
-            guid,
+        let guid = world.managers.creature_mgr.spawn_into_map(
             &spawn,
+            &map,
             Some(&world.managers.waypoint_mgr),
-        );
+        )?;
 
         self.manager.mark_spawned(
             pool_id,
@@ -262,12 +246,7 @@ impl PoolSystem {
             .get_or_create_map(spawn.map_id, instance_id);
         let guid = world.managers.gameobject_mgr.spawn_gameobject(&spawn)?;
 
-        {
-            let grid_mgr = map.grid_manager();
-            let mut grid_mgr = grid_mgr.write();
-            map.add_gameobject_with_grid_manager(guid, spawn.position, &mut grid_mgr);
-            grid_mgr.register_gameobject(guid, spawn.position.x, spawn.position.y);
-        }
+        map.add_gameobject(guid, spawn.position);
 
         world
             .managers
@@ -329,11 +308,6 @@ impl PoolSystem {
             .map_mgr
             .get_or_create_map(map_id, instance_id);
         map.remove_creature(guid, position);
-        {
-            let grid_mgr = map.grid_manager();
-            let mut grid_mgr = grid_mgr.write();
-            grid_mgr.unregister_creature(guid, position.x, position.y);
-        }
 
         self.send_destroy(guid, map_id, instance_id, position, world);
 
@@ -360,11 +334,6 @@ impl PoolSystem {
             .map_mgr
             .get_or_create_map(map_id, instance_id);
         map.remove_gameobject(guid, position);
-        {
-            let grid_mgr = map.grid_manager();
-            let mut grid_mgr = grid_mgr.write();
-            grid_mgr.unregister_gameobject(guid, position.x, position.y);
-        }
 
         self.send_destroy(guid, map_id, instance_id, position, world);
 

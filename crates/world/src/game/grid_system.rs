@@ -172,15 +172,12 @@ impl GridSystem {
             map_id
         );
 
-        // Load VMap/MMap tiles for this grid (before spawning creatures so pathfinding is available)
-        world
-            .managers
-            .vmap_mgr
-            .load_map(map_id, grid_x as i32, grid_y as i32);
-        world
-            .managers
-            .mmap_mgr
-            .load_map_tile(map_id, grid_x as i32, grid_y as i32);
+        // Load VMap/MMap tiles for this grid (before spawning creatures so pathfinding is available).
+        // Tile files are named in terrain space, not the spatial grid space used
+        // for object placement — convert before asking for them.
+        let (tile_x, tile_y) = crate::map::grid_coords::grid_to_terrain_tile(grid_x, grid_y);
+        world.managers.vmap_mgr.load_map(map_id, tile_x, tile_y);
+        world.managers.mmap_mgr.load_map_tile(map_id, tile_x, tile_y);
 
         // Get spawns for this grid
         let spawns = world
@@ -206,41 +203,18 @@ impl GridSystem {
                 continue;
             }
 
-            // Spawn the creature with the map's instance_id
-            if let Some(guid) = world
-                .managers
-                .creature_mgr
-                .spawn_creature(&spawn, map.instance_id())
-            {
+            let spawned = world.managers.creature_mgr.spawn_into_map(
+                &spawn,
+                map,
+                Some(&world.managers.waypoint_mgr),
+            );
+
+            if let Some(guid) = spawned {
                 // Let the pool track the object it just got in this instance
                 world
                     .systems
                     .pool
                     .on_creature_spawned(spawn.spawn_id, map.instance_id(), guid);
-
-                // Register with map and grid in a single lock acquisition
-                {
-                    let grid_mgr = map.grid_manager();
-                    let mut grid_mgr = grid_mgr.write();
-
-                    // Add to map's creature tracking and grid's object lists
-                    map.add_creature_with_grid_manager(guid, spawn.position, &mut grid_mgr);
-
-                    // Also register in grid for creature tracking (unload purposes)
-                    grid_mgr.register_creature(guid, spawn.position.x, spawn.position.y);
-                }
-
-                // Mark as spawned in world
-                world.managers.creature_mgr.with_creature_mut(guid, |c| {
-                    c.in_world = true;
-                });
-
-                // Initialize movement generators based on spawn data (random wander, waypoints)
-                world.managers.creature_mgr.initialize_creature_movement(
-                    guid,
-                    &spawn,
-                    Some(&world.managers.waypoint_mgr),
-                );
             }
         }
 
@@ -274,8 +248,12 @@ impl GridSystem {
                     let grid_mgr = map.grid_manager();
                     let mut grid_mgr = grid_mgr.write();
 
-                    map.add_gameobject_with_grid_manager(guid, go_spawn.position, &mut grid_mgr);
-                    grid_mgr.register_gameobject(guid, go_spawn.position.x, go_spawn.position.y);
+                    map.add_object_with_grid_manager(
+                        crate::map::map::ObjectKind::GameObject,
+                        guid,
+                        go_spawn.position,
+                        &mut grid_mgr,
+                    );
                 }
 
                 // Register collision so LoS, pathfinding, and height queries see
@@ -304,18 +282,87 @@ impl GridSystem {
         world: &World,
         map: &std::sync::Arc<crate::map::Map>,
     ) -> anyhow::Result<()> {
-        // Get grids to unload
-        let grids_to_unload = {
-            let grid_mgr = map.grid_manager();
-            let grid_mgr = grid_mgr.read();
-            grid_mgr.get_grids_to_unload()
-        };
+        // Run the state machine, which applies the unload guards: manual and
+        // active-object pins, and whether anyone is still close enough to see in.
+        let pass = map.update_grid_states();
 
-        for (grid_x, grid_y) in grids_to_unload {
+        for (grid_x, grid_y) in pass.to_unload {
+            // Quiesce before draining: a creature that is mid-fight when its
+            // grid disappears would otherwise be dropped still in combat, with
+            // its threat list pointing at a player who is no longer there.
+            // `ObjectGridStoper` (ObjectGridLoader.cpp:359-384).
+            self.quiesce_grid(grid_x, grid_y, world, map);
+
             self.unload_grid(map_id, grid_x, grid_y, world, map).await?;
         }
 
         Ok(())
+    }
+
+    /// Put a creature back at its spawn point if that lies in a *different*,
+    /// still-loaded grid. Returns whether it was relocated instead of despawned.
+    fn move_to_home_grid(
+        guid: ObjectGuid,
+        unloading: (u8, u8),
+        world: &World,
+        map: &std::sync::Arc<crate::map::Map>,
+    ) -> bool {
+        use crate::map::grid_coords::world_to_grid;
+
+        let Some((position, home)) = world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| (c.position, c.home_position))
+        else {
+            return false;
+        };
+
+        let home_grid = world_to_grid(home.x, home.y);
+        if home_grid == unloading {
+            return false; // Belongs here; it goes away with the grid.
+        }
+
+        {
+            let grid_mgr = map.grid_manager();
+            let grid_mgr = grid_mgr.read();
+            if !grid_mgr
+                .get_grid(home_grid.0, home_grid.1)
+                .is_some_and(|g| g.state().is_loaded())
+            {
+                return false; // Home is not loaded either — let it despawn.
+            }
+        }
+
+        world.managers.creature_mgr.with_creature_mut(guid, |c| {
+            c.motion_master.stop(guid);
+            c.move_spline.stop();
+            c.position = c.home_position;
+        });
+        map.add_creature(guid, home);
+
+        tracing::debug!(
+            "[GRID] Creature {:?} moved to its spawn grid ({}, {}) instead of despawning",
+            guid,
+            home_grid.0,
+            home_grid.1
+        );
+        true
+    }
+
+    /// Send every creature in a grid back to its home and out of combat.
+    fn quiesce_grid(
+        &self,
+        grid_x: u8,
+        grid_y: u8,
+        world: &World,
+        map: &std::sync::Arc<crate::map::Map>,
+    ) {
+        use crate::game::creature::ai::executor::execute_actions;
+        use crate::game::creature::ai::AIAction;
+
+        for guid in map.creatures_in_grid(grid_x, grid_y) {
+            execute_actions(world, guid, vec![AIAction::EnterEvadeMode]);
+        }
     }
 
     /// Unload a specific grid and despawn its creatures
@@ -334,27 +381,46 @@ impl GridSystem {
             map_id
         );
 
-        // Get creatures and gameobjects to despawn
-        let (creatures, gameobjects) = {
-            let grid_mgr = map.grid_manager();
-            let mut grid_mgr = grid_mgr.write();
-            grid_mgr.unload_grid(grid_x, grid_y)
-        };
+        // Drain the grid. This also drops the objects from the map's registries,
+        // so nothing survives as a ghost in later range queries.
+        let unloaded = map.unload_grid(grid_x, grid_y);
 
-        let creature_count = creatures.len();
-        let go_count = gameobjects.len();
+        let creature_count = unloaded.creatures.len();
+        let go_count = unloaded.gameobjects.len();
+
+        if !unloaded.players.is_empty() {
+            tracing::warn!(
+                "[GRID] Unloaded grid ({}, {}) on map {} with {} player(s) still in it",
+                grid_x,
+                grid_y,
+                map_id,
+                unloaded.players.len()
+            );
+        }
 
         // Despawn creatures. Pooled ones keep their roster slot, so they come
         // back when the grid is loaded again.
-        for guid in creatures {
+        //
+        // A creature that wandered in from elsewhere is sent home instead of
+        // despawned: its spawn point lives in another grid, which would otherwise
+        // stop producing spawns until that grid itself cycled.
+        // `ObjectGridRespawnMover` (ObjectGridLoader.cpp:36-81).
+        let mut relocated = 0usize;
+        for guid in unloaded.creatures {
+            if Self::move_to_home_grid(guid, (grid_x, grid_y), world, map) {
+                relocated += 1;
+                continue;
+            }
+
             world.managers.creature_mgr.save_respawn_state(guid);
             world.systems.pool.on_object_despawned(guid);
             world.managers.creature_mgr.remove_creature(guid);
         }
+        let creature_count = creature_count - relocated;
 
         // Despawn gameobjects. Drop collision first — it is looked up through the
         // object, which `remove_gameobject` is about to discard.
-        for guid in gameobjects {
+        for guid in unloaded.gameobjects {
             world.systems.pool.on_object_despawned(guid);
             world
                 .managers
@@ -363,11 +429,11 @@ impl GridSystem {
             world.managers.gameobject_mgr.remove_gameobject(guid);
         }
 
-        // Unload VMap/MMap tiles for this grid
-        world
-            .managers
-            .mmap_mgr
-            .unload_tile(map_id, grid_x as i32, grid_y as i32);
+        // VMap/MMap tiles are deliberately *not* released per grid.
+        // `MMapManager::unload_tile` reparses every remaining tile on the map to
+        // rebuild the merged navmesh, and `VMapManager` has no per-tile unload at
+        // all. Grid churn is frequent, so both tile sets are held until the map
+        // itself is torn down via `unload_map`.
 
         if creature_count > 0 || go_count > 0 {
             tracing::info!(
@@ -557,17 +623,18 @@ impl GridSystem {
     pub fn are_grids_loaded(&self, map: &crate::map::Map, pos: Position) -> bool {
         use crate::map::grid_coords::world_to_grid;
 
-        let (center_gx, center_gy) = world_to_grid(pos.x, pos.y);
+        // Check exactly the grids activation covers. Using a fixed 3x3 here would
+        // wait forever on grids outside the activation radius, which are never
+        // created.
+        let distance = map.grid_activation_distance();
+        let (min_gx, min_gy) = world_to_grid(pos.x - distance, pos.y - distance);
+        let (max_gx, max_gy) = world_to_grid(pos.x + distance, pos.y + distance);
 
         let grid_mgr = map.grid_manager();
         let grid_mgr = grid_mgr.read();
 
-        // Check 3x3 grid area around player (same as visibility range)
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                let gx = (center_gx as i32 + dx) as u8;
-                let gy = (center_gy as i32 + dy) as u8;
-
+        for gx in min_gx..=max_gx {
+            for gy in min_gy..=max_gy {
                 // Check if grid exists and is loaded
                 if let Some(grid) = grid_mgr.get_grid(gx, gy) {
                     if !grid.state().is_loaded() {
@@ -589,43 +656,6 @@ impl GridSystem {
         true // All required grids are loaded
     }
 
-    /// Activate grids around a player position
-    /// Returns list of grids that need loading
-    pub fn activate_grids_around_player(
-        &self,
-        map: &crate::map::Map,
-        pos: Position,
-        visibility_range: f32,
-    ) -> Vec<(u8, u8)> {
-        use crate::map::grid::MAX_GRIDS;
-        use crate::map::grid_coords::world_to_grid;
-        use crate::map::grid_coords::GRID_SIZE;
-
-        let mut needs_load = Vec::new();
-
-        let (center_gx, center_gy) = world_to_grid(pos.x, pos.y);
-        let grid_range = (visibility_range / GRID_SIZE).ceil() as i32 + 1;
-
-        let grid_mgr = map.grid_manager();
-        let mut grid_mgr = grid_mgr.write();
-
-        for dx in -grid_range..=grid_range {
-            for dy in -grid_range..=grid_range {
-                let gx = center_gx as i32 + dx;
-                let gy = center_gy as i32 + dy;
-
-                if gx < 0 || gx >= MAX_GRIDS as i32 || gy < 0 || gy >= MAX_GRIDS as i32 {
-                    continue;
-                }
-
-                if grid_mgr.get_or_activate_grid(gx as u8, gy as u8) {
-                    needs_load.push((gx as u8, gy as u8));
-                }
-            }
-        }
-
-        needs_load
-    }
 }
 
 impl Default for GridSystem {

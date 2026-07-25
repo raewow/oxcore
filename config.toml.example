@@ -76,6 +76,24 @@ logs_dir = ""  # Empty = current directory
 # World Update Settings
 world_update_interval = 50  # milliseconds
 
+# Visibility
+# How far (yards) objects are shown to a player, per map kind. These are the
+# 1.12 reference values. Cost scales with the square of the distance: raising
+# the continent value multiplies both create/destroy packet volume and the
+# number of creatures kept spawned. Set continents to 533 to restore the old
+# "one full grid" behaviour.
+visibility_distance_continents = 100
+visibility_distance_instances = 170
+visibility_distance_bg = 533
+# Floor the continent distance will not shrink past when ticks run long.
+# Continents shed load by shrinking visibility one yard per slow tick and
+# growing it back when ticks are cheap.
+visibility_distance_min = 45
+
+# Seconds a grid must sit idle (no players in or near it) before it unloads
+# and despawns its creatures.
+grid_unload_delay_secs = 300
+
 # Logging
 # Log levels: 0=Error, 1=Warning, 2=Info, 3=Debug, 4=Trace
 log_level = 2

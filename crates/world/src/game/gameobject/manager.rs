@@ -10,6 +10,7 @@ use super::gameobject::{GameObject, GameObjectTemplate};
 use super::spawn::GameObjectSpawnData;
 use super::types::{GOState, GameObjectType, LootState};
 use crate::core::common::compress_update_packet_if_needed;
+use crate::game::common::spawn_index::{build_grid_index, SpawnGridIndex};
 use crate::map::grid_coords::world_to_grid;
 use crate::map::pathfinding::vmap::{GameObjectModelSpawn, VMapManager};
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -31,6 +32,9 @@ pub struct GameObjectManager {
     gameobjects: DashMap<ObjectGuid, GameObject>,
     /// Spawn data by map_id -> list of spawns
     spawns_by_map: DashMap<u32, Vec<GameObjectSpawnData>>,
+    /// map_id -> grid -> indices into `spawns_by_map[map_id]`. Built once by
+    /// `load_spawns`; `spawns_by_map` is append-only afterwards.
+    spawn_grid_index: DashMap<u32, SpawnGridIndex>,
     /// Track spawn states by spawn_id
     spawn_states: DashMap<u32, SpawnState>,
     /// Track which gameobject GUID belongs to which spawn_id
@@ -48,6 +52,7 @@ impl GameObjectManager {
             templates: DashMap::new(),
             gameobjects: DashMap::new(),
             spawns_by_map: DashMap::new(),
+            spawn_grid_index: DashMap::new(),
             spawn_states: DashMap::new(),
             guid_to_spawn: DashMap::new(),
             next_guid: AtomicU64::new(1),
@@ -331,6 +336,8 @@ impl GameObjectManager {
                 .push(spawn);
         }
 
+        self.rebuild_spawn_grid_index();
+
         let total: usize = self.spawns_by_map.iter().map(|e| e.value().len()).sum();
         tracing::info!(
             "Loaded {} gameobject spawns across {} maps (skipped {} for patch)",
@@ -342,6 +349,15 @@ impl GameObjectManager {
         Ok(())
     }
 
+    /// Rebuild the grid index from `spawns_by_map`. Call after any bulk change.
+    fn rebuild_spawn_grid_index(&self) {
+        self.spawn_grid_index.clear();
+        for entry in self.spawns_by_map.iter() {
+            let index = build_grid_index(entry.value(), |s| s.position);
+            self.spawn_grid_index.insert(*entry.key(), index);
+        }
+    }
+
     /// Get spawns for a specific grid on a map
     pub fn get_spawns_for_grid(
         &self,
@@ -349,18 +365,34 @@ impl GameObjectManager {
         grid_x: u8,
         grid_y: u8,
     ) -> Vec<GameObjectSpawnData> {
-        let mut result = Vec::new();
+        let Some(spawns) = self.spawns_by_map.get(&map_id) else {
+            return Vec::new();
+        };
+        let Some(index) = self.spawn_grid_index.get(&map_id) else {
+            // Index not built (spawns added outside load_spawns) — fall back to a
+            // scan rather than silently spawning nothing.
+            tracing::warn!("GameObject spawn grid index missing for map {}", map_id);
+            return spawns
+                .iter()
+                .filter(|s| world_to_grid(s.position.x, s.position.y) == (grid_x, grid_y))
+                .cloned()
+                .collect();
+        };
 
-        if let Some(spawns) = self.spawns_by_map.get(&map_id) {
-            for spawn in spawns.iter() {
-                let (spawn_gx, spawn_gy) = world_to_grid(spawn.position.x, spawn.position.y);
-                if spawn_gx == grid_x && spawn_gy == grid_y {
-                    result.push(spawn.clone());
-                }
-            }
-        }
+        debug_assert_eq!(
+            index.values().map(Vec::len).sum::<usize>(),
+            spawns.len(),
+            "gameobject spawn grid index is stale for map {map_id}"
+        );
 
-        result
+        index
+            .get(&(grid_x, grid_y))
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|&i| spawns.get(i as usize).cloned())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Spawn a single gameobject from spawn data

@@ -89,6 +89,23 @@ pub fn world_to_cell_in_grid(x: f32, y: f32, _grid_x: u8, _grid_y: u8) -> (u8, u
     )
 }
 
+/// Convert our spatial grid indices to the terrain/file tile indices used by the
+/// `.map`, `.vmtile` and `.mmtile` files.
+///
+/// Two coordinate spaces exist and must not be confused:
+///
+/// * *Spatial* — what [`world_to_grid`] returns. This is MaNGOS `ComputeGridPair`
+///   transposed: our `grid_x` is its `y_coord` and our `grid_y` is its `x_coord`.
+/// * *Terrain/file* — `(32 - y/533.33, 32 - x/533.33)`, implemented by
+///   [`crate::terrain::terrain_grid_coords`] and baked into the extractor's file
+///   names.
+///
+/// The bridge is `Map::EnsureGridCreated` (Map.cpp:329-335), which loads terrain and
+/// vmaps for `(63 - x_coord, 63 - y_coord)`.
+pub fn grid_to_terrain_tile(grid_x: u8, grid_y: u8) -> (i32, i32) {
+    (63 - grid_y as i32, 63 - grid_x as i32)
+}
+
 /// Convert grid coordinates to world coordinates (center of grid)
 pub fn grid_to_world(grid_x: u8, grid_y: u8) -> (f32, f32) {
     let x = (grid_x as f32 * GRID_SIZE) - MAP_HALF_SIZE + (GRID_SIZE / 2.0);
@@ -119,5 +136,64 @@ mod tests {
         let (gx, gy) = world_to_grid(17066.0, 17066.0);
         assert_eq!(gx, 63);
         assert_eq!(gy, 63);
+    }
+
+    #[test]
+    fn northshire_tile_indices() {
+        // Northshire Abbey. The terrain files for this spot are 0004832.map /
+        // 0004832.mmtile / 000_32_48.vmtile.
+        let (gx, gy) = world_to_grid(-8949.95, -132.49);
+        assert_eq!((gx, gy), (15, 31));
+        assert_eq!(grid_to_terrain_tile(gx, gy), (32, 48));
+    }
+
+    #[test]
+    fn grid_to_terrain_tile_round_trips() {
+        use crate::terrain::terrain_grid_coords;
+
+        // Deterministic LCG so a failure is reproducible.
+        let mut seed: u32 = 0x5eed_1234;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            // Map into roughly +/-16000, inside the map bounds.
+            (seed >> 8) as f32 / 16_777_216.0 * 32_000.0 - 16_000.0
+        };
+
+        for _ in 0..200 {
+            let (x, y) = (next(), next());
+
+            // MaNGOS truncates where we floor, so the two spaces can disagree by
+            // one index right on a grid boundary. Skip those.
+            let on_boundary = |c: f32| {
+                let frac = (c / GRID_SIZE).fract().abs();
+                frac < 0.001 || frac > 0.999
+            };
+            if on_boundary(x) || on_boundary(y) {
+                continue;
+            }
+
+            let (gx, gy) = world_to_grid(x, y);
+            let (tile_x, tile_y) = grid_to_terrain_tile(gx, gy);
+            let (expect_x, expect_y) = terrain_grid_coords(x, y)
+                .unwrap_or_else(|| panic!("({x}, {y}) has no terrain grid"));
+
+            assert_eq!(
+                (tile_x, tile_y),
+                (expect_x as i32, expect_y as i32),
+                "mismatch at ({x}, {y}) spatial grid ({gx}, {gy})"
+            );
+        }
+    }
+
+    #[test]
+    fn spatial_and_terrain_spaces_are_distinct() {
+        use crate::terrain::terrain_grid_coords;
+
+        // Guard against anyone "simplifying" the two conversions into one: at
+        // Northshire the spatial grid and the terrain tile share no index.
+        let (x, y) = (-8949.95, -132.49);
+        let (gx, gy) = world_to_grid(x, y);
+        let (tx, ty) = terrain_grid_coords(x, y).unwrap();
+        assert_ne!((gx as usize, gy as usize), (tx, ty));
     }
 }
