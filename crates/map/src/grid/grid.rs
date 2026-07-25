@@ -202,6 +202,11 @@ impl Grid {
         std::mem::take(&mut self.creatures)
     }
 
+    /// Drop a single creature (despawned while the grid stays loaded)
+    pub fn unregister_creature(&mut self, guid: ObjectGuid) {
+        self.creatures.retain(|g| *g != guid);
+    }
+
     /// Register a spawned gameobject
     pub fn register_gameobject(&mut self, guid: ObjectGuid) {
         if !self.gameobjects.contains(&guid) {
@@ -212,6 +217,11 @@ impl Grid {
     /// Clear all gameobjects (for unloading)
     pub fn clear_gameobjects(&mut self) -> SmallVec<[ObjectGuid; 8]> {
         std::mem::take(&mut self.gameobjects)
+    }
+
+    /// Drop a single gameobject (despawned while the grid stays loaded)
+    pub fn unregister_gameobject(&mut self, guid: ObjectGuid) {
+        self.gameobjects.retain(|g| *g != guid);
     }
 
     /// Check if grid should be unloaded (idle timeout expired)
@@ -498,6 +508,24 @@ impl GridManager {
 
         if let Some(grid) = self.get_grid_mut(grid_x, grid_y) {
             grid.register_gameobject(guid);
+        }
+    }
+
+    /// Drop a single creature from its grid (pool replacement, scripted despawn)
+    pub fn unregister_creature(&mut self, guid: ObjectGuid, x: f32, y: f32) {
+        let (grid_x, grid_y) = world_to_grid(x, y);
+
+        if let Some(grid) = self.get_grid_mut(grid_x, grid_y) {
+            grid.unregister_creature(guid);
+        }
+    }
+
+    /// Drop a single gameobject from its grid (pool replacement, scripted despawn)
+    pub fn unregister_gameobject(&mut self, guid: ObjectGuid, x: f32, y: f32) {
+        let (grid_x, grid_y) = world_to_grid(x, y);
+
+        if let Some(grid) = self.get_grid_mut(grid_x, grid_y) {
+            grid.unregister_gameobject(guid);
         }
     }
 

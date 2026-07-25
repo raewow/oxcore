@@ -72,6 +72,7 @@ pub mod trade;
 pub mod trainer;
 pub mod update;
 pub mod vendor;
+pub mod weather;
 
 // Re-exports for convenience
 pub use auction::*;
@@ -112,3 +113,4 @@ pub use trade::*;
 pub use trainer::*;
 pub use update::*;
 pub use vendor::*;
+pub use weather::*;

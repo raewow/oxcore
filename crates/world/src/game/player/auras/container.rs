@@ -2,7 +2,8 @@
 
 use super::aura::Aura;
 use super::effects::{
-    AURA_EFFECT_IMMUNITY, AURA_MECHANIC_IMMUNITY, AURA_SCHOOL_IMMUNITY, AURA_STATE_IMMUNITY,
+    AURA_DAMAGE_IMMUNITY, AURA_EFFECT_IMMUNITY, AURA_MECHANIC_IMMUNITY, AURA_SCHOOL_IMMUNITY,
+    AURA_STATE_IMMUNITY,
 };
 use super::stacking::{exclusive_aura_can_apply, ExclusiveAuraAction};
 use super::state::*;
@@ -457,6 +458,15 @@ impl AuraContainer {
                     && (aura.misc_value as u32 & school_mask) != 0
                     && (aura.is_positive() != effects_are_positive
                         || immunity_affects_all_polarities(aura.spell_id))
+            })
+    }
+
+    /// Whether an active damage-immunity aura blocks the given school mask.
+    pub fn is_immune_to_damage(&self, school_mask: u32) -> bool {
+        school_mask != 0
+            && self.auras.values().any(|aura| {
+                aura.aura_type == AURA_DAMAGE_IMMUNITY
+                    && (aura.misc_value as u32 & school_mask) != 0
             })
     }
 
@@ -1034,6 +1044,22 @@ mod tests {
         assert!(!container.is_immune_to_school(1 << 2, 7000, true, |_| false));
         assert!(!container.is_immune_to_school(1 << 2, 6000, false, |_| false));
         assert!(container.is_immune_to_school(1 << 2, 7000, true, |id| id == 6000));
+    }
+
+    #[test]
+    fn damage_immunity_matches_school_masks_until_its_aura_is_removed() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut immunity = make_aura(7000, 0, caster, None);
+        immunity.aura_type = AURA_DAMAGE_IMMUNITY;
+        immunity.misc_value = 1 << 2;
+        container.add_aura(immunity);
+
+        assert!(container.is_immune_to_damage(1 << 2));
+        assert!(!container.is_immune_to_damage(1 << 1));
+
+        container.remove_aura(7000, 0);
+        assert!(!container.is_immune_to_damage(1 << 2));
     }
 
     #[test]

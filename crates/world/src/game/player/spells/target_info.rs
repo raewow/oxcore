@@ -50,6 +50,9 @@ const SPELL_ATTR_EX2_NO_INITIAL_THREAT: u32 = 0x0040_0000; // bit 22
 /// SPELL_ATTR_EX3_PVP_ENABLING — counts as hostile for PvP even without combat.
 const SPELL_ATTR_EX3_PVP_ENABLING: u32 = 0x0000_0001; // bit 0
 
+/// SPELL_ATTR_NO_IMMUNITIES — bypasses damage and school immunities.
+const SPELL_ATTR_NO_IMMUNITIES: u32 = 0x2000_0000;
+
 // ─── Aura type constants ──────────────────────────────────────────────────────
 // Reference: SpellAuraDefines.h
 
@@ -590,6 +593,39 @@ fn target_is_immune_to_school(
     }
 }
 
+fn target_is_immune_to_damage(target_guid: ObjectGuid, spell: &SpellEntry, world: &World) -> bool {
+    const SPELL_ATTR_EX_IGNORE_CASTER_AND_TARGET_RESTRICTIONS: u32 = 0x0080_0000;
+    const SPELL_ATTR_EX3_IGNORE_CASTER_AND_TARGET_RESTRICTIONS: u32 = 0x1000_0000;
+
+    if spell.attributes & SPELL_ATTR_NO_IMMUNITIES != 0
+        || spell.attributes_ex & SPELL_ATTR_EX_IGNORE_CASTER_AND_TARGET_RESTRICTIONS != 0
+        || spell.attributes_ex3 & SPELL_ATTR_EX3_IGNORE_CASTER_AND_TARGET_RESTRICTIONS != 0
+    {
+        return false;
+    }
+
+    let school_mask = 1u32.checked_shl(spell.school).unwrap_or(0);
+    let is_immune =
+        |auras: &crate::game::player::auras::AuraContainer| auras.is_immune_to_damage(school_mask);
+
+    if target_guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| is_immune(&player.auras.container))
+            .unwrap_or(false)
+    } else if target_guid.is_creature() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |creature| is_immune(&creature.auras))
+            .unwrap_or(false)
+    } else {
+        false
+    }
+}
+
 /// Enter combat for a landed hit (MaNGOS: `unit->AttackedBy(pRealUnitCaster)`,
 /// `unit->AddThreat(pRealUnitCaster)`, `SetInCombatWithAggressor`,
 /// `SetInCombatWithVictim`).
@@ -744,6 +780,14 @@ pub async fn apply_target_effects(
             hit::roll_spell_hit(caster_guid, target.target_guid, spell_id, world)
         };
         target.outcome_resolved = true;
+    }
+
+    if target.miss_condition.is_hit()
+        && target.target_guid != caster_guid
+        && !spell_entry.is_positive_spell()
+        && target_is_immune_to_damage(target.target_guid, &spell_entry, world)
+    {
+        target.miss_condition = SpellHitOutcome::Immune;
     }
 
     match target.miss_condition {
@@ -1273,6 +1317,44 @@ mod tests {
             !do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, &world).await
         );
         assert_eq!(mask, 0);
+    }
+
+    #[tokio::test]
+    async fn damage_immunity_blocks_matching_school_unless_the_spell_bypasses_immunities() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(36);
+        let target = ObjectGuid::new_player(37);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target, |player| {
+                player.auras.container.add_aura(Aura::new(
+                    9003,
+                    caster,
+                    0,
+                    crate::game::player::auras::effects::AURA_DAMAGE_IMMUNITY,
+                    1 << 2,
+                    0,
+                    None,
+                    0,
+                    1,
+                    0,
+                    AuraFlags {
+                        is_positive: true,
+                        ..AuraFlags::default()
+                    },
+                ));
+            });
+
+        let mut spell = harmful_spell(111);
+        spell.school = 2;
+        assert!(target_is_immune_to_damage(target, &spell, &world));
+
+        spell.attributes |= SPELL_ATTR_NO_IMMUNITIES;
+        assert!(!target_is_immune_to_damage(target, &spell, &world));
     }
 
     #[tokio::test]

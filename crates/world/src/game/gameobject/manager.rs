@@ -129,6 +129,16 @@ impl GameObjectManager {
             .unwrap_or(false)
     }
 
+    /// Get spawn data by spawn_id (for the pool system)
+    pub fn get_spawn_data_by_id(&self, spawn_id: u32) -> Option<GameObjectSpawnData> {
+        for map_spawns in self.spawns_by_map.iter() {
+            if let Some(spawn) = map_spawns.value().iter().find(|s| s.spawn_id == spawn_id) {
+                return Some(spawn.clone());
+            }
+        }
+        None
+    }
+
     /// Remove a gameobject
     pub fn remove_gameobject(&self, guid: ObjectGuid) -> Option<(ObjectGuid, GameObject)> {
         if let Some(spawn_id) = self.guid_to_spawn.remove(&guid) {

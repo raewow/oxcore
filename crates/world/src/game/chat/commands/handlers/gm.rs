@@ -466,3 +466,68 @@ pub fn port_info() -> ChatCommandInfo {
         min_security: AccountType::GameMaster,
     }
 }
+
+/// Weather change command - forces the weather in the GM's current zone
+/// (MaNGOS `.wchange`).
+pub async fn cmd_wchange(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {
+    use crate::game::weather::WeatherType;
+
+    if !ctx.world.config.activate_weather.unwrap_or(true) {
+        return Ok("Weather is disabled on this server.".to_string());
+    }
+
+    let parts: Vec<&str> = args.split_whitespace().collect();
+    if parts.len() < 2 {
+        return Ok(
+            "Usage: .wchange <type> <intensity>. Types: 0=fine, 1=rain, 2=snow, 3=sandstorm. \
+             Intensity: 0.0-1.0"
+                .to_string(),
+        );
+    }
+
+    let Some(weather_type) = parts[0].parse::<u32>().ok().and_then(WeatherType::from_u32) else {
+        return Ok("Invalid weather type. Use 0=fine, 1=rain, 2=snow, 3=sandstorm.".to_string());
+    };
+
+    let Ok(grade) = parts[1].parse::<f32>() else {
+        return Ok("Invalid intensity. Must be a number between 0.0 and 1.0.".to_string());
+    };
+    if !(0.0..=1.0).contains(&grade) {
+        return Ok("Invalid intensity. Must be between 0.0 and 1.0.".to_string());
+    }
+
+    let Some((map_id, instance_id, zone_id)) = ctx
+        .world
+        .managers
+        .player_mgr
+        .with_player(ctx.player_guid, |p| (p.map_id, p.instance_id, p.zone_id))
+    else {
+        return Ok("Could not determine your current zone.".to_string());
+    };
+
+    ctx.world.systems.weather.set_weather(
+        map_id,
+        instance_id,
+        zone_id,
+        weather_type,
+        grade,
+        false,
+        ctx.world,
+    );
+
+    Ok(format!(
+        "Weather in zone {} set to {} (intensity {:.2}).",
+        zone_id,
+        weather_type.name(),
+        grade
+    ))
+}
+
+pub fn wchange_info() -> ChatCommandInfo {
+    ChatCommandInfo {
+        name: "wchange",
+        help: "Change the weather in your zone. Usage: .wchange <type> <intensity> \
+               (0=fine, 1=rain, 2=snow, 3=sandstorm; intensity 0.0-1.0)",
+        min_security: AccountType::GameMaster,
+    }
+}

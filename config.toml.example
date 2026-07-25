@@ -85,3 +85,7 @@ log_file_level = 2
 # Performance
 max_players = 100
 player_limit = 0
+
+# Weather
+activate_weather = true          # Enable the zone weather system
+change_weather_interval = 600000 # milliseconds between weather rolls (10 minutes)

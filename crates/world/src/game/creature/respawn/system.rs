@@ -42,6 +42,13 @@ impl RespawnSystem {
 
     /// Respawn a single creature
     async fn respawn_creature(&self, guid: ObjectGuid, world: &World) -> anyhow::Result<()> {
+        // Pooled creatures re-roll their pool instead of respawning blindly:
+        // the pool may replace this creature with another of its members
+        // (MaNGOS `PoolManager::UpdatePool` on respawn).
+        if !world.systems.pool.on_creature_respawn(guid, world) {
+            return Ok(());
+        }
+
         // Get respawn info before modifying
         let respawn_info = world
             .managers

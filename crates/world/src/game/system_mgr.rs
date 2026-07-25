@@ -37,6 +37,7 @@ use crate::game::social::SocialSystem;
 use crate::game::ticket::TicketSystem;
 use crate::game::trade::TradeSystem;
 use crate::game::visibility::VisibilitySystem;
+use crate::game::weather::{WeatherManager, WeatherSystem};
 use crate::game::{BroadcastManager, ItemManager};
 use crate::World;
 use oxcore_shared::database::characters::repositories::InventoryRepository;
@@ -96,6 +97,10 @@ pub struct SystemManager {
     pub linking: Arc<LinkingSystem>,
     /// Addon system for creature addons
     pub addon: Arc<AddonSystem>,
+    /// Weather chances loaded from `game_weather`
+    pub weather_manager: Arc<WeatherManager>,
+    /// Per-zone weather system
+    pub weather: Arc<WeatherSystem>,
 }
 
 impl SystemManager {
@@ -266,6 +271,13 @@ impl SystemManager {
 
         let addon = Arc::new(AddonSystem::new(addon_mgr, broadcast_mgr.clone()));
 
+        // Weather: chances are loaded from the world DB during World::init()
+        let weather_manager = Arc::new(WeatherManager::new());
+        let weather = Arc::new(WeatherSystem::new(
+            weather_manager.clone(),
+            broadcast_mgr.clone(),
+        ));
+
         Self {
             player: player_system,
             combat,
@@ -307,6 +319,8 @@ impl SystemManager {
             pool,
             linking,
             addon,
+            weather_manager,
+            weather,
         }
     }
 
@@ -363,6 +377,11 @@ impl SystemManager {
         // Death system: tick death timers, handle auto-release
         if let Err(e) = self.death.update(diff, world) {
             tracing::error!("Death system update error: {}", e);
+        }
+
+        // Weather: roll zone weather when the change interval expires
+        if let Err(e) = self.weather.update(diff, world) {
+            tracing::error!("Weather system update error: {}", e);
         }
 
         Ok(())

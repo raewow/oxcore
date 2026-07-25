@@ -361,6 +361,34 @@ impl World {
             .await
             .context("Failed to load loot tables")?;
 
+        // Load spawn pools and roll their initial rosters. Must run after
+        // creature and gameobject spawns are loaded — pool members reference
+        // spawn ids — and before grids load, which consults the rosters.
+        {
+            use crate::game::coordination::PoolRepository;
+            let pool_repo =
+                PoolRepository::new(self.databases.world.clone()).with_patch(creature_patch);
+            match pool_repo.load_all_pools().await {
+                Ok(pool_data) => {
+                    self.managers.pool_mgr.load_from_repository(pool_data);
+                    self.systems.pool.initialize();
+                }
+                Err(e) => {
+                    tracing::error!("Failed to load spawn pools: {} (pools disabled)", e);
+                }
+            }
+        }
+
+        // Load zone weather chances (`game_weather`)
+        if let Err(e) = self
+            .systems
+            .weather_manager
+            .load(&self.databases.world)
+            .await
+        {
+            tracing::error!("Failed to load weather data: {} (weather disabled)", e);
+        }
+
         // Load area trigger data
         step("Loading area triggers & instances");
         self.managers

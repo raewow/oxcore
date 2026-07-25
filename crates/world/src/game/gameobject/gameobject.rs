@@ -98,7 +98,11 @@ impl GameObject {
             go_type: GameObjectType::from(template.go_type),
             flags: template.flags,
             faction: template.faction,
-            level: 0,
+            level: match GameObjectType::from(template.go_type) {
+                GameObjectType::Chest => template.data[9].max(0) as u32,
+                GameObjectType::Trap => template.data[1].max(0) as u32,
+                _ => 0,
+            },
             go_state: GOState::from(state),
             loot_state: LootState::Ready,
             art_kit: 0,

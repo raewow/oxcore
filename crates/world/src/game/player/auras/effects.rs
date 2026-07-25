@@ -178,6 +178,7 @@ pub const AURA_MOD_STALKED: u32 = 68; // Hunter's Mark tracking
 pub const AURA_EFFECT_IMMUNITY: u32 = 37; // Immune to specific effect
 pub const AURA_STATE_IMMUNITY: u32 = 38; // Immune to specific state
 pub const AURA_SCHOOL_IMMUNITY: u32 = 39; // Immune to spell school
+pub const AURA_DAMAGE_IMMUNITY: u32 = 40; // Immune to damage school
 pub const AURA_MECHANIC_IMMUNITY: u32 = 77; // Immune to mechanic (e.g., stun immunity)
 pub const AURA_MOD_MECHANIC_RESISTANCE: u32 = 117; // Resist mechanic chance
 

@@ -69,6 +69,9 @@ pub fn register_all_commands(registry: &mut CommandRegistry) {
     registry.register(gm::speed_info(), |ctx, args| {
         Box::pin(gm::cmd_speed(ctx, args))
     });
+    registry.register(gm::wchange_info(), |ctx, args| {
+        Box::pin(gm::cmd_wchange(ctx, args))
+    });
 
     // Spell commands
     registry.register(spell::cast_info(), |ctx, args| {

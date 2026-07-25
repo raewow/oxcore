@@ -197,12 +197,27 @@ impl GridSystem {
                 continue;
             }
 
+            // Pooled spawns only exist while their pool has them on its roster
+            if !world
+                .systems
+                .pool
+                .can_creature_spawn(spawn.spawn_id, map.instance_id())
+            {
+                continue;
+            }
+
             // Spawn the creature with the map's instance_id
             if let Some(guid) = world
                 .managers
                 .creature_mgr
                 .spawn_creature(&spawn, map.instance_id())
             {
+                // Let the pool track the object it just got in this instance
+                world
+                    .systems
+                    .pool
+                    .on_creature_spawned(spawn.spawn_id, map.instance_id(), guid);
+
                 // Register with map and grid in a single lock acquisition
                 {
                     let grid_mgr = map.grid_manager();
@@ -240,7 +255,21 @@ impl GridSystem {
                 continue;
             }
 
+            if !world
+                .systems
+                .pool
+                .can_gameobject_spawn(go_spawn.spawn_id, map.instance_id())
+            {
+                continue;
+            }
+
             if let Some(guid) = world.managers.gameobject_mgr.spawn_gameobject(&go_spawn) {
+                world.systems.pool.on_gameobject_spawned(
+                    go_spawn.spawn_id,
+                    map.instance_id(),
+                    guid,
+                );
+
                 {
                     let grid_mgr = map.grid_manager();
                     let mut grid_mgr = grid_mgr.write();
@@ -315,15 +344,18 @@ impl GridSystem {
         let creature_count = creatures.len();
         let go_count = gameobjects.len();
 
-        // Despawn creatures
+        // Despawn creatures. Pooled ones keep their roster slot, so they come
+        // back when the grid is loaded again.
         for guid in creatures {
             world.managers.creature_mgr.save_respawn_state(guid);
+            world.systems.pool.on_object_despawned(guid);
             world.managers.creature_mgr.remove_creature(guid);
         }
 
         // Despawn gameobjects. Drop collision first — it is looked up through the
         // object, which `remove_gameobject` is about to discard.
         for guid in gameobjects {
+            world.systems.pool.on_object_despawned(guid);
             world
                 .managers
                 .gameobject_mgr

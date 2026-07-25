@@ -1132,6 +1132,10 @@ pub async fn handle_player_login_with_guid(
         character.map, character.zone
     );
 
+    // Send the current weather of the zone the player logs into
+    // (MaNGOS sends it from Player::UpdateZone, which runs on login too).
+    world.systems.weather.send_weather_to_player(guid, world);
+
     // Clear update_in_progress (already moved to before self-create send).
 
     info!(
@@ -2633,10 +2637,16 @@ pub async fn handle_zoneupdate(
         }
     }
 
+    // --- Zone weather (MaNGOS Player::UpdateZone) ---
+    world
+        .systems
+        .weather
+        .send_weather_to_player(player_guid, world);
+
     // TODO: Handle other zone-specific effects:
     // - Check for exploration quest objectives
     // - Update PvP flags based on zone type
-    // - Send zone-specific packets (weather, music)
+    // - Send zone-specific packets (music)
 
     Ok(())
 }

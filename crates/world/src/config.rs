@@ -157,6 +157,8 @@ pub struct Config {
     // Weather Settings
     #[serde(default = "default_change_weather_interval")]
     pub change_weather_interval: Option<u32>, // Weather change interval in milliseconds (default: 10 minutes = 600000)
+    #[serde(default = "default_activate_weather")]
+    pub activate_weather: Option<bool>, // Enable the zone weather system (default: true)
 
     // Social/Who List Settings
     #[serde(default)]
@@ -386,6 +388,10 @@ fn default_change_weather_interval() -> Option<u32> {
     Some(10 * 60 * 1000) // 10 minutes
 }
 
+fn default_activate_weather() -> Option<bool> {
+    Some(true)
+}
+
 fn default_min_honor_kills() -> Option<u32> {
     Some(15)
 }
@@ -593,6 +599,7 @@ impl Default for Config {
             motd: default_motd(),
             autobroadcast_db_check_interval: default_autobroadcast_db_check_interval(),
             change_weather_interval: default_change_weather_interval(),
+            activate_weather: default_activate_weather(),
             allow_two_side_who_list: None,
             gm_level_in_who_list: None,
             min_honor_kills: default_min_honor_kills(),

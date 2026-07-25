@@ -1905,6 +1905,44 @@ mod tests {
         go
     }
 
+    fn gameobject_with_template_level(
+        guid: ObjectGuid,
+        go_type: crate::game::gameobject::GameObjectType,
+        level_index: usize,
+        level: i32,
+    ) -> GameObject {
+        let mut data = [0; 24];
+        data[level_index] = level;
+        let template = GameObjectTemplate {
+            entry: guid.entry(),
+            go_type: go_type as u32,
+            display_id: 1,
+            name: format!("GO{}", guid.entry()),
+            icon_name: String::new(),
+            cast_bar_caption: String::new(),
+            faction: 0,
+            flags: 0,
+            size: 1.0,
+            data,
+        };
+        GameObject::new(
+            guid,
+            template.entry,
+            1,
+            Position {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                o: 0.0,
+            },
+            1,
+            &template,
+            [0.0, 0.0, 0.0, 1.0],
+            0,
+            0,
+        )
+    }
+
     #[tokio::test]
     async fn player_source_returns_player_level() {
         let world = test_world();
@@ -1979,6 +2017,35 @@ mod tests {
         assert_eq!(get_level_for_target(source, Some(target), &world), 45);
 
         assert_eq!(get_level_for_target(source, None, &world), 60);
+    }
+
+    #[tokio::test]
+    async fn gameobject_source_uses_chest_and_trap_template_levels() {
+        let world = test_world();
+        let chest = ObjectGuid::new_gameobject(301, 1);
+        let trap = ObjectGuid::new_gameobject(302, 1);
+
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(gameobject_with_template_level(
+                chest,
+                crate::game::gameobject::GameObjectType::Chest,
+                9,
+                18,
+            ));
+        world
+            .managers
+            .gameobject_mgr
+            .add_gameobject_for_test(gameobject_with_template_level(
+                trap,
+                crate::game::gameobject::GameObjectType::Trap,
+                1,
+                24,
+            ));
+
+        assert_eq!(get_level_for_target(chest, None, &world), 18);
+        assert_eq!(get_level_for_target(trap, None, &world), 24);
     }
 
     #[tokio::test]

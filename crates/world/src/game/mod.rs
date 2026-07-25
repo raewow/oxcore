@@ -27,6 +27,7 @@ pub mod ticket;
 pub mod trade;
 pub mod transport;
 pub mod visibility;
+pub mod weather;
 
 pub use auction::{AuctionHouseManager, AuctionHouseObject};
 pub use broadcast_mgr::BroadcastManager;
@@ -38,3 +39,4 @@ pub use npc::GossipSystem;
 pub use player::PlayerSystem;
 pub use spell::SpellManager;
 pub use system_mgr::SystemManager;
+pub use weather::{WeatherManager, WeatherSystem};
