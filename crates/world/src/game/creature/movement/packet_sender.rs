@@ -114,12 +114,16 @@ impl MovementPacketSender {
         true
     }
 
-    pub fn send_toggle_run_walk_to_all(world: &World, creature_guid: ObjectGuid, run: bool) {
-        let opcode = if run {
+    fn toggle_run_walk_opcode(run: bool) -> Opcode {
+        if run {
             Opcode::SMSG_SPLINE_MOVE_SET_RUN_MODE
         } else {
             Opcode::SMSG_SPLINE_MOVE_SET_WALK_MODE
-        };
+        }
+    }
+
+    pub fn send_toggle_run_walk_to_all(world: &World, creature_guid: ObjectGuid, run: bool) {
+        let opcode = Self::toggle_run_walk_opcode(run);
 
         if !Self::creature_exists(world, creature_guid) {
             return;
@@ -319,5 +323,17 @@ mod tests {
                 off
             );
         }
+    }
+
+    #[test]
+    fn toggling_run_walk_uses_the_matching_spline_opcode() {
+        assert_eq!(
+            MovementPacketSender::toggle_run_walk_opcode(true),
+            Opcode::SMSG_SPLINE_MOVE_SET_RUN_MODE
+        );
+        assert_eq!(
+            MovementPacketSender::toggle_run_walk_opcode(false),
+            Opcode::SMSG_SPLINE_MOVE_SET_WALK_MODE
+        );
     }
 }
