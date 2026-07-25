@@ -6,7 +6,9 @@ use tracing::{debug, info, trace};
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::core::common::{is_valid_map_coord, MovementInfo};
 use crate::core::session::WorldSession;
-use crate::game::creature::movement::packet_sender::{MovementChangeType, MovementFlagChange};
+use crate::game::creature::movement::packet_sender::{
+    MovementChangeType, MovementFlagChange, MovementPacketSender,
+};
 use crate::World;
 use oxcore_shared::messages::character::SmsgLogoutCancelAck;
 use oxcore_shared::messages::movement::SmsgForceMoveUnroot;
@@ -821,15 +823,15 @@ impl FlagChange {
         })
     }
 
-    fn observer_opcode(self) -> Opcode {
+    /// The pending-change flag this toggle is queued under.
+    fn pending_flag(self) -> MovementFlagChange {
         match self {
-            Self::WaterWalk => Opcode::MSG_MOVE_WATER_WALK,
-            Self::FeatherFall => Opcode::MSG_MOVE_FEATHER_FALL,
+            Self::WaterWalk => MovementFlagChange::WaterWalking,
+            Self::FeatherFall => MovementFlagChange::SafeFall,
         }
     }
 
-    /// The pending-change flag this toggle is queued under.
-    fn pending_flag(self) -> MovementFlagChange {
+    fn observer_flag(self) -> MovementFlagChange {
         match self {
             Self::WaterWalk => MovementFlagChange::WaterWalking,
             Self::FeatherFall => MovementFlagChange::SafeFall,
@@ -917,14 +919,13 @@ pub fn handle_movement_flag_change_ack(
             }
         });
 
-    // Observers: packed guid + movement info (no apply byte, matching C++).
-    let mut data = WorldPacket::new(change.observer_opcode());
-    movement_info.write_to_packet(&mut data);
-
-    world
-        .managers
-        .broadcast_mgr
-        .broadcast_nearby_exclude_self(player_guid, &data);
+    MovementPacketSender::send_movement_flag_change_to_observers(
+        world,
+        player_guid,
+        change.observer_flag(),
+        apply,
+        &movement_info,
+    );
 
     Ok(())
 }
@@ -1178,13 +1179,13 @@ mod tests {
 
         assert_eq!(
             FlagChange::from_ack_opcode(Opcode::CMSG_MOVE_WATER_WALK_ACK)
-                .map(FlagChange::observer_opcode),
-            Some(Opcode::MSG_MOVE_WATER_WALK)
+                .map(FlagChange::observer_flag),
+            Some(MovementFlagChange::WaterWalking)
         );
         assert_eq!(
             FlagChange::from_ack_opcode(Opcode::CMSG_MOVE_FEATHER_FALL_ACK)
-                .map(FlagChange::observer_opcode),
-            Some(Opcode::MSG_MOVE_FEATHER_FALL)
+                .map(FlagChange::observer_flag),
+            Some(MovementFlagChange::SafeFall)
         );
     }
 

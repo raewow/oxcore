@@ -172,6 +172,48 @@ impl MovementPacketSender {
         }
     }
 
+    /// Opcode sent to observers for a client-controlled unit's acknowledged flag change.
+    fn flag_change_observer_opcode(flag: MovementFlagChange, apply: bool) -> Opcode {
+        match flag {
+            MovementFlagChange::Root => {
+                if apply {
+                    Opcode::MSG_MOVE_ROOT
+                } else {
+                    Opcode::MSG_MOVE_UNROOT
+                }
+            }
+            MovementFlagChange::WaterWalking => Opcode::MSG_MOVE_WATER_WALK,
+            MovementFlagChange::Hover => Opcode::MSG_MOVE_HOVER,
+            MovementFlagChange::SafeFall => Opcode::MSG_MOVE_FEATHER_FALL,
+        }
+    }
+
+    /// Broadcast an acknowledged movement-flag change to observers of a player-controlled unit.
+    pub fn send_movement_flag_change_to_observers(
+        world: &World,
+        player_guid: ObjectGuid,
+        flag: MovementFlagChange,
+        apply: bool,
+        movement_info: &crate::core::common::MovementInfo,
+    ) -> bool {
+        if world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |_| ())
+            .is_none()
+        {
+            return false;
+        }
+
+        let mut packet = WorldPacket::new(Self::flag_change_observer_opcode(flag, apply));
+        movement_info.write_to_packet(&mut packet);
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_nearby_exclude_self(player_guid, &packet);
+        true
+    }
+
     pub fn send_movement_flag_change_to_all(
         world: &World,
         creature_guid: ObjectGuid,
@@ -339,6 +381,33 @@ mod tests {
                 off
             );
         }
+    }
+
+    #[test]
+    fn observer_flag_change_opcodes_match_client_controlled_movement() {
+        assert_eq!(
+            MovementPacketSender::flag_change_observer_opcode(MovementFlagChange::Root, true),
+            Opcode::MSG_MOVE_ROOT
+        );
+        assert_eq!(
+            MovementPacketSender::flag_change_observer_opcode(MovementFlagChange::Root, false),
+            Opcode::MSG_MOVE_UNROOT
+        );
+        assert_eq!(
+            MovementPacketSender::flag_change_observer_opcode(
+                MovementFlagChange::WaterWalking,
+                false
+            ),
+            Opcode::MSG_MOVE_WATER_WALK
+        );
+        assert_eq!(
+            MovementPacketSender::flag_change_observer_opcode(MovementFlagChange::Hover, true),
+            Opcode::MSG_MOVE_HOVER
+        );
+        assert_eq!(
+            MovementPacketSender::flag_change_observer_opcode(MovementFlagChange::SafeFall, false),
+            Opcode::MSG_MOVE_FEATHER_FALL
+        );
     }
 
     #[test]
