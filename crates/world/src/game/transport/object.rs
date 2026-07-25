@@ -285,6 +285,9 @@ mod tests {
     fn path_progress_and_creation_time_are_tracked() {
         let mut t = transport();
         assert_eq!(t.path_progress(), 0);
+        assert_eq!(t.start_progress(), 0);
+        assert_eq!(t.frame_cursor(), 0);
+        assert_eq!(t.passenger_count(), 0);
         t.set_path_progress(4_200);
         assert_eq!(t.path_progress(), 4_200);
         // Created at clock 1000, now 5000 -> 4000 ms alive.
