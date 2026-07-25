@@ -506,6 +506,26 @@ impl ToWorldPacket for MsgChannelUpdate {
     }
 }
 
+/// SMSG_SPELL_UPDATE_CHAIN_TARGETS for channeled spell beam visuals.
+pub struct SmsgSpellUpdateChainTargets {
+    pub caster_guid: ObjectGuid,
+    pub spell_id: u32,
+    pub targets: Vec<ObjectGuid>,
+}
+
+impl SmsgSpellUpdateChainTargets {
+    pub fn to_world_packet(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_UPDATE_CHAIN_TARGETS);
+        packet.write_guid(self.caster_guid);
+        packet.write_u32(self.spell_id);
+        packet.write_u32(self.targets.len() as u32);
+        for target in &self.targets {
+            packet.write_guid(*target);
+        }
+        packet
+    }
+}
+
 impl SmsgSpellFailedOther {
     pub fn to_world_packet(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_FAILED_OTHER);

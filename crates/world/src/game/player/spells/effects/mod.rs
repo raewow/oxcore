@@ -27,9 +27,16 @@ pub mod summon;
 pub mod teleport;
 
 use crate::World;
+use crate::game::player::spells::target_info::TargetInfo;
 use anyhow::Result;
 use oxcore_shared::messages::spells::ExecuteLogData;
 use oxcore_shared::protocol::ObjectGuid;
+
+/// Effects and per-target outcomes produced by one spell execution.
+pub struct EffectDispatchResult {
+    pub effects: Vec<EffectResult>,
+    pub targets: Vec<crate::game::player::spells::target_info::TargetInfo>,
+}
 
 /// Input data for a single spell effect.
 ///
@@ -243,13 +250,14 @@ impl EffectsDispatcher {
         target_guid: Option<ObjectGuid>,
         is_triggered: bool,
         world: &World,
-    ) -> Result<Vec<EffectResult>> {
+    ) -> Result<EffectDispatchResult> {
         self.dispatch_with_targets(
             caster_guid,
             None,
             spell_id,
             target_guid,
             is_triggered,
+            None,
             None,
             None,
             world,
@@ -275,17 +283,16 @@ impl EffectsDispatcher {
         is_triggered: bool,
         resolved: Option<&crate::game::player::spells::targets::ResolvedTargets>,
         custom_base_points: Option<[Option<i32>; 3]>,
+        target_infos: Option<Vec<TargetInfo>>,
         world: &World,
-    ) -> Result<Vec<EffectResult>> {
-        use crate::game::player::spells::target_info::TargetInfo;
-
+    ) -> Result<EffectDispatchResult> {
         let mut results = Vec::new();
 
         let spell_entry = match world.managers.spell_mgr.get(spell_id) {
             Some(entry) => entry,
             None => {
                 tracing::warn!("Spell {} not found", spell_id);
-                return Ok(results);
+                return Ok(EffectDispatchResult { effects: results, targets: Vec::new() });
             }
         };
 
@@ -311,13 +318,16 @@ impl EffectsDispatcher {
             }
         }
 
-        let mut hit_targets: Vec<TargetInfo> = Vec::with_capacity(order.len());
-        for target_guid in order {
-            let effect_mask = masks[&target_guid];
-            let mut target = TargetInfo::new(target_guid, effect_mask);
+        let mut hit_targets = target_infos.unwrap_or_else(|| {
+            order
+                .into_iter()
+                .map(|target_guid| TargetInfo::new(target_guid, masks[&target_guid]))
+                .collect()
+        });
+        for target in &mut hit_targets {
             let mut target_results =
                 crate::game::player::spells::target_info::apply_target_effects(
-                    &mut target,
+                    target,
                     caster_guid,
                     cast_item_guid,
                     spell_id,
@@ -327,7 +337,6 @@ impl EffectsDispatcher {
                 )
                 .await?;
             results.append(&mut target_results);
-            hit_targets.push(target);
         }
 
         // `Spell::HandleThreatSpells()` — run once per cast after every target's effects
@@ -353,7 +362,63 @@ impl EffectsDispatcher {
             .await;
         }
 
-        Ok(results)
+        Ok(EffectDispatchResult {
+            effects: results,
+            targets: hit_targets,
+        })
+    }
+
+    /// Resolve each target's hit outcome at projectile launch. Delayed effects consume this
+    /// snapshot at impact rather than resolving selection or hit chance again.
+    pub fn resolve_target_outcomes(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        target_guid: Option<ObjectGuid>,
+        is_triggered: bool,
+        resolved: &crate::game::player::spells::targets::ResolvedTargets,
+        world: &World,
+    ) -> Vec<TargetInfo> {
+        let Some(entry) = world.managers.spell_mgr.get(spell_id) else {
+            return Vec::new();
+        };
+        let mut order = Vec::new();
+        let mut masks = std::collections::HashMap::new();
+        for effect_index in 0..3 {
+            if entry.effect[effect_index] == 0 {
+                continue;
+            }
+            let targets = if resolved.effect_targets[effect_index].is_empty() {
+                target_guid.into_iter().collect()
+            } else {
+                resolved.effect_targets[effect_index].clone()
+            };
+            for target_guid in targets {
+                let mask = masks.entry(target_guid).or_insert_with(|| {
+                    order.push(target_guid);
+                    0u8
+                });
+                *mask |= 1 << effect_index;
+            }
+        }
+        order
+            .into_iter()
+            .map(|target_guid| {
+                let mut target = TargetInfo::new(target_guid, masks[&target_guid]);
+                target.miss_condition = if is_triggered || target_guid == caster_guid {
+                    crate::game::player::spells::hit::SpellHitOutcome::Hit
+                } else {
+                    crate::game::player::spells::hit::roll_spell_hit(
+                        caster_guid,
+                        target_guid,
+                        spell_id,
+                        world,
+                    )
+                };
+                target.outcome_resolved = true;
+                target
+            })
+            .collect()
     }
 }
 

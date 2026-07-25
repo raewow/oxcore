@@ -6,9 +6,12 @@
 //! - [`delayed_channel`] (`Spell::DelayedChannel`) shortens the remaining
 //!   duration of an active channeled spell, interrupting it if it hits zero.
 
+use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::player::spells::modifiers::apply_spell_modifiers_to_value;
 use crate::game::player::spells::state::{CurrentSpellType, SpellMod, SpellModOp, SpellState};
 use crate::World;
+use oxcore_shared::messages::spells::SmsgSpellDelayed;
+use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
 
 /// `SPELL_INTERRUPT_FLAG_DAMAGE_PUSHBACK` — spell loses casting time on damage.
@@ -17,10 +20,6 @@ const SPELL_INTERRUPT_FLAG_DAMAGE_PUSHBACK: u32 = 0x02;
 
 /// `SPELL_AURA_RESIST_PUSHBACK` — Concentration Aura-style reduction to cast pushback.
 const SPELL_AURA_RESIST_PUSHBACK: u32 = 68;
-
-/// Vanilla opcode the original code sends to the caster after applying a delay.
-#[allow(dead_code)]
-const SMSG_SPELL_DELAYED: u32 = 482;
 
 /// Snapshot of the per-cast fields the decision reads.
 ///
@@ -194,8 +193,7 @@ pub fn apply_not_lose_casting_time_mod(
 /// caller owns `delay_at_damage_count` and must persist the returned
 /// `decision.new_count` between calls for the same cast.
 ///
-/// Mirrors every branch of the original method's guards and arithmetic; the
-/// `SMSG_SPELL_DELAYED` packet send is not yet wired.
+/// Mirrors every branch of the original method's guards and arithmetic.
 pub fn delayed(
     caster_guid: ObjectGuid,
     delay_at_damage_count: &mut u32,
@@ -276,9 +274,6 @@ pub fn delayed(
                     decision.new_timer
                 );
 
-                // packet send not yet wired — the original builds
-                // WorldPacket(SMSG_SPELL_DELAYED) writing caster ObjectGuid (8 bytes)
-                // + uint32 delaytime and sends it to the caster.
             }
 
             decision
@@ -287,6 +282,16 @@ pub fn delayed(
     match decision {
         Some(d) => {
             *delay_at_damage_count = d.new_count;
+            if d.applied {
+                world.managers.broadcast_mgr.send_msg_to_player(
+                    caster_guid,
+                    SmsgSpellDelayed {
+                        caster_guid,
+                        delay_ms: d.delaytime,
+                    }
+                    .to_world_packet(),
+                );
+            }
             d
         }
         None => PushbackDecision::passthrough(0, *delay_at_damage_count),

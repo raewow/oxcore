@@ -1,7 +1,9 @@
 //! AuraContainer - manages all active auras on a player
 
 use super::aura::Aura;
-use super::effects::{AURA_EFFECT_IMMUNITY, AURA_MECHANIC_IMMUNITY, AURA_STATE_IMMUNITY};
+use super::effects::{
+    AURA_EFFECT_IMMUNITY, AURA_MECHANIC_IMMUNITY, AURA_SCHOOL_IMMUNITY, AURA_STATE_IMMUNITY,
+};
 use super::stacking::{exclusive_aura_can_apply, ExclusiveAuraAction};
 use super::state::*;
 use oxcore_shared::protocol::ObjectGuid;
@@ -438,6 +440,24 @@ impl AuraContainer {
                 _ => false,
             }
         })
+    }
+
+    /// Whether an active school-immunity aura rejects a spell as a whole.
+    pub fn is_immune_to_school(
+        &self,
+        school_mask: u32,
+        spell_id: u32,
+        effects_are_positive: bool,
+        immunity_affects_all_polarities: impl Fn(u32) -> bool,
+    ) -> bool {
+        school_mask != 0
+            && self.auras.values().any(|aura| {
+                aura.aura_type == AURA_SCHOOL_IMMUNITY
+                    && aura.spell_id != spell_id
+                    && (aura.misc_value as u32 & school_mask) != 0
+                    && (aura.is_positive() != effects_are_positive
+                        || immunity_affects_all_polarities(aura.spell_id))
+            })
     }
 
     /// Get all active auras (immutable).
@@ -997,6 +1017,23 @@ mod tests {
         assert!(container.is_immune_to_spell_effect(0, 0, 17, false, |_| false));
         assert!(!container.is_immune_to_spell_effect(0, 4, 0, false, |_| false));
         assert!(!container.is_immune_to_spell_effect(0, 0, 18, false, |_| false));
+    }
+
+    #[test]
+    fn school_immunity_matches_school_mask_polarity_and_excludes_itself() {
+        let mut container = AuraContainer::new();
+        let caster = test_guid(1);
+        let mut immunity = make_aura(6000, 0, caster, None);
+        immunity.aura_type = super::super::effects::AURA_SCHOOL_IMMUNITY;
+        immunity.misc_value = 1 << 2;
+        immunity.flags.is_positive = true;
+        container.add_aura(immunity);
+
+        assert!(container.is_immune_to_school(1 << 2, 7000, false, |_| false));
+        assert!(!container.is_immune_to_school(1 << 1, 7000, false, |_| false));
+        assert!(!container.is_immune_to_school(1 << 2, 7000, true, |_| false));
+        assert!(!container.is_immune_to_school(1 << 2, 6000, false, |_| false));
+        assert!(container.is_immune_to_school(1 << 2, 7000, true, |id| id == 6000));
     }
 
     #[test]

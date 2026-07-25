@@ -86,6 +86,9 @@ pub struct TargetInfo {
     pub effect_mask: u8,
     /// Hit/miss/resist/immune outcome, resolved once for the whole target.
     pub miss_condition: SpellHitOutcome,
+    /// Whether `miss_condition` has already been rolled for this cast. Delayed
+    /// projectiles resolve at launch and carry this snapshot to impact.
+    pub outcome_resolved: bool,
     /// Set once this target's effects have been applied; a second call is a no-op
     /// (mirrors `TargetInfo::processed`).
     pub processed: bool,
@@ -107,6 +110,7 @@ impl TargetInfo {
             target_guid,
             effect_mask,
             miss_condition: SpellHitOutcome::Hit,
+            outcome_resolved: false,
             processed: false,
             proc_attacker: proc_flags::NONE,
             proc_victim: proc_flags::NONE,
@@ -203,6 +207,11 @@ async fn do_spell_hit_on_unit(
     // TODO: MaNGOS `Unit::IsEffectResist(m_spellInfo, eff)` not yet ported.
     // When it lands, iterate 0..3, clear bit `eff` from `*effect_mask` when the
     // target resists that effect's mechanic, and return false if mask becomes 0.
+
+    if target_is_immune_to_school(target_guid, spell_entry, *effect_mask, world) {
+        *effect_mask = 0;
+        return false;
+    }
 
     // ── Step 5.  Per-effect immunity re-check ─────────────────────────────────
     // Apply the common Unit aura immunity rules before dispatch, including for
@@ -458,6 +467,71 @@ fn target_is_immune_to_spell_effect(
     }
 }
 
+fn target_is_immune_to_school(
+    target_guid: ObjectGuid,
+    spell: &SpellEntry,
+    effect_mask: u8,
+    world: &World,
+) -> bool {
+    const SPELL_ATTR_EX_IMMUNITY_PURGES_EFFECT: u32 = 0x0000_8000;
+    const SPELL_ATTR_EX2_NO_SCHOOL_IMMUNITIES: u32 = 0x0400_0000;
+    const SPELL_ATTR_EX_IGNORE_CASTER_AND_TARGET_RESTRICTIONS: u32 = 0x0080_0000;
+    const SPELL_ATTR_EX3_IGNORE_CASTER_AND_TARGET_RESTRICTIONS: u32 = 0x1000_0000;
+    const SPELL_ATTR_EX_IMMUNITY_TO_HOSTILE_AND_FRIENDLY_EFFECTS: u32 = 0x0001_0000;
+
+    if spell.attributes_ex
+        & (SPELL_ATTR_EX_IMMUNITY_PURGES_EFFECT
+            | SPELL_ATTR_EX_IGNORE_CASTER_AND_TARGET_RESTRICTIONS)
+        != 0
+        || spell.attributes_ex2 & SPELL_ATTR_EX2_NO_SCHOOL_IMMUNITIES != 0
+        || spell.attributes_ex3 & SPELL_ATTR_EX3_IGNORE_CASTER_AND_TARGET_RESTRICTIONS != 0
+    {
+        return false;
+    }
+
+    let effects_are_positive = (0..3).all(|effect_index| {
+        spell.effect[effect_index] == 0
+            || effect_mask & (1 << effect_index) == 0
+            || spell.is_positive_effect(effect_index)
+    });
+    let school_mask = 1u32.checked_shl(spell.school).unwrap_or(0);
+    let is_immune = |auras: &crate::game::player::auras::AuraContainer| {
+        auras.is_immune_to_school(
+            school_mask,
+            spell.id,
+            effects_are_positive,
+            |immunity_spell_id| {
+                world
+                    .managers
+                    .spell_mgr
+                    .get(immunity_spell_id)
+                    .is_some_and(|immunity_spell| {
+                        immunity_spell.attributes_ex
+                            & SPELL_ATTR_EX_IMMUNITY_TO_HOSTILE_AND_FRIENDLY_EFFECTS
+                            != 0
+                    })
+            },
+        )
+    };
+
+    if target_guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| is_immune(&player.auras.container))
+            .unwrap_or(false)
+    } else if target_guid.is_creature() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |creature| is_immune(&creature.auras))
+            .unwrap_or(false)
+    } else {
+        false
+    }
+}
+
 /// Enter combat for a landed hit (MaNGOS: `unit->AttackedBy(pRealUnitCaster)`,
 /// `unit->AddThreat(pRealUnitCaster)`, `SetInCombatWithAggressor`,
 /// `SetInCombatWithVictim`).
@@ -605,11 +679,14 @@ pub async fn apply_target_effects(
     // Resolve the hit outcome once for the whole target (not once per effect — the old
     // per-effect dispatch loop rolled a fresh hit per effect index, which could both
     // double-roll and desync the miss packet/AI event from the effects actually applied).
-    target.miss_condition = if is_triggered || target.target_guid == caster_guid {
-        SpellHitOutcome::Hit
-    } else {
-        hit::roll_spell_hit(caster_guid, target.target_guid, spell_id, world)
-    };
+    if !target.outcome_resolved {
+        target.miss_condition = if is_triggered || target.target_guid == caster_guid {
+            SpellHitOutcome::Hit
+        } else {
+            hit::roll_spell_hit(caster_guid, target.target_guid, spell_id, world)
+        };
+        target.outcome_resolved = true;
+    }
 
     match target.miss_condition {
         SpellHitOutcome::Miss | SpellHitOutcome::Resist | SpellHitOutcome::Immune => {
@@ -1094,6 +1171,45 @@ mod tests {
             });
 
         let spell = harmful_spell(108);
+        let mut mask = 0b001;
+        assert!(
+            !do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, &world).await
+        );
+        assert_eq!(mask, 0);
+    }
+
+    #[tokio::test]
+    async fn school_immunity_aborts_the_live_target_hit() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(32);
+        let target = ObjectGuid::new_player(33);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target, |player| {
+                player.auras.container.add_aura(Aura::new(
+                    9001,
+                    caster,
+                    0,
+                    crate::game::player::auras::effects::AURA_SCHOOL_IMMUNITY,
+                    1 << 2,
+                    0,
+                    None,
+                    0,
+                    1,
+                    0,
+                    AuraFlags {
+                        is_positive: true,
+                        ..AuraFlags::default()
+                    },
+                ));
+            });
+
+        let mut spell = harmful_spell(109);
+        spell.school = 2;
         let mut mask = 0b001;
         assert!(
             !do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, &world).await

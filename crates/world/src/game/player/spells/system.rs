@@ -6,7 +6,7 @@
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::player::spells::channel_visual::initialize_channeled_visual_timer;
 use crate::game::player::spells::cooldowns;
-use crate::game::player::spells::effects::EffectsDispatcher;
+use crate::game::player::spells::effects::{EffectDispatchResult, EffectsDispatcher};
 use crate::game::player::spells::hit;
 use crate::game::player::spells::learning;
 use crate::game::player::spells::modifiers;
@@ -14,7 +14,7 @@ use crate::game::player::spells::state::{
     ActiveCast, CurrentSpellType, SpellCastError, SpellCastResult, SpellCastTargets,
     SpellEventQueue, SpellEventType, SpellModOp, SpellModType, SpellState, SpellsState,
 };
-use crate::game::player::spells::target_info::set_caster_in_combat_with_victim;
+use crate::game::player::spells::target_info::{set_caster_in_combat_with_victim, TargetInfo};
 use crate::game::player::spells::validation;
 use crate::game::player::spells::{ammo, cast_pointers};
 use crate::World;
@@ -22,11 +22,13 @@ use anyhow::Result;
 use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
 use oxcore_shared::messages::spells::{
     ExecuteLogInfo, MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailure,
-    SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellStart, SPELL_RESULT_STATUS_FAIL,
+    SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellStart, SmsgSpellUpdateChainTargets,
+    SpellMissTarget, SPELL_RESULT_STATUS_FAIL,
     SPELL_RESULT_STATUS_OKAY,
 };
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -54,6 +56,36 @@ fn collect_execute_log_entries(
         }
     }
     entries
+}
+
+/// Split the one-shot target outcome records into the two SMSG_SPELL_GO lists.
+fn spell_go_target_lists(targets: &[TargetInfo]) -> (Vec<ObjectGuid>, Vec<SpellMissTarget>) {
+    targets.iter().fold((Vec::new(), Vec::new()), |mut lists, target| {
+        match target.miss_condition {
+            hit::SpellHitOutcome::Hit | hit::SpellHitOutcome::PartialResist(_) => {
+                lists.0.push(target.target_guid);
+            }
+            hit::SpellHitOutcome::Miss => lists.1.push(SpellMissTarget {
+                guid: target.target_guid,
+                reason: hit::SpellMissInfo::Miss as u8,
+            }),
+            hit::SpellHitOutcome::Resist => lists.1.push(SpellMissTarget {
+                guid: target.target_guid,
+                reason: hit::SpellMissInfo::Resist as u8,
+            }),
+            hit::SpellHitOutcome::Immune => lists.1.push(SpellMissTarget {
+                guid: target.target_guid,
+                reason: hit::SpellMissInfo::Immune as u8,
+            }),
+            // The legacy packet has a reflect-result byte after the miss reason.
+            // Reflect redirection is not implemented, so retain the target as a miss.
+            hit::SpellHitOutcome::Reflect => lists.1.push(SpellMissTarget {
+                guid: target.target_guid,
+                reason: hit::SpellMissInfo::Reflect as u8,
+            }),
+        }
+        lists
+    })
 }
 
 /// Select the channel object from effect-zero unit targets, falling back to the
@@ -432,6 +464,9 @@ pub struct SpellSystem {
     effects_dispatcher: EffectsDispatcher,
     /// Event-driven spell queue — replaces per-player polling
     event_queue: Mutex<SpellEventQueue>,
+    /// Per-cast outcomes retained until SMSG_SPELL_GO is built. Delayed casts put
+    /// their launch snapshot here before scheduling impact.
+    target_outcomes: Mutex<HashMap<(ObjectGuid, u32), Vec<TargetInfo>>>,
 }
 
 /// Resolve ammo projectile display info for SMSG_SPELL_START / SMSG_SPELL_GO.
@@ -501,6 +536,7 @@ impl SpellSystem {
             broadcast_mgr,
             effects_dispatcher: EffectsDispatcher::new(),
             event_queue: Mutex::new(SpellEventQueue::new()),
+            target_outcomes: Mutex::new(HashMap::new()),
         }
     }
 
@@ -629,6 +665,7 @@ impl SpellSystem {
                 true, // always triggered
                 Some(&resolved),
                 Some(custom_base_points),
+                None,
                 world,
             )
             .await?;
@@ -975,6 +1012,21 @@ impl SpellSystem {
         packet.write_u32(spell_id);
         packet.write_u32(duration_ms);
         self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
+
+        let chain_targets: Vec<_> = resolved.effect_targets[0]
+            .iter()
+            .copied()
+            .filter(|target| *target != caster_guid)
+            .collect();
+        if !chain_targets.is_empty() {
+            let packet = SmsgSpellUpdateChainTargets {
+                caster_guid,
+                spell_id,
+                targets: chain_targets,
+            };
+            self.broadcast_mgr
+                .broadcast_nearby(caster_guid, &packet.to_world_packet(), true);
+        }
 
         // Spell::InitializeChanneledVisualTimer: a handful of channeled spells (Tranquility,
         // Starshards) periodically re-send their visual kit. Wired against the real spell
@@ -1325,6 +1377,7 @@ impl SpellSystem {
                     is_triggered,
                     cast_targets,
                     resolved_targets,
+                    target_infos,
                 } => {
                     tracing::info!(
                         "[SPELL_PROJECTILE_HIT] spell={spell_id} caster={caster_guid:?} target={target_guid:?} — executing delayed damage"
@@ -1336,6 +1389,7 @@ impl SpellSystem {
                         &cast_targets,
                         is_triggered,
                         &resolved_targets,
+                        Some(target_infos),
                         world,
                     )
                     .await?;
@@ -1608,6 +1662,17 @@ impl SpellSystem {
                     caster_guid,
                     world,
                 );
+                let target_infos = self.effects_dispatcher.resolve_target_outcomes(
+                    caster_guid,
+                    spell_id,
+                    target_guid,
+                    is_triggered,
+                    &resolved_targets,
+                    world,
+                );
+                if let Ok(mut outcomes) = self.target_outcomes.lock() {
+                    outcomes.insert((caster_guid, spell_id), target_infos.clone());
+                }
                 // Schedule delayed effect via event queue
                 let now = get_game_time_ms();
                 if let Ok(mut queue) = self.event_queue.lock() {
@@ -1621,6 +1686,7 @@ impl SpellSystem {
                             is_triggered,
                             cast_targets: cast_targets.clone(),
                             resolved_targets: resolved_targets.clone(),
+                            target_infos,
                         },
                     );
                 }
@@ -1681,6 +1747,7 @@ impl SpellSystem {
             cast_targets,
             is_triggered,
             &resolved,
+            None,
             world,
         )
         .await
@@ -1695,6 +1762,7 @@ impl SpellSystem {
         cast_targets: &SpellCastTargets,
         is_triggered: bool,
         resolved: &crate::game::player::spells::targets::ResolvedTargets,
+        target_infos: Option<Vec<TargetInfo>>,
         world: &World,
     ) -> Result<()> {
         let target_guid = cast_targets.unit_target();
@@ -1709,9 +1777,13 @@ impl SpellSystem {
                 is_triggered,
                 Some(resolved),
                 None,
+                target_infos,
                 world,
             )
             .await?;
+        if let Ok(mut outcomes) = self.target_outcomes.lock() {
+            outcomes.insert((caster_guid, spell_id), effect_results.targets.clone());
+        }
 
         // `_handle_finish_phase`: emit the spell-execute log when the cast is client-visible
         // and isn't a plain school-damage nuke (those log via the damage packet instead).
@@ -1729,7 +1801,7 @@ impl SpellSystem {
                 is_triggered,
             );
             if needs_spell_log(send_to_client, &entry.effect) {
-                let execute_log = collect_execute_log_entries(effect_results);
+                let execute_log = collect_execute_log_entries(effect_results.effects);
                 let execute_log_refs = [
                     execute_log[0].as_slice(),
                     execute_log[1].as_slice(),
@@ -1835,13 +1907,20 @@ impl SpellSystem {
         });
 
         // Collect all unique hit targets across all effects
-        let mut hit_targets: Vec<ObjectGuid> = resolved
+        let fallback_hit_targets: Vec<ObjectGuid> = resolved
             .effect_targets
             .iter()
             .flat_map(|t| t.iter().copied())
             .collect();
-        hit_targets.sort_by_key(|g| g.raw());
-        hit_targets.dedup_by_key(|g| g.raw());
+        let target_outcomes = self
+            .target_outcomes
+            .lock()
+            .ok()
+            .and_then(|mut outcomes| outcomes.remove(&(caster_guid, spell_id)));
+        let (hit_targets, miss_targets) = target_outcomes
+            .as_deref()
+            .map(spell_go_target_lists)
+            .unwrap_or((fallback_hit_targets, Vec::new()));
 
         // Completion packet order matches Spell::cast: SMSG_SPELL_COOLDOWN, then the
         // success SMSG_CAST_RESULT, then SMSG_SPELL_GO.
@@ -1897,7 +1976,7 @@ impl SpellSystem {
             cast_flags: (if is_triggered { 0x0000 } else { 0x0002 })
                 | if is_ranged { CAST_FLAG_AMMO } else { 0 },
             hit_targets,
-            miss_targets: Vec::new(),
+            miss_targets,
             target_guid,
             cast_item_guid,
             ammo_display_id,

@@ -1186,6 +1186,8 @@ pub enum SpellEventType {
         /// Target/effect-mask source resolved at projectile launch. Impact must
         /// dispatch this snapshot rather than resolving the world again.
         resolved_targets: crate::game::player::spells::targets::ResolvedTargets,
+        /// Hit outcomes resolved at launch and preserved until projectile impact.
+        target_infos: Vec<crate::game::player::spells::target_info::TargetInfo>,
     },
     /// Delayed proc resolution — run after the current spell event batch.
     PendingProc {
@@ -1489,6 +1491,7 @@ mod tests {
                 is_triggered: false,
                 cast_targets: SpellCastTargets::default(),
                 resolved_targets: crate::game::player::spells::targets::ResolvedTargets::default(),
+                target_infos: Vec::new(),
             },
         );
         q.schedule(500, pending_proc(a, 5));
@@ -1517,6 +1520,7 @@ mod tests {
                 is_triggered: false,
                 cast_targets: SpellCastTargets::default(),
                 resolved_targets,
+                target_infos: Vec::new(),
             },
         );
 
