@@ -1678,6 +1678,32 @@ mod tests {
     }
 
     #[test]
+    fn spell_area_validation_rejects_invalid_requirements_and_autocast_cycles() {
+        let mgr = SpellManager::new();
+        let valid = SpellArea {
+            spell: 1,
+            area_id: 42,
+            quest_start: 100,
+            quest_end: 0,
+            aura_spell: 0,
+            racemask: 1,
+            gender: 0,
+            quest_start_can_active: false,
+            autocast: false,
+        };
+        assert!(mgr.is_valid_spell_area(&valid, &[], |id| id == 42, |id| id == 100));
+        assert!(!mgr.is_valid_spell_area(&valid, &[], |_| false, |_| true));
+        assert!(!mgr.is_valid_spell_area(&valid, &[], |_| true, |_| false));
+        assert!(!mgr.is_valid_spell_area(&valid, &[valid.clone()], |_| true, |_| true));
+
+        let invalid_race = SpellArea {
+            racemask: 0x100,
+            ..valid.clone()
+        };
+        assert!(!mgr.is_valid_spell_area(&invalid_race, &[], |_| true, |_| true));
+    }
+
+    #[test]
     fn spell_learn_rows_use_inclusive_classic_build_range() {
         assert!(is_spell_learn_build_supported(5875, 5875));
         assert!(is_spell_learn_build_supported(1, 6000));

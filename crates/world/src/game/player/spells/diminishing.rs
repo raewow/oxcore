@@ -12,8 +12,8 @@
 //! DR groups are shared among related CC effects (e.g., all stuns share a group).
 //! The DR level resets 15 seconds after the last application.
 
-use std::collections::HashMap;
 use oxcore_dbc::structures::SpellEntry;
+use std::collections::HashMap;
 
 /// Duration (in milliseconds) before DR resets for a target.
 pub const DR_RESET_TIME_MS: u64 = 15_000;
@@ -65,9 +65,18 @@ pub enum DRType {
 pub fn dr_type(group: DRGroup) -> DRType {
     match group {
         DRGroup::Stun | DRGroup::TriggerStun | DRGroup::KidneyShot => DRType::All,
-        DRGroup::Sleep | DRGroup::Root | DRGroup::TriggerRoot | DRGroup::Fear
-        | DRGroup::MindControl | DRGroup::Polymorph | DRGroup::Silence | DRGroup::Disarm
-        | DRGroup::DeathCoil | DRGroup::Freeze | DRGroup::Banish | DRGroup::WarlockFear
+        DRGroup::Sleep
+        | DRGroup::Root
+        | DRGroup::TriggerRoot
+        | DRGroup::Fear
+        | DRGroup::MindControl
+        | DRGroup::Polymorph
+        | DRGroup::Silence
+        | DRGroup::Disarm
+        | DRGroup::DeathCoil
+        | DRGroup::Freeze
+        | DRGroup::Banish
+        | DRGroup::WarlockFear
         | DRGroup::Knockout => DRType::Player,
         _ => DRType::None,
     }
@@ -80,6 +89,7 @@ pub struct DRState {
     pub level: u8,
     /// Game time (ms) when the DR was last incremented — resets after 15s
     pub last_applied_ms: u64,
+    pub active_auras: u16,
 }
 
 /// Per-player (target) diminishing returns state.
@@ -116,11 +126,22 @@ impl DiminishingState {
         let state = self.groups.entry(group).or_insert(DRState {
             level: 0,
             last_applied_ms: now_ms,
+            active_auras: 0,
         });
         state.level = (state.level + 1).min(DR_MAX_LEVEL + 1);
         state.last_applied_ms = now_ms;
+        state.active_auras += 1;
 
         modifier
+    }
+
+    pub fn remove_aura(&mut self, group: DRGroup, now_ms: u64) {
+        if let Some(state) = self.groups.get_mut(&group) {
+            state.active_auras = state.active_auras.saturating_sub(1);
+            if state.active_auras == 0 {
+                state.last_applied_ms = now_ms;
+            }
+        }
     }
 
     /// Check if target is immune to a DR group (without incrementing).
@@ -165,21 +186,60 @@ pub fn get_dr_group_for_spell(spell: &SpellEntry, triggered_by_aura: bool) -> DR
         0 if matches!(spell.id, 12355 | 18093) => return DRGroup::TriggerStun,
         _ => {}
     }
-    if matches!(spell.id, 7922 | 20253 | 20614 | 20615) { return DRGroup::Stun; }
-    let mechanics = spell.effect_mechanic.iter().fold(1u32 << spell.mechanic.saturating_sub(1), |mask, &m| mask | (1u32 << m.saturating_sub(1)));
+    if matches!(spell.id, 7922 | 20253 | 20614 | 20615) {
+        return DRGroup::Stun;
+    }
+    let mechanics = spell
+        .effect_mechanic
+        .iter()
+        .fold(1u32 << spell.mechanic.saturating_sub(1), |mask, &m| {
+            mask | (1u32 << m.saturating_sub(1))
+        });
     let has = |mechanic: u32| mechanics & (1 << mechanic.saturating_sub(1)) != 0;
-    if has(12) { return if triggered_by_aura { DRGroup::TriggerStun } else { DRGroup::Stun }; }
-    if has(10) { return DRGroup::Sleep; }
-    if has(17) { return DRGroup::Polymorph; }
-    if has(7) { return if triggered_by_aura { DRGroup::TriggerRoot } else { DRGroup::Root }; }
-    if has(5) { return DRGroup::Fear; }
-    if has(1) { return DRGroup::MindControl; }
-    if has(9) { return DRGroup::Silence; }
-    if has(2) { return DRGroup::Disarm; }
-    if has(3) { return DRGroup::Freeze; }
-    if has(14) || has(15) { return DRGroup::Knockout; }
-    if has(18) { return DRGroup::Banish; }
-    if has(24) { return DRGroup::DeathCoil; }
+    if has(12) {
+        return if triggered_by_aura {
+            DRGroup::TriggerStun
+        } else {
+            DRGroup::Stun
+        };
+    }
+    if has(10) {
+        return DRGroup::Sleep;
+    }
+    if has(17) {
+        return DRGroup::Polymorph;
+    }
+    if has(7) {
+        return if triggered_by_aura {
+            DRGroup::TriggerRoot
+        } else {
+            DRGroup::Root
+        };
+    }
+    if has(5) {
+        return DRGroup::Fear;
+    }
+    if has(1) {
+        return DRGroup::MindControl;
+    }
+    if has(9) {
+        return DRGroup::Silence;
+    }
+    if has(2) {
+        return DRGroup::Disarm;
+    }
+    if has(3) {
+        return DRGroup::Freeze;
+    }
+    if has(14) || has(15) {
+        return DRGroup::Knockout;
+    }
+    if has(18) {
+        return DRGroup::Banish;
+    }
+    if has(24) {
+        return DRGroup::DeathCoil;
+    }
     DRGroup::None
 }
 

@@ -124,40 +124,56 @@ impl AuraSystem {
                 .spell_mgr
                 .get(spell_id)
                 .expect("spell lookup succeeded while applying its aura");
-            let dr_group = crate::game::player::spells::diminishing::get_dr_group_for_spell(
-                &spell, false,
-            );
+            let dr_group =
+                crate::game::player::spells::diminishing::get_dr_group_for_spell(&spell, false);
 
             if dr_group == crate::game::player::spells::diminishing::DRGroup::LimitOnly {
                 duration_ms.map(|duration| duration.min(10_000))
             } else if crate::game::player::spells::diminishing::dr_type(dr_group)
                 != crate::game::player::spells::diminishing::DRType::None
             {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-
-                let modifier = world
+                let existing_duration = world
                     .systems
                     .player
                     .manager()
-                    .with_player_mut(target_guid, |player| {
-                        player.combat.diminishing.apply_dr(dr_group, now)
+                    .with_player(target_guid, |player| {
+                        player
+                            .auras
+                            .container
+                            .all_auras()
+                            .find(|aura| aura.spell_id == spell_id)
+                            .and_then(|aura| aura.duration_ms)
                     })
-                    .unwrap_or(1.0);
+                    .flatten();
+                if let Some(duration) = existing_duration {
+                    Some(duration)
+                } else {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
 
-                if modifier <= 0.0 {
-                    tracing::debug!(
-                        "[DR] Target {:?} immune to DR group {:?} for spell {}",
-                        target_guid,
-                        dr_group,
-                        spell_id,
-                    );
-                    return Ok(None); // Target is immune — don't apply aura
+                    let modifier = world
+                        .systems
+                        .player
+                        .manager()
+                        .with_player_mut(target_guid, |player| {
+                            player.combat.diminishing.apply_dr(dr_group, now)
+                        })
+                        .unwrap_or(1.0);
+
+                    if modifier <= 0.0 {
+                        tracing::debug!(
+                            "[DR] Target {:?} immune to DR group {:?} for spell {}",
+                            target_guid,
+                            dr_group,
+                            spell_id,
+                        );
+                        return Ok(None); // Target is immune — don't apply aura
+                    }
+
+                    duration_ms.map(|d| (d as f32 * modifier) as u32)
                 }
-
-                duration_ms.map(|d| (d as f32 * modifier) as u32)
             } else {
                 duration_ms
             }
@@ -203,6 +219,16 @@ impl AuraSystem {
             max_charges,
             flags,
         );
+        aura.diminishing_group = (effect_index == 0)
+            .then(|| world.managers.spell_mgr.get(spell_id))
+            .flatten()
+            .and_then(|spell| {
+                let group =
+                    crate::game::player::spells::diminishing::get_dr_group_for_spell(&spell, false);
+                (crate::game::player::spells::diminishing::dr_type(group)
+                    != crate::game::player::spells::diminishing::DRType::None)
+                    .then_some(group)
+            });
         aura.cast_item_guid = cast_item_guid;
         if let Some(item_guid) = cast_item_guid {
             const MAIN_HAND: u8 = 15;
@@ -453,6 +479,19 @@ impl AuraSystem {
             .flatten();
 
         if let Some((aura, slot)) = removed_aura {
+            if let Some(group) = aura.diminishing_group {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| {
+                        player.combat.diminishing.remove_aura(group, now)
+                    });
+            }
             if let Some(trigger_spell_id) = removal_trigger_spell(spell_id, remove_mode) {
                 let caster_guid = if aura.caster_guid.is_empty() {
                     target_guid
@@ -2074,7 +2113,9 @@ impl AuraSystem {
             }
 
             for (spell_id, effect_index) in aura_removals {
-                let _ = self.remove_aura(player_guid, spell_id, effect_index, world).await;
+                let _ = self
+                    .remove_aura(player_guid, spell_id, effect_index, world)
+                    .await;
             }
         }
 

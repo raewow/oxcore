@@ -784,6 +784,80 @@ mod tests {
         assert!(actions.is_empty());
     }
 
+    #[test]
+    fn critter_spell_hit_flees_from_hostile_non_damage_spell() {
+        let caster = player_guid(10);
+        let mut snapshot = make_snapshot(AIState::Idle);
+        snapshot.ai_type = AIType::Critter;
+        let input = make_input(
+            snapshot,
+            vec![AIEvent::SpellHit {
+                caster_guid: caster,
+                spell_id: 123,
+                spell_is_positive: false,
+                spell_is_direct_damage: false,
+            }],
+            vec![],
+        );
+
+        let result = decide(&input);
+
+        assert!(has_action(&result.actions, |action| matches!(
+            action,
+            AIAction::FleeFrom {
+                flee_from_guid,
+                duration_ms: ESCAPE_TIMER_MS,
+                ..
+            } if *flee_from_guid == caster
+        )));
+    }
+
+    #[test]
+    fn critter_spell_hit_ignores_positive_and_direct_damage_spells() {
+        let caster = player_guid(10);
+        let mut snapshot = make_snapshot(AIState::Idle);
+        snapshot.ai_type = AIType::Critter;
+        let input = make_input(
+            snapshot,
+            vec![
+                AIEvent::SpellHit {
+                    caster_guid: caster,
+                    spell_id: 123,
+                    spell_is_positive: true,
+                    spell_is_direct_damage: false,
+                },
+                AIEvent::SpellHit {
+                    caster_guid: caster,
+                    spell_id: 456,
+                    spell_is_positive: false,
+                    spell_is_direct_damage: true,
+                },
+            ],
+            vec![],
+        );
+
+        assert!(decide(&input).actions.is_empty());
+    }
+
+    #[test]
+    fn critter_spell_hit_does_not_restart_an_existing_flee() {
+        let caster = player_guid(10);
+        let mut snapshot = make_snapshot(AIState::Fleeing);
+        snapshot.ai_type = AIType::Critter;
+        let input = make_input(
+            snapshot,
+            vec![AIEvent::SpellHit {
+                caster_guid: caster,
+                spell_id: 123,
+                spell_is_positive: false,
+                spell_is_direct_damage: false,
+            }],
+            vec![],
+        );
+
+        assert!(decide(&input).actions.is_empty());
+    }
+
     // ========== decide_basic integration test ==========
 
     #[test]

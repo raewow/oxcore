@@ -1,5 +1,6 @@
 //! Aura struct - represents a single active buff/debuff on a unit
 
+use crate::game::player::spells::diminishing::DRGroup;
 use oxcore_shared::protocol::ObjectGuid;
 
 /// Number of effects per spell in vanilla WoW
@@ -87,6 +88,8 @@ pub struct Aura {
 
     /// Misc value from spell effect (e.g., stat index for MOD_STAT, school mask for resist)
     pub misc_value: i32,
+    /// Diminishing-return group registered for this aura's lifetime.
+    pub diminishing_group: Option<DRGroup>,
 
     /// Aura flags
     pub flags: AuraFlags,
@@ -190,6 +193,7 @@ impl Aura {
             current_values,
             aura_type,
             misc_value,
+            diminishing_group: None,
             flags,
             is_applied: true,
         }

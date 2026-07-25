@@ -252,14 +252,19 @@ impl World {
             .load(&self.databases.world)
             .await
             .context("Failed to load conditions")?;
-        step("Loading spells");
-        self.managers
-            .spell_mgr
-            .load(&self.databases.world)
+        // Spell-area loading validates quest requirements against the loaded templates.
+        step("Loading quests");
+        QuestTemplateRepository::load(&self.systems.quest_manager, &self.databases.world)
             .await
-            .context("Failed to load spells from SQL")?;
+            .context("Failed to load quest data")?;
+        step("Loading spells");
         {
             let dbc = self.dbc.read();
+            self.managers
+                .spell_mgr
+                .load(&self.databases.world, &dbc, &self.systems.quest_manager)
+                .await
+                .context("Failed to load spells from SQL")?;
             self.managers
                 .spell_mgr
                 .load_spell_chains(&self.databases.world, &dbc)
@@ -391,12 +396,6 @@ impl World {
                 );
             }
         }
-
-        // Load quest data from world database
-        step("Loading quests");
-        QuestTemplateRepository::load(&self.systems.quest_manager, &self.databases.world)
-            .await
-            .context("Failed to load quest data")?;
 
         // Initialize game systems
         step("Initializing systems");
