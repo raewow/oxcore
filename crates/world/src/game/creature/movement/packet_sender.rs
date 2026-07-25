@@ -77,6 +77,18 @@ impl MovementPacketSender {
         }
     }
 
+    fn observer_speed_opcode(move_type: MoveType) -> Option<Opcode> {
+        match move_type {
+            MoveType::Walk => Some(Opcode::MSG_MOVE_SET_WALK_SPEED),
+            MoveType::Run => Some(Opcode::MSG_MOVE_SET_RUN_SPEED),
+            MoveType::RunBack => Some(Opcode::MSG_MOVE_SET_RUN_BACK_SPEED),
+            MoveType::Swim => Some(Opcode::MSG_MOVE_SET_SWIM_SPEED),
+            MoveType::SwimBack => Some(Opcode::MSG_MOVE_SET_SWIM_BACK_SPEED),
+            MoveType::TurnRate => Some(Opcode::MSG_MOVE_SET_TURN_RATE),
+            MoveType::Flight | MoveType::FlightBack => None,
+        }
+    }
+
     fn absolute_speed(move_type: MoveType, rate: f32) -> Option<f32> {
         Self::base_move_speed(move_type).map(|base_speed| rate * base_speed)
     }
@@ -115,6 +127,49 @@ impl MovementPacketSender {
         packet.write_f32(speed);
 
         broadcast_around_creature(world, creature_guid, &packet);
+        true
+    }
+
+    /// Broadcast a client-controlled unit's acknowledged speed change to observers.
+    ///
+    /// A running spline owns the unit's position, so observers receive the compact spline
+    /// packet. Otherwise they receive the normal movement packet with full movement info.
+    pub fn send_speed_change_to_observers(
+        world: &World,
+        player_guid: ObjectGuid,
+        move_type: MoveType,
+        new_speed: f32,
+        movement_info: &crate::core::common::MovementInfo,
+    ) -> bool {
+        let Some(spline_active) = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| {
+                player.movement.pending_spline.is_some()
+            })
+        else {
+            return false;
+        };
+
+        let Some(opcode) = (if spline_active {
+            Self::opcode_for_move_type(move_type)
+        } else {
+            Self::observer_speed_opcode(move_type)
+        }) else {
+            return false;
+        };
+
+        let mut packet = WorldPacket::new(opcode);
+        if spline_active {
+            packet.write_packed_guid_raw(player_guid.raw());
+        } else {
+            movement_info.write_to_packet(&mut packet);
+        }
+        packet.write_f32(new_speed);
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_nearby_exclude_self(player_guid, &packet);
         true
     }
 
@@ -294,6 +349,22 @@ mod tests {
         );
         assert_eq!(
             MovementPacketSender::opcode_for_move_type(MoveType::FlightBack),
+            None
+        );
+    }
+
+    #[test]
+    fn observer_speed_opcodes_use_non_spline_messages() {
+        assert_eq!(
+            MovementPacketSender::observer_speed_opcode(MoveType::Run),
+            Some(Opcode::MSG_MOVE_SET_RUN_SPEED)
+        );
+        assert_eq!(
+            MovementPacketSender::observer_speed_opcode(MoveType::TurnRate),
+            Some(Opcode::MSG_MOVE_SET_TURN_RATE)
+        );
+        assert_eq!(
+            MovementPacketSender::observer_speed_opcode(MoveType::Flight),
             None
         );
     }

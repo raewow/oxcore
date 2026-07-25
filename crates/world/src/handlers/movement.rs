@@ -9,6 +9,7 @@ use crate::core::session::WorldSession;
 use crate::game::creature::movement::packet_sender::{
     MovementChangeType, MovementFlagChange, MovementPacketSender,
 };
+use crate::game::creature::movement::MoveType;
 use crate::World;
 use oxcore_shared::messages::character::SmsgLogoutCancelAck;
 use oxcore_shared::messages::movement::SmsgForceMoveUnroot;
@@ -687,15 +688,14 @@ impl SpeedMoveType {
         })
     }
 
-    /// The MSG_MOVE_SET_* opcode used to inform observers of the new value.
-    fn observer_opcode(self) -> Opcode {
+    fn move_type(self) -> MoveType {
         match self {
-            Self::Walk => Opcode::MSG_MOVE_SET_WALK_SPEED,
-            Self::Run => Opcode::MSG_MOVE_SET_RUN_SPEED,
-            Self::RunBack => Opcode::MSG_MOVE_SET_RUN_BACK_SPEED,
-            Self::Swim => Opcode::MSG_MOVE_SET_SWIM_SPEED,
-            Self::SwimBack => Opcode::MSG_MOVE_SET_SWIM_BACK_SPEED,
-            Self::TurnRate => Opcode::MSG_MOVE_SET_TURN_RATE,
+            Self::Walk => MoveType::Walk,
+            Self::Run => MoveType::Run,
+            Self::RunBack => MoveType::RunBack,
+            Self::Swim => MoveType::Swim,
+            Self::SwimBack => MoveType::SwimBack,
+            Self::TurnRate => MoveType::TurnRate,
         }
     }
 }
@@ -793,16 +793,13 @@ pub fn handle_force_speed_change_ack(
             }
         });
 
-    // Inform observers: packed guid + movement info + new speed.
-    // write_to_packet emits the packed mover guid first, matching the C++ layout.
-    let mut data = WorldPacket::new(move_type.observer_opcode());
-    movement_info.write_to_packet(&mut data);
-    data.write_f32(new_speed);
-
-    world
-        .managers
-        .broadcast_mgr
-        .broadcast_nearby_exclude_self(player_guid, &data);
+    MovementPacketSender::send_speed_change_to_observers(
+        world,
+        player_guid,
+        move_type.move_type(),
+        new_speed,
+        &movement_info,
+    );
 
     Ok(())
 }
@@ -1155,24 +1152,15 @@ mod tests {
     }
 
     #[test]
-    fn forced_movement_ack_opcodes_map_to_their_observer_messages() {
+    fn forced_movement_ack_opcodes_map_to_their_move_types() {
         let speed_cases = [
-            (
-                Opcode::CMSG_FORCE_RUN_SPEED_CHANGE_ACK,
-                Opcode::MSG_MOVE_SET_RUN_SPEED,
-            ),
-            (
-                Opcode::CMSG_FORCE_WALK_SPEED_CHANGE_ACK,
-                Opcode::MSG_MOVE_SET_WALK_SPEED,
-            ),
-            (
-                Opcode::CMSG_FORCE_TURN_RATE_CHANGE_ACK,
-                Opcode::MSG_MOVE_SET_TURN_RATE,
-            ),
+            (Opcode::CMSG_FORCE_RUN_SPEED_CHANGE_ACK, MoveType::Run),
+            (Opcode::CMSG_FORCE_WALK_SPEED_CHANGE_ACK, MoveType::Walk),
+            (Opcode::CMSG_FORCE_TURN_RATE_CHANGE_ACK, MoveType::TurnRate),
         ];
         for (ack, observer) in speed_cases {
             assert_eq!(
-                SpeedMoveType::from_ack_opcode(ack).map(SpeedMoveType::observer_opcode),
+                SpeedMoveType::from_ack_opcode(ack).map(SpeedMoveType::move_type),
                 Some(observer)
             );
         }
