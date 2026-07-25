@@ -72,7 +72,7 @@ impl DbcManager {
             spell_duration: DbcStore::new("niii"),
             spell_focus_object: DbcStore::new("n"),
             spell_radius: DbcStore::new("nff"),
-            spell_range: DbcStore::new("nff"),
+            spell_range: DbcStore::new("nffff"),
             item: DbcStore::new("n"),
             skill_line: DbcStore::new("nixxxxxxxxxxxxxxxxixx"),
             skill_line_ability: DbcStore::new("niiiixxiiiiixxi"),

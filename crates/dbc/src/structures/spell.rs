@@ -153,7 +153,7 @@ impl DbcEntry for SpellRangeEntry {
                 .get_f32(1)
                 .context("Failed to read SpellRange range_min")?,
             range_max: record
-                .get_f32(2)
+                .get_f32(3)
                 .context("Failed to read SpellRange range_max")?,
         };
 
@@ -826,7 +826,11 @@ mod tests {
 
         let mut spell = make_spell_entry(102);
         spell.range_index = 3;
+        assert_eq!(spell.get_spell_max_range(&dbc), 30.0);
         assert!(spell.is_target_in_range(10.0, &dbc));
         assert!(!spell.is_target_in_range(35.0, &dbc));
+
+        spell.range_index = 99;
+        assert_eq!(spell.get_spell_max_range(&dbc), 0.0);
     }
 }

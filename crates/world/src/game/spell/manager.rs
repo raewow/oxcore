@@ -3,6 +3,7 @@
 use crate::database::repositories::SpellRepository;
 use crate::dbc::manager::DbcManager;
 use crate::dbc::structures::{SkillLineAbilityEntry, SkillRaceClassInfoEntry, SpellEntry};
+use crate::game::npc::quest::manager::QuestManager;
 use anyhow::Result;
 use dashmap::DashMap;
 use parking_lot::RwLock;
@@ -12,6 +13,10 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 const CLASSIC_CLIENT_BUILD: u32 = 5875;
+const PLAYABLE_RACE_MASK: u32 = 0xFF;
+const SPELL_EFFECT_APPLY_AURA: u32 = 6;
+const SPELL_AURA_DUMMY: u32 = 4;
+const SPELL_AURA_GHOST: u32 = 95;
 
 /// Faithful `SpellChainNode` (MaNGOS `SpellMgr.h`): prev/first/req + 1-based rank.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,7 +256,12 @@ impl SpellManager {
     }
 
     /// Load all spells from the spell_template SQL table
-    pub async fn load(&self, world_db: &MySqlPool) -> Result<()> {
+    pub async fn load(
+        &self,
+        world_db: &MySqlPool,
+        dbc: &DbcManager,
+        quest_manager: &QuestManager,
+    ) -> Result<()> {
         let repo = SpellRepository::new(Arc::new(world_db.clone()));
         let entries = repo.load_all().await?;
         let count = entries.len();
@@ -285,7 +295,7 @@ impl SpellManager {
         self.load_spell_cones(world_db).await?;
 
         // Load spell_areas
-        self.load_spell_areas(world_db).await?;
+        self.load_spell_areas(world_db, dbc, quest_manager).await?;
 
         // Load spell_learn_spells
         self.load_spell_learn_spells(world_db).await?;
@@ -1000,7 +1010,12 @@ impl SpellManager {
     }
 
     /// Port of `SpellMgr::LoadSpellAreas` (SpellMgr.cpp:2418).
-    async fn load_spell_areas(&self, world_db: &MySqlPool) -> Result<()> {
+    async fn load_spell_areas(
+        &self,
+        world_db: &MySqlPool,
+        dbc: &DbcManager,
+        quest_manager: &QuestManager,
+    ) -> Result<()> {
         let rows = sqlx::query(
             "SELECT CAST(`spell` AS UNSIGNED) AS spell, \
                     CAST(`area` AS UNSIGNED) AS area, \
@@ -1051,6 +1066,16 @@ impl SpellManager {
                 autocast: row.try_get("autocast").unwrap_or(false),
             };
 
+            if !self.is_valid_spell_area(
+                &sa,
+                &areas,
+                |area_id| dbc.get_area(area_id).is_some(),
+                |quest_id| quest_manager.get_quest_template(quest_id).is_some(),
+            ) {
+                warn!("Spell {spell} has an invalid spell_area requirement");
+                continue;
+            }
+
             areas.push(sa);
             count += 1;
         }
@@ -1058,6 +1083,67 @@ impl SpellManager {
         *self.spell_areas.write() = areas;
         info!(">> Loaded {count} spell area requirements");
         Ok(())
+    }
+
+    fn is_valid_spell_area(
+        &self,
+        area: &SpellArea,
+        loaded_areas: &[SpellArea],
+        has_area: impl Fn(u32) -> bool,
+        has_quest: impl Fn(u32) -> bool,
+    ) -> bool {
+        if loaded_areas.iter().any(|existing| {
+            existing.spell == area.spell
+                && existing.area_id == area.area_id
+                && existing.quest_start == area.quest_start
+                && existing.aura_spell == area.aura_spell
+                && (existing.racemask & area.racemask) != 0
+                && existing.gender == area.gender
+        }) {
+            return false;
+        }
+        if area.area_id != 0 && !has_area(area.area_id) {
+            return false;
+        }
+        if area.quest_start != 0 && !has_quest(area.quest_start) {
+            return false;
+        }
+        if area.quest_end != 0
+            && (!has_quest(area.quest_end)
+                || (area.quest_end == area.quest_start && !area.quest_start_can_active))
+        {
+            return false;
+        }
+        if area.aura_spell != 0 {
+            let aura_spell_id = area.aura_spell.unsigned_abs();
+            let Some(aura_spell) = self.get(aura_spell_id) else {
+                return false;
+            };
+            if !aura_spell
+                .effect
+                .iter()
+                .zip(aura_spell.effect_apply_aura_name.iter())
+                .any(|(&effect, &aura)| {
+                    effect == SPELL_EFFECT_APPLY_AURA
+                        && matches!(aura, SPELL_AURA_DUMMY | SPELL_AURA_GHOST)
+                })
+                || aura_spell_id == area.spell
+            {
+                return false;
+            }
+            if area.autocast
+                && area.aura_spell > 0
+                && loaded_areas.iter().any(|existing| {
+                    existing.autocast
+                        && existing.aura_spell > 0
+                        && (existing.spell == area.spell || existing.spell == aura_spell_id)
+                })
+            {
+                return false;
+            }
+        }
+        (area.racemask == 0 || area.racemask & PLAYABLE_RACE_MASK != 0)
+            && matches!(area.gender, 0..=2)
     }
 
     /// Port of `SpellMgr::LoadExistingSpellIds` (SpellMgr.cpp:3103).
@@ -1678,7 +1764,7 @@ mod tests {
     }
 
     #[test]
-    fn spell_area_validation_rejects_invalid_requirements_and_autocast_cycles() {
+    fn spell_area_validation_rejects_invalid_requirements() {
         let mgr = SpellManager::new();
         let valid = SpellArea {
             spell: 1,
