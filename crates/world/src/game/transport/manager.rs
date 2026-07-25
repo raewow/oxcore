@@ -561,6 +561,7 @@ mod tests {
             .expect("created on its map");
         // A ship is a mobile-transport object keyed by its template entry.
         assert!(guid.is_mo_transport());
+        assert_eq!(guid.counter(), 176231);
         let transport = mgr.get(guid).unwrap();
         assert_eq!(transport.entry, 176231);
         assert_eq!(transport.map_id, 0);
