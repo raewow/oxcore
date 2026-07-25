@@ -2,7 +2,7 @@
 
 use crate::database::repositories::SpellRepository;
 use crate::dbc::manager::DbcManager;
-use crate::dbc::structures::SpellEntry;
+use crate::dbc::structures::{SkillLineAbilityEntry, SpellEntry};
 use anyhow::Result;
 use dashmap::DashMap;
 use parking_lot::RwLock;
@@ -210,6 +210,8 @@ pub struct SpellManager {
     spell_threats: DashMap<u32, SpellThreatEntry>,
     spell_elixirs: HashMap<u32, u8>,
     spell_learn_skills: RwLock<HashMap<u32, SpellLearnSkillNode>>,
+    skill_line_abilities_by_spell: RwLock<HashMap<u32, Vec<SkillLineAbilityEntry>>>,
+    skill_line_abilities_by_skill: RwLock<HashMap<u32, Vec<SkillLineAbilityEntry>>>,
     spell_learn_spells: RwLock<HashMap<u32, Vec<SpellLearnSpellNode>>>,
     spell_script_targets: RwLock<HashMap<u32, Vec<SpellTargetEntry>>>,
     spell_areas: RwLock<Vec<SpellArea>>,
@@ -233,6 +235,8 @@ impl SpellManager {
             spell_threats: DashMap::new(),
             spell_elixirs: HashMap::new(),
             spell_learn_skills: RwLock::new(HashMap::new()),
+            skill_line_abilities_by_spell: RwLock::new(HashMap::new()),
+            skill_line_abilities_by_skill: RwLock::new(HashMap::new()),
             spell_learn_spells: RwLock::new(HashMap::new()),
             spell_script_targets: RwLock::new(HashMap::new()),
             spell_areas: RwLock::new(Vec::new()),
@@ -383,6 +387,7 @@ impl SpellManager {
     /// from DBC data), merged/overridden by the `spell_chain` SQL table (custom cases).
     /// Faithful `SpellMgr::LoadSpellChains` port (validation logging trimmed to warnings).
     pub async fn load_spell_chains(&self, world_db: &MySqlPool, dbc: &DbcManager) -> Result<()> {
+        self.load_skill_line_ability_maps(dbc);
         let mut chains: HashMap<u32, SpellChainNode> = HashMap::new();
 
         // 1. Talent DBC: ranks 2..5 form a chain rooted at rank_spell_ids[0].
@@ -584,6 +589,27 @@ impl SpellManager {
         self.rebuild_spell_chains_next(&chains);
         *self.spell_chains.write() = chains;
         Ok(())
+    }
+
+    /// Port of `SpellMgr::LoadSkillLineAbilityMaps` (SpellMgr.cpp:2746).
+    /// Indexes every SkillLineAbility DBC entry by both spell and skill ID.
+    pub fn load_skill_line_ability_maps(&self, dbc: &DbcManager) {
+        let mut by_spell = HashMap::new();
+        let mut by_skill = HashMap::new();
+
+        for (_, ability) in dbc.skill_line_ability.entries() {
+            by_spell
+                .entry(ability.spell_id)
+                .or_insert_with(Vec::new)
+                .push(ability.clone());
+            by_skill
+                .entry(ability.skill_id)
+                .or_insert_with(Vec::new)
+                .push(ability.clone());
+        }
+
+        *self.skill_line_abilities_by_spell.write() = by_spell;
+        *self.skill_line_abilities_by_skill.write() = by_skill;
     }
 
     /// Rebuild the `prev`/`req` -> spell_id reverse-lookup map (MaNGOS `mSpellChainsNext`).
@@ -1458,6 +1484,33 @@ mod tests {
         let node = mgr.get_spell_chain_node(999).expect("inserted node");
         assert_eq!(node.first, 997);
         assert_eq!(node.prev, 998);
+    }
+
+    #[test]
+    fn skill_line_abilities_are_indexed_by_spell_and_skill() {
+        let mgr = SpellManager::new();
+        let mut dbc = DbcManager::new();
+        dbc.skill_line_ability.insert(
+            1,
+            SkillLineAbilityEntry {
+                id: 1,
+                skill_id: 164,
+                spell_id: 2660,
+                race_mask: 0,
+                class_mask: 0,
+                req_skill_value: 1,
+                forward_spell_id: 0,
+                learn_on_get_skill: 0,
+                max_value: 0,
+                min_value: 0,
+                req_train_points: 0,
+            },
+        );
+
+        mgr.load_skill_line_ability_maps(&dbc);
+
+        assert_eq!(mgr.skill_line_abilities_by_spell.read()[&2660].len(), 1);
+        assert_eq!(mgr.skill_line_abilities_by_skill.read()[&164].len(), 1);
     }
 
     #[tokio::test]
