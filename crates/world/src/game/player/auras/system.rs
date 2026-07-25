@@ -1937,6 +1937,7 @@ impl AuraSystem {
                         && aura.aura_type != effects::AURA_REFLECT_SPELLS_SCHOOL
                         && aura.aura_type != effects::AURA_MOD_POWER_COST_PCT
                         && aura.aura_type != effects::AURA_MOD_POWER_COST
+                        && aura.aura_type != effects::AURA_MECHANIC_IMMUNITY
                     {
                         continue;
                     }

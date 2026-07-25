@@ -436,6 +436,10 @@ fn is_costly_proc_spell(mana_cost: u32, mana_cost_percentage: u32, school: u32, 
     (mana_cost != 0 || mana_cost_percentage != 0) && (mask as u32 & (1 << (school & 0x07))) != 0
 }
 
+fn is_proc_spell_with_mechanic(mechanic: Option<u32>, expected: i32) -> bool {
+    mechanic == Some(expected as u32)
+}
+
 /// Dispatch a proc event for a single aura candidate.
 /// Returns a ProcResult indicating if a triggered spell cast is needed.
 pub fn dispatch_proc(
@@ -528,6 +532,15 @@ pub fn dispatch_proc(
                         candidate.misc_value,
                     )
                 }),
+        }),
+        AURA_MECHANIC_IMMUNITY => Ok(ProcResult {
+            trigger_spell_id: None,
+            consume_charge: is_proc_spell_with_mechanic(
+                proc_spell_id
+                    .and_then(|id| world.managers.spell_mgr.get(id))
+                    .map(|spell| spell.mechanic),
+                candidate.misc_value,
+            ),
         }),
         _ => {
             tracing::debug!(
@@ -1296,5 +1309,12 @@ mod tests {
         assert!(is_costly_proc_spell(0, 5, 2, 1 << 2));
         assert!(!is_costly_proc_spell(0, 0, 2, 1 << 2));
         assert!(!is_costly_proc_spell(10, 0, 2, 1 << 1));
+    }
+
+    #[test]
+    fn mechanic_immunity_proc_requires_matching_mechanic() {
+        assert!(is_proc_spell_with_mechanic(Some(12), 12));
+        assert!(!is_proc_spell_with_mechanic(Some(12), 5));
+        assert!(!is_proc_spell_with_mechanic(None, 12));
     }
 }
