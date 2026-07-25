@@ -1286,6 +1286,7 @@ mod tests {
             (MovementGeneratorType::Home, "HOME_MOTION_TYPE"),
             (MovementGeneratorType::Effect, "EFFECT_MOTION_TYPE"),
             (MovementGeneratorType::Taxi, "FLIGHT_MOTION_TYPE"),
+            (MovementGeneratorType::Charge, "CHARGE_MOTION_TYPE"),
         ];
 
         for (generator_type, name) in cases {
