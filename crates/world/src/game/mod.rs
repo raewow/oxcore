@@ -18,6 +18,7 @@ pub mod items;
 pub mod loot;
 pub mod map_update;
 pub mod npc;
+pub mod pet;
 pub mod player;
 pub mod social;
 pub mod spell;
