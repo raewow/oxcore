@@ -117,19 +117,22 @@ impl AuraSystem {
         }
 
         // Apply diminishing returns to CC auras (PvP)
-        let dr_duration_ms = if target_guid.is_player() && effects::is_cc_aura(aura_type) {
+        let dr_duration_ms = if target_guid.is_player() {
             // Look up the spell's mechanic for DR group determination
-            let mechanic = world
+            let spell = world
                 .managers
                 .spell_mgr
                 .get(spell_id)
-                .map(|e| e.mechanic)
-                .unwrap_or(0);
+                .expect("spell lookup succeeded while applying its aura");
             let dr_group = crate::game::player::spells::diminishing::get_dr_group_for_spell(
-                mechanic, aura_type,
+                &spell, false,
             );
 
-            if dr_group != crate::game::player::spells::diminishing::DRGroup::None {
+            if dr_group == crate::game::player::spells::diminishing::DRGroup::LimitOnly {
+                duration_ms.map(|duration| duration.min(10_000))
+            } else if crate::game::player::spells::diminishing::dr_type(dr_group)
+                != crate::game::player::spells::diminishing::DRType::None
+            {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -1939,6 +1942,8 @@ impl AuraSystem {
                         && aura.aura_type != effects::AURA_MOD_POWER_COST
                         && aura.aura_type != effects::AURA_MECHANIC_IMMUNITY
                         && aura.aura_type != effects::AURA_MOD_RESISTANCE
+                        && aura.aura_type != effects::AURA_MOD_ROOT
+                        && aura.aura_type != effects::AURA_MOD_PACIFY_SILENCE
                     {
                         continue;
                     }
@@ -2007,6 +2012,7 @@ impl AuraSystem {
         // Process each proc candidate, collecting triggered spell casts
         let mut triggered_casts: Vec<u32> = Vec::new();
         let mut charge_consumption = Vec::new();
+        let mut aura_removals = Vec::new();
         for candidate in &procable_auras {
             let result = proc::dispatch_proc(
                 player_guid,
@@ -2022,6 +2028,9 @@ impl AuraSystem {
                 triggered_casts.push(trigger_id);
             }
             charge_consumption.push(result.consume_charge);
+            if result.remove_aura {
+                aura_removals.push((candidate.spell_id, candidate.effect_index));
+            }
         }
 
         // Consume charges for procs that fired
@@ -2062,6 +2071,10 @@ impl AuraSystem {
                         )
                         .await;
                 }
+            }
+
+            for (spell_id, effect_index) in aura_removals {
+                let _ = self.remove_aura(player_guid, spell_id, effect_index, world).await;
             }
         }
 

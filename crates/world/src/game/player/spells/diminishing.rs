@@ -13,6 +13,7 @@
 //! The DR level resets 15 seconds after the last application.
 
 use std::collections::HashMap;
+use oxcore_dbc::structures::SpellEntry;
 
 /// Duration (in milliseconds) before DR resets for a target.
 pub const DR_RESET_TIME_MS: u64 = 15_000;
@@ -27,22 +28,49 @@ pub enum DRGroup {
     None = 0,
     /// All stuns (Cheap Shot, Hammer of Justice, Bash, Kidney Shot, etc.)
     Stun,
+    TriggerStun,
+    Sleep,
     /// Rogue-only: Kidney Shot has its own DR in vanilla
     KidneyShot,
     /// Fear effects (Fear, Psychic Scream, Intimidating Shout, etc.)
     Fear,
     /// Root effects (Frost Nova, Entangling Roots, etc.)
     Root,
+    TriggerRoot,
     /// Silence effects (Silence, Counterspell silence, etc.)
     Silence,
     /// Disorient (Polymorph, Sap, Gouge, etc.)
     Disorient,
+    Polymorph,
     /// Mind Control
     MindControl,
     /// Freeze (Frost Nova pet, etc.)
     Freeze,
     /// Banish
     Banish,
+    DeathCoil,
+    WarlockFear,
+    Disarm,
+    Knockout,
+    LimitOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DRType {
+    None,
+    Player,
+    All,
+}
+
+pub fn dr_type(group: DRGroup) -> DRType {
+    match group {
+        DRGroup::Stun | DRGroup::TriggerStun | DRGroup::KidneyShot => DRType::All,
+        DRGroup::Sleep | DRGroup::Root | DRGroup::TriggerRoot | DRGroup::Fear
+        | DRGroup::MindControl | DRGroup::Polymorph | DRGroup::Silence | DRGroup::Disarm
+        | DRGroup::DeathCoil | DRGroup::Freeze | DRGroup::Banish | DRGroup::WarlockFear
+        | DRGroup::Knockout => DRType::Player,
+        _ => DRType::None,
+    }
 }
 
 /// Per-target DR tracking for one group.
@@ -66,7 +94,7 @@ impl DiminishingState {
     /// Get the DR duration modifier for a group (1.0 = full, 0.5 = half, 0.25 = quarter, 0.0 = immune).
     /// Also increments the DR level and resets the timer.
     pub fn apply_dr(&mut self, group: DRGroup, now_ms: u64) -> f32 {
-        if group == DRGroup::None {
+        if matches!(dr_type(group), DRType::None) {
             return 1.0;
         }
 
@@ -116,44 +144,43 @@ impl DiminishingState {
     }
 }
 
-/// Determine the DR group for a spell based on its mechanic and aura type.
-///
-/// This is a simplified mapping based on MaNGOS GetDiminishingReturnsGroupForSpell().
-/// In vanilla, DR grouping is based on spell mechanic and specific spell IDs.
-pub fn get_dr_group_for_spell(mechanic: u32, aura_type: u32) -> DRGroup {
-    // Check by mechanic first (covers most cases)
-    match mechanic {
-        // MECHANIC_STUN = 12
-        12 => DRGroup::Stun,
-        // MECHANIC_FEAR = 5
-        5 => DRGroup::Fear,
-        // MECHANIC_ROOT = 7
-        7 => DRGroup::Root,
-        // MECHANIC_SILENCE = 9
-        9 => DRGroup::Silence,
-        // MECHANIC_POLYMORPH = 17
-        17 => DRGroup::Disorient,
-        // MECHANIC_SAP = 14
-        14 => DRGroup::Disorient,
-        // MECHANIC_SLEEP = 10
-        10 => DRGroup::Disorient,
-        // MECHANIC_CHARM = 1
-        1 => DRGroup::MindControl,
-        // MECHANIC_FREEZE = 3
-        3 => DRGroup::Freeze,
-        // MECHANIC_BANISH = 18
-        18 => DRGroup::Banish,
-        _ => {
-            // Fallback: check aura type for CC that might not have a mechanic set
-            use crate::game::player::auras::effects::*;
-            match aura_type {
-                AURA_MOD_STUN => DRGroup::Stun,
-                AURA_MOD_FEAR => DRGroup::Fear,
-                AURA_MOD_ROOT => DRGroup::Root,
-                _ => DRGroup::None,
-            }
-        }
+/// Classify a spell using the reference `SpellEntry::GetDiminishingReturnsGroup` order.
+pub fn get_dr_group_for_spell(spell: &SpellEntry, triggered_by_aura: bool) -> DRGroup {
+    const ROGUE: u32 = 8;
+    const HUNTER: u32 = 9;
+    const WARLOCK: u32 = 5;
+    const WARRIOR: u32 = 4;
+    const SHAMAN: u32 = 11;
+    let flags = spell.spell_family_flags;
+    match spell.spell_family_name {
+        ROGUE if flags & 0x0020_0000 != 0 => return DRGroup::KidneyShot,
+        ROGUE if flags & 0x0100_0000 != 0 => return DRGroup::None,
+        HUNTER if flags & 0x0000_0008 != 0 => return DRGroup::Freeze,
+        WARLOCK if flags & 0x8000_0000 != 0 && spell.mechanic == 5 => return DRGroup::WarlockFear,
+        WARLOCK if spell.id == 6358 => return DRGroup::WarlockFear,
+        WARLOCK if flags & 0x8000_0000 != 0 => return DRGroup::LimitOnly,
+        WARRIOR if flags & 0x0000_0002 != 0 => return DRGroup::LimitOnly,
+        SHAMAN if flags & 0x8000_0000 != 0 => return DRGroup::Root,
+        3 if spell.spell_visual == 4325 => return DRGroup::None,
+        0 if matches!(spell.id, 12355 | 18093) => return DRGroup::TriggerStun,
+        _ => {}
     }
+    if matches!(spell.id, 7922 | 20253 | 20614 | 20615) { return DRGroup::Stun; }
+    let mechanics = spell.effect_mechanic.iter().fold(1u32 << spell.mechanic.saturating_sub(1), |mask, &m| mask | (1u32 << m.saturating_sub(1)));
+    let has = |mechanic: u32| mechanics & (1 << mechanic.saturating_sub(1)) != 0;
+    if has(12) { return if triggered_by_aura { DRGroup::TriggerStun } else { DRGroup::Stun }; }
+    if has(10) { return DRGroup::Sleep; }
+    if has(17) { return DRGroup::Polymorph; }
+    if has(7) { return if triggered_by_aura { DRGroup::TriggerRoot } else { DRGroup::Root }; }
+    if has(5) { return DRGroup::Fear; }
+    if has(1) { return DRGroup::MindControl; }
+    if has(9) { return DRGroup::Silence; }
+    if has(2) { return DRGroup::Disarm; }
+    if has(3) { return DRGroup::Freeze; }
+    if has(14) || has(15) { return DRGroup::Knockout; }
+    if has(18) { return DRGroup::Banish; }
+    if has(24) { return DRGroup::DeathCoil; }
+    DRGroup::None
 }
 
 #[cfg(test)]

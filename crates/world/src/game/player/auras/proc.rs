@@ -410,6 +410,12 @@ pub struct ProcResult {
     pub trigger_spell_id: Option<u32>,
     /// Whether post-processing should consume one aura charge.
     pub consume_charge: bool,
+    pub remove_aura: bool,
+}
+
+fn remove_by_damage_chance(damage: u32, level: u32) -> f32 {
+    let max_damage = if level > 8 { 25 * level - 150 } else { 50 };
+    damage as f32 / max_damage as f32 * 100.0
 }
 
 fn should_consume_haste_proc_charge(
@@ -466,6 +472,7 @@ pub fn dispatch_proc(
             Ok(ProcResult {
                 trigger_spell_id: None,
                 consume_charge: true,
+                remove_aura: false,
             })
         }
         AURA_DUMMY => {
@@ -480,6 +487,7 @@ pub fn dispatch_proc(
             Ok(ProcResult {
                 trigger_spell_id: None,
                 consume_charge: true,
+                remove_aura: false,
             })
         }
         AURA_MOD_MELEE_HASTE => {
@@ -499,6 +507,7 @@ pub fn dispatch_proc(
             Ok(ProcResult {
                 trigger_spell_id: None,
                 consume_charge,
+                remove_aura: false,
             })
         }
         AURA_MOD_CASTING_SPEED_NOT_STACK => {
@@ -514,6 +523,7 @@ pub fn dispatch_proc(
             Ok(ProcResult {
                 trigger_spell_id: None,
                 consume_charge: is_noninstant_proc_spell(cast_time),
+                remove_aura: false,
             })
         }
         AURA_REFLECT_SPELLS_SCHOOL => Ok(ProcResult {
@@ -524,6 +534,7 @@ pub fn dispatch_proc(
                     .map(|spell| spell.school),
                 candidate.misc_value,
             ),
+            remove_aura: false,
         }),
         AURA_MOD_POWER_COST_PCT | AURA_MOD_POWER_COST => Ok(ProcResult {
             trigger_spell_id: None,
@@ -537,6 +548,7 @@ pub fn dispatch_proc(
                         candidate.misc_value,
                     )
                 }),
+            remove_aura: false,
         }),
         AURA_MECHANIC_IMMUNITY => Ok(ProcResult {
             trigger_spell_id: None,
@@ -546,6 +558,7 @@ pub fn dispatch_proc(
                     .map(|spell| spell.mechanic),
                 candidate.misc_value,
             ),
+            remove_aura: false,
         }),
         AURA_MOD_RESISTANCE => {
             let consume_charge = world
@@ -563,6 +576,21 @@ pub fn dispatch_proc(
             Ok(ProcResult {
                 trigger_spell_id: None,
                 consume_charge,
+                remove_aura: false,
+            })
+        }
+        AURA_MOD_ROOT | AURA_MOD_PACIFY_SILENCE => {
+            let level = world
+                .systems
+                .player
+                .manager()
+                .with_player(player_guid, |player| player.level)
+                .unwrap_or(1);
+            let remove_aura = roll_proc_chance(remove_by_damage_chance(damage, level.into()));
+            Ok(ProcResult {
+                trigger_spell_id: None,
+                consume_charge: remove_aura,
+                remove_aura,
             })
         }
         _ => {
@@ -574,6 +602,7 @@ pub fn dispatch_proc(
             Ok(ProcResult {
                 trigger_spell_id: None,
                 consume_charge: true,
+                remove_aura: false,
             })
         }
     }
@@ -601,6 +630,7 @@ fn handle_proc_trigger_spell(
         return Ok(ProcResult {
             trigger_spell_id: None,
             consume_charge: true,
+            remove_aura: false,
         });
     }
 
@@ -614,6 +644,7 @@ fn handle_proc_trigger_spell(
         return Ok(ProcResult {
             trigger_spell_id: None,
             consume_charge: true,
+            remove_aura: false,
         });
     }
 
@@ -628,6 +659,7 @@ fn handle_proc_trigger_spell(
     Ok(ProcResult {
         trigger_spell_id: Some(trigger_spell_id),
         consume_charge: true,
+        remove_aura: false,
     })
 }
 
