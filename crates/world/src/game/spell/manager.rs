@@ -489,22 +489,14 @@ impl SpellManager {
                 }
             }
 
-            // Resolve the deferred (rank not yet known) forward chains.
-            while let Some(spell_id) = prev_ranks.keys().next().copied() {
-                let prev_id = prev_ranks.remove(&spell_id).unwrap();
-                let (first, rank) = match chains.get(&prev_id) {
-                    Some(prev_node) => (prev_node.first, prev_node.rank + 1),
-                    None => (prev_id, 2), // prev is itself the (unranked) first spell.
-                };
-                chains.insert(
-                    spell_id,
-                    SpellChainNode {
-                        prev: prev_id,
-                        first,
-                        rank,
-                        req: 0,
-                    },
-                );
+            // Resolve predecessor chains before their successors so map iteration
+            // order cannot change the selected root or rank.
+            for (&spell_id, &prev_id) in &prev_ranks {
+                if !Self::insert_ability_chain(&mut chains, &prev_ranks, spell_id, prev_id, 30) {
+                    warn!(
+                        "Ignoring cyclic or conflicting SkillLineAbility spell chain at {spell_id}"
+                    );
+                }
             }
         }
 
@@ -602,6 +594,57 @@ impl SpellManager {
         self.rebuild_spell_chains_next(&chains);
         *self.spell_chains.write() = chains;
         Ok(())
+    }
+
+    fn insert_ability_chain(
+        chains: &mut HashMap<u32, SpellChainNode>,
+        previous_ranks: &HashMap<u32, u32>,
+        spell_id: u32,
+        prev_id: u32,
+        remaining_depth: u8,
+    ) -> bool {
+        if let Some(existing) = chains.get(&spell_id) {
+            return existing.prev == prev_id;
+        }
+        if remaining_depth == 0 {
+            return false;
+        }
+
+        if !chains.contains_key(&prev_id) {
+            if let Some(&previous_prev_id) = previous_ranks.get(&prev_id) {
+                if !Self::insert_ability_chain(
+                    chains,
+                    previous_ranks,
+                    prev_id,
+                    previous_prev_id,
+                    remaining_depth - 1,
+                ) {
+                    return false;
+                }
+            } else {
+                chains.insert(
+                    prev_id,
+                    SpellChainNode {
+                        prev: 0,
+                        first: prev_id,
+                        rank: 1,
+                        req: 0,
+                    },
+                );
+            }
+        }
+
+        let previous = chains[&prev_id];
+        chains.insert(
+            spell_id,
+            SpellChainNode {
+                prev: prev_id,
+                first: previous.first,
+                rank: previous.rank + 1,
+                req: 0,
+            },
+        );
+        true
     }
 
     /// Port of `SpellMgr::LoadSkillLineAbilityMaps` (SpellMgr.cpp:2746).
@@ -1590,6 +1633,40 @@ mod tests {
         let node = mgr.get_spell_chain_node(999).expect("inserted node");
         assert_eq!(node.first, 997);
         assert_eq!(node.prev, 998);
+    }
+
+    #[test]
+    fn ability_chain_resolution_is_independent_of_map_iteration_order() {
+        let mut chains = HashMap::new();
+        let previous_ranks = HashMap::from([(30, 20), (20, 10)]);
+
+        assert!(SpellManager::insert_ability_chain(
+            &mut chains,
+            &previous_ranks,
+            30,
+            20,
+            30,
+        ));
+
+        assert_eq!(chains[&10].rank, 1);
+        assert_eq!(chains[&20].rank, 2);
+        assert_eq!(chains[&30].rank, 3);
+        assert_eq!(chains[&30].first, 10);
+    }
+
+    #[test]
+    fn ability_chain_resolution_rejects_cycles() {
+        let mut chains = HashMap::new();
+        let previous_ranks = HashMap::from([(10, 20), (20, 10)]);
+
+        assert!(!SpellManager::insert_ability_chain(
+            &mut chains,
+            &previous_ranks,
+            10,
+            20,
+            2,
+        ));
+        assert!(chains.is_empty());
     }
 
     #[test]
