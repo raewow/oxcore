@@ -440,6 +440,11 @@ fn is_proc_spell_with_mechanic(mechanic: Option<u32>, expected: i32) -> bool {
     mechanic == Some(expected as u32)
 }
 
+fn should_consume_resistance_proc_charge(family: u32, flags: u64, damage: u32) -> bool {
+    // CF_PRIEST_INNER_FIRE is CM0 bit 1 (0x2).
+    family != 6 || flags & 0x2 == 0 || damage != 0
+}
+
 /// Dispatch a proc event for a single aura candidate.
 /// Returns a ProcResult indicating if a triggered spell cast is needed.
 pub fn dispatch_proc(
@@ -542,6 +547,24 @@ pub fn dispatch_proc(
                 candidate.misc_value,
             ),
         }),
+        AURA_MOD_RESISTANCE => {
+            let consume_charge = world
+                .managers
+                .spell_mgr
+                .get(candidate.spell_id)
+                .map(|spell| {
+                    should_consume_resistance_proc_charge(
+                        spell.spell_family_name,
+                        spell.spell_family_flags,
+                        damage,
+                    )
+                })
+                .unwrap_or(true);
+            Ok(ProcResult {
+                trigger_spell_id: None,
+                consume_charge,
+            })
+        }
         _ => {
             tracing::debug!(
                 "Unhandled proc aura type {} for spell {}",
@@ -1316,5 +1339,12 @@ mod tests {
         assert!(is_proc_spell_with_mechanic(Some(12), 12));
         assert!(!is_proc_spell_with_mechanic(Some(12), 5));
         assert!(!is_proc_spell_with_mechanic(None, 12));
+    }
+
+    #[test]
+    fn inner_fire_resistance_proc_requires_real_damage() {
+        assert!(!should_consume_resistance_proc_charge(6, 0x2, 0));
+        assert!(should_consume_resistance_proc_charge(6, 0x2, 1));
+        assert!(should_consume_resistance_proc_charge(6, 0, 0));
     }
 }
