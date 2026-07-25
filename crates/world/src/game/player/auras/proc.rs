@@ -432,6 +432,10 @@ fn is_proc_spell_in_school_mask(school: Option<u32>, mask: i32) -> bool {
     school.is_some_and(|school| (mask as u32 & (1 << (school & 0x07))) != 0)
 }
 
+fn is_costly_proc_spell(mana_cost: u32, mana_cost_percentage: u32, school: u32, mask: i32) -> bool {
+    (mana_cost != 0 || mana_cost_percentage != 0) && (mask as u32 & (1 << (school & 0x07))) != 0
+}
+
 /// Dispatch a proc event for a single aura candidate.
 /// Returns a ProcResult indicating if a triggered spell cast is needed.
 pub fn dispatch_proc(
@@ -511,6 +515,19 @@ pub fn dispatch_proc(
                     .map(|spell| spell.school),
                 candidate.misc_value,
             ),
+        }),
+        AURA_MOD_POWER_COST_PCT | AURA_MOD_POWER_COST => Ok(ProcResult {
+            trigger_spell_id: None,
+            consume_charge: proc_spell_id
+                .and_then(|id| world.managers.spell_mgr.get(id))
+                .is_some_and(|spell| {
+                    is_costly_proc_spell(
+                        spell.mana_cost,
+                        spell.mana_cost_percentage,
+                        spell.school,
+                        candidate.misc_value,
+                    )
+                }),
         }),
         _ => {
             tracing::debug!(
@@ -1271,5 +1288,13 @@ mod tests {
         assert!(is_proc_spell_in_school_mask(Some(2), 1 << 2));
         assert!(!is_proc_spell_in_school_mask(Some(2), 1 << 1));
         assert!(!is_proc_spell_in_school_mask(None, 1 << 2));
+    }
+
+    #[test]
+    fn power_cost_proc_requires_cost_and_matching_school() {
+        assert!(is_costly_proc_spell(10, 0, 2, 1 << 2));
+        assert!(is_costly_proc_spell(0, 5, 2, 1 << 2));
+        assert!(!is_costly_proc_spell(0, 0, 2, 1 << 2));
+        assert!(!is_costly_proc_spell(10, 0, 2, 1 << 1));
     }
 }

@@ -1935,6 +1935,8 @@ impl AuraSystem {
                         && aura.aura_type != effects::AURA_MOD_MELEE_HASTE
                         && aura.aura_type != effects::AURA_MOD_CASTING_SPEED_NOT_STACK
                         && aura.aura_type != effects::AURA_REFLECT_SPELLS_SCHOOL
+                        && aura.aura_type != effects::AURA_MOD_POWER_COST_PCT
+                        && aura.aura_type != effects::AURA_MOD_POWER_COST
                     {
                         continue;
                     }
