@@ -206,8 +206,11 @@ impl AuraSystem {
             const OFF_HAND: u8 = 16;
             let inventory = &world.systems.inventory;
             aura.weapon_buff_slot = [MAIN_HAND, OFF_HAND].into_iter().find(|&slot| {
-                inventory.get_item_at(target_guid, oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0, slot)
-                    == Some(item_guid)
+                inventory.get_item_at(
+                    target_guid,
+                    oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0,
+                    slot,
+                ) == Some(item_guid)
             });
         }
         aura.duration_index = world
@@ -361,7 +364,10 @@ impl AuraSystem {
             );
             if effect_index == 0 {
                 Box::pin(self.apply_holder_specific_boosts(
-                    target_guid, caster_guid, spell_id, world,
+                    target_guid,
+                    caster_guid,
+                    spell_id,
+                    world,
                 ))
                 .await;
             }
@@ -553,7 +559,10 @@ impl AuraSystem {
             );
             if effect_index == 0 {
                 Box::pin(self.remove_holder_specific_boosts(
-                    target_guid, aura.caster_guid, spell_id, world,
+                    target_guid,
+                    aura.caster_guid,
+                    spell_id,
+                    world,
                 ))
                 .await;
             }
@@ -910,13 +919,23 @@ impl AuraSystem {
         world: &World,
     ) {
         if spell_id == 2645 {
-            let _ = self.remove_spell_auras_by_caster(caster_guid, 546, caster_guid, world).await;
+            let _ = self
+                .remove_spell_auras_by_caster(caster_guid, 546, caster_guid, world)
+                .await;
         }
         if spell_id == 19574 {
             for trigger_spell_id in [24395, 24396, 24397, 26592] {
-                let _ = world.systems.spells.cast_spell(
-                    target_guid, trigger_spell_id, Some(target_guid), true, world,
-                ).await;
+                let _ = world
+                    .systems
+                    .spells
+                    .cast_spell(
+                        target_guid,
+                        trigger_spell_id,
+                        Some(target_guid),
+                        true,
+                        world,
+                    )
+                    .await;
             }
         }
     }
@@ -930,9 +949,9 @@ impl AuraSystem {
     ) {
         if spell_id == 19574 {
             for trigger_spell_id in [24395, 24396, 24397, 26592] {
-                let _ = self.remove_spell_auras_by_caster(
-                    target_guid, trigger_spell_id, caster_guid, world,
-                ).await;
+                let _ = self
+                    .remove_spell_auras_by_caster(target_guid, trigger_spell_id, caster_guid, world)
+                    .await;
             }
         }
     }

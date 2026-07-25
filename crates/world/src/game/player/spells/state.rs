@@ -1598,7 +1598,11 @@ mod tests {
         assert!(cast.is_triggered);
         assert!(!cast.is_client_started);
         assert_eq!(
-            (cast.start_position_x, cast.start_position_y, cast.start_position_z),
+            (
+                cast.start_position_x,
+                cast.start_position_y,
+                cast.start_position_z
+            ),
             (1.0, 2.0, 3.0)
         );
         assert_eq!(cast.cast_targets.target_flags, TARGET_FLAG_SELF);
