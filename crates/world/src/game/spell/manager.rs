@@ -1455,4 +1455,24 @@ mod tests {
 
         assert_eq!(*mgr.existing_spell_ids.read(), HashSet::from([0, 3]));
     }
+
+    #[test]
+    fn required_spell_area_uses_database_then_warsong_fallback() {
+        let mgr = SpellManager::new();
+        mgr.spell_areas.write().push(SpellArea {
+            spell: 23333,
+            area_id: 42,
+            quest_start: 0,
+            quest_end: 0,
+            aura_spell: 0,
+            racemask: 0,
+            gender: 2,
+            quest_start_can_active: false,
+            autocast: false,
+        });
+
+        assert_eq!(mgr.get_required_area_for_spell(23333), 42);
+        assert_eq!(mgr.get_required_area_for_spell(23335), 3277);
+        assert_eq!(mgr.get_required_area_for_spell(1), 0);
+    }
 }
