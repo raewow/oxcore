@@ -33,6 +33,9 @@ pub struct Aura {
     /// Whether this aura is subject to the visible buff/debuff slot limit.
     pub affected_by_visible_slot_limit: bool,
 
+    /// Priority used when visible buff slots are exhausted.
+    pub visible_slot_limit_score: i32,
+
     // === Timing ===
     /// Remaining duration in milliseconds. None = permanent (passive/talent).
     pub duration_ms: Option<u32>,
@@ -171,6 +174,7 @@ impl Aura {
             effect_index,
             slot: None,
             affected_by_visible_slot_limit: false,
+            visible_slot_limit_score: 0,
             duration_ms,
             max_duration_ms: duration_ms,
             duration_index: 0,
@@ -223,6 +227,20 @@ impl Aura {
     /// Mark this aura as subject to the visible buff/debuff slot limit.
     pub fn set_affected_by_visible_slot_limit(&mut self) {
         self.affected_by_visible_slot_limit = true;
+    }
+
+    /// Mark this aura for visible-slot eviction and calculate its priority.
+    pub fn calculate_for_buff_limit(&mut self, target_guid: ObjectGuid) {
+        self.set_affected_by_visible_slot_limit();
+        self.visible_slot_limit_score = if self.duration_ms.is_none() {
+            3
+        } else if self.caster_guid != target_guid {
+            2
+        } else if self.cast_item_guid.is_some() {
+            1
+        } else {
+            0
+        };
     }
 
     /// Get the current effect value for this aura's effect index
@@ -454,6 +472,29 @@ mod tests {
         aura.set_affected_by_visible_slot_limit();
 
         assert!(aura.affected_by_visible_slot_limit);
+    }
+
+    #[test]
+    fn calculate_for_buff_limit_assigns_priority_by_aura_source() {
+        let target = guid(1);
+
+        let mut permanent = make_aura(target, 10, None);
+        permanent.calculate_for_buff_limit(target);
+        assert_eq!(permanent.visible_slot_limit_score, 3);
+
+        let mut external = make_aura(guid(2), 10, Some(5_000));
+        external.calculate_for_buff_limit(target);
+        assert_eq!(external.visible_slot_limit_score, 2);
+
+        let mut item = make_aura(target, 10, Some(5_000));
+        item.cast_item_guid = Some(ObjectGuid::new_item(3));
+        item.calculate_for_buff_limit(target);
+        assert_eq!(item.visible_slot_limit_score, 1);
+
+        let mut self_cast = make_aura(target, 10, Some(5_000));
+        self_cast.calculate_for_buff_limit(target);
+        assert_eq!(self_cast.visible_slot_limit_score, 0);
+        assert!(self_cast.affected_by_visible_slot_limit);
     }
 
     // --- refresh_duration (existing helper, same-caster non-stacked refresh path) ---
