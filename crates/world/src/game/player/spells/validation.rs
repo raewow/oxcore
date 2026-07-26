@@ -35,6 +35,7 @@ pub fn validate_cast(
     spell_id: u32,
     _target_guid: Option<ObjectGuid>,
     is_triggered: bool,
+    is_item_cast: bool,
     world: &World,
 ) -> Result<SpellCastError> {
     let now = get_game_time_ms(world);
@@ -114,7 +115,7 @@ pub fn validate_cast(
 
     world.systems.player.manager().with_player_mut(caster_guid, |player| {
         // 1. Check spell is known (skip for triggered spells - they might be procs)
-        if !is_triggered && !player.spells.knows_spell(spell_id) {
+        if !is_triggered && !is_item_cast && !player.spells.knows_spell(spell_id) {
             error = SpellCastError::SpellNotKnown;
             return;
         }
@@ -223,7 +224,7 @@ pub fn validate_cast(
         }
 
         // 7. Check resources (skip for triggered spells)
-        if !is_triggered && spell_mana_cost > 0 {
+        if !is_triggered && !is_item_cast && spell_mana_cost > 0 {
             let current_power = player.power.current[spell_power_type as usize];
             if current_power < spell_mana_cost {
                 error = match spell_power_type {

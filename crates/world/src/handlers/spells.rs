@@ -25,7 +25,7 @@ use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 /// - if SOURCE_LOCATION: packed GUID (transport) + 3x f32
 /// - if DEST_LOCATION: packed GUID (transport) + 3x f32
 /// - if STRING: null-terminated string
-fn parse_spell_cast_targets(
+pub(crate) fn parse_spell_cast_targets(
     packet: &mut WorldPacket,
     caster_guid: ObjectGuid,
 ) -> Result<SpellCastTargets> {
@@ -470,6 +470,19 @@ pub async fn handle_cancel_auto_repeat_spell(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxcore_shared::protocol::Opcode;
+
+    #[test]
+    fn parses_self_target_for_item_use_packets() {
+        let caster = ObjectGuid::new_player(1);
+        let mut packet = WorldPacket::new(Opcode::CMSG_USE_ITEM);
+        packet.write_u16(TARGET_FLAG_SELF as u16);
+
+        let targets = parse_spell_cast_targets(&mut packet, caster).unwrap();
+
+        assert_eq!(targets.target_flags, TARGET_FLAG_SELF);
+        assert_eq!(targets.unit_target(), Some(caster));
+    }
 
     #[test]
     fn explicit_unit_targets_match_mangos_set() {

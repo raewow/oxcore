@@ -3,6 +3,7 @@ use tracing::{info, warn};
 
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::inventory::types::EquipResult;
+use crate::handlers::spells::parse_spell_cast_targets;
 use crate::World;
 use oxcore_shared::game::inventory::{
     is_bag_pos, is_bank_pos, is_equipment_pos, INVENTORY_SLOT_BAG_0,
@@ -61,6 +62,9 @@ pub async fn handle_use_item(
         Some(guid) => guid,
         None => return Ok(()),
     };
+
+    // CMSG_USE_ITEM carries the same target payload as CMSG_CAST_SPELL.
+    let targets = parse_spell_cast_targets(packet, player_guid)?;
 
     // Get item GUID from inventory
     let item_guid = match world.systems.inventory.get_item_at(player_guid, bag, slot) {
@@ -126,7 +130,9 @@ pub async fn handle_use_item(
         }
     }
 
-    // Get spell ID from template
+    // Validate the client-selected slot, then cast every on-use effect below.
+    // This mirrors Player::CastItemUseSpell: the slot is an anti-cheat check,
+    // not a request to suppress the item's other on-use spells.
     let spell_id = template.spell_id[spell_slot as usize];
     if spell_id == 0 {
         warn!("Item {} has no spell at slot {}", item_entry, spell_slot);
@@ -148,20 +154,28 @@ pub async fn handle_use_item(
         player_guid, item_entry, spell_id, bag, slot
     );
 
-    // Cast the spell from the item. Passes item_guid so SMSG_SPELL_START and
-    // SMSG_SPELL_GO write the item GUID as the first packed GUID (per MaNGOS
-    // protocol), preventing the client from sending CMSG_DESTROYITEM.
-    world
-        .systems
-        .spells
-        .cast_spell_from_item(
-            player_guid,
-            spell_id,
-            Some(player_guid), // Self-target
-            item_guid,
-            world,
-        )
-        .await?;
+    let mut on_use_count = 0;
+    for index in 0..5 {
+        let spell_id = template.spell_id[index];
+        if spell_id == 0 || template.spell_trigger[index] != 0 {
+            continue;
+        }
+
+        // The first spell pays the item cost; additional effects are triggered.
+        world
+            .systems
+            .spells
+            .cast_spell_from_item(
+                player_guid,
+                spell_id,
+                targets.clone(),
+                item_guid,
+                on_use_count > 0,
+                world,
+            )
+            .await?;
+        on_use_count += 1;
+    }
 
     Ok(())
 }

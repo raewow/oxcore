@@ -367,7 +367,11 @@ mod spell_packet_tests {
 
         assert_eq!(data.get_u64_le(), reflector.raw());
         assert_eq!(data.get_u8(), SPELL_MISS_REFLECT);
-        assert_eq!(data.get_u8(), 0, "reflect result byte follows a reflect miss");
+        assert_eq!(
+            data.get_u8(),
+            0,
+            "reflect result byte follows a reflect miss"
+        );
 
         assert_eq!(data.get_u64_le(), immune.raw());
         assert_eq!(data.get_u8(), 7);

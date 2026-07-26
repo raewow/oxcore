@@ -2272,9 +2272,10 @@ mod tests {
         give_aura(&world, target, 8100, SPELL_AURA_MOD_STEALTH, false);
 
         let mut mask = 0b001; // one effect bit
-        let result =
-            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                .await;
+        let result = do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await;
 
         assert!(
             result.is_some(),
@@ -2299,9 +2300,10 @@ mod tests {
         give_aura(&world, target, 8101, SPELL_AURA_MOD_STEALTH, false);
 
         let mut mask = 0b001;
-        let result =
-            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                .await;
+        let result = do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await;
 
         assert!(result.is_some(), "hit should continue");
         assert!(
@@ -2323,9 +2325,10 @@ mod tests {
         give_aura(&world, target, 8102, SPELL_AURA_MOD_INVISIBILITY, false);
 
         let mut mask = 0b001;
-        let result =
-            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                .await;
+        let result = do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await;
 
         assert!(result.is_some(), "hit should continue");
         assert!(
@@ -2347,9 +2350,10 @@ mod tests {
         give_aura(&world, target, 8103, SPELL_AURA_MOD_STEALTH, false);
 
         let mut mask = 0b001;
-        let result =
-            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                .await;
+        let result = do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await;
 
         assert!(result.is_some(), "hit should continue");
         assert!(

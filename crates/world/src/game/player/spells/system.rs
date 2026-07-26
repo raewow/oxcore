@@ -23,11 +23,12 @@ use anyhow::Result;
 use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
 use oxcore_shared::messages::spells::{
     ExecuteLogInfo, MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailure,
-    SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellStart, SmsgSpellUpdateChainTargets,
-    SpellMissTarget, SPELL_RESULT_STATUS_FAIL,
-    SPELL_RESULT_STATUS_OKAY,
+    SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellStart, SmsgSpellUpdateChainTargets, SpellMissTarget,
+    SPELL_RESULT_STATUS_FAIL, SPELL_RESULT_STATUS_OKAY,
 };
-use oxcore_shared::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashMap;
@@ -62,36 +63,38 @@ fn collect_execute_log_entries(
 
 /// Split the one-shot target outcome records into the two SMSG_SPELL_GO lists.
 fn spell_go_target_lists(targets: &[TargetInfo]) -> (Vec<ObjectGuid>, Vec<SpellMissTarget>) {
-    targets.iter().fold((Vec::new(), Vec::new()), |mut lists, target| {
-        match target.miss_condition {
-            hit::SpellHitOutcome::Hit | hit::SpellHitOutcome::PartialResist(_) => {
-                lists.0.push(target.target_guid);
+    targets
+        .iter()
+        .fold((Vec::new(), Vec::new()), |mut lists, target| {
+            match target.miss_condition {
+                hit::SpellHitOutcome::Hit | hit::SpellHitOutcome::PartialResist(_) => {
+                    lists.0.push(target.target_guid);
+                }
+                hit::SpellHitOutcome::Miss => lists.1.push(SpellMissTarget {
+                    guid: target.target_guid,
+                    reason: hit::SpellMissInfo::Miss as u8,
+                    reflect_result: hit::SpellMissInfo::None as u8,
+                }),
+                hit::SpellHitOutcome::Resist => lists.1.push(SpellMissTarget {
+                    guid: target.target_guid,
+                    reason: hit::SpellMissInfo::Resist as u8,
+                    reflect_result: hit::SpellMissInfo::None as u8,
+                }),
+                hit::SpellHitOutcome::Immune => lists.1.push(SpellMissTarget {
+                    guid: target.target_guid,
+                    reason: hit::SpellMissInfo::Immune as u8,
+                    reflect_result: hit::SpellMissInfo::None as u8,
+                }),
+                // A reflected target stays in the miss list; the packet carries the outcome
+                // of the reflected cast on the caster in the trailing reflect-result byte.
+                hit::SpellHitOutcome::Reflect => lists.1.push(SpellMissTarget {
+                    guid: target.target_guid,
+                    reason: hit::SpellMissInfo::Reflect as u8,
+                    reflect_result: target.reflect_result.to_miss_info() as u8,
+                }),
             }
-            hit::SpellHitOutcome::Miss => lists.1.push(SpellMissTarget {
-                guid: target.target_guid,
-                reason: hit::SpellMissInfo::Miss as u8,
-                reflect_result: hit::SpellMissInfo::None as u8,
-            }),
-            hit::SpellHitOutcome::Resist => lists.1.push(SpellMissTarget {
-                guid: target.target_guid,
-                reason: hit::SpellMissInfo::Resist as u8,
-                reflect_result: hit::SpellMissInfo::None as u8,
-            }),
-            hit::SpellHitOutcome::Immune => lists.1.push(SpellMissTarget {
-                guid: target.target_guid,
-                reason: hit::SpellMissInfo::Immune as u8,
-                reflect_result: hit::SpellMissInfo::None as u8,
-            }),
-            // A reflected target stays in the miss list; the packet carries the outcome
-            // of the reflected cast on the caster in the trailing reflect-result byte.
-            hit::SpellHitOutcome::Reflect => lists.1.push(SpellMissTarget {
-                guid: target.target_guid,
-                reason: hit::SpellMissInfo::Reflect as u8,
-                reflect_result: target.reflect_result.to_miss_info() as u8,
-            }),
-        }
-        lists
-    })
+            lists
+        })
 }
 
 /// Select the channel object from effect-zero unit targets, falling back to the
@@ -641,20 +644,17 @@ impl SpellSystem {
         &'a self,
         caster_guid: ObjectGuid,
         spell_id: u32,
-        target_guid: Option<ObjectGuid>,
+        cast_targets: SpellCastTargets,
         item_guid: ObjectGuid,
+        is_triggered: bool,
         world: &'a World,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
     {
-        let cast_targets = SpellCastTargets {
-            unit_target_guid: target_guid,
-            ..Default::default()
-        };
         Box::pin(self.cast_spell_inner(
             caster_guid,
             spell_id,
             cast_targets,
-            true,
+            is_triggered,
             Some(item_guid),
             world,
         ))
@@ -735,8 +735,14 @@ impl SpellSystem {
         let target_guid = cast_targets.unit_target();
 
         // Step 1: Validate
-        let validate_result =
-            validation::validate_cast(caster_guid, spell_id, target_guid, is_triggered, world)?;
+        let validate_result = validation::validate_cast(
+            caster_guid,
+            spell_id,
+            target_guid,
+            is_triggered,
+            cast_item_guid.is_some(),
+            world,
+        )?;
 
         if validate_result != SpellCastError::None {
             // Send failure to client
@@ -871,9 +877,8 @@ impl SpellSystem {
         Ok(SpellCastResult::Success)
     }
 
-    /// Take power, reagents, and the cast item. Runs at cast completion, right before
-    /// effects are handled (Spell::cast: TakePower/TakeReagents), so a cancelled or
-    /// interrupted cast never pays its costs.
+    /// Take power and reagents at cast completion, right before effects are handled.
+    /// Cast items are consumed after `SMSG_SPELL_GO`, matching `Spell::TakeCastItem`.
     async fn take_spell_costs(
         &self,
         caster_guid: ObjectGuid,
@@ -898,15 +903,6 @@ impl SpellSystem {
             },
         )
         .await;
-        if let Some(item_guid) = cast_item_guid {
-            if caster_guid.is_player() {
-                world
-                    .systems
-                    .inventory
-                    .consume_cast_item(caster_guid, item_guid)
-                    .await;
-            }
-        }
         Ok(())
     }
 
@@ -1338,6 +1334,7 @@ impl SpellSystem {
                             spell_id,
                             target_guid,
                             true,
+                            cast_item_guid.is_some(),
                             world,
                         )
                         .unwrap_or(SpellCastError::InvalidTarget);
@@ -1623,6 +1620,7 @@ impl SpellSystem {
                         spell_id,
                         target_guid,
                         true, // skip GCD/cooldown/resource/already-casting checks
+                        false,
                         world,
                     )
                     .unwrap_or(SpellCastError::InvalidTarget);
@@ -2070,6 +2068,19 @@ impl SpellSystem {
         };
         self.broadcast_mgr
             .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
+
+        // The client must receive the completed cast before an expendable item is
+        // removed. Consuming it earlier can remove the active cast before its effects
+        // run (and makes the client discard the pending item-use cast).
+        if !is_triggered && caster_guid.is_player() {
+            if let Some(item_guid) = cast_item_guid {
+                world
+                    .systems
+                    .inventory
+                    .consume_cast_item(caster_guid, item_guid)
+                    .await;
+            }
+        }
 
         // Reset main-hand attack timer after cast-time spells (MaNGOS behavior).
         // Prevents players from getting a free swing immediately after a cast.

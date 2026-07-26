@@ -598,6 +598,11 @@ impl InventorySystem {
         };
 
         let max_stack = proto.stackable;
+        let initial_charges = proto
+            .spell_charges
+            .iter()
+            .any(|&charges| charges != 0)
+            .then(|| Self::format_spell_charges(&proto.spell_charges));
 
         // Validate space BEFORE any DB queries
         let can_store = self.can_store_item(
@@ -687,7 +692,7 @@ impl InventorySystem {
                 gift_creator_guid: 0,
                 count: stack_count,
                 duration: 0,
-                charges: None,
+                charges: initial_charges.clone(),
                 flags: 0,
                 enchantments: String::new(),
                 random_property_id: 0,
@@ -751,7 +756,7 @@ impl InventorySystem {
                 creator_guid,
                 gift_creator_guid,
                 item_row.duration as u32,
-                Self::parse_spell_charges(item_row.charges.as_deref()),
+                Self::parse_spell_charges(initial_charges.as_deref()),
             );
 
             self.cache
