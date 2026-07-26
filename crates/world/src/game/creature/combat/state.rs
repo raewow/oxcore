@@ -36,6 +36,10 @@ pub struct CombatState {
 
     /// Threat list for target selection (Phase 2: basic, Phase 5: full system)
     pub threat_list: Vec<ThreatEntry>,
+
+    /// Diminishing-returns counters (`Unit::m_Diminishing`). Creatures need these too:
+    /// `DRTYPE_ALL` groups — the stun family — diminish against non-players as well.
+    pub diminishing: crate::game::player::spells::diminishing::DiminishingState,
 }
 
 impl CombatState {

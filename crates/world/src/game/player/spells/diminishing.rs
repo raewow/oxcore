@@ -22,9 +22,10 @@ pub const DR_RESET_TIME_MS: u64 = 15_000;
 pub const DR_MAX_LEVEL: u8 = 3;
 
 /// Diminishing return groups. Spells in the same group share DR on a target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum DRGroup {
+    #[default]
     None = 0,
     /// All stuns (Cheap Shot, Hammer of Justice, Bash, Kidney Shot, etc.)
     Stun,
@@ -60,6 +61,53 @@ pub enum DRType {
     None,
     Player,
     All,
+}
+
+/// Duration multiplier for a diminishing level (`Spells::GetDiminishingRate`).
+/// Level 0 is the first application and is never reduced; level 3 is full immunity.
+pub fn diminishing_rate(level: u8) -> f32 {
+    match level {
+        0 => 1.0,
+        1 => 0.5,
+        2 => 0.25,
+        _ => 0.0,
+    }
+}
+
+/// The diminishing-returns decision taken once per unit hit, then reused by every aura
+/// that hit applies (`Spell::m_diminishGroup` / `m_diminishLevel`).
+///
+/// MaNGOS deliberately samples this in `Spell::DoSpellHitOnUnit` rather than when each
+/// aura is added, because one spell may apply several auras that must all share a single
+/// level and a single counter increment.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DiminishSnapshot {
+    /// The group this spell diminishes on, or `None` when it has no DR.
+    pub group: DRGroup,
+    /// The target's level in that group *before* this hit incremented it.
+    pub level: u8,
+    /// Whether `Unit::ApplyDiminishingToDuration` would actually shorten this hit's
+    /// durations. False for a group with no DR, for a friendly (non-reflected) caster,
+    /// and for a `DRTYPE_PLAYER` group outside a player-versus-player pair.
+    pub diminishes_duration: bool,
+}
+
+impl DiminishSnapshot {
+    /// Apply the snapshot to an aura duration (`Unit::ApplyDiminishingToDuration`).
+    /// Permanent auras (`None`) are never diminished, matching the C++ `duration == -1` guard.
+    pub fn apply_to_duration(&self, duration_ms: Option<u32>) -> Option<u32> {
+        let duration = duration_ms?;
+        if !self.diminishes_duration {
+            return Some(duration);
+        }
+        Some((duration as f32 * diminishing_rate(self.level)) as u32)
+    }
+
+    /// Whether this hit is fully diminished, i.e. its auras would land with zero duration.
+    /// MaNGOS drops the whole aura holder in that case.
+    pub fn is_fully_diminished(&self) -> bool {
+        self.diminishes_duration && diminishing_rate(self.level) <= 0.0
+    }
 }
 
 pub fn dr_type(group: DRGroup) -> DRType {
@@ -101,38 +149,47 @@ pub struct DiminishingState {
 }
 
 impl DiminishingState {
-    /// Get the DR duration modifier for a group (1.0 = full, 0.5 = half, 0.25 = quarter, 0.0 = immune).
-    /// Also increments the DR level and resets the timer.
-    pub fn apply_dr(&mut self, group: DRGroup, now_ms: u64) -> f32 {
-        if matches!(dr_type(group), DRType::None) {
-            return 1.0;
-        }
-
-        // Clean up expired DR
-        if let Some(state) = self.groups.get(&group) {
-            if now_ms >= state.last_applied_ms + DR_RESET_TIME_MS {
-                self.groups.remove(&group);
-            }
-        }
-
-        let modifier = match self.groups.get(&group).map(|s| s.level).unwrap_or(0) {
-            0 => 1.0,  // First application: full duration
-            1 => 0.5,  // Second: half
-            2 => 0.25, // Third: quarter
-            _ => 0.0,  // Fourth+: immune
+    /// Current diminishing level for a group (`Unit::GetDiminishing`).
+    ///
+    /// Level 0 means "first application, full duration". Like the C++ this also performs
+    /// the lazy reset: once no aura of the group is active and 15 seconds have passed
+    /// since the last one dropped, the counter falls back to level 0.
+    pub fn get_diminishing(&mut self, group: DRGroup, now_ms: u64) -> u8 {
+        let Some(state) = self.groups.get_mut(&group) else {
+            return 0;
         };
+        if state.level == 0 {
+            return 0;
+        }
+        if state.active_auras == 0 && now_ms >= state.last_applied_ms + DR_RESET_TIME_MS {
+            state.level = 0;
+            return 0;
+        }
+        state.level
+    }
 
-        // Increment DR level
+    /// Raise the diminishing level for a group by one, capped at immunity
+    /// (`Unit::IncrDiminishing`). A group seen for the first time goes straight to level 1,
+    /// because the hit doing the incrementing has already consumed level 0.
+    pub fn incr_diminishing(&mut self, group: DRGroup, now_ms: u64) {
         let state = self.groups.entry(group).or_insert(DRState {
             level: 0,
             last_applied_ms: now_ms,
             active_auras: 0,
         });
-        state.level = (state.level + 1).min(DR_MAX_LEVEL + 1);
+        state.level = (state.level + 1).min(DR_MAX_LEVEL);
         state.last_applied_ms = now_ms;
-        state.active_auras += 1;
+    }
 
-        modifier
+    /// Track an aura of this group being applied (`Unit::ApplyDiminishingAura(group, true)`).
+    /// The reset timer only starts once the last aura of the group has dropped.
+    pub fn add_aura(&mut self, group: DRGroup, now_ms: u64) {
+        let state = self.groups.entry(group).or_insert(DRState {
+            level: 0,
+            last_applied_ms: now_ms,
+            active_auras: 0,
+        });
+        state.active_auras += 1;
     }
 
     pub fn remove_aura(&mut self, group: DRGroup, now_ms: u64) {
@@ -151,11 +208,54 @@ impl DiminishingState {
         }
 
         if let Some(state) = self.groups.get(&group) {
-            if now_ms < state.last_applied_ms + DR_RESET_TIME_MS {
+            if state.active_auras > 0 || now_ms < state.last_applied_ms + DR_RESET_TIME_MS {
                 return state.level >= DR_MAX_LEVEL;
             }
         }
         false
+    }
+
+    /// Snapshot the diminishing decision for one spell hit, then charge the target for it
+    /// (MaNGOS `Spell::DoSpellHitOnUnit`: `GetDiminishing` followed by `IncrDiminishing`).
+    ///
+    /// `applies_aura` mirrors `IsSpellAppliesAura(effectMask)` — a hit that applies no aura
+    /// reads the level but never increments it. `caster_is_friendly` folds in the
+    /// `ApplyDiminishingToDuration` exemption for friendly casters, which a reflected cast
+    /// bypasses.
+    pub fn snapshot_for_hit(
+        &mut self,
+        group: DRGroup,
+        target_is_player_like: bool,
+        caster_is_player_like: bool,
+        applies_aura: bool,
+        caster_is_friendly: bool,
+        is_reflected: bool,
+        now_ms: u64,
+    ) -> DiminishSnapshot {
+        let group_type = dr_type(group);
+        if group_type == DRType::None {
+            return DiminishSnapshot::default();
+        }
+
+        let level = self.get_diminishing(group, now_ms);
+
+        // The counter advances for the *next* cast, gated on this hit actually applying an
+        // aura and on the group covering this target.
+        if applies_aura && (group_type == DRType::All || target_is_player_like) {
+            self.incr_diminishing(group, now_ms);
+        }
+
+        // DRTYPE_PLAYER only diminishes durations between two player-like units; DRTYPE_ALL
+        // (the stun family) diminishes everywhere.
+        let pvp = target_is_player_like && caster_is_player_like;
+        let diminishes_duration = (!caster_is_friendly || is_reflected)
+            && (group_type == DRType::All || (group_type == DRType::Player && pvp));
+
+        DiminishSnapshot {
+            group,
+            level,
+            diminishes_duration,
+        }
     }
 
     /// Clear expired DR states (housekeeping, called periodically).
@@ -247,33 +347,144 @@ pub fn get_dr_group_for_spell(spell: &SpellEntry, triggered_by_aura: bool) -> DR
 mod tests {
     use super::*;
 
+    /// One player-versus-player hit: sample, charge the counter, reduce the duration.
+    fn pvp_hit(state: &mut DiminishingState, group: DRGroup, now_ms: u64) -> DiminishSnapshot {
+        state.snapshot_for_hit(group, true, true, true, false, false, now_ms)
+    }
+
     #[test]
     fn repeated_applications_reduce_duration_then_make_target_immune() {
         let mut state = DiminishingState::default();
 
-        assert_eq!(state.apply_dr(DRGroup::Stun, 1_000), 1.0);
-        assert_eq!(state.apply_dr(DRGroup::Stun, 2_000), 0.5);
-        assert_eq!(state.apply_dr(DRGroup::Stun, 3_000), 0.25);
-        assert_eq!(state.apply_dr(DRGroup::Stun, 4_000), 0.0);
+        assert_eq!(pvp_hit(&mut state, DRGroup::Stun, 1_000).level, 0);
+        assert_eq!(pvp_hit(&mut state, DRGroup::Stun, 2_000).level, 1);
+        assert_eq!(pvp_hit(&mut state, DRGroup::Stun, 3_000).level, 2);
+
+        let immune = pvp_hit(&mut state, DRGroup::Stun, 4_000);
+        assert_eq!(immune.level, 3);
+        assert!(immune.is_fully_diminished());
         assert!(state.is_immune(DRGroup::Stun, 4_000));
+    }
+
+    #[test]
+    fn snapshot_scales_duration_by_the_sampled_level() {
+        let mut state = DiminishingState::default();
+
+        assert_eq!(
+            pvp_hit(&mut state, DRGroup::Fear, 1_000).apply_to_duration(Some(8_000)),
+            Some(8_000)
+        );
+        assert_eq!(
+            pvp_hit(&mut state, DRGroup::Fear, 2_000).apply_to_duration(Some(8_000)),
+            Some(4_000)
+        );
+        assert_eq!(
+            pvp_hit(&mut state, DRGroup::Fear, 3_000).apply_to_duration(Some(8_000)),
+            Some(2_000)
+        );
+    }
+
+    /// A permanent aura has no duration to diminish (`duration == -1` in the C++).
+    #[test]
+    fn permanent_durations_are_never_diminished() {
+        let mut state = DiminishingState::default();
+        pvp_hit(&mut state, DRGroup::Stun, 1_000);
+        let snapshot = pvp_hit(&mut state, DRGroup::Stun, 2_000);
+
+        assert_eq!(snapshot.apply_to_duration(None), None);
     }
 
     #[test]
     fn expired_diminishing_state_restores_full_duration() {
         let mut state = DiminishingState::default();
 
-        state.apply_dr(DRGroup::Fear, 1_000);
-        state.apply_dr(DRGroup::Fear, 2_000);
+        pvp_hit(&mut state, DRGroup::Fear, 1_000);
+        pvp_hit(&mut state, DRGroup::Fear, 2_000);
 
-        assert_eq!(state.apply_dr(DRGroup::Fear, 17_000), 1.0);
-        assert!(!state.is_immune(DRGroup::Fear, 17_000));
+        // The reset only lands once no aura of the group is still active.
+        state.remove_aura(DRGroup::Fear, 2_000);
+        assert_eq!(pvp_hit(&mut state, DRGroup::Fear, 18_000).level, 0);
+        assert!(!state.is_immune(DRGroup::Fear, 18_000));
+    }
+
+    /// While an aura of the group is still up, the 15-second window has not started.
+    #[test]
+    fn active_aura_holds_the_reset_window_open() {
+        let mut state = DiminishingState::default();
+
+        pvp_hit(&mut state, DRGroup::Stun, 1_000);
+        pvp_hit(&mut state, DRGroup::Stun, 2_000);
+        state.add_aura(DRGroup::Stun, 2_000);
+
+        assert_eq!(state.get_diminishing(DRGroup::Stun, 100_000), 2);
     }
 
     #[test]
     fn no_diminishing_group_never_records_state() {
         let mut state = DiminishingState::default();
 
-        assert_eq!(state.apply_dr(DRGroup::None, 1_000), 1.0);
+        let snapshot = pvp_hit(&mut state, DRGroup::None, 1_000);
+        assert_eq!(snapshot, DiminishSnapshot::default());
+        assert_eq!(snapshot.apply_to_duration(Some(8_000)), Some(8_000));
         assert!(state.groups.is_empty());
+    }
+
+    /// DRTYPE_PLAYER groups (fear, root, polymorph…) only shorten durations between two
+    /// players; DRTYPE_ALL groups (the stun family) also apply against creatures.
+    #[test]
+    fn player_only_groups_do_not_diminish_creature_targets() {
+        let mut state = DiminishingState::default();
+        state.incr_diminishing(DRGroup::Fear, 1_000);
+
+        let vs_creature = state.snapshot_for_hit(DRGroup::Fear, false, true, true, false, false, 2_000);
+        assert_eq!(vs_creature.level, 1);
+        assert!(!vs_creature.diminishes_duration);
+        assert_eq!(vs_creature.apply_to_duration(Some(8_000)), Some(8_000));
+
+        let mut stun_state = DiminishingState::default();
+        stun_state.incr_diminishing(DRGroup::Stun, 1_000);
+        let stun_vs_creature =
+            stun_state.snapshot_for_hit(DRGroup::Stun, false, true, true, false, false, 2_000);
+        assert!(stun_vs_creature.diminishes_duration);
+        assert_eq!(stun_vs_creature.apply_to_duration(Some(8_000)), Some(4_000));
+    }
+
+    /// A DRTYPE_PLAYER group never charges a creature's counter, but DRTYPE_ALL does.
+    #[test]
+    fn creature_counters_only_advance_for_all_type_groups() {
+        let mut state = DiminishingState::default();
+        state.snapshot_for_hit(DRGroup::Fear, false, true, true, false, false, 1_000);
+        assert_eq!(state.get_diminishing(DRGroup::Fear, 1_000), 0);
+
+        state.snapshot_for_hit(DRGroup::Stun, false, true, true, false, false, 1_000);
+        assert_eq!(state.get_diminishing(DRGroup::Stun, 1_000), 1);
+    }
+
+    /// A hit that applies no aura reads the level but leaves the counter alone.
+    #[test]
+    fn hits_without_auras_do_not_charge_the_counter() {
+        let mut state = DiminishingState::default();
+
+        state.snapshot_for_hit(DRGroup::Stun, true, true, false, false, false, 1_000);
+        assert_eq!(state.get_diminishing(DRGroup::Stun, 1_000), 0);
+    }
+
+    /// A friendly caster does not diminish its target — unless the spell was reflected
+    /// back at it, in which case the exemption is skipped.
+    #[test]
+    fn friendly_casters_do_not_diminish_unless_reflected() {
+        let mut state = DiminishingState::default();
+        state.incr_diminishing(DRGroup::Stun, 1_000);
+
+        let friendly = state.snapshot_for_hit(DRGroup::Stun, true, true, true, true, false, 2_000);
+        assert!(!friendly.diminishes_duration);
+        assert_eq!(friendly.apply_to_duration(Some(8_000)), Some(8_000));
+
+        let mut reflected_state = DiminishingState::default();
+        reflected_state.incr_diminishing(DRGroup::Stun, 1_000);
+        let reflected =
+            reflected_state.snapshot_for_hit(DRGroup::Stun, true, true, true, true, true, 2_000);
+        assert!(reflected.diminishes_duration);
+        assert_eq!(reflected.apply_to_duration(Some(8_000)), Some(4_000));
     }
 }

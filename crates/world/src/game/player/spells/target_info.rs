@@ -12,6 +12,7 @@
 //! single post-loop apply like the C++ does — see the module doc on
 //! [`apply_target_effects`] for why that divergence is intentional for now.
 
+use super::diminishing::{self, DiminishSnapshot};
 use super::effects::{dispatch_effect, EffectInput, EffectResult, SpellEffectType};
 use super::hit::{self, SpellHitOutcome};
 use crate::dbc::structures::SpellEntry;
@@ -110,6 +111,9 @@ pub struct TargetInfo {
     pub healing: u32,
     /// Damage absorbed across this target's effects (`Spell::m_absorbed` equivalent).
     pub absorbed: u32,
+    /// Diminishing-returns decision sampled when this target was hit, shared by every
+    /// aura the hit applies (`Spell::m_diminishGroup` / `m_diminishLevel`).
+    pub diminishing: DiminishSnapshot,
 }
 
 impl TargetInfo {
@@ -126,6 +130,7 @@ impl TargetInfo {
             damage: 0,
             healing: 0,
             absorbed: 0,
+            diminishing: DiminishSnapshot::default(),
         }
     }
 
@@ -191,8 +196,9 @@ impl TargetInfo {
 ///    modifies `effect_mask` in-place.
 ///
 /// # Returns
-/// `false` — hit should be aborted (all effects resisted, delayed-spell immune
-/// or evaded).  `true` — continue with effect dispatch.
+/// `None` — hit should be aborted (all effects resisted, delayed-spell immune
+/// or evaded).  `Some(snapshot)` — continue with effect dispatch, carrying the
+/// diminishing-returns decision every aura this hit applies must share.
 async fn do_spell_hit_on_unit(
     spell_entry: &SpellEntry,
     caster_guid: ObjectGuid,
@@ -200,15 +206,16 @@ async fn do_spell_hit_on_unit(
     effect_mask: &mut u8,
     is_delayed: bool,
     is_triggered: bool,
+    is_reflected: bool,
     world: &World,
-) -> bool {
+) -> Option<DiminishSnapshot> {
     // ── Step 3.  Zero effect mask: just flag combat if non-positive ────────────
     // (C++ lines 1540-1545)
     if *effect_mask == 0 {
         if !spell_entry.is_positive_spell() {
             enter_combat_on_miss(caster_guid, target_guid, world);
         }
-        return false;
+        return None;
     }
 
     // ── Step 4.  Per-effect mechanic resistance ───────────────────────────────
@@ -222,12 +229,12 @@ async fn do_spell_hit_on_unit(
         }
     }
     if *effect_mask == 0 {
-        return false;
+        return None;
     }
 
     if target_is_immune_to_school(target_guid, spell_entry, *effect_mask, world) {
         *effect_mask = 0;
-        return false;
+        return None;
     }
 
     // ── Step 5.  Per-effect immunity re-check ─────────────────────────────────
@@ -241,7 +248,7 @@ async fn do_spell_hit_on_unit(
         }
     }
     if *effect_mask == 0 {
-        return false;
+        return None;
     }
 
     // ── Step 6a.  Hostile-side side effects ────────────────────────────────────
@@ -325,7 +332,7 @@ async fn do_spell_hit_on_unit(
         // Delayed negative spells on friendly targets (post-duel) → evade
         // (C++ lines 1645-1651)
         if is_delayed && !spell_entry.is_positive_spell() {
-            return false;
+            return None;
         }
 
         // Combat assist (C++ lines 1656-1667)
@@ -353,15 +360,104 @@ async fn do_spell_hit_on_unit(
         // TODO: PvP flagging (C++ lines 1669-1675) — `UpdatePvP` not ported.
     }
 
-    // ── Step 7.  Diminishing-returns snapshot + aura-holder setup ──────────────
+    // ── Step 7.  Diminishing-returns snapshot ──────────────────────────────────
     // (C++ lines 1681-1700)
-    // TODO: DR group/level and aura-holder creation are not wired here yet.
-    // The effect loop below dispatches effects directly; the aura system
-    // creates holders as effects are applied.  When the DR/aura-holder
-    // pipeline is refactored, the DR snapshot (`GetDiminishingReturnsGroup`,
-    // `GetDiminishing`) belongs here.
+    // Sampled once per unit hit rather than per aura: a spell whose effect mask applies
+    // several auras must give all of them one level and charge the target only once.
+    // Aura-holder creation is still done by the aura system as each effect is applied,
+    // so only the DR half of this block is ported.
+    Some(snapshot_diminishing_for_hit(
+        spell_entry,
+        caster_guid,
+        target_guid,
+        *effect_mask,
+        is_triggered,
+        is_reflected,
+        world,
+    ))
+}
 
-    true
+/// Whether any effect in `effect_mask` applies an aura (`SpellEntry::IsSpellAppliesAura`).
+fn spell_applies_aura(spell_entry: &SpellEntry, effect_mask: u8) -> bool {
+    const SPELL_EFFECT_APPLY_AURA: u32 = 6;
+    const SPELL_EFFECT_PERSISTENT_AREA_AURA_EFFECT: u32 = 27;
+    const SPELL_EFFECT_APPLY_AREA_AURA_PARTY: u32 = 65;
+
+    (0..3).any(|i| {
+        effect_mask & (1 << i) != 0
+            && matches!(
+                spell_entry.effect[i],
+                SPELL_EFFECT_APPLY_AURA
+                    | SPELL_EFFECT_PERSISTENT_AREA_AURA_EFFECT
+                    | SPELL_EFFECT_APPLY_AREA_AURA_PARTY
+            )
+            && spell_entry.effect_apply_aura_name[i] != 0
+    })
+}
+
+/// Take the per-hit diminishing-returns snapshot and charge the target's counter
+/// (`m_diminishGroup` / `m_diminishLevel` in `Spell::DoSpellHitOnUnit`).
+///
+/// Divergences: `m_triggeredByAuraSpell` is approximated by `is_triggered`, and
+/// `caster->IsFriendlyTo(target)` by the spell's polarity, which is the same proxy the
+/// rest of this module uses. Only players and creatures carry DR state; any other caster
+/// or target kind is treated as having none.
+fn snapshot_diminishing_for_hit(
+    spell_entry: &SpellEntry,
+    caster_guid: ObjectGuid,
+    target_guid: ObjectGuid,
+    effect_mask: u8,
+    is_triggered: bool,
+    is_reflected: bool,
+    world: &World,
+) -> DiminishSnapshot {
+    let group = diminishing::get_dr_group_for_spell(spell_entry, is_triggered);
+    if diminishing::dr_type(group) == diminishing::DRType::None {
+        return DiminishSnapshot::default();
+    }
+
+    let applies_aura = spell_applies_aura(spell_entry, effect_mask);
+    let caster_is_friendly = spell_entry.is_positive_spell();
+    let now = now_ms();
+
+    let take = |state: &mut diminishing::DiminishingState, target_is_player_like: bool| {
+        state.snapshot_for_hit(
+            group,
+            target_is_player_like,
+            caster_guid.is_player(),
+            applies_aura,
+            caster_is_friendly,
+            is_reflected,
+            now,
+        )
+    };
+
+    if target_guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |player| take(&mut player.combat.diminishing, true))
+            .unwrap_or_default()
+    } else if target_guid.is_creature() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(target_guid, |creature| {
+                take(&mut creature.combat.diminishing, false)
+            })
+            .unwrap_or_default()
+    } else {
+        DiminishSnapshot::default()
+    }
+}
+
+/// Wall-clock milliseconds, the time base the diminishing counters are kept in.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 /// `SpellEntry::HasDirectThreatIncreaseEffect()` — true when any effect type
@@ -809,6 +905,7 @@ pub async fn apply_target_effects(
     // its caster (`unitTarget = m_casterUnit` in `Spell::DoAllEffectOnTarget`); every
     // other outcome applies to the registered target.
     let mut hit_target_guid = target.target_guid;
+    let is_reflected = target.miss_condition == SpellHitOutcome::Reflect;
 
     match target.miss_condition {
         SpellHitOutcome::Miss | SpellHitOutcome::Resist | SpellHitOutcome::Immune => {
@@ -853,21 +950,37 @@ pub async fn apply_target_effects(
             // Per-unit pre-effect processing (DoSpellHitOnUnit chunk_0):
             // combat entry, stealth removal, resist checks, DR snapshot, etc.
             let is_delayed = spell_entry.speed > 0.0;
-            if !do_spell_hit_on_unit(
+            match do_spell_hit_on_unit(
                 &spell_entry,
                 caster_guid,
                 hit_target_guid,
                 &mut target.effect_mask,
                 is_delayed,
                 is_triggered,
+                is_reflected,
                 world,
             )
             .await
             {
                 // All effects resisted/aborted — nothing to dispatch.
-                return Ok(results);
+                None => return Ok(results),
+                Some(snapshot) => target.diminishing = snapshot,
             }
         }
+    }
+
+    // A fully diminished hit lands no auras at all: MaNGOS deletes the holder before it is
+    // added. Nothing else in the effect mask can run either, because the same mask is what
+    // marked this hit as aura-applying.
+    if target.diminishing.is_fully_diminished() && spell_applies_aura(&spell_entry, target.effect_mask)
+    {
+        tracing::debug!(
+            "[DR] spell {} fully diminished on {:?} (group {:?})",
+            spell_id,
+            hit_target_guid,
+            target.diminishing.group
+        );
+        return Ok(results);
     }
 
     // Per-target proc flags: helpful spells proc DEAL/TAKE_HELPFUL, harmful spells proc
@@ -918,6 +1031,7 @@ pub async fn apply_target_effects(
                 .get_spell_cast_time(spell_entry.casting_time_index)
                 .map(|entry| entry.cast_time.max(0) as u32)
                 .unwrap_or(0),
+            diminishing: target.diminishing,
         };
 
         match dispatch_effect(effect_type_enum, &input, world).await {
@@ -1062,6 +1176,55 @@ mod tests {
     fn add_test_player(world: &World, guid: ObjectGuid) {
         let player = Player::new(guid, format!("P{}", guid.counter()), 0, 0, 0, 60, 1, 1, 0);
         world.managers.player_mgr.add_player(player, guid.counter());
+    }
+
+    fn add_test_creature(world: &World, guid: ObjectGuid) {
+        use crate::game::creature::{Creature, CreatureTemplate};
+        use oxcore_shared::protocol::Position;
+
+        let entry = guid.entry();
+        let template = CreatureTemplate {
+            entry,
+            name: format!("Creature {entry}"),
+            subname: None,
+            min_level: 60,
+            max_level: 60,
+            faction: 14,
+            model_id_1: 1,
+            model_id_2: 0,
+            model_id_3: 0,
+            model_id_4: 0,
+            scale: 1.0,
+            npc_flags: 0,
+            unit_flags: 0,
+            static_flags1: 0,
+            flags_extra: 0,
+            creature_type: 0,
+            unit_class: 1,
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            damage_variance: 0.0,
+            attack_time: 2000,
+            rank: 0,
+            gossip_menu_id: 0,
+            vendor_id: 0,
+            trainer_id: 0,
+            trainer_type: 0,
+            spells: [0; 4],
+        };
+        world.managers.creature_mgr.add_creature(Creature::new(
+            guid,
+            entry,
+            60,
+            Position::default(),
+            0,
+            0,
+            &template,
+            1,
+            None,
+        ));
     }
 
     /// Create a minimal harmful spell entry with one damage effect.
@@ -1253,11 +1416,12 @@ mod tests {
             &mut mask,
             false,
             false,
+            false,
             &world,
         )
         .await;
 
-        assert!(!result, "zero mask should abort hit");
+        assert!(result.is_none(), "zero mask should abort hit");
         assert_eq!(mask, 0, "mask should still be zero");
     }
 
@@ -1276,12 +1440,13 @@ mod tests {
             &mut mask,
             false,
             false,
+            false,
             &world,
         )
         .await;
 
         assert!(
-            !result,
+            result.is_none(),
             "zero mask should abort hit even for positive spells"
         );
     }
@@ -1321,7 +1486,9 @@ mod tests {
         let spell = harmful_spell(108);
         let mut mask = 0b001;
         assert!(
-            !do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, &world).await
+            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                .await
+                .is_none()
         );
         assert_eq!(mask, 0);
     }
@@ -1360,7 +1527,9 @@ mod tests {
         spell.school = 2;
         let mut mask = 0b001;
         assert!(
-            !do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, &world).await
+            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                .await
+                .is_none()
         );
         assert_eq!(mask, 0);
     }
@@ -1401,6 +1570,171 @@ mod tests {
 
         spell.attributes |= SPELL_ATTR_NO_IMMUNITIES;
         assert!(!target_is_immune_to_damage(target, &spell, &world));
+    }
+
+    // ─── Diminishing returns ──────────────────────────────────────────────────────
+
+    /// A stun (mechanic 12, `DRTYPE_ALL`) applying one aura effect.
+    fn stun_spell(id: u32) -> SpellEntry {
+        const SPELL_EFFECT_APPLY_AURA: u32 = 6;
+        const MECHANIC_STUNNED: u32 = 12;
+        let mut spell = harmful_spell(id);
+        spell.effect = [SPELL_EFFECT_APPLY_AURA, 0, 0];
+        spell.effect_apply_aura_name = [crate::game::player::auras::effects::AURA_MOD_STUN, 0, 0];
+        spell.mechanic = MECHANIC_STUNNED;
+        // A bare APPLY_AURA fixture with zeroed implicit targets classifies as positive,
+        // which would make the caster count as friendly and skip DR. Real CC spells carry
+        // the negative override, so set it explicitly here.
+        spell.custom |= SPELL_CUSTOM_NEGATIVE;
+        spell
+    }
+
+    /// `SPELL_CUSTOM_NEGATIVE` — the explicit "this spell is hostile" override honoured
+    /// ahead of the effect-based polarity heuristic.
+    const SPELL_CUSTOM_NEGATIVE: u32 = 0x0000_0002;
+
+    #[tokio::test]
+    async fn stun_hits_diminish_and_then_fully_diminish_a_player_target() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(50);
+        let target = ObjectGuid::new_player(51);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
+        let spell = stun_spell(9300);
+        let mut levels = Vec::new();
+        for _ in 0..4 {
+            let mut mask = 0b001;
+            let snapshot =
+                do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                    .await
+                    .expect("stun hit should not abort");
+            levels.push(snapshot.level);
+        }
+
+        assert_eq!(
+            levels,
+            vec![0, 1, 2, 3],
+            "each stun landing raises the target's level for the next one"
+        );
+        assert!(
+            DiminishSnapshot {
+                group: diminishing::DRGroup::Stun,
+                level: 3,
+                diminishes_duration: true,
+            }
+            .is_fully_diminished(),
+            "the fourth stun lands with zero duration"
+        );
+    }
+
+    /// One cast whose effect mask applies two auras must charge the counter once and hand
+    /// both auras the same level — the reason MaNGOS samples DR on hit, not on aura add.
+    #[tokio::test]
+    async fn a_multi_aura_cast_charges_the_counter_once() {
+        const SPELL_EFFECT_APPLY_AURA: u32 = 6;
+        let world = test_world();
+        let caster = ObjectGuid::new_player(52);
+        let target = ObjectGuid::new_player(53);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
+        let mut spell = stun_spell(9301);
+        spell.effect[1] = SPELL_EFFECT_APPLY_AURA;
+        spell.effect_apply_aura_name[1] = crate::game::player::auras::effects::AURA_MOD_ROOT;
+
+        let mut mask = 0b011;
+        let first = do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+            .await
+            .expect("hit should not abort");
+        assert_eq!(first.level, 0);
+
+        let mut mask = 0b011;
+        let second =
+            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                .await
+                .expect("hit should not abort");
+        assert_eq!(
+            second.level, 1,
+            "two aura effects in one cast must advance the level by one, not two"
+        );
+    }
+
+    /// `DRTYPE_ALL` groups diminish creatures too, so a creature must carry its own counter.
+    #[tokio::test]
+    async fn stun_diminishes_creature_targets() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(54);
+        let target = ObjectGuid::new_creature(1, 55);
+        add_test_player(&world, caster);
+        add_test_creature(&world, target);
+
+        let spell = stun_spell(9302);
+
+        let mut mask = 0b001;
+        let first = do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+            .await
+            .expect("hit should not abort");
+        assert!(first.diminishes_duration, "stuns diminish on creatures");
+        assert_eq!(first.apply_to_duration(Some(8_000)), Some(8_000));
+
+        let mut mask = 0b001;
+        let second =
+            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                .await
+                .expect("hit should not abort");
+        assert_eq!(second.apply_to_duration(Some(8_000)), Some(4_000));
+    }
+
+    /// A fear (`DRTYPE_PLAYER`) leaves creature durations alone.
+    #[tokio::test]
+    async fn player_only_groups_do_not_diminish_creatures() {
+        const SPELL_EFFECT_APPLY_AURA: u32 = 6;
+        const MECHANIC_FLEEING: u32 = 5;
+        let world = test_world();
+        let caster = ObjectGuid::new_player(56);
+        let target = ObjectGuid::new_creature(1, 57);
+        add_test_player(&world, caster);
+        add_test_creature(&world, target);
+
+        let mut spell = harmful_spell(9303);
+        spell.effect = [SPELL_EFFECT_APPLY_AURA, 0, 0];
+        spell.effect_apply_aura_name = [crate::game::player::auras::effects::AURA_MOD_FEAR, 0, 0];
+        spell.mechanic = MECHANIC_FLEEING;
+        spell.custom |= SPELL_CUSTOM_NEGATIVE;
+
+        for _ in 0..3 {
+            let mut mask = 0b001;
+            let snapshot =
+                do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                    .await
+                    .expect("hit should not abort");
+            assert!(!snapshot.diminishes_duration);
+            assert_eq!(snapshot.apply_to_duration(Some(8_000)), Some(8_000));
+        }
+    }
+
+    /// A spell that applies no aura reads the level without charging the counter.
+    #[tokio::test]
+    async fn direct_damage_hits_never_charge_the_counter() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(58);
+        let target = ObjectGuid::new_player(59);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
+        // A pure damage spell that still classifies into a DR group by its mechanic.
+        let mut spell = harmful_spell(9304);
+        spell.mechanic = 12; // MECHANIC_STUNNED
+
+        for _ in 0..3 {
+            let mut mask = 0b001;
+            let snapshot =
+                do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                    .await
+                    .expect("hit should not abort");
+            assert_eq!(snapshot.level, 0, "no aura applied, so no level is consumed");
+        }
     }
 
     // ─── Reflect ──────────────────────────────────────────────────────────────────
@@ -1644,7 +1978,9 @@ mod tests {
         spell.effect_mechanic[0] = 5;
         let mut mask = 0b001;
         assert!(
-            !do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, &world).await
+            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                .await
+                .is_none()
         );
         assert_eq!(mask, 0);
     }
@@ -1668,12 +2004,13 @@ mod tests {
             &mut mask,
             false,
             false,
+            false,
             &world,
         )
         .await;
 
         assert!(
-            result,
+            result.is_some(),
             "hostile hit should continue with effect application"
         );
         // Stealth removal is called; the player target has no stealth to remove
@@ -1694,11 +2031,12 @@ mod tests {
             &mut mask,
             false,
             false,
+            false,
             &world,
         )
         .await;
 
-        assert!(result, "hit should continue");
+        assert!(result.is_some(), "hit should continue");
     }
 
     #[tokio::test]
@@ -1715,11 +2053,12 @@ mod tests {
             &mut mask,
             false,
             false,
+            false,
             &world,
         )
         .await;
 
-        assert!(result, "hit should continue");
+        assert!(result.is_some(), "hit should continue");
     }
 
     #[tokio::test]
@@ -1736,11 +2075,12 @@ mod tests {
             &mut mask,
             false,
             false,
+            false,
             &world,
         )
         .await;
 
-        assert!(result, "hit should continue");
+        assert!(result.is_some(), "hit should continue");
     }
 
     #[tokio::test]
@@ -1759,11 +2099,15 @@ mod tests {
             &mut mask,
             false,
             false,
+            false,
             &world,
         )
         .await;
 
-        assert!(result, "possess should continue with effect application");
+        assert!(
+            result.is_some(),
+            "possess should continue with effect application"
+        );
         // Combat entry should be skipped (AttackedBy not called for possess).
     }
 
@@ -1781,10 +2125,14 @@ mod tests {
             &mut mask,
             false,
             false,
+            false,
             &world,
         )
         .await;
 
-        assert!(result, "no-threat hit should still continue with effects");
+        assert!(
+            result.is_some(),
+            "no-threat hit should still continue with effects"
+        );
     }
 }

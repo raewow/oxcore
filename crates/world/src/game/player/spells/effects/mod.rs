@@ -63,6 +63,10 @@ pub struct EffectInput {
     pub spell_school: u8,
     /// Casting time in milliseconds (from DBC, for fallback coefficient calc)
     pub casting_time_ms: u32,
+    /// Diminishing-returns decision sampled once when this target was hit
+    /// (`Spell::m_diminishGroup` / `m_diminishLevel`). Aura effects apply it to the
+    /// duration they request so that every aura of one cast is diminished identically.
+    pub diminishing: crate::game::player::spells::diminishing::DiminishSnapshot,
 }
 
 impl EffectInput {
@@ -87,6 +91,7 @@ impl EffectInput {
             spell_coefficient: 0.0,
             spell_school: 0,
             casting_time_ms: 0,
+            diminishing: Default::default(),
         }
     }
 

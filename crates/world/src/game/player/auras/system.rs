@@ -17,6 +17,7 @@ use crate::game::player::auras::effects::StatModifier;
 use crate::game::player::auras::periodic;
 use crate::game::player::auras::proc;
 use crate::game::player::movement::MovementControllerSender;
+use crate::game::player::spells::diminishing::{DiminishSnapshot, DRGroup};
 use crate::World;
 use oxcore_shared::messages::auras::SmsgUpdateAuraDuration;
 use oxcore_shared::messages::update::{
@@ -30,6 +31,23 @@ use std::time::Duration;
 use anyhow::Result;
 
 /// Stateless aura system - operates on player.auras via PlayerManager.
+/// The DR group an aura should remember so it can release the target's counter when it
+/// drops (`Unit::ApplyDiminishingAura(group, false)`).
+///
+/// Only the first effect slot records it: one cast holds the group once, however many
+/// aura effects it applied.
+fn diminishing_group_for_slot(effect_index: u8, diminishing: DiminishSnapshot) -> Option<DRGroup> {
+    (effect_index == 0 && diminishing.group != DRGroup::None).then_some(diminishing.group)
+}
+
+/// Wall-clock milliseconds, the time base the diminishing counters are kept in.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 pub struct AuraSystem {
     broadcast_mgr: Arc<BroadcastManager>,
 }
@@ -83,11 +101,33 @@ impl AuraSystem {
         max_stacks: u8,
         max_charges: u8,
         flags: AuraFlags,
+        // Diminishing-returns decision taken when the spell hit this target. Every aura of
+        // one cast shares it, so a multi-aura spell diminishes once rather than per effect.
+        diminishing: DiminishSnapshot,
         world: &World,
     ) -> Result<Option<u8>> {
         if target_guid.is_creature() && aura_type == effects::AURA_AOE_CHARM {
             anyhow::bail!("AURA_AOE_CHARM creature targets are unsupported");
         }
+
+        // Diminishing returns. The group/level were sampled once when the spell hit this
+        // target (`Spell::DoSpellHitOnUnit`), so every aura of the cast is reduced by the
+        // same rate; here we only apply it. This runs before the creature branch because
+        // `DRTYPE_ALL` groups — the stun family — diminish on creatures too.
+        // `DIMINISHING_LIMITONLY` carries no rate; it only caps the duration.
+        let dr_duration_ms = if diminishing.is_fully_diminished() {
+            tracing::debug!(
+                "[DR] Target {:?} immune to DR group {:?} for spell {}",
+                target_guid,
+                diminishing.group,
+                spell_id,
+            );
+            return Ok(None); // Fully diminished — the aura never lands
+        } else if diminishing.group == DRGroup::LimitOnly {
+            duration_ms.map(|duration| duration.min(10_000))
+        } else {
+            diminishing.apply_to_duration(duration_ms)
+        };
 
         // Creature targets share AuraContainer storage with players, but their
         // gameplay modifier handling remains limited to supported creature effects.
@@ -99,13 +139,14 @@ impl AuraSystem {
                 aura_type,
                 misc_value,
                 base_value,
-                duration_ms,
+                dr_duration_ms,
                 periodic_interval_ms,
                 max_stacks,
                 max_charges,
                 flags,
             );
             aura.cast_item_guid = cast_item_guid;
+            aura.diminishing_group = diminishing_group_for_slot(effect_index, diminishing);
             aura.duration_index = world
                 .managers
                 .spell_mgr
@@ -115,71 +156,6 @@ impl AuraSystem {
             self.apply_creature_aura(target_guid, caster_guid, aura, world);
             return Ok(None);
         }
-
-        // Apply diminishing returns to CC auras (PvP)
-        let dr_duration_ms = if target_guid.is_player() {
-            // Look up the spell's mechanic for DR group determination
-            let spell = world
-                .managers
-                .spell_mgr
-                .get(spell_id)
-                .expect("spell lookup succeeded while applying its aura");
-            let dr_group =
-                crate::game::player::spells::diminishing::get_dr_group_for_spell(&spell, false);
-
-            if dr_group == crate::game::player::spells::diminishing::DRGroup::LimitOnly {
-                duration_ms.map(|duration| duration.min(10_000))
-            } else if crate::game::player::spells::diminishing::dr_type(dr_group)
-                != crate::game::player::spells::diminishing::DRType::None
-            {
-                let existing_duration = world
-                    .systems
-                    .player
-                    .manager()
-                    .with_player(target_guid, |player| {
-                        player
-                            .auras
-                            .container
-                            .all_auras()
-                            .find(|aura| aura.spell_id == spell_id)
-                            .and_then(|aura| aura.duration_ms)
-                    })
-                    .flatten();
-                if let Some(duration) = existing_duration {
-                    Some(duration)
-                } else {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
-
-                    let modifier = world
-                        .systems
-                        .player
-                        .manager()
-                        .with_player_mut(target_guid, |player| {
-                            player.combat.diminishing.apply_dr(dr_group, now)
-                        })
-                        .unwrap_or(1.0);
-
-                    if modifier <= 0.0 {
-                        tracing::debug!(
-                            "[DR] Target {:?} immune to DR group {:?} for spell {}",
-                            target_guid,
-                            dr_group,
-                            spell_id,
-                        );
-                        return Ok(None); // Target is immune — don't apply aura
-                    }
-
-                    duration_ms.map(|d| (d as f32 * modifier) as u32)
-                }
-            } else {
-                duration_ms
-            }
-        } else {
-            duration_ms
-        };
 
         let periodic_interval_ms = if effects::is_periodic_aura_type(aura_type) {
             if caster_guid.is_player() {
@@ -219,16 +195,7 @@ impl AuraSystem {
             max_charges,
             flags,
         );
-        aura.diminishing_group = (effect_index == 0)
-            .then(|| world.managers.spell_mgr.get(spell_id))
-            .flatten()
-            .and_then(|spell| {
-                let group =
-                    crate::game::player::spells::diminishing::get_dr_group_for_spell(&spell, false);
-                (crate::game::player::spells::diminishing::dr_type(group)
-                    != crate::game::player::spells::diminishing::DRType::None)
-                    .then_some(group)
-            });
+        aura.diminishing_group = diminishing_group_for_slot(effect_index, diminishing);
         aura.cast_item_guid = cast_item_guid;
         if let Some(item_guid) = cast_item_guid {
             const MAIN_HAND: u8 = 15;
@@ -270,6 +237,8 @@ impl AuraSystem {
 
         // Store aura_type and slot for later use after lock release
         let aura_type_copy = aura_type;
+        let dr_group_to_track = aura.diminishing_group;
+        let applied_at_ms = now_ms();
 
         // Insert into container (handles stacking/refresh internally)
         let assigned_slot = world
@@ -285,6 +254,13 @@ impl AuraSystem {
                 );
 
                 player.auras.needs_client_update = true;
+
+                // Hold the group's reset window open while this aura is up
+                // (`Unit::ApplyDiminishingAura(group, true)`); the matching decrement runs
+                // in the removal path.
+                if let Some(group) = dr_group_to_track {
+                    player.combat.diminishing.add_aura(group, applied_at_ms);
+                }
 
                 // If this is a stat modifier aura, flag for recalc
                 if effects::is_stat_modifier_aura(aura_type_copy) {
@@ -726,6 +702,7 @@ impl AuraSystem {
                 entry.stack_amount.max(1) as u8,
                 entry.proc_charges as u8,
                 flags,
+                DiminishSnapshot::default(),
                 world,
             ))
             .await?;
@@ -3820,8 +3797,16 @@ impl AuraSystem {
     ) {
         let aura_type = aura.aura_type;
         let base_value = aura.base_value();
+        let dr_group_to_track = aura.diminishing_group;
+        let applied_at_ms = now_ms();
         creature_mgr.with_creature_mut(creature_guid, |creature| {
             let _ = creature.add_aura(aura);
+
+            // Hold the group's reset window open while this aura is up
+            // (`Unit::ApplyDiminishingAura(group, true)`).
+            if let Some(group) = dr_group_to_track {
+                creature.combat.diminishing.add_aura(group, applied_at_ms);
+            }
 
             // Apply movement speed modifier
             // base_value for MOD_DECREASE_SPEED is negative (e.g. -40 = 40% slow)
@@ -3922,10 +3907,17 @@ impl AuraSystem {
         creature_mgr: &crate::game::creature::CreatureManager,
     ) {
         let mut removed_speed_aura = false;
+        let removed_at_ms = now_ms();
         creature_mgr.with_creature_mut(creature_guid, |creature| {
             let Some((aura, _)) = creature.auras.remove_aura(spell_id, effect_index) else {
                 return;
             };
+
+            // Release the group's counter so its 15-second reset window can start
+            // (`Unit::ApplyDiminishingAura(group, false)`).
+            if let Some(group) = aura.diminishing_group {
+                creature.combat.diminishing.remove_aura(group, removed_at_ms);
+            }
 
             if aura.aura_type == effects::AURA_EMPATHY
                 && !creature.auras.has_aura_type(effects::AURA_EMPATHY)
@@ -4494,6 +4486,74 @@ mod tests {
 
         let system = AuraSystem::new(broadcast_mgr);
         (system, creature_mgr)
+    }
+
+    /// Only the first effect slot of a cast records the group, so a multi-aura spell
+    /// holds the target's counter once rather than once per effect.
+    #[test]
+    fn only_the_first_effect_slot_records_the_diminishing_group() {
+        let snapshot = DiminishSnapshot {
+            group: DRGroup::Stun,
+            level: 1,
+            diminishes_duration: true,
+        };
+        assert_eq!(diminishing_group_for_slot(0, snapshot), Some(DRGroup::Stun));
+        assert_eq!(diminishing_group_for_slot(1, snapshot), None);
+        assert_eq!(diminishing_group_for_slot(2, snapshot), None);
+
+        // A spell with no DR group records nothing at all.
+        assert_eq!(
+            diminishing_group_for_slot(0, DiminishSnapshot::default()),
+            None
+        );
+    }
+
+    /// Applying and then removing a diminishing aura on a creature must leave the group's
+    /// active-aura count balanced, otherwise the 15-second reset window never opens.
+    #[tokio::test]
+    async fn creature_diminishing_tracking_is_balanced_across_apply_and_remove() {
+        let (system, creature_mgr) = make_aura_system();
+        let guid = add_test_creature(&creature_mgr, 100, 42);
+
+        let mut aura = Aura::new(
+            5000,
+            ObjectGuid::empty(),
+            0,
+            effects::AURA_MOD_STUN,
+            0,
+            0,
+            Some(8_000),
+            0,
+            1,
+            0,
+            AuraFlags::default(),
+        );
+        aura.diminishing_group = Some(DRGroup::Stun);
+        system.apply_creature_aura_record_with_mgr(guid, aura, &creature_mgr);
+
+        let active = creature_mgr
+            .with_creature(guid, |c| {
+                c.combat
+                    .diminishing
+                    .groups
+                    .get(&DRGroup::Stun)
+                    .map(|s| s.active_auras)
+            })
+            .flatten();
+        assert_eq!(active, Some(1), "the applied aura holds the group open");
+
+        system.remove_creature_aura_effect_with_mgr(guid, 5000, 0, &creature_mgr);
+
+        let active = creature_mgr
+            .with_creature(guid, |c| {
+                c.combat
+                    .diminishing
+                    .groups
+                    .get(&DRGroup::Stun)
+                    .map(|s| s.active_auras)
+            })
+            .flatten();
+        assert_eq!(active, Some(0), "removal releases the group");
     }
 
     #[test]

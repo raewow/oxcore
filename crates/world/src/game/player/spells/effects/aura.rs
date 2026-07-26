@@ -114,6 +114,7 @@ pub async fn effect_apply_aura(input: &EffectInput, world: &World) -> Result<Eff
             max_stacks,
             max_charges,
             flags,
+            input.diminishing,
             world,
         )
         .await?;
@@ -276,6 +277,7 @@ async fn apply_area_aura(
             max_stacks,
             max_charges,
             flags,
+            input.diminishing,
             world,
         )
         .await?;
