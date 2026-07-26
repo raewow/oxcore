@@ -1893,8 +1893,14 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
         player_guid, session_id
     );
 
-    // Send SMSG_LOGOUT_COMPLETE
-    session.send_msg(SmsgLogoutComplete)?;
+    // A disconnected socket has already dropped its receive channel. Do not let
+    // this optional client acknowledgement abort the remaining world cleanup.
+    if let Err(error) = session.send_msg(SmsgLogoutComplete) {
+        debug!(
+            "[LOGOUT] Could not send logout completion to disconnected player {}: {}",
+            player_guid, error
+        );
+    }
 
     // Save all player data to database (BEFORE removing from systems)
     // This saves: position, experience, health/power, rest state, spells, action bars, reputation, skills, account data
