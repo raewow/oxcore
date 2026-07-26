@@ -39,6 +39,19 @@ impl SpellHitOutcome {
     pub fn is_hit(&self) -> bool {
         matches!(self, Self::Hit | Self::PartialResist(_))
     }
+
+    /// Wire-level `SpellMissInfo` for this outcome. Landed outcomes map to `None`
+    /// (the C++ `SPELL_MISS_NONE`), which is what the reflect-result byte carries when
+    /// a reflected spell lands on its caster.
+    pub fn to_miss_info(self) -> SpellMissInfo {
+        match self {
+            Self::Hit | Self::PartialResist(_) => SpellMissInfo::None,
+            Self::Miss => SpellMissInfo::Miss,
+            Self::Resist => SpellMissInfo::Resist,
+            Self::Immune => SpellMissInfo::Immune,
+            Self::Reflect => SpellMissInfo::Reflect,
+        }
+    }
 }
 
 /// Wire-level miss reason sent in `SMSG_SPELLLOGMISS` (client `SpellMissInfo` enum).
@@ -61,8 +74,58 @@ pub enum SpellMissInfo {
 
 /// Spell damage classes (SpellEntry.dmg_class), used to route the hit roll.
 const SPELL_DAMAGE_CLASS_NONE: u32 = 0;
+const SPELL_DAMAGE_CLASS_MAGIC: u32 = 1;
 const SPELL_DAMAGE_CLASS_MELEE: u32 = 2;
 const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+
+/// SPELL_ATTR_IS_ABILITY (bit 4) — physical abilities are never reflected.
+const SPELL_ATTR_IS_ABILITY: u32 = 0x0000_0010;
+/// SPELL_ATTR_PASSIVE (bit 6).
+const SPELL_ATTR_PASSIVE: u32 = 0x0000_0040;
+/// SPELL_ATTR_NO_IMMUNITIES (bit 29) — bypasses invulnerability, so also reflection.
+const SPELL_ATTR_NO_IMMUNITIES: u32 = 0x2000_0000;
+/// SPELL_ATTR_EX_NO_REFLECTION (bit 7).
+const SPELL_ATTR_EX_NO_REFLECTION: u32 = 0x0000_0080;
+
+/// Whether a spell can be reflected at all (MaNGOS `SpellEntry::IsReflectableSpell`).
+///
+/// The caster/victim-aware overload additionally rejects spells that are positive
+/// toward this victim; `roll_spell_hit` has already returned on that case before this
+/// helper runs, so only the spell-intrinsic conditions are tested here.
+pub fn is_reflectable_spell(spell: &crate::dbc::structures::SpellEntry) -> bool {
+    spell.dmg_class == SPELL_DAMAGE_CLASS_MAGIC
+        && spell.attributes & (SPELL_ATTR_IS_ABILITY | SPELL_ATTR_PASSIVE | SPELL_ATTR_NO_IMMUNITIES)
+            == 0
+        && spell.attributes_ex & SPELL_ATTR_EX_NO_REFLECTION == 0
+}
+
+/// Total reflect chance percent the victim has against this spell's school
+/// (MaNGOS `SpellCaster::SpellHitResult`: `SPELL_AURA_REFLECT_SPELLS` flat plus every
+/// `SPELL_AURA_REFLECT_SPELLS_SCHOOL` whose misc value overlaps the spell school mask).
+fn victim_reflect_chance(victim_guid: ObjectGuid, school_mask: u32, world: &World) -> i32 {
+    use crate::game::player::auras::effects::{AURA_REFLECT_SPELLS, AURA_REFLECT_SPELLS_SCHOOL};
+
+    let chance = |auras: &crate::game::player::auras::AuraContainer| {
+        auras.get_total_aura_modifier(AURA_REFLECT_SPELLS)
+            + auras.get_total_aura_modifier_by_misc_mask(AURA_REFLECT_SPELLS_SCHOOL, school_mask)
+    };
+
+    if victim_guid.is_player() {
+        world
+            .managers
+            .player_mgr
+            .with_player(victim_guid, |p| chance(&p.auras.container))
+            .unwrap_or(0)
+    } else if victim_guid.is_creature() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(victim_guid, |c| chance(&c.auras))
+            .unwrap_or(0)
+    } else {
+        0
+    }
+}
 
 /// Magic spell hit chance as a percentage in [1, 99] (MaNGOS `MagicSpellHitChance`).
 ///
@@ -426,6 +489,22 @@ pub fn roll_spell_hit(
     // Self-cast and positive spells can never miss (MaNGOS SpellHitResult early returns).
     if caster_guid == target_guid || spell_entry.is_positive_spell() {
         return SpellHitOutcome::Hit;
+    }
+
+    // Damage immunity is checked before the reflect roll so an invulnerable victim does
+    // not burn a reflect charge (MaNGOS `IsImmuneToDamage` precedes the reflect block).
+    if super::target_info::target_is_immune_to_damage(target_guid, &spell_entry, world) {
+        return SpellHitOutcome::Immune;
+    }
+
+    // Try victim reflect. `m_canReflect` is `IsReflectableSpell(caster, victim)`, which
+    // this point has already satisfied for the positive-spell half.
+    if is_reflectable_spell(&spell_entry) {
+        let school_mask = 1u32.checked_shl(spell_entry.school).unwrap_or(0);
+        let reflect_chance = victim_reflect_chance(target_guid, school_mask, world);
+        if reflect_chance > 0 && (rand::random::<f32>() * 100.0) < reflect_chance as f32 {
+            return SpellHitOutcome::Reflect;
+        }
     }
 
     // Route by damage class. NONE never misses; melee/ranged use the (un-ported) melee

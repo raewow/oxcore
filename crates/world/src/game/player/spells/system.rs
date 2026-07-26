@@ -70,20 +70,24 @@ fn spell_go_target_lists(targets: &[TargetInfo]) -> (Vec<ObjectGuid>, Vec<SpellM
             hit::SpellHitOutcome::Miss => lists.1.push(SpellMissTarget {
                 guid: target.target_guid,
                 reason: hit::SpellMissInfo::Miss as u8,
+                reflect_result: hit::SpellMissInfo::None as u8,
             }),
             hit::SpellHitOutcome::Resist => lists.1.push(SpellMissTarget {
                 guid: target.target_guid,
                 reason: hit::SpellMissInfo::Resist as u8,
+                reflect_result: hit::SpellMissInfo::None as u8,
             }),
             hit::SpellHitOutcome::Immune => lists.1.push(SpellMissTarget {
                 guid: target.target_guid,
                 reason: hit::SpellMissInfo::Immune as u8,
+                reflect_result: hit::SpellMissInfo::None as u8,
             }),
-            // The legacy packet has a reflect-result byte after the miss reason.
-            // Reflect redirection is not implemented, so retain the target as a miss.
+            // A reflected target stays in the miss list; the packet carries the outcome
+            // of the reflected cast on the caster in the trailing reflect-result byte.
             hit::SpellHitOutcome::Reflect => lists.1.push(SpellMissTarget {
                 guid: target.target_guid,
                 reason: hit::SpellMissInfo::Reflect as u8,
+                reflect_result: target.reflect_result.to_miss_info() as u8,
             }),
         }
         lists
@@ -3766,6 +3770,52 @@ mod tests {
     #[test]
     fn ammo_packet_keeps_weapon_type_when_ammo_is_missing() {
         assert_eq!(ammo_packet_values(Some((106, 15)), None), (0, 15));
+    }
+
+    /// Reflected targets stay in the SMSG_SPELL_GO miss list and carry the outcome of
+    /// the reflected cast on the caster; other miss reasons carry SPELL_MISS_NONE.
+    #[test]
+    fn spell_go_miss_list_carries_the_reflect_result() {
+        let landed = ObjectGuid::new_player(1);
+        let missed = ObjectGuid::new_player(2);
+        let reflected = ObjectGuid::new_player(3);
+        let reflected_onto_immune_caster = ObjectGuid::new_player(4);
+
+        let mut targets = vec![
+            TargetInfo::new(landed, 0b001),
+            TargetInfo::new(missed, 0b001),
+            TargetInfo::new(reflected, 0b001),
+            TargetInfo::new(reflected_onto_immune_caster, 0b001),
+        ];
+        targets[1].miss_condition = hit::SpellHitOutcome::Miss;
+        targets[2].miss_condition = hit::SpellHitOutcome::Reflect;
+        targets[2].reflect_result = hit::SpellHitOutcome::Hit;
+        targets[3].miss_condition = hit::SpellHitOutcome::Reflect;
+        targets[3].reflect_result = hit::SpellHitOutcome::Immune;
+
+        let (hits, misses) = spell_go_target_lists(&targets);
+
+        assert_eq!(hits, vec![landed]);
+        assert_eq!(
+            misses,
+            vec![
+                SpellMissTarget {
+                    guid: missed,
+                    reason: hit::SpellMissInfo::Miss as u8,
+                    reflect_result: hit::SpellMissInfo::None as u8,
+                },
+                SpellMissTarget {
+                    guid: reflected,
+                    reason: hit::SpellMissInfo::Reflect as u8,
+                    reflect_result: hit::SpellMissInfo::None as u8,
+                },
+                SpellMissTarget {
+                    guid: reflected_onto_immune_caster,
+                    reason: hit::SpellMissInfo::Reflect as u8,
+                    reflect_result: hit::SpellMissInfo::Immune as u8,
+                },
+            ]
+        );
     }
 
     #[test]

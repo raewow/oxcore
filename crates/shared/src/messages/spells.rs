@@ -79,7 +79,13 @@ pub struct SmsgSpellGo {
 pub struct SpellMissTarget {
     pub guid: ObjectGuid,
     pub reason: u8,
+    /// Result of the reflected cast on the original caster. The client reads this extra
+    /// byte only when `reason` is `SPELL_MISS_REFLECT` (11); it is ignored otherwise.
+    pub reflect_result: u8,
 }
+
+/// `SpellMissInfo::SPELL_MISS_REFLECT` — the only miss reason carrying a trailing result byte.
+const SPELL_MISS_REFLECT: u8 = 11;
 
 // CAST_FLAG_UNKNOWN7: signals that the first packed GUID is a cast item, not
 // the caster. The client uses this to track which item was used.
@@ -111,6 +117,9 @@ impl SmsgSpellGo {
         for target in &self.miss_targets {
             packet.write_guid(target.guid); // Full 8-byte GUID
             packet.write_u8(target.reason);
+            if target.reason == SPELL_MISS_REFLECT {
+                packet.write_u8(target.reflect_result);
+            }
         }
 
         // SpellCastTargets section (vanilla 1.12.x requires this)
@@ -174,6 +183,12 @@ mod spell_packet_tests {
         // advance past the packed guid bytes
         data.advance(pos);
         result
+    }
+
+    /// Byte length of the SpellCastTargets tail when there is no explicit target:
+    /// a single TARGET_FLAG_SELF u16.
+    fn empty_spell_cast_targets_len() -> usize {
+        2
     }
 
     fn read_u16_le(data: &mut bytes::BytesMut) -> u16 {
@@ -286,6 +301,7 @@ mod spell_packet_tests {
             miss_targets: vec![SpellMissTarget {
                 guid: missed,
                 reason: 7,
+                reflect_result: 0,
             }],
             target_guid: None,
             cast_item_guid: None,
@@ -300,6 +316,60 @@ mod spell_packet_tests {
         assert_eq!(data.get_u8(), 0); // hit targets
         assert_eq!(data.get_u8(), 1); // miss targets
         assert_eq!(data.get_u64_le(), missed.raw());
+        assert_eq!(data.get_u8(), 7);
+        // Only the (empty) SpellCastTargets tail is left: a non-reflect miss writes no
+        // reflect-result byte.
+        let tail_len = data.remaining();
+        assert_eq!(
+            tail_len,
+            empty_spell_cast_targets_len(),
+            "a non-reflect miss must not emit a reflect-result byte"
+        );
+    }
+
+    /// A reflected target carries an extra reflect-result byte after the miss reason,
+    /// and only that target does (MaNGOS `Spell::WriteSpellGoTargets`).
+    #[test]
+    fn test_spell_go_reflect_miss_appends_reflect_result() {
+        let caster = player_guid(10);
+        let reflector = player_guid(20);
+        let immune = player_guid(30);
+        let msg = SmsgSpellGo {
+            caster_guid: caster,
+            caster_guid_pack: caster,
+            spell_id: 1234,
+            cast_flags: 0,
+            hit_targets: vec![],
+            miss_targets: vec![
+                SpellMissTarget {
+                    guid: reflector,
+                    reason: SPELL_MISS_REFLECT,
+                    reflect_result: 0, // SPELL_MISS_NONE: the reflected spell landed
+                },
+                SpellMissTarget {
+                    guid: immune,
+                    reason: 7,
+                    reflect_result: 0,
+                },
+            ],
+            target_guid: None,
+            cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
+        };
+        let mut data = msg.to_world_packet().data().clone();
+
+        let _ = read_packed_guid(&mut data);
+        let _ = read_packed_guid(&mut data);
+        data.advance(4 + 2);
+        assert_eq!(data.get_u8(), 0); // hit targets
+        assert_eq!(data.get_u8(), 2); // miss targets
+
+        assert_eq!(data.get_u64_le(), reflector.raw());
+        assert_eq!(data.get_u8(), SPELL_MISS_REFLECT);
+        assert_eq!(data.get_u8(), 0, "reflect result byte follows a reflect miss");
+
+        assert_eq!(data.get_u64_le(), immune.raw());
         assert_eq!(data.get_u8(), 7);
     }
 

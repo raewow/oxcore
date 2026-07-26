@@ -89,6 +89,11 @@ pub struct TargetInfo {
     pub effect_mask: u8,
     /// Hit/miss/resist/immune outcome, resolved once for the whole target.
     pub miss_condition: SpellHitOutcome,
+    /// Outcome of the *reflected* cast back onto the caster (`TargetInfo::reflectResult`).
+    /// Only meaningful when `miss_condition` is [`SpellHitOutcome::Reflect`]; `Hit` stands
+    /// for the C++ `SPELL_MISS_NONE` default and means the reflected spell lands on the
+    /// caster.
+    pub reflect_result: SpellHitOutcome,
     /// Whether `miss_condition` has already been rolled for this cast. Delayed
     /// projectiles resolve at launch and carry this snapshot to impact.
     pub outcome_resolved: bool,
@@ -113,6 +118,7 @@ impl TargetInfo {
             target_guid,
             effect_mask,
             miss_condition: SpellHitOutcome::Hit,
+            reflect_result: SpellHitOutcome::Hit,
             outcome_resolved: false,
             processed: false,
             proc_attacker: proc_flags::NONE,
@@ -593,7 +599,11 @@ fn target_is_immune_to_school(
     }
 }
 
-fn target_is_immune_to_damage(target_guid: ObjectGuid, spell: &SpellEntry, world: &World) -> bool {
+pub(super) fn target_is_immune_to_damage(
+    target_guid: ObjectGuid,
+    spell: &SpellEntry,
+    world: &World,
+) -> bool {
     const SPELL_ATTR_EX_IGNORE_CASTER_AND_TARGET_RESTRICTIONS: u32 = 0x0080_0000;
     const SPELL_ATTR_EX3_IGNORE_CASTER_AND_TARGET_RESTRICTIONS: u32 = 0x1000_0000;
 
@@ -779,6 +789,11 @@ pub async fn apply_target_effects(
         } else {
             hit::roll_spell_hit(caster_guid, target.target_guid, spell_id, world)
         };
+        target.reflect_result = if target.miss_condition == SpellHitOutcome::Reflect {
+            resolve_reflect_result(caster_guid, &spell_entry, world)
+        } else {
+            SpellHitOutcome::Hit
+        };
         target.outcome_resolved = true;
     }
 
@@ -789,6 +804,11 @@ pub async fn apply_target_effects(
     {
         target.miss_condition = SpellHitOutcome::Immune;
     }
+
+    // The unit that actually receives the effects. A reflected spell bounces back onto
+    // its caster (`unitTarget = m_casterUnit` in `Spell::DoAllEffectOnTarget`); every
+    // other outcome applies to the registered target.
+    let mut hit_target_guid = target.target_guid;
 
     match target.miss_condition {
         SpellHitOutcome::Miss | SpellHitOutcome::Resist | SpellHitOutcome::Immune => {
@@ -810,24 +830,25 @@ pub async fn apply_target_effects(
             }
             return Ok(results);
         }
-        SpellHitOutcome::Reflect => {
-            // Reflecting the effect back onto the caster is not yet supported; the
-            // original dispatch loop had the same limitation (see effects/mod.rs history).
+        // Reflected, but the caster cannot take the spell back (immune, or the cast has
+        // no unit caster at all). The spell fizzles; SMSG_SPELL_GO still reports the
+        // reflect together with this result byte.
+        SpellHitOutcome::Reflect if !target.reflect_result.is_hit() => {
             tracing::debug!(
-                "[SPELL-HIT] spell {} REFLECTED by {:?} (reflect-to-caster not yet supported)",
+                "[SPELL-HIT] spell {} reflected by {:?} but caster {:?} did not take it ({:?})",
                 spell_id,
-                target.target_guid
+                target.target_guid,
+                caster_guid,
+                target.reflect_result
             );
             return Ok(results);
         }
-        SpellHitOutcome::Hit | SpellHitOutcome::PartialResist(_) => {
-            fire_spell_hit_ai_event(
-                caster_guid,
-                target.target_guid,
-                spell_id,
-                &spell_entry,
-                world,
-            );
+        SpellHitOutcome::Reflect | SpellHitOutcome::Hit | SpellHitOutcome::PartialResist(_) => {
+            if target.miss_condition == SpellHitOutcome::Reflect {
+                hit_target_guid = caster_guid;
+            }
+
+            fire_spell_hit_ai_event(caster_guid, hit_target_guid, spell_id, &spell_entry, world);
 
             // Per-unit pre-effect processing (DoSpellHitOnUnit chunk_0):
             // combat entry, stealth removal, resist checks, DR snapshot, etc.
@@ -835,7 +856,7 @@ pub async fn apply_target_effects(
             if !do_spell_hit_on_unit(
                 &spell_entry,
                 caster_guid,
-                target.target_guid,
+                hit_target_guid,
                 &mut target.effect_mask,
                 is_delayed,
                 is_triggered,
@@ -880,7 +901,7 @@ pub async fn apply_target_effects(
         let input = EffectInput {
             caster_guid,
             cast_item_guid,
-            target_guid: Some(target.target_guid),
+            target_guid: Some(hit_target_guid),
             spell_id,
             effect_index: effect_index as u8,
             base_value,
@@ -902,7 +923,7 @@ pub async fn apply_target_effects(
         match dispatch_effect(effect_type_enum, &input, world).await {
             Ok(result) => {
                 let mut result = result;
-                result.target_guid = Some(target.target_guid);
+                result.target_guid = Some(hit_target_guid);
                 result.effect_index = effect_index as u8;
                 target.damage = target.damage.saturating_add(result.damage);
                 target.healing = target.healing.saturating_add(result.healing);
@@ -913,7 +934,7 @@ pub async fn apply_target_effects(
                     "Effect {} failed for spell {} target {:?}: {}",
                     effect_index,
                     spell_id,
-                    target.target_guid,
+                    hit_target_guid,
                     e
                 );
                 results.push(EffectResult::empty());
@@ -922,6 +943,31 @@ pub async fn apply_target_effects(
     }
 
     Ok(results)
+}
+
+/// Resolve the outcome of a reflected spell landing back on its caster
+/// (the reflect block of MaNGOS `Spell::AddUnitTarget`).
+///
+/// MaNGOS records `SPELL_MISS_IMMUNE` when there is no unit caster to take the spell back
+/// (`!m_casterUnit || m_originalCasterGUID.IsGameObject()`); otherwise it re-runs
+/// `SpellHitResult` with the caster as its own victim. That self-target path short-circuits
+/// after the immunity checks, so it reduces to "immune, or it lands". A second reflect is
+/// therefore impossible and the C++ `REFLECT -> PARRY` downgrade is unreachable here.
+///
+/// Simplification: only damage immunity is consulted, matching the immunity surface
+/// `roll_spell_hit` itself uses; the full `IsImmuneToSpell` check is not ported yet.
+fn resolve_reflect_result(
+    caster_guid: ObjectGuid,
+    spell: &SpellEntry,
+    world: &World,
+) -> SpellHitOutcome {
+    if !caster_guid.is_player() && !caster_guid.is_creature() {
+        return SpellHitOutcome::Immune;
+    }
+    if target_is_immune_to_damage(caster_guid, spell, world) {
+        return SpellHitOutcome::Immune;
+    }
+    SpellHitOutcome::Hit
 }
 
 /// Put the caster and a non-positive-spell miss target into combat (MaNGOS: `unit->AttackedBy`,
@@ -1355,6 +1401,213 @@ mod tests {
 
         spell.attributes |= SPELL_ATTR_NO_IMMUNITIES;
         assert!(!target_is_immune_to_damage(target, &spell, &world));
+    }
+
+    // ─── Reflect ──────────────────────────────────────────────────────────────────
+
+    /// A plain magic spell registered in the manager, reflectable and guaranteed to be
+    /// reflected by a victim carrying a 100% reflect aura.
+    fn reflectable_spell(id: u32) -> SpellEntry {
+        let mut spell = harmful_spell(id);
+        spell.dmg_class = 1; // SPELL_DAMAGE_CLASS_MAGIC
+        spell
+    }
+
+    fn give_reflect_aura(world: &World, guid: ObjectGuid, chance: i32, school_mask: i32) {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(guid, |player| {
+                player.auras.container.add_aura(Aura::new(
+                    9100,
+                    guid,
+                    0,
+                    crate::game::player::auras::effects::AURA_REFLECT_SPELLS_SCHOOL,
+                    school_mask,
+                    chance,
+                    None,
+                    0,
+                    1,
+                    0,
+                    AuraFlags {
+                        is_positive: true,
+                        ..AuraFlags::default()
+                    },
+                ));
+            });
+    }
+
+    #[test]
+    fn only_plain_magic_spells_are_reflectable() {
+        let mut spell = reflectable_spell(9200);
+        assert!(hit::is_reflectable_spell(&spell));
+
+        // Non-magic damage classes are never reflectable.
+        for class in [0u32, 2, 3] {
+            spell.dmg_class = class;
+            assert!(!hit::is_reflectable_spell(&spell), "dmg_class {class}");
+        }
+        spell.dmg_class = 1;
+
+        // IS_ABILITY, PASSIVE, NO_IMMUNITIES on Attributes; NO_REFLECTION on AttributesEx.
+        for attr in [0x0000_0010u32, 0x0000_0040, 0x2000_0000] {
+            let mut other = spell.clone();
+            other.attributes |= attr;
+            assert!(!hit::is_reflectable_spell(&other), "attribute {attr:#x}");
+        }
+        let mut no_reflection = spell.clone();
+        no_reflection.attributes_ex |= 0x0000_0080;
+        assert!(!hit::is_reflectable_spell(&no_reflection));
+    }
+
+    #[tokio::test]
+    async fn reflect_aura_bounces_the_spell_back_onto_the_caster() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(40);
+        let target = ObjectGuid::new_player(41);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
+        let spell = reflectable_spell(9201);
+        world.managers.spell_mgr.add_spell(spell.clone());
+        // 100% reflect against the spell's school (school 1 -> mask 0b10).
+        give_reflect_aura(&world, target, 100, 1 << spell.school);
+
+        let mut info = TargetInfo::new(target, 0b001);
+        let results =
+            apply_target_effects(&mut info, caster, None, spell.id, false, None, &world).await;
+
+        assert_eq!(info.miss_condition, SpellHitOutcome::Reflect);
+        assert_eq!(
+            info.reflect_result,
+            SpellHitOutcome::Hit,
+            "a caster with no immunity takes the reflected spell (SPELL_MISS_NONE)"
+        );
+
+        let results = results.expect("reflected effects should dispatch");
+        assert!(!results.is_empty(), "the reflected effect must still run");
+        for result in &results {
+            assert_eq!(
+                result.target_guid,
+                Some(caster),
+                "reflected effects apply to the caster, not the reflecting victim"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn reflected_spell_fizzles_when_the_caster_is_immune() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(42);
+        let target = ObjectGuid::new_player(43);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
+        let mut spell = reflectable_spell(9202);
+        spell.school = 2;
+        world.managers.spell_mgr.add_spell(spell.clone());
+        give_reflect_aura(&world, target, 100, 1 << spell.school);
+
+        // The caster is immune to the school it is about to receive back.
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster, |player| {
+                player.auras.container.add_aura(Aura::new(
+                    9103,
+                    caster,
+                    0,
+                    crate::game::player::auras::effects::AURA_DAMAGE_IMMUNITY,
+                    1 << spell.school,
+                    0,
+                    None,
+                    0,
+                    1,
+                    0,
+                    AuraFlags {
+                        is_positive: true,
+                        ..AuraFlags::default()
+                    },
+                ));
+            });
+
+        let mut info = TargetInfo::new(target, 0b001);
+        let results = apply_target_effects(&mut info, caster, None, spell.id, false, None, &world)
+            .await
+            .expect("reflect handling should not error");
+
+        assert_eq!(info.miss_condition, SpellHitOutcome::Reflect);
+        assert_eq!(info.reflect_result, SpellHitOutcome::Immune);
+        assert!(
+            results.is_empty(),
+            "nothing lands when the caster cannot take the spell back"
+        );
+    }
+
+    #[tokio::test]
+    async fn damage_immunity_is_checked_before_the_reflect_roll() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(44);
+        let target = ObjectGuid::new_player(45);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
+        let mut spell = reflectable_spell(9203);
+        spell.school = 3;
+        world.managers.spell_mgr.add_spell(spell.clone());
+
+        // The victim would reflect every cast, but it is also immune to the damage:
+        // MaNGOS returns SPELL_MISS_IMMUNE before ever rolling reflect.
+        give_reflect_aura(&world, target, 100, 1 << spell.school);
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target, |player| {
+                player.auras.container.add_aura(Aura::new(
+                    9104,
+                    target,
+                    0,
+                    crate::game::player::auras::effects::AURA_DAMAGE_IMMUNITY,
+                    1 << spell.school,
+                    0,
+                    None,
+                    0,
+                    1,
+                    0,
+                    AuraFlags {
+                        is_positive: true,
+                        ..AuraFlags::default()
+                    },
+                ));
+            });
+
+        assert_eq!(
+            hit::roll_spell_hit(caster, target, spell.id, &world),
+            SpellHitOutcome::Immune
+        );
+    }
+
+    #[tokio::test]
+    async fn spell_without_reflect_aura_is_not_reflected() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(46);
+        let target = ObjectGuid::new_player(47);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
+        let spell = reflectable_spell(9204);
+        world.managers.spell_mgr.add_spell(spell.clone());
+
+        for _ in 0..50 {
+            assert_ne!(
+                hit::roll_spell_hit(caster, target, spell.id, &world),
+                SpellHitOutcome::Reflect,
+                "reflect requires a reflect aura on the victim"
+            );
+        }
     }
 
     #[tokio::test]

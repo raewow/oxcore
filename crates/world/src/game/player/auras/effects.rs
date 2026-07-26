@@ -99,7 +99,7 @@ pub const AURA_MOD_PACIFY_SILENCE: u32 = 60; // Pacify + Silence
 pub const AURA_MOD_DISARM: u32 = 67; // Disarm
 
 // --- Absorb / Shield ---
-pub const AURA_SPELL_MAGNET: u32 = 28; // Spell redirection / magnet
+pub const AURA_SPELL_MAGNET: u32 = 96; // Spell redirection / magnet (Grounding Totem)
 pub const AURA_SCHOOL_ABSORB: u32 = 69; // Damage absorb (Power Word: Shield)
 pub const AURA_MANA_SHIELD: u32 = 97; // Mana Shield
 pub const AURA_DAMAGE_SHIELD: u32 = 15; // Damage reflect (Thorns)
@@ -202,6 +202,7 @@ pub const AURA_MOD_SHIELD_BLOCKVALUE_PCT: u32 = 150; // Pct shield block value
 pub const AURA_RETAIN_COMBO_POINTS: u32 = 148; // Retain combo points on aura expire
 
 // --- Misc / Others ---
+pub const AURA_REFLECT_SPELLS: u32 = 28; // Flat chance to reflect any reflectable spell
 pub const AURA_REFLECT_SPELLS_SCHOOL: u32 = 74; // Reflect chance -> SPELLMOD_RESIST_MISS_CHANCE
 pub const AURA_EMPATHY: u32 = 121; // Beast/Humanoid inspect info (UNIT_DYNFLAG_SPECIALINFO)
 pub const UNIT_DYNFLAG_SPECIALINFO: u32 = 0x0010;
