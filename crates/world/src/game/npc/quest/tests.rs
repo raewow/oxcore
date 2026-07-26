@@ -191,7 +191,8 @@ fn create_test_setup() -> TestQuestSetup {
     let broadcast_mgr = Arc::new(BroadcastManager::new(session_mgr, player_mgr.clone()));
     let experience = Arc::new(ExperienceSystem::new(broadcast_mgr, player_mgr.clone()));
 
-    let mock_broadcaster = MockBroadcastManagerTrait::new();
+    let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+    mock_broadcaster.expect_send_to_player().return_const(());
     let mock_quest_repo = MockQuestRepositoryTrait::new();
 
     let quest_system = QuestSystem::new(
@@ -823,6 +824,44 @@ async fn test_complete_quest_syncs_item_objectives() {
 }
 
 // ========== get_quest_status TESTS ==========
+
+#[tokio::test]
+async fn test_handle_item_added_updates_quest_without_deliver_flag() {
+    let setup = create_test_setup();
+    let player_guid = test_player_guid(1);
+    let player = create_test_player(player_guid, 1, 1, 1);
+    add_player_to_setup(&setup, player);
+
+    // Glyphic Letter (3104) has a required item but no DELIVER special flag.
+    let mut quest = create_test_quest_template(3104);
+    quest.req_item_id[0] = 9571;
+    quest.req_item_count[0] = 1;
+    add_quest_template(&setup, quest.clone());
+    add_active_quest(&setup, player_guid, quest.id);
+
+    assert!(!setup
+        .quest_system
+        .can_complete_quest_basic(player_guid, &quest));
+
+    add_item_to_inventory(&setup, player_guid, create_test_item(9571, 1));
+
+    setup.quest_system.handle_item_added(player_guid, 9571, 1);
+
+    let item_count = setup
+        .player_mgr
+        .with_player(player_guid, |player| {
+            player
+                .active_quests
+                .iter()
+                .find(|progress| progress.quest_id == quest.id)
+                .map(|progress| progress.item_count[0])
+        })
+        .flatten();
+    assert_eq!(item_count, Some(1));
+    assert!(setup
+        .quest_system
+        .can_complete_quest_basic(player_guid, &quest));
+}
 
 #[tokio::test]
 async fn test_get_quest_status_none() {

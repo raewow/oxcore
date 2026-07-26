@@ -621,7 +621,7 @@ impl QuestSystem {
         }
 
         // Check item objectives
-        if quest.special_flags.contains(QuestSpecialFlags::DELIVER) {
+        if quest.has_item_objectives() {
             for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
                 if quest.req_item_count[i] != 0
                     && self
@@ -733,7 +733,7 @@ impl QuestSystem {
         }
 
         // Check required items
-        if quest.special_flags.contains(QuestSpecialFlags::DELIVER) {
+        if quest.has_item_objectives() {
             for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
                 if quest.req_item_count[i] != 0
                     && self
@@ -804,7 +804,7 @@ impl QuestSystem {
             return false;
         }
 
-        if quest.special_flags.contains(QuestSpecialFlags::DELIVER) {
+        if quest.has_item_objectives() {
             for i in 0..super::types::QUEST_ITEM_OBJECTIVES_COUNT {
                 if quest.req_item_id[i] != 0
                     && quest.req_item_count[i] != 0
@@ -2482,8 +2482,9 @@ impl QuestSystem {
                 continue;
             };
 
-            // Only process quests with item delivery objectives
-            if !quest.special_flags.contains(QuestSpecialFlags::DELIVER) {
+            // Required-item columns are authoritative. Legacy templates may omit
+            // the DELIVER special flag despite requiring an item turn-in.
+            if !quest.has_item_objectives() {
                 continue;
             }
 
