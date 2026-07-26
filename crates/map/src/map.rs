@@ -517,7 +517,7 @@ impl Map {
     ///
     /// Must not be called while the grid lock is held.
     pub fn active_objects_near_grid(&self, grid_x: u8, grid_y: u8) -> bool {
-        use crate::grid_coords::{world_to_cell, CELL_SIZE, CELLS_PER_GRID};
+        use crate::grid_coords::{world_to_cell, CELLS_PER_GRID, CELL_SIZE};
 
         const MAX_CELL: i32 = 1023;
 
@@ -612,7 +612,11 @@ impl Map {
     /// Remove a player from the map
     #[inline]
     pub fn remove_player(&self, guid: ObjectGuid) {
-        let pos = self.players.get(&guid).map(|p| *p.value()).unwrap_or_default();
+        let pos = self
+            .players
+            .get(&guid)
+            .map(|p| *p.value())
+            .unwrap_or_default();
         self.remove_object(ObjectKind::Player, guid, pos);
     }
 

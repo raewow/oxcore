@@ -16,6 +16,20 @@ use crate::map::grid_coords::world_to_grid;
 use oxcore_shared::database::world::repositories::CreatureRepository;
 use oxcore_shared::protocol::{ObjectGuid, Position};
 
+/// Dynamic flags for a real corpse. The client identifies real death from zero
+/// health and the dead stand state; UNIT_DYNFLAG_DEAD is for feign death only.
+/// Tapped flags are viewer-specific in the reference server, so they cannot be
+/// included in a broadcast update.
+fn corpse_dynamic_flags(has_loot: bool) -> u32 {
+    use super::death::UNIT_DYNFLAG_LOOTABLE;
+
+    if has_loot {
+        UNIT_DYNFLAG_LOOTABLE
+    } else {
+        0
+    }
+}
+
 /// Creature model info from creature_display_info_addon table
 /// Stores bounding_radius, combat_reach, and speed rates per display_id
 #[derive(Debug, Clone)]
@@ -963,19 +977,9 @@ impl CreatureManager {
 
     /// Clear the lootable flag on a creature corpse
     pub fn clear_lootable_flag(&self, guid: ObjectGuid, world: &crate::World) {
-        use super::death::{UNIT_DYNFLAG_DEAD, UNIT_DYNFLAG_TAPPED, UNIT_DYNFLAG_TAPPED_BY_PLAYER};
-
-        // Get creature's loot recipient to determine tapped flag
-        let has_loot_recipient = self
-            .with_creature(guid, |c| c.loot_recipient.is_some())
-            .unwrap_or(false);
-
-        // Calculate new flags: Keep DEAD and TAPPED flags, but remove LOOTABLE
-        let new_flags = if has_loot_recipient {
-            UNIT_DYNFLAG_DEAD | UNIT_DYNFLAG_TAPPED_BY_PLAYER
-        } else {
-            UNIT_DYNFLAG_DEAD | UNIT_DYNFLAG_TAPPED
-        };
+        // Match DoLootRelease: remove LOOTABLE and leave the corpse with no
+        // broadcast dynamic flags. Tapped state is per-viewer state.
+        let new_flags = corpse_dynamic_flags(false);
 
         tracing::debug!(
             "Clearing lootable flag for creature {:?}, new flags: 0x{:04X}",
@@ -1188,29 +1192,10 @@ impl CreatureManager {
             // NPC interaction flags (cleared on death so dead creatures aren't interactable)
             .set_required(UNIT_NPC_FLAGS, if is_dead { 0 } else { creature.npc_flags });
 
-        // Calculate dynamic flags for dead creatures
-        // CRITICAL: Include LOOTABLE flag for dead creatures with loot
+        // Calculate dynamic flags for dead creatures. Real death is conveyed by
+        // health=0 and stand state Dead, not UNIT_DYNFLAG_DEAD.
         let dynamic_flags = if is_dead {
-            let mut flags = super::death::UNIT_DYNFLAG_DEAD;
-
-            // Add LOOTABLE flag if creature has loot
-            if creature.has_loot() {
-                flags |= super::death::UNIT_DYNFLAG_LOOTABLE;
-
-                // Add tapped flags based on loot recipient
-                if creature.loot_recipient.is_some() {
-                    flags |= super::death::UNIT_DYNFLAG_TAPPED_BY_PLAYER;
-                } else {
-                    flags |= super::death::UNIT_DYNFLAG_TAPPED;
-                }
-            } else if creature.loot_recipient.is_some() {
-                // Dead but no loot - still show tapped
-                flags |= super::death::UNIT_DYNFLAG_TAPPED_BY_PLAYER;
-            } else {
-                flags |= super::death::UNIT_DYNFLAG_TAPPED;
-            }
-
-            flags
+            corpse_dynamic_flags(creature.has_loot())
         } else {
             0
         };
@@ -1431,5 +1416,24 @@ impl CreatureManager {
         packet.write_u8(0); // racial_leader
 
         Some(packet)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::corpse_dynamic_flags;
+    use crate::game::creature::death::{UNIT_DYNFLAG_DEAD, UNIT_DYNFLAG_LOOTABLE};
+
+    #[test]
+    fn emptied_corpse_flags_do_not_include_feign_death() {
+        let flags = corpse_dynamic_flags(false);
+
+        assert_eq!(flags, 0);
+        assert_eq!(flags & UNIT_DYNFLAG_DEAD, 0);
+    }
+
+    #[test]
+    fn lootable_corpse_flags_include_only_lootable() {
+        assert_eq!(corpse_dynamic_flags(true), UNIT_DYNFLAG_LOOTABLE);
     }
 }

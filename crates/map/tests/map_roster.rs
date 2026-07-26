@@ -60,7 +60,11 @@ fn relocation_moves_grid_membership() {
         left.creatures.is_empty(),
         "creature was despawned by the grid it walked out of"
     );
-    assert_eq!(map.creature_count(), 1, "creature should still be on the map");
+    assert_eq!(
+        map.creature_count(),
+        1,
+        "creature should still be on the map"
+    );
 
     // ...and the grid it walked into must.
     let arrived = map.unload_grid(end_gx, end_gy);
@@ -111,7 +115,10 @@ fn unload_clears_map_registries() {
     assert_eq!(map.creature_count(), 0);
     let mut found = Vec::new();
     map.get_creatures_in_range(at, f32::MAX, &mut found);
-    assert!(found.is_empty(), "despawned creatures still visible: {found:?}");
+    assert!(
+        found.is_empty(),
+        "despawned creatures still visible: {found:?}"
+    );
     assert!(map.get_objects_in_range(at, 500.0).is_empty());
 }
 
@@ -131,7 +138,11 @@ fn unload_excludes_pets_and_reports_players() {
     let (gx, gy) = world_to_grid(at.x, at.y);
     let unloaded = map.unload_grid(gx, gy);
 
-    assert_eq!(unloaded.creatures, vec![creature], "only the creature despawns");
+    assert_eq!(
+        unloaded.creatures,
+        vec![creature],
+        "only the creature despawns"
+    );
     assert_eq!(unloaded.pets, vec![pet]);
     assert_eq!(unloaded.players, vec![player]);
 

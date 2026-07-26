@@ -163,5 +163,9 @@ fn visibility_override_keeps_the_ramp_ceiling_consistent() {
     for _ in 0..10 {
         map.tune_distances(Duration::from_millis(0));
     }
-    assert_eq!(map.visibility_distance(), 533.0, "must not ramp past the override");
+    assert_eq!(
+        map.visibility_distance(),
+        533.0,
+        "must not ramp past the override"
+    );
 }
