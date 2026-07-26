@@ -26,8 +26,8 @@ pub mod script;
 pub mod summon;
 pub mod teleport;
 
-use crate::World;
 use crate::game::player::spells::target_info::TargetInfo;
+use crate::World;
 use anyhow::Result;
 use oxcore_shared::messages::spells::ExecuteLogData;
 use oxcore_shared::protocol::ObjectGuid;
@@ -297,7 +297,10 @@ impl EffectsDispatcher {
             Some(entry) => entry,
             None => {
                 tracing::warn!("Spell {} not found", spell_id);
-                return Ok(EffectDispatchResult { effects: results, targets: Vec::new() });
+                return Ok(EffectDispatchResult {
+                    effects: results,
+                    targets: Vec::new(),
+                });
             }
         };
 

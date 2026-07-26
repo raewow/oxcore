@@ -177,7 +177,10 @@ impl GridSystem {
         // for object placement — convert before asking for them.
         let (tile_x, tile_y) = crate::map::grid_coords::grid_to_terrain_tile(grid_x, grid_y);
         world.managers.vmap_mgr.load_map(map_id, tile_x, tile_y);
-        world.managers.mmap_mgr.load_map_tile(map_id, tile_x, tile_y);
+        world
+            .managers
+            .mmap_mgr
+            .load_map_tile(map_id, tile_x, tile_y);
 
         // Get spawns for this grid
         let spawns = world
@@ -655,7 +658,6 @@ impl GridSystem {
 
         true // All required grids are loaded
     }
-
 }
 
 impl Default for GridSystem {

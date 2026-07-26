@@ -342,10 +342,25 @@ impl AuraContainer {
     /// Remove all auras of a specific aura type.
     /// Used for dispelling or mechanic-specific removal.
     pub fn remove_auras_by_type(&mut self, aura_type: u32) -> Vec<(Aura, u8)> {
+        self.remove_auras_by_type_filtered(aura_type, false)
+    }
+
+    /// Remove every non-passive aura of a type, leaving passives in place
+    /// (`Unit::RemoveNonPassiveSpellsCausingAura`). Passive invisibility — racial and
+    /// permanent effects — survives a hostile hit that strips ordinary invisibility.
+    pub fn remove_non_passive_auras_by_type(&mut self, aura_type: u32) -> Vec<(Aura, u8)> {
+        self.remove_auras_by_type_filtered(aura_type, true)
+    }
+
+    fn remove_auras_by_type_filtered(
+        &mut self,
+        aura_type: u32,
+        keep_passive: bool,
+    ) -> Vec<(Aura, u8)> {
         let keys_to_remove: Vec<(u32, u8)> = self
             .auras
             .iter()
-            .filter(|(_, a)| a.aura_type == aura_type)
+            .filter(|(_, a)| a.aura_type == aura_type && !(keep_passive && a.flags.is_passive))
             .map(|(k, _)| *k)
             .collect();
 

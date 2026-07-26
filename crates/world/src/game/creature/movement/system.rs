@@ -55,15 +55,12 @@ impl MovementSystem {
         map: &Arc<crate::map::Map>,
         world: &World,
     ) {
-        let home = world
-            .managers
-            .creature_mgr
-            .with_creature_mut(guid, |c| {
-                c.motion_master.stop(guid);
-                c.move_spline.stop();
-                c.position = c.home_position;
-                c.home_position
-            });
+        let home = world.managers.creature_mgr.with_creature_mut(guid, |c| {
+            c.motion_master.stop(guid);
+            c.move_spline.stop();
+            c.position = c.home_position;
+            c.home_position
+        });
 
         let Some(home) = home else { return };
 

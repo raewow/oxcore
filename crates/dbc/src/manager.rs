@@ -72,7 +72,9 @@ impl DbcManager {
             spell_duration: DbcStore::new("niii"),
             spell_focus_object: DbcStore::new("n"),
             spell_radius: DbcStore::new("nff"),
-            spell_range: DbcStore::new("nffff"),
+            // SpellRange.dbc stores min and max range in fields 1 and 2; later
+            // fields are flags and localized display names.
+            spell_range: DbcStore::new("nffxxxxxxxxxxxxxxxxxxx"),
             item: DbcStore::new("n"),
             skill_line: DbcStore::new("nixxxxxxxxxxxxxxxxixx"),
             skill_line_ability: DbcStore::new("niiiixxiiiiixxi"),

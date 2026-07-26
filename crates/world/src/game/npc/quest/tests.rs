@@ -725,20 +725,28 @@ async fn test_can_store_reward_items_valid_choice() {
 }
 
 #[tokio::test]
-async fn test_can_store_reward_items_invalid_choice() {
+async fn test_a_threat_within_accepts_implicit_reward_choice() {
     let setup = create_test_setup();
     let player_guid = test_player_guid(1);
     let player = create_test_player(player_guid, 1, 1, 1);
     add_player_to_setup(&setup, player);
 
-    let quest = create_test_quest_template(1);
+    // A Threat Within (783) grants only XP and money. The client still sends
+    // reward choice 0 when completing it.
+    let quest = create_test_quest_template(783);
     add_quest_template(&setup, quest.clone());
 
-    // No reward choices, so choice 0 is invalid
+    // No choice rewards means implicit choice 0 is valid.
     let result = setup
         .quest_system
         .can_store_reward_items(player_guid, &quest, 0);
-    assert_eq!(result, None);
+    assert_eq!(result, Some(true));
+
+    // No-choice quests must still reject a forged choice index.
+    let invalid_result = setup
+        .quest_system
+        .can_store_reward_items(player_guid, &quest, 1);
+    assert_eq!(invalid_result, None);
 }
 
 #[tokio::test]

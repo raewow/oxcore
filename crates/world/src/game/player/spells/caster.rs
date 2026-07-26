@@ -245,7 +245,7 @@ pub fn melee_damage_bonus_done(
 
     // Spells with IGNORE_CASTER_MODIFIERS bypass done bonuses
     if let Some(proto) = spell_proto {
-        if proto.has_attribute(SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS) {
+        if proto.has_attribute_ex3(SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS) {
             return pdamage;
         }
     }
@@ -626,7 +626,7 @@ pub fn spell_healing_bonus_done(
         if (proto.custom & 0x0000_0004) != 0 {
             return if healamount < 0.0 { 0.0 } else { healamount };
         }
-        if proto.has_attribute(SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS) {
+        if proto.has_attribute_ex3(SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS) {
             return if healamount < 0.0 { 0.0 } else { healamount };
         }
     }
@@ -823,7 +823,7 @@ pub fn spell_damage_bonus_done(
     if (proto.custom & SPELL_CUSTOM_FIXED_DAMAGE) != 0 {
         return pdamage;
     }
-    if proto.has_attribute(SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS) {
+    if proto.has_attribute_ex3(SPELL_ATTR_EX3_IGNORE_CASTER_MODIFIERS) {
         return pdamage;
     }
     // Mage Ignite already includes modifiers

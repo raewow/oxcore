@@ -273,7 +273,6 @@ pub fn delayed(
                     input.timer,
                     decision.new_timer
                 );
-
             }
 
             decision

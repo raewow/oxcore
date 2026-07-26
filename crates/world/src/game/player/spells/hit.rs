@@ -94,7 +94,8 @@ const SPELL_ATTR_EX_NO_REFLECTION: u32 = 0x0000_0080;
 /// helper runs, so only the spell-intrinsic conditions are tested here.
 pub fn is_reflectable_spell(spell: &crate::dbc::structures::SpellEntry) -> bool {
     spell.dmg_class == SPELL_DAMAGE_CLASS_MAGIC
-        && spell.attributes & (SPELL_ATTR_IS_ABILITY | SPELL_ATTR_PASSIVE | SPELL_ATTR_NO_IMMUNITIES)
+        && spell.attributes
+            & (SPELL_ATTR_IS_ABILITY | SPELL_ATTR_PASSIVE | SPELL_ATTR_NO_IMMUNITIES)
             == 0
         && spell.attributes_ex & SPELL_ATTR_EX_NO_REFLECTION == 0
 }

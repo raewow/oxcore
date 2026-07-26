@@ -325,8 +325,8 @@ impl QuestSystem {
                 quest.rew_choice_item_id[idx],
                 quest.rew_choice_item_count[idx],
             ));
-        } else {
-            // No choice rewards exist, so the client should not be providing a choice.
+        } else if reward_choice != 0 {
+            // The client sends index 0 even when a quest has no choice rewards.
             return None;
         }
 

@@ -436,7 +436,8 @@ mod tests {
         let mut state = DiminishingState::default();
         state.incr_diminishing(DRGroup::Fear, 1_000);
 
-        let vs_creature = state.snapshot_for_hit(DRGroup::Fear, false, true, true, false, false, 2_000);
+        let vs_creature =
+            state.snapshot_for_hit(DRGroup::Fear, false, true, true, false, false, 2_000);
         assert_eq!(vs_creature.level, 1);
         assert!(!vs_creature.diminishes_duration);
         assert_eq!(vs_creature.apply_to_duration(Some(8_000)), Some(8_000));

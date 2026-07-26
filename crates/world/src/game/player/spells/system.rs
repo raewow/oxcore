@@ -587,8 +587,8 @@ impl SpellSystem {
     ///
     /// Pipeline:
     /// 1. Validate (has spell, enough resources, not on CD, valid target, etc.)
-    /// 2. If instant: execute immediately
-    /// 3. If cast time: create ActiveCast, broadcast SMSG_SPELL_START
+    /// 2. Broadcast SMSG_SPELL_START for a non-triggered cast
+    /// 3. If instant: execute immediately; otherwise create an ActiveCast
     /// 4. Timer runs in update_casts() until cast_time_remaining == 0
     /// 5. Execute: dispatch effects, apply results
     /// 6. Finish: broadcast SMSG_SPELL_GO, apply cooldown + GCD
@@ -787,6 +787,18 @@ impl SpellSystem {
                 .await;
         }
 
+        // MaNGOS sends SPELL_START for every non-triggered cast, including instant
+        // spells. The client uses it to start the cast animation before SPELL_GO.
+        self.send_spell_start(
+            caster_guid,
+            spell_id,
+            cast_time_ms,
+            target_guid,
+            cast_item_guid,
+            is_triggered,
+            world,
+        );
+
         // Check if this is a channeled spell
         let is_channeled = slot == CurrentSpellType::Channeled;
 
@@ -898,7 +910,7 @@ impl SpellSystem {
         Ok(())
     }
 
-    /// Start a cast-time spell. Creates ActiveCast and broadcasts SMSG_SPELL_START.
+    /// Start a cast-time spell and create its ActiveCast.
     async fn start_cast(
         &self,
         caster_guid: ObjectGuid,
@@ -953,39 +965,53 @@ impl SpellSystem {
             );
         }
 
-        // Triggered casts do not send SMSG_SPELL_START.
-        if !is_triggered {
-            const CAST_FLAG_UNKNOWN2: u16 = 0x0002;
-            const CAST_FLAG_AMMO: u16 = 0x0020;
-            const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+        Ok(())
+    }
 
-            let is_ranged = world
-                .managers
-                .spell_mgr
-                .get(spell_id)
-                .is_some_and(|entry| entry.dmg_class == SPELL_DAMAGE_CLASS_RANGED);
-            let cast_flags = CAST_FLAG_UNKNOWN2 | if is_ranged { CAST_FLAG_AMMO } else { 0 };
-            let (ammo_display_id, ammo_inventory_type) = if is_ranged {
-                resolve_ammo_for_caster(caster_guid, world)
-            } else {
-                (0, 0)
-            };
-            let msg = SmsgSpellStart {
-                caster_guid,
-                caster_guid_pack: caster_guid,
-                spell_id,
-                cast_flags,
-                cast_time_ms,
-                target_guid,
-                cast_item_guid,
-                ammo_display_id,
-                ammo_inventory_type,
-            };
-            self.broadcast_mgr
-                .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
+    /// Broadcast the start packet for a normal spell cast. Triggered spells have
+    /// no client-side cast animation and therefore intentionally omit it.
+    fn send_spell_start(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        cast_time_ms: u32,
+        target_guid: Option<ObjectGuid>,
+        cast_item_guid: Option<ObjectGuid>,
+        is_triggered: bool,
+        world: &World,
+    ) {
+        if is_triggered {
+            return;
         }
 
-        Ok(())
+        const CAST_FLAG_UNKNOWN2: u16 = 0x0002;
+        const CAST_FLAG_AMMO: u16 = 0x0020;
+        const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
+
+        let is_ranged = world
+            .managers
+            .spell_mgr
+            .get(spell_id)
+            .is_some_and(|entry| entry.dmg_class == SPELL_DAMAGE_CLASS_RANGED);
+        let cast_flags = CAST_FLAG_UNKNOWN2 | if is_ranged { CAST_FLAG_AMMO } else { 0 };
+        let (ammo_display_id, ammo_inventory_type) = if is_ranged {
+            resolve_ammo_for_caster(caster_guid, world)
+        } else {
+            (0, 0)
+        };
+        let msg = SmsgSpellStart {
+            caster_guid,
+            caster_guid_pack: caster_guid,
+            spell_id,
+            cast_flags,
+            cast_time_ms,
+            target_guid,
+            cast_item_guid,
+            ammo_display_id,
+            ammo_inventory_type,
+        };
+        self.broadcast_mgr
+            .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
     }
 
     /// Start a channeled spell. Creates ActiveCast in channel mode.

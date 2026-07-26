@@ -17,7 +17,7 @@ use crate::game::player::auras::effects::StatModifier;
 use crate::game::player::auras::periodic;
 use crate::game::player::auras::proc;
 use crate::game::player::movement::MovementControllerSender;
-use crate::game::player::spells::diminishing::{DiminishSnapshot, DRGroup};
+use crate::game::player::spells::diminishing::{DRGroup, DiminishSnapshot};
 use crate::World;
 use oxcore_shared::messages::auras::SmsgUpdateAuraDuration;
 use oxcore_shared::messages::update::{
@@ -3916,7 +3916,10 @@ impl AuraSystem {
             // Release the group's counter so its 15-second reset window can start
             // (`Unit::ApplyDiminishingAura(group, false)`).
             if let Some(group) = aura.diminishing_group {
-                creature.combat.diminishing.remove_aura(group, removed_at_ms);
+                creature
+                    .combat
+                    .diminishing
+                    .remove_aura(group, removed_at_ms);
             }
 
             if aura.aura_type == effects::AURA_EMPATHY

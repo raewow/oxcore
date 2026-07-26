@@ -54,6 +54,10 @@ const SPELL_ATTR_EX3_PVP_ENABLING: u32 = 0x0000_0001; // bit 0
 /// SPELL_ATTR_NO_IMMUNITIES — bypasses damage and school immunities.
 const SPELL_ATTR_NO_IMMUNITIES: u32 = 0x2000_0000;
 
+/// AURA_INTERRUPT_HOSTILE_ACTION_RECEIVED_CANCELS — aura drops when its bearer is hit by a
+/// hostile spell.
+const AURA_INTERRUPT_HOSTILE_ACTION_RECEIVED_CANCELS: u32 = 0x0000_0001;
+
 // ─── Aura type constants ──────────────────────────────────────────────────────
 // Reference: SpellAuraDefines.h
 
@@ -165,12 +169,13 @@ impl TargetInfo {
 ///    dependency APIs land.
 ///
 /// 4. **Stealth/invisibility removal** — on hostile hits, removes
-///    `SPELL_AURA_MOD_STEALTH` and `SPELL_AURA_MOD_INVISIBILITY` from the
-///    target, unless the spell's `AttributesEx`/`AttributesEx2` carry the
+///    `SPELL_AURA_MOD_STEALTH` and non-passive `SPELL_AURA_MOD_INVISIBILITY` from
+///    the target, unless the spell's `AttributesEx`/`AttributesEx2` carry the
 ///    `ALLOW_WHILE_STEALTHED` / `ALLOW_WHILE_INVISIBLE` flags.  Game-object
-///    casters (traps, etc.) skip stealth removal.
-///    *Approximated:* `RemoveSpellsCausingAura` → `remove_auras_by_type` for
-///    players; creature stealth removal is stub-only (no creature aura system).
+///    casters (traps, etc.) skip stealth removal.  The same removal runs against
+///    the *caster* once the hit passes the threat gate.  Direct-damage hits also
+///    drop the target's `HOSTILE_ACTION_RECEIVED_CANCELS` auras (player targets
+///    only, since interrupt-flag removal is not generalised to creatures yet).
 ///
 /// 5. **Visibility check for delayed spells** — a delayed spell targeting the
 ///    explicit unit target that has become non-visible to the caster is evaded.
@@ -182,7 +187,9 @@ impl TargetInfo {
 ///    stealth removal from the *caster*, and related PvP-enabling fallthrough.
 ///    *Approximated:* uses `enter_combat_on_miss`-style `apply_damage(0)`
 ///    and `add_threat` / `set_in_combat` for creatures when the gate passes.
-///    Caster-stealth removal is a TODO.
+///    The whole hostile/friendly block is skipped when caster and target are the
+///    same unit, matching the C++ `pRealCaster != unit` guard — a reflected cast
+///    lands back on its caster and must not put it in combat with itself.
 ///
 /// 7. **Friendly-target assist/PvP** — when a friendly target is in combat and
 ///    the spell would generate threat, the caster enters assisted combat and
@@ -256,9 +263,33 @@ async fn do_spell_hit_on_unit(
     // TODO: `IsFriendlyTo(unit)` not ported — use `is_positive_spell()` as proxy.
     let caster_is_player = caster_guid.is_player();
 
+    // The whole hostile/friendly block is `if (pRealCaster && pRealCaster != unit)`: a unit
+    // never breaks its own stealth or enters combat with itself. This matters for reflected
+    // casts, which land back on the caster.
+    if caster_guid == target_guid {
+        return Some(snapshot_diminishing_for_hit(
+            spell_entry,
+            caster_guid,
+            target_guid,
+            *effect_mask,
+            is_triggered,
+            is_reflected,
+            world,
+        ));
+    }
+
     if !spell_entry.is_positive_spell() {
-        // AURA_INTERRUPT_HOSTILE_ACTION_RECEIVED_CANCELS not yet wired
-        // (C++ line 1572-1573) — skip until interrupt flags are modelled.
+        // Auras cancelled by taking a hostile action (C++ lines 1572-1573). MaNGOS gates
+        // this on `m_damage`, the damage the delayed launch already accumulated; here the
+        // closest stand-in before effects run is "this spell deals direct damage".
+        if spell_entry.is_direct_damage_spell() {
+            remove_auras_with_interrupt_flag_from_target(
+                target_guid,
+                AURA_INTERRUPT_HOSTILE_ACTION_RECEIVED_CANCELS,
+                world,
+            )
+            .await;
+        }
 
         // Stealth/invisibility removal on target (C++ lines 1575-1583)
         // Game-object caster check: if caster_guid is not a player, we approximate
@@ -266,13 +297,8 @@ async fn do_spell_hit_on_unit(
         let caster_is_object =
             !caster_is_player && !target_guid.is_creature() && !target_guid.is_player();
 
-        if !caster_is_object && !spell_entry.has_attribute(SPELL_ATTR_EX2_NOT_AN_ACTION) {
-            if !spell_entry.has_attribute(SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED) {
-                remove_aura_type_from_target(target_guid, SPELL_AURA_MOD_STEALTH, world);
-            }
-            if !spell_entry.has_attribute(SPELL_ATTR_EX2_ALLOW_WHILE_INVISIBLE) {
-                remove_aura_type_from_target(target_guid, SPELL_AURA_MOD_INVISIBILITY, world);
-            }
+        if !caster_is_object && !spell_entry.has_attribute_ex2(SPELL_ATTR_EX2_NOT_AN_ACTION) {
+            remove_stealth_and_invisibility(target_guid, spell_entry, world);
         }
 
         // Delayed-spell visibility check (C++ lines 1585-1594)
@@ -296,13 +322,14 @@ async fn do_spell_hit_on_unit(
             // Gate: not (triggered-by-aura without speed/threat)  (C++ lines 1603-1606)
             let can_threat =
                 (!is_triggered || spell_entry.speed > 0.0 || has_direct_threat_effect(spell_entry))
-                    && !spell_entry.has_attribute(SPELL_ATTR_EX_NO_THREAT)
-                    && !spell_entry.has_attribute(SPELL_ATTR_EX_THREAT_ONLY_ON_MISS)
-                    && !spell_entry.has_attribute(SPELL_ATTR_EX2_NO_INITIAL_THREAT);
+                    && !spell_entry.has_attribute_ex(SPELL_ATTR_EX_NO_THREAT)
+                    && !spell_entry.has_attribute_ex(SPELL_ATTR_EX_THREAT_ONLY_ON_MISS)
+                    && !spell_entry.has_attribute_ex2(SPELL_ATTR_EX2_NO_INITIAL_THREAT);
 
             if can_threat {
-                // TODO: caster stealth removal (C++ lines 1609-1615) not ported —
-                // would remove stealth/invisibility from the caster unit.
+                // The caster can be detected but still be carrying a stealth aura, so a
+                // hostile action drops its own stealth/invisibility too (C++ 1609-1615).
+                remove_stealth_and_invisibility(caster_guid, spell_entry, world);
 
                 // Enter combat (C++ lines 1617-1627)
                 if !spell_has_aura_type(spell_entry, SPELL_AURA_MOD_POSSESS)
@@ -311,7 +338,7 @@ async fn do_spell_hit_on_unit(
                     enter_combat_on_hit(caster_guid, target_guid, world);
                 }
                 set_caster_in_combat_with_victim(caster_guid, target_guid, world);
-            } else if spell_entry.has_attribute(SPELL_ATTR_EX3_PVP_ENABLING) {
+            } else if spell_entry.has_attribute_ex3(SPELL_ATTR_EX3_PVP_ENABLING) {
                 // PvP-enabling only (C++ lines 1629-1634)
                 set_out_of_combat(caster_guid, target_guid, world);
             }
@@ -320,7 +347,7 @@ async fn do_spell_hit_on_unit(
             // (C++ lines 1635-1641)
             let not_only_peaceful = !spell_entry
                 .has_attribute(SPELL_ATTR_NOT_IN_COMBAT_ONLY_PEACEFUL)
-                || !spell_entry.has_attribute(SPELL_ATTR_EX_ONLY_PEACEFUL_TARGETS);
+                || !spell_entry.has_attribute_ex(SPELL_ATTR_EX_ONLY_PEACEFUL_TARGETS);
             if not_only_peaceful {
                 set_out_of_combat(caster_guid, target_guid, world);
             }
@@ -351,9 +378,9 @@ async fn do_spell_hit_on_unit(
                 .unwrap_or(false);
 
         if target_in_combat
-            && !spell_entry.has_attribute(SPELL_ATTR_EX_NO_THREAT)
+            && !spell_entry.has_attribute_ex(SPELL_ATTR_EX_NO_THREAT)
             && !is_triggered
-            && !spell_entry.has_attribute(SPELL_ATTR_EX2_NO_INITIAL_THREAT)
+            && !spell_entry.has_attribute_ex2(SPELL_ATTR_EX2_NO_INITIAL_THREAT)
         {
             assisted_combat(caster_guid, target_guid, world);
         }
@@ -437,7 +464,9 @@ fn snapshot_diminishing_for_hit(
             .systems
             .player
             .manager()
-            .with_player_mut(target_guid, |player| take(&mut player.combat.diminishing, true))
+            .with_player_mut(target_guid, |player| {
+                take(&mut player.combat.diminishing, true)
+            })
             .unwrap_or_default()
     } else if target_guid.is_creature() {
         world
@@ -507,6 +536,73 @@ fn is_friendly_target(target_a: u32) -> bool {
 }
 
 /// Remove a specific aura type from a unit target if possible.
+/// Drop the unit's stealth and invisibility for a hostile action, honouring the spell's
+/// opt-outs (`RemoveSpellsCausingAura(MOD_STEALTH)` /
+/// `RemoveNonPassiveSpellsCausingAura(MOD_INVISIBILITY)`).
+///
+/// Note the asymmetry the C++ has: stealth is removed outright, but only *non-passive*
+/// invisibility is, so permanent/racial invisibility survives.
+fn remove_stealth_and_invisibility(unit_guid: ObjectGuid, spell: &SpellEntry, world: &World) {
+    if !spell.has_attribute_ex(SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED) {
+        remove_aura_type_from_target(unit_guid, SPELL_AURA_MOD_STEALTH, world);
+    }
+    if !spell.has_attribute_ex2(SPELL_ATTR_EX2_ALLOW_WHILE_INVISIBLE) {
+        remove_non_passive_aura_type_from_target(unit_guid, SPELL_AURA_MOD_INVISIBILITY, world);
+    }
+}
+
+/// Remove every aura on a unit whose spell carries any of `interrupt_flags`
+/// (`Unit::RemoveAurasWithInterruptFlags`).
+///
+/// Creature targets are skipped: the aura system's interrupt-flag removal is player-only,
+/// so creature auras are left alone until that path is generalised.
+async fn remove_auras_with_interrupt_flag_from_target(
+    target_guid: ObjectGuid,
+    interrupt_flags: u32,
+    world: &World,
+) {
+    if !target_guid.is_player() {
+        return;
+    }
+    if let Err(error) = world
+        .systems
+        .auras
+        .remove_auras_with_interrupt_flag(target_guid, interrupt_flags, world)
+        .await
+    {
+        tracing::warn!(
+            "failed to remove interrupt-flag auras from {:?}: {}",
+            target_guid,
+            error
+        );
+    }
+}
+
+fn remove_non_passive_aura_type_from_target(
+    target_guid: ObjectGuid,
+    aura_type: u32,
+    world: &World,
+) {
+    if target_guid.is_player() {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(target_guid, |p| {
+                p.auras
+                    .container
+                    .remove_non_passive_auras_by_type(aura_type);
+            });
+    } else if target_guid.is_creature() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(target_guid, |creature| {
+                creature.auras.remove_non_passive_auras_by_type(aura_type);
+            });
+    }
+}
+
 fn remove_aura_type_from_target(target_guid: ObjectGuid, aura_type: u32, world: &World) {
     if target_guid.is_player() {
         world
@@ -972,7 +1068,8 @@ pub async fn apply_target_effects(
     // A fully diminished hit lands no auras at all: MaNGOS deletes the holder before it is
     // added. Nothing else in the effect mask can run either, because the same mask is what
     // marked this hit as aura-applying.
-    if target.diminishing.is_fully_diminished() && spell_applies_aura(&spell_entry, target.effect_mask)
+    if target.diminishing.is_fully_diminished()
+        && spell_applies_aura(&spell_entry, target.effect_mask)
     {
         tracing::debug!(
             "[DR] spell {} fully diminished on {:?} (group {:?})",
@@ -1485,11 +1582,11 @@ mod tests {
 
         let spell = harmful_spell(108);
         let mut mask = 0b001;
-        assert!(
-            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                .await
-                .is_none()
-        );
+        assert!(do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world
+        )
+        .await
+        .is_none());
         assert_eq!(mask, 0);
     }
 
@@ -1526,11 +1623,11 @@ mod tests {
         let mut spell = harmful_spell(109);
         spell.school = 2;
         let mut mask = 0b001;
-        assert!(
-            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                .await
-                .is_none()
-        );
+        assert!(do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world
+        )
+        .await
+        .is_none());
         assert_eq!(mask, 0);
     }
 
@@ -1572,6 +1669,167 @@ mod tests {
         assert!(!target_is_immune_to_damage(target, &spell, &world));
     }
 
+    // ─── Hostile-action side effects ──────────────────────────────────────────────
+
+    fn give_aura(world: &World, guid: ObjectGuid, spell_id: u32, aura_type: u32, passive: bool) {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(guid, |player| {
+                player.auras.container.add_aura(Aura::new(
+                    spell_id,
+                    guid,
+                    0,
+                    aura_type,
+                    0,
+                    0,
+                    None,
+                    0,
+                    1,
+                    0,
+                    AuraFlags {
+                        is_passive: passive,
+                        ..AuraFlags::default()
+                    },
+                ));
+            });
+    }
+
+    fn has_aura_type(world: &World, guid: ObjectGuid, aura_type: u32) -> bool {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(guid, |player| {
+                player.auras.container.has_aura_type(aura_type)
+            })
+            .unwrap_or(false)
+    }
+
+    /// Invisibility removal is `RemoveNonPassiveSpellsCausingAura`: passive invisibility
+    /// survives a hostile hit that strips the ordinary kind.
+    #[tokio::test]
+    async fn hostile_hit_strips_only_non_passive_invisibility() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(60);
+        let target = ObjectGuid::new_player(61);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
+        give_aura(&world, target, 8000, SPELL_AURA_MOD_INVISIBILITY, false);
+        give_aura(&world, target, 8001, SPELL_AURA_MOD_INVISIBILITY, true);
+
+        let spell = harmful_spell(9400);
+        let mut mask = 0b001;
+        do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await
+        .expect("hit should continue");
+
+        let remaining: Vec<u32> = world
+            .systems
+            .player
+            .manager()
+            .with_player(target, |player| {
+                player
+                    .auras
+                    .container
+                    .get_auras_by_type(SPELL_AURA_MOD_INVISIBILITY)
+                    .iter()
+                    .map(|aura| aura.spell_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(
+            remaining,
+            vec![8001],
+            "only the passive invisibility should survive"
+        );
+    }
+
+    /// A hostile action drops the caster's own stealth once the hit passes the threat gate.
+    #[tokio::test]
+    async fn hostile_hit_strips_the_casters_stealth() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(62);
+        let target = ObjectGuid::new_player(63);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
+        give_aura(&world, caster, 8002, SPELL_AURA_MOD_STEALTH, false);
+
+        let spell = harmful_spell(9401);
+        let mut mask = 0b001;
+        do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await
+        .expect("hit should continue");
+
+        assert!(
+            !has_aura_type(&world, caster, SPELL_AURA_MOD_STEALTH),
+            "the caster breaks its own stealth"
+        );
+    }
+
+    /// `ALLOW_WHILE_STEALTHED` keeps the caster hidden too, not just the target.
+    #[tokio::test]
+    async fn allow_while_stealthed_keeps_the_casters_stealth() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(64);
+        let target = ObjectGuid::new_player(65);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
+        give_aura(&world, caster, 8003, SPELL_AURA_MOD_STEALTH, false);
+
+        let mut spell = harmful_spell(9402);
+        spell.attributes_ex |= SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED;
+        let mut mask = 0b001;
+        do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await
+        .expect("hit should continue");
+
+        assert!(has_aura_type(&world, caster, SPELL_AURA_MOD_STEALTH));
+    }
+
+    /// A unit is never hostile to itself: a reflected cast landing back on its caster must
+    /// not strip the caster's stealth or drag it into combat with itself.
+    #[tokio::test]
+    async fn a_self_hit_runs_no_hostile_side_effects() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(66);
+        add_test_player(&world, caster);
+
+        give_aura(&world, caster, 8004, SPELL_AURA_MOD_STEALTH, false);
+
+        let spell = harmful_spell(9403);
+        let mut mask = 0b001;
+        do_spell_hit_on_unit(
+            &spell, caster, caster, &mut mask, false, false, true, &world,
+        )
+        .await
+        .expect("self hit should continue");
+
+        assert!(
+            has_aura_type(&world, caster, SPELL_AURA_MOD_STEALTH),
+            "a self-hit is not a hostile action against oneself"
+        );
+        assert!(
+            !world
+                .systems
+                .player
+                .manager()
+                .with_player(caster, |p| p.combat.in_combat)
+                .unwrap_or(false),
+            "a unit does not enter combat with itself"
+        );
+    }
+
     // ─── Diminishing returns ──────────────────────────────────────────────────────
 
     /// A stun (mechanic 12, `DRTYPE_ALL`) applying one aura effect.
@@ -1605,10 +1863,11 @@ mod tests {
         let mut levels = Vec::new();
         for _ in 0..4 {
             let mut mask = 0b001;
-            let snapshot =
-                do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                    .await
-                    .expect("stun hit should not abort");
+            let snapshot = do_spell_hit_on_unit(
+                &spell, caster, target, &mut mask, false, false, false, &world,
+            )
+            .await
+            .expect("stun hit should not abort");
             levels.push(snapshot.level);
         }
 
@@ -1644,16 +1903,19 @@ mod tests {
         spell.effect_apply_aura_name[1] = crate::game::player::auras::effects::AURA_MOD_ROOT;
 
         let mut mask = 0b011;
-        let first = do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-            .await
-            .expect("hit should not abort");
+        let first = do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await
+        .expect("hit should not abort");
         assert_eq!(first.level, 0);
 
         let mut mask = 0b011;
-        let second =
-            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                .await
-                .expect("hit should not abort");
+        let second = do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await
+        .expect("hit should not abort");
         assert_eq!(
             second.level, 1,
             "two aura effects in one cast must advance the level by one, not two"
@@ -1672,17 +1934,20 @@ mod tests {
         let spell = stun_spell(9302);
 
         let mut mask = 0b001;
-        let first = do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-            .await
-            .expect("hit should not abort");
+        let first = do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await
+        .expect("hit should not abort");
         assert!(first.diminishes_duration, "stuns diminish on creatures");
         assert_eq!(first.apply_to_duration(Some(8_000)), Some(8_000));
 
         let mut mask = 0b001;
-        let second =
-            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                .await
-                .expect("hit should not abort");
+        let second = do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world,
+        )
+        .await
+        .expect("hit should not abort");
         assert_eq!(second.apply_to_duration(Some(8_000)), Some(4_000));
     }
 
@@ -1705,10 +1970,11 @@ mod tests {
 
         for _ in 0..3 {
             let mut mask = 0b001;
-            let snapshot =
-                do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                    .await
-                    .expect("hit should not abort");
+            let snapshot = do_spell_hit_on_unit(
+                &spell, caster, target, &mut mask, false, false, false, &world,
+            )
+            .await
+            .expect("hit should not abort");
             assert!(!snapshot.diminishes_duration);
             assert_eq!(snapshot.apply_to_duration(Some(8_000)), Some(8_000));
         }
@@ -1729,11 +1995,15 @@ mod tests {
 
         for _ in 0..3 {
             let mut mask = 0b001;
-            let snapshot =
-                do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                    .await
-                    .expect("hit should not abort");
-            assert_eq!(snapshot.level, 0, "no aura applied, so no level is consumed");
+            let snapshot = do_spell_hit_on_unit(
+                &spell, caster, target, &mut mask, false, false, false, &world,
+            )
+            .await
+            .expect("hit should not abort");
+            assert_eq!(
+                snapshot.level, 0,
+                "no aura applied, so no level is consumed"
+            );
         }
     }
 
@@ -1977,110 +2247,115 @@ mod tests {
         let mut spell = harmful_spell(110);
         spell.effect_mechanic[0] = 5;
         let mut mask = 0b001;
-        assert!(
-            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
-                .await
-                .is_none()
-        );
+        assert!(do_spell_hit_on_unit(
+            &spell, caster, target, &mut mask, false, false, false, &world
+        )
+        .await
+        .is_none());
         assert_eq!(mask, 0);
     }
 
     #[tokio::test]
     async fn hostile_hit_removes_stealth_from_target_without_allow_flag() {
         let world = test_world();
+        let caster = ObjectGuid::new_player(3);
+        let target = ObjectGuid::new_player(4);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
         let spell = harmful_spell(102);
         assert!(!spell.is_positive_spell(), "test requires harmful spell");
         assert!(
-            !spell.has_attribute(SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED),
+            !spell.has_attribute_ex(SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED),
             "test requires no allow-stealth flag"
         );
+        give_aura(&world, target, 8100, SPELL_AURA_MOD_STEALTH, false);
 
         let mut mask = 0b001; // one effect bit
-
-        let result = do_spell_hit_on_unit(
-            &spell,
-            ObjectGuid::new_player(3),
-            ObjectGuid::new_player(4),
-            &mut mask,
-            false,
-            false,
-            false,
-            &world,
-        )
-        .await;
+        let result =
+            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                .await;
 
         assert!(
             result.is_some(),
             "hostile hit should continue with effect application"
         );
-        // Stealth removal is called; the player target has no stealth to remove
-        // so the call is a no-op but should not panic.
+        assert!(
+            !has_aura_type(&world, target, SPELL_AURA_MOD_STEALTH),
+            "a hostile hit breaks the target's stealth"
+        );
     }
 
     #[tokio::test]
     async fn allow_while_stealthed_suppresses_stealth_removal() {
         let world = test_world();
+        let caster = ObjectGuid::new_player(5);
+        let target = ObjectGuid::new_player(6);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
         let mut spell = harmful_spell(103);
         spell.attributes_ex |= SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED;
-        let mut mask = 0b001;
+        give_aura(&world, target, 8101, SPELL_AURA_MOD_STEALTH, false);
 
-        let result = do_spell_hit_on_unit(
-            &spell,
-            ObjectGuid::new_player(5),
-            ObjectGuid::new_player(6),
-            &mut mask,
-            false,
-            false,
-            false,
-            &world,
-        )
-        .await;
+        let mut mask = 0b001;
+        let result =
+            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                .await;
 
         assert!(result.is_some(), "hit should continue");
+        assert!(
+            has_aura_type(&world, target, SPELL_AURA_MOD_STEALTH),
+            "ALLOW_WHILE_STEALTHED leaves the target's stealth intact"
+        );
     }
 
     #[tokio::test]
     async fn allow_while_invisible_suppresses_invis_removal() {
         let world = test_world();
+        let caster = ObjectGuid::new_player(7);
+        let target = ObjectGuid::new_player(8);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
         let mut spell = harmful_spell(104);
         spell.attributes_ex2 |= SPELL_ATTR_EX2_ALLOW_WHILE_INVISIBLE;
-        let mut mask = 0b001;
+        give_aura(&world, target, 8102, SPELL_AURA_MOD_INVISIBILITY, false);
 
-        let result = do_spell_hit_on_unit(
-            &spell,
-            ObjectGuid::new_player(7),
-            ObjectGuid::new_player(8),
-            &mut mask,
-            false,
-            false,
-            false,
-            &world,
-        )
-        .await;
+        let mut mask = 0b001;
+        let result =
+            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                .await;
 
         assert!(result.is_some(), "hit should continue");
+        assert!(
+            has_aura_type(&world, target, SPELL_AURA_MOD_INVISIBILITY),
+            "ALLOW_WHILE_INVISIBLE leaves the target's invisibility intact"
+        );
     }
 
     #[tokio::test]
     async fn not_an_action_suppresses_stealth_removal() {
         let world = test_world();
+        let caster = ObjectGuid::new_player(9);
+        let target = ObjectGuid::new_player(10);
+        add_test_player(&world, caster);
+        add_test_player(&world, target);
+
         let mut spell = harmful_spell(105);
         spell.attributes_ex2 |= SPELL_ATTR_EX2_NOT_AN_ACTION;
-        let mut mask = 0b001;
+        give_aura(&world, target, 8103, SPELL_AURA_MOD_STEALTH, false);
 
-        let result = do_spell_hit_on_unit(
-            &spell,
-            ObjectGuid::new_player(9),
-            ObjectGuid::new_player(10),
-            &mut mask,
-            false,
-            false,
-            false,
-            &world,
-        )
-        .await;
+        let mut mask = 0b001;
+        let result =
+            do_spell_hit_on_unit(&spell, caster, target, &mut mask, false, false, false, &world)
+                .await;
 
         assert!(result.is_some(), "hit should continue");
+        assert!(
+            has_aura_type(&world, target, SPELL_AURA_MOD_STEALTH),
+            "a spell that is not an action does not break stealth"
+        );
     }
 
     #[tokio::test]

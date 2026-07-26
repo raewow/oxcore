@@ -121,15 +121,14 @@ impl DbcEntry for SpellRadiusEntry {
 }
 
 /// SpellRange DBC entry
-/// Format: "nffff" (5 fields: ID, RangeMin, RangeMinHostile, RangeMax, RangeMaxHostile)
+/// Format: "nffxxxxxxxxxxxxxxxxxxx" (ID, RangeMin, RangeMax, then metadata)
 /// Range values are in yards
 ///
 /// Vanilla 1.12.1 SpellRange.dbc layout:
 /// Field 0: ID
 /// Field 1: RangeMin (friendly)
-/// Field 2: RangeMinHostile
-/// Field 3: RangeMax (friendly)
-/// Field 4: RangeMaxHostile
+/// Field 2: RangeMax (friendly)
+/// Field 3: Flags
 #[derive(Debug, Clone)]
 pub struct SpellRangeEntry {
     pub id: u32,
@@ -153,7 +152,7 @@ impl DbcEntry for SpellRangeEntry {
                 .get_f32(1)
                 .context("Failed to read SpellRange range_min")?,
             range_max: record
-                .get_f32(3)
+                .get_f32(2)
                 .context("Failed to read SpellRange range_max")?,
         };
 
@@ -302,8 +301,28 @@ impl SpellEntry {
     }
 
     /// Check if spell has a specific attribute
+    /// Test a `SPELL_ATTR_*` bit against the base `Attributes` column.
+    ///
+    /// The four attribute columns reuse the same bit values for unrelated flags, so a
+    /// `SPELL_ATTR_EX*` constant must go through the matching accessor below — passing one
+    /// here silently tests a different flag.
     pub fn has_attribute(&self, attribute: u32) -> bool {
         (self.attributes & attribute) != 0
+    }
+
+    /// Test a `SPELL_ATTR_EX_*` bit against the `AttributesEx` column.
+    pub fn has_attribute_ex(&self, attribute: u32) -> bool {
+        (self.attributes_ex & attribute) != 0
+    }
+
+    /// Test a `SPELL_ATTR_EX2_*` bit against the `AttributesEx2` column.
+    pub fn has_attribute_ex2(&self, attribute: u32) -> bool {
+        (self.attributes_ex2 & attribute) != 0
+    }
+
+    /// Test a `SPELL_ATTR_EX3_*` bit against the `AttributesEx3` column.
+    pub fn has_attribute_ex3(&self, attribute: u32) -> bool {
+        (self.attributes_ex3 & attribute) != 0
     }
 
     /// Check if spell has a specific effect
@@ -832,5 +851,33 @@ mod tests {
 
         spell.range_index = 99;
         assert_eq!(spell.get_spell_max_range(&dbc), 0.0);
+    }
+
+    #[test]
+    fn spell_range_decodes_max_range_before_flags() {
+        use crate::file_loader::DbcFileLoader;
+
+        let path =
+            std::env::temp_dir().join(format!("oxcore-spell-range-{}.dbc", std::process::id()));
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"WDBC");
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // record count
+        bytes.extend_from_slice(&4u32.to_le_bytes()); // field count
+        bytes.extend_from_slice(&16u32.to_le_bytes()); // record size
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // string-table size
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&5.0f32.to_le_bytes());
+        bytes.extend_from_slice(&30.0f32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // flags, not range data
+        std::fs::write(&path, bytes).unwrap();
+
+        let mut loader = DbcFileLoader::new();
+        loader.load(path.to_str().unwrap(), "nffx").unwrap();
+        let record = loader.get_record(0).unwrap();
+        let (_, range) = SpellRangeEntry::from_record(&record).unwrap().unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(range.range_min, 5.0);
+        assert_eq!(range.range_max, 30.0);
     }
 }
