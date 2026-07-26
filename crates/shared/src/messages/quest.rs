@@ -180,19 +180,29 @@ impl ToWorldPacket for SmsgQuestgiverQuestInvalid {
 ///
 /// Sent when player receives quest rewards.
 #[derive(Debug, Clone)]
-pub struct SmsgQuestgiverQuestComplete {
+pub struct SmsgQuestgiverQuestComplete<'a> {
     /// Quest ID
     pub quest_id: u32,
     /// XP reward amount
     pub xp: u32,
+    /// Money reward amount
+    pub money: u32,
+    /// Fixed reward items
+    pub reward_items: &'a [(u32, u32)],
 }
 
-impl ToWorldPacket for SmsgQuestgiverQuestComplete {
+impl ToWorldPacket for SmsgQuestgiverQuestComplete<'_> {
     fn to_world_packet(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_QUEST_COMPLETE);
         packet.write_u32(self.quest_id);
         packet.write_u32(0x03); // Unknown flag
         packet.write_u32(self.xp);
+        packet.write_u32(self.money);
+        packet.write_u32(self.reward_items.len() as u32);
+        for &(item_id, count) in self.reward_items {
+            packet.write_u32(item_id);
+            packet.write_u32(count);
+        }
         packet
     }
 }
@@ -436,6 +446,8 @@ pub struct SmsgQuestgiverOfferRewardV2<'a> {
     pub quest_flags: QuestFlags,
     /// Reward spell
     pub rew_spell: u32,
+    /// Spell cast when the reward is claimed
+    pub rew_spell_cast: u32,
     /// Offer reward emotes
     pub offer_reward_emote: [u32; QUEST_EMOTE_COUNT],
     /// Offer reward emote delays
@@ -480,6 +492,7 @@ impl ToWorldPacket for SmsgQuestgiverOfferRewardV2<'_> {
         packet.write_u32(self.money_reward);
         packet.write_u32(self.quest_flags.0);
         packet.write_u32(self.rew_spell);
+        packet.write_u32(self.rew_spell_cast);
 
         packet
     }
@@ -808,9 +821,45 @@ mod tests {
         let msg = SmsgQuestgiverQuestComplete {
             quest_id: 123,
             xp: 1000,
+            money: 500,
+            reward_items: &[(456, 2)],
         };
         let packet = msg.to_world_packet();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_COMPLETE);
+        assert_eq!(packet.data().len(), 28);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[12..16].try_into().unwrap()),
+            500
+        );
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[16..20].try_into().unwrap()),
+            1
+        );
+    }
+
+    #[test]
+    fn test_smsg_questgiver_offer_reward_includes_cast_spell() {
+        let msg = SmsgQuestgiverOfferRewardV2 {
+            guid: ObjectGuid::from_low(1),
+            quest_id: 783,
+            title: "",
+            offer_reward_text: "",
+            enable_next: true,
+            reward_choices: &[],
+            reward_items: &[],
+            money_reward: 0,
+            quest_flags: QuestFlags(0),
+            rew_spell: 10,
+            rew_spell_cast: 20,
+            offer_reward_emote: [0; QUEST_EMOTE_COUNT],
+            offer_reward_emote_delay: [0; QUEST_EMOTE_COUNT],
+        };
+        let packet = msg.to_world_packet();
+        assert_eq!(packet.opcode(), Opcode::SMSG_QUESTGIVER_OFFER_REWARD);
+        assert_eq!(
+            u32::from_le_bytes(packet.data()[packet.data().len() - 4..].try_into().unwrap()),
+            20
+        );
     }
 
     #[test]

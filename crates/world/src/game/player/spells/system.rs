@@ -2041,6 +2041,7 @@ impl SpellSystem {
         }
 
         // Broadcast SMSG_SPELL_GO
+        const CAST_FLAG_UNKNOWN9: u16 = 0x0100;
         const CAST_FLAG_AMMO: u16 = 0x0020;
         const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
         let is_ranged = world
@@ -2057,8 +2058,9 @@ impl SpellSystem {
             caster_guid,
             caster_guid_pack: caster_guid,
             spell_id,
-            cast_flags: (if is_triggered { 0x0000 } else { 0x0002 })
-                | if is_ranged { CAST_FLAG_AMMO } else { 0 },
+            // Spell::SendSpellGo uses UNKNOWN9, distinct from the UNKNOWN2 flag
+            // carried by SMSG_SPELL_START.
+            cast_flags: CAST_FLAG_UNKNOWN9 | if is_ranged { CAST_FLAG_AMMO } else { 0 },
             hit_targets,
             miss_targets,
             target_guid,

@@ -1811,6 +1811,7 @@ impl QuestSystem {
             money_reward: quest.rew_or_req_money.max(0) as u32,
             quest_flags: oxcore_shared::messages::quest::QuestFlags(quest.quest_flags.bits()),
             rew_spell: quest.rew_spell,
+            rew_spell_cast: quest.rew_spell_cast,
             offer_reward_emote: quest.offer_reward_emote,
             offer_reward_emote_delay: quest.offer_reward_emote_delay,
         };
@@ -1946,7 +1947,7 @@ impl QuestSystem {
         let rate_drop_money = world.config.rate_drop_money;
         let max_level = oxcore_shared::game::experience::MAX_PLAYER_LEVEL;
 
-        let xp_reward = if player_level >= max_level {
+        let (xp_reward, max_level_gold_reward) = if player_level >= max_level {
             // Max level: give gold instead of XP
             let gold_reward = quest.get_rew_money_max_level_at_complete(
                 rate_drop_money,
@@ -1956,7 +1957,7 @@ impl QuestSystem {
             if gold_reward > 0 {
                 self.inventory.add_gold(player_guid, gold_reward);
             }
-            0
+            (0, gold_reward)
         } else {
             let xp = quest.xp_value(player_level as u32);
             if xp > 0 {
@@ -1965,7 +1966,7 @@ impl QuestSystem {
                     .experience
                     .add_xp(player_guid, xp, XpSource::Quest, None, 0.0);
             }
-            xp
+            (xp, 0)
         };
 
         // 3. Give money reward (scaled by rate)
@@ -2095,9 +2096,18 @@ impl QuestSystem {
             .send_msg_to_player(player_guid, gossip_complete);
 
         // Send quest complete packet with XP info
+        let reward_items: Vec<(u32, u32)> = quest
+            .rew_item_id
+            .iter()
+            .zip(quest.rew_item_count.iter())
+            .filter(|(id, _)| **id != 0)
+            .map(|(id, count)| (*id, *count))
+            .collect();
         let complete_msg = SmsgQuestgiverQuestComplete {
             quest_id,
             xp: xp_reward,
+            money: (money.max(0) as u32).saturating_add(max_level_gold_reward),
+            reward_items: &reward_items,
         };
         self.broadcast_mgr
             .send_msg_to_player(player_guid, complete_msg);
