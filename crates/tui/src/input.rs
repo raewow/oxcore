@@ -5,6 +5,8 @@ use ratatui::layout::Size;
 
 use crate::app::{App, Focus, TabKind};
 
+const BACK_TO_LATEST: &str = " Back to latest (End) ";
+
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     // Quit-confirmation popup captures all input while open.
     if app.confirm_quit {
@@ -52,6 +54,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::PageDown => {
             app.scroll_down(10);
+            return;
+        }
+        KeyCode::End => {
+            app.follow_latest();
             return;
         }
         KeyCode::Up if ctrl => {
@@ -108,6 +114,11 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent, size: Size) {
         MouseEventKind::ScrollDown if over_logs(app, size, mouse.column, mouse.row) => {
             app.scroll_down(3);
         }
+        MouseEventKind::Down(MouseButton::Left)
+            if over_back_to_latest(app, size, mouse.column, mouse.row) =>
+        {
+            app.follow_latest();
+        }
         _ => {}
     }
 }
@@ -138,4 +149,59 @@ fn over_logs(app: &App, size: Size, x: u16, y: u16) -> bool {
 
     let log_y = if app.show_logo() { body_y + 4 } else { body_y };
     y >= log_y && y < body_y.saturating_add(body_h)
+}
+
+fn over_back_to_latest(app: &App, size: Size, x: u16, y: u16) -> bool {
+    if app.follow_logs || matches!(app.current_tab(), TabKind::Performance) || size.height <= 4 {
+        return false;
+    }
+
+    let log_width = size.width.saturating_sub(34);
+    let button_width = BACK_TO_LATEST.chars().count() as u16;
+    let log_y = if app.show_logo() { 5 } else { 1 };
+    x >= log_width.saturating_sub(button_width + 1) && x < log_width && y == log_y
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyEvent, KeyModifiers};
+
+    use super::*;
+    use crate::log_layer::LogStore;
+    use crate::logging::LogControl;
+
+    fn app() -> App {
+        let mut app = App::new(Vec::new(), LogStore::new(10), LogControl::new(2));
+        app.tabs = vec![TabKind::Both];
+        app
+    }
+
+    #[test]
+    fn end_returns_to_latest_logs() {
+        let mut app = app();
+        app.scroll_up(5);
+
+        handle_key(&mut app, KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+
+        assert_eq!(app.scroll, 0);
+        assert!(app.follow_logs);
+    }
+
+    #[test]
+    fn back_to_latest_button_is_clickable() {
+        let mut app = app();
+        app.scroll_up(5);
+        let size = Size::new(120, 30);
+        let x = size.width.saturating_sub(34 + BACK_TO_LATEST.len() as u16);
+        let mouse = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: x,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        handle_mouse(&mut app, mouse, size);
+
+        assert!(app.follow_logs);
+    }
 }

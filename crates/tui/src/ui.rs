@@ -6,6 +6,8 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Sparkline, Tabs, Wrap};
 use ratatui::Frame;
 use tracing::Level;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Focus, TabKind};
 use crate::log_layer::{LogFilter, LogRecord, LogSource, LogStore};
@@ -20,6 +22,7 @@ pub const LOGO: [&str; 3] = [
 ];
 
 const ACCENT: Color = Color::Rgb(0xff, 0x8c, 0x32);
+const BACK_TO_LATEST: &str = " Back to latest (End) ";
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -122,9 +125,12 @@ pub fn render_loading(
     let records = store.filtered(LogFilter::All);
     let height = inner.height as usize;
     let lines: Vec<Line> = records.iter().flat_map(|r| record_lines(r, true)).collect();
-    let start = lines.len().saturating_sub(height);
+    let total = wrapped_line_count(&lines, inner.width);
+    let top = total.saturating_sub(height);
     f.render_widget(
-        Paragraph::new(Text::from(lines[start..].to_vec())).wrap(Wrap { trim: false }),
+        Paragraph::new(Text::from(lines))
+            .wrap(Wrap { trim: false })
+            .scroll((top.min(u16::MAX as usize) as u16, 0)),
         inner,
     );
 }
@@ -283,6 +289,7 @@ fn record_lines(rec: &LogRecord, show_source: bool) -> Vec<Line<'static>> {
 fn render_logs(f: &mut Frame, area: Rect, app: &mut App) {
     let filter = app.log_filter();
     let show_source = matches!(app.current_tab(), TabKind::Both);
+    let revision = app.store.revision();
     let mut records = app.store.filtered(filter);
     let total_before = records.len();
 
@@ -303,10 +310,19 @@ fn render_logs(f: &mut Frame, area: Rect, app: &mut App) {
         )
     };
 
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
         .title(title)
         .border_style(Style::default().fg(Color::DarkGray));
+    if !app.follow_logs {
+        block = block.title_top(
+            Line::from(Span::styled(
+                BACK_TO_LATEST,
+                Style::default().fg(Color::Black).bg(ACCENT),
+            ))
+            .right_aligned(),
+        );
+    }
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -316,13 +332,106 @@ fn render_logs(f: &mut Frame, area: Rect, app: &mut App) {
         .collect();
 
     let height = inner.height as usize;
-    let total = lines.len();
+    let total = app
+        .cached_log_lines(inner.width, revision)
+        .unwrap_or_else(|| {
+            let total = wrapped_line_count(&lines, inner.width);
+            app.update_log_layout(total, inner.width, revision);
+            total
+        });
+    let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
     app.clamp_scroll_to(total, height);
-    // `scroll` lines up from the bottom.
-    let end = total.saturating_sub(app.scroll);
-    let start = end.saturating_sub(height);
-    let para = Paragraph::new(Text::from(lines[start..end].to_vec())).wrap(Wrap { trim: false });
-    f.render_widget(para, inner);
+    // `scroll` is measured from the bottom, while Paragraph scrolls from the top.
+    let top = total.saturating_sub(height.saturating_add(app.scroll));
+    f.render_widget(
+        paragraph.scroll((top.min(u16::MAX as usize) as u16, 0)),
+        inner,
+    );
+}
+
+/// Count rows using Ratatui's untrimmed word-wrap rules. Paragraph's corresponding API is
+/// unstable in Ratatui 0.28, but the scroll offset must use the same wrapped row count.
+fn wrapped_line_count(lines: &[Line], width: u16) -> usize {
+    if width == 0 {
+        return 0;
+    }
+
+    lines
+        .iter()
+        .map(|line| {
+            let graphemes = line
+                .spans
+                .iter()
+                .flat_map(|span| span.content.graphemes(true));
+            wrapped_text_line_count(graphemes, width)
+        })
+        .sum()
+}
+
+fn wrapped_text_line_count<'a>(graphemes: impl Iterator<Item = &'a str>, width: u16) -> usize {
+    let mut wrapped = 0;
+    let mut line_width = 0;
+    let mut word_width = 0;
+    let mut whitespace_width = 0;
+    let mut pending_line_has_text = false;
+    let mut pending_word_has_text = false;
+    let mut whitespace = std::collections::VecDeque::new();
+    let mut previous_was_text = false;
+
+    for grapheme in graphemes {
+        let grapheme_width = grapheme.width() as u16;
+        if grapheme_width > width {
+            continue;
+        }
+        let is_whitespace = grapheme == "\u{200b}"
+            || (grapheme != "\u{00a0}" && grapheme.chars().all(char::is_whitespace));
+        let word_found = previous_was_text && is_whitespace;
+        let untrimmed_overflow =
+            !pending_line_has_text && word_width + whitespace_width + grapheme_width > width;
+
+        if word_found || untrimmed_overflow {
+            line_width += whitespace_width + word_width;
+            pending_line_has_text |= !whitespace.is_empty() || pending_word_has_text;
+            whitespace.clear();
+            whitespace_width = 0;
+            word_width = 0;
+            pending_word_has_text = false;
+        }
+
+        let line_full = line_width >= width;
+        let pending_word_overflow =
+            grapheme_width > 0 && line_width + whitespace_width + word_width >= width;
+        if line_full || pending_word_overflow {
+            wrapped += 1;
+            let mut remaining_width = width.saturating_sub(line_width);
+            while let Some(whitespace_width) = whitespace.front().copied() {
+                if whitespace_width > remaining_width {
+                    break;
+                }
+                remaining_width -= whitespace_width;
+                whitespace.pop_front();
+            }
+            whitespace_width = whitespace.iter().sum();
+            line_width = 0;
+            pending_line_has_text = false;
+
+            if is_whitespace && whitespace.is_empty() {
+                previous_was_text = false;
+                continue;
+            }
+        }
+
+        if is_whitespace {
+            whitespace_width += grapheme_width;
+            whitespace.push_back(grapheme_width);
+        } else {
+            word_width += grapheme_width;
+            pending_word_has_text = true;
+        }
+        previous_was_text = !is_whitespace;
+    }
+
+    wrapped + 1
 }
 
 fn render_status(f: &mut Frame, area: Rect, app: &App) {
@@ -470,6 +579,19 @@ fn render_spark(f: &mut Frame, area: Rect, title: &str, data: &[u64], color: Col
         .data(data)
         .style(Style::default().fg(color));
     f.render_widget(spark, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrapped_text_line_count;
+    use unicode_segmentation::UnicodeSegmentation;
+
+    #[test]
+    fn wrapped_line_count_uses_visual_rows() {
+        assert_eq!(wrapped_text_line_count("12345".graphemes(true), 5), 1);
+        assert_eq!(wrapped_text_line_count("123456".graphemes(true), 5), 2);
+        assert_eq!(wrapped_text_line_count("word word".graphemes(true), 5), 2);
+    }
 }
 
 fn render_input(f: &mut Frame, area: Rect, app: &App) {

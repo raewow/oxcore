@@ -96,6 +96,8 @@ pub struct App {
     pub scroll: usize,
     /// Whether new log records should keep the viewport pinned to the newest lines.
     pub follow_logs: bool,
+    /// Wrapped line count, width, and store revision from the most recent log render.
+    last_log_layout: Option<(usize, u16, u64)>,
     pub should_quit: bool,
     pub perf: Vec<PaneSeries>,
     /// Active log filter substring (empty = no filtering).
@@ -133,6 +135,7 @@ impl App {
             history_cursor: None,
             scroll: 0,
             follow_logs: true,
+            last_log_layout: None,
             should_quit: false,
             perf,
             filter: String::new(),
@@ -416,6 +419,26 @@ impl App {
         self.scroll = self.scroll.min(max_scroll);
     }
 
+    /// Preserve the visible rows while new matching logs arrive during manual scrolling.
+    pub fn cached_log_lines(&self, width: u16, revision: u64) -> Option<usize> {
+        self.last_log_layout
+            .filter(|(_, previous_width, previous_revision)| {
+                *previous_width == width && *previous_revision == revision
+            })
+            .map(|(total, _, _)| total)
+    }
+
+    pub fn update_log_layout(&mut self, total_lines: usize, width: u16, revision: u64) {
+        if !self.follow_logs {
+            if let Some((previous_total, previous_width, _)) = self.last_log_layout {
+                if previous_width == width && total_lines > previous_total {
+                    self.scroll = self.scroll.saturating_add(total_lines - previous_total);
+                }
+            }
+        }
+        self.last_log_layout = Some((total_lines, width, revision));
+    }
+
     /// Begin the quit-confirmation flow (shows the popup; does not quit yet).
     pub fn request_quit(&mut self) {
         self.confirm_quit = true;
@@ -474,6 +497,7 @@ impl App {
     pub fn follow_latest(&mut self) {
         self.scroll = 0;
         self.follow_logs = true;
+        self.last_log_layout = None;
     }
 
     /// Submit the current input as a console command to the resolved pane.
@@ -575,5 +599,38 @@ fn strip_prefix_ci<'a>(input: &'a str, prefix: &str) -> Option<&'a str> {
         Some(&input[prefix.len()..])
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app() -> App {
+        App::new(Vec::new(), LogStore::new(10), LogControl::new(2))
+    }
+
+    #[test]
+    fn paused_scroll_preserves_visible_rows_when_logs_arrive() {
+        let mut app = app();
+        app.update_log_layout(20, 80, 1);
+        app.scroll_up(5);
+
+        app.update_log_layout(23, 80, 2);
+
+        assert_eq!(app.scroll, 8);
+        assert!(!app.follow_logs);
+    }
+
+    #[test]
+    fn returning_to_latest_resets_scroll_tracking() {
+        let mut app = app();
+        app.update_log_layout(20, 80, 1);
+        app.scroll_up(5);
+        app.follow_latest();
+
+        assert_eq!(app.scroll, 0);
+        assert!(app.follow_logs);
+        assert_eq!(app.last_log_layout, None);
     }
 }

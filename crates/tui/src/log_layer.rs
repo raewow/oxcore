@@ -98,6 +98,11 @@ impl LogStore {
         self.updates.subscribe()
     }
 
+    /// Monotonically increasing identifier for the currently captured records.
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Relaxed)
+    }
+
     /// Push a synthetic line (e.g. an echo of a typed console command).
     pub fn push_synthetic(&self, source: LogSource, level: Level, message: String) {
         self.push(LogRecord {
