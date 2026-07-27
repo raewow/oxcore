@@ -814,6 +814,21 @@ pub async fn handle_player_login_with_guid(
     session.set_state(crate::core::session::SessionState::LoggedIn);
     info!("[LOGIN] Session state updated to LoggedIn");
 
+    // Restore persisted auras only after spells and inventory are available, then send their
+    // initial state before the rest of the login packets. Auras with real-time durations lose
+    // the time spent offline, matching Player::_LoadAuras in the reference core.
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let offline_secs = aura_offline_seconds(now_secs, character.logout_time);
+    world
+        .systems
+        .auras
+        .on_login(guid, offline_secs, world)
+        .await?;
+    info!("[LOGIN] Restored persisted auras");
+
     // 7.5 Create player packet handler task
     use crate::core::network::player_handler::PlayerPacketHandler;
     // Get Arc<WorldSession> from session manager
@@ -1456,6 +1471,11 @@ fn add_player_power_create_fields(
     block
 }
 
+/// Convert the persisted logout timestamp into the `u32` duration expected by aura loading.
+fn aura_offline_seconds(now_secs: u64, logout_time: u64) -> u32 {
+    now_secs.saturating_sub(logout_time).min(u32::MAX as u64) as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1487,6 +1507,17 @@ mod tests {
 
         assert!(block.fields.contains(&(UNIT_FIELD_POWER1 + 1, 256)));
         assert!(block.fields.contains(&(UNIT_FIELD_MAXPOWER1 + 1, 1000)));
+    }
+
+    #[test]
+    fn aura_offline_seconds_matches_persisted_logout_duration() {
+        assert_eq!(aura_offline_seconds(1_000, 700), 300);
+        assert_eq!(aura_offline_seconds(700, 1_000), 0);
+        assert_eq!(
+            aura_offline_seconds(u64::MAX, 0),
+            u32::MAX,
+            "the aura loader accepts at most u32 seconds",
+        );
     }
 }
 
@@ -1901,6 +1932,9 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
             player_guid, error
         );
     }
+
+    // Save auras before removing the player from systems, matching Player::_SaveAuras.
+    world.systems.auras.on_logout(player_guid, world).await?;
 
     // Save all player data to database (BEFORE removing from systems)
     // This saves: position, experience, health/power, rest state, spells, action bars, reputation, skills, account data
