@@ -166,11 +166,7 @@ impl PowerSystem {
 
             PowerType::Rage => {
                 // Rage decays out of combat
-                // Note: We need to check combat state from the combat system
-                // For now, we'll need to pass this in or access it differently
-                // This is a placeholder - actual implementation depends on CombatSystem integration
-                let in_combat = false; // TODO: Get from CombatSystem
-                if !in_combat {
+                if !player.combat.in_combat {
                     let idx = PowerType::Rage as usize;
                     power.current[idx] =
                         power.current[idx].saturating_sub(regen::RAGE_DECAY_PER_TICK);
@@ -557,6 +553,32 @@ mod tests {
 
         assert!(!PowerSystem::apply_damage_dealt_rage(&mut player, 100));
         assert_eq!(player.power.current[PowerType::Rage as usize], 0);
+    }
+
+    #[test]
+    fn rage_does_not_decay_in_combat() {
+        let system = PowerSystem::new(Arc::new(MockBroadcastManagerTrait::new()));
+        let mut player = warrior(60);
+        player.power.current[PowerType::Rage as usize] = 100;
+        player.combat.in_combat = true;
+
+        system.regen_tick(player.guid, &mut player, 0);
+
+        assert_eq!(player.power.current[PowerType::Rage as usize], 100);
+    }
+
+    #[test]
+    fn rage_decays_out_of_combat() {
+        let system = PowerSystem::new(Arc::new(MockBroadcastManagerTrait::new()));
+        let mut player = warrior(60);
+        player.power.current[PowerType::Rage as usize] = 100;
+
+        system.regen_tick(player.guid, &mut player, 0);
+
+        assert_eq!(
+            player.power.current[PowerType::Rage as usize],
+            100 - regen::RAGE_DECAY_PER_TICK
+        );
     }
 
     #[test]
