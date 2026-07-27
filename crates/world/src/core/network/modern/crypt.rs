@@ -10,7 +10,6 @@
 //! AES key; only the nonce differs, so a single cipher instance serves both.
 
 use aes_gcm::aead::consts::U12;
-use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::aead::AeadInPlace;
 use aes_gcm::aes::Aes128;
 use aes_gcm::{AesGcm, KeyInit};
@@ -62,12 +61,12 @@ impl WorldCrypt {
         let nonce = build_nonce(self.out_counter, self.out_tag);
         let tag = self
             .cipher
-            .encrypt_in_place_detached(GenericArray::from_slice(&nonce), &[], data)
+            .encrypt_in_place_detached((&nonce).into(), &[], data)
             .expect("AES-GCM encryption cannot fail with an in-memory buffer");
         self.out_counter = self.out_counter.wrapping_add(1);
 
         let mut out = [0u8; TAG_SIZE];
-        out.copy_from_slice(tag.as_slice());
+        out.copy_from_slice(&tag);
         out
     }
 
@@ -77,12 +76,7 @@ impl WorldCrypt {
     pub fn decrypt(&mut self, data: &mut [u8], tag: &[u8; TAG_SIZE]) -> Result<()> {
         let nonce = build_nonce(self.in_counter, self.in_tag);
         self.cipher
-            .decrypt_in_place_detached(
-                GenericArray::from_slice(&nonce),
-                &[],
-                data,
-                GenericArray::from_slice(tag),
-            )
+            .decrypt_in_place_detached((&nonce).into(), &[], data, tag.into())
             .map_err(|_| anyhow!("AES-GCM tag verification failed"))?;
         self.in_counter = self.in_counter.wrapping_add(1);
         Ok(())
