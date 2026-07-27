@@ -1413,7 +1413,6 @@ impl GroupSystem {
     }
 
     /// Broadcast a message to all group members
-    #[allow(dead_code)]
     fn broadcast_to_group<M>(&self, group_id: u32, msg: M)
     where
         M: oxcore_shared::messages::ToWorldPacket + Clone + Send,

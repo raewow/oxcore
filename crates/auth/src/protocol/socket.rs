@@ -1160,14 +1160,6 @@ impl AuthSocket {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    fn get_security_on(&self, realm_id: u32) -> u8 {
-        self.account_security_on_realm
-            .get(&realm_id)
-            .copied()
-            .unwrap_or(self.account_default_security_level)
-    }
-
     async fn verify_version(
         &self,
         a: &[u8],

@@ -5,20 +5,6 @@ use crate::protocol::guid::ObjectGuid as WorldObjectGuid;
 use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
-/// Generic movement broadcast message (MSG_MOVE_*)
-/// Used to broadcast movement to nearby players (Phase 5 - not yet implemented)
-#[allow(dead_code)]
-pub struct MsgMoveBroadcast {
-    pub opcode: Opcode,
-}
-
-impl ToWorldPacket for MsgMoveBroadcast {
-    fn to_world_packet(&self) -> WorldPacket {
-        // TODO: Implement for Phase 5 (broadcasting to nearby players)
-        WorldPacket::new(self.opcode)
-    }
-}
-
 /// SMSG_PONG - response to CMSG_PING
 pub struct SmsgPong {
     pub sequence: u32,

@@ -24,7 +24,6 @@ pub fn generate(input: &Path, output: &Path, filter: Vec<u32>, debug_meshes: boo
     info!("Generating navigation meshes...");
 
     let maps_dir = output.join("maps");
-    let vmaps_dir = output.join("vmaps");
 
     if !maps_dir.exists() {
         warn!("Maps directory not found: {}. Run 'maps' extraction first.", maps_dir.display());
@@ -46,7 +45,7 @@ pub fn generate(input: &Path, output: &Path, filter: Vec<u32>, debug_meshes: boo
 
     // Process each map
     for (map_id, tile_coords) in &tiles {
-        build_map(*map_id, tile_coords, &maps_dir, &vmaps_dir, &writer, debug_meshes)?;
+        build_map(*map_id, tile_coords, &maps_dir, &writer, debug_meshes)?;
     }
 
     info!("Navigation mesh generation complete");
@@ -95,7 +94,6 @@ fn build_map(
     map_id: u32,
     tile_coords: &[(u32, u32)],
     maps_dir: &Path,
-    vmaps_dir: &Path,
     writer: &MMapWriter,
     debug_meshes: bool,
 ) -> Result<()> {
@@ -141,7 +139,7 @@ fn build_map(
         }
 
         // Build tile
-        match build_tile(map_id, tile_x, tile_y, maps_dir, vmaps_dir, writer, debug_meshes) {
+        match build_tile(map_id, tile_x, tile_y, maps_dir, writer, debug_meshes) {
             Ok(true) => {
                 built_count.fetch_add(1, Ordering::Relaxed);
             }
@@ -178,7 +176,6 @@ fn build_tile(
     tile_x: u32,
     tile_y: u32,
     maps_dir: &Path,
-    vmaps_dir: &Path,
     writer: &MMapWriter,
     debug_meshes: bool,
 ) -> Result<bool> {
@@ -197,10 +194,6 @@ fn build_tile(
     if !has_terrain {
         return Ok(false);
     }
-
-    // TODO: Load VMap collision geometry
-    // This would load WMO/M2 models from the vmaps directory and add them to mesh_data
-    // load_vmap(vmaps_dir, map_id, tile_x, tile_y, &mut mesh_data)?;
 
     // Clean up unused vertices
     TerrainBuilder::clean_vertices(&mut mesh_data.solid_verts, &mut mesh_data.solid_tris);
@@ -225,34 +218,6 @@ fn build_tile(
 
     // Even without actual navmesh data, we processed the tile
     Ok(false)
-}
-
-/// Load VMap collision geometry (WMO/M2 models)
-#[allow(dead_code)]
-fn load_vmap(
-    vmaps_dir: &Path,
-    map_id: u32,
-    tile_x: u32,
-    tile_y: u32,
-    mesh_data: &mut MeshData,
-) -> Result<()> {
-    // TODO: Implement VMap loading
-    // This would:
-    // 1. Load .vmtree file for the map
-    // 2. Load .vmtile files for referenced models
-    // 3. Extract collision geometry and add to mesh_data
-
-    // For now, just check if vmap files exist
-    let vmtree_file = vmaps_dir.join(format!("{:03}.vmtree", map_id));
-    if !vmtree_file.exists() {
-        debug!(
-            "[Map {:03}] VMap tree file not found: {}",
-            map_id,
-            vmtree_file.display()
-        );
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

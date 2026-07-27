@@ -3218,6 +3218,9 @@ impl SpellSystem {
         // Load spells from database
         learning::load_from_db(player_guid, world)?;
 
+        // Restore active cooldowns before sending the initial spellbook packet.
+        cooldowns::load_cooldowns(player_guid, world).await?;
+
         // Send spellbook to client
         self.send_initial_spells(player_guid, world)?;
 
@@ -3236,7 +3239,7 @@ impl SpellSystem {
         learning::save_to_db(player_guid, world)?;
 
         // Save cooldowns to database
-        cooldowns::save_cooldowns(player_guid, world)?;
+        cooldowns::save_cooldowns(player_guid, world).await?;
 
         Ok(())
     }

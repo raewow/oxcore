@@ -63,26 +63,6 @@ impl Geolock {
             }
         }
     }
-
-    /// Get country code for an IP (placeholder - would use GeoIP database)
-    #[allow(dead_code)]
-    pub fn get_country_code(&self, _ip: &IpAddr) -> Option<String> {
-        // In a full implementation, this would query a GeoIP database
-        // For now, return None (unknown)
-        None
-    }
-
-    /// Check if country is allowed for account
-    #[allow(dead_code)]
-    pub fn is_country_allowed(
-        &self,
-        _account_country: Option<&str>,
-        _current_country: &str,
-    ) -> bool {
-        // In a full implementation, this would check if the country matches
-        // or is in an allowed list
-        true
-    }
 }
 
 #[cfg(test)]

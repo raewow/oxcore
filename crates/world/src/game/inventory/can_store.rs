@@ -185,14 +185,6 @@ impl<'a> CanStoreChecker<'a> {
         }
     }
 
-    /// Check if item being moved is a non-empty bag (anti-dupe).
-    /// Stub — the C++ version iterates all bag slots; we skip the deep check
-    /// and rely on the caller (ItemHandler) to prevent moving non-empty bags.
-    #[allow(dead_code)]
-    fn non_empty_bag_check(_p_src_item: Option<&Item>, _is_swap_with_bag: bool) -> InventoryResult {
-        InventoryResult::Ok
-    }
-
     // ── _CanStoreItem_InSpecificSlot ──────────────────────────────────
 
     /// Check if an item can be stored in a specific bag+slot.
@@ -218,19 +210,6 @@ impl<'a> CanStoreChecker<'a> {
 
         if p_item2_is_src {
             // pretend the slot is empty
-        }
-
-        // Fix dupe exploit (move non empty bag)
-        if let Some(src) = p_src_item {
-            if let Some(src_proto) = self.get_proto(src.entry) {
-                if src_proto.container_slots > 0 {
-                    if !p_item2_is_src {
-                        // Can't move non-empty bag unless swapping with another bag
-                        // We don't have an empty-check here without scanning bag contents,
-                        // but the C++ code does this. For now, we accept the risk.
-                    }
-                }
-            }
         }
 
         let is_empty_slot = p_item2_guid.is_none() || p_item2_is_src || swap;

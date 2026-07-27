@@ -614,6 +614,41 @@ impl CharacterRepository {
         Ok(())
     }
 
+    /// Replace all active spell cooldowns for a character atomically.
+    pub async fn replace_spell_cooldowns(
+        &self,
+        guid: u32,
+        cooldowns: &[CharacterSpellCooldownRow],
+    ) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+
+        sqlx::query("DELETE FROM character_spell_cooldown WHERE guid = ?")
+            .bind(guid)
+            .execute(&mut *transaction)
+            .await
+            .context("Failed to delete character spell cooldowns")?;
+
+        for cooldown in cooldowns {
+            sqlx::query(
+                "INSERT INTO character_spell_cooldown \
+                 (guid, spell, spell_expire_time, category, category_expire_time, item_id) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(guid)
+            .bind(cooldown.spell)
+            .bind(cooldown.spell_expire_time)
+            .bind(cooldown.category)
+            .bind(cooldown.category_expire_time)
+            .bind(cooldown.item_id)
+            .execute(&mut *transaction)
+            .await
+            .context("Failed to save character spell cooldown")?;
+        }
+
+        transaction.commit().await?;
+        Ok(())
+    }
+
     // ========== ACCOUNT DATA ==========
 
     /// Load all global account_data rows for an account (types 0, 2, 4).

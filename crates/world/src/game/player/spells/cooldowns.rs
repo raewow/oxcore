@@ -7,6 +7,8 @@ use crate::game::player::spells::modifiers;
 use crate::World;
 use anyhow::Result;
 use oxcore_dbc::structures::spell::SpellEntry;
+use oxcore_shared::database::characters::models::CharacterSpellCooldownRow;
+use oxcore_shared::database::characters::repositories::CharacterRepository;
 use oxcore_shared::messages::spells::{SmsgClearCooldown, SmsgSpellCooldown};
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
@@ -278,19 +280,89 @@ pub fn send_cooldowns_on_login(
     Ok(())
 }
 
-/// Save cooldowns to database for persistence across logout/login.
-pub fn save_cooldowns(_player_guid: ObjectGuid, _world: &World) -> Result<()> {
-    // TODO: Implement database persistence
-    // Only save cooldowns longer than 30 seconds
-    // DELETE FROM character_spell_cooldowns WHERE guid = ?
-    // INSERT INTO character_spell_cooldowns (guid, spell_id, remaining_ms) VALUES (?, ?, ?)
+/// Save active cooldowns to the database for persistence across logout/login.
+pub async fn save_cooldowns(player_guid: ObjectGuid, world: &World) -> Result<()> {
+    let now = get_game_time_ms(world);
+    let cooldowns = world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            player
+                .spells
+                .cooldowns
+                .iter()
+                .filter_map(|(&spell, &spell_expire_time)| {
+                    (spell_expire_time > now).then(|| {
+                        let category = world
+                            .managers
+                            .spell_mgr
+                            .get(spell)
+                            .map_or(0, |entry| entry.category);
+                        let category_expire_time = player
+                            .spells
+                            .category_cooldowns
+                            .get(&category)
+                            .copied()
+                            .filter(|&expire_time| expire_time > now)
+                            .unwrap_or(0);
+
+                        CharacterSpellCooldownRow {
+                            guid: player_guid.counter(),
+                            spell,
+                            spell_expire_time,
+                            category,
+                            category_expire_time,
+                            item_id: 0,
+                        }
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    CharacterRepository::new(Arc::new(world.databases.character.clone()))
+        .replace_spell_cooldowns(player_guid.counter(), &cooldowns)
+        .await?;
+
     Ok(())
 }
 
 /// Load cooldowns from database on login.
-#[allow(dead_code)]
-pub fn load_cooldowns(_player_guid: ObjectGuid, _world: &World) -> Result<()> {
-    // TODO: Implement database loading
+pub async fn load_cooldowns(player_guid: ObjectGuid, world: &World) -> Result<()> {
+    let now = get_game_time_ms(world);
+    let cooldowns = CharacterRepository::new(Arc::new(world.databases.character.clone()))
+        .find_spell_cooldowns(player_guid.counter())
+        .await?;
+
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| {
+            player.spells.cooldowns.clear();
+            player.spells.category_cooldowns.clear();
+
+            for cooldown in cooldowns {
+                if cooldown.spell_expire_time > now {
+                    player
+                        .spells
+                        .cooldowns
+                        .insert(cooldown.spell, cooldown.spell_expire_time);
+                }
+                if cooldown.category > 0 && cooldown.category_expire_time > now {
+                    player
+                        .spells
+                        .category_cooldowns
+                        .entry(cooldown.category)
+                        .and_modify(|expire_time| {
+                            *expire_time = (*expire_time).max(cooldown.category_expire_time)
+                        })
+                        .or_insert(cooldown.category_expire_time);
+                }
+            }
+        });
+
     Ok(())
 }
 
