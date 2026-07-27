@@ -3,6 +3,7 @@
 //! Handles game object interactions.
 
 use super::{EffectInput, EffectResult};
+use crate::game::gameobject::GameObjectType;
 use crate::World;
 use anyhow::Result;
 use oxcore_shared::protocol::ObjectGuid;
@@ -13,12 +14,29 @@ use oxcore_shared::protocol::ObjectGuid;
 /// misc_value = lock ID
 pub async fn effect_open_lock(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let lock_id = input.misc_value as u32;
-    let target_guid = match input.target_guid {
-        Some(guid) => guid,
-        None => return Ok(EffectResult::empty()),
+    let Some(target_guid) = input.target_guid else {
+        return Ok(EffectResult::empty());
     };
 
-    // TODO: Open the lock on the target game object
+    let is_chest = world
+        .managers
+        .gameobject_mgr
+        .with_gameobject(target_guid, |gameobject| {
+            gameobject.go_type == GameObjectType::Chest
+        })
+        .unwrap_or(false);
+    if is_chest {
+        tracing::info!(
+            "[OPEN_LOCK] Opening chest {:?} for {:?}",
+            target_guid,
+            input.caster_guid
+        );
+        world
+            .systems
+            .loot
+            .handle_loot_request(input.caster_guid, target_guid, world)
+            .await?;
+    }
 
     tracing::debug!(
         "Open lock: caster={:?} target={:?} lock={}",

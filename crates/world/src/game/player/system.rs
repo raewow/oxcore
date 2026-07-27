@@ -188,6 +188,18 @@ impl PlayerSystem {
                     p.combat.last_swing_error = 0;
                 });
 
+                // "melee attack spell casted at main hand attack only" — a queued
+                // on-next-swing spell (Heroic Strike, ...) replaces this white swing.
+                if attack.hand == crate::game::combat::AttackHand::MainHand
+                    && world
+                        .systems
+                        .spells
+                        .cast_queued_melee_spell(attack.attacker, attack.target, world)
+                        .await?
+                {
+                    continue;
+                }
+
                 let target_died =
                     crate::handlers::creature_combat::execute_pending_attack_vs_creature(
                         world,

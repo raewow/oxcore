@@ -3,6 +3,7 @@
 //! Manages the casting pipeline:
 //! validate -> start -> timer -> execute -> finish
 
+use crate::dbc::structures::SpellEntry;
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::common::update_fields::{UNIT_CHANNEL_SPELL, UNIT_FIELD_CHANNEL_OBJECT};
 use crate::game::player::spells::channel_visual::initialize_channeled_visual_timer;
@@ -45,6 +46,21 @@ fn spell_needs_combo_points(attributes_ex: u32) -> bool {
     const FINISHING_MOVE_DAMAGE: u32 = 0x0010_0000;
     const FINISHING_MOVE_DURATION: u32 = 0x0040_0000;
     attributes_ex & (FINISHING_MOVE_DAMAGE | FINISHING_MOVE_DURATION) != 0
+}
+
+/// `SpellEntry::IsNextMeleeSwingSpell` — the spell is queued in the melee slot and fires
+/// on the caster's next main-hand swing instead of casting straight away (Heroic Strike,
+/// Raptor Strike, Slam, ...).
+///
+/// `Attributes & (SPELL_ATTR_ON_NEXT_SWING_NO_DAMAGE | SPELL_ATTR_ON_NEXT_SWING)`.
+pub fn is_next_melee_swing_spell(spell: &SpellEntry) -> bool {
+    spell_is_next_melee_swing(spell.attributes)
+}
+
+fn spell_is_next_melee_swing(attributes: u32) -> bool {
+    const ON_NEXT_SWING_NO_DAMAGE: u32 = 0x0000_0004;
+    const ON_NEXT_SWING: u32 = 0x0000_0400;
+    attributes & (ON_NEXT_SWING_NO_DAMAGE | ON_NEXT_SWING) != 0
 }
 
 fn collect_execute_log_entries(
@@ -805,6 +821,14 @@ impl SpellSystem {
             world,
         );
 
+        // On-next-swing spells (Heroic Strike, Raptor Strike, Slam, ...) do not cast here.
+        // `Spell::update` explicitly skips the melee slot while the spell sits in it; the
+        // cast is fired from `Unit::AttackerStateUpdate` on the next main-hand swing.
+        if slot == CurrentSpellType::Melee {
+            self.park_next_swing_spell(caster_guid, spell_id, is_triggered, cast_targets, world);
+            return Ok(SpellCastResult::Success);
+        }
+
         // Check if this is a channeled spell
         let is_channeled = slot == CurrentSpellType::Channeled;
 
@@ -904,6 +928,127 @@ impl SpellSystem {
         )
         .await;
         Ok(())
+    }
+
+    /// Hold an on-next-swing spell in the melee slot until the caster's next main-hand
+    /// swing. Unlike [`Self::start_cast`] no `CastFinish` event is scheduled — the melee
+    /// slot has no timer, `Unit::AttackerStateUpdate` is what eventually casts it.
+    fn park_next_swing_spell(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        is_triggered: bool,
+        cast_targets: SpellCastTargets,
+        world: &World,
+    ) {
+        let target_guid = cast_targets.unit_target();
+        world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster_guid, |player| {
+                let (x, y, z) = (
+                    player.movement.position.x,
+                    player.movement.position.y,
+                    player.movement.position.z,
+                );
+                let mut active = ActiveCast::new(
+                    spell_id,
+                    target_guid,
+                    0,
+                    is_triggered,
+                    CurrentSpellType::Melee,
+                    x,
+                    y,
+                    z,
+                );
+                active.cast_targets = cast_targets;
+                player
+                    .spells
+                    .set_current_spell(CurrentSpellType::Melee, active);
+            });
+    }
+
+    /// `Unit::AttackerStateUpdate`'s melee-slot branch — fire the queued on-next-swing
+    /// spell in place of this main-hand white swing.
+    ///
+    /// Returns `true` when a queued spell consumed the swing, in which case the caller
+    /// must skip the normal weapon hit (the C++ early `return` after `spell->cast()`).
+    pub async fn cast_queued_melee_spell(
+        &self,
+        caster_guid: ObjectGuid,
+        victim_guid: ObjectGuid,
+        world: &World,
+    ) -> Result<bool> {
+        let queued = world
+            .systems
+            .player
+            .manager()
+            .with_player_mut(caster_guid, |player| {
+                player.spells.clear_current_spell(CurrentSpellType::Melee)
+            })
+            .flatten();
+        let Some(cast) = queued else {
+            return Ok(false);
+        };
+
+        let Some(entry) = world.managers.spell_mgr.get(cast.spell_id) else {
+            return Ok(false);
+        };
+        if !is_next_melee_swing_spell(&entry) {
+            return Ok(false);
+        }
+
+        // "we need to override the target otherwise its possible to hit a far away target
+        // with client modifications since melee spells skip range checks"
+        let mut cast_targets = cast.cast_targets;
+        let (vx, vy, vz) = unit_position(victim_guid, world).unwrap_or_default();
+        cast_targets.set_unit_target(victim_guid, vx, vy, vz);
+
+        // `Spell::cast` re-checks power and target state: the swing can land many seconds
+        // after the ability was queued, by which time the rage may already be spent.
+        let recheck = validation::validate_cast(
+            caster_guid,
+            cast.spell_id,
+            Some(victim_guid),
+            cast.is_triggered,
+            false,
+            world,
+        )?;
+        if recheck != SpellCastError::None {
+            self.send_cast_failure(caster_guid, cast.spell_id, recheck, world)?;
+            // The C++ path clears the melee slot in `Spell::finish(false)` and returns
+            // without a white swing, so a failed queued ability still eats the swing.
+            return Ok(true);
+        }
+
+        if !cast.is_triggered {
+            self.take_spell_costs(caster_guid, cast.spell_id, None, world)
+                .await?;
+        }
+        on_spell_launch(caster_guid, cast.spell_id, &cast_targets, world);
+        let resolved_targets = self
+            .execute_spell(
+                caster_guid,
+                None,
+                cast.spell_id,
+                &cast_targets,
+                cast.is_triggered,
+                world,
+            )
+            .await?;
+        self.finish_cast(
+            caster_guid,
+            cast.spell_id,
+            &cast_targets,
+            cast.is_triggered,
+            None,
+            resolved_targets.as_ref(),
+            world,
+        )
+        .await?;
+
+        Ok(true)
     }
 
     /// Start a cast-time spell and create its ActiveCast.
@@ -1205,10 +1350,7 @@ impl SpellSystem {
             None => return CurrentSpellType::Generic,
         };
 
-        // Melee spells (on-next-melee): SPELL_ATTR_ON_NEXT_SWING_1 = 0x01,
-        // SPELL_ATTR_ON_NEXT_SWING_2 = 0x80000000
-        let is_next_melee_swing =
-            (spell_entry.attributes & 0x01) != 0 || (spell_entry.attributes & 0x80000000) != 0;
+        let is_next_melee_swing = is_next_melee_swing_spell(&spell_entry);
 
         // Auto-repeat spells (Auto-Shot, Wand): SPELL_ATTR_EX2_AUTOREPEAT_FLAG = 0x00000020
         let is_auto_repeat = (spell_entry.attributes_ex2 & 0x00000020) != 0;
@@ -1819,7 +1961,6 @@ impl SpellSystem {
     ) -> Result<()> {
         use crate::game::player::spells::targets;
 
-        let target_guid = cast_targets.unit_target();
         let resolved = targets::resolve_spell_targets(spell_id, cast_targets, caster_guid, world);
 
         self.execute_spell_immediate_with_targets(
@@ -3277,10 +3418,7 @@ impl SpellSystem {
                     .spells
                     .get_next_swing_spell_id()
                     .and_then(|spell_id| world.managers.spell_mgr.get(spell_id))
-                    .map(|entry| {
-                        // IsNextMeleeSwingSpell = AttributesEx & 0x00000004
-                        (entry.attributes_ex & 0x0000_0004) != 0
-                    })
+                    .map(|entry| is_next_melee_swing_spell(&entry))
                     .unwrap_or(false)
             })
             .unwrap_or(false)
@@ -3376,7 +3514,7 @@ impl SpellSystem {
                             if !is_preparing_or_casting {
                                 continue;
                             }
-                            let is_next_swing = (entry.attributes_ex & 0x0000_0004) != 0;
+                            let is_next_swing = is_next_melee_swing_spell(&entry);
                             let is_autorepeat = slot == CurrentSpellType::Autorepeat;
                             let is_triggered = cast.is_triggered;
                             if !is_next_swing
@@ -3772,6 +3910,30 @@ enum CastUpdateInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn next_melee_swing_reads_the_attributes_field() {
+        // Heroic Strike (78) — SPELL_ATTR_ON_NEXT_SWING_NO_DAMAGE among its attributes.
+        assert!(spell_is_next_melee_swing(0x0005_0014));
+        // SPELL_ATTR_ON_NEXT_SWING on its own (Raptor Strike / Slam family).
+        assert!(spell_is_next_melee_swing(0x0000_0400));
+        // Battle Stance (2457) is not a swing ability. The bits live in `Attributes`,
+        // never in `AttributesEx` — reading the wrong field made Heroic Strike cast
+        // instantly instead of queueing for the swing.
+        assert!(!spell_is_next_melee_swing(0x0905_0010));
+    }
+
+    #[test]
+    fn next_melee_swing_spells_take_the_melee_slot() {
+        assert_eq!(
+            cast_pointers::current_container(true, false, false, 0, false, SpellState::Preparing),
+            CurrentSpellType::Melee
+        );
+        assert_eq!(
+            cast_pointers::current_container(false, false, false, 0, false, SpellState::Preparing),
+            CurrentSpellType::Generic
+        );
+    }
 
     #[test]
     fn missing_script_target_is_silent_only_when_triggered() {
@@ -4615,18 +4777,18 @@ mod tests {
     #[tokio::test]
     async fn slot_routing_melee_spell_goes_to_melee() {
         let world = launch_test_world();
-        // SPELL_ATTR_ON_NEXT_SWING_1 = 0x01
+        // SPELL_ATTR_ON_NEXT_SWING_NO_DAMAGE = 0x004 (Heroic Strike)
         let mut spell = charge_spell(50010, [2, 0, 0]);
-        spell.attributes = 0x01;
+        spell.attributes = 0x0000_0004;
         world.managers.spell_mgr.add_spell(spell);
         assert_eq!(
             world.systems.spells.get_spell_slot(50010, &world),
             CurrentSpellType::Melee,
         );
 
-        // SPELL_ATTR_ON_NEXT_SWING_2 = 0x80000000
+        // SPELL_ATTR_ON_NEXT_SWING = 0x400
         let mut spell2 = charge_spell(50011, [2, 0, 0]);
-        spell2.attributes = 0x8000_0000;
+        spell2.attributes = 0x0000_0400;
         world.managers.spell_mgr.add_spell(spell2);
         assert_eq!(
             world.systems.spells.get_spell_slot(50011, &world),
@@ -4673,7 +4835,7 @@ mod tests {
         // generic. A (contrived) spell carrying both bits resolves to Melee.
         let world = launch_test_world();
         let mut spell = charge_spell(50040, [2, 0, 0]);
-        spell.attributes = 0x01;
+        spell.attributes = 0x0000_0004;
         spell.attributes_ex = 0x04;
         world.managers.spell_mgr.add_spell(spell);
         assert_eq!(
