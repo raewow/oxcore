@@ -1,6 +1,7 @@
 pub mod gameobject;
 pub mod manager;
 pub mod spawn;
+pub mod system;
 pub mod types;
 
 pub use gameobject::{GameObject, GameObjectTemplate};

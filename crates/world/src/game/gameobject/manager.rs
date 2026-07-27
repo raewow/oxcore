@@ -408,7 +408,7 @@ impl GameObjectManager {
         let counter = self.next_guid.fetch_add(1, Ordering::Relaxed);
         let guid = ObjectGuid::new_gameobject(spawn.entry, counter as u32);
 
-        let gameobject = GameObject::new(
+        let mut gameobject = GameObject::new(
             guid,
             spawn.entry,
             spawn.spawn_id,
@@ -424,6 +424,8 @@ impl GameObjectManager {
             spawn.state,
             spawn.animprogress,
         );
+        gameobject.in_world = true;
+        gameobject.spawntimesecs = spawn.spawntimesecs;
 
         self.gameobjects.insert(guid, gameobject);
 

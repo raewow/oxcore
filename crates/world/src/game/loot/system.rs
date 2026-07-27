@@ -237,8 +237,16 @@ impl LootSystem {
         };
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
-        // Check if loot is empty
-        self.check_and_clear_if_empty(target_guid, world);
+        // Reference consumes a fully looted chest only after CMSG_LOOT_RELEASE.
+        if target_guid.is_game_object() && self.manager.is_loot_empty(target_guid) {
+            crate::game::gameobject::system::despawn_looted_gameobject(
+                player_guid,
+                target_guid,
+                world,
+            );
+        } else {
+            self.check_and_clear_if_empty(target_guid, world);
+        }
 
         Ok(())
     }
@@ -427,6 +435,12 @@ impl LootSystem {
     }
 
     fn check_and_clear_if_empty(&self, target_guid: ObjectGuid, world: &World) {
+        // Reference defers chest despawn until CMSG_LOOT_RELEASE, after the client
+        // has received its final loot-item removal packet.
+        if target_guid.is_game_object() {
+            return;
+        }
+
         let is_empty = self.manager.is_loot_empty(target_guid);
 
         if is_empty {
