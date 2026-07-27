@@ -14,6 +14,14 @@ use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 const NPC_FLAG_BANKER: u32 = 0x0000_0100;
 const BUY_BANK_SLOT_NOT_BANKER: u8 = 2;
 
+fn normalize_buyback_slot(slot: u32) -> Result<u8> {
+    let slot = u8::try_from(slot).map_err(|_| anyhow!("Invalid buyback slot"))?;
+    // The client identifies visible buyback entries by their zero-based index,
+    // while inventory stores them in absolute slots 69..80. Accept absolute slots
+    // too so manually constructed packets remain valid.
+    Ok(if slot < 12 { 69 + slot } else { slot })
+}
+
 fn can_use_bank(player_guid: ObjectGuid, banker_guid: Option<ObjectGuid>, world: &World) -> bool {
     let current_banker_guid = world
         .managers
@@ -1049,10 +1057,9 @@ pub async fn handle_buyback_item(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let vendor_guid_raw = packet
-        .read_packed_guid_raw()
+    let vendor_guid = packet
+        .read_guid()
         .ok_or_else(|| anyhow!("Failed to read vendor guid"))?;
-    let vendor_guid = ObjectGuid::from(vendor_guid_raw);
     let slot = packet
         .read_u32()
         .ok_or_else(|| anyhow!("Failed to read slot"))?;
@@ -1062,7 +1069,7 @@ pub async fn handle_buyback_item(
         None => return Ok(()),
     };
 
-    let slot = u8::try_from(slot).map_err(|_| anyhow!("Invalid buyback slot"))?;
+    let slot = normalize_buyback_slot(slot)?;
     world
         .systems
         .vendor
@@ -1083,4 +1090,26 @@ fn find_item_location(
     }
 
     (None, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_buyback_slot;
+
+    #[test]
+    fn buyback_client_indices_map_to_inventory_slots() {
+        assert_eq!(normalize_buyback_slot(0).unwrap(), 69);
+        assert_eq!(normalize_buyback_slot(11).unwrap(), 80);
+    }
+
+    #[test]
+    fn buyback_absolute_slots_are_preserved() {
+        assert_eq!(normalize_buyback_slot(69).unwrap(), 69);
+        assert_eq!(normalize_buyback_slot(80).unwrap(), 80);
+    }
+
+    #[test]
+    fn buyback_slot_rejects_values_outside_packet_range() {
+        assert!(normalize_buyback_slot(256).is_err());
+    }
 }

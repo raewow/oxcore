@@ -553,13 +553,25 @@ impl VendorSystem {
         if !self.player_mgr.is_player_alive(player_guid)
             || self.creature_mgr.get_creature(vendor_guid).is_none()
         {
+            warn!(
+                "Buyback rejected: player {:?} is unavailable or vendor {:?} does not exist",
+                player_guid, vendor_guid
+            );
             return Ok(());
         }
 
         let Some(item_guid) = self.inventory.get_item_at(player_guid, 255, slot) else {
+            warn!(
+                "Buyback rejected: player {:?} has no item in slot {}",
+                player_guid, slot
+            );
             return Ok(());
         };
         let Some(item) = self.inventory.cache().get_item(player_guid, item_guid) else {
+            warn!(
+                "Buyback rejected: item {:?} is missing from player {:?}'s cache",
+                item_guid, player_guid
+            );
             return Ok(());
         };
         let item = item.read();
@@ -574,6 +586,10 @@ impl VendorSystem {
             self.inventory.remove_gold(player_guid, price),
             GoldResult::Success { .. }
         ) {
+            warn!(
+                "Buyback rejected: player {:?} cannot pay {} copper for {:?}",
+                player_guid, price, item_guid
+            );
             return Ok(());
         }
 
@@ -586,6 +602,15 @@ impl VendorSystem {
             // This should only fail if inventory state changed between validation and
             // retrieval; restore the payment rather than charging for no item.
             self.inventory.add_gold(player_guid, price);
+            warn!(
+                "Buyback failed: item {:?} could not be restored for player {:?}",
+                item_guid, player_guid
+            );
+        } else {
+            info!(
+                "Player {:?} bought back item {:?} from slot {} for {} copper",
+                player_guid, item_guid, slot, price
+            );
         }
 
         Ok(())

@@ -153,7 +153,7 @@ impl<'a> CanStoreChecker<'a> {
         &self,
         entry: u32,
         count: u32,
-        pItem: Option<&Item>,
+        p_item: Option<&Item>,
     ) -> (InventoryResult, u32) {
         let proto = match self.get_proto(entry) {
             Some(p) => p,
@@ -167,7 +167,7 @@ impl<'a> CanStoreChecker<'a> {
         let mut cur_count = self.cache.count_items_by_entry(self.player_guid, entry);
 
         // Subtract item being moved (if it's the same entry — it's leaving the source)
-        if let Some(item) = pItem {
+        if let Some(item) = p_item {
             if item.entry == entry {
                 cur_count = cur_count.saturating_sub(item.count);
             }
@@ -189,7 +189,7 @@ impl<'a> CanStoreChecker<'a> {
     /// Stub — the C++ version iterates all bag slots; we skip the deep check
     /// and rely on the caller (ItemHandler) to prevent moving non-empty bags.
     #[allow(dead_code)]
-    fn non_empty_bag_check(_pSrcItem: Option<&Item>, _is_swap_with_bag: bool) -> InventoryResult {
+    fn non_empty_bag_check(_p_src_item: Option<&Item>, _is_swap_with_bag: bool) -> InventoryResult {
         InventoryResult::Ok
     }
 
@@ -204,27 +204,27 @@ impl<'a> CanStoreChecker<'a> {
         proto: &ItemTemplate,
         count: &mut u32,
         swap: bool,
-        pSrcItem: Option<&Item>,
+        p_src_item: Option<&Item>,
         bag_slot: &mut u8,
     ) -> InventoryResult {
-        let pItem2_guid = self.get_item_at(bag, slot);
-        let pItem2 = pItem2_guid.and_then(|g| self.get_item(g));
+        let p_item2_guid = self.get_item_at(bag, slot);
+        let p_item2 = p_item2_guid.and_then(|g| self.get_item(g));
 
         // Ignore move item (this slot will be empty at move)
-        let pItem2_is_src = pSrcItem
-            .zip(pItem2.as_ref())
+        let p_item2_is_src = p_src_item
+            .zip(p_item2.as_ref())
             .map(|(src, dst)| src.guid == dst.read().guid)
             .unwrap_or(false);
 
-        if pItem2_is_src {
+        if p_item2_is_src {
             // pretend the slot is empty
         }
 
         // Fix dupe exploit (move non empty bag)
-        if let Some(src) = pSrcItem {
+        if let Some(src) = p_src_item {
             if let Some(src_proto) = self.get_proto(src.entry) {
                 if src_proto.container_slots > 0 {
-                    if !pItem2_is_src {
+                    if !p_item2_is_src {
                         // Can't move non-empty bag unless swapping with another bag
                         // We don't have an empty-check here without scanning bag contents,
                         // but the C++ code does this. For now, we accept the risk.
@@ -233,7 +233,7 @@ impl<'a> CanStoreChecker<'a> {
             }
         }
 
-        let is_empty_slot = pItem2_guid.is_none() || pItem2_is_src || swap;
+        let is_empty_slot = p_item2_guid.is_none() || p_item2_is_src || swap;
 
         let need_space: u32;
 
@@ -257,15 +257,17 @@ impl<'a> CanStoreChecker<'a> {
                 }
             } else {
                 // item is being placed in a bag (19-22 or 63-68)
-                let pBag_guid = self.resolve_bag_item(bag);
-                if pBag_guid.is_none()
-                    || pSrcItem.map(|s| pBag_guid == Some(s.guid)).unwrap_or(false)
+                let p_bag_guid = self.resolve_bag_item(bag);
+                if p_bag_guid.is_none()
+                    || p_src_item
+                        .map(|s| p_bag_guid == Some(s.guid))
+                        .unwrap_or(false)
                 {
                     *bag_slot = bag;
                     return InventoryResult::IntBagError;
                 }
 
-                let pBagProto = match self.resolve_bag_proto(bag) {
+                let p_bag_proto = match self.resolve_bag_proto(bag) {
                     Some(p) => p,
                     None => {
                         *bag_slot = bag;
@@ -273,12 +275,12 @@ impl<'a> CanStoreChecker<'a> {
                     }
                 };
 
-                if slot >= pBagProto.container_slots {
+                if slot >= p_bag_proto.container_slots {
                     *bag_slot = bag;
                     return InventoryResult::IntBagError;
                 }
 
-                if !item_can_go_into_bag(proto.bag_family, pBagProto.bag_family) {
+                if !item_can_go_into_bag(proto.bag_family, p_bag_proto.bag_family) {
                     *bag_slot = bag;
                     return InventoryResult::ItemDoesntGoIntoBag2;
                 }
@@ -287,13 +289,13 @@ impl<'a> CanStoreChecker<'a> {
             need_space = proto.stackable;
         } else {
             // non-empty slot, check item type
-            if let Some(pItem2_ref) = pItem2 {
-                let pItem2_read = pItem2_ref.read();
-                let res = can_be_merged_partly_with(pItem2_read.entry, pItem2_read.count, proto);
+            if let Some(p_item2_ref) = p_item2 {
+                let p_item2_read = p_item2_ref.read();
+                let res = can_be_merged_partly_with(p_item2_read.entry, p_item2_read.count, proto);
                 if res != InventoryResult::Ok {
                     return res;
                 }
-                need_space = proto.stackable.saturating_sub(pItem2_read.count);
+                need_space = proto.stackable.saturating_sub(p_item2_read.count);
             } else {
                 return InventoryResult::ItemNotFound;
             }
@@ -321,7 +323,7 @@ impl<'a> CanStoreChecker<'a> {
         count: &mut u32,
         merge: bool,
         non_specialized: bool,
-        pSrcItem: Option<&Item>,
+        p_src_item: Option<&Item>,
         skip_bag: u8,
         skip_slot: u8,
         bag_slot: &mut u8,
@@ -331,7 +333,7 @@ impl<'a> CanStoreChecker<'a> {
             return InventoryResult::ItemDoesntGoIntoBag2;
         }
 
-        let pBag_guid = match self.resolve_bag_item(bag) {
+        let p_bag_guid = match self.resolve_bag_item(bag) {
             Some(g) => g,
             None => {
                 *bag_slot = bag;
@@ -339,12 +341,12 @@ impl<'a> CanStoreChecker<'a> {
             }
         };
 
-        if pSrcItem.map(|s| pBag_guid == s.guid).unwrap_or(false) {
+        if p_src_item.map(|s| p_bag_guid == s.guid).unwrap_or(false) {
             *bag_slot = bag;
             return InventoryResult::IntBagError;
         }
 
-        let pBagProto = match self.resolve_bag_proto(bag) {
+        let p_bag_proto = match self.resolve_bag_proto(bag) {
             Some(p) => p,
             None => {
                 *bag_slot = bag;
@@ -354,37 +356,37 @@ impl<'a> CanStoreChecker<'a> {
 
         // specialized bag mode: non_specialized=false means we want bags that match the item's bag_family.
         // non_specialized=true means we want plain containers (class=container, subclass=container).
-        let is_plain_container = pBagProto.item_class == 1 && pBagProto.item_subclass == 0; // ITEM_CLASS_CONTAINER=1, ITEM_SUBCLASS_CONTAINER=0
+        let is_plain_container = p_bag_proto.item_class == 1 && p_bag_proto.item_subclass == 0; // ITEM_CLASS_CONTAINER=1, ITEM_SUBCLASS_CONTAINER=0
 
         if non_specialized != is_plain_container {
             *bag_slot = bag;
             return InventoryResult::ItemDoesntGoIntoBag2;
         }
 
-        if !item_can_go_into_bag(proto.bag_family, pBagProto.bag_family) {
+        if !item_can_go_into_bag(proto.bag_family, p_bag_proto.bag_family) {
             *bag_slot = bag;
             return InventoryResult::ItemDoesntGoIntoBag2;
         }
 
-        let bag_size = pBagProto.container_slots;
+        let bag_size = p_bag_proto.container_slots;
 
         for j in 0..bag_size {
             if j == skip_slot && bag == skip_bag {
                 continue;
             }
 
-            let pItem2_guid = self.get_item_at(bag, j);
-            let pItem2_is_src = pSrcItem
-                .zip(pItem2_guid)
+            let p_item2_guid = self.get_item_at(bag, j);
+            let p_item2_is_src = p_src_item
+                .zip(p_item2_guid)
                 .map(|(src, dst_guid)| src.guid == dst_guid)
                 .unwrap_or(false);
 
-            if pItem2_is_src {
+            if p_item2_is_src {
                 // ignore move item — slot will be empty
             }
 
             // if merge, skip empty; if !merge, skip non-empty
-            let has_item = pItem2_guid.is_some() && !pItem2_is_src;
+            let has_item = p_item2_guid.is_some() && !p_item2_is_src;
             if has_item != merge {
                 continue;
             }
@@ -392,14 +394,14 @@ impl<'a> CanStoreChecker<'a> {
             let mut need_space = proto.stackable;
 
             if has_item {
-                if let Some(pItem2) = pItem2_guid.and_then(|g| self.get_item(g)) {
-                    let pItem2_read = pItem2.read();
+                if let Some(p_item2) = p_item2_guid.and_then(|g| self.get_item(g)) {
+                    let p_item2_read = p_item2.read();
                     let res =
-                        can_be_merged_partly_with(pItem2_read.entry, pItem2_read.count, proto);
+                        can_be_merged_partly_with(p_item2_read.entry, p_item2_read.count, proto);
                     if res != InventoryResult::Ok {
                         continue;
                     }
-                    need_space = need_space.saturating_sub(pItem2_read.count);
+                    need_space = need_space.saturating_sub(p_item2_read.count);
                 } else {
                     continue;
                 }
@@ -434,7 +436,7 @@ impl<'a> CanStoreChecker<'a> {
         proto: &ItemTemplate,
         count: &mut u32,
         merge: bool,
-        pSrcItem: Option<&Item>,
+        p_src_item: Option<&Item>,
         skip_bag: u8,
         skip_slot: u8,
     ) -> InventoryResult {
@@ -443,17 +445,17 @@ impl<'a> CanStoreChecker<'a> {
                 continue;
             }
 
-            let pItem2_guid = self.get_item_at(INVENTORY_SLOT_BAG_0, j);
-            let pItem2_is_src = pSrcItem
-                .zip(pItem2_guid)
+            let p_item2_guid = self.get_item_at(INVENTORY_SLOT_BAG_0, j);
+            let p_item2_is_src = p_src_item
+                .zip(p_item2_guid)
                 .map(|(src, dst_guid)| src.guid == dst_guid)
                 .unwrap_or(false);
 
-            if pItem2_is_src {
+            if p_item2_is_src {
                 // slot will be empty
             }
 
-            let has_item = pItem2_guid.is_some() && !pItem2_is_src;
+            let has_item = p_item2_guid.is_some() && !p_item2_is_src;
             if has_item != merge {
                 continue;
             }
@@ -461,14 +463,14 @@ impl<'a> CanStoreChecker<'a> {
             let mut need_space = proto.stackable;
 
             if has_item {
-                if let Some(pItem2) = pItem2_guid.and_then(|g| self.get_item(g)) {
-                    let pItem2_read = pItem2.read();
+                if let Some(p_item2) = p_item2_guid.and_then(|g| self.get_item(g)) {
+                    let p_item2_read = p_item2.read();
                     let res =
-                        can_be_merged_partly_with(pItem2_read.entry, pItem2_read.count, proto);
+                        can_be_merged_partly_with(p_item2_read.entry, p_item2_read.count, proto);
                     if res != InventoryResult::Ok {
                         continue;
                     }
-                    need_space = need_space.saturating_sub(pItem2_read.count);
+                    need_space = need_space.saturating_sub(p_item2_read.count);
                 } else {
                     continue;
                 }
@@ -499,7 +501,7 @@ impl<'a> CanStoreChecker<'a> {
     /// * `bag` / `slot` — desired destination (NULL_BAG / NULL_SLOT means "anywhere")
     /// * `entry` — item template entry
     /// * `count` — how many to store
-    /// * `pItem` — the actual item instance (for bind/temp-loot checks)
+    /// * `p_item` — the actual item instance (for bind/temp-loot checks)
     /// * `swap` — true if this is part of a swap operation
     pub fn can_store_item(
         &self,
@@ -507,7 +509,7 @@ impl<'a> CanStoreChecker<'a> {
         slot: u8,
         entry: u32,
         mut count: u32,
-        pItem: Option<&Item>,
+        p_item: Option<&Item>,
         swap: bool,
     ) -> CanStoreResult {
         let proto_arc = match self.get_proto(entry) {
@@ -527,7 +529,7 @@ impl<'a> CanStoreChecker<'a> {
         let proto: &ItemTemplate = &*proto_arc;
 
         // item used / temp loot
-        if let Some(item) = pItem {
+        if let Some(item) = p_item {
             if item.loot_state != crate::game::items::item::ItemLootUpdateState::None {
                 return CanStoreResult::err(InventoryResult::AlreadyLooted, count, 0);
             }
@@ -538,7 +540,8 @@ impl<'a> CanStoreChecker<'a> {
         }
 
         // check count of similar items (unique/quest limits)
-        let (similar_res, no_similar_count) = self.can_take_more_similar_items(entry, count, pItem);
+        let (similar_res, no_similar_count) =
+            self.can_take_more_similar_items(entry, count, p_item);
 
         let mut no_similar: u32 = no_similar_count;
 
@@ -568,7 +571,7 @@ impl<'a> CanStoreChecker<'a> {
                 proto,
                 &mut count,
                 swap,
-                pItem,
+                p_item,
                 &mut bag_slot,
             );
             if res != InventoryResult::Ok {
@@ -606,7 +609,7 @@ impl<'a> CanStoreChecker<'a> {
                         proto,
                         &mut count,
                         true,
-                        pItem,
+                        p_item,
                         bag,
                         slot,
                     );
@@ -625,7 +628,7 @@ impl<'a> CanStoreChecker<'a> {
                         proto,
                         &mut count,
                         true,
-                        pItem,
+                        p_item,
                         bag,
                         slot,
                     );
@@ -644,7 +647,7 @@ impl<'a> CanStoreChecker<'a> {
                         &mut count,
                         true,
                         false,
-                        pItem,
+                        p_item,
                         NULL_BAG,
                         slot,
                         &mut bag_slot,
@@ -657,7 +660,7 @@ impl<'a> CanStoreChecker<'a> {
                             &mut count,
                             true,
                             true,
-                            pItem,
+                            p_item,
                             NULL_BAG,
                             slot,
                             &mut bag_slot,
@@ -682,7 +685,7 @@ impl<'a> CanStoreChecker<'a> {
                         proto,
                         &mut count,
                         false,
-                        pItem,
+                        p_item,
                         bag,
                         slot,
                     );
@@ -701,7 +704,7 @@ impl<'a> CanStoreChecker<'a> {
                     proto,
                     &mut count,
                     false,
-                    pItem,
+                    p_item,
                     bag,
                     slot,
                 );
@@ -719,7 +722,7 @@ impl<'a> CanStoreChecker<'a> {
                     &mut count,
                     false,
                     false,
-                    pItem,
+                    p_item,
                     NULL_BAG,
                     slot,
                     &mut bag_slot,
@@ -732,7 +735,7 @@ impl<'a> CanStoreChecker<'a> {
                         &mut count,
                         false,
                         true,
-                        pItem,
+                        p_item,
                         NULL_BAG,
                         slot,
                         &mut bag_slot,
@@ -758,7 +761,7 @@ impl<'a> CanStoreChecker<'a> {
                 proto,
                 &mut count,
                 true,
-                pItem,
+                p_item,
                 bag,
                 slot,
             );
@@ -776,7 +779,7 @@ impl<'a> CanStoreChecker<'a> {
                 proto,
                 &mut count,
                 true,
-                pItem,
+                p_item,
                 bag,
                 slot,
             );
@@ -797,7 +800,7 @@ impl<'a> CanStoreChecker<'a> {
                         &mut count,
                         true,
                         false,
-                        pItem,
+                        p_item,
                         bag,
                         slot,
                         &mut bag_slot,
@@ -820,7 +823,7 @@ impl<'a> CanStoreChecker<'a> {
                     &mut count,
                     true,
                     true,
-                    pItem,
+                    p_item,
                     bag,
                     slot,
                     &mut bag_slot,
@@ -844,7 +847,7 @@ impl<'a> CanStoreChecker<'a> {
                     proto,
                     &mut count,
                     false,
-                    pItem,
+                    p_item,
                     bag,
                     slot,
                 );
@@ -864,7 +867,7 @@ impl<'a> CanStoreChecker<'a> {
                     &mut count,
                     false,
                     false,
-                    pItem,
+                    p_item,
                     bag,
                     slot,
                     &mut bag_slot,
@@ -879,7 +882,7 @@ impl<'a> CanStoreChecker<'a> {
         }
 
         // non-empty bag over other bag check
-        if let Some(item) = pItem {
+        if let Some(item) = p_item {
             if let Some(item_proto) = self.get_proto(item.entry) {
                 if item_proto.container_slots > 0 {
                     return CanStoreResult::err(
@@ -899,7 +902,7 @@ impl<'a> CanStoreChecker<'a> {
             proto,
             &mut count,
             false,
-            pItem,
+            p_item,
             bag,
             slot,
         );
@@ -919,7 +922,7 @@ impl<'a> CanStoreChecker<'a> {
                 &mut count,
                 false,
                 true,
-                pItem,
+                p_item,
                 bag,
                 slot,
                 &mut bag_slot,
