@@ -1924,8 +1924,31 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
         player_guid, session_id
     );
 
-    // A disconnected socket has already dropped its receive channel. Do not let
-    // this optional client acknowledgement abort the remaining world cleanup.
+    // A failed save must not strand the client on a dead character screen, so the
+    // session reset below always runs even when persistence fails.
+    if let Err(e) = logout_persist_and_teardown(session, world, player_guid, save_context).await {
+        error!(
+            "[LOGOUT] Cleanup failed for player {} (session {}): {e}. \
+             Resetting session to character-select anyway.",
+            player_guid, session_id
+        );
+    }
+
+    // Unregister player from session manager
+    world.session_mgr.unregister_player(player_guid);
+    session.set_player_guid(None);
+
+    // Clear logout timer to prevent repeated cleanup attempts
+    session.cancel_logout_timer();
+
+    // Set session state back to Authenticated (character select)
+    session.set_state(SessionState::Authenticated);
+
+    // Only now is the session able to serve CMSG_CHAR_ENUM: route_packet gates on
+    // SessionState, and the player packet handler is already gone. Telling the client
+    // any earlier makes its immediate char-enum request get dropped, leaving it stuck
+    // on "Retrieving character list". A disconnected socket has already dropped its
+    // receive channel, so a send error here is expected and not a failure.
     if let Err(error) = session.send_msg(SmsgLogoutComplete) {
         debug!(
             "[LOGOUT] Could not send logout completion to disconnected player {}: {}",
@@ -1933,6 +1956,22 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
         );
     }
 
+    info!("Logout cleanup complete for player {}", player_guid);
+
+    Ok(())
+}
+
+/// Persist player state and tear it down from the world's systems, map and manager.
+///
+/// Split out of [`perform_logout_cleanup`] so that a failure in any of these fallible
+/// steps still leaves the session reset to character-select rather than wedged in
+/// `LoggedIn` with no packet handler.
+async fn logout_persist_and_teardown(
+    session: &WorldSession,
+    world: &World,
+    player_guid: ObjectGuid,
+    save_context: &str,
+) -> Result<()> {
     // Save auras before removing the player from systems, matching Player::_SaveAuras.
     world.systems.auras.on_logout(player_guid, world).await?;
 
@@ -1988,18 +2027,6 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
         .player_mgr
         .logout_player(player_guid, account_id, &world.databases.character, world)
         .await?;
-
-    // Unregister player from session manager
-    world.session_mgr.unregister_player(player_guid);
-    session.set_player_guid(None);
-
-    // Clear logout timer to prevent repeated cleanup attempts
-    session.cancel_logout_timer();
-
-    // Set session state back to Authenticated (character select)
-    session.set_state(SessionState::Authenticated);
-
-    info!("Logout cleanup complete for player {}", player_guid);
 
     Ok(())
 }
