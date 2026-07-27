@@ -156,7 +156,6 @@ impl ImplicitTarget {
                 | Self::Unit
                 | Self::SingleRaid
                 | Self::PartyMember
-                | Self::GameObject
         )
     }
 
@@ -2782,6 +2781,25 @@ mod tests {
 
         let resolved =
             resolve_spell_targets(spell_id, &SpellCastTargets::default(), caster, &world);
+        assert_eq!(resolved.effect_targets[0], vec![gameobject_guid]);
+    }
+
+    #[tokio::test]
+    async fn explicit_gameobject_target_is_resolved() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(1);
+        let gameobject_guid = ObjectGuid::new_gameobject(161557, 1);
+        let spell_id = 6478;
+        let mut spell = aoe_enemy_spell(spell_id);
+        spell.effect_implicit_target_a[0] = ImplicitTarget::GameObject as u32;
+        world.managers.spell_mgr.add_spell(spell);
+
+        let targets = SpellCastTargets {
+            gameobject_target_guid: Some(gameobject_guid),
+            ..Default::default()
+        };
+        let resolved = resolve_spell_targets(spell_id, &targets, caster, &world);
+
         assert_eq!(resolved.effect_targets[0], vec![gameobject_guid]);
     }
 

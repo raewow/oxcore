@@ -58,6 +58,15 @@ pub async fn handle_gameobj_use(
         })
         .unwrap_or(0);
 
+    if go_type == GameObjectType::Chest {
+        world
+            .systems
+            .loot
+            .handle_loot_request(player_guid, go_guid, world)
+            .await?;
+        return Ok(());
+    }
+
     if !matches!(go_type, GameObjectType::QuestGiver | GameObjectType::Goober) {
         return Ok(());
     }

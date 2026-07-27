@@ -972,6 +972,52 @@ pub async fn apply_target_effects(
         return Ok(results);
     }
 
+    // Game objects are spell targets but not units: they do not receive hit rolls,
+    // combat processing, diminishing returns, or proc flags. Dispatch their effects
+    // directly, as `Spell::EffectOpenLock` does for a GO target in the reference core.
+    if target.target_guid.is_game_object() {
+        for effect_index in 0..3usize {
+            if target.effect_mask & (1 << effect_index) == 0 {
+                continue;
+            }
+            let effect_type = spell_entry.effect[effect_index];
+            let Some(effect_type_enum) = SpellEffectType::from_u32(effect_type) else {
+                tracing::warn!("Unknown effect type {} for spell {}", effect_type, spell_id);
+                continue;
+            };
+            let base_value = custom_base_points
+                .and_then(|bp| bp[effect_index])
+                .unwrap_or(spell_entry.effect_base_points[effect_index]);
+            let input = EffectInput {
+                caster_guid,
+                cast_item_guid,
+                target_guid: Some(target.target_guid),
+                spell_id,
+                effect_index: effect_index as u8,
+                base_value,
+                misc_value: spell_entry.effect_misc_value[effect_index],
+                misc_value_b: 0,
+                is_triggered,
+                die_sides: spell_entry.effect_die_sides[effect_index],
+                points_per_level: spell_entry.effect_real_points_per_level[effect_index],
+                spell_coefficient: spell_entry.effect_bonus_coefficient[effect_index],
+                spell_school: spell_entry.school as u8,
+                casting_time_ms: world
+                    .dbc
+                    .read()
+                    .get_spell_cast_time(spell_entry.casting_time_index)
+                    .map(|entry| entry.cast_time.max(0) as u32)
+                    .unwrap_or(0),
+                diminishing: target.diminishing,
+            };
+            let mut result = dispatch_effect(effect_type_enum, &input, world).await?;
+            result.target_guid = Some(target.target_guid);
+            result.effect_index = effect_index as u8;
+            results.push(result);
+        }
+        return Ok(results);
+    }
+
     // Resolve the hit outcome once for the whole target (not once per effect — the old
     // per-effect dispatch loop rolled a fresh hit per effect index, which could both
     // double-roll and desync the miss packet/AI event from the effects actually applied).

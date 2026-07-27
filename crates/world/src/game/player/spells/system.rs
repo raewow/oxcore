@@ -2210,6 +2210,23 @@ impl SpellSystem {
         self.broadcast_mgr
             .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
 
+        // `Spell::handle_immediate` sends SPELL_GO before executing EffectOpenLock.
+        // The client keeps an opened chest in-use until it receives that completion packet.
+        if let Some(go_guid) = cast_targets.gameobject_target_guid {
+            if world
+                .managers
+                .spell_mgr
+                .get(spell_id)
+                .is_some_and(|entry| opens_lock(&entry.effect))
+            {
+                world
+                    .systems
+                    .loot
+                    .handle_open_lock_loot(caster_guid, go_guid, world)
+                    .await?;
+            }
+        }
+
         // The client must receive the completed cast before an expendable item is
         // removed. Consuming it earlier can remove the active cast before its effects
         // run (and makes the client discard the pending item-use cast).

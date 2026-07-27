@@ -11,7 +11,6 @@ use crate::game::player::spells::state::{
 };
 use crate::World;
 use anyhow::Result;
-use bytes::Buf;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Parse SpellCastTargets from a CMSG_CAST_SPELL packet.

@@ -1,10 +1,15 @@
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
-use crate::game::gameobject::{GameObjectType, LootState};
+use crate::game::common::update_fields::GAMEOBJECT_STATE;
+use crate::game::gameobject::{GOState, GameObjectType, LootState};
 use crate::game::items::ItemManager;
 use crate::game::loot::manager::LootManager;
 use crate::game::player::PlayerManager;
 use crate::World;
 use oxcore_shared::messages::loot::*;
+use oxcore_shared::messages::update::{
+    ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
 use std::sync::Arc;
 
@@ -48,6 +53,31 @@ impl LootSystem {
         target_guid: ObjectGuid,
         world: &World,
     ) -> anyhow::Result<()> {
+        self.handle_loot_request_with_type(player_guid, target_guid, 1, world)
+            .await
+    }
+
+    /// Open loot through `SPELL_EFFECT_OPEN_LOCK`.
+    ///
+    /// MaNGOS passes `LOOT_SKINNING` to `Player::SendLoot`, which the client-facing
+    /// packet converts to `LOOT_PICKPOCKETING` (2).
+    pub async fn handle_open_lock_loot(
+        &self,
+        player_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        world: &World,
+    ) -> anyhow::Result<()> {
+        self.handle_loot_request_with_type(player_guid, target_guid, 2, world)
+            .await
+    }
+
+    async fn handle_loot_request_with_type(
+        &self,
+        player_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        loot_type: u8,
+        world: &World,
+    ) -> anyhow::Result<()> {
         tracing::info!(
             "[LOOT] handle_loot_request: player={:?} target={:?}",
             player_guid,
@@ -83,12 +113,16 @@ impl LootSystem {
         // 3. Mark as being looted
         self.manager.set_looting(target_guid, player_guid);
 
+        if target_guid.is_game_object() {
+            self.set_gameobject_state(player_guid, target_guid, GOState::Active, world);
+        }
+
         // 4. Set player's looting target
         self.player_mgr.set_looting_target(player_guid, target_guid);
 
         // 5. Build and send loot response
         tracing::info!("[LOOT] Sending loot window to player={:?}", player_guid);
-        self.send_loot_window(player_guid, target_guid, world);
+        self.send_loot_window(player_guid, target_guid, loot_type, world);
 
         Ok(())
     }
@@ -186,6 +220,10 @@ impl LootSystem {
         target_guid: ObjectGuid,
         world: &World,
     ) -> anyhow::Result<()> {
+        if target_guid.is_game_object() {
+            self.set_gameobject_state(player_guid, target_guid, GOState::Ready, world);
+        }
+
         // Clear looting state
         self.manager.clear_looting(target_guid);
 
@@ -221,7 +259,13 @@ impl LootSystem {
 
     // Private methods
 
-    fn send_loot_window(&self, player_guid: ObjectGuid, target_guid: ObjectGuid, world: &World) {
+    fn send_loot_window(
+        &self,
+        player_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        loot_type: u8,
+        world: &World,
+    ) {
         // Decide (once per player) which quest drops this player may see. This also makes
         // them count as unlooted loot — quest items nobody needs never do.
         let visible_quest_slots =
@@ -299,21 +343,10 @@ impl LootSystem {
         // Build and send message
         let msg = SmsgLootResponse {
             loot_guid: target_guid,
-            loot_type: 1, // LOOT_CORPSE
+            loot_type,
             gold,
             items,
         };
-        tracing::info!(
-            "[LOOT] Sending {} item(s) to player={:?} for target={:?}: {:?}",
-            msg.items.len(),
-            player_guid,
-            target_guid,
-            msg.items
-                .iter()
-                .map(|item| item.item_id)
-                .collect::<Vec<_>>(),
-        );
-
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 
@@ -367,6 +400,30 @@ impl LootSystem {
                 gameobject.loot_state = LootState::Activated;
             });
         Ok(())
+    }
+
+    fn set_gameobject_state(
+        &self,
+        player_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        state: GOState,
+        world: &World,
+    ) {
+        if world
+            .managers
+            .gameobject_mgr
+            .with_gameobject_mut(target_guid, |gameobject| gameobject.go_state = state)
+            .is_none()
+        {
+            return;
+        }
+
+        let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+            ValuesUpdateBlock::new(target_guid, ObjectType::GameObject)
+                .set_field(GAMEOBJECT_STATE, state as u32),
+        ));
+        self.broadcast_mgr
+            .send_to_player(player_guid, update.to_world_packet());
     }
 
     fn check_and_clear_if_empty(&self, target_guid: ObjectGuid, world: &World) {
