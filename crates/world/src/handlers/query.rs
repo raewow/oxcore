@@ -5,9 +5,47 @@ use bytes::Buf;
 use std::sync::Arc;
 
 use crate::core::session::WorldSession;
+use crate::game::items::manager::ItemTemplate;
 use crate::World;
 use oxcore_shared::database::{CharacterRepository, Databases};
 use oxcore_shared::protocol::WorldPacket;
+
+fn item_spell_query_values(
+    template: &ItemTemplate,
+    index: usize,
+    world: &World,
+) -> (u32, u32, i32, u32, u32, u32) {
+    let spell_id = template.spell_id[index];
+    if spell_id == 0 {
+        return (0, 0, 0, u32::MAX, 0, u32::MAX);
+    }
+
+    let (spell_cooldown, spell_category, spell_category_cooldown) =
+        if template.spell_cooldown[index] >= 0 || template.spell_category_cooldown[index] >= 0 {
+            (
+                template.spell_cooldown[index] as u32,
+                template.spell_category[index],
+                template.spell_category_cooldown[index] as u32,
+            )
+        } else if let Some(spell) = world.managers.spell_mgr.get(spell_id) {
+            (
+                spell.recovery_time,
+                spell.category,
+                spell.category_recovery_time,
+            )
+        } else {
+            (0, 0, 0)
+        };
+
+    (
+        spell_id,
+        template.spell_trigger[index],
+        template.spell_charges[index].max(0),
+        spell_cooldown,
+        spell_category,
+        spell_category_cooldown,
+    )
+}
 
 /// Handle CMSG_CREATURE_QUERY
 ///
@@ -88,6 +126,12 @@ pub async fn handle_item_query(
         // The client builds on-use tooltip text from the item spell records, so preserve
         // every loaded template spell field in this 1.12 response.
 
+        let spell1 = item_spell_query_values(&template, 0, world);
+        let spell2 = item_spell_query_values(&template, 1, world);
+        let spell3 = item_spell_query_values(&template, 2, world);
+        let spell4 = item_spell_query_values(&template, 3, world);
+        let spell5 = item_spell_query_values(&template, 4, world);
+
         let response = SmsgItemQuerySingleResponse {
             entry: template.entry,
             class: template.item_class,
@@ -165,36 +209,36 @@ pub async fn handle_item_query(
             ammo_type: template.ammo_type as u32,
             ranged_mod_range: 0.0,
 
-            spell_id1: template.spell_id[0],
-            spell_trigger1: template.spell_trigger[0],
-            spell_charges1: template.spell_charges[0],
-            spell_cooldown1: template.spell_cooldown[0] as u32,
-            spell_category1: template.spell_category[0],
-            spell_category_cooldown1: template.spell_category_cooldown[0] as u32,
-            spell_id2: template.spell_id[1],
-            spell_trigger2: template.spell_trigger[1],
-            spell_charges2: template.spell_charges[1],
-            spell_cooldown2: template.spell_cooldown[1] as u32,
-            spell_category2: template.spell_category[1],
-            spell_category_cooldown2: template.spell_category_cooldown[1] as u32,
-            spell_id3: template.spell_id[2],
-            spell_trigger3: template.spell_trigger[2],
-            spell_charges3: template.spell_charges[2],
-            spell_cooldown3: template.spell_cooldown[2] as u32,
-            spell_category3: template.spell_category[2],
-            spell_category_cooldown3: template.spell_category_cooldown[2] as u32,
-            spell_id4: template.spell_id[3],
-            spell_trigger4: template.spell_trigger[3],
-            spell_charges4: template.spell_charges[3],
-            spell_cooldown4: template.spell_cooldown[3] as u32,
-            spell_category4: template.spell_category[3],
-            spell_category_cooldown4: template.spell_category_cooldown[3] as u32,
-            spell_id5: template.spell_id[4],
-            spell_trigger5: template.spell_trigger[4],
-            spell_charges5: template.spell_charges[4],
-            spell_cooldown5: template.spell_cooldown[4] as u32,
-            spell_category5: template.spell_category[4],
-            spell_category_cooldown5: template.spell_category_cooldown[4] as u32,
+            spell_id1: spell1.0,
+            spell_trigger1: spell1.1,
+            spell_charges1: spell1.2,
+            spell_cooldown1: spell1.3,
+            spell_category1: spell1.4,
+            spell_category_cooldown1: spell1.5,
+            spell_id2: spell2.0,
+            spell_trigger2: spell2.1,
+            spell_charges2: spell2.2,
+            spell_cooldown2: spell2.3,
+            spell_category2: spell2.4,
+            spell_category_cooldown2: spell2.5,
+            spell_id3: spell3.0,
+            spell_trigger3: spell3.1,
+            spell_charges3: spell3.2,
+            spell_cooldown3: spell3.3,
+            spell_category3: spell3.4,
+            spell_category_cooldown3: spell3.5,
+            spell_id4: spell4.0,
+            spell_trigger4: spell4.1,
+            spell_charges4: spell4.2,
+            spell_cooldown4: spell4.3,
+            spell_category4: spell4.4,
+            spell_category_cooldown4: spell4.5,
+            spell_id5: spell5.0,
+            spell_trigger5: spell5.1,
+            spell_charges5: spell5.2,
+            spell_cooldown5: spell5.3,
+            spell_category5: spell5.4,
+            spell_category_cooldown5: spell5.5,
 
             // Misc fields
             bonding: 0,
@@ -230,10 +274,11 @@ pub async fn handle_item_query(
             quality2: 0,
         };
 
-        tracing::debug!(
-            "SMSG_ITEM_QUERY_SINGLE_RESPONSE: entry={}, name='{}'",
+        tracing::info!(
+            "SMSG_ITEM_QUERY_SINGLE_RESPONSE: entry={}, name='{}', spells={:?}",
             item_entry,
-            template.name
+            template.name,
+            template.spell_id
         );
 
         session.send_packet(response.to_world_packet())?;

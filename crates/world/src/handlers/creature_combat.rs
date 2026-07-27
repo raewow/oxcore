@@ -82,6 +82,14 @@ pub async fn handle_attack_swing(
         .combat
         .enter_combat(attacker_guid, target_guid, &world.managers.player_mgr);
 
+    // Tell the target it is being attacked (vmangos Unit::Attack -> CreatureAI::AttackedBy).
+    // The creature engages on the swing itself, so a first swing that misses still pulls it.
+    crate::game::creature::ai::queue_event(
+        world,
+        target_guid,
+        crate::game::creature::ai::AIEvent::AttackedBy { attacker_guid },
+    );
+
     // Broadcast SMSG_ATTACKSTART to nearby players
     let packet = SmsgAttackStart {
         attacker_guid,
@@ -179,18 +187,20 @@ pub async fn execute_pending_attack_vs_creature(
             health_after
         );
 
-        // Trigger AI event
-        if actual_damage > 0 && !is_dead {
-            crate::game::creature::ai::queue_event(
-                world,
-                target_guid,
+        // Trigger AI event. A swing that misses (or is dodged/parried/fully absorbed)
+        // still engages the creature — vmangos routes both through the victim's AI.
+        if !is_dead {
+            let event = if actual_damage > 0 {
                 crate::game::creature::ai::AIEvent::DamageTaken {
                     attacker_guid,
                     damage: actual_damage,
                     spell_id: None,
                     school: 0,
-                },
-            );
+                }
+            } else {
+                crate::game::creature::ai::AIEvent::AttackedBy { attacker_guid }
+            };
+            crate::game::creature::ai::queue_event(world, target_guid, event);
         }
 
         // Send damage packet

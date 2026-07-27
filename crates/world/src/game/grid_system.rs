@@ -791,7 +791,11 @@ mod tests {
         let map = world.managers.map_mgr.get_or_create_map(0, 0);
         map.add_player(ObjectGuid::new_player(1), here);
 
-        world.systems.grid.process_map_grids(0, 0, &world).await
+        world
+            .systems
+            .grid
+            .process_map_grids(0, 0, &world)
+            .await
             .expect("grid processing");
 
         assert!(

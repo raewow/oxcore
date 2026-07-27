@@ -303,6 +303,16 @@ impl LootSystem {
             gold,
             items,
         };
+        tracing::info!(
+            "[LOOT] Sending {} item(s) to player={:?} for target={:?}: {:?}",
+            msg.items.len(),
+            player_guid,
+            target_guid,
+            msg.items
+                .iter()
+                .map(|item| item.item_id)
+                .collect::<Vec<_>>(),
+        );
 
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }

@@ -22,6 +22,7 @@ use crate::game::items::Item;
 use crate::game::player::experience::ExperienceSystem;
 use crate::game::player::Player;
 use crate::game::player::PlayerManager;
+use oxcore_shared::database::characters::models::quest::QuestStatusRow;
 use oxcore_shared::database::characters::repositories::inventory_repository_trait::MockInventoryRepositoryTrait;
 use oxcore_shared::database::characters::repositories::quest_repository::MockQuestRepositoryTrait;
 use oxcore_shared::protocol::{HighGuid, ObjectGuid};
@@ -1033,3 +1034,68 @@ async fn test_handle_quest_complete_repeatable_with_items() {
 
 // Additional integration tests for the full handlers should be added once
 // a test-safe World constructor is available.
+
+#[tokio::test]
+async fn kill_credit_marks_quest_complete() {
+    let setup = create_test_setup();
+    let player_guid = test_player_guid(1);
+    add_player_to_setup(&setup, create_test_player(player_guid, 1, 1, 1));
+
+    let mut quest = create_test_quest_template(1);
+    quest.req_creature_or_go_id[0] = 200;
+    quest.req_creature_or_go_count[0] = 1;
+    add_quest_template(&setup, quest);
+    add_active_quest(&setup, player_guid, 1);
+
+    setup
+        .quest_system
+        .handle_kill_credit(player_guid, 200, test_creature_guid(1));
+
+    let progress = setup
+        .player_mgr
+        .with_player(player_guid, |player| player.active_quests[0].clone())
+        .unwrap();
+    assert_eq!(progress.creature_or_go_count, [1, 0, 0, 0]);
+    assert_eq!(progress.status, QuestStatus::Complete);
+}
+
+#[tokio::test]
+async fn load_from_db_promotes_completed_kill_credit() {
+    let setup = create_test_setup();
+    let player_guid = test_player_guid(1);
+    add_player_to_setup(&setup, create_test_player(player_guid, 1, 1, 1));
+
+    let mut quest = create_test_quest_template(1);
+    quest.req_creature_or_go_id[0] = 200;
+    quest.req_creature_or_go_count[0] = 3;
+    add_quest_template(&setup, quest);
+
+    setup.quest_system.load_from_db(
+        player_guid,
+        vec![QuestStatusRow {
+            guid: player_guid.counter(),
+            quest: 1,
+            status: QuestStatus::Incomplete as u8,
+            rewarded: false,
+            explored: false,
+            timer: 0,
+            mob_count1: 3,
+            mob_count2: 0,
+            mob_count3: 0,
+            mob_count4: 0,
+            item_count1: 0,
+            item_count2: 0,
+            item_count3: 0,
+            item_count4: 0,
+            reward_choice: 0,
+        }],
+        vec![],
+    );
+
+    let progress = setup
+        .player_mgr
+        .with_player(player_guid, |player| player.active_quests[0].clone())
+        .unwrap();
+    assert_eq!(progress.creature_or_go_count, [3, 0, 0, 0]);
+    assert_eq!(progress.status, QuestStatus::Complete);
+}
