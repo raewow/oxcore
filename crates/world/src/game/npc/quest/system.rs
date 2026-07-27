@@ -496,20 +496,6 @@ impl QuestSystem {
             }
         }
 
-        // 8b. Do not offer an earlier chain step or breadcrumb once the next quest is active/rewarded.
-        if quest.next_quest_id > 0 {
-            let next_quest_id = quest.next_quest_id as u32;
-            if active.contains(&next_quest_id) || rewarded.contains(&next_quest_id) {
-                return false;
-            }
-        }
-        if quest.next_quest_in_chain > 0
-            && (active.contains(&quest.next_quest_in_chain)
-                || rewarded.contains(&quest.next_quest_in_chain))
-        {
-            return false;
-        }
-
         for active_quest_id in &active {
             if let Some(active_quest) = self.manager.get_quest_template(*active_quest_id) {
                 if active_quest.breadcrumb_for_quest_id == quest.id as i32 {

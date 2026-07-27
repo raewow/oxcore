@@ -1599,6 +1599,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn quest_menu_keeps_independent_quest_when_its_next_quest_is_active() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (_session, _rx) = add_player(&mut world);
+        let player_guid = test_player_guid();
+        let creature_entry = 823; // Deputy Willem
+        add_creature(&mut world, creature_entry, NPC_FLAG_QUEST_GIVER);
+
+        let brotherhood = QuestTemplate {
+            id: 18,
+            title: "Brotherhood of Thieves".to_string(),
+            quest_level: 4,
+            next_quest_id: 3903,
+            ..QuestTemplate::default()
+        };
+        let milly = QuestTemplate {
+            id: 3903,
+            title: "Milly Osworth".to_string(),
+            quest_level: 4,
+            ..QuestTemplate::default()
+        };
+        world.systems.quest.manager.add_quest_template(brotherhood);
+        world.systems.quest.manager.add_quest_template(milly);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(creature_entry, 18);
+        world
+            .systems
+            .quest
+            .manager
+            .add_creature_quest_starter(creature_entry, 3903);
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.active_quests.push(QuestProgress::new(3903));
+            });
+
+        let quest_ids: Vec<u32> = world
+            .systems
+            .quest
+            .prepare_quest_menu(player_guid, creature_entry, &world)
+            .into_iter()
+            .map(|quest| quest.quest_id)
+            .collect();
+
+        assert!(quest_ids.contains(&18));
+    }
+
+    #[tokio::test]
     async fn questgiver_hello_gossip_flag_without_menu_sends_quest_details() {
         let mut world = test_world();
         install_mock_quest_system(&mut world);
