@@ -97,11 +97,13 @@ impl PowerSystem {
 
         // Process regen for all online players, collecting power changes
         let mut power_updates: Vec<(ObjectGuid, PowerType, u32)> = Vec::new();
+        let mut health_updates: Vec<(ObjectGuid, u32)> = Vec::new();
         let player_mgr = world.managers.player_mgr.clone();
         player_mgr.for_each_player(|guid, player| {
             let power_type = player.power.power_type;
             let idx = power_type as usize;
             let old_value = player.power.current[idx];
+            let old_health = player.stats.health;
             self.regen_tick(guid, player, now);
             let new_value = player.power.current[idx];
             if new_value != old_value {
@@ -115,11 +117,17 @@ impl PowerSystem {
                 );
                 power_updates.push((guid, power_type, new_value));
             }
+            if player.stats.health != old_health {
+                health_updates.push((guid, player.stats.health));
+            }
         });
 
         // Broadcast power updates outside the player lock
         for (guid, power_type, value) in power_updates {
             self.broadcast_power_value(guid, power_type, value, world);
+        }
+        for (guid, value) in health_updates {
+            self.broadcast_health_value(guid, value);
         }
 
         Ok(())
@@ -227,8 +235,9 @@ impl PowerSystem {
                 player.power.carry_health_regen = with_carry - whole as f32;
 
                 if whole > 0 {
-                    player.stats.modify_health(whole);
-                    // TODO: broadcast UNIT_FIELD_HEALTH update when health system wired
+                    if player.stats.modify_health(whole) != 0 {
+                        player.stats.dirty = true;
+                    }
                 }
             }
         }
@@ -424,14 +433,49 @@ impl PowerSystem {
         self.broadcast_mgr
             .broadcast_nearby(player_guid, &packet, true);
     }
+
+    /// Broadcast a health update produced by passive regeneration.
+    fn broadcast_health_value(&self, player_guid: ObjectGuid, value: u32) {
+        let block = ValuesUpdateBlock::new(player_guid, ObjectType::Player)
+            .set_field(UNIT_FIELD_HEALTH, value);
+        let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
+        let packet = update_msg.to_world_packet();
+        self.broadcast_mgr
+            .broadcast_nearby(player_guid, &packet, true);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
     use crate::game::broadcast_mgr::MockBroadcastManagerTrait;
     use crate::game::player::auras::{Aura, AuraFlags};
     use crate::game::player::power::regen::MAX_RAGE;
+    use oxcore_shared::database::Databases;
+    use sqlx::mysql::MySqlPoolOptions;
+    use std::path::PathBuf;
+
+    fn test_world() -> World {
+        let pool = || {
+            MySqlPoolOptions::new()
+                .connect_lazy("mysql://test:test@localhost/test")
+                .expect("lazy pool should be constructible")
+        };
+        let databases = Arc::new(Databases {
+            world: pool(),
+            character: pool(),
+            auth: pool(),
+            logs: pool(),
+        });
+
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
 
     #[test]
     fn test_power_type_for_class() {
@@ -554,6 +598,7 @@ mod tests {
 
         // Level 60: 100 spirit * 0.30 = 30; seated multiplier yields 45.
         assert_eq!(player.stats.health, 145);
+        assert!(player.stats.dirty);
     }
 
     #[test]
@@ -587,6 +632,7 @@ mod tests {
 
         // Spirit regen is 30 * 1.5; the unscaled 5 HP5 contributes 2 per tick.
         assert_eq!(player.stats.health, 147);
+        assert!(player.stats.dirty);
     }
 
     #[test]
@@ -600,6 +646,38 @@ mod tests {
         system.regen_tick(player.guid, &mut player, 0);
 
         assert_eq!(player.stats.health, 1_000);
+    }
+
+    #[test]
+    fn passive_health_regen_broadcasts_health_update() {
+        let world = test_world();
+        let mut broadcast_mgr = MockBroadcastManagerTrait::new();
+        let guid = ObjectGuid::new_player(1);
+        broadcast_mgr
+            .expect_broadcast_nearby()
+            .withf(move |sender_guid, _, include_self| *sender_guid == guid && *include_self)
+            .times(1)
+            .returning(|_, _, _| ());
+        let system = PowerSystem::new(Arc::new(broadcast_mgr));
+
+        let mut player = warrior(60);
+        player.stats.health = 100;
+        player.stats.max_health = 1_000;
+        player.stats.spirit = 100;
+        world.managers.player_mgr.add_player(player, 1);
+
+        system
+            .update(Duration::from_millis(REGEN_TICK_MS as u64), &world)
+            .expect("health regen update should succeed");
+
+        world
+            .managers
+            .player_mgr
+            .with_player(guid, |player| {
+                assert_eq!(player.stats.health, 130);
+                assert!(player.stats.dirty);
+            })
+            .expect("regenerating player should remain registered");
     }
 
     #[test]

@@ -1208,6 +1208,15 @@ fn enter_combat_on_miss(caster_guid: ObjectGuid, target_guid: ObjectGuid, world:
                 creature.threat_manager.add_threat(caster_guid, 1.0);
                 creature.combat.add_threat(caster_guid, 1.0, timestamp);
             });
+        // `AttackedBy` is what makes the AI enter combat *and* set an attack target;
+        // seeding threat alone leaves the creature chasing without a victim.
+        crate::game::creature::ai::queue_event(
+            world,
+            target_guid,
+            crate::game::creature::ai::AIEvent::AttackedBy {
+                attacker_guid: caster_guid,
+            },
+        );
     } else if target_guid.is_player() {
         world
             .systems

@@ -277,7 +277,13 @@ impl AuraSystem {
                 & super::interrupt::AuraInterruptFlags::STANDING_CANCELS.0)
                 != 0
             {
-                // Send SMSG_STANDSTATE_UPDATE packet to make player sit
+                // Keep authoritative state in sync with the client animation so seated
+                // regeneration receives its correct multiplier.
+                world
+                    .systems
+                    .player
+                    .manager()
+                    .with_player_mut(target_guid, |player| player.stand_state = 1);
                 self.send_stand_state_update(target_guid, 1, world);
             }
         }
