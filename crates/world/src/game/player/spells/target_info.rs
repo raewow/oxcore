@@ -1184,10 +1184,10 @@ fn resolve_reflect_result(
 /// Put the caster and a non-positive-spell miss target into combat (MaNGOS: `unit->AttackedBy`,
 /// `AddThreat`, `SetInCombatWithAggressor`/`SetInCombatWithVictim` on a miss/resist/immune).
 ///
-/// Simplified: registers zero threat on creature victims (enough to aggro without
-/// double-counting damage threat, which is added separately when a hit actually lands)
-/// and flags player victims as in combat. Full `SPELL_ATTR_EX_FAILURE_BREAKS_STEALTH`/
-/// stealth-removal handling is not ported yet.
+/// Simplified: mirrors `AttackedBy` plus the initial `AddThreat` so the creature AI has
+/// an active victim to chase, without double-counting damage threat (which is added when
+/// a hit lands). Full `SPELL_ATTR_EX_FAILURE_BREAKS_STEALTH`/stealth-removal handling is
+/// not ported yet.
 fn enter_combat_on_miss(caster_guid: ObjectGuid, target_guid: ObjectGuid, world: &World) {
     if target_guid.is_creature() {
         let timestamp = std::time::SystemTime::now()
@@ -1198,13 +1198,25 @@ fn enter_combat_on_miss(caster_guid: ObjectGuid, target_guid: ObjectGuid, world:
             .managers
             .creature_mgr
             .apply_damage(target_guid, 0, caster_guid, timestamp);
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(target_guid, |creature| {
+                // `Unit::AttackedBy` causes CreatureAI::AttackStart, which adds initial
+                // threat. The AI snapshot selects targets from ThreatManager, not the
+                // legacy combat threat list populated by apply_damage(0).
+                creature.threat_manager.add_threat(caster_guid, 1.0);
+                creature.combat.add_threat(caster_guid, 1.0, timestamp);
+            });
     } else if target_guid.is_player() {
         world
             .systems
             .player
             .manager()
-            .with_player_mut(target_guid, |p| p.combat.in_combat = true);
+            .with_player_mut(target_guid, |p| p.combat.enter_combat(caster_guid));
     }
+
+    set_caster_in_combat_with_victim(caster_guid, target_guid, world);
 }
 
 /// Fire the AI SpellHit event for a creature target on a landed hit (once per target,
@@ -1545,6 +1557,44 @@ mod tests {
         assert!(
             result.is_none(),
             "zero mask should abort hit even for positive spells"
+        );
+    }
+
+    #[tokio::test]
+    async fn harmful_spell_miss_gives_creature_an_ai_threat_target() {
+        let world = test_world();
+        let caster = ObjectGuid::new_player(20);
+        let target = ObjectGuid::new_creature(20, 50);
+        add_test_player(&world, caster);
+        add_test_creature(&world, target);
+
+        let spell = harmful_spell(102);
+        world.managers.spell_mgr.add_spell(spell.clone());
+        let mut info = TargetInfo::new(target, 0b001);
+        info.miss_condition = SpellHitOutcome::Miss;
+        info.outcome_resolved = true;
+
+        let results = apply_target_effects(&mut info, caster, None, spell.id, false, None, &world)
+            .await
+            .expect("a miss should be handled");
+
+        assert!(results.is_empty());
+        assert!(world.managers.creature_mgr.is_in_combat(target));
+        assert_eq!(
+            world
+                .managers
+                .creature_mgr
+                .get_highest_threat_target(target),
+            Some(caster),
+            "the AI selects the missed spell's caster as its victim"
+        );
+        assert!(
+            world
+                .managers
+                .player_mgr
+                .with_player(caster, |player| player.combat.in_combat)
+                .unwrap_or(false),
+            "the caster also enters combat with the missed target"
         );
     }
 
