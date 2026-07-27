@@ -77,6 +77,27 @@ impl MovementSystem {
         );
     }
 
+    /// Current position and transport of a tracked unit, player or creature.
+    fn get_target_movement_state(
+        target_guid: ObjectGuid,
+        world: &World,
+    ) -> Option<(Position, Option<ObjectGuid>)> {
+        if target_guid.is_player() {
+            world
+                .managers
+                .player_mgr
+                .get_movement_state(target_guid)
+                .map(|state| (state.position, state.transport_guid))
+        } else {
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(target_guid, |target| {
+                    (target.position, target.movement_info.transport_guid)
+                })
+        }
+    }
+
     /// Update a single creature's movement
     fn update_single_creature(
         &self,
@@ -168,22 +189,51 @@ impl MovementSystem {
             }
         }
 
-        // Update target position for chase/follow/flee generators
-        let target = world
+        // Feed the unit-tracking generators (chase, fear/flee) their target's live
+        // position. The target guid is read from the generator itself rather than from
+        // combat.attacking: not every path that starts a chase or a flee sets an attack
+        // target, and a generator left with its default target position walks the
+        // creature towards the map origin.
+        let (chase_target, flee_target) = world
             .managers
             .creature_mgr
-            .with_creature_mut(guid, |c| c.combat.attacking)
-            .flatten();
+            .with_creature_mut(guid, |creature| {
+                let chase_target = creature
+                    .motion_master
+                    .get_generator_mut(MovementGeneratorType::Chase)
+                    .and_then(|gen| gen.as_any_mut().downcast_mut::<ChaseMovementGenerator>())
+                    .map(|chase| chase.target);
 
-        if let Some(target_guid) = target {
-            if let Some(target_state) = world.managers.player_mgr.get_movement_state(target_guid) {
+                let flee_target = creature
+                    .motion_master
+                    .get_generator_mut(MovementGeneratorType::Fleeing)
+                    .and_then(|gen| {
+                        let any = gen.as_any_mut();
+                        if let Some(fear) = any.downcast_mut::<TimedFearMovementGenerator>() {
+                            Some(fear.fright_guid())
+                        } else if let Some(fear) = any.downcast_mut::<FearMovementGenerator>() {
+                            Some(fear.fright_guid())
+                        } else {
+                            any.downcast_mut::<FleeMovementGenerator>()
+                                .map(|flee| flee.flee_from())
+                        }
+                    });
+
+                (chase_target, flee_target)
+            })
+            .unwrap_or((None, None));
+
+        if let Some(target_guid) = chase_target {
+            if let Some((target_position, target_transport)) =
+                Self::get_target_movement_state(target_guid, world)
+            {
                 let transport_mismatch = world
                     .managers
                     .creature_mgr
                     .with_creature_mut(guid, |creature| {
                         let creature_pos = creature.position;
-                        let transport_mismatch = target_state.transport_guid.is_some()
-                            && creature.movement_info.transport_guid != target_state.transport_guid;
+                        let transport_mismatch = target_transport.is_some()
+                            && creature.movement_info.transport_guid != target_transport;
 
                         // Update chase generator target + creature position
                         if let Some(gen) = creature
@@ -193,34 +243,10 @@ impl MovementSystem {
                             if let Some(chase) =
                                 gen.as_any_mut().downcast_mut::<ChaseMovementGenerator>()
                             {
-                                chase.update_target_position(target_state.position);
-                                chase.update_target_transport(target_state.transport_guid);
+                                chase.update_target_position(target_position);
+                                chase.update_target_transport(target_transport);
                                 chase.set_creature_position(creature_pos);
                                 chase.set_reachable(!transport_mismatch);
-                            }
-                        }
-
-                        // Update flee generator target position
-                        if let Some(gen) = creature
-                            .motion_master
-                            .get_generator_mut(MovementGeneratorType::Fleeing)
-                        {
-                            if let Some(fear) = gen
-                                .as_any_mut()
-                                .downcast_mut::<TimedFearMovementGenerator>()
-                            {
-                                fear.update_target_position(target_state.position);
-                                fear.set_creature_position(creature_pos);
-                            } else if let Some(fear) =
-                                gen.as_any_mut().downcast_mut::<FearMovementGenerator>()
-                            {
-                                fear.update_target_position(target_state.position);
-                                fear.set_creature_position(creature_pos);
-                            } else if let Some(flee) =
-                                gen.as_any_mut().downcast_mut::<FleeMovementGenerator>()
-                            {
-                                flee.update_target_position(target_state.position);
-                                flee.set_creature_position(creature_pos);
                             }
                         }
 
@@ -232,6 +258,34 @@ impl MovementSystem {
                     self.send_stop_packet(guid, current_pos, world);
                     return;
                 }
+            }
+        }
+
+        if let Some(target_guid) = flee_target {
+            if let Some((target_position, _)) = Self::get_target_movement_state(target_guid, world)
+            {
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(guid, |creature| {
+                        let creature_pos = creature.position;
+                        if let Some(gen) = creature
+                            .motion_master
+                            .get_generator_mut(MovementGeneratorType::Fleeing)
+                        {
+                            let any = gen.as_any_mut();
+                            if let Some(fear) = any.downcast_mut::<TimedFearMovementGenerator>() {
+                                fear.update_target_position(target_position);
+                                fear.set_creature_position(creature_pos);
+                            } else if let Some(fear) = any.downcast_mut::<FearMovementGenerator>() {
+                                fear.update_target_position(target_position);
+                                fear.set_creature_position(creature_pos);
+                            } else if let Some(flee) = any.downcast_mut::<FleeMovementGenerator>() {
+                                flee.update_target_position(target_position);
+                                flee.set_creature_position(creature_pos);
+                            }
+                        }
+                    });
             }
         }
 

@@ -135,7 +135,7 @@ impl DamageResult {
 pub struct CombatState {
     // Combat flags
     pub in_combat: bool,
-    pub combat_timer: u32, // ms, decays to 0 when no attackers
+    pub combat_timer: u32, // ms since the last combat interaction
     pub attack_target: Option<ObjectGuid>,
     pub attackers: HashSet<ObjectGuid>,
 
@@ -268,12 +268,17 @@ impl CombatState {
         self.attackers.insert(attacker);
     }
 
-    /// Update combat timer, returns true if combat ended
+    /// Update the combat inactivity timer, returning true when combat ends.
+    ///
+    /// Incoming combat interactions refresh this timer through `enter_combat`.
+    /// The attacker set is advisory and may retain creatures after they evade,
+    /// so it cannot be used to keep a player in combat indefinitely.
     pub fn update_combat_timer(&mut self, diff_ms: u32) -> bool {
         if self.combat_timer > 0 {
             self.combat_timer = self.combat_timer.saturating_sub(diff_ms);
-            if self.combat_timer == 0 && self.attackers.is_empty() {
+            if self.combat_timer == 0 {
                 self.in_combat = false;
+                self.attackers.clear();
                 return true; // Combat ended
             }
         }

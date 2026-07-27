@@ -33,11 +33,14 @@ impl CombatSystem {
         Ok(())
     }
 
-    /// Update combat timers for all players
+    /// Update combat timers for all players.
     /// Called every world tick
-    pub fn update(&self, _diff: Duration, _player_mgr: &PlayerManager) -> Result<()> {
-        // Combat update is now handled per-player through PlayerManager
-        // This method is kept for system update pattern consistency
+    pub fn update(&self, diff: Duration, player_mgr: &PlayerManager) -> Result<()> {
+        let diff_ms = diff.as_millis().min(u128::from(u32::MAX)) as u32;
+        player_mgr.for_each_player(|_, player| {
+            player.combat.update_combat_timer(diff_ms);
+        });
+
         Ok(())
     }
 
@@ -386,7 +389,28 @@ impl CombatSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::broadcast_mgr::MockBroadcastManagerTrait;
+    use crate::game::player::Player;
 
-    // Tests would require mocking PlayerManager and BroadcastManager
-    // Integration tests would be more appropriate for this system
+    #[test]
+    fn update_expires_inactive_combat() {
+        let player_mgr = PlayerManager::new();
+        let player_guid = ObjectGuid::new_player(1);
+        let attacker_guid = ObjectGuid::new_player(2);
+        let mut player = Player::new(player_guid, "Player".to_string(), 0, 0, 0, 1, 1, 1, 0);
+        player.combat.enter_combat(attacker_guid);
+        player_mgr.add_player(player, 1);
+        let system = CombatSystem::new(Arc::new(MockBroadcastManagerTrait::new()));
+
+        system
+            .update(Duration::from_secs(6), &player_mgr)
+            .expect("combat update should succeed");
+
+        player_mgr
+            .with_player(player_guid, |player| {
+                assert!(!player.combat.in_combat);
+                assert!(player.combat.attackers.is_empty());
+            })
+            .expect("player should remain registered");
+    }
 }

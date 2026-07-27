@@ -24,6 +24,8 @@ const _MELEE_RANGE: f32 = 5.0;
 const AI_UPDATE_INTERVAL: u32 = 500;
 /// Critter flee duration when hit by a hostile non-damage spell (CritterAI ESCAPE_TIMER).
 const ESCAPE_TIMER_MS: u32 = 30000;
+/// Threat seeded when a fight starts without damage (aggro pull, missed swing).
+const INITIAL_AGGRO_THREAT: f32 = 1.0;
 
 /// Main decision entry point
 /// Routes to the appropriate AI type's decision function
@@ -88,13 +90,11 @@ fn decide_critter(input: &AIInput) -> AIDecisionResult {
 
     for event in &input.events {
         match event {
-            AIEvent::DamageTaken { attacker_guid, .. } => {
+            AIEvent::DamageTaken { attacker_guid, .. }
+            // CritterAI::AttackedBy — a missed swing scares the critter just the same.
+            | AIEvent::AttackedBy { attacker_guid } => {
                 // Flee from attacker
-                if let Some(attacker) = input
-                    .nearby_targets
-                    .iter()
-                    .find(|t| t.guid == *attacker_guid)
-                {
+                if input.snapshot.ai_state != AIState::Fleeing {
                     result.actions.push(AIAction::FleeFrom {
                         flee_from_guid: *attacker_guid,
                         distance: 20.0,
@@ -236,8 +236,47 @@ pub fn basic_combat_behavior(input: &AIInput) -> Vec<AIAction> {
                     actions.push(AIAction::EnterCombat {
                         target_guid: target,
                     });
+                    // Without this the creature enters combat with no attack target
+                    // and the chase generator never learns where the target is.
+                    actions.push(AIAction::SetAttackTarget {
+                        target_guid: target,
+                    });
                 }
             }
+        }
+        _ => {}
+    }
+
+    actions
+}
+
+/// Engage an attacker: enter combat, set it as the attack target and seed threat.
+///
+/// `EnterCombat` alone is not enough — the chase generator is only fed the target's
+/// live position while `combat.attacking` is set, so a creature that enters combat
+/// without an attack target chases the default (0,0,0) position instead.
+fn engage_attacker(input: &AIInput, attacker_guid: ObjectGuid, threat: f32) -> Vec<AIAction> {
+    let mut actions = Vec::new();
+
+    match input.snapshot.ai_state {
+        // Already fighting: only the threat matters, the target is picked by threat.
+        AIState::Combat => {
+            actions.push(AIAction::AddThreat {
+                target_guid: attacker_guid,
+                amount: threat,
+            });
+        }
+        AIState::Idle | AIState::Returning | AIState::Evading => {
+            actions.push(AIAction::EnterCombat {
+                target_guid: attacker_guid,
+            });
+            actions.push(AIAction::SetAttackTarget {
+                target_guid: attacker_guid,
+            });
+            actions.push(AIAction::AddThreat {
+                target_guid: attacker_guid,
+                amount: threat,
+            });
         }
         _ => {}
     }
@@ -270,47 +309,19 @@ pub fn process_basic_event(input: &AIInput, event: &AIEvent) -> Vec<AIAction> {
                 });
             }
         }
+        // A connecting swing and a missed one both start the fight (vmangos
+        // `Unit::Attack` -> `CreatureAI::AttackedBy`). A miss carries no damage,
+        // so it seeds the same initial threat an aggro pull would.
+        AIEvent::AttackedBy { attacker_guid } => {
+            actions.extend(engage_attacker(input, *attacker_guid, INITIAL_AGGRO_THREAT));
+        }
         AIEvent::DamageTaken {
             attacker_guid,
             damage,
             ..
         } => {
-            match input.snapshot.ai_state {
-                AIState::Idle => {
-                    // Enter combat and fight back
-                    actions.push(AIAction::EnterCombat {
-                        target_guid: *attacker_guid,
-                    });
-                    actions.push(AIAction::SetAttackTarget {
-                        target_guid: *attacker_guid,
-                    });
-                    actions.push(AIAction::AddThreat {
-                        target_guid: *attacker_guid,
-                        amount: *damage as f32,
-                    });
-                }
-                AIState::Combat => {
-                    // Add threat to attacker
-                    actions.push(AIAction::AddThreat {
-                        target_guid: *attacker_guid,
-                        amount: *damage as f32,
-                    });
-                }
-                AIState::Returning | AIState::Evading => {
-                    // Re-engage if attacked while returning
-                    actions.push(AIAction::EnterCombat {
-                        target_guid: *attacker_guid,
-                    });
-                    actions.push(AIAction::SetAttackTarget {
-                        target_guid: *attacker_guid,
-                    });
-                    actions.push(AIAction::AddThreat {
-                        target_guid: *attacker_guid,
-                        amount: *damage as f32,
-                    });
-                }
-                _ => {}
-            }
+            // Enter combat and fight back when idle or returning, otherwise just threat.
+            actions.extend(engage_attacker(input, *attacker_guid, *damage as f32));
         }
         AIEvent::TargetKilled { victim_guid } => {
             // Clear the killed target
@@ -584,6 +595,73 @@ mod tests {
     }
 
     #[test]
+    fn test_attacked_by_while_idle_engages_attacker() {
+        // A missed first swing must still pull the creature: enter combat, pick the
+        // attacker as attack target (the chase generator needs it) and seed threat.
+        let attacker = player_guid(10);
+        let input = make_input(make_snapshot(AIState::Idle), vec![], vec![]);
+        let event = AIEvent::AttackedBy {
+            attacker_guid: attacker,
+        };
+
+        let actions = process_basic_event(&input, &event);
+
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::EnterCombat { target_guid } if *target_guid == attacker)
+        ));
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == attacker)
+        ));
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::AddThreat { amount, .. } if *amount == INITIAL_AGGRO_THREAT)
+        ));
+    }
+
+    #[test]
+    fn test_attacked_by_while_in_combat_only_adds_threat() {
+        let attacker = player_guid(10);
+        let input = make_input(make_snapshot(AIState::Combat), vec![], vec![]);
+        let event = AIEvent::AttackedBy {
+            attacker_guid: attacker,
+        };
+
+        let actions = process_basic_event(&input, &event);
+
+        assert!(!has_action(&actions, |a| matches!(
+            a,
+            AIAction::EnterCombat { .. }
+        )));
+        assert!(has_action(&actions, |a| matches!(
+            a,
+            AIAction::AddThreat { .. }
+        )));
+    }
+
+    #[test]
+    fn critter_flees_from_a_missed_swing() {
+        let attacker = player_guid(10);
+        let mut snapshot = make_snapshot(AIState::Idle);
+        snapshot.ai_type = AIType::Critter;
+        let input = make_input(
+            snapshot,
+            vec![AIEvent::AttackedBy {
+                attacker_guid: attacker,
+            }],
+            vec![],
+        );
+
+        let result = decide(&input);
+
+        assert!(has_action(&result.actions, |a| matches!(
+            a,
+            AIAction::FleeFrom { flee_from_guid, .. } if *flee_from_guid == attacker
+        )));
+    }
+
+    #[test]
     fn test_damage_taken_while_combat_adds_threat() {
         let attacker = player_guid(10);
         let input = make_input(make_snapshot(AIState::Combat), vec![], vec![]);
@@ -772,6 +850,12 @@ mod tests {
         assert!(has_action(
             &actions,
             |a| matches!(a, AIAction::EnterCombat { target_guid } if *target_guid == target)
+        ));
+        // Entering combat without an attack target leaves the chase generator
+        // pointed at its default (0,0,0) position.
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == target)
         ));
     }
 

@@ -291,7 +291,9 @@ fn capture_snapshot(world: &World, guid: ObjectGuid) -> Option<CreatureSnapshot>
                 home_position: creature.home_position,
                 ai_state: creature.ai_state,
                 ai_type,
-                current_target: creature.threat_manager.get_victim(),
+                // The unit we are actually swinging at, not the top threat entry:
+                // the Combat branch compares the two to decide when to retarget.
+                current_target: creature.combat.attacking,
                 threat_list,
                 health_pct,
                 current_health: creature.current_health,

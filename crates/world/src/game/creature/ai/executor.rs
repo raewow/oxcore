@@ -214,6 +214,12 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                     creature.ai_state = AIState::Combat;
                     creature.combat.in_combat = true;
                     creature.combat.attackers.insert(target_guid);
+                    // vmangos Unit::Attack sets the victim when combat starts. Without it
+                    // the creature has no attack target to swing at, and UNIT_FIELD_TARGET
+                    // stays empty for clients that see it enter combat.
+                    if creature.combat.attacking.is_none() {
+                        creature.combat.attacking = Some(target_guid);
+                    }
                     creature.unit_flags |= crate::game::common::unit_flags::IN_COMBAT;
 
                     // Stop any active movement (wander spline, etc.) immediately

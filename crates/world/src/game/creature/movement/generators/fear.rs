@@ -61,6 +61,11 @@ impl FearMovementGenerator {
         self
     }
 
+    /// Unit this creature is fleeing from.
+    pub fn fright_guid(&self) -> ObjectGuid {
+        self.fright_guid
+    }
+
     pub fn update_target_position(&mut self, pos: Position) {
         self.target_position = pos;
     }
@@ -230,6 +235,11 @@ impl TimedFearMovementGenerator {
             total_flee_time: time,
             time_remaining: time,
         }
+    }
+
+    /// Unit this creature is fleeing from.
+    pub fn fright_guid(&self) -> ObjectGuid {
+        self.inner.fright_guid()
     }
 
     pub fn update_target_position(&mut self, pos: Position) {

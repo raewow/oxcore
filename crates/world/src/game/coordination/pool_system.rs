@@ -260,10 +260,15 @@ impl PoolSystem {
             guid,
         );
 
-        if let Some(create_msg) = world.managers.gameobject_mgr.build_create_msg(guid, world) {
-            for player_guid in players_near(world, spawn.map_id, instance_id, spawn.position) {
+        for player_guid in players_near(world, spawn.map_id, instance_id, spawn.position) {
+            if let Some(create_msg) =
+                world
+                    .managers
+                    .gameobject_mgr
+                    .build_create_msg(guid, player_guid, world)
+            {
                 self.broadcast_mgr
-                    .send_msg_to_player(player_guid, create_msg.clone());
+                    .send_msg_to_player(player_guid, create_msg);
             }
         }
 
