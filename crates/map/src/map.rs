@@ -885,7 +885,10 @@ mod tests {
 
         // Middle of a grid: only that grid is in the activation box.
         let (gx, gy) = (20u8, 20u8);
-        let centre = pos(grid_min_x(gx) + GRID_SIZE / 2.0, grid_min_x(gy) + GRID_SIZE / 2.0);
+        let centre = pos(
+            grid_min_x(gx) + GRID_SIZE / 2.0,
+            grid_min_x(gy) + GRID_SIZE / 2.0,
+        );
         assert_eq!(world_to_grid(centre.x, centre.y), (gx, gy));
 
         map.add_player(guid, centre);

@@ -428,6 +428,21 @@ impl GridSystem {
         }
         let creature_count = creature_count - relocated;
 
+        // Creatures that died and decayed are no longer in the grid, so the drain
+        // above cannot see them — but their spawn point is here and their spawn
+        // slot is still marked taken, which keeps a later grid load from putting
+        // them back. Sweep them by spawn point so the reload spawns them fresh.
+        let dead = world.managers.creature_mgr.dead_creatures_spawned_in_grid(
+            map_id,
+            map.instance_id(),
+            (grid_x, grid_y),
+        );
+        for guid in dead {
+            world.managers.creature_mgr.save_respawn_state(guid);
+            world.systems.pool.on_object_despawned(guid);
+            world.managers.creature_mgr.remove_creature(guid);
+        }
+
         // Despawn gameobjects. Drop collision first — it is looked up through the
         // object, which `remove_gameobject` is about to discard.
         for guid in unloaded.gameobjects {
@@ -670,5 +685,122 @@ impl GridSystem {
 impl Default for GridSystem {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::game::creature::{CreatureSpawnData, CreatureTemplate};
+    use crate::map::grid_coords::{world_to_grid, GRID_SIZE, MAP_HALF_SIZE};
+    use oxcore_shared::database::Databases;
+    use sqlx::mysql::MySqlPoolOptions;
+    use std::path::PathBuf;
+
+    fn lazy_pool() -> sqlx::MySqlPool {
+        MySqlPoolOptions::new()
+            .connect_lazy("mysql://test:test@localhost/test")
+            .expect("lazy pool should be constructible")
+    }
+
+    fn test_world() -> World {
+        let databases = Arc::new(Databases {
+            world: lazy_pool(),
+            character: lazy_pool(),
+            auth: lazy_pool(),
+            logs: lazy_pool(),
+        });
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    fn template(entry: u32) -> CreatureTemplate {
+        CreatureTemplate {
+            entry,
+            name: format!("Creature {entry}"),
+            subname: None,
+            min_level: 1,
+            max_level: 1,
+            faction: 35,
+            model_id_1: 1,
+            model_id_2: 0,
+            model_id_3: 0,
+            model_id_4: 0,
+            scale: 1.0,
+            npc_flags: 0,
+            unit_flags: 0,
+            static_flags1: 0,
+            flags_extra: 0,
+            creature_type: 7,
+            unit_class: 1,
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            damage_variance: 0.0,
+            attack_time: 2000,
+            rank: 0,
+            gossip_menu_id: 0,
+            vendor_id: 0,
+            trainer_id: 0,
+            trainer_type: 0,
+            spells: [0; 4],
+        }
+    }
+
+    fn pos(x: f32, y: f32) -> Position {
+        Position {
+            x,
+            y,
+            z: 0.0,
+            o: 0.0,
+        }
+    }
+
+    /// West edge of grid `g` along either axis.
+    fn grid_min(g: u8) -> f32 {
+        g as f32 * GRID_SIZE - MAP_HALF_SIZE
+    }
+
+    /// A player standing near a grid boundary must get the creatures on the other
+    /// side of it, not just the ones in the grid they are standing in.
+    #[tokio::test]
+    async fn spawns_in_the_neighbouring_grid_are_loaded() {
+        let world = test_world();
+        let (gx, gy) = (20u8, 20u8);
+
+        world.managers.creature_mgr.add_template(template(70));
+
+        // Two spawns: one in the player's grid, one just over the west boundary.
+        let here = pos(grid_min(gx) + 20.0, grid_min(gy) + GRID_SIZE / 2.0);
+        let next_door = pos(grid_min(gx) - 20.0, grid_min(gy) + GRID_SIZE / 2.0);
+        assert_eq!(world_to_grid(here.x, here.y), (gx, gy));
+        assert_eq!(world_to_grid(next_door.x, next_door.y), (gx - 1, gy));
+
+        world.managers.creature_mgr.add_spawns_for_test(vec![
+            CreatureSpawnData::new(1, 70, 0, here, 300),
+            CreatureSpawnData::new(2, 70, 0, next_door, 300),
+        ]);
+
+        // Player inside the first grid, within activation range of the boundary.
+        let map = world.managers.map_mgr.get_or_create_map(0, 0);
+        map.add_player(ObjectGuid::new_player(1), here);
+
+        world.systems.grid.process_map_grids(0, 0, &world).await
+            .expect("grid processing");
+
+        assert!(
+            world.managers.creature_mgr.has_spawn(1),
+            "spawn in the player's own grid was not loaded"
+        );
+        assert!(
+            world.managers.creature_mgr.has_spawn(2),
+            "spawn in the neighbouring grid was not loaded"
+        );
     }
 }

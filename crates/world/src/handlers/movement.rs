@@ -709,6 +709,37 @@ impl SpeedMoveType {
 /// applied and nearby observers informed via the matching MSG_MOVE_SET_* opcode.
 ///
 /// Not ported: the anticheat `OnWrongAckData` reporting on a mismatched ack.
+/// Push a position an ack handler just accepted into the map.
+///
+/// `HandleMoverRelocation` ends in `Player::SetPosition`, which relocates the
+/// player on the map (MovementHandler.cpp:1113). Updating only the player object
+/// leaves the map holding the old spot, and everything spatial reads it from
+/// there: grid activation stops following the player, so the grids they are
+/// walking into are never created and the visibility update — which waits on
+/// those grids — stalls with it.
+fn apply_ack_relocation(
+    player_guid: ObjectGuid,
+    relocation: Option<(Position, u32, u32)>,
+    new_pos: Position,
+    world: &World,
+) {
+    let Some((old_pos, map_id, instance_id)) = relocation else {
+        return;
+    };
+
+    let map = world
+        .managers
+        .map_mgr
+        .get_or_create_map(map_id, instance_id);
+    map.relocate_player(player_guid, old_pos, new_pos);
+
+    world
+        .systems
+        .player
+        .visibility()
+        .check_cell_crossing(player_guid, old_pos, new_pos, world);
+}
+
 pub fn handle_force_speed_change_ack(
     session: &WorldSession,
     opcode: Opcode,
@@ -771,7 +802,7 @@ pub fn handle_force_speed_change_ack(
         movement_info.time > session.move_reject_time() && verify_movement_info(&movement_info);
 
     // Apply the authoritative speed and (if valid) the relocation in one lock.
-    world
+    let relocation = world
         .managers
         .player_mgr
         .with_player_mut(player_guid, |player| {
@@ -784,14 +815,21 @@ pub fn handle_force_speed_change_ack(
                 // still notified below.
                 SpeedMoveType::RunBack | SpeedMoveType::SwimBack => {}
             }
-            if position_valid {
-                player.movement.position = movement_info.position;
-                player.movement.flags = movement_info.flags.value();
-                player.movement.movement_flags = movement_info.flags.value();
-                player.movement.timestamp = movement_info.time;
-                player.movement.last_movement_time = movement_info.time;
+            if !position_valid {
+                return None;
             }
-        });
+
+            let old_pos = player.movement.position;
+            player.movement.position = movement_info.position;
+            player.movement.flags = movement_info.flags.value();
+            player.movement.movement_flags = movement_info.flags.value();
+            player.movement.timestamp = movement_info.time;
+            player.movement.last_movement_time = movement_info.time;
+            Some((old_pos, player.map_id, player.instance_id))
+        })
+        .flatten();
+
+    apply_ack_relocation(player_guid, relocation, movement_info.position, world);
 
     MovementPacketSender::send_speed_change_to_observers(
         world,
@@ -900,21 +938,28 @@ pub fn handle_movement_flag_change_ack(
     let position_valid =
         movement_info.time > session.move_reject_time() && verify_movement_info(&movement_info);
 
-    world
+    let relocation = world
         .managers
         .player_mgr
         .with_player_mut(player_guid, |player| {
             if let FlagChange::WaterWalk = change {
                 player.movement.water_walking = apply;
             }
-            if position_valid {
-                player.movement.position = movement_info.position;
-                player.movement.flags = movement_info.flags.value();
-                player.movement.movement_flags = movement_info.flags.value();
-                player.movement.timestamp = movement_info.time;
-                player.movement.last_movement_time = movement_info.time;
+            if !position_valid {
+                return None;
             }
-        });
+
+            let old_pos = player.movement.position;
+            player.movement.position = movement_info.position;
+            player.movement.flags = movement_info.flags.value();
+            player.movement.movement_flags = movement_info.flags.value();
+            player.movement.timestamp = movement_info.time;
+            player.movement.last_movement_time = movement_info.time;
+            Some((old_pos, player.map_id, player.instance_id))
+        })
+        .flatten();
+
+    apply_ack_relocation(player_guid, relocation, movement_info.position, world);
 
     MovementPacketSender::send_movement_flag_change_to_observers(
         world,
