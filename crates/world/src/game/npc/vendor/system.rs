@@ -11,7 +11,7 @@ use super::manager::VendorManager;
 use super::types::{ReputationRank, VendorItem};
 use crate::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::game::creature::CreatureManager;
-use crate::game::inventory::InventorySystem;
+use crate::game::inventory::{BuybackResult, GoldResult, InventorySystem, MAX_MONEY};
 use crate::game::items::ItemManager;
 use crate::game::player::PlayerManager;
 use crate::World;
@@ -325,10 +325,6 @@ impl VendorSystem {
             return Ok(());
         }
 
-        if amount == 0 {
-            return Ok(());
-        }
-
         // If vendor_guid is empty (0), try to get from player's current selection
         let vendor_guid = if vendor_guid.is_empty() {
             self.player_mgr
@@ -396,7 +392,12 @@ impl VendorSystem {
             (item_read.entry, item_read.count)
         };
 
-        let sell_count = amount as u32;
+        // The 1.12 client sends zero to sell the entire stack.
+        let sell_count = if amount == 0 {
+            stack_count
+        } else {
+            amount as u32
+        };
         if sell_count > stack_count {
             let msg = SmsgSellItem {
                 vendor_guid,
@@ -437,42 +438,70 @@ impl VendorSystem {
         // Calculate total sell price
         let total_price = template.sell_price.saturating_mul(sell_count);
 
-        // Remove item from inventory (sends SMSG_UPDATE_OBJECT slot clear + SMSG_DESTROY_OBJECT)
-        let remove_result = self
-            .inventory
-            .remove_item(player_guid, item_guid, sell_count);
-        match remove_result {
-            crate::game::inventory::RemoveItemResult::ItemRemoved { .. }
-            | crate::game::inventory::RemoveItemResult::CountReduced { .. } => {
-                // Success - add money (updates cache, DB, and sends client update)
-                self.inventory.add_gold(player_guid, total_price);
-
-                // Send success message
-                let msg = SmsgSellItem {
+        if sell_count == stack_count {
+            if self.inventory.get_money(player_guid).unwrap_or(0) > MAX_MONEY - total_price {
+                self.send_sell_result(
+                    player_guid,
                     vendor_guid,
                     item_guid,
-                    result: SellResult::Ok,
-                };
-                self.broadcast_mgr.send_msg_to_player(player_guid, msg);
-
-                info!(
-                    "Player {:?} sold item {} (x{}) to vendor {:?} for {} copper",
-                    player_guid, entry_id, sell_count, vendor_guid, total_price
+                    SellResult::CantSellItem,
                 );
+                return Ok(());
             }
-            _ => {
-                warn!(
-                    "Sell item failed: couldn't remove item {:?} from inventory",
-                    item_guid
-                );
-                let msg = SmsgSellItem {
-                    vendor_guid,
-                    item_guid,
-                    result: SellResult::CantFindItem,
-                };
-                self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+
+            match self
+                .inventory
+                .add_to_buyback(player_guid, item_guid, total_price)
+                .await
+            {
+                BuybackResult::Added { .. } => {
+                    self.inventory.add_gold(player_guid, total_price);
+                    self.send_sell_result(player_guid, vendor_guid, item_guid, SellResult::Ok);
+                }
+                result => {
+                    warn!(
+                        "Sell item failed: couldn't add item {:?} to buyback: {:?}",
+                        item_guid, result
+                    );
+                    self.send_sell_result(
+                        player_guid,
+                        vendor_guid,
+                        item_guid,
+                        SellResult::CantFindItem,
+                    );
+                }
+            }
+        } else {
+            // A partial sale leaves the original item object in place, so it cannot
+            // be represented by the existing whole-item buyback slots.
+            match self
+                .inventory
+                .remove_item(player_guid, item_guid, sell_count)
+            {
+                crate::game::inventory::RemoveItemResult::CountReduced { .. } => {
+                    // Success - add money (updates cache, DB, and sends client update)
+                    self.inventory.add_gold(player_guid, total_price);
+                    self.send_sell_result(player_guid, vendor_guid, item_guid, SellResult::Ok);
+                }
+                result => {
+                    warn!(
+                        "Sell item failed: couldn't reduce item {:?}: {:?}",
+                        item_guid, result
+                    );
+                    self.send_sell_result(
+                        player_guid,
+                        vendor_guid,
+                        item_guid,
+                        SellResult::CantFindItem,
+                    );
+                }
             }
         }
+
+        info!(
+            "Player {:?} sold item {} (x{}) to vendor {:?} for {} copper",
+            player_guid, entry_id, sell_count, vendor_guid, total_price
+        );
 
         Ok(())
     }
@@ -512,5 +541,70 @@ impl VendorSystem {
             error,
         };
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+    }
+
+    /// Retrieve an item previously sold to a vendor.
+    pub async fn handle_buyback_item(
+        &self,
+        player_guid: ObjectGuid,
+        vendor_guid: ObjectGuid,
+        slot: u8,
+    ) -> Result<()> {
+        if !self.player_mgr.is_player_alive(player_guid)
+            || self.creature_mgr.get_creature(vendor_guid).is_none()
+        {
+            return Ok(());
+        }
+
+        let Some(item_guid) = self.inventory.get_item_at(player_guid, 255, slot) else {
+            return Ok(());
+        };
+        let Some(item) = self.inventory.cache().get_item(player_guid, item_guid) else {
+            return Ok(());
+        };
+        let item = item.read();
+        let price = self
+            .item_mgr
+            .get_template(item.entry)
+            .map(|template| template.sell_price.saturating_mul(item.count))
+            .unwrap_or(0);
+        drop(item);
+
+        if !matches!(
+            self.inventory.remove_gold(player_guid, price),
+            GoldResult::Success { .. }
+        ) {
+            return Ok(());
+        }
+
+        if !matches!(
+            self.inventory
+                .retrieve_from_buyback(player_guid, slot)
+                .await,
+            BuybackResult::Retrieved { .. }
+        ) {
+            // This should only fail if inventory state changed between validation and
+            // retrieval; restore the payment rather than charging for no item.
+            self.inventory.add_gold(player_guid, price);
+        }
+
+        Ok(())
+    }
+
+    fn send_sell_result(
+        &self,
+        player_guid: ObjectGuid,
+        vendor_guid: ObjectGuid,
+        item_guid: ObjectGuid,
+        result: SellResult,
+    ) {
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgSellItem {
+                vendor_guid,
+                item_guid,
+                result,
+            },
+        );
     }
 }

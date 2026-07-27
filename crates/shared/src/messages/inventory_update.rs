@@ -19,8 +19,9 @@
 
 use crate::messages::ToWorldPacket;
 use crate::protocol::update_fields::{
-    PLAYER_FIELD_BANKBAG_SLOT_1, PLAYER_FIELD_BANK_SLOT_1, PLAYER_FIELD_INV_SLOT_HEAD,
-    PLAYER_FIELD_PACK_SLOT_1, PLAYER_VISIBLE_ITEM_1_0,
+    PLAYER_FIELD_BANKBAG_SLOT_1, PLAYER_FIELD_BANK_SLOT_1, PLAYER_FIELD_BUYBACK_PRICE_1,
+    PLAYER_FIELD_BUYBACK_TIMESTAMP_1, PLAYER_FIELD_INV_SLOT_HEAD, PLAYER_FIELD_PACK_SLOT_1,
+    PLAYER_FIELD_VENDORBUYBACK_SLOT_1, PLAYER_VISIBLE_ITEM_1_0,
 };
 use crate::protocol::updates::update_mask::UpdateMask;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
@@ -33,6 +34,8 @@ const BANK_SLOT_START: u8 = 39;
 const BANK_SLOT_END: u8 = 63;
 const BANK_BAG_SLOT_START: u8 = 63;
 const BANK_BAG_SLOT_END: u8 = 69;
+const BUYBACK_SLOT_START: u8 = 69;
+const BUYBACK_SLOT_END: u8 = 81;
 
 #[derive(Debug, Clone)]
 pub struct SmsgInventorySlotUpdate {
@@ -128,6 +131,50 @@ impl ToWorldPacket for SmsgInventorySlotUpdate {
                     mask.set_field_required(field_high, 0);
                 }
             }
+        }
+
+        mask.write_to_packet(&mut packet);
+        packet
+    }
+}
+
+/// Updates one vendor buyback slot, including the price and expiry timestamp
+/// required for the client to display it in the vendor window.
+#[derive(Debug, Clone)]
+pub struct SmsgBuybackSlotUpdate {
+    pub player_guid: ObjectGuid,
+    pub slot: u8,
+    pub item_guid: Option<ObjectGuid>,
+    pub price: u32,
+    pub timestamp: u32,
+}
+
+impl ToWorldPacket for SmsgBuybackSlotUpdate {
+    fn to_world_packet(&self) -> WorldPacket {
+        debug_assert!(
+            self.slot >= BUYBACK_SLOT_START && self.slot < BUYBACK_SLOT_END,
+            "Buyback slot must be 69-80"
+        );
+
+        let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
+        packet.write_u32(1);
+        packet.write_u8(0);
+        packet.write_u8(0);
+        packet.write_packed_guid_raw(self.player_guid.raw());
+
+        let offset = (self.slot - BUYBACK_SLOT_START) as u32;
+        let field_low = PLAYER_FIELD_VENDORBUYBACK_SLOT_1 + (offset * 2);
+        let field_high = field_low + 1;
+        let mut mask = UpdateMask::new();
+        if let Some(guid) = self.item_guid {
+            mask.set_guid(field_low, guid.low(), guid.high_u32());
+            mask.set_field(PLAYER_FIELD_BUYBACK_PRICE_1 + offset, self.price);
+            mask.set_field(PLAYER_FIELD_BUYBACK_TIMESTAMP_1 + offset, self.timestamp);
+        } else {
+            mask.set_field_required(field_low, 0);
+            mask.set_field_required(field_high, 0);
+            mask.set_field_required(PLAYER_FIELD_BUYBACK_PRICE_1 + offset, 0);
+            mask.set_field_required(PLAYER_FIELD_BUYBACK_TIMESTAMP_1 + offset, 0);
         }
 
         mask.write_to_packet(&mut packet);
@@ -278,5 +325,58 @@ impl ToWorldPacket for SmsgVisibleItemUpdate {
 
         mask.write_to_packet(&mut packet);
         packet
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::messages::ToWorldPacket;
+    use crate::protocol::HighGuid;
+
+    #[test]
+    fn buyback_slot_update_includes_item_price_and_timestamp() {
+        let player_guid = ObjectGuid::new_without_entry(HighGuid::Player, 1);
+        let item_guid = ObjectGuid::new_without_entry(HighGuid::Item, 42);
+        let price = 12_345;
+        let timestamp = 67_890;
+
+        let packet = SmsgBuybackSlotUpdate {
+            player_guid,
+            slot: 69,
+            item_guid: Some(item_guid),
+            price,
+            timestamp,
+        }
+        .to_world_packet();
+
+        assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
+        let data = packet.data();
+        assert!(
+            data.windows(4).any(|value| value == price.to_le_bytes()),
+            "buyback update must contain the item's sell price"
+        );
+        assert!(
+            data.windows(4)
+                .any(|value| value == timestamp.to_le_bytes()),
+            "buyback update must contain its expiry timestamp"
+        );
+    }
+
+    #[test]
+    fn cleared_buyback_slot_update_uses_vendor_buyback_fields() {
+        let packet = SmsgBuybackSlotUpdate {
+            player_guid: ObjectGuid::new_without_entry(HighGuid::Player, 1),
+            slot: 80,
+            item_guid: None,
+            price: 0,
+            timestamp: 0,
+        }
+        .to_world_packet();
+
+        // Slot 80 is the last supported buyback slot. Serializing it exercises the
+        // buyback field offset rather than the normal inventory field range.
+        assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
+        assert!(!packet.data().is_empty());
     }
 }

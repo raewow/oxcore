@@ -288,6 +288,7 @@ impl ItemPosition {
 }
 
 /// Result of a buyback operation
+#[derive(Debug)]
 pub enum BuybackResult {
     /// Successfully added to buyback
     Added { slot: u8, item_guid: ObjectGuid },

@@ -24,7 +24,7 @@ use oxcore_shared::game::inventory::{
 };
 use oxcore_shared::messages::inventory::{SmsgDestroyItem, SmsgItemPushResult};
 use oxcore_shared::messages::inventory_update::{
-    SmsgInventorySlotUpdate, SmsgInventorySlotsUpdate, SmsgVisibleItemUpdate,
+    SmsgBuybackSlotUpdate, SmsgInventorySlotUpdate, SmsgInventorySlotsUpdate, SmsgVisibleItemUpdate,
 };
 use oxcore_shared::messages::login::EquipmentSlot;
 use oxcore_shared::messages::player::SmsgPlayerMoneyUpdate;
@@ -176,6 +176,29 @@ impl InventorySystem {
             item_guid,
         };
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+    }
+
+    fn send_buyback_slot_update(
+        &self,
+        player_guid: ObjectGuid,
+        slot: u8,
+        item_guid: Option<ObjectGuid>,
+        price: u32,
+    ) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as u32;
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgBuybackSlotUpdate {
+                player_guid,
+                slot,
+                item_guid,
+                price,
+                timestamp,
+            },
+        );
     }
 
     fn send_slots_update(
@@ -869,6 +892,7 @@ impl InventorySystem {
             // Update cache
             self.cache
                 .update_item_count(player_guid, item_guid, new_count);
+            self.send_item_update(player_guid, item_guid);
 
             RemoveItemResult::CountReduced {
                 item_guid,
@@ -2393,6 +2417,15 @@ impl InventorySystem {
                 Some(slot) => slot,
                 None => {
                     let oldest_slot = Self::BUYBACK_START_SLOT;
+                    if let Some(oldest_guid) = inv.get_item_at(INVENTORY_SLOT_BAG_0, oldest_slot) {
+                        self.cache.push_pending_op(
+                            player_guid,
+                            super::cache::PendingInventoryOp::DeleteItem {
+                                item_guid: oldest_guid.low(),
+                            },
+                        );
+                        self.cache.remove_item(player_guid, oldest_guid);
+                    }
                     self.cache
                         .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, oldest_slot, None);
                     oldest_slot
@@ -2408,14 +2441,20 @@ impl InventorySystem {
             buyback_slot,
             Some(item_guid),
         );
+        self.cache.push_pending_op(
+            player_guid,
+            super::cache::PendingInventoryOp::MoveItem {
+                player_guid: player_guid.low(),
+                item_guid: item_guid.low(),
+                bag: INVENTORY_SLOT_BAG_0,
+                slot: buyback_slot,
+            },
+        );
+        self.cache
+            .update_item_position(player_guid, item_guid, INVENTORY_SLOT_BAG_0, buyback_slot);
 
         self.send_slot_update(player_guid, item_bag, item_slot, None);
-        self.send_slot_update(
-            player_guid,
-            INVENTORY_SLOT_BAG_0,
-            buyback_slot,
-            Some(item_guid),
-        );
+        self.send_buyback_slot_update(player_guid, buyback_slot, Some(item_guid), sell_price);
 
         BuybackResult::Added {
             slot: buyback_slot,
@@ -2461,8 +2500,19 @@ impl InventorySystem {
             .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, buyback_slot, None);
         self.cache
             .set_item_at(player_guid, dst_bag, dst_slot, Some(item_guid));
+        self.cache.push_pending_op(
+            player_guid,
+            super::cache::PendingInventoryOp::MoveItem {
+                player_guid: player_guid.low(),
+                item_guid: item_guid.low(),
+                bag: dst_bag,
+                slot: dst_slot,
+            },
+        );
+        self.cache
+            .update_item_position(player_guid, item_guid, dst_bag, dst_slot);
 
-        self.send_slot_update(player_guid, INVENTORY_SLOT_BAG_0, buyback_slot, None);
+        self.send_buyback_slot_update(player_guid, buyback_slot, None, 0);
         self.send_slot_update(player_guid, dst_bag, dst_slot, Some(item_guid));
 
         let item_read = item.read();

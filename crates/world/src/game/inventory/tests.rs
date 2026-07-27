@@ -642,7 +642,7 @@ fn test_update_player_data() {
 #[cfg(test)]
 mod integration_tests {
     use super::super::system::InventorySystem;
-    use super::super::types::GoldResult;
+    use super::super::types::{BuybackResult, GoldResult};
     use super::*;
     use crate::game::broadcast_mgr::MockBroadcastManagerTrait;
     use crate::game::ItemManager;
@@ -970,6 +970,71 @@ mod integration_tests {
             0,
             charges,
         )))
+    }
+
+    #[tokio::test]
+    async fn test_buyback_moves_item_and_restores_inventory_position() {
+        let mut mock_repo = MockInventoryRepositoryTrait::new();
+        let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        make_standard_load_expectations(&mut mock_repo);
+        // Two slot updates move the item to buyback, and two move it back.
+        mock_broadcaster
+            .expect_send_to_player()
+            .times(4)
+            .returning(|_, _| ());
+
+        let system = create_test_system(mock_repo, mock_broadcaster);
+        let player_guid = test_player_guid(1);
+        let item_guid = test_item_guid(30);
+        system.load_player_inventory(player_guid).await.unwrap();
+        system
+            .cache()
+            .add_item(player_guid, make_charged_item(30, player_guid, 23, [0; 5]));
+        system
+            .cache()
+            .set_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23, Some(item_guid));
+
+        assert!(matches!(
+            system.add_to_buyback(player_guid, item_guid, 0).await,
+            BuybackResult::Added { slot: 69, .. }
+        ));
+        assert_eq!(
+            system.get_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23),
+            None
+        );
+        assert_eq!(
+            system.get_item_at(player_guid, INVENTORY_SLOT_BAG_0, 69),
+            Some(item_guid)
+        );
+        assert_eq!(
+            system
+                .cache()
+                .get_item_info(player_guid, item_guid)
+                .unwrap()
+                .slot,
+            69
+        );
+
+        assert!(matches!(
+            system.retrieve_from_buyback(player_guid, 69).await,
+            BuybackResult::Retrieved { .. }
+        ));
+        assert_eq!(
+            system.get_item_at(player_guid, INVENTORY_SLOT_BAG_0, 69),
+            None
+        );
+        assert_eq!(
+            system.get_item_at(player_guid, INVENTORY_SLOT_BAG_0, 23),
+            Some(item_guid)
+        );
+        assert_eq!(
+            system
+                .cache()
+                .get_item_info(player_guid, item_guid)
+                .unwrap()
+                .slot,
+            23
+        );
     }
 
     /// An item with spell_charges = 1 (positive) has one charge tracked. After use

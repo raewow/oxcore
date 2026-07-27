@@ -1047,25 +1047,27 @@ pub async fn handle_buy_bank_slot(
 pub async fn handle_buyback_item(
     session: &crate::core::session::WorldSession,
     packet: &mut WorldPacket,
-    _world: &World,
+    world: &World,
 ) -> Result<()> {
     let vendor_guid_raw = packet
         .read_packed_guid_raw()
         .ok_or_else(|| anyhow!("Failed to read vendor guid"))?;
     let vendor_guid = ObjectGuid::from(vendor_guid_raw);
-    let _slot = packet
+    let slot = packet
         .read_u32()
         .ok_or_else(|| anyhow!("Failed to read slot"))?;
 
-    let _player_guid = match session.player_guid() {
+    let player_guid = match session.player_guid() {
         Some(guid) => guid,
         None => return Ok(()),
     };
 
-    warn!(
-        "CMSG_BUYBACK_ITEM received but not fully implemented for vendor {:?} slot {}",
-        vendor_guid, _slot
-    );
+    let slot = u8::try_from(slot).map_err(|_| anyhow!("Invalid buyback slot"))?;
+    world
+        .systems
+        .vendor
+        .handle_buyback_item(player_guid, vendor_guid, slot)
+        .await?;
 
     Ok(())
 }
