@@ -3,6 +3,7 @@
 //! Handles all teleportation, binding, and transportation effects.
 
 use super::{EffectInput, EffectResult};
+use crate::core::common::MovementInfo;
 use crate::World;
 use anyhow::Result;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
@@ -101,8 +102,36 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
         }
     };
 
-    // Always send SMSG_TRANSFER_PENDING — this triggers the client loading screen.
-    // MaNGOS sends it unconditionally for all TeleportTo() calls, including same-map teleports.
+    let (current_map, current_instance_id) = world
+        .systems
+        .player
+        .manager()
+        .with_player(target_guid, |player| (player.map_id, player.instance_id))
+        .ok_or_else(|| anyhow::anyhow!("Player not found for teleport"))?;
+
+    if current_map == dest_map && current_instance_id == 0 {
+        // A same-map teleport must use the near-teleport handshake. Sending NEW_WORLD
+        // here leaves the client waiting for a worldport ACK it will never send.
+        let mut movement = MovementInfo::new();
+        movement.mover_guid = target_guid;
+        movement.position = dest_pos;
+        let mut teleport_packet = WorldPacket::new(Opcode::MSG_MOVE_TELEPORT);
+        movement.write_to_packet(&mut teleport_packet);
+        session.send_packet(teleport_packet)?;
+        session.set_pending_near_teleport(Some(dest_pos));
+
+        tracing::info!(
+            "Near teleport initiated: target={:?} to map={} pos=({:.1}, {:.1}, {:.1})",
+            target_guid,
+            dest_map,
+            dest_pos.x,
+            dest_pos.y,
+            dest_pos.z
+        );
+        return Ok(EffectResult::empty());
+    }
+
+    // Cross-map teleports use the far-transfer handshake.
     let mut transfer_packet = WorldPacket::new(Opcode::SMSG_TRANSFER_PENDING);
     transfer_packet.write_u32(dest_map);
     session.send_packet(transfer_packet)?;

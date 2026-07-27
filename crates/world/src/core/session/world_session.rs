@@ -33,6 +33,8 @@ pub struct WorldSession {
     auction_list_request_in_progress: AtomicBool,
     /// Pending area trigger teleport (dest_map, dest_instance_id, dest_pos)
     pending_teleport: Arc<RwLock<Option<(u32, u32, Position)>>>,
+    /// Pending same-map teleport destination, completed by MSG_MOVE_TELEPORT_ACK.
+    pending_near_teleport: Arc<RwLock<Option<Position>>>,
     /// GUID the client currently believes it is controlling (`m_clientMoverGuid`).
     /// `None`/empty means the player itself. Set via CMSG_SET_ACTIVE_MOVER.
     client_mover_guid: RwLock<Option<ObjectGuid>>,
@@ -63,6 +65,7 @@ impl WorldSession {
             login_in_progress: AtomicBool::new(false),
             auction_list_request_in_progress: AtomicBool::new(false),
             pending_teleport: Arc::new(RwLock::new(None)),
+            pending_near_teleport: Arc::new(RwLock::new(None)),
             client_mover_guid: RwLock::new(None),
             move_reject_time: AtomicU32::new(0),
             pending_root_ack: AtomicBool::new(false),
@@ -292,5 +295,20 @@ impl WorldSession {
     /// Clear pending teleport destination
     pub fn clear_pending_teleport(&self) {
         *self.pending_teleport.write() = None;
+    }
+
+    /// Set the destination for a same-map teleport awaiting MSG_MOVE_TELEPORT_ACK.
+    pub fn set_pending_near_teleport(&self, position: Option<Position>) {
+        *self.pending_near_teleport.write() = position;
+    }
+
+    /// Get the destination for a same-map teleport awaiting MSG_MOVE_TELEPORT_ACK.
+    pub fn get_pending_near_teleport(&self) -> Option<Position> {
+        *self.pending_near_teleport.read()
+    }
+
+    /// Clear the pending same-map teleport destination.
+    pub fn clear_pending_near_teleport(&self) {
+        *self.pending_near_teleport.write() = None;
     }
 }

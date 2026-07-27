@@ -325,6 +325,60 @@ pub async fn handle_worldport_ack(
     Ok(())
 }
 
+/// Handle MSG_MOVE_TELEPORT_ACK, which completes a same-map teleport.
+pub async fn handle_move_teleport_ack(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+    let guid_raw = packet
+        .read_packed_guid_raw()
+        .ok_or_else(|| anyhow!("MoveTeleportAck: missing guid"))?;
+    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
+    if session.get_mover_from_guid(mover) != Some(player_guid) {
+        return Ok(());
+    }
+
+    // The client echoes movement info after the mover GUID. Consume it to keep the
+    // packet layout in sync, but use the server-authoritative queued destination.
+    let _movement_info = MovementInfo::read_from_packet(packet)?;
+    let Some(destination) = session.get_pending_near_teleport() else {
+        return Ok(());
+    };
+    if !is_valid_map_coord(destination.x, destination.y, destination.z, destination.o) {
+        session.clear_pending_near_teleport();
+        return Ok(());
+    }
+
+    let (old_position, map_id, instance_id) = world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            let old_position = player.movement.position;
+            player.movement.position = destination;
+            (old_position, player.map_id, player.instance_id)
+        })
+        .ok_or_else(|| anyhow!("Player not found"))?;
+    session.clear_pending_near_teleport();
+
+    let map = world
+        .managers
+        .map_mgr
+        .get_or_create_map(map_id, instance_id);
+    map.relocate_player(player_guid, old_position, destination);
+    world.systems.player.visibility().check_cell_crossing(
+        player_guid,
+        old_position,
+        destination,
+        world,
+    );
+
+    Ok(())
+}
+
 /// Validate incoming movement info before applying it (`WorldSession::VerifyMovementInfo`).
 ///
 /// Rejects positions that aren't finite/in-bounds, and for on-transport movement
@@ -1068,7 +1122,7 @@ pub async fn handle_movement(
 
     // Ignore client movement while a teleport is awaiting its ACK; the worldport/
     // teleport-ack handlers own position during that window.
-    if session.get_pending_teleport().is_some() {
+    if session.get_pending_teleport().is_some() || session.get_pending_near_teleport().is_some() {
         return Ok(());
     }
 
@@ -1314,6 +1368,33 @@ mod tests {
             .await
             .unwrap();
         assert!(session.get_pending_teleport().is_none());
+    }
+
+    #[tokio::test]
+    async fn teleport_ack_relocates_same_map_player_and_clears_pending_state() {
+        let mut world = test_world();
+        let (session, _rx) = add_test_player(&mut world);
+        let player_guid = session.player_guid().expect("player guid");
+        let destination = Position::new(125.0, -75.0, 30.0, 1.5);
+        session.set_pending_near_teleport(Some(destination));
+
+        let mut packet = WorldPacket::new(Opcode::MSG_MOVE_TELEPORT_ACK);
+        packet.write_packed_guid_raw(player_guid.raw());
+        write_client_movement_info(&mut packet);
+        handle_move_teleport_ack(&session, &mut packet, &world)
+            .await
+            .unwrap();
+
+        assert!(session.get_pending_near_teleport().is_none());
+        let position = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| player.movement.position)
+            .expect("player remains loaded");
+        assert_eq!(position.x, destination.x);
+        assert_eq!(position.y, destination.y);
+        assert_eq!(position.z, destination.z);
+        assert_eq!(position.o, destination.o);
     }
 
     #[tokio::test]

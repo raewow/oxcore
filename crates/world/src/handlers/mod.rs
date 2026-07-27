@@ -251,6 +251,9 @@ pub async fn dispatch_packet(
                     movement::handle_worldport_ack(session, packet, world).await?;
                     info!("[DISPATCHER] handle_worldport_ack completed successfully");
                 }
+                Opcode::MSG_MOVE_TELEPORT_ACK => {
+                    movement::handle_move_teleport_ack(session, packet, world).await?;
+                }
 
                 // Movement packets - processed inline for immediate responsiveness
                 Opcode::MSG_MOVE_HEARTBEAT
