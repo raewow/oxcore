@@ -108,22 +108,24 @@ impl LootManager {
 
                 if entry.is_quest_drop {
                     // Quest drops go into a separate list; filtered per-player when showing loot
-                    loot.quest_items.push(LootItem {
+                    loot.add_quest_item(LootItem {
                         slot: quest_slot,
                         item_id: entry.item,
                         count,
                         is_looted: false,
                         is_blocked: false,
+                        is_counted: false,
                         roll_winner: None,
                     });
                     quest_slot += 1;
                 } else {
-                    loot.items.push(LootItem {
+                    loot.add_item(LootItem {
                         slot,
                         item_id: entry.item,
                         count,
                         is_looted: false,
                         is_blocked: false,
+                        is_counted: false,
                         roll_winner: None,
                     });
                     slot += 1;
@@ -191,27 +193,74 @@ impl LootManager {
         }
     }
 
-    /// Loot an item by slot.
+    /// Resolve which quest items `player` may see, counting them once.
+    ///
+    /// Mirrors vmangos `Loot::FillNotNormalLootFor` -> `FillQuestLoot`: a quest drop only
+    /// becomes "unlooted loot" once a player who needs it opens the corpse.
+    pub fn fill_quest_loot<F>(&self, source: ObjectGuid, player: ObjectGuid, allowed: F) -> Vec<u8>
+    where
+        F: FnMut(u32) -> bool,
+    {
+        self.active_loot
+            .get_mut(&source)
+            .map(|mut loot| loot.fill_quest_loot(player, allowed))
+            .unwrap_or_default()
+    }
+
+    /// Look up an item by the slot the client sees, without marking it looted.
     ///
     /// Quest items are presented to the client with a slot offset equal to the number of
     /// normal items, so we first check normal items. If not found, we subtract the offset
-    /// and check quest items.
-    pub fn loot_item(&self, source: ObjectGuid, slot: u8) -> Option<LootItem> {
-        if let Some(mut loot) = self.active_loot.get_mut(&source) {
-            // Try normal items first
-            if let Some(item) = loot.loot_item(slot) {
-                return Some(item);
-            }
-            // Try quest items using offset slot
-            let normal_count = loot.items.len() as u8;
-            if slot >= normal_count {
-                let quest_slot = slot - normal_count;
-                return loot.loot_quest_item(quest_slot);
-            }
-            None
-        } else {
-            None
+    /// and check quest items — but only those already made visible to this player.
+    pub fn peek_item(&self, source: ObjectGuid, slot: u8, player: ObjectGuid) -> Option<LootItem> {
+        let loot = self.active_loot.get(&source)?;
+
+        if let Some(item) = loot.get_item(slot) {
+            return Some(item.clone());
         }
+
+        let normal_count = loot.items.len() as u8;
+        if slot < normal_count {
+            return None;
+        }
+
+        let quest_slot = slot - normal_count;
+        // Don't hand out a quest item the player was never shown
+        if !loot
+            .visible_quest_slots(player)
+            .is_some_and(|slots| slots.contains(&quest_slot))
+        {
+            return None;
+        }
+
+        loot.get_quest_item(quest_slot).cloned()
+    }
+
+    /// Mark the item at the client-visible slot as looted, using the same slot mapping
+    /// as [`Self::peek_item`].
+    pub fn loot_item(&self, source: ObjectGuid, slot: u8, player: ObjectGuid) -> Option<LootItem> {
+        let mut loot = self.active_loot.get_mut(&source)?;
+
+        // Try normal items first
+        if let Some(item) = loot.loot_item(slot) {
+            return Some(item);
+        }
+
+        // Try quest items using offset slot
+        let normal_count = loot.items.len() as u8;
+        if slot < normal_count {
+            return None;
+        }
+
+        let quest_slot = slot - normal_count;
+        if !loot
+            .visible_quest_slots(player)
+            .is_some_and(|slots| slots.contains(&quest_slot))
+        {
+            return None;
+        }
+
+        loot.loot_quest_item(quest_slot)
     }
 
     /// Check if loot is empty

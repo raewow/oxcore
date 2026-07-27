@@ -127,11 +127,12 @@ impl LootSystem {
     ) -> anyhow::Result<()> {
         use crate::game::inventory::types::AddItemResult;
 
-        // Get and remove item from loot
-        let loot_item = self.manager.loot_item(target_guid, slot);
+        // Look at the item without consuming it — vmangos only marks it looted once the
+        // item is actually stored, otherwise a full bag destroys the drop.
+        let loot_item = self.manager.peek_item(target_guid, slot, player_guid);
 
         let Some(item) = loot_item else {
-            return Ok(()); // Item not found or already looted
+            return Ok(()); // Item not found, already looted, or not visible to this player
         };
 
         // Add to player inventory
@@ -143,6 +144,9 @@ impl LootSystem {
 
         match result {
             AddItemResult::Success { .. } => {
+                // Stored — now remove it from the loot
+                self.manager.loot_item(target_guid, slot, player_guid);
+
                 // Notify quest system about item gain
                 world
                     .systems
@@ -157,9 +161,13 @@ impl LootSystem {
                 self.check_and_clear_if_empty(target_guid, world);
             }
             _ => {
-                // Item couldn't be added, restore it to loot
-                // TODO: Restore item to loot
-                tracing::warn!("Failed to add loot item to inventory: {:?}", result);
+                // Item stays in the loot so the player can retry after making room
+                tracing::warn!(
+                    "Failed to add loot item {} to inventory for {:?}: {:?}",
+                    item.item_id,
+                    player_guid,
+                    result
+                );
             }
         }
 
@@ -209,6 +217,17 @@ impl LootSystem {
     // Private methods
 
     fn send_loot_window(&self, player_guid: ObjectGuid, target_guid: ObjectGuid, world: &World) {
+        // Decide (once per player) which quest drops this player may see. This also makes
+        // them count as unlooted loot — quest items nobody needs never do.
+        let visible_quest_slots =
+            self.manager
+                .fill_quest_loot(target_guid, player_guid, |item_id| {
+                    world
+                        .systems
+                        .quest
+                        .player_has_quest_for_item(player_guid, item_id)
+                });
+
         let loot = self.manager.get_loot(target_guid);
 
         let Some(loot_ref) = loot else {
@@ -249,14 +268,7 @@ impl LootSystem {
         // Quest item slots start after normal items to avoid slot collisions.
         let quest_slot_offset = loot_ref.items.len() as u8;
         for item in &loot_ref.quest_items {
-            if item.is_looted {
-                continue;
-            }
-            if !world
-                .systems
-                .quest
-                .player_has_quest_for_item(player_guid, item.item_id)
-            {
+            if item.is_looted || !visible_quest_slots.contains(&item.slot) {
                 continue;
             }
 
