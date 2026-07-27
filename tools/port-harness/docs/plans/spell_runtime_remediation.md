@@ -56,7 +56,7 @@ Unit/aura state + map queries
 | 0 | Classify all spell gaps and establish acceptance scenarios | `tools/port-harness/docs/plans/` | All blocked and rust_compiled tasks | Verified | Every gap has a dependency class, target batch, and minimal scenario. |
 | 1 | Shared player/creature spell and aura runtime state | `game/player/auras/*`, `game/creature/*`, `game/player/spells/state.rs` | Aura holder lifecycle | Verified | Both target kinds retain full aura metadata and support common core storage, query, refresh, type removal, and expiry operations. |
 | 2 | Spell data and world spatial/object queries | spell manager, DBC manager, map/world services | `spell_data`, target selection | Implementing | Targeting has real data, radius/cone, location, and object lookups. |
-| 3 | Target validation, hit, immunity, combat, and DR | `spells/targets.rs`, `validation.rs`, `hit.rs`, `target_info.rs` | `spell_target_selection_and_registration`, effect application | Not started | Scenario tests cover reject, immune, evade, miss, reflect, and hit. |
+| 3 | Target validation, hit, immunity, combat, and DR | `spells/targets.rs`, `validation.rs`, `hit.rs`, `target_info.rs`, `diminishing.rs` | `spell_target_selection_and_registration`, effect application | Implementing | Scenario tests cover reject, immune, evade, miss, reflect, and hit. |
 | 4 | Aura-holder lifecycle, stacks, and channel ownership | `auras/*`, `spells/state.rs`, `channeled_holders.rs` | Aura holder methods | Not started | No stale holder survives cancel, expiry, target loss, or channel end. |
 | 5 | Cast pushback, channel lifecycle, and client packets | `spells/system.rs`, `delayed.rs`, `channel_visual.rs` | `spell_packet_and_channel_io` | Not started | Start, go, delayed, channel update, and interrupt packets match state. |
 | 6 | Periodic auras and proc pipeline | `auras/periodic.rs`, `auras/proc.rs` | `aura_periodic_effect_execution`, `aura_proc_event_dispatch`, proc handlers | Not started | Direct and periodic effects share damage/heal/proc behaviour. |
@@ -73,8 +73,8 @@ Unit/aura state + map queries
 | G-002 | Unit operations are split across player and creature code with incomplete parity | player/creature managers | Shared spell target surface | 1 | Not started |
 | G-003 | Script targets, spell areas, chains, learn-spells, cones, and internal flags are incomplete | spell manager | Database and DBC loading | 2 | Implementing |
 | G-004 | Radius, cone, visibility, line-of-sight, corpse, game-object, and dynamic-object queries are incomplete | map/world services | Spatial query surface | 2 | Implementing |
-| G-005 | Faction is used as a polarity proxy; immunity, reflect, and effect resistance are incomplete | `spells/target_info.rs`, `hit.rs` | Unit and target queries | 3 | Not started |
-| G-006 | DR snapshots and complete combat/threat transitions are absent from spell hit handling | `spells/target_info.rs` | Holder lifecycle and combat surface | 3-4 | Not started |
+| G-005 | Faction is used as a polarity proxy; core active-aura effect/state/mechanic/school immunity, per-effect mechanic resistance, and spell reflection are live | `spells/target_info.rs`, `hit.rs` | Unit and target queries | 3 | Implementing |
+| G-006 | DR snapshots and hostile-action side effects are live at spell hit; visibility gating and PvP flagging remain blocked | `spells/target_info.rs` | `IsVisibleForOrDetect`, `UpdatePvP` | 3-4 | Blocked |
 | G-007 | Channel holder list has no live owner or callers | `spells/channeled_holders.rs` | Active-cast holder state | 4 | Not started |
 | G-008 | Holder stacks, real caster, and visible-slot decisions are blocked | aura container/system | Holder model | 4 | Not started |
 | G-009 | Delayed pushback omits `SMSG_SPELL_DELAYED` | `spells/delayed.rs` | Packet definitions | 5 | Ready |
@@ -103,7 +103,7 @@ or update path; it does not mean the behavior is complete.
 | `game/player/spells/hit.rs:413,490` | Melee/ranged spell hit is automatic; creature school resistance is zero. | Missing state | Yes | Combat table and creature resistance data. | Melee miss and partial fire resistance are possible. |
 | `game/player/spells/area_targets.rs:238,314` | Area relationship selection uses object kind rather than faction. | World query | Yes | Faction and reputation resolver. | Friendly AoE excludes hostile units of the same object kind. |
 | `game/player/spells/targets.rs:331,809,1314-1323,1349,1407` | Missing ignore-restriction attribute, faction hostility, rank selection, charm ownership, AoE immunity, and script target hooks. | Data/query | Yes | Spell attributes, faction/charm state, script hooks. | Rank-scaled aura selects correct rank; immune/script-rejected unit is excluded. |
-| `game/player/spells/target_info.rs:203-324,390,456,484,566` | Per-effect resistance, immunity, real friendliness/visibility, hostile-action interrupt, PvP/DR, creature aura removal, assist threat, and reflected recast are incomplete. | Lifecycle hook | Yes | Unit query surface, creature auras, PvP/DR/combat APIs. | Delayed hostile cast is immune/evaded/reflected correctly and applies DR/combat effects. |
+| `game/player/spells/target_info.rs:203-324,390,456,484,566` | Real friendliness/visibility, hostile-action interrupt, PvP/DR, creature aura removal, and assist threat are incomplete. Per-effect resistance, immunity, and reflected recast are live. | Lifecycle hook | Yes | Unit query surface, creature auras, PvP/DR/combat APIs. | Delayed hostile cast is immune/evaded/reflected correctly and applies DR/combat effects. |
 | `game/player/spells/modifiers.rs:51` | School power-cost aura fields are not represented. | Missing state | Yes | Aura-derived unit modifiers. | Cost-reduction aura changes school spell mana cost. |
 | `game/player/spells/threat_bonus.rs:211-216` | Inverse effect mask is manually threaded because loaded spell-threat data is absent. | Persistent data | Yes | `SpellThreatEntry` loader and getter. | Threat applies only to effects allowed by inverse mask. |
 | `game/player/spells/validation.rs:1371-1375` | Loatheb and battleground open-lock/banner validation are disconnected. | Lifecycle hook | Yes | Encounter script and battleground-object state. | Restricted heal/dispel/banner casts fail in the relevant encounter state. |
@@ -208,7 +208,11 @@ or update path; it does not mean the behavior is complete.
   flags and cycle protection. Unknown condition kinds fail closed. Spell-focus casts now
   require an active matching spell-focus gameobject in the caster's map, phase, and template
   range. Script destination-AOE persistent aura and summon exceptions now match the source
-  target registration behavior. Ordinary casts now use a side-effect-free script-target
+  target registration behavior. `spell_area` loading now validates DBC areas, quest templates,
+  duplicate requirements, aura requirements, autocast chains, playable race masks, and genders
+  before exposing restrictions to live cast validation. Spell-chain DBC forward links now resolve
+  predecessor-first with cycle protection, preserving rank roots independently of hash iteration
+  order. Ordinary casts now use a side-effect-free script-target
   preflight and reject missing required unit/location targets before costs; triggered casts
   fail silently with `DONT_REPORT`. Execution remains the only resolver mode that consumes
   spell-magnet charges. Dead script targets now require visible creature-corpse state rather
@@ -222,6 +226,52 @@ or update path; it does not mean the behavior is complete.
 - Includes: hostility, immunity, reflect, effect resistance, delayed rechecks, DR snapshot, and combat/threat side effects.
 - Harness symbols: `Spell::FindCorpseUsing`, `Spell::CheckScriptTargeting`, and the blocked chunks of `Spell::DoAllEffectOnTarget`.
 - Verification: scenario tests for direct and delayed player/creature casts.
+- Progress (2026-07-25): `AuraContainer` now resolves active effect, state, and mechanic
+  immunity modifiers for both player and creature targets. `do_spell_hit_on_unit` removes
+  only immune effect bits before live effect dispatch. School immunity now rejects an entire
+  hit when the active aura school mask matches, respecting source exemptions, polarity, and
+  all-polarity attributes. Per-effect mechanic resistance now removes only the resisted effect
+  before dispatch.
+- Progress (2026-07-25, reflect): `roll_spell_hit` now checks damage immunity before rolling
+  reflect, so an invulnerable victim never burns a reflect charge. Reflectability follows
+  `SpellEntry::IsReflectableSpell` (magic damage class; not `IS_ABILITY`, `PASSIVE`,
+  `NO_IMMUNITIES`, or `EX_NO_REFLECTION`), and the chance sums `SPELL_AURA_REFLECT_SPELLS`
+  plus every school-matching `SPELL_AURA_REFLECT_SPELLS_SCHOOL` on the victim. `TargetInfo`
+  gained `reflect_result`; a reflected cast resolves it against the caster and, when the
+  caster can take the spell back, redirects `do_spell_hit_on_unit` and every effect dispatch
+  onto the caster instead of the reflecting victim. `SMSG_SPELL_GO` now writes the
+  reflect-result byte after a `SPELL_MISS_REFLECT` entry and only after that entry. Fixed
+  `AURA_SPELL_MAGNET`, which was defined as 28 (`SPELL_AURA_REFLECT_SPELLS`) instead of 96,
+  so spell-magnet targeting had been reading reflect auras. Remaining: the `PROC_EX_REFLECT`
+  victim proc (phase 6) and the full `IsImmuneToSpell` precheck.
+- Progress (2026-07-26, diminishing returns): step 7 of `DoSpellHitOnUnit` is now ported.
+  The DR group and level are sampled once per unit hit into `TargetInfo::diminishing` and
+  travel to every aura of that cast through `EffectInput`, so a multi-aura spell advances the
+  counter once and diminishes all of its auras by one rate — the reason MaNGOS samples on hit
+  rather than on aura add. The counter only advances when the surviving effect mask actually
+  applies an aura. Creatures gained their own `DiminishingState`, so `DRTYPE_ALL` (the stun
+  family) now diminishes them too, while `DRTYPE_PLAYER` groups stay confined to
+  player-versus-player pairs. Aura apply/remove hold and release the group symmetrically for
+  both target kinds, so the 15-second reset window only starts once the last aura drops. A
+  fully diminished hit lands no aura at all. Divergences: `caster->IsFriendlyTo(target)` is
+  approximated by spell polarity and `m_triggeredByAuraSpell` by `is_triggered`; the
+  `DIMINISHING_LIMITONLY` 10-second cap is kept as it was.
+- Progress (2026-07-26, hostile-action side effects): the `pRealCaster != unit` guard is now
+  in place, so a reflected cast landing back on its caster no longer breaks the caster's own
+  stealth or puts it in combat with itself. Direct-damage hits remove the target's
+  `HOSTILE_ACTION_RECEIVED_CANCELS` auras; invisibility removal now uses
+  `RemoveNonPassiveSpellsCausingAura` semantics so passive invisibility survives; and the
+  caster's own stealth/invisibility drops once the hit passes the threat gate. Fixed a
+  pre-existing bug behind all of this: every `SPELL_ATTR_EX*` test in the hit path went
+  through `SpellEntry::has_attribute`, which only reads the base `Attributes` column, so
+  `ALLOW_WHILE_STEALTHED`, `ALLOW_WHILE_INVISIBLE`, `NOT_AN_ACTION`, `NO_THREAT`,
+  `THREAT_ONLY_ON_MISS`, `NO_INITIAL_THREAT`, `ONLY_PEACEFUL_TARGETS`, and `PVP_ENABLING`
+  were all reading unrelated bits — `NOT_AN_ACTION` collided exactly with
+  `NOT_IN_COMBAT_ONLY_PEACEFUL`. Added `has_attribute_ex/ex2/ex3` and corrected all 14 call
+  sites. The attribute tests that should have caught this only asserted the function
+  returned, so they were strengthened to assert real aura state. Still blocked on missing
+  primitives: `IsVisibleForOrDetect` (the delayed-spell evade check and the caster-visibility
+  gate) and `UpdatePvP` flagging.
 
 ### B-005: Holder and Channel Lifecycle
 
@@ -293,7 +343,11 @@ or update path; it does not mean the behavior is complete.
 | None | - | - | Plan created; no implementation begun. | `cargo check -p oxcore-world --all-targets` completed during investigation. | None |
 | B-001 | 2026-07-24 | Runtime gap inventory and scenario matrix. | Complete; detailed inventory identifies core dependency layers and selects B-002 as the first implementation batch. | Source/reference audit; every substantive gap has a dependency class and minimal scenario. | None; Phase 0 does not advance implementation tasks. |
 | B-002 | 2026-07-24 | Shared creature/player aura storage and core creature lifecycle. | Complete; creature auras now use `AuraContainer`, preserve metadata, expire through `AuraSystem`, and re-sum remaining speed modifiers on removal. | `cargo check -p oxcore-world --all-targets`; `cargo test -p oxcore-world --lib game::player::auras::system`; `cargo test -p oxcore-world --lib game::player::spells::target_info`. | None; this foundation batch extends already-done lifecycle symbols without a new discrete harness task. |
-| B-003 | 2026-07-24 | Script target data, spatial resolution, conditions, and spell-focus validation. | In progress; script-near, location, unit/GO AoE, and script-cone target modes consume live data. Condition filtering and spell-focus lookup are wired; remaining source parity is recorded above. | Focused targets tests and `cargo check -p oxcore-world --lib`; spell-focus lookup test passes. | `SpellMgr::LoadSpellScriptTarget` advanced to `rust_compiled`; `Spell::CheckScriptTargeting` remains blocked pending remaining branches. |
+| B-003 | 2026-07-24 | Script target data, spatial resolution, conditions, spell-focus validation, spell-area loading, and spell-chain resolution. | In progress; script-near, location, unit/GO AoE, and script-cone target modes consume live data. Condition filtering, spell-focus lookup, source-valid `spell_area` loading, and deterministic DBC forward-chain resolution are wired; remaining source parity is recorded above. | `cargo test -p oxcore-world --lib game::spell::manager`; `cargo check -p oxcore-world --all-targets`. | `SpellMgr::LoadSpellAreas` and `SpellMgr::LoadSpellChains` chunks advanced to done; `SpellMgr::LoadSpellScriptTarget` remains `rust_compiled`; `Spell::CheckScriptTargeting` remains blocked pending remaining branches. |
+| B-004 | 2026-07-25 | Shared active-aura immunity and mechanic-resistance hit filtering. | In progress; player and creature targets use the same `AuraContainer` query to reject matching effect/state/mechanic effects and whole hits covered by school immunity. Effect-specific mechanics now roll active mechanic resistance before dispatch. Reflect and packets remain. | `cargo test -p oxcore-world --lib game::player::auras::container`; `cargo test -p oxcore-world --lib game::player::spells::target_info`; `cargo check -p oxcore-world --all-targets`. | `Unit::IsImmuneToSpellEffect`, `Unit::IsImmuneToSchool`, and `Unit::IsEffectResist` advanced to done. |
+| B-004 | 2026-07-26 | Spell reflection and the `SMSG_SPELL_GO` reflect-result byte. | In progress; reflect is rolled from live victim auras after the immunity check, the reflected cast resolves its own outcome against the caster and redirects hit processing plus every effect onto the caster, and the packet carries the reflect result. Also corrected `AURA_SPELL_MAGNET` (28 to 96), which had aliased `SPELL_AURA_REFLECT_SPELLS`. Remaining for phase 3: DR snapshots and complete combat/threat transitions (G-006). | `cargo test -p oxcore-world --lib` (1732 passed); `cargo test -p oxcore-shared --lib` (188 passed); `cargo check --workspace --all-targets`. | `SpellCaster::SpellHitResult` advanced to done. |
+| B-004 | 2026-07-26 | Per-hit diminishing-returns snapshot shared across a cast's auras, for player and creature targets. | In progress; DR moved from per-aura application to the spell-hit step it belongs to, creatures gained their own counters so `DRTYPE_ALL` groups diminish them, and apply/remove now hold the reset window symmetrically. Combat/threat transitions (the other half of G-006) remain. | `cargo test -p oxcore-world --lib` (1746 passed); `cargo test -p oxcore-shared --lib` (188 passed); `cargo check --workspace --all-targets`. | `Unit::GetDiminishing`, `Unit::IncrDiminishing`, `Unit::ApplyDiminishingToDuration`, `Unit::ApplyDiminishingAura`, and `Spells::GetDiminishingReturnsGroupType` advanced to done. |
+| B-004 | 2026-07-26 | Hostile-action side effects in `DoSpellHitOnUnit`, plus the `SPELL_ATTR_EX*` accessor fix. | In progress; self-hit guard, hostile-action interrupt removal, non-passive invisibility semantics, and caster-side stealth removal are live. Every extended-attribute test in the hit path was reading the base `Attributes` column and is now corrected, with the smoke tests that missed it strengthened to assert aura state. Remaining in G-006: visibility gating and PvP flagging, both blocked on absent primitives. | `cargo test -p oxcore-world --lib` (1750 passed); `cargo test -p oxcore-shared --lib` (188 passed); `cargo test -p oxcore-dbc --lib` (4 passed); `cargo check --workspace --all-targets`. | `Spell::DoSpellHitOnUnit:chunk_0` advanced to verified. |
 
 ## Milestone Verification
 
