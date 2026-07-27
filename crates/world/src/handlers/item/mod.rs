@@ -3,6 +3,7 @@ use tracing::{info, warn};
 
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::inventory::types::EquipResult;
+use crate::game::player::auras::interrupt::AuraInterruptFlags;
 use crate::handlers::spells::parse_spell_cast_targets;
 use crate::World;
 use oxcore_shared::game::inventory::{
@@ -161,6 +162,14 @@ pub async fn handle_use_item(
         "CMSG_USE_ITEM: player {:?} using item {} (spell {}) from bag={} slot={}",
         player_guid, item_entry, spell_id, bag, slot
     );
+
+    // Item use breaks auras such as stealth that explicitly opt into the USE
+    // interrupt flag, matching Player::CastItemUseSpell.
+    world
+        .systems
+        .auras
+        .remove_auras_with_interrupt_flag(player_guid, AuraInterruptFlags::USE.0, world)
+        .await?;
 
     let mut on_use_count = 0;
     for index in 0..5 {

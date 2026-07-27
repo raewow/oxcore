@@ -58,15 +58,6 @@ pub async fn handle_gameobj_use(
         })
         .unwrap_or(0);
 
-    if go_type == GameObjectType::Chest {
-        world
-            .systems
-            .loot
-            .handle_loot_request(player_guid, go_guid, world)
-            .await?;
-        return Ok(());
-    }
-
     if !matches!(go_type, GameObjectType::QuestGiver | GameObjectType::Goober) {
         return Ok(());
     }
@@ -341,23 +332,5 @@ mod tests {
 
         let out = read_packet(&mut rx);
         assert_eq!(out.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_LIST);
-    }
-
-    #[tokio::test]
-    async fn chest_use_opens_a_loot_window() {
-        let mut world = test_world();
-        install_mock_quest_system(&mut world);
-        let (session, mut rx) = add_player(&mut world);
-        let mut data = [0; 24];
-        data[1] = 10119;
-        let go_guid = add_gameobject(&world, 161557, GameObjectType::Chest as u32, data);
-
-        let mut packet = WorldPacket::new(Opcode::CMSG_GAMEOBJ_USE);
-        packet.write_guid(go_guid);
-        handle_gameobj_use(&session, &mut packet, &world)
-            .await
-            .expect("handler should succeed");
-
-        assert_eq!(read_packet(&mut rx).opcode(), Opcode::SMSG_LOOT_RESPONSE);
     }
 }

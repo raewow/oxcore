@@ -362,6 +362,11 @@ impl World {
             .load_loot_tables(&self.databases.world)
             .await
             .context("Failed to load loot tables")?;
+        self.systems
+            .loot_manager
+            .load_gameobject_loot_tables(&self.databases.world)
+            .await
+            .context("Failed to load gameobject loot tables")?;
 
         // Load spawn pools and roll their initial rosters. Must run after
         // creature and gameobject spawns are loaded — pool members reference
