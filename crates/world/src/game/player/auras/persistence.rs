@@ -13,7 +13,8 @@
 //! `(spell_id, caster_guid, cast_item_guid)` before writing a row, and loading reconstructs the
 //! per-effect auras from a row's `effect_index_mask`.
 
-use super::aura::{Aura, AuraFlags};
+use super::aura::AuraFlags;
+use crate::game::player::spells::diminishing::DiminishSnapshot;
 use crate::World;
 use anyhow::Result;
 use oxcore_shared::database::characters::models::character::CharacterAuraRow;
@@ -164,6 +165,12 @@ async fn load_aura(player_guid: ObjectGuid, row: &CharacterAuraRow, timediff: u3
     let base_points = [row.base_points0, row.base_points1, row.base_points2];
     let periodic_time = [row.periodic_time0, row.periodic_time1, row.periodic_time2];
 
+    let cast_item_guid = if row.item_guid != 0 {
+        Some(ObjectGuid::new_item(row.item_guid))
+    } else {
+        None
+    };
+
     for effect_index in 0..3u8 {
         if (row.effect_index_mask & (1 << effect_index)) == 0 {
             continue;
@@ -187,36 +194,59 @@ async fn load_aura(player_guid: ObjectGuid, row: &CharacterAuraRow, timediff: u3
             is_permanent: duration_ms.is_none(),
         };
 
-        let mut aura = Aura::new(
-            row.spell,
-            caster_guid,
-            effect_index,
-            aura_type,
-            0, // misc_value: not persisted per-effect in AuraSaveStruct; recomputed from spell on next apply-effect pass if needed
-            base_value,
-            duration_ms,
-            periodic_interval_ms,
-            stacks.max(1) as u8,
-            spell_entry.proc_charges.max(charges) as u8,
-            flags,
-        );
-        aura.duration_index = spell_entry.duration_index;
-        aura.max_duration_ms = max_duration_ms;
-        aura.stack_count = stacks.max(1) as u8;
-        aura.charges = charges as u8;
-        aura.cast_item_guid = if row.item_guid != 0 {
-            Some(ObjectGuid::new_item(row.item_guid))
-        } else {
-            None
-        };
+        // Go through the normal apply path (`Player::AddSpellAuraHolder`) rather than
+        // pushing straight into the container: a restored aura must re-run its effect
+        // handlers, or the character comes back without the state the aura owns —
+        // a warrior's saved stance would leave `shapeshift_form` at 0, a movement
+        // aura would not re-apply its speed, and so on.
+        let applied = world
+            .systems
+            .auras
+            .apply_aura(
+                player_guid,
+                caster_guid,
+                cast_item_guid,
+                row.spell,
+                effect_index,
+                aura_type,
+                spell_entry.effect_misc_value[idx],
+                base_value,
+                duration_ms,
+                periodic_interval_ms,
+                stacks.max(1) as u8,
+                spell_entry.proc_charges.max(charges) as u8,
+                flags,
+                // Saved auras already had DR applied to the duration they were stored with;
+                // re-diminishing on load would shorten them a second time.
+                DiminishSnapshot::default(),
+                world,
+            )
+            .await;
 
+        if let Err(err) = applied {
+            tracing::error!(
+                "Player::LoadAura: failed to apply spell {} effect {}: {err:#}",
+                row.spell,
+                effect_index
+            );
+            continue;
+        }
+
+        // `Aura::SetLoadedState` — restore the persisted counters the apply path
+        // recomputed from the spell template.
         world
             .systems
             .player
             .manager()
             .with_player_mut(player_guid, |player| {
-                player.auras.container.add_aura(aura);
-                player.auras.needs_client_update = true;
+                if let Some(aura) = player.auras.container.get_aura_mut(row.spell, effect_index) {
+                    aura.duration_index = spell_entry.duration_index;
+                    aura.max_duration_ms = max_duration_ms;
+                    aura.duration_ms = duration_ms;
+                    aura.stack_count = stacks.max(1) as u8;
+                    aura.charges = charges as u8;
+                    aura.periodic_interval_ms = periodic_interval_ms;
+                }
             });
     }
 }
