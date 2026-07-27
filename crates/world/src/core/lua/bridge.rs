@@ -217,7 +217,8 @@ pub fn map_ai_event_to_callback(event: &AIEvent) -> Option<LuaCallback> {
             spell_id: *spell_id,
         }),
         // Events that don't have direct Lua callbacks
-        AIEvent::DamageDealt { .. }
+        AIEvent::AttackedBy { .. }
+        | AIEvent::DamageDealt { .. }
         | AIEvent::SpellInterrupted { .. }
         | AIEvent::UnitInRange { .. }
         | AIEvent::TimerExpired { .. }

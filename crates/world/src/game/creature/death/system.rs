@@ -110,35 +110,28 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
         .filter(|g| g.is_player())
         .count() as u32;
 
-    // Calculate respawn time with flags and population
-    let respawn_time_secs = world
+    // Scale the spawn delay by the spawn flags and arm the timer with it
+    let respawn_delay_secs = world
         .managers
         .creature_mgr
         .with_creature_mut(guid, |creature| {
-            creature.calculate_respawn_time_with_flags(
+            let delay = creature.calculate_respawn_delay_secs(
                 spawn_data.spawntimesecs,
                 spawn_data.spawn_flags,
                 nearby_players,
-            )
+            );
+            creature.set_respawn_timer(delay);
+            delay
         })
-        .map(|time_ms| (time_ms / 1000) as u32)
         .unwrap_or(spawn_data.spawntimesecs); // Fallback to base time
 
     tracing::debug!(
         "[RESPAWN] Creature {:?} will respawn in {} seconds (base: {}, nearby players: {})",
         guid,
-        respawn_time_secs,
+        respawn_delay_secs,
         spawn_data.spawntimesecs,
         nearby_players
     );
-
-    // Set respawn timer
-    world
-        .managers
-        .creature_mgr
-        .with_creature_mut(guid, |creature| {
-            creature.set_respawn_timer(respawn_time_secs);
-        });
 
     // Transition to corpse state
     world

@@ -868,6 +868,18 @@ impl CreatureManager {
         self.creatures.insert(creature.guid, creature);
     }
 
+    /// Install spawn rows without a database, as `load_creature_spawns` would.
+    #[cfg(test)]
+    pub fn add_spawns_for_test(&self, spawns: Vec<CreatureSpawnData>) {
+        for spawn in spawns {
+            self.spawns_by_map
+                .entry(spawn.map_id)
+                .or_default()
+                .push(spawn);
+        }
+        self.rebuild_spawn_grid_index();
+    }
+
     /// Apply damage to a creature with threat tracking (Phase 5: ThreatManager)
     /// Returns (actual_damage, is_dead)
     pub fn apply_damage(
@@ -1063,6 +1075,32 @@ impl CreatureManager {
         self.creatures
             .iter()
             .filter(|e| e.death_state == DeathState::Corpse && e.corpse_decay_timer == 0)
+            .map(|e| *e.key())
+            .collect()
+    }
+
+    /// Creatures that have decayed away and are only waiting on their respawn
+    /// timer, whose spawn point is in `grid` on this map instance.
+    ///
+    /// Corpse removal takes them out of the map, so a grid unload cannot find
+    /// them the way it finds everything else — it has to ask for them by spawn
+    /// point.
+    pub fn dead_creatures_spawned_in_grid(
+        &self,
+        map_id: u32,
+        instance_id: u32,
+        grid: (u8, u8),
+    ) -> Vec<ObjectGuid> {
+        use crate::map::grid_coords::world_to_grid;
+
+        self.creatures
+            .iter()
+            .filter(|e| {
+                e.death_state == DeathState::Dead
+                    && e.map_id == map_id
+                    && e.instance_id == instance_id
+                    && world_to_grid(e.home_position.x, e.home_position.y) == grid
+            })
             .map(|e| *e.key())
             .collect()
     }

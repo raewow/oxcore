@@ -437,21 +437,24 @@ impl Creature {
         self.corpse_decay_timer = 0;
     }
 
-    /// Calculate respawn time with spawn flags
-    pub fn calculate_respawn_time_with_flags(
+    /// Respawn delay in seconds, with the spawn flags applied to `spawntimesecs`.
+    ///
+    /// Returns a *delay*, not a point in time: `Creature::SetDeathState`
+    /// (Creature.cpp:2245-2259) scales the base delay by the spawn flags and only
+    /// then turns it into `m_respawnTime = time(nullptr) + respawnDelay`. Handing
+    /// back an absolute timestamp here is what let the caller add "now" a second
+    /// time, pushing every respawn decades into the future.
+    pub fn calculate_respawn_delay_secs(
         &self,
         base_time_secs: u32,
         spawn_flags: u32,
         nearby_player_count: u32,
-    ) -> u64 {
-        use std::time::{SystemTime, UNIX_EPOCH};
+    ) -> u32 {
+        let mut time = base_time_secs as f32;
 
-        let mut time = base_time_secs;
-
+        // urand(90, 110) / 100
         if spawn_flags & super::spawn::spawn_flags::RANDOM_RESPAWN_TIME != 0 {
-            let variance = (time as f32 * 0.1 * rand::random::<f32>()) as u32;
-            let min = time - time / 10;
-            time = min + variance;
+            time *= 0.9 + rand::random::<f32>() * 0.2;
         }
 
         if spawn_flags & super::spawn::spawn_flags::DYNAMIC_RESPAWN_TIME != 0 {
@@ -461,15 +464,10 @@ impl Creature {
                 6..=10 => 0.6,
                 _ => 0.5,
             };
-            time = (time as f32 * scale) as u32;
+            time *= scale;
         }
 
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-
-        now_ms + (time as u64 * 1000)
+        time as u32
     }
 
     /// Set respawn time based on calculated delay
@@ -493,6 +491,7 @@ impl Creature {
     /// Reset creature to alive state at home position
     pub fn respawn(&mut self) {
         self.death_state = DeathState::Alive;
+        self.in_world = true;
         self.position = self.home_position;
         self.current_health = self.max_health;
         self.current_mana = self.max_mana;
@@ -540,5 +539,113 @@ impl Creature {
     /// Clear all auras (e.g., on death)
     pub fn clear_auras(&mut self) {
         self.auras.remove_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::creature::spawn::spawn_flags;
+
+    fn template() -> CreatureTemplate {
+        CreatureTemplate {
+            entry: 1,
+            name: String::from("Test Creature"),
+            subname: None,
+            min_level: 1,
+            max_level: 1,
+            faction: 35,
+            model_id_1: 1,
+            model_id_2: 0,
+            model_id_3: 0,
+            model_id_4: 0,
+            scale: 1.0,
+            npc_flags: 0,
+            unit_flags: 0,
+            static_flags1: 0,
+            flags_extra: 0,
+            creature_type: 7,
+            unit_class: 1,
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            damage_variance: 0.0,
+            attack_time: 2000,
+            rank: 0,
+            gossip_menu_id: 0,
+            vendor_id: 0,
+            trainer_id: 0,
+            trainer_type: 0,
+            spells: [0; 4],
+        }
+    }
+
+    fn creature() -> Creature {
+        Creature::new(
+            ObjectGuid::new_creature(1, 1),
+            1,
+            1,
+            Position::default(),
+            0,
+            0,
+            &template(),
+            1,
+            None,
+        )
+    }
+
+    fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    }
+
+    /// The regression: the delay used to come back as an absolute timestamp,
+    /// which `set_respawn_timer` then added to "now" a second time — putting
+    /// every respawn ~55 years out, so `should_respawn` never fired.
+    #[test]
+    fn respawn_timer_is_the_spawn_delay_from_now() {
+        let mut creature = creature();
+        let delay = creature.calculate_respawn_delay_secs(300, 0, 0);
+        assert_eq!(delay, 300);
+
+        creature.set_respawn_timer(delay);
+        creature.death_state = DeathState::Dead;
+
+        let now = now_ms();
+        assert!(!creature.should_respawn(now));
+        assert!(!creature.should_respawn(now + 299_000));
+        assert!(creature.should_respawn(now + 301_000));
+    }
+
+    /// `urand(90, 110) / 100` around the base delay.
+    #[test]
+    fn random_respawn_time_stays_within_ten_percent() {
+        let creature = creature();
+
+        for _ in 0..200 {
+            let delay =
+                creature.calculate_respawn_delay_secs(300, spawn_flags::RANDOM_RESPAWN_TIME, 0);
+            assert!((270..=330).contains(&delay), "delay {delay} out of range");
+        }
+    }
+
+    /// Death drops the movement generators and clears `in_world`; a respawned
+    /// creature has to be back in the world or nothing will tick it.
+    #[test]
+    fn respawn_puts_the_creature_back_in_the_world() {
+        let mut creature = creature();
+        creature.in_world = true;
+        creature.kill(None);
+        creature.in_world = false; // corpse removal
+
+        creature.respawn();
+
+        assert!(creature.in_world);
+        assert_eq!(creature.death_state, DeathState::Alive);
+        assert_eq!(creature.current_health, creature.max_health);
+        assert_eq!(creature.respawn_time, 0);
     }
 }

@@ -69,6 +69,18 @@ impl RespawnSystem {
             return Ok(());
         };
 
+        // Death cleared the motion master (`MotionMaster::Clear` in
+        // `SetDeathState`), so the spawn's movement type has to be applied again —
+        // otherwise every respawned wanderer and patroller stands on its spawn
+        // point for the rest of the map's life.
+        if let Some(spawn) = world.managers.creature_mgr.get_spawn_data(guid) {
+            world.managers.creature_mgr.initialize_creature_movement(
+                guid,
+                &spawn,
+                Some(&world.managers.waypoint_mgr),
+            );
+        }
+
         tracing::info!(
             "[RESPAWN] Creature {:?} (entry {}) respawning at ({:.1}, {:.1}, {:.1})",
             guid,
@@ -131,5 +143,171 @@ impl RespawnSystem {
             self.broadcast_mgr
                 .send_msg_to_player(player_guid, create_msg.clone());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::game::creature::death::{process_corpse_decay, process_deaths, DeathState};
+    use crate::game::creature::{CreatureSpawnData, CreatureTemplate};
+    use oxcore_shared::database::Databases;
+    use sqlx::mysql::MySqlPoolOptions;
+    use std::path::PathBuf;
+
+    fn lazy_pool() -> sqlx::MySqlPool {
+        MySqlPoolOptions::new()
+            .connect_lazy("mysql://test:test@localhost/test")
+            .expect("lazy pool should be constructible")
+    }
+
+    fn test_world() -> World {
+        let databases = Arc::new(Databases {
+            world: lazy_pool(),
+            character: lazy_pool(),
+            auth: lazy_pool(),
+            logs: lazy_pool(),
+        });
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    fn template(entry: u32) -> CreatureTemplate {
+        CreatureTemplate {
+            entry,
+            name: format!("Creature {entry}"),
+            subname: None,
+            min_level: 1,
+            max_level: 1,
+            faction: 35,
+            model_id_1: 1,
+            model_id_2: 0,
+            model_id_3: 0,
+            model_id_4: 0,
+            scale: 1.0,
+            npc_flags: 0,
+            unit_flags: 0,
+            static_flags1: 0,
+            flags_extra: 0,
+            creature_type: 7,
+            unit_class: 1,
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            damage_variance: 0.0,
+            attack_time: 2000,
+            rank: 0,
+            gossip_menu_id: 0,
+            vendor_id: 0,
+            trainer_id: 0,
+            trainer_type: 0,
+            spells: [0; 4],
+        }
+    }
+
+    fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    }
+
+    /// Kill -> corpse -> decay -> respawn, driven through the same calls the world
+    /// tick makes. The timer half of this used to overflow into the next century,
+    /// so nothing ever came back.
+    #[tokio::test]
+    async fn a_killed_creature_comes_back_after_its_spawn_delay() {
+        let world = test_world();
+        let spawn_pos = Position {
+            x: 100.0,
+            y: 200.0,
+            z: 0.0,
+            o: 0.0,
+        };
+
+        world.managers.creature_mgr.add_template(template(70));
+        world
+            .managers
+            .creature_mgr
+            .add_spawns_for_test(vec![CreatureSpawnData::new(1, 70, 0, spawn_pos, 300)]);
+
+        let map = world.managers.map_mgr.get_or_create_map(0, 0);
+        map.add_player(ObjectGuid::new_player(1), spawn_pos);
+        world
+            .systems
+            .grid
+            .process_map_grids(0, 0, &world)
+            .await
+            .expect("grid processing");
+
+        let guid = *world
+            .managers
+            .creature_mgr
+            .iter_creatures()
+            .next()
+            .expect("creature spawned")
+            .key();
+
+        // Kill it, then run the tick's death phase.
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(guid, |c| c.kill(None));
+        process_deaths(&world).await.expect("deaths");
+
+        let (state, respawn_time) = world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| (c.death_state, c.respawn_time))
+            .expect("creature");
+        assert_eq!(state, DeathState::Corpse);
+        // 300s base, +/-10% from the random respawn flag — not a timestamp.
+        let delay_ms = respawn_time - now_ms();
+        assert!(
+            (269_000..=331_000).contains(&delay_ms),
+            "respawn is {delay_ms}ms out, expected ~300s"
+        );
+
+        // Let the corpse decay away.
+        process_corpse_decay(&world, 60_000).await.expect("decay");
+        assert_eq!(
+            world
+                .managers
+                .creature_mgr
+                .with_creature(guid, |c| c.death_state),
+            Some(DeathState::Dead)
+        );
+        assert!(!map.get_objects_in_range(spawn_pos, 10.0).contains(&guid));
+
+        // Fast-forward to the respawn point and run the respawn phase.
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(guid, |c| c.respawn_time = 0);
+        world
+            .systems
+            .creature_respawn
+            .process_respawns(&world)
+            .await
+            .expect("respawns");
+
+        let creature = world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| (c.death_state, c.in_world, c.current_health))
+            .expect("creature");
+        assert_eq!(creature.0, DeathState::Alive);
+        assert!(creature.1, "respawned creature must be in world");
+        assert!(creature.2 > 0);
+        assert!(
+            map.get_objects_in_range(spawn_pos, 10.0).contains(&guid),
+            "respawned creature must be back on the map"
+        );
     }
 }
