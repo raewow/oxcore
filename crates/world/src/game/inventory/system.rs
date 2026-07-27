@@ -719,7 +719,7 @@ impl InventorySystem {
                 flags: 0,
                 enchantments: String::new(),
                 random_property_id: 0,
-                durability: 0,
+                durability: proto.max_durability as u16,
                 text: 0,
                 generated_loot: None,
             };
@@ -1742,6 +1742,7 @@ impl InventorySystem {
                 count: item.count,
                 bag: item.bag,
                 slot: item.slot,
+                durability: item.durability,
             }
         };
 
@@ -1762,8 +1763,8 @@ impl InventorySystem {
         }
 
         // Get item template for stack size validation
-        let max_stack = match self.item_mgr.get_template(src_info.entry_id) {
-            Some(t) => t.stackable,
+        let proto = match self.item_mgr.get_template(src_info.entry_id) {
+            Some(t) => t,
             None => {
                 tracing::error!(
                     "[INVENTORY] split_item FAILED: template not found for item {}",
@@ -1776,6 +1777,7 @@ impl InventorySystem {
                 return SplitItemResult::InvalidCount;
             }
         };
+        let max_stack = proto.stackable;
 
         if !self.is_valid_item_position(player_guid, dst_bag, dst_slot) {
             tracing::warn!(
@@ -1821,6 +1823,7 @@ impl InventorySystem {
                     count: item.count,
                     bag: item.bag,
                     slot: item.slot,
+                    durability: item.durability,
                 }
             };
 
@@ -1936,7 +1939,7 @@ impl InventorySystem {
                 flags: 0,
                 enchantments: String::new(),
                 random_property_id: 0,
-                durability: 0,
+                durability: src_info.durability as u16,
                 text: 0,
                 generated_loot: None,
             };
@@ -2009,8 +2012,8 @@ impl InventorySystem {
                 player_guid,
                 dst_slot,
                 dst_bag,
-                0,
-                0,
+                src_info.durability,
+                proto.max_durability,
                 0,
                 Vec::new(),
                 0,

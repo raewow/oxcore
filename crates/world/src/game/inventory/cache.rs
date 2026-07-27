@@ -27,6 +27,7 @@ pub struct CachedItemInfo {
     pub count: u32,
     pub bag: u8,
     pub slot: u8,
+    pub durability: u32,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -525,6 +526,7 @@ impl InventoryCache {
                     count: item.count,
                     bag: item.bag,
                     slot: item.slot,
+                    durability: item.durability,
                 }
             })
         })

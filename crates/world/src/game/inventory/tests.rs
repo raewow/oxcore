@@ -1560,6 +1560,60 @@ mod integration_tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_add_item_initializes_durability_from_template() {
+        let mut mock_repo = MockInventoryRepositoryTrait::new();
+        let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        make_standard_load_expectations(&mut mock_repo);
+        mock_repo
+            .expect_get_next_item_guid()
+            .with()
+            .times(1)
+            .returning(|| Ok(100));
+        mock_repo
+            .expect_create_item()
+            .withf(|item, slot| {
+                item.guid == 100
+                    && item.item_id == 7777
+                    && item.durability == 100
+                    && slot.item_guid == 100
+            })
+            .times(1)
+            .returning(|_, _| Ok(()));
+        mock_broadcaster
+            .expect_send_to_player()
+            .times(0..)
+            .returning(|_, _| ());
+
+        let mut item_mgr = ItemManager::new();
+        let mut template = cast_item_template(7777, 0, 1);
+        template.max_durability = 100;
+        item_mgr.add_template(template);
+
+        let system = InventorySystem::with_mocks(
+            Arc::new(mock_repo),
+            Arc::new(mock_broadcaster),
+            InventoryCache::new(),
+            Arc::new(item_mgr),
+        );
+        let player_guid = test_player_guid(1);
+        system.load_player_inventory(player_guid).await.unwrap();
+
+        let result = system.add_item(player_guid, 7777, 1).await;
+        assert!(matches!(
+            result,
+            super::super::types::AddItemResult::Success { .. }
+        ));
+
+        let item = system
+            .cache()
+            .get_item(player_guid, test_item_guid(100))
+            .expect("new item should be cached");
+        let item = item.read();
+        assert_eq!(item.durability, 100);
+        assert_eq!(item.max_durability, 100);
+    }
+
     fn cast_item_instance(
         item_id: u32,
         entry: u32,
