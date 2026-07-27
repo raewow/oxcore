@@ -3047,9 +3047,9 @@ impl InventorySystem {
                     let visible_base = visible_item_entry_field(slot);
                     fields.push((visible_base, item_entry));
 
-                    // Set enchantment fields (fields 1-2) - 0x40000000 as default
-                    fields.push((visible_base + 1, 0x40000000));
-                    fields.push((visible_base + 2, 0x40000000));
+                    // Unenchanted visible items use zero-valued enchantment fields.
+                    fields.push((visible_base + 1, 0));
+                    fields.push((visible_base + 2, 0));
 
                     // Set UNIT_VIRTUAL_ITEM_SLOT_DISPLAY for weapon slots (for visual display)
                     if slot == EQUIPMENT_SLOT_MAINHAND

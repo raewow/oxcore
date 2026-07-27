@@ -311,8 +311,8 @@ impl ToWorldPacket for SmsgVisibleItemUpdate {
             mask.set_field_required(visible_base, 0);
         }
 
-        mask.set_field_required(visible_base + 1, 0x40000000);
-        mask.set_field_required(visible_base + 2, 0x40000000);
+        mask.set_field_required(visible_base + 1, 0);
+        mask.set_field_required(visible_base + 2, 0);
         mask.set_field_required(visible_base + 3, 0);
         mask.set_field_required(visible_base + 4, 0);
         mask.set_field_required(visible_base + 5, 0);
