@@ -76,20 +76,6 @@ pub async fn handle_attack_swing(
         .start_attack(attacker_guid, target_guid, &world.managers.player_mgr)
         .await?;
 
-    // Enter combat state
-    world
-        .systems
-        .combat
-        .enter_combat(attacker_guid, target_guid, &world.managers.player_mgr);
-
-    // Tell the target it is being attacked (vmangos Unit::Attack -> CreatureAI::AttackedBy).
-    // The creature engages on the swing itself, so a first swing that misses still pulls it.
-    crate::game::creature::ai::queue_event(
-        world,
-        target_guid,
-        crate::game::creature::ai::AIEvent::AttackedBy { attacker_guid },
-    );
-
     // Broadcast SMSG_ATTACKSTART to nearby players
     let packet = SmsgAttackStart {
         attacker_guid,
@@ -124,6 +110,13 @@ pub async fn execute_pending_attack_vs_creature(
         send_attack_stop(world, attacker_guid, target_guid, true);
         return Ok(true);
     }
+
+    // Starting auto-attack only arms the swing timer. Combat begins when the
+    // first swing is actually attempted, after the range check in the update loop.
+    world
+        .systems
+        .combat
+        .enter_combat(attacker_guid, target_guid, &world.managers.player_mgr);
 
     // Get attacker weapon damage from combat state (with level-based fallback)
     let (attacker_level, weapon_min, weapon_max) = world
