@@ -382,13 +382,16 @@ pub const FORM_BEAR: u8 = 5;
 pub const FORM_AMBIENT: u8 = 6;
 pub const FORM_GHOUL: u8 = 7;
 pub const FORM_DIREBEAR: u8 = 8;
-pub const FORM_CREATUREBEAR: u8 = 16;
-pub const FORM_GHOSTWOLF: u8 = 17;
-pub const FORM_BATTLESTANCE: u8 = 18;
-pub const FORM_DEFENSIVESTANCE: u8 = 19;
-pub const FORM_BERSERKERSTANCE: u8 = 20;
-pub const FORM_MOONKIN: u8 = 27;
-pub const FORM_SPIRITOFREDEMPTION: u8 = 28;
+pub const FORM_CREATUREBEAR: u8 = 14;
+pub const FORM_CREATURECAT: u8 = 15;
+pub const FORM_GHOSTWOLF: u8 = 16;
+pub const FORM_BATTLESTANCE: u8 = 17;
+pub const FORM_DEFENSIVESTANCE: u8 = 18;
+pub const FORM_BERSERKERSTANCE: u8 = 19;
+pub const FORM_SHADOW: u8 = 28;
+pub const FORM_STEALTH: u8 = 30;
+pub const FORM_MOONKIN: u8 = 31;
+pub const FORM_SPIRITOFREDEMPTION: u8 = 32;
 
 /// Returns `(display_id, scale)` for a shapeshift form, or `(0, 1.0)` if the
 /// form has no hardcoded display (keeps native model). `is_alliance` picks the
@@ -423,5 +426,42 @@ pub fn shapeshift_power_type(form: u8) -> Option<crate::game::player::power::Pow
         FORM_BEAR | FORM_DIREBEAR => Some(PowerType::Rage),
         FORM_BATTLESTANCE | FORM_BERSERKERSTANCE | FORM_DEFENSIVESTANCE => Some(PowerType::Rage),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shapeshift_forms_match_the_reference_enum() {
+        // `ShapeshiftForm` in SharedDefines.h is written in hex; these are its decimal values.
+        assert_eq!(FORM_DIREBEAR, 0x08);
+        assert_eq!(FORM_CREATUREBEAR, 0x0E);
+        assert_eq!(FORM_CREATURECAT, 0x0F);
+        assert_eq!(FORM_GHOSTWOLF, 0x10);
+        assert_eq!(FORM_BATTLESTANCE, 0x11);
+        assert_eq!(FORM_DEFENSIVESTANCE, 0x12);
+        assert_eq!(FORM_BERSERKERSTANCE, 0x13);
+        assert_eq!(FORM_SHADOW, 0x1C);
+        assert_eq!(FORM_STEALTH, 0x1E);
+        assert_eq!(FORM_MOONKIN, 0x1F);
+        assert_eq!(FORM_SPIRITOFREDEMPTION, 0x20);
+    }
+
+    #[test]
+    fn warrior_stances_keep_the_native_model() {
+        // Regression: Battle Stance (form 17) used to collide with FORM_GHOSTWOLF and
+        // turned every logging-in warrior into a wolf.
+        assert_eq!(shapeshift_display_info(FORM_BATTLESTANCE, true), (0, 1.0));
+        assert_eq!(
+            shapeshift_display_info(FORM_DEFENSIVESTANCE, true),
+            (0, 1.0)
+        );
+        assert_eq!(
+            shapeshift_display_info(FORM_BERSERKERSTANCE, true),
+            (0, 1.0)
+        );
+        assert_eq!(shapeshift_display_info(FORM_GHOSTWOLF, true), (4613, 0.80));
     }
 }
