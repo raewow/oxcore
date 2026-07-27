@@ -8,6 +8,8 @@ use std::sync::Arc;
 pub struct LootManager {
     /// Loot tables by creature entry
     creature_loot_tables: DashMap<u32, Vec<LootTableEntry>>,
+    /// Loot tables by gameobject loot ID
+    gameobject_loot_tables: DashMap<u32, Vec<LootTableEntry>>,
     /// Active loot instances by source GUID
     active_loot: DashMap<ObjectGuid, Loot>,
 }
@@ -27,6 +29,7 @@ impl LootManager {
     pub fn new() -> Self {
         Self {
             creature_loot_tables: DashMap::new(),
+            gameobject_loot_tables: DashMap::new(),
             active_loot: DashMap::new(),
         }
     }
@@ -63,6 +66,43 @@ impl LootManager {
         tracing::info!(
             "Loaded loot tables for {} creature entries",
             self.creature_loot_tables.len()
+        );
+        Ok(())
+    }
+
+    /// Load gameobject loot tables from the world database.
+    pub async fn load_gameobject_loot_tables(
+        &self,
+        world_db: &sqlx::MySqlPool,
+    ) -> anyhow::Result<()> {
+        let rows = sqlx::query_as::<_, LootTableRow>(
+            r#"SELECT entry, item, ChanceOrQuestChance as chance,
+               CAST(mincountOrRef AS SIGNED) as min_count, maxcount as max_count, groupid as group_id
+               FROM gameobject_loot_template"#,
+        )
+        .fetch_all(world_db)
+        .await?;
+
+        for row in rows {
+            let entry = LootTableEntry {
+                entry: row.entry,
+                item: row.item,
+                chance: row.chance.abs(),
+                min_count: row.min_count.max(1) as u32,
+                max_count: (row.max_count as u32).max(1),
+                group_id: row.group_id,
+                is_reference: row.min_count < 0,
+                is_quest_drop: row.chance < 0.0,
+            };
+            self.gameobject_loot_tables
+                .entry(entry.entry)
+                .or_insert_with(Vec::new)
+                .push(entry);
+        }
+
+        tracing::info!(
+            "Loaded loot tables for {} gameobject loot IDs",
+            self.gameobject_loot_tables.len()
         );
         Ok(())
     }
@@ -140,6 +180,73 @@ impl LootManager {
 
         self.active_loot.insert(source_guid, loot);
         true
+    }
+
+    /// Generate loot for a gameobject chest. Unlike creatures, chests do not
+    /// generate a level-based gold drop.
+    pub fn generate_gameobject_loot(&self, source_guid: ObjectGuid, loot_id: u32) -> bool {
+        let Some(table) = self.gameobject_loot_tables.get(&loot_id) else {
+            self.active_loot.insert(
+                source_guid,
+                Loot {
+                    generated: true,
+                    ..Loot::new()
+                },
+            );
+            return true;
+        };
+
+        let mut loot = Loot::new();
+        let mut slot: u8 = 0;
+        let mut quest_slot: u8 = 0;
+        for entry in table.iter() {
+            if entry.is_reference || rand::random::<f32>() * 100.0 > entry.chance {
+                continue;
+            }
+
+            let count = if entry.min_count == entry.max_count {
+                entry.min_count
+            } else {
+                rand::thread_rng().gen_range(entry.min_count..=entry.max_count)
+            };
+            let item = LootItem {
+                slot: if entry.is_quest_drop {
+                    quest_slot
+                } else {
+                    slot
+                },
+                item_id: entry.item,
+                count,
+                is_looted: false,
+                is_blocked: false,
+                is_counted: false,
+                roll_winner: None,
+            };
+            if entry.is_quest_drop {
+                loot.add_quest_item(item);
+                quest_slot += 1;
+            } else {
+                loot.add_item(item);
+                slot += 1;
+            }
+        }
+        loot.generated = true;
+        self.active_loot.insert(source_guid, loot);
+        true
+    }
+
+    /// Whether a gameobject loot table has a quest-only item needed by a player.
+    pub fn player_needs_gameobject_quest_loot<F>(&self, loot_id: u32, mut needs_item: F) -> bool
+    where
+        F: FnMut(u32) -> bool,
+    {
+        self.gameobject_loot_tables
+            .get(&loot_id)
+            .is_some_and(|table| {
+                table
+                    .iter()
+                    .any(|entry| entry.is_quest_drop && needs_item(entry.item))
+            })
     }
 
     /// Check if loot exists for a source
@@ -296,5 +403,39 @@ fn calculate_gold_drop(level: u8) -> u32 {
 impl Default for LootManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gameobject_quest_loot_is_generated_as_quest_only() {
+        let manager = LootManager::new();
+        let loot_id = 10119;
+        let source = ObjectGuid::new_gameobject(161557, 1);
+        manager.gameobject_loot_tables.insert(
+            loot_id,
+            vec![LootTableEntry {
+                entry: loot_id,
+                item: 11119,
+                chance: 100.0,
+                min_count: 1,
+                max_count: 1,
+                group_id: 0,
+                is_reference: false,
+                is_quest_drop: true,
+            }],
+        );
+
+        manager.generate_gameobject_loot(source, loot_id);
+
+        let loot = manager.get_loot(source).expect("chest loot should exist");
+        assert!(loot.items.is_empty());
+        assert_eq!(loot.quest_items.len(), 1);
+        assert_eq!(loot.quest_items[0].item_id, 11119);
+        assert!(manager.player_needs_gameobject_quest_loot(loot_id, |item_id| item_id == 11119));
+        assert!(!manager.player_needs_gameobject_quest_loot(loot_id, |_| false));
     }
 }

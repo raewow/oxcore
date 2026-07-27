@@ -443,7 +443,7 @@ impl VisibilitySubsystem {
                 world
                     .managers
                     .gameobject_mgr
-                    .build_create_msg(target_guid, world)
+                    .build_create_msg(target_guid, viewer_guid, world)
             } else if target_guid.is_corpse() {
                 world
                     .managers

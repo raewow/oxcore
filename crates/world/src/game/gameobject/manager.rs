@@ -441,7 +441,8 @@ impl GameObjectManager {
     pub fn build_create_msg(
         &self,
         guid: ObjectGuid,
-        _world: &crate::World,
+        viewer_guid: ObjectGuid,
+        world: &crate::World,
     ) -> Option<oxcore_shared::messages::update::SmsgUpdateObject> {
         use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
         use crate::core::common::position::Position as WorldPosition;
@@ -450,6 +451,18 @@ impl GameObjectManager {
         use oxcore_shared::messages::update::*;
 
         let go = self.gameobjects.get(&guid)?;
+        let quest_activate = go.go_type == GameObjectType::Chest
+            && self.get_template(go.entry).is_some_and(|template| {
+                world
+                    .systems
+                    .loot_manager
+                    .player_needs_gameobject_quest_loot(template.data[1].max(0) as u32, |item_id| {
+                        world
+                            .systems
+                            .quest
+                            .player_has_quest_for_item(viewer_guid, item_id)
+                    })
+            });
 
         let world_guid = WorldObjectGuid::new_gameobject(go.entry, guid.counter());
         let world_position =
@@ -483,7 +496,14 @@ impl GameObjectManager {
                 .set_float_field(GAMEOBJECT_POS_Z, go.position.z)
                 .set_float_field(GAMEOBJECT_FACING, go.position.o)
                 // Dynamic flags
-                .set_field(GAMEOBJECT_DYN_FLAGS, 0)
+                .set_field(
+                    GAMEOBJECT_DYN_FLAGS,
+                    if quest_activate {
+                        crate::game::gameobject::types::go_dyn_flags::GO_DYNFLAG_LO_ACTIVATE
+                    } else {
+                        0
+                    },
+                )
                 // Faction
                 .set_field(GAMEOBJECT_FACTION, go.faction)
                 // Type
@@ -563,7 +583,7 @@ impl GameObjectManager {
         let mut total_sent = 0;
 
         for guid in &gameobjects {
-            if let Some(msg) = self.build_create_msg(*guid, world) {
+            if let Some(msg) = self.build_create_msg(*guid, player_guid, world) {
                 for block in msg.blocks {
                     if count >= MAX_BLOCKS_PER_PACKET {
                         let packet = current_msg.to_world_packet();

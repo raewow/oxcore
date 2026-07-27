@@ -1,4 +1,5 @@
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
+use crate::game::gameobject::{GameObjectType, LootState};
 use crate::game::items::ItemManager;
 use crate::game::loot::manager::LootManager;
 use crate::game::player::PlayerManager;
@@ -72,7 +73,11 @@ impl LootSystem {
         // 2. Generate loot if needed
         if !self.manager.has_loot(target_guid) {
             tracing::info!("[LOOT] Generating loot for target={:?}", target_guid);
-            self.generate_creature_loot(target_guid, world).await?;
+            if target_guid.is_game_object() {
+                self.generate_gameobject_loot(target_guid, world)?;
+            } else {
+                self.generate_creature_loot(target_guid, world).await?;
+            }
         }
 
         // 3. Mark as being looted
@@ -326,23 +331,60 @@ impl LootSystem {
         Ok(())
     }
 
+    fn generate_gameobject_loot(
+        &self,
+        target_guid: ObjectGuid,
+        world: &World,
+    ) -> anyhow::Result<()> {
+        let loot_id = world
+            .managers
+            .gameobject_mgr
+            .with_gameobject(target_guid, |gameobject| {
+                world
+                    .managers
+                    .gameobject_mgr
+                    .get_template(gameobject.entry)
+                    .map(|template| template.data[1].max(0) as u32)
+                    .unwrap_or(0)
+            })
+            .ok_or_else(|| anyhow::anyhow!("Gameobject not found for loot generation"))?;
+
+        self.manager.generate_gameobject_loot(target_guid, loot_id);
+        world
+            .managers
+            .gameobject_mgr
+            .with_gameobject_mut(target_guid, |gameobject| {
+                gameobject.loot_state = LootState::Activated;
+            });
+        Ok(())
+    }
+
     fn check_and_clear_if_empty(&self, target_guid: ObjectGuid, world: &World) {
         let is_empty = self.manager.is_loot_empty(target_guid);
 
         if is_empty {
-            // Clear has_loot flag on creature
-            world
-                .managers
-                .creature_mgr
-                .with_creature_mut(target_guid, |creature| {
-                    creature.set_has_loot(false);
-                });
+            if target_guid.is_game_object() {
+                world
+                    .managers
+                    .gameobject_mgr
+                    .with_gameobject_mut(target_guid, |gameobject| {
+                        gameobject.loot_state = LootState::JustDeactivated;
+                    });
+            } else {
+                // Clear has_loot flag on creature
+                world
+                    .managers
+                    .creature_mgr
+                    .with_creature_mut(target_guid, |creature| {
+                        creature.set_has_loot(false);
+                    });
 
-            // Clear lootable flag on corpse
-            world
-                .managers
-                .creature_mgr
-                .clear_lootable_flag(target_guid, world);
+                // Clear lootable flag on corpse
+                world
+                    .managers
+                    .creature_mgr
+                    .clear_lootable_flag(target_guid, world);
+            }
 
             // Remove loot data
             self.manager.remove_loot(target_guid);
@@ -351,6 +393,20 @@ impl LootSystem {
 
     fn can_loot(&self, player_guid: ObjectGuid, target_guid: ObjectGuid, world: &World) -> bool {
         use crate::game::creature::DeathState;
+
+        if target_guid.is_game_object() {
+            return world
+                .managers
+                .gameobject_mgr
+                .with_gameobject(target_guid, |gameobject| {
+                    gameobject.go_type == GameObjectType::Chest
+                        && matches!(
+                            gameobject.loot_state,
+                            LootState::Ready | LootState::Activated
+                        )
+                })
+                .unwrap_or(false);
+        }
 
         // Check if target is a lootable corpse
         let result = world

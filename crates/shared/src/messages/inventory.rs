@@ -175,6 +175,9 @@ pub struct SmsgItemQuerySingleResponse {
     pub frost_res: u32,
     pub shadow_res: u32,
     pub arcane_res: u32,
+    pub delay: u32,
+    pub ammo_type: u32,
+    pub ranged_mod_range: f32,
     pub spell_id1: u32,
     pub spell_trigger1: u32,
     pub spell_charges1: i32,
@@ -331,6 +334,9 @@ impl ToWorldPacket for SmsgItemQuerySingleResponse {
         packet.write_u32(self.frost_res);
         packet.write_u32(self.shadow_res);
         packet.write_u32(self.arcane_res);
+        packet.write_u32(self.delay);
+        packet.write_u32(self.ammo_type);
+        packet.write_f32(self.ranged_mod_range);
 
         for i in 1..=5 {
             let (
@@ -401,25 +407,12 @@ impl ToWorldPacket for SmsgItemQuerySingleResponse {
         packet.write_u32(self.material);
         packet.write_u32(self.sheath);
         packet.write_i32(self.random_property);
-        packet.write_u32(self.random_suffix);
         packet.write_u32(self.block);
         packet.write_u32(self.item_set);
         packet.write_u32(self.max_durability);
         packet.write_u32(self.area);
         packet.write_u32(self.map);
         packet.write_u32(self.bag_family);
-        packet.write_u32(self.totem_category);
-        packet.write_u32(self.socket_color1);
-        packet.write_u32(self.socket_color2);
-        packet.write_u32(self.socket_color3);
-        packet.write_u32(self.socket_bonus);
-        packet.write_u32(self.gem_properties);
-        packet.write_i32(self.required_disenchant_skill);
-        packet.write_f32(self.armor_damage_modifier);
-        packet.write_u32(self.duration);
-        packet.write_u32(self.item_limit_id);
-        packet.write_u32(self.item_limit_category);
-        packet.write_u32(self.quality2);
 
         packet
     }

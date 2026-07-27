@@ -1061,21 +1061,33 @@ impl QuestSystem {
 
             let status = self.get_quest_status(player_guid, quest_id);
 
+            // NOTE: the icon here is not the minimap/head dialog status - the client uses it
+            // to split the gossip quest list into "Current Quests" (CHAT/INCOMPLETE/REWARD_REP)
+            // and "Available Quests" (AVAILABLE). Using REWARD2 here makes the client treat a
+            // completed quest as a new one to pick up. Matches Player::PrepareQuestMenu.
             if status == QuestStatus::Complete && !rewarded_quests.contains(&quest_id) {
-                // Yellow ? for complete (ready to turn in)
+                // Active quest, ready to turn in
                 seen.insert(quest_id);
                 quest_items.push(super::types::GossipQuestData {
                     quest_id,
-                    icon: DialogStatus::Reward2 as u32,
+                    icon: DialogStatus::RewardRep as u32,
                     level: quest.quest_level,
                     title: quest.title.clone(),
                 });
             } else if status == QuestStatus::Incomplete {
-                // Gray ? for incomplete (not ready yet)
+                // Active quest, objectives not done yet
                 seen.insert(quest_id);
                 quest_items.push(super::types::GossipQuestData {
                     quest_id,
                     icon: DialogStatus::Incomplete as u32,
+                    level: quest.quest_level,
+                    title: quest.title.clone(),
+                });
+            } else if status == QuestStatus::Available {
+                seen.insert(quest_id);
+                quest_items.push(super::types::GossipQuestData {
+                    quest_id,
+                    icon: DialogStatus::Chat as u32,
                     level: quest.quest_level,
                     title: quest.title.clone(),
                 });
@@ -1096,16 +1108,22 @@ impl QuestSystem {
 
             let status = self.get_quest_status(player_guid, quest_id);
 
-            // Only show quests that are not started AND can be taken (validates prerequisites)
-            if status == QuestStatus::None && self.can_take_quest(player_guid, &quest, world) {
-                let icon = if quest.is_auto_complete() || quest.is_repeatable() {
-                    DialogStatus::RewardRep as u32
-                } else {
-                    DialogStatus::Available as u32
-                };
+            let can_take = self.can_take_quest(player_guid, &quest, world);
+
+            // Auto-complete quests go straight into the "Current Quests" section so the client
+            // asks for the reward instead of showing an accept dialog. Everything else is only
+            // listed when not started and actually takeable (validates prerequisites).
+            if quest.is_auto_complete() && can_take {
                 quest_items.push(super::types::GossipQuestData {
                     quest_id,
-                    icon,
+                    icon: DialogStatus::RewardRep as u32,
+                    level: quest.quest_level,
+                    title: quest.title.clone(),
+                });
+            } else if status == QuestStatus::None && can_take {
+                quest_items.push(super::types::GossipQuestData {
+                    quest_id,
+                    icon: DialogStatus::Available as u32,
                     level: quest.quest_level,
                     title: quest.title.clone(),
                 });
@@ -2387,7 +2405,7 @@ impl QuestSystem {
                     );
                     return None;
                 }
-                Some(super::types::QuestProgress {
+                let mut progress = super::types::QuestProgress {
                     quest_id: row.quest,
                     status,
                     rewarded: row.rewarded,
@@ -2407,7 +2425,19 @@ impl QuestSystem {
                         row.item_count4,
                     ],
                     update_state: QuestUpdateState::Unchanged,
-                })
+                };
+
+                // Older rows may have complete objective counts but an incomplete
+                // status because kill credit did not transition the quest state.
+                if progress.status == super::types::QuestStatus::Incomplete {
+                    if let Some(template) = self.manager.get_quest_template(row.quest) {
+                        if progress.is_complete(&template) || template.is_auto_complete() {
+                            progress.status = super::types::QuestStatus::Complete;
+                        }
+                    }
+                }
+
+                Some(progress)
             })
             .take(MAX_QUEST_LOG_SIZE)
             .collect();
@@ -2776,9 +2806,13 @@ impl QuestSystem {
                                 progress.mark_changed();
                                 let new_count = progress.creature_or_go_count[obj_idx];
 
+                                let is_complete = progress.is_complete(&quest);
+                                if is_complete {
+                                    progress.status = QuestStatus::Complete;
+                                }
+
                                 // Collect all counts for quest log field update
                                 let all_counts = progress.creature_or_go_count;
-                                let is_complete = progress.is_complete(&quest);
 
                                 // Find quest slot index
                                 let slot =
