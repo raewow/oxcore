@@ -558,7 +558,11 @@ impl Map {
         let delay = self.config.grid_unload_delay;
 
         let idle_candidates: Vec<(u8, u8)> = {
-            let grid_mgr = self.grid_manager.read();
+            let mut grid_mgr = self.grid_manager.write();
+            // A grid activated from the outside — by a player close enough to see
+            // in, but standing in another grid — never receives the leave event
+            // that would idle it, so poll the player counts first.
+            grid_mgr.demote_empty_active_grids();
             grid_mgr.get_grids_to_unload(delay)
         };
 
@@ -682,14 +686,43 @@ impl Map {
     /// even at short distances, spawning roughly an order of magnitude more
     /// creatures than the reference.
     fn activate_grids_around_position(&self, pos: Position) {
+        let mut grid_mgr = self.grid_manager.write();
+        self.activate_grids_locked(pos, &mut grid_mgr);
+    }
+
+    /// Re-activate the grids around every player on the map.
+    ///
+    /// Relocation only activates when a player *crosses* a grid boundary, which
+    /// is not enough: the activation box is derived from the player's position,
+    /// so walking within the activation radius of a boundary brings a new grid
+    /// into the box without any grid change happening. That grid was never
+    /// created, so it never spawned anything — and `are_grids_loaded` waits on a
+    /// grid that will never exist, freezing the visibility update with it.
+    ///
+    /// The reference re-derives the area from the current position of every
+    /// player on every tick (`Map::Update`, Map.cpp:1006-1050). This is that
+    /// pass, under a single write lock for the whole map.
+    pub fn activate_grids_around_players(&self) {
+        if self.players.is_empty() {
+            return;
+        }
+
+        let positions: Vec<Position> = self.players.iter().map(|e| *e.value()).collect();
+
+        let mut grid_mgr = self.grid_manager.write();
+        for pos in positions {
+            self.activate_grids_locked(pos, &mut grid_mgr);
+        }
+    }
+
+    /// Activation body, with the grid lock already held by the caller.
+    fn activate_grids_locked(&self, pos: Position, grid_mgr: &mut GridManager) {
         use crate::grid_coords::world_to_grid;
 
         let distance = self.grid_activation_distance();
         let (center_gx, center_gy) = world_to_grid(pos.x, pos.y);
         let (min_gx, min_gy) = world_to_grid(pos.x - distance, pos.y - distance);
         let (max_gx, max_gy) = world_to_grid(pos.x + distance, pos.y + distance);
-
-        let mut grid_mgr = self.grid_manager.write();
 
         for gx in min_gx..=max_gx {
             for gy in min_gy..=max_gy {
@@ -807,5 +840,100 @@ impl Map {
     /// Snapshot of all player GUIDs currently on this map.
     pub fn player_guids(&self) -> Vec<ObjectGuid> {
         self.players.iter().map(|r| *r.key()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grid::GridState;
+    use crate::grid_coords::{world_to_grid, GRID_SIZE, MAP_HALF_SIZE};
+
+    fn pos(x: f32, y: f32) -> Position {
+        Position {
+            x,
+            y,
+            z: 0.0,
+            o: 0.0,
+        }
+    }
+
+    /// West edge of grid `gx` along the x axis.
+    fn grid_min_x(gx: u8) -> f32 {
+        gx as f32 * GRID_SIZE - MAP_HALF_SIZE
+    }
+
+    fn state(map: &Map, gx: u8, gy: u8) -> Option<GridState> {
+        map.grid_manager().read().get_grid_state(gx, gy)
+    }
+
+    /// Pretend the grid load completed, so state checks see `Idle`/`Active`
+    /// rather than `Loading`.
+    fn finish_load(map: &Map, gx: u8, gy: u8) {
+        map.grid_manager().write().mark_loaded(gx, gy);
+    }
+
+    /// The regression: a player walking *within* one grid, to within the
+    /// activation radius of its boundary, must pull the neighbouring grid in.
+    /// Relocation alone does not — no grid change happens — so the neighbour was
+    /// never created and never spawned anything.
+    #[test]
+    fn walking_toward_a_boundary_activates_the_neighbour_grid() {
+        let map = Map::new(0, 0);
+        let distance = map.grid_activation_distance();
+        let guid = ObjectGuid::new_player(1);
+
+        // Middle of a grid: only that grid is in the activation box.
+        let (gx, gy) = (20u8, 20u8);
+        let centre = pos(grid_min_x(gx) + GRID_SIZE / 2.0, grid_min_x(gy) + GRID_SIZE / 2.0);
+        assert_eq!(world_to_grid(centre.x, centre.y), (gx, gy));
+
+        map.add_player(guid, centre);
+        assert_eq!(state(&map, gx, gy), Some(GridState::Loading));
+        assert_eq!(state(&map, gx - 1, gy), None);
+        finish_load(&map, gx, gy);
+
+        // Walk west to just inside the boundary — same grid, so relocation does
+        // not activate anything.
+        let near_edge = pos(grid_min_x(gx) + distance / 2.0, centre.y);
+        map.relocate_player(guid, centre, near_edge);
+        assert_eq!(world_to_grid(near_edge.x, near_edge.y), (gx, gy));
+        assert_eq!(state(&map, gx - 1, gy), None);
+
+        // The per-tick pass is what closes the gap.
+        map.activate_grids_around_players();
+        assert_eq!(state(&map, gx - 1, gy), Some(GridState::Loading));
+    }
+
+    /// A grid activated from the outside gets no leave event when the player
+    /// wanders off, so it must be idled by the state-machine poll — otherwise it
+    /// stays `Active` forever and can never be unloaded.
+    #[test]
+    fn grid_activated_from_outside_is_idled_again() {
+        let map = Map::new(0, 0);
+        let guid = ObjectGuid::new_player(1);
+        let (gx, gy) = (20u8, 20u8);
+
+        let near_edge = pos(
+            grid_min_x(gx) + map.grid_activation_distance() / 2.0,
+            grid_min_x(gy) + GRID_SIZE / 2.0,
+        );
+        map.add_player(guid, near_edge);
+
+        // Both the player's grid and the neighbour it can see into are loaded.
+        finish_load(&map, gx, gy);
+        finish_load(&map, gx - 1, gy);
+        assert_eq!(state(&map, gx, gy), Some(GridState::Active));
+        assert_eq!(state(&map, gx - 1, gy), Some(GridState::Idle));
+
+        // Activation flips the neighbour to Active even though nobody is in it.
+        map.activate_grids_around_players();
+        assert_eq!(state(&map, gx - 1, gy), Some(GridState::Active));
+
+        // The poll must hand it back, or it never becomes an unload candidate.
+        map.update_grid_states();
+        assert_eq!(state(&map, gx - 1, gy), Some(GridState::Idle));
+        // The player's own grid keeps its player, so it stays active.
+        assert_eq!(state(&map, gx, gy), Some(GridState::Active));
     }
 }

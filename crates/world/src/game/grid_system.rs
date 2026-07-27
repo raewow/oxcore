@@ -87,6 +87,13 @@ impl GridSystem {
             .map_mgr
             .get_or_create_map(map_id, instance_id);
 
+        // Re-derive the activation area from where the players actually are.
+        // Relocation only does this when a player crosses a grid boundary, which
+        // misses the case that matters most: walking to within the activation
+        // radius of a boundary pulls the neighbouring grid into the area without
+        // changing which grid the player is in.
+        map.activate_grids_around_players();
+
         // Process grid loading
         self.load_pending_grids(map_id, world, &map).await?;
 

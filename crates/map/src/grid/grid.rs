@@ -184,6 +184,22 @@ impl Grid {
         }
     }
 
+    /// Start the idle countdown if the grid is active but holds no players.
+    ///
+    /// The `Active -> Idle` edge in `GridStates::Update` (GridStates.cpp:42-56)
+    /// is driven by the player *count*, not by the event that emptied the grid.
+    /// A grid activated by a player standing in the grid next door never gets a
+    /// leave event, so without this poll it would stay `Active` — and therefore
+    /// never unloadable — for the lifetime of the map.
+    pub fn mark_idle_if_empty(&mut self) -> bool {
+        if self.state == GridState::Active && self.player_count == 0 {
+            self.state = GridState::Idle;
+            self.idle_since = Some(Instant::now());
+            return true;
+        }
+        false
+    }
+
     /// Check if grid has players
     pub fn has_players(&self) -> bool {
         self.player_count > 0
@@ -467,6 +483,17 @@ impl GridManager {
 
         // Return just coordinates (priority was for sorting)
         result.into_iter().map(|(gx, gy, _)| (gx, gy)).collect()
+    }
+
+    /// Start the idle countdown on every active grid that has no players left in
+    /// it. See [`Grid::mark_idle_if_empty`].
+    pub fn demote_empty_active_grids(&mut self) {
+        let coords: Vec<(u8, u8)> = self.active_grids.iter().copied().collect();
+        for (gx, gy) in coords {
+            if let Some(grid) = self.get_grid_mut(gx, gy) {
+                grid.mark_idle_if_empty();
+            }
+        }
     }
 
     /// Get grids that have been idle for longer than `delay`
