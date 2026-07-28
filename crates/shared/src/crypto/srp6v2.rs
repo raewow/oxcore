@@ -166,6 +166,19 @@ pub fn register_with_salt(login: &str, password: &str, salt: [u8; SALT_LENGTH]) 
     Credentials { salt, verifier }
 }
 
+/// Verify a plaintext password against an existing SRP verifier. Legacy Arctium web login uses
+/// this path instead of the SRP challenge/evidence exchange.
+pub fn verify_password(
+    login: &str,
+    password: &str,
+    salt: [u8; SALT_LENGTH],
+    verifier: &[u8],
+) -> bool {
+    let n = prime_n();
+    let x = compute_x(&srp_username(login), password, &salt, &n);
+    generator().modpow(&x, &n) == BigUint::from_bytes_be(verifier)
+}
+
 /// The challenge fields sent to the client (all big-endian, uppercase hex).
 #[derive(Debug, Clone)]
 pub struct Challenge {
@@ -437,6 +450,25 @@ mod tests {
         let proof = SrpClient::new().prove("wrong-password", &challenge);
 
         assert!(server.verify(&proof.public_a, &proof.client_m1).is_none());
+    }
+
+    #[test]
+    fn plaintext_password_verifies_against_the_stored_verifier() {
+        let salt = [0x5Au8; SALT_LENGTH];
+        let credentials = register_with_salt("player@example.test", "hunter2", salt);
+
+        assert!(verify_password(
+            "player@example.test",
+            "hunter2",
+            credentials.salt,
+            &credentials.verifier
+        ));
+        assert!(!verify_password(
+            "player@example.test",
+            "wrong-password",
+            credentials.salt,
+            &credentials.verifier
+        ));
     }
 
     #[test]

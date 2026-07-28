@@ -1,7 +1,6 @@
 //! Wire types for the REST login service.
 //!
-//! These mirror `Battlenet.JSON.Login` (TrinityCore `src/server/proto/Login/Login.proto`),
-//! which the client consumes as JSON rather than binary protobuf. Field names are therefore
+//! The client consumes these as JSON rather than binary protobuf. Field names are therefore
 //! load-bearing and must match the proto exactly — including the odd-looking `public_B` and
 //! `server_evidence_M2`.
 
@@ -13,23 +12,44 @@ pub enum FormType {
     LoginForm,
 }
 
+// Field order in these two structs is load-bearing by imitation, not by protocol: Hermes
+// serializes them with `DataContractJsonSerializer`, which emits data members **alphabetically by
+// name**. Keeping serde's declaration order in step with that makes our form byte-identical to the
+// one the 1.14 login browser is known to accept, so key order is one fewer variable if it starts
+// rejecting the form again.
 #[derive(Debug, Clone, Serialize)]
 pub struct FormInput {
     pub input_id: &'static str,
-    #[serde(rename = "type")]
-    pub input_type: &'static str,
     pub label: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_length: Option<u32>,
+    #[serde(rename = "type")]
+    pub input_type: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FormInputs {
-    #[serde(rename = "type")]
-    pub form_type: FormType,
     pub inputs: Vec<FormInput>,
+    /// The bundled login browser requires this unset optional to be present as JSON `null`.
+    /// the field to be present even though it has no prompt text.
+    pub prompt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub srp_url: Option<String>,
+    #[serde(rename = "type")]
+    pub form_type: Option<FormType>,
+}
+
+impl FormInputs {
+    /// The empty form Hermes nests inside every `LogonResult` — no inputs, and a null `type`
+    /// because its `FormInputs.Type` is a default-constructed string.
+    pub fn empty() -> Self {
+        Self {
+            inputs: Vec::new(),
+            prompt: None,
+            srp_url: None,
+            form_type: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -105,20 +125,37 @@ pub fn login_error(error_code: &str, error_message: &str) -> axum::Json<LoginRes
     axum::Json(LoginResult::rejected(error_code, error_message))
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[allow(non_snake_case)] // field names are fixed by the proto/JSON contract
 pub struct LoginResult {
     pub authentication_state: Option<AuthenticationState>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Always present and always empty. Hermes initialises `LogonResult.AuthenticatorForm` to a
+    /// fresh `FormInputs`, so `DataContractJsonSerializer` emits a nested object rather than
+    /// omitting the member; the login browser is fussy enough about this response's shape that we
+    /// mirror it exactly rather than find out the hard way.
+    pub authenticator_form: FormInputs,
     pub error_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub login_ticket: Option<String>,
+    /// Only the SRP path produces evidence; Hermes has no such member, so it is omitted when
+    /// unset rather than sent as null.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_evidence_M2: Option<String>,
+    pub support_error_code: Option<String>,
+}
+
+impl Default for LoginResult {
+    fn default() -> Self {
+        Self {
+            authentication_state: None,
+            authenticator_form: FormInputs::empty(),
+            error_code: None,
+            error_message: None,
+            login_ticket: None,
+            server_evidence_M2: None,
+            support_error_code: None,
+        }
+    }
 }
 
 impl LoginResult {
@@ -127,6 +164,14 @@ impl LoginResult {
             authentication_state: Some(AuthenticationState::Done),
             login_ticket: Some(login_ticket),
             server_evidence_M2: Some(server_evidence_m2),
+            ..Default::default()
+        }
+    }
+
+    pub fn done_without_evidence(login_ticket: String) -> Self {
+        Self {
+            authentication_state: Some(AuthenticationState::Done),
+            login_ticket: Some(login_ticket),
             ..Default::default()
         }
     }
@@ -163,9 +208,9 @@ pub struct GameAccountList {
 }
 
 /// The login form description served by `GET /bnetserver/login/`.
-pub fn login_form(srp_url: Option<String>) -> FormInputs {
+pub fn login_form() -> FormInputs {
     FormInputs {
-        form_type: FormType::LoginForm,
+        form_type: Some(FormType::LoginForm),
         inputs: vec![
             FormInput {
                 input_id: "account_name",
@@ -177,16 +222,19 @@ pub fn login_form(srp_url: Option<String>) -> FormInputs {
                 input_id: "password",
                 input_type: "password",
                 label: "Password",
-                max_length: Some(128),
+                max_length: Some(16),
             },
             FormInput {
                 input_id: "log_in_submit",
                 input_type: "submit",
                 label: "Log In",
-                max_length: None,
+                max_length: Some(0),
             },
         ],
-        srp_url,
+        prompt: None,
+        // The bundled 1.14.2 browser uses the legacy plain-password login form. Including
+        // `srp_url` makes it reject the form before it renders credentials.
+        srp_url: None,
     }
 }
 
@@ -196,7 +244,7 @@ mod tests {
 
     #[test]
     fn login_form_serializes_with_proto_field_names() {
-        let json = serde_json::to_value(login_form(None)).unwrap();
+        let json = serde_json::to_value(login_form()).unwrap();
         assert_eq!(json["type"], "LOGIN_FORM");
         assert_eq!(json["inputs"][0]["input_id"], "account_name");
         assert_eq!(json["inputs"][0]["type"], "text");
@@ -206,18 +254,35 @@ mod tests {
     }
 
     #[test]
-    fn submit_input_has_no_max_length() {
-        let json = serde_json::to_value(login_form(None)).unwrap();
-        assert!(json["inputs"][2].get("max_length").is_none());
+    fn legacy_form_includes_hermes_optional_defaults() {
+        let json = serde_json::to_value(login_form()).unwrap();
+        assert!(json["prompt"].is_null());
+        assert_eq!(json["inputs"][2]["max_length"], 0);
     }
 
     #[test]
-    fn login_result_omits_unset_optionals() {
+    fn login_result_matches_the_hermes_logon_result_shape() {
+        let json =
+            serde_json::to_string(&LoginResult::done_without_evidence("OX-abc".into())).unwrap();
+
+        // Every member present, unset ones as null, alphabetical, with the nested empty
+        // authenticator form — byte-identical to what `DataContractJsonSerializer` produces for
+        // A legacy login result.
+        assert_eq!(
+            json,
+            r#"{"authentication_state":"DONE","authenticator_form":{"inputs":[],"prompt":null,"type":null},"error_code":null,"error_message":null,"login_ticket":"OX-abc","support_error_code":null}"#
+        );
+    }
+
+    #[test]
+    fn srp_evidence_is_the_only_member_added_beyond_the_hermes_shape() {
         let json = serde_json::to_value(LoginResult::done("OX-abc".into(), "ff".into())).unwrap();
         assert_eq!(json["authentication_state"], "DONE");
         assert_eq!(json["login_ticket"], "OX-abc");
         assert_eq!(json["server_evidence_M2"], "ff");
-        assert!(json.get("error_code").is_none());
+        // Unset members are null rather than absent.
+        assert!(json["error_code"].is_null());
+        assert!(json["support_error_code"].is_null());
     }
 
     #[test]

@@ -4,9 +4,6 @@ use std::net::SocketAddr;
 
 use anyhow::{Context, Result};
 use axum::Router;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto::Builder;
-use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio_rustls::TlsAcceptor;
@@ -49,22 +46,22 @@ pub async fn serve_rest(
         let router = router.clone();
 
         tokio::spawn(async move {
+            debug!(%peer, "REST TCP connection accepted");
             let tls_stream = match acceptor.accept(stream).await {
                 Ok(s) => s,
                 Err(e) => {
                     // Overwhelmingly this means the client rejected our certificate, which is
                     // the single most common misconfiguration — log it at debug with the peer
                     // so it is findable without drowning the log.
-                    debug!(%peer, "TLS handshake failed: {e}");
+                    warn!(%peer, "REST TLS handshake failed: {e}");
                     return;
                 }
             };
+            debug!(%peer, "REST TLS session established");
 
-            let service = TowerToHyperService::new(router);
-            if let Err(e) = Builder::new(TokioExecutor::new())
-                .serve_connection(TokioIo::new(tls_stream), service)
-                .await
-            {
+            // Deliberately not hyper: it lowercases response header names and the login browser
+            // will not accept that. See `rest::wire`.
+            if let Err(e) = crate::rest::wire::serve_connection(tls_stream, router).await {
                 debug!(%peer, "REST connection error: {e}");
             }
         });

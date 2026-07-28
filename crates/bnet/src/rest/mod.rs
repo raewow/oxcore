@@ -7,20 +7,23 @@
 //! ## Request correlation
 //!
 //! The exchange spans two requests: `POST /login/srp/` (server generates `B`, replies with the
-//! challenge) then `POST /login/` (client sends `A`/`M1`). TrinityCore correlates them by TLS
-//! connection. We instead key an in-flight store by the SRP username, which requires the
+//! challenge) then `POST /login/` (client sends `A`/`M1`). We key an in-flight store by the SRP
+//! username, which requires the
 //! client to include `account_name` on the second POST as well. That is how the form
 //! resubmission behaves, but it is **unverified against a live client** — if the second request
 //! turns out to omit `account_name`, switch this to per-connection state.
 
 pub mod types;
+pub mod wire;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::State;
-use axum::response::IntoResponse;
+use axum::http::{header, Method, Request, StatusCode, Uri};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use oxcore_shared::crypto::srp6v2::{self, SrpServer};
@@ -61,13 +64,49 @@ pub fn router(state: Arc<RestState>) -> Router {
     Router::new()
         .route("/bnetserver/portal/", get(get_portal))
         .route("/bnetserver/login/", get(get_login_form).post(post_login))
+        // The real login URL the client is handed at `Logon` carries its own platform, build and
+        // locale as path segments. The client GETs the form from this URL and
+        // POSTs the filled-in form straight back to it, so both verbs must be routed here. We do
+        // not need the captured values — the account is resolved from `account_name` — but the
+        // route has to exist or the submit 404s.
+        .route(
+            "/bnetserver/login/:platform/:build/:locale/",
+            get(get_login_form).post(post_login),
+        )
         .route("/bnetserver/login/srp/", post(post_login_srp))
         .route("/bnetserver/gameAccounts/", get(get_game_accounts))
         .route(
             "/bnetserver/refreshLoginTicket/",
             post(refresh_login_ticket),
         )
+        .fallback(rest_not_found)
+        .layer(middleware::from_fn(log_request))
         .with_state(state)
+}
+
+/// Log every browser-facing request, including 404/JSON-extraction failures that never enter an
+/// endpoint handler. Do not log request bodies: they contain passwords and login tickets.
+async fn log_request(request: Request<axum::body::Body>, next: Next) -> Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    // Temporary live-client diagnostic: the request headers say what the login browser actually
+    // expects back (Accept, Connection, User-Agent), which is the only signal we get when it
+    // rejects a response without logging anything itself.
+    let headers: Vec<String> = request
+        .headers()
+        .iter()
+        .map(|(k, v)| format!("{k}: {}", v.to_str().unwrap_or("<binary>")))
+        .collect();
+    debug!(%method, %uri, headers = %headers.join(" | "), "REST request");
+
+    let response = next.run(request).await;
+    debug!(%method, %uri, status = %response.status(), "REST response");
+    response
+}
+
+async fn rest_not_found(method: Method, uri: Uri) -> impl IntoResponse {
+    debug!(%method, %uri, "unhandled REST route");
+    StatusCode::NOT_FOUND
 }
 
 /// `GET /bnetserver/portal/` — plain `host:port` of the BGS RPC channel, not JSON.
@@ -78,11 +117,17 @@ async fn get_portal(State(state): State<Arc<RestState>>) -> impl IntoResponse {
 }
 
 /// `GET /bnetserver/login/` — describes the form the client should render.
-async fn get_login_form(State(state): State<Arc<RestState>>) -> impl IntoResponse {
-    Json(types::login_form(Some(format!(
-        "{}srp/",
-        state.config.login_base_url()
-    ))))
+async fn get_login_form() -> impl IntoResponse {
+    debug!("REST login form requested");
+    let form = types::login_form();
+    debug!(
+        body = %serde_json::to_string(&form).expect("login form is always serializable"),
+        "REST login form response body"
+    );
+    (
+        [(header::CONTENT_TYPE, "application/json;charset=UTF-8")],
+        Json(form),
+    )
 }
 
 /// `POST /bnetserver/login/srp/` — look up the account, generate `B`, return the challenge.
@@ -90,6 +135,7 @@ async fn post_login_srp(
     State(state): State<Arc<RestState>>,
     Json(form): Json<types::LoginForm>,
 ) -> impl IntoResponse {
+    debug!("REST SRP challenge requested");
     let Some(account_name) = form.get("account_name") else {
         return types::login_error("MISSING_ACCOUNT", "No account name supplied").into_response();
     };
@@ -132,6 +178,50 @@ async fn post_login(
     State(state): State<Arc<RestState>>,
     Json(form): Json<types::LoginForm>,
 ) -> impl IntoResponse {
+    debug!("REST login evidence submitted");
+    if let (Some(account_name), Some(password)) = (form.get("account_name"), form.get("password")) {
+        let creds = match state.db.accounts.find_bnet_credentials(account_name).await {
+            Ok(Some(creds)) => creds,
+            Ok(None) => {
+                debug!(account = %account_name, "plain login for unknown account");
+                return Json(types::LoginResult::done_without_evidence(String::new()))
+                    .into_response();
+            }
+            Err(e) => {
+                warn!("bnet credential lookup failed: {e}");
+                return Json(types::LoginResult::rejected(
+                    "SERVER_ERROR",
+                    "Internal error",
+                ))
+                .into_response();
+            }
+        };
+
+        if !srp6v2::verify_password(account_name, password, creds.salt, &creds.verifier) {
+            debug!(account = %account_name, "plain login password rejected");
+            return Json(types::LoginResult::done_without_evidence(String::new())).into_response();
+        }
+
+        let ticket = generate_login_ticket();
+        let expiry = chrono::Utc::now().timestamp() + state.config.login_ticket_duration as i64;
+        if let Err(e) = state
+            .db
+            .accounts
+            .store_bnet_login_ticket(creds.id, &ticket, expiry)
+            .await
+        {
+            warn!("failed to store login ticket: {e}");
+            return Json(types::LoginResult::rejected(
+                "SERVER_ERROR",
+                "Internal error",
+            ))
+            .into_response();
+        }
+
+        debug!(account = %account_name, "plain login succeeded, ticket issued");
+        return Json(types::LoginResult::done_without_evidence(ticket)).into_response();
+    }
+
     let (Some(account_name), Some(public_a), Some(client_m1)) = (
         form.get("account_name"),
         form.get("public_A"),
@@ -215,8 +305,7 @@ async fn refresh_login_ticket() -> impl IntoResponse {
     axum::http::StatusCode::NOT_IMPLEMENTED
 }
 
-/// A login ticket: `OX-` followed by 40 hex chars (20 random bytes), matching TrinityCore's
-/// `TC-<hex>` shape.
+/// A login ticket: `OX-` followed by 40 hex chars (20 random bytes).
 fn generate_login_ticket() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 20];

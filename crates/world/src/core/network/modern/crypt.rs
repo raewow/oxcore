@@ -44,6 +44,15 @@ impl WorldCrypt {
         Self::with_roles(key, SERVER_TAG, CLIENT_TAG)
     }
 
+    /// Server-side crypt after the plaintext authentication exchange. The client advances the
+    /// nonce sequence for all frames, including the two plaintext frames in each direction.
+    pub fn server_after_handshake(key: &[u8; 16]) -> Self {
+        let mut crypt = Self::server(key);
+        crypt.out_counter = 2; // SMSG_AUTH_CHALLENGE, SMSG_ENTER_ENCRYPTED_MODE
+        crypt.in_counter = 2; // CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK
+        crypt
+    }
+
     fn with_roles(key: &[u8; 16], out_tag: u32, in_tag: u32) -> Self {
         let cipher = Aes128Gcm12::new_from_slice(key).expect("AES-128 key is always 16 bytes here");
         Self {
@@ -87,6 +96,15 @@ impl WorldCrypt {
     #[cfg(test)]
     pub fn client(key: &[u8; 16]) -> Self {
         Self::with_roles(key, CLIENT_TAG, SERVER_TAG)
+    }
+
+    /// Client-side counterpart to [`WorldCrypt::server_after_handshake`].
+    #[cfg(test)]
+    pub fn client_after_handshake(key: &[u8; 16]) -> Self {
+        let mut crypt = Self::client(key);
+        crypt.out_counter = 2;
+        crypt.in_counter = 2;
+        crypt
     }
 }
 

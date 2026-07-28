@@ -557,6 +557,7 @@ impl World {
 
         // Process respawns (Phase 6)
         self.systems.creature_respawn.process_respawns(self).await?;
+        crate::game::gameobject::system::update_respawns(self);
 
         // Process creature combat timers and melee attacks
         // Timer countdown + attack execution in one pass (matches vmangos

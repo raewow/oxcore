@@ -1,8 +1,7 @@
 //! BGS service constants and request handlers.
 //!
-//! Requests are dispatched by `(service_hash, method_id)` (CypherCore `Session.cs`). The hashes
-//! are the FNV-1a-32 values of the service names, taken verbatim from CypherCore's `OriginalHash`
-//! enum.
+//! Requests are dispatched by `(service_hash, method_id)`. The hashes are FNV-1a-32 values of
+//! service names.
 //!
 //! ## Server-initiated frames
 //!
@@ -13,20 +12,25 @@
 //! (`service_id = 0`, our own incrementing token), sent *in addition to* the ordinary OK response
 //! for the method the client called. A handler therefore returns a list of frames, not one.
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use anyhow::Result;
 use prost::Message;
 use tracing::{debug, warn};
 
 use super::framing::{self, Frame};
 use super::proto::{
-    Attribute, ChallengeExternalRequest, ClientRequest, ClientResponse, ConnectRequest,
-    ConnectResponse, EntityId, GetAllValuesForAttributeResponse, Header, LogonRequest, LogonResult,
-    ProcessId, Variant, VerifyWebCredentialsRequest,
+    AccountFieldTags, AccountState, Attribute, ChallengeExternalRequest, ClientRequest,
+    ClientResponse, ConnectRequest, ConnectResponse, EntityId, GameAccountFieldTags,
+    GameAccountState, GameLevelInfo, GameStatus, GetAccountStateRequest, GetAccountStateResponse,
+    GetAllValuesForAttributeResponse, GetGameAccountStateRequest, GetGameAccountStateResponse,
+    Header, LogonRequest, LogonResult, PrivacyInfo, ProcessId, Variant,
+    VerifyWebCredentialsRequest,
 };
 use super::realmlist::{self, ClientVersion, RealmDescriptor};
 use crate::database::Database;
 
-// Service hashes (dispatch keys + callback targets), from CypherCore `OriginalHash`.
+// Service hashes (dispatch keys + callback targets).
 pub const CONNECTION_SERVICE: u32 = 0x6544_6991;
 pub const AUTHENTICATION_SERVICE: u32 = 0x0DEC_FC01;
 pub const AUTHENTICATION_LISTENER: u32 = 0x7124_0E35;
@@ -38,6 +42,19 @@ pub const GAME_UTILITIES_SERVICE: u32 = 0x3FC1_274D;
 const METHOD_CONNECT: u32 = 1;
 const METHOD_KEEP_ALIVE: u32 = 5;
 const METHOD_REQUEST_DISCONNECT: u32 = 7;
+
+// AccountService method ids.
+const METHOD_GET_ACCOUNT_STATE: u32 = 30;
+const METHOD_GET_GAME_ACCOUNT_STATE: u32 = 31;
+
+// Opaque per-field-group version tags. The client caches state against them; the values themselves
+// carry no meaning to us.
+const PRIVACY_INFO_TAG: u32 = 0xD7CA_834D;
+const GAME_LEVEL_INFO_TAG: u32 = 0x5C46_D483;
+const GAME_STATUS_TAG: u32 = 0x98B7_5F99;
+
+/// `"WoW"` in ASCII, the program id every game-account field group is tagged with.
+const PROGRAM_WOW: u32 = 0x0057_6F57;
 
 // AuthenticationService method ids.
 const METHOD_LOGON: u32 = 1;
@@ -51,7 +68,7 @@ const METHOD_GET_ALL_VALUES_FOR_ATTRIBUTE: u32 = 10;
 const METHOD_ON_EXTERNAL_CHALLENGE: u32 = 3; // on ChallengeListener
 const METHOD_ON_LOGON_COMPLETE: u32 = 5; // on AuthenticationListener
 
-// A subset of BattlenetRpcErrorCode (src/server/proto/BattlenetRpcErrorCodes.h).
+// A subset of Battle.net RPC error codes.
 const ERROR_OK: u32 = 0x0000_0000;
 const ERROR_DENIED: u32 = 0x0000_0003;
 const ERROR_BAD_PROGRAM: u32 = 0x0000_004D;
@@ -63,15 +80,17 @@ const ERROR_UTIL_SERVER_UNKNOWN_REALM: u32 = 0x8000_0069;
 const ERROR_UTIL_SERVER_FAILED_TO_SERIALIZE_RESPONSE: u32 = 0x8000_0073;
 const ERROR_WOW_SERVICES_DENIED_REALM_LIST_TICKET: u32 = 0x8000_0132;
 
-// EntityId high bits, verbatim from CypherCore's LogonResult construction. The low half is the
-// account id; the high half encodes the entity kind ("WoW" = 0x57_6F_57 shows up in the game
-// account high bits).
+// The low half is the account id; the high half encodes the entity kind.
 const ENTITY_HIGH_ACCOUNT: u64 = 0x0100_0000_0000_0000;
-const ENTITY_HIGH_GAME_ACCOUNT: u64 = 0x0200_0002_0057_6F57;
+// This value is required by the 1.14.2 client; a different final byte causes a disconnect.
+const ENTITY_HIGH_GAME_ACCOUNT: u64 = 0x0200_0002_0057_6F51;
 
 /// Length of the BGS session key handed to the client in `LogonResult`, and later validated by
 /// the world server.
 const SESSION_KEY_LEN: usize = 64;
+
+/// ConnectionService assigns this when a bindless client does not provide its own client id.
+static NEXT_SESSION_ID: AtomicU32 = AtomicU32::new(1);
 
 /// What a handler decided to do with a request: a list of already-framed bytes to write (in
 /// order), and whether to close the connection afterwards.
@@ -119,6 +138,8 @@ pub struct Services {
     client_version: ClientVersion,
     /// `(platform, arch, type)` build variant from the realm-list ticket, echoed into join tickets.
     build_variant: (u32, u32, u32),
+    /// Identifier returned by ConnectionService.Connect and carried in every following header.
+    client_instance_id: Option<String>,
 }
 
 impl Services {
@@ -126,11 +147,13 @@ impl Services {
         Self {
             db,
             web_auth_url,
-            request_token: 0,
+            // Server-initiated callback tokens start at one.
+            request_token: 1,
             account: None,
             client_secret: None,
             client_version: ClientVersion::default(),
             build_variant: (0, 0, 0),
+            client_instance_id: None,
         }
     }
 
@@ -164,6 +187,7 @@ impl Services {
         let result = match service_hash {
             CONNECTION_SERVICE => self.dispatch_connection(method_id, frame),
             AUTHENTICATION_SERVICE => self.dispatch_authentication(method_id, frame).await,
+            ACCOUNT_SERVICE => self.dispatch_account(method_id, frame),
             GAME_UTILITIES_SERVICE => self.dispatch_game_utilities(method_id, frame).await,
             other => {
                 debug!(
@@ -177,16 +201,33 @@ impl Services {
             }
         };
 
-        result.map_err(|e| {
+        let mut outcome = result.map_err(|e| {
             anyhow::anyhow!(
                 "handling service 0x{service_hash:08X} method {method_id} (token {token}): {e}"
             )
-        })
+        })?;
+
+        // BGS routes both responses and listener callbacks by the connection instance id issued
+        // during Connect. Without it the 1.14 client drops the Logon callback immediately.
+        if let Some(ciid) = &self.client_instance_id {
+            for bytes in &mut outcome.frames {
+                let Some((mut response, consumed)) = framing::decode(bytes)? else {
+                    anyhow::bail!("attempted to route an incomplete BGS response frame");
+                };
+                if consumed != bytes.len() {
+                    anyhow::bail!("attempted to route a BGS response with trailing bytes");
+                }
+                response.header.ciid = Some(ciid.clone());
+                *bytes = framing::encode(response.header, &response.payload)?;
+            }
+        }
+
+        Ok(outcome)
     }
 
     fn dispatch_connection(&mut self, method_id: u32, frame: &Frame) -> Result<Outcome> {
         match method_id {
-            METHOD_CONNECT => handle_connect(frame),
+            METHOD_CONNECT => self.handle_connect(frame),
             METHOD_KEEP_ALIVE => {
                 debug!("keep-alive");
                 Ok(Outcome::send(vec![reply(&frame.header, ERROR_OK)?]))
@@ -203,6 +244,46 @@ impl Services {
                 )?]))
             }
         }
+    }
+
+    /// ConnectionService.Connect — establish the routing id used by subsequent callbacks.
+    fn handle_connect(&mut self, frame: &Frame) -> Result<Outcome> {
+        let request = ConnectRequest::decode(frame.payload.as_slice())
+            .map_err(|e| anyhow::anyhow!("bad ConnectRequest: {e}"))?;
+        let bindless = request.use_bindless_rpc;
+        let now = chrono::Utc::now();
+        let server_id = ProcessId {
+            label: Some(std::process::id()),
+            epoch: Some(now.timestamp() as u32),
+        };
+        let client_id = request.client_id.unwrap_or(ProcessId {
+            label: Some(NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed)),
+            epoch: Some(now.timestamp() as u32),
+        });
+        let ciid = format!(
+            "{:08X}{:08X}-{:08X}{:08X}",
+            server_id.label.unwrap_or_default(),
+            server_id.epoch.unwrap_or_default(),
+            client_id.label.unwrap_or_default(),
+            client_id.epoch.unwrap_or_default(),
+        );
+        self.client_instance_id = Some(ciid.clone());
+
+        let response = ConnectResponse {
+            server_id: Some(server_id),
+            client_id: Some(client_id),
+            bind_result: None,
+            server_time: Some(now.timestamp_millis() as u64),
+            use_bindless_rpc: bindless,
+            ciid: Some(ciid),
+        };
+
+        debug!(bindless = ?bindless, "connect: replying with server id and time");
+        Ok(Outcome::send(vec![reply_with(
+            &frame.header,
+            ERROR_OK,
+            &response.encode_to_vec(),
+        )?]))
     }
 
     async fn dispatch_authentication(&mut self, method_id: u32, frame: &Frame) -> Result<Outcome> {
@@ -235,16 +316,19 @@ impl Services {
                 ERROR_BAD_PROGRAM,
             )?]));
         }
-        debug!(
-            platform = request.platform.as_deref().unwrap_or_default(),
-            locale = request.locale.as_deref().unwrap_or_default(),
-            "logon: sending external web-auth challenge"
-        );
+        // The web-auth URL carries the client's own platform/build/locale as path segments —
+        // A bare `/bnetserver/login/` leaves the client with nowhere to submit the form to.
+        let platform = request.platform.as_deref().unwrap_or("Wn64");
+        let locale = request.locale.as_deref().unwrap_or("enUS");
+        let build = request.application_version.unwrap_or_default();
+        let url = format!("{}{platform}/{build}/{locale}/", self.web_auth_url);
+
+        debug!(platform, locale, build, %url, "logon: sending external web-auth challenge");
 
         let challenge = ChallengeExternalRequest {
             request_token: None,
             payload_type: Some("web_auth_url".to_string()),
-            payload: Some(self.web_auth_url.clone().into_bytes()),
+            payload: Some(url.into_bytes()),
         };
         let callback = self.server_request(
             CHALLENGE_LISTENER,
@@ -252,8 +336,7 @@ impl Services {
             &challenge.encode_to_vec(),
         )?;
 
-        // Callback first (mirrors CypherCore, which sends the request inside the handler body and
-        // the OK response only after the handler returns).
+        // The callback must precede the ordinary OK response.
         Ok(Outcome::send(vec![
             callback,
             reply(&frame.header, ERROR_OK)?,
@@ -332,6 +415,102 @@ impl Services {
         ]))
     }
 
+    /// AccountService — the client calls these immediately after `OnLogonComplete`, before it will
+    /// touch the realm list, and drops the connection if either is refused.
+    fn dispatch_account(&mut self, method_id: u32, frame: &Frame) -> Result<Outcome> {
+        match method_id {
+            METHOD_GET_ACCOUNT_STATE => self.handle_get_account_state(frame),
+            METHOD_GET_GAME_ACCOUNT_STATE => self.handle_get_game_account_state(frame),
+            other => {
+                debug!(method_id = other, "unimplemented account method");
+                Ok(Outcome::send(vec![reply(
+                    &frame.header,
+                    ERROR_RPC_INVALID_METHOD,
+                )?]))
+            }
+        }
+    }
+
+    /// `AccountService.GetAccountState` — we model no real privacy settings, so answer the one
+    /// field group the client asks for with fixed values.
+    fn handle_get_account_state(&mut self, frame: &Frame) -> Result<Outcome> {
+        if !self.is_authed() {
+            return Ok(Outcome::send(vec![reply(&frame.header, ERROR_DENIED)?]));
+        }
+        let request = GetAccountStateRequest::decode(frame.payload.as_slice())
+            .map_err(|e| anyhow::anyhow!("bad GetAccountStateRequest: {e}"))?;
+        let options = request.options.unwrap_or_default();
+
+        let mut response = GetAccountStateResponse::default();
+        if options.field_privacy_info.unwrap_or(false) || options.all_fields.unwrap_or(false) {
+            response.state = Some(AccountState {
+                privacy_info: Some(PrivacyInfo {
+                    is_using_rid: Some(false),
+                    is_visible_for_view_friends: Some(false),
+                    is_hidden_from_friend_finder: Some(true),
+                }),
+            });
+            response.tags = Some(AccountFieldTags {
+                privacy_info_tag: Some(PRIVACY_INFO_TAG),
+                ..Default::default()
+            });
+        }
+
+        debug!("account state requested");
+        Ok(Outcome::send(vec![reply_with(
+            &frame.header,
+            ERROR_OK,
+            &response.encode_to_vec(),
+        )?]))
+    }
+
+    /// `AccountService.GetGameAccountState` — the game account's display name and status. The
+    /// request's id fields are ignored: one bnet account owns exactly one game account here, and
+    /// the session already knows which.
+    fn handle_get_game_account_state(&mut self, frame: &Frame) -> Result<Outcome> {
+        if !self.is_authed() {
+            return Ok(Outcome::send(vec![reply(&frame.header, ERROR_DENIED)?]));
+        }
+        let request = GetGameAccountStateRequest::decode(frame.payload.as_slice())
+            .map_err(|e| anyhow::anyhow!("bad GetGameAccountStateRequest: {e}"))?;
+        let options = request.options.unwrap_or_default();
+        let all = options.all_fields.unwrap_or(false);
+        let account = self.account.as_ref().expect("authed").clone();
+
+        let mut state = GameAccountState::default();
+        let mut tags = GameAccountFieldTags::default();
+
+        if options.field_game_level_info.unwrap_or(false) || all {
+            state.game_level_info = Some(GameLevelInfo {
+                name: Some(account.name.clone()),
+                program: Some(PROGRAM_WOW),
+                ..Default::default()
+            });
+            tags.game_level_info_tag = Some(GAME_LEVEL_INFO_TAG);
+        }
+        if options.field_game_status.unwrap_or(false) || all {
+            state.game_status = Some(GameStatus {
+                is_suspended: Some(false),
+                is_banned: Some(false),
+                suspension_expires: Some(0),
+                program: Some(PROGRAM_WOW),
+            });
+            tags.game_status_tag = Some(GAME_STATUS_TAG);
+        }
+
+        let response = GetGameAccountStateResponse {
+            state: Some(state),
+            tags: Some(tags),
+        };
+
+        debug!(account = %account.name, "game account state requested");
+        Ok(Outcome::send(vec![reply_with(
+            &frame.header,
+            ERROR_OK,
+            &response.encode_to_vec(),
+        )?]))
+    }
+
     async fn dispatch_game_utilities(&mut self, method_id: u32, frame: &Frame) -> Result<Outcome> {
         match method_id {
             METHOD_PROCESS_CLIENT_REQUEST => self.handle_client_request(frame).await,
@@ -357,8 +536,8 @@ impl Services {
         let request = ClientRequest::decode(frame.payload.as_slice())
             .map_err(|e| anyhow::anyhow!("bad ClientRequest: {e}"))?;
 
-        // Key every attribute the way TrinityCore's ParseParamName does: `Command_*` names have
-        // their trailing `_<suffix>` (e.g. `_b9`) stripped; `Param_*` names are left as-is.
+        // `Command_*` names have their trailing `_<suffix>` (e.g. `_b9`) stripped; `Param_*`
+        // names are left as-is.
         let params: Vec<(&str, &Variant)> = request
             .attribute
             .iter()
@@ -377,7 +556,11 @@ impl Services {
             )?]));
         };
 
-        debug!(command, "process client request");
+        debug!(
+            command,
+            params = %params.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "),
+            "process client request"
+        );
         let (status, attributes) = match command {
             "Command_RealmListTicketRequest_v1" => {
                 self.cmd_realm_list_ticket(find_blob(&params, "Param_ClientInfo"))
@@ -408,7 +591,17 @@ impl Services {
     /// realm-list ticket the client presents on the following requests.
     fn cmd_realm_list_ticket(&mut self, client_info: Option<&[u8]>) -> (u32, Vec<Attribute>) {
         let Some(info) = client_info.and_then(realmlist::parse_client_info) else {
-            debug!("realm-list ticket: missing or unparseable ClientInfo");
+            // Dump the blob: it carries the client secret the whole world handshake is keyed on,
+            // and a parse failure here is otherwise indistinguishable from the attribute simply
+            // not being sent.
+            match client_info {
+                Some(blob) => debug!(
+                    len = blob.len(),
+                    blob = %String::from_utf8_lossy(&blob[..blob.len().min(600)]),
+                    "realm-list ticket: ClientInfo present but unparseable"
+                ),
+                None => debug!("realm-list ticket: no Param_ClientInfo attribute"),
+            }
             return (ERROR_WOW_SERVICES_DENIED_REALM_LIST_TICKET, Vec::new());
         };
 
@@ -416,7 +609,7 @@ impl Services {
         self.client_version = info.version;
         self.build_variant = (info.platform, info.arch, info.ty);
 
-        // TrinityCore returns the literal "AuthRealmListTicket" plus a trailing NUL.
+        // The literal ticket includes a trailing NUL.
         let ticket = b"AuthRealmListTicket\0".to_vec();
         (ERROR_OK, vec![blob_attr("Param_RealmListTicket", ticket)])
     }
@@ -566,36 +759,6 @@ impl Services {
     }
 }
 
-/// ConnectionService.Connect — the first call the client makes. Echoes its client id, reports a
-/// server id/time, and mirrors the bindless-RPC preference.
-fn handle_connect(frame: &Frame) -> Result<Outcome> {
-    let request = ConnectRequest::decode(frame.payload.as_slice())
-        .map_err(|e| anyhow::anyhow!("bad ConnectRequest: {e}"))?;
-
-    let now = chrono::Utc::now();
-    let response = ConnectResponse {
-        server_id: Some(ProcessId {
-            // A stable-ish server identity; the client only uses it for routing bookkeeping.
-            label: Some(std::process::id()),
-            epoch: Some(now.timestamp() as u32),
-        }),
-        client_id: request.client_id,
-        bind_result: None,
-        server_time: Some(now.timestamp_millis() as u64),
-        use_bindless_rpc: request.use_bindless_rpc,
-    };
-
-    debug!(
-        bindless = ?request.use_bindless_rpc,
-        "connect: replying with server id and time"
-    );
-    Ok(Outcome::send(vec![reply_with(
-        &frame.header,
-        ERROR_OK,
-        &response.encode_to_vec(),
-    )?]))
-}
-
 /// Frame an OK/error response with an empty payload.
 fn reply(request: &Header, status: u32) -> Result<Vec<u8>> {
     reply_with(request, status, &[])
@@ -622,8 +785,8 @@ fn random_secret() -> [u8; 32] {
     secret
 }
 
-/// Key an attribute name the way TrinityCore's `ParseParamName` does: a `Command_*` name has its
-/// trailing `_<suffix>` removed (the client appends e.g. `_b9`); everything else is unchanged.
+/// A `Command_*` name has its trailing `_<suffix>` removed (the client appends e.g. `_b9`);
+/// everything else is unchanged.
 fn param_key(name: &str) -> &str {
     if name.starts_with("Command_") {
         if let Some(pos) = name.rfind('_') {
@@ -714,6 +877,8 @@ mod tests {
         assert!(resp.server_time.unwrap() > 0);
         assert_eq!(resp.use_bindless_rpc, Some(true));
         assert_eq!(resp.client_id.unwrap().label, Some(123));
+        let ciid = resp.ciid.expect("ConnectResponse must establish a ciid");
+        assert_eq!(resp_frame.header.ciid.as_deref(), Some(ciid.as_str()));
     }
 
     #[tokio::test]
@@ -761,6 +926,7 @@ mod tests {
             program: Some("WoW".to_string()),
             platform: Some("Wn64".to_string()),
             locale: Some("enUS".to_string()),
+            application_version: Some(42597),
             ..Default::default()
         }
         .encode_to_vec();
@@ -781,9 +947,11 @@ mod tests {
         );
         let ext = ChallengeExternalRequest::decode(callback.payload.as_slice()).unwrap();
         assert_eq!(ext.payload_type.as_deref(), Some("web_auth_url"));
+        // The URL carries the client's platform/build/locale as path segments, matching
+        // The client GETs the form from this URL and POSTs the filled form back to it.
         assert_eq!(
             String::from_utf8(ext.payload.unwrap()).unwrap(),
-            "https://localhost:8081/bnetserver/login/"
+            "https://localhost:8081/bnetserver/login/Wn64/42597/enUS/"
         );
 
         let (resp, _) = framing::decode(&out.frames[1]).unwrap().unwrap();
@@ -791,6 +959,30 @@ mod tests {
         assert_eq!(resp.header.token, Some(11));
         assert_eq!(resp.header.status, Some(ERROR_OK));
         assert!(!svc.is_authed());
+    }
+
+    #[tokio::test]
+    async fn logon_callback_is_routed_by_the_connect_ciid() {
+        let mut svc = services();
+        svc.dispatch(&connect_frame(1, true)).await.unwrap();
+
+        let payload = LogonRequest {
+            program: Some("WoW".to_string()),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        let out = svc
+            .dispatch(&frame(AUTHENTICATION_SERVICE, METHOD_LOGON, 2, payload))
+            .await
+            .unwrap();
+
+        for bytes in out.frames {
+            let (frame, _) = framing::decode(&bytes).unwrap().unwrap();
+            assert_eq!(
+                frame.header.ciid.as_deref(),
+                svc.client_instance_id.as_deref()
+            );
+        }
     }
 
     #[tokio::test]
@@ -820,8 +1012,10 @@ mod tests {
         let (fa, _) = framing::decode(&a).unwrap().unwrap();
         let (fb, _) = framing::decode(&b).unwrap().unwrap();
         assert_eq!(fa.header.service_id, Some(0));
-        assert_eq!(fa.header.token, Some(0));
-        assert_eq!(fb.header.token, Some(1));
+        assert_eq!(fa.header.token, Some(1));
+        assert_eq!(fb.header.token, Some(2));
+        assert_eq!(fa.header.status, Some(ERROR_OK));
+        assert_eq!(fb.header.status, Some(ERROR_OK));
     }
 
     fn attr_blob(name: &str, blob: Vec<u8>) -> Attribute {

@@ -145,8 +145,9 @@ where
         );
     }
 
-    // 7. Encryption is now live. Send the auth response encrypted.
-    let mut crypt = WorldCrypt::server(&keys.aes_key);
+    // 7. Encryption is now live. The client has already consumed nonce counters for both
+    // plaintext handshake frames in each direction.
+    let mut crypt = WorldCrypt::server_after_handshake(&keys.aes_key);
     let info = AuthResponseSuccess {
         virtual_realm_address: ctx.virtual_realm_address,
         active_expansion: ctx.active_expansion,
@@ -384,7 +385,7 @@ mod tests {
         // 7. the auth response is encrypted — decode it with a client crypt keyed by the same
         // derived AES key.
         let keys = derive_keys(&session_key(), &server_challenge, &local_challenge);
-        let mut client_crypt = WorldCrypt::client(&keys.aes_key);
+        let mut client_crypt = WorldCrypt::client_after_handshake(&keys.aes_key);
         let mut enc_buf = Vec::new();
         let mut chunk = [0u8; 512];
         let response = loop {

@@ -27,6 +27,9 @@ message Header {
     optional uint32 status = 6;
     // Note: fixed32 on the wire, not varint. This is the dispatch key for requests.
     optional fixed32 service_hash = 11;
+    // Connection instance id assigned by ConnectionService.Connect. The client uses this to route
+    // listener callbacks such as ChallengeListener.OnExternalChallenge.
+    optional string ciid = 13;
 }
 
 // Empty request/response body (e.g. KeepAlive).
@@ -59,6 +62,7 @@ message ConnectResponse {
     optional uint32 bind_result = 3;
     optional uint64 server_time = 6;
     optional bool use_bindless_rpc = 7;
+    optional string ciid = 9;
 }
 
 message DisconnectRequest {
@@ -161,4 +165,106 @@ message ClientResponse {
 // attribute (e.g. the list of realm sub-regions); we answer with a list of Variants.
 message GetAllValuesForAttributeResponse {
     repeated Variant attribute_value = 1;
+}
+
+// ---------------------------------------------------------------------------
+// account.v1 — AccountService. After OnLogonComplete the client immediately asks for its account
+// and game-account state (methods 30 and 31) and disconnects if either is refused. Field numbers
+// are taken from TrinityCore's generated `account_types.pb.h` / `account_service.pb.h`; the
+// response contents mirror HermesProxy's `Services/Account.cs`.
+// ---------------------------------------------------------------------------
+
+// Which slices of the account the client is asking for. Only the ones we answer are modelled.
+message AccountFieldOptions {
+    optional bool all_fields = 1;
+    optional bool field_account_level_info = 2;
+    optional bool field_privacy_info = 3;
+    optional bool field_parental_control_info = 4;
+    optional bool field_game_level_info = 6;
+    optional bool field_game_status = 7;
+    optional bool field_game_accounts = 8;
+    optional bool field_security_status = 9;
+}
+
+message GameAccountFieldOptions {
+    optional bool all_fields = 1;
+    optional bool field_game_level_info = 2;
+    optional bool field_game_time_info = 3;
+    optional bool field_game_status = 4;
+    optional bool field_raf_info = 5;
+}
+
+// Opaque version tags echoed back per field group; the client caches state against them.
+message AccountFieldTags {
+    optional uint32 account_level_info_tag = 2;
+    optional uint32 privacy_info_tag = 3;
+    optional uint32 parental_control_info_tag = 4;
+    optional uint32 security_status_tag = 12;
+}
+
+message GameAccountFieldTags {
+    optional uint32 game_level_info_tag = 2;
+    optional uint32 game_time_info_tag = 3;
+    optional uint32 game_status_tag = 4;
+    optional uint32 raf_info_tag = 5;
+}
+
+message PrivacyInfo {
+    optional bool is_using_rid = 3;
+    optional bool is_visible_for_view_friends = 4;
+    optional bool is_hidden_from_friend_finder = 5;
+}
+
+message GameLevelInfo {
+    optional bool is_trial = 4;
+    optional bool is_lifetime = 5;
+    optional bool is_restricted = 6;
+    optional bool is_beta = 7;
+    optional string name = 8;
+    optional uint32 program = 9;
+}
+
+message GameStatus {
+    optional bool is_suspended = 4;
+    optional bool is_banned = 5;
+    optional uint64 suspension_expires = 6;
+    optional uint32 program = 7;
+}
+
+message AccountState {
+    optional PrivacyInfo privacy_info = 2;
+}
+
+message GameAccountState {
+    optional GameLevelInfo game_level_info = 1;
+    optional GameStatus game_status = 3;
+}
+
+message GetAccountStateRequest {
+    optional EntityId entity_id = 1;
+    optional uint32 program = 2;
+    optional uint32 region = 3;
+    optional AccountFieldOptions options = 10;
+    optional AccountFieldTags tags = 11;
+}
+
+message GetAccountStateResponse {
+    optional AccountState state = 1;
+    optional AccountFieldTags tags = 2;
+}
+
+// The id fields are decoded but unused: this server has exactly one game account per bnet account,
+// so the session already knows which one is meant. (Worth noting because TrinityCore's current
+// proto numbers these `account_id = 1, game_account_id = 2`, while the 1.14.2 client puts the game
+// account in field 1 — ignoring both sidesteps the disagreement.)
+message GetGameAccountStateRequest {
+    optional EntityId account_id = 1;
+    optional EntityId game_account_id = 2;
+    optional GameAccountFieldOptions options = 10;
+    optional GameAccountFieldTags tags = 11;
+}
+
+message GetGameAccountStateResponse {
+    optional GameAccountState state = 1;
+    optional GameAccountFieldTags tags = 2;
 }

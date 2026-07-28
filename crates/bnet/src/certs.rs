@@ -108,7 +108,7 @@ pub struct Artifacts {
 
 /// Build the bundle JSON bytes trusting a CA identified by its PEM and SPKI hash.
 fn build_bundle_json(ca_pem: &str, ca_spki_hash: &str, created: i64) -> Result<Vec<u8>> {
-    // RawData is the CA PEM as a single line (newlines stripped), matching the reference.
+    // RawData stores the CA PEM as one line.
     let raw_data: String = ca_pem.chars().filter(|&c| c != '\n' && c != '\r').collect();
     let entry = BundleEntry {
         uri: PINNED_URI.to_string(),

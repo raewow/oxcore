@@ -34,11 +34,34 @@ where
                 method_id = frame.header.method_id,
                 "request"
             );
+            debug!(
+                service_id = frame.header.service_id,
+                service_hash = frame
+                    .header
+                    .service_hash
+                    .map(|hash| format!("0x{hash:08X}")),
+                method_id = frame.header.method_id,
+                token = frame.header.token,
+                payload_len = frame.payload.len(),
+                "BGS request decoded"
+            );
 
             let outcome = services.dispatch(&frame).await?;
             buf.drain(..consumed);
 
             for bytes in &outcome.frames {
+                if let Some((response, _)) = framing::decode(bytes)? {
+                    debug!(
+                        service_id = response.header.service_id,
+                        service_hash = response.header.service_hash.map(|hash| format!("0x{hash:08X}")),
+                        method_id = response.header.method_id,
+                        token = response.header.token,
+                        status = response.header.status,
+                        ciid = response.header.ciid.as_deref(),
+                        payload = %hex::encode(&response.payload),
+                        "bgs tx"
+                    );
+                }
                 stream.write_all(bytes).await?;
             }
             if outcome.disconnect {

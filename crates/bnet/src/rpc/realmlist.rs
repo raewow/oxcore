@@ -1,20 +1,15 @@
 //! Realm-list payload construction for `GameUtilities.ProcessClientRequest`.
 //!
 //! The realm list, character counts, and realm-join server addresses are all **JSON documents**
-//! (not protobuf) that the client expects compressed a particular way, transcribed from
-//! TrinityCore's `RealmList.cpp` and `GameUtilitiesService.cpp`:
+//! (not protobuf) that the client expects compressed a particular way:
 //!
 //! * each document is a UTF-8 string prefixed with a type tag (`JSONRealmListUpdates:` etc.),
 //! * compressed as `[u32 little-endian uncompressed-length][zlib bytes]`, where the uncompressed
 //!   length **includes a trailing NUL** (C++ compresses `json.length() + 1` bytes),
 //! * then handed back as the `blob_value` of a named response attribute.
 //!
-//! The JSON field names are the exact (camelCase) names from TrinityCore's `RealmList.proto`,
-//! serialized here by hand with `serde_json` so we do not need a protobuf-JSON layer.
-//!
-//! **Unverified against a live client**: the realm-address synthesis (region/site), the config-id
-//! mapping, and the whole ticket→list→join sequence are faithful to TrinityCore but have not been
-//! exercised by a real 1.14 client.
+//! The JSON field names use the client-required camelCase spelling, serialized here by hand with
+//! `serde_json` so we do not need a protobuf-JSON layer.
 
 use std::io::Write;
 
@@ -200,16 +195,21 @@ pub struct ClientInfo {
 /// Parse the `Param_ClientInfo` blob (a `prefix:json` document) into a [`ClientInfo`]. Returns
 /// `None` if the secret is missing or not 32 bytes.
 pub fn parse_client_info(blob: &[u8]) -> Option<ClientInfo> {
-    let text = std::str::from_utf8(blob).ok()?;
+    // Lossy rather than strict: a stray non-UTF-8 byte anywhere in the blob must not cost us the
+    // whole ticket, and every field we read is ASCII.
+    let text = String::from_utf8_lossy(blob);
     let json = &text[text.find(':')? + 1..];
-    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+
+    // Read one JSON value and ignore whatever follows. `from_str` rejects trailing bytes, and
+    // these documents are conventionally NUL-terminated (the server compresses `json.length()+1`
+    // bytes for the same reason), so a terminator or padding would otherwise fail the whole parse.
+    let value: serde_json::Value = serde_json::Deserializer::from_str(json)
+        .into_iter()
+        .next()?
+        .ok()?;
     let info = value.get("info")?;
 
-    let secret_b64 = info.get("secret")?.as_str()?;
-    let secret_bytes = base64::engine::general_purpose::STANDARD
-        .decode(secret_b64)
-        .ok()?;
-    let secret: [u8; 32] = secret_bytes.try_into().ok()?;
+    let secret = parse_secret(info.get("secret")?)?;
 
     let v = info.get("version");
     let version = ClientVersion {
@@ -226,6 +226,25 @@ pub fn parse_client_info(blob: &[u8]) -> Option<ClientInfo> {
         arch: json_u32(Some(info), "clientArch").unwrap_or(0),
         ty: json_u32(Some(info), "type").unwrap_or(0),
     })
+}
+
+/// Read the 32-byte client secret out of `info.secret`.
+///
+/// The 1.14 client sends it as a **JSON array of 32 numbers**, not a base64 string. Elements may
+/// be signed (a byte over 127 arrives negative), so each is masked down rather than range-checked.
+/// A base64 string is also accepted for interoperability.
+fn parse_secret(value: &serde_json::Value) -> Option<[u8; 32]> {
+    let bytes: Vec<u8> = match value {
+        serde_json::Value::Array(elements) => elements
+            .iter()
+            .map(|e| e.as_i64().map(|n| (n & 0xFF) as u8))
+            .collect::<Option<Vec<u8>>>()?,
+        serde_json::Value::String(encoded) => base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .ok()?,
+        _ => return None,
+    };
+    bytes.try_into().ok()
 }
 
 fn json_u32(value: Option<&serde_json::Value>, key: &str) -> Option<u32> {
@@ -335,6 +354,29 @@ mod tests {
         assert_eq!(info.secret, secret);
         assert_eq!(info.version.build, 42597);
         assert_eq!(info.ty, 2);
+    }
+
+    #[test]
+    fn client_info_parses_a_secret_sent_as_a_number_array() {
+        // How the live 1.14.2 client actually sends it — and with a value past 127 arriving
+        // signed, as a C# `List<int>` cast from a byte would.
+        let mut numbers: Vec<i32> = (0..32).collect();
+        numbers[0] = -1; // 0xFF seen as a signed byte
+        let json = format!(
+            "JSONRealmListTicketClientInformation:{{\"info\":{{\"secret\":{},\
+             \"platformType\":1,\"clientArch\":1,\"type\":2}}}}",
+            serde_json::to_string(&numbers).unwrap()
+        );
+
+        let info = parse_client_info(json.as_bytes()).unwrap();
+        assert_eq!(info.secret[0], 0xFF);
+        assert_eq!(info.secret[31], 31);
+    }
+
+    #[test]
+    fn client_info_rejects_a_number_array_of_the_wrong_length() {
+        let json = "x:{\"info\":{\"secret\":[1,2,3]}}";
+        assert!(parse_client_info(json.as_bytes()).is_none());
     }
 
     #[test]

@@ -28,10 +28,13 @@ pub struct Config {
     /// The client OS string selecting the auth seed: `Wn64`, `Mc64`, `MacA`.
     #[serde(default = "default_modern_world_os")]
     pub modern_world_os: String,
-    /// RSA key that signs `SMSG_ENTER_ENCRYPTED_MODE`; pairs with `connect_to_modulus.bin` in the
-    /// patched client. Produced by `bnet gen-certs` as `world.signing.key.pem`.
+    /// RSA key that signs `SMSG_ENTER_ENCRYPTED_MODE`; used when the Arctium key is disabled.
+    /// Produced by `bnet gen-certs` as `world.signing.key.pem`.
     #[serde(default = "default_modern_world_signing_key")]
     pub modern_world_signing_key: std::path::PathBuf,
+    /// Use the fixed legacy signing key expected by an Arctium-patched 1.14.x client.
+    #[serde(default)]
+    pub modern_world_use_arctium_key: bool,
 
     // Directories
     #[serde(default = "default_data_dir")]
@@ -576,6 +579,7 @@ impl Default for Config {
             modern_world_build: default_modern_world_build(),
             modern_world_os: default_modern_world_os(),
             modern_world_signing_key: default_modern_world_signing_key(),
+            modern_world_use_arctium_key: false,
             data_dir: default_data_dir(),
             world_update_interval: default_world_update_interval(),
             spell_effect_delay_ms: default_spell_effect_delay_ms(),

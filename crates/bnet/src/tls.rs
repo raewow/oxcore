@@ -23,7 +23,7 @@ pub fn build_acceptor(cert_file: &Path, key_file: &Path) -> Result<TlsAcceptor> 
 
     // Force TLS 1.2. The modern BGS client (like real Battle.net) expects TLS 1.2 on this channel;
     // if the server negotiates TLS 1.3 the client completes the handshake and then silently drops
-    // the connection without sending a single BGS frame. HermesProxy pins Tls12 for the same reason.
+    // the connection without sending a single BGS frame.
     let builder = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS12])
         .with_no_client_auth();
 

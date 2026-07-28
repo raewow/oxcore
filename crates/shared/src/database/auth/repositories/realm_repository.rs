@@ -36,13 +36,13 @@ impl RealmRepository {
         sqlx::query_as::<_, RealmRow>(
             r#"SELECT `id`, `name`, `address`, `localAddress`, `localSubnetMask`, `port`, `icon`,
                `realmflags`, `timezone`, `allowedSecurityLevel`, `population`, `gamebuild_min`,
-               `gamebuild_max`, `flag`, `realmbuilds`
+               `gamebuild_max`, `flag`, `realmbuilds`, `last_seen`
                FROM `realmlist`
                ORDER BY `name`"#,
         )
         .fetch_all(&*self.pool)
         .await
-        .context("Failed to load all realms")
+        .map_err(|e| anyhow!("Failed to load all realms: {:#}", e))
     }
 
     /// Find realm by ID
@@ -50,14 +50,18 @@ impl RealmRepository {
         sqlx::query_as::<_, RealmRow>(
             r#"SELECT `id`, `name`, `address`, `localAddress`, `localSubnetMask`, `port`, `icon`,
                `realmflags`, `timezone`, `allowedSecurityLevel`, `population`, `gamebuild_min`,
-               `gamebuild_max`, `flag`, `realmbuilds`
+               `gamebuild_max`, `flag`, `realmbuilds`, `last_seen`
                FROM `realmlist`
                WHERE `id` = ?"#,
         )
         .bind(realm_id)
         .fetch_optional(&*self.pool)
         .await
-        .context("Failed to find realm by ID")
+        // `{:#}` so a decode failure names the offending column. Selecting a subset of the columns
+        // `RealmRow` declares fails here at decode time, not at query time — the row comes back
+        // fine and sqlx then cannot fill the struct, which reads like "realm not found" unless the
+        // source error is printed.
+        .map_err(|e| anyhow!("Failed to find realm by ID: {:#}", e))
     }
 
     /// Get character count for an account on a specific realm

@@ -8,7 +8,7 @@
 //!
 //! where the payload is exactly `header.size` bytes. Requests carry a `service_hash`
 //! (fixed32) + `method_id` identifying the call; responses set `service_id = 0xFE` and echo the
-//! request `token`. Transcribed from CypherCore's `Session.cs` framing.
+//! request `token`.
 
 use anyhow::{bail, Result};
 use prost::Message;
@@ -42,26 +42,31 @@ pub fn encode(mut header: Header, payload: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Build the header for a response to `request`: `service_id = 0xFE`, the request token echoed,
-/// and the given status. `size` is filled in by [`encode`].
+/// Build the header for a response to `request`: `service_id = 0xFE`, the request routing keys
+/// and token echoed, and the given status. The client requires service hash/method id here to
+/// 1.14.2 uses them to complete the Logon call after handling its listener callback.
 pub fn response_header(request: &Header, status: u32) -> Header {
     Header {
         service_id: Some(RESPONSE_SERVICE_ID),
+        method_id: request.method_id,
         token: request.token,
         status: Some(status),
+        service_hash: request.service_hash,
         ..Default::default()
     }
 }
 
 /// Build the header for a *server-initiated* request (a listener callback): `service_id = 0`, the
-/// target `service_hash` + `method_id`, and a server-chosen `token`. Mirrors CypherCore's
-/// `SendRequest`. `size` is filled in by [`encode`].
+/// target `service_hash` + `method_id`, and a server-chosen `token`. `size` is filled in by
+/// [`encode`].
 pub fn request_header(service_hash: u32, method_id: u32, token: u32) -> Header {
     Header {
         service_id: Some(0),
         service_hash: Some(service_hash),
         method_id: Some(method_id),
         token: Some(token),
+        // The bundled 1.14.2 client rejects the callback when this proto2 field is omitted.
+        status: Some(0),
         ..Default::default()
     }
 }
@@ -173,7 +178,8 @@ mod tests {
         assert_eq!(resp.service_id, Some(RESPONSE_SERVICE_ID));
         assert_eq!(resp.token, Some(77));
         assert_eq!(resp.status, Some(0));
-        assert!(resp.service_hash.is_none());
+        assert_eq!(resp.service_hash, Some(0x6544_6991));
+        assert_eq!(resp.method_id, Some(1));
     }
 
     #[test]

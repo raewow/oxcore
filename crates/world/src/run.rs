@@ -65,6 +65,10 @@ fn load_modern_signer(path: &std::path::Path) -> Result<Arc<dyn EnterEncryptedMo
     Ok(Arc::new(signer))
 }
 
+fn load_arctium_modern_signer() -> Result<Arc<dyn EnterEncryptedModeSigner>> {
+    Ok(Arc::new(RsaSigner::arctium()?))
+}
+
 /// Set up and start the world server. Returns the live `Arc<World>` immediately; the
 /// accept loop, update loop, and shutdown watcher run as background tasks.
 pub async fn serve(
@@ -134,7 +138,12 @@ pub async fn serve(
 
     // 4b. Modern (1.14.x) world listener (opt-in), running alongside the vanilla one.
     if config.modern_world_enabled {
-        match load_modern_signer(&config.modern_world_signing_key) {
+        let signer = if config.modern_world_use_arctium_key {
+            load_arctium_modern_signer()
+        } else {
+            load_modern_signer(&config.modern_world_signing_key)
+        };
+        match signer {
             Ok(signer) => {
                 let modern_addr: SocketAddr =
                     format!("{}:{}", config.bind_ip, config.modern_world_port)
