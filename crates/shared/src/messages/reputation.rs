@@ -11,9 +11,16 @@
 
 use crate::game::reputation::{ReputationListID, MAX_REPUTATION_LIST_SLOTS};
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::Opcode;
 use crate::protocol::WorldPacket;
 use std::collections::HashMap;
+
+/// Faction slots the modern client expects in `SMSG_INITIALIZE_FACTIONS`.
+///
+/// Fixed at 400 regardless of how many the server actually tracks — the body has no count field,
+/// so the client reads exactly this many and anything shorter desynchronises the stream.
+const MODERN_FACTION_COUNT: usize = 400;
 
 /// SMSG_INITIALIZE_FACTIONS - Initializes all reputation factions for the player
 ///
@@ -53,6 +60,28 @@ impl ToWorldPacket for SmsgInitializeFactions {
         }
 
         packet
+    }
+
+    /// The modern body drops the leading flags word and splits the record: all 400 `(flags,
+    /// standing)` pairs first, then 400 "has bonus" bits packed together at the end. Standing is
+    /// signed here rather than reinterpreted as `u32`.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        for slot in 0..MODERN_FACTION_COUNT {
+            let (flags, standing) = self
+                .factions
+                .get(&(slot as ReputationListID))
+                .copied()
+                .unwrap_or((0, 0));
+            writer.write_u8(flags);
+            writer.write_i32(standing);
+        }
+        // No faction bonuses are modelled yet; the client still needs all 400 bits.
+        for _ in 0..MODERN_FACTION_COUNT {
+            writer.write_bit(false);
+        }
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_INITIALIZE_FACTIONS))
     }
 }
 

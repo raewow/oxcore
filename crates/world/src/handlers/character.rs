@@ -916,7 +916,7 @@ pub async fn handle_player_login_with_guid(
             })
             .unwrap_or([0u32; NUM_ACCOUNT_DATA_TYPES]);
 
-        let msg = SmsgAccountDataTimes::new(timestamps);
+        let msg = SmsgAccountDataTimes::new(timestamps, guid, world.get_realm_id() as u16);
         session.send_msg(msg)?;
     }
     info!("[LOGIN] 2/11 SMSG_ACCOUNT_DATA_TIMES");

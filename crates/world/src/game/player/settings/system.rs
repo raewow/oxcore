@@ -293,7 +293,11 @@ impl SettingsSystem {
             })
             .unwrap_or([0u32; NUM_ACCOUNT_DATA_TYPES]);
 
-        let msg = SmsgAccountDataTimes::new(timestamps);
+        // Realm 1: this system has no realm id in scope, and HermesProxy hardcodes 1 here too.
+        // It only qualifies the GUID-128, so it must agree with whatever `SmsgCharEnum` used —
+        // both are 1 today. Thread a real realm id through `SystemManager` before running a
+        // second realm.
+        let msg = SmsgAccountDataTimes::new(timestamps, player_guid, 1);
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 

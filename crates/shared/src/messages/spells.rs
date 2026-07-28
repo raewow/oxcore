@@ -705,6 +705,13 @@ impl ToWorldPacket for SmsgInitialSpells {
         }
         packet
     }
+
+    /// See [`crate::messages::login::SmsgInitialSpellsRef::to_modern`] — same body. Cooldowns are
+    /// not part of the modern message and are dropped; the client gets them from
+    /// `SMSG_SPELL_COOLDOWN`.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        crate::messages::login::write_modern_known_spells(&self.spells).into()
+    }
 }
 
 pub struct InitialSpellCooldown {

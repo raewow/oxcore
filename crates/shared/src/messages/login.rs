@@ -521,6 +521,29 @@ impl ToWorldPacket for SmsgInitialSpellsRef<'_> {
 
         packet
     }
+
+    /// A different message in all but name: spell ids widen to `u32`, a favourites list appears,
+    /// and **cooldowns are not carried here at all** — the modern client learns them from
+    /// `SMSG_SPELL_COOLDOWN` instead. Anything in `self.cooldowns` is silently not sent.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(write_modern_known_spells(self.spells))
+    }
+}
+
+/// Shared body for the modern `SMSG_SEND_KNOWN_SPELLS`, which all three initial-spell messages
+/// serialize to.
+///
+/// `InitialLogin` is always true: every message that reaches here is part of the login sequence.
+/// The favourites list is tradeskill recipes, which are not modelled, so it is always empty.
+pub(crate) fn write_modern_known_spells(spells: &[u32]) -> WorldPacket {
+    let mut writer = BitWriter::new();
+    writer.write_bit(true); // InitialLogin
+    writer.write_i32(spells.len() as i32);
+    writer.write_i32(0); // FavoriteSpells.Count
+    for &spell_id in spells {
+        writer.write_u32(spell_id);
+    }
+    writer.finish(Opcode::SMSG_INITIAL_SPELLS)
 }
 
 /// Empty initial spells (convenience)
@@ -534,6 +557,10 @@ impl ToWorldPacket for SmsgInitialSpellsEmpty {
         packet.write_u16(0); // Spell count
         packet.write_u16(0); // Cooldown count
         packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(write_modern_known_spells(&[]))
     }
 }
 
@@ -575,6 +602,16 @@ pub struct SmsgActionButtons<'a> {
     pub buttons: &'a [ActionButton; 120],
 }
 
+/// No `to_modern` yet, deliberately.
+///
+/// HermesProxy — the only reference verified against build 42597 — has no `SMSG_UPDATE_ACTION_BUTTONS`
+/// implementation at all, so there is nothing to transcribe. CypherCore has one, but it is retail:
+/// 132 buttons of `u64` plus a reason byte, against vanilla's 120 of `u32`. Both the count and the
+/// width would be guesses.
+///
+/// Getting either wrong desynchronises the stream for every packet that follows, which is a far
+/// worse failure than an empty action bar. Needs a capture from a live 1.14 client before it can be
+/// written; until then the defaulted `to_modern` declines and the send layer logs and drops it.
 impl ToWorldPacket for SmsgActionButtons<'_> {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ACTION_BUTTONS);
@@ -777,7 +814,29 @@ impl SmsgInitWorldStates {
     }
 }
 
+impl SmsgInitWorldStates {
+    /// The modern body adds an area id between the zone and the state list, and widens the count
+    /// from `u16` to `i32`. Vanilla carries no separate area, so the zone is reused — the client
+    /// treats them the same for world-state scoping.
+    fn write_modern(&self) -> WorldPacket {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.map_id);
+        writer.write_u32(self.zone_id);
+        writer.write_u32(self.zone_id); // AreaID
+        writer.write_i32(self.states.len() as i32);
+        for (state_id, value) in &self.states {
+            writer.write_u32(*state_id);
+            writer.write_i32(*value as i32);
+        }
+        writer.finish(Opcode::SMSG_INIT_WORLD_STATES)
+    }
+}
+
 impl ToWorldPacket for SmsgInitWorldStates {
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.write_modern())
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INIT_WORLD_STATES);
         packet.write_u32(self.map_id);

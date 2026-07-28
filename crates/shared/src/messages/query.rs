@@ -1,6 +1,7 @@
 //! Query message structs - name, creature, item queries
 
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 // =========================================================================
@@ -197,7 +198,56 @@ impl ToWorldPacket for SmsgNameQueryResponse<'_> {
 
         packet
     }
+
+    /// A much larger message than vanilla's: a result byte, the GUID as a packed 128-bit value,
+    /// then a lookup block carrying bit-length-prefixed names, three more GUIDs and the virtual
+    /// realm address.
+    ///
+    /// Several fields have no vanilla source and are sent empty: declined names (a Cyrillic-locale
+    /// feature), the account and bnet-account GUIDs, and the guild club member id. The client uses
+    /// them for social features, not for rendering a name, so zeros are safe here.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        /// Declined-name cases the client always expects, even when unused.
+        const DECLINED_NAME_CASES: usize = 5;
+
+        let mut writer = BitWriter::new();
+        writer.write_u8(0); // Result: 0 = full data follows
+        let (high, low) = self.guid.to_guid128(REALM_ID);
+        writer.write_packed_guid_128(high, low);
+
+        // --- PlayerGuidLookupData ---
+        writer.write_bit(false); // IsDeleted
+        writer.write_bits(self.name.len() as u32, 6);
+        for _ in 0..DECLINED_NAME_CASES {
+            writer.write_bits(0, 7); // each declined name's length
+        }
+        writer.flush_bits();
+        // Declined names themselves would follow here; all are empty.
+
+        writer.write_packed_guid_128(0, 0); // AccountID
+        writer.write_packed_guid_128(0, 0); // BnetAccountID
+        writer.write_packed_guid_128(high, low); // GuidActual
+        writer.write_u64(0); // GuildClubMemberID
+        writer.write_u32(VIRTUAL_REALM_ADDRESS);
+        writer.write_u8(self.race);
+        writer.write_u8(self.gender);
+        writer.write_u8(self.class);
+        writer.write_u8(0); // Level — not carried by the vanilla message
+        writer.write_u8(0); // Unused915
+        writer.write_string_raw(self.name);
+
+        Some(writer.finish(Opcode::SMSG_NAME_QUERY_RESPONSE))
+    }
 }
+
+/// Realm used to qualify GUIDs in modern bodies built here.
+///
+/// Single-realm assumption, matching HermesProxy, which hardcodes the same. Thread a real value
+/// through before running a second realm — it must agree with what `SmsgCharEnum` sends.
+const REALM_ID: u16 = 1;
+
+/// `region << 24 | site << 16 | realm id`, the same scheme the bnet realm list advertises.
+const VIRTUAL_REALM_ADDRESS: u32 = 0x0101_0000 | REALM_ID as u32;
 
 #[cfg(test)]
 mod tests {
@@ -246,6 +296,41 @@ mod tests {
         assert_eq!(data[5], 0x00);
         assert_eq!(data[6], 0x00);
         assert_eq!(data[7], 0x00);
+    }
+
+    /// Byte-for-byte against HermesProxy's `PlayerGuidLookupData::Write`
+    /// (`World/Server/Packets/QueryPackets.cs:137`).
+    ///
+    /// The bit block is the fragile part: one `IsDeleted` bit, a 6-bit name length, then five 7-bit
+    /// declined-name lengths — 42 bits, so the flush pads out to six bytes. A miscount there shifts
+    /// every following field and the client reads garbage rather than failing cleanly.
+    #[test]
+    fn name_query_modern_body_matches_hermes_layout() {
+        let msg = SmsgNameQueryResponse::new(ObjectGuid::from_low(42), "Kris", 1, 0, 1);
+        let packet = msg.to_modern().expect("ported to modern");
+
+        assert_eq!(packet.opcode(), Opcode::SMSG_NAME_QUERY_RESPONSE);
+        assert_eq!(
+            packet.contents(),
+            &[
+                0x00, // Result: data follows
+                // Player: guid128 (low mask, high mask, low bytes, high bytes)
+                0x01, 0xA0, 0x2A, 0x04, 0x08, //
+                // 42 bits: !IsDeleted, name len 4, five zero-length declined names
+                0x08, 0x00, 0x00, 0x00, 0x00, 0x00, //
+                0x00, 0x00, // AccountID: empty guid128
+                0x00, 0x00, // BnetAccountID: empty guid128
+                0x01, 0xA0, 0x2A, 0x04, 0x08, // GuidActual
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // GuildClubMemberID
+                0x01, 0x00, 0x01, 0x01, // VirtualRealmAddress
+                0x01, // RaceID
+                0x00, // Sex
+                0x01, // ClassID
+                0x00, // Level
+                0x00, // Unused915
+                b'K', b'r', b'i', b's',
+            ][..]
+        );
     }
 
     #[test]

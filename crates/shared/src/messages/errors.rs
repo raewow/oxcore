@@ -1,4 +1,5 @@
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::ObjectGuid;
 use crate::protocol::Opcode;
 use crate::protocol::WorldPacket;
@@ -192,5 +193,14 @@ impl ToWorldPacket for SmsgSetProficiency {
         packet.write_u8(self.item_class);
         packet.write_u32(self.proficiency_mask);
         packet
+    }
+
+    /// Same two fields as vanilla, in the opposite order: modern writes the mask first, then the
+    /// class.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.proficiency_mask);
+        writer.write_u8(self.item_class);
+        Some(writer.finish(Opcode::SMSG_SET_PROFICIENCY))
     }
 }

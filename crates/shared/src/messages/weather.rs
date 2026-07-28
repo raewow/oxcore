@@ -5,6 +5,7 @@
 //! zone entry and whenever the zone weather changes.
 
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{Opcode, WorldPacket};
 
 /// SMSG_WEATHER (0x02F4)
@@ -30,5 +31,17 @@ impl ToWorldPacket for SmsgWeather {
         packet.write_u32(self.sound_id);
         packet.write_u8(u8::from(self.instant_change));
         packet
+    }
+
+    /// The modern body drops the sound id and turns the abrupt flag into a single flushed bit:
+    /// weather id, intensity, then one bit. There is nowhere to carry `sound_id`, so it is simply
+    /// not sent — the modern client derives ambience from the weather id itself.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.weather_type);
+        writer.write_f32(self.grade);
+        writer.write_bit(self.instant_change);
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_WEATHER))
     }
 }
