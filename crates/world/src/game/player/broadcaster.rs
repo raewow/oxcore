@@ -73,7 +73,7 @@ impl PlayerBroadcaster {
     /// Encode `msg` for this player and send it immediately.
     pub fn send_msg(&self, msg: &dyn ToWorldPacket) {
         match self.encode(msg) {
-            Some(packet) => self.send_direct(packet),
+            Some(packet) => self.send_encoded(packet),
             None => self.warn_unported(),
         }
     }
@@ -81,7 +81,7 @@ impl PlayerBroadcaster {
     /// Encode `msg` for this player and queue it for the next flush.
     pub fn queue_msg(&self, msg: &dyn ToWorldPacket) {
         match self.encode(msg) {
-            Some(packet) => self.queue_packet(packet),
+            Some(packet) => self.enqueue_encoded(packet),
             None => self.warn_unported(),
         }
     }
@@ -92,6 +92,26 @@ impl PlayerBroadcaster {
             self.protocol,
             self.self_guid
         );
+    }
+
+    /// Whether a packet handed to us pre-encoded can be sent as-is.
+    ///
+    /// A `WorldPacket` built by a caller is always vanilla bytes — nothing in the type records
+    /// which protocol produced it. Putting those on a modern connection would be silent corruption
+    /// the client can only report as a disconnect, so refuse and say which opcode did it. The
+    /// remaining callers are the update-object and compression paths, which are vanilla-only by
+    /// design; see `docs/modern-opcode-plan.md`.
+    fn accepts_prebuilt(&self, packet: &WorldPacket) -> bool {
+        if self.protocol == Protocol::Vanilla {
+            return true;
+        }
+        tracing::warn!(
+            "Refusing pre-encoded {:?} for modern player {:?}: the body is vanilla-only. \
+             Send the message type instead so it can be encoded per protocol.",
+            packet.opcode(),
+            self.self_guid
+        );
+        false
     }
 
     pub fn with_config(
@@ -182,20 +202,40 @@ impl PlayerBroadcaster {
 
     /// Send a packet directly to this player (non-blocking, guaranteed delivery)
     /// Uses unbounded channel - packets are never dropped, only fails if player disconnected
+    /// Send an already-encoded packet.
+    ///
+    /// Only safe for a vanilla recipient — see [`Self::accepts_prebuilt`]. Prefer
+    /// [`Self::send_msg`], which encodes for whichever protocol this player speaks.
     pub fn send_direct(&self, packet: WorldPacket) {
+        if !self.accepts_prebuilt(&packet) {
+            return;
+        }
+        self.send_encoded(packet);
+    }
+
+    /// Send a packet already encoded for this player's protocol, skipping the pre-built check.
+    fn send_encoded(&self, packet: WorldPacket) {
         tracing::trace!(
             "[PKT-DIRECT] opcode={:?} len={} to={:?}",
             packet.opcode(),
             packet.size(),
             self.self_guid
         );
-        if let Err(_) = self.packet_tx.send(packet) {
+        if self.packet_tx.send(packet).is_err() {
             debug!("Skipping send to disconnected player {:?}", self.self_guid);
         }
     }
 
     /// Queue a packet for later flushing (packet collapsing optimization)
     pub fn queue_packet(&self, packet: WorldPacket) {
+        if !self.accepts_prebuilt(&packet) {
+            return;
+        }
+        self.enqueue_encoded(packet);
+    }
+
+    /// Queue a packet already encoded for this player's protocol.
+    fn enqueue_encoded(&self, packet: WorldPacket) {
         let mut queue = self.packet_queue.write();
         queue.enqueue(packet);
 

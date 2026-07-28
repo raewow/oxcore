@@ -27,6 +27,13 @@
 //! renumber: 580 of the 1723 opcodes shared between 40688 and 41750 have different values, so this
 //! column is not portable to another build without regenerating it.
 
+/// The client build the `modern` column was generated for.
+///
+/// Opcodes are renumbered between builds — 580 of the 1723 shared between 40688 and 41750 have
+/// different values — so this table is only valid for this one. Serving a different build needs the
+/// column regenerated (`tools/opcode-gen/opcode_gen.py`), not a tweak.
+pub const MODERN_OPCODE_BUILD: u32 = 42597;
+
 /// A packet opcode and its number on each protocol's wire.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Opcode {
@@ -43,27 +50,27 @@ impl Opcode {
     };
 
     /// The vanilla wire number, or `0` if this opcode has no vanilla form.
-    pub fn vanilla(self) -> u32 {
+    pub const fn vanilla(self) -> u32 {
         self.vanilla
     }
 
     /// The vanilla wire number as it appears in a server header.
-    pub fn vanilla_u16(self) -> u16 {
+    pub const fn vanilla_u16(self) -> u16 {
         self.vanilla as u16
     }
 
     /// The modern wire number, or `0` if this opcode has no modern form.
-    pub fn modern(self) -> u16 {
+    pub const fn modern(self) -> u16 {
         self.modern as u16
     }
 
     /// Whether this opcode exists on the vanilla wire.
-    pub fn has_vanilla(self) -> bool {
+    pub const fn has_vanilla(self) -> bool {
         self.vanilla != 0
     }
 
     /// Whether this opcode exists on the modern wire.
-    pub fn has_modern(self) -> bool {
+    pub const fn has_modern(self) -> bool {
         self.modern != 0
     }
 

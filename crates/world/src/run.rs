@@ -138,6 +138,18 @@ pub async fn serve(
 
     // 4b. Modern (1.14.x) world listener (opt-in), running alongside the vanilla one.
     if config.modern_world_enabled {
+        // The opcode table's modern column is generated for one build. A mismatch does not fail
+        // loudly — the handshake opcodes happen to agree across nearby builds — it fails much later
+        // as an unrecognised gameplay opcode, so say so up front.
+        if config.modern_world_build != oxcore_shared::protocol::opcodes::MODERN_OPCODE_BUILD {
+            warn!(
+                configured = config.modern_world_build,
+                table = oxcore_shared::protocol::opcodes::MODERN_OPCODE_BUILD,
+                "modern_world_build does not match the build the opcode table was generated for; \
+                 gameplay opcodes will be wrong. Regenerate with tools/opcode-gen/opcode_gen.py."
+            );
+        }
+
         let signer = if config.modern_world_use_arctium_key {
             load_arctium_modern_signer()
         } else {
