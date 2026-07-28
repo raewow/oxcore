@@ -96,81 +96,81 @@ impl Opcode {
     // ============================================================================
 
     pub const CMSG_NULL_ACTION: Opcode = Opcode { vanilla: 0x000, ..Opcode::NONE };
-    pub const CMSG_PING: Opcode = Opcode { vanilla: 0x01DC, ..Opcode::NONE }; // 476
-    pub const CMSG_AUTH_SESSION: Opcode = Opcode { vanilla: 0x01ED, ..Opcode::NONE };
-    pub const SMSG_AUTH_CHALLENGE: Opcode = Opcode { vanilla: 0x01EC, ..Opcode::NONE };
-    pub const SMSG_AUTH_RESPONSE: Opcode = Opcode { vanilla: 0x01EE, ..Opcode::NONE };
-    pub const SMSG_PONG: Opcode = Opcode { vanilla: 0x01D, ..Opcode::NONE };
+    pub const CMSG_PING: Opcode = Opcode { vanilla: 0x01DC, modern: 0x3768 }; // 476
+    pub const CMSG_AUTH_SESSION: Opcode = Opcode { vanilla: 0x01ED, modern: 0x3765 };
+    pub const SMSG_AUTH_CHALLENGE: Opcode = Opcode { vanilla: 0x01EC, modern: 0x3048 };
+    pub const SMSG_AUTH_RESPONSE: Opcode = Opcode { vanilla: 0x01EE, modern: 0x256D };
+    pub const SMSG_PONG: Opcode = Opcode { vanilla: 0x001D, modern: 0x304E };
 
     // ============================================================================
     // Character Management
     // ============================================================================
 
-    pub const CMSG_CHAR_CREATE: Opcode = Opcode { vanilla: 0x0036, ..Opcode::NONE };
-    pub const CMSG_CHAR_ENUM: Opcode = Opcode { vanilla: 0x0037, ..Opcode::NONE };
-    pub const CMSG_CHAR_DELETE: Opcode = Opcode { vanilla: 0x0038, ..Opcode::NONE };
-    pub const CMSG_PLAYER_LOGIN: Opcode = Opcode { vanilla: 0x003D, ..Opcode::NONE };
-    pub const CMSG_CHAR_RENAME: Opcode = Opcode { vanilla: 0x02C7, ..Opcode::NONE }; // 711
-    pub const SMSG_CHAR_CREATE: Opcode = Opcode { vanilla: 0x003A, ..Opcode::NONE };
-    pub const SMSG_CHAR_ENUM: Opcode = Opcode { vanilla: 0x003B, ..Opcode::NONE };
-    pub const SMSG_CHAR_DELETE: Opcode = Opcode { vanilla: 0x003C, ..Opcode::NONE };
-    pub const SMSG_CHAR_RENAME: Opcode = Opcode { vanilla: 0x02C8, ..Opcode::NONE }; // 712
-    pub const SMSG_CHARACTER_LOGIN_FAILED: Opcode = Opcode { vanilla: 0x0041, ..Opcode::NONE }; // 65
+    pub const CMSG_CHAR_CREATE: Opcode = Opcode { vanilla: 0x0036, modern: 0x3645 };
+    pub const CMSG_CHAR_ENUM: Opcode = Opcode { vanilla: 0x0037, modern: 0x35E9 };
+    pub const CMSG_CHAR_DELETE: Opcode = Opcode { vanilla: 0x0038, modern: 0x369C };
+    pub const CMSG_PLAYER_LOGIN: Opcode = Opcode { vanilla: 0x003D, modern: 0x35EB };
+    pub const CMSG_CHAR_RENAME: Opcode = Opcode { vanilla: 0x02C7, modern: 0x36C7 }; // 711
+    pub const SMSG_CHAR_CREATE: Opcode = Opcode { vanilla: 0x003A, modern: 0x26F8 };
+    pub const SMSG_CHAR_ENUM: Opcode = Opcode { vanilla: 0x003B, modern: 0x2583 };
+    pub const SMSG_CHAR_DELETE: Opcode = Opcode { vanilla: 0x003C, modern: 0x26F9 };
+    pub const SMSG_CHAR_RENAME: Opcode = Opcode { vanilla: 0x02C8, modern: 0x275E }; // 712
+    pub const SMSG_CHARACTER_LOGIN_FAILED: Opcode = Opcode { vanilla: 0x0041, modern: 0x26FC }; // 65
 
     // ============================================================================
     // Logout
     // ============================================================================
 
-    pub const CMSG_LOGOUT_REQUEST: Opcode = Opcode { vanilla: 0x004B, ..Opcode::NONE };
-    pub const CMSG_LOGOUT_CANCEL: Opcode = Opcode { vanilla: 0x004E, ..Opcode::NONE };
-    pub const SMSG_LOGOUT_RESPONSE: Opcode = Opcode { vanilla: 0x004C, ..Opcode::NONE };
-    pub const SMSG_LOGOUT_COMPLETE: Opcode = Opcode { vanilla: 0x004D, ..Opcode::NONE };
-    pub const SMSG_LOGOUT_CANCEL_ACK: Opcode = Opcode { vanilla: 0x004F, ..Opcode::NONE };
+    pub const CMSG_LOGOUT_REQUEST: Opcode = Opcode { vanilla: 0x004B, modern: 0x34D6 };
+    pub const CMSG_LOGOUT_CANCEL: Opcode = Opcode { vanilla: 0x004E, modern: 0x34D8 };
+    pub const SMSG_LOGOUT_RESPONSE: Opcode = Opcode { vanilla: 0x004C, modern: 0x267C };
+    pub const SMSG_LOGOUT_COMPLETE: Opcode = Opcode { vanilla: 0x004D, modern: 0x267D };
+    pub const SMSG_LOGOUT_CANCEL_ACK: Opcode = Opcode { vanilla: 0x004F, modern: 0x267E };
 
     // ============================================================================
     // World Entry & Time
     // ============================================================================
 
-    pub const SMSG_NEW_WORLD: Opcode = Opcode { vanilla: 0x003E, ..Opcode::NONE }; // 62
-    pub const SMSG_TRANSFER_PENDING: Opcode = Opcode { vanilla: 0x003F, ..Opcode::NONE }; // 63
-    pub const SMSG_LOGIN_SETTIMESPEED: Opcode = Opcode { vanilla: 0x0042, ..Opcode::NONE }; // 66
-    pub const SMSG_LOGIN_VERIFY_WORLD: Opcode = Opcode { vanilla: 0x0236, ..Opcode::NONE }; // 566
-    pub const CMSG_QUERY_TIME: Opcode = Opcode { vanilla: 0x01CE, ..Opcode::NONE }; // 462
-    pub const SMSG_QUERY_TIME_RESPONSE: Opcode = Opcode { vanilla: 0x01CF, ..Opcode::NONE }; // 463
+    pub const SMSG_NEW_WORLD: Opcode = Opcode { vanilla: 0x003E, modern: 0x2599 }; // 62
+    pub const SMSG_TRANSFER_PENDING: Opcode = Opcode { vanilla: 0x003F, modern: 0x25C9 }; // 63
+    pub const SMSG_LOGIN_SETTIMESPEED: Opcode = Opcode { vanilla: 0x0042, modern: 0x2704 }; // 66
+    pub const SMSG_LOGIN_VERIFY_WORLD: Opcode = Opcode { vanilla: 0x0236, modern: 0x259A }; // 566
+    pub const CMSG_QUERY_TIME: Opcode = Opcode { vanilla: 0x01CE, modern: 0x34D5 }; // 462
+    pub const SMSG_QUERY_TIME_RESPONSE: Opcode = Opcode { vanilla: 0x01CF, modern: 0x26DC }; // 463
 
     // ============================================================================
     // Tutorial & Account Data
     // ============================================================================
 
-    pub const SMSG_TUTORIAL_FLAGS: Opcode = Opcode { vanilla: 0x00FD, ..Opcode::NONE }; // 253
-    pub const CMSG_TUTORIAL_FLAG: Opcode = Opcode { vanilla: 0x00FE, ..Opcode::NONE }; // 254
+    pub const SMSG_TUTORIAL_FLAGS: Opcode = Opcode { vanilla: 0x00FD, modern: 0x27B6 }; // 253
+    pub const CMSG_TUTORIAL_FLAG: Opcode = Opcode { vanilla: 0x00FE, modern: 0x36E2 }; // 254
     pub const CMSG_TUTORIAL_CLEAR: Opcode = Opcode { vanilla: 0x00FF, ..Opcode::NONE }; // 255
     pub const CMSG_TUTORIAL_RESET: Opcode = Opcode { vanilla: 0x0100, ..Opcode::NONE }; // 256
-    pub const CMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020B, ..Opcode::NONE }; // 523
-    pub const SMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020C, ..Opcode::NONE }; // 524
-    pub const CMSG_REQUEST_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020A, ..Opcode::NONE }; // 522
+    pub const CMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020B, modern: 0x3695 }; // 523
+    pub const SMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020C, modern: 0x2700 }; // 524
+    pub const CMSG_REQUEST_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020A, modern: 0x3694 }; // 522
     pub const SMSG_UPDATE_ACCOUNT_DATA_COMPLETE: Opcode = Opcode { vanilla: 0x020D, ..Opcode::NONE }; // 525
-    pub const SMSG_ACCOUNT_DATA_MD5: Opcode = Opcode { vanilla: 0x0209, ..Opcode::NONE }; // 521
-    pub const SMSG_ACCOUNT_DATA_TIMES: Opcode = Opcode { vanilla: 0x0209, ..Opcode::NONE }; // 521
+    pub const SMSG_ACCOUNT_DATA_MD5: Opcode = Opcode { vanilla: 0x0209, modern: 0x2701 }; // 521
+    pub const SMSG_ACCOUNT_DATA_TIMES: Opcode = Opcode { vanilla: 0x0209, modern: 0x2701 }; // 521
 
     // ============================================================================
     // Query Responses
     // ============================================================================
 
     pub const CMSG_NAME_QUERY: Opcode = Opcode { vanilla: 0x050, ..Opcode::NONE };
-    pub const SMSG_NAME_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x051, ..Opcode::NONE }; // 81
-    pub const CMSG_CREATURE_QUERY: Opcode = Opcode { vanilla: 0x060, ..Opcode::NONE }; // 96
-    pub const SMSG_CREATURE_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x061, ..Opcode::NONE }; // 97
+    pub const SMSG_NAME_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x0051, modern: 0x3002 }; // 81
+    pub const CMSG_CREATURE_QUERY: Opcode = Opcode { vanilla: 0x0060, modern: 0x326B }; // 96
+    pub const SMSG_CREATURE_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x0061, modern: 0x2914 }; // 97
     pub const CMSG_ITEM_QUERY_SINGLE: Opcode = Opcode { vanilla: 0x056, ..Opcode::NONE };
     pub const CMSG_ITEM_QUERY_MULTIPLE: Opcode = Opcode { vanilla: 0x057, ..Opcode::NONE };
     pub const SMSG_ITEM_QUERY_SINGLE_RESPONSE: Opcode = Opcode { vanilla: 0x058, ..Opcode::NONE }; // 88
     pub const SMSG_ITEM_QUERY_MULTIPLE_RESPONSE: Opcode = Opcode { vanilla: 0x057, ..Opcode::NONE };
-    pub const CMSG_GAMEOBJECT_QUERY: Opcode = Opcode { vanilla: 0x005E, ..Opcode::NONE }; // 94
-    pub const SMSG_GAMEOBJECT_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x005F, ..Opcode::NONE }; // 95
-    pub const CMSG_PAGE_TEXT_QUERY: Opcode = Opcode { vanilla: 0x005A, ..Opcode::NONE }; // 90
-    pub const SMSG_PAGE_TEXT_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x005B, ..Opcode::NONE }; // 91
-    pub const CMSG_ITEM_TEXT_QUERY: Opcode = Opcode { vanilla: 0x0243, ..Opcode::NONE }; // 579
-    pub const SMSG_ITEM_TEXT_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x0244, ..Opcode::NONE }; // 580
+    pub const CMSG_GAMEOBJECT_QUERY: Opcode = Opcode { vanilla: 0x005E, modern: 0x326C }; // 94
+    pub const SMSG_GAMEOBJECT_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x005F, modern: 0x2915 }; // 95
+    pub const CMSG_PAGE_TEXT_QUERY: Opcode = Opcode { vanilla: 0x005A, modern: 0x326F }; // 90
+    pub const SMSG_PAGE_TEXT_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x005B, modern: 0x2917 }; // 91
+    pub const CMSG_ITEM_TEXT_QUERY: Opcode = Opcode { vanilla: 0x0243, modern: 0x32BD }; // 579
+    pub const SMSG_ITEM_TEXT_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x0244, modern: 0x291E }; // 580
     pub const MSG_CORPSE_QUERY: Opcode = Opcode { vanilla: 0x0216, ..Opcode::NONE }; // 534
     pub const CMSG_ITEM_NAME_QUERY: Opcode = Opcode { vanilla: 0x02C4, ..Opcode::NONE }; // 708
     pub const SMSG_ITEM_NAME_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x02C5, ..Opcode::NONE }; // 709
@@ -179,7 +179,7 @@ impl Opcode {
     // Object Updates
     // ============================================================================
 
-    pub const SMSG_UPDATE_OBJECT: Opcode = Opcode { vanilla: 0x00A9, ..Opcode::NONE }; // 169
+    pub const SMSG_UPDATE_OBJECT: Opcode = Opcode { vanilla: 0x00A9, modern: 0x27C4 }; // 169
     pub const SMSG_COMPRESSED_UPDATE_OBJECT: Opcode = Opcode { vanilla: 0x01F6, ..Opcode::NONE }; // 502
     pub const SMSG_COMPRESSED_MOVES: Opcode = Opcode { vanilla: 0x02B3, ..Opcode::NONE }; // 691
     pub const SMSG_DESTROY_OBJECT: Opcode = Opcode { vanilla: 0x00AA, ..Opcode::NONE }; // 170
@@ -208,19 +208,19 @@ impl Opcode {
     // Movement - Advanced
     // ============================================================================
 
-    pub const CMSG_SET_ACTIVE_MOVER: Opcode = Opcode { vanilla: 0x026A, ..Opcode::NONE }; // 618
-    pub const CMSG_MOVE_SPLINE_DONE: Opcode = Opcode { vanilla: 0x02C9, ..Opcode::NONE }; // 713
-    pub const CMSG_MOVE_FALL_RESET: Opcode = Opcode { vanilla: 0x02CA, ..Opcode::NONE }; // 714
-    pub const CMSG_MOVE_TIME_SKIPPED: Opcode = Opcode { vanilla: 0x02CE, ..Opcode::NONE }; // 718
-    pub const CMSG_MOVE_FEATHER_FALL_ACK: Opcode = Opcode { vanilla: 0x02CF, ..Opcode::NONE }; // 719
-    pub const CMSG_MOVE_WATER_WALK_ACK: Opcode = Opcode { vanilla: 0x02D0, ..Opcode::NONE }; // 720
+    pub const CMSG_SET_ACTIVE_MOVER: Opcode = Opcode { vanilla: 0x026A, modern: 0x3A3B }; // 618
+    pub const CMSG_MOVE_SPLINE_DONE: Opcode = Opcode { vanilla: 0x02C9, modern: 0x3A17 }; // 713
+    pub const CMSG_MOVE_FALL_RESET: Opcode = Opcode { vanilla: 0x02CA, modern: 0x3A18 }; // 714
+    pub const CMSG_MOVE_TIME_SKIPPED: Opcode = Opcode { vanilla: 0x02CE, modern: 0x3A1A }; // 718
+    pub const CMSG_MOVE_FEATHER_FALL_ACK: Opcode = Opcode { vanilla: 0x02CF, modern: 0x3A1B }; // 719
+    pub const CMSG_MOVE_WATER_WALK_ACK: Opcode = Opcode { vanilla: 0x02D0, modern: 0x3A1C }; // 720
     pub const CMSG_MOVE_NOT_ACTIVE_MOVER: Opcode = Opcode { vanilla: 0x02D1, ..Opcode::NONE }; // 721
     pub const MSG_MOVE_TELEPORT_ACK: Opcode = Opcode { vanilla: 0x00C7, ..Opcode::NONE }; // 199
     pub const MSG_MOVE_TELEPORT: Opcode = Opcode { vanilla: 0x00C5, ..Opcode::NONE }; // 197
     pub const MSG_MOVE_KNOCK_BACK: Opcode = Opcode { vanilla: 0x00F1, ..Opcode::NONE }; // 241
-    pub const MSG_MOVE_TIME_SKIPPED: Opcode = Opcode { vanilla: 0x02CE, ..Opcode::NONE }; // 718 (same wire value as CMSG, used for observer rebroadcast)
-    pub const CMSG_MOUNTSPECIAL_ANIM: Opcode = Opcode { vanilla: 0x0171, ..Opcode::NONE }; // 369
-    pub const SMSG_MOUNTSPECIAL_ANIM: Opcode = Opcode { vanilla: 0x0172, ..Opcode::NONE }; // 370
+    pub const MSG_MOVE_TIME_SKIPPED: Opcode = Opcode { vanilla: 0x02CE, modern: 0x3A1A }; // 718 (same wire value as CMSG, used for observer rebroadcast)
+    pub const CMSG_MOUNTSPECIAL_ANIM: Opcode = Opcode { vanilla: 0x0171, modern: 0x327B }; // 369
+    pub const SMSG_MOUNTSPECIAL_ANIM: Opcode = Opcode { vanilla: 0x0172, modern: 0x2698 }; // 370
 
     // ============================================================================
     // Movement - Speed Changes (Force - to controller)
@@ -234,23 +234,23 @@ impl Opcode {
     pub const SMSG_FORCE_TURN_RATE_CHANGE: Opcode = Opcode { vanilla: 0x02DE, ..Opcode::NONE }; // 734
 
     // Client acknowledgements of the forced speed changes above
-    pub const CMSG_FORCE_WALK_SPEED_CHANGE_ACK: Opcode = Opcode { vanilla: 0x02DB, ..Opcode::NONE }; // 731
-    pub const CMSG_FORCE_RUN_SPEED_CHANGE_ACK: Opcode = Opcode { vanilla: 0x00E3, ..Opcode::NONE }; // 227
-    pub const CMSG_FORCE_RUN_BACK_SPEED_CHANGE_ACK: Opcode = Opcode { vanilla: 0x00E5, ..Opcode::NONE }; // 229
-    pub const CMSG_FORCE_SWIM_SPEED_CHANGE_ACK: Opcode = Opcode { vanilla: 0x00E7, ..Opcode::NONE }; // 231
-    pub const CMSG_FORCE_SWIM_BACK_SPEED_CHANGE_ACK: Opcode = Opcode { vanilla: 0x02DD, ..Opcode::NONE }; // 733
-    pub const CMSG_FORCE_TURN_RATE_CHANGE_ACK: Opcode = Opcode { vanilla: 0x02DF, ..Opcode::NONE }; // 735
+    pub const CMSG_FORCE_WALK_SPEED_CHANGE_ACK: Opcode = Opcode { vanilla: 0x02DB, modern: 0x3A20 }; // 731
+    pub const CMSG_FORCE_RUN_SPEED_CHANGE_ACK: Opcode = Opcode { vanilla: 0x00E3, modern: 0x3A0A }; // 227
+    pub const CMSG_FORCE_RUN_BACK_SPEED_CHANGE_ACK: Opcode = Opcode { vanilla: 0x00E5, modern: 0x3A0B }; // 229
+    pub const CMSG_FORCE_SWIM_SPEED_CHANGE_ACK: Opcode = Opcode { vanilla: 0x00E7, modern: 0x3A0C }; // 231
+    pub const CMSG_FORCE_SWIM_BACK_SPEED_CHANGE_ACK: Opcode = Opcode { vanilla: 0x02DD, modern: 0x3A21 }; // 733
+    pub const CMSG_FORCE_TURN_RATE_CHANGE_ACK: Opcode = Opcode { vanilla: 0x02DF, modern: 0x3A22 }; // 735
 
     // ============================================================================
     // Movement - Speed Changes (Spline - server-controlled units)
     // ============================================================================
 
-    pub const SMSG_SPLINE_SET_WALK_SPEED: Opcode = Opcode { vanilla: 0x0301, ..Opcode::NONE }; // 769
-    pub const SMSG_SPLINE_SET_RUN_SPEED: Opcode = Opcode { vanilla: 0x02FE, ..Opcode::NONE }; // 766
-    pub const SMSG_SPLINE_SET_RUN_BACK_SPEED: Opcode = Opcode { vanilla: 0x02FF, ..Opcode::NONE }; // 767
-    pub const SMSG_SPLINE_SET_SWIM_SPEED: Opcode = Opcode { vanilla: 0x0300, ..Opcode::NONE }; // 768
-    pub const SMSG_SPLINE_SET_SWIM_BACK_SPEED: Opcode = Opcode { vanilla: 0x0302, ..Opcode::NONE }; // 770
-    pub const SMSG_SPLINE_SET_TURN_RATE: Opcode = Opcode { vanilla: 0x0303, ..Opcode::NONE }; // 771
+    pub const SMSG_SPLINE_SET_WALK_SPEED: Opcode = Opcode { vanilla: 0x0301, modern: 0x2DED }; // 769
+    pub const SMSG_SPLINE_SET_RUN_SPEED: Opcode = Opcode { vanilla: 0x02FE, modern: 0x2DE7 }; // 766
+    pub const SMSG_SPLINE_SET_RUN_BACK_SPEED: Opcode = Opcode { vanilla: 0x02FF, modern: 0x2DE8 }; // 767
+    pub const SMSG_SPLINE_SET_SWIM_SPEED: Opcode = Opcode { vanilla: 0x0300, modern: 0x2DE9 }; // 768
+    pub const SMSG_SPLINE_SET_SWIM_BACK_SPEED: Opcode = Opcode { vanilla: 0x0302, modern: 0x2DEA }; // 770
+    pub const SMSG_SPLINE_SET_TURN_RATE: Opcode = Opcode { vanilla: 0x0303, modern: 0x2DEE }; // 771
 
     // ============================================================================
     // Movement - Speed Changes (MSG - to observers)
@@ -267,32 +267,32 @@ impl Opcode {
     // Movement - Flags (Force - to controller)
     // ============================================================================
 
-    pub const SMSG_FORCE_MOVE_ROOT: Opcode = Opcode { vanilla: 0x00E8, ..Opcode::NONE }; // 232
-    pub const CMSG_FORCE_MOVE_ROOT_ACK: Opcode = Opcode { vanilla: 0x00E9, ..Opcode::NONE }; // 233
-    pub const SMSG_FORCE_MOVE_UNROOT: Opcode = Opcode { vanilla: 0x00EA, ..Opcode::NONE }; // 234
-    pub const SMSG_MOVE_WATER_WALK: Opcode = Opcode { vanilla: 0x00DE, ..Opcode::NONE }; // 222
-    pub const SMSG_MOVE_LAND_WALK: Opcode = Opcode { vanilla: 0x00DF, ..Opcode::NONE }; // 223
-    pub const SMSG_MOVE_SET_HOVER: Opcode = Opcode { vanilla: 0x00F4, ..Opcode::NONE }; // 244
-    pub const SMSG_MOVE_UNSET_HOVER: Opcode = Opcode { vanilla: 0x00F5, ..Opcode::NONE }; // 245
-    pub const SMSG_MOVE_FEATHER_FALL: Opcode = Opcode { vanilla: 0x00F2, ..Opcode::NONE }; // 242
-    pub const SMSG_MOVE_NORMAL_FALL: Opcode = Opcode { vanilla: 0x00F3, ..Opcode::NONE }; // 243
-    pub const SMSG_MOVE_KNOCK_BACK: Opcode = Opcode { vanilla: 0x00EF, ..Opcode::NONE }; // 239
-    pub const CMSG_MOVE_KNOCK_BACK_ACK: Opcode = Opcode { vanilla: 0x00F0, ..Opcode::NONE }; // 240
+    pub const SMSG_FORCE_MOVE_ROOT: Opcode = Opcode { vanilla: 0x00E8, modern: 0x2DF9 }; // 232
+    pub const CMSG_FORCE_MOVE_ROOT_ACK: Opcode = Opcode { vanilla: 0x00E9, modern: 0x3A0D }; // 233
+    pub const SMSG_FORCE_MOVE_UNROOT: Opcode = Opcode { vanilla: 0x00EA, modern: 0x2DFA }; // 234
+    pub const SMSG_MOVE_WATER_WALK: Opcode = Opcode { vanilla: 0x00DE, modern: 0x2DFB }; // 222
+    pub const SMSG_MOVE_LAND_WALK: Opcode = Opcode { vanilla: 0x00DF, modern: 0x2DFE }; // 223
+    pub const SMSG_MOVE_SET_HOVER: Opcode = Opcode { vanilla: 0x00F4, modern: 0x2E01 }; // 244
+    pub const SMSG_MOVE_UNSET_HOVER: Opcode = Opcode { vanilla: 0x00F5, modern: 0x2E02 }; // 245
+    pub const SMSG_MOVE_FEATHER_FALL: Opcode = Opcode { vanilla: 0x00F2, modern: 0x2DFF }; // 242
+    pub const SMSG_MOVE_NORMAL_FALL: Opcode = Opcode { vanilla: 0x00F3, modern: 0x2E00 }; // 243
+    pub const SMSG_MOVE_KNOCK_BACK: Opcode = Opcode { vanilla: 0x00EF, modern: 0x2E03 }; // 239
+    pub const CMSG_MOVE_KNOCK_BACK_ACK: Opcode = Opcode { vanilla: 0x00F0, modern: 0x3A11 }; // 240
 
     // ============================================================================
     // Movement - Flags (Spline - server-controlled units)
     // ============================================================================
 
-    pub const SMSG_SPLINE_MOVE_ROOT: Opcode = Opcode { vanilla: 0x031A, ..Opcode::NONE }; // 794
-    pub const SMSG_SPLINE_MOVE_UNROOT: Opcode = Opcode { vanilla: 0x0304, ..Opcode::NONE }; // 772
-    pub const SMSG_SPLINE_MOVE_WATER_WALK: Opcode = Opcode { vanilla: 0x0309, ..Opcode::NONE }; // 777
-    pub const SMSG_SPLINE_MOVE_LAND_WALK: Opcode = Opcode { vanilla: 0x030A, ..Opcode::NONE }; // 778
-    pub const SMSG_SPLINE_MOVE_SET_HOVER: Opcode = Opcode { vanilla: 0x0307, ..Opcode::NONE }; // 775
-    pub const SMSG_SPLINE_MOVE_UNSET_HOVER: Opcode = Opcode { vanilla: 0x0308, ..Opcode::NONE }; // 776
-    pub const SMSG_SPLINE_MOVE_FEATHER_FALL: Opcode = Opcode { vanilla: 0x0305, ..Opcode::NONE }; // 773
-    pub const SMSG_SPLINE_MOVE_NORMAL_FALL: Opcode = Opcode { vanilla: 0x0306, ..Opcode::NONE }; // 774
-    pub const SMSG_SPLINE_MOVE_SET_RUN_MODE: Opcode = Opcode { vanilla: 0x030D, ..Opcode::NONE }; // 781
-    pub const SMSG_SPLINE_MOVE_SET_WALK_MODE: Opcode = Opcode { vanilla: 0x030E, ..Opcode::NONE }; // 782
+    pub const SMSG_SPLINE_MOVE_ROOT: Opcode = Opcode { vanilla: 0x031A, modern: 0x2E19 }; // 794
+    pub const SMSG_SPLINE_MOVE_UNROOT: Opcode = Opcode { vanilla: 0x0304, modern: 0x2E1A }; // 772
+    pub const SMSG_SPLINE_MOVE_WATER_WALK: Opcode = Opcode { vanilla: 0x0309, modern: 0x2E23 }; // 777
+    pub const SMSG_SPLINE_MOVE_LAND_WALK: Opcode = Opcode { vanilla: 0x030A, modern: 0x2E24 }; // 778
+    pub const SMSG_SPLINE_MOVE_SET_HOVER: Opcode = Opcode { vanilla: 0x0307, modern: 0x2E21 }; // 775
+    pub const SMSG_SPLINE_MOVE_UNSET_HOVER: Opcode = Opcode { vanilla: 0x0308, modern: 0x2E22 }; // 776
+    pub const SMSG_SPLINE_MOVE_FEATHER_FALL: Opcode = Opcode { vanilla: 0x0305, modern: 0x2E1F }; // 773
+    pub const SMSG_SPLINE_MOVE_NORMAL_FALL: Opcode = Opcode { vanilla: 0x0306, modern: 0x2E20 }; // 774
+    pub const SMSG_SPLINE_MOVE_SET_RUN_MODE: Opcode = Opcode { vanilla: 0x030D, modern: 0x2E27 }; // 781
+    pub const SMSG_SPLINE_MOVE_SET_WALK_MODE: Opcode = Opcode { vanilla: 0x030E, modern: 0x2E28 }; // 782
 
     // ============================================================================
     // Movement - Flags (MSG - to observers)
@@ -308,196 +308,196 @@ impl Opcode {
     // Monster Movement
     // ============================================================================
 
-    pub const SMSG_MONSTER_MOVE: Opcode = Opcode { vanilla: 0x00DD, ..Opcode::NONE }; // 221
+    pub const SMSG_MONSTER_MOVE: Opcode = Opcode { vanilla: 0x00DD, modern: 0x2DD4 }; // 221
     pub const SMSG_MONSTER_MOVE_TRANSPORT: Opcode = Opcode { vanilla: 0x02AE, ..Opcode::NONE }; // 686
 
     // ============================================================================
     // Combat
     // ============================================================================
 
-    pub const CMSG_ATTACKSWING: Opcode = Opcode { vanilla: 0x0141, ..Opcode::NONE }; // 321
-    pub const CMSG_ATTACKSTOP: Opcode = Opcode { vanilla: 0x0142, ..Opcode::NONE }; // 322
-    pub const SMSG_ATTACKSTART: Opcode = Opcode { vanilla: 0x0143, ..Opcode::NONE }; // 323
-    pub const SMSG_ATTACKSTOP: Opcode = Opcode { vanilla: 0x0144, ..Opcode::NONE }; // 324
+    pub const CMSG_ATTACKSWING: Opcode = Opcode { vanilla: 0x0141, modern: 0x3250 }; // 321
+    pub const CMSG_ATTACKSTOP: Opcode = Opcode { vanilla: 0x0142, modern: 0x3251 }; // 322
+    pub const SMSG_ATTACKSTART: Opcode = Opcode { vanilla: 0x0143, modern: 0x293B }; // 323
+    pub const SMSG_ATTACKSTOP: Opcode = Opcode { vanilla: 0x0144, modern: 0x293C }; // 324
     pub const SMSG_ATTACKSWING_NOTINRANGE: Opcode = Opcode { vanilla: 0x0145, ..Opcode::NONE }; // 325
     pub const SMSG_ATTACKSWING_BADFACING: Opcode = Opcode { vanilla: 0x0146, ..Opcode::NONE }; // 326
     pub const SMSG_ATTACKSWING_NOTSTANDING: Opcode = Opcode { vanilla: 0x0147, ..Opcode::NONE }; // 327
     pub const SMSG_ATTACKSWING_DEADTARGET: Opcode = Opcode { vanilla: 0x0148, ..Opcode::NONE }; // 328
     pub const SMSG_ATTACKSWING_CANT_ATTACK: Opcode = Opcode { vanilla: 0x0149, ..Opcode::NONE }; // 329
-    pub const SMSG_ATTACKERSTATEUPDATE: Opcode = Opcode { vanilla: 0x014A, ..Opcode::NONE }; // 330
+    pub const SMSG_ATTACKERSTATEUPDATE: Opcode = Opcode { vanilla: 0x014A, modern: 0x2950 }; // 330
 
     // ============================================================================
     // Selection & Targeting
     // ============================================================================
 
-    pub const CMSG_SET_SELECTION: Opcode = Opcode { vanilla: 0x013D, ..Opcode::NONE }; // 317
+    pub const CMSG_SET_SELECTION: Opcode = Opcode { vanilla: 0x013D, modern: 0x3527 }; // 317
 
     // ============================================================================
     // Stand State
     // ============================================================================
 
-    pub const CMSG_STANDSTATECHANGE: Opcode = Opcode { vanilla: 0x0101, ..Opcode::NONE }; // 257
-    pub const SMSG_STANDSTATE_UPDATE: Opcode = Opcode { vanilla: 0x029D, ..Opcode::NONE }; // 669
+    pub const CMSG_STANDSTATECHANGE: Opcode = Opcode { vanilla: 0x0101, modern: 0x318D }; // 257
+    pub const SMSG_STANDSTATE_UPDATE: Opcode = Opcode { vanilla: 0x029D, modern: 0x2713 }; // 669
 
     // ============================================================================
     // Spell Casting
     // ============================================================================
 
-    pub const CMSG_CAST_SPELL: Opcode = Opcode { vanilla: 0x012E, ..Opcode::NONE }; // 302
-    pub const CMSG_CANCEL_CAST: Opcode = Opcode { vanilla: 0x012F, ..Opcode::NONE }; // 303
-    pub const CMSG_CANCEL_AURA: Opcode = Opcode { vanilla: 0x0136, ..Opcode::NONE }; // 310
-    pub const CMSG_CANCEL_GROWTH_AURA: Opcode = Opcode { vanilla: 0x029B, ..Opcode::NONE }; // 667
-    pub const CMSG_CANCEL_AUTO_REPEAT_SPELL: Opcode = Opcode { vanilla: 0x026D, ..Opcode::NONE }; // 621
-    pub const SMSG_CANCEL_AUTO_REPEAT: Opcode = Opcode { vanilla: 0x029C, ..Opcode::NONE }; // 668
-    pub const CMSG_CANCEL_CHANNELING: Opcode = Opcode { vanilla: 0x013B, ..Opcode::NONE }; // 315
-    pub const CMSG_CANCEL_CHANNELLING: Opcode = Opcode { vanilla: 0x013B, ..Opcode::NONE }; // 315 (alias)
-    pub const CMSG_USE_ITEM: Opcode = Opcode { vanilla: 0x00AB, ..Opcode::NONE }; // 171
+    pub const CMSG_CAST_SPELL: Opcode = Opcode { vanilla: 0x012E, modern: 0x3294 }; // 302
+    pub const CMSG_CANCEL_CAST: Opcode = Opcode { vanilla: 0x012F, modern: 0x3297 }; // 303
+    pub const CMSG_CANCEL_AURA: Opcode = Opcode { vanilla: 0x0136, modern: 0x31B0 }; // 310
+    pub const CMSG_CANCEL_GROWTH_AURA: Opcode = Opcode { vanilla: 0x029B, modern: 0x326A }; // 667
+    pub const CMSG_CANCEL_AUTO_REPEAT_SPELL: Opcode = Opcode { vanilla: 0x026D, modern: 0x34E7 }; // 621
+    pub const SMSG_CANCEL_AUTO_REPEAT: Opcode = Opcode { vanilla: 0x029C, modern: 0x26D6 }; // 668
+    pub const CMSG_CANCEL_CHANNELING: Opcode = Opcode { vanilla: 0x013B, modern: 0x3265 }; // 315
+    pub const CMSG_CANCEL_CHANNELLING: Opcode = Opcode { vanilla: 0x013B, modern: 0x3265 }; // 315 (alias)
+    pub const CMSG_USE_ITEM: Opcode = Opcode { vanilla: 0x00AB, modern: 0x3290 }; // 171
     pub const CMSG_NEW_SPELL_SLOT: Opcode = Opcode { vanilla: 0x012D, ..Opcode::NONE }; // 301
-    pub const SMSG_SPELL_START: Opcode = Opcode { vanilla: 0x0131, ..Opcode::NONE }; // 305
-    pub const SMSG_SPELL_GO: Opcode = Opcode { vanilla: 0x0132, ..Opcode::NONE }; // 306
-    pub const SMSG_CAST_RESULT: Opcode = Opcode { vanilla: 0x0130, ..Opcode::NONE }; // 304
-    pub const SMSG_SPELL_COOLDOWN: Opcode = Opcode { vanilla: 0x0134, ..Opcode::NONE }; // 308
+    pub const SMSG_SPELL_START: Opcode = Opcode { vanilla: 0x0131, modern: 0x2C3A }; // 305
+    pub const SMSG_SPELL_GO: Opcode = Opcode { vanilla: 0x0132, modern: 0x2C39 }; // 306
+    pub const SMSG_CAST_RESULT: Opcode = Opcode { vanilla: 0x0130, modern: 0x2C57 }; // 304
+    pub const SMSG_SPELL_COOLDOWN: Opcode = Opcode { vanilla: 0x0134, modern: 0x2C15 }; // 308
     pub const MSG_CHANNEL_START: Opcode = Opcode { vanilla: 0x0139, ..Opcode::NONE }; // 313
     pub const MSG_CHANNEL_UPDATE: Opcode = Opcode { vanilla: 0x013A, ..Opcode::NONE }; // 314
     pub const SMSG_SPELL_INTERRUPTED: Opcode = Opcode { vanilla: 0x0152, ..Opcode::NONE }; // 338
-    pub const SMSG_SPELL_DELAYED: Opcode = Opcode { vanilla: 0x01E2, ..Opcode::NONE }; // 482
-    pub const SMSG_SPELL_FAILED_OTHER: Opcode = Opcode { vanilla: 0x02A6, ..Opcode::NONE }; // 678
+    pub const SMSG_SPELL_DELAYED: Opcode = Opcode { vanilla: 0x01E2, modern: 0x2C3F }; // 482
+    pub const SMSG_SPELL_FAILED_OTHER: Opcode = Opcode { vanilla: 0x02A6, modern: 0x2C55 }; // 678
     pub const SMSG_SPELL_UPDATE_CHAIN_TARGETS: Opcode = Opcode { vanilla: 0x0330, ..Opcode::NONE }; // 816
-    pub const SMSG_SET_PROFICIENCY: Opcode = Opcode { vanilla: 0x0127, ..Opcode::NONE }; // 295
-    pub const SMSG_INITIAL_SPELLS: Opcode = Opcode { vanilla: 0x012A, ..Opcode::NONE }; // 298
+    pub const SMSG_SET_PROFICIENCY: Opcode = Opcode { vanilla: 0x0127, modern: 0x272C }; // 295
+    pub const SMSG_INITIAL_SPELLS: Opcode = Opcode { vanilla: 0x012A, modern: 0x2C2A }; // 298
     pub const SMSG_LEARNED_SPELL: Opcode = Opcode { vanilla: 0x012B, ..Opcode::NONE }; // 299
-    pub const SMSG_REMOVED_SPELL: Opcode = Opcode { vanilla: 0x0203, ..Opcode::NONE }; // 515
-    pub const SMSG_SPELL_FAILURE: Opcode = Opcode { vanilla: 0x0133, ..Opcode::NONE }; // 307
-    pub const SMSG_CLEAR_COOLDOWN: Opcode = Opcode { vanilla: 0x01DE, ..Opcode::NONE }; // 478
+    pub const SMSG_REMOVED_SPELL: Opcode = Opcode { vanilla: 0x0203, modern: 0x2C4E }; // 515
+    pub const SMSG_SPELL_FAILURE: Opcode = Opcode { vanilla: 0x0133, modern: 0x2C53 }; // 307
+    pub const SMSG_CLEAR_COOLDOWN: Opcode = Opcode { vanilla: 0x01DE, modern: 0x26B3 }; // 478
 
     // ============================================================================
     // Auras
     // ============================================================================
 
-    pub const SMSG_AURA_UPDATE: Opcode = Opcode { vanilla: 0x0495, ..Opcode::NONE }; // 1173
+    pub const SMSG_AURA_UPDATE: Opcode = Opcode { vanilla: 0x0495, modern: 0x2C22 }; // 1173
     pub const SMSG_AURA_UPDATE_ALL: Opcode = Opcode { vanilla: 0x0496, ..Opcode::NONE }; // 1174
     pub const SMSG_UPDATE_AURA_DURATION: Opcode = Opcode { vanilla: 0x0137, ..Opcode::NONE }; // 311
     pub const SMSG_SET_EXTRA_AURA_INFO: Opcode = Opcode { vanilla: 0x04A7, ..Opcode::NONE }; // 1191
-    pub const SMSG_PERIODICAURALOG: Opcode = Opcode { vanilla: 0x024E, ..Opcode::NONE }; // 590
+    pub const SMSG_PERIODICAURALOG: Opcode = Opcode { vanilla: 0x024E, modern: 0x2C1B }; // 590
 
     // ============================================================================
     // Combat Log
     // ============================================================================
 
-    pub const SMSG_SPELLDAMAGELOG: Opcode = Opcode { vanilla: 0x014E, ..Opcode::NONE }; // 334
-    pub const SMSG_SPELLHEALLOG: Opcode = Opcode { vanilla: 0x0150, ..Opcode::NONE }; // 336
+    pub const SMSG_SPELLDAMAGELOG: Opcode = Opcode { vanilla: 0x014E, modern: 0x2949 }; // 334
+    pub const SMSG_SPELLHEALLOG: Opcode = Opcode { vanilla: 0x0150, modern: 0x2C1D }; // 336
     pub const SMSG_SPELLLOGMISS: Opcode = Opcode { vanilla: 0x014C, ..Opcode::NONE }; // 332
-    pub const SMSG_SPELLENERGIZELOG: Opcode = Opcode { vanilla: 0x0151, ..Opcode::NONE }; // 337
+    pub const SMSG_SPELLENERGIZELOG: Opcode = Opcode { vanilla: 0x0151, modern: 0x2C1C }; // 337
     pub const SMSG_SPELLNONMELEEDAMAGELOG: Opcode = Opcode { vanilla: 0x0148, ..Opcode::NONE }; // 328
-    pub const SMSG_SPELLLOGEXECUTE: Opcode = Opcode { vanilla: 0x024C, ..Opcode::NONE }; // 588
+    pub const SMSG_SPELLLOGEXECUTE: Opcode = Opcode { vanilla: 0x024C, modern: 0x2C40 }; // 588
     pub const SMSG_SPELLINSTAKILLLOG: Opcode = Opcode { vanilla: 0x033F, ..Opcode::NONE }; // 815
-    pub const SMSG_PROCRESIST: Opcode = Opcode { vanilla: 0x0260, ..Opcode::NONE }; // 608
-    pub const SMSG_SPELLORDAMAGE_IMMUNE: Opcode = Opcode { vanilla: 0x0263, ..Opcode::NONE }; // 611
+    pub const SMSG_PROCRESIST: Opcode = Opcode { vanilla: 0x0260, modern: 0x2752 }; // 608
+    pub const SMSG_SPELLORDAMAGE_IMMUNE: Opcode = Opcode { vanilla: 0x0263, modern: 0x2C2F }; // 611
 
     // ============================================================================
     // Action Bar
     // ============================================================================
 
-    pub const CMSG_SET_ACTION_BUTTON: Opcode = Opcode { vanilla: 0x0128, ..Opcode::NONE }; // 296
-    pub const SMSG_ACTION_BUTTONS: Opcode = Opcode { vanilla: 0x0129, ..Opcode::NONE }; // 297
+    pub const CMSG_SET_ACTION_BUTTON: Opcode = Opcode { vanilla: 0x0128, modern: 0x3558 }; // 296
+    pub const SMSG_ACTION_BUTTONS: Opcode = Opcode { vanilla: 0x0129, modern: 0x25D9 }; // 297
 
     // ============================================================================
     // Death & Resurrection
     // ============================================================================
 
-    pub const SMSG_DURABILITY_DAMAGE_DEATH: Opcode = Opcode { vanilla: 0x02BD, ..Opcode::NONE }; // 701
-    pub const SMSG_CORPSE_RECLAIM_DELAY: Opcode = Opcode { vanilla: 0x0269, ..Opcode::NONE }; // 617
-    pub const CMSG_REPOP_REQUEST: Opcode = Opcode { vanilla: 0x015A, ..Opcode::NONE }; // 346
-    pub const CMSG_RESURRECT_RESPONSE: Opcode = Opcode { vanilla: 0x015C, ..Opcode::NONE }; // 348
-    pub const CMSG_RECLAIM_CORPSE: Opcode = Opcode { vanilla: 0x01D2, ..Opcode::NONE }; // 466
-    pub const SMSG_RESURRECT_REQUEST: Opcode = Opcode { vanilla: 0x015B, ..Opcode::NONE }; // 347
-    pub const SMSG_SPIRIT_HEALER_CONFIRM: Opcode = Opcode { vanilla: 0x0222, ..Opcode::NONE }; // 546
-    pub const CMSG_SPIRIT_HEALER_ACTIVATE: Opcode = Opcode { vanilla: 0x021C, ..Opcode::NONE }; // 540
-    pub const CMSG_SELF_RES: Opcode = Opcode { vanilla: 0x02B3, ..Opcode::NONE }; // 691
+    pub const SMSG_DURABILITY_DAMAGE_DEATH: Opcode = Opcode { vanilla: 0x02BD, modern: 0x273D }; // 701
+    pub const SMSG_CORPSE_RECLAIM_DELAY: Opcode = Opcode { vanilla: 0x0269, modern: 0x2741 }; // 617
+    pub const CMSG_REPOP_REQUEST: Opcode = Opcode { vanilla: 0x015A, modern: 0x3525 }; // 346
+    pub const CMSG_RESURRECT_RESPONSE: Opcode = Opcode { vanilla: 0x015C, modern: 0x3685 }; // 348
+    pub const CMSG_RECLAIM_CORPSE: Opcode = Opcode { vanilla: 0x01D2, modern: 0x34DB }; // 466
+    pub const SMSG_RESURRECT_REQUEST: Opcode = Opcode { vanilla: 0x015B, modern: 0x257E }; // 347
+    pub const SMSG_SPIRIT_HEALER_CONFIRM: Opcode = Opcode { vanilla: 0x0222, modern: 0x270C }; // 546
+    pub const CMSG_SPIRIT_HEALER_ACTIVATE: Opcode = Opcode { vanilla: 0x021C, modern: 0x34AF }; // 540
+    pub const CMSG_SELF_RES: Opcode = Opcode { vanilla: 0x02B3, modern: 0x3530 }; // 691
 
     // ============================================================================
     // NPC Interaction - Gossip
     // ============================================================================
 
-    pub const CMSG_GOSSIP_HELLO: Opcode = Opcode { vanilla: 0x017B, ..Opcode::NONE }; // 379
-    pub const CMSG_GOSSIP_SELECT_OPTION: Opcode = Opcode { vanilla: 0x017C, ..Opcode::NONE }; // 380
-    pub const SMSG_GOSSIP_MESSAGE: Opcode = Opcode { vanilla: 0x017D, ..Opcode::NONE }; // 381
-    pub const SMSG_GOSSIP_COMPLETE: Opcode = Opcode { vanilla: 0x017E, ..Opcode::NONE }; // 382
-    pub const SMSG_GOSSIP_POI: Opcode = Opcode { vanilla: 0x0223, ..Opcode::NONE }; // 547
-    pub const SMSG_NPC_TEXT_UPDATE: Opcode = Opcode { vanilla: 0x0180, ..Opcode::NONE }; // 384
-    pub const CMSG_NPC_TEXT_QUERY: Opcode = Opcode { vanilla: 0x017F, ..Opcode::NONE }; // 383
+    pub const CMSG_GOSSIP_HELLO: Opcode = Opcode { vanilla: 0x017B, modern: 0x3492 }; // 379
+    pub const CMSG_GOSSIP_SELECT_OPTION: Opcode = Opcode { vanilla: 0x017C, modern: 0x3494 }; // 380
+    pub const SMSG_GOSSIP_MESSAGE: Opcode = Opcode { vanilla: 0x017D, modern: 0x2A98 }; // 381
+    pub const SMSG_GOSSIP_COMPLETE: Opcode = Opcode { vanilla: 0x017E, modern: 0x2A97 }; // 382
+    pub const SMSG_GOSSIP_POI: Opcode = Opcode { vanilla: 0x0223, modern: 0x2790 }; // 547
+    pub const SMSG_NPC_TEXT_UPDATE: Opcode = Opcode { vanilla: 0x0180, modern: 0x2916 }; // 384
+    pub const CMSG_NPC_TEXT_QUERY: Opcode = Opcode { vanilla: 0x017F, modern: 0x326D }; // 383
 
     // ============================================================================
     // NPC Interaction - Vendor
     // ============================================================================
 
-    pub const CMSG_LIST_INVENTORY: Opcode = Opcode { vanilla: 0x019E, ..Opcode::NONE }; // 414
-    pub const SMSG_LIST_INVENTORY: Opcode = Opcode { vanilla: 0x019F, ..Opcode::NONE }; // 415
-    pub const CMSG_SELL_ITEM: Opcode = Opcode { vanilla: 0x01A0, ..Opcode::NONE }; // 416
-    pub const SMSG_SELL_ITEM: Opcode = Opcode { vanilla: 0x01A1, ..Opcode::NONE }; // 417
-    pub const CMSG_BUY_ITEM: Opcode = Opcode { vanilla: 0x01A2, ..Opcode::NONE }; // 418
+    pub const CMSG_LIST_INVENTORY: Opcode = Opcode { vanilla: 0x019E, modern: 0x34A1 }; // 414
+    pub const SMSG_LIST_INVENTORY: Opcode = Opcode { vanilla: 0x019F, modern: 0x25B5 }; // 415
+    pub const CMSG_SELL_ITEM: Opcode = Opcode { vanilla: 0x01A0, modern: 0x34A2 }; // 416
+    pub const SMSG_SELL_ITEM: Opcode = Opcode { vanilla: 0x01A1, modern: 0x26BD }; // 417
+    pub const CMSG_BUY_ITEM: Opcode = Opcode { vanilla: 0x01A2, modern: 0x34A3 }; // 418
     pub const CMSG_BUY_ITEM_IN_SLOT: Opcode = Opcode { vanilla: 0x01A3, ..Opcode::NONE }; // 419
-    pub const SMSG_BUY_ITEM: Opcode = Opcode { vanilla: 0x01A4, ..Opcode::NONE }; // 420
-    pub const SMSG_BUY_FAILED: Opcode = Opcode { vanilla: 0x01A5, ..Opcode::NONE }; // 421
-    pub const SMSG_ITEM_PUSH_RESULT: Opcode = Opcode { vanilla: 0x0166, ..Opcode::NONE }; // 358
-    pub const CMSG_BUYBACK_ITEM: Opcode = Opcode { vanilla: 0x0290, ..Opcode::NONE }; // 656
+    pub const SMSG_BUY_ITEM: Opcode = Opcode { vanilla: 0x01A4, modern: 0x26BE }; // 420
+    pub const SMSG_BUY_FAILED: Opcode = Opcode { vanilla: 0x01A5, modern: 0x26BF }; // 421
+    pub const SMSG_ITEM_PUSH_RESULT: Opcode = Opcode { vanilla: 0x0166, modern: 0x261C }; // 358
+    pub const CMSG_BUYBACK_ITEM: Opcode = Opcode { vanilla: 0x0290, modern: 0x34A4 }; // 656
 
     // ============================================================================
     // NPC Interaction - Trainer
     // ============================================================================
 
-    pub const CMSG_TRAINER_LIST: Opcode = Opcode { vanilla: 0x01B0, ..Opcode::NONE }; // 432
-    pub const SMSG_TRAINER_LIST: Opcode = Opcode { vanilla: 0x01B1, ..Opcode::NONE }; // 433
-    pub const CMSG_TRAINER_BUY_SPELL: Opcode = Opcode { vanilla: 0x01B2, ..Opcode::NONE }; // 434
+    pub const CMSG_TRAINER_LIST: Opcode = Opcode { vanilla: 0x01B0, modern: 0x34AD }; // 432
+    pub const SMSG_TRAINER_LIST: Opcode = Opcode { vanilla: 0x01B1, modern: 0x26D7 }; // 433
+    pub const CMSG_TRAINER_BUY_SPELL: Opcode = Opcode { vanilla: 0x01B2, modern: 0x34AE }; // 434
     pub const SMSG_TRAINER_BUY_SUCCEEDED: Opcode = Opcode { vanilla: 0x01B3, ..Opcode::NONE }; // 435
-    pub const SMSG_TRAINER_BUY_FAILED: Opcode = Opcode { vanilla: 0x01B4, ..Opcode::NONE }; // 436
+    pub const SMSG_TRAINER_BUY_FAILED: Opcode = Opcode { vanilla: 0x01B4, modern: 0x26D8 }; // 436
 
     // ============================================================================
     // NPC Interaction - Banker
     // ============================================================================
 
-    pub const CMSG_BANKER_ACTIVATE: Opcode = Opcode { vanilla: 0x01B5, ..Opcode::NONE }; // 439
-    pub const SMSG_SHOW_BANK: Opcode = Opcode { vanilla: 0x01B8, ..Opcode::NONE }; // 440
-    pub const CMSG_BUY_BANK_SLOT: Opcode = Opcode { vanilla: 0x01B9, ..Opcode::NONE }; // 441
+    pub const CMSG_BANKER_ACTIVATE: Opcode = Opcode { vanilla: 0x01B5, modern: 0x34B3 }; // 439
+    pub const SMSG_SHOW_BANK: Opcode = Opcode { vanilla: 0x01B8, modern: 0x2678 }; // 440
+    pub const CMSG_BUY_BANK_SLOT: Opcode = Opcode { vanilla: 0x01B9, modern: 0x34B4 }; // 441
     pub const SMSG_BUY_BANK_SLOT_RESULT: Opcode = Opcode { vanilla: 0x0216, ..Opcode::NONE }; // 534
-    pub const CMSG_AUTOBANK_ITEM: Opcode = Opcode { vanilla: 0x0283, ..Opcode::NONE }; // 643
-    pub const CMSG_AUTOSTORE_BANK_ITEM: Opcode = Opcode { vanilla: 0x0282, ..Opcode::NONE }; // 642
+    pub const CMSG_AUTOBANK_ITEM: Opcode = Opcode { vanilla: 0x0283, modern: 0x3997 }; // 643
+    pub const CMSG_AUTOSTORE_BANK_ITEM: Opcode = Opcode { vanilla: 0x0282, modern: 0x3996 }; // 642
 
     // ============================================================================
     // NPC Interaction - Other
     // ============================================================================
 
-    pub const CMSG_BINDER_ACTIVATE: Opcode = Opcode { vanilla: 0x01B5, ..Opcode::NONE }; // 437
+    pub const CMSG_BINDER_ACTIVATE: Opcode = Opcode { vanilla: 0x01B5, modern: 0x34B2 }; // 437
     pub const MSG_TABARDVENDOR_ACTIVATE: Opcode = Opcode { vanilla: 0x01F2, ..Opcode::NONE }; // 498
 
     // ============================================================================
     // Taxi
     // ============================================================================
 
-    pub const CMSG_TAXINODE_STATUS_QUERY: Opcode = Opcode { vanilla: 0x01AA, ..Opcode::NONE }; // 426
-    pub const SMSG_TAXINODE_STATUS: Opcode = Opcode { vanilla: 0x01AB, ..Opcode::NONE }; // 427
-    pub const CMSG_TAXIQUERYAVAILABLENODES: Opcode = Opcode { vanilla: 0x01AC, ..Opcode::NONE }; // 428
-    pub const SMSG_SHOWTAXINODES: Opcode = Opcode { vanilla: 0x01A9, ..Opcode::NONE }; // 425
-    pub const CMSG_ACTIVATETAXI: Opcode = Opcode { vanilla: 0x01AD, ..Opcode::NONE }; // 429
-    pub const SMSG_ACTIVATETAXIREPLY: Opcode = Opcode { vanilla: 0x01AE, ..Opcode::NONE }; // 430
-    pub const SMSG_NEW_TAXI_PATH: Opcode = Opcode { vanilla: 0x01AF, ..Opcode::NONE }; // 431
+    pub const CMSG_TAXINODE_STATUS_QUERY: Opcode = Opcode { vanilla: 0x01AA, modern: 0x34A8 }; // 426
+    pub const SMSG_TAXINODE_STATUS: Opcode = Opcode { vanilla: 0x01AB, modern: 0x2675 }; // 427
+    pub const CMSG_TAXIQUERYAVAILABLENODES: Opcode = Opcode { vanilla: 0x01AC, modern: 0x34AA }; // 428
+    pub const SMSG_SHOWTAXINODES: Opcode = Opcode { vanilla: 0x01A9, modern: 0x26C5 }; // 425
+    pub const CMSG_ACTIVATETAXI: Opcode = Opcode { vanilla: 0x01AD, modern: 0x34AB }; // 429
+    pub const SMSG_ACTIVATETAXIREPLY: Opcode = Opcode { vanilla: 0x01AE, modern: 0x2676 }; // 430
+    pub const SMSG_NEW_TAXI_PATH: Opcode = Opcode { vanilla: 0x01AF, modern: 0x2677 }; // 431
 
     // ============================================================================
     // Talents & Skills
     // ============================================================================
 
-    pub const CMSG_LEARN_TALENT: Opcode = Opcode { vanilla: 0x0251, ..Opcode::NONE }; // 593
+    pub const CMSG_LEARN_TALENT: Opcode = Opcode { vanilla: 0x0251, modern: 0x3551 }; // 593
     pub const CMSG_UNLEARN_TALENTS: Opcode = Opcode { vanilla: 0x0213, ..Opcode::NONE }; // 531
     pub const CMSG_UNLEARN_SPELL: Opcode = Opcode { vanilla: 0x0201, ..Opcode::NONE }; // 513
-    pub const CMSG_UNLEARN_SKILL: Opcode = Opcode { vanilla: 0x0202, ..Opcode::NONE }; // 514
+    pub const CMSG_UNLEARN_SKILL: Opcode = Opcode { vanilla: 0x0202, modern: 0x34E5 }; // 514
 
     // ============================================================================
     // Bind Point
     // ============================================================================
 
-    pub const SMSG_BINDPOINTUPDATE: Opcode = Opcode { vanilla: 0x0155, ..Opcode::NONE }; // 341
+    pub const SMSG_BINDPOINTUPDATE: Opcode = Opcode { vanilla: 0x0155, modern: 0x257D }; // 341
     pub const SMSG_BINDZONEREPLY: Opcode = Opcode { vanilla: 0x0157, ..Opcode::NONE }; // 343
-    pub const SMSG_PLAYERBOUND: Opcode = Opcode { vanilla: 0x0158, ..Opcode::NONE }; // 344
+    pub const SMSG_PLAYERBOUND: Opcode = Opcode { vanilla: 0x0158, modern: 0x2FF8 }; // 344
     pub const CMSG_SETDEATHBINDPOINT: Opcode = Opcode { vanilla: 0x0154, ..Opcode::NONE }; // 340
     pub const CMSG_GETDEATHBINDZONE: Opcode = Opcode { vanilla: 0x0156, ..Opcode::NONE }; // 342
 
@@ -506,38 +506,38 @@ impl Opcode {
     // ============================================================================
 
     pub const SMSG_SET_REST_START: Opcode = Opcode { vanilla: 0x021E, ..Opcode::NONE }; // 542
-    pub const SMSG_LOG_XPGAIN: Opcode = Opcode { vanilla: 0x01D0, ..Opcode::NONE }; // 464
-    pub const SMSG_LEVELUP_INFO: Opcode = Opcode { vanilla: 0x01D4, ..Opcode::NONE }; // 468
+    pub const SMSG_LOG_XPGAIN: Opcode = Opcode { vanilla: 0x01D0, modern: 0x26DD }; // 464
+    pub const SMSG_LEVELUP_INFO: Opcode = Opcode { vanilla: 0x01D4, modern: 0x26E1 }; // 468
 
     // ============================================================================
     // Environment & Mirror Timers
     // ============================================================================
 
-    pub const SMSG_START_MIRROR_TIMER: Opcode = Opcode { vanilla: 0x0C1D, ..Opcode::NONE }; // 3101
-    pub const SMSG_STOP_MIRROR_TIMER: Opcode = Opcode { vanilla: 0x0C1E, ..Opcode::NONE }; // 3102
+    pub const SMSG_START_MIRROR_TIMER: Opcode = Opcode { vanilla: 0x0C1D, modern: 0x2706 }; // 3101
+    pub const SMSG_STOP_MIRROR_TIMER: Opcode = Opcode { vanilla: 0x0C1E, modern: 0x2708 }; // 3102
     pub const SMSG_ENVIRONMENTALDAMAGELOG: Opcode = Opcode { vanilla: 0x0C1F, ..Opcode::NONE }; // 3103
-    pub const SMSG_EXPLORATION_EXPERIENCE: Opcode = Opcode { vanilla: 0x01F8, ..Opcode::NONE }; // 504
+    pub const SMSG_EXPLORATION_EXPERIENCE: Opcode = Opcode { vanilla: 0x01F8, modern: 0x2756 }; // 504
 
     // ============================================================================
     // World States & Factions
     // ============================================================================
 
-    pub const SMSG_INIT_WORLD_STATES: Opcode = Opcode { vanilla: 0x02C2, ..Opcode::NONE }; // 706
-    pub const SMSG_INITIALIZE_FACTIONS: Opcode = Opcode { vanilla: 0x0122, ..Opcode::NONE }; // 290
-    pub const SMSG_SET_FACTION_STANDING: Opcode = Opcode { vanilla: 0x0124, ..Opcode::NONE }; // 292
-    pub const SMSG_SET_FACTION_VISIBLE: Opcode = Opcode { vanilla: 0x0123, ..Opcode::NONE }; // 291
-    pub const SMSG_SET_FORCED_REACTIONS: Opcode = Opcode { vanilla: 0x02A5, ..Opcode::NONE }; // 677
-    pub const CMSG_SET_FACTION_ATWAR: Opcode = Opcode { vanilla: 0x0125, ..Opcode::NONE }; // 293
-    pub const CMSG_SET_FACTION_INACTIVE: Opcode = Opcode { vanilla: 0x0317, ..Opcode::NONE }; // 791
+    pub const SMSG_INIT_WORLD_STATES: Opcode = Opcode { vanilla: 0x02C2, modern: 0x273E }; // 706
+    pub const SMSG_INITIALIZE_FACTIONS: Opcode = Opcode { vanilla: 0x0122, modern: 0x271B }; // 290
+    pub const SMSG_SET_FACTION_STANDING: Opcode = Opcode { vanilla: 0x0124, modern: 0x2723 }; // 292
+    pub const SMSG_SET_FACTION_VISIBLE: Opcode = Opcode { vanilla: 0x0123, modern: 0x2721 }; // 291
+    pub const SMSG_SET_FORCED_REACTIONS: Opcode = Opcode { vanilla: 0x02A5, modern: 0x2714 }; // 677
+    pub const CMSG_SET_FACTION_ATWAR: Opcode = Opcode { vanilla: 0x0125, modern: 0x34DE }; // 293
+    pub const CMSG_SET_FACTION_INACTIVE: Opcode = Opcode { vanilla: 0x0317, modern: 0x34E0 }; // 791
 
     // ============================================================================
     // Cinematic
     // ============================================================================
 
-    pub const SMSG_TRIGGER_CINEMATIC: Opcode = Opcode { vanilla: 0x00FA, ..Opcode::NONE }; // 250
-    pub const CMSG_NEXT_CINEMATIC_CAMERA: Opcode = Opcode { vanilla: 0x00FB, ..Opcode::NONE }; // 251
-    pub const CMSG_COMPLETE_CINEMATIC: Opcode = Opcode { vanilla: 0x00FC, ..Opcode::NONE }; // 252
-    pub const CMSG_SET_ACTION_BAR_TOGGLES: Opcode = Opcode { vanilla: 0x0568, ..Opcode::NONE }; // 1384
+    pub const SMSG_TRIGGER_CINEMATIC: Opcode = Opcode { vanilla: 0x00FA, modern: 0x27C3 }; // 250
+    pub const CMSG_NEXT_CINEMATIC_CAMERA: Opcode = Opcode { vanilla: 0x00FB, modern: 0x3543 }; // 251
+    pub const CMSG_COMPLETE_CINEMATIC: Opcode = Opcode { vanilla: 0x00FC, modern: 0x3544 }; // 252
+    pub const CMSG_SET_ACTION_BAR_TOGGLES: Opcode = Opcode { vanilla: 0x0568, modern: 0x3531 }; // 1384
 
     // ============================================================================
     // Zone
@@ -549,135 +549,135 @@ impl Opcode {
     // Item Management
     // ============================================================================
 
-    pub const CMSG_OPEN_ITEM: Opcode = Opcode { vanilla: 0x00AC, ..Opcode::NONE }; // 172
-    pub const CMSG_READ_ITEM: Opcode = Opcode { vanilla: 0x00AD, ..Opcode::NONE }; // 173
-    pub const SMSG_READ_ITEM_OK: Opcode = Opcode { vanilla: 0x00AE, ..Opcode::NONE }; // 174
-    pub const SMSG_READ_ITEM_FAILED: Opcode = Opcode { vanilla: 0x00AF, ..Opcode::NONE }; // 175
-    pub const SMSG_ITEM_COOLDOWN: Opcode = Opcode { vanilla: 0x00B0, ..Opcode::NONE }; // 176
-    pub const SMSG_INVENTORY_CHANGE_FAILURE: Opcode = Opcode { vanilla: 0x0112, ..Opcode::NONE }; // 274
-    pub const SMSG_OPEN_CONTAINER: Opcode = Opcode { vanilla: 0x0113, ..Opcode::NONE }; // 275
+    pub const CMSG_OPEN_ITEM: Opcode = Opcode { vanilla: 0x00AC, modern: 0x32BE }; // 172
+    pub const CMSG_READ_ITEM: Opcode = Opcode { vanilla: 0x00AD, modern: 0x32BF }; // 173
+    pub const SMSG_READ_ITEM_OK: Opcode = Opcode { vanilla: 0x00AE, modern: 0x2799 }; // 174
+    pub const SMSG_READ_ITEM_FAILED: Opcode = Opcode { vanilla: 0x00AF, modern: 0x27A1 }; // 175
+    pub const SMSG_ITEM_COOLDOWN: Opcode = Opcode { vanilla: 0x00B0, modern: 0x27C0 }; // 176
+    pub const SMSG_INVENTORY_CHANGE_FAILURE: Opcode = Opcode { vanilla: 0x0112, modern: 0x2DA5 }; // 274
+    pub const SMSG_OPEN_CONTAINER: Opcode = Opcode { vanilla: 0x0113, modern: 0x2DA6 }; // 275
     pub const CMSG_AUTOEQUIP_GROUND_ITEM: Opcode = Opcode { vanilla: 0x0106, ..Opcode::NONE }; // 262
     pub const CMSG_AUTOSTORE_GROUND_ITEM: Opcode = Opcode { vanilla: 0x0107, ..Opcode::NONE }; // 263
     pub const CMSG_AUTOSTORE_LOOT_ITEM: Opcode = Opcode { vanilla: 0x0108, ..Opcode::NONE }; // 264
     pub const CMSG_STORE_LOOT_IN_SLOT: Opcode = Opcode { vanilla: 0x0109, ..Opcode::NONE }; // 265
-    pub const CMSG_AUTOEQUIP_ITEM: Opcode = Opcode { vanilla: 0x010A, ..Opcode::NONE }; // 266
-    pub const CMSG_AUTOSTORE_BAG_ITEM: Opcode = Opcode { vanilla: 0x010B, ..Opcode::NONE }; // 267
-    pub const CMSG_SWAP_ITEM: Opcode = Opcode { vanilla: 0x010C, ..Opcode::NONE }; // 268
-    pub const CMSG_SWAP_INV_ITEM: Opcode = Opcode { vanilla: 0x010D, ..Opcode::NONE }; // 269
-    pub const CMSG_SPLIT_ITEM: Opcode = Opcode { vanilla: 0x010E, ..Opcode::NONE }; // 270
-    pub const CMSG_AUTOEQUIP_ITEM_SLOT: Opcode = Opcode { vanilla: 0x010F, ..Opcode::NONE }; // 271
+    pub const CMSG_AUTOEQUIP_ITEM: Opcode = Opcode { vanilla: 0x010A, modern: 0x3998 }; // 266
+    pub const CMSG_AUTOSTORE_BAG_ITEM: Opcode = Opcode { vanilla: 0x010B, modern: 0x3999 }; // 267
+    pub const CMSG_SWAP_ITEM: Opcode = Opcode { vanilla: 0x010C, modern: 0x399A }; // 268
+    pub const CMSG_SWAP_INV_ITEM: Opcode = Opcode { vanilla: 0x010D, modern: 0x399B }; // 269
+    pub const CMSG_SPLIT_ITEM: Opcode = Opcode { vanilla: 0x010E, modern: 0x399C }; // 270
+    pub const CMSG_AUTOEQUIP_ITEM_SLOT: Opcode = Opcode { vanilla: 0x010F, modern: 0x399D }; // 271
     pub const CMSG_DROP_ITEM: Opcode = Opcode { vanilla: 0x0110, ..Opcode::NONE }; // 272
-    pub const CMSG_DESTROYITEM: Opcode = Opcode { vanilla: 0x0111, ..Opcode::NONE }; // 273
-    pub const CMSG_INSPECT: Opcode = Opcode { vanilla: 0x0114, ..Opcode::NONE }; // 276
-    pub const SMSG_INSPECT: Opcode = Opcode { vanilla: 0x0115, ..Opcode::NONE }; // 277
+    pub const CMSG_DESTROYITEM: Opcode = Opcode { vanilla: 0x0111, modern: 0x328B }; // 273
+    pub const CMSG_INSPECT: Opcode = Opcode { vanilla: 0x0114, modern: 0x3528 }; // 276
+    pub const SMSG_INSPECT: Opcode = Opcode { vanilla: 0x0115, modern: 0x262A }; // 277
     pub const MSG_INSPECT_HONOR_STATS: Opcode = Opcode { vanilla: 0x02D6, ..Opcode::NONE }; // 726
-    pub const CMSG_REPAIR_ITEM: Opcode = Opcode { vanilla: 0x02A8, ..Opcode::NONE }; // 680
-    pub const SMSG_ITEM_TIME_UPDATE: Opcode = Opcode { vanilla: 0x01EB, ..Opcode::NONE }; // 491
-    pub const SMSG_ITEM_ENCHANT_TIME_UPDATE: Opcode = Opcode { vanilla: 0x01EC, ..Opcode::NONE }; // 492
-    pub const CMSG_SET_AMMO: Opcode = Opcode { vanilla: 0x0268, ..Opcode::NONE }; // 619
-    pub const CMSG_WRAP_ITEM: Opcode = Opcode { vanilla: 0x01D3, ..Opcode::NONE }; // 467
+    pub const CMSG_REPAIR_ITEM: Opcode = Opcode { vanilla: 0x02A8, modern: 0x34EC }; // 680
+    pub const SMSG_ITEM_TIME_UPDATE: Opcode = Opcode { vanilla: 0x01EB, modern: 0x274B }; // 491
+    pub const SMSG_ITEM_ENCHANT_TIME_UPDATE: Opcode = Opcode { vanilla: 0x01EC, modern: 0x274C }; // 492
+    pub const CMSG_SET_AMMO: Opcode = Opcode { vanilla: 0x0268, modern: 0x3559 }; // 619
+    pub const CMSG_WRAP_ITEM: Opcode = Opcode { vanilla: 0x01D3, modern: 0x3994 }; // 467
 
     // ============================================================================
     // Gameobject
     // ============================================================================
 
-    pub const CMSG_GAMEOBJ_USE: Opcode = Opcode { vanilla: 0x00B1, ..Opcode::NONE }; // 177
+    pub const CMSG_GAMEOBJ_USE: Opcode = Opcode { vanilla: 0x00B1, modern: 0x34EE }; // 177
 
     // ============================================================================
     // Area Trigger
     // ============================================================================
 
-    pub const CMSG_AREATRIGGER: Opcode = Opcode { vanilla: 0x00B4, ..Opcode::NONE }; // 180
+    pub const CMSG_AREATRIGGER: Opcode = Opcode { vanilla: 0x00B4, modern: 0x31D7 }; // 180
 
     // ============================================================================
     // Chat
     // ============================================================================
 
     pub const CMSG_MESSAGECHAT: Opcode = Opcode { vanilla: 0x0095, ..Opcode::NONE }; // 149
-    pub const SMSG_MESSAGECHAT: Opcode = Opcode { vanilla: 0x0096, ..Opcode::NONE }; // 150
-    pub const CMSG_CHAT_IGNORED: Opcode = Opcode { vanilla: 0x0225, ..Opcode::NONE }; // 549
+    pub const SMSG_MESSAGECHAT: Opcode = Opcode { vanilla: 0x0096, modern: 0x2BAD }; // 150
+    pub const CMSG_CHAT_IGNORED: Opcode = Opcode { vanilla: 0x0225, modern: 0x37CB }; // 549
     pub const SMSG_CHAT_WRONG_FACTION: Opcode = Opcode { vanilla: 0x0219, ..Opcode::NONE }; // 537
-    pub const SMSG_CHAT_PLAYER_NOT_FOUND: Opcode = Opcode { vanilla: 0x02A9, ..Opcode::NONE }; // 681
-    pub const SMSG_CHAT_RESTRICTED: Opcode = Opcode { vanilla: 0x02FD, ..Opcode::NONE }; // 765
-    pub const SMSG_CHAT_PLAYER_AMBIGUOUS: Opcode = Opcode { vanilla: 0x032D, ..Opcode::NONE }; // 813
-    pub const CMSG_CHAT_FILTERED: Opcode = Opcode { vanilla: 0x0331, ..Opcode::NONE }; // 817
+    pub const SMSG_CHAT_PLAYER_NOT_FOUND: Opcode = Opcode { vanilla: 0x02A9, modern: 0x2BB7 }; // 681
+    pub const SMSG_CHAT_RESTRICTED: Opcode = Opcode { vanilla: 0x02FD, modern: 0x2BB3 }; // 765
+    pub const SMSG_CHAT_PLAYER_AMBIGUOUS: Opcode = Opcode { vanilla: 0x032D, modern: 0x2BB0 }; // 813
+    pub const CMSG_CHAT_FILTERED: Opcode = Opcode { vanilla: 0x0331, modern: 0x37CC }; // 817
 
     // ============================================================================
     // Emote
     // ============================================================================
 
-    pub const CMSG_EMOTE: Opcode = Opcode { vanilla: 0x0102, ..Opcode::NONE }; // 258
-    pub const CMSG_TEXT_EMOTE: Opcode = Opcode { vanilla: 0x0104, ..Opcode::NONE }; // 260
-    pub const SMSG_TEXT_EMOTE: Opcode = Opcode { vanilla: 0x0105, ..Opcode::NONE }; // 261
-    pub const SMSG_EMOTE: Opcode = Opcode { vanilla: 0x0103, ..Opcode::NONE }; // 259
-    pub const SMSG_PLAY_OBJECT_SOUND: Opcode = Opcode { vanilla: 0x0278, ..Opcode::NONE }; // 632
-    pub const SMSG_PLAY_SOUND: Opcode = Opcode { vanilla: 0x02D2, ..Opcode::NONE }; // 722
-    pub const SMSG_PLAY_SPELL_VISUAL: Opcode = Opcode { vanilla: 0x01F3, ..Opcode::NONE }; // 499
+    pub const CMSG_EMOTE: Opcode = Opcode { vanilla: 0x0102, modern: 0x3540 }; // 258
+    pub const CMSG_TEXT_EMOTE: Opcode = Opcode { vanilla: 0x0104, modern: 0x3488 }; // 260
+    pub const SMSG_TEXT_EMOTE: Opcode = Opcode { vanilla: 0x0105, modern: 0x2673 }; // 261
+    pub const SMSG_EMOTE: Opcode = Opcode { vanilla: 0x0103, modern: 0x27C2 }; // 259
+    pub const SMSG_PLAY_OBJECT_SOUND: Opcode = Opcode { vanilla: 0x0278, modern: 0x2765 }; // 632
+    pub const SMSG_PLAY_SOUND: Opcode = Opcode { vanilla: 0x02D2, modern: 0x2763 }; // 722
+    pub const SMSG_PLAY_SPELL_VISUAL: Opcode = Opcode { vanilla: 0x01F3, modern: 0x2C45 }; // 499
 
     // ============================================================================
     // Channel
     // ============================================================================
 
-    pub const CMSG_JOIN_CHANNEL: Opcode = Opcode { vanilla: 0x0097, ..Opcode::NONE }; // 151
-    pub const CMSG_LEAVE_CHANNEL: Opcode = Opcode { vanilla: 0x0098, ..Opcode::NONE }; // 152
-    pub const SMSG_CHANNEL_NOTIFY: Opcode = Opcode { vanilla: 0x0099, ..Opcode::NONE }; // 153
-    pub const CMSG_CHANNEL_LIST: Opcode = Opcode { vanilla: 0x009A, ..Opcode::NONE }; // 154
-    pub const SMSG_CHANNEL_LIST: Opcode = Opcode { vanilla: 0x009B, ..Opcode::NONE }; // 155
-    pub const CMSG_CHANNEL_PASSWORD: Opcode = Opcode { vanilla: 0x009C, ..Opcode::NONE }; // 156
-    pub const CMSG_CHANNEL_SET_OWNER: Opcode = Opcode { vanilla: 0x009D, ..Opcode::NONE }; // 157
-    pub const CMSG_CHANNEL_OWNER: Opcode = Opcode { vanilla: 0x009E, ..Opcode::NONE }; // 158
-    pub const CMSG_CHANNEL_MODERATOR: Opcode = Opcode { vanilla: 0x009F, ..Opcode::NONE }; // 159
-    pub const CMSG_CHANNEL_UNMODERATOR: Opcode = Opcode { vanilla: 0x00A0, ..Opcode::NONE }; // 160
+    pub const CMSG_JOIN_CHANNEL: Opcode = Opcode { vanilla: 0x0097, modern: 0x37C8 }; // 151
+    pub const CMSG_LEAVE_CHANNEL: Opcode = Opcode { vanilla: 0x0098, modern: 0x37C9 }; // 152
+    pub const SMSG_CHANNEL_NOTIFY: Opcode = Opcode { vanilla: 0x0099, modern: 0x2BC0 }; // 153
+    pub const CMSG_CHANNEL_LIST: Opcode = Opcode { vanilla: 0x009A, modern: 0x37D5 }; // 154
+    pub const SMSG_CHANNEL_LIST: Opcode = Opcode { vanilla: 0x009B, modern: 0x2BC3 }; // 155
+    pub const CMSG_CHANNEL_PASSWORD: Opcode = Opcode { vanilla: 0x009C, modern: 0x37D7 }; // 156
+    pub const CMSG_CHANNEL_SET_OWNER: Opcode = Opcode { vanilla: 0x009D, modern: 0x37D8 }; // 157
+    pub const CMSG_CHANNEL_OWNER: Opcode = Opcode { vanilla: 0x009E, modern: 0x37D9 }; // 158
+    pub const CMSG_CHANNEL_MODERATOR: Opcode = Opcode { vanilla: 0x009F, modern: 0x37DB }; // 159
+    pub const CMSG_CHANNEL_UNMODERATOR: Opcode = Opcode { vanilla: 0x00A0, modern: 0x37DC }; // 160
     pub const CMSG_CHANNEL_MUTE: Opcode = Opcode { vanilla: 0x00A1, ..Opcode::NONE }; // 161
     pub const CMSG_CHANNEL_UNMUTE: Opcode = Opcode { vanilla: 0x00A2, ..Opcode::NONE }; // 162
-    pub const CMSG_CHANNEL_INVITE: Opcode = Opcode { vanilla: 0x00A3, ..Opcode::NONE }; // 163
-    pub const CMSG_CHANNEL_KICK: Opcode = Opcode { vanilla: 0x00A4, ..Opcode::NONE }; // 164
-    pub const CMSG_CHANNEL_BAN: Opcode = Opcode { vanilla: 0x00A5, ..Opcode::NONE }; // 165
-    pub const CMSG_CHANNEL_UNBAN: Opcode = Opcode { vanilla: 0x00A6, ..Opcode::NONE }; // 166
-    pub const CMSG_CHANNEL_ANNOUNCEMENTS: Opcode = Opcode { vanilla: 0x00A7, ..Opcode::NONE }; // 167
+    pub const CMSG_CHANNEL_INVITE: Opcode = Opcode { vanilla: 0x00A3, modern: 0x37DF }; // 163
+    pub const CMSG_CHANNEL_KICK: Opcode = Opcode { vanilla: 0x00A4, modern: 0x37E0 }; // 164
+    pub const CMSG_CHANNEL_BAN: Opcode = Opcode { vanilla: 0x00A5, modern: 0x37E1 }; // 165
+    pub const CMSG_CHANNEL_UNBAN: Opcode = Opcode { vanilla: 0x00A6, modern: 0x37E2 }; // 166
+    pub const CMSG_CHANNEL_ANNOUNCEMENTS: Opcode = Opcode { vanilla: 0x00A7, modern: 0x37E3 }; // 167
     pub const CMSG_CHANNEL_MODERATE: Opcode = Opcode { vanilla: 0x00A8, ..Opcode::NONE }; // 168
 
     // ============================================================================
     // Social - Who & Friends
     // ============================================================================
 
-    pub const CMSG_WHO: Opcode = Opcode { vanilla: 0x0062, ..Opcode::NONE }; // 98
-    pub const SMSG_WHO: Opcode = Opcode { vanilla: 0x0063, ..Opcode::NONE }; // 99
+    pub const CMSG_WHO: Opcode = Opcode { vanilla: 0x0062, modern: 0x3683 }; // 98
+    pub const SMSG_WHO: Opcode = Opcode { vanilla: 0x0063, modern: 0x2BAE }; // 99
     pub const CMSG_FRIEND_LIST: Opcode = Opcode { vanilla: 0x0066, ..Opcode::NONE }; // 102
     pub const SMSG_FRIEND_LIST: Opcode = Opcode { vanilla: 0x0067, ..Opcode::NONE }; // 103
-    pub const SMSG_FRIEND_STATUS: Opcode = Opcode { vanilla: 0x0068, ..Opcode::NONE }; // 104
-    pub const CMSG_ADD_FRIEND: Opcode = Opcode { vanilla: 0x0069, ..Opcode::NONE }; // 105
-    pub const CMSG_DEL_FRIEND: Opcode = Opcode { vanilla: 0x006A, ..Opcode::NONE }; // 106
+    pub const SMSG_FRIEND_STATUS: Opcode = Opcode { vanilla: 0x0068, modern: 0x2784 }; // 104
+    pub const CMSG_ADD_FRIEND: Opcode = Opcode { vanilla: 0x0069, modern: 0x36D6 }; // 105
+    pub const CMSG_DEL_FRIEND: Opcode = Opcode { vanilla: 0x006A, modern: 0x36D7 }; // 106
     pub const SMSG_IGNORE_LIST: Opcode = Opcode { vanilla: 0x006B, ..Opcode::NONE }; // 107
-    pub const CMSG_ADD_IGNORE: Opcode = Opcode { vanilla: 0x006C, ..Opcode::NONE }; // 108
-    pub const CMSG_DEL_IGNORE: Opcode = Opcode { vanilla: 0x006D, ..Opcode::NONE }; // 109
+    pub const CMSG_ADD_IGNORE: Opcode = Opcode { vanilla: 0x006C, modern: 0x36DA }; // 108
+    pub const CMSG_DEL_IGNORE: Opcode = Opcode { vanilla: 0x006D, modern: 0x36DB }; // 109
 
     // ============================================================================
     // Group
     // ============================================================================
 
-    pub const CMSG_GROUP_INVITE: Opcode = Opcode { vanilla: 0x006E, ..Opcode::NONE }; // 110
-    pub const SMSG_GROUP_INVITE: Opcode = Opcode { vanilla: 0x006F, ..Opcode::NONE }; // 111
+    pub const CMSG_GROUP_INVITE: Opcode = Opcode { vanilla: 0x006E, modern: 0x3603 }; // 110
+    pub const SMSG_GROUP_INVITE: Opcode = Opcode { vanilla: 0x006F, modern: 0x25BA }; // 111
     pub const MSG_PARTY_LEAVE: Opcode = Opcode { vanilla: 0x0071, ..Opcode::NONE }; // 113
     pub const CMSG_GROUP_ACCEPT: Opcode = Opcode { vanilla: 0x0072, ..Opcode::NONE }; // 114
     pub const CMSG_GROUP_DECLINE: Opcode = Opcode { vanilla: 0x0073, ..Opcode::NONE }; // 115
-    pub const SMSG_GROUP_DECLINE: Opcode = Opcode { vanilla: 0x0074, ..Opcode::NONE }; // 116
+    pub const SMSG_GROUP_DECLINE: Opcode = Opcode { vanilla: 0x0074, modern: 0x278B }; // 116
     pub const CMSG_GROUP_UNINVITE: Opcode = Opcode { vanilla: 0x0075, ..Opcode::NONE }; // 117
-    pub const SMSG_GROUP_UNINVITE: Opcode = Opcode { vanilla: 0x0077, ..Opcode::NONE }; // 119
-    pub const CMSG_GROUP_SET_LEADER: Opcode = Opcode { vanilla: 0x0078, ..Opcode::NONE }; // 120
-    pub const SMSG_GROUP_SET_LEADER: Opcode = Opcode { vanilla: 0x0079, ..Opcode::NONE }; // 121
-    pub const CMSG_LOOT_METHOD: Opcode = Opcode { vanilla: 0x007A, ..Opcode::NONE }; // 122
+    pub const SMSG_GROUP_UNINVITE: Opcode = Opcode { vanilla: 0x0077, modern: 0x278C }; // 119
+    pub const CMSG_GROUP_SET_LEADER: Opcode = Opcode { vanilla: 0x0078, modern: 0x364D }; // 120
+    pub const SMSG_GROUP_SET_LEADER: Opcode = Opcode { vanilla: 0x0079, modern: 0x2626 }; // 121
+    pub const CMSG_LOOT_METHOD: Opcode = Opcode { vanilla: 0x007A, modern: 0x364B }; // 122
     pub const CMSG_GROUP_DISBAND: Opcode = Opcode { vanilla: 0x007B, ..Opcode::NONE }; // 123
-    pub const SMSG_GROUP_DESTROYED: Opcode = Opcode { vanilla: 0x007C, ..Opcode::NONE }; // 124
+    pub const SMSG_GROUP_DESTROYED: Opcode = Opcode { vanilla: 0x007C, modern: 0x278D }; // 124
     pub const SMSG_GROUP_LIST: Opcode = Opcode { vanilla: 0x007D, ..Opcode::NONE }; // 125
-    pub const SMSG_PARTY_MEMBER_STATS: Opcode = Opcode { vanilla: 0x007E, ..Opcode::NONE }; // 126
-    pub const SMSG_PARTY_COMMAND_RESULT: Opcode = Opcode { vanilla: 0x007F, ..Opcode::NONE }; // 127
-    pub const CMSG_GROUP_CHANGE_SUB_GROUP: Opcode = Opcode { vanilla: 0x027E, ..Opcode::NONE }; // 638
-    pub const CMSG_GROUP_SWAP_SUB_GROUP: Opcode = Opcode { vanilla: 0x0280, ..Opcode::NONE }; // 640
-    pub const CMSG_GROUP_ASSISTANT_LEADER: Opcode = Opcode { vanilla: 0x028F, ..Opcode::NONE }; // 655
-    pub const CMSG_GROUP_RAID_CONVERT: Opcode = Opcode { vanilla: 0x028E, ..Opcode::NONE }; // 654
-    pub const CMSG_REQUEST_PARTY_MEMBER_STATS: Opcode = Opcode { vanilla: 0x027F, ..Opcode::NONE }; // 639
-    pub const SMSG_PARTY_MEMBER_STATS_FULL: Opcode = Opcode { vanilla: 0x02F2, ..Opcode::NONE }; // 754
+    pub const SMSG_PARTY_MEMBER_STATS: Opcode = Opcode { vanilla: 0x007E, modern: 0x274F }; // 126
+    pub const SMSG_PARTY_COMMAND_RESULT: Opcode = Opcode { vanilla: 0x007F, modern: 0x278F }; // 127
+    pub const CMSG_GROUP_CHANGE_SUB_GROUP: Opcode = Opcode { vanilla: 0x027E, modern: 0x364F }; // 638
+    pub const CMSG_GROUP_SWAP_SUB_GROUP: Opcode = Opcode { vanilla: 0x0280, modern: 0x3650 }; // 640
+    pub const CMSG_GROUP_ASSISTANT_LEADER: Opcode = Opcode { vanilla: 0x028F, modern: 0x3652 }; // 655
+    pub const CMSG_GROUP_RAID_CONVERT: Opcode = Opcode { vanilla: 0x028E, modern: 0x3651 }; // 654
+    pub const CMSG_REQUEST_PARTY_MEMBER_STATS: Opcode = Opcode { vanilla: 0x027F, modern: 0x3656 }; // 639
+    pub const SMSG_PARTY_MEMBER_STATS_FULL: Opcode = Opcode { vanilla: 0x02F2, modern: 0x2750 }; // 754
     pub const MSG_RAID_TARGET_UPDATE: Opcode = Opcode { vanilla: 0x0321, ..Opcode::NONE }; // 801
     pub const MSG_RAID_READY_CHECK: Opcode = Opcode { vanilla: 0x0322, ..Opcode::NONE }; // 802
     pub const MSG_MINIMAP_PING: Opcode = Opcode { vanilla: 0x01D5, ..Opcode::NONE }; // 469
@@ -687,124 +687,124 @@ impl Opcode {
     // Loot
     // ============================================================================
 
-    pub const CMSG_LOOT: Opcode = Opcode { vanilla: 0x015D, ..Opcode::NONE }; // 349
-    pub const CMSG_LOOT_MONEY: Opcode = Opcode { vanilla: 0x015E, ..Opcode::NONE }; // 350
-    pub const CMSG_LOOT_RELEASE: Opcode = Opcode { vanilla: 0x015F, ..Opcode::NONE }; // 351
-    pub const SMSG_LOOT_RESPONSE: Opcode = Opcode { vanilla: 0x0160, ..Opcode::NONE }; // 352
-    pub const SMSG_LOOT_RELEASE_RESPONSE: Opcode = Opcode { vanilla: 0x0161, ..Opcode::NONE }; // 353
-    pub const SMSG_LOOT_REMOVED: Opcode = Opcode { vanilla: 0x0162, ..Opcode::NONE }; // 354
-    pub const SMSG_LOOT_MONEY_NOTIFY: Opcode = Opcode { vanilla: 0x0163, ..Opcode::NONE }; // 355
+    pub const CMSG_LOOT: Opcode = Opcode { vanilla: 0x015D, modern: 0x320C }; // 349
+    pub const CMSG_LOOT_MONEY: Opcode = Opcode { vanilla: 0x015E, modern: 0x320D }; // 350
+    pub const CMSG_LOOT_RELEASE: Opcode = Opcode { vanilla: 0x015F, modern: 0x3210 }; // 351
+    pub const SMSG_LOOT_RESPONSE: Opcode = Opcode { vanilla: 0x0160, modern: 0x260D }; // 352
+    pub const SMSG_LOOT_RELEASE_RESPONSE: Opcode = Opcode { vanilla: 0x0161, modern: 0x2614 }; // 353
+    pub const SMSG_LOOT_REMOVED: Opcode = Opcode { vanilla: 0x0162, modern: 0x260E }; // 354
+    pub const SMSG_LOOT_MONEY_NOTIFY: Opcode = Opcode { vanilla: 0x0163, modern: 0x2615 }; // 355
     pub const SMSG_LOOT_CLEAR_MONEY: Opcode = Opcode { vanilla: 0x0165, ..Opcode::NONE }; // 357
-    pub const CMSG_LOOT_ROLL: Opcode = Opcode { vanilla: 0x02A0, ..Opcode::NONE }; // 672
-    pub const SMSG_LOOT_START_ROLL: Opcode = Opcode { vanilla: 0x02A1, ..Opcode::NONE }; // 673
-    pub const SMSG_LOOT_ROLL: Opcode = Opcode { vanilla: 0x02A2, ..Opcode::NONE }; // 674
-    pub const CMSG_LOOT_MASTER_GIVE: Opcode = Opcode { vanilla: 0x02A3, ..Opcode::NONE }; // 675
-    pub const SMSG_LOOT_MASTER_LIST: Opcode = Opcode { vanilla: 0x02A4, ..Opcode::NONE }; // 676
-    pub const SMSG_LOOT_ROLL_WON: Opcode = Opcode { vanilla: 0x029F, ..Opcode::NONE }; // 671
-    pub const SMSG_LOOT_ALL_PASSED: Opcode = Opcode { vanilla: 0x029E, ..Opcode::NONE }; // 670
+    pub const CMSG_LOOT_ROLL: Opcode = Opcode { vanilla: 0x02A0, modern: 0x3211 }; // 672
+    pub const SMSG_LOOT_START_ROLL: Opcode = Opcode { vanilla: 0x02A1, modern: 0x2616 }; // 673
+    pub const SMSG_LOOT_ROLL: Opcode = Opcode { vanilla: 0x02A2, modern: 0x2617 }; // 674
+    pub const CMSG_LOOT_MASTER_GIVE: Opcode = Opcode { vanilla: 0x02A3, modern: 0x320F }; // 675
+    pub const SMSG_LOOT_MASTER_LIST: Opcode = Opcode { vanilla: 0x02A4, modern: 0x2618 }; // 676
+    pub const SMSG_LOOT_ROLL_WON: Opcode = Opcode { vanilla: 0x029F, modern: 0x261B }; // 671
+    pub const SMSG_LOOT_ALL_PASSED: Opcode = Opcode { vanilla: 0x029E, modern: 0x261A }; // 670
 
     // ============================================================================
     // Trade
     // ============================================================================
 
-    pub const CMSG_INITIATE_TRADE: Opcode = Opcode { vanilla: 0x0116, ..Opcode::NONE }; // 278
-    pub const CMSG_BEGIN_TRADE: Opcode = Opcode { vanilla: 0x0117, ..Opcode::NONE }; // 279
-    pub const CMSG_BUSY_TRADE: Opcode = Opcode { vanilla: 0x0118, ..Opcode::NONE }; // 280
-    pub const CMSG_IGNORE_TRADE: Opcode = Opcode { vanilla: 0x0119, ..Opcode::NONE }; // 281
-    pub const CMSG_ACCEPT_TRADE: Opcode = Opcode { vanilla: 0x011A, ..Opcode::NONE }; // 282
-    pub const CMSG_UNACCEPT_TRADE: Opcode = Opcode { vanilla: 0x011B, ..Opcode::NONE }; // 283
-    pub const CMSG_CANCEL_TRADE: Opcode = Opcode { vanilla: 0x011C, ..Opcode::NONE }; // 284
-    pub const CMSG_SET_TRADE_ITEM: Opcode = Opcode { vanilla: 0x011D, ..Opcode::NONE }; // 285
-    pub const CMSG_CLEAR_TRADE_ITEM: Opcode = Opcode { vanilla: 0x011E, ..Opcode::NONE }; // 286
-    pub const CMSG_SET_TRADE_GOLD: Opcode = Opcode { vanilla: 0x011F, ..Opcode::NONE }; // 287
-    pub const SMSG_TRADE_STATUS: Opcode = Opcode { vanilla: 0x0120, ..Opcode::NONE }; // 288
+    pub const CMSG_INITIATE_TRADE: Opcode = Opcode { vanilla: 0x0116, modern: 0x3156 }; // 278
+    pub const CMSG_BEGIN_TRADE: Opcode = Opcode { vanilla: 0x0117, modern: 0x3157 }; // 279
+    pub const CMSG_BUSY_TRADE: Opcode = Opcode { vanilla: 0x0118, modern: 0x3158 }; // 280
+    pub const CMSG_IGNORE_TRADE: Opcode = Opcode { vanilla: 0x0119, modern: 0x3159 }; // 281
+    pub const CMSG_ACCEPT_TRADE: Opcode = Opcode { vanilla: 0x011A, modern: 0x315A }; // 282
+    pub const CMSG_UNACCEPT_TRADE: Opcode = Opcode { vanilla: 0x011B, modern: 0x315B }; // 283
+    pub const CMSG_CANCEL_TRADE: Opcode = Opcode { vanilla: 0x011C, modern: 0x315C }; // 284
+    pub const CMSG_SET_TRADE_ITEM: Opcode = Opcode { vanilla: 0x011D, modern: 0x315D }; // 285
+    pub const CMSG_CLEAR_TRADE_ITEM: Opcode = Opcode { vanilla: 0x011E, modern: 0x315E }; // 286
+    pub const CMSG_SET_TRADE_GOLD: Opcode = Opcode { vanilla: 0x011F, modern: 0x315F }; // 287
+    pub const SMSG_TRADE_STATUS: Opcode = Opcode { vanilla: 0x0120, modern: 0x2582 }; // 288
     pub const SMSG_TRADE_STATUS_EXTENDED: Opcode = Opcode { vanilla: 0x0121, ..Opcode::NONE }; // 289
 
     // ============================================================================
     // Quest
     // ============================================================================
 
-    pub const CMSG_QUEST_QUERY: Opcode = Opcode { vanilla: 0x005C, ..Opcode::NONE }; // 92
-    pub const SMSG_QUEST_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x005D, ..Opcode::NONE }; // 93
-    pub const CMSG_QUESTGIVER_STATUS_QUERY: Opcode = Opcode { vanilla: 0x0182, ..Opcode::NONE }; // 386
-    pub const SMSG_QUESTGIVER_STATUS: Opcode = Opcode { vanilla: 0x0183, ..Opcode::NONE }; // 387
-    pub const CMSG_QUESTGIVER_HELLO: Opcode = Opcode { vanilla: 0x0184, ..Opcode::NONE }; // 388
-    pub const SMSG_QUESTGIVER_QUEST_LIST: Opcode = Opcode { vanilla: 0x0185, ..Opcode::NONE }; // 389
-    pub const CMSG_QUESTGIVER_QUERY_QUEST: Opcode = Opcode { vanilla: 0x0186, ..Opcode::NONE }; // 390
+    pub const CMSG_QUEST_QUERY: Opcode = Opcode { vanilla: 0x005C, modern: 0x326E }; // 92
+    pub const SMSG_QUEST_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x005D, modern: 0x2A96 }; // 93
+    pub const CMSG_QUESTGIVER_STATUS_QUERY: Opcode = Opcode { vanilla: 0x0182, modern: 0x349C }; // 386
+    pub const SMSG_QUESTGIVER_STATUS: Opcode = Opcode { vanilla: 0x0183, modern: 0x2A9B }; // 387
+    pub const CMSG_QUESTGIVER_HELLO: Opcode = Opcode { vanilla: 0x0184, modern: 0x3496 }; // 388
+    pub const SMSG_QUESTGIVER_QUEST_LIST: Opcode = Opcode { vanilla: 0x0185, modern: 0x2A9A }; // 389
+    pub const CMSG_QUESTGIVER_QUERY_QUEST: Opcode = Opcode { vanilla: 0x0186, modern: 0x3497 }; // 390
     pub const CMSG_QUESTGIVER_QUEST_AUTOLAUNCH: Opcode = Opcode { vanilla: 0x0187, ..Opcode::NONE }; // 391
-    pub const SMSG_QUESTGIVER_QUEST_DETAILS: Opcode = Opcode { vanilla: 0x0188, ..Opcode::NONE }; // 392
-    pub const CMSG_QUESTGIVER_ACCEPT_QUEST: Opcode = Opcode { vanilla: 0x0189, ..Opcode::NONE }; // 393
-    pub const CMSG_QUESTGIVER_COMPLETE_QUEST: Opcode = Opcode { vanilla: 0x018A, ..Opcode::NONE }; // 394
-    pub const SMSG_QUESTGIVER_REQUEST_ITEMS: Opcode = Opcode { vanilla: 0x018B, ..Opcode::NONE }; // 395
-    pub const CMSG_QUESTGIVER_REQUEST_REWARD: Opcode = Opcode { vanilla: 0x018C, ..Opcode::NONE }; // 396
-    pub const SMSG_QUESTGIVER_OFFER_REWARD: Opcode = Opcode { vanilla: 0x018D, ..Opcode::NONE }; // 397
-    pub const CMSG_QUESTGIVER_CHOOSE_REWARD: Opcode = Opcode { vanilla: 0x018E, ..Opcode::NONE }; // 398
-    pub const SMSG_QUESTGIVER_QUEST_INVALID: Opcode = Opcode { vanilla: 0x018F, ..Opcode::NONE }; // 399
+    pub const SMSG_QUESTGIVER_QUEST_DETAILS: Opcode = Opcode { vanilla: 0x0188, modern: 0x2A92 }; // 392
+    pub const CMSG_QUESTGIVER_ACCEPT_QUEST: Opcode = Opcode { vanilla: 0x0189, modern: 0x3498 }; // 393
+    pub const CMSG_QUESTGIVER_COMPLETE_QUEST: Opcode = Opcode { vanilla: 0x018A, modern: 0x3499 }; // 394
+    pub const SMSG_QUESTGIVER_REQUEST_ITEMS: Opcode = Opcode { vanilla: 0x018B, modern: 0x2A93 }; // 395
+    pub const CMSG_QUESTGIVER_REQUEST_REWARD: Opcode = Opcode { vanilla: 0x018C, modern: 0x349B }; // 396
+    pub const SMSG_QUESTGIVER_OFFER_REWARD: Opcode = Opcode { vanilla: 0x018D, modern: 0x2A94 }; // 397
+    pub const CMSG_QUESTGIVER_CHOOSE_REWARD: Opcode = Opcode { vanilla: 0x018E, modern: 0x349A }; // 398
+    pub const SMSG_QUESTGIVER_QUEST_INVALID: Opcode = Opcode { vanilla: 0x018F, modern: 0x2A85 }; // 399
     pub const CMSG_QUESTGIVER_CANCEL: Opcode = Opcode { vanilla: 0x0190, ..Opcode::NONE }; // 400
-    pub const SMSG_QUESTGIVER_QUEST_COMPLETE: Opcode = Opcode { vanilla: 0x0191, ..Opcode::NONE }; // 401
-    pub const SMSG_QUESTGIVER_QUEST_FAILED: Opcode = Opcode { vanilla: 0x0192, ..Opcode::NONE }; // 402
+    pub const SMSG_QUESTGIVER_QUEST_COMPLETE: Opcode = Opcode { vanilla: 0x0191, modern: 0x2A83 }; // 401
+    pub const SMSG_QUESTGIVER_QUEST_FAILED: Opcode = Opcode { vanilla: 0x0192, modern: 0x2A86 }; // 402
     pub const CMSG_QUESTLOG_SWAP_QUEST: Opcode = Opcode { vanilla: 0x0193, ..Opcode::NONE }; // 403
-    pub const CMSG_QUESTLOG_REMOVE_QUEST: Opcode = Opcode { vanilla: 0x0194, ..Opcode::NONE }; // 404
-    pub const SMSG_QUESTLOG_FULL: Opcode = Opcode { vanilla: 0x0195, ..Opcode::NONE }; // 405
-    pub const SMSG_QUESTUPDATE_FAILED: Opcode = Opcode { vanilla: 0x0196, ..Opcode::NONE }; // 406
-    pub const SMSG_QUESTUPDATE_FAILEDTIMER: Opcode = Opcode { vanilla: 0x0197, ..Opcode::NONE }; // 407
-    pub const SMSG_QUESTUPDATE_COMPLETE: Opcode = Opcode { vanilla: 0x0198, ..Opcode::NONE }; // 408
+    pub const CMSG_QUESTLOG_REMOVE_QUEST: Opcode = Opcode { vanilla: 0x0194, modern: 0x352D }; // 404
+    pub const SMSG_QUESTLOG_FULL: Opcode = Opcode { vanilla: 0x0195, modern: 0x2A87 }; // 405
+    pub const SMSG_QUESTUPDATE_FAILED: Opcode = Opcode { vanilla: 0x0196, modern: 0x2A8A }; // 406
+    pub const SMSG_QUESTUPDATE_FAILEDTIMER: Opcode = Opcode { vanilla: 0x0197, modern: 0x2A8B }; // 407
+    pub const SMSG_QUESTUPDATE_COMPLETE: Opcode = Opcode { vanilla: 0x0198, modern: 0x2A89 }; // 408
     pub const SMSG_QUESTUPDATE_ADD_KILL: Opcode = Opcode { vanilla: 0x0199, ..Opcode::NONE }; // 409
     pub const SMSG_QUESTUPDATE_ADD_ITEM: Opcode = Opcode { vanilla: 0x019A, ..Opcode::NONE }; // 410
-    pub const CMSG_QUEST_CONFIRM_ACCEPT: Opcode = Opcode { vanilla: 0x019B, ..Opcode::NONE }; // 411
-    pub const SMSG_QUEST_CONFIRM_ACCEPT: Opcode = Opcode { vanilla: 0x019C, ..Opcode::NONE }; // 412
-    pub const CMSG_PUSHQUESTTOPARTY: Opcode = Opcode { vanilla: 0x019D, ..Opcode::NONE }; // 413
+    pub const CMSG_QUEST_CONFIRM_ACCEPT: Opcode = Opcode { vanilla: 0x019B, modern: 0x349E }; // 411
+    pub const SMSG_QUEST_CONFIRM_ACCEPT: Opcode = Opcode { vanilla: 0x019C, modern: 0x2A8F }; // 412
+    pub const CMSG_PUSHQUESTTOPARTY: Opcode = Opcode { vanilla: 0x019D, modern: 0x349F }; // 413
     pub const MSG_QUEST_PUSH_RESULT: Opcode = Opcode { vanilla: 0x0276, ..Opcode::NONE }; // 630
 
     // ============================================================================
     // Guild
     // ============================================================================
 
-    pub const CMSG_GUILD_QUERY: Opcode = Opcode { vanilla: 0x0054, ..Opcode::NONE }; // 84
-    pub const SMSG_GUILD_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x0055, ..Opcode::NONE }; // 85
+    pub const CMSG_GUILD_QUERY: Opcode = Opcode { vanilla: 0x0054, modern: 0x368B }; // 84
+    pub const SMSG_GUILD_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x0055, modern: 0x29E5 }; // 85
     pub const CMSG_GUILD_CREATE: Opcode = Opcode { vanilla: 0x0081, ..Opcode::NONE }; // 129
-    pub const CMSG_GUILD_INVITE: Opcode = Opcode { vanilla: 0x0082, ..Opcode::NONE }; // 130
-    pub const SMSG_GUILD_INVITE: Opcode = Opcode { vanilla: 0x0083, ..Opcode::NONE }; // 131
-    pub const CMSG_GUILD_ACCEPT: Opcode = Opcode { vanilla: 0x0084, ..Opcode::NONE }; // 132
-    pub const CMSG_GUILD_DECLINE: Opcode = Opcode { vanilla: 0x0085, ..Opcode::NONE }; // 133
-    pub const SMSG_GUILD_DECLINE: Opcode = Opcode { vanilla: 0x0086, ..Opcode::NONE }; // 134
+    pub const CMSG_GUILD_INVITE: Opcode = Opcode { vanilla: 0x0082, modern: 0x3607 }; // 130
+    pub const SMSG_GUILD_INVITE: Opcode = Opcode { vanilla: 0x0083, modern: 0x29CA }; // 131
+    pub const CMSG_GUILD_ACCEPT: Opcode = Opcode { vanilla: 0x0084, modern: 0x35FD }; // 132
+    pub const CMSG_GUILD_DECLINE: Opcode = Opcode { vanilla: 0x0085, modern: 0x3060 }; // 133
+    pub const SMSG_GUILD_DECLINE: Opcode = Opcode { vanilla: 0x0086, modern: 0x29E8 }; // 134
     pub const CMSG_GUILD_INFO: Opcode = Opcode { vanilla: 0x0087, ..Opcode::NONE }; // 135
     pub const SMSG_GUILD_INFO: Opcode = Opcode { vanilla: 0x0088, ..Opcode::NONE }; // 136
-    pub const CMSG_GUILD_ROSTER: Opcode = Opcode { vanilla: 0x0089, ..Opcode::NONE }; // 137
-    pub const SMSG_GUILD_ROSTER: Opcode = Opcode { vanilla: 0x008A, ..Opcode::NONE }; // 138
-    pub const CMSG_GUILD_PROMOTE: Opcode = Opcode { vanilla: 0x008B, ..Opcode::NONE }; // 139
-    pub const CMSG_GUILD_DEMOTE: Opcode = Opcode { vanilla: 0x008C, ..Opcode::NONE }; // 140
-    pub const CMSG_GUILD_LEAVE: Opcode = Opcode { vanilla: 0x008D, ..Opcode::NONE }; // 141
-    pub const CMSG_GUILD_REMOVE: Opcode = Opcode { vanilla: 0x008E, ..Opcode::NONE }; // 142
-    pub const CMSG_GUILD_DISBAND: Opcode = Opcode { vanilla: 0x008F, ..Opcode::NONE }; // 143
-    pub const CMSG_GUILD_LEADER: Opcode = Opcode { vanilla: 0x0090, ..Opcode::NONE }; // 144
-    pub const CMSG_GUILD_MOTD: Opcode = Opcode { vanilla: 0x0091, ..Opcode::NONE }; // 145
+    pub const CMSG_GUILD_ROSTER: Opcode = Opcode { vanilla: 0x0089, modern: 0x3073 }; // 137
+    pub const SMSG_GUILD_ROSTER: Opcode = Opcode { vanilla: 0x008A, modern: 0x29BB }; // 138
+    pub const CMSG_GUILD_PROMOTE: Opcode = Opcode { vanilla: 0x008B, modern: 0x305D }; // 139
+    pub const CMSG_GUILD_DEMOTE: Opcode = Opcode { vanilla: 0x008C, modern: 0x305E }; // 140
+    pub const CMSG_GUILD_LEAVE: Opcode = Opcode { vanilla: 0x008D, modern: 0x3062 }; // 141
+    pub const CMSG_GUILD_REMOVE: Opcode = Opcode { vanilla: 0x008E, modern: 0x3063 }; // 142
+    pub const CMSG_GUILD_DISBAND: Opcode = Opcode { vanilla: 0x008F, modern: 0x3068 }; // 143
+    pub const CMSG_GUILD_LEADER: Opcode = Opcode { vanilla: 0x0090, modern: 0x36CE }; // 144
+    pub const CMSG_GUILD_MOTD: Opcode = Opcode { vanilla: 0x0091, modern: 0x3074 }; // 145
     pub const SMSG_GUILD_EVENT: Opcode = Opcode { vanilla: 0x0092, ..Opcode::NONE }; // 146
-    pub const SMSG_GUILD_COMMAND_RESULT: Opcode = Opcode { vanilla: 0x0093, ..Opcode::NONE }; // 147
-    pub const CMSG_GUILD_RANK: Opcode = Opcode { vanilla: 0x0231, ..Opcode::NONE }; // 561
-    pub const CMSG_GUILD_ADD_RANK: Opcode = Opcode { vanilla: 0x0232, ..Opcode::NONE }; // 562
-    pub const CMSG_GUILD_DEL_RANK: Opcode = Opcode { vanilla: 0x0233, ..Opcode::NONE }; // 563
+    pub const SMSG_GUILD_COMMAND_RESULT: Opcode = Opcode { vanilla: 0x0093, modern: 0x29BA }; // 147
+    pub const CMSG_GUILD_RANK: Opcode = Opcode { vanilla: 0x0231, modern: 0x3067 }; // 561
+    pub const CMSG_GUILD_ADD_RANK: Opcode = Opcode { vanilla: 0x0232, modern: 0x3064 }; // 562
+    pub const CMSG_GUILD_DEL_RANK: Opcode = Opcode { vanilla: 0x0233, modern: 0x3065 }; // 563
     pub const CMSG_GUILD_SET_PUBLIC_NOTE: Opcode = Opcode { vanilla: 0x0234, ..Opcode::NONE }; // 564
     pub const CMSG_GUILD_SET_OFFICER_NOTE: Opcode = Opcode { vanilla: 0x0235, ..Opcode::NONE }; // 565
-    pub const CMSG_GUILD_INFO_TEXT: Opcode = Opcode { vanilla: 0x02FC, ..Opcode::NONE }; // 764
+    pub const CMSG_GUILD_INFO_TEXT: Opcode = Opcode { vanilla: 0x02FC, modern: 0x3075 }; // 764
     pub const MSG_SAVE_GUILD_EMBLEM: Opcode = Opcode { vanilla: 0x01F1, ..Opcode::NONE }; // 497
 
     // ============================================================================
     // Petition / Charter
     // ============================================================================
 
-    pub const CMSG_PETITION_SHOWLIST: Opcode = Opcode { vanilla: 0x01BB, ..Opcode::NONE }; // 443
-    pub const SMSG_PETITION_SHOWLIST: Opcode = Opcode { vanilla: 0x01BC, ..Opcode::NONE }; // 444
-    pub const CMSG_PETITION_BUY: Opcode = Opcode { vanilla: 0x01BD, ..Opcode::NONE }; // 445
-    pub const CMSG_PETITION_SHOW_SIGNATURES: Opcode = Opcode { vanilla: 0x01BE, ..Opcode::NONE }; // 446
-    pub const SMSG_PETITION_SHOW_SIGNATURES: Opcode = Opcode { vanilla: 0x01BF, ..Opcode::NONE }; // 447
-    pub const CMSG_PETITION_SIGN: Opcode = Opcode { vanilla: 0x01C0, ..Opcode::NONE }; // 448
-    pub const SMSG_PETITION_SIGN_RESULTS: Opcode = Opcode { vanilla: 0x01C1, ..Opcode::NONE }; // 449
+    pub const CMSG_PETITION_SHOWLIST: Opcode = Opcode { vanilla: 0x01BB, modern: 0x34C7 }; // 443
+    pub const SMSG_PETITION_SHOWLIST: Opcode = Opcode { vanilla: 0x01BC, modern: 0x26B7 }; // 444
+    pub const CMSG_PETITION_BUY: Opcode = Opcode { vanilla: 0x01BD, modern: 0x34C8 }; // 445
+    pub const CMSG_PETITION_SHOW_SIGNATURES: Opcode = Opcode { vanilla: 0x01BE, modern: 0x34C9 }; // 446
+    pub const SMSG_PETITION_SHOW_SIGNATURES: Opcode = Opcode { vanilla: 0x01BF, modern: 0x26B8 }; // 447
+    pub const CMSG_PETITION_SIGN: Opcode = Opcode { vanilla: 0x01C0, modern: 0x3532 }; // 448
+    pub const SMSG_PETITION_SIGN_RESULTS: Opcode = Opcode { vanilla: 0x01C1, modern: 0x2743 }; // 449
     pub const MSG_PETITION_DECLINE: Opcode = Opcode { vanilla: 0x01C2, ..Opcode::NONE }; // 450
     pub const SMSG_PETITION_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x01C3, ..Opcode::NONE }; // 451
-    pub const CMSG_TURN_IN_PETITION: Opcode = Opcode { vanilla: 0x01C4, ..Opcode::NONE }; // 452
-    pub const SMSG_TURN_IN_PETITION_RESULTS: Opcode = Opcode { vanilla: 0x01C5, ..Opcode::NONE }; // 453
-    pub const CMSG_OFFER_PETITION: Opcode = Opcode { vanilla: 0x01C7, ..Opcode::NONE }; // 455
+    pub const CMSG_TURN_IN_PETITION: Opcode = Opcode { vanilla: 0x01C4, modern: 0x3534 }; // 452
+    pub const SMSG_TURN_IN_PETITION_RESULTS: Opcode = Opcode { vanilla: 0x01C5, modern: 0x2745 }; // 453
+    pub const CMSG_OFFER_PETITION: Opcode = Opcode { vanilla: 0x01C7, modern: 0x32F4 }; // 455
     pub const MSG_PETITION_RENAME: Opcode = Opcode { vanilla: 0x02C1, ..Opcode::NONE }; // 705
 
     // ============================================================================
@@ -812,35 +812,35 @@ impl Opcode {
     // ============================================================================
 
     pub const MSG_QUERY_NEXT_MAIL_TIME: Opcode = Opcode { vanilla: 0x0284, ..Opcode::NONE }; // 644
-    pub const CMSG_SEND_MAIL: Opcode = Opcode { vanilla: 0x0238, ..Opcode::NONE }; // 568
-    pub const SMSG_SEND_MAIL_RESULT: Opcode = Opcode { vanilla: 0x0239, ..Opcode::NONE }; // 569
-    pub const CMSG_GET_MAIL_LIST: Opcode = Opcode { vanilla: 0x023A, ..Opcode::NONE }; // 570
-    pub const SMSG_MAIL_LIST_RESULT: Opcode = Opcode { vanilla: 0x023B, ..Opcode::NONE }; // 571
-    pub const CMSG_MAIL_TAKE_MONEY: Opcode = Opcode { vanilla: 0x0245, ..Opcode::NONE }; // 581
-    pub const CMSG_MAIL_TAKE_ITEM: Opcode = Opcode { vanilla: 0x0246, ..Opcode::NONE }; // 582
-    pub const CMSG_MAIL_MARK_AS_READ: Opcode = Opcode { vanilla: 0x0247, ..Opcode::NONE }; // 583
-    pub const CMSG_MAIL_RETURN_TO_SENDER: Opcode = Opcode { vanilla: 0x0248, ..Opcode::NONE }; // 584
-    pub const CMSG_MAIL_DELETE: Opcode = Opcode { vanilla: 0x0249, ..Opcode::NONE }; // 585
-    pub const CMSG_MAIL_CREATE_TEXT_ITEM: Opcode = Opcode { vanilla: 0x024A, ..Opcode::NONE }; // 586
-    pub const SMSG_RECEIVED_MAIL: Opcode = Opcode { vanilla: 0x0285, ..Opcode::NONE }; // 645
+    pub const CMSG_SEND_MAIL: Opcode = Opcode { vanilla: 0x0238, modern: 0x35FB }; // 568
+    pub const SMSG_SEND_MAIL_RESULT: Opcode = Opcode { vanilla: 0x0239, modern: 0x2634 }; // 569
+    pub const CMSG_GET_MAIL_LIST: Opcode = Opcode { vanilla: 0x023A, modern: 0x3535 }; // 570
+    pub const SMSG_MAIL_LIST_RESULT: Opcode = Opcode { vanilla: 0x023B, modern: 0x274D }; // 571
+    pub const CMSG_MAIL_TAKE_MONEY: Opcode = Opcode { vanilla: 0x0245, modern: 0x3536 }; // 581
+    pub const CMSG_MAIL_TAKE_ITEM: Opcode = Opcode { vanilla: 0x0246, modern: 0x3537 }; // 582
+    pub const CMSG_MAIL_MARK_AS_READ: Opcode = Opcode { vanilla: 0x0247, modern: 0x3539 }; // 583
+    pub const CMSG_MAIL_RETURN_TO_SENDER: Opcode = Opcode { vanilla: 0x0248, modern: 0x3658 }; // 584
+    pub const CMSG_MAIL_DELETE: Opcode = Opcode { vanilla: 0x0249, modern: 0x3222 }; // 585
+    pub const CMSG_MAIL_CREATE_TEXT_ITEM: Opcode = Opcode { vanilla: 0x024A, modern: 0x353A }; // 586
+    pub const SMSG_RECEIVED_MAIL: Opcode = Opcode { vanilla: 0x0285, modern: 0x2635 }; // 645
 
     // ============================================================================
     // Auction House
     // ============================================================================
 
     pub const MSG_AUCTION_HELLO: Opcode = Opcode { vanilla: 0x0255, ..Opcode::NONE }; // 597
-    pub const CMSG_AUCTION_SELL_ITEM: Opcode = Opcode { vanilla: 0x0256, ..Opcode::NONE }; // 598
-    pub const CMSG_AUCTION_REMOVE_ITEM: Opcode = Opcode { vanilla: 0x0257, ..Opcode::NONE }; // 599
-    pub const CMSG_AUCTION_LIST_ITEMS: Opcode = Opcode { vanilla: 0x0258, ..Opcode::NONE }; // 600
-    pub const CMSG_AUCTION_LIST_OWNER_ITEMS: Opcode = Opcode { vanilla: 0x0259, ..Opcode::NONE }; // 601
-    pub const CMSG_AUCTION_PLACE_BID: Opcode = Opcode { vanilla: 0x025A, ..Opcode::NONE }; // 602
-    pub const SMSG_AUCTION_COMMAND_RESULT: Opcode = Opcode { vanilla: 0x025B, ..Opcode::NONE }; // 603
-    pub const SMSG_AUCTION_LIST_RESULT: Opcode = Opcode { vanilla: 0x025C, ..Opcode::NONE }; // 604
-    pub const SMSG_AUCTION_OWNER_LIST_RESULT: Opcode = Opcode { vanilla: 0x025D, ..Opcode::NONE }; // 605
+    pub const CMSG_AUCTION_SELL_ITEM: Opcode = Opcode { vanilla: 0x0256, modern: 0x34CB }; // 598
+    pub const CMSG_AUCTION_REMOVE_ITEM: Opcode = Opcode { vanilla: 0x0257, modern: 0x34CC }; // 599
+    pub const CMSG_AUCTION_LIST_ITEMS: Opcode = Opcode { vanilla: 0x0258, modern: 0x34CD }; // 600
+    pub const CMSG_AUCTION_LIST_OWNER_ITEMS: Opcode = Opcode { vanilla: 0x0259, modern: 0x34CF }; // 601
+    pub const CMSG_AUCTION_PLACE_BID: Opcode = Opcode { vanilla: 0x025A, modern: 0x34D1 }; // 602
+    pub const SMSG_AUCTION_COMMAND_RESULT: Opcode = Opcode { vanilla: 0x025B, modern: 0x26E7 }; // 603
+    pub const SMSG_AUCTION_LIST_RESULT: Opcode = Opcode { vanilla: 0x025C, modern: 0x2871 }; // 604
+    pub const SMSG_AUCTION_OWNER_LIST_RESULT: Opcode = Opcode { vanilla: 0x025D, modern: 0x288B }; // 605
     pub const SMSG_AUCTION_BIDDER_NOTIFICATION: Opcode = Opcode { vanilla: 0x025E, ..Opcode::NONE }; // 606
     pub const SMSG_AUCTION_OWNER_NOTIFICATION: Opcode = Opcode { vanilla: 0x025F, ..Opcode::NONE }; // 607
-    pub const CMSG_AUCTION_LIST_BIDDER_ITEMS: Opcode = Opcode { vanilla: 0x0264, ..Opcode::NONE }; // 612
-    pub const SMSG_AUCTION_BIDDER_LIST_RESULT: Opcode = Opcode { vanilla: 0x0265, ..Opcode::NONE }; // 613
+    pub const CMSG_AUCTION_LIST_BIDDER_ITEMS: Opcode = Opcode { vanilla: 0x0264, modern: 0x34D0 }; // 612
+    pub const SMSG_AUCTION_BIDDER_LIST_RESULT: Opcode = Opcode { vanilla: 0x0265, modern: 0x288C }; // 613
     pub const SMSG_AUCTION_REMOVED_NOTIFICATION: Opcode = Opcode { vanilla: 0x028D, ..Opcode::NONE }; // 653
 
     // ============================================================================
@@ -849,30 +849,30 @@ impl Opcode {
 
     pub const CMSG_BATTLEFIELD_STATUS: Opcode = Opcode { vanilla: 0x02D3, ..Opcode::NONE }; // 723
     pub const SMSG_BATTLEFIELD_STATUS: Opcode = Opcode { vanilla: 0x02D4, ..Opcode::NONE }; // 724
-    pub const CMSG_BATTLEFIELD_LIST: Opcode = Opcode { vanilla: 0x023B, ..Opcode::NONE }; // 571
-    pub const SMSG_BATTLEFIELD_LIST: Opcode = Opcode { vanilla: 0x023C, ..Opcode::NONE }; // 572
+    pub const CMSG_BATTLEFIELD_LIST: Opcode = Opcode { vanilla: 0x023B, modern: 0x3182 }; // 571
+    pub const SMSG_BATTLEFIELD_LIST: Opcode = Opcode { vanilla: 0x023C, modern: 0x2927 }; // 572
     pub const CMSG_BATTLEFIELD_JOIN: Opcode = Opcode { vanilla: 0x023E, ..Opcode::NONE }; // 574
     pub const SMSG_BATTLEFIELD_JOINED: Opcode = Opcode { vanilla: 0x02E1, ..Opcode::NONE }; // 737
     pub const SMSG_BATTLEFIELD_LEFT: Opcode = Opcode { vanilla: 0x02E2, ..Opcode::NONE }; // 738
     pub const CMSG_LEAVE_BATTLEFIELD: Opcode = Opcode { vanilla: 0x02E5, ..Opcode::NONE }; // 741
-    pub const CMSG_BATTLEFIELD_PORT: Opcode = Opcode { vanilla: 0x02D5, ..Opcode::NONE }; // 725
-    pub const CMSG_BATTLEMASTER_HELLO: Opcode = Opcode { vanilla: 0x02D7, ..Opcode::NONE }; // 727
+    pub const CMSG_BATTLEFIELD_PORT: Opcode = Opcode { vanilla: 0x02D5, modern: 0x3524 }; // 725
+    pub const CMSG_BATTLEMASTER_HELLO: Opcode = Opcode { vanilla: 0x02D7, modern: 0x32A9 }; // 727
     pub const SMSG_BATTLEMASTER_JOINED: Opcode = Opcode { vanilla: 0x02E3, ..Opcode::NONE }; // 739
     pub const CMSG_BATTLEFIELD_QUEUE: Opcode = Opcode { vanilla: 0x023D, ..Opcode::NONE }; // 573
     pub const CMSG_BATTLEFIELD_UN_QUEUE: Opcode = Opcode { vanilla: 0x023F, ..Opcode::NONE }; // 575
-    pub const CMSG_AREA_SPIRIT_HEALER_QUERY: Opcode = Opcode { vanilla: 0x02E2, ..Opcode::NONE }; // 738
-    pub const CMSG_AREA_SPIRIT_HEALER_QUEUE: Opcode = Opcode { vanilla: 0x02E3, ..Opcode::NONE }; // 739
-    pub const SMSG_AREA_SPIRIT_HEALER_TIME: Opcode = Opcode { vanilla: 0x02E4, ..Opcode::NONE }; // 740
+    pub const CMSG_AREA_SPIRIT_HEALER_QUERY: Opcode = Opcode { vanilla: 0x02E2, modern: 0x34B0 }; // 738
+    pub const CMSG_AREA_SPIRIT_HEALER_QUEUE: Opcode = Opcode { vanilla: 0x02E3, modern: 0x34B1 }; // 739
+    pub const SMSG_AREA_SPIRIT_HEALER_TIME: Opcode = Opcode { vanilla: 0x02E4, modern: 0x2737 }; // 740
 
     // ============================================================================
     // Instance & Raid
     // ============================================================================
 
-    pub const CMSG_REQUEST_RAID_INFO: Opcode = Opcode { vanilla: 0x02CD, ..Opcode::NONE }; // 717
-    pub const SMSG_RAID_INSTANCE_INFO: Opcode = Opcode { vanilla: 0x02CC, ..Opcode::NONE }; // 716
-    pub const CMSG_RESET_INSTANCES: Opcode = Opcode { vanilla: 0x031D, ..Opcode::NONE }; // 797
-    pub const SMSG_INSTANCE_RESET: Opcode = Opcode { vanilla: 0x031E, ..Opcode::NONE }; // 798
-    pub const SMSG_INSTANCE_RESET_FAILED: Opcode = Opcode { vanilla: 0x031F, ..Opcode::NONE }; // 799
+    pub const CMSG_REQUEST_RAID_INFO: Opcode = Opcode { vanilla: 0x02CD, modern: 0x36D0 }; // 717
+    pub const SMSG_RAID_INSTANCE_INFO: Opcode = Opcode { vanilla: 0x02CC, modern: 0x262D }; // 716
+    pub const CMSG_RESET_INSTANCES: Opcode = Opcode { vanilla: 0x031D, modern: 0x366A }; // 797
+    pub const SMSG_INSTANCE_RESET: Opcode = Opcode { vanilla: 0x031E, modern: 0x267F }; // 798
+    pub const SMSG_INSTANCE_RESET_FAILED: Opcode = Opcode { vanilla: 0x031F, modern: 0x2680 }; // 799
 
     // ============================================================================
     // Meeting Stone
@@ -890,49 +890,49 @@ impl Opcode {
 
     pub const CMSG_DUEL_ACCEPTED: Opcode = Opcode { vanilla: 0x016C, ..Opcode::NONE }; // 364
     pub const CMSG_DUEL_CANCELLED: Opcode = Opcode { vanilla: 0x016D, ..Opcode::NONE }; // 365
-    pub const SMSG_DUEL_REQUESTED: Opcode = Opcode { vanilla: 0x0167, ..Opcode::NONE }; // 359
-    pub const SMSG_DUEL_COUNTDOWN: Opcode = Opcode { vanilla: 0x02B7, ..Opcode::NONE }; // 695
-    pub const SMSG_DUEL_OUTOFBOUNDS: Opcode = Opcode { vanilla: 0x0168, ..Opcode::NONE }; // 360
-    pub const SMSG_DUEL_INBOUNDS: Opcode = Opcode { vanilla: 0x0169, ..Opcode::NONE }; // 361
-    pub const SMSG_DUEL_COMPLETE: Opcode = Opcode { vanilla: 0x016A, ..Opcode::NONE }; // 362
-    pub const SMSG_DUEL_WINNER: Opcode = Opcode { vanilla: 0x016B, ..Opcode::NONE }; // 363
+    pub const SMSG_DUEL_REQUESTED: Opcode = Opcode { vanilla: 0x0167, modern: 0x293E }; // 359
+    pub const SMSG_DUEL_COUNTDOWN: Opcode = Opcode { vanilla: 0x02B7, modern: 0x2942 }; // 695
+    pub const SMSG_DUEL_OUTOFBOUNDS: Opcode = Opcode { vanilla: 0x0168, modern: 0x2940 }; // 360
+    pub const SMSG_DUEL_INBOUNDS: Opcode = Opcode { vanilla: 0x0169, modern: 0x2941 }; // 361
+    pub const SMSG_DUEL_COMPLETE: Opcode = Opcode { vanilla: 0x016A, modern: 0x2943 }; // 362
+    pub const SMSG_DUEL_WINNER: Opcode = Opcode { vanilla: 0x016B, modern: 0x2944 }; // 363
 
     // ============================================================================
     // Pet
     // ============================================================================
 
-    pub const CMSG_PET_NAME_QUERY: Opcode = Opcode { vanilla: 0x0052, ..Opcode::NONE }; // 82
-    pub const SMSG_PET_NAME_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x0053, ..Opcode::NONE }; // 83
-    pub const CMSG_PET_SET_ACTION: Opcode = Opcode { vanilla: 0x0174, ..Opcode::NONE }; // 372
-    pub const CMSG_PET_ACTION: Opcode = Opcode { vanilla: 0x0175, ..Opcode::NONE }; // 373
-    pub const CMSG_PET_ABANDON: Opcode = Opcode { vanilla: 0x0176, ..Opcode::NONE }; // 374
-    pub const CMSG_PET_RENAME: Opcode = Opcode { vanilla: 0x0177, ..Opcode::NONE }; // 375
-    pub const SMSG_PET_SPELLS: Opcode = Opcode { vanilla: 0x0179, ..Opcode::NONE }; // 377
-    pub const SMSG_PET_MODE: Opcode = Opcode { vanilla: 0x017A, ..Opcode::NONE }; // 378
-    pub const SMSG_PET_TAME_FAILURE: Opcode = Opcode { vanilla: 0x0173, ..Opcode::NONE }; // 371
-    pub const SMSG_PET_NAME_INVALID: Opcode = Opcode { vanilla: 0x0178, ..Opcode::NONE }; // 376
-    pub const CMSG_PET_CAST_SPELL: Opcode = Opcode { vanilla: 0x01F0, ..Opcode::NONE }; // 496
-    pub const SMSG_PET_CAST_FAILED: Opcode = Opcode { vanilla: 0x0138, ..Opcode::NONE }; // 312
-    pub const CMSG_PET_CANCEL_AURA: Opcode = Opcode { vanilla: 0x026B, ..Opcode::NONE }; // 619
-    pub const SMSG_PET_ACTION_FEEDBACK: Opcode = Opcode { vanilla: 0x02C6, ..Opcode::NONE }; // 710
+    pub const CMSG_PET_NAME_QUERY: Opcode = Opcode { vanilla: 0x0052, modern: 0x3270 }; // 82
+    pub const SMSG_PET_NAME_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x0053, modern: 0x2919 }; // 83
+    pub const CMSG_PET_SET_ACTION: Opcode = Opcode { vanilla: 0x0174, modern: 0x348A }; // 372
+    pub const CMSG_PET_ACTION: Opcode = Opcode { vanilla: 0x0175, modern: 0x348B }; // 373
+    pub const CMSG_PET_ABANDON: Opcode = Opcode { vanilla: 0x0176, modern: 0x348D }; // 374
+    pub const CMSG_PET_RENAME: Opcode = Opcode { vanilla: 0x0177, modern: 0x3686 }; // 375
+    pub const SMSG_PET_SPELLS: Opcode = Opcode { vanilla: 0x0179, modern: 0x2C25 }; // 377
+    pub const SMSG_PET_MODE: Opcode = Opcode { vanilla: 0x017A, modern: 0x258C }; // 378
+    pub const SMSG_PET_TAME_FAILURE: Opcode = Opcode { vanilla: 0x0173, modern: 0x26AC }; // 371
+    pub const SMSG_PET_NAME_INVALID: Opcode = Opcode { vanilla: 0x0178, modern: 0x26BC }; // 376
+    pub const CMSG_PET_CAST_SPELL: Opcode = Opcode { vanilla: 0x01F0, modern: 0x3293 }; // 496
+    pub const SMSG_PET_CAST_FAILED: Opcode = Opcode { vanilla: 0x0138, modern: 0x2C58 }; // 312
+    pub const CMSG_PET_CANCEL_AURA: Opcode = Opcode { vanilla: 0x026B, modern: 0x348E }; // 619
+    pub const SMSG_PET_ACTION_FEEDBACK: Opcode = Opcode { vanilla: 0x02C6, modern: 0x2740 }; // 710
     pub const SMSG_PET_BROKEN: Opcode = Opcode { vanilla: 0x02B3, ..Opcode::NONE }; // 691
     pub const CMSG_PET_UNLEARN: Opcode = Opcode { vanilla: 0x02F0, ..Opcode::NONE }; // 752
     pub const SMSG_PET_UNLEARN_CONFIRM: Opcode = Opcode { vanilla: 0x02F1, ..Opcode::NONE }; // 753
-    pub const CMSG_PET_SPELL_AUTOCAST: Opcode = Opcode { vanilla: 0x02F3, ..Opcode::NONE }; // 755
-    pub const CMSG_PET_STOP_ATTACK: Opcode = Opcode { vanilla: 0x02EA, ..Opcode::NONE }; // 746
-    pub const CMSG_REQUEST_PET_INFO: Opcode = Opcode { vanilla: 0x0279, ..Opcode::NONE }; // 633
+    pub const CMSG_PET_SPELL_AUTOCAST: Opcode = Opcode { vanilla: 0x02F3, modern: 0x348F }; // 755
+    pub const CMSG_PET_STOP_ATTACK: Opcode = Opcode { vanilla: 0x02EA, modern: 0x348C }; // 746
+    pub const CMSG_REQUEST_PET_INFO: Opcode = Opcode { vanilla: 0x0279, modern: 0x3490 }; // 633
 
     // ============================================================================
     // Pet Stable
     // ============================================================================
 
     pub const MSG_LIST_STABLED_PETS: Opcode = Opcode { vanilla: 0x026E, ..Opcode::NONE }; // 623
-    pub const CMSG_STABLE_PET: Opcode = Opcode { vanilla: 0x026F, ..Opcode::NONE }; // 624
-    pub const CMSG_UNSTABLE_PET: Opcode = Opcode { vanilla: 0x0270, ..Opcode::NONE }; // 625
-    pub const CMSG_BUY_STABLE_SLOT: Opcode = Opcode { vanilla: 0x0272, ..Opcode::NONE }; // 626
-    pub const SMSG_STABLE_RESULT: Opcode = Opcode { vanilla: 0x0273, ..Opcode::NONE }; // 627
+    pub const CMSG_STABLE_PET: Opcode = Opcode { vanilla: 0x026F, modern: 0x3169 }; // 624
+    pub const CMSG_UNSTABLE_PET: Opcode = Opcode { vanilla: 0x0270, modern: 0x316A }; // 625
+    pub const CMSG_BUY_STABLE_SLOT: Opcode = Opcode { vanilla: 0x0272, modern: 0x316C }; // 626
+    pub const SMSG_STABLE_RESULT: Opcode = Opcode { vanilla: 0x0273, modern: 0x2598 }; // 627
     pub const CMSG_STABLE_REVIVE_PET: Opcode = Opcode { vanilla: 0x0274, ..Opcode::NONE }; // 628
-    pub const CMSG_STABLE_SWAP_PET: Opcode = Opcode { vanilla: 0x0275, ..Opcode::NONE }; // 629
+    pub const CMSG_STABLE_SWAP_PET: Opcode = Opcode { vanilla: 0x0275, modern: 0x316B }; // 629
 
     // ============================================================================
     // GM Ticket
@@ -946,45 +946,45 @@ impl Opcode {
     pub const SMSG_GMTICKET_GETTICKET: Opcode = Opcode { vanilla: 0x0212, ..Opcode::NONE }; // 530
     pub const CMSG_GMTICKET_DELETETICKET: Opcode = Opcode { vanilla: 0x0217, ..Opcode::NONE }; // 535
     pub const SMSG_GMTICKET_DELETETICKET: Opcode = Opcode { vanilla: 0x0218, ..Opcode::NONE }; // 536
-    pub const CMSG_GMTICKET_SYSTEMSTATUS: Opcode = Opcode { vanilla: 0x021A, ..Opcode::NONE }; // 538
-    pub const SMSG_GMTICKET_SYSTEMSTATUS: Opcode = Opcode { vanilla: 0x021B, ..Opcode::NONE }; // 539
+    pub const CMSG_GMTICKET_SYSTEMSTATUS: Opcode = Opcode { vanilla: 0x021A, modern: 0x368E }; // 538
+    pub const SMSG_GMTICKET_SYSTEMSTATUS: Opcode = Opcode { vanilla: 0x021B, modern: 0x269B }; // 539
     pub const CMSG_GMSURVEY_SUBMIT: Opcode = Opcode { vanilla: 0x032A, ..Opcode::NONE }; // 810
 
     // ============================================================================
     // PvP
     // ============================================================================
 
-    pub const CMSG_TOGGLE_PVP: Opcode = Opcode { vanilla: 0x0253, ..Opcode::NONE }; // 595
+    pub const CMSG_TOGGLE_PVP: Opcode = Opcode { vanilla: 0x0253, modern: 0x32A3 }; // 595
 
     // ============================================================================
     // Summon
     // ============================================================================
 
-    pub const SMSG_SUMMON_REQUEST: Opcode = Opcode { vanilla: 0x02AB, ..Opcode::NONE }; // 683
-    pub const CMSG_SUMMON_RESPONSE: Opcode = Opcode { vanilla: 0x02AC, ..Opcode::NONE }; // 684
+    pub const SMSG_SUMMON_REQUEST: Opcode = Opcode { vanilla: 0x02AB, modern: 0x2718 }; // 683
+    pub const CMSG_SUMMON_RESPONSE: Opcode = Opcode { vanilla: 0x02AC, modern: 0x366C }; // 684
 
     // ============================================================================
     // Far Sight
     // ============================================================================
 
-    pub const CMSG_FAR_SIGHT: Opcode = Opcode { vanilla: 0x027A, ..Opcode::NONE }; // 634
+    pub const CMSG_FAR_SIGHT: Opcode = Opcode { vanilla: 0x027A, modern: 0x34E8 }; // 634
 
     // ============================================================================
     // Appearance
     // ============================================================================
 
-    pub const CMSG_TOGGLE_HELM: Opcode = Opcode { vanilla: 0x02B9, ..Opcode::NONE }; // 697
-    pub const CMSG_TOGGLE_CLOAK: Opcode = Opcode { vanilla: 0x02BA, ..Opcode::NONE }; // 698
+    pub const CMSG_TOGGLE_HELM: Opcode = Opcode { vanilla: 0x02B9, modern: 0x3563 }; // 697
+    pub const CMSG_TOGGLE_CLOAK: Opcode = Opcode { vanilla: 0x02BA, modern: 0x3564 }; // 698
 
     // ============================================================================
     // Player Misc
     // ============================================================================
 
     pub const CMSG_SAVE_PLAYER: Opcode = Opcode { vanilla: 0x0153, ..Opcode::NONE }; // 339
-    pub const CMSG_SETSHEATHED: Opcode = Opcode { vanilla: 0x01E0, ..Opcode::NONE }; // 480
+    pub const CMSG_SETSHEATHED: Opcode = Opcode { vanilla: 0x01E0, modern: 0x3489 }; // 480
     pub const CMSG_GHOST: Opcode = Opcode { vanilla: 0x01E5, ..Opcode::NONE }; // 485
-    pub const CMSG_PLAYED_TIME: Opcode = Opcode { vanilla: 0x01CC, ..Opcode::NONE }; // 460
-    pub const SMSG_PLAYED_TIME: Opcode = Opcode { vanilla: 0x01CD, ..Opcode::NONE }; // 461
+    pub const CMSG_PLAYED_TIME: Opcode = Opcode { vanilla: 0x01CC, modern: 0x3275 }; // 460
+    pub const SMSG_PLAYED_TIME: Opcode = Opcode { vanilla: 0x01CD, modern: 0x26CD }; // 461
     pub const CMSG_BUG: Opcode = Opcode { vanilla: 0x01CA, ..Opcode::NONE }; // 458
 
     // ============================================================================
@@ -998,7 +998,30 @@ impl Opcode {
     // Weather
     // ============================================================================
 
-    pub const SMSG_WEATHER: Opcode = Opcode { vanilla: 0x02F4, ..Opcode::NONE }; // 756
+    pub const SMSG_WEATHER: Opcode = Opcode { vanilla: 0x02F4, modern: 0x269F }; // 756
+
+    // ============================================================================
+    // Modern-only
+    //
+    // No 1.12 counterpart, so `vanilla` stays 0. Added by hand as handlers need them rather than
+    // bulk-imported: the modern table has ~1730 entries, and importing the lot would bury the
+    // opcodes we actually serve under dead ones.
+    // ============================================================================
+
+    // Handshake. Also mirrored as bare u16s in world's `modern/opcodes.rs`, which predates this
+    // table; that module should fold into these once the modern socket uses `Opcode` throughout.
+    pub const SMSG_ENTER_ENCRYPTED_MODE: Opcode = Opcode { modern: 0x3049, ..Opcode::NONE };
+    pub const CMSG_ENTER_ENCRYPTED_MODE_ACK: Opcode = Opcode { modern: 0x3767, ..Opcode::NONE };
+    pub const CMSG_AUTH_CONTINUED_SESSION: Opcode = Opcode { modern: 0x3766, ..Opcode::NONE };
+    pub const SMSG_CONNECT_TO: Opcode = Opcode { modern: 0x304D, ..Opcode::NONE };
+
+    // Glue screen. The client sends all of these unprompted at character select.
+    pub const CMSG_SERVER_TIME_OFFSET_REQUEST: Opcode = Opcode { modern: 0x369B, ..Opcode::NONE };
+    pub const SMSG_SERVER_TIME_OFFSET: Opcode = Opcode { modern: 0x270B, ..Opcode::NONE };
+    pub const CMSG_UPDATE_VAS_PURCHASE_STATES: Opcode = Opcode { modern: 0x36F9, ..Opcode::NONE };
+    pub const CMSG_GET_UNDELETE_CHARACTER_COOLDOWN_STATUS: Opcode = Opcode { modern: 0x36E5, ..Opcode::NONE };
+    pub const CMSG_BATTLE_PAY_GET_PRODUCT_LIST: Opcode = Opcode { modern: 0x36C2, ..Opcode::NONE };
+    pub const CMSG_BATTLE_PAY_GET_PURCHASE_LIST: Opcode = Opcode { modern: 0x36C3, ..Opcode::NONE };
 }
 
 /// Prints the constant's name — `CMSG_PING` rather than `Opcode(476)`. Every dispatcher logs
@@ -2015,6 +2038,40 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::CMSG_WARDEN_DATA, "CMSG_WARDEN_DATA"),
     (Opcode::SMSG_WARDEN_DATA, "SMSG_WARDEN_DATA"),
     (Opcode::SMSG_WEATHER, "SMSG_WEATHER"),
+    (
+        Opcode::SMSG_ENTER_ENCRYPTED_MODE,
+        "SMSG_ENTER_ENCRYPTED_MODE",
+    ),
+    (
+        Opcode::CMSG_ENTER_ENCRYPTED_MODE_ACK,
+        "CMSG_ENTER_ENCRYPTED_MODE_ACK",
+    ),
+    (
+        Opcode::CMSG_AUTH_CONTINUED_SESSION,
+        "CMSG_AUTH_CONTINUED_SESSION",
+    ),
+    (Opcode::SMSG_CONNECT_TO, "SMSG_CONNECT_TO"),
+    (
+        Opcode::CMSG_SERVER_TIME_OFFSET_REQUEST,
+        "CMSG_SERVER_TIME_OFFSET_REQUEST",
+    ),
+    (Opcode::SMSG_SERVER_TIME_OFFSET, "SMSG_SERVER_TIME_OFFSET"),
+    (
+        Opcode::CMSG_UPDATE_VAS_PURCHASE_STATES,
+        "CMSG_UPDATE_VAS_PURCHASE_STATES",
+    ),
+    (
+        Opcode::CMSG_GET_UNDELETE_CHARACTER_COOLDOWN_STATUS,
+        "CMSG_GET_UNDELETE_CHARACTER_COOLDOWN_STATUS",
+    ),
+    (
+        Opcode::CMSG_BATTLE_PAY_GET_PRODUCT_LIST,
+        "CMSG_BATTLE_PAY_GET_PRODUCT_LIST",
+    ),
+    (
+        Opcode::CMSG_BATTLE_PAY_GET_PURCHASE_LIST,
+        "CMSG_BATTLE_PAY_GET_PURCHASE_LIST",
+    ),
 ];
 
 /// Marks an empty slot in the wire index tables. `u16::MAX` is safe as a sentinel because `ALL` is
@@ -2102,15 +2159,20 @@ mod tests {
             let Some(rest) = trimmed.strip_prefix("pub const ") else {
                 continue;
             };
-            let Some((name, rest)) = rest.split_once(": Opcode = Opcode { vanilla: 0x") else {
+            let Some((name, body)) = rest.split_once(": Opcode = Opcode {") else {
                 continue;
             };
-            let Some((hex, _)) = rest.split_once(',') else {
+            if name == "NONE" {
                 continue;
-            };
-            if let Ok(value) = u32::from_str_radix(hex, 16) {
-                out.push((name, value));
             }
+            // A constant may declare either column or both, so parse the field rather than
+            // assuming a position. Modern-only opcodes have no `vanilla:` at all.
+            let vanilla = body
+                .split_once("vanilla: 0x")
+                .and_then(|(_, rest)| rest.split_once(','))
+                .and_then(|(hex, _)| u32::from_str_radix(hex.trim(), 16).ok())
+                .unwrap_or(0);
+            out.push((name, vanilla));
         }
         out
     }
@@ -2153,8 +2215,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            577,
-            "expected 577 opcode constants; update this count deliberately when adding opcodes"
+            587,
+            "expected 587 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 
@@ -2162,7 +2224,10 @@ mod tests {
     fn no_unexpected_duplicate_opcode_values() {
         let mut by_value: HashMap<u32, Vec<&str>> = HashMap::new();
         for (name, value) in declared_opcodes() {
-            by_value.entry(value).or_default().push(name);
+            // 0 means "no vanilla number", which the modern-only constants all share.
+            if value != 0 {
+                by_value.entry(value).or_default().push(name);
+            }
         }
 
         let mut unexpected: Vec<String> = by_value
@@ -2235,6 +2300,79 @@ mod tests {
                 "{name} did not round-trip through the vanilla index"
             );
         }
+    }
+
+    /// Modern values shared by more than one constant.
+    ///
+    /// All three are the modern-side shadow of a vanilla duplicate already listed above — the
+    /// generator resolved both spellings to the same modern opcode, which is correct. There is no
+    /// modern-only collision, and there should never be one: the modern column is generated.
+    const KNOWN_DUPLICATE_MODERN_VALUES: &[u16] = &[0x2701, 0x3265, 0x3A1A];
+
+    #[test]
+    fn no_unexpected_duplicate_modern_values() {
+        let mut by_value: HashMap<u16, Vec<&str>> = HashMap::new();
+        for (opcode, name) in ALL {
+            if opcode.has_modern() {
+                by_value.entry(opcode.modern()).or_default().push(name);
+            }
+        }
+
+        let mut unexpected: Vec<String> = by_value
+            .iter()
+            .filter(|(value, names)| {
+                names.len() > 1 && !KNOWN_DUPLICATE_MODERN_VALUES.contains(value)
+            })
+            .map(|(value, names)| format!("0x{value:04X}: {}", names.join(", ")))
+            .collect();
+        unexpected.sort();
+
+        assert!(
+            unexpected.is_empty(),
+            "new duplicate modern opcode values:\n  {}",
+            unexpected.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn modern_wire_numbers_round_trip() {
+        for (opcode, name) in ALL {
+            if !opcode.has_modern() || KNOWN_DUPLICATE_MODERN_VALUES.contains(&opcode.modern()) {
+                continue;
+            }
+            assert_eq!(
+                Opcode::from_modern_wire(opcode.modern()),
+                Some(*opcode),
+                "{name} did not round-trip through the modern index"
+            );
+        }
+    }
+
+    /// Values observed on the wire from a live 1.14.2 client, plus the handshake opcodes that were
+    /// hand-transcribed before this table existed. If the generator is ever re-run against a
+    /// different build these are the first things that would silently change.
+    #[test]
+    fn modern_values_match_the_live_client() {
+        assert_eq!(Opcode::CMSG_CHAR_ENUM.modern(), 0x35E9);
+        assert_eq!(Opcode::CMSG_PING.modern(), 0x3768);
+        assert_eq!(Opcode::SMSG_PONG.modern(), 0x304E);
+        assert_eq!(Opcode::SMSG_AUTH_CHALLENGE.modern(), 0x3048);
+        assert_eq!(Opcode::CMSG_AUTH_SESSION.modern(), 0x3765);
+        assert_eq!(Opcode::SMSG_AUTH_RESPONSE.modern(), 0x256D);
+        assert_eq!(Opcode::SMSG_ENTER_ENCRYPTED_MODE.modern(), 0x3049);
+        assert_eq!(Opcode::CMSG_ENTER_ENCRYPTED_MODE_ACK.modern(), 0x3767);
+        // The character list reply reuses the vanilla constant: the modern name for it is
+        // SMSG_ENUM_CHARACTERS_RESULT, but it is the same message and the same handler.
+        assert_eq!(Opcode::SMSG_CHAR_ENUM.modern(), 0x2583);
+        assert_eq!(Opcode::CMSG_SERVER_TIME_OFFSET_REQUEST.modern(), 0x369B);
+        assert_eq!(Opcode::CMSG_BATTLE_PAY_GET_PRODUCT_LIST.modern(), 0x36C2);
+    }
+
+    #[test]
+    fn modern_only_opcodes_have_no_vanilla_number() {
+        assert!(!Opcode::SMSG_CONNECT_TO.has_vanilla());
+        assert!(Opcode::SMSG_CONNECT_TO.has_modern());
+        assert_eq!(Opcode::from_vanilla_wire(0x304D), None);
     }
 
     #[test]
