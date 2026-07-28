@@ -1140,7 +1140,6 @@ impl CharacterRepository {
             "character_action",
             "character_aura",
             "character_battleground_data",
-            "character_deleted_items",
             "character_gifts",
             "character_homebind",
             "character_instance",
@@ -1158,6 +1157,9 @@ impl CharacterRepository {
                 .await
                 .context(format!("Failed to delete from {table}"))?;
         }
+
+        // Oxcore does not populate Trinity's optional `character_deleted_items` table. Deleting
+        // a character must not fail when an existing database has not imported that legacy table.
 
         sqlx::query("DELETE FROM group_instance WHERE leader_guid = ?")
             .bind(guid)

@@ -1022,6 +1022,9 @@ impl Opcode {
     pub const CMSG_GET_UNDELETE_CHARACTER_COOLDOWN_STATUS: Opcode = Opcode { modern: 0x36E5, ..Opcode::NONE };
     pub const CMSG_BATTLE_PAY_GET_PRODUCT_LIST: Opcode = Opcode { modern: 0x36C2, ..Opcode::NONE };
     pub const CMSG_BATTLE_PAY_GET_PURCHASE_LIST: Opcode = Opcode { modern: 0x36C3, ..Opcode::NONE };
+
+    // Transport diagnostic sent by the modern client while it disconnects.
+    pub const CMSG_LOG_DISCONNECT: Opcode = Opcode { modern: 0x3769, ..Opcode::NONE };
 }
 
 /// Prints the constant's name — `CMSG_PING` rather than `Opcode(476)`. Every dispatcher logs
@@ -2072,6 +2075,7 @@ pub const ALL: &[(Opcode, &str)] = &[
         Opcode::CMSG_BATTLE_PAY_GET_PURCHASE_LIST,
         "CMSG_BATTLE_PAY_GET_PURCHASE_LIST",
     ),
+    (Opcode::CMSG_LOG_DISCONNECT, "CMSG_LOG_DISCONNECT"),
 ];
 
 /// Marks an empty slot in the wire index tables. `u16::MAX` is safe as a sentinel because `ALL` is
@@ -2215,8 +2219,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            587,
-            "expected 587 opcode constants; update this count deliberately when adding opcodes"
+            588,
+            "expected 588 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

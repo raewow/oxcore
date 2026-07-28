@@ -32,8 +32,8 @@ pub use framing::{
 };
 pub use handshake::HandshakeServer;
 pub use packets::{
-    auth_response_success, AuthChallenge, AuthResponseSuccess, AuthSession, ClassAvailability,
-    EnterEncryptedModeSigner, RaceClassAvailability,
+    auth_response_success, classic_available_classes, AuthChallenge, AuthResponseSuccess,
+    AuthSession, ClassAvailability, EnterEncryptedModeSigner, RaceClassAvailability,
 };
 pub use rsa_signer::RsaSigner;
 pub use server::{serve_modern, ModernServerConfig};

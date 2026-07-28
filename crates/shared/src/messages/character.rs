@@ -4,6 +4,23 @@ use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{Opcode, WorldPacket};
 
+// Hermes maps the legacy response enum by name before serializing it for the modern client.
+// Oxcore's handlers retain legacy result values, so modern replies perform the same conversion.
+fn modern_response_code(result: u8) -> u8 {
+    match result {
+        // CHAR_CREATE_*: legacy 45..55, modern 23..33.
+        0x2D..=0x37 => result - 22,
+        // CHAR_DELETE_*: legacy 56..59, modern 52..55.
+        0x38..=0x3B => result - 4,
+        // CHAR_LOGIN_*: legacy 60..68, modern 63..71.
+        0x3C..=0x44 => result + 3,
+        // CHAR_NAME validation errors: legacy 69..79, modern 82..92.
+        0x45..=0x4F => result + 13,
+        // CHAR_NAME_SUCCESS and CHAR_NAME_FAILURE have the same values in both tables.
+        _ => result,
+    }
+}
+
 /// SMSG_CHAR_CREATE - Character creation response
 #[derive(Debug, Clone)]
 pub struct SmsgCharCreate {
@@ -19,7 +36,7 @@ impl ToWorldPacket for SmsgCharCreate {
     }
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
-        writer.write_u8(self.result);
+        writer.write_u8(modern_response_code(self.result));
         writer.write_packed_guid_128(self.guid.0, self.guid.1);
         Some(writer.finish(Opcode::SMSG_CHAR_CREATE))
     }
@@ -38,7 +55,9 @@ impl ToWorldPacket for SmsgCharDelete {
         packet
     }
     fn to_modern(&self) -> Option<WorldPacket> {
-        Some(self.to_vanilla())
+        let mut packet = WorldPacket::new(Opcode::SMSG_CHAR_DELETE);
+        packet.write_u8(modern_response_code(self.result));
+        Some(packet)
     }
 }
 
@@ -69,6 +88,12 @@ mod tests {
         .unwrap();
         assert_eq!(packet.contents(), &[0, 0x86, 1, 0, 1, b'B', b'o', b'b']);
     }
+
+    #[test]
+    fn modern_delete_translates_legacy_success() {
+        let packet = SmsgCharDelete { result: 0x39 }.to_modern().unwrap();
+        assert_eq!(packet.contents(), &[53]); // Hermes CharDeleteSuccess
+    }
 }
 
 /// SMSG_CHAR_RENAME - Character rename response
@@ -97,7 +122,7 @@ impl ToWorldPacket for SmsgCharRename {
     }
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
-        writer.write_u8(self.result);
+        writer.write_u8(modern_response_code(self.result));
         writer.write_bit(self.guid128.is_some());
         writer.write_bits(
             self.new_name.as_ref().map_or(0, |name| name.len() as u32),

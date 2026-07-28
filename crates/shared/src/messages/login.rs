@@ -197,14 +197,31 @@ impl ToWorldPacket for SmsgCharEnum<'_> {
     }
 
     fn to_modern(&self) -> Option<WorldPacket> {
+        const CLASSIC_RACES: [i32; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+        const VISUAL_ITEM_COUNT: usize = 23;
         let mut writer = BitWriter::new();
         writer.write_bit(true); // Success
-        for _ in 0..6 {
-            writer.write_bit(false);
-        }
+        writer.write_bit(false); // IsDeletedCharacters
+        writer.write_bit(false); // IsNewPlayerRestrictionSkipped
+        writer.write_bit(false); // IsNewPlayerRestricted
+        writer.write_bit(true); // IsNewPlayer
+        writer.write_bit(false); // DisabledClassesMask.has_value
+        writer.write_bit(false); // IsAlliedRacesCreationAllowed
+
+        // The highest level among the listed characters, floored at 1. The client uses this to
+        // decide what the character list is allowed to offer, so a hardcoded 1 mislabels every
+        // account that has actually played.
+        let max_character_level = self
+            .characters
+            .iter()
+            .map(|character| character.level as i32)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+
         writer.write_i32(self.characters.len() as i32);
-        writer.write_i32(1); // MaxCharacterLevel
-        writer.write_i32(0); // RaceUnlockData.Count
+        writer.write_i32(max_character_level);
+        writer.write_i32(CLASSIC_RACES.len() as i32); // RaceUnlockData.Count
         writer.write_i32(0); // UnlockedConditionalAppearances.Count
         for (position, character) in self.characters.iter().enumerate() {
             let guid =
@@ -224,38 +241,51 @@ impl ToWorldPacket for SmsgCharEnum<'_> {
             writer.write_f32(character.position_x);
             writer.write_f32(character.position_y);
             writer.write_f32(character.position_z);
-            writer.write_packed_guid_128(0, 0);
-            writer.write_u32(character.character_flags);
-            writer.write_u32(0);
-            writer.write_u32(0);
+            writer.write_packed_guid_128(0, 0); // GuildGuid
+            writer.write_u32(character.character_flags); // Flags
+                                                         // Flags2/Flags3 sit immediately after Flags, *before* the pet triple. These two
+                                                         // constants are the values HermesProxy sends for Classic; they are opaque to us.
+            writer.write_u32(402_685_956); // Flags2
+            writer.write_u32(855_688_192); // Flags3
             writer.write_u32(character.pet_info.map_or(0, |pet| pet.0));
             writer.write_u32(character.pet_info.map_or(0, |pet| pet.1));
             writer.write_u32(character.pet_info.map_or(0, |pet| pet.2));
-            writer.write_u32(0);
-            writer.write_u32(0);
-            for slot in &character.equipment {
+            writer.write_u32(0); // ProfessionIds[0]
+            writer.write_u32(0); // ProfessionIds[1]
+            for index in 0..VISUAL_ITEM_COUNT {
+                let slot = character.equipment.get(index).copied().unwrap_or_default();
                 writer.write_u32(slot.display_id);
                 writer.write_u32(0);
                 writer.write_u32(0);
                 writer.write_u8(slot.inventory_type);
                 writer.write_u8(0);
             }
-            writer.write_u64(0);
+            writer.write_u64(chrono::Utc::now().timestamp() as u64);
             writer.write_u16(0);
-            writer.write_u32(0);
-            writer.write_u32(0);
+            writer.write_u32(55); // Unknown703, Hermes Classic placeholder
+            writer.write_u32(11_400); // LastLoginVersion, Classic Era
             writer.write_u32(0);
             writer.write_i32(0);
             writer.write_i32(0);
             writer.write_u32(0);
             writer.write_bits(character.name.len() as u32, 6);
             writer.write_bit(character.first_login);
+            // BoostInProgress must be false and ExpansionChosen true, and they are five bits
+            // apart — swapping them marks every character as mid-boost, which the client renders
+            // as unselectable.
+            writer.write_bit(false); // BoostInProgress
+            writer.write_bits(0, 5); // unkWod61x
             writer.write_bit(false);
-            writer.write_bits(0, 5);
-            writer.write_bit(false);
-            writer.write_bit(false);
+            writer.write_bit(true); // ExpansionChosen
             writer.flush_bits();
             writer.write_string_raw(&character.name);
+        }
+        for race_id in CLASSIC_RACES {
+            writer.write_i32(race_id);
+            writer.write_bit(true); // HasExpansion
+            writer.write_bit(false); // HasAchievement
+            writer.write_bit(false); // HasHeritageArmor
+            writer.flush_bits();
         }
         Some(writer.finish(Opcode::SMSG_CHAR_ENUM))
     }
@@ -276,7 +306,17 @@ mod modern_tests {
         assert_eq!(packet.opcode(), Opcode::SMSG_CHAR_ENUM);
         assert_eq!(
             packet.contents(),
-            &[0x80, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            &[
+                // Header bits, MSB-first: Success | IsNewPlayer. HermesProxy sets IsNewPlayer on
+                // every enumeration, so this byte is 0x88, not 0x80.
+                0x88, // Characters.Count = 0
+                0, 0, 0, 0, // MaxCharacterLevel = 1 (floor, no characters to raise it)
+                1, 0, 0, 0, // RaceUnlockData.Count = 8
+                8, 0, 0, 0, // UnlockedConditionalAppearances.Count = 0
+                0, 0, 0, 0, // Eight RaceUnlock entries: i32 race id, then HasExpansion set.
+                1, 0, 0, 0, 0x80, 2, 0, 0, 0, 0x80, 3, 0, 0, 0, 0x80, 4, 0, 0, 0, 0x80, 5, 0, 0, 0,
+                0x80, 6, 0, 0, 0, 0x80, 7, 0, 0, 0, 0x80, 8, 0, 0, 0, 0x80,
+            ]
         );
     }
 

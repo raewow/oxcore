@@ -105,6 +105,9 @@ pub async fn dispatch_packet(
                         "ignoring unsupported modern character-select request"
                     );
                 }
+                Opcode::CMSG_LOG_DISCONNECT => {
+                    tracing::trace!("modern client reported disconnect");
+                }
                 _ => {
                     debug!("Unhandled opcode {:?} in Authenticated state", opcode);
                 }

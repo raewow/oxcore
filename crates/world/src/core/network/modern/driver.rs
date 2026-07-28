@@ -36,7 +36,10 @@ use super::framing::{
 };
 use super::handshake::{auth_response_frame, HandshakeServer};
 use super::opcodes::{CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK, CMSG_PING, SMSG_PONG};
-use super::packets::{pong_body, AuthResponseSuccess, AuthSession, EnterEncryptedModeSigner, Ping};
+use super::packets::{
+    classic_available_classes, pong_body, AuthResponseSuccess, AuthSession,
+    EnterEncryptedModeSigner, Ping,
+};
 
 /// Resolves a realm-join ticket (a game-account name) to that account's 64-byte bnet session key.
 /// The real implementation reads `account.sessionkey`; tests use an in-memory map.
@@ -186,7 +189,7 @@ where
         active_expansion: ctx.active_expansion,
         account_expansion: ctx.account_expansion,
         time: chrono::Utc::now().timestamp(),
-        available_classes: Vec::new(),
+        available_classes: classic_available_classes(),
     };
     stream
         .write_all(&auth_response_frame(&mut crypt, &info))

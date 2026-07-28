@@ -166,6 +166,35 @@ pub struct RaceClassAvailability {
     pub classes: Vec<ClassAvailability>,
 }
 
+/// Classic Era race/class choices advertised by HermesProxy during modern authentication.
+pub fn classic_available_classes() -> Vec<RaceClassAvailability> {
+    const CLASSIC: &[(u8, &[u8])] = &[
+        (1, &[1, 2, 4, 5, 8, 9]),
+        (2, &[1, 3, 4, 7, 9]),
+        (3, &[1, 2, 3, 5, 4]),
+        (4, &[1, 3, 4, 5, 11]),
+        (5, &[1, 4, 5, 8, 9]),
+        (6, &[1, 3, 7, 11]),
+        (7, &[1, 4, 8, 9]),
+        (8, &[1, 4, 3, 5, 7, 8]),
+    ];
+
+    CLASSIC
+        .iter()
+        .map(|(race_id, classes)| RaceClassAvailability {
+            race_id: *race_id,
+            classes: classes
+                .iter()
+                .map(|class_id| ClassAvailability {
+                    class_id: *class_id,
+                    active_expansion: 0,
+                    account_expansion: 0,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 /// The fields of a successful `SMSG_AUTH_RESPONSE` we populate. This is the minimal success body
 /// that gets the client to the character-select screen: no login queue, no virtual realms, no
 /// character templates, no optional player counts.
@@ -483,5 +512,21 @@ mod tests {
         assert_eq!(body[43], 1); // RaceID
         assert_eq!(&body[44..48], &1i32.to_le_bytes()); // Classes.Count
         assert_eq!(&body[48..51], &[1, 0, 0]); // ClassID, active, account
+    }
+
+    #[test]
+    fn classic_availability_matches_hermes_character_creation_matrix() {
+        let available = classic_available_classes();
+        assert_eq!(available.len(), 8);
+        assert_eq!(available[0].race_id, 1);
+        assert_eq!(
+            available[0]
+                .classes
+                .iter()
+                .map(|class| class.class_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 4, 5, 8, 9]
+        );
+        assert_eq!(available[7].race_id, 8);
     }
 }
