@@ -1,12 +1,8 @@
 //! Per-(build, OS) auth seeds mixed into the `CMSG_AUTH_SESSION` digest.
 //!
 //! The client hashes its session key with a seed that depends on its exact build and operating
-//! system, so the server must know that seed to reproduce the digest. Values transcribed from
-//! HermesProxy's `BuildAuthSeeds.csv`. The build and OS are not in `CMSG_AUTH_SESSION` itself —
-//! they come from the session context established during the bnet flow.
-//!
-//! **Unverified against a live client**: correct per the reference table, but the mapping to a
-//! given client is only confirmed once a real one connects.
+//! system, so the server must know that seed to reproduce the digest. The build and OS are not in
+//! `CMSG_AUTH_SESSION` itself — they come from the session context established during the bnet flow.
 
 /// OS strings the modern client reports (`AuthSession`/bnet logon `platform`).
 pub mod os {
@@ -50,6 +46,22 @@ static SEEDS: &[SeedRow] = &[
         seed: hexlit(*b"3B31A4F4C25382131A8FB95A1317412B"),
     },
 ];
+
+/// The seed a client patched to use a fixed one reports instead of its build's own.
+///
+/// Some patched clients use this fixed value instead of their build's own seed.
+pub const STATIC_SEED: [u8; 16] = hexlit(*b"179D3DC3235629D07113A9B3867F97A7");
+
+/// Every seed worth trying for a `(build, os)` pair, most specific first: the build's own seed if
+/// we know it, then the static fallback.
+pub fn candidates(build: u32, os: &str) -> Vec<[u8; 16]> {
+    let mut seeds = Vec::with_capacity(2);
+    if let Some(seed) = lookup(build, os) {
+        seeds.push(seed);
+    }
+    seeds.push(STATIC_SEED);
+    seeds
+}
 
 /// The seed for a `(build, os)` pair, if known.
 pub fn lookup(build: u32, os: &str) -> Option<[u8; 16]> {

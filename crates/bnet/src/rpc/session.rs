@@ -108,7 +108,11 @@ mod tests {
 
         // Connect never touches the database, so a lazy pool is enough.
         let db = Database::connect_lazy("mysql://user:pass@127.0.0.1/oxcore_auth").unwrap();
-        let svc = Services::new(db, "https://localhost:8081/bnetserver/login/".to_string());
+        let svc = Services::new(
+            db,
+            "https://localhost:8081/bnetserver/login/".to_string(),
+            None,
+        );
         let server_task = tokio::spawn(async move { run(svc, server).await });
 
         // Send a Connect request frame.

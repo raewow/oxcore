@@ -24,6 +24,26 @@ pub struct LogSettings {
     pub log_file: Option<PathBuf>,
     /// Truncate the log file on start instead of appending.
     pub wipe: bool,
+    /// Extra per-component log files.
+    ///
+    /// The main `log_file` above is chosen from whichever server config the runtime found first
+    /// (in practice `world`), and its level filters *everything* — so a component that wants more
+    /// detail than the shared file carries, or its own file entirely, needs a layer of its own.
+    /// Without this a server's configured `log_file` is silently ignored whenever it runs inside
+    /// the unified runtime rather than standalone.
+    pub components: Vec<ComponentLogFile>,
+}
+
+/// One component's dedicated log file: everything logged under `target_prefix`, at its own level.
+#[derive(Clone)]
+pub struct ComponentLogFile {
+    pub path: PathBuf,
+    /// Numeric level (0=error .. 4=trace) for this file alone.
+    pub level: u8,
+    /// Crate-name prefix of the tracing target to capture, e.g. `oxcore_bnet`.
+    pub target_prefix: String,
+    /// Truncate on start instead of appending.
+    pub wipe: bool,
 }
 
 #[derive(Clone)]
@@ -113,22 +133,57 @@ pub fn install_tui_subscriber(store: Arc<LogStore>, settings: &LogSettings) -> R
     let control = LogControl::new(settings.console_level);
     let tui_layer = TuiLogLayer::new(store, control.shared_level());
 
-    if let Some(path) = &settings.log_file {
-        let file = open_log_file(path, settings.wipe)?;
-        let file_layer = fmt::layer()
-            .with_writer(file)
-            .with_ansi(false)
-            .with_target(false)
-            .with_filter(EnvFilter::new(level_str(settings.file_level)));
-        tracing_subscriber::registry()
-            .with(tui_layer)
-            .with(file_layer)
-            .init();
-    } else {
-        tracing_subscriber::registry().with(tui_layer).init();
-    }
+    tracing_subscriber::registry()
+        .with(tui_layer)
+        .with(file_layers(settings)?)
+        .init();
 
     Ok(control)
+}
+
+/// Build the shared log file layer (if configured) plus one layer per component file.
+///
+/// Returned as a boxed `Vec`, which is itself a `Layer`, so both subscribers compose the same set.
+fn file_layers<S>(settings: &LogSettings) -> Result<Vec<Box<dyn Layer<S> + Send + Sync>>>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    let mut layers: Vec<Box<dyn Layer<S> + Send + Sync>> = Vec::new();
+
+    if let Some(path) = &settings.log_file {
+        let file = open_log_file(path, settings.wipe)?;
+        layers.push(Box::new(
+            fmt::layer()
+                .with_writer(file)
+                .with_ansi(false)
+                .with_target(false)
+                .with_filter(EnvFilter::new(level_str(settings.file_level))),
+        ));
+    }
+
+    for component in &settings.components {
+        // Skip a component pointed at the shared file: it would double every line.
+        if settings.log_file.as_deref() == Some(component.path.as_path()) {
+            continue;
+        }
+        let file = open_log_file(&component.path, component.wipe)?;
+        // A lone `target=level` directive enables that target and nothing else, which is exactly
+        // the per-component split we want.
+        let filter = EnvFilter::new(format!(
+            "{}={}",
+            component.target_prefix,
+            level_str(component.level)
+        ));
+        layers.push(Box::new(
+            fmt::layer()
+                .with_writer(file)
+                .with_ansi(false)
+                .with_target(false)
+                .with_filter(filter),
+        ));
+    }
+
+    Ok(layers)
 }
 
 /// Install the headless subscriber: ANSI stderr output plus an optional file layer
@@ -142,20 +197,10 @@ pub fn install_headless_subscriber(settings: &LogSettings) -> Result<()> {
         .with_target(false)
         .with_filter(console_filter);
 
-    if let Some(path) = &settings.log_file {
-        let file = open_log_file(path, settings.wipe)?;
-        let file_layer = fmt::layer()
-            .with_writer(file)
-            .with_ansi(false)
-            .with_target(false)
-            .with_filter(EnvFilter::new(level_str(settings.file_level)));
-        tracing_subscriber::registry()
-            .with(console_layer)
-            .with(file_layer)
-            .init();
-    } else {
-        tracing_subscriber::registry().with(console_layer).init();
-    }
+    tracing_subscriber::registry()
+        .with(console_layer)
+        .with(file_layers(settings)?)
+        .init();
 
     Ok(())
 }

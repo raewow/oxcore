@@ -48,6 +48,8 @@ async fn main() -> Result<()> {
         file_level: config.log_file_level,
         log_file: Some(resolve_log_file(&config.logs_dir, &config.log_file)),
         wipe: false,
+        // Standalone: this process logs one server, which the shared file already covers.
+        components: Vec::new(),
     })?;
 
     info!("bnet server starting up...");

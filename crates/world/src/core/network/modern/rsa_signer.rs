@@ -3,14 +3,11 @@
 //! `SMSG_ENTER_ENCRYPTED_MODE` (and later `SMSG_CONNECT_TO`) carry an RSA signature the client
 //! verifies against a modulus **baked into the executable**. The server signs the pre-computed
 //! 32-byte hash and then **reverses the signature
-//! bytes** (the client's bignum representation is little-endian). Transcribed from HermesProxy's
-//! `ConnectTo`/`EnterEncryptedMode` (`RsaCrypt.RSA.SignHash(hash, SHA256, Pkcs1).Reverse()`).
+//! bytes** (the client's bignum representation is little-endian).
 //!
 //! The private key must match the client patch's GameCrypt modulus, or the client rejects
 //! encrypted mode.
 //!
-//! **Unverified against a live client**: the reversal and the modulus byte order are faithful to
-//! the reference but confirmed only by a real client.
 
 use anyhow::{Context, Result};
 use rsa::pkcs1::DecodeRsaPrivateKey;
@@ -31,19 +28,27 @@ impl RsaSigner {
     pub fn from_pkcs1_pem(pem: &str) -> Result<Self> {
         let key = RsaPrivateKey::from_pkcs1_pem(pem)
             .context("failed to parse world RSA signing key (PKCS#1 PEM)")?;
-        Ok(Self { key })
+        Ok(Self::new(key))
     }
 
     /// Wrap an already-loaded key.
-    pub fn new(key: RsaPrivateKey) -> Self {
+    ///
+    /// Precomputes the CRT values. `rsa` signs via the CRT path and returns `Error::Internal` if
+    /// they are absent, so a key built from components alone can fail on first use rather than at
+    /// construction.
+    pub fn new(mut key: RsaPrivateKey) -> Self {
+        if let Err(e) = key.precompute() {
+            // Non-fatal here: `sign` reports it per call rather than taking the process down at
+            // startup for a key that may never be used.
+            tracing::warn!("world RSA signing key precompute failed: {e}");
+        }
         Self { key }
     }
 
-    /// Construct the public Arctium/HermesProxy legacy signing key used by their 1.14.x client
-    /// patches. Its private parameters are published by HermesProxy's `RsaStore`.
+    /// Construct the fixed legacy signing key used by supported 1.14.x clients.
     pub fn arctium() -> Result<Self> {
         const P: &str = "F3B359686F5AF3F3286FA1A06380552C7255392CF315D372300FB82DF49BB7380E376452672783D09A43A30C17B2CC395CEC9451CB63D9C2CB765302A437DDCE4E05FCF11A925A03256A5AB289F7966BABD3FE4EAB74FDDFE7E735497877750EB358DC275C8643F05FAD3C914DC128671F0CBBD989E22B6E5642AE2DE1B9BD7D";
-        const Q: &str = "FABFF0401252EA40F240F8F593F48C0A55215A1C800F00E8774DE11D340773D065789CA35E6572FBFA5684DEDA10B86380B6DFA3F1A6DDA2898C2C52E2A066A942B002F1A8495BB1D41A3666371F17BB17F415C13A51531BE6CF542654A1A92C4F25CD83B1AC0357EB2A45969204E39E2B7A3FA7D219A0197DDEF1207131A0B";
+        const Q: &str = "FABFF0401252EA40F240F8F593F48C0A55215A1C800F00E8774DE11D340773D065789CA35E6572FBFA5684DEDA10B86380B6DFA3F1A6DDA2898C2C52E2A066A942B002F1A8495BB1D41A3666371F17BB17F415C13A51531BE6CF542654A1A92C4F25CD83B1AC0357EB2A459692042E39E2B7A3FA7D219A0197DDEF1207131A0B";
 
         let p = BigUint::parse_bytes(P.as_bytes(), 16).expect("Arctium RSA prime P is valid");
         let q = BigUint::parse_bytes(Q.as_bytes(), 16).expect("Arctium RSA prime Q is valid");
@@ -56,10 +61,16 @@ impl RsaSigner {
 impl EnterEncryptedModeSigner for RsaSigner {
     fn sign(&self, hash: &[u8; 32]) -> Vec<u8> {
         // PKCS#1 v1.5 signature over the pre-hashed 32 bytes (SHA-256 DigestInfo), then reversed.
-        let mut signature = self
-            .key
-            .sign(Pkcs1v15Sign::new::<Sha256>(), hash)
-            .expect("RSA signing over a fixed-size digest cannot fail");
+        // Never panic: this runs inside a per-connection task, where a panic kills the handshake
+        // with no log line at all (the default hook writes to stderr, which the TUI owns). An
+        // empty signature still fails the client's check, but leaves an ERROR behind explaining it.
+        let mut signature = match self.key.sign(Pkcs1v15Sign::new::<Sha256>(), hash) {
+            Ok(signature) => signature,
+            Err(e) => {
+                tracing::error!("world RSA signing failed: {e}");
+                return Vec::new();
+            }
+        };
         signature.reverse();
         signature
     }
@@ -109,6 +120,26 @@ mod tests {
         let signer = RsaSigner::from_pkcs1_pem(&pem).unwrap();
         let sig = signer.sign(&[1u8; 32]);
         assert_eq!(sig.len(), 256);
+    }
+
+    /// The fixed key must actually *sign*, not merely construct. It is built from its primes, so
+    /// without precomputed CRT values `rsa` fails every signature with `Error::Internal`.
+    #[test]
+    fn arctium_key_signs_and_the_signature_verifies() {
+        use rsa::pkcs1v15::Pkcs1v15Sign as VerifyScheme;
+        use rsa::RsaPublicKey;
+
+        let signer = RsaSigner::arctium().unwrap();
+        let hash = [0x5Au8; 32];
+
+        let signature = signer.sign(&hash);
+        assert_eq!(signature.len(), 256, "signing must not fall back to empty");
+
+        let mut big_endian = signature;
+        big_endian.reverse();
+        RsaPublicKey::from(&signer.key)
+            .verify(VerifyScheme::new::<Sha256>(), &hash, &big_endian)
+            .expect("the reversed signature must verify once un-reversed");
     }
 
     #[test]

@@ -140,13 +140,17 @@ pub struct Services {
     build_variant: (u32, u32, u32),
     /// Identifier returned by ConnectionService.Connect and carried in every following header.
     client_instance_id: Option<String>,
+    /// Overrides the realm's `realmlist.port` when telling a client where the world server is.
+    /// See `Config::world_port`.
+    world_port: Option<u16>,
 }
 
 impl Services {
-    pub fn new(db: Database, web_auth_url: String) -> Self {
+    pub fn new(db: Database, web_auth_url: String, world_port: Option<u16>) -> Self {
         Self {
             db,
             web_auth_url,
+            world_port,
             // Server-initiated callback tokens start at one.
             request_token: 1,
             account: None,
@@ -701,14 +705,16 @@ impl Services {
             .update_session_key(account.id, &hex::encode_upper(&session_key))
             .await?;
 
-        let server_addresses =
-            match realmlist::build_server_addresses(&realm.address, realm.port as u16) {
-                Ok(blob) => blob,
-                Err(e) => {
-                    warn!("failed to build server addresses: {e}");
-                    return Ok((ERROR_UTIL_SERVER_FAILED_TO_SERIALIZE_RESPONSE, Vec::new()));
-                }
-            };
+        let server_addresses = match realmlist::build_server_addresses(
+            &realm.address,
+            self.world_port.unwrap_or(realm.port as u16),
+        ) {
+            Ok(blob) => blob,
+            Err(e) => {
+                warn!("failed to build server addresses: {e}");
+                return Ok((ERROR_UTIL_SERVER_FAILED_TO_SERIALIZE_RESPONSE, Vec::new()));
+            }
+        };
         let (platform, arch, ty) = self.build_variant;
         let join_ticket =
             realmlist::build_join_ticket(&account.name, platform, arch, ty).unwrap_or_default();
@@ -827,7 +833,11 @@ mod tests {
     fn services() -> Services {
         let db =
             Database::connect_lazy("mysql://user:pass@127.0.0.1/oxcore_auth").expect("lazy pool");
-        Services::new(db, "https://localhost:8081/bnetserver/login/".to_string())
+        Services::new(
+            db,
+            "https://localhost:8081/bnetserver/login/".to_string(),
+            None,
+        )
     }
 
     fn frame(service_hash: u32, method_id: u32, token: u32, payload: Vec<u8>) -> Frame {

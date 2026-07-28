@@ -1,6 +1,6 @@
 //! The modern (1.14.x) world auth driver: runs the whole pre-gameplay handshake over one stream.
 //!
-//! Sequence (transcribed from HermesProxy's modern `WorldSocket`):
+//! Sequence:
 //!
 //! 1. server sends `"WORLD OF WARCRAFT CONNECTION - SERVER TO CLIENT - V2\n"`,
 //! 2. client replies `"…CLIENT TO SERVER - V2\n"`,
@@ -84,6 +84,11 @@ pub struct AuthedConnection {
     pub session_key40: [u8; 40],
 }
 
+/// How long to wait for the client's encrypted-mode ack before giving up. A client that dislikes
+/// the signature stalls silently instead of disconnecting, and an un-capped read leaves the
+/// connection task parked with no log line explaining why.
+const ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Run the handshake to completion over `stream`.
 pub async fn run_auth<S, P>(
     stream: &mut S,
@@ -123,21 +128,40 @@ where
         .session_key(&session.realm_join_ticket)
         .await?
         .with_context(|| format!("no session key for '{}'", session.realm_join_ticket))?;
-    let seed = auth_seeds::lookup(ctx.build, ctx.os)
-        .with_context(|| format!("no auth seed for build {} os '{}'", ctx.build, ctx.os))?;
+    // The build's own seed first, then the static fallback a patched client may have been made to
+    // use instead — the packet does not say which, so both are tried.
+    let seeds = auth_seeds::candidates(ctx.build, ctx.os);
+    let seed_refs: Vec<&[u8]> = seeds.iter().map(|s| s.as_slice()).collect();
 
     let keys = handshake
-        .verify_session(&session, &session_key, &seed)
+        .verify_session_any_seed(&session, &session_key, &seed_refs)
         .context("auth digest verification failed")?;
+    debug!("modern handshake: digest verified");
 
-    // 5. Enter encrypted mode.
-    stream
-        .write_all(&handshake.enter_encrypted_mode_frame(&keys, ctx.signer))
-        .await?;
+    // 5. Enter encrypted mode. Signing happens here, so a failure in the RSA signer surfaces
+    // between these two log lines rather than as an unexplained stall.
+    let eem = handshake.enter_encrypted_mode_frame(&keys, ctx.signer);
+    debug!(
+        bytes = eem.len(),
+        "modern handshake: signed enter-encrypted-mode"
+    );
+    stream.write_all(&eem).await?;
     stream.flush().await?;
+    debug!("modern handshake: sent enter-encrypted-mode, awaiting ack");
 
-    // 6. The ack is still plaintext (encryption turns on only afterwards).
-    let ack = read_plaintext(stream, &mut buf).await?;
+    // 6. The ack is still plaintext (encryption turns on only afterwards). A client that rejects
+    // the signature simply stops talking without closing, so cap the wait rather than parking the
+    // connection task forever with nothing in the log.
+    let ack = tokio::time::timeout(ACK_TIMEOUT, read_plaintext(stream, &mut buf))
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "timed out after {:?} waiting for CMSG_ENTER_ENCRYPTED_MODE_ACK — the client \
+                 usually goes silent here when it rejects the enter-encrypted-mode signature",
+                ACK_TIMEOUT
+            )
+        })??;
+    debug!("modern handshake: ack received");
     if ack.opcode != CMSG_ENTER_ENCRYPTED_MODE_ACK {
         bail!(
             "expected CMSG_ENTER_ENCRYPTED_MODE_ACK, got opcode 0x{:04X}",

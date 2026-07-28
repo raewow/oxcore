@@ -76,6 +76,7 @@ pub async fn serve_bnet(
     acceptor: TlsAcceptor,
     db: Database,
     web_auth_url: String,
+    world_port: Option<u16>,
     mut shutdown: broadcast::Receiver<()>,
 ) -> Result<()> {
     let listener = TcpListener::bind(addr)
@@ -100,7 +101,7 @@ pub async fn serve_bnet(
         };
 
         let acceptor = acceptor.clone();
-        let services = Services::new(db.clone(), web_auth_url.clone());
+        let services = Services::new(db.clone(), web_auth_url.clone(), world_port);
         tokio::spawn(async move {
             // Temporary diagnostic: peek the raw ClientHello (without consuming it) so we can see
             // the TLS extensions the client offers — ALPN in particular.

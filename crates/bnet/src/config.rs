@@ -25,6 +25,13 @@ pub struct Config {
     /// and must match a name in the certificate.
     #[serde(default = "default_external_hostname")]
     pub external_hostname: String,
+    /// Port advertised to a joining client instead of the realm's `realmlist.port`.
+    ///
+    /// Only modern clients ever reach realm-join, and they speak the 1.14 protocol on the world
+    /// server's *modern* listener — a different port from the vanilla one the `realmlist` row
+    /// carries for the legacy auth server. Leave unset when both listeners share a port.
+    #[serde(default)]
+    pub world_port: Option<u16>,
 
     // TLS
     #[serde(default = "default_cert_file")]

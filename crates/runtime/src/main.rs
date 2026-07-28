@@ -12,8 +12,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use oxcore_shared::config::{find_config_file, load_toml};
 use oxcore_tui::{
-    LoadUpdate, LogControl, LogSettings, LogSource, LogStore, MetricsSnapshot, MetricsSource,
-    Progress, ServerPane,
+    ComponentLogFile, LoadUpdate, LogControl, LogSettings, LogSource, LogStore, MetricsSnapshot,
+    MetricsSource, Progress, ServerPane,
 };
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
@@ -87,13 +87,20 @@ fn parse_args() -> Args {
 }
 
 /// Build TUI/headless log settings from the world config (preferred) or auth config.
+///
+/// The shared file and console levels come from one server's config, but each server additionally
+/// gets its own file at its own level — otherwise running inside this runtime silently discards
+/// whatever `log_file`/`log_file_level` the other servers configured.
 fn log_settings(root: &RootConfig) -> LogSettings {
+    let components = component_log_files(root);
+
     if let Some(w) = &root.world {
         return LogSettings {
             console_level: w.log_level,
             file_level: w.log_file_level,
             log_file: resolve_log_file(&w.logs_dir, &w.log_file),
             wipe: w.log_wipe_on_start,
+            components,
         };
     }
     if let Some(a) = &root.auth {
@@ -102,6 +109,7 @@ fn log_settings(root: &RootConfig) -> LogSettings {
             file_level: a.log_file_level,
             log_file: resolve_log_file(&a.logs_dir, &a.log_file),
             wipe: false,
+            components,
         };
     }
     if let Some(b) = &root.bnet {
@@ -110,6 +118,7 @@ fn log_settings(root: &RootConfig) -> LogSettings {
             file_level: b.log_file_level,
             log_file: resolve_log_file(&b.logs_dir, &b.log_file),
             wipe: false,
+            components,
         };
     }
     LogSettings {
@@ -117,7 +126,38 @@ fn log_settings(root: &RootConfig) -> LogSettings {
         file_level: 0,
         log_file: None,
         wipe: false,
+        components,
     }
+}
+
+/// One dedicated log file per configured server, keyed on its crate's tracing target.
+///
+/// The level used is the server's *console* level, not its file level: the point of these files is
+/// to be the copyable equivalent of what the TUI shows for that server, and the TUI is driven by
+/// the console level.
+fn component_log_files(root: &RootConfig) -> Vec<ComponentLogFile> {
+    let mut files = Vec::new();
+    if let Some(b) = &root.bnet {
+        if let Some(path) = resolve_log_file(&b.logs_dir, &b.log_file) {
+            files.push(ComponentLogFile {
+                path,
+                level: b.log_level,
+                target_prefix: "oxcore_bnet".to_string(),
+                wipe: true,
+            });
+        }
+    }
+    if let Some(a) = &root.auth {
+        if let Some(path) = resolve_log_file(&a.logs_dir, &a.log_file) {
+            files.push(ComponentLogFile {
+                path,
+                level: a.log_level,
+                target_prefix: "oxcore_auth".to_string(),
+                wipe: true,
+            });
+        }
+    }
+    files
 }
 
 fn resolve_log_file(logs_dir: &std::path::Path, log_file: &str) -> Option<PathBuf> {

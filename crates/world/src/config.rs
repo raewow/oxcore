@@ -28,11 +28,11 @@ pub struct Config {
     /// The client OS string selecting the auth seed: `Wn64`, `Mc64`, `MacA`.
     #[serde(default = "default_modern_world_os")]
     pub modern_world_os: String,
-    /// RSA key that signs `SMSG_ENTER_ENCRYPTED_MODE`; used when the Arctium key is disabled.
+    /// RSA key that signs `SMSG_ENTER_ENCRYPTED_MODE`; used when the fixed legacy key is disabled.
     /// Produced by `bnet gen-certs` as `world.signing.key.pem`.
     #[serde(default = "default_modern_world_signing_key")]
     pub modern_world_signing_key: std::path::PathBuf,
-    /// Use the fixed legacy signing key expected by an Arctium-patched 1.14.x client.
+    /// Use the fixed legacy signing key expected by supported 1.14.x clients.
     #[serde(default)]
     pub modern_world_use_arctium_key: bool,
 

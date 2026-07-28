@@ -16,7 +16,9 @@ pub mod ui;
 
 pub use app::ServerPane;
 pub use log_layer::{LogFilter, LogRecord, LogSource, LogStore, TuiLogLayer};
-pub use logging::{install_headless_subscriber, install_tui_subscriber, LogControl, LogSettings};
+pub use logging::{
+    install_headless_subscriber, install_tui_subscriber, ComponentLogFile, LogControl, LogSettings,
+};
 pub use metrics::{MetricsSnapshot, MetricsSource};
 pub use progress::{Progress, ProgressSnapshot};
 pub use runner::{run_tui_loading, LoadUpdate};

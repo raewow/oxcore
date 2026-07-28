@@ -75,13 +75,30 @@ impl HandshakeServer {
         session_key: &[u8],
         seed: &[u8],
     ) -> Option<DerivedKeys> {
-        if !verify_digest(
-            session_key,
-            seed,
-            &session.local_challenge,
-            &self.server_challenge,
-            &session.digest,
-        ) {
+        self.verify_session_any_seed(session, session_key, std::slice::from_ref(&seed))
+    }
+
+    /// Verify against each candidate seed in turn, taking the first that matches.
+    ///
+    /// A patched client can use a fixed seed instead of its build seed, and the server cannot tell
+    /// which from the packet alone.
+    pub fn verify_session_any_seed(
+        &self,
+        session: &AuthSession,
+        session_key: &[u8],
+        seeds: &[&[u8]],
+    ) -> Option<DerivedKeys> {
+        let matched = seeds.iter().any(|seed| {
+            verify_digest(
+                session_key,
+                seed,
+                &session.local_challenge,
+                &self.server_challenge,
+                &session.digest,
+            )
+        });
+        if !matched {
+            self.log_digest_mismatch(session, session_key, seeds);
             return None;
         }
         Some(derive_keys(
@@ -89,6 +106,37 @@ impl HandshakeServer {
             &self.server_challenge,
             &session.local_challenge,
         ))
+    }
+
+    /// Dump every input to the digest so a mismatch can be reproduced offline. Nothing here is
+    /// usable without the account's session key, which is already in the log line — this is a
+    /// bring-up diagnostic and should not survive into a public deployment.
+    fn log_digest_mismatch(&self, session: &AuthSession, session_key: &[u8], seeds: &[&[u8]]) {
+        tracing::debug!(
+            session_key = %hex::encode_upper(session_key),
+            session_key_len = session_key.len(),
+            local_challenge = %hex::encode_upper(session.local_challenge),
+            server_challenge = %hex::encode_upper(self.server_challenge),
+            client_digest = %hex::encode_upper(session.digest),
+            seeds = %seeds
+                .iter()
+                .map(|s| hex::encode_upper(s))
+                .collect::<Vec<_>>()
+                .join(","),
+            expected = %seeds
+                .iter()
+                .map(|s| hex::encode_upper(
+                    &super::auth_crypto::expected_digest(
+                        session_key,
+                        s,
+                        &session.local_challenge,
+                        &self.server_challenge,
+                    )[..24]
+                ))
+                .collect::<Vec<_>>()
+                .join(","),
+            "modern auth digest mismatch"
+        );
     }
 
     /// The `SMSG_ENTER_ENCRYPTED_MODE` frame to send after a successful verify (plaintext-framed;
