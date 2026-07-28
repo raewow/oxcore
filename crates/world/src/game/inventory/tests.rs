@@ -736,7 +736,7 @@ mod integration_tests {
 
         // Expect money update packet to be sent to player
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(1)
             .returning(|_, _| ());
 
@@ -772,7 +772,7 @@ mod integration_tests {
 
         // Expect money update packet to be sent to player
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(1)
             .returning(|_, _| ());
 
@@ -921,7 +921,7 @@ mod integration_tests {
 
         // Expect money update packet to be sent to player
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(1)
             .returning(|_, _| ());
 
@@ -979,7 +979,7 @@ mod integration_tests {
         make_standard_load_expectations(&mut mock_repo);
         // Two slot updates move the item to buyback, and two move it back.
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(4)
             .returning(|_, _| ());
 
@@ -1398,7 +1398,7 @@ mod integration_tests {
 
         // remove_item sends two packets: SmsgDestroyItem + slot update
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(2)
             .returning(|_, _| ());
 
@@ -1460,7 +1460,7 @@ mod integration_tests {
         // remove_item defers DB writes to the pending-ops queue (no direct repo calls).
         // It sends a variable number of slot/destroy packets, so allow any count.
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(0..)
             .returning(|_, _| ());
 
@@ -1581,7 +1581,7 @@ mod integration_tests {
             .times(1)
             .returning(|_, _| Ok(()));
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(0..)
             .returning(|_, _| ());
 
@@ -1649,7 +1649,7 @@ mod integration_tests {
         make_standard_load_expectations(&mut mock_repo);
         // No update_item_charges expectation: a destroyed item must not persist charges.
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(0..)
             .returning(|_, _| ());
 
@@ -1699,7 +1699,7 @@ mod integration_tests {
             .times(1)
             .returning(|_, _| Ok(()));
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(0..)
             .returning(|_, _| ());
 

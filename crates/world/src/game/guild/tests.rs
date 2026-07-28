@@ -703,8 +703,12 @@ mod integration_tests {
 
         // Expect 3 packets sent to leader: command result, guild query response, guild roster
         mock_broadcaster
+            .expect_send_msg_to_player_ref()
+            .times(1)
+            .returning(|_, _| ());
+        mock_broadcaster
             .expect_send_to_player()
-            .times(3)
+            .times(2)
             .returning(|_, _| ());
 
         let system = create_test_system(mock_repo, mock_broadcaster);
@@ -729,7 +733,7 @@ mod integration_tests {
 
         // Should send error packet
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(1)
             .returning(|_, _| ());
 
@@ -759,7 +763,7 @@ mod integration_tests {
 
         // Should send error packet
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(1)
             .returning(|_, _| ());
 
@@ -816,8 +820,12 @@ mod integration_tests {
 
         // Verify 3 packets sent: command result, guild query response, guild roster
         mock_broadcaster
+            .expect_send_msg_to_player_ref()
+            .times(1)
+            .returning(|_, _| ());
+        mock_broadcaster
             .expect_send_to_player()
-            .times(3)
+            .times(2)
             .returning(|_, _| ());
 
         let system = create_test_system(mock_repo, mock_broadcaster);
@@ -857,6 +865,9 @@ mod integration_tests {
         mock_repo1.expect_exists_by_name().returning(|_| Ok(false));
         mock_repo1.expect_create().returning(|_, _, _, _| Ok(()));
         mock_broadcaster1
+            .expect_send_msg_to_player_ref()
+            .returning(|_, _| ());
+        mock_broadcaster1
             .expect_send_to_player()
             .returning(|_, _| ());
 
@@ -888,10 +899,10 @@ mod integration_tests {
 
         // Verify SMSG_GUILD_COMMAND_RESULT packet sent (plus query response and roster)
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(1)
-            .withf(|_player_guid, packet: &WorldPacket| {
-                packet.opcode() == Opcode::SMSG_GUILD_COMMAND_RESULT
+            .withf(|_player_guid, msg| {
+                msg.to_vanilla().opcode() == Opcode::SMSG_GUILD_COMMAND_RESULT
             })
             .returning(|_, _| ());
 
@@ -924,10 +935,10 @@ mod integration_tests {
 
         // Verify error packet with correct opcode
         mock_broadcaster
-            .expect_send_to_player()
+            .expect_send_msg_to_player_ref()
             .times(1)
-            .withf(|_player_guid, packet: &WorldPacket| {
-                packet.opcode() == Opcode::SMSG_GUILD_COMMAND_RESULT
+            .withf(|_player_guid, msg| {
+                msg.to_vanilla().opcode() == Opcode::SMSG_GUILD_COMMAND_RESULT
             })
             .returning(|_, _| ());
 

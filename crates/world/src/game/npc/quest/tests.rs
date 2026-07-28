@@ -193,7 +193,9 @@ fn create_test_setup() -> TestQuestSetup {
     let experience = Arc::new(ExperienceSystem::new(broadcast_mgr, player_mgr.clone()));
 
     let mut mock_broadcaster = MockBroadcastManagerTrait::new();
-    mock_broadcaster.expect_send_to_player().return_const(());
+    mock_broadcaster
+        .expect_send_msg_to_player_ref()
+        .return_const(());
     let mock_quest_repo = MockQuestRepositoryTrait::new();
 
     let quest_system = QuestSystem::new(
