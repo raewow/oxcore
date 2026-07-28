@@ -397,7 +397,7 @@ impl<'a> SmsgChannelNotify<'a> {
 }
 
 impl ToWorldPacket for SmsgChannelNotify<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHANNEL_NOTIFY);
 
         // Write notify type
@@ -516,7 +516,7 @@ pub struct SmsgChannelList<'a> {
 }
 
 impl ToWorldPacket for SmsgChannelList<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHANNEL_LIST);
 
         // Write channel name
@@ -545,21 +545,21 @@ mod tests {
     #[test]
     fn test_smsg_channel_notify_you_joined() {
         let msg = SmsgChannelNotify::you_joined("General", 0x10);
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_CHANNEL_NOTIFY);
     }
 
     #[test]
     fn test_smsg_channel_notify_you_left() {
         let msg = SmsgChannelNotify::you_left("General");
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_CHANNEL_NOTIFY);
     }
 
     #[test]
     fn test_smsg_channel_notify_player_joined() {
         let msg = SmsgChannelNotify::player_joined("General", ObjectGuid::from_low(1));
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_CHANNEL_NOTIFY);
     }
 
@@ -568,14 +568,14 @@ mod tests {
         let kicked = ObjectGuid::from_low(2);
         let kicker = ObjectGuid::from_low(1);
         let msg = SmsgChannelNotify::player_kicked("MyChannel", kicked, kicker);
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_CHANNEL_NOTIFY);
     }
 
     #[test]
     fn test_smsg_channel_notify_mode_change() {
         let msg = SmsgChannelNotify::mode_change("MyChannel", ObjectGuid::from_low(1), 0x00, 0x04);
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_CHANNEL_NOTIFY);
     }
 
@@ -596,7 +596,7 @@ mod tests {
             channel_flags: 0x10,
             members: &members,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_CHANNEL_LIST);
     }
 }

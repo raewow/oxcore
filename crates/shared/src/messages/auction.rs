@@ -31,7 +31,7 @@ pub struct MsgAuctionHello {
 }
 
 impl ToWorldPacket for MsgAuctionHello {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::MSG_AUCTION_HELLO);
         packet.write_u64(self.auctioneer_guid.raw());
         packet.write_u32(self.house_id);
@@ -110,7 +110,7 @@ impl SmsgAuctionCommandResult {
 }
 
 impl ToWorldPacket for SmsgAuctionCommandResult {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::with_capacity(Opcode::SMSG_AUCTION_COMMAND_RESULT, 16);
         packet.write_u32(self.auction_id());
         packet.write_u32(self.action() as u32);
@@ -154,7 +154,7 @@ pub struct SmsgAuctionListResult<'a> {
 }
 
 impl ToWorldPacket for SmsgAuctionListResult<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AUCTION_LIST_RESULT);
         let count = self.auctions.len().min(50) as u32;
         packet.write_u32(count);
@@ -180,7 +180,7 @@ pub struct SmsgAuctionOwnerListResult<'a> {
 }
 
 impl ToWorldPacket for SmsgAuctionOwnerListResult<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AUCTION_OWNER_LIST_RESULT);
         let count = self.auctions.len().min(50) as u32;
         packet.write_u32(count);
@@ -206,7 +206,7 @@ pub struct SmsgAuctionBidderListResult<'a> {
 }
 
 impl ToWorldPacket for SmsgAuctionBidderListResult<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AUCTION_BIDDER_LIST_RESULT);
         let count = self.auctions.len().min(50) as u32;
         packet.write_u32(count);
@@ -242,7 +242,7 @@ pub struct SmsgAuctionBidderNotification {
 }
 
 impl ToWorldPacket for SmsgAuctionBidderNotification {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AUCTION_BIDDER_NOTIFICATION);
         packet.write_u32(self.house_id);
         packet.write_u32(self.auction_id);
@@ -277,7 +277,7 @@ pub struct SmsgAuctionOwnerNotification {
 }
 
 impl ToWorldPacket for SmsgAuctionOwnerNotification {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AUCTION_OWNER_NOTIFICATION);
         packet.write_u32(self.auction_id);
         packet.write_u32(self.bid);
@@ -301,7 +301,7 @@ pub struct SmsgAuctionRemovedNotification {
 }
 
 impl ToWorldPacket for SmsgAuctionRemovedNotification {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AUCTION_REMOVED_NOTIFICATION);
         packet.write_u32(self.auction_id);
         packet.write_u32(self.item_template);
@@ -351,7 +351,7 @@ mod tests {
             auctioneer_guid: ObjectGuid::from_low(123),
             house_id: 0,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::MSG_AUCTION_HELLO);
         assert_eq!(packet.data().len(), 12);
         assert_eq!(
@@ -370,7 +370,7 @@ mod tests {
             auction_id: 123,
             action: AuctionAction::Started,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
         assert_eq!(packet.data().len(), 12); // 3 * u32
         assert_eq!(
@@ -393,7 +393,7 @@ mod tests {
             auction_id: 123,
             outbid: 100,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
         assert_eq!(packet.data().len(), 16); // 4 * u32
         assert_eq!(
@@ -421,7 +421,7 @@ mod tests {
             action: AuctionAction::Started,
             inventory_error: crate::game::InventoryResult::BagFull,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
         assert_eq!(packet.data().len(), 16); // 4 * u32
         assert_eq!(
@@ -452,7 +452,7 @@ mod tests {
             bid: 1000,
             outbid: 50,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
         assert_eq!(packet.data().len(), 28); // 3 * u32 + u64 + 2 * u32
         assert_eq!(
@@ -488,7 +488,7 @@ mod tests {
             action: AuctionAction::Started,
             error: AuctionError::NotEnoughMoney,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_COMMAND_RESULT);
         assert_eq!(packet.data().len(), 12); // 3 * u32
         assert_eq!(
@@ -516,7 +516,7 @@ mod tests {
             item_template: 789,
             item_random_property_id: 0,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_BIDDER_NOTIFICATION);
     }
 
@@ -530,7 +530,7 @@ mod tests {
             item_template: 789,
             item_random_property_id: 0,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_OWNER_NOTIFICATION);
     }
 
@@ -544,7 +544,7 @@ mod tests {
             item_template: 789,
             item_random_property_id: 0,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_OWNER_NOTIFICATION);
     }
 
@@ -555,7 +555,7 @@ mod tests {
             item_template: 123,
             item_random_property_id: 45,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_AUCTION_REMOVED_NOTIFICATION);
         assert_eq!(
             u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),

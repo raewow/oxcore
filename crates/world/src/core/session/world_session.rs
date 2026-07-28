@@ -195,7 +195,7 @@ impl WorldSession {
     /// Send a message struct to the client
     /// Note: This is now synchronous (unbounded channel send never blocks)
     pub fn send_msg(&self, msg: impl ToWorldPacket) -> anyhow::Result<()> {
-        let packet_data: WorldPacket = msg.to_world_packet();
+        let packet_data: WorldPacket = msg.to_vanilla();
         let mut packet = WorldPacket::new(packet_data.opcode());
         packet.write_bytes(packet_data.contents());
         self.send_packet(packet)

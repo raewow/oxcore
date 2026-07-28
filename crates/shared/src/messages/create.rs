@@ -17,19 +17,19 @@
 //! let guid = ObjectGuid::from_raw(0x0000000000000004);
 //! let pos = Position::new(100.0, 200.0, 300.0, 1.5);
 //! let packet = SmsgCreateObject::for_creature(guid, pos)
-//!     .to_world_packet();
+//!     .to_vanilla();
 //!
 //! // Player with self flag
 //! let packet = SmsgCreateObject::for_player(guid, pos)
 //!     .for_self()
-//!     .to_world_packet();
+//!     .to_vanilla();
 //!
 //! // Item with stack count
 //! use oxcore_shared::protocol::update_fields::ITEM_FIELD_STACK_COUNT;
 //! let item_guid = ObjectGuid::from_raw(0x0000000000000005);
 //! let packet = SmsgCreateObject::for_item(item_guid, 25)
 //!     .set_field(ITEM_FIELD_STACK_COUNT, 5)
-//!     .to_world_packet();
+//!     .to_vanilla();
 //! ```
 
 use crate::messages::update::{CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData};
@@ -57,7 +57,7 @@ pub use crate::messages::update::MovementBlockData;
 /// return an `SmsgUpdateObject` for further chaining or packet generation.
 ///
 /// Methods that return `SmsgUpdateObject` can be chained with more `.add_block()` calls
-/// to create multi-block packets, or directly converted to a packet via `.to_world_packet()`.
+/// to create multi-block packets, or directly converted to a packet via `.to_vanilla()`.
 #[derive(Debug, Clone)]
 pub struct SmsgCreateObject {
     pub guid: crate::protocol::guid::ObjectGuid,
@@ -258,7 +258,7 @@ impl SmsgCreateObject {
     /// Set a single u32 field.
     ///
     /// This returns an `SmsgUpdateObject` which can be further configured
-    /// or converted to a packet via `.to_world_packet()`.
+    /// or converted to a packet via `.to_vanilla()`.
     pub fn set_field(self, index: u32, value: u32) -> SmsgUpdateObject {
         SmsgUpdateObject::new().add_block(UpdateBlockData::CreateObject(
             CreateObjectBlock::new(self.guid, self.type_id, self.object_type)
@@ -299,14 +299,14 @@ impl SmsgCreateObject {
 // =====================================================================
 
 impl ToWorldPacket for SmsgCreateObject {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         SmsgUpdateObject::new()
             .add_block(UpdateBlockData::CreateObject(CreateObjectBlock::new(
                 self.guid,
                 self.type_id,
                 self.object_type,
             )))
-            .to_world_packet()
+            .to_vanilla()
     }
 }
 
@@ -330,10 +330,10 @@ impl SmsgOutOfRange {
 }
 
 impl ToWorldPacket for SmsgOutOfRange {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         SmsgUpdateObject::new()
             .add_block(UpdateBlockData::OutOfRange(self.guids.clone()))
-            .to_world_packet()
+            .to_vanilla()
     }
 }
 
@@ -352,7 +352,7 @@ mod tests {
     fn test_create_player_simple() {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
         let pos = Position::new(100.0, 200.0, 300.0, 1.5);
-        let packet = SmsgCreateObject::for_player(guid, pos).to_world_packet();
+        let packet = SmsgCreateObject::for_player(guid, pos).to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -362,7 +362,7 @@ mod tests {
         let pos = Position::new(100.0, 200.0, 300.0, 1.5);
         let packet = SmsgCreateObject::for_creature(guid, pos)
             .set_field(UNIT_FIELD_HEALTH, 100)
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -370,7 +370,7 @@ mod tests {
     fn test_create_gameobject() {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
         let pos = Position::new(100.0, 200.0, 300.0, 1.5);
-        let packet = SmsgCreateObject::for_gameobject(guid, pos).to_world_packet();
+        let packet = SmsgCreateObject::for_gameobject(guid, pos).to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -379,14 +379,14 @@ mod tests {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
         let packet = SmsgCreateObject::for_item(guid, 25)
             .set_field(ITEM_FIELD_STACK_COUNT, 5)
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
     #[test]
     fn test_create_container() {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
-        let packet = SmsgCreateObject::for_container(guid, 15).to_world_packet();
+        let packet = SmsgCreateObject::for_container(guid, 15).to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -394,7 +394,7 @@ mod tests {
     fn test_create_dynamic_object() {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
         let pos = Position::new(100.0, 200.0, 300.0, 1.5);
-        let packet = SmsgCreateObject::for_dynamic_object(guid, pos).to_world_packet();
+        let packet = SmsgCreateObject::for_dynamic_object(guid, pos).to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -402,7 +402,7 @@ mod tests {
     fn test_create_corpse() {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
         let pos = Position::new(100.0, 200.0, 300.0, 1.5);
-        let packet = SmsgCreateObject::for_corpse(guid, pos).to_world_packet();
+        let packet = SmsgCreateObject::for_corpse(guid, pos).to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -412,7 +412,7 @@ mod tests {
         let pos = Position::new(100.0, 200.0, 300.0, 1.5);
         let packet = SmsgCreateObject::for_player(guid, pos)
             .for_self()
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -422,7 +422,7 @@ mod tests {
         let pos = Position::new(100.0, 200.0, 300.0, 1.5);
         let packet = SmsgCreateObject::for_player(guid, pos)
             .create_object2()
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -432,7 +432,7 @@ mod tests {
         let pos = Position::new(100.0, 200.0, 300.0, 1.5);
         let packet = SmsgCreateObject::for_creature_only(guid)
             .with_movement(pos, 0)
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -450,7 +450,7 @@ mod tests {
         };
         let packet = SmsgCreateObject::for_creature_only(guid)
             .with_movement_and_speeds(pos, 0, speeds)
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -460,7 +460,7 @@ mod tests {
         let pos = Position::new(100.0, 200.0, 300.0, 1.5);
         let packet = SmsgCreateObject::for_creature_only(guid)
             .with_movement_and_default_speeds(pos, 0)
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -470,7 +470,7 @@ mod tests {
         let target_guid = ObjectGuid::from_raw(0x0000000000000005);
         let packet = SmsgCreateObject::for_player_only(guid)
             .set_guid_field(UNIT_FIELD_HEALTH, target_guid)
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -479,7 +479,7 @@ mod tests {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
         let packet = SmsgCreateObject::for_player_only(guid)
             .set_float_field(UNIT_FIELD_HEALTH, 100.5)
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -488,7 +488,7 @@ mod tests {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
         let packet = SmsgCreateObject::for_player_only(guid)
             .set_field(UNIT_FIELD_HEALTH, 0)
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -497,7 +497,7 @@ mod tests {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
         let packet = SmsgCreateObject::for_player_only(guid)
             .set_fields(vec![(UNIT_FIELD_HEALTH, 100), (UNIT_FIELD_HEALTH + 1, 100)])
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -513,7 +513,7 @@ mod tests {
             .for_self()
             .set_field(UNIT_FIELD_HEALTH, 100)
             .set_field(UNIT_FIELD_HEALTH + 1, 100)
-            .to_world_packet();
+            .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
     */
@@ -522,16 +522,16 @@ mod tests {
     fn test_generic_constructor() {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
         let packet =
-            SmsgCreateObject::new(guid, ObjectTypeId::Player, ObjectType::Player).to_world_packet();
+            SmsgCreateObject::new(guid, ObjectTypeId::Player, ObjectType::Player).to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
     #[test]
     fn test_convenience_constructors_without_position() {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
-        let player_packet = SmsgCreateObject::for_player_only(guid).to_world_packet();
-        let creature_packet = SmsgCreateObject::for_creature_only(guid).to_world_packet();
-        let go_packet = SmsgCreateObject::for_gameobject_only(guid).to_world_packet();
+        let player_packet = SmsgCreateObject::for_player_only(guid).to_vanilla();
+        let creature_packet = SmsgCreateObject::for_creature_only(guid).to_vanilla();
+        let go_packet = SmsgCreateObject::for_gameobject_only(guid).to_vanilla();
 
         assert_eq!(player_packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
         assert_eq!(creature_packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);

@@ -23,8 +23,8 @@ pub struct SmsgSpellStart {
     pub ammo_inventory_type: u32,
 }
 
-impl SmsgSpellStart {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgSpellStart {
+    fn to_vanilla(&self) -> WorldPacket {
         const CAST_FLAG_AMMO: u16 = 0x0020;
 
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_START);
@@ -91,8 +91,8 @@ const SPELL_MISS_REFLECT: u8 = 11;
 // the caster. The client uses this to track which item was used.
 const CAST_FLAG_ITEM_CAST: u16 = 0x0040;
 
-impl SmsgSpellGo {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgSpellGo {
+    fn to_vanilla(&self) -> WorldPacket {
         const CAST_FLAG_AMMO: u16 = 0x0020;
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_GO);
         // First packed GUID: item GUID if cast from an item, else caster GUID
@@ -146,8 +146,8 @@ pub struct SmsgPlaySpellVisual {
     pub spell_visual_kit_id: u32,
 }
 
-impl SmsgPlaySpellVisual {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgPlaySpellVisual {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_PLAY_SPELL_VISUAL);
         packet.write_u64(self.caster_guid.raw());
         packet.write_u32(self.spell_visual_kit_id);
@@ -216,7 +216,7 @@ mod spell_packet_tests {
             ammo_display_id: 0,
             ammo_inventory_type: 0,
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let mut data = pkt.data().clone();
 
         let first_guid = read_packed_guid(&mut data);
@@ -259,7 +259,7 @@ mod spell_packet_tests {
             ammo_display_id: 0,
             ammo_inventory_type: 0,
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let mut data = pkt.data().clone();
 
         let first_guid = read_packed_guid(&mut data);
@@ -308,7 +308,7 @@ mod spell_packet_tests {
             ammo_display_id: 0,
             ammo_inventory_type: 0,
         };
-        let mut data = msg.to_world_packet().data().clone();
+        let mut data = msg.to_vanilla().data().clone();
 
         let _ = read_packed_guid(&mut data);
         let _ = read_packed_guid(&mut data);
@@ -357,7 +357,7 @@ mod spell_packet_tests {
             ammo_display_id: 0,
             ammo_inventory_type: 0,
         };
-        let mut data = msg.to_world_packet().data().clone();
+        let mut data = msg.to_vanilla().data().clone();
 
         let _ = read_packed_guid(&mut data);
         let _ = read_packed_guid(&mut data);
@@ -393,8 +393,8 @@ mod spell_packet_tests {
             ammo_inventory_type: 26,
         };
 
-        let without_ammo = go(0x0002).to_world_packet();
-        let with_ammo = go(0x0022).to_world_packet();
+        let without_ammo = go(0x0002).to_vanilla();
+        let with_ammo = go(0x0022).to_vanilla();
 
         assert_eq!(with_ammo.data().len(), without_ammo.data().len() + 8);
     }
@@ -416,7 +416,7 @@ mod spell_packet_tests {
             ammo_display_id: 0,
             ammo_inventory_type: 0,
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let mut data = pkt.data().clone();
 
         let first_guid = read_packed_guid(&mut data);
@@ -443,7 +443,7 @@ mod spell_packet_tests {
             ammo_display_id: 0,
             ammo_inventory_type: 0,
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let mut data = pkt.data().clone();
 
         let first_guid = read_packed_guid(&mut data);
@@ -469,8 +469,8 @@ mod spell_packet_tests {
             ammo_inventory_type: 26,
         };
 
-        let without_ammo = start(0x0002).to_world_packet();
-        let with_ammo = start(0x0022).to_world_packet();
+        let without_ammo = start(0x0002).to_vanilla();
+        let with_ammo = start(0x0022).to_vanilla();
 
         assert_eq!(with_ammo.data().len(), without_ammo.data().len() + 8);
     }
@@ -482,7 +482,7 @@ mod spell_packet_tests {
             caster_guid: caster,
             spell_id: 8690,
         }
-        .to_world_packet();
+        .to_vanilla();
 
         assert_eq!(packet.opcode(), Opcode::SMSG_SPELL_FAILED_OTHER);
         let mut data = packet.data().clone();
@@ -499,7 +499,7 @@ mod spell_packet_tests {
             spell_id: 8690,
             result: 0x23,
         }
-        .to_world_packet();
+        .to_vanilla();
 
         assert_eq!(packet.opcode(), Opcode::SMSG_SPELL_FAILURE);
         let mut data = packet.data().clone();
@@ -511,7 +511,7 @@ mod spell_packet_tests {
 
     #[test]
     fn test_channel_update_contains_remaining_duration() {
-        let packet = MsgChannelUpdate { remaining_ms: 1200 }.to_world_packet();
+        let packet = MsgChannelUpdate { remaining_ms: 1200 }.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::MSG_CHANNEL_UPDATE);
         let mut data = packet.data().clone();
         assert_eq!(data.get_u32_le(), 1200);
@@ -543,8 +543,8 @@ pub struct SmsgSpellFailure {
     pub result: u8,
 }
 
-impl SmsgSpellFailure {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgSpellFailure {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_FAILURE);
         packet.write_guid(self.caster_guid);
         packet.write_u32(self.spell_id);
@@ -566,17 +566,11 @@ pub struct MsgChannelUpdate {
     pub remaining_ms: u32,
 }
 
-impl MsgChannelUpdate {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for MsgChannelUpdate {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::MSG_CHANNEL_UPDATE);
         packet.write_u32(self.remaining_ms);
         packet
-    }
-}
-
-impl ToWorldPacket for MsgChannelUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
-        MsgChannelUpdate::to_world_packet(self)
     }
 }
 
@@ -587,8 +581,8 @@ pub struct SmsgSpellUpdateChainTargets {
     pub targets: Vec<ObjectGuid>,
 }
 
-impl SmsgSpellUpdateChainTargets {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgSpellUpdateChainTargets {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_UPDATE_CHAIN_TARGETS);
         packet.write_guid(self.caster_guid);
         packet.write_u32(self.spell_id);
@@ -600,8 +594,8 @@ impl SmsgSpellUpdateChainTargets {
     }
 }
 
-impl SmsgSpellFailedOther {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgSpellFailedOther {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_FAILED_OTHER);
         packet.write_guid(self.caster_guid);
         packet.write_u32(self.spell_id);
@@ -665,8 +659,8 @@ pub struct SmsgSpellCooldown {
     pub cooldowns: Vec<(u32, u32)>, // (spell_id, cooldown_ms)
 }
 
-impl SmsgSpellCooldown {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgSpellCooldown {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_COOLDOWN);
         packet.write_packed_guid(self.caster_guid);
         for (spell_id, cooldown_ms) in &self.cooldowns {
@@ -692,8 +686,8 @@ pub struct SmsgInitialSpells {
     pub cooldowns: Vec<InitialSpellCooldown>,
 }
 
-impl SmsgInitialSpells {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgInitialSpells {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INITIAL_SPELLS);
         packet.write_u8(self.cast_count);
         packet.write_u16(self.spells.len() as u16);
@@ -726,8 +720,8 @@ pub struct SmsgLearnedSpell {
     pub spell_id: u32,
 }
 
-impl SmsgLearnedSpell {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgLearnedSpell {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LEARNED_SPELL);
         packet.write_u32(self.spell_id);
         packet.write_u16(0); // unknown
@@ -740,8 +734,8 @@ pub struct SmsgRemovedSpell {
     pub spell_id: u32,
 }
 
-impl SmsgRemovedSpell {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgRemovedSpell {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_REMOVED_SPELL);
         packet.write_u32(self.spell_id);
         packet
@@ -754,8 +748,8 @@ pub struct SmsgClearCooldown {
     pub caster_guid: ObjectGuid,
 }
 
-impl SmsgClearCooldown {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgClearCooldown {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CLEAR_COOLDOWN);
         packet.write_u32(self.spell_id);
         packet.write_guid(self.caster_guid);
@@ -770,8 +764,8 @@ pub struct SmsgSpellDelayed {
     pub delay_ms: u32,
 }
 
-impl SmsgSpellDelayed {
-    pub fn to_world_packet(&self) -> WorldPacket {
+impl ToWorldPacket for SmsgSpellDelayed {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_DELAYED);
         packet.write_guid(self.caster_guid);
         packet.write_u32(self.delay_ms);

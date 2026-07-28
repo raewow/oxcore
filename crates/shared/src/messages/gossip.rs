@@ -62,7 +62,7 @@ pub struct SmsgGossipMessage {
 }
 
 impl ToWorldPacket for SmsgGossipMessage {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GOSSIP_MESSAGE);
 
         // Write source GUID (unpacked, fixed 8 bytes — Vanilla 1.12.1 protocol)
@@ -101,7 +101,7 @@ impl ToWorldPacket for SmsgGossipMessage {
 pub struct SmsgGossipComplete;
 
 impl ToWorldPacket for SmsgGossipComplete {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_GOSSIP_COMPLETE)
     }
 }
@@ -116,7 +116,7 @@ pub struct SmsgShowBank {
 }
 
 impl ToWorldPacket for SmsgShowBank {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SHOW_BANK);
         packet.write_guid(self.banker_guid);
         packet
@@ -145,7 +145,7 @@ pub struct SmsgGossipPoi {
 }
 
 impl ToWorldPacket for SmsgGossipPoi {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GOSSIP_POI);
         packet.write_u32(self.poi_id);
         packet.write_f32(self.x);
@@ -206,7 +206,7 @@ pub struct SmsgNpcTextUpdate {
 }
 
 impl ToWorldPacket for SmsgNpcTextUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_NPC_TEXT_UPDATE);
         packet.write_u32(self.text_id);
 
@@ -282,7 +282,7 @@ mod tests {
             options: vec![],
             quests: vec![],
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let data = pkt.data();
 
         assert_eq!(
@@ -303,7 +303,7 @@ mod tests {
             options: vec![],
             quests: vec![],
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let data = pkt.data();
 
         let after_guid = read_u32_le(data, 8);
@@ -330,7 +330,7 @@ mod tests {
             }],
             quests: vec![],
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let data = pkt.data();
 
         let mut pos = 0;
@@ -358,7 +358,7 @@ mod tests {
     fn smsg_show_bank_writes_raw_banker_guid() {
         let guid = ObjectGuid::from_raw(0xF130_0000_0998_0001);
         let msg = SmsgShowBank { banker_guid: guid };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let data = pkt.data();
 
         assert_eq!(pkt.opcode(), Opcode::SMSG_SHOW_BANK);
@@ -388,7 +388,7 @@ mod tests {
             text_id: 538,
             options,
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let data = pkt.data();
 
         let mut pos = 0;
@@ -437,7 +437,7 @@ mod tests {
             text_id: 1,
             options,
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let data = pkt.data();
 
         // text_id(4) + probability(4) = offset 8, then male slot cstring

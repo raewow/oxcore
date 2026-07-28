@@ -47,7 +47,7 @@ pub struct SmsgTrainerList {
 }
 
 impl ToWorldPacket for SmsgTrainerList {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TRAINER_LIST);
 
         packet.write_guid(self.trainer_guid);
@@ -82,7 +82,7 @@ pub struct SmsgTrainerBuySucceeded {
 }
 
 impl ToWorldPacket for SmsgTrainerBuySucceeded {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TRAINER_BUY_SUCCEEDED);
         packet.write_guid(self.trainer_guid);
         packet.write_u32(self.spell_id);
@@ -108,7 +108,7 @@ pub struct SmsgTrainerBuyFailed {
 }
 
 impl ToWorldPacket for SmsgTrainerBuyFailed {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TRAINER_BUY_FAILED);
         packet.write_guid(self.trainer_guid);
         packet.write_u32(self.spell_id);
@@ -166,7 +166,7 @@ mod tests {
             spells: vec![],
             greeting: String::new(),
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let data = pkt.data();
 
         assert_eq!(
@@ -188,7 +188,7 @@ mod tests {
             spells: vec![one_spell()],
             greeting: "Hi".to_string(),
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let data = pkt.data();
 
         let mut pos = 0;
@@ -237,7 +237,7 @@ mod tests {
             spells: vec![],
             greeting: "Hello trainer".to_string(),
         };
-        let pkt = msg.to_world_packet();
+        let pkt = msg.to_vanilla();
         let data = pkt.data();
 
         // After GUID(8) + trainer_type(4) + count(4) = offset 16

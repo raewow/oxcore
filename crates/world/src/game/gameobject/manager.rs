@@ -588,7 +588,7 @@ impl GameObjectManager {
             if let Some(msg) = self.build_create_msg(*guid, player_guid, world) {
                 for block in msg.blocks {
                     if count >= MAX_BLOCKS_PER_PACKET {
-                        let packet = current_msg.to_world_packet();
+                        let packet = current_msg.to_vanilla();
                         let compressed = compress_update_packet_if_needed(packet)?;
                         world
                             .managers
@@ -605,7 +605,7 @@ impl GameObjectManager {
         }
 
         if !current_msg.blocks.is_empty() {
-            let packet = current_msg.to_world_packet();
+            let packet = current_msg.to_vanilla();
             let compressed = compress_update_packet_if_needed(packet)?;
             world
                 .managers

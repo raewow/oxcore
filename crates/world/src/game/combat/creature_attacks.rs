@@ -160,7 +160,7 @@ pub fn perform_creature_melee_attack(
         blocked,
     };
 
-    broadcast_around_creature(world, creature_guid, &attack_packet.to_world_packet());
+    broadcast_around_creature(world, creature_guid, &attack_packet.to_vanilla());
 
     // Send player health update
     send_player_health_update(world, target_guid);
@@ -206,7 +206,7 @@ fn send_player_health_update(world: &World, player_guid: ObjectGuid) {
 
         world.managers.broadcast_mgr.broadcast_nearby(
             player_guid,
-            &msg.to_world_packet(),
+            &msg.to_vanilla(),
             true, // include self so player sees their own health drop
         );
     }
@@ -245,7 +245,7 @@ fn handle_creature_kill_cleanup(world: &World, player_guid: ObjectGuid, killer_g
         target_guid: player_guid,
         unk: 0,
     };
-    broadcast_around_creature(world, killer_guid, &stop_packet.to_world_packet());
+    broadcast_around_creature(world, killer_guid, &stop_packet.to_vanilla());
 }
 
 #[cfg(test)]

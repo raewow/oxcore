@@ -10,7 +10,7 @@ pub struct SmsgCharCreate {
 }
 
 impl ToWorldPacket for SmsgCharCreate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHAR_CREATE);
         packet.write_u8(self.result);
         packet
@@ -24,7 +24,7 @@ pub struct SmsgCharDelete {
 }
 
 impl ToWorldPacket for SmsgCharDelete {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHAR_DELETE);
         packet.write_u8(self.result);
         packet
@@ -40,7 +40,7 @@ pub struct SmsgCharRename {
 }
 
 impl ToWorldPacket for SmsgCharRename {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHAR_RENAME);
         packet.write_u8(self.result);
 
@@ -64,7 +64,7 @@ pub struct SmsgLogoutResponse {
 }
 
 impl ToWorldPacket for SmsgLogoutResponse {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOGOUT_RESPONSE);
         packet.write_u8(self.reason);
         packet.write_u8(if self.instant { 1 } else { 0 });
@@ -77,7 +77,7 @@ impl ToWorldPacket for SmsgLogoutResponse {
 pub struct SmsgLogoutComplete;
 
 impl ToWorldPacket for SmsgLogoutComplete {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_LOGOUT_COMPLETE)
     }
 }
@@ -87,7 +87,7 @@ impl ToWorldPacket for SmsgLogoutComplete {
 pub struct SmsgLogoutCancelAck;
 
 impl ToWorldPacket for SmsgLogoutCancelAck {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_LOGOUT_CANCEL_ACK)
     }
 }

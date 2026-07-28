@@ -27,7 +27,7 @@ pub trait BroadcastManagerTrait: Send + Sync {
 /// This is a separate trait to avoid issues with trait objects and generics
 pub trait BroadcastManagerExt: BroadcastManagerTrait {
     fn send_msg_to_player<T: ToWorldPacket + Send>(&self, player_guid: ObjectGuid, msg: T) {
-        self.send_to_player(player_guid, msg.to_world_packet())
+        self.send_to_player(player_guid, msg.to_vanilla())
     }
 }
 
@@ -52,7 +52,7 @@ impl BroadcastManager {
     /// Non-blocking - uses try_send() internally
     pub fn send_msg_to_player<T: ToWorldPacket + Send>(&self, player_guid: ObjectGuid, msg: T) {
         if let Some(broadcaster) = self.player_mgr.get_broadcaster(player_guid) {
-            broadcaster.send_direct(msg.to_world_packet());
+            broadcaster.send_direct(msg.to_vanilla());
         }
     }
 

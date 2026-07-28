@@ -1528,7 +1528,7 @@ fn send_creature_health_update(creature_guid: ObjectGuid, world: &World) {
                 .set_field(UNIT_FIELD_HEALTH, current)
                 .set_field(UNIT_FIELD_MAXHEALTH, max),
         ));
-        broadcast_around_creature(world, creature_guid, &update.to_world_packet());
+        broadcast_around_creature(world, creature_guid, &update.to_vanilla());
     }
 }
 
@@ -1564,18 +1564,17 @@ fn send_creature_killed_update(caster_guid: ObjectGuid, creature_guid: ObjectGui
             .set_field(UNIT_FIELD_BYTES_1, 7u32) // Stand state Dead
             .set_field(UNIT_NPC_FLAGS, 0u32),
     ));
-    broadcast_around_creature(world, creature_guid, &update.to_world_packet());
+    broadcast_around_creature(world, creature_guid, &update.to_vanilla());
 
     let stop_packet = oxcore_shared::messages::combat::SmsgAttackStop {
         attacker_guid: caster_guid,
         target_guid: creature_guid,
         unk: 1, // target is dead
     };
-    world.managers.broadcast_mgr.broadcast_nearby(
-        caster_guid,
-        &stop_packet.to_world_packet(),
-        true,
-    );
+    world
+        .managers
+        .broadcast_mgr
+        .broadcast_nearby(caster_guid, &stop_packet.to_vanilla(), true);
 }
 
 /// Deal healing to a target unit.

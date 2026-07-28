@@ -101,7 +101,7 @@ impl<'a> SmsgCreatureQueryResponse<'a> {
 }
 
 impl ToWorldPacket for SmsgCreatureQueryResponse<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CREATURE_QUERY_RESPONSE);
         packet.write_u32(self.entry);
 
@@ -174,7 +174,7 @@ impl<'a> SmsgNameQueryResponse<'a> {
 }
 
 impl ToWorldPacket for SmsgNameQueryResponse<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_NAME_QUERY_RESPONSE);
 
         // Write GUID as u64 (NOT packed - vanilla 1.12.1 format)
@@ -207,7 +207,7 @@ mod tests {
     fn test_smsg_name_query_response() {
         let guid = ObjectGuid::from_low(42);
         let msg = SmsgNameQueryResponse::new(guid, "TestPlayer", 1, 0, 1);
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
 
         assert_eq!(packet.opcode(), Opcode::SMSG_NAME_QUERY_RESPONSE);
 
@@ -231,7 +231,7 @@ mod tests {
         // Test that GUID is written as u64, not packed
         let guid = ObjectGuid::from_low(1000);
         let msg = SmsgNameQueryResponse::new(guid, "Player", 1, 0, 1);
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
 
         let data = packet.contents();
 
@@ -254,7 +254,7 @@ mod tests {
         let mut msg = SmsgNameQueryResponse::new(guid, "TestPlayer", 1, 0, 1);
         msg.realm = "TestRealm";
 
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_NAME_QUERY_RESPONSE);
     }
 }

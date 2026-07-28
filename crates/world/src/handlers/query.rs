@@ -281,7 +281,7 @@ pub async fn handle_item_query(
             template.spell_id
         );
 
-        session.send_packet(response.to_world_packet())?;
+        session.send_packet(response.to_vanilla())?;
     } else {
         tracing::warn!(
             "Item template not found for entry={} - sending placeholder response",
@@ -436,7 +436,7 @@ pub async fn handle_item_query(
             quality2: 0,
         };
 
-        session.send_packet(placeholder_response.to_world_packet())?;
+        session.send_packet(placeholder_response.to_vanilla())?;
     }
 
     Ok(())

@@ -431,7 +431,7 @@ impl LootSystem {
                 .set_field(GAMEOBJECT_STATE, state as u32),
         ));
         self.broadcast_mgr
-            .send_to_player(player_guid, update.to_world_packet());
+            .send_to_player(player_guid, update.to_vanilla());
     }
 
     fn check_and_clear_if_empty(&self, target_guid: ObjectGuid, world: &World) {

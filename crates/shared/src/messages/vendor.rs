@@ -45,7 +45,7 @@ pub struct SmsgListInventory {
 }
 
 impl ToWorldPacket for SmsgListInventory {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LIST_INVENTORY);
 
         // Write vendor GUID (unpacked - matches MaNGOS behavior)
@@ -83,7 +83,7 @@ pub struct SmsgBuyItem {
 }
 
 impl ToWorldPacket for SmsgBuyItem {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_BUY_ITEM);
         packet.write_guid(self.vendor_guid);
         packet.write_u32(self.vendor_slot);
@@ -129,7 +129,7 @@ pub struct SmsgBuyFailed {
 }
 
 impl ToWorldPacket for SmsgBuyFailed {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_BUY_FAILED);
         packet.write_guid(self.vendor_guid);
         packet.write_u32(self.item_id);
@@ -182,7 +182,7 @@ pub struct SmsgSellItem {
 }
 
 impl ToWorldPacket for SmsgSellItem {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SELL_ITEM);
         packet.write_guid(self.vendor_guid);
         packet.write_guid(self.item_guid);

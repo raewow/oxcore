@@ -570,7 +570,7 @@ impl DeathSystem {
             use_corpse_timer,
         };
         self.broadcast_mgr
-            .send_to_player(target_guid, packet.to_world_packet());
+            .send_to_player(target_guid, packet.to_vanilla());
 
         debug!(
             "Sent resurrection offer to player {:?} from {:?}",
@@ -840,7 +840,7 @@ impl DeathSystem {
             delay_ms: delay_s * 1000,
         };
         self.broadcast_mgr
-            .send_to_player(player_guid, reclaim_delay.to_world_packet());
+            .send_to_player(player_guid, reclaim_delay.to_vanilla());
 
         debug!(
             "Sent death packets to player {:?}, reclaim delay: {}s",
@@ -1439,7 +1439,7 @@ impl DeathSystem {
 
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(values_block))
-            .to_world_packet();
+            .to_vanilla();
 
         self.broadcast_mgr
             .broadcast_nearby(player_guid, &packet, true);
@@ -1491,7 +1491,7 @@ impl DeathSystem {
         if affected > 0 {
             // Send SMSG_DURABILITY_DAMAGE_DEATH to notify client
             self.broadcast_mgr
-                .send_to_player(player_guid, SmsgDurabilityDamageDeath.to_world_packet());
+                .send_to_player(player_guid, SmsgDurabilityDamageDeath.to_vanilla());
             debug!(
                 "Applied death durability loss to {} items for player {:?}",
                 affected, player_guid

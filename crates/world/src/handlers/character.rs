@@ -1000,7 +1000,7 @@ pub async fn handle_player_login_with_guid(
             spells: spellbook,
             cooldowns,
         };
-        session.send_packet(msg.to_world_packet())?;
+        session.send_packet(msg.to_vanilla())?;
     }
     info!("[LOGIN] 6/11 SMSG_INITIAL_SPELLS: sent spellbook");
 
@@ -1132,7 +1132,7 @@ pub async fn handle_player_login_with_guid(
 
     // Compressing packet (matching /world behavior)
     // Note: SmsgUpdateObject internally creates a WorldPacket, so we just need to compress and send it
-    let mut packet = update_object.to_world_packet();
+    let mut packet = update_object.to_vanilla();
     let compressed = compress_update_packet_if_needed(packet)?;
     session.send_packet(compressed.clone())?;
     info!(

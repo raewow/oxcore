@@ -335,7 +335,7 @@ impl SocialSystem {
             friend_guids: &friend_guids_low,
             friend_infos: &friend_infos,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         self.broadcast_mgr.send_to_player(player_guid, packet);
     }
 
@@ -508,7 +508,7 @@ impl SocialSystem {
         let msg = SmsgIgnoreList {
             ignore_guids: &ignore_guids_low,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         self.broadcast_mgr.send_to_player(player_guid, packet);
     }
 
@@ -602,7 +602,7 @@ impl SocialSystem {
             players: &matching_players,
             total_online,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         self.broadcast_mgr.send_to_player(player_guid, packet);
 
         tracing::debug!(

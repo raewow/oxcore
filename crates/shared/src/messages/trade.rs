@@ -25,7 +25,7 @@ pub struct SmsgTradeStatus {
 }
 
 impl ToWorldPacket for SmsgTradeStatus {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TRADE_STATUS);
         packet.write_u32(self.status as u32);
 
@@ -92,7 +92,7 @@ pub struct SmsgTradeStatusV2 {
 }
 
 impl ToWorldPacket for SmsgTradeStatusV2 {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TRADE_STATUS);
         packet.write_u32(self.status as u32);
 
@@ -144,7 +144,7 @@ impl Default for SmsgTradeStatusExtendedV2 {
 }
 
 impl ToWorldPacket for SmsgTradeStatusExtendedV2 {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TRADE_STATUS_EXTENDED);
 
         // Header
@@ -195,7 +195,7 @@ mod tests {
             status: TradeStatus::BeginTrade,
             partner_guid: Some(ObjectGuid::from_low(123)),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TRADE_STATUS);
     }
 
@@ -205,7 +205,7 @@ mod tests {
             status: TradeStatus::BeginTrade,
             partner_guid: Some(ObjectGuid::from_low(456)),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TRADE_STATUS);
     }
 
@@ -215,14 +215,14 @@ mod tests {
             status: TradeStatus::TradeComplete,
             partner_guid: None,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TRADE_STATUS);
     }
 
     #[test]
     fn test_smsg_trade_status_extended_v2_empty() {
         let msg = SmsgTradeStatusExtendedV2::default();
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TRADE_STATUS_EXTENDED);
     }
 
@@ -243,7 +243,7 @@ mod tests {
             ..Default::default()
         });
 
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TRADE_STATUS_EXTENDED);
     }
 

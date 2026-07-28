@@ -42,7 +42,7 @@ pub struct SmsgAuthChallenge {
 }
 
 impl ToWorldPacket for SmsgAuthChallenge {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AUTH_CHALLENGE);
         packet.write_u32(self.seed);
         // Add padding to match expected packet size (vanilla expects specific size)
@@ -62,7 +62,7 @@ pub struct SmsgAuthResponse {
 }
 
 impl ToWorldPacket for SmsgAuthResponse {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AUTH_RESPONSE);
         // For vanilla: error_code is 4 bytes (u32), but only low byte is used
         packet.write_u32(self.error_code as u32);
@@ -123,7 +123,7 @@ pub struct SmsgCharEnum<'a> {
 }
 
 impl ToWorldPacket for SmsgCharEnum<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHAR_ENUM);
 
         // Character count
@@ -206,7 +206,7 @@ pub struct SmsgLoginVerifyWorld {
 }
 
 impl ToWorldPacket for SmsgLoginVerifyWorld {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOGIN_VERIFY_WORLD);
         packet.write_u32(self.map_id);
         packet.write_f32(self.position.x);
@@ -229,7 +229,7 @@ pub struct SmsgAccountDataMd5 {
 }
 
 impl ToWorldPacket for SmsgAccountDataMd5 {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ACCOUNT_DATA_MD5);
         for hash in &self.hashes {
             for byte in hash {
@@ -253,7 +253,7 @@ pub struct SmsgBindPointUpdate {
 }
 
 impl ToWorldPacket for SmsgBindPointUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_BINDPOINTUPDATE);
         packet.write_f32(self.x);
         packet.write_f32(self.y);
@@ -273,7 +273,7 @@ pub struct SmsgSetRestStart {
 }
 
 impl ToWorldPacket for SmsgSetRestStart {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SET_REST_START);
         packet.write_u32(self.time);
         packet
@@ -294,7 +294,7 @@ pub struct SmsgInitialSpellsRef<'a> {
 }
 
 impl ToWorldPacket for SmsgInitialSpellsRef<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INITIAL_SPELLS);
         packet.write_u8(0); // Talent spec count (0 for vanilla)
         packet.write_u16(self.spells.len() as u16);
@@ -322,7 +322,7 @@ impl ToWorldPacket for SmsgInitialSpellsRef<'_> {
 pub struct SmsgInitialSpellsEmpty;
 
 impl ToWorldPacket for SmsgInitialSpellsEmpty {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INITIAL_SPELLS);
         packet.write_u8(0); // Talent spec count
         packet.write_u16(0); // Spell count
@@ -370,7 +370,7 @@ pub struct SmsgActionButtons<'a> {
 }
 
 impl ToWorldPacket for SmsgActionButtons<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ACTION_BUTTONS);
         for button in self.buttons {
             packet.write_u32(button.to_u32());
@@ -384,7 +384,7 @@ impl ToWorldPacket for SmsgActionButtons<'_> {
 pub struct SmsgActionButtonsEmpty;
 
 impl ToWorldPacket for SmsgActionButtonsEmpty {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ACTION_BUTTONS);
         for _ in 0..120 {
             packet.write_u32(0);
@@ -398,7 +398,7 @@ impl ToWorldPacket for SmsgActionButtonsEmpty {
 pub struct SmsgInitializeFactionsEmpty;
 
 impl ToWorldPacket for SmsgInitializeFactionsEmpty {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INITIALIZE_FACTIONS);
         packet.write_u32(0);
         packet.write_u8(64);
@@ -430,7 +430,7 @@ impl Default for SmsgTutorialFlags {
 }
 
 impl ToWorldPacket for SmsgTutorialFlags {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TUTORIAL_FLAGS);
         for flag in &self.flags {
             packet.write_u32(*flag);
@@ -513,7 +513,7 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
 }
 
 impl ToWorldPacket for SmsgLoginSetTimeSpeed {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOGIN_SETTIMESPEED);
         packet.write_u32(self.game_time);
         packet.write_f32(self.game_speed);
@@ -549,7 +549,7 @@ impl SmsgInitWorldStates {
 }
 
 impl ToWorldPacket for SmsgInitWorldStates {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INIT_WORLD_STATES);
         packet.write_u32(self.map_id);
         packet.write_u32(self.zone_id);
@@ -575,7 +575,7 @@ pub struct SmsgTriggerCinematic {
 }
 
 impl ToWorldPacket for SmsgTriggerCinematic {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TRIGGER_CINEMATIC);
         packet.write_u32(self.cinematic_sequence_id);
         packet
@@ -592,14 +592,14 @@ mod tests {
             map_id: 0,
             position: Position::new(100.0, 200.0, 300.0, 1.5),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOGIN_VERIFY_WORLD);
     }
 
     #[test]
     fn test_account_data_md5() {
         let msg = SmsgAccountDataMd5::default();
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_ACCOUNT_DATA_MD5);
     }
 
@@ -612,28 +612,28 @@ mod tests {
             map_id: 0,
             zone_id: 12,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_BINDPOINTUPDATE);
     }
 
     #[test]
     fn test_initial_spells_empty() {
         let msg = SmsgInitialSpellsEmpty;
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_INITIAL_SPELLS);
     }
 
     #[test]
     fn test_action_buttons_empty() {
         let msg = SmsgActionButtonsEmpty;
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_ACTION_BUTTONS);
     }
 
     #[test]
     fn test_initialize_factions_empty() {
         let msg = SmsgInitializeFactionsEmpty;
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_INITIALIZE_FACTIONS);
     }
 }

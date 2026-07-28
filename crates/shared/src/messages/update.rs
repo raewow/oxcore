@@ -95,7 +95,7 @@ impl Default for SmsgUpdateObject {
 }
 
 impl ToWorldPacket for SmsgUpdateObject {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
         packet.write_u32(self.blocks.len() as u32);
         packet.write_u8(if self.has_transport { 1 } else { 0 });
@@ -439,7 +439,7 @@ impl MovementUpdateBlock {
 /// let guid = ObjectGuid::from_raw(0x0000000000000004);
 /// let packet = SmsgValuesUpdate::new(guid, ObjectType::Unit)
 ///     .set_field(UNIT_FIELD_HEALTH, 100)
-///     .to_world_packet();
+///     .to_vanilla();
 /// ```
 #[derive(Debug, Clone)]
 pub struct SmsgValuesUpdate {
@@ -478,13 +478,13 @@ impl SmsgValuesUpdate {
 }
 
 impl ToWorldPacket for SmsgValuesUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(ValuesUpdateBlock::new(
                 self.guid,
                 self.object_type,
             )))
-            .to_world_packet()
+            .to_vanilla()
     }
 }
 
@@ -548,7 +548,7 @@ mod tests {
     #[test]
     fn test_smsg_update_object_empty() {
         let msg = SmsgUpdateObject::new();
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -558,7 +558,7 @@ mod tests {
         let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
             ValuesUpdateBlock::new(guid, ObjectType::Unit).set_field(22, 100),
         ));
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -566,7 +566,7 @@ mod tests {
     fn test_smsg_values_update() {
         let guid = ObjectGuid::from_raw(0x0000000000000004);
         let msg = SmsgValuesUpdate::new(guid, ObjectType::Unit).set_field(22, 100);
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
     }
 
@@ -615,7 +615,7 @@ mod tests {
                 ValuesUpdateBlock::new(guid2, ObjectType::Unit).set_field(22, 200),
             ));
 
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
         assert_eq!(msg.blocks.len(), 2);
     }

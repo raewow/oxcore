@@ -283,7 +283,7 @@ impl ExperienceSystem {
         }
 
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
-        let packet = update_msg.to_world_packet();
+        let packet = update_msg.to_vanilla();
 
         // Broadcast to self and nearby players (include_self = true)
         self.broadcast_mgr

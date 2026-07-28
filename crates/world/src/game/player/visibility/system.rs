@@ -506,7 +506,7 @@ impl VisibilitySubsystem {
 
         // Send all packets with compression
         for update_msg in packets_to_send {
-            let packet = update_msg.to_world_packet();
+            let packet = update_msg.to_vanilla();
 
             // Apply compression if needed (>128 bytes threshold)
             let compressed_packet = compress_update_packet_if_needed(packet)?;
@@ -595,7 +595,7 @@ impl VisibilitySubsystem {
             return Ok(());
         };
 
-        let packet = our_create_msg.to_world_packet();
+        let packet = our_create_msg.to_vanilla();
 
         for &target_guid in &targets_to_send {
             if let Some(target_broadcaster) = world.managers.player_mgr.get_broadcaster(target_guid)
@@ -649,7 +649,7 @@ impl VisibilitySubsystem {
             .collect();
 
         let msg = SmsgOutOfRange::new(world_guids);
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         let mut v2_packet = WorldPacket::new(packet.opcode());
         v2_packet.write_bytes(packet.contents());
 

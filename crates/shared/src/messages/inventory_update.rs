@@ -76,7 +76,7 @@ impl SmsgInventorySlotUpdate {
 }
 
 impl ToWorldPacket for SmsgInventorySlotUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
         packet.write_u32(1);
         packet.write_u8(0);
@@ -150,7 +150,7 @@ pub struct SmsgBuybackSlotUpdate {
 }
 
 impl ToWorldPacket for SmsgBuybackSlotUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         debug_assert!(
             self.slot >= BUYBACK_SLOT_START && self.slot < BUYBACK_SLOT_END,
             "Buyback slot must be 69-80"
@@ -206,7 +206,7 @@ impl SmsgInventorySlotsUpdate {
 }
 
 impl ToWorldPacket for SmsgInventorySlotsUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
         packet.write_u32(1);
         packet.write_u8(0);
@@ -293,7 +293,7 @@ impl SmsgVisibleItemUpdate {
 }
 
 impl ToWorldPacket for SmsgVisibleItemUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
         packet.write_u32(1);
         packet.write_u8(0);
@@ -348,7 +348,7 @@ mod tests {
             price,
             timestamp,
         }
-        .to_world_packet();
+        .to_vanilla();
 
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
         let data = packet.data();
@@ -372,7 +372,7 @@ mod tests {
             price: 0,
             timestamp: 0,
         }
-        .to_world_packet();
+        .to_vanilla();
 
         // Slot 80 is the last supported buyback slot. Serializing it exercises the
         // buyback field offset rather than the normal inventory field range.

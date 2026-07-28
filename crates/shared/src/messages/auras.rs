@@ -32,7 +32,7 @@ pub struct SmsgAuraUpdate {
 }
 
 impl ToWorldPacket for SmsgAuraUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AURA_UPDATE);
         packet.write_packed_guid(self.target_guid);
         packet.write_u8(self.slot);
@@ -69,7 +69,7 @@ pub struct SmsgUpdateAuraDuration {
 }
 
 impl ToWorldPacket for SmsgUpdateAuraDuration {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_AURA_DURATION);
         packet.write_u8(self.slot);
         packet.write_u32(self.duration_ms);
@@ -92,7 +92,7 @@ pub struct SmsgPeriodicAuraLog {
 }
 
 impl ToWorldPacket for SmsgPeriodicAuraLog {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_PERIODICAURALOG);
         packet.write_packed_guid(self.target_guid);
         packet.write_packed_guid(self.caster_guid);
@@ -127,7 +127,7 @@ pub struct AuraSlotData {
 }
 
 impl ToWorldPacket for SmsgAuraUpdateAll {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_AURA_UPDATE_ALL);
         packet.write_packed_guid(self.target_guid);
 

@@ -23,7 +23,7 @@ pub struct SmsgWeather {
 }
 
 impl ToWorldPacket for SmsgWeather {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_WEATHER);
         packet.write_u32(self.weather_type);
         packet.write_f32(self.grade);

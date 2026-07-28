@@ -45,6 +45,6 @@ pub fn compress_update_packet_if_needed(packet: WorldPacket) -> Result<WorldPack
 }
 
 pub fn compress_update_object<T: ToWorldPacket + Clone + Send>(msg: T) -> Result<WorldPacket> {
-    let packet = msg.to_world_packet();
+    let packet = msg.to_vanilla();
     compress_update_packet_if_needed(packet)
 }

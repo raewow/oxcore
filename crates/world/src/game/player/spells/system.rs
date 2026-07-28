@@ -577,7 +577,7 @@ impl SpellSystem {
                 channel_object,
                 spell_id,
             )))
-            .to_world_packet();
+            .to_vanilla();
         self.broadcast_mgr
             .broadcast_nearby(caster_guid, &packet, true);
     }
@@ -1152,7 +1152,7 @@ impl SpellSystem {
             ammo_inventory_type,
         };
         self.broadcast_mgr
-            .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
+            .broadcast_nearby(caster_guid, &msg.to_vanilla(), true);
     }
 
     /// Start a channeled spell. Creates ActiveCast in channel mode.
@@ -1247,7 +1247,7 @@ impl SpellSystem {
                 targets: chain_targets,
             };
             self.broadcast_mgr
-                .broadcast_nearby(caster_guid, &packet.to_world_packet(), true);
+                .broadcast_nearby(caster_guid, &packet.to_vanilla(), true);
         }
 
         self.send_channel_state_update(caster_guid, target_guid, spell_id);
@@ -1322,7 +1322,7 @@ impl SpellSystem {
             ammo_inventory_type,
         };
         self.broadcast_mgr
-            .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
+            .broadcast_nearby(caster_guid, &msg.to_vanilla(), true);
 
         Ok(())
     }
@@ -2169,7 +2169,7 @@ impl SpellSystem {
                         cooldowns: vec![(spell_id, cd_ms)],
                     };
                     self.broadcast_mgr
-                        .send_msg_to_player(caster_guid, msg.to_world_packet());
+                        .send_msg_to_player(caster_guid, msg.to_vanilla());
                 }
             }
 
@@ -2208,7 +2208,7 @@ impl SpellSystem {
             ammo_inventory_type,
         };
         self.broadcast_mgr
-            .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
+            .broadcast_nearby(caster_guid, &msg.to_vanilla(), true);
 
         // `Spell::handle_immediate` sends SPELL_GO before executing EffectOpenLock.
         // The client keeps an opened chest in-use until it receives that completion packet.
@@ -2578,7 +2578,7 @@ impl SpellSystem {
                 result: validation::spell_cast_error_to_u8(SpellCastError::Interrupted),
             };
             self.broadcast_mgr
-                .broadcast_nearby(caster_guid, &msg.to_world_packet(), true);
+                .broadcast_nearby(caster_guid, &msg.to_vanilla(), true);
 
             // Also send SMSG_CAST_RESULT(SPELL_FAILED_INTERRUPTED) so the client cast bar clears
             // (MaNGOS Spell::cancel sends SendCastResult on the PREPARING/DELAYED cancel path).
@@ -2668,7 +2668,7 @@ impl SpellSystem {
                 result: validation::spell_cast_error_to_u8(SpellCastError::Interrupted),
             };
             self.broadcast_mgr
-                .broadcast_nearby(target_guid, &msg.to_world_packet(), true);
+                .broadcast_nearby(target_guid, &msg.to_vanilla(), true);
 
             if was_channeling {
                 self.send_channel_state_update(target_guid, None, 0);
@@ -2839,7 +2839,7 @@ impl SpellSystem {
                 .set_field(UNIT_FIELD_HEALTH, new_health);
             let packet = SmsgUpdateObject::new()
                 .add_block(UpdateBlockData::Values(block))
-                .to_world_packet();
+                .to_vanilla();
             self.broadcast_mgr
                 .broadcast_nearby(caster_guid, &packet, true);
         }
@@ -3182,7 +3182,7 @@ impl SpellSystem {
             cooldowns: vec![(spell_id, gcd_ms)],
         };
         self.broadcast_mgr
-            .send_msg_to_player(caster_guid, msg.to_world_packet());
+            .send_msg_to_player(caster_guid, msg.to_vanilla());
 
         Ok(())
     }

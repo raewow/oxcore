@@ -646,7 +646,7 @@ impl MovementSystem {
         } else {
             SmsgMonsterMove::new_path_move(guid, from, path, duration, is_walking)
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
 
         let visible_players = self.get_visible_nearby_players(guid, from, world);
         self.broadcast_mgr
@@ -669,7 +669,7 @@ impl MovementSystem {
         } else {
             SmsgMonsterMove::new_point_move(guid, from, to, speed, is_walking)
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
 
         let visible_players = self.get_visible_nearby_players(guid, from, world);
         self.broadcast_mgr
@@ -693,7 +693,7 @@ impl MovementSystem {
         world: &World,
     ) {
         let msg = SmsgMonsterMove::new_facing_angle(guid, position, angle);
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
 
         let visible_players = self.get_visible_nearby_players(guid, position, world);
         self.broadcast_mgr
@@ -703,7 +703,7 @@ impl MovementSystem {
     /// Send stop movement packet
     pub fn send_stop_packet(&self, guid: ObjectGuid, position: Position, world: &World) {
         let msg = SmsgMonsterMove::new_stop(guid, position);
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
 
         let visible_players = self.get_visible_nearby_players(guid, position, world);
         self.broadcast_mgr

@@ -13,6 +13,7 @@ use oxcore_shared::messages::trainer::{
     SmsgTrainerBuyFailed, SmsgTrainerBuySucceeded, SmsgTrainerList, TrainerBuyError,
     TrainerSpellData,
 };
+use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 
 /// Handle CMSG_TRAINER_LIST (0x1B0)
@@ -165,7 +166,7 @@ pub async fn send_trainer_list(
     };
 
     // Log raw packet bytes for debugging
-    let raw = oxcore_shared::messages::ToWorldPacket::to_world_packet(&msg);
+    let raw = oxcore_shared::messages::ToWorldPacket::to_vanilla(&msg);
     let raw_bytes = raw.data();
     let preview_len = raw_bytes.len().min(80);
     info!(
@@ -435,7 +436,7 @@ pub(crate) fn build_trainer_anim_packets(
         ammo_display_id: 0,
         ammo_inventory_type: 0,
     }
-    .to_world_packet();
+    .to_vanilla();
 
     let spell_go = SmsgSpellGo {
         caster_guid,
@@ -449,13 +450,13 @@ pub(crate) fn build_trainer_anim_packets(
         ammo_display_id: 0,
         ammo_inventory_type: 0,
     }
-    .to_world_packet();
+    .to_vanilla();
 
     let spell_visual = SmsgPlaySpellVisual {
         caster_guid,
         spell_visual_kit_id: spell_visual,
     }
-    .to_world_packet();
+    .to_vanilla();
 
     TrainerAnimPackets {
         caster_is_player,
@@ -568,7 +569,7 @@ mod tests {
             caster_guid: player_guid(),
             spell_visual_kit_id: 42,
         }
-        .to_world_packet();
+        .to_vanilla();
         assert_eq!(pkt.opcode(), Opcode::SMSG_PLAY_SPELL_VISUAL);
     }
 
@@ -582,7 +583,7 @@ mod tests {
             caster_guid: guid,
             spell_visual_kit_id: kit_id,
         }
-        .to_world_packet();
+        .to_vanilla();
         let data = pkt.data();
 
         assert_eq!(

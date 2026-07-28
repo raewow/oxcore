@@ -69,7 +69,7 @@ impl Default for SmsgAttackerStateUpdate {
 }
 
 impl ToWorldPacket for SmsgAttackerStateUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ATTACKERSTATEUPDATE);
 
         packet.write_u32(self.hit_info);
@@ -101,7 +101,7 @@ pub struct SmsgAttackStart {
 }
 
 impl ToWorldPacket for SmsgAttackStart {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ATTACKSTART);
         // MaNGOS uses full 8-byte GUIDs for SMSG_ATTACKSTART (not packed)
         packet.write_guid_raw(self.attacker_guid.raw());
@@ -119,7 +119,7 @@ pub struct SmsgAttackStop {
 }
 
 impl ToWorldPacket for SmsgAttackStop {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ATTACKSTOP);
         packet.write_packed_guid_raw(self.attacker_guid.raw());
         packet.write_packed_guid_raw(self.target_guid.raw());
@@ -139,7 +139,7 @@ pub struct SmsgSpellDamageLog {
 }
 
 impl ToWorldPacket for SmsgSpellDamageLog {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELLDAMAGELOG);
         packet.write_packed_guid_raw(self.victim_guid.raw());
         packet.write_packed_guid_raw(self.caster_guid.raw());

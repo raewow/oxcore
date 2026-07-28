@@ -20,7 +20,7 @@ pub struct SmsgMeetingstoneSetqueue {
 }
 
 impl ToWorldPacket for SmsgMeetingstoneSetqueue {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_MEETINGSTONE_SETQUEUE);
         packet.write_u8(if self.in_queue { 1 } else { 0 });
         packet
@@ -35,7 +35,7 @@ mod tests {
     #[test]
     fn test_smsg_meetingstone_setqueue() {
         let msg = SmsgMeetingstoneSetqueue { in_queue: true };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_MEETINGSTONE_SETQUEUE);
     }
 }

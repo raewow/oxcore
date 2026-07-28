@@ -22,7 +22,7 @@ pub struct LootResponseItem {
 }
 
 impl ToWorldPacket for SmsgLootResponse {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_RESPONSE);
         packet.write_u64(self.loot_guid.raw());
         packet.write_u8(self.loot_type);
@@ -51,7 +51,7 @@ pub struct SmsgLootReleaseResponse {
 }
 
 impl ToWorldPacket for SmsgLootReleaseResponse {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_RELEASE_RESPONSE);
         packet.write_u64(self.loot_guid.raw());
         packet.write_u8(self.unknown);
@@ -66,7 +66,7 @@ pub struct SmsgLootRemoved {
 }
 
 impl ToWorldPacket for SmsgLootRemoved {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_REMOVED);
         packet.write_u8(self.slot);
         packet
@@ -80,7 +80,7 @@ pub struct SmsgLootMoneyNotify {
 }
 
 impl ToWorldPacket for SmsgLootMoneyNotify {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_MONEY_NOTIFY);
         packet.write_u32(self.gold);
         packet
@@ -92,7 +92,7 @@ impl ToWorldPacket for SmsgLootMoneyNotify {
 pub struct SmsgLootClearMoney;
 
 impl ToWorldPacket for SmsgLootClearMoney {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_LOOT_CLEAR_MONEY)
     }
 }

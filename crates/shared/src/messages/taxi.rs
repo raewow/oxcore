@@ -27,7 +27,7 @@ pub struct SmsgTaxinodeStatus {
 }
 
 impl ToWorldPacket for SmsgTaxinodeStatus {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TAXINODE_STATUS);
         packet.write_guid_raw(self.creature_guid.raw());
         packet.write_u8(if self.is_known { 1 } else { 0 });
@@ -49,7 +49,7 @@ pub struct SmsgShowTaxinodes {
 }
 
 impl ToWorldPacket for SmsgShowTaxinodes {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SHOWTAXINODES);
         packet.write_u32(1);
         packet.write_guid_raw(self.creature_guid.raw());
@@ -71,7 +71,7 @@ impl ToWorldPacket for SmsgShowTaxinodes {
 pub struct SmsgNewTaxiPath {}
 
 impl ToWorldPacket for SmsgNewTaxiPath {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_NEW_TAXI_PATH)
     }
 }
@@ -86,7 +86,7 @@ pub struct SmsgActivateTaxiReply {
 }
 
 impl ToWorldPacket for SmsgActivateTaxiReply {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ACTIVATETAXIREPLY);
         packet.write_u32(self.reply);
         packet
@@ -119,7 +119,7 @@ mod tests {
             creature_guid: ObjectGuid::from_low(123),
             is_known: true,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TAXINODE_STATUS);
     }
 
@@ -135,21 +135,21 @@ mod tests {
             current_node: 1,
             taxi_mask,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_SHOWTAXINODES);
     }
 
     #[test]
     fn test_smsg_new_taxi_path() {
         let msg = SmsgNewTaxiPath {};
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_NEW_TAXI_PATH);
     }
 
     #[test]
     fn test_smsg_activate_taxi_reply() {
         let msg = SmsgActivateTaxiReply { reply: ERR_TAXIOK };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_ACTIVATETAXIREPLY);
     }
 }

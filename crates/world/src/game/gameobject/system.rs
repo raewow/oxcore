@@ -122,7 +122,7 @@ pub fn update_respawns(world: &World) {
                 world
                     .managers
                     .broadcast_mgr
-                    .send_to_player(viewer_guid, create.to_world_packet());
+                    .send_to_player(viewer_guid, create.to_vanilla());
             }
         }
         tracing::debug!("Respawned gameobject {:?}", guid);

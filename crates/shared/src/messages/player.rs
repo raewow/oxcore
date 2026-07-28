@@ -29,7 +29,7 @@ pub struct SmsgPlayerMoneyUpdate {
 }
 
 impl ToWorldPacket for SmsgPlayerMoneyUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
         packet.write_u32(1); // block count
         packet.write_u8(0); // hasTransport
@@ -93,7 +93,7 @@ pub struct SmsgPlayerInventoryUpdate<'a> {
 }
 
 impl<'a> ToWorldPacket for SmsgPlayerInventoryUpdate<'a> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
         packet.write_u32(self.items.len() as u32);
         packet.write_u8(0); // hasTransport

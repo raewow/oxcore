@@ -139,7 +139,7 @@ impl GossipSystem {
         }
 
         // Debug: dump raw packet bytes
-        let raw_pkt = oxcore_shared::messages::ToWorldPacket::to_world_packet(&msg);
+        let raw_pkt = oxcore_shared::messages::ToWorldPacket::to_vanilla(&msg);
         let raw_bytes = raw_pkt.data();
         let preview = raw_bytes.len().min(80);
         info!(

@@ -30,7 +30,7 @@ pub struct SmsgFriendList<'a> {
 }
 
 impl ToWorldPacket for SmsgFriendList<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_FRIEND_LIST);
         packet.write_u8(self.friend_guids.len() as u8);
 
@@ -69,7 +69,7 @@ pub struct SmsgFriendStatus {
 }
 
 impl ToWorldPacket for SmsgFriendStatus {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_FRIEND_STATUS);
         packet.write_u8(self.result as u8);
         packet.write_guid_raw(self.friend_guid.raw());
@@ -102,7 +102,7 @@ pub struct SmsgIgnoreList<'a> {
 }
 
 impl ToWorldPacket for SmsgIgnoreList<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_IGNORE_LIST);
         packet.write_u8(self.ignore_guids.len() as u8);
 
@@ -139,7 +139,7 @@ pub struct SmsgWho<'a> {
 }
 
 impl ToWorldPacket for SmsgWho<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_WHO);
         packet.write_u32(self.players.len() as u32);
         packet.write_u32(self.total_online as u32);
@@ -179,7 +179,7 @@ pub struct SmsgStandstateUpdate {
 }
 
 impl ToWorldPacket for SmsgStandstateUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_STANDSTATE_UPDATE);
         packet.write_u8(self.stand_state);
         packet
@@ -217,7 +217,7 @@ mod tests {
             friend_guids: &friend_guids,
             friend_infos: &friend_infos,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_FRIEND_LIST);
     }
 
@@ -236,7 +236,7 @@ mod tests {
             friend_guid: ObjectGuid::from_low(123),
             friend_info: Some(friend_info),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_FRIEND_STATUS);
     }
 
@@ -247,7 +247,7 @@ mod tests {
             friend_guid: ObjectGuid::from_low(123),
             friend_info: None,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_FRIEND_STATUS);
     }
 
@@ -258,7 +258,7 @@ mod tests {
         let msg = SmsgIgnoreList {
             ignore_guids: &ignore_guids,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_IGNORE_LIST);
     }
 }

@@ -288,7 +288,7 @@ pub fn delayed(
                         caster_guid,
                         delay_ms: d.delaytime,
                     }
-                    .to_world_packet(),
+                    .to_vanilla(),
                 );
             }
             d

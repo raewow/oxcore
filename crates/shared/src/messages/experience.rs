@@ -35,7 +35,7 @@ pub struct SmsgLogXpGain {
 }
 
 impl ToWorldPacket for SmsgLogXpGain {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOG_XPGAIN);
 
         // Write victim GUID (full 8 bytes, not packed)
@@ -80,7 +80,7 @@ pub struct SmsgLevelupInfo {
 }
 
 impl ToWorldPacket for SmsgLevelupInfo {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LEVELUP_INFO);
 
         // Write new level
@@ -118,7 +118,7 @@ mod tests {
             xp_type: 0, // kill
             group_bonus: 1.0,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOG_XPGAIN);
         // Size: 8 (guid) + 4 (xp) + 1 (type) + 4 (bonus) = 17 bytes
         assert_eq!(packet.size(), 17);
@@ -132,7 +132,7 @@ mod tests {
             xp_type: 1,       // quest
             group_bonus: 1.0, // ignored for quest
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOG_XPGAIN);
         // Size: 8 (guid) + 4 (xp) + 1 (type) = 13 bytes (no bonus for quest)
         assert_eq!(packet.size(), 13);
@@ -146,7 +146,7 @@ mod tests {
             mana_gain: 30,
             stat_gains: [2, 2, 3, 2, 2], // STR, AGI, STA, INT, SPI
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LEVELUP_INFO);
         // Size: 4 (level) + 4 (hp) + 4 (mana) + 4*4 (powers) + 5*4 (stats) = 48 bytes
         assert_eq!(packet.size(), 48);

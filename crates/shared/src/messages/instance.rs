@@ -29,7 +29,7 @@ pub struct SmsgInstanceResetWarning {
 }
 
 impl ToWorldPacket for SmsgInstanceResetWarning {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_RAID_INSTANCE_INFO);
         packet.write_u32(1); // Number of instances (1)
         packet.write_u32(self.map_id);
@@ -50,7 +50,7 @@ pub struct SmsgInstanceReset {
 }
 
 impl ToWorldPacket for SmsgInstanceReset {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INSTANCE_RESET);
         packet.write_u32(self.map_id);
         packet
@@ -69,7 +69,7 @@ pub struct SmsgInstanceResetFailed {
 }
 
 impl ToWorldPacket for SmsgInstanceResetFailed {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INSTANCE_RESET_FAILED);
         packet.write_u32(self.reason as u32);
         packet.write_u32(self.map_id);
@@ -91,14 +91,14 @@ mod tests {
             warning_type: InstanceResetWarningType::Hours15Min,
             time_remaining: 900,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_RAID_INSTANCE_INFO);
     }
 
     #[test]
     fn test_smsg_instance_reset() {
         let msg = SmsgInstanceReset { map_id: 100 };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_INSTANCE_RESET);
     }
 
@@ -108,7 +108,7 @@ mod tests {
             reason: InstanceResetFailReason::General,
             map_id: 100,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_INSTANCE_RESET_FAILED);
     }
 }

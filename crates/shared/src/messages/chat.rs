@@ -139,7 +139,7 @@ impl<'a> SmsgMessageChat<'a> {
 }
 
 impl ToWorldPacket for SmsgMessageChat<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_MESSAGECHAT);
 
         // Write message type (as u8, Addon is special - 0xFF)
@@ -229,7 +229,7 @@ impl ToWorldPacket for SmsgMessageChat<'_> {
 pub struct SmsgChatWrongFaction;
 
 impl ToWorldPacket for SmsgChatWrongFaction {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_CHAT_WRONG_FACTION)
     }
 }
@@ -247,7 +247,7 @@ pub struct SmsgChatPlayerNotFound<'a> {
 }
 
 impl ToWorldPacket for SmsgChatPlayerNotFound<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHAT_PLAYER_NOT_FOUND);
         packet.write_cstring(self.name);
         packet
@@ -264,7 +264,7 @@ impl ToWorldPacket for SmsgChatPlayerNotFound<'_> {
 pub struct SmsgChatRestricted;
 
 impl ToWorldPacket for SmsgChatRestricted {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_CHAT_RESTRICTED)
     }
 }
@@ -282,7 +282,7 @@ pub struct SmsgChatPlayerAmbiguous<'a> {
 }
 
 impl ToWorldPacket for SmsgChatPlayerAmbiguous<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHAT_PLAYER_AMBIGUOUS);
         packet.write_cstring(self.name);
         packet
@@ -306,7 +306,7 @@ pub struct SmsgEmote {
 }
 
 impl ToWorldPacket for SmsgEmote {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_EMOTE);
         packet.write_u32(self.emote_id);
         packet.write_guid(self.guid);
@@ -338,7 +338,7 @@ pub struct SmsgTextEmote<'a> {
 }
 
 impl ToWorldPacket for SmsgTextEmote<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TEXT_EMOTE);
         packet.write_guid(self.guid);
         packet.write_u32(self.text_emote);
@@ -366,7 +366,7 @@ mod tests {
         let sender_guid = ObjectGuid::from_low(100);
         let target_guid = ObjectGuid::from_low(200);
         let msg = SmsgMessageChat::whisper(sender_guid, "Sender", target_guid, "Hello!");
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_MESSAGECHAT);
     }
 
@@ -374,7 +374,7 @@ mod tests {
     fn test_smsg_message_chat_whisper_inform() {
         let target_guid = ObjectGuid::from_low(200);
         let msg = SmsgMessageChat::whisper_inform(target_guid, "Target", "Hello!");
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_MESSAGECHAT);
     }
 
@@ -382,35 +382,35 @@ mod tests {
     fn test_smsg_message_chat_ignored() {
         let target_guid = ObjectGuid::from_low(200);
         let msg = SmsgMessageChat::ignored(target_guid, "Target");
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_MESSAGECHAT);
     }
 
     #[test]
     fn test_smsg_chat_wrong_faction() {
         let msg = SmsgChatWrongFaction;
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_CHAT_WRONG_FACTION);
     }
 
     #[test]
     fn test_smsg_chat_player_not_found() {
         let msg = SmsgChatPlayerNotFound { name: "Unknown" };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_CHAT_PLAYER_NOT_FOUND);
     }
 
     #[test]
     fn test_smsg_chat_restricted() {
         let msg = SmsgChatRestricted;
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_CHAT_RESTRICTED);
     }
 
     #[test]
     fn test_smsg_chat_player_ambiguous() {
         let msg = SmsgChatPlayerAmbiguous { name: "Player" };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_CHAT_PLAYER_AMBIGUOUS);
     }
 
@@ -418,7 +418,7 @@ mod tests {
     fn test_smsg_emote() {
         let guid = ObjectGuid::from_low(100);
         let msg = SmsgEmote { emote_id: 1, guid };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_EMOTE);
 
         // Verify packet structure
@@ -439,7 +439,7 @@ mod tests {
             emote_num: 2,
             target_name: None,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TEXT_EMOTE);
     }
 
@@ -452,7 +452,7 @@ mod tests {
             emote_num: 2,
             target_name: Some("Target"),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TEXT_EMOTE);
     }
 
@@ -472,7 +472,7 @@ mod tests {
             message: "Hello!",
             chat_tag: ChatTag::None,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         let data = packet.contents();
 
         // Byte 0: chat type = MonsterSay = 0x0B
@@ -529,7 +529,7 @@ mod tests {
             message: "Die!",
             chat_tag: ChatTag::None,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         let data = packet.contents();
 
         // Byte 0: chat type = MonsterYell = 0x0C
@@ -565,7 +565,7 @@ mod tests {
             message: "B",
             chat_tag: ChatTag::None,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         let data = packet.contents();
 
         // Expected layout:

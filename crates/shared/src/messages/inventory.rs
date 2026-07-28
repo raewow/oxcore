@@ -15,7 +15,7 @@ pub struct SmsgItemPushResult {
 }
 
 impl ToWorldPacket for SmsgItemPushResult {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_PUSH_RESULT);
         packet.write_guid_raw(self.player_guid.raw());
         packet.write_u32(self.received as u32);
@@ -37,7 +37,7 @@ pub struct SmsgDestroyItem {
 }
 
 impl ToWorldPacket for SmsgDestroyItem {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_DESTROY_OBJECT);
         packet.write_guid_raw(self.item_guid.raw());
         packet
@@ -50,7 +50,7 @@ pub struct SmsgOpenContainer {
 }
 
 impl ToWorldPacket for SmsgOpenContainer {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_OPEN_CONTAINER);
         packet.write_guid_raw(self.item_guid.raw());
         packet
@@ -61,7 +61,7 @@ impl ToWorldPacket for SmsgOpenContainer {
 pub struct SmsgDurabilityDamageDeath;
 
 impl ToWorldPacket for SmsgDurabilityDamageDeath {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_DURABILITY_DAMAGE_DEATH)
     }
 }
@@ -75,7 +75,7 @@ pub struct SmsgItemEnchantTimeUpdate {
 }
 
 impl ToWorldPacket for SmsgItemEnchantTimeUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_ENCHANT_TIME_UPDATE);
         packet.write_guid_raw(self.item_guid.raw());
         packet.write_u32(self.slot);
@@ -96,7 +96,7 @@ pub struct SmsgItemNameQueryResponse<'a> {
 }
 
 impl ToWorldPacket for SmsgItemNameQueryResponse<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_NAME_QUERY_RESPONSE);
         packet.write_u32(self.item_id);
         packet.write_cstring(self.name);
@@ -240,7 +240,7 @@ pub struct SmsgItemQuerySingleResponse {
 }
 
 impl ToWorldPacket for SmsgItemQuerySingleResponse {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_QUERY_SINGLE_RESPONSE);
         packet.write_u32(self.entry);
         packet.write_u32(self.class);
@@ -424,7 +424,7 @@ pub struct SmsgBuyBankSlotResult {
 }
 
 impl ToWorldPacket for SmsgBuyBankSlotResult {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_BUY_BANK_SLOT_RESULT);
         packet.write_u8(self.result);
         packet
@@ -437,7 +437,7 @@ pub struct SmsgReadItemOk {
 }
 
 impl ToWorldPacket for SmsgReadItemOk {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_READ_ITEM_OK);
         packet.write_guid_raw(self.item_guid.raw());
         packet
@@ -450,7 +450,7 @@ pub struct SmsgReadItemFailed {
 }
 
 impl ToWorldPacket for SmsgReadItemFailed {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_READ_ITEM_FAILED);
         packet.write_guid_raw(self.item_guid.raw());
         packet

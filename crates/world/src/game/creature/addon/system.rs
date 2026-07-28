@@ -115,7 +115,7 @@ impl AddonSystem {
         //     guid: creature_guid,
         //     mount_display_id: mount_id,
         // };
-        // let packet = msg.to_world_packet();
+        // let packet = msg.to_vanilla();
         // self.broadcast_mgr.broadcast_nearby(creature_guid, &packet, false);
 
         Ok(())

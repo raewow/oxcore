@@ -27,7 +27,7 @@ pub struct SmsgPetitionShowlist {
 }
 
 impl ToWorldPacket for SmsgPetitionShowlist {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         const CHARTER_DISPLAY_ID: u32 = 16161;
         const CHARTER_ENTRY_GENERIC: u32 = 5863;
         const CHARTER_COST: u32 = 1000;
@@ -63,7 +63,7 @@ pub struct SmsgPetitionShowSignatures<'a> {
 }
 
 impl ToWorldPacket for SmsgPetitionShowSignatures<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_PETITION_SHOW_SIGNATURES);
 
         packet.write_guid_raw(self.charter_guid.raw()); // Charter item GUID
@@ -97,7 +97,7 @@ pub struct SmsgPetitionSignResults {
 }
 
 impl ToWorldPacket for SmsgPetitionSignResults {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_PETITION_SIGN_RESULTS);
 
         packet.write_guid_raw(self.charter_guid.raw()); // Charter item GUID
@@ -118,7 +118,7 @@ pub struct SmsgTurnInPetitionResults {
 }
 
 impl ToWorldPacket for SmsgTurnInPetitionResults {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TURN_IN_PETITION_RESULTS);
         packet.write_u32(self.result.as_u32()); // Result code
         packet
@@ -139,7 +139,7 @@ pub struct SmsgPetitionQueryResponse<'a> {
 }
 
 impl ToWorldPacket for SmsgPetitionQueryResponse<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_PETITION_QUERY_RESPONSE);
 
         packet.write_u32(self.petition_guid); // Petition ID
@@ -170,7 +170,7 @@ mod tests {
         let msg = SmsgPetitionShowlist {
             npc_guid: ObjectGuid::from_low(123),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_PETITION_SHOWLIST);
     }
 
@@ -198,7 +198,7 @@ mod tests {
             signatures: &signatures,
         };
 
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_PETITION_SHOW_SIGNATURES);
     }
 
@@ -209,7 +209,7 @@ mod tests {
             owner_guid: ObjectGuid::from_low(456),
             result: PetitionResult::Ok,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_PETITION_SIGN_RESULTS);
     }
 
@@ -218,7 +218,7 @@ mod tests {
         let msg = SmsgTurnInPetitionResults {
             result: PetitionResult::Ok,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TURN_IN_PETITION_RESULTS);
     }
 
@@ -229,7 +229,7 @@ mod tests {
             owner_guid: ObjectGuid::from_low(456),
             guild_name: "MyGuild",
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_PETITION_QUERY_RESPONSE);
     }
 }

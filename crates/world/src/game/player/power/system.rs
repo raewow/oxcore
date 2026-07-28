@@ -425,7 +425,7 @@ impl PowerSystem {
     ) {
         let block = Self::power_value_update_block(player_guid, power_type, value);
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
-        let packet = update_msg.to_world_packet();
+        let packet = update_msg.to_vanilla();
         self.broadcast_mgr
             .broadcast_nearby(player_guid, &packet, true);
     }
@@ -435,7 +435,7 @@ impl PowerSystem {
         let block = ValuesUpdateBlock::new(player_guid, ObjectType::Player)
             .set_field(UNIT_FIELD_HEALTH, value);
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
-        let packet = update_msg.to_world_packet();
+        let packet = update_msg.to_vanilla();
         self.broadcast_mgr
             .broadcast_nearby(player_guid, &packet, true);
     }

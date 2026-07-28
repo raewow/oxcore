@@ -24,7 +24,7 @@ pub struct SmsgGmTicketSystemStatus {
 }
 
 impl ToWorldPacket for SmsgGmTicketSystemStatus {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GMTICKET_SYSTEMSTATUS);
         packet.write_u32(self.status);
         packet
@@ -41,7 +41,7 @@ pub struct SmsgGmTicketCreate {
 }
 
 impl ToWorldPacket for SmsgGmTicketCreate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GMTICKET_CREATE);
         packet.write_u32(self.result);
         packet
@@ -72,7 +72,7 @@ pub struct SmsgGmTicketGetTicket {
 }
 
 impl ToWorldPacket for SmsgGmTicketGetTicket {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GMTICKET_GETTICKET);
         packet.write_u32(self.status);
 
@@ -100,7 +100,7 @@ pub struct SmsgGmTicketUpdateText {
 }
 
 impl ToWorldPacket for SmsgGmTicketUpdateText {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GMTICKET_UPDATETEXT);
         packet.write_u32(self.result);
         packet
@@ -117,7 +117,7 @@ pub struct SmsgGmTicketDeleteTicket {
 }
 
 impl ToWorldPacket for SmsgGmTicketDeleteTicket {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GMTICKET_DELETETICKET);
         packet.write_u32(self.result);
         packet
@@ -132,14 +132,14 @@ mod tests {
     #[test]
     fn test_smsg_gm_ticket_system_status() {
         let msg = SmsgGmTicketSystemStatus { status: 1 };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GMTICKET_SYSTEMSTATUS);
     }
 
     #[test]
     fn test_smsg_gm_ticket_create() {
         let msg = SmsgGmTicketCreate { result: 0 };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GMTICKET_CREATE);
     }
 
@@ -157,7 +157,7 @@ mod tests {
                 read_by_gm: false,
             }),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GMTICKET_GETTICKET);
     }
 
@@ -167,21 +167,21 @@ mod tests {
             status: 0x0A, // Default status
             ticket: None,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GMTICKET_GETTICKET);
     }
 
     #[test]
     fn test_smsg_gm_ticket_update_text() {
         let msg = SmsgGmTicketUpdateText { result: 0 };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GMTICKET_UPDATETEXT);
     }
 
     #[test]
     fn test_smsg_gm_ticket_delete_ticket() {
         let msg = SmsgGmTicketDeleteTicket { result: 0 };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GMTICKET_DELETETICKET);
     }
 }

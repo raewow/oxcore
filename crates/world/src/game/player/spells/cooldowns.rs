@@ -213,7 +213,7 @@ pub async fn reset_cooldown(
         spell_id,
         caster_guid,
     };
-    broadcast_mgr.send_msg_to_player(caster_guid, msg.to_world_packet());
+    broadcast_mgr.send_msg_to_player(caster_guid, msg.to_vanilla());
 
     Ok(())
 }
@@ -241,7 +241,7 @@ pub async fn reset_all_cooldowns(
             spell_id,
             caster_guid,
         };
-        broadcast_mgr.send_msg_to_player(caster_guid, msg.to_world_packet());
+        broadcast_mgr.send_msg_to_player(caster_guid, msg.to_vanilla());
     }
 
     Ok(())
@@ -274,7 +274,7 @@ pub fn send_cooldowns_on_login(
             caster_guid: player_guid,
             cooldowns: active_cooldowns,
         };
-        broadcast_mgr.send_msg_to_player(player_guid, msg.to_world_packet());
+        broadcast_mgr.send_msg_to_player(player_guid, msg.to_vanilla());
     }
 
     Ok(())

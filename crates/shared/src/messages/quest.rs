@@ -103,7 +103,7 @@ pub const QUEST_EMOTE_COUNT: usize = 4;
 pub struct SmsgQuestlogFull;
 
 impl ToWorldPacket for SmsgQuestlogFull {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_QUESTLOG_FULL)
     }
 }
@@ -118,7 +118,7 @@ pub struct SmsgQuestupdateComplete {
 }
 
 impl ToWorldPacket for SmsgQuestupdateComplete {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTUPDATE_COMPLETE);
         packet.write_u32(self.quest_id);
         packet
@@ -135,7 +135,7 @@ pub struct SmsgQuestupdateFailed {
 }
 
 impl ToWorldPacket for SmsgQuestupdateFailed {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTUPDATE_FAILED);
         packet.write_u32(self.quest_id);
         packet
@@ -152,7 +152,7 @@ pub struct SmsgQuestupdateFailedtimer {
 }
 
 impl ToWorldPacket for SmsgQuestupdateFailedtimer {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTUPDATE_FAILEDTIMER);
         packet.write_u32(self.quest_id);
         packet
@@ -169,7 +169,7 @@ pub struct SmsgQuestgiverQuestInvalid {
 }
 
 impl ToWorldPacket for SmsgQuestgiverQuestInvalid {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_QUEST_INVALID);
         packet.write_u32(self.reason);
         packet
@@ -192,7 +192,7 @@ pub struct SmsgQuestgiverQuestComplete<'a> {
 }
 
 impl ToWorldPacket for SmsgQuestgiverQuestComplete<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_QUEST_COMPLETE);
         packet.write_u32(self.quest_id);
         packet.write_u32(0x03); // Unknown flag
@@ -219,7 +219,7 @@ pub struct SmsgQuestupdateAddItem {
 }
 
 impl ToWorldPacket for SmsgQuestupdateAddItem {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTUPDATE_ADD_ITEM);
         packet.write_u32(self.item_id);
         packet.write_u32(self.count);
@@ -239,7 +239,7 @@ pub struct SmsgQuestgiverStatus {
 }
 
 impl ToWorldPacket for SmsgQuestgiverStatus {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_STATUS);
         packet.write_guid_raw(self.guid.raw());
         packet.write_u32(self.status as u32);
@@ -265,7 +265,7 @@ pub struct SmsgQuestupdateAddKill {
 }
 
 impl ToWorldPacket for SmsgQuestupdateAddKill {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTUPDATE_ADD_KILL);
         packet.write_u32(self.quest_id);
         packet.write_u32(self.entry);
@@ -307,7 +307,7 @@ pub struct SmsgQuestgiverQuestListV2<'a> {
 }
 
 impl ToWorldPacket for SmsgQuestgiverQuestListV2<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_QUEST_LIST);
         packet.write_guid_raw(self.guid.raw());
         packet.write_string(self.title);
@@ -362,7 +362,7 @@ pub struct SmsgQuestgiverRequestItemsV2<'a> {
 }
 
 impl ToWorldPacket for SmsgQuestgiverRequestItemsV2<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_REQUEST_ITEMS);
 
         packet.write_guid_raw(self.guid.raw());
@@ -455,7 +455,7 @@ pub struct SmsgQuestgiverOfferRewardV2<'a> {
 }
 
 impl ToWorldPacket for SmsgQuestgiverOfferRewardV2<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_OFFER_REWARD);
 
         packet.write_guid_raw(self.guid.raw());
@@ -532,7 +532,7 @@ pub struct SmsgQuestgiverQuestDetailsV2<'a> {
 }
 
 impl ToWorldPacket for SmsgQuestgiverQuestDetailsV2<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_QUEST_DETAILS);
 
         packet.write_guid_raw(self.guid.raw());
@@ -657,7 +657,7 @@ pub struct SmsgQuestQueryResponseV2<'a> {
 }
 
 impl ToWorldPacket for SmsgQuestQueryResponseV2<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUEST_QUERY_RESPONSE);
 
         packet.write_u32(self.quest_id);
@@ -745,7 +745,7 @@ pub struct SmsgQuestConfirmAccept {
 }
 
 impl ToWorldPacket for SmsgQuestConfirmAccept {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUEST_CONFIRM_ACCEPT);
         packet.write_u32(self.quest_id);
         packet.write_string(&self.title);
@@ -768,7 +768,7 @@ pub struct MsgQuestPushResult {
 }
 
 impl ToWorldPacket for MsgQuestPushResult {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::MSG_QUEST_PUSH_RESULT);
         packet.write_packed_guid(self.sender_guid);
         packet.write_u8(self.msg);
@@ -784,35 +784,35 @@ mod tests {
     #[test]
     fn test_smsg_questlog_full() {
         let msg = SmsgQuestlogFull;
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTLOG_FULL);
     }
 
     #[test]
     fn test_smsg_questupdate_complete() {
         let msg = SmsgQuestupdateComplete { quest_id: 123 };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTUPDATE_COMPLETE);
     }
 
     #[test]
     fn test_smsg_questupdate_failed() {
         let msg = SmsgQuestupdateFailed { quest_id: 123 };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTUPDATE_FAILED);
     }
 
     #[test]
     fn test_smsg_questupdate_failedtimer() {
         let msg = SmsgQuestupdateFailedtimer { quest_id: 123 };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTUPDATE_FAILEDTIMER);
     }
 
     #[test]
     fn test_smsg_questgiver_quest_invalid() {
         let msg = SmsgQuestgiverQuestInvalid { reason: 1 };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_INVALID);
     }
 
@@ -824,7 +824,7 @@ mod tests {
             money: 500,
             reward_items: &[(456, 2)],
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_COMPLETE);
         assert_eq!(packet.data().len(), 28);
         assert_eq!(
@@ -854,7 +854,7 @@ mod tests {
             offer_reward_emote: [0; QUEST_EMOTE_COUNT],
             offer_reward_emote_delay: [0; QUEST_EMOTE_COUNT],
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTGIVER_OFFER_REWARD);
         assert_eq!(
             u32::from_le_bytes(packet.data()[packet.data().len() - 4..].try_into().unwrap()),
@@ -868,7 +868,7 @@ mod tests {
             item_id: 456,
             count: 5,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTUPDATE_ADD_ITEM);
     }
 
@@ -878,7 +878,7 @@ mod tests {
             guid: ObjectGuid::from_low(789),
             status: DialogStatus::Available,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTGIVER_STATUS);
     }
 
@@ -891,7 +891,7 @@ mod tests {
             required_count: 10,
             guid: ObjectGuid::from_low(789),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTUPDATE_ADD_KILL);
     }
 
@@ -945,7 +945,7 @@ mod tests {
             objective_text: &objective_text,
         };
 
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUEST_QUERY_RESPONSE);
         assert_eq!(
             u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
@@ -984,7 +984,7 @@ mod tests {
             title: "Shared Quest".to_string(),
             sender_guid: ObjectGuid::from_low(7),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUEST_CONFIRM_ACCEPT);
         assert_eq!(
             u32::from_le_bytes(packet.data()[0..4].try_into().unwrap()),
@@ -1000,7 +1000,7 @@ mod tests {
             sender_guid: ObjectGuid::from_low(5),
             msg: 4, // QUEST_PARTY_MSG_TOO_FAR
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
     }
 }

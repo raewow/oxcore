@@ -2204,7 +2204,7 @@ impl AuraSystem {
         block = block.set_field(UNIT_FIELD_AURAAPPLICATIONS + apps_index, apps_field_value);
 
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
-        let packet = update_msg.to_world_packet();
+        let packet = update_msg.to_vanilla();
         tracing::info!(
             "[AURA_UPDATE] slot={} spell={} target={:?} packet_len={} bytes={:02X?}",
             slot,
@@ -3065,7 +3065,7 @@ impl AuraSystem {
         );
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
-            .to_world_packet();
+            .to_vanilla();
         self.broadcast_mgr
             .broadcast_nearby(target_guid, &packet, true);
     }
@@ -3361,7 +3361,7 @@ impl AuraSystem {
         }
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
-            .to_world_packet();
+            .to_vanilla();
         self.broadcast_mgr
             .broadcast_nearby(target_guid, &packet, true);
     }
@@ -3419,7 +3419,7 @@ impl AuraSystem {
         );
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
-            .to_world_packet();
+            .to_vanilla();
         self.broadcast_mgr
             .broadcast_nearby(target_guid, &packet, true);
     }
@@ -3451,7 +3451,7 @@ impl AuraSystem {
             );
             let packet = SmsgUpdateObject::new()
                 .add_block(UpdateBlockData::Values(block))
-                .to_world_packet();
+                .to_vanilla();
             self.broadcast_mgr
                 .broadcast_nearby(target_guid, &packet, true);
         }
@@ -3596,7 +3596,7 @@ impl AuraSystem {
         );
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
-            .to_world_packet();
+            .to_vanilla();
         self.broadcast_mgr
             .broadcast_nearby(target_guid, &packet, true);
     }
@@ -3724,7 +3724,7 @@ impl AuraSystem {
         );
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
-            .to_world_packet();
+            .to_vanilla();
         self.broadcast_mgr.send_to_player(target_guid, packet);
     }
 
@@ -3979,7 +3979,7 @@ impl AuraSystem {
         block = block.set_field(UNIT_DYNAMIC_FLAGS, dynamic_flags);
         let packet = SmsgUpdateObject::new()
             .add_block(UpdateBlockData::Values(block))
-            .to_world_packet();
+            .to_vanilla();
         self.broadcast_mgr.send_to_player(recipient_guid, packet);
     }
 }

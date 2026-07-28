@@ -16,7 +16,7 @@ pub struct SmsgCorpseReclaimDelay {
 }
 
 impl ToWorldPacket for SmsgCorpseReclaimDelay {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CORPSE_RECLAIM_DELAY);
         packet.write_u32(self.delay_ms);
         packet
@@ -36,7 +36,7 @@ pub struct SmsgResurrectRequest {
 }
 
 impl ToWorldPacket for SmsgResurrectRequest {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_RESURRECT_REQUEST);
         packet.write_u64(self.caster_guid.raw());
         let name_bytes = self.caster_name.as_bytes();
@@ -61,7 +61,7 @@ pub struct SmsgSpiritHealerConfirm {
 }
 
 impl ToWorldPacket for SmsgSpiritHealerConfirm {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPIRIT_HEALER_CONFIRM);
         packet.write_u64(self.healer_guid.raw());
         packet
@@ -80,7 +80,7 @@ mod tests {
             causes_sickness: false,
             use_corpse_timer: true,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_RESURRECT_REQUEST);
 
         let bytes = packet.contents();
@@ -101,7 +101,7 @@ mod tests {
             causes_sickness: true,
             use_corpse_timer: false,
         };
-        let bytes = msg.to_world_packet().contents().to_vec();
+        let bytes = msg.to_vanilla().contents().to_vec();
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 4); // "Bob" + null
         assert_eq!(&bytes[12..15], b"Bob");
         assert_eq!(bytes[15], 0); // null terminator

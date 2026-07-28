@@ -6,7 +6,8 @@
 
 use crate::game::player::packet_queue::{PacketQueue, PacketQueueConfig};
 use arc_swap::ArcSwap;
-use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
+use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,6 +19,10 @@ use tracing::debug;
 pub struct PlayerBroadcaster {
     packet_tx: mpsc::UnboundedSender<WorldPacket>,
     self_guid: ObjectGuid,
+    /// Which protocol this player's client speaks. Held here because the broadcaster is the last
+    /// point that still knows *who* a packet is for — by the time bytes reach the send queue the
+    /// recipient is gone, so this is where a message must be turned into the right encoding.
+    protocol: Protocol,
     listeners: Arc<RwLock<HashMap<ObjectGuid, Arc<PlayerBroadcaster>>>>,
     listener_snapshot: Arc<ArcSwap<Vec<(ObjectGuid, Arc<PlayerBroadcaster>)>>>,
     packet_queue: RwLock<PacketQueue>,
@@ -44,6 +49,51 @@ impl PlayerBroadcaster {
         Self::with_config(packet_tx, self_guid, PacketQueueConfig::default())
     }
 
+    /// Which protocol this player's client speaks.
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+
+    /// Set the protocol for this player's connection.
+    pub fn set_protocol(&mut self, protocol: Protocol) {
+        self.protocol = protocol;
+    }
+
+    /// Encode `msg` for this player's protocol.
+    ///
+    /// `None` means the message has no encoding for that protocol yet — see
+    /// [`ToWorldPacket::to_modern`]. Callers log and drop rather than treating it as an error.
+    pub fn encode(&self, msg: &impl ToWorldPacket) -> Option<WorldPacket> {
+        match self.protocol {
+            Protocol::Vanilla => Some(msg.to_vanilla()),
+            Protocol::Modern => msg.to_modern(),
+        }
+    }
+
+    /// Encode `msg` for this player and send it immediately.
+    pub fn send_msg(&self, msg: &impl ToWorldPacket) {
+        match self.encode(msg) {
+            Some(packet) => self.send_direct(packet),
+            None => self.warn_unported(),
+        }
+    }
+
+    /// Encode `msg` for this player and queue it for the next flush.
+    pub fn queue_msg(&self, msg: &impl ToWorldPacket) {
+        match self.encode(msg) {
+            Some(packet) => self.queue_packet(packet),
+            None => self.warn_unported(),
+        }
+    }
+
+    fn warn_unported(&self) {
+        tracing::debug!(
+            "No {:?} encoding for a message bound for {:?}; dropping",
+            self.protocol,
+            self.self_guid
+        );
+    }
+
     pub fn with_config(
         packet_tx: mpsc::UnboundedSender<WorldPacket>,
         self_guid: ObjectGuid,
@@ -52,6 +102,7 @@ impl PlayerBroadcaster {
         Self {
             packet_tx,
             self_guid,
+            protocol: Protocol::Vanilla,
             listeners: Arc::new(RwLock::new(HashMap::new())),
             listener_snapshot: Arc::new(ArcSwap::new(Arc::new(Vec::new()))),
             packet_queue: RwLock::new(PacketQueue::with_config(queue_config)),

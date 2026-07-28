@@ -84,7 +84,7 @@ pub async fn handle_attack_swing(
     world
         .managers
         .broadcast_mgr
-        .broadcast_nearby(attacker_guid, &packet.to_world_packet(), true);
+        .broadcast_nearby(attacker_guid, &packet.to_vanilla(), true);
 
     Ok(())
 }
@@ -431,7 +431,7 @@ fn send_attacker_state_update(
     // Broadcast to nearby players
     world.managers.broadcast_mgr.broadcast_nearby(
         attacker,
-        &packet.to_world_packet(),
+        &packet.to_vanilla(),
         true, // include self
     );
 
@@ -454,7 +454,7 @@ fn send_health_update(world: &World, creature_guid: ObjectGuid) -> anyhow::Resul
                 .set_field(UNIT_FIELD_HEALTH, current)
                 .set_field(UNIT_FIELD_MAXHEALTH, max),
         ));
-        broadcast_around_creature(world, creature_guid, &update.to_world_packet());
+        broadcast_around_creature(world, creature_guid, &update.to_vanilla());
     }
 
     Ok(())
@@ -492,7 +492,7 @@ fn send_creature_killed_update(world: &World, creature_guid: ObjectGuid) -> anyh
             .set_field(UNIT_FIELD_BYTES_1, 7u32) // Stand state Dead = 7 (UNIT_STAND_STATE_DEAD)
             .set_field(UNIT_NPC_FLAGS, 0u32), // Clear NPC interaction flags
     ));
-    broadcast_around_creature(world, creature_guid, &update.to_world_packet());
+    broadcast_around_creature(world, creature_guid, &update.to_vanilla());
     Ok(())
 }
 
@@ -507,7 +507,7 @@ fn send_attack_stop(world: &World, attacker: ObjectGuid, target: ObjectGuid, _ta
 
     world.managers.broadcast_mgr.broadcast_nearby(
         attacker,
-        &packet.to_world_packet(),
+        &packet.to_vanilla(),
         true, // include self
     );
 }
@@ -529,7 +529,7 @@ fn send_attack_stop_to_player(
     world
         .managers
         .broadcast_mgr
-        .send_to_player(attacker, packet.to_world_packet());
+        .send_to_player(attacker, packet.to_vanilla());
 }
 
 /// Send attack stop from a creature (uses creature position for broadcast)
@@ -545,5 +545,5 @@ fn send_creature_attack_stop(
         unk: 0,
     };
 
-    broadcast_around_creature(world, creature_guid, &packet.to_world_packet());
+    broadcast_around_creature(world, creature_guid, &packet.to_vanilla());
 }

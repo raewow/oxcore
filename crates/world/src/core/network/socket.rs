@@ -501,7 +501,7 @@ impl WorldSocket {
         let response = SmsgAuthResponse {
             error_code: AuthErrorCode::Ok as u8,
         };
-        let packet_data = response.to_world_packet();
+        let packet_data = response.to_vanilla();
         let mut packet = WorldPacket::new(packet_data.opcode());
         packet.write_bytes(packet_data.contents());
 
@@ -520,7 +520,7 @@ impl WorldSocket {
         use oxcore_shared::messages::login::SmsgAuthResponse;
 
         let response = SmsgAuthResponse { error_code };
-        let packet_data = response.to_world_packet();
+        let packet_data = response.to_vanilla();
         let mut packet = WorldPacket::new(packet_data.opcode());
         packet.write_bytes(packet_data.contents());
 
@@ -666,7 +666,7 @@ impl WorldSocket {
 
     /// Send a message struct (using ToWorldPacket trait)
     async fn send_msg(&mut self, msg: impl ToWorldPacket) -> Result<()> {
-        let packet_data = msg.to_world_packet();
+        let packet_data = msg.to_vanilla();
         let mut packet = WorldPacket::new(packet_data.opcode());
         packet.write_bytes(packet_data.contents());
         self.send_packet(&packet).await

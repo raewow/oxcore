@@ -27,7 +27,7 @@ pub struct SmsgStartMirrorTimer {
 }
 
 impl ToWorldPacket for SmsgStartMirrorTimer {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_START_MIRROR_TIMER);
         packet.write_u32(self.timer_type);
         packet.write_u32(self.current);
@@ -48,7 +48,7 @@ pub struct SmsgStopMirrorTimer {
 }
 
 impl ToWorldPacket for SmsgStopMirrorTimer {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_STOP_MIRROR_TIMER);
         packet.write_u32(self.timer_type);
         packet
@@ -72,7 +72,7 @@ pub struct SmsgEnvironmentalDamageLog {
 }
 
 impl ToWorldPacket for SmsgEnvironmentalDamageLog {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ENVIRONMENTALDAMAGELOG);
         packet.write_u64(self.guid);
         packet.write_u8(self.damage_type);
@@ -94,7 +94,7 @@ pub struct SmsgExplorationExperience {
 }
 
 impl ToWorldPacket for SmsgExplorationExperience {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_EXPLORATION_EXPERIENCE);
         packet.write_u32(self.area_id);
         packet.write_u32(self.xp);

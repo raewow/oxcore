@@ -25,7 +25,7 @@ pub struct SmsgUpdateAccountData {
 }
 
 impl ToWorldPacket for SmsgUpdateAccountData {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_ACCOUNT_DATA);
         packet.write_u32(self.data_type);
 
@@ -80,7 +80,7 @@ impl Default for SmsgAccountDataTimes {
 }
 
 impl ToWorldPacket for SmsgAccountDataTimes {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ACCOUNT_DATA_TIMES);
         for &timestamp in &self.timestamps {
             packet.write_u32(timestamp);
@@ -101,7 +101,7 @@ pub struct SmsgUpdateAccountDataComplete {
 }
 
 impl ToWorldPacket for SmsgUpdateAccountDataComplete {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_ACCOUNT_DATA_COMPLETE);
         packet.write_u32(self.data_type);
         packet.write_u32(self.status);

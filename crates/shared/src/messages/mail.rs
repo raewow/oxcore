@@ -35,7 +35,7 @@ pub struct SmsgSendMailResult {
 }
 
 impl ToWorldPacket for SmsgSendMailResult {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SEND_MAIL_RESULT);
         packet.write_u32(self.mail_id);
         packet.write_u32(self.response_type as u32);
@@ -71,7 +71,7 @@ pub struct SmsgMailListResult<'a> {
 }
 
 impl ToWorldPacket for SmsgMailListResult<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_MAIL_LIST_RESULT);
 
         // Filter out expired and undelivered mails
@@ -165,7 +165,7 @@ impl ToWorldPacket for SmsgMailListResult<'_> {
 pub struct SmsgReceivedMail {}
 
 impl ToWorldPacket for SmsgReceivedMail {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_RECEIVED_MAIL);
         packet.write_u32(0); // Always 0
         packet
@@ -185,7 +185,7 @@ pub struct SmsgItemTextQueryResponse<'a> {
 }
 
 impl ToWorldPacket for SmsgItemTextQueryResponse<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_TEXT_QUERY_RESPONSE);
         packet.write_u32(self.text_id);
         packet.write_string(self.text);
@@ -209,7 +209,7 @@ mod tests {
             item_guid: None,
             item_count: None,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_SEND_MAIL_RESULT);
     }
 
@@ -223,7 +223,7 @@ mod tests {
             item_guid: None,
             item_count: None,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_SEND_MAIL_RESULT);
     }
 
@@ -237,7 +237,7 @@ mod tests {
             item_guid: Some(456),
             item_count: Some(1),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_SEND_MAIL_RESULT);
     }
 
@@ -272,14 +272,14 @@ mod tests {
         }];
 
         let msg = SmsgMailListResult { mails: &mails };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_MAIL_LIST_RESULT);
     }
 
     #[test]
     fn test_smsg_received_mail() {
         let msg = SmsgReceivedMail {};
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_RECEIVED_MAIL);
     }
 
@@ -289,7 +289,7 @@ mod tests {
             text_id: 123,
             text: "This is some item text content.",
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_ITEM_TEXT_QUERY_RESPONSE);
     }
 }

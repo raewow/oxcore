@@ -11,7 +11,7 @@ pub struct SmsgPong {
 }
 
 impl ToWorldPacket for SmsgPong {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_PONG);
         packet.write_u32(self.sequence);
         packet
@@ -25,7 +25,7 @@ pub struct SmsgForceMoveRoot {
 }
 
 impl ToWorldPacket for SmsgForceMoveRoot {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_FORCE_MOVE_ROOT);
         packet.write_packed_guid(self.guid);
         packet.write_u32(0); // counter
@@ -40,7 +40,7 @@ pub struct SmsgForceMoveUnroot {
 }
 
 impl ToWorldPacket for SmsgForceMoveUnroot {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_FORCE_MOVE_UNROOT);
         packet.write_packed_guid(self.guid);
         packet.write_u32(0); // counter
@@ -222,7 +222,7 @@ impl SmsgMonsterMove {
 }
 
 impl ToWorldPacket for SmsgMonsterMove {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_MONSTER_MOVE);
 
         packet.write_packed_guid(self.guid);

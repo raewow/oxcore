@@ -295,7 +295,7 @@ fn send_death_packet(world: &World, guid: ObjectGuid) {
             .set_field(UNIT_NPC_FLAGS, 0u32), // Clear NPC interaction flags on death
     ));
 
-    broadcast_around_creature(world, guid, &update.to_world_packet());
+    broadcast_around_creature(world, guid, &update.to_vanilla());
 }
 
 /// Send complete death+loot update with ALL fields (health, flags, dynamic flags, etc.)
@@ -313,7 +313,7 @@ fn send_complete_loot_update(world: &World, guid: ObjectGuid, dynamic_flags: u32
         "[DEATH] Sending lootable update: dynflags=0x{:04X}",
         dynamic_flags
     );
-    broadcast_around_creature(world, guid, &update.to_world_packet());
+    broadcast_around_creature(world, guid, &update.to_vanilla());
 }
 
 /// Update dynamic flags only (e.g. clear lootable after all loot taken)
@@ -323,7 +323,7 @@ pub fn send_dynamic_flags_update(world: &World, guid: ObjectGuid, flags: u32) {
         ValuesUpdateBlock::new(world_guid, ObjectType::Unit).set_field(UNIT_DYNAMIC_FLAGS, flags),
     ));
 
-    broadcast_around_creature(world, guid, &update.to_world_packet());
+    broadcast_around_creature(world, guid, &update.to_vanilla());
 }
 
 /// Send destroy object packet

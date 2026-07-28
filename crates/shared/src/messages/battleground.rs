@@ -30,7 +30,7 @@ pub struct SmsgBattlefieldStatus {
 }
 
 impl ToWorldPacket for SmsgBattlefieldStatus {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_BATTLEFIELD_STATUS);
         packet.write_u32(self.bg_type_id.map_id());
         packet.write_u8(self.status as u8);
@@ -55,7 +55,7 @@ pub struct SmsgBattlefieldList<'a> {
 }
 
 impl ToWorldPacket for SmsgBattlefieldList<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_BATTLEFIELD_LIST);
         packet.write_u32(self.bg_type_id.map_id());
         packet.write_u8(self.instance_ids.len() as u8);
@@ -81,7 +81,7 @@ mod tests {
             time2: 0,
             client_instance_id: 123,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_BATTLEFIELD_STATUS);
     }
 
@@ -91,7 +91,7 @@ mod tests {
             bg_type_id: BattleGroundTypeId::WarsongGulch,
             instance_ids: &[1, 2, 3],
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_BATTLEFIELD_LIST);
     }
 }

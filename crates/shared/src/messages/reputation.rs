@@ -25,7 +25,7 @@ pub struct SmsgInitializeFactions {
 }
 
 impl ToWorldPacket for SmsgInitializeFactions {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INITIALIZE_FACTIONS);
         packet.write_u32(0x00000040); // Flags
 
@@ -66,7 +66,7 @@ pub struct SmsgSetFactionStanding {
 }
 
 impl ToWorldPacket for SmsgSetFactionStanding {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SET_FACTION_STANDING);
         packet.write_u32(self.factions.len() as u32);
 
@@ -89,7 +89,7 @@ pub struct SmsgSetForcedReactions {
 }
 
 impl ToWorldPacket for SmsgSetForcedReactions {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SET_FORCED_REACTIONS);
         packet.write_u32(self.forced_reactions.len() as u32);
 
@@ -112,7 +112,7 @@ pub struct SmsgSetFactionVisible {
 }
 
 impl ToWorldPacket for SmsgSetFactionVisible {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SET_FACTION_VISIBLE);
         packet.write_u32(self.reputation_list_id);
         packet
@@ -132,7 +132,7 @@ mod tests {
         factions.insert(3, (0x04, -200));
 
         let msg = SmsgInitializeFactions { factions };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_INITIALIZE_FACTIONS);
     }
 
@@ -140,7 +140,7 @@ mod tests {
     fn test_smsg_set_faction_standing() {
         let factions = vec![(0, 1200), (1, 500)];
         let msg = SmsgSetFactionStanding { factions };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_SET_FACTION_STANDING);
     }
 
@@ -151,7 +151,7 @@ mod tests {
         forced_reactions.insert(2, 3);
 
         let msg = SmsgSetForcedReactions { forced_reactions };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_SET_FORCED_REACTIONS);
     }
 
@@ -160,7 +160,7 @@ mod tests {
         let msg = SmsgSetFactionVisible {
             reputation_list_id: 5,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_SET_FACTION_VISIBLE);
     }
 }

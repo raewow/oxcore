@@ -28,7 +28,7 @@ pub struct SmsgDuelRequested {
 }
 
 impl ToWorldPacket for SmsgDuelRequested {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_DUEL_REQUESTED);
         packet.write_guid_raw(self.arbiter_guid.raw());
         packet.write_guid_raw(self.initiator_guid.raw());
@@ -46,7 +46,7 @@ pub struct SmsgDuelCountdown {
 }
 
 impl ToWorldPacket for SmsgDuelCountdown {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_DUEL_COUNTDOWN);
         packet.write_u32(self.countdown);
         packet
@@ -60,7 +60,7 @@ impl ToWorldPacket for SmsgDuelCountdown {
 pub struct SmsgDuelOutOfBounds {}
 
 impl ToWorldPacket for SmsgDuelOutOfBounds {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_DUEL_OUTOFBOUNDS)
     }
 }
@@ -72,7 +72,7 @@ impl ToWorldPacket for SmsgDuelOutOfBounds {
 pub struct SmsgDuelInBounds {}
 
 impl ToWorldPacket for SmsgDuelInBounds {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_DUEL_INBOUNDS)
     }
 }
@@ -87,7 +87,7 @@ pub struct SmsgDuelComplete {
 }
 
 impl ToWorldPacket for SmsgDuelComplete {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_DUEL_COMPLETE);
         packet.write_u8(if self.completed { 1 } else { 0 });
         packet
@@ -108,7 +108,7 @@ pub struct SmsgDuelWinner<'a> {
 }
 
 impl ToWorldPacket for SmsgDuelWinner<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_DUEL_WINNER);
         packet.write_u8(if self.won { 0 } else { 1 });
         packet.write_string(self.winner_name);
@@ -128,21 +128,21 @@ mod tests {
             arbiter_guid: ObjectGuid::from_low(123),
             initiator_guid: ObjectGuid::from_low(456),
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_DUEL_REQUESTED);
     }
 
     #[test]
     fn test_smsg_duel_countdown() {
         let msg = SmsgDuelCountdown { countdown: 3 };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_DUEL_COUNTDOWN);
     }
 
     #[test]
     fn test_smsg_duel_complete() {
         let msg = SmsgDuelComplete { completed: true };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_DUEL_COMPLETE);
     }
 
@@ -153,7 +153,7 @@ mod tests {
             winner_name: "Player1",
             loser_name: "Player2",
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_DUEL_WINNER);
     }
 }

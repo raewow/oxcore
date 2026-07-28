@@ -44,7 +44,7 @@ pub struct SmsgLootRollStarted {
 }
 
 impl ToWorldPacket for SmsgLootRollStarted {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_START_ROLL);
         packet.write_u64(self.loot_guid.raw());
         packet.write_u32(self.item_slot);
@@ -71,7 +71,7 @@ pub struct SmsgLootRoll {
 }
 
 impl ToWorldPacket for SmsgLootRoll {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_ROLL);
         packet.write_u64(self.player_guid.raw());
         packet.write_u32(self.item_slot);
@@ -94,7 +94,7 @@ pub struct SmsgLootRollWon {
 }
 
 impl ToWorldPacket for SmsgLootRollWon {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_ROLL_WON);
         packet.write_u64(self.player_guid.raw());
         packet.write_u32(self.item_slot);
@@ -115,7 +115,7 @@ pub struct SmsgLootAllPassed {
 }
 
 impl ToWorldPacket for SmsgLootAllPassed {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_ALL_PASSED);
         packet.write_u64(self.loot_guid.raw());
         packet.write_u32(self.item_slot);
@@ -134,7 +134,7 @@ pub struct SmsgGroupInvite<'a> {
 }
 
 impl ToWorldPacket for SmsgGroupInvite<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GROUP_INVITE);
         packet.write_string(self.inviter_name);
         packet
@@ -154,7 +154,7 @@ pub struct SmsgGroupList<'a> {
 }
 
 impl ToWorldPacket for SmsgGroupList<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GROUP_LIST);
 
         // Group type (0 = normal, 1 = raid)
@@ -232,7 +232,7 @@ pub struct SmsgGroupSetLeader<'a> {
 }
 
 impl ToWorldPacket for SmsgGroupSetLeader<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GROUP_SET_LEADER);
         packet.write_string(self.leader_name);
         packet
@@ -254,7 +254,7 @@ pub struct SmsgPartyCommandResult<'a> {
 }
 
 impl ToWorldPacket for SmsgPartyCommandResult<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_PARTY_COMMAND_RESULT);
         packet.write_u32(self.operation);
         packet.write_string(self.member_name);
@@ -326,7 +326,7 @@ pub struct SmsgPartyMemberStats<'a> {
 }
 
 impl ToWorldPacket for SmsgPartyMemberStats<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         use group_update_flags::*;
 
         let mut packet = WorldPacket::new(Opcode::SMSG_PARTY_MEMBER_STATS);
@@ -604,7 +604,7 @@ impl ToWorldPacket for SmsgPartyMemberStats<'_> {
 pub struct SmsgGroupDestroyed;
 
 impl ToWorldPacket for SmsgGroupDestroyed {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_GROUP_DESTROYED)
     }
 }
@@ -616,7 +616,7 @@ impl ToWorldPacket for SmsgGroupDestroyed {
 pub struct SmsgGroupUninvite;
 
 impl ToWorldPacket for SmsgGroupUninvite {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_GROUP_UNINVITE)
     }
 }
@@ -634,7 +634,7 @@ pub struct MsgRaidTargetUpdate {
 }
 
 impl ToWorldPacket for MsgRaidTargetUpdate {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::MSG_RAID_TARGET_UPDATE);
         packet.write_u8(self.mode);
 
@@ -662,7 +662,7 @@ pub struct MsgRaidReadyCheck {
 }
 
 impl ToWorldPacket for MsgRaidReadyCheck {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::MSG_RAID_READY_CHECK);
         packet.write_u64(self.player_guid.raw());
         if let Some(ready) = self.ready {
@@ -686,7 +686,7 @@ pub struct MsgMinimapPing {
 }
 
 impl ToWorldPacket for MsgMinimapPing {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::MSG_MINIMAP_PING);
         packet.write_u64(self.player_guid.raw());
         packet.write_f32(self.x);
@@ -711,7 +711,7 @@ pub struct MsgRandomRoll {
 }
 
 impl ToWorldPacket for MsgRandomRoll {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::MSG_RANDOM_ROLL);
         packet.write_u32(self.min);
         packet.write_u32(self.max);
@@ -769,7 +769,7 @@ mod tests {
             group: &group,
             member_guid,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GROUP_LIST);
     }
 
@@ -778,7 +778,7 @@ mod tests {
         let msg = SmsgGroupSetLeader {
             leader_name: "NewLeader",
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GROUP_SET_LEADER);
     }
 
@@ -789,7 +789,7 @@ mod tests {
             member_name: "TargetPlayer",
             result: 0,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_PARTY_COMMAND_RESULT);
     }
 
@@ -821,7 +821,7 @@ mod tests {
             pet_auras: None,
             pet_negative_auras: None,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_PARTY_MEMBER_STATS);
     }
 
@@ -837,7 +837,7 @@ mod tests {
             roll_timeout: 60,
             roll_type: 0,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOOT_START_ROLL);
     }
 
@@ -849,7 +849,7 @@ mod tests {
             roll_number: 42,
             roll_type: 0,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOOT_ROLL);
     }
 
@@ -861,7 +861,7 @@ mod tests {
             roll_number: 95,
             roll_type: 0,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOOT_ROLL_WON);
     }
 
@@ -871,7 +871,7 @@ mod tests {
             loot_guid: ObjectGuid::from_low(456),
             item_slot: 0,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOOT_ALL_PASSED);
     }
 }

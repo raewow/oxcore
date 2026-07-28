@@ -18,18 +18,45 @@
 
 use crate::protocol::WorldPacket;
 
-/// Trait for types that can be serialized to a WorldPacket
+/// Serializes a message into the body its recipient's protocol expects.
 ///
-/// This trait enables clean struct-based packet construction.
-/// Types implementing this trait can be sent via `WorldSession::send_msg()`
-/// or `BroadcastManager::send_msg_to_player()`.
+/// The same logical message has a different byte layout on the vanilla 1.12 wire and the modern
+/// 1.14 wire, so a type provides one encoding per protocol. `WorldSession::send_msg()` picks
+/// between them from the session's protocol; the socket layer then frames whichever it gets.
+///
+/// Both return a [`WorldPacket`] — opcode plus body bytes — because that is the currency every
+/// outbound path already speaks (session queue, broadcaster, per-player handler). Only the socket
+/// knows about framing, and it reads the protocol-appropriate number off the [`Opcode`] the packet
+/// carries. Modern bodies are built with a bit-packing writer rather than the byte-oriented
+/// `WorldPacket` writers, but they finish as the same type.
+///
+/// [`Opcode`]: crate::protocol::Opcode
 pub trait ToWorldPacket {
-    fn to_world_packet(&self) -> WorldPacket;
+    /// The vanilla 1.12 body. Every message must provide this — it is the protocol the server was
+    /// built for and the one the 1.12 client still uses.
+    fn to_vanilla(&self) -> WorldPacket;
+
+    /// The modern 1.14 body, or `None` if this message has not been ported yet.
+    ///
+    /// Defaulted so the ~200 existing messages need no change: modern encodings are added one at a
+    /// time as a 1.14 client turns out to need them. Sending an unported message to a modern
+    /// session logs once and drops the packet rather than erroring — a missing cosmetic packet
+    /// should not tear down a connection that is otherwise working.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        None
+    }
 }
 
 impl ToWorldPacket for WorldPacket {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         self.clone()
+    }
+
+    /// Deliberately not implemented. An already-encoded packet carries no record of which
+    /// protocol's layout its bytes are in, so re-labelling it as modern would put vanilla bytes on
+    /// a modern wire. Callers that need both must send the message type, not a built packet.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        None
     }
 }
 

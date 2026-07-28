@@ -475,7 +475,7 @@ fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, t
         message: text,
         chat_tag: ChatTag::None,
     }
-    .to_world_packet();
+    .to_vanilla();
 
     broadcast_around_creature(world, creature_guid, &packet);
 }

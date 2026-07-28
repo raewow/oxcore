@@ -412,7 +412,7 @@ impl EnvironmentSystem {
                     paused: if timer.frozen { 1 } else { 0 },
                     spell_id: timer.spell_id,
                 }
-                .to_world_packet()
+                .to_vanilla()
             };
 
             match status {
@@ -428,7 +428,7 @@ impl EnvironmentSystem {
                             SmsgStopMirrorTimer {
                                 timer_type: timer_type as u32,
                             }
-                            .to_world_packet(),
+                            .to_vanilla(),
                         ));
                     }
                 }

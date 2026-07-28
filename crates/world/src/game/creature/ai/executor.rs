@@ -935,7 +935,7 @@ fn send_health_update(world: &World, creature_guid: ObjectGuid) {
         let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
 
         // Broadcast to nearby players (creatures don't have PlayerBroadcasters)
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         broadcast_around_creature(world, creature_guid, &packet);
 
         tracing::debug!(
@@ -958,7 +958,7 @@ fn send_attack_start(world: &World, creature_guid: ObjectGuid, target_guid: Obje
     };
 
     // Broadcast to nearby players
-    broadcast_around_creature(world, creature_guid, &packet.to_world_packet());
+    broadcast_around_creature(world, creature_guid, &packet.to_vanilla());
 
     tracing::debug!(
         "[AI] Sent SMSG_ATTACKSTART for creature {:?} attacking {:?}",
@@ -1000,7 +1000,7 @@ fn send_combat_state_update(world: &World, creature_guid: ObjectGuid, target_gui
                 .set_field(UNIT_FIELD_FLAGS, flags)
                 .set_guid_field(UNIT_FIELD_TARGET, target_world_guid),
         ));
-        broadcast_around_creature(world, creature_guid, &update.to_world_packet());
+        broadcast_around_creature(world, creature_guid, &update.to_vanilla());
 
         tracing::debug!(
             "[AI] Combat state GUID check: creature_mgr_key={:?} (raw=0x{:016X}), world_guid=0x{:016X}, target_world_guid=0x{:016X}",
@@ -1041,7 +1041,7 @@ fn send_combat_exit_update(world: &World, creature_guid: ObjectGuid) {
                 .set_field(UNIT_FIELD_FLAGS, flags)
                 .set_guid_field(UNIT_FIELD_TARGET, WorldObjectGuid::empty()),
         ));
-        broadcast_around_creature(world, creature_guid, &update.to_world_packet());
+        broadcast_around_creature(world, creature_guid, &update.to_vanilla());
 
         tracing::debug!(
             "[AI] Sent combat exit update for {:?}: flags=0x{:08X}",
@@ -1119,7 +1119,7 @@ pub fn execute_creature_spell_cast(
         ammo_display_id: 0,
         ammo_inventory_type: 0,
     };
-    broadcast_around_creature(world, creature_guid, &msg.to_world_packet());
+    broadcast_around_creature(world, creature_guid, &msg.to_vanilla());
 
     // Apply spell effects - handle common damage/heal effects inline
     for effect_idx in 0..3u8 {
@@ -1514,7 +1514,7 @@ fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, t
         message: text,
         chat_tag: oxcore_shared::game::chat::ChatTag::None,
     }
-    .to_world_packet();
+    .to_vanilla();
 
     broadcast_around_creature(world, creature_guid, &packet);
 }
@@ -1556,7 +1556,7 @@ fn send_display_update(world: &World, creature_guid: ObjectGuid, display_id: u32
         ValuesUpdateBlock::new(world_guid, ObjectType::Unit)
             .set_field(UNIT_FIELD_DISPLAYID, display_id),
     ));
-    broadcast_around_creature(world, creature_guid, &update.to_world_packet());
+    broadcast_around_creature(world, creature_guid, &update.to_vanilla());
 }
 
 #[cfg(test)]

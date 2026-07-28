@@ -1301,7 +1301,7 @@ impl CreatureManager {
             waypoints: vec![final_dest],
         };
 
-        Some(msg.to_world_packet())
+        Some(msg.to_vanilla())
     }
 
     /// Send nearby creatures to a player (called during login)
@@ -1354,7 +1354,7 @@ impl CreatureManager {
                 for block in msg.blocks {
                     if count >= MAX_BLOCKS_PER_PACKET {
                         // Send current batch with compression via broadcast manager
-                        let packet = current_msg.to_world_packet();
+                        let packet = current_msg.to_vanilla();
                         let compressed = compress_update_packet_if_needed(packet)?;
                         world
                             .managers
@@ -1372,7 +1372,7 @@ impl CreatureManager {
 
         // Send remaining blocks with compression via broadcast manager
         if !current_msg.blocks.is_empty() {
-            let packet = current_msg.to_world_packet();
+            let packet = current_msg.to_vanilla();
             let compressed = compress_update_packet_if_needed(packet)?;
             world
                 .managers

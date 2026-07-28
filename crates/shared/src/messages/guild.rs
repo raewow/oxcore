@@ -25,7 +25,7 @@ pub struct SmsgGuildInvite<'a> {
 }
 
 impl ToWorldPacket for SmsgGuildInvite<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GUILD_INVITE);
         packet.write_string(self.inviter_name);
         packet.write_string(self.guild_name);
@@ -43,7 +43,7 @@ pub struct SmsgGuildDecline<'a> {
 }
 
 impl ToWorldPacket for SmsgGuildDecline<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GUILD_DECLINE);
         packet.write_string(self.player_name);
         packet
@@ -64,7 +64,7 @@ pub struct SmsgGuildCommandResult<'a> {
 }
 
 impl ToWorldPacket for SmsgGuildCommandResult<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GUILD_COMMAND_RESULT);
         packet.write_u32(self.command);
         packet.write_string(self.target_name);
@@ -87,7 +87,7 @@ pub struct SmsgGuildQueryResponse<'a> {
 }
 
 impl ToWorldPacket for SmsgGuildQueryResponse<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GUILD_QUERY_RESPONSE);
 
         packet.write_u32(self.guild_id);
@@ -127,7 +127,7 @@ pub struct SmsgGuildInfo<'a> {
 }
 
 impl ToWorldPacket for SmsgGuildInfo<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GUILD_INFO);
 
         packet.write_string(self.guild_name);
@@ -172,7 +172,7 @@ pub enum SmsgGuildEvent {
 }
 
 impl ToWorldPacket for SmsgGuildEvent {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GUILD_EVENT);
 
         match self {
@@ -224,7 +224,7 @@ pub struct SmsgGuildRoster<'a> {
 }
 
 impl ToWorldPacket for SmsgGuildRoster<'_> {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GUILD_ROSTER);
 
         packet.write_u32(self.members.len() as u32);
@@ -370,14 +370,14 @@ mod tests {
             inviter_name: "Alice",
             guild_name: "TestGuild",
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GUILD_INVITE);
     }
 
     #[test]
     fn test_smsg_guild_decline() {
         let msg = SmsgGuildDecline { player_name: "Bob" };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GUILD_DECLINE);
     }
 
@@ -388,7 +388,7 @@ mod tests {
             target_name: "TestPlayer",
             error_code: ERR_GUILD_SUCCESS,
         };
-        let packet = msg.to_world_packet();
+        let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_GUILD_COMMAND_RESULT);
     }
 
@@ -420,22 +420,22 @@ mod tests {
         };
 
         let msg = smsg_guild_query_response_from_cached(&cached);
-        let _packet = msg.to_world_packet();
+        let _packet = msg.to_vanilla();
         // Verify it serializes without panicking
     }
 
     #[test]
     fn test_smsg_guild_event_from_params() {
         let msg = smsg_guild_event_from_params(GE_JOINED, &["PlayerName"]);
-        let _packet = msg.to_world_packet();
+        let _packet = msg.to_vanilla();
         // Verify it serializes without panicking
 
         let msg2 = smsg_guild_event_from_params(GE_PROMOTION, &["Player", "Promoter"]);
-        let _packet2 = msg2.to_world_packet();
+        let _packet2 = msg2.to_vanilla();
         // Verify it serializes without panicking
 
         let msg3 = smsg_guild_event_from_params(GE_LEADER_CHANGED, &["Old", "New", "Reason"]);
-        let _packet3 = msg3.to_world_packet();
+        let _packet3 = msg3.to_vanilla();
         // Verify it serializes without panicking
     }
 }

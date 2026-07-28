@@ -133,7 +133,7 @@ impl SmsgInventoryChangeFailure {
 }
 
 impl ToWorldPacket for SmsgInventoryChangeFailure {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INVENTORY_CHANGE_FAILURE);
         packet.write_u8(self.error);
 
@@ -172,7 +172,7 @@ pub struct SmsgItemCooldown {
 }
 
 impl ToWorldPacket for SmsgItemCooldown {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_COOLDOWN);
         packet.write_guid_raw(self.item_guid.raw());
         packet.write_u32(self.spell_id);
@@ -187,7 +187,7 @@ pub struct SmsgSetProficiency {
 }
 
 impl ToWorldPacket for SmsgSetProficiency {
-    fn to_world_packet(&self) -> WorldPacket {
+    fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SET_PROFICIENCY);
         packet.write_u8(self.item_class);
         packet.write_u32(self.proficiency_mask);
