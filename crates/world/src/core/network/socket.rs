@@ -210,7 +210,7 @@ impl WorldSocket {
                             while let Some(mut packet) = self.read_packet_encrypted()? {
                                 let dispatch_start = std::time::Instant::now();
                                 let packet_opcode = packet.opcode();
-                                trace!("[PACKET] {:?} (opcode=0x{:04X}, size={}) from {}", packet_opcode, packet_opcode.as_u32(), packet.size(), self.remote_addr);
+                                trace!("[PACKET] {:?} (size={}) from {}", packet_opcode, packet.size(), self.remote_addr);
 
                                 // Get session for this connection
                                 if let Some(session_id) = self.session_id {
@@ -534,31 +534,47 @@ impl WorldSocket {
             return Ok(None);
         }
 
-        // Parse header (unencrypted)
-        let header = &self.read_buffer[..CLIENT_HEADER_SIZE];
-        let (size, opcode) = match parse_client_header(header) {
-            Some(result) => result,
-            None => return Ok(None),
-        };
+        // Loop so an unrecognised opcode is skipped rather than stalling any packets queued behind
+        // it in the same buffer.
+        loop {
+            if self.read_buffer.len() < CLIENT_HEADER_SIZE {
+                return Ok(None);
+            }
 
-        // Calculate total packet size
-        let payload_size = client_payload_size(size);
-        let total_size = CLIENT_HEADER_SIZE + payload_size;
+            // Parse header (unencrypted)
+            let header = &self.read_buffer[..CLIENT_HEADER_SIZE];
+            let (size, raw_opcode) = match parse_client_header(header) {
+                Some(result) => result,
+                None => return Ok(None),
+            };
 
-        if self.read_buffer.len() < total_size {
-            return Ok(None);
+            // Calculate total packet size
+            let payload_size = client_payload_size(size);
+            let total_size = CLIENT_HEADER_SIZE + payload_size;
+
+            if self.read_buffer.len() < total_size {
+                return Ok(None);
+            }
+
+            // Validate size
+            if total_size > MAX_PACKET_SIZE {
+                return Err(anyhow::anyhow!("Packet too large: {} bytes", total_size));
+            }
+
+            // Extract packet data
+            self.read_buffer.advance(CLIENT_HEADER_SIZE);
+            let data = self.read_buffer.split_to(payload_size);
+
+            match Opcode::from_vanilla_wire(raw_opcode) {
+                Some(opcode) => return Ok(Some(WorldPacket::from_data(opcode, data))),
+                None => {
+                    warn!(
+                        "Unknown vanilla opcode 0x{:04X} ({} byte payload) from {}; skipping",
+                        raw_opcode, payload_size, self.remote_addr
+                    );
+                }
+            }
         }
-
-        // Validate size
-        if total_size > MAX_PACKET_SIZE {
-            return Err(anyhow::anyhow!("Packet too large: {} bytes", total_size));
-        }
-
-        // Extract packet data
-        self.read_buffer.advance(CLIENT_HEADER_SIZE);
-        let data = self.read_buffer.split_to(payload_size);
-
-        Ok(Some(WorldPacket::from_data(opcode, data)))
     }
 
     /// Read a packet from the buffer (encrypted)
@@ -567,35 +583,52 @@ impl WorldSocket {
             return Ok(None);
         }
 
-        // Decrypt header in place
-        let mut header = [0u8; CLIENT_HEADER_SIZE];
-        header.copy_from_slice(&self.read_buffer[..CLIENT_HEADER_SIZE]);
-        self.crypt.decrypt_recv(&mut header);
+        // As above: skip unrecognised opcodes rather than stalling the buffer. Note the header has
+        // already been decrypted by the time we discover we cannot resolve it, so the packet must
+        // be consumed — the cipher state has advanced past it either way.
+        loop {
+            if self.read_buffer.len() < CLIENT_HEADER_SIZE {
+                return Ok(None);
+            }
 
-        // Parse decrypted header
-        let (size, opcode) = match parse_client_header(&header) {
-            Some(result) => result,
-            None => return Ok(None),
-        };
+            // Decrypt header in place
+            let mut header = [0u8; CLIENT_HEADER_SIZE];
+            header.copy_from_slice(&self.read_buffer[..CLIENT_HEADER_SIZE]);
+            self.crypt.decrypt_recv(&mut header);
 
-        // Calculate total packet size
-        let payload_size = client_payload_size(size);
-        let total_size = CLIENT_HEADER_SIZE + payload_size;
+            // Parse decrypted header
+            let (size, raw_opcode) = match parse_client_header(&header) {
+                Some(result) => result,
+                None => return Ok(None),
+            };
 
-        if self.read_buffer.len() < total_size {
-            return Ok(None);
+            // Calculate total packet size
+            let payload_size = client_payload_size(size);
+            let total_size = CLIENT_HEADER_SIZE + payload_size;
+
+            if self.read_buffer.len() < total_size {
+                return Ok(None);
+            }
+
+            // Validate size
+            if total_size > MAX_PACKET_SIZE {
+                return Err(anyhow::anyhow!("Packet too large: {} bytes", total_size));
+            }
+
+            // Remove header from buffer (already decrypted via copy)
+            self.read_buffer.advance(CLIENT_HEADER_SIZE);
+            let data = self.read_buffer.split_to(payload_size);
+
+            match Opcode::from_vanilla_wire(raw_opcode) {
+                Some(opcode) => return Ok(Some(WorldPacket::from_data(opcode, data))),
+                None => {
+                    warn!(
+                        "Unknown vanilla opcode 0x{:04X} ({} byte payload) from {}; skipping",
+                        raw_opcode, payload_size, self.remote_addr
+                    );
+                }
+            }
         }
-
-        // Validate size
-        if total_size > MAX_PACKET_SIZE {
-            return Err(anyhow::anyhow!("Packet too large: {} bytes", total_size));
-        }
-
-        // Remove header from buffer (already decrypted via copy)
-        self.read_buffer.advance(CLIENT_HEADER_SIZE);
-        let data = self.read_buffer.split_to(payload_size);
-
-        Ok(Some(WorldPacket::from_data(opcode, data)))
     }
 
     /// Send a packet (encrypted if crypt is initialized)

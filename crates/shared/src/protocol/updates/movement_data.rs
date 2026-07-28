@@ -67,7 +67,7 @@ impl MovementData {
         // Write packet size + opcode size
         self.m_buffer.put_u8((packet_size + opcode_size) as u8);
         // Write opcode
-        self.m_buffer.put_u16_le(data.opcode().as_u16());
+        self.m_buffer.put_u16_le(data.opcode().vanilla_u16());
         // Append packet data
         self.m_buffer.extend_from_slice(data.data());
     }

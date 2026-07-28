@@ -34,9 +34,12 @@ pub const MIN_SERVER_PACKET_SIZE: usize = SERVER_HEADER_SIZE;
 
 /// Parse client packet header
 ///
-/// Returns (size, opcode) where size includes the opcode bytes.
+/// Returns (size, raw opcode) where size includes the opcode bytes.
 /// The actual payload size is: size - 4 (opcode size)
-pub fn parse_client_header(data: &[u8]) -> Option<(u16, Opcode)> {
+///
+/// The opcode is returned as its raw wire number, not an [`Opcode`] — resolving it is the caller's
+/// job via [`Opcode::from_vanilla_wire`], which can fail for a number we do not recognise.
+pub fn parse_client_header(data: &[u8]) -> Option<(u16, u32)> {
     if data.len() < CLIENT_HEADER_SIZE {
         return None;
     }
@@ -47,7 +50,7 @@ pub fn parse_client_header(data: &[u8]) -> Option<(u16, Opcode)> {
     // Opcode is little-endian, 4 bytes
     let opcode = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
 
-    Some((size, Opcode::new(opcode)))
+    Some((size, opcode))
 }
 
 /// Build server packet header
@@ -57,7 +60,7 @@ pub fn parse_client_header(data: &[u8]) -> Option<(u16, Opcode)> {
 pub fn build_server_header(size: u16, opcode: Opcode) -> [u8; SERVER_HEADER_SIZE] {
     let mut header = [0u8; SERVER_HEADER_SIZE];
     header[0..2].copy_from_slice(&size.to_be_bytes());
-    header[2..4].copy_from_slice(&opcode.as_u16().to_le_bytes());
+    header[2..4].copy_from_slice(&opcode.vanilla_u16().to_le_bytes());
     header
 }
 
