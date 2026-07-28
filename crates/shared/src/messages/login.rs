@@ -321,6 +321,56 @@ mod modern_tests {
     }
 
     #[test]
+    fn bind_point_update_modern_matches_vanilla_layout() {
+        let msg = SmsgBindPointUpdate {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+            map_id: 0,
+            zone_id: 12,
+        };
+        let modern = msg.to_modern().expect("ported");
+        assert_eq!(modern.opcode(), Opcode::SMSG_BINDPOINTUPDATE);
+        // Vector3, map, area — identical bytes to vanilla, only the wire opcode differs.
+        assert_eq!(modern.contents(), msg.to_vanilla().contents());
+    }
+
+    #[test]
+    fn tutorial_flags_modern_is_eight_u32s() {
+        let msg = SmsgTutorialFlags::default();
+        let modern = msg.to_modern().expect("ported");
+        assert_eq!(modern.opcode(), Opcode::SMSG_TUTORIAL_FLAGS);
+        assert_eq!(modern.contents().len(), 32, "Tutorials::Max is 8 u32s");
+        assert_eq!(modern.contents(), &[0xFF; 32]);
+    }
+
+    #[test]
+    fn login_set_time_speed_modern_adds_server_time_and_holiday_offsets() {
+        let msg = SmsgLoginSetTimeSpeed {
+            game_time: 0x1122_3344,
+            game_speed: 0.016_666_67,
+        };
+        let modern = msg.to_modern().expect("ported");
+        assert_eq!(modern.opcode(), Opcode::SMSG_LOGIN_SETTIMESPEED);
+
+        let body = modern.contents();
+        assert_eq!(body.len(), 20, "u32 + u32 + f32 + i32 + i32");
+        // ServerTime and GameTime carry the same packed value.
+        assert_eq!(&body[0..4], &0x1122_3344u32.to_le_bytes());
+        assert_eq!(&body[4..8], &0x1122_3344u32.to_le_bytes());
+        assert_eq!(&body[8..12], &0.016_666_67f32.to_le_bytes());
+        assert_eq!(&body[12..20], &[0u8; 8], "both holiday offsets are zero");
+    }
+
+    #[test]
+    fn set_rest_start_has_no_modern_encoding() {
+        // SMSG_SET_REST_START does not exist in the 1.14 opcode table at all, so the defaulted
+        // `to_modern` correctly declines rather than inventing a body.
+        assert!(SmsgSetRestStart { time: 0 }.to_modern().is_none());
+        assert!(!Opcode::SMSG_SET_REST_START.has_modern());
+    }
+
+    #[test]
     fn login_verify_world_modern_appends_reason() {
         let packet = SmsgLoginVerifyWorld {
             map_id: 1,
@@ -405,6 +455,18 @@ impl ToWorldPacket for SmsgBindPointUpdate {
         packet.write_u32(self.map_id);
         packet.write_u32(self.zone_id);
         packet
+    }
+
+    /// Field order is unchanged from vanilla (`Vector3`, map, area) — only the opcode differs.
+    /// Written out rather than delegating so it stays honest if either layout moves.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_f32(self.x);
+        writer.write_f32(self.y);
+        writer.write_f32(self.z);
+        writer.write_u32(self.map_id);
+        writer.write_u32(self.zone_id);
+        Some(writer.finish(Opcode::SMSG_BINDPOINTUPDATE))
     }
 }
 
@@ -581,6 +643,16 @@ impl ToWorldPacket for SmsgTutorialFlags {
         }
         packet
     }
+
+    /// The modern client also expects eight `u32`s (`Tutorials::Max` is 8 in Classic), so the body
+    /// is the same size and shape as vanilla's.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        for flag in &self.flags {
+            writer.write_u32(*flag);
+        }
+        Some(writer.finish(Opcode::SMSG_TUTORIAL_FLAGS))
+    }
 }
 
 /// SMSG_LOGIN_SETTIMESPEED - Game time and speed
@@ -662,6 +734,19 @@ impl ToWorldPacket for SmsgLoginSetTimeSpeed {
         packet.write_u32(self.game_time);
         packet.write_f32(self.game_speed);
         packet
+    }
+
+    /// The modern body gained a separate server time and two holiday offsets. HermesProxy mirrors
+    /// the single legacy time into both fields and leaves the offsets at zero — the legacy protocol
+    /// has nothing to fill them from, and the packed time format itself is unchanged.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.game_time); // ServerTime
+        writer.write_u32(self.game_time); // GameTime
+        writer.write_f32(self.game_speed); // NewSpeed
+        writer.write_i32(0); // ServerTimeHolidayOffset
+        writer.write_i32(0); // GameTimeHolidayOffset
+        Some(writer.finish(Opcode::SMSG_LOGIN_SETTIMESPEED))
     }
 }
 
