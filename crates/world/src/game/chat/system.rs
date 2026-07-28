@@ -260,8 +260,7 @@ impl ChatSystem {
             .insert(channel_name.to_string());
 
         let notify = SmsgChannelNotify::you_joined(channel_name, channel_id);
-        self.broadcast_mgr
-            .send_to_player(player_guid, notify.to_vanilla());
+        self.broadcast_mgr.send_msg_to_player(player_guid, notify);
 
         Ok(())
     }
@@ -342,8 +341,7 @@ impl ChatSystem {
         }
 
         let notify = SmsgChannelNotify::you_left(channel_name);
-        self.broadcast_mgr
-            .send_to_player(player_guid, notify.to_vanilla());
+        self.broadcast_mgr.send_msg_to_player(player_guid, notify);
 
         Ok(())
     }
@@ -580,8 +578,7 @@ impl ChatSystem {
             .unwrap_or_default();
 
         let notify = SmsgChannelNotify::channel_owner(channel_name, &owner_name);
-        self.broadcast_mgr
-            .send_to_player(player_guid, notify.to_vanilla());
+        self.broadcast_mgr.send_msg_to_player(player_guid, notify);
 
         Ok(())
     }
@@ -626,7 +623,7 @@ impl ChatSystem {
         // Notify kicked player
         let kick_notify = SmsgChannelNotify::player_kicked(channel_name, target_guid, player_guid);
         self.broadcast_mgr
-            .send_to_player(target_guid, kick_notify.to_vanilla());
+            .send_msg_to_player(target_guid, kick_notify);
 
         // Notify remaining members
         let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
@@ -666,27 +663,24 @@ impl ChatSystem {
 
         if channel_data.members.contains_key(&target_guid) {
             let notify = SmsgChannelNotify::player_already_member(channel_name, target_guid);
-            self.broadcast_mgr
-                .send_to_player(player_guid, notify.to_vanilla());
+            self.broadcast_mgr.send_msg_to_player(player_guid, notify);
             return Ok(());
         }
 
         if channel_data.banned.contains(&target_guid) {
             let notify = SmsgChannelNotify::player_invite_banned(channel_name, target_name);
-            self.broadcast_mgr
-                .send_to_player(player_guid, notify.to_vanilla());
+            self.broadcast_mgr.send_msg_to_player(player_guid, notify);
             return Ok(());
         }
 
         // Send invite notification to target
         let notify = SmsgChannelNotify::invite(channel_name, player_guid);
-        self.broadcast_mgr
-            .send_to_player(target_guid, notify.to_vanilla());
+        self.broadcast_mgr.send_msg_to_player(target_guid, notify);
 
         // Send confirmation to inviter
         let invite_notify = SmsgChannelNotify::player_invited(channel_name, target_name);
         self.broadcast_mgr
-            .send_to_player(player_guid, invite_notify.to_vanilla());
+            .send_msg_to_player(player_guid, invite_notify);
 
         Ok(())
     }
@@ -876,8 +870,7 @@ impl ChatSystem {
             members: &members,
         };
 
-        self.broadcast_mgr
-            .send_to_player(player_guid, packet.to_vanilla());
+        self.broadcast_mgr.send_msg_to_player(player_guid, packet);
 
         Ok(())
     }
@@ -904,7 +897,7 @@ impl ChatSystem {
                 // Target not found - send error notification to sender
                 let not_found_msg = SmsgChatPlayerNotFound { name: target_name };
                 self.broadcast_mgr
-                    .send_to_player(sender_guid, not_found_msg.to_vanilla());
+                    .send_msg_to_player(sender_guid, not_found_msg);
                 return Ok(());
             }
         };
@@ -1199,7 +1192,7 @@ impl ChatSystem {
 
         // Broadcast to nearby players (exclude sender)
         self.broadcast_mgr
-            .broadcast_nearby(sender_guid, &packet, false);
+            .broadcast_nearby_packet(sender_guid, &packet, false);
 
         Ok(())
     }

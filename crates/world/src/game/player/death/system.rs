@@ -13,7 +13,7 @@ use super::sickness;
 use super::state::{DeathState, DeathSystemState};
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::dbc::DbcManager;
-use crate::game::broadcast_mgr::BroadcastManagerTrait;
+use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::creature::movement::packet_sender::MovementFlagChange;
 use crate::game::player::movement::MovementControllerSender;
 use crate::World;
@@ -569,8 +569,7 @@ impl DeathSystem {
             causes_sickness,
             use_corpse_timer,
         };
-        self.broadcast_mgr
-            .send_to_player(target_guid, packet.to_vanilla());
+        self.broadcast_mgr.send_msg_to_player(target_guid, packet);
 
         debug!(
             "Sent resurrection offer to player {:?} from {:?}",
@@ -840,7 +839,7 @@ impl DeathSystem {
             delay_ms: delay_s * 1000,
         };
         self.broadcast_mgr
-            .send_to_player(player_guid, reclaim_delay.to_vanilla());
+            .send_msg_to_player(player_guid, reclaim_delay);
 
         debug!(
             "Sent death packets to player {:?}, reclaim delay: {}s",
@@ -1442,7 +1441,7 @@ impl DeathSystem {
             .to_vanilla();
 
         self.broadcast_mgr
-            .broadcast_nearby(player_guid, &packet, true);
+            .broadcast_nearby_packet(player_guid, &packet, true);
     }
 
     /// Force water-walking on the ghost's client, queued for its acknowledgement.
@@ -1491,7 +1490,7 @@ impl DeathSystem {
         if affected > 0 {
             // Send SMSG_DURABILITY_DAMAGE_DEATH to notify client
             self.broadcast_mgr
-                .send_to_player(player_guid, SmsgDurabilityDamageDeath.to_vanilla());
+                .send_msg_to_player(player_guid, SmsgDurabilityDamageDeath);
             debug!(
                 "Applied death durability loss to {} items for player {:?}",
                 affected, player_guid

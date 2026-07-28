@@ -941,7 +941,8 @@ impl StatsSystem {
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
         let packet = update_msg.to_vanilla();
 
-        self.broadcast_mgr.broadcast_nearby(guid, &packet, true);
+        self.broadcast_mgr
+            .broadcast_nearby_packet(guid, &packet, true);
     }
 }
 

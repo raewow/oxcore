@@ -2214,7 +2214,7 @@ impl AuraSystem {
             packet.data().as_ref()
         );
         self.broadcast_mgr
-            .broadcast_nearby(target_guid, &packet, true);
+            .broadcast_nearby_packet(target_guid, &packet, true);
 
         Ok(())
     }
@@ -3067,7 +3067,7 @@ impl AuraSystem {
             .add_block(UpdateBlockData::Values(block))
             .to_vanilla();
         self.broadcast_mgr
-            .broadcast_nearby(target_guid, &packet, true);
+            .broadcast_nearby_packet(target_guid, &packet, true);
     }
 
     // ---- Water walk / feather fall / hover ----
@@ -3363,7 +3363,7 @@ impl AuraSystem {
             .add_block(UpdateBlockData::Values(block))
             .to_vanilla();
         self.broadcast_mgr
-            .broadcast_nearby(target_guid, &packet, true);
+            .broadcast_nearby_packet(target_guid, &packet, true);
     }
 
     // ---- Transform ----
@@ -3421,7 +3421,7 @@ impl AuraSystem {
             .add_block(UpdateBlockData::Values(block))
             .to_vanilla();
         self.broadcast_mgr
-            .broadcast_nearby(target_guid, &packet, true);
+            .broadcast_nearby_packet(target_guid, &packet, true);
     }
 
     fn remove_transform(&self, target_guid: ObjectGuid, world: &World) {
@@ -3453,7 +3453,7 @@ impl AuraSystem {
                 .add_block(UpdateBlockData::Values(block))
                 .to_vanilla();
             self.broadcast_mgr
-                .broadcast_nearby(target_guid, &packet, true);
+                .broadcast_nearby_packet(target_guid, &packet, true);
         }
     }
 
@@ -3598,7 +3598,7 @@ impl AuraSystem {
             .add_block(UpdateBlockData::Values(block))
             .to_vanilla();
         self.broadcast_mgr
-            .broadcast_nearby(target_guid, &packet, true);
+            .broadcast_nearby_packet(target_guid, &packet, true);
     }
 
     // ---- Invisibility ----
@@ -3853,7 +3853,7 @@ impl AuraSystem {
                 packet.write_packed_guid_raw(creature_guid.raw());
                 packet.write_f32(new_speed);
                 self.broadcast_mgr
-                    .broadcast_nearby(creature_guid, &packet, true);
+                    .broadcast_nearby_packet(creature_guid, &packet, true);
             }
         }
     }
@@ -3963,7 +3963,7 @@ impl AuraSystem {
             packet.write_packed_guid_raw(creature_guid.raw());
             packet.write_f32(rate * 7.0);
             self.broadcast_mgr
-                .broadcast_nearby(creature_guid, &packet, true);
+                .broadcast_nearby_packet(creature_guid, &packet, true);
         }
     }
 

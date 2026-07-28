@@ -19,15 +19,28 @@ use std::sync::Arc;
 #[cfg_attr(test, mockall::automock)]
 pub trait BroadcastManagerTrait: Send + Sync {
     fn send_to_player(&self, player_guid: ObjectGuid, packet: WorldPacket);
+    fn send_msg_to_player_ref(&self, player_guid: ObjectGuid, msg: &dyn ToWorldPacket);
     fn broadcast_to_players(&self, player_guids: &[ObjectGuid], packet: &WorldPacket);
-    fn broadcast_nearby(&self, sender_guid: ObjectGuid, packet: &WorldPacket, include_self: bool);
+    fn broadcast_msg_to_players(&self, player_guids: &[ObjectGuid], msg: &dyn ToWorldPacket);
+    fn broadcast_nearby_packet(
+        &self,
+        sender_guid: ObjectGuid,
+        packet: &WorldPacket,
+        include_self: bool,
+    );
+    fn broadcast_msg_nearby(
+        &self,
+        sender_guid: ObjectGuid,
+        msg: &dyn ToWorldPacket,
+        include_self: bool,
+    );
 }
 
 /// Extension trait for sending messages directly (struct-based API)
 /// This is a separate trait to avoid issues with trait objects and generics
 pub trait BroadcastManagerExt: BroadcastManagerTrait {
     fn send_msg_to_player<T: ToWorldPacket + Send>(&self, player_guid: ObjectGuid, msg: T) {
-        self.send_to_player(player_guid, msg.to_vanilla())
+        self.send_msg_to_player_ref(player_guid, &msg)
     }
 }
 
@@ -48,11 +61,74 @@ impl BroadcastManager {
         }
     }
 
-    /// Send message to specific player using struct-based API (preferred)
-    /// Non-blocking - uses try_send() internally
+    /// Send a message to one player, encoded for that player's protocol.
+    ///
+    /// This is the API game code should use. Passing a message rather than a `WorldPacket` is what
+    /// lets the encoding be chosen per recipient — a pre-encoded packet has already committed to
+    /// one protocol and cannot be sent to a client speaking the other.
     pub fn send_msg_to_player<T: ToWorldPacket + Send>(&self, player_guid: ObjectGuid, msg: T) {
         if let Some(broadcaster) = self.player_mgr.get_broadcaster(player_guid) {
-            broadcaster.send_direct(msg.to_vanilla());
+            broadcaster.send_msg(&msg);
+        }
+    }
+
+    /// Send a message to several named players, encoding per recipient.
+    pub fn broadcast_msg_to_players(&self, player_guids: &[ObjectGuid], msg: &dyn ToWorldPacket) {
+        for &guid in player_guids {
+            if let Some(broadcaster) = self.player_mgr.get_broadcaster(guid) {
+                broadcaster.send_msg(msg);
+            }
+        }
+    }
+
+    /// Broadcast a message to everyone who can see `sender_guid`, encoding per recipient.
+    ///
+    /// Routing matches [`Self::broadcast_nearby`]: critical packets go straight out, the rest are
+    /// queued so the collapsing pass can fold them. The category is read from the opcode, which is
+    /// protocol-independent, so it is decided once rather than per recipient.
+    pub fn broadcast_msg_nearby(
+        &self,
+        sender_guid: ObjectGuid,
+        msg: &dyn ToWorldPacket,
+        include_self: bool,
+    ) {
+        if !sender_guid.is_player() {
+            tracing::warn!(
+                "broadcast_msg_nearby called with non-player GUID {:?} — use broadcast_msg_around_creature() instead",
+                sender_guid
+            );
+        }
+
+        let Some(broadcaster) = self.player_mgr.get_broadcaster(sender_guid) else {
+            tracing::debug!(
+                "No broadcaster found for player {:?}, cannot broadcast",
+                sender_guid
+            );
+            return;
+        };
+
+        let listeners = broadcaster.listener_snapshot().load_full();
+
+        // Any encoding will do to categorise: the opcode is the same object either way.
+        let use_queue = match broadcaster.encode(msg) {
+            Some(packet) => !matches!(categorize_opcode(packet.opcode()), PacketCategory::Critical),
+            None => false,
+        };
+
+        if include_self {
+            if use_queue {
+                broadcaster.queue_msg(msg);
+            } else {
+                broadcaster.send_msg(msg);
+            }
+        }
+
+        for (_listener_guid, listener) in listeners.iter() {
+            if use_queue {
+                listener.queue_msg(msg);
+            } else {
+                listener.send_msg(msg);
+            }
         }
     }
 
@@ -72,15 +148,66 @@ impl BroadcastManager {
         }
     }
 
-    /// Broadcast packet to all online players (non-blocking)
-    pub fn broadcast_to_all(&self, packet: &WorldPacket) {
+    /// Broadcast a message to all online players, encoding it per recipient.
+    pub fn broadcast_msg_to_all(&self, msg: &dyn ToWorldPacket) {
+        let all_guids = self.session_mgr.get_all_sessions();
+        self.broadcast_msg_to_players(&all_guids, msg);
+    }
+
+    /// Broadcast a pre-encoded packet to all online players (non-blocking).
+    ///
+    /// This is for protocol-specific transport paths only. Game systems should use
+    /// [`Self::broadcast_msg_to_all`] instead.
+    pub fn broadcast_to_all_packet(&self, packet: &WorldPacket) {
         let all_guids = self.session_mgr.get_all_sessions();
         for guid in all_guids {
             self.send_to_player(guid, packet.clone());
         }
     }
 
-    /// Broadcast to nearby players using PlayerBroadcaster listeners (non-blocking)
+    /// Broadcast a message to nearby players, encoding it per recipient.
+    pub fn broadcast_msg_to_distance(
+        &self,
+        sender_guid: ObjectGuid,
+        msg: &dyn ToWorldPacket,
+        max_distance: f32,
+        include_self: bool,
+    ) -> Vec<ObjectGuid> {
+        let mut recipients = Vec::new();
+        let Some(sender_pos) = self.player_mgr.get_position(sender_guid) else {
+            tracing::debug!(
+                "Cannot broadcast_msg_to_distance: sender {:?} position not found",
+                sender_guid
+            );
+            return recipients;
+        };
+        let Some(broadcaster) = self.player_mgr.get_broadcaster(sender_guid) else {
+            tracing::debug!(
+                "No broadcaster found for player {:?}, cannot broadcast",
+                sender_guid
+            );
+            return recipients;
+        };
+
+        let listeners = broadcaster.listener_snapshot().load_full();
+        if include_self {
+            broadcaster.send_msg(msg);
+            recipients.push(sender_guid);
+        }
+        for (listener_guid, listener_broadcaster) in listeners.iter() {
+            if self
+                .player_mgr
+                .get_position(*listener_guid)
+                .is_some_and(|listener_pos| sender_pos.distance_2d(&listener_pos) <= max_distance)
+            {
+                listener_broadcaster.send_msg(msg);
+                recipients.push(*listener_guid);
+            }
+        }
+        recipients
+    }
+
+    /// Broadcast to nearby players using PlayerBroadcaster listeners (non-blocking).
     ///
     /// Uses smart routing based on packet category:
     /// - Critical packets (combat, chat) → send_direct (immediate)
@@ -91,7 +218,7 @@ impl BroadcastManager {
     /// - Yell: map-wide
     /// - Emote: 25 yards
     /// Currently broadcasts to all players on same map via visibility system
-    pub fn broadcast_nearby(
+    pub fn broadcast_nearby_packet(
         &self,
         sender_guid: ObjectGuid,
         packet: &WorldPacket,
@@ -140,7 +267,7 @@ impl BroadcastManager {
 
     /// Broadcast to nearby players excluding self (convenience method for movement)
     pub fn broadcast_nearby_exclude_self(&self, sender_guid: ObjectGuid, packet: &WorldPacket) {
-        self.broadcast_nearby(sender_guid, packet, false);
+        self.broadcast_nearby_packet(sender_guid, packet, false);
     }
 
     /// Broadcast to players within a specific distance range (non-blocking)
@@ -149,7 +276,7 @@ impl BroadcastManager {
     /// Used for distance-limited chat (Say: 25 yards, Yell: 300 yards, etc.)
     ///
     /// Returns the list of player GUIDs that received the packet (for logging/debugging)
-    pub fn broadcast_to_distance(
+    pub fn broadcast_to_distance_packet(
         &self,
         sender_guid: ObjectGuid,
         packet: &WorldPacket,
@@ -229,15 +356,41 @@ impl BroadcastManagerTrait for BroadcastManager {
         }
     }
 
+    fn send_msg_to_player_ref(&self, player_guid: ObjectGuid, msg: &dyn ToWorldPacket) {
+        if let Some(broadcaster) = self.player_mgr.get_broadcaster(player_guid) {
+            broadcaster.send_msg(msg);
+        } else {
+            tracing::debug!("No broadcaster found for player {:?}", player_guid);
+        }
+    }
+
     fn broadcast_to_players(&self, player_guids: &[ObjectGuid], packet: &WorldPacket) {
         for &guid in player_guids {
             self.send_to_player(guid, packet.clone());
         }
     }
 
-    fn broadcast_nearby(&self, sender_guid: ObjectGuid, packet: &WorldPacket, include_self: bool) {
+    fn broadcast_msg_to_players(&self, player_guids: &[ObjectGuid], msg: &dyn ToWorldPacket) {
+        BroadcastManager::broadcast_msg_to_players(self, player_guids, msg)
+    }
+
+    fn broadcast_nearby_packet(
+        &self,
+        sender_guid: ObjectGuid,
+        packet: &WorldPacket,
+        include_self: bool,
+    ) {
         // Delegate to the concrete implementation
-        BroadcastManager::broadcast_nearby(self, sender_guid, packet, include_self)
+        BroadcastManager::broadcast_nearby_packet(self, sender_guid, packet, include_self)
+    }
+
+    fn broadcast_msg_nearby(
+        &self,
+        sender_guid: ObjectGuid,
+        msg: &dyn ToWorldPacket,
+        include_self: bool,
+    ) {
+        BroadcastManager::broadcast_msg_nearby(self, sender_guid, msg, include_self)
     }
 }
 
@@ -246,7 +399,7 @@ impl BroadcastManagerTrait for BroadcastManager {
 /// `broadcast_nearby()` only works for player senders (creatures don't have
 /// PlayerBroadcasters). This function looks up the creature's position and
 /// uses the map's spatial query to find nearby players instead.
-pub fn broadcast_around_creature(
+pub fn broadcast_around_creature_packet(
     world: &crate::World,
     creature_guid: ObjectGuid,
     packet: &WorldPacket,
@@ -340,4 +493,34 @@ pub fn broadcast_around_creature(
         );
     }
     tracing::warn!("[BROADCAST-TRACE] broadcast_around_creature COMPLETE");
+}
+
+/// Broadcast a message to all players around a creature, encoding it per recipient.
+pub fn broadcast_around_creature(
+    world: &crate::World,
+    creature_guid: ObjectGuid,
+    msg: &dyn ToWorldPacket,
+) {
+    let creature_info = world
+        .managers
+        .creature_mgr
+        .with_creature(creature_guid, |c| (c.position, c.map_id, c.instance_id));
+
+    if let Some((position, map_id, instance_id)) = creature_info {
+        let map = world
+            .managers
+            .map_mgr
+            .get_or_create_map(map_id, instance_id);
+        let nearby_players =
+            map.get_players_in_range_limit(position, map.visibility_distance(), 50);
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_msg_to_players(&nearby_players, msg);
+    } else {
+        tracing::warn!(
+            "[BROADCAST] creature {:?} not found in creature_mgr, skipping broadcast",
+            creature_guid,
+        );
+    }
 }

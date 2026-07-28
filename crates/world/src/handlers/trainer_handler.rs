@@ -483,20 +483,32 @@ fn send_trainer_spell_animation(
         world
             .managers
             .broadcast_mgr
-            .broadcast_nearby(player_guid, &pkts.spell_start, true);
+            .broadcast_nearby_packet(player_guid, &pkts.spell_start, true);
         world
             .managers
             .broadcast_mgr
-            .broadcast_nearby(player_guid, &pkts.spell_go, true);
+            .broadcast_nearby_packet(player_guid, &pkts.spell_go, true);
         world
             .managers
             .broadcast_mgr
-            .broadcast_nearby(player_guid, &pkts.spell_visual, true);
+            .broadcast_nearby_packet(player_guid, &pkts.spell_visual, true);
     } else {
         // Trainer NPC is caster — broadcast from the creature's position
-        broadcast_around_creature(world, trainer_guid, &pkts.spell_start);
-        broadcast_around_creature(world, trainer_guid, &pkts.spell_go);
-        broadcast_around_creature(world, trainer_guid, &pkts.spell_visual);
+        crate::game::broadcast_mgr::broadcast_around_creature_packet(
+            world,
+            trainer_guid,
+            &pkts.spell_start,
+        );
+        crate::game::broadcast_mgr::broadcast_around_creature_packet(
+            world,
+            trainer_guid,
+            &pkts.spell_go,
+        );
+        crate::game::broadcast_mgr::broadcast_around_creature_packet(
+            world,
+            trainer_guid,
+            &pkts.spell_visual,
+        );
     }
 }
 

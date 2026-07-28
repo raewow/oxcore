@@ -63,7 +63,7 @@ impl PlayerBroadcaster {
     ///
     /// `None` means the message has no encoding for that protocol yet — see
     /// [`ToWorldPacket::to_modern`]. Callers log and drop rather than treating it as an error.
-    pub fn encode(&self, msg: &impl ToWorldPacket) -> Option<WorldPacket> {
+    pub fn encode(&self, msg: &dyn ToWorldPacket) -> Option<WorldPacket> {
         match self.protocol {
             Protocol::Vanilla => Some(msg.to_vanilla()),
             Protocol::Modern => msg.to_modern(),
@@ -71,7 +71,7 @@ impl PlayerBroadcaster {
     }
 
     /// Encode `msg` for this player and send it immediately.
-    pub fn send_msg(&self, msg: &impl ToWorldPacket) {
+    pub fn send_msg(&self, msg: &dyn ToWorldPacket) {
         match self.encode(msg) {
             Some(packet) => self.send_direct(packet),
             None => self.warn_unported(),
@@ -79,7 +79,7 @@ impl PlayerBroadcaster {
     }
 
     /// Encode `msg` for this player and queue it for the next flush.
-    pub fn queue_msg(&self, msg: &impl ToWorldPacket) {
+    pub fn queue_msg(&self, msg: &dyn ToWorldPacket) {
         match self.encode(msg) {
             Some(packet) => self.queue_packet(packet),
             None => self.warn_unported(),

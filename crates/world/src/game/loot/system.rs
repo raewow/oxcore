@@ -430,8 +430,7 @@ impl LootSystem {
             ValuesUpdateBlock::new(target_guid, ObjectType::GameObject)
                 .set_field(GAMEOBJECT_STATE, state as u32),
         ));
-        self.broadcast_mgr
-            .send_to_player(player_guid, update.to_vanilla());
+        self.broadcast_mgr.send_msg_to_player(player_guid, update);
     }
 
     fn check_and_clear_if_empty(&self, target_guid: ObjectGuid, world: &World) {

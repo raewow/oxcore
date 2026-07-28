@@ -1000,7 +1000,7 @@ pub async fn handle_player_login_with_guid(
             spells: spellbook,
             cooldowns,
         };
-        session.send_packet(msg.to_vanilla())?;
+        session.send_msg(msg)?;
     }
     info!("[LOGIN] 6/11 SMSG_INITIAL_SPELLS: sent spellbook");
 

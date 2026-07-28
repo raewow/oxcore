@@ -287,8 +287,7 @@ pub fn delayed(
                     SmsgSpellDelayed {
                         caster_guid,
                         delay_ms: d.delaytime,
-                    }
-                    .to_vanilla(),
+                    },
                 );
             }
             d

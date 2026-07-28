@@ -1508,7 +1508,7 @@ fn send_spell_damage_log(
     world
         .managers
         .broadcast_mgr
-        .broadcast_nearby(caster_guid, &packet, true);
+        .broadcast_nearby_packet(caster_guid, &packet, true);
 }
 
 /// Send creature health update to nearby players via SMSG_UPDATE_OBJECT.
@@ -1528,7 +1528,7 @@ fn send_creature_health_update(creature_guid: ObjectGuid, world: &World) {
                 .set_field(UNIT_FIELD_HEALTH, current)
                 .set_field(UNIT_FIELD_MAXHEALTH, max),
         ));
-        broadcast_around_creature(world, creature_guid, &update.to_vanilla());
+        broadcast_around_creature(world, creature_guid, &update);
     }
 }
 
@@ -1564,7 +1564,7 @@ fn send_creature_killed_update(caster_guid: ObjectGuid, creature_guid: ObjectGui
             .set_field(UNIT_FIELD_BYTES_1, 7u32) // Stand state Dead
             .set_field(UNIT_NPC_FLAGS, 0u32),
     ));
-    broadcast_around_creature(world, creature_guid, &update.to_vanilla());
+    broadcast_around_creature(world, creature_guid, &update);
 
     let stop_packet = oxcore_shared::messages::combat::SmsgAttackStop {
         attacker_guid: caster_guid,
@@ -1574,7 +1574,7 @@ fn send_creature_killed_update(caster_guid: ObjectGuid, creature_guid: ObjectGui
     world
         .managers
         .broadcast_mgr
-        .broadcast_nearby(caster_guid, &stop_packet.to_vanilla(), true);
+        .broadcast_msg_nearby(caster_guid, &stop_packet, true);
 }
 
 /// Deal healing to a target unit.
@@ -1675,7 +1675,7 @@ fn send_spell_heal_log(
     world
         .managers
         .broadcast_mgr
-        .broadcast_nearby(caster_guid, &packet, true);
+        .broadcast_nearby_packet(caster_guid, &packet, true);
 }
 
 /// Stochastic rounding of a float to an integer (faithful `rand_dither`).

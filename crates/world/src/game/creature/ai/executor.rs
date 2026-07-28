@@ -936,7 +936,7 @@ fn send_health_update(world: &World, creature_guid: ObjectGuid) {
 
         // Broadcast to nearby players (creatures don't have PlayerBroadcasters)
         let packet = msg.to_vanilla();
-        broadcast_around_creature(world, creature_guid, &packet);
+        crate::game::broadcast_mgr::broadcast_around_creature_packet(world, creature_guid, &packet);
 
         tracing::debug!(
             "[AI] Sent health update for {:?}: {}/{}",
@@ -958,7 +958,7 @@ fn send_attack_start(world: &World, creature_guid: ObjectGuid, target_guid: Obje
     };
 
     // Broadcast to nearby players
-    broadcast_around_creature(world, creature_guid, &packet.to_vanilla());
+    broadcast_around_creature(world, creature_guid, &packet);
 
     tracing::debug!(
         "[AI] Sent SMSG_ATTACKSTART for creature {:?} attacking {:?}",
@@ -1000,7 +1000,7 @@ fn send_combat_state_update(world: &World, creature_guid: ObjectGuid, target_gui
                 .set_field(UNIT_FIELD_FLAGS, flags)
                 .set_guid_field(UNIT_FIELD_TARGET, target_world_guid),
         ));
-        broadcast_around_creature(world, creature_guid, &update.to_vanilla());
+        broadcast_around_creature(world, creature_guid, &update);
 
         tracing::debug!(
             "[AI] Combat state GUID check: creature_mgr_key={:?} (raw=0x{:016X}), world_guid=0x{:016X}, target_world_guid=0x{:016X}",
@@ -1041,7 +1041,7 @@ fn send_combat_exit_update(world: &World, creature_guid: ObjectGuid) {
                 .set_field(UNIT_FIELD_FLAGS, flags)
                 .set_guid_field(UNIT_FIELD_TARGET, WorldObjectGuid::empty()),
         ));
-        broadcast_around_creature(world, creature_guid, &update.to_vanilla());
+        broadcast_around_creature(world, creature_guid, &update);
 
         tracing::debug!(
             "[AI] Sent combat exit update for {:?}: flags=0x{:08X}",
@@ -1119,7 +1119,7 @@ pub fn execute_creature_spell_cast(
         ammo_display_id: 0,
         ammo_inventory_type: 0,
     };
-    broadcast_around_creature(world, creature_guid, &msg.to_vanilla());
+    broadcast_around_creature(world, creature_guid, &msg);
 
     // Apply spell effects - handle common damage/heal effects inline
     for effect_idx in 0..3u8 {
@@ -1478,9 +1478,9 @@ fn send_creature_spell_damage_log(
         world
             .managers
             .broadcast_mgr
-            .broadcast_nearby(target_guid, &packet, true);
+            .broadcast_nearby_packet(target_guid, &packet, true);
     } else {
-        broadcast_around_creature(world, target_guid, &packet);
+        crate::game::broadcast_mgr::broadcast_around_creature_packet(world, target_guid, &packet);
     }
 }
 
@@ -1503,7 +1503,7 @@ fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, t
         _ => ChatMsg::MonsterSay,
     };
 
-    let packet = SmsgMessageChat {
+    let msg = SmsgMessageChat {
         msgtype,
         language: oxcore_shared::game::chat::Language::Universal,
         sender_guid: creature_guid,
@@ -1513,10 +1513,9 @@ fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, t
         player_rank: None,
         message: text,
         chat_tag: oxcore_shared::game::chat::ChatTag::None,
-    }
-    .to_vanilla();
+    };
 
-    broadcast_around_creature(world, creature_guid, &packet);
+    broadcast_around_creature(world, creature_guid, &msg);
 }
 
 /// Send SMSG_EMOTE for creature emote animation.
@@ -1527,7 +1526,7 @@ fn send_creature_emote(world: &World, creature_guid: ObjectGuid, emote_id: u32) 
     packet.write_u32(emote_id);
     packet.write_u64(creature_guid.raw());
 
-    broadcast_around_creature(world, creature_guid, &packet);
+    crate::game::broadcast_mgr::broadcast_around_creature_packet(world, creature_guid, &packet);
 }
 
 /// Send SMSG_PLAY_OBJECT_SOUND for creature sounds.
@@ -1538,7 +1537,7 @@ fn send_creature_sound(world: &World, creature_guid: ObjectGuid, sound_id: u32) 
     packet.write_u32(sound_id);
     packet.write_u64(creature_guid.raw());
 
-    broadcast_around_creature(world, creature_guid, &packet);
+    crate::game::broadcast_mgr::broadcast_around_creature_packet(world, creature_guid, &packet);
 }
 
 /// Send display ID update to nearby players (for Morph/Demorph).
@@ -1556,7 +1555,7 @@ fn send_display_update(world: &World, creature_guid: ObjectGuid, display_id: u32
         ValuesUpdateBlock::new(world_guid, ObjectType::Unit)
             .set_field(UNIT_FIELD_DISPLAYID, display_id),
     ));
-    broadcast_around_creature(world, creature_guid, &update.to_vanilla());
+    broadcast_around_creature(world, creature_guid, &update);
 }
 
 #[cfg(test)]

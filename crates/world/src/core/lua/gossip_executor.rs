@@ -464,7 +464,7 @@ fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, t
         _ => ChatMsg::MonsterSay,
     };
 
-    let packet = SmsgMessageChat {
+    let msg = SmsgMessageChat {
         msgtype,
         language: Language::Universal,
         sender_guid: creature_guid,
@@ -474,10 +474,9 @@ fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, t
         player_rank: None,
         message: text,
         chat_tag: ChatTag::None,
-    }
-    .to_vanilla();
+    };
 
-    broadcast_around_creature(world, creature_guid, &packet);
+    broadcast_around_creature(world, creature_guid, &msg);
 }
 
 /// Send SMSG_EMOTE from an NPC.
@@ -487,5 +486,5 @@ fn send_creature_emote(world: &World, creature_guid: ObjectGuid, emote_id: u32) 
     packet.write_u64(creature_guid.raw());
 
     use crate::game::broadcast_mgr::broadcast_around_creature;
-    broadcast_around_creature(world, creature_guid, &packet);
+    crate::game::broadcast_mgr::broadcast_around_creature_packet(world, creature_guid, &packet);
 }

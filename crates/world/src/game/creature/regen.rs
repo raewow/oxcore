@@ -126,5 +126,5 @@ fn regenerate_creature(world: &World, creature_guid: ObjectGuid) {
 
     let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
 
-    broadcast_around_creature(world, creature_guid, &msg.to_vanilla());
+    broadcast_around_creature(world, creature_guid, &msg);
 }

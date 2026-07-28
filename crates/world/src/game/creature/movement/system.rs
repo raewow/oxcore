@@ -646,11 +646,9 @@ impl MovementSystem {
         } else {
             SmsgMonsterMove::new_path_move(guid, from, path, duration, is_walking)
         };
-        let packet = msg.to_vanilla();
-
         let visible_players = self.get_visible_nearby_players(guid, from, world);
         self.broadcast_mgr
-            .broadcast_to_players(&visible_players, &packet);
+            .broadcast_msg_to_players(&visible_players, &msg);
     }
 
     /// Send movement packet to nearby players
@@ -669,11 +667,9 @@ impl MovementSystem {
         } else {
             SmsgMonsterMove::new_point_move(guid, from, to, speed, is_walking)
         };
-        let packet = msg.to_vanilla();
-
         let visible_players = self.get_visible_nearby_players(guid, from, world);
         self.broadcast_mgr
-            .broadcast_to_players(&visible_players, &packet);
+            .broadcast_msg_to_players(&visible_players, &msg);
 
         tracing::trace!(
             "[MOVEMENT] Creature {:?} moving from ({:.1}, {:.1}) to ({:.1}, {:.1}), sent to {} players",
@@ -693,20 +689,16 @@ impl MovementSystem {
         world: &World,
     ) {
         let msg = SmsgMonsterMove::new_facing_angle(guid, position, angle);
-        let packet = msg.to_vanilla();
-
         let visible_players = self.get_visible_nearby_players(guid, position, world);
         self.broadcast_mgr
-            .broadcast_to_players(&visible_players, &packet);
+            .broadcast_msg_to_players(&visible_players, &msg);
     }
 
     /// Send stop movement packet
     pub fn send_stop_packet(&self, guid: ObjectGuid, position: Position, world: &World) {
         let msg = SmsgMonsterMove::new_stop(guid, position);
-        let packet = msg.to_vanilla();
-
         let visible_players = self.get_visible_nearby_players(guid, position, world);
         self.broadcast_mgr
-            .broadcast_to_players(&visible_players, &packet);
+            .broadcast_msg_to_players(&visible_players, &msg);
     }
 }

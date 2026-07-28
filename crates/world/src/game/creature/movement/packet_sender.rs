@@ -126,7 +126,7 @@ impl MovementPacketSender {
         packet.write_packed_guid_raw(creature_guid.raw());
         packet.write_f32(speed);
 
-        broadcast_around_creature(world, creature_guid, &packet);
+        crate::game::broadcast_mgr::broadcast_around_creature_packet(world, creature_guid, &packet);
         true
     }
 
@@ -190,7 +190,7 @@ impl MovementPacketSender {
 
         let mut packet = WorldPacket::new(opcode);
         packet.write_packed_guid_raw(creature_guid.raw());
-        broadcast_around_creature(world, creature_guid, &packet);
+        crate::game::broadcast_mgr::broadcast_around_creature_packet(world, creature_guid, &packet);
     }
 
     /// Opcode carrying a movement flag change for a server-controlled unit.
@@ -281,7 +281,7 @@ impl MovementPacketSender {
 
         let mut packet = WorldPacket::new(Self::flag_change_broadcast_opcode(flag, apply));
         packet.write_packed_guid_raw(creature_guid.raw());
-        broadcast_around_creature(world, creature_guid, &packet);
+        crate::game::broadcast_mgr::broadcast_around_creature_packet(world, creature_guid, &packet);
         true
     }
 }

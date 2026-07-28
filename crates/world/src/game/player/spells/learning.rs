@@ -120,7 +120,7 @@ pub async fn learn_spell(
     if newly_learned {
         // Send SMSG_LEARNED_SPELL to client
         let msg = SmsgLearnedSpell { spell_id };
-        broadcast_mgr.send_msg_to_player(player_guid, msg.to_vanilla());
+        broadcast_mgr.send_msg_to_player(player_guid, msg);
 
         // TODO: Check if this spell teaches a dependent spell (e.g., learning a rank teaches the rank)
         // Check SkillLineAbility.dbc for forward references
@@ -151,7 +151,7 @@ pub async fn unlearn_spell(
     if was_removed {
         // Send SMSG_REMOVED_SPELL to client
         let msg = SmsgRemovedSpell { spell_id };
-        broadcast_mgr.send_msg_to_player(player_guid, msg.to_vanilla());
+        broadcast_mgr.send_msg_to_player(player_guid, msg);
 
         // Remove any auras from this spell
         world
@@ -204,7 +204,7 @@ pub fn send_initial_spells(
         spells: spellbook,
         cooldowns,
     };
-    broadcast_mgr.send_msg_to_player(player_guid, msg.to_vanilla());
+    broadcast_mgr.send_msg_to_player(player_guid, msg);
 
     Ok(())
 }

@@ -154,7 +154,7 @@ fn handle_periodic_damage(
         damage,
         school: 0, // TODO: Get from spell data
     };
-    broadcast_mgr.broadcast_nearby(target_guid, &msg.to_vanilla(), true);
+    broadcast_mgr.broadcast_msg_nearby(target_guid, &msg, true);
 
     Ok(())
 }
@@ -193,7 +193,7 @@ fn handle_periodic_heal(
         damage: heal_amount, // "damage" field used for healing amount too
         school: 0,
     };
-    broadcast_mgr.broadcast_nearby(target_guid, &msg.to_vanilla(), true);
+    broadcast_mgr.broadcast_msg_nearby(target_guid, &msg, true);
 
     Ok(())
 }
@@ -421,7 +421,7 @@ fn handle_obs_mod_health(
             damage: heal_amount,
             school: 0,
         };
-        broadcast_mgr.broadcast_nearby(target_guid, &msg.to_vanilla(), true);
+        broadcast_mgr.broadcast_msg_nearby(target_guid, &msg, true);
     }
 
     Ok(())

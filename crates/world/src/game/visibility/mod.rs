@@ -148,10 +148,7 @@ impl VisibilitySystem {
                     .build_create_msg(target_guid, world)
                 {
                     if let Some(ref viewer_bc) = viewer_broadcaster {
-                        let packet = create_msg.to_vanilla();
-                        let mut v2_packet = WorldPacket::new(packet.opcode());
-                        v2_packet.write_bytes(packet.contents());
-                        viewer_bc.send_direct(v2_packet);
+                        viewer_bc.send_msg(&create_msg);
                     }
                 }
 
@@ -161,10 +158,7 @@ impl VisibilitySystem {
                 {
                     if let Some(target_bc) = world.managers.player_mgr.get_broadcaster(target_guid)
                     {
-                        let packet = viewer_create_msg.to_vanilla();
-                        let mut v2_packet = WorldPacket::new(packet.opcode());
-                        v2_packet.write_bytes(packet.contents());
-                        target_bc.send_direct(v2_packet);
+                        target_bc.send_msg(&viewer_create_msg);
                     }
                 }
 
@@ -206,10 +200,7 @@ impl VisibilitySystem {
                 if let Some(ref viewer_bc) = viewer_broadcaster {
                     let world_guid = WorldObjectGuid::from_raw(target_guid.raw());
                     let msg = SmsgOutOfRange::new(vec![world_guid]);
-                    let packet = msg.to_vanilla();
-                    let mut v2_packet = WorldPacket::new(packet.opcode());
-                    v2_packet.write_bytes(packet.contents());
-                    viewer_bc.send_direct(v2_packet);
+                    viewer_bc.send_msg(&msg);
                 }
             }
         }

@@ -57,7 +57,7 @@ pub async fn handle_text_emote(
     world
         .managers
         .broadcast_mgr
-        .broadcast_nearby(player_guid, &text_emote_msg.to_vanilla(), true);
+        .broadcast_msg_nearby(player_guid, &text_emote_msg, true);
 
     Ok(())
 }

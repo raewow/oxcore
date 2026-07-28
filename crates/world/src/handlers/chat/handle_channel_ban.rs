@@ -43,7 +43,7 @@ pub async fn handle_channel_ban(
     world
         .managers
         .broadcast_mgr
-        .send_to_player(target_guid, ban_notify.to_vanilla());
+        .send_msg_to_player(target_guid, ban_notify);
 
     Ok(())
 }

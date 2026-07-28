@@ -199,7 +199,7 @@ fn send_creature_killed_update(world: &crate::World, creature_guid: ObjectGuid) 
             .set_field(UNIT_NPC_FLAGS, 0u32),
     ));
 
-    broadcast_around_creature(world, creature_guid, &update.to_vanilla());
+    broadcast_around_creature(world, creature_guid, &update);
 }
 
 /// Helper to get target name for feedback

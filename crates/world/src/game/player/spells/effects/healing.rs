@@ -308,5 +308,5 @@ fn send_spell_heal_log(
     world
         .managers
         .broadcast_mgr
-        .broadcast_nearby(caster_guid, &packet, true);
+        .broadcast_nearby_packet(caster_guid, &packet, true);
 }

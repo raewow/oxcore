@@ -335,8 +335,7 @@ impl SocialSystem {
             friend_guids: &friend_guids_low,
             friend_infos: &friend_infos,
         };
-        let packet = msg.to_vanilla();
-        self.broadcast_mgr.send_to_player(player_guid, packet);
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 
     // ========== IGNORE OPERATIONS ==========
@@ -508,8 +507,7 @@ impl SocialSystem {
         let msg = SmsgIgnoreList {
             ignore_guids: &ignore_guids_low,
         };
-        let packet = msg.to_vanilla();
-        self.broadcast_mgr.send_to_player(player_guid, packet);
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 
     // ========== WHO COMMAND ==========
@@ -602,8 +600,7 @@ impl SocialSystem {
             players: &matching_players,
             total_online,
         };
-        let packet = msg.to_vanilla();
-        self.broadcast_mgr.send_to_player(player_guid, packet);
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
 
         tracing::debug!(
             "WHO command from {:?}: {} matches, {} total online",

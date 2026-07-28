@@ -147,7 +147,7 @@ pub async fn cmd_sendmail(ctx: &ChatCommandContext<'_>, args: &str) -> Result<St
                     if let Some(session) =
                         world.session_mgr.get_session_by_player(receiver_guid_obj)
                     {
-                        let _ = session.send_packet(notification.to_vanilla());
+                        let _ = session.send_msg(notification);
                         tracing::info!(
                             "[SENDMAIL] Notification sent to online player '{}'",
                             player_name

@@ -1,6 +1,6 @@
 # rcore - World of Warcraft Vanilla Emulation Server
 
-A World of Warcraft (Vanilla 1.12.x) private server implementation written in Rust. 
+A World of Warcraft (Vanilla 1.12.x, Classic 1.14.x) private server implementation written in Rust. 
 
 ## Server Goals + Milestones
 

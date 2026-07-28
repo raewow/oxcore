@@ -427,7 +427,7 @@ impl PowerSystem {
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
         let packet = update_msg.to_vanilla();
         self.broadcast_mgr
-            .broadcast_nearby(player_guid, &packet, true);
+            .broadcast_nearby_packet(player_guid, &packet, true);
     }
 
     /// Broadcast a health update produced by passive regeneration.
@@ -437,7 +437,7 @@ impl PowerSystem {
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
         let packet = update_msg.to_vanilla();
         self.broadcast_mgr
-            .broadcast_nearby(player_guid, &packet, true);
+            .broadcast_nearby_packet(player_guid, &packet, true);
     }
 }
 
@@ -676,7 +676,7 @@ mod tests {
         let mut broadcast_mgr = MockBroadcastManagerTrait::new();
         let guid = ObjectGuid::new_player(1);
         broadcast_mgr
-            .expect_broadcast_nearby()
+            .expect_broadcast_nearby_packet()
             .withf(move |sender_guid, _, include_self| *sender_guid == guid && *include_self)
             .times(1)
             .returning(|_, _, _| ());
