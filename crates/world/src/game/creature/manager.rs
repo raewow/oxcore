@@ -1359,7 +1359,7 @@ impl CreatureManager {
                         world
                             .managers
                             .broadcast_mgr
-                            .send_to_player(player_guid, compressed);
+                            .send_msg_to_player(player_guid, compressed);
                         total_sent += count;
                         current_msg = SmsgUpdateObject::new();
                         count = 0;
@@ -1377,7 +1377,7 @@ impl CreatureManager {
             world
                 .managers
                 .broadcast_mgr
-                .send_to_player(player_guid, compressed);
+                .send_msg_to_player(player_guid, compressed);
             total_sent += count;
         }
 
@@ -1408,7 +1408,7 @@ impl CreatureManager {
                 world
                     .managers
                     .broadcast_mgr
-                    .send_to_player(player_guid, query_packet);
+                    .send_msg_to_player(player_guid, query_packet);
                 sent_entries.insert(entry);
             }
         }

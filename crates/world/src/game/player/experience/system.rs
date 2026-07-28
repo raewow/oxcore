@@ -283,11 +283,11 @@ impl ExperienceSystem {
         }
 
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
-        let packet = update_msg.to_vanilla();
+        let packet = update_msg;
 
         // Broadcast to self and nearby players (include_self = true)
         self.broadcast_mgr
-            .broadcast_nearby_packet(player_guid, &packet, true);
+            .broadcast_msg_nearby(player_guid, &packet, true);
 
         // Log XP gain
         if leveled_up {

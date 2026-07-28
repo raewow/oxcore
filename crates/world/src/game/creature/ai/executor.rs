@@ -935,8 +935,8 @@ fn send_health_update(world: &World, creature_guid: ObjectGuid) {
         let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
 
         // Broadcast to nearby players (creatures don't have PlayerBroadcasters)
-        let packet = msg.to_vanilla();
-        crate::game::broadcast_mgr::broadcast_around_creature_packet(world, creature_guid, &packet);
+        let packet = msg;
+        crate::game::broadcast_mgr::broadcast_around_creature(world, creature_guid, &packet);
 
         tracing::debug!(
             "[AI] Sent health update for {:?}: {}/{}",
@@ -1478,9 +1478,9 @@ fn send_creature_spell_damage_log(
         world
             .managers
             .broadcast_mgr
-            .broadcast_nearby_packet(target_guid, &packet, true);
+            .broadcast_msg_nearby(target_guid, &packet, true);
     } else {
-        crate::game::broadcast_mgr::broadcast_around_creature_packet(world, target_guid, &packet);
+        crate::game::broadcast_mgr::broadcast_around_creature(world, target_guid, &packet);
     }
 }
 
@@ -1526,7 +1526,7 @@ fn send_creature_emote(world: &World, creature_guid: ObjectGuid, emote_id: u32) 
     packet.write_u32(emote_id);
     packet.write_u64(creature_guid.raw());
 
-    crate::game::broadcast_mgr::broadcast_around_creature_packet(world, creature_guid, &packet);
+    crate::game::broadcast_mgr::broadcast_around_creature(world, creature_guid, &packet);
 }
 
 /// Send SMSG_PLAY_OBJECT_SOUND for creature sounds.
@@ -1537,7 +1537,7 @@ fn send_creature_sound(world: &World, creature_guid: ObjectGuid, sound_id: u32) 
     packet.write_u32(sound_id);
     packet.write_u64(creature_guid.raw());
 
-    crate::game::broadcast_mgr::broadcast_around_creature_packet(world, creature_guid, &packet);
+    crate::game::broadcast_mgr::broadcast_around_creature(world, creature_guid, &packet);
 }
 
 /// Send display ID update to nearby players (for Morph/Demorph).

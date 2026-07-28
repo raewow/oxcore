@@ -44,7 +44,7 @@ pub async fn handle_attack_swing(
         world
             .managers
             .broadcast_mgr
-            .send_to_player(attacker_guid, dead_packet);
+            .send_msg_to_player(attacker_guid, dead_packet);
         send_attack_stop_to_player(world, attacker_guid, target_guid, true);
         // Also clear server-side auto-attack state
         world
@@ -106,7 +106,7 @@ pub async fn execute_pending_attack_vs_creature(
         world
             .managers
             .broadcast_mgr
-            .send_to_player(attacker_guid, dead_packet);
+            .send_msg_to_player(attacker_guid, dead_packet);
         send_attack_stop(world, attacker_guid, target_guid, true);
         return Ok(true);
     }
@@ -429,10 +429,8 @@ fn send_attacker_state_update(
     };
 
     // Broadcast to nearby players
-    world.managers.broadcast_mgr.broadcast_nearby_packet(
-        attacker,
-        &packet.to_vanilla(),
-        true, // include self
+    world.managers.broadcast_mgr.broadcast_msg_nearby(
+        attacker, &packet, true, // include self
     );
 
     Ok(())

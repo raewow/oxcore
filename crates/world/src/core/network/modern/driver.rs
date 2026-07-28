@@ -186,6 +186,7 @@ where
     let mut crypt = WorldCrypt::server_after_handshake(&keys.aes_key);
     let info = AuthResponseSuccess {
         virtual_realm_address: ctx.virtual_realm_address,
+        virtual_realm_name: "Oxcore".into(),
         active_expansion: ctx.active_expansion,
         account_expansion: ctx.account_expansion,
         time: chrono::Utc::now().timestamp(),

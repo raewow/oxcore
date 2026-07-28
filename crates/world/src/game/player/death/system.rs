@@ -1436,12 +1436,10 @@ impl DeathSystem {
             .set_required(UNIT_FIELD_BYTES_1, bytes_1)
             .set_required(PLAYER_FLAGS, player_flags);
 
-        let packet = SmsgUpdateObject::new()
-            .add_block(UpdateBlockData::Values(values_block))
-            .to_vanilla();
+        let packet = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
 
         self.broadcast_mgr
-            .broadcast_nearby_packet(player_guid, &packet, true);
+            .broadcast_msg_nearby(player_guid, &packet, true);
     }
 
     /// Force water-walking on the ghost's client, queued for its acknowledgement.

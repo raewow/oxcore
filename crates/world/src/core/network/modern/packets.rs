@@ -201,6 +201,8 @@ pub fn classic_available_classes() -> Vec<RaceClassAvailability> {
 #[derive(Debug, Clone)]
 pub struct AuthResponseSuccess {
     pub virtual_realm_address: u32,
+    /// The local realm advertised to the character-selection UI.
+    pub virtual_realm_name: String,
     pub active_expansion: u8,
     pub account_expansion: u8,
     pub time: i64,
@@ -219,7 +221,7 @@ pub fn auth_response_success(info: &AuthResponseSuccess) -> Vec<u8> {
     w.flush_bits();
 
     w.write_u32(info.virtual_realm_address);
-    w.write_i32(0); // VirtualRealms.Count
+    w.write_i32(1); // VirtualRealms.Count: Hermes includes the home realm.
     w.write_u32(0); // TimeRested
     w.write_u8(info.active_expansion);
     w.write_u8(info.account_expansion);
@@ -255,7 +257,21 @@ pub fn auth_response_success(info: &AuthResponseSuccess) -> Vec<u8> {
     }
     w.flush_bits();
 
-    // No optional player counts / trial expiration, no virtual realms, no templates.
+    w.write_u32(info.virtual_realm_address);
+    w.write_bit(true); // IsLocal
+    w.write_bit(false); // IsInternalRealm
+    w.write_bits(info.virtual_realm_name.len() as u32, 8);
+    let normalized_name: String = info
+        .virtual_realm_name
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    w.write_bits(normalized_name.len() as u32, 8);
+    w.flush_bits();
+    w.write_string_raw(&info.virtual_realm_name);
+    w.write_string_raw(&normalized_name);
+
+    // No optional player counts / trial expiration or templates.
     w.into_bytes()
 }
 
@@ -465,6 +481,7 @@ mod tests {
     fn auth_response_success_lays_out_the_fixed_prefix() {
         let info = AuthResponseSuccess {
             virtual_realm_address: 0x0101_0001,
+            virtual_realm_name: "Oxcore".into(),
             active_expansion: 2,
             account_expansion: 3,
             time: 0x1122_3344,
@@ -475,7 +492,7 @@ mod tests {
         assert_eq!(&body[0..4], &[0, 0, 0, 0]); // Result = Ok
         assert_eq!(body[4], 0x80); // SuccessInfo bit set, WaitInfo clear
         assert_eq!(&body[5..9], &0x0101_0001u32.to_le_bytes()); // VirtualRealmAddress
-        assert_eq!(&body[9..13], &0i32.to_le_bytes()); // VirtualRealms.Count
+        assert_eq!(&body[9..13], &1i32.to_le_bytes()); // VirtualRealms.Count
         assert_eq!(&body[13..17], &0u32.to_le_bytes()); // TimeRested
         assert_eq!(body[17], 2); // ActiveExpansionLevel
         assert_eq!(body[18], 3); // AccountExpansionLevel
@@ -485,14 +502,16 @@ mod tests {
         assert_eq!(&body[31..35], &0u32.to_le_bytes()); // CurrencyID
         assert_eq!(&body[35..43], &0x1122_3344i64.to_le_bytes()); // Time
 
-        // Then a 5-bit flush byte, the 12-byte GameTime block, and a 3-bit flush byte.
-        assert_eq!(body.len(), 43 + 1 + 12 + 1);
+        // Then a 5-bit flush byte, the 12-byte GameTime block, a home-realm record, and its
+        // bit-packed names. "Oxcore" is six bytes in both forms.
+        assert_eq!(body.len(), 43 + 1 + 12 + 1 + 4 + 3 + 6 + 6);
     }
 
     #[test]
     fn auth_response_success_writes_the_class_availability_count_and_rows() {
         let info = AuthResponseSuccess {
             virtual_realm_address: 1,
+            virtual_realm_name: "Oxcore".into(),
             active_expansion: 0,
             account_expansion: 0,
             time: 0,

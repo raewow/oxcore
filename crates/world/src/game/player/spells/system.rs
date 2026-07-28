@@ -571,15 +571,11 @@ impl SpellSystem {
         channel_object: Option<ObjectGuid>,
         spell_id: u32,
     ) {
-        let packet = SmsgUpdateObject::new()
-            .add_block(UpdateBlockData::Values(channel_state_update_block(
-                caster_guid,
-                channel_object,
-                spell_id,
-            )))
-            .to_vanilla();
+        let packet = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+            channel_state_update_block(caster_guid, channel_object, spell_id),
+        ));
         self.broadcast_mgr
-            .broadcast_nearby_packet(caster_guid, &packet, true);
+            .broadcast_msg_nearby(caster_guid, &packet, true);
     }
 
     /// Send the remaining duration for an active channel to its caster.
@@ -2036,7 +2032,7 @@ impl SpellSystem {
                     entry.effect,
                     execute_log_refs,
                 ) {
-                    self.broadcast_mgr.send_to_player(caster_guid, packet);
+                    self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
                 }
             }
         }
@@ -2836,11 +2832,9 @@ impl SpellSystem {
         if let Some(new_health) = new_health {
             let block = ValuesUpdateBlock::new(caster_guid, ObjectType::Player)
                 .set_field(UNIT_FIELD_HEALTH, new_health);
-            let packet = SmsgUpdateObject::new()
-                .add_block(UpdateBlockData::Values(block))
-                .to_vanilla();
+            let packet = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
             self.broadcast_mgr
-                .broadcast_nearby_packet(caster_guid, &packet, true);
+                .broadcast_msg_nearby(caster_guid, &packet, true);
         }
     }
 
@@ -2903,7 +2897,7 @@ impl SpellSystem {
         packet.write_u32(power_type as u32);
         packet.write_u32(amount);
         self.broadcast_mgr
-            .broadcast_nearby_packet(caster_guid, &packet, true);
+            .broadcast_msg_nearby(caster_guid, &packet, true);
 
         world
             .systems
@@ -2931,7 +2925,7 @@ impl SpellSystem {
         packet.write_guid(target_guid);
         packet.write_u8(miss_info as u8);
         self.broadcast_mgr
-            .broadcast_nearby_packet(caster_guid, &packet, true);
+            .broadcast_msg_nearby(caster_guid, &packet, true);
     }
 
     /// Broadcast one `SMSG_SPELLLOGMISS` entry when every target of a spell missed.
@@ -2963,7 +2957,7 @@ impl SpellSystem {
             packet.write_u8(*miss_info as u8);
         }
         self.broadcast_mgr
-            .broadcast_nearby_packet(caster_guid, &packet, true);
+            .broadcast_msg_nearby(caster_guid, &packet, true);
     }
 
     /// Broadcast `SMSG_PROCRESIST` for a spell resisted by a target
@@ -2983,7 +2977,7 @@ impl SpellSystem {
         packet.write_u32(spell_id);
         packet.write_u8(0); // log format: 0-default, 1-debug
         self.broadcast_mgr
-            .broadcast_nearby_packet(caster_guid, &packet, true);
+            .broadcast_msg_nearby(caster_guid, &packet, true);
     }
 
     /// Broadcast `SMSG_SPELLORDAMAGE_IMMUNE` for a spell a target was immune to
@@ -3003,7 +2997,7 @@ impl SpellSystem {
         packet.write_u32(spell_id);
         packet.write_u8(0);
         self.broadcast_mgr
-            .broadcast_nearby_packet(caster_guid, &packet, true);
+            .broadcast_msg_nearby(caster_guid, &packet, true);
     }
 
     /// Calculate the power cost of a spell (faithful `Spell::CalculatePowerCost`).

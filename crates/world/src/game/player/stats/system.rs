@@ -939,10 +939,9 @@ impl StatsSystem {
             .set_field(PLAYER_AMMO_ID, ammo_id);
 
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
-        let packet = update_msg.to_vanilla();
+        let packet = update_msg;
 
-        self.broadcast_mgr
-            .broadcast_nearby_packet(guid, &packet, true);
+        self.broadcast_mgr.broadcast_msg_nearby(guid, &packet, true);
     }
 }
 

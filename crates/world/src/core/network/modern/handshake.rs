@@ -266,6 +266,7 @@ mod tests {
 
         let info = AuthResponseSuccess {
             virtual_realm_address: 0x0101_0001,
+            virtual_realm_name: "Oxcore".into(),
             active_expansion: 0,
             account_expansion: 0,
             time: 42,

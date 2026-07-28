@@ -275,8 +275,8 @@ impl SocialSystem {
             friend_guid,
             friend_info: None,
         };
-        let packet = msg.to_vanilla();
-        self.broadcast_mgr.send_to_player(player_guid, packet);
+        let packet = msg;
+        self.broadcast_mgr.send_msg_to_player(player_guid, packet);
 
         tracing::debug!("Player {:?} removed friend {:?}", player_guid, friend_guid);
 
@@ -336,8 +336,8 @@ impl SocialSystem {
             friend_guids: &friend_guids_low,
             friend_infos: &friend_infos,
         };
-        let packet = msg.to_vanilla();
-        self.broadcast_mgr.send_to_player(player_guid, packet);
+        let packet = msg;
+        self.broadcast_mgr.send_msg_to_player(player_guid, packet);
     }
 
     // ========== IGNORE OPERATIONS ==========

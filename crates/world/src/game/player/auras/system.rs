@@ -2204,17 +2204,17 @@ impl AuraSystem {
         block = block.set_field(UNIT_FIELD_AURAAPPLICATIONS + apps_index, apps_field_value);
 
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
-        let packet = update_msg.to_vanilla();
-        tracing::info!(
-            "[AURA_UPDATE] slot={} spell={} target={:?} packet_len={} bytes={:02X?}",
+        let packet = update_msg;
+        // No byte dump here any more: the wire bytes now depend on the recipient's protocol, so
+        // there is no single encoding to log at this point.
+        tracing::debug!(
+            "[AURA_UPDATE] slot={} spell={} target={:?}",
             slot,
             spell_id,
-            target_guid,
-            packet.data().len(),
-            packet.data().as_ref()
+            target_guid
         );
         self.broadcast_mgr
-            .broadcast_nearby_packet(target_guid, &packet, true);
+            .broadcast_msg_nearby(target_guid, &packet, true);
 
         Ok(())
     }
@@ -3063,11 +3063,9 @@ impl AuraSystem {
             oxcore_shared::protocol::update_fields::UNIT_FIELD_MOUNTDISPLAYID,
             display_id,
         );
-        let packet = SmsgUpdateObject::new()
-            .add_block(UpdateBlockData::Values(block))
-            .to_vanilla();
+        let packet = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
         self.broadcast_mgr
-            .broadcast_nearby_packet(target_guid, &packet, true);
+            .broadcast_msg_nearby(target_guid, &packet, true);
     }
 
     // ---- Water walk / feather fall / hover ----
@@ -3359,11 +3357,9 @@ impl AuraSystem {
                 display_id,
             );
         }
-        let packet = SmsgUpdateObject::new()
-            .add_block(UpdateBlockData::Values(block))
-            .to_vanilla();
+        let packet = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
         self.broadcast_mgr
-            .broadcast_nearby_packet(target_guid, &packet, true);
+            .broadcast_msg_nearby(target_guid, &packet, true);
     }
 
     // ---- Transform ----
@@ -3417,11 +3413,9 @@ impl AuraSystem {
             oxcore_shared::protocol::update_fields::UNIT_FIELD_DISPLAYID,
             display_id,
         );
-        let packet = SmsgUpdateObject::new()
-            .add_block(UpdateBlockData::Values(block))
-            .to_vanilla();
+        let packet = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
         self.broadcast_mgr
-            .broadcast_nearby_packet(target_guid, &packet, true);
+            .broadcast_msg_nearby(target_guid, &packet, true);
     }
 
     fn remove_transform(&self, target_guid: ObjectGuid, world: &World) {
@@ -3449,11 +3443,9 @@ impl AuraSystem {
                 oxcore_shared::protocol::update_fields::UNIT_FIELD_DISPLAYID,
                 native_display_id,
             );
-            let packet = SmsgUpdateObject::new()
-                .add_block(UpdateBlockData::Values(block))
-                .to_vanilla();
+            let packet = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
             self.broadcast_mgr
-                .broadcast_nearby_packet(target_guid, &packet, true);
+                .broadcast_msg_nearby(target_guid, &packet, true);
         }
     }
 
@@ -3594,11 +3586,9 @@ impl AuraSystem {
             oxcore_shared::protocol::update_fields::UNIT_FIELD_BYTES_1,
             bytes_1,
         );
-        let packet = SmsgUpdateObject::new()
-            .add_block(UpdateBlockData::Values(block))
-            .to_vanilla();
+        let packet = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
         self.broadcast_mgr
-            .broadcast_nearby_packet(target_guid, &packet, true);
+            .broadcast_msg_nearby(target_guid, &packet, true);
     }
 
     // ---- Invisibility ----
@@ -3722,10 +3712,8 @@ impl AuraSystem {
             oxcore_shared::protocol::update_fields::PLAYER_FIELD_BYTES2,
             bytes2,
         );
-        let packet = SmsgUpdateObject::new()
-            .add_block(UpdateBlockData::Values(block))
-            .to_vanilla();
-        self.broadcast_mgr.send_to_player(target_guid, packet);
+        let packet = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
+        self.broadcast_mgr.send_msg_to_player(target_guid, packet);
     }
 
     // =========================================================================
@@ -3853,7 +3841,7 @@ impl AuraSystem {
                 packet.write_packed_guid_raw(creature_guid.raw());
                 packet.write_f32(new_speed);
                 self.broadcast_mgr
-                    .broadcast_nearby_packet(creature_guid, &packet, true);
+                    .broadcast_msg_nearby(creature_guid, &packet, true);
             }
         }
     }
@@ -3963,7 +3951,7 @@ impl AuraSystem {
             packet.write_packed_guid_raw(creature_guid.raw());
             packet.write_f32(rate * 7.0);
             self.broadcast_mgr
-                .broadcast_nearby_packet(creature_guid, &packet, true);
+                .broadcast_msg_nearby(creature_guid, &packet, true);
         }
     }
 
@@ -3977,10 +3965,9 @@ impl AuraSystem {
     ) {
         let mut block = ValuesUpdateBlock::new(target_guid, object_type);
         block = block.set_field(UNIT_DYNAMIC_FLAGS, dynamic_flags);
-        let packet = SmsgUpdateObject::new()
-            .add_block(UpdateBlockData::Values(block))
-            .to_vanilla();
-        self.broadcast_mgr.send_to_player(recipient_guid, packet);
+        let packet = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
+        self.broadcast_mgr
+            .send_msg_to_player(recipient_guid, packet);
     }
 }
 

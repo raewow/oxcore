@@ -204,9 +204,9 @@ fn send_player_health_update(world: &World, player_guid: ObjectGuid) {
 
         let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(values_block));
 
-        world.managers.broadcast_mgr.broadcast_nearby_packet(
+        world.managers.broadcast_mgr.broadcast_msg_nearby(
             player_guid,
-            &msg.to_vanilla(),
+            &msg,
             true, // include self so player sees their own health drop
         );
     }

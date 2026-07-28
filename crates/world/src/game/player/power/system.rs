@@ -425,9 +425,9 @@ impl PowerSystem {
     ) {
         let block = Self::power_value_update_block(player_guid, power_type, value);
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
-        let packet = update_msg.to_vanilla();
+        let packet = update_msg;
         self.broadcast_mgr
-            .broadcast_nearby_packet(player_guid, &packet, true);
+            .broadcast_msg_nearby(player_guid, &packet, true);
     }
 
     /// Broadcast a health update produced by passive regeneration.
@@ -435,9 +435,9 @@ impl PowerSystem {
         let block = ValuesUpdateBlock::new(player_guid, ObjectType::Player)
             .set_field(UNIT_FIELD_HEALTH, value);
         let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
-        let packet = update_msg.to_vanilla();
+        let packet = update_msg;
         self.broadcast_mgr
-            .broadcast_nearby_packet(player_guid, &packet, true);
+            .broadcast_msg_nearby(player_guid, &packet, true);
     }
 }
 

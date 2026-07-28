@@ -246,9 +246,9 @@ impl ChatSystem {
 
             if !member_guids.is_empty() {
                 let notify = SmsgChannelNotify::player_joined(channel_name, player_guid);
-                let packet = notify.to_vanilla();
+                let packet = notify;
                 self.broadcast_mgr
-                    .broadcast_to_players(&member_guids, &packet);
+                    .broadcast_msg_to_players(&member_guids, &packet);
             }
         }
 
@@ -308,9 +308,9 @@ impl ChatSystem {
 
             if !member_guids.is_empty() {
                 let notify = SmsgChannelNotify::player_left(channel_name, player_guid);
-                let packet = notify.to_vanilla();
+                let packet = notify;
                 self.broadcast_mgr
-                    .broadcast_to_players(&member_guids, &packet);
+                    .broadcast_msg_to_players(&member_guids, &packet);
             }
         }
 
@@ -320,9 +320,9 @@ impl ChatSystem {
 
             if !member_guids.is_empty() {
                 let notify = SmsgChannelNotify::owner_changed(channel_name, owner_guid);
-                let packet = notify.to_vanilla();
+                let packet = notify;
                 self.broadcast_mgr
-                    .broadcast_to_players(&member_guids, &packet);
+                    .broadcast_msg_to_players(&member_guids, &packet);
             }
         }
 
@@ -390,10 +390,10 @@ impl ChatSystem {
                 old_flags,
                 member.flags.as_u8(),
             );
-            let packet = notify.to_vanilla();
+            let packet = notify;
             let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
             self.broadcast_mgr
-                .broadcast_to_players(&member_guids, &packet);
+                .broadcast_msg_to_players(&member_guids, &packet);
 
             Ok(())
         } else {
@@ -427,10 +427,10 @@ impl ChatSystem {
                 old_flags,
                 member.flags.as_u8(),
             );
-            let packet = notify.to_vanilla();
+            let packet = notify;
             let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
             self.broadcast_mgr
-                .broadcast_to_players(&member_guids, &packet);
+                .broadcast_msg_to_players(&member_guids, &packet);
 
             Ok(())
         } else {
@@ -496,11 +496,11 @@ impl ChatSystem {
         channel_data.channel.password = password.to_string();
 
         let notify = SmsgChannelNotify::password_changed(channel_name, player_guid);
-        let packet = notify.to_vanilla();
+        let packet = notify;
 
         let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
         self.broadcast_mgr
-            .broadcast_to_players(&member_guids, &packet);
+            .broadcast_msg_to_players(&member_guids, &packet);
 
         Ok(())
     }
@@ -551,11 +551,11 @@ impl ChatSystem {
         }
 
         let notify = SmsgChannelNotify::owner_changed(channel_name, target_guid);
-        let packet = notify.to_vanilla();
+        let packet = notify;
 
         let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
         self.broadcast_mgr
-            .broadcast_to_players(&member_guids, &packet);
+            .broadcast_msg_to_players(&member_guids, &packet);
 
         Ok(())
     }
@@ -628,9 +628,9 @@ impl ChatSystem {
         // Notify remaining members
         let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
         let left_notify = SmsgChannelNotify::player_left(channel_name, target_guid);
-        let packet = left_notify.to_vanilla();
+        let packet = left_notify;
         self.broadcast_mgr
-            .broadcast_to_players(&member_guids, &packet);
+            .broadcast_msg_to_players(&member_guids, &packet);
 
         Ok(())
     }
@@ -714,10 +714,10 @@ impl ChatSystem {
             SmsgChannelNotify::announcements_off(channel_name, player_guid)
         };
 
-        let packet = notify.to_vanilla();
+        let packet = notify;
         let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
         self.broadcast_mgr
-            .broadcast_to_players(&member_guids, &packet);
+            .broadcast_msg_to_players(&member_guids, &packet);
 
         Ok(())
     }
@@ -751,10 +751,10 @@ impl ChatSystem {
             SmsgChannelNotify::moderation_off(channel_name, player_guid)
         };
 
-        let packet = notify.to_vanilla();
+        let packet = notify;
         let member_guids: Vec<ObjectGuid> = channel_data.members.keys().copied().collect();
         self.broadcast_mgr
-            .broadcast_to_players(&member_guids, &packet);
+            .broadcast_msg_to_players(&member_guids, &packet);
 
         Ok(())
     }
@@ -818,12 +818,11 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }
-        .to_vanilla();
+        };
 
         // Broadcast to all channel members (including sender)
         self.broadcast_mgr
-            .broadcast_to_players(&member_guids, &packet);
+            .broadcast_msg_to_players(&member_guids, &packet);
 
         Ok(())
     }
@@ -922,11 +921,10 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }
-        .to_vanilla();
+        };
 
         self.broadcast_mgr
-            .send_to_player(target_guid, whisper_packet);
+            .send_msg_to_player(target_guid, whisper_packet);
 
         // Send echo/confirmation to sender
         let inform_packet = SmsgMessageChat {
@@ -939,11 +937,10 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }
-        .to_vanilla();
+        };
 
         self.broadcast_mgr
-            .send_to_player(sender_guid, inform_packet);
+            .send_msg_to_player(sender_guid, inform_packet);
 
         Ok(())
     }
@@ -977,33 +974,29 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }
-        .to_vanilla();
+        };
 
         // Build cross-faction packet if cross-faction chat is disabled (racial language - gibberish)
         let cross_faction_packet = if !allow_cross_faction {
             let racial_lang = Language::for_faction(sender_team);
-            Some(
-                SmsgMessageChat {
-                    msgtype: ChatMsg::Say,
-                    language: racial_lang,
-                    sender_guid,
-                    sender_name: Some(&sender_name),
-                    target_guid: None,
-                    channel_name: None,
-                    player_rank: None,
-                    message: &clean_message,
-                    chat_tag: ChatTag::None,
-                }
-                .to_vanilla(),
-            )
+            Some(SmsgMessageChat {
+                msgtype: ChatMsg::Say,
+                language: racial_lang,
+                sender_guid,
+                sender_name: Some(&sender_name),
+                target_guid: None,
+                channel_name: None,
+                player_rank: None,
+                message: &clean_message,
+                chat_tag: ChatTag::None,
+            })
         } else {
             None
         };
 
         // Send to sender first (always same-faction)
         self.broadcast_mgr
-            .send_to_player(sender_guid, same_faction_packet.clone());
+            .send_msg_to_player(sender_guid, same_faction_packet.clone());
 
         // Broadcast to nearby players with distance filtering (25 yards) and faction-aware packets
         let broadcaster = self.player_mgr.get_broadcaster(sender_guid);
@@ -1042,7 +1035,7 @@ impl ChatSystem {
                             };
 
                             self.broadcast_mgr
-                                .send_to_player(listener_guid, packet.clone());
+                                .send_msg_to_player(listener_guid, packet.clone());
                         }
                     }
                 }
@@ -1081,33 +1074,29 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }
-        .to_vanilla();
+        };
 
         // Build cross-faction packet if cross-faction chat is disabled (racial language - gibberish)
         let cross_faction_packet = if !allow_cross_faction {
             let racial_lang = Language::for_faction(sender_team);
-            Some(
-                SmsgMessageChat {
-                    msgtype: ChatMsg::Yell,
-                    language: racial_lang,
-                    sender_guid,
-                    sender_name: Some(&sender_name),
-                    target_guid: None,
-                    channel_name: None,
-                    player_rank: None,
-                    message: &clean_message,
-                    chat_tag: ChatTag::None,
-                }
-                .to_vanilla(),
-            )
+            Some(SmsgMessageChat {
+                msgtype: ChatMsg::Yell,
+                language: racial_lang,
+                sender_guid,
+                sender_name: Some(&sender_name),
+                target_guid: None,
+                channel_name: None,
+                player_rank: None,
+                message: &clean_message,
+                chat_tag: ChatTag::None,
+            })
         } else {
             None
         };
 
         // Send to sender first (always same-faction)
         self.broadcast_mgr
-            .send_to_player(sender_guid, same_faction_packet.clone());
+            .send_msg_to_player(sender_guid, same_faction_packet.clone());
 
         // Broadcast to nearby players with distance filtering (300 yards) and faction-aware packets
         let broadcaster = self.player_mgr.get_broadcaster(sender_guid);
@@ -1146,7 +1135,7 @@ impl ChatSystem {
                             };
 
                             self.broadcast_mgr
-                                .send_to_player(listener_guid, packet.clone());
+                                .send_msg_to_player(listener_guid, packet.clone());
                         }
                     }
                 }
@@ -1183,16 +1172,15 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }
-        .to_vanilla();
+        };
 
         // Send to sender first
         self.broadcast_mgr
-            .send_to_player(sender_guid, packet.clone());
+            .send_msg_to_player(sender_guid, packet.clone());
 
         // Broadcast to nearby players (exclude sender)
         self.broadcast_mgr
-            .broadcast_nearby_packet(sender_guid, &packet, false);
+            .broadcast_msg_nearby(sender_guid, &packet, false);
 
         Ok(())
     }
@@ -1231,14 +1219,13 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }
-        .to_vanilla();
+        };
 
         // Send to all online group members
         for member in &group.members {
             if member.status.is_online() {
                 self.broadcast_mgr
-                    .send_to_player(member.guid, packet.clone());
+                    .send_msg_to_player(member.guid, packet.clone());
             }
         }
 
@@ -1287,14 +1274,13 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }
-        .to_vanilla();
+        };
 
         // Send to all online group members
         for member in &group.members {
             if member.status.is_online() {
                 self.broadcast_mgr
-                    .send_to_player(member.guid, packet.clone());
+                    .send_msg_to_player(member.guid, packet.clone());
             }
         }
 
@@ -1338,13 +1324,12 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }
-        .to_vanilla();
+        };
 
         // Send to all guild members (broadcast_mgr silently drops for offline players)
         for member_guid in guild_data.members.keys() {
             self.broadcast_mgr
-                .send_to_player(*member_guid, packet.clone());
+                .send_msg_to_player(*member_guid, packet.clone());
         }
 
         Ok(())
@@ -1391,15 +1376,14 @@ impl ChatSystem {
             player_rank: None,
             message: &clean_message,
             chat_tag: ChatTag::None,
-        }
-        .to_vanilla();
+        };
 
         // Send to all guild members (officers can see officer chat, but so can GM)
         // In vanilla, officer chat is visible to anyone with GRIGHT_OFFCHATLISTEN
         // For simplicity, send to all members — client filters based on rank
         for member_guid in guild_data.members.keys() {
             self.broadcast_mgr
-                .send_to_player(*member_guid, packet.clone());
+                .send_msg_to_player(*member_guid, packet.clone());
         }
 
         Ok(())

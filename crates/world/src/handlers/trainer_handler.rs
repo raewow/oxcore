@@ -401,11 +401,15 @@ fn send_buy_failed(
 
 /// The three packets emitted for a trainer spell animation plus whether the player
 /// or the trainer NPC is the caster.
+/// The three messages that make up a trainer-teach cast animation.
+///
+/// These are held as messages, not encoded packets: they fan out to everyone nearby, and each
+/// recipient may be on a different protocol.
 pub(crate) struct TrainerAnimPackets {
     pub caster_is_player: bool,
-    pub spell_start: WorldPacket,
-    pub spell_go: WorldPacket,
-    pub spell_visual: WorldPacket,
+    pub spell_start: SmsgSpellStart,
+    pub spell_go: SmsgSpellGo,
+    pub spell_visual: SmsgPlaySpellVisual,
 }
 
 /// Build the three animation packets for a trainer-teach cast.
@@ -435,8 +439,7 @@ pub(crate) fn build_trainer_anim_packets(
         cast_item_guid: None,
         ammo_display_id: 0,
         ammo_inventory_type: 0,
-    }
-    .to_vanilla();
+    };
 
     let spell_go = SmsgSpellGo {
         caster_guid,
@@ -449,14 +452,12 @@ pub(crate) fn build_trainer_anim_packets(
         cast_item_guid: None,
         ammo_display_id: 0,
         ammo_inventory_type: 0,
-    }
-    .to_vanilla();
+    };
 
     let spell_visual = SmsgPlaySpellVisual {
         caster_guid,
         spell_visual_kit_id: spell_visual,
-    }
-    .to_vanilla();
+    };
 
     TrainerAnimPackets {
         caster_is_player,
@@ -483,28 +484,24 @@ fn send_trainer_spell_animation(
         world
             .managers
             .broadcast_mgr
-            .broadcast_nearby_packet(player_guid, &pkts.spell_start, true);
+            .broadcast_msg_nearby(player_guid, &pkts.spell_start, true);
         world
             .managers
             .broadcast_mgr
-            .broadcast_nearby_packet(player_guid, &pkts.spell_go, true);
+            .broadcast_msg_nearby(player_guid, &pkts.spell_go, true);
         world
             .managers
             .broadcast_mgr
-            .broadcast_nearby_packet(player_guid, &pkts.spell_visual, true);
+            .broadcast_msg_nearby(player_guid, &pkts.spell_visual, true);
     } else {
         // Trainer NPC is caster — broadcast from the creature's position
-        crate::game::broadcast_mgr::broadcast_around_creature_packet(
+        crate::game::broadcast_mgr::broadcast_around_creature(
             world,
             trainer_guid,
             &pkts.spell_start,
         );
-        crate::game::broadcast_mgr::broadcast_around_creature_packet(
-            world,
-            trainer_guid,
-            &pkts.spell_go,
-        );
-        crate::game::broadcast_mgr::broadcast_around_creature_packet(
+        crate::game::broadcast_mgr::broadcast_around_creature(world, trainer_guid, &pkts.spell_go);
+        crate::game::broadcast_mgr::broadcast_around_creature(
             world,
             trainer_guid,
             &pkts.spell_visual,
@@ -621,7 +618,8 @@ mod tests {
     #[test]
     fn visual_pkt_caster_is_player_for_222() {
         let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 5, 222);
-        let data = pkts.spell_visual.data();
+        let packet = pkts.spell_visual.to_vanilla();
+        let data = packet.data();
         assert_eq!(
             read_u64_le(data, 0),
             player_guid().raw(),
@@ -633,7 +631,8 @@ mod tests {
     #[test]
     fn visual_pkt_caster_is_trainer_for_other_visuals() {
         let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 5, 300);
-        let data = pkts.spell_visual.data();
+        let packet = pkts.spell_visual.to_vanilla();
+        let data = packet.data();
         assert_eq!(
             read_u64_le(data, 0),
             trainer_guid().raw(),
@@ -647,7 +646,8 @@ mod tests {
     #[test]
     fn spell_start_self_cast_caster_is_player() {
         let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 100, 222);
-        let data = pkts.spell_start.data();
+        let packet = pkts.spell_start.to_vanilla();
+        let data = packet.data();
         let (first_guid, _) = decode_packed_guid(data);
         assert_eq!(
             first_guid,
@@ -660,7 +660,8 @@ mod tests {
     #[test]
     fn spell_start_trainer_cast_caster_is_trainer() {
         let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 100, 0);
-        let data = pkts.spell_start.data();
+        let packet = pkts.spell_start.to_vanilla();
+        let data = packet.data();
         let (first_guid, _) = decode_packed_guid(data);
         assert_eq!(
             first_guid,
@@ -673,7 +674,8 @@ mod tests {
     #[test]
     fn spell_go_hit_list_contains_player() {
         let pkts = build_trainer_anim_packets(player_guid(), trainer_guid(), 100, 0);
-        let data = pkts.spell_go.data();
+        let packet = pkts.spell_go.to_vanilla();
+        let data = packet.data();
 
         // Skip: packed_guid(caster) + packed_guid(pack) + spell_id(4) + cast_flags(2)
         let (_, n1) = decode_packed_guid(data);
