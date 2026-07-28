@@ -37,7 +37,8 @@ use oxcore_shared::messages::update::{
     CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
 };
 use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
+use oxcore_shared::protocol::bitbuf::BitReader;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, Protocol, WorldPacket};
 
 /// Handle CMSG_CHAR_ENUM - list characters for this account
 pub async fn handle_char_enum(
@@ -127,6 +128,7 @@ pub async fn handle_char_enum(
     // Build and send the packet using SmsgCharEnum
     let message = SmsgCharEnum {
         characters: &char_entries,
+        realm_id: world.get_realm_id() as u16,
     };
 
     session.send_msg(message)?;
@@ -141,9 +143,19 @@ pub async fn handle_player_login(
     databases: &Databases,
     world: &World,
 ) -> Result<()> {
-    let guid_raw = packet
-        .read_u64()
-        .ok_or_else(|| anyhow!("Failed to read character GUID"))?;
+    let guid_raw = if session.protocol() == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        let (_, low) = reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow!("Failed to read modern character GUID"))?;
+        let _far_clip = reader.read_f32();
+        let _unknown = reader.read_bit();
+        low
+    } else {
+        packet
+            .read_u64()
+            .ok_or_else(|| anyhow!("Failed to read character GUID"))?
+    };
     handle_player_login_with_guid(session, guid_raw, databases, world).await
 }
 
@@ -2048,37 +2060,106 @@ pub async fn handle_char_create(
     use oxcore_shared::game::chat::Team;
     use oxcore_shared::messages::character::SmsgCharCreate;
 
-    // 1. Parse packet
-    let name = packet
-        .read_cstring()
-        .ok_or_else(|| anyhow!("Failed to read character name"))?;
-    let race = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read race"))?;
-    let class = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read class"))?;
-    let gender = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read gender"))?;
-    let skin = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read skin"))?;
-    let face = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read face"))?;
-    let hair_style = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read hair_style"))?;
-    let hair_color = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read hair_color"))?;
-    let facial_hair = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read facial_hair"))?;
-    let _outfit_id = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read outfit_id"))?;
+    // 1. Parse packet. Modern customizations are DB2 IDs, which the legacy character schema
+    // cannot retain. Map their ordered choice values conservatively to the five legacy fields.
+    let (name, race, class, gender, skin, face, hair_style, hair_color, facial_hair) =
+        if session.protocol() == Protocol::Modern {
+            let mut reader = BitReader::new(packet.contents());
+            let name_length = reader
+                .read_bits(6)
+                .ok_or_else(|| anyhow!("Failed to read modern character name length"))?
+                as usize;
+            let has_template_set = reader
+                .read_bit()
+                .ok_or_else(|| anyhow!("Failed to read modern template flag"))?;
+            let _trial_boost = reader.read_bit();
+            let _use_npe = reader.read_bit();
+            let race = reader
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read race"))?;
+            let class = reader
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read class"))?;
+            let gender = reader
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read gender"))?;
+            let count = reader
+                .read_u32()
+                .ok_or_else(|| anyhow!("Failed to read customization count"))?;
+            let name = reader
+                .read_string(name_length)
+                .ok_or_else(|| anyhow!("Failed to read character name"))?;
+            if has_template_set {
+                reader
+                    .read_u32()
+                    .ok_or_else(|| anyhow!("Failed to read template set"))?;
+            }
+            let mut appearance = [0; 5];
+            for index in 0..count {
+                let _option = reader
+                    .read_u32()
+                    .ok_or_else(|| anyhow!("Failed to read customization option"))?;
+                let choice = reader
+                    .read_u32()
+                    .ok_or_else(|| anyhow!("Failed to read customization choice"))?;
+                if let Some(field) = appearance.get_mut(index as usize) {
+                    *field = choice as u8;
+                }
+            }
+            (
+                name,
+                race,
+                class,
+                gender,
+                appearance[0],
+                appearance[1],
+                appearance[2],
+                appearance[3],
+                appearance[4],
+            )
+        } else {
+            let name = packet
+                .read_cstring()
+                .ok_or_else(|| anyhow!("Failed to read character name"))?;
+            let race = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read race"))?;
+            let class = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read class"))?;
+            let gender = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read gender"))?;
+            let skin = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read skin"))?;
+            let face = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read face"))?;
+            let hair_style = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read hair_style"))?;
+            let hair_color = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read hair_color"))?;
+            let facial_hair = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read facial_hair"))?;
+            let _outfit_id = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read outfit_id"))?;
+            (
+                name,
+                race,
+                class,
+                gender,
+                skin,
+                face,
+                hair_style,
+                hair_color,
+                facial_hair,
+            )
+        };
 
     debug!(
         "Character creation: name={}, race={}, class={}, account={}",
@@ -2104,6 +2185,7 @@ pub async fn handle_char_create(
         };
         session.send_msg(SmsgCharCreate {
             result: result_code,
+            guid: (0, 0),
         })?;
         return Ok(());
     }
@@ -2113,6 +2195,7 @@ pub async fn handle_char_create(
     if char_repo.exists_by_name(&normalized_name).await? {
         session.send_msg(SmsgCharCreate {
             result: char_create::NAME_IN_USE,
+            guid: (0, 0),
         })?;
         return Ok(());
     }
@@ -2133,6 +2216,7 @@ pub async fn handle_char_create(
     if existing_chars.len() >= characters_per_realm as usize {
         session.send_msg(SmsgCharCreate {
             result: char_create::SERVER_LIMIT,
+            guid: (0, 0),
         })?;
         return Ok(());
     }
@@ -2150,6 +2234,7 @@ pub async fn handle_char_create(
     if disabled {
         session.send_msg(SmsgCharCreate {
             result: char_create::DISABLED,
+            guid: (0, 0),
         })?;
         return Ok(());
     }
@@ -2160,6 +2245,7 @@ pub async fn handle_char_create(
         if team != first_char_team && team != Team::None && first_char_team != Team::None {
             session.send_msg(SmsgCharCreate {
                 result: char_create::PVP_TEAMS_VIOLATION,
+                guid: (0, 0),
             })?;
             return Ok(());
         }
@@ -2363,6 +2449,7 @@ pub async fn handle_char_create(
 
     session.send_msg(SmsgCharCreate {
         result: char_create::SUCCESS,
+        guid: ObjectGuid::new_player(guid).to_guid128(world.get_realm_id() as u16),
     })?;
 
     Ok(())
@@ -2379,9 +2466,17 @@ pub async fn handle_char_delete(
     use oxcore_shared::messages::character::SmsgCharDelete;
 
     // 1. Parse GUID
-    let guid_raw = packet
-        .read_u64()
-        .ok_or_else(|| anyhow!("Failed to read GUID"))?;
+    let guid_raw = if session.protocol() == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow!("Failed to read modern GUID"))?
+            .1
+    } else {
+        packet
+            .read_u64()
+            .ok_or_else(|| anyhow!("Failed to read GUID"))?
+    };
     let guid = guid_raw as u32;
 
     debug!(
@@ -2454,13 +2549,29 @@ pub async fn handle_char_rename(
     const CHARACTER_FLAG_RENAME_NEEDS_GM_REVIEW: u32 = 0x00008000;
 
     // 1. Parse packet
-    let guid_u64 = packet
-        .read_packed_guid_raw()
-        .ok_or_else(|| anyhow!("Failed to read GUID"))?;
+    let (guid_u64, new_name) = if session.protocol() == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        let (_, low) = reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow!("Failed to read modern GUID"))?;
+        let length = reader
+            .read_bits(6)
+            .ok_or_else(|| anyhow!("Failed to read modern name length"))?
+            as usize;
+        let name = reader
+            .read_string(length)
+            .ok_or_else(|| anyhow!("Failed to read new name"))?;
+        (low, name)
+    } else {
+        let guid = packet
+            .read_packed_guid_raw()
+            .ok_or_else(|| anyhow!("Failed to read GUID"))?;
+        let name = packet
+            .read_cstring()
+            .ok_or_else(|| anyhow!("Failed to read new name"))?;
+        (guid, name)
+    };
     let guid = ObjectGuid::from(guid_u64);
-    let new_name = packet
-        .read_cstring()
-        .ok_or_else(|| anyhow!("Failed to read new name"))?;
 
     debug!(
         "Character rename: guid={}, new_name={}, account={}",
@@ -2487,6 +2598,7 @@ pub async fn handle_char_rename(
             result: result_code,
             guid: None,
             new_name: None,
+            guid128: None,
         })?;
         return Ok(());
     }
@@ -2498,6 +2610,7 @@ pub async fn handle_char_rename(
             result: char_name::FAILURE,
             guid: None,
             new_name: None,
+            guid128: None,
         })?;
         return Ok(());
     }
@@ -2512,6 +2625,7 @@ pub async fn handle_char_rename(
                 result: response::FAILURE,
                 guid: None,
                 new_name: None,
+                guid128: None,
             })?;
             return Ok(());
         }
@@ -2525,6 +2639,7 @@ pub async fn handle_char_rename(
                 result: response::FAILURE,
                 guid: None,
                 new_name: None,
+                guid128: None,
             })?;
             return Ok(());
         }
@@ -2538,6 +2653,7 @@ pub async fn handle_char_rename(
             result: response::FAILURE,
             guid: None,
             new_name: None,
+            guid128: None,
         })?;
         return Ok(());
     }
@@ -2550,6 +2666,7 @@ pub async fn handle_char_rename(
             result: response::FAILURE,
             guid: None,
             new_name: None,
+            guid128: None,
         })?;
         return Ok(());
     }
@@ -2567,6 +2684,7 @@ pub async fn handle_char_rename(
         result: response::SUCCESS,
         guid: Some(guid.into()),
         new_name: Some(normalized_name),
+        guid128: Some(guid.to_guid128(world.get_realm_id() as u16)),
     })?;
 
     Ok(())

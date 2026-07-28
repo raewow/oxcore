@@ -1,12 +1,14 @@
 //! Character management message structs
 
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{Opcode, WorldPacket};
 
 /// SMSG_CHAR_CREATE - Character creation response
 #[derive(Debug, Clone)]
 pub struct SmsgCharCreate {
     pub result: u8,
+    pub guid: (u64, u64),
 }
 
 impl ToWorldPacket for SmsgCharCreate {
@@ -14,6 +16,12 @@ impl ToWorldPacket for SmsgCharCreate {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHAR_CREATE);
         packet.write_u8(self.result);
         packet
+    }
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u8(self.result);
+        writer.write_packed_guid_128(self.guid.0, self.guid.1);
+        Some(writer.finish(Opcode::SMSG_CHAR_CREATE))
     }
 }
 
@@ -29,6 +37,38 @@ impl ToWorldPacket for SmsgCharDelete {
         packet.write_u8(self.result);
         packet
     }
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modern_create_includes_result_and_packed_guid128() {
+        let packet = SmsgCharCreate {
+            result: 0,
+            guid: (0x0100, 0x020001),
+        }
+        .to_modern()
+        .unwrap();
+        assert_eq!(packet.contents(), &[0, 0x05, 0x02, 1, 2, 1]);
+    }
+
+    #[test]
+    fn modern_rename_uses_bit_length_and_raw_name() {
+        let packet = SmsgCharRename {
+            result: 0,
+            guid: Some(1),
+            new_name: Some("Bob".into()),
+            guid128: Some((0, 1)),
+        }
+        .to_modern()
+        .unwrap();
+        assert_eq!(packet.contents(), &[0, 0x86, 1, 0, 1, b'B', b'o', b'b']);
+    }
 }
 
 /// SMSG_CHAR_RENAME - Character rename response
@@ -37,6 +77,7 @@ pub struct SmsgCharRename {
     pub result: u8,
     pub guid: Option<u64>,        // Only on success (result = 0x00)
     pub new_name: Option<String>, // Only on success
+    pub guid128: Option<(u64, u64)>,
 }
 
 impl ToWorldPacket for SmsgCharRename {
@@ -53,6 +94,23 @@ impl ToWorldPacket for SmsgCharRename {
         }
 
         packet
+    }
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u8(self.result);
+        writer.write_bit(self.guid128.is_some());
+        writer.write_bits(
+            self.new_name.as_ref().map_or(0, |name| name.len() as u32),
+            6,
+        );
+        writer.flush_bits();
+        if let Some(guid) = self.guid128 {
+            writer.write_packed_guid_128(guid.0, guid.1);
+        }
+        if let Some(name) = &self.new_name {
+            writer.write_string_raw(name);
+        }
+        Some(writer.finish(Opcode::SMSG_CHAR_RENAME))
     }
 }
 

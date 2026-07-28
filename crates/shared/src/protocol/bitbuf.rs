@@ -10,6 +10,98 @@ pub struct BitWriter {
     bits: u8,
 }
 
+/// A cursor over a modern bit-packed packet body.
+#[derive(Debug)]
+pub struct BitReader<'a> {
+    buf: &'a [u8],
+    byte: usize,
+    bit: u8,
+}
+
+impl<'a> BitReader<'a> {
+    pub fn new(buf: &'a [u8]) -> Self {
+        Self {
+            buf,
+            byte: 0,
+            bit: 0,
+        }
+    }
+
+    pub fn read_bit(&mut self) -> Option<bool> {
+        let value = *self.buf.get(self.byte)? & (1 << (7 - self.bit)) != 0;
+        self.bit += 1;
+        if self.bit == 8 {
+            self.byte += 1;
+            self.bit = 0;
+        }
+        Some(value)
+    }
+
+    pub fn read_bits(&mut self, count: u8) -> Option<u32> {
+        let mut value = 0;
+        for _ in 0..count {
+            value = (value << 1) | u32::from(self.read_bit()?);
+        }
+        Some(value)
+    }
+
+    fn align(&mut self) {
+        if self.bit != 0 {
+            self.byte += 1;
+            self.bit = 0;
+        }
+    }
+
+    pub fn read_u8(&mut self) -> Option<u8> {
+        self.align();
+        let value = *self.buf.get(self.byte)?;
+        self.byte += 1;
+        Some(value)
+    }
+
+    pub fn read_u32(&mut self) -> Option<u32> {
+        self.read_array().map(u32::from_le_bytes)
+    }
+
+    pub fn read_f32(&mut self) -> Option<f32> {
+        self.read_array().map(f32::from_le_bytes)
+    }
+
+    pub fn read_bytes(&mut self, count: usize) -> Option<&'a [u8]> {
+        self.align();
+        let end = self.byte.checked_add(count)?;
+        let value = self.buf.get(self.byte..end)?;
+        self.byte = end;
+        Some(value)
+    }
+
+    pub fn read_string(&mut self, count: usize) -> Option<String> {
+        String::from_utf8(self.read_bytes(count)?.to_vec()).ok()
+    }
+
+    pub fn read_packed_guid_128(&mut self) -> Option<(u64, u64)> {
+        let low_mask = self.read_u8()?;
+        let high_mask = self.read_u8()?;
+        let low = self.read_packed_u64(low_mask)?;
+        let high = self.read_packed_u64(high_mask)?;
+        Some((high, low))
+    }
+
+    fn read_array<const N: usize>(&mut self) -> Option<[u8; N]> {
+        self.read_bytes(N)?.try_into().ok()
+    }
+
+    fn read_packed_u64(&mut self, mask: u8) -> Option<u64> {
+        let mut value = 0;
+        for index in 0..8 {
+            if mask & (1 << index) != 0 {
+                value |= u64::from(self.read_u8()?) << (index * 8);
+            }
+        }
+        Some(value)
+    }
+}
+
 impl BitWriter {
     pub fn new() -> Self {
         Self::default()
@@ -146,5 +238,18 @@ mod tests {
         writer.write_bit(true);
         let packet = writer.finish(Opcode::SMSG_CHAR_ENUM);
         assert_eq!(packet.contents(), &[0x80]);
+    }
+
+    #[test]
+    fn reader_round_trips_bits_and_packed_guid() {
+        let mut writer = BitWriter::new();
+        writer.write_bits(17, 6);
+        writer.write_bit(true);
+        writer.write_packed_guid_128(0x0100, 0x020001);
+        let bytes = writer.into_bytes();
+        let mut reader = BitReader::new(&bytes);
+        assert_eq!(reader.read_bits(6), Some(17));
+        assert_eq!(reader.read_bit(), Some(true));
+        assert_eq!(reader.read_packed_guid_128(), Some((0x0100, 0x020001)));
     }
 }

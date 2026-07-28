@@ -121,6 +121,7 @@ pub struct CharacterEnumEntry {
 #[derive(Debug, Clone)]
 pub struct SmsgCharEnum<'a> {
     pub characters: &'a [CharacterEnumEntry],
+    pub realm_id: u16,
 }
 
 impl ToWorldPacket for SmsgCharEnum<'_> {
@@ -196,21 +197,66 @@ impl ToWorldPacket for SmsgCharEnum<'_> {
     }
 
     fn to_modern(&self) -> Option<WorldPacket> {
-        // The first modern milestone intentionally serves an empty list. CharacterInfo has a
-        // substantially different 1.14 layout and is added when character selection is wired.
-        if !self.characters.is_empty() {
-            return None;
-        }
-
         let mut writer = BitWriter::new();
         writer.write_bit(true); // Success
         for _ in 0..6 {
             writer.write_bit(false);
         }
-        writer.write_i32(0); // Characters.Count
+        writer.write_i32(self.characters.len() as i32);
         writer.write_i32(1); // MaxCharacterLevel
         writer.write_i32(0); // RaceUnlockData.Count
         writer.write_i32(0); // UnlockedConditionalAppearances.Count
+        for (position, character) in self.characters.iter().enumerate() {
+            let guid =
+                crate::protocol::ObjectGuid::new_player(character.guid).to_guid128(self.realm_id);
+            writer.write_packed_guid_128(guid.0, guid.1);
+            writer.write_u64(0); // GuildClubMemberID
+            writer.write_u8(position as u8);
+            writer.write_u8(character.race);
+            writer.write_u8(character.class);
+            writer.write_u8(character.gender);
+            // The legacy schema has no ChrCustomization IDs. Do not invent DB2 choice IDs: an
+            // empty list leaves the client with a valid, if default-looking, selection entry.
+            writer.write_i32(0);
+            writer.write_u8(character.level);
+            writer.write_u32(character.zone);
+            writer.write_u32(character.map);
+            writer.write_f32(character.position_x);
+            writer.write_f32(character.position_y);
+            writer.write_f32(character.position_z);
+            writer.write_packed_guid_128(0, 0);
+            writer.write_u32(character.character_flags);
+            writer.write_u32(0);
+            writer.write_u32(0);
+            writer.write_u32(character.pet_info.map_or(0, |pet| pet.0));
+            writer.write_u32(character.pet_info.map_or(0, |pet| pet.1));
+            writer.write_u32(character.pet_info.map_or(0, |pet| pet.2));
+            writer.write_u32(0);
+            writer.write_u32(0);
+            for slot in &character.equipment {
+                writer.write_u32(slot.display_id);
+                writer.write_u32(0);
+                writer.write_u32(0);
+                writer.write_u8(slot.inventory_type);
+                writer.write_u8(0);
+            }
+            writer.write_u64(0);
+            writer.write_u16(0);
+            writer.write_u32(0);
+            writer.write_u32(0);
+            writer.write_u32(0);
+            writer.write_i32(0);
+            writer.write_i32(0);
+            writer.write_u32(0);
+            writer.write_bits(character.name.len() as u32, 6);
+            writer.write_bit(character.first_login);
+            writer.write_bit(false);
+            writer.write_bits(0, 5);
+            writer.write_bit(false);
+            writer.write_bit(false);
+            writer.flush_bits();
+            writer.write_string_raw(&character.name);
+        }
         Some(writer.finish(Opcode::SMSG_CHAR_ENUM))
     }
 }
@@ -221,14 +267,29 @@ mod modern_tests {
 
     #[test]
     fn char_enum_modern_empty_list_matches_enum_characters_result() {
-        let packet = SmsgCharEnum { characters: &[] }
-            .to_modern()
-            .expect("empty character list has a modern encoding");
+        let packet = SmsgCharEnum {
+            characters: &[],
+            realm_id: 1,
+        }
+        .to_modern()
+        .expect("empty character list has a modern encoding");
         assert_eq!(packet.opcode(), Opcode::SMSG_CHAR_ENUM);
         assert_eq!(
             packet.contents(),
             &[0x80, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         );
+    }
+
+    #[test]
+    fn login_verify_world_modern_appends_reason() {
+        let packet = SmsgLoginVerifyWorld {
+            map_id: 1,
+            position: Position::new(2.0, 3.0, 4.0, 5.0),
+        }
+        .to_modern()
+        .unwrap();
+        assert_eq!(packet.contents().len(), 24);
+        assert_eq!(&packet.contents()[20..], &[0, 0, 0, 0]);
     }
 }
 
@@ -251,6 +312,12 @@ impl ToWorldPacket for SmsgLoginVerifyWorld {
         packet.write_f32(self.position.z);
         packet.write_f32(self.position.o);
         packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut packet = self.to_vanilla();
+        packet.write_u32(0); // Reason
+        Some(packet)
     }
 }
 

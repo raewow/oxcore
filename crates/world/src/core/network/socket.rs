@@ -64,9 +64,24 @@ pub async fn route_packet(
                     return Ok(());
                 }
 
-                let guid_raw = packet
-                    .read_u64()
-                    .ok_or_else(|| anyhow::anyhow!("Failed to read GUID for login"))?;
+                let guid_raw = if session.protocol() == oxcore_shared::protocol::Protocol::Modern {
+                    let mut reader =
+                        oxcore_shared::protocol::bitbuf::BitReader::new(packet.contents());
+                    let (_, low) = reader
+                        .read_packed_guid_128()
+                        .ok_or_else(|| anyhow::anyhow!("Failed to read modern GUID for login"))?;
+                    let _far_clip = reader
+                        .read_f32()
+                        .ok_or_else(|| anyhow::anyhow!("Failed to read modern login far clip"))?;
+                    let _unknown = reader
+                        .read_bit()
+                        .ok_or_else(|| anyhow::anyhow!("Failed to read modern login flag"))?;
+                    low
+                } else {
+                    packet
+                        .read_u64()
+                        .ok_or_else(|| anyhow::anyhow!("Failed to read GUID for login"))?
+                };
                 let session_clone = Arc::clone(&session);
                 tokio::spawn(async move {
                     use crate::handlers::character;

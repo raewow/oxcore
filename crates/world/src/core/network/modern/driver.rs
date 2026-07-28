@@ -225,6 +225,10 @@ pub async fn run_world_connection<S>(
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
 {
+    world
+        .session_mgr
+        .remove_session_for_account(conn.account_id)
+        .await;
     let session_id = world.session_mgr.generate_session_id();
     let (packet_tx, mut packet_rx) = tokio::sync::mpsc::unbounded_channel();
     let session = Arc::new(WorldSession::new_with_protocol(

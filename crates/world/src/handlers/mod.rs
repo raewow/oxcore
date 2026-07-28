@@ -89,6 +89,22 @@ pub async fn dispatch_packet(
                     let pong = SmsgPong { sequence };
                     session.send_msg(pong)?;
                 }
+                Opcode::CMSG_SERVER_TIME_OFFSET_REQUEST => {
+                    if session.protocol() == oxcore_shared::protocol::Protocol::Modern {
+                        let mut response = WorldPacket::new(Opcode::SMSG_SERVER_TIME_OFFSET);
+                        response.write_u64(chrono::Utc::now().timestamp() as u64);
+                        session.send_packet(response)?;
+                    }
+                }
+                Opcode::CMSG_UPDATE_VAS_PURCHASE_STATES
+                | Opcode::CMSG_GET_UNDELETE_CHARACTER_COOLDOWN_STATUS
+                | Opcode::CMSG_BATTLE_PAY_GET_PRODUCT_LIST
+                | Opcode::CMSG_BATTLE_PAY_GET_PURCHASE_LIST => {
+                    tracing::trace!(
+                        ?opcode,
+                        "ignoring unsupported modern character-select request"
+                    );
+                }
                 _ => {
                     debug!("Unhandled opcode {:?} in Authenticated state", opcode);
                 }
