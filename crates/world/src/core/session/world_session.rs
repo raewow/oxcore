@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use crate::core::session::SessionState;
 use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Position, Protocol, WorldPacket};
 
 /// World session - represents an authenticated player connection
 pub struct WorldSession {
@@ -19,6 +19,8 @@ pub struct WorldSession {
     account_name: String,
     /// GM security level
     security: u8,
+    /// Client protocol used to select message bodies and wire opcodes.
+    protocol: Protocol,
     /// Current state (uses interior mutability for shared access)
     state: RwLock<SessionState>,
     /// Channel to send packets to the socket (unbounded for no packet drops)
@@ -53,11 +55,31 @@ impl WorldSession {
         security: u8,
         packet_tx: mpsc::UnboundedSender<WorldPacket>,
     ) -> Self {
+        Self::new_with_protocol(
+            id,
+            account_id,
+            account_name,
+            security,
+            Protocol::Vanilla,
+            packet_tx,
+        )
+    }
+
+    /// Create a session for a specific client protocol.
+    pub fn new_with_protocol(
+        id: u32,
+        account_id: u32,
+        account_name: String,
+        security: u8,
+        protocol: Protocol,
+        packet_tx: mpsc::UnboundedSender<WorldPacket>,
+    ) -> Self {
         Self {
             id,
             account_id,
             account_name,
             security,
+            protocol,
             state: RwLock::new(SessionState::Authenticated),
             packet_tx,
             player_guid: RwLock::new(None),
@@ -153,6 +175,11 @@ impl WorldSession {
         self.security
     }
 
+    /// Client protocol selected during authentication.
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+
     /// Get current state
     pub fn state(&self) -> SessionState {
         *self.state.read()
@@ -195,9 +222,16 @@ impl WorldSession {
     /// Send a message struct to the client
     /// Note: This is now synchronous (unbounded channel send never blocks)
     pub fn send_msg(&self, msg: impl ToWorldPacket) -> anyhow::Result<()> {
-        let packet_data: WorldPacket = msg.to_vanilla();
-        let mut packet = WorldPacket::new(packet_data.opcode());
-        packet.write_bytes(packet_data.contents());
+        let packet = match self.protocol {
+            Protocol::Vanilla => msg.to_vanilla(),
+            Protocol::Modern => match msg.to_modern() {
+                Some(packet) => packet,
+                None => {
+                    tracing::debug!("message has no modern encoding; dropping");
+                    return Ok(());
+                }
+            },
+        };
         self.send_packet(packet)
     }
 

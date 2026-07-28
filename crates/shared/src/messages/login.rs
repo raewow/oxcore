@@ -16,6 +16,7 @@
 //! - [`SmsgInitializeFactionsEmpty`] - Empty faction/reputation data (convenience)
 
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::position::Position;
 use crate::protocol::{Opcode, WorldPacket};
 
@@ -192,6 +193,42 @@ impl ToWorldPacket for SmsgCharEnum<'_> {
         }
 
         packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        // The first modern milestone intentionally serves an empty list. CharacterInfo has a
+        // substantially different 1.14 layout and is added when character selection is wired.
+        if !self.characters.is_empty() {
+            return None;
+        }
+
+        let mut writer = BitWriter::new();
+        writer.write_bit(true); // Success
+        for _ in 0..6 {
+            writer.write_bit(false);
+        }
+        writer.write_i32(0); // Characters.Count
+        writer.write_i32(1); // MaxCharacterLevel
+        writer.write_i32(0); // RaceUnlockData.Count
+        writer.write_i32(0); // UnlockedConditionalAppearances.Count
+        Some(writer.finish(Opcode::SMSG_CHAR_ENUM))
+    }
+}
+
+#[cfg(test)]
+mod modern_tests {
+    use super::*;
+
+    #[test]
+    fn char_enum_modern_empty_list_matches_enum_characters_result() {
+        let packet = SmsgCharEnum { characters: &[] }
+            .to_modern()
+            .expect("empty character list has a modern encoding");
+        assert_eq!(packet.opcode(), Opcode::SMSG_CHAR_ENUM);
+        assert_eq!(
+            packet.contents(),
+            &[0x80, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
     }
 }
 

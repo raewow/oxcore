@@ -159,6 +159,7 @@ pub async fn serve(
                     account_expansion: 0,
                 });
                 let modern_shutdown = shutdown_rx.resubscribe();
+                let modern_world = world.clone();
                 info!("Modern (1.14.x) world listener enabled on {}", modern_addr);
                 tokio::spawn(async move {
                     if let Err(e) = serve_modern(
@@ -166,6 +167,7 @@ pub async fn serve(
                         accounts,
                         signer,
                         modern_config,
+                        modern_world,
                         modern_shutdown,
                     )
                     .await

@@ -99,6 +99,42 @@ impl ObjectGuid {
         self.guid
     }
 
+    /// Convert this legacy GUID to the 1.14 `ObjectGuid` high/low pair.
+    ///
+    /// Legacy GUIDs do not carry a map or server ID, so map-specific GUIDs use zero for both.
+    pub fn to_guid128(&self, realm_id: u16) -> (u64, u64) {
+        let counter = self.counter() as u64;
+        let high_type = match self.high() {
+            HighGuid::Player => 2,
+            HighGuid::Item => 3,
+            HighGuid::Transport | HighGuid::MoTransport => 6,
+            HighGuid::Unit => 8,
+            HighGuid::Pet => 10,
+            HighGuid::GameObject => 11,
+            HighGuid::DynamicObject => 12,
+            HighGuid::Corpse => 14,
+        };
+
+        if self.is_empty() {
+            return (0, 0);
+        }
+        if matches!(self.high(), HighGuid::Transport | HighGuid::MoTransport) {
+            return (
+                (high_type as u64) << 58 | (counter << 38) | self.entry() as u64,
+                0,
+            );
+        }
+
+        let high = if matches!(self.high(), HighGuid::Player | HighGuid::Item) {
+            (high_type as u64) << 58 | ((realm_id as u64 & 0x1FFF) << 42)
+        } else {
+            (high_type as u64) << 58
+                | ((realm_id as u64 & 0x1FFF) << 42)
+                | ((self.entry() as u64 & 0x7FFFFF) << 6)
+        };
+        (high, counter)
+    }
+
     pub fn high(&self) -> HighGuid {
         let high_16 = ((self.guid >> 48) & 0xFFFF) as u16;
 

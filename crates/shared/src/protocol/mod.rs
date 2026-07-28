@@ -2,6 +2,7 @@
 //!
 //! This module contains protocol definitions shared between world and world.
 
+pub mod bitbuf;
 pub mod guid;
 pub mod movement;
 pub mod opcodes;

@@ -277,7 +277,8 @@ pub async fn handle_player_login_with_guid(
     info!("[LOGIN] Creating PlayerBroadcaster");
     if let Some(mut player_mut) = world.managers.player_mgr.get_player_mut(guid) {
         let packet_tx = session.packet_tx();
-        let broadcaster = PlayerBroadcaster::new(packet_tx, guid);
+        let mut broadcaster = PlayerBroadcaster::new(packet_tx, guid);
+        broadcaster.set_protocol(session.protocol());
         player_mut.set_broadcaster(std::sync::Arc::new(broadcaster));
         info!(
             "[LOGIN] PlayerBroadcaster created and set for player {:?}",

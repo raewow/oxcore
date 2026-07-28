@@ -11,7 +11,6 @@
 
 pub mod auth_crypto;
 pub mod auth_seeds;
-pub mod bitbuf;
 pub mod crypt;
 pub mod driver;
 pub mod framing;
@@ -24,7 +23,7 @@ pub mod server;
 pub use auth_crypto::{derive_keys, verify_digest, DerivedKeys};
 pub use crypt::WorldCrypt;
 pub use driver::{
-    run_auth, run_connection, serve_connection, AccountSessionKeys, AuthedConnection,
+    run_auth, run_world_connection, serve_connection, AccountSessionKeys, AuthedConnection,
     ModernAuthContext, SessionKeyProvider,
 };
 pub use framing::{

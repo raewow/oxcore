@@ -39,6 +39,106 @@ pub enum ConnectionState {
     Error,
 }
 
+/// Route a decoded packet through the same state-aware path used by every world transport.
+pub async fn route_packet(
+    session: Arc<WorldSession>,
+    mut packet: WorldPacket,
+    databases: Arc<Databases>,
+    world: Arc<World>,
+) -> Result<()> {
+    use crate::core::session::SessionState;
+    use crate::handlers::dispatch_packet;
+
+    match session.state() {
+        SessionState::LoggedIn => {
+            if let Some(player_guid) = session.player_guid() {
+                route_to_player_handler(&world, player_guid, packet).await?;
+            } else {
+                warn!("LoggedIn state but no player GUID");
+            }
+        }
+        SessionState::Authenticated => {
+            if packet.opcode() == Opcode::CMSG_PLAYER_LOGIN {
+                if !session.try_start_login() {
+                    warn!("Login already in progress for session {}", session.id());
+                    return Ok(());
+                }
+
+                let guid_raw = packet
+                    .read_u64()
+                    .ok_or_else(|| anyhow::anyhow!("Failed to read GUID for login"))?;
+                let session_clone = Arc::clone(&session);
+                tokio::spawn(async move {
+                    use crate::handlers::character;
+                    if let Err(e) = character::handle_player_login_with_guid(
+                        &session_clone,
+                        guid_raw,
+                        &databases,
+                        &world,
+                    )
+                    .await
+                    {
+                        error!("[LOGIN] Spawned login task failed: {}", e);
+                        session_clone.clear_login_in_progress();
+                    }
+                });
+            } else {
+                dispatch_packet(&session, &mut packet, &databases, &world).await?;
+            }
+        }
+        _ => debug!(
+            "Packet {:?} received in unexpected state {:?}",
+            packet.opcode(),
+            session.state()
+        ),
+    }
+    Ok(())
+}
+
+async fn route_to_player_handler(
+    world: &World,
+    player_guid: ObjectGuid,
+    packet: WorldPacket,
+) -> Result<()> {
+    let opcode = packet.opcode();
+    if let Some(handler) = world.player_handlers.get(&player_guid) {
+        handler.send(packet).await?;
+    } else {
+        warn!(
+            "No handler found for player {}, packet {:?} dropped",
+            player_guid, opcode
+        );
+    }
+    Ok(())
+}
+
+/// Remove a disconnected session and perform the normal player logout cleanup.
+pub async fn cleanup_disconnected_session(
+    session_id: u32,
+    session_mgr: &SessionManager,
+    world: &World,
+) {
+    if let Some(session) = session_mgr.get_session(session_id) {
+        if let Some(player_guid) = session.player_guid() {
+            info!(
+                "[DISCONNECT] Performing logout cleanup for player {}",
+                player_guid
+            );
+            world.remove_player_handler(player_guid);
+            world.remove_movement_buffer(player_guid);
+            if let Err(e) =
+                crate::handlers::character::perform_logout_cleanup(&session, world).await
+            {
+                error!(
+                    "[DISCONNECT] Failed to cleanup player {}: {}",
+                    player_guid, e
+                );
+            }
+        }
+        session_mgr.remove_session(session_id);
+    }
+}
+
 /// Per-connection handler
 pub struct WorldSocket {
     /// TCP stream
@@ -194,7 +294,7 @@ impl WorldSocket {
                 result = self.stream.read(&mut read_buf) => {
                     match result {
                         Ok(0) => {
-                            self.handle_disconnect("normal");
+                            self.handle_disconnect("normal").await;
                             return Ok(());
                         }
                         Ok(n) => {
@@ -217,7 +317,12 @@ impl WorldSocket {
                                     if let Some(session) = self.session_mgr.get_session(session_id) {
                                         debug!("Dispatching {:?} to handler (state: {:?})", packet_opcode, session.state());
                                         // Route packet based on session state
-                                        if let Err(e) = self.route_packet(session, packet).await {
+                                        if let Err(e) = route_packet(
+                                            session,
+                                            packet,
+                                            Arc::clone(&self.databases),
+                                            Arc::clone(&self.world),
+                                        ).await {
                                             error!("Error routing packet: {}", e);
                                         }
                                     } else {
@@ -234,7 +339,7 @@ impl WorldSocket {
                             }
                         }
                         Err(e) => {
-                            self.handle_disconnect("read error");
+                            self.handle_disconnect("read error").await;
                             return Err(e.into());
                         }
                     }
@@ -261,99 +366,13 @@ impl WorldSocket {
                             self.send_packet(p).await?;
                         }
                     } else {
-                        self.handle_disconnect("channel closed");
+                        self.handle_disconnect("channel closed").await;
                         return Ok(());
                     }
                     last_select_time = std::time::Instant::now();
                 }
             }
         }
-    }
-
-    /// Route packet based on session state
-    async fn route_packet(
-        &self,
-        session: Arc<WorldSession>,
-        mut packet: WorldPacket,
-    ) -> Result<()> {
-        use crate::core::session::SessionState;
-        use crate::handlers::dispatch_packet;
-
-        let opcode_for_log = packet.opcode();
-        match session.state() {
-            SessionState::LoggedIn => {
-                // Player in-world, route to handler task
-                if let Some(player_guid) = session.player_guid() {
-                    self.route_to_player_handler(player_guid, packet).await?;
-                } else {
-                    warn!("LoggedIn state but no player GUID");
-                }
-            }
-            SessionState::Authenticated => {
-                let opcode = packet.opcode();
-
-                if opcode == Opcode::CMSG_PLAYER_LOGIN {
-                    // Spawn login as a separate task to keep socket responsive (~157ms)
-                    if !session.try_start_login() {
-                        warn!("Login already in progress for session {}", session.id());
-                        return Ok(());
-                    }
-
-                    let guid_raw = packet
-                        .read_u64()
-                        .ok_or_else(|| anyhow::anyhow!("Failed to read GUID for login"))?;
-                    let session_clone = Arc::clone(&session);
-                    let databases = Arc::clone(&self.databases);
-                    let world = self.world.clone();
-
-                    tokio::spawn(async move {
-                        use crate::handlers::character;
-                        if let Err(e) = character::handle_player_login_with_guid(
-                            &session_clone,
-                            guid_raw,
-                            &databases,
-                            &world,
-                        )
-                        .await
-                        {
-                            error!("[LOGIN] Spawned login task failed: {}", e);
-                            session_clone.clear_login_in_progress();
-                        }
-                    });
-                } else {
-                    // Other authenticated packets processed inline (fast operations)
-                    dispatch_packet(&session, &mut packet, &self.databases, &self.world).await?;
-                }
-            }
-            _ => {
-                debug!(
-                    "Packet {:?} received in unexpected state {:?}",
-                    packet.opcode(),
-                    session.state()
-                );
-            }
-        }
-        Ok(())
-    }
-
-    /// Route packet to player's handler task
-    async fn route_to_player_handler(
-        &self,
-        player_guid: ObjectGuid,
-        packet: WorldPacket,
-    ) -> Result<()> {
-        let opcode = packet.opcode();
-
-        // All packets (including movement) go to the handler task for immediate processing
-        if let Some(handler) = self.world.player_handlers.get(&player_guid) {
-            handler.send(packet).await?;
-        } else {
-            warn!(
-                "No handler found for player {}, packet {:?} dropped",
-                player_guid, opcode
-            );
-        }
-        Ok(())
     }
 
     /// Perform cleanup when a client disconnects
@@ -363,51 +382,8 @@ impl WorldSocket {
             reason, self.remote_addr
         );
 
-        // Perform logout cleanup if player is logged in
         if let Some(session_id) = self.session_id {
-            if let Some(session) = self.session_mgr.get_session(session_id) {
-                if let Some(player_guid) = session.player_guid() {
-                    // Log broadcaster state before cleanup
-                    if let Some(broadcaster) =
-                        self.world.managers.player_mgr.get_broadcaster(player_guid)
-                    {
-                        info!(
-                            "[DISCONNECT] Player {} had {} listeners before disconnect",
-                            player_guid,
-                            broadcaster.listener_count()
-                        );
-                        let listeners_lock = broadcaster.listeners().read();
-                        let listeners = listeners_lock.keys().cloned().collect::<Vec<_>>();
-                        info!(
-                            "[DISCONNECT] Player {} listeners: {:?}",
-                            player_guid, listeners
-                        );
-                    }
-
-                    info!(
-                        "[DISCONNECT] Performing logout cleanup for player {}",
-                        player_guid
-                    );
-
-                    // Remove player handler and movement buffer before other cleanup
-                    self.world.remove_player_handler(player_guid);
-                    self.world.remove_movement_buffer(player_guid);
-
-                    // Perform instant logout on disconnect
-                    if let Err(e) =
-                        crate::handlers::character::perform_logout_cleanup(&session, &self.world)
-                            .await
-                    {
-                        error!(
-                            "[DISCONNECT] Failed to cleanup player {}: {}",
-                            player_guid, e
-                        );
-                    }
-                }
-
-                // Remove session
-                self.session_mgr.remove_session(session_id);
-            }
+            cleanup_disconnected_session(session_id, &self.session_mgr, &self.world).await;
         }
     }
 

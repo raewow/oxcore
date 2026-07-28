@@ -18,10 +18,16 @@
 //! **Unverified against a live client.**
 
 use std::future::Future;
+use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::debug;
+use tracing::{debug, warn};
+
+use crate::core::network::socket::{cleanup_disconnected_session, route_packet};
+use crate::core::session::WorldSession;
+use crate::World;
+use oxcore_shared::protocol::{Opcode, Protocol, WorldPacket};
 
 use super::auth_seeds;
 use super::crypt::WorldCrypt;
@@ -37,11 +43,11 @@ use super::packets::{pong_body, AuthResponseSuccess, AuthSession, EnterEncrypted
 ///
 /// The returned future is `Send` so the driver can run inside a spawned task.
 pub trait SessionKeyProvider {
-    /// Return the raw session-key bytes for `realm_join_ticket`, or `None` if unknown.
+    /// Return the account ID and raw session-key bytes for `realm_join_ticket`, or `None` if unknown.
     fn session_key(
         &self,
         realm_join_ticket: &str,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
+    ) -> impl Future<Output = Result<Option<(u32, Vec<u8>)>>> + Send;
 }
 
 /// The production [`SessionKeyProvider`]: reads `account.sessionkey` (hex) via the shared
@@ -52,11 +58,12 @@ pub struct AccountSessionKeys<'a> {
 }
 
 impl SessionKeyProvider for AccountSessionKeys<'_> {
-    async fn session_key(&self, realm_join_ticket: &str) -> Result<Option<Vec<u8>>> {
+    async fn session_key(&self, realm_join_ticket: &str) -> Result<Option<(u32, Vec<u8>)>> {
         match self.accounts.find_session_key(realm_join_ticket).await? {
-            Some((hex_key, _id)) => Ok(Some(
+            Some((hex_key, id)) => Ok(Some((
+                id,
                 hex::decode(hex_key.trim()).context("stored session key is not valid hex")?,
-            )),
+            ))),
             None => Ok(None),
         }
     }
@@ -80,6 +87,8 @@ pub struct AuthedConnection {
     pub crypt: WorldCrypt,
     /// The game-account name from the realm-join ticket.
     pub account: String,
+    /// Persistent account ID used by the shared world session manager.
+    pub account_id: u32,
     /// The 40-byte continued-session key, for later instance (`SMSG_CONNECT_TO`) handshakes.
     pub session_key40: [u8; 40],
 }
@@ -123,7 +132,7 @@ where
     let session = AuthSession::parse(&session_packet.body)?;
     debug!(account = %session.realm_join_ticket, "modern auth session");
 
-    let session_key = ctx
+    let (account_id, session_key) = ctx
         .sessions
         .session_key(&session.realm_join_ticket)
         .await?
@@ -188,25 +197,101 @@ where
     Ok(AuthedConnection {
         crypt,
         account: session.realm_join_ticket,
+        account_id,
         session_key40: keys.session_key,
     })
 }
 
 /// Run the auth handshake and then the post-auth (encrypted) packet loop over one stream.
-pub async fn serve_connection<S, P>(mut stream: S, ctx: &ModernAuthContext<'_, P>) -> Result<()>
+pub async fn serve_connection<S, P>(
+    mut stream: S,
+    ctx: &ModernAuthContext<'_, P>,
+    world: Arc<World>,
+) -> Result<()>
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
     P: SessionKeyProvider,
 {
     let conn = run_auth(&mut stream, ctx).await?;
-    run_connection(stream, conn).await
+    run_world_connection(stream, conn, world).await
+}
+
+/// Run a modern gameplay connection through the shared `WorldSession` dispatcher.
+pub async fn run_world_connection<S>(
+    mut stream: S,
+    mut conn: AuthedConnection,
+    world: Arc<World>,
+) -> Result<()>
+where
+    S: AsyncReadExt + AsyncWriteExt + Unpin,
+{
+    let session_id = world.session_mgr.generate_session_id();
+    let (packet_tx, mut packet_rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = Arc::new(WorldSession::new_with_protocol(
+        session_id,
+        conn.account_id,
+        conn.account.clone(),
+        0,
+        Protocol::Modern,
+        packet_tx,
+    ));
+    world.session_mgr.add_session(session.clone());
+
+    let mut buf = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    let result = loop {
+        while let Some((packet, consumed)) = framing::decode(&mut conn.crypt, &buf)? {
+            buf.drain(..consumed);
+            let Some(opcode) = Opcode::from_modern_wire(packet.opcode) else {
+                debug!(account = %conn.account, opcode = format!("0x{:04X}", packet.opcode), "unknown modern opcode");
+                continue;
+            };
+            let mut world_packet = WorldPacket::new(opcode);
+            world_packet.write_bytes(&packet.body);
+            if let Err(e) = route_packet(
+                Arc::clone(&session),
+                world_packet,
+                Arc::clone(&world.databases),
+                Arc::clone(&world),
+            )
+            .await
+            {
+                warn!(account = %conn.account, ?opcode, "modern packet dispatch failed: {e}");
+            }
+        }
+
+        tokio::select! {
+            read = stream.read(&mut chunk) => {
+                let n = read?;
+                if n == 0 {
+                    break Ok(());
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            packet = packet_rx.recv() => match packet {
+                Some(packet) => {
+                    if !packet.opcode().has_modern() {
+                        debug!(?packet, "dropping packet without a modern opcode");
+                        continue;
+                    }
+                    let frame = framing::encode(&mut conn.crypt, packet.opcode().modern(), packet.contents());
+                    stream.write_all(&frame).await?;
+                    stream.flush().await?;
+                }
+                None => break Ok(()),
+            },
+        }
+    };
+
+    cleanup_disconnected_session(session_id, &world.session_mgr, &world).await;
+    result
 }
 
 /// The post-auth loop: read **encrypted** frames off the stream and dispatch them. Only the
 /// keep-alive `CMSG_PING` is answered so far (with `SMSG_PONG`); the gameplay opcodes — starting
 /// with character enumeration — are the next milestone. Unknown opcodes are logged and skipped so
 /// one unhandled packet does not drop the connection.
-pub async fn run_connection<S>(mut stream: S, mut conn: AuthedConnection) -> Result<()>
+async fn run_connection<S>(mut stream: S, mut conn: AuthedConnection) -> Result<()>
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
 {
@@ -304,9 +389,9 @@ mod tests {
         (0..64u8).collect()
     }
 
-    struct MapProvider(HashMap<String, Vec<u8>>);
+    struct MapProvider(HashMap<String, (u32, Vec<u8>)>);
     impl SessionKeyProvider for MapProvider {
-        async fn session_key(&self, ticket: &str) -> Result<Option<Vec<u8>>> {
+        async fn session_key(&self, ticket: &str) -> Result<Option<(u32, Vec<u8>)>> {
             Ok(self.0.get(ticket).cloned())
         }
     }
@@ -336,7 +421,7 @@ mod tests {
     async fn a_correct_client_completes_the_handshake_and_gets_an_encrypted_auth_response() {
         let (mut client, mut server) = tokio::io::duplex(8192);
 
-        let provider = MapProvider(HashMap::from([(TICKET.to_string(), session_key())]));
+        let provider = MapProvider(HashMap::from([(TICKET.to_string(), (1, session_key()))]));
         let server_task = tokio::spawn(async move {
             let ctx = ModernAuthContext {
                 signer: &StubSigner,
@@ -425,6 +510,7 @@ mod tests {
 
         let outcome = server_task.await.unwrap().unwrap();
         assert_eq!(outcome.account, TICKET);
+        assert_eq!(outcome.account_id, 1);
     }
 
     #[tokio::test]
@@ -438,6 +524,7 @@ mod tests {
         let conn = AuthedConnection {
             crypt: WorldCrypt::server(&key),
             account: "PLAYER#1".to_string(),
+            account_id: 1,
             session_key40: [0u8; 40],
         };
         let task = tokio::spawn(run_connection(server, conn));
@@ -471,7 +558,7 @@ mod tests {
         let (mut client, mut server) = tokio::io::duplex(8192);
 
         // Provider hands back a key that does not match what the client used.
-        let provider = MapProvider(HashMap::from([(TICKET.to_string(), vec![0xFFu8; 64])]));
+        let provider = MapProvider(HashMap::from([(TICKET.to_string(), (1, vec![0xFFu8; 64]))]));
         let server_task = tokio::spawn(async move {
             let ctx = ModernAuthContext {
                 signer: &StubSigner,

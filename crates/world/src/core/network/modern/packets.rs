@@ -12,7 +12,7 @@ use anyhow::{bail, Result};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
-use super::bitbuf::BitWriter;
+use oxcore_shared::protocol::bitbuf::BitWriter;
 
 type HmacSha256 = Hmac<Sha256>;
 

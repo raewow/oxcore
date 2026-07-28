@@ -17,8 +17,9 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
-use super::driver::{run_auth, run_connection, AccountSessionKeys, ModernAuthContext};
+use super::driver::{run_auth, run_world_connection, AccountSessionKeys, ModernAuthContext};
 use super::packets::EnterEncryptedModeSigner;
+use crate::World;
 
 /// Per-server settings for the modern listener that don't vary by connection.
 #[derive(Debug, Clone)]
@@ -41,6 +42,7 @@ pub async fn serve_modern(
     accounts: AccountRepository,
     signer: Arc<dyn EnterEncryptedModeSigner>,
     config: Arc<ModernServerConfig>,
+    world: Arc<World>,
     mut shutdown: broadcast::Receiver<()>,
 ) -> Result<()> {
     let listener = TcpListener::bind(addr)
@@ -66,6 +68,7 @@ pub async fn serve_modern(
         let accounts = accounts.clone();
         let signer = signer.clone();
         let config = config.clone();
+        let world = world.clone();
         tokio::spawn(async move {
             let mut stream = stream;
             let provider = AccountSessionKeys {
@@ -84,7 +87,7 @@ pub async fn serve_modern(
             match run_auth(&mut stream, &ctx).await {
                 Ok(conn) => {
                     debug!(%peer, account = %conn.account, "modern client authenticated");
-                    if let Err(e) = run_connection(stream, conn).await {
+                    if let Err(e) = run_world_connection(stream, conn, world).await {
                         debug!(%peer, "modern connection ended: {e}");
                     }
                 }

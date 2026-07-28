@@ -16,6 +16,12 @@ impl ToWorldPacket for SmsgPong {
         packet.write_u32(self.sequence);
         packet
     }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut packet = WorldPacket::new(Opcode::SMSG_PONG);
+        packet.write_u32(self.sequence);
+        Some(packet)
+    }
 }
 
 /// SMSG_FORCE_MOVE_ROOT - Lock player in place (prevent movement)
