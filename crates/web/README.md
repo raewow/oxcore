@@ -9,6 +9,7 @@ For a production-equivalent local build, install `cargo-leptos` once:
 
 ```bash
 cargo install --locked cargo-leptos
+rustup target add wasm32-unknown-unknown
 ```
 
 Then run the full server, WASM, and Tailwind watch pipeline:
@@ -23,12 +24,9 @@ For a release artifact:
 cargo leptos build --release -p oxcore-web
 ```
 
-For quick development without installing `cargo-leptos`, the debug server loads Tailwind's browser
-compiler from a CDN:
-
-```bash
-cargo run --bin web
-```
+Use `cargo leptos watch -p oxcore-web` for development. It builds the SSR binary, the hydrated
+WebAssembly client, and Tailwind assets together. `cargo run --bin web` is useful only for
+server-side troubleshooting and does not build browser assets.
 
 `cargo-leptos` manages the standalone Tailwind compiler; Node and a JavaScript package manager
 are not required. The server binds according to `[web]` in `config.toml`.

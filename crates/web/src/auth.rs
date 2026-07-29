@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use axum::extract::Form;
-use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::Extension;
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -124,18 +124,6 @@ pub async fn logout(Extension(state): Extension<AppState>, jar: CookieJar) -> Re
     }
 
     (jar.remove(Cookie::from(SESSION_COOKIE)), Redirect::to("/")).into_response()
-}
-
-pub async fn account(Extension(state): Extension<AppState>, jar: CookieJar) -> Response {
-    let Some(session) = current_session(&state.web, &jar).await else {
-        return Redirect::to("/").into_response();
-    };
-
-    Html(format!(
-        r#"<main><h1>Account portal</h1><p>Account {}</p><form action="/auth/logout" method="post"><button type="submit">Sign out</button></form></main>"#,
-        session.account_id
-    ))
-    .into_response()
 }
 
 pub async fn admin(Extension(state): Extension<AppState>, jar: CookieJar) -> Response {

@@ -64,9 +64,9 @@ pub fn Input(
         }
     };
     let input_class = if is_password {
-        "block h-8 w-full rounded-none border border-input bg-transparent px-2.5 pr-16 py-1 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
+        "block h-8 w-full rounded-none border border-input bg-input px-2.5 pr-16 py-1 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
     } else {
-        "block h-8 w-full rounded-none border border-input bg-transparent px-2.5 py-1 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
+        "block h-8 w-full rounded-none border border-input bg-input px-2.5 py-1 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
     };
 
     view! {
@@ -84,6 +84,7 @@ pub fn Input(
                 <button
                     class="absolute inset-y-0 right-0 px-2.5 text-xs font-medium text-muted-foreground hover:text-primary focus-visible:outline-1 focus-visible:outline-ring"
                     type="button"
+                    aria-controls=id
                     aria-label=move || if password_visible.get() { "Hide password" } else { "Show password" }
                     on:click=move |_| set_password_visible.update(|visible| *visible = !*visible)
                 >

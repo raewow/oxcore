@@ -1,34 +1,46 @@
 mod components;
 
+#[cfg(feature = "ssr")]
+pub mod auth;
+#[cfg(feature = "ssr")]
+pub mod config;
+#[cfg(feature = "ssr")]
+pub mod server;
+#[cfg(feature = "ssr")]
+pub mod state;
+
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
 use leptos_router::{components::Route, components::Router, components::Routes, StaticSegment};
 
 use crate::components::ui::{Button, Card, Input, Label};
 
-const DEV_TAILWIND_THEME: &str = r#"
-@theme inline {
-  --font-sans: "Cinzel", ui-serif, serif;
-  --color-background: oklch(0.12 0.01 250);
-  --color-foreground: oklch(0.95 0.01 90);
-  --color-card: oklch(0.15 0.01 250);
-  --color-card-foreground: oklch(0.95 0.01 90);
-  --color-primary: oklch(0.75 0.15 75);
-  --color-primary-foreground: oklch(0.12 0.01 250);
-  --color-muted-foreground: oklch(0.65 0.02 90);
-  --color-border: oklch(0.25 0.02 250);
-  --color-input: oklch(0.2 0.01 250);
-  --color-ring: oklch(0.75 0.15 75);
+#[cfg(feature = "ssr")]
+pub async fn run() -> anyhow::Result<()> {
+    use anyhow::Context;
+    use oxcore_shared::config::{find_config_file, load_toml};
+
+    let config_path = std::env::args()
+        .nth(1)
+        .map(Into::into)
+        .unwrap_or_else(find_config_file);
+    let root: config::RootConfig = load_toml(&config_path).with_context(|| {
+        format!(
+            "failed to load configuration from {}",
+            config_path.display()
+        )
+    })?;
+    let config = root.web.context("[web] config section missing")?;
+
+    server::serve(config).await
 }
 
-@layer base {
-  body {
-    background: oklch(0.12 0.01 250);
-    color: oklch(0.95 0.01 90);
-    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  }
+#[cfg(feature = "hydrate")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn hydrate() {
+    console_error_panic_hook::set_once();
+    leptos::mount::hydrate_body(App);
 }
-"#;
 
 /// Document shell used by Axum when server-side rendering a route.
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -43,11 +55,6 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <link rel="preconnect" href="https://fonts.googleapis.com"/>
                 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous"/>
                 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap"/>
-                {cfg!(debug_assertions).then(|| view! {
-                    <style id="tailwind-dev-theme">{DEV_TAILWIND_THEME}</style>
-                    <script>{"document.getElementById('tailwind-dev-theme').setAttribute('type', 'text/tailwindcss');"}</script>
-                    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-                })}
                 <AutoReload options=options.clone() />
                 <HydrationScripts options/>
                 <MetaTags/>
@@ -65,7 +72,7 @@ pub fn App() -> impl IntoView {
     provide_meta_context();
 
     view! {
-        <Stylesheet id="oxcore-web" href="/pkg/oxcore-web.css" />
+        <Stylesheet id="web" href="/pkg/web.css" />
         <Title text="oxcore" />
         <Router>
             <Routes fallback=|| view! { <NotFound /> }>
@@ -73,6 +80,7 @@ pub fn App() -> impl IntoView {
                 <Route path=StaticSegment("login") view=Login />
                 <Route path=StaticSegment("register") view=Register />
                 <Route path=StaticSegment("recover") view=RecoverAccount />
+                <Route path=StaticSegment("account") view=Account />
             </Routes>
         </Router>
     }
@@ -81,27 +89,41 @@ pub fn App() -> impl IntoView {
 #[component]
 fn Home() -> impl IntoView {
     view! {
-        <main class="min-h-screen bg-slate-950 text-slate-100">
+        <main class="min-h-screen bg-background text-foreground">
             <section class="mx-auto flex min-h-screen max-w-5xl flex-col justify-center px-6 py-20">
-                <p class="mb-4 text-sm font-semibold uppercase tracking-[0.3em] text-sky-400">
+                <p class="mb-4 text-xs font-semibold uppercase tracking-[0.3em] text-primary">
                     "oxcore"
                 </p>
-                <h1 class="max-w-3xl text-5xl font-semibold tracking-tight sm:text-6xl">
+                <h1 class="max-w-3xl font-sans text-5xl font-semibold tracking-tight sm:text-6xl">
                     "The player portal is taking shape."
                 </h1>
-                <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
+                <p class="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
                     "Account registration, character management, and operations tooling will be available here."
                 </p>
                 <div class="mt-10 flex flex-wrap gap-3 text-sm">
-                    <a class="rounded-full bg-sky-400 px-4 py-2 font-semibold text-slate-950 hover:bg-sky-300" href="/register">
+                    <a class="inline-flex h-8 items-center justify-center rounded-none bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/80" href="/register">
                         "Create an account"
                     </a>
-                    <a class="rounded-full border border-slate-700 px-4 py-2 text-slate-300 hover:border-slate-500" href="/login">
+                    <a class="inline-flex h-8 items-center justify-center rounded-none border border-input bg-input px-3 text-xs font-medium text-foreground hover:bg-card" href="/login">
                         "Sign in"
                     </a>
                 </div>
             </section>
         </main>
+    }
+}
+
+#[component]
+fn Account() -> impl IntoView {
+    view! {
+        <AuthShell title="Your account" subtitle="Account controls and character information will appear here.">
+            <div class="mt-8 border-y border-border py-5 text-xs leading-6 text-muted-foreground">
+                "You are signed in. Character management and account-security controls are the next portal features."
+            </div>
+            <form class="mt-6" action="/auth/logout" method="post">
+                <Button button_type="submit">"Sign out"</Button>
+            </form>
+        </AuthShell>
     }
 }
 

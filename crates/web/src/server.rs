@@ -12,7 +12,7 @@ use tracing::info;
 
 use crate::config::Config;
 use crate::state::AppState;
-use oxcore_web::{shell, App};
+use crate::{shell, App};
 
 pub async fn serve(config: Config) -> Result<()> {
     config.validate()?;
@@ -34,7 +34,6 @@ pub async fn serve(config: Config) -> Result<()> {
         .route("/auth/login", post(crate::auth::login))
         .route("/auth/register", post(crate::auth::register))
         .route("/auth/logout", post(crate::auth::logout))
-        .route("/account", get(crate::auth::account))
         .route("/admin", get(crate::auth::admin))
         .leptos_routes(&leptos_options, routes, {
             let leptos_options = leptos_options.clone();
@@ -77,15 +76,24 @@ async fn redirect_authenticated_auth_pages(
     request: Request,
     next: Next,
 ) -> Response {
-    if request.method() == Method::GET
-        && matches!(request.uri().path(), "/login" | "/register" | "/recover")
-    {
-        if let Some(token) = session_cookie(request.headers()) {
-            if crate::auth::session_from_token(&state.web, token)
-                .await
-                .is_some()
-            {
+    if request.method() == Method::GET {
+        let path = request.uri().path();
+        let is_auth_page = matches!(path, "/login" | "/register" | "/recover");
+        let is_account_page = path == "/account";
+
+        if is_auth_page || is_account_page {
+            let authenticated = match session_cookie(request.headers()) {
+                Some(token) => crate::auth::session_from_token(&state.web, token)
+                    .await
+                    .is_some(),
+                None => false,
+            };
+
+            if is_auth_page && authenticated {
                 return Redirect::to("/account").into_response();
+            }
+            if is_account_page && !authenticated {
+                return Redirect::to("/login").into_response();
             }
         }
     }

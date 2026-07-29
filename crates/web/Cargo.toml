@@ -6,6 +6,11 @@ description = "Player portal and operations console for oxcore"
 
 [[bin]]
 name = "web"
+path = "src/bin/web.rs"
+required-features = ["ssr"]
+
+[[bin]]
+name = "oxcore-web"
 path = "src/main.rs"
 required-features = ["ssr"]
 
@@ -14,7 +19,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["ssr"]
-hydrate = ["leptos/hydrate"]
+hydrate = ["dep:console_error_panic_hook", "dep:wasm-bindgen", "leptos/hydrate"]
 ssr = [
     "dep:anyhow",
     "dep:axum",
@@ -39,6 +44,7 @@ anyhow = { version = "1.0", optional = true }
 axum = { version = "0.8", optional = true }
 axum-extra = { version = "0.10", features = ["cookie"], optional = true }
 base64 = { version = "0.22", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
 leptos = { version = "0.8", default-features = false }
 leptos_axum = { version = "0.8", optional = true }
 leptos_meta = { version = "0.8", default-features = false }
@@ -52,13 +58,15 @@ tokio = { version = "1.35", features = ["macros", "net", "rt-multi-thread", "sig
 tower-http = { version = "0.6", features = ["trace"], optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
 
 [package.metadata.leptos]
+bin-target = "oxcore-web"
 bin-features = ["ssr"]
 bin-default-features = false
 lib-features = ["hydrate"]
 lib-default-features = false
-output-name = "oxcore-web"
+output-name = "web"
 site-root = "target/site"
 site-pkg-dir = "pkg"
 tailwind-input-file = "style/tailwind.css"

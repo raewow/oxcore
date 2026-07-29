@@ -94,6 +94,11 @@ cargo run --bin oxcore -- --only world
 cargo run --bin auth
 cargo run --bin world
 
+# Run the player portal with SSR, Tailwind, and hydrated Leptos WASM
+cargo install --locked cargo-leptos
+rustup target add wasm32-unknown-unknown
+cargo leptos watch -p oxcore-web
+
 # Disable the TUI (plain stderr/file logging, for systemd/CI/piped logs)
 cargo run --bin oxcore -- --headless
 
@@ -101,6 +106,10 @@ cargo run --bin oxcore -- --headless
 cargo build --release
 
 ```
+
+`cargo leptos watch -p oxcore-web` is the normal portal development command. It builds the
+Axum SSR server, Tailwind stylesheet, and browser WASM client together; Leptos interactions such
+as the password Show/Hide control require this hydrated client. Use `cargo leptos build --release -p oxcore-web` to create the deployable production assets under `target/site/`.
 
 All binaries launch a shared ratatui terminal UI with tabs (**Both / Auth / World /
 Performance**), an autosuggesting command input box, live connection/player counts, and
