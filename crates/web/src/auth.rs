@@ -29,6 +29,13 @@ pub struct RegistrationForm {
     pub password: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PasswordChangeForm {
+    pub current_password: String,
+    pub new_password: String,
+    pub confirm_password: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Session {
     pub account_id: u32,
@@ -126,6 +133,73 @@ pub async fn logout(Extension(state): Extension<AppState>, jar: CookieJar) -> Re
     (jar.remove(Cookie::from(SESSION_COOKIE)), Redirect::to("/")).into_response()
 }
 
+pub async fn change_password(
+    Extension(state): Extension<AppState>,
+    jar: CookieJar,
+    Form(form): Form<PasswordChangeForm>,
+) -> Response {
+    if form.new_password != form.confirm_password {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let Some(cookie) = jar.get(SESSION_COOKIE) else {
+        return Redirect::to("/login").into_response();
+    };
+    let Some(session) = session_from_token(&state.web, cookie.value()).await else {
+        return Redirect::to("/login").into_response();
+    };
+
+    let username = match sqlx::query_scalar::<_, String>(
+        "SELECT `username` FROM `account` WHERE `id` = ?",
+    )
+    .bind(session.account_id)
+    .fetch_optional(&*state.auth)
+    .await
+    {
+        Ok(Some(username)) => username,
+        Ok(None) => return Redirect::to("/login").into_response(),
+        Err(error) => {
+            tracing::error!(target: "oxcore_web", %error, "password change account lookup failed");
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let repository = AccountRepository::new(state.auth.clone());
+    let current_credentials = match repository.find_bnet_credentials(&username).await {
+        Ok(Some(credentials)) => credentials,
+        Ok(None) => return axum::http::StatusCode::UNAUTHORIZED.into_response(),
+        Err(error) => {
+            tracing::error!(target: "oxcore_web", %error, "password change credential lookup failed");
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    if !srp6v2::verify_password(
+        &username,
+        &form.current_password,
+        current_credentials.salt,
+        &current_credentials.verifier,
+    ) {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    if let Err(error) = repository
+        .set_password(session.account_id, &username, &form.new_password)
+        .await
+    {
+        tracing::warn!(target: "oxcore_web", %error, account_id = session.account_id, "password change rejected");
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    if let Err(error) = delete_account_sessions(&state.web, session.account_id).await {
+        tracing::error!(target: "oxcore_web", %error, account_id = session.account_id, "password change session revocation failed");
+        return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    (
+        jar.remove(Cookie::from(SESSION_COOKIE)),
+        Redirect::to("/login"),
+    )
+        .into_response()
+}
+
 pub async fn admin(Extension(state): Extension<AppState>, jar: CookieJar) -> Response {
     let Some(session) = current_session(&state.web, &jar).await else {
         return Redirect::to("/").into_response();
@@ -167,6 +241,15 @@ async fn delete_session(pool: &MySqlPool, token: &str) -> Result<()> {
         .execute(pool)
         .await
         .context("failed to delete web session")?;
+    Ok(())
+}
+
+async fn delete_account_sessions(pool: &MySqlPool, account_id: u32) -> Result<()> {
+    sqlx::query("DELETE FROM `web_sessions` WHERE `account_id` = ?")
+        .bind(account_id)
+        .execute(pool)
+        .await
+        .context("failed to revoke account web sessions")?;
     Ok(())
 }
 

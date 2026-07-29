@@ -37,6 +37,7 @@ bind_ip = "127.0.0.1"
 port = 8080
 public_base_url = "http://127.0.0.1:8080"
 auth_database_url = "mysql://root:root@127.0.0.1:3306/auth"
+character_database_url = "mysql://root:root@127.0.0.1:3306/characters"
 web_database_url = "mysql://root:root@127.0.0.1:3306/web"
 ```
 

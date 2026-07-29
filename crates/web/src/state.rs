@@ -9,6 +9,7 @@ use crate::config::Config;
 #[derive(Clone)]
 pub struct AppState {
     pub auth: Arc<MySqlPool>,
+    pub characters: Arc<MySqlPool>,
     pub web: Arc<MySqlPool>,
     pub secure_cookies: bool,
 }
@@ -27,9 +28,16 @@ impl AppState {
             .connect(&config.web_database_url)
             .await
             .context("failed to connect to the web database")?;
+        let characters = MySqlPoolOptions::new()
+            .max_connections(10)
+            .min_connections(1)
+            .connect(&config.character_database_url)
+            .await
+            .context("failed to connect to the characters database")?;
 
         Ok(Self {
             auth: Arc::new(auth),
+            characters: Arc::new(characters),
             web: Arc::new(web),
             secure_cookies: config.secure_cookies(),
         })
@@ -37,6 +45,10 @@ impl AppState {
 
     pub async fn ready(&self) -> bool {
         sqlx::query("SELECT 1").execute(&*self.auth).await.is_ok()
+            && sqlx::query("SELECT 1")
+                .execute(&*self.characters)
+                .await
+                .is_ok()
             && sqlx::query("SELECT 1").execute(&*self.web).await.is_ok()
     }
 }

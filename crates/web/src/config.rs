@@ -14,6 +14,7 @@ pub struct Config {
     pub port: u16,
     pub public_base_url: String,
     pub auth_database_url: String,
+    pub character_database_url: String,
     pub web_database_url: String,
 }
 
@@ -35,6 +36,9 @@ impl Config {
         }
         if !self.web_database_url.starts_with("mysql://") {
             anyhow::bail!("web.web_database_url must be a MySQL connection URL");
+        }
+        if !self.character_database_url.starts_with("mysql://") {
+            anyhow::bail!("web.character_database_url must be a MySQL connection URL");
         }
         Ok(())
     }

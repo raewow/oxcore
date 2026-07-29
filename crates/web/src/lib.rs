@@ -4,6 +4,7 @@ mod components;
 pub mod auth;
 #[cfg(feature = "ssr")]
 pub mod config;
+pub mod portal;
 #[cfg(feature = "ssr")]
 pub mod server;
 #[cfg(feature = "ssr")]
@@ -81,6 +82,7 @@ pub fn App() -> impl IntoView {
                 <Route path=StaticSegment("register") view=Register />
                 <Route path=StaticSegment("recover") view=RecoverAccount />
                 <Route path=StaticSegment("account") view=Account />
+                <Route path=StaticSegment("security") view=Security />
             </Routes>
         </Router>
     }
@@ -115,15 +117,117 @@ fn Home() -> impl IntoView {
 
 #[component]
 fn Account() -> impl IntoView {
+    let overview = Resource::new(|| (), |_| portal::get_portal_overview());
+
     view! {
         <AuthShell title="Your account" subtitle="Account controls and character information will appear here.">
-            <div class="mt-8 border-y border-border py-5 text-xs leading-6 text-muted-foreground">
-                "You are signed in. Character management and account-security controls are the next portal features."
-            </div>
+            <Suspense fallback=move || view! {
+                <div class="mt-8 border-y border-border py-5 text-xs text-muted-foreground">"Loading account..."</div>
+            }>
+                {move || overview.get().map(render_portal_overview)}
+            </Suspense>
             <form class="mt-6" action="/auth/logout" method="post">
                 <Button button_type="submit">"Sign out"</Button>
             </form>
+            <a class="mt-5 inline-block text-xs text-primary hover:underline" href="/security">
+                "Change password"
+            </a>
         </AuthShell>
+    }
+}
+
+#[component]
+fn Security() -> impl IntoView {
+    view! {
+        <AuthShell title="Account security" subtitle="Changing your password signs out every portal session.">
+            <form class="mt-8 space-y-5" action="/auth/change-password" method="post">
+                <AuthField id="current-password" name="current_password" label="Current password" input_type="password" autocomplete="current-password" />
+                <AuthField id="new-password" name="new_password" label="New password" input_type="password" autocomplete="new-password" />
+                <AuthField id="confirm-password" name="confirm_password" label="Confirm new password" input_type="password" autocomplete="new-password" />
+                <Button button_type="submit" class="w-full">"Update password"</Button>
+            </form>
+            <a class="mt-6 inline-block text-xs text-primary hover:underline" href="/account">"Return to account"</a>
+        </AuthShell>
+    }
+}
+
+fn render_portal_overview(result: Result<portal::PortalOverview, ServerFnError>) -> AnyView {
+    match result {
+        Ok(overview) => {
+            let email = overview
+                .email
+                .unwrap_or_else(|| "No email address".to_string());
+            let email_status = if overview.email_verified {
+                "Verified"
+            } else {
+                "Verification pending"
+            };
+            let characters = overview.characters.into_iter().map(|character| {
+                view! {
+                    <li class="flex items-center justify-between border-t border-border py-3 first:border-t-0">
+                        <div>
+                            <p class="font-medium text-foreground">{character.name}</p>
+                            <p class="mt-1 text-muted-foreground">
+                                "Level " {character.level} " " {class_name(character.class)} " - " {race_name(character.race)}
+                            </p>
+                        </div>
+                        <span class=if character.online == 0 { "text-muted-foreground" } else { "text-primary" }>
+                            {if character.online == 0 { "Offline" } else { "Online" }}
+                        </span>
+                    </li>
+                }
+            });
+            view! {
+                <div class="mt-8 space-y-6 text-xs">
+                    <section class="border-y border-border py-5">
+                        <p class="text-muted-foreground">"Signed in as"</p>
+                        <p class="mt-1 font-sans text-lg font-semibold text-foreground">{overview.username}</p>
+                        <p class="mt-3 text-muted-foreground">{email}</p>
+                        <p class="mt-1 text-primary">{email_status}</p>
+                    </section>
+                    <section>
+                        <p class="font-medium text-foreground">"Characters"</p>
+                        <ul class="mt-3">{characters.collect_view()}</ul>
+                    </section>
+                </div>
+            }
+            .into_any()
+        }
+        Err(_) => view! {
+            <div class="mt-8 border-y border-border py-5 text-xs text-muted-foreground">
+                "Account details are temporarily unavailable."
+            </div>
+        }
+        .into_any(),
+    }
+}
+
+fn class_name(class: u8) -> &'static str {
+    match class {
+        1 => "Warrior",
+        2 => "Paladin",
+        3 => "Hunter",
+        4 => "Rogue",
+        5 => "Priest",
+        7 => "Shaman",
+        8 => "Mage",
+        9 => "Warlock",
+        11 => "Druid",
+        _ => "Unknown class",
+    }
+}
+
+fn race_name(race: u8) -> &'static str {
+    match race {
+        1 => "Human",
+        2 => "Orc",
+        3 => "Dwarf",
+        4 => "Night Elf",
+        5 => "Undead",
+        6 => "Tauren",
+        7 => "Gnome",
+        8 => "Troll",
+        _ => "Unknown race",
     }
 }
 

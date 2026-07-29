@@ -6,6 +6,7 @@ use axum::routing::{get, post};
 use axum::{extract::Request, extract::State, response::Redirect, response::Response};
 use axum::{Extension, Router};
 use leptos::config::get_configuration;
+use leptos::prelude::provide_context;
 use leptos_axum::{generate_route_list, LeptosRoutes};
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -34,11 +35,21 @@ pub async fn serve(config: Config) -> Result<()> {
         .route("/auth/login", post(crate::auth::login))
         .route("/auth/register", post(crate::auth::register))
         .route("/auth/logout", post(crate::auth::logout))
+        .route("/auth/change-password", post(crate::auth::change_password))
+        .route("/api/portal/overview", get(crate::portal::overview))
         .route("/admin", get(crate::auth::admin))
-        .leptos_routes(&leptos_options, routes, {
-            let leptos_options = leptos_options.clone();
-            move || shell(leptos_options.clone())
-        })
+        .leptos_routes_with_context(
+            &leptos_options,
+            routes,
+            {
+                let state = state.clone();
+                move || provide_context(state.clone())
+            },
+            {
+                let leptos_options = leptos_options.clone();
+                move || shell(leptos_options.clone())
+            },
+        )
         .fallback(leptos_axum::file_and_error_handler(shell))
         .with_state(leptos_options)
         .layer(Extension(state.clone()))
@@ -79,7 +90,7 @@ async fn redirect_authenticated_auth_pages(
     if request.method() == Method::GET {
         let path = request.uri().path();
         let is_auth_page = matches!(path, "/login" | "/register" | "/recover");
-        let is_account_page = path == "/account";
+        let is_account_page = matches!(path, "/account" | "/security");
 
         if is_auth_page || is_account_page {
             let authenticated = match session_cookie(request.headers()) {
