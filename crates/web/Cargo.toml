@@ -1,0 +1,59 @@
+[package]
+name = "oxcore-web"
+version = "0.1.0"
+edition = "2021"
+description = "Player portal and operations console for oxcore"
+
+[[bin]]
+name = "web"
+path = "src/main.rs"
+required-features = ["ssr"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["ssr"]
+hydrate = ["leptos/hydrate"]
+ssr = [
+    "dep:anyhow",
+    "dep:axum",
+    "dep:leptos_axum",
+    "dep:oxcore-shared",
+    "dep:tokio",
+    "dep:tower-http",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "leptos/ssr",
+    "leptos_meta/ssr",
+    "leptos_router/ssr",
+]
+
+[dependencies]
+anyhow = { version = "1.0", optional = true }
+axum = { version = "0.8", optional = true }
+leptos = { version = "0.8", default-features = false }
+leptos_axum = { version = "0.8", optional = true }
+leptos_meta = { version = "0.8", default-features = false }
+leptos_router = { version = "0.8", default-features = false }
+oxcore-shared = { workspace = true, optional = true }
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.35", features = ["macros", "net", "rt-multi-thread", "signal"], optional = true }
+tower-http = { version = "0.6", features = ["trace"], optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+
+[package.metadata.leptos]
+bin-features = ["ssr"]
+bin-default-features = false
+lib-features = ["hydrate"]
+lib-default-features = false
+output-name = "oxcore-web"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+tailwind-input-file = "style/tailwind.css"
+assets-dir = "public"
+site-addr = "127.0.0.1:8080"
+reload-port = 3001
+browserquery = "defaults"
+graceful-shutdown-unix-signal = "SIGTERM"
