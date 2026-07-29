@@ -1,3 +1,4 @@
+use crate::messages::update::SmsgUpdateObject;
 use crate::messages::ToWorldPacket;
 use crate::protocol::{ObjectGuid as SharedObjectGuid, Opcode, WorldPacket};
 
@@ -41,6 +42,15 @@ impl ToWorldPacket for SmsgDestroyItem {
         let mut packet = WorldPacket::new(Opcode::SMSG_DESTROY_OBJECT);
         packet.write_guid_raw(self.item_guid.raw());
         packet
+    }
+
+    /// 1.14 has no `SMSG_DESTROY_OBJECT`; destruction is a list inside `SMSG_UPDATE_OBJECT`.
+    ///
+    /// HermesProxy does the same translation when it sees a legacy destroy
+    /// (`World/Client/PacketHandlers/UpdateHandler.cs:20`), which is why the shared opcode table
+    /// has no modern number for this one.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        SmsgUpdateObject::new().destroy(self.item_guid).to_modern()
     }
 }
 

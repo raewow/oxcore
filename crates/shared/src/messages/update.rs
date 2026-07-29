@@ -25,9 +25,13 @@
 //!     ));
 //! ```
 
-use crate::messages::ToWorldPacket;
+use crate::messages::{Recipient, ToWorldPacket};
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::guid::ObjectGuid;
 use crate::protocol::position::Position;
+use crate::protocol::updates::modern::{
+    ModernCreateData, ModernObjectType, ModernUpdateBlock, ModernUpdateType,
+};
 use crate::protocol::updates::movement_block::MovementSpeeds;
 use crate::protocol::updates::update_block_builder::{
     min_mask_blocks, update_flags, UpdateBlockBuilder,
@@ -53,6 +57,20 @@ pub use crate::protocol::updates::update_types::ObjectUpdateType;
 pub struct SmsgUpdateObject {
     pub blocks: Vec<UpdateBlockData>,
     pub has_transport: bool,
+    /// Map the recipient is standing on. Modern bodies carry this in the header; vanilla does not,
+    /// so it defaults to 0 and must be set by callers that a modern client might receive.
+    pub map_id: u16,
+    /// The recipient's own object, when this update is aimed at one player.
+    ///
+    /// Modern splits the player field table in two, and the self-only half (xp, coinage, inventory,
+    /// skills) only exists under the `ActivePlayer` type. Without this the recipient's own object
+    /// encodes as a plain `Player` and every self-only field is silently dropped.
+    pub self_guid: Option<ObjectGuid>,
+    /// Objects the client should destroy outright, as opposed to the out-of-range blocks.
+    ///
+    /// Vanilla has a separate `SMSG_DESTROY_OBJECT` for this; 1.14 folds it in here, which is why
+    /// this has no vanilla counterpart and only [`ToWorldPacket::to_modern`] reads it.
+    pub destroyed: Vec<ObjectGuid>,
 }
 
 impl SmsgUpdateObject {
@@ -60,7 +78,25 @@ impl SmsgUpdateObject {
         Self {
             blocks: Vec::new(),
             has_transport: false,
+            map_id: 0,
+            self_guid: None,
+            destroyed: Vec::new(),
         }
+    }
+
+    /// Tell the client to destroy an object.
+    ///
+    /// Modern-only: vanilla sends [`SmsgDestroyItem`] as its own packet instead.
+    pub fn destroy(mut self, guid: ObjectGuid) -> Self {
+        self.destroyed.push(guid);
+        self
+    }
+
+    /// Set the map id and the recipient, both of which only the modern body uses.
+    pub fn for_recipient(mut self, self_guid: ObjectGuid, map_id: u16) -> Self {
+        self.self_guid = Some(self_guid);
+        self.map_id = map_id;
+        self
     }
 
     pub fn with_transport(mut self) -> Self {
@@ -106,7 +142,83 @@ impl ToWorldPacket for SmsgUpdateObject {
 
         packet
     }
+
+    /// The modern body reshapes the packet rather than just renumbering fields.
+    ///
+    /// Out-of-range objects move out of the block list into a removal list in the header, the
+    /// object blocks are length-prefixed as one chunk, and each block's fields are translated
+    /// through the 1.14 slot map.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        self.encode_modern(self.self_guid, self.map_id)
+    }
+
+    /// Prefers the recipient the send path supplies over anything baked into the message.
+    ///
+    /// A broadcast reaches many players, and only one of them owns the object being described, so
+    /// the message itself cannot know. `self_guid`/`map_id` remain as a fallback for the paths that
+    /// build an update for one known player.
+    fn to_modern_for(&self, recipient: Recipient) -> Option<WorldPacket> {
+        self.encode_modern(Some(recipient.guid), recipient.map_id)
+    }
 }
+
+impl SmsgUpdateObject {
+    fn encode_modern(&self, self_guid: Option<ObjectGuid>, map_id: u16) -> Option<WorldPacket> {
+        let mut removed: Vec<ObjectGuid> = Vec::new();
+        let mut blocks: Vec<ModernUpdateBlock> = Vec::new();
+
+        for block in &self.blocks {
+            match block {
+                UpdateBlockData::Values(values) => blocks.push(values.to_modern(self_guid)),
+                UpdateBlockData::CreateObject(create) => {
+                    blocks.push(create.to_modern(ModernUpdateType::CreateObject1, self_guid))
+                }
+                UpdateBlockData::CreateObject2(create) => {
+                    blocks.push(create.to_modern(ModernUpdateType::CreateObject2, self_guid))
+                }
+                UpdateBlockData::OutOfRange(guids) => removed.extend(guids.iter().copied()),
+                // 1.14 has no standalone movement block inside SMSG_UPDATE_OBJECT -- movement
+                // arrives as its own SMSG_MOVE_* message. Dropping is correct here; until those
+                // are ported a modern client sees objects teleport rather than walk.
+                UpdateBlockData::Movement(_) => {}
+            }
+        }
+
+        let mut writer = BitWriter::new();
+        writer.write_u32(blocks.len() as u32);
+        writer.write_u16(map_id);
+
+        writer.write_bit(!removed.is_empty() || !self.destroyed.is_empty());
+        if !removed.is_empty() || !self.destroyed.is_empty() {
+            // Two counts, then the two lists back to back: destroyed objects first, then the ones
+            // that merely went out of range. Destroying plays a removal effect where going out of
+            // range just forgets the object, so the split is visible in-game.
+            writer.write_u16(self.destroyed.len() as u16);
+            writer.write_i32((self.destroyed.len() + removed.len()) as i32);
+            for guid in self.destroyed.iter().chain(&removed) {
+                let (high, low) = guid.to_guid128(MODERN_REALM_ID);
+                writer.write_packed_guid_128(high, low);
+            }
+        }
+
+        let mut data = BitWriter::new();
+        for block in &blocks {
+            block.write_to(&mut data, MODERN_REALM_ID);
+        }
+        let data = data.into_bytes();
+
+        writer.write_i32(data.len() as i32);
+        writer.write_bytes(&data);
+
+        Some(writer.finish(Opcode::SMSG_UPDATE_OBJECT))
+    }
+}
+
+/// Realm used to qualify GUIDs in modern update bodies.
+///
+/// Single-realm assumption, matching HermesProxy. Must agree with the value the character list and
+/// name queries send, or the client treats the same object as two different ones.
+const MODERN_REALM_ID: u16 = 1;
 
 // =========================================================================
 // BLOCK DATA ENUM
@@ -209,6 +321,15 @@ impl ValuesUpdateBlock {
         }
 
         builder.write_to_packet(packet, 0);
+    }
+
+    fn to_modern(&self, self_guid: Option<ObjectGuid>) -> ModernUpdateBlock {
+        let object_type = self.object_type.to_modern(self_guid == Some(self.guid));
+        let mut block = ModernUpdateBlock::new(ModernUpdateType::Values, self.guid, object_type);
+        for &(index, value) in &self.fields {
+            block.fields.set_vanilla(index, value);
+        }
+        block
     }
 }
 
@@ -375,6 +496,47 @@ impl CreateObjectBlock {
 
         builder.write_to_packet(packet, min_blocks);
     }
+
+    fn to_modern(
+        &self,
+        update_type: ModernUpdateType,
+        self_guid: Option<ObjectGuid>,
+    ) -> ModernUpdateBlock {
+        // Vanilla marks the recipient's own object with a flag on the block; the caller-supplied
+        // guid is the more reliable signal, so either will do.
+        let is_self =
+            self_guid == Some(self.guid) || self.update_flags & update_flags::UPDATEFLAG_SELF != 0;
+        let object_type = ModernObjectType::from_vanilla(self.type_id, is_self);
+
+        let mut block = ModernUpdateBlock::new(update_type, self.guid, object_type);
+
+        let (position, movement_flags, speeds) = match &self.movement {
+            Some(MovementBlockData::Position(position)) => (*position, 0, None),
+            Some(MovementBlockData::Living {
+                position,
+                movement_flags,
+                speeds,
+            }) => (*position, *movement_flags, *speeds),
+            None => (Position::default(), 0, None),
+        };
+
+        block.create = Some(ModernCreateData {
+            position,
+            movement_flags,
+            speeds,
+            this_is_you: is_self,
+            combat_victim: self.melee_attacking_victim,
+        });
+
+        for &(index, value) in self.fields.iter().chain(&self.required_fields) {
+            block.fields.set_vanilla(index, value);
+        }
+        for &(index, bytes) in &self.bytes_fields {
+            block.fields.set_vanilla(index, u32::from_le_bytes(bytes));
+        }
+
+        block
+    }
 }
 
 // =========================================================================
@@ -509,6 +671,21 @@ pub enum ObjectType {
 }
 
 impl ObjectType {
+    /// Map to the 1.14 numbering, promoting the recipient's own object to `ActivePlayer`.
+    fn to_modern(self, is_self: bool) -> ModernObjectType {
+        match self {
+            ObjectType::Object => ModernObjectType::Object,
+            ObjectType::Item => ModernObjectType::Item,
+            ObjectType::Container => ModernObjectType::Container,
+            ObjectType::Unit => ModernObjectType::Unit,
+            ObjectType::Player if is_self => ModernObjectType::ActivePlayer,
+            ObjectType::Player => ModernObjectType::Player,
+            ObjectType::GameObject => ModernObjectType::GameObject,
+            ObjectType::DynamicObject => ModernObjectType::DynamicObject,
+            ObjectType::Corpse => ModernObjectType::Corpse,
+        }
+    }
+
     pub fn min_mask_blocks(self) -> u8 {
         match self {
             ObjectType::Object => min_mask_blocks::OBJECT,
@@ -600,6 +777,213 @@ mod tests {
         assert_eq!(ObjectType::Unit.min_mask_blocks(), 6);
         assert_eq!(ObjectType::Player.min_mask_blocks(), 41);
         assert_eq!(ObjectType::Item.min_mask_blocks(), 2);
+    }
+
+    /// The header is a count, a map id, then a removal bit that flushes into its own byte before
+    /// the length-prefixed block chunk.
+    #[test]
+    fn modern_empty_update_has_header_and_zero_length_chunk() {
+        let packet = SmsgUpdateObject::new().to_modern().expect("ported");
+
+        assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
+        assert_eq!(
+            packet.contents(),
+            &[
+                0x00, 0x00, 0x00, 0x00, // NumObjUpdates
+                0x00, 0x00, // MapID
+                0x00, // no removals; the bit flushes to a whole byte
+                0x00, 0x00, 0x00, 0x00, // block chunk length
+            ][..]
+        );
+    }
+
+    /// Out-of-range objects leave the block list entirely in 1.14 and become a removal list in the
+    /// header, so the update count stays at zero.
+    #[test]
+    fn modern_out_of_range_moves_into_the_header() {
+        let msg = SmsgUpdateObject::new()
+            .add_block(UpdateBlockData::OutOfRange(vec![ObjectGuid::from_low(7)]));
+        let packet = msg.to_modern().expect("ported");
+
+        assert_eq!(
+            packet.contents(),
+            &[
+                0x00, 0x00, 0x00, 0x00, // NumObjUpdates: the removal is not an object update
+                0x00, 0x00, // MapID
+                0x80, // removal bit set, MSB-first, then flushed
+                0x00, 0x00, // DestroyedCount: out of range is not the same as destroyed
+                0x01, 0x00, 0x00, 0x00, // destroyed + out of range
+                0x01, 0xA0, 0x07, 0x04, 0x08, // guid128
+                0x00, 0x00, 0x00, 0x00, // block chunk length
+            ][..]
+        );
+    }
+
+    /// A values block is a type byte, a guid128, the full-width mask, the set values, then the
+    /// empty dynamic mask. Getting the mask width wrong desynchronises every later block.
+    #[test]
+    fn modern_values_block_layout() {
+        let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+            // UNIT_FIELD_HEALTH, which lands at modern slot 55.
+            ValuesUpdateBlock::new(ObjectGuid::from_low(4), ObjectType::Unit).set_field(22, 100),
+        ));
+        let packet = msg.to_modern().expect("ported");
+        let body = packet.contents();
+
+        let chunk_len = u32::from_le_bytes(body[7..11].try_into().unwrap()) as usize;
+        let block = &body[11..];
+        assert_eq!(
+            block.len(),
+            chunk_len,
+            "chunk length must match what follows"
+        );
+
+        assert_eq!(block[0], 0, "UpdateTypeModern::Values");
+        assert_eq!(&block[1..6], &[0x01, 0xA0, 0x04, 0x04, 0x08], "guid128");
+
+        let mask = &block[6..];
+        assert_eq!(mask[0], 7, "Unit has 218 slots = 7 blocks");
+        // Slot 55 is block 1, bit 23.
+        assert_eq!(&mask[5..9], &(1u32 << 23).to_le_bytes());
+        assert_eq!(&mask[1 + 7 * 4..1 + 7 * 4 + 4], &100u32.to_le_bytes());
+        // Then the empty dynamic mask: Unit has 3 dynamic slots, so one block.
+        assert_eq!(&mask[1 + 7 * 4 + 4..], &[0x01, 0x00, 0x00, 0x00, 0x00]);
+    }
+
+    /// The same broadcast encodes differently per recipient: whoever owns the object gets
+    /// `ThisIsYou` and the larger `ActivePlayer` field table, everyone else does not.
+    #[test]
+    fn modern_recipient_decides_who_owns_the_object() {
+        let owner = ObjectGuid::from_low(4);
+        let bystander = ObjectGuid::from_low(5);
+        let msg =
+            SmsgUpdateObject::new().add_block(UpdateBlockData::CreateObject2(
+                CreateObjectBlock::new(owner, ObjectTypeId::Player, ObjectType::Player)
+                    .with_movement(Position::new(1.0, 2.0, 3.0, 0.0), 0, None),
+            ));
+
+        let to_owner = msg
+            .to_modern_for(Recipient {
+                guid: owner,
+                map_id: 1,
+            })
+            .expect("ported");
+        let to_bystander = msg
+            .to_modern_for(Recipient {
+                guid: bystander,
+                map_id: 1,
+            })
+            .expect("ported");
+
+        assert_eq!(&to_owner.contents()[4..6], &1u16.to_le_bytes(), "MapID");
+
+        // ObjectTypeBCC: ActivePlayer is 5, Player is 4.
+        assert_eq!(to_owner.contents()[17], 5);
+        assert_eq!(to_bystander.contents()[17], 4);
+
+        // ThisIsYou and ActivePlayer are create bits 14 and 16 of 18, MSB-first: byte 1 bit 6 and
+        // byte 2 bit 7.
+        let owner_bits = &to_owner.contents()[22..25];
+        let bystander_bits = &to_bystander.contents()[22..25];
+        assert_eq!(owner_bits[1] & 0x02, 0x02, "ThisIsYou");
+        assert_eq!(owner_bits[2] & 0x80, 0x80, "ActivePlayer");
+        assert_eq!(bystander_bits[1] & 0x02, 0, "not ThisIsYou");
+        assert_eq!(bystander_bits[2] & 0x80, 0, "not ActivePlayer");
+    }
+
+    /// Destroying counts separately from going out of range: the client plays a removal effect for
+    /// one and silently forgets the other.
+    #[test]
+    fn modern_destroy_is_counted_apart_from_out_of_range() {
+        let msg = SmsgUpdateObject::new()
+            .destroy(ObjectGuid::from_low(9))
+            .add_block(UpdateBlockData::OutOfRange(vec![ObjectGuid::from_low(7)]));
+        let packet = msg.to_modern().expect("ported");
+
+        assert_eq!(
+            packet.contents(),
+            &[
+                0x00, 0x00, 0x00, 0x00, // NumObjUpdates
+                0x00, 0x00, // MapID
+                0x80, // removal bit
+                0x01, 0x00, // DestroyedCount
+                0x02, 0x00, 0x00, 0x00, // destroyed + out of range
+                0x01, 0xA0, 0x09, 0x04, 0x08, // destroyed guid first
+                0x01, 0xA0, 0x07, 0x04, 0x08, // then out of range
+                0x00, 0x00, 0x00, 0x00, // block chunk length
+            ][..]
+        );
+    }
+
+    /// A create block opens with 18 presence bits that flush to three bytes, then the movement
+    /// block. If the bit count or the flush is off, the client reads the mover GUID out of the
+    /// middle of the header and the whole packet is lost.
+    #[test]
+    fn modern_create_block_bit_header_and_movement_layout() {
+        let guid = ObjectGuid::from_low(4);
+        let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::CreateObject(
+            CreateObjectBlock::new(guid, ObjectTypeId::Unit, ObjectType::Unit).with_movement(
+                Position::new(1.0, 2.0, 3.0, 0.5),
+                0,
+                None,
+            ),
+        ));
+        let packet = msg.to_modern().expect("ported");
+        let body = packet.contents();
+        let block = &body[11..];
+
+        assert_eq!(block[0], 1, "UpdateTypeModern::CreateObject1");
+        assert_eq!(&block[1..6], &[0x01, 0xA0, 0x04, 0x04, 0x08], "guid128");
+        assert_eq!(block[6], 3, "ObjectTypeBCC::Unit");
+        assert_eq!(
+            &block[7..11],
+            &(0x001i32 | 0x008).to_le_bytes(),
+            "HeirFlags: Object | Unit"
+        );
+
+        // Only MovementUpdate is set, and it is bit 3 of the first byte, MSB-first.
+        assert_eq!(&block[11..14], &[0x10, 0x00, 0x00], "18 create bits");
+
+        // MovementInfo opens by repeating the object's guid as the mover.
+        assert_eq!(&block[14..19], &[0x01, 0xA0, 0x04, 0x04, 0x08], "MoverGUID");
+        // Flags, FlagsExtra, FlagsExtra2, MoveTime, then the position.
+        assert_eq!(&block[19..23], &0u32.to_le_bytes(), "Flags");
+        assert_eq!(&block[35..39], &1.0f32.to_le_bytes(), "position x");
+        assert_eq!(&block[39..43], &2.0f32.to_le_bytes(), "position y");
+        assert_eq!(&block[43..47], &3.0f32.to_le_bytes(), "position z");
+        assert_eq!(&block[47..51], &0.5f32.to_le_bytes(), "orientation");
+
+        // Pitch, StepUpStartElevation, RemoveForcesIDs count, MoveIndex, then 6 bits that flush to
+        // one byte, then the nine speeds.
+        assert_eq!(block[67], 0x00, "movement presence bits");
+        assert_eq!(&block[68..72], &2.5f32.to_le_bytes(), "walk speed");
+        assert_eq!(
+            &block[88..92],
+            &7.0f32.to_le_bytes(),
+            "flight speed default"
+        );
+    }
+
+    /// Vanilla and modern movement-flag words agree only up to WalkMode. Vanilla Root is 0x1000,
+    /// which 1.14 reads as FallingFar.
+    #[test]
+    fn modern_movement_flags_translate_by_name() {
+        use crate::protocol::updates::modern::block::to_modern_movement_flags;
+
+        assert_eq!(
+            to_modern_movement_flags(0x0000_0001),
+            0x0000_0001,
+            "Forward"
+        );
+        assert_eq!(to_modern_movement_flags(0x0000_1000), 0x0000_0400, "Root");
+        assert_eq!(
+            to_modern_movement_flags(0x0020_0000),
+            0x0010_0000,
+            "Swimming"
+        );
+        // Levitating, FixedZ, OnTransport and SplineEnabled have no 1.14 member of the same name.
+        assert_eq!(to_modern_movement_flags(0x0000_0400), 0, "Levitating");
+        assert_eq!(to_modern_movement_flags(0x0200_0000), 0, "OnTransport");
     }
 
     #[test]

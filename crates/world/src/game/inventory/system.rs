@@ -1577,6 +1577,7 @@ impl InventorySystem {
             blocks: vec![
                 oxcore_shared::messages::update::UpdateBlockData::CreateObject2(create_block),
             ],
+            ..SmsgUpdateObject::new()
         };
 
         self.broadcast_mgr

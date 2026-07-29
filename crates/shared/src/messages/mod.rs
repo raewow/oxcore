@@ -16,7 +16,7 @@
 //! # }
 //! ```
 
-use crate::protocol::WorldPacket;
+use crate::protocol::{ObjectGuid, WorldPacket};
 
 /// Serializes a message into the body its recipient's protocol expects.
 ///
@@ -45,6 +45,30 @@ pub trait ToWorldPacket {
     fn to_modern(&self) -> Option<WorldPacket> {
         None
     }
+
+    /// The modern body for a specific recipient.
+    ///
+    /// Some modern bodies depend on *who* is receiving them, in a way vanilla bodies never do. An
+    /// object update marks the recipient's own object with `ThisIsYou` and encodes it under a
+    /// larger field table, and it carries the recipient's map id in its header — so one broadcast
+    /// to ten nearby players is ten different bodies. Baking the recipient into the message before
+    /// broadcasting cannot express that; only the send path still knows who each copy is for.
+    ///
+    /// Defaulted to ignore the recipient, since almost every message does.
+    fn to_modern_for(&self, _recipient: Recipient) -> Option<WorldPacket> {
+        self.to_modern()
+    }
+}
+
+/// Who a message is being encoded for.
+///
+/// Only the modern protocol reads this; see [`ToWorldPacket::to_modern_for`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Recipient {
+    /// The receiving player's own object.
+    pub guid: ObjectGuid,
+    /// The map that player is on.
+    pub map_id: u16,
 }
 
 impl ToWorldPacket for WorldPacket {

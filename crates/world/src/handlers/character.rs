@@ -291,6 +291,7 @@ pub async fn handle_player_login_with_guid(
         let packet_tx = session.packet_tx();
         let mut broadcaster = PlayerBroadcaster::new(packet_tx, guid);
         broadcaster.set_protocol(session.protocol());
+        broadcaster.set_map_id(player_mut.map_id as u16);
         player_mut.set_broadcaster(std::sync::Arc::new(broadcaster));
         info!(
             "[LOGIN] PlayerBroadcaster created and set for player {:?}",

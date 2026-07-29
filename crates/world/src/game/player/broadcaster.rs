@@ -6,10 +6,11 @@
 
 use crate::game::player::packet_queue::{PacketQueue, PacketQueueConfig};
 use arc_swap::ArcSwap;
-use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
+use oxcore_shared::messages::{Recipient, ToWorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Protocol, WorldPacket};
 use parking_lot::RwLock;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -23,6 +24,16 @@ pub struct PlayerBroadcaster {
     /// point that still knows *who* a packet is for — by the time bytes reach the send queue the
     /// recipient is gone, so this is where a message must be turned into the right encoding.
     protocol: Protocol,
+    /// Opcodes already reported as unported on this connection.
+    ///
+    /// An unported per-tick message (movement, object updates) would otherwise fill the log at
+    /// tick rate and bury everything else, which is exactly what happened the first time a 1.14
+    /// client reached the world.
+    unported_seen: RwLock<HashSet<Opcode>>,
+    /// Map this player is on, needed by modern object-update headers.
+    ///
+    /// Atomic because it changes on teleport, long after the broadcaster is behind an `Arc`.
+    map_id: AtomicU16,
     listeners: Arc<RwLock<HashMap<ObjectGuid, Arc<PlayerBroadcaster>>>>,
     listener_snapshot: Arc<ArcSwap<Vec<(ObjectGuid, Arc<PlayerBroadcaster>)>>>,
     packet_queue: RwLock<PacketQueue>,
@@ -59,6 +70,16 @@ impl PlayerBroadcaster {
         self.protocol = protocol;
     }
 
+    /// The map this player is on. Only modern object updates read it.
+    pub fn map_id(&self) -> u16 {
+        self.map_id.load(Ordering::Relaxed)
+    }
+
+    /// Record a map change, so later object updates carry the right map in their header.
+    pub fn set_map_id(&self, map_id: u16) {
+        self.map_id.store(map_id, Ordering::Relaxed);
+    }
+
     /// Encode `msg` for this player's protocol.
     ///
     /// `None` means the message has no encoding for that protocol yet — see
@@ -66,7 +87,12 @@ impl PlayerBroadcaster {
     pub fn encode(&self, msg: &dyn ToWorldPacket) -> Option<WorldPacket> {
         match self.protocol {
             Protocol::Vanilla => Some(msg.to_vanilla()),
-            Protocol::Modern => msg.to_modern(),
+            // Encoding happens here, per recipient, precisely because this is the last point that
+            // still knows who the packet is for — see [`ToWorldPacket::to_modern_for`].
+            Protocol::Modern => msg.to_modern_for(Recipient {
+                guid: self.self_guid,
+                map_id: self.map_id(),
+            }),
         }
     }
 
@@ -74,7 +100,7 @@ impl PlayerBroadcaster {
     pub fn send_msg(&self, msg: &dyn ToWorldPacket) {
         match self.encode(msg) {
             Some(packet) => self.send_encoded(packet),
-            None => self.warn_unported(),
+            None => self.warn_unported(msg),
         }
     }
 
@@ -82,16 +108,29 @@ impl PlayerBroadcaster {
     pub fn queue_msg(&self, msg: &dyn ToWorldPacket) {
         match self.encode(msg) {
             Some(packet) => self.enqueue_encoded(packet),
-            None => self.warn_unported(),
+            None => self.warn_unported(msg),
         }
     }
 
-    fn warn_unported(&self) {
-        tracing::debug!(
-            "No {:?} encoding for a message bound for {:?}; dropping",
-            self.protocol,
-            self.self_guid
-        );
+    /// Report a dropped message, naming the opcode.
+    ///
+    /// Encodes the vanilla body purely to read the opcode off it — the trait has no other way to
+    /// ask a message what it is. That is wasted work, but only on the drop path, and a log line
+    /// that does not say *which* message went missing is no help at all when a client renders a
+    /// half-populated world.
+    fn warn_unported(&self, msg: &dyn ToWorldPacket) {
+        let opcode = msg.to_vanilla().opcode();
+        if self.unported_seen.write().insert(opcode) {
+            tracing::warn!(
+                "No {:?} encoding for {:?}; dropping it for player {:?}. \
+                 Further drops of this opcode on this connection are silent.",
+                self.protocol,
+                opcode,
+                self.self_guid
+            );
+        } else {
+            tracing::trace!("Dropping unported {:?} for {:?}", opcode, self.self_guid);
+        }
     }
 
     /// Whether a packet handed to us pre-encoded can be sent as-is.
@@ -123,6 +162,8 @@ impl PlayerBroadcaster {
             packet_tx,
             self_guid,
             protocol: Protocol::Vanilla,
+            map_id: AtomicU16::new(0),
+            unported_seen: RwLock::new(HashSet::new()),
             listeners: Arc::new(RwLock::new(HashMap::new())),
             listener_snapshot: Arc::new(ArcSwap::new(Arc::new(Vec::new()))),
             packet_queue: RwLock::new(PacketQueue::with_config(queue_config)),

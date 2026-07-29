@@ -1,3 +1,4 @@
+pub mod modern;
 pub mod movement_block;
 pub mod movement_data;
 pub mod packet_compression;

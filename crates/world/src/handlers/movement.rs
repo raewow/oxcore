@@ -148,6 +148,11 @@ pub async fn handle_worldport_ack(
             player.map_id = dest_map;
             player.instance_id = dest_instance_id;
             player.movement.position = dest_pos;
+            // Modern object updates carry the map in their header, so the broadcaster has to learn
+            // about the change too or every later update claims the old map.
+            if let Some(broadcaster) = player.broadcaster() {
+                broadcaster.set_map_id(dest_map as u16);
+            }
         });
     info!("[WORLDPORT-ACK] ✓ Player state updated");
 
