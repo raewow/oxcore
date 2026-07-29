@@ -5,7 +5,7 @@ server-side rendering and hydration, Axum for HTTP/WebSocket handling, and Tailw
 
 ## Development
 
-Install `cargo-leptos` once:
+For a production-equivalent local build, install `cargo-leptos` once:
 
 ```bash
 cargo install --locked cargo-leptos
@@ -23,7 +23,8 @@ For a release artifact:
 cargo leptos build --release -p oxcore-web
 ```
 
-To run the server without the Leptos asset pipeline:
+For quick development without installing `cargo-leptos`, the debug server loads Tailwind's browser
+compiler from a CDN:
 
 ```bash
 cargo run --bin web

@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
+use axum::{extract::Request, extract::State, response::Redirect, response::Response};
 use axum::{Extension, Router};
 use leptos::config::get_configuration;
 use leptos_axum::{generate_route_list, LeptosRoutes};
@@ -30,6 +32,7 @@ pub async fn serve(config: Config) -> Result<()> {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/auth/login", post(crate::auth::login))
+        .route("/auth/register", post(crate::auth::register))
         .route("/auth/logout", post(crate::auth::logout))
         .route("/account", get(crate::auth::account))
         .route("/admin", get(crate::auth::admin))
@@ -39,7 +42,11 @@ pub async fn serve(config: Config) -> Result<()> {
         })
         .fallback(leptos_axum::file_and_error_handler(shell))
         .with_state(leptos_options)
-        .layer(Extension(state))
+        .layer(Extension(state.clone()))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            redirect_authenticated_auth_pages,
+        ))
         .layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(address)
@@ -63,6 +70,37 @@ async fn readyz(Extension(state): Extension<AppState>) -> impl IntoResponse {
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     }
+}
+
+async fn redirect_authenticated_auth_pages(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if request.method() == Method::GET
+        && matches!(request.uri().path(), "/login" | "/register" | "/recover")
+    {
+        if let Some(token) = session_cookie(request.headers()) {
+            if crate::auth::session_from_token(&state.web, token)
+                .await
+                .is_some()
+            {
+                return Redirect::to("/account").into_response();
+            }
+        }
+    }
+
+    next.run(request).await
+}
+
+fn session_cookie(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .map(str::trim)
+        .find_map(|pair| pair.strip_prefix("oxcore_session="))
 }
 
 async fn shutdown_signal() {
