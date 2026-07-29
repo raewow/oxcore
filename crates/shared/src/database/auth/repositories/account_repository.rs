@@ -240,6 +240,55 @@ impl AccountRepository {
         Ok(result.last_insert_id() as u32)
     }
 
+    /// Replace both the vanilla SRP6 and Battle.net SRP6v2 credentials for an account.
+    ///
+    /// A portal password change must keep the two client protocols in sync, so all verifier
+    /// columns are updated in one transaction rather than reusing the Bnet-only helper below.
+    pub async fn set_password(
+        &self,
+        account_id: u32,
+        username: &str,
+        password: &str,
+    ) -> Result<()> {
+        let username_norm =
+            NormalizedString::new(username).map_err(|e| anyhow!("Invalid username: {}", e))?;
+        let password_norm =
+            NormalizedString::new(password).map_err(|e| anyhow!("Invalid password: {}", e))?;
+        let verifier = SrpVerifier::from_username_and_password(username_norm, password_norm);
+        let stored_username = verifier.username().to_string();
+        let bnet = crate::crypto::srp6v2::register(&stored_username, password);
+
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin password change")?;
+        let result = sqlx::query(
+            "UPDATE `account` SET `v` = ?, `s` = ?, `bnet_srp_version` = ?, \
+             `bnet_salt` = ?, `bnet_verifier` = ?, `last_pwd_reset` = NOW() \
+             WHERE `id` = ? AND `username` = ?",
+        )
+        .bind(hex::encode_upper(verifier.password_verifier()))
+        .bind(hex::encode_upper(verifier.salt()))
+        .bind(crate::crypto::srp6v2::SRP_VERSION as u8)
+        .bind(hex::encode_upper(bnet.salt))
+        .bind(hex::encode_upper(bnet.verifier))
+        .bind(account_id)
+        .bind(stored_username)
+        .execute(&mut *transaction)
+        .await
+        .context("Failed to update account password")?;
+
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("Account no longer exists or username changed"));
+        }
+        transaction
+            .commit()
+            .await
+            .context("Failed to commit password change")?;
+        Ok(())
+    }
+
     /// Update the Battle.net (SRP6v2) credentials for an existing account, e.g. after a
     /// password change. The vanilla `v`/`s` are updated separately by the caller.
     pub async fn set_bnet_credentials(&self, username: &str, password: &str) -> Result<()> {
