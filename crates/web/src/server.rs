@@ -39,7 +39,6 @@ pub async fn serve(config: Config) -> Result<()> {
         .route("/auth/revoke-session", post(crate::auth::revoke_session))
         .route("/support/create", post(crate::auth::create_support_ticket))
         .route("/api/portal/overview", get(crate::portal::overview))
-        .route("/admin", get(crate::auth::admin))
         .leptos_routes_with_context(
             &leptos_options,
             routes,

@@ -90,6 +90,7 @@ pub fn App() -> impl IntoView {
                 <Route path=StaticSegment("activity") view=Activity />
                 <Route path=StaticSegment("support") view=Support />
                 <Route path=StaticSegment("status") view=Status />
+                <Route path=StaticSegment("admin") view=Admin />
             </Routes>
         </Router>
     }
@@ -123,23 +124,30 @@ fn Home() -> impl IntoView {
 
 #[component]
 fn HomeActions(authenticated: bool) -> impl IntoView {
-    view! {
-        <div class="mt-10 flex flex-wrap gap-3 text-sm">
-            {authenticated.then(|| view! {
-                <a class="inline-flex h-8 items-center justify-center rounded-none bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/80" href="/account">
-                    "My account"
-                </a>
-            })}
-            {(!authenticated).then(|| view! {
+    let account_action = if authenticated {
+        view! {
+            <a class="inline-flex h-8 items-center justify-center rounded-none bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/80" href="/account">
+                "My account"
+            </a>
+        }
+        .into_any()
+    } else {
+        view! {
+            <>
                 <a class="inline-flex h-8 items-center justify-center rounded-none bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/80" href="/register">
                     "Create an account"
                 </a>
-            })}
-            {(!authenticated).then(|| view! {
                 <a class="inline-flex h-8 items-center justify-center rounded-none border border-input bg-input px-3 text-xs font-medium text-foreground hover:bg-card" href="/login">
                     "Sign in"
                 </a>
-            })}
+            </>
+        }
+        .into_any()
+    };
+
+    view! {
+        <div class="mt-10 flex flex-wrap gap-3 text-sm">
+            {account_action}
             <a class="inline-flex h-8 items-center justify-center rounded-none border border-input bg-input px-3 text-xs font-medium text-foreground hover:bg-card" href="/status">
                 "Realm status"
             </a>
@@ -255,6 +263,40 @@ fn Status() -> impl IntoView {
             </Suspense>
             <a class="mt-6 inline-block text-xs text-primary hover:underline" href="/">"Return home"</a>
         </AuthShell>
+    }
+}
+
+#[component]
+fn Admin() -> impl IntoView {
+    let overview = Resource::new(|| (), |_| portal::get_admin_overview());
+    view! {
+        <AuthShell title="GM tools" subtitle="Game master account controls.">
+            <Suspense fallback=move || view! { <p class="mt-8 text-xs text-muted-foreground">"Loading operations..."</p> }>
+                {move || overview.get().map(render_admin_overview)}
+            </Suspense>
+            <a class="mt-6 inline-block text-xs text-primary hover:underline" href="/account">"Return to account"</a>
+        </AuthShell>
+    }
+}
+
+fn render_admin_overview(result: Result<portal::AdminOverview, ServerFnError>) -> AnyView {
+    match result {
+        Ok(overview) => view! {
+            <div class="mt-8 border-y border-border py-5 text-xs">
+                <p class="text-muted-foreground">"Open support queue"</p>
+                <p class="mt-1 font-sans text-2xl font-semibold text-foreground">{overview.open_support_tickets}</p>
+            </div>
+            <ul class="mt-6 divide-y divide-border">
+                {overview.realms.into_iter().map(|realm| {
+                    let state = if realm.online { "Online" } else { "Offline" };
+                    view! { <li class="flex items-center justify-between py-3 text-xs"><span class="font-medium text-foreground">{realm.name}</span><span class=if realm.online { "text-primary" } else { "text-muted-foreground" }>{state}</span></li> }
+                }).collect_view()}
+            </ul>
+        }.into_any(),
+        Err(error) => view! {
+            <p class="mt-8 text-xs text-muted-foreground">"GM tools could not load."</p>
+            <pre class="mt-3 overflow-x-auto border border-border bg-input p-3 text-xs text-destructive">{error.to_string()}</pre>
+        }.into_any(),
     }
 }
 

@@ -406,10 +406,34 @@ async fn record_audit(
 }
 
 fn has_same_origin(headers: &HeaderMap, state: &AppState) -> bool {
-    headers
+    let origin = headers
         .get(axum::http::header::ORIGIN)
-        .and_then(|origin| origin.to_str().ok())
-        == Some(state.public_origin.as_str())
+        .and_then(|value| value.to_str().ok());
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|value| value.to_str().ok());
+    let expected_scheme = if state.secure_cookies {
+        "https://"
+    } else {
+        "http://"
+    };
+    let allowed = origin
+        .and_then(|origin| origin.strip_prefix(expected_scheme))
+        .and_then(|authority| authority.split('/').next())
+        .zip(host)
+        .is_some_and(|(authority, host)| authority.eq_ignore_ascii_case(host));
+
+    if !allowed {
+        tracing::error!(
+            target: "oxcore_web",
+            ?origin,
+            ?host,
+            expected_scheme,
+            configured_origin = %state.public_origin,
+            "portal rejected cross-origin form request"
+        );
+    }
+    allowed
 }
 
 async fn current_session(pool: &MySqlPool, jar: &CookieJar) -> Option<Session> {
@@ -440,17 +464,39 @@ pub async fn session_from_token(pool: &MySqlPool, token: &str) -> Option<Session
     Some(Session { account_id })
 }
 
-async fn has_gm_access(pool: &MySqlPool, account_id: u32) -> Result<bool> {
-    let exists = sqlx::query_scalar::<_, i64>(
-        "SELECT EXISTS(SELECT 1 FROM `account` WHERE `id` = ? AND `gmlevel` > 0) \
-         OR EXISTS(SELECT 1 FROM `account_access` WHERE `id` = ? AND `gmlevel` > 0)",
+pub(crate) async fn has_gm_access(pool: &MySqlPool, account_id: u32) -> Result<bool> {
+    let account_level =
+        sqlx::query_scalar::<_, u8>("SELECT `gmlevel` FROM `account` WHERE `id` = ?")
+            .bind(account_id)
+            .fetch_optional(pool)
+            .await
+            .context("failed to query GM access")?;
+    if account_level.unwrap_or(0) > 0 {
+        tracing::error!(
+            target: "oxcore_web",
+            account_id,
+            gmlevel = account_level.unwrap_or(0),
+            "portal GM authorization granted by account gmlevel"
+        );
+        return Ok(true);
+    }
+
+    let realm_access = sqlx::query_scalar::<_, i64>(
+        "SELECT EXISTS(SELECT 1 FROM `account_access` WHERE `id` = ? AND `gmlevel` > 0)",
     )
-    .bind(account_id)
     .bind(account_id)
     .fetch_one(pool)
     .await
-    .context("failed to query GM access")?;
-    Ok(exists != 0)
+    .context("failed to query realm GM access")?;
+    let allowed = realm_access != 0;
+    tracing::error!(
+        target: "oxcore_web",
+        account_id,
+        account_gmlevel = account_level.unwrap_or(0),
+        realm_access = allowed,
+        "portal GM authorization decision"
+    );
+    Ok(allowed)
 }
 
 fn token_hash(token: &str) -> [u8; 32] {

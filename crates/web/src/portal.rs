@@ -65,6 +65,12 @@ pub struct RealmStatus {
     pub online: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminOverview {
+    pub realms: Vec<RealmStatus>,
+    pub open_support_tickets: u64,
+}
+
 #[server]
 pub async fn get_portal_overview() -> Result<PortalOverview, ServerFnError> {
     #[cfg(feature = "ssr")]
@@ -241,6 +247,42 @@ pub async fn get_realm_status() -> Result<Vec<RealmStatus>, ServerFnError> {
                 .collect()
         })
         .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_admin_overview() -> Result<AdminOverview, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        let is_gm = match crate::auth::has_gm_access(&state.auth, account_id).await {
+            Ok(is_gm) => is_gm,
+            Err(error) => {
+                tracing::error!(target: "oxcore_web", %error, account_id, "portal GM authorization lookup failed");
+                return Err(ServerFnError::ServerError(error.to_string()));
+            }
+        };
+        if !is_gm {
+            tracing::warn!(target: "oxcore_web", account_id, "portal GM authorization denied");
+            return Err(ServerFnError::ServerError("Not authorized".to_string()));
+        }
+        let realms = get_realm_status().await?;
+        let open_support_tickets = match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM `web_support_tickets` WHERE `status` IN ('open', 'awaiting_player')",
+        )
+        .fetch_one(&*state.web)
+        .await
+        {
+            Ok(count) => count as u64,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        return Ok(AdminOverview {
+            realms,
+            open_support_tickets,
+        });
     }
 
     #[cfg(not(feature = "ssr"))]
