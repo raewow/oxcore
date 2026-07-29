@@ -487,6 +487,9 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_SET_SELECTION => {
                     player_handler::handle_set_selection(session, packet, world).await?;
                 }
+                Opcode::CMSG_STANDSTATECHANGE => {
+                    player_handler::handle_stand_state_change(session, packet, world).await?;
+                }
 
                 // Trainer handlers
                 Opcode::CMSG_TRAINER_LIST => {

@@ -4,7 +4,8 @@
 
 use anyhow::Result;
 
-use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
+use oxcore_shared::protocol::movement::MovementInfo as SharedMovementInfo;
+use oxcore_shared::protocol::{ObjectGuid, Position, Protocol, WorldPacket};
 
 /// Movement flags - 32-bit bitmask representing various movement states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,6 +148,19 @@ impl MovementInfo {
 
     /// Read movement info from a packet
     /// Note: mover_guid must be set separately (it's derived from the session, not the packet)
+    /// Parse a movement body in whichever layout the client speaks.
+    ///
+    /// The modern parse is delegated to the shared implementation rather than duplicated -- the
+    /// bit-packed 1.14 layout is fiddly enough that two copies would drift. The two `MovementInfo`
+    /// types are field-for-field identical apart from their `MoveFlags` newtype, which is why this
+    /// can just copy across.
+    pub fn read_for(protocol: Protocol, packet: &mut WorldPacket) -> Result<Self> {
+        match protocol {
+            Protocol::Vanilla => Self::read_from_packet(packet),
+            Protocol::Modern => Ok(SharedMovementInfo::read_modern(packet)?.into()),
+        }
+    }
+
     pub fn read_from_packet(packet: &mut WorldPacket) -> Result<Self> {
         let mut info = Self::new();
 
@@ -329,5 +343,48 @@ mod tests {
 
         assert_eq!(info.transport_guid, None);
         assert_eq!(info.transport_position, None);
+    }
+}
+
+/// The world crate keeps its own `MovementInfo` (see the module header -- it was ported wholesale).
+/// The two are structurally identical, so parses done in `oxcore-shared` convert straight across.
+impl From<SharedMovementInfo> for MovementInfo {
+    fn from(shared: SharedMovementInfo) -> Self {
+        Self {
+            mover_guid: shared.mover_guid,
+            flags: MoveFlags::new(shared.flags.value()),
+            position: shared.position,
+            transport_guid: shared.transport_guid,
+            transport_position: shared.transport_position,
+            transport_time: shared.transport_time,
+            fall_time: shared.fall_time,
+            jump_velocity: shared.jump_velocity,
+            jump_sin_angle: shared.jump_sin_angle,
+            jump_cos_angle: shared.jump_cos_angle,
+            jump_xy_speed: shared.jump_xy_speed,
+            spline_elevation: shared.spline_elevation,
+            time: shared.time,
+        }
+    }
+}
+
+/// The other direction, for handing a parsed movement block to a shared message type.
+impl From<MovementInfo> for SharedMovementInfo {
+    fn from(local: MovementInfo) -> Self {
+        Self {
+            mover_guid: local.mover_guid,
+            flags: oxcore_shared::protocol::movement::MoveFlags::new(local.flags.value()),
+            position: local.position,
+            transport_guid: local.transport_guid,
+            transport_position: local.transport_position,
+            transport_time: local.transport_time,
+            fall_time: local.fall_time,
+            jump_velocity: local.jump_velocity,
+            jump_sin_angle: local.jump_sin_angle,
+            jump_cos_angle: local.jump_cos_angle,
+            jump_xy_speed: local.jump_xy_speed,
+            spline_elevation: local.spline_elevation,
+            time: local.time,
+        }
     }
 }

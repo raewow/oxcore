@@ -12,6 +12,7 @@ use anyhow::Result;
 use parking_lot::Mutex;
 
 use crate::core::common::MovementInfo;
+use oxcore_shared::protocol::Protocol;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// A single buffered movement packet, pre-parsed at push time
@@ -72,7 +73,9 @@ impl MovementBuffer {
     /// Push a movement packet into the buffer.
     /// Pre-parses MovementInfo from the packet for efficient map-level processing.
     /// Called from the socket task.
-    pub fn push(&self, opcode: Opcode, mut packet: WorldPacket) -> Result<()> {
+    ///
+    /// `protocol` selects the body layout: the 1.12 and 1.14 movement blocks share no structure.
+    pub fn push(&self, opcode: Opcode, protocol: Protocol, mut packet: WorldPacket) -> Result<()> {
         let mut movement_info = MovementInfo::read_for(protocol, &mut packet)?;
         movement_info.mover_guid = self.player_guid;
 

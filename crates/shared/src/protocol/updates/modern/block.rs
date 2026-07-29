@@ -109,13 +109,23 @@ impl ModernUpdateBlock {
         update_type: ModernUpdateType,
         guid: ObjectGuid,
         object_type: ModernObjectType,
+        realm_id: u16,
     ) -> Self {
+        let mut fields = ModernFieldsArray::new(object_type, realm_id);
+        if update_type != ModernUpdateType::Values {
+            // 1.14 needs a set of scales and divisors present on every newly created object;
+            // vanilla has no source for them and zero is fatal. See `placeholders`.
+            //
+            // Applied first so that anything the caller sets afterwards wins.
+            super::placeholders::apply(&mut fields, object_type, guid, realm_id);
+        }
+
         Self {
             update_type,
             guid,
             object_type,
             create: None,
-            fields: ModernFieldsArray::new(object_type),
+            fields,
         }
     }
 

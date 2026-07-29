@@ -25,6 +25,16 @@ fn read_selection_target(protocol: Protocol, packet: &mut WorldPacket) -> Result
     }
 }
 
+fn read_stand_state(packet: &mut WorldPacket) -> Result<Option<u8>> {
+    let state = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read stand state"))?;
+    Ok(match state {
+        0 | 1 | 3 | 8 => Some(state as u8),
+        _ => None,
+    })
+}
+
 /// Handle CMSG_SET_SELECTION (0x13D / 317)
 ///
 /// Sent when player clicks/targets a unit, object, or NPC.
@@ -59,6 +69,29 @@ pub async fn handle_set_selection(
     Ok(())
 }
 
+/// Handle CMSG_STANDSTATECHANGE.
+///
+/// The modern and vanilla request bodies both carry the requested state as a u32.
+pub async fn handle_stand_state_change(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let Some(state) = read_stand_state(packet)? else {
+        return Ok(());
+    };
+
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(player_guid, |player| player.stand_state = state);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,5 +111,16 @@ mod tests {
                 .raw(),
             0x0200_01
         );
+    }
+
+    #[test]
+    fn stand_state_accepts_only_client_selectable_states() {
+        let mut sit = WorldPacket::new(Opcode::CMSG_STANDSTATECHANGE);
+        sit.write_u32(1);
+        assert_eq!(read_stand_state(&mut sit).unwrap(), Some(1));
+
+        let mut dead = WorldPacket::new(Opcode::CMSG_STANDSTATECHANGE);
+        dead.write_u32(7);
+        assert_eq!(read_stand_state(&mut dead).unwrap(), None);
     }
 }

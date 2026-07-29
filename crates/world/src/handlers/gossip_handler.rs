@@ -14,11 +14,25 @@ use crate::game::creature::ai::is_hostile_faction;
 use crate::game::player::spells::state::CurrentSpellType;
 use crate::World;
 use oxcore_shared::protocol::bitbuf::BitReader;
-use oxcore_shared::protocol::{Opcode, Protocol, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Protocol, WorldPacket};
 
 const NPC_FLAG_BANKER: u32 = 0x00000100;
 const INTERACTION_DISTANCE: f32 = 5.0;
 const UNIT_FLAG_NOT_SELECTABLE: u32 = 0x02000000;
+
+fn read_gossip_hello_guid(protocol: Protocol, packet: &mut WorldPacket) -> Result<ObjectGuid> {
+    if protocol == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        let (_, low) = reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read modern NPC GUID"))?;
+        Ok(ObjectGuid::from_raw(low))
+    } else {
+        packet
+            .read_guid()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read NPC GUID"))
+    }
+}
 
 fn read_npc_text_query(protocol: Protocol, packet: &mut WorldPacket) -> Result<u32> {
     if protocol == Protocol::Modern {
@@ -41,6 +55,41 @@ fn read_npc_text_query(protocol: Protocol, packet: &mut WorldPacket) -> Result<u
     }
 }
 
+fn read_gossip_select_option(
+    protocol: Protocol,
+    packet: &mut WorldPacket,
+) -> Result<(ObjectGuid, u32)> {
+    if protocol == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        let (_, low) = reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read modern NPC GUID"))?;
+        let _gossip_id = reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read gossip ID"))?;
+        let option_id = reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read option ID"))?;
+        let code_length = reader
+            .read_bits(8)
+            .ok_or_else(|| anyhow::anyhow!("Failed to read promotion code length"))?
+            as usize;
+        reader
+            .read_string(code_length)
+            .ok_or_else(|| anyhow::anyhow!("Failed to read promotion code"))?;
+        Ok((ObjectGuid::from_raw(low), option_id))
+    } else {
+        let npc_guid = packet
+            .read_guid()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read NPC GUID"))?;
+        let option_id = packet
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read option ID"))?;
+        let _coded_text = packet.read_cstring();
+        Ok((npc_guid, option_id))
+    }
+}
+
 /// Handle CMSG_GOSSIP_HELLO (0x17B)
 ///
 /// Sent when player right-clicks an NPC to open gossip.
@@ -54,10 +103,7 @@ pub async fn handle_gossip_hello(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    // CMSG_GOSSIP_HELLO uses unpacked GUID (8 bytes)
-    let npc_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read NPC GUID"))?;
+    let npc_guid = read_gossip_hello_guid(session.protocol(), packet)?;
 
     info!(
         "CMSG_GOSSIP_HELLO: player={:?}, npc={:?}",
@@ -394,18 +440,8 @@ pub async fn handle_gossip_select_option(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    // CMSG_GOSSIP_SELECT_OPTION uses unpacked GUID (8 bytes)
-    let npc_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read NPC GUID"))?;
-
-    // Client sends option_id (called gossipListId in MaNGOS), NOT menu_id
-    let option_id = packet
-        .read_u32()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read option ID"))?;
-
-    // Optional coded text (for input boxes)
-    let _coded_text = packet.read_cstring();
+    // Hermes' modern body adds GossipID and bit-length-prefixes the promotion code.
+    let (npc_guid, option_id) = read_gossip_select_option(session.protocol(), packet)?;
 
     debug!(
         "CMSG_GOSSIP_SELECT_OPTION: player={:?}, npc={:?}, option={}",
@@ -609,6 +645,40 @@ mod tests {
         assert_eq!(
             read_npc_text_query(Protocol::Modern, &mut packet).unwrap(),
             42
+        );
+    }
+
+    #[test]
+    fn modern_gossip_hello_reads_packed_guid128() {
+        let mut writer = BitWriter::new();
+        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        let mut packet = WorldPacket::new(Opcode::CMSG_GOSSIP_HELLO);
+        packet.write_bytes(&writer.into_bytes());
+
+        assert_eq!(
+            read_gossip_hello_guid(Protocol::Modern, &mut packet)
+                .unwrap()
+                .raw(),
+            0x0200_01
+        );
+    }
+
+    #[test]
+    fn modern_gossip_select_reads_index_after_gossip_id() {
+        let mut writer = BitWriter::new();
+        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        writer.write_u32(7); // GossipID
+        writer.write_u32(3); // GossipIndex
+        writer.write_bits(4, 8);
+        writer.write_string_raw("code");
+        let mut packet = WorldPacket::new(Opcode::CMSG_GOSSIP_SELECT_OPTION);
+        packet.write_bytes(&writer.into_bytes());
+
+        assert_eq!(
+            read_gossip_select_option(Protocol::Modern, &mut packet)
+                .unwrap()
+                .1,
+            3
         );
     }
 }

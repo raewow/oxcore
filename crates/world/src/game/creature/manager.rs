@@ -1265,12 +1265,13 @@ impl CreatureManager {
     /// the creature's current position but no spline/movement data. Without this
     /// sync packet, the client shows the creature standing still until the next
     /// natural SMSG_MONSTER_MOVE fires (when the creature picks a new destination).
+    /// Returns the message, not an encoded packet: the recipient's protocol decides the body, and
+    /// only the send path knows it.
     pub fn build_movement_sync_packet(
         &self,
         guid: ObjectGuid,
-    ) -> Option<oxcore_shared::protocol::WorldPacket> {
+    ) -> Option<oxcore_shared::messages::movement::SmsgMonsterMove> {
         use oxcore_shared::messages::movement::{spline_flags, SmsgMonsterMove};
-        use oxcore_shared::messages::ToWorldPacket;
 
         let creature = self.creatures.get(&guid)?;
 
@@ -1301,7 +1302,7 @@ impl CreatureManager {
             waypoints: vec![final_dest],
         };
 
-        Some(msg.to_vanilla())
+        Some(msg)
     }
 
     /// Send nearby creatures to a player (called during login)
@@ -1353,13 +1354,9 @@ impl CreatureManager {
             if let Some(msg) = self.build_create_msg(guid, world) {
                 for block in msg.blocks {
                     if count >= MAX_BLOCKS_PER_PACKET {
-                        // Send current batch with compression via broadcast manager
-                        let packet = current_msg.to_vanilla();
-                        let compressed = compress_update_packet_if_needed(packet)?;
-                        world
-                            .managers
-                            .broadcast_mgr
-                            .send_msg_to_player(player_guid, compressed);
+                        // Compression is part of the vanilla encoding, so the recipient's
+                        // broadcaster decides whether to apply it.
+                        send_update_to(world, player_guid, &current_msg)?;
                         total_sent += count;
                         current_msg = SmsgUpdateObject::new();
                         count = 0;
@@ -1370,14 +1367,8 @@ impl CreatureManager {
             }
         }
 
-        // Send remaining blocks with compression via broadcast manager
         if !current_msg.blocks.is_empty() {
-            let packet = current_msg.to_vanilla();
-            let compressed = compress_update_packet_if_needed(packet)?;
-            world
-                .managers
-                .broadcast_mgr
-                .send_msg_to_player(player_guid, compressed);
+            send_update_to(world, player_guid, &current_msg)?;
             total_sent += count;
         }
 
@@ -1474,4 +1465,19 @@ mod tests {
     fn lootable_corpse_flags_include_only_lootable() {
         assert_eq!(corpse_dynamic_flags(true), UNIT_DYNFLAG_LOOTABLE);
     }
+}
+
+/// Send one object update to a single player, letting their broadcaster pick the encoding.
+///
+/// A missing broadcaster is not an error: the player may have disconnected between the visibility
+/// scan and the send.
+fn send_update_to(
+    world: &crate::World,
+    player_guid: ObjectGuid,
+    msg: &oxcore_shared::messages::update::SmsgUpdateObject,
+) -> anyhow::Result<()> {
+    if let Some(broadcaster) = world.managers.player_mgr.get_broadcaster(player_guid) {
+        broadcaster.send_update_object(msg)?;
+    }
+    Ok(())
 }

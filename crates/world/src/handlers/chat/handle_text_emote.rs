@@ -7,7 +7,35 @@ use crate::core::session::WorldSession;
 use crate::World;
 use oxcore_shared::messages::chat::SmsgTextEmote;
 use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::WorldPacket;
+use oxcore_shared::protocol::bitbuf::BitReader;
+use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
+
+fn read_text_emote(protocol: Protocol, packet: &mut WorldPacket) -> Result<(u32, u32, ObjectGuid)> {
+    if protocol == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        let (_, low) = reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow!("Failed to read modern target GUID from CMSG_TEXT_EMOTE"))?;
+        let text_emote = reader
+            .read_u32()
+            .ok_or_else(|| anyhow!("Failed to read text_emote from CMSG_TEXT_EMOTE"))?;
+        let emote_num = reader
+            .read_u32()
+            .ok_or_else(|| anyhow!("Failed to read emote_num from CMSG_TEXT_EMOTE"))?;
+        Ok((text_emote, emote_num, ObjectGuid::from_raw(low)))
+    } else {
+        let text_emote = packet
+            .read_u32()
+            .ok_or_else(|| anyhow!("Failed to read text_emote from CMSG_TEXT_EMOTE"))?;
+        let emote_num = packet
+            .read_u32()
+            .ok_or_else(|| anyhow!("Failed to read emote_num from CMSG_TEXT_EMOTE"))?;
+        let target_guid = packet
+            .read_packed_guid()
+            .ok_or_else(|| anyhow!("Failed to read target GUID from CMSG_TEXT_EMOTE"))?;
+        Ok((text_emote, emote_num, target_guid))
+    }
+}
 
 /// Handle CMSG_TEXT_EMOTE - player performs a text emote
 pub async fn handle_text_emote(
@@ -19,18 +47,7 @@ pub async fn handle_text_emote(
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
 
-    // Read packet data: textEmote (u32), emoteNum (u32), targetGUID (packed)
-    let text_emote = packet
-        .read_u32()
-        .ok_or_else(|| anyhow!("Failed to read text_emote from CMSG_TEXT_EMOTE"))?;
-
-    let emote_num = packet
-        .read_u32()
-        .ok_or_else(|| anyhow!("Failed to read emote_num from CMSG_TEXT_EMOTE"))?;
-
-    let target_guid = packet
-        .read_packed_guid()
-        .ok_or_else(|| anyhow!("Failed to read target GUID from CMSG_TEXT_EMOTE"))?;
+    let (text_emote, emote_num, target_guid) = read_text_emote(session.protocol(), packet)?;
 
     // Basic validation
     if text_emote > 1000 {
@@ -60,4 +77,26 @@ pub async fn handle_text_emote(
         .broadcast_msg_nearby(player_guid, &text_emote_msg, true);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxcore_shared::protocol::bitbuf::BitWriter;
+    use oxcore_shared::protocol::Opcode;
+
+    #[test]
+    fn modern_text_emote_starts_with_packed_target_guid() {
+        let mut writer = BitWriter::new();
+        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        writer.write_u32(42);
+        writer.write_u32(7);
+        let mut packet = WorldPacket::new(Opcode::CMSG_TEXT_EMOTE);
+        packet.write_bytes(&writer.into_bytes());
+
+        assert_eq!(
+            read_text_emote(Protocol::Modern, &mut packet).unwrap(),
+            (42, 7, ObjectGuid::from_raw(0x0200_01))
+        );
+    }
 }

@@ -164,7 +164,7 @@ impl Opcode {
     // Query Responses
     // ============================================================================
 
-    pub const CMSG_NAME_QUERY: Opcode = Opcode { vanilla: 0x050, ..Opcode::NONE };
+    pub const CMSG_NAME_QUERY: Opcode = Opcode { vanilla: 0x050, modern: 0x376F }; // CMSG_QUERY_PLAYER_NAME
     pub const SMSG_NAME_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x0051, modern: 0x3002 }; // 81
     pub const CMSG_CREATURE_QUERY: Opcode = Opcode { vanilla: 0x0060, modern: 0x326B }; // 96
     pub const SMSG_CREATURE_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x0061, modern: 0x2914 }; // 97
@@ -1021,6 +1021,11 @@ impl Opcode {
     pub const CMSG_ENTER_ENCRYPTED_MODE_ACK: Opcode = Opcode { modern: 0x3767, ..Opcode::NONE };
     pub const CMSG_AUTH_CONTINUED_SESSION: Opcode = Opcode { modern: 0x3766, ..Opcode::NONE };
     pub const SMSG_CONNECT_TO: Opcode = Opcode { modern: 0x304D, ..Opcode::NONE };
+
+    // Movement. 1.14 split vanilla's bidirectional MSG_MOVE_* pairs: the client still sends the
+    // shared number, but the server answers observers on a dedicated SMSG. There is no vanilla
+    // equivalent -- vanilla simply echoes the client's own opcode back to nearby players.
+    pub const SMSG_MOVE_UPDATE: Opcode = Opcode { modern: 0x2DE0, ..Opcode::NONE };
 
     // Glue screen. The client sends all of these unprompted at character select.
     pub const CMSG_SERVER_TIME_OFFSET_REQUEST: Opcode = Opcode { modern: 0x369B, ..Opcode::NONE };
@@ -2048,6 +2053,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::CMSG_WARDEN_DATA, "CMSG_WARDEN_DATA"),
     (Opcode::SMSG_WARDEN_DATA, "SMSG_WARDEN_DATA"),
     (Opcode::SMSG_WEATHER, "SMSG_WEATHER"),
+    (Opcode::SMSG_MOVE_UPDATE, "SMSG_MOVE_UPDATE"),
     (
         Opcode::SMSG_ENTER_ENCRYPTED_MODE,
         "SMSG_ENTER_ENCRYPTED_MODE",
@@ -2226,8 +2232,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            588,
-            "expected 588 opcode constants; update this count deliberately when adding opcodes"
+            589,
+            "expected 589 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

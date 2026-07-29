@@ -504,17 +504,9 @@ impl VisibilitySubsystem {
             packets_to_send.len()
         );
 
-        // Send all packets with compression
+        // Compression only applies to the vanilla body, so the broadcaster picks per protocol.
         for update_msg in packets_to_send {
-            let packet = update_msg.to_vanilla();
-
-            // Apply compression if needed (>128 bytes threshold)
-            let compressed_packet = compress_update_packet_if_needed(packet)?;
-
-            let mut v2_packet = WorldPacket::new(compressed_packet.opcode());
-            v2_packet.write_bytes(compressed_packet.contents());
-
-            broadcaster.send_direct(v2_packet);
+            broadcaster.send_update_object(&update_msg)?;
         }
 
         // Send movement sync packets for creatures that are currently mid-movement.
@@ -522,12 +514,12 @@ impl VisibilitySubsystem {
         // client shows moving creatures as standing still until their next movement.
         for &target_guid in &targets_to_send {
             if target_guid.is_unit() && !target_guid.is_player() {
-                if let Some(move_packet) = world
+                if let Some(move_msg) = world
                     .managers
                     .creature_mgr
                     .build_movement_sync_packet(target_guid)
                 {
-                    broadcaster.send_direct(move_packet);
+                    broadcaster.send_msg(&move_msg);
                 }
             }
         }
@@ -595,21 +587,18 @@ impl VisibilitySubsystem {
             return Ok(());
         };
 
-        let packet = our_create_msg.to_vanilla();
-
+        // Encoded once per observer rather than once overall: each sees this object under their
+        // own protocol, and none of them owns it.
         for &target_guid in &targets_to_send {
             if let Some(target_broadcaster) = world.managers.player_mgr.get_broadcaster(target_guid)
             {
-                let mut v2_packet = WorldPacket::new(packet.opcode());
-                v2_packet.write_bytes(packet.contents());
-
                 tracing::debug!(
                     "[VISIBILITY] Sending reverse CREATE_OBJECT2: {:?} -> {:?}",
                     viewer_guid,
                     target_guid
                 );
 
-                target_broadcaster.send_direct(v2_packet);
+                target_broadcaster.send_update_object(&our_create_msg)?;
             }
         }
 
@@ -649,9 +638,6 @@ impl VisibilitySubsystem {
             .collect();
 
         let msg = SmsgOutOfRange::new(world_guids);
-        let packet = msg.to_vanilla();
-        let mut v2_packet = WorldPacket::new(packet.opcode());
-        v2_packet.write_bytes(packet.contents());
 
         // Diagnostic: log when creatures in combat are sent out of range
         for &target in targets {
@@ -677,7 +663,7 @@ impl VisibilitySubsystem {
             targets.len()
         );
 
-        broadcaster.send_direct(v2_packet);
+        broadcaster.send_msg(&msg);
 
         Ok(())
     }

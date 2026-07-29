@@ -227,7 +227,12 @@ impl WorldSession {
             Protocol::Modern => match msg.to_modern() {
                 Some(packet) => packet,
                 None => {
-                    tracing::debug!("message has no modern encoding; dropping");
+                    // Name it: an unnamed drop is unactionable when a client renders a
+                    // half-populated world. Costs a vanilla encode, but only on the drop path.
+                    tracing::debug!(
+                        "No modern encoding for {:?}; dropping",
+                        msg.to_vanilla().opcode()
+                    );
                     return Ok(());
                 }
             },

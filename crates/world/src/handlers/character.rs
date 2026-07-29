@@ -1144,15 +1144,21 @@ pub async fn handle_player_login_with_guid(
     }
     update_object = update_object.add_block(UpdateBlockData::CreateObject2(player_block));
 
-    // Compressing packet (matching /world behavior)
-    // Note: SmsgUpdateObject internally creates a WorldPacket, so we just need to compress and send it
-    let mut packet = update_object.to_vanilla();
-    let compressed = compress_update_packet_if_needed(packet)?;
-    session.send_packet(compressed.clone())?;
-    info!(
-        "[LOGIN] 10/11 SMSG_UPDATE_OBJECT: 1 player block (opcode={:?})",
-        compressed.opcode()
-    );
+    // Routed through the broadcaster rather than the session: this is the packet that tells the
+    // client which object it *is*, and only the broadcaster knows the recipient well enough to
+    // encode it. On modern that decides `ThisIsYou` and the `ActivePlayer` field table, and whether
+    // to compress at all -- sending a vanilla compressed body here is what left 1.14 clients on the
+    // loading screen forever, since the client cannot parse it and never finishes loading.
+    if let Some(broadcaster) = world.managers.player_mgr.get_broadcaster(guid) {
+        broadcaster.send_update_object(&update_object)?;
+    } else {
+        // No broadcaster means the player vanished mid-login; nothing to send to.
+        tracing::warn!(
+            "[LOGIN] No broadcaster for {:?}; skipping self create-object",
+            guid
+        );
+    }
+    info!("[LOGIN] 10/11 SMSG_UPDATE_OBJECT: 1 player block");
     // 11/11. SMSG_INIT_WORLD_STATES
     let init_world_states = SmsgInitWorldStates::new(character.map, character.zone);
     session.send_msg(init_world_states)?;

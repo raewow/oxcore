@@ -325,7 +325,12 @@ impl ValuesUpdateBlock {
 
     fn to_modern(&self, self_guid: Option<ObjectGuid>) -> ModernUpdateBlock {
         let object_type = self.object_type.to_modern(self_guid == Some(self.guid));
-        let mut block = ModernUpdateBlock::new(ModernUpdateType::Values, self.guid, object_type);
+        let mut block = ModernUpdateBlock::new(
+            ModernUpdateType::Values,
+            self.guid,
+            object_type,
+            MODERN_REALM_ID,
+        );
         for &(index, value) in &self.fields {
             block.fields.set_vanilla(index, value);
         }
@@ -508,7 +513,8 @@ impl CreateObjectBlock {
             self_guid == Some(self.guid) || self.update_flags & update_flags::UPDATEFLAG_SELF != 0;
         let object_type = ModernObjectType::from_vanilla(self.type_id, is_self);
 
-        let mut block = ModernUpdateBlock::new(update_type, self.guid, object_type);
+        let mut block =
+            ModernUpdateBlock::new(update_type, self.guid, object_type, MODERN_REALM_ID);
 
         let (position, movement_flags, speeds) = match &self.movement {
             Some(MovementBlockData::Position(position)) => (*position, 0, None),
@@ -961,6 +967,60 @@ mod tests {
             &block[88..92],
             &7.0f32.to_le_bytes(),
             "flight speed default"
+        );
+    }
+
+    /// An object's own `OBJECT_FIELD_GUID` must equal the GUID in its block header.
+    ///
+    /// Vanilla stores a GUID in two slots, modern in four. Copying only the two vanilla supplies
+    /// leaves the upper 64 bits zero, so the field decodes as high-type `Null` while the header
+    /// says `Player` — the object claims to be two different things and the client crashes on it.
+    ///
+    /// Uses a values block deliberately: it has no movement block and gets no placeholder fields,
+    /// so the four GUID slots are the only values present and their offsets are unambiguous.
+    #[test]
+    fn object_guid_field_is_widened_to_match_the_header() {
+        use crate::protocol::update_fields::OBJECT_FIELD_GUID;
+
+        let guid = ObjectGuid::new_player(4);
+        let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+            ValuesUpdateBlock::new(guid, ObjectType::Player)
+                .set_guid_field(OBJECT_FIELD_GUID, guid),
+        ));
+        let packet = msg.to_modern().expect("ported");
+
+        let (expected_high, expected_low) = guid.to_guid128(MODERN_REALM_ID);
+        assert_ne!(
+            expected_high, 0,
+            "a player guid128 has a non-zero high half"
+        );
+
+        // Values block: type byte, packed guid128, mask, then the set values.
+        let block = &packet.contents()[11..];
+        let blocks = ModernObjectType::Player.field_count().div_ceil(32) as usize;
+        assert_eq!(block[0], 0, "UpdateTypeModern::Values");
+        assert_eq!(block[6], blocks as u8);
+
+        let values = &block[7 + blocks * 4..];
+        assert_eq!(
+            &values[0..4],
+            &(expected_low as u32).to_le_bytes(),
+            "guid low word"
+        );
+        assert_eq!(
+            &values[4..8],
+            &((expected_low >> 32) as u32).to_le_bytes(),
+            "guid low upper word"
+        );
+        assert_eq!(
+            &values[8..12],
+            &(expected_high as u32).to_le_bytes(),
+            "guid high word — zero here is the crash"
+        );
+        assert_eq!(
+            &values[12..16],
+            &((expected_high >> 32) as u32).to_le_bytes(),
+            "guid high upper word"
         );
     }
 

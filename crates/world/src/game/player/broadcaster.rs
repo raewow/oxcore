@@ -4,8 +4,11 @@
 //! who should receive packets sent through BroadcastManager. The visibility system
 //! manages the listener list based on who can see whom.
 
+use crate::core::common::compress_update_packet_if_needed;
 use crate::game::player::packet_queue::{PacketQueue, PacketQueueConfig};
+use anyhow::Result;
 use arc_swap::ArcSwap;
+use oxcore_shared::messages::update::SmsgUpdateObject;
 use oxcore_shared::messages::{Recipient, ToWorldPacket};
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Protocol, WorldPacket};
 use parking_lot::RwLock;
@@ -110,6 +113,27 @@ impl PlayerBroadcaster {
             Some(packet) => self.enqueue_encoded(packet),
             None => self.warn_unported(msg),
         }
+    }
+
+    /// Send an object update, compressing it only for clients that understand compression.
+    ///
+    /// `SMSG_COMPRESSED_UPDATE_OBJECT` wraps a *vanilla* body in zlib, so it is inseparable from
+    /// the vanilla encoding — there is no way to compress first and choose a protocol later. A
+    /// modern client gets the uncompressed body, which is also what HermesProxy sends: it inflates
+    /// the legacy packet and forwards a plain `SMSG_UPDATE_OBJECT`.
+    ///
+    /// This exists because the visibility system is the one place that must compress, and routing
+    /// it through the ordinary message path would silently drop every object update for a modern
+    /// player — which is exactly what left 1.14 clients staring at a loading screen.
+    pub fn send_update_object(&self, msg: &SmsgUpdateObject) -> Result<()> {
+        match self.protocol {
+            Protocol::Vanilla => {
+                let compressed = compress_update_packet_if_needed(msg.to_vanilla())?;
+                self.send_encoded(compressed);
+            }
+            Protocol::Modern => self.send_msg(msg),
+        }
+        Ok(())
     }
 
     /// Report a dropped message, naming the opcode.
@@ -322,5 +346,62 @@ impl PlayerBroadcaster {
     pub fn free_at_logout(&self) {
         self.clear_listeners();
         self.packet_queue.write().clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxcore_shared::messages::update::{ObjectType, UpdateBlockData, ValuesUpdateBlock};
+    use oxcore_shared::protocol::HighGuid;
+
+    fn broadcaster(
+        protocol: Protocol,
+    ) -> (PlayerBroadcaster, mpsc::UnboundedReceiver<WorldPacket>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let guid = ObjectGuid::new_without_entry(HighGuid::Player, 1);
+        let mut broadcaster = PlayerBroadcaster::new(tx, guid);
+        broadcaster.set_protocol(protocol);
+        (broadcaster, rx)
+    }
+
+    /// A big enough update compresses for vanilla. `SMSG_COMPRESSED_UPDATE_OBJECT` wraps a vanilla
+    /// body, so it must never reach a modern client -- that is unparseable to them, and it is what
+    /// left 1.14 clients stuck on the loading screen.
+    #[test]
+    fn object_updates_compress_for_vanilla_and_not_for_modern() {
+        let target = ObjectGuid::new_without_entry(HighGuid::Unit, 9);
+        let mut msg = SmsgUpdateObject::new();
+        // Enough blocks to cross the compression threshold.
+        for field in 0..64 {
+            msg = msg.add_block(UpdateBlockData::Values(
+                ValuesUpdateBlock::new(target, ObjectType::Unit).set_field(22 + field, 1),
+            ));
+        }
+
+        let (vanilla, mut vanilla_rx) = broadcaster(Protocol::Vanilla);
+        vanilla.send_update_object(&msg).expect("sent");
+        let sent = vanilla_rx.try_recv().expect("a packet was sent");
+        assert_eq!(sent.opcode(), Opcode::SMSG_COMPRESSED_UPDATE_OBJECT);
+
+        let (modern, mut modern_rx) = broadcaster(Protocol::Modern);
+        modern.send_update_object(&msg).expect("sent");
+        let sent = modern_rx.try_recv().expect("a packet was sent");
+        assert_eq!(
+            sent.opcode(),
+            Opcode::SMSG_UPDATE_OBJECT,
+            "a modern client cannot parse a zlib-wrapped vanilla body"
+        );
+    }
+
+    /// The modern body must actually be built, not silently dropped -- a dropped self create-object
+    /// leaves the client with no player to attach its camera to.
+    #[test]
+    fn a_modern_object_update_is_not_dropped() {
+        let (modern, mut rx) = broadcaster(Protocol::Modern);
+        modern
+            .send_update_object(&SmsgUpdateObject::new())
+            .expect("sent");
+        assert!(rx.try_recv().is_ok(), "the update must reach the queue");
     }
 }

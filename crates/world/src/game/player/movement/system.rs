@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use crate::core::common::{MoveFlags, MovementInfo};
 use crate::World;
-use oxcore_shared::messages::movement::{spline_flags, SmsgMonsterMove};
+use oxcore_shared::messages::movement::{
+    spline_flags, KnockbackVector, MsgMovementBroadcast, SmsgMonsterMove,
+};
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 use super::state::PendingKnockback;
@@ -372,8 +374,9 @@ impl MovementSystem {
             .get_position(player_guid)
             .unwrap_or_else(Position::default);
 
-        // Create raw movement packet with the same opcode the client sent
-        let mut packet = WorldPacket::new(opcode);
+        // Built as a message, not a packet: vanilla echoes the client's own opcode back to
+        // observers while 1.14 answers with a single SMSG_MOVE_UPDATE, so the opcode itself differs
+        // per recipient and only the send path knows which each observer needs.
 
         // Create updated movement_info for broadcasting
         // CRITICAL: Use the player's CURRENT position (after update) for broadcasting, not the packet position
@@ -388,18 +391,14 @@ impl MovementSystem {
         // Replacing with server time breaks movement interpolation because the time bases don't match
         // broadcast_movement_info.time is already correct from movement_info.clone()
 
-        // Write movement info (with server time and current position)
-        // This properly handles all conditional fields (transport, fall/jump, spline)
-        broadcast_movement_info.write_to_packet(&mut packet);
-
         // Knockback observers receive the acknowledged launch vector after the
         // movement block, matching MSG_MOVE_KNOCK_BACK in the reference core.
-        if opcode == Opcode::MSG_MOVE_KNOCK_BACK {
-            packet.write_f32(broadcast_movement_info.jump_cos_angle.unwrap_or(0.0));
-            packet.write_f32(broadcast_movement_info.jump_sin_angle.unwrap_or(0.0));
-            packet.write_f32(broadcast_movement_info.jump_xy_speed.unwrap_or(0.0));
-            packet.write_f32(broadcast_movement_info.jump_velocity.unwrap_or(0.0));
-        }
+        let knockback = (opcode == Opcode::MSG_MOVE_KNOCK_BACK).then(|| KnockbackVector {
+            cos_angle: broadcast_movement_info.jump_cos_angle.unwrap_or(0.0),
+            sin_angle: broadcast_movement_info.jump_sin_angle.unwrap_or(0.0),
+            xy_speed: broadcast_movement_info.jump_xy_speed.unwrap_or(0.0),
+            velocity: broadcast_movement_info.jump_velocity.unwrap_or(0.0),
+        });
 
         // Safety check: Ensure broadcaster exists before broadcasting
         // This prevents crashes during login or when player is in an invalid state
@@ -414,17 +413,23 @@ impl MovementSystem {
 
         // Broadcast to nearby players (exclude self)
         tracing::debug!(
-            "[MOVE-BROADCAST] opcode={:?} guid={:?} orient={:.4} time={} pkt_len={}",
+            "[MOVE-BROADCAST] opcode={:?} guid={:?} orient={:.4} time={}",
             opcode,
             player_guid,
             broadcast_movement_info.position.o,
             broadcast_movement_info.time,
-            packet.size()
         );
+
+        let msg = MsgMovementBroadcast {
+            opcode,
+            mover: player_guid,
+            info: broadcast_movement_info.into(),
+            knockback,
+        };
         world
             .managers
             .broadcast_mgr
-            .broadcast_nearby_exclude_self(player_guid, &packet);
+            .broadcast_msg_nearby(player_guid, &msg, false);
 
         Ok(())
     }

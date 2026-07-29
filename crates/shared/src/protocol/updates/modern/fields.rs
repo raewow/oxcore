@@ -3,7 +3,9 @@
 use super::field_map::{self, ModernSlot};
 use super::repack::repack;
 use crate::protocol::bitbuf::BitWriter;
+use crate::protocol::guid::ObjectGuid;
 use crate::protocol::updates::update_types::ObjectTypeId;
+use std::collections::HashMap;
 
 /// Object type as 1.14 numbers them.
 ///
@@ -178,15 +180,25 @@ pub struct ModernFieldsArray {
     object_type: ModernObjectType,
     values: Vec<u32>,
     mask: ModernUpdateMask,
+    /// Realm used to widen 64-bit GUID fields to 128 bits.
+    realm_id: u16,
+    /// Vanilla GUID halves seen so far, keyed by the modern slot their widened form starts at.
+    ///
+    /// A vanilla GUID arrives as two separate `set_vanilla` calls, and neither alone is enough to
+    /// widen: the modern high half encodes the object type, which is only known from the whole
+    /// 64-bit value. So the halves are held here until both have landed.
+    guid_halves: HashMap<u16, (Option<u32>, Option<u32>)>,
 }
 
 impl ModernFieldsArray {
-    pub fn new(object_type: ModernObjectType) -> Self {
+    pub fn new(object_type: ModernObjectType, realm_id: u16) -> Self {
         let field_count = object_type.field_count();
         Self {
             object_type,
             values: vec![0; field_count as usize],
             mask: ModernUpdateMask::new(field_count),
+            realm_id,
+            guid_halves: HashMap::new(),
         }
     }
 
@@ -214,11 +226,21 @@ impl ModernFieldsArray {
             return false;
         };
 
-        // `Guid` and `Plain` write the same way here. They differ only in that a GUID's upper two
-        // modern slots have no vanilla source, and those are simply left unset.
         let index = match slot {
             ModernSlot::None => return false,
-            ModernSlot::Plain(index) | ModernSlot::Guid(index) => index,
+            ModernSlot::Plain(index) => index,
+            // GUIDs cannot be written a half at a time: widening 64 bits to 128 needs the whole
+            // value, because the modern high half is derived from the object type encoded in it.
+            ModernSlot::GuidLow(base) => {
+                self.guid_halves.entry(base).or_default().0 = Some(value);
+                self.widen_guid(base);
+                return true;
+            }
+            ModernSlot::GuidHigh(base) => {
+                self.guid_halves.entry(base).or_default().1 = Some(value);
+                self.widen_guid(base);
+                return true;
+            }
         };
 
         let Some(cell) = self.values.get_mut(index as usize) else {
@@ -229,12 +251,47 @@ impl ModernFieldsArray {
         true
     }
 
+    /// Widen a vanilla GUID field into its four modern slots, once both halves have arrived.
+    ///
+    /// Filling only the two slots vanilla supplies leaves the upper 64 bits zero, which the client
+    /// reads as high-type `Null`. The object's own GUID field then disagrees with the GUID in its
+    /// block header -- the object claims to be two different things, and the client does not
+    /// survive it.
+    fn widen_guid(&mut self, base: u16) {
+        let Some(&(Some(low), Some(high))) = self.guid_halves.get(&base) else {
+            return; // still waiting on the other half
+        };
+
+        let raw = u64::from(low) | (u64::from(high) << 32);
+        let (guid_high, guid_low) = ObjectGuid::from_raw(raw).to_guid128(self.realm_id);
+
+        self.set_modern(base, guid_low as u32);
+        self.set_modern(base + 1, (guid_low >> 32) as u32);
+        self.set_modern(base + 2, guid_high as u32);
+        self.set_modern(base + 3, (guid_high >> 32) as u32);
+    }
+
     /// Set a field by its modern slot number, for values with no vanilla origin.
     pub fn set_modern(&mut self, index: u16, value: u32) {
         if let Some(cell) = self.values.get_mut(index as usize) {
             *cell = value;
             self.mask.set(index);
         }
+    }
+
+    /// Set a float field by its modern slot number.
+    ///
+    /// Modern stores floats in the same u32 slots as integers; only the interpretation differs.
+    pub fn set_modern_f32(&mut self, index: u16, value: f32) {
+        self.set_modern(index, value.to_bits());
+    }
+
+    /// Read back a modern slot, or `None` if it was never set. For tests and diagnostics.
+    pub fn modern_value(&self, index: u16) -> Option<u32> {
+        self.mask
+            .is_set(index)
+            .then(|| self.values.get(index as usize).copied())
+            .flatten()
     }
 
     /// Write the mask followed by every set value in slot order.
@@ -319,7 +376,7 @@ mod tests {
 
     #[test]
     fn values_follow_the_mask_in_slot_order() {
-        let mut fields = ModernFieldsArray::new(ModernObjectType::Unit);
+        let mut fields = ModernFieldsArray::new(ModernObjectType::Unit, 1);
         // UNIT_FIELD_LEVEL and UNIT_FIELD_HEALTH, deliberately set out of order.
         assert!(fields.set_vanilla(34, 60));
         assert!(fields.set_vanilla(22, 100));
@@ -338,7 +395,7 @@ mod tests {
     /// Vanilla-only fields must drop rather than land somewhere arbitrary.
     #[test]
     fn unmapped_vanilla_fields_are_dropped() {
-        let mut fields = ModernFieldsArray::new(ModernObjectType::Unit);
+        let mut fields = ModernFieldsArray::new(ModernObjectType::Unit, 1);
         // OBJECT_FIELD_TYPE: 1.14 sends the type as a header byte, so the field is gone.
         assert!(!fields.set_vanilla(2, 25));
         assert!(!fields.set_vanilla(9_999, 1));

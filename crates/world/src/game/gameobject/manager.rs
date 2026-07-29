@@ -588,12 +588,9 @@ impl GameObjectManager {
             if let Some(msg) = self.build_create_msg(*guid, player_guid, world) {
                 for block in msg.blocks {
                     if count >= MAX_BLOCKS_PER_PACKET {
-                        let packet = current_msg.to_vanilla();
-                        let compressed = compress_update_packet_if_needed(packet)?;
-                        world
-                            .managers
-                            .broadcast_mgr
-                            .send_msg_to_player(player_guid, compressed);
+                        // Compression belongs to the vanilla encoding, so the recipient's
+                        // broadcaster decides whether it applies.
+                        send_update_to(world, player_guid, &current_msg)?;
                         total_sent += count;
                         current_msg = SmsgUpdateObject::new();
                         count = 0;
@@ -605,12 +602,7 @@ impl GameObjectManager {
         }
 
         if !current_msg.blocks.is_empty() {
-            let packet = current_msg.to_vanilla();
-            let compressed = compress_update_packet_if_needed(packet)?;
-            world
-                .managers
-                .broadcast_mgr
-                .send_msg_to_player(player_guid, compressed);
+            send_update_to(world, player_guid, &current_msg)?;
             total_sent += count;
         }
 
@@ -701,4 +693,19 @@ struct GameObjectSpawnRow {
     pub state: u8,
     pub patch_min: u8,
     pub patch_max: u8,
+}
+
+/// Send one object update to a single player, letting their broadcaster pick the encoding.
+///
+/// A missing broadcaster is not an error: the player may have disconnected between the visibility
+/// scan and the send.
+fn send_update_to(
+    world: &crate::World,
+    player_guid: ObjectGuid,
+    msg: &oxcore_shared::messages::update::SmsgUpdateObject,
+) -> anyhow::Result<()> {
+    if let Some(broadcaster) = world.managers.player_mgr.get_broadcaster(player_guid) {
+        broadcaster.send_update_object(msg)?;
+    }
+    Ok(())
 }

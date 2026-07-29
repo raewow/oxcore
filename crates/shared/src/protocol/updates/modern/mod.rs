@@ -16,6 +16,7 @@
 pub mod block;
 pub mod field_map;
 pub mod fields;
+pub mod placeholders;
 pub mod repack;
 
 pub use block::{ModernCreateData, ModernUpdateBlock, ModernUpdateType};

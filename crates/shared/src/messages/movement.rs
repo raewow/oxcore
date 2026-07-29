@@ -4,7 +4,7 @@ use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::guid::ObjectGuid as WorldObjectGuid;
 use crate::protocol::packet::WorldPacketGuidExt;
-use crate::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
+use crate::protocol::{MovementInfo, ObjectGuid, Opcode, Position, WorldPacket};
 
 /// SMSG_PONG - response to CMSG_PING
 pub struct SmsgPong {
@@ -387,7 +387,15 @@ impl ToWorldPacket for SmsgMonsterMove {
             MODERN_SPLINE_TYPE_FACING_ANGLE => {
                 writer.write_f32(self.facing_angle.unwrap_or(0.0));
             }
-            // FacingSpot needs a target position, which the vanilla body never carried.
+            MODERN_SPLINE_TYPE_FACING_SPOT => {
+                // The reference writes the spot as a Vector3 here. The vanilla body carries one
+                // too, but our struct never records it, so this sends the origin rather than
+                // omitting 12 bytes and desynchronising everything after it. No caller produces
+                // FacingSpot today; add the field before one does.
+                writer.write_f32(0.0);
+                writer.write_f32(0.0);
+                writer.write_f32(0.0);
+            }
             _ => {}
         }
 
@@ -598,5 +606,61 @@ mod modern_tests {
         // packed guid128 then a u32 counter
         assert_eq!(root.contents().len(), 5 + 4);
         assert_eq!(&root.contents()[5..9], &0u32.to_le_bytes());
+    }
+}
+
+/// A player's movement, relayed to nearby observers.
+///
+/// The two protocols disagree about what this even is. Vanilla echoes the client's own
+/// `MSG_MOVE_*` opcode back to observers, so the opcode carries the meaning (started running,
+/// stopped, jumped). 1.14 has one `SMSG_MOVE_UPDATE` for all of them and puts the meaning in the
+/// movement flags instead.
+///
+/// That is why this is a message rather than a re-broadcast of the received packet: the opcode has
+/// to change per recipient, which a pre-encoded `WorldPacket` cannot express.
+#[derive(Debug, Clone)]
+pub struct MsgMovementBroadcast {
+    /// The opcode the client sent, echoed to vanilla observers.
+    pub opcode: Opcode,
+    pub mover: ObjectGuid,
+    pub info: MovementInfo,
+    /// Knockback observers receive the acknowledged launch vector after the movement block.
+    pub knockback: Option<KnockbackVector>,
+}
+
+/// The launch vector trailing `MSG_MOVE_KNOCK_BACK`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct KnockbackVector {
+    pub cos_angle: f32,
+    pub sin_angle: f32,
+    pub xy_speed: f32,
+    pub velocity: f32,
+}
+
+impl ToWorldPacket for MsgMovementBroadcast {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(self.opcode);
+        self.info.write_to_packet(&mut packet);
+
+        if let Some(knockback) = self.knockback {
+            packet.write_f32(knockback.cos_angle);
+            packet.write_f32(knockback.sin_angle);
+            packet.write_f32(knockback.xy_speed);
+            packet.write_f32(knockback.velocity);
+        }
+
+        packet
+    }
+
+    /// `SMSG_MOVE_UPDATE` (HermesProxy `MovementPackets.cs:42`): just a movement block, with the
+    /// mover named inside it.
+    ///
+    /// The knockback vector has no place in this body -- 1.14 sends knockbacks as their own
+    /// message -- so it is dropped here. Observers see the destination but not the launch arc.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        self.info
+            .write_modern(&mut writer, self.mover, MODERN_REALM_ID);
+        Some(writer.finish(Opcode::SMSG_MOVE_UPDATE))
     }
 }

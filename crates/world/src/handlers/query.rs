@@ -83,6 +83,22 @@ fn read_gameobject_query_entry(protocol: Protocol, packet: &mut WorldPacket) -> 
     }
 }
 
+fn read_name_query_guid(protocol: Protocol, packet: &mut WorldPacket) -> Result<u64> {
+    if protocol == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        reader
+            .read_packed_guid_128()
+            .map(|(_, low)| low)
+            .ok_or_else(|| {
+                anyhow::anyhow!("Failed to read modern player GUID from CMSG_NAME_QUERY")
+            })
+    } else {
+        packet
+            .read_u64()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read GUID from CMSG_NAME_QUERY"))
+    }
+}
+
 /// Handle CMSG_CREATURE_QUERY
 ///
 /// Client sends this when it needs creature template info (name, type, etc.)
@@ -524,10 +540,7 @@ pub async fn handle_name_query(
     use oxcore_shared::messages::query::SmsgNameQueryResponse;
     use oxcore_shared::protocol::ObjectGuid;
 
-    // Read GUID from packet (u64 little-endian)
-    let guid_raw = packet
-        .read_u64()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read GUID from CMSG_NAME_QUERY"))?;
+    let guid_raw = read_name_query_guid(session.protocol(), packet)?;
     let guid = ObjectGuid::from_raw(guid_raw);
 
     tracing::debug!(
@@ -731,5 +744,18 @@ mod tests {
         packet.write_u32(7);
 
         assert!(read_gameobject_query_entry(Protocol::Vanilla, &mut packet).is_err());
+    }
+
+    #[test]
+    fn modern_name_query_reads_packed_guid128() {
+        let mut writer = BitWriter::new();
+        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        let mut packet = WorldPacket::new(Opcode::CMSG_NAME_QUERY);
+        packet.write_bytes(&writer.into_bytes());
+
+        assert_eq!(
+            read_name_query_guid(Protocol::Modern, &mut packet).unwrap(),
+            0x0200_01
+        );
     }
 }

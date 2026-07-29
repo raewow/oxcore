@@ -220,6 +220,81 @@ impl MovementInfo {
         Ok(info)
     }
 
+    /// Write this movement block in the 1.14 layout.
+    ///
+    /// The exact inverse of [`Self::read_modern`], kept next to it so the two stay in step. Also
+    /// used by the create-object movement block, which embeds the same structure.
+    pub fn write_modern(
+        &self,
+        writer: &mut crate::protocol::bitbuf::BitWriter,
+        mover: ObjectGuid,
+        realm_id: u16,
+    ) {
+        use crate::protocol::updates::modern::block::to_modern_movement_flags;
+
+        let (high, low) = mover.to_guid128(realm_id);
+        writer.write_packed_guid_128(high, low);
+
+        writer.write_u32(to_modern_movement_flags(self.flags.value()));
+        writer.write_u32(0); // FlagsExtra
+        writer.write_u32(0); // FlagsExtra2
+
+        writer.write_u32(self.time);
+        writer.write_f32(self.position.x);
+        writer.write_f32(self.position.y);
+        writer.write_f32(self.position.z);
+        writer.write_f32(self.position.o);
+
+        writer.write_f32(0.0); // Pitch
+        writer.write_f32(self.spline_elevation.unwrap_or(0.0));
+
+        writer.write_u32(0); // RemoveForcesIDs count
+        writer.write_u32(0); // MoveIndex
+
+        // 1.14 selects the optional blocks with presence bits rather than movement flags.
+        let has_transport = self.transport_guid.is_some();
+        let has_fall =
+            self.fall_time.is_some_and(|time| time != 0) || self.flags.has_flag(MoveFlags::JUMPING);
+
+        writer.write_bit(has_transport);
+        writer.write_bit(has_fall);
+        writer.write_bit(false); // HasSpline
+        writer.write_bit(false); // HeightChangeFailed
+        writer.write_bit(false); // RemoteTimeValid
+        writer.write_bit(false); // HasInertia
+        writer.flush_bits();
+
+        if has_transport {
+            let (high, low) = self.transport_guid.unwrap_or_default().to_guid128(realm_id);
+            writer.write_packed_guid_128(high, low);
+            let offset = self.transport_position.unwrap_or_default();
+            writer.write_f32(offset.x);
+            writer.write_f32(offset.y);
+            writer.write_f32(offset.z);
+            writer.write_f32(offset.o);
+            writer.write_u8(0); // VehicleSeatIndex
+            writer.write_u32(self.transport_time.unwrap_or(0));
+            writer.write_bit(false); // HasPrevMoveTime
+            writer.write_bit(false); // HasVehicleRecID
+            writer.flush_bits();
+        }
+
+        if has_fall {
+            writer.write_u32(self.fall_time.unwrap_or(0));
+            writer.write_f32(self.jump_velocity.unwrap_or(0.0));
+
+            let has_direction = self.jump_xy_speed.is_some();
+            writer.write_bit(has_direction);
+            writer.flush_bits();
+
+            if has_direction {
+                writer.write_f32(self.jump_sin_angle.unwrap_or(0.0));
+                writer.write_f32(self.jump_cos_angle.unwrap_or(0.0));
+                writer.write_f32(self.jump_xy_speed.unwrap_or(0.0));
+            }
+        }
+    }
+
     /// Parse a movement body in whichever layout the client speaks.
     ///
     /// The two layouts share no structure, so this is a branch rather than a translation; see
@@ -369,5 +444,208 @@ impl MovementInfo {
 impl Default for MovementInfo {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod modern_tests {
+    use super::*;
+    use crate::protocol::bitbuf::BitWriter;
+    use crate::protocol::updates::modern::block::{
+        from_modern_movement_flags, to_modern_movement_flags,
+    };
+    use crate::protocol::Opcode;
+
+    /// Build a 1.14 client movement body. Mirrors what the client sends, so the reader is tested
+    /// against the layout rather than against itself.
+    fn modern_body(flags: u32, position: Position, fall: Option<(u32, f32)>) -> WorldPacket {
+        let mut w = BitWriter::new();
+        w.write_packed_guid_128(0x0800_0400_0000_0000, 42); // MoverGUID
+        w.write_u32(flags);
+        w.write_u32(0); // FlagsExtra
+        w.write_u32(0); // FlagsExtra2
+        w.write_u32(1234); // MoveTime
+        w.write_f32(position.x);
+        w.write_f32(position.y);
+        w.write_f32(position.z);
+        w.write_f32(position.o);
+        w.write_f32(0.5); // Pitch
+        w.write_f32(1.5); // StepUpStartElevation
+        w.write_u32(0); // RemoveForcesIDs count
+        w.write_u32(0); // MoveIndex
+
+        w.write_bit(false); // HasTransport
+        w.write_bit(fall.is_some()); // HasFall
+        w.write_bit(false); // HasSpline
+        w.write_bit(false); // HeightChangeFailed
+        w.write_bit(false); // RemoteTimeValid
+        w.write_bit(false); // HasInertia
+        w.flush_bits();
+
+        if let Some((time, velocity)) = fall {
+            w.write_u32(time);
+            w.write_f32(velocity);
+            w.write_bit(false); // no fall direction
+            w.flush_bits();
+        }
+
+        w.finish(Opcode::MSG_MOVE_HEARTBEAT)
+    }
+
+    #[test]
+    fn reads_position_time_and_flags() {
+        let position = Position::new(100.0, 200.0, 300.0, 1.5);
+        let mut packet = modern_body(
+            to_modern_movement_flags(MoveFlags::FORWARD.value()),
+            position,
+            None,
+        );
+
+        let info = MovementInfo::read_modern(&mut packet).expect("parsed");
+
+        assert_eq!(info.position.x, 100.0);
+        assert_eq!(info.position.y, 200.0);
+        assert_eq!(info.position.z, 300.0);
+        assert_eq!(info.position.o, 1.5);
+        assert_eq!(info.time, 1234);
+        assert!(info.flags.has_flag(MoveFlags::FORWARD));
+        assert_eq!(info.spline_elevation, Some(1.5));
+    }
+
+    /// Fall data sits behind a presence bit, not behind a movement flag as it does in vanilla.
+    #[test]
+    fn reads_fall_data_from_its_presence_bit() {
+        let mut packet = modern_body(0, Position::default(), Some((900, -7.5)));
+
+        let info = MovementInfo::read_modern(&mut packet).expect("parsed");
+
+        assert_eq!(info.fall_time, Some(900));
+        assert_eq!(info.jump_velocity, Some(-7.5));
+        assert_eq!(info.jump_sin_angle, None, "no fall direction was sent");
+    }
+
+    /// The parse must leave the packet cursor where it finished, or a caller reading afterwards
+    /// re-reads the movement block.
+    #[test]
+    fn consumes_the_bytes_it_parsed() {
+        let mut packet = modern_body(0, Position::default(), None);
+        let before = packet.contents().len();
+
+        MovementInfo::read_modern(&mut packet).expect("parsed");
+
+        assert!(packet.contents().len() < before);
+        assert_eq!(packet.contents().len(), 0, "the body is entirely movement");
+    }
+
+    /// A truncated body must be an error, not a panic or a half-populated position -- this is
+    /// attacker-controlled input.
+    #[test]
+    fn a_truncated_body_is_rejected() {
+        let full = modern_body(0, Position::default(), None);
+        for length in 0..full.contents().len() {
+            let mut packet = WorldPacket::new(Opcode::MSG_MOVE_HEARTBEAT);
+            packet.write_bytes(&full.contents()[..length]);
+            assert!(
+                MovementInfo::read_modern(&mut packet).is_err(),
+                "a {length}-byte body should not parse"
+            );
+        }
+    }
+
+    /// Flags round-trip, so a client's word survives the trip out and back.
+    #[test]
+    fn flag_translation_round_trips() {
+        for flag in [
+            MoveFlags::FORWARD,
+            MoveFlags::BACKWARD,
+            MoveFlags::WALK_MODE,
+            MoveFlags::ROOT,
+            MoveFlags::JUMPING,
+            MoveFlags::SWIMMING,
+            MoveFlags::FLYING,
+            MoveFlags::WATERWALKING,
+            MoveFlags::HOVER,
+        ] {
+            let value = flag.value();
+            assert_eq!(
+                from_modern_movement_flags(to_modern_movement_flags(value)),
+                value,
+                "flag 0x{value:08X} did not survive the round trip"
+            );
+        }
+    }
+
+    /// The writer and reader must agree exactly: the writer feeds observers' `SMSG_MOVE_UPDATE`
+    /// and the create-object movement block, the reader consumes client input. A drift between
+    /// them desynchronises the stream rather than failing cleanly, so round-trip them.
+    #[test]
+    fn write_modern_round_trips_through_read_modern() {
+        let mut original = MovementInfo::new();
+        original.flags = MoveFlags::from(
+            MoveFlags::FORWARD.value() | MoveFlags::JUMPING.value() | MoveFlags::SWIMMING.value(),
+        );
+        original.position = Position::new(-8900.5, 700.25, 96.75, 2.25);
+        original.time = 987_654;
+        original.spline_elevation = Some(3.5);
+        original.fall_time = Some(450);
+        original.jump_velocity = Some(-9.5);
+        original.jump_sin_angle = Some(0.5);
+        original.jump_cos_angle = Some(0.75);
+        original.jump_xy_speed = Some(6.25);
+
+        let mover = ObjectGuid::new_player(42);
+        let mut writer = BitWriter::new();
+        original.write_modern(&mut writer, mover, 1);
+        let mut packet = writer.finish(Opcode::SMSG_MOVE_UPDATE);
+
+        let parsed = MovementInfo::read_modern(&mut packet).expect("parsed");
+
+        assert_eq!(parsed.flags.value(), original.flags.value());
+        assert_eq!(parsed.position.x, original.position.x);
+        assert_eq!(parsed.position.y, original.position.y);
+        assert_eq!(parsed.position.z, original.position.z);
+        assert_eq!(parsed.position.o, original.position.o);
+        assert_eq!(parsed.time, original.time);
+        assert_eq!(parsed.spline_elevation, original.spline_elevation);
+        assert_eq!(parsed.fall_time, original.fall_time);
+        assert_eq!(parsed.jump_velocity, original.jump_velocity);
+        assert_eq!(parsed.jump_sin_angle, original.jump_sin_angle);
+        assert_eq!(parsed.jump_cos_angle, original.jump_cos_angle);
+        assert_eq!(parsed.jump_xy_speed, original.jump_xy_speed);
+        assert_eq!(packet.contents().len(), 0, "the whole body was consumed");
+    }
+
+    /// A move with no fall data must not emit the fall block, or the reader reads the next
+    /// message's bytes as a fall time.
+    #[test]
+    fn round_trips_without_optional_blocks() {
+        let mut original = MovementInfo::new();
+        original.flags = MoveFlags::FORWARD;
+        original.position = Position::new(1.0, 2.0, 3.0, 0.5);
+        original.time = 7;
+
+        let mut writer = BitWriter::new();
+        original.write_modern(&mut writer, ObjectGuid::new_player(1), 1);
+        let mut packet = writer.finish(Opcode::SMSG_MOVE_UPDATE);
+
+        let parsed = MovementInfo::read_modern(&mut packet).expect("parsed");
+
+        assert_eq!(parsed.fall_time, None);
+        assert_eq!(parsed.transport_guid, None);
+        assert_eq!(packet.contents().len(), 0);
+    }
+
+    /// Vanilla `Root` is 0x1000, which 1.14 reads as `FallingFar`. A pass-through would make every
+    /// rooted player look like they were falling.
+    #[test]
+    fn root_is_not_confused_with_falling_far() {
+        assert_eq!(
+            to_modern_movement_flags(MoveFlags::ROOT.value()),
+            0x0000_0400
+        );
+        assert_eq!(
+            from_modern_movement_flags(0x0000_1000),
+            MoveFlags::FALLINGFAR.value()
+        );
     }
 }
