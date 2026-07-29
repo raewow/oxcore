@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use axum::extract::Form;
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::Extension;
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
@@ -41,6 +42,12 @@ pub struct SessionRevokeForm {
     pub session_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SupportTicketForm {
+    pub subject: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Session {
     pub account_id: u32,
@@ -48,9 +55,13 @@ pub struct Session {
 
 pub async fn login(
     Extension(state): Extension<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
     Form(form): Form<LoginForm>,
 ) -> Response {
+    if !has_same_origin(&headers, &state) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
     let repository = AccountRepository::new(state.auth.clone());
     let account_id = match repository.find_bnet_credentials(&form.username).await {
         Ok(Some(credentials)) => srp6v2::verify_password(
@@ -79,14 +90,19 @@ pub async fn login(
     };
 
     let cookie = session_cookie(token, state.secure_cookies);
+    let _ = record_audit(&state.web, account_id, "session.created", "session").await;
     (jar.add(cookie), Redirect::to("/account")).into_response()
 }
 
 pub async fn register(
     Extension(state): Extension<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
     Form(form): Form<RegistrationForm>,
 ) -> Response {
+    if !has_same_origin(&headers, &state) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
     if !is_valid_email(&form.email) {
         return axum::http::StatusCode::BAD_REQUEST.into_response();
     }
@@ -124,14 +140,26 @@ pub async fn register(
     };
 
     let cookie = session_cookie(token, state.secure_cookies);
+    let _ = record_audit(&state.web, account_id, "account.registered", "account").await;
     (jar.add(cookie), Redirect::to("/account")).into_response()
 }
 
-pub async fn logout(Extension(state): Extension<AppState>, jar: CookieJar) -> Response {
+pub async fn logout(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+) -> Response {
+    if !has_same_origin(&headers, &state) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
     if let Some(cookie) = jar.get(SESSION_COOKIE) {
+        let session = session_from_token(&state.web, cookie.value()).await;
         if let Err(error) = delete_session(&state.web, cookie.value()).await {
             tracing::error!(target: "oxcore_web", %error, "web session deletion failed");
             return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        if let Some(session) = session {
+            let _ = record_audit(&state.web, session.account_id, "session.ended", "session").await;
         }
     }
 
@@ -140,9 +168,13 @@ pub async fn logout(Extension(state): Extension<AppState>, jar: CookieJar) -> Re
 
 pub async fn change_password(
     Extension(state): Extension<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
     Form(form): Form<PasswordChangeForm>,
 ) -> Response {
+    if !has_same_origin(&headers, &state) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
     if form.new_password != form.confirm_password {
         return axum::http::StatusCode::BAD_REQUEST.into_response();
     }
@@ -197,6 +229,13 @@ pub async fn change_password(
         tracing::error!(target: "oxcore_web", %error, account_id = session.account_id, "password change session revocation failed");
         return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
+    let _ = record_audit(
+        &state.web,
+        session.account_id,
+        "password.changed",
+        "account",
+    )
+    .await;
 
     (
         jar.remove(Cookie::from(SESSION_COOKIE)),
@@ -207,9 +246,13 @@ pub async fn change_password(
 
 pub async fn revoke_session(
     Extension(state): Extension<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
     Form(form): Form<SessionRevokeForm>,
 ) -> Response {
+    if !has_same_origin(&headers, &state) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
     if form.session_id.len() != 64 || !form.session_id.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
         return axum::http::StatusCode::BAD_REQUEST.into_response();
@@ -235,6 +278,7 @@ pub async fn revoke_session(
     if result.rows_affected() != 1 {
         return axum::http::StatusCode::NOT_FOUND.into_response();
     }
+    let _ = record_audit(&state.web, session.account_id, "session.revoked", "session").await;
 
     if form.session_id.eq_ignore_ascii_case(&current_session_id) {
         return (
@@ -244,6 +288,50 @@ pub async fn revoke_session(
             .into_response();
     }
     Redirect::to("/security").into_response()
+}
+
+pub async fn create_support_ticket(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    Form(form): Form<SupportTicketForm>,
+) -> Response {
+    if !has_same_origin(&headers, &state) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let subject = form.subject.trim();
+    let message = form.message.trim();
+    if subject.is_empty() || subject.len() > 160 || message.is_empty() || message.len() > 8_000 {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let Some(cookie) = jar.get(SESSION_COOKIE) else {
+        return Redirect::to("/login").into_response();
+    };
+    let Some(session) = session_from_token(&state.web, cookie.value()).await else {
+        return Redirect::to("/login").into_response();
+    };
+
+    let result = sqlx::query(
+        "INSERT INTO `web_support_tickets` (`account_id`, `subject`, `message`) VALUES (?, ?, ?)",
+    )
+    .bind(session.account_id)
+    .bind(subject)
+    .bind(message)
+    .execute(&*state.web)
+    .await;
+    if let Err(error) = result {
+        tracing::error!(target: "oxcore_web", %error, account_id = session.account_id, "support ticket creation failed");
+        return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    let _ = record_audit(
+        &state.web,
+        session.account_id,
+        "support_ticket.created",
+        "support_ticket",
+    )
+    .await;
+    Redirect::to("/support").into_response()
 }
 
 pub async fn admin(Extension(state): Extension<AppState>, jar: CookieJar) -> Response {
@@ -297,6 +385,31 @@ async fn delete_account_sessions(pool: &MySqlPool, account_id: u32) -> Result<()
         .await
         .context("failed to revoke account web sessions")?;
     Ok(())
+}
+
+async fn record_audit(
+    pool: &MySqlPool,
+    account_id: u32,
+    action: &str,
+    target_type: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO `web_audit_log` (`actor_account_id`, `action`, `target_type`) VALUES (?, ?, ?)",
+    )
+    .bind(account_id)
+    .bind(action)
+    .bind(target_type)
+    .execute(pool)
+    .await
+    .context("failed to write web audit event")?;
+    Ok(())
+}
+
+fn has_same_origin(headers: &HeaderMap, state: &AppState) -> bool {
+    headers
+        .get(axum::http::header::ORIGIN)
+        .and_then(|origin| origin.to_str().ok())
+        == Some(state.public_origin.as_str())
 }
 
 async fn current_session(pool: &MySqlPool, jar: &CookieJar) -> Option<Session> {

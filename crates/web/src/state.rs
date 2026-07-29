@@ -12,6 +12,7 @@ pub struct AppState {
     pub characters: Arc<MySqlPool>,
     pub web: Arc<MySqlPool>,
     pub secure_cookies: bool,
+    pub public_origin: String,
 }
 
 impl AppState {
@@ -40,6 +41,7 @@ impl AppState {
             characters: Arc::new(characters),
             web: Arc::new(web),
             secure_cookies: config.secure_cookies(),
+            public_origin: config.public_base_url.trim_end_matches('/').to_string(),
         })
     }
 

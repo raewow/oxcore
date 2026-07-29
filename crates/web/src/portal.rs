@@ -21,12 +21,48 @@ pub struct PortalCharacter {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterDetail {
+    pub guid: u32,
+    pub name: String,
+    pub race: u8,
+    pub class: u8,
+    pub level: u8,
+    pub online: u8,
+    pub zone: u32,
+    pub money: u32,
+    pub played_time_total: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id: String,
     pub created_at: i64,
     pub last_seen_at: i64,
     pub expires_at: i64,
     pub current: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityEvent {
+    pub action: String,
+    pub target_type: String,
+    pub occurred_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupportTicket {
+    pub id: u64,
+    pub subject: String,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RealmStatus {
+    pub name: String,
+    pub population: f32,
+    pub online: bool,
 }
 
 #[server]
@@ -78,6 +114,132 @@ pub async fn get_active_sessions() -> Result<Vec<SessionSummary>, ServerFnError>
             &crate::auth::session_token_hash_hex(cookie.value()),
         )
         .await
+        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_account_activity() -> Result<Vec<ActivityEvent>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        return sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT `action`, `target_type`, UNIX_TIMESTAMP(`occurred_at`) \
+             FROM `web_audit_log` WHERE `actor_account_id` = ? \
+             ORDER BY `occurred_at` DESC LIMIT 50",
+        )
+        .bind(account_id)
+        .fetch_all(&*state.web)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(action, target_type, occurred_at)| ActivityEvent {
+                    action,
+                    target_type,
+                    occurred_at,
+                })
+                .collect()
+        })
+        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_character_detail(guid: u32) -> Result<Option<CharacterDetail>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        return sqlx::query_as::<_, (u32, String, u8, u8, u8, u8, u32, u32, u32)>(
+            "SELECT `guid`, `name`, `race`, `class`, `level`, `online`, `zone`, `money`, \
+             `played_time_total` FROM `characters` WHERE `guid` = ? AND `account` = ?",
+        )
+        .bind(guid)
+        .bind(account_id)
+        .fetch_optional(&*state.characters)
+        .await
+        .map(|row| {
+            row.map(
+                |(guid, name, race, class, level, online, zone, money, played_time_total)| {
+                    CharacterDetail {
+                        guid,
+                        name,
+                        race,
+                        class,
+                        level,
+                        online,
+                        zone,
+                        money,
+                        played_time_total,
+                    }
+                },
+            )
+        })
+        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_support_tickets() -> Result<Vec<SupportTicket>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        return sqlx::query_as::<_, (u64, String, String, i64, i64)>(
+            "SELECT `id`, `subject`, `status`, UNIX_TIMESTAMP(`created_at`), \
+             UNIX_TIMESTAMP(`updated_at`) FROM `web_support_tickets` \
+             WHERE `account_id` = ? ORDER BY `updated_at` DESC",
+        )
+        .bind(account_id)
+        .fetch_all(&*state.web)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(
+                    |(id, subject, status, created_at, updated_at)| SupportTicket {
+                        id,
+                        subject,
+                        status,
+                        created_at,
+                        updated_at,
+                    },
+                )
+                .collect()
+        })
+        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_realm_status() -> Result<Vec<RealmStatus>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let state = expect_context::<crate::state::AppState>();
+        return sqlx::query_as::<_, (String, f32, u8)>(
+            "SELECT `name`, `population`, IF(`last_seen` > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 60 SECOND), 1, 0) \
+             FROM `realmlist` ORDER BY `id`",
+        )
+        .fetch_all(&*state.auth)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(name, population, flag)| RealmStatus {
+                    name,
+                    population,
+                    online: flag != 0,
+                })
+                .collect()
+        })
         .map_err(|error| ServerFnError::ServerError(error.to_string()));
     }
 
@@ -171,4 +333,20 @@ async fn load_sessions(
             },
         )
         .collect())
+}
+
+#[cfg(feature = "ssr")]
+async fn authenticated_request() -> Result<(crate::state::AppState, u32, String), ServerFnError> {
+    use axum_extra::extract::cookie::CookieJar;
+    use leptos_axum::extract;
+
+    let state = expect_context::<crate::state::AppState>();
+    let jar: CookieJar = extract().await?;
+    let Some(cookie) = jar.get("oxcore_session") else {
+        return Err(ServerFnError::ServerError("Not authenticated".to_string()));
+    };
+    let Some(session) = crate::auth::session_from_token(&state.web, cookie.value()).await else {
+        return Err(ServerFnError::ServerError("Not authenticated".to_string()));
+    };
+    Ok((state, session.account_id, cookie.value().to_string()))
 }

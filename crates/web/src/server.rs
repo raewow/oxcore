@@ -37,6 +37,7 @@ pub async fn serve(config: Config) -> Result<()> {
         .route("/auth/logout", post(crate::auth::logout))
         .route("/auth/change-password", post(crate::auth::change_password))
         .route("/auth/revoke-session", post(crate::auth::revoke_session))
+        .route("/support/create", post(crate::auth::create_support_ticket))
         .route("/api/portal/overview", get(crate::portal::overview))
         .route("/admin", get(crate::auth::admin))
         .leptos_routes_with_context(
@@ -91,7 +92,8 @@ async fn redirect_authenticated_auth_pages(
     if request.method() == Method::GET {
         let path = request.uri().path();
         let is_auth_page = matches!(path, "/login" | "/register" | "/recover");
-        let is_account_page = matches!(path, "/account" | "/security");
+        let is_account_page = matches!(path, "/account" | "/security" | "/activity" | "/support")
+            || path.starts_with("/characters/");
 
         if is_auth_page || is_account_page {
             let authenticated = match session_cookie(request.headers()) {
