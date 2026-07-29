@@ -11,7 +11,22 @@ use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
 use crate::game::gameobject::GameObjectType;
 use crate::World;
-use oxcore_shared::protocol::WorldPacket;
+use oxcore_shared::protocol::bitbuf::BitReader;
+use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
+
+fn read_gameobject_use_guid(protocol: Protocol, packet: &mut WorldPacket) -> Result<ObjectGuid> {
+    if protocol == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        let (_, low) = reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read modern GO GUID"))?;
+        Ok(ObjectGuid::from_raw(low))
+    } else {
+        packet
+            .read_guid()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read GO GUID"))
+    }
+}
 
 /// Handle CMSG_GAMEOBJ_USE (0x00B1)
 ///
@@ -26,9 +41,7 @@ pub async fn handle_gameobj_use(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let go_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read GO GUID"))?;
+    let go_guid = read_gameobject_use_guid(session.protocol(), packet)?;
 
     debug!(
         "CMSG_GAMEOBJ_USE: player={:?}, go={:?}",
@@ -173,7 +186,8 @@ mod tests {
         MockQuestRepositoryTrait, QuestRepositoryTrait,
     };
     use oxcore_shared::database::Databases;
-    use oxcore_shared::protocol::{HighGuid, ObjectGuid, Opcode, Position, WorldPacket};
+    use oxcore_shared::protocol::bitbuf::BitWriter;
+    use oxcore_shared::protocol::{HighGuid, Opcode, Position};
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -303,6 +317,21 @@ mod tests {
 
     fn read_packet(rx: &mut mpsc::UnboundedReceiver<WorldPacket>) -> WorldPacket {
         rx.try_recv().expect("expected outbound packet")
+    }
+
+    #[test]
+    fn modern_gameobject_use_reads_packed_guid128() {
+        let mut writer = BitWriter::new();
+        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        let mut packet = WorldPacket::new(Opcode::CMSG_GAMEOBJ_USE);
+        packet.write_bytes(&writer.into_bytes());
+
+        assert_eq!(
+            read_gameobject_use_guid(Protocol::Modern, &mut packet)
+                .unwrap()
+                .raw(),
+            0x0200_01
+        );
     }
 
     #[tokio::test]

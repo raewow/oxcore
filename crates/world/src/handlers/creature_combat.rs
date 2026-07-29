@@ -1,6 +1,7 @@
 //! Attack Handler - Player attacks on creatures
 
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
+use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::broadcast_mgr::broadcast_around_creature;
 use crate::game::common::update_fields::*;
 use crate::game::creature::combat::{
@@ -13,7 +14,22 @@ use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
 use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use oxcore_shared::protocol::bitbuf::BitReader;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Protocol, WorldPacket};
+
+pub fn read_attack_swing_target(
+    protocol: Protocol,
+    packet: &mut WorldPacket,
+) -> Option<ObjectGuid> {
+    if protocol == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        reader
+            .read_packed_guid_128()
+            .map(|(_, low)| ObjectGuid::from_raw(low))
+    } else {
+        packet.read_guid()
+    }
+}
 
 /// Handle player attack swing (CMSG_ATTACKSWING)
 /// Initializes auto-attack state and sends SMSG_ATTACKSTART.
@@ -313,6 +329,7 @@ fn melee_swing_proc_ex(outcome: &MeleeHitOutcome) -> u32 {
 mod tests {
     use super::*;
     use crate::game::player::auras::proc::proc_flags_ex;
+    use oxcore_shared::protocol::bitbuf::BitWriter;
 
     #[test]
     fn swing_outcome_maps_to_proc_ex() {
@@ -348,6 +365,21 @@ mod tests {
         assert_eq!(
             melee_swing_proc_ex(&MeleeHitOutcome::Crushing),
             proc_flags_ex::NORMAL_HIT
+        );
+    }
+
+    #[test]
+    fn modern_attack_swing_reads_packed_guid128() {
+        let mut writer = BitWriter::new();
+        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        let mut packet = WorldPacket::new(Opcode::CMSG_ATTACKSWING);
+        packet.write_bytes(&writer.into_bytes());
+
+        assert_eq!(
+            read_attack_swing_target(Protocol::Modern, &mut packet)
+                .unwrap()
+                .raw(),
+            0x0200_01
         );
     }
 

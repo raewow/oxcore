@@ -25,35 +25,49 @@ const FLIGHT_BACK_SPEED: f32 = 4.5;
 /// `Levitating`, `FixedZ`, `OnTransport` and `SplineEnabled`; the last two are carried by dedicated
 /// bits in the movement block instead, and `FixedZ` re-emerges as the hover animation bit.
 pub fn to_modern_movement_flags(vanilla: u32) -> u32 {
-    /// (vanilla bit, modern bit) for every flag whose name survived into 1.14.
-    const TRANSLATED: [(u32, u32); 20] = [
-        (0x0000_0001, 0x0000_0001), // Forward
-        (0x0000_0002, 0x0000_0002), // Backward
-        (0x0000_0004, 0x0000_0004), // StrafeLeft
-        (0x0000_0008, 0x0000_0008), // StrafeRight
-        (0x0000_0010, 0x0000_0010), // TurnLeft
-        (0x0000_0020, 0x0000_0020), // TurnRight
-        (0x0000_0040, 0x0000_0040), // PitchUp
-        (0x0000_0080, 0x0000_0080), // PitchDown
-        (0x0000_0100, 0x0000_0100), // WalkMode
-        (0x0000_1000, 0x0000_0400), // Root
-        (0x0000_2000, 0x0000_0800), // Falling
-        (0x0000_4000, 0x0000_1000), // FallingFar
-        (0x0020_0000, 0x0010_0000), // Swimming
-        (0x0080_0000, 0x0080_0000), // CanFly
-        (0x0100_0000, 0x0100_0000), // Flying
-        (0x0400_0000, 0x0200_0000), // SplineElevation
-        (0x1000_0000, 0x0400_0000), // Waterwalking
-        (0x2000_0000, 0x0800_0000), // CanSafeFall
-        (0x4000_0000, 0x1000_0000), // Hover
-        (0x0000_0000, 0x0000_0000), // None
-    ];
-
-    TRANSLATED
+    MOVEMENT_FLAGS
         .iter()
         .filter(|(from, _)| vanilla & from != 0)
         .fold(0, |acc, (_, to)| acc | to)
 }
+
+/// Translate a 1.14 movement-flag word back to vanilla, for packets arriving from a modern client.
+///
+/// The exact inverse of [`to_modern_movement_flags`], sharing one table so the two cannot drift.
+/// Modern-only flags (the `Pending*` family, `DisableGravity`, `DisableCollision`) have no vanilla
+/// bit and are dropped.
+pub fn from_modern_movement_flags(modern: u32) -> u32 {
+    MOVEMENT_FLAGS
+        .iter()
+        .filter(|(_, to)| modern & to != 0)
+        .fold(0, |acc, (from, _)| acc | from)
+}
+
+/// (vanilla bit, modern bit) for every movement flag whose name survived into 1.14.
+///
+/// Read in either direction. `None` is deliberately absent: it is zero on both sides, so including
+/// it would make the reverse translation match every input.
+const MOVEMENT_FLAGS: [(u32, u32); 19] = [
+    (0x0000_0001, 0x0000_0001), // Forward
+    (0x0000_0002, 0x0000_0002), // Backward
+    (0x0000_0004, 0x0000_0004), // StrafeLeft
+    (0x0000_0008, 0x0000_0008), // StrafeRight
+    (0x0000_0010, 0x0000_0010), // TurnLeft
+    (0x0000_0020, 0x0000_0020), // TurnRight
+    (0x0000_0040, 0x0000_0040), // PitchUp
+    (0x0000_0080, 0x0000_0080), // PitchDown
+    (0x0000_0100, 0x0000_0100), // WalkMode
+    (0x0000_1000, 0x0000_0400), // Root
+    (0x0000_2000, 0x0000_0800), // Falling
+    (0x0000_4000, 0x0000_1000), // FallingFar
+    (0x0020_0000, 0x0010_0000), // Swimming
+    (0x0080_0000, 0x0080_0000), // CanFly
+    (0x0100_0000, 0x0100_0000), // Flying
+    (0x0400_0000, 0x0200_0000), // SplineElevation
+    (0x1000_0000, 0x0400_0000), // Waterwalking
+    (0x2000_0000, 0x0800_0000), // CanSafeFall
+    (0x4000_0000, 0x1000_0000), // Hover
+];
 
 /// Vanilla `MOVEFLAG_FIXED_Z`, which 1.14 expresses as the `PlayHoverAnim` create bit rather than
 /// a movement flag.

@@ -73,7 +73,7 @@ impl MovementBuffer {
     /// Pre-parses MovementInfo from the packet for efficient map-level processing.
     /// Called from the socket task.
     pub fn push(&self, opcode: Opcode, mut packet: WorldPacket) -> Result<()> {
-        let mut movement_info = MovementInfo::read_from_packet(&mut packet)?;
+        let mut movement_info = MovementInfo::read_for(protocol, &mut packet)?;
         movement_info.mover_guid = self.player_guid;
 
         let mut inner = self.inner.lock();

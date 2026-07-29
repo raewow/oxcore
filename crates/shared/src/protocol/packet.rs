@@ -51,6 +51,16 @@ impl WorldPacket {
         self.data.len()
     }
 
+    /// Drop `count` bytes from the front of the unread body.
+    ///
+    /// For parsers that read from [`Self::contents`] directly -- bit-packed modern bodies cannot go
+    /// through the byte-oriented `read_*` methods -- so that the packet cursor still ends up where
+    /// the parse finished.
+    pub fn advance(&mut self, count: usize) {
+        let count = count.min(self.data.len());
+        let _ = self.data.split_to(count);
+    }
+
     // ========================================================================
     // Read methods
     // ========================================================================

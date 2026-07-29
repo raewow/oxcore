@@ -677,7 +677,9 @@ pub async fn dispatch_packet(
 
                 // Creature combat handlers (Phase 2)
                 Opcode::CMSG_ATTACKSWING => {
-                    if let Some(target_guid) = packet.read_guid() {
+                    if let Some(target_guid) =
+                        creature_combat::read_attack_swing_target(session.protocol(), packet)
+                    {
                         if let Some(attacker_guid) = session.player_guid() {
                             creature_combat::handle_attack_swing(world, attacker_guid, target_guid)
                                 .await?;

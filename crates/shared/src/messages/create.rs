@@ -331,9 +331,22 @@ impl SmsgOutOfRange {
 
 impl ToWorldPacket for SmsgOutOfRange {
     fn to_vanilla(&self) -> WorldPacket {
-        SmsgUpdateObject::new()
-            .add_block(UpdateBlockData::OutOfRange(self.guids.clone()))
-            .to_vanilla()
+        self.as_update().to_vanilla()
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        self.as_update().to_modern()
+    }
+
+    /// Forwards the recipient so the underlying update carries the right map id.
+    fn to_modern_for(&self, recipient: crate::messages::Recipient) -> Option<WorldPacket> {
+        self.as_update().to_modern_for(recipient)
+    }
+}
+
+impl SmsgOutOfRange {
+    fn as_update(&self) -> SmsgUpdateObject {
+        SmsgUpdateObject::new().add_block(UpdateBlockData::OutOfRange(self.guids.clone()))
     }
 }
 

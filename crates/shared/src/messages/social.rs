@@ -184,6 +184,14 @@ impl ToWorldPacket for SmsgStandstateUpdate {
         packet.write_u8(self.stand_state);
         packet
     }
+
+    /// 1.14 prefixes an AnimKitID. We have no source for one, and 0 means "no override".
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut packet = WorldPacket::new(Opcode::SMSG_STANDSTATE_UPDATE);
+        packet.write_u32(0); // AnimKitID
+        packet.write_u8(self.stand_state);
+        Some(packet)
+    }
 }
 
 #[cfg(test)]

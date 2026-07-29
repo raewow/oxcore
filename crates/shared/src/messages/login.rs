@@ -651,6 +651,14 @@ impl ToWorldPacket for SmsgInitializeFactionsEmpty {
         }
         packet
     }
+
+    /// Defers to the populated message with no factions, so the two cannot drift.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        crate::messages::reputation::SmsgInitializeFactions {
+            factions: Default::default(),
+        }
+        .to_modern()
+    }
 }
 
 /// SMSG_TUTORIAL_FLAGS - Tutorial completion flags

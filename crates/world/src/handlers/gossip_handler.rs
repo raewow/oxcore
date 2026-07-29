@@ -13,11 +13,33 @@ use crate::game::common::player_constants::get_faction_for_race;
 use crate::game::creature::ai::is_hostile_faction;
 use crate::game::player::spells::state::CurrentSpellType;
 use crate::World;
-use oxcore_shared::protocol::{Opcode, WorldPacket};
+use oxcore_shared::protocol::bitbuf::BitReader;
+use oxcore_shared::protocol::{Opcode, Protocol, WorldPacket};
 
 const NPC_FLAG_BANKER: u32 = 0x00000100;
 const INTERACTION_DISTANCE: f32 = 5.0;
 const UNIT_FLAG_NOT_SELECTABLE: u32 = 0x02000000;
+
+fn read_npc_text_query(protocol: Protocol, packet: &mut WorldPacket) -> Result<u32> {
+    if protocol == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        let text_id = reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read text ID"))?;
+        reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read modern NPC GUID"))?;
+        Ok(text_id)
+    } else {
+        let text_id = packet
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read text ID"))?;
+        packet
+            .read_guid()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read NPC GUID"))?;
+        Ok(text_id)
+    }
+}
 
 /// Handle CMSG_GOSSIP_HELLO (0x17B)
 ///
@@ -527,14 +549,7 @@ pub async fn handle_npc_text_query(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let text_id = packet
-        .read_u32()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read text ID"))?;
-
-    // CMSG_NPC_TEXT_QUERY uses unpacked GUID (8 bytes)
-    let _npc_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read NPC GUID"))?;
+    let text_id = read_npc_text_query(session.protocol(), packet)?;
 
     debug!("CMSG_NPC_TEXT_QUERY: text_id={}", text_id);
 
@@ -576,4 +591,24 @@ pub async fn handle_npc_text_query(
         .send_msg_to_player(player_guid, msg);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxcore_shared::protocol::bitbuf::BitWriter;
+
+    #[test]
+    fn modern_npc_text_query_reads_packed_guid128() {
+        let mut writer = BitWriter::new();
+        writer.write_u32(42);
+        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        let mut packet = WorldPacket::new(Opcode::CMSG_NPC_TEXT_QUERY);
+        packet.write_bytes(&writer.into_bytes());
+
+        assert_eq!(
+            read_npc_text_query(Protocol::Modern, &mut packet).unwrap(),
+            42
+        );
+    }
 }

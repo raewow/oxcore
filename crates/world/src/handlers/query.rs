@@ -8,7 +8,8 @@ use crate::core::session::WorldSession;
 use crate::game::items::manager::ItemTemplate;
 use crate::World;
 use oxcore_shared::database::{CharacterRepository, Databases};
-use oxcore_shared::protocol::WorldPacket;
+use oxcore_shared::protocol::bitbuf::BitReader;
+use oxcore_shared::protocol::{Protocol, WorldPacket};
 
 fn item_spell_query_values(
     template: &ItemTemplate,
@@ -47,6 +48,41 @@ fn item_spell_query_values(
     )
 }
 
+fn read_creature_query_entry(protocol: Protocol, packet: &mut WorldPacket) -> Result<u32> {
+    let entry = packet
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read creature entry from CMSG_CREATURE_QUERY"))?;
+
+    if protocol == Protocol::Vanilla {
+        packet.read_u64().ok_or_else(|| {
+            anyhow::anyhow!("Failed to read creature GUID from CMSG_CREATURE_QUERY")
+        })?;
+    }
+
+    Ok(entry)
+}
+
+fn read_gameobject_query_entry(protocol: Protocol, packet: &mut WorldPacket) -> Result<u32> {
+    if protocol == Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        let entry = reader.read_u32().ok_or_else(|| {
+            anyhow::anyhow!("Failed to read gameobject entry from CMSG_GAMEOBJECT_QUERY")
+        })?;
+        reader.read_packed_guid_128().ok_or_else(|| {
+            anyhow::anyhow!("Failed to read gameobject GUID from CMSG_GAMEOBJECT_QUERY")
+        })?;
+        Ok(entry)
+    } else {
+        let entry = packet.read_u32().ok_or_else(|| {
+            anyhow::anyhow!("Failed to read gameobject entry from CMSG_GAMEOBJECT_QUERY")
+        })?;
+        packet.read_u64().ok_or_else(|| {
+            anyhow::anyhow!("Failed to read gameobject GUID from CMSG_GAMEOBJECT_QUERY")
+        })?;
+        Ok(entry)
+    }
+}
+
 /// Handle CMSG_CREATURE_QUERY
 ///
 /// Client sends this when it needs creature template info (name, type, etc.)
@@ -58,13 +94,8 @@ pub async fn handle_creature_query(
 ) -> Result<()> {
     use oxcore_shared::messages::query::SmsgCreatureQueryResponse;
 
-    // Read entry and GUID from packet (Vanilla 1.12.1 format)
-    let entry = packet
-        .read_u32()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read creature entry from CMSG_CREATURE_QUERY"))?;
-    let _guid = packet
-        .read_u64()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read creature GUID from CMSG_CREATURE_QUERY"))?;
+    // Hermes' modern QueryCreature body contains only CreatureID; vanilla appends a GUID.
+    let entry = read_creature_query_entry(session.protocol(), packet)?;
 
     tracing::debug!("CMSG_CREATURE_QUERY: entry={}", entry);
 
@@ -599,13 +630,8 @@ pub async fn handle_gameobject_query(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    // Read entry and GUID from packet (Vanilla 1.12.1 format)
-    let entry = packet.read_u32().ok_or_else(|| {
-        anyhow::anyhow!("Failed to read gameobject entry from CMSG_GAMEOBJECT_QUERY")
-    })?;
-    let _guid = packet.read_u64().ok_or_else(|| {
-        anyhow::anyhow!("Failed to read gameobject GUID from CMSG_GAMEOBJECT_QUERY")
-    })?;
+    // Hermes' modern QueryGameObject body uses a packed GUID128 after GameObjectID.
+    let entry = read_gameobject_query_entry(session.protocol(), packet)?;
 
     tracing::debug!("CMSG_GAMEOBJECT_QUERY: entry={}", entry);
 
@@ -666,4 +692,44 @@ pub async fn handle_query_time(session: &WorldSession) -> Result<()> {
     session.send_packet(response)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxcore_shared::protocol::bitbuf::BitWriter;
+    use oxcore_shared::protocol::Opcode;
+
+    #[test]
+    fn modern_creature_query_has_only_the_entry() {
+        let mut packet = WorldPacket::new(Opcode::CMSG_CREATURE_QUERY);
+        packet.write_u32(12_345);
+
+        assert_eq!(
+            read_creature_query_entry(Protocol::Modern, &mut packet).unwrap(),
+            12_345
+        );
+    }
+
+    #[test]
+    fn modern_gameobject_query_reads_packed_guid128() {
+        let mut writer = BitWriter::new();
+        writer.write_u32(54_321);
+        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        let mut packet = WorldPacket::new(Opcode::CMSG_GAMEOBJECT_QUERY);
+        packet.write_bytes(&writer.into_bytes());
+
+        assert_eq!(
+            read_gameobject_query_entry(Protocol::Modern, &mut packet).unwrap(),
+            54_321
+        );
+    }
+
+    #[test]
+    fn vanilla_gameobject_query_still_requires_guid64() {
+        let mut packet = WorldPacket::new(Opcode::CMSG_GAMEOBJECT_QUERY);
+        packet.write_u32(7);
+
+        assert!(read_gameobject_query_entry(Protocol::Vanilla, &mut packet).is_err());
+    }
 }

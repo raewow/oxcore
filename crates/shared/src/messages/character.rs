@@ -153,6 +153,15 @@ impl ToWorldPacket for SmsgLogoutResponse {
         packet.write_u8(if self.instant { 1 } else { 0 });
         packet
     }
+
+    /// The reason widens to an i32 and `instant` becomes a flushed bit.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_i32(self.reason as i32);
+        writer.write_bit(self.instant);
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_LOGOUT_RESPONSE))
+    }
 }
 
 /// SMSG_LOGOUT_COMPLETE - Logout complete notification
@@ -163,6 +172,11 @@ impl ToWorldPacket for SmsgLogoutComplete {
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_LOGOUT_COMPLETE)
     }
+
+    /// Empty in both protocols.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(WorldPacket::new(Opcode::SMSG_LOGOUT_COMPLETE))
+    }
 }
 
 /// SMSG_LOGOUT_CANCEL_ACK - Logout cancellation acknowledgment
@@ -172,5 +186,10 @@ pub struct SmsgLogoutCancelAck;
 impl ToWorldPacket for SmsgLogoutCancelAck {
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_LOGOUT_CANCEL_ACK)
+    }
+
+    /// Empty in both protocols.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(WorldPacket::new(Opcode::SMSG_LOGOUT_CANCEL_ACK))
     }
 }

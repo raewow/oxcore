@@ -349,7 +349,7 @@ pub async fn handle_move_teleport_ack(
 
     // The client echoes movement info after the mover GUID. Consume it to keep the
     // packet layout in sync, but use the server-authoritative queued destination.
-    let _movement_info = MovementInfo::read_from_packet(packet)?;
+    let _movement_info = MovementInfo::read_for(session.protocol(), packet)?;
     let Some(destination) = session.get_pending_near_teleport() else {
         return Ok(());
     };
@@ -485,7 +485,7 @@ pub async fn handle_move_not_active_mover(
 
     session.set_client_mover_guid(None);
 
-    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+    let mut movement_info = MovementInfo::read_for(session.protocol(), packet)?;
     movement_info.mover_guid = player_guid;
 
     // Do not accept packets sent before the reject window or that fail validation.
@@ -550,7 +550,7 @@ pub async fn handle_move_knock_back_ack(
     let counter = packet
         .read_u32()
         .ok_or_else(|| anyhow!("KnockBackAck: missing counter"))?;
-    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+    let mut movement_info = MovementInfo::read_for(session.protocol(), packet)?;
 
     let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
     if session.get_mover_from_guid(mover) != Some(player_guid) {
@@ -605,7 +605,7 @@ pub async fn handle_move_spline_done(
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
-    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+    let mut movement_info = MovementInfo::read_for(session.protocol(), packet)?;
     let spline_id = packet
         .read_u32()
         .ok_or_else(|| anyhow!("MoveSplineDone: missing spline id"))?;
@@ -820,7 +820,7 @@ pub fn handle_force_speed_change_ack(
     let movement_counter = packet
         .read_u32()
         .ok_or_else(|| anyhow!("SpeedChangeAck: missing counter"))?;
-    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+    let mut movement_info = MovementInfo::read_for(session.protocol(), packet)?;
     let new_speed = packet
         .read_f32()
         .ok_or_else(|| anyhow!("SpeedChangeAck: missing speed"))?;
@@ -962,7 +962,7 @@ pub fn handle_movement_flag_change_ack(
     let movement_counter = packet
         .read_u32()
         .ok_or_else(|| anyhow!("FlagChangeAck: missing counter"))?;
-    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+    let mut movement_info = MovementInfo::read_for(session.protocol(), packet)?;
     let _client_apply = packet.read_u32().unwrap_or(0) != 0;
 
     movement_info.mover_guid = player_guid;
@@ -1117,7 +1117,7 @@ pub async fn handle_movement(
     }
 
     // Continue with normal movement processing
-    let mut movement_info = MovementInfo::read_from_packet(packet)?;
+    let mut movement_info = MovementInfo::read_for(session.protocol(), packet)?;
     movement_info.mover_guid = player_guid;
 
     // Do not accept packets sent before the reject window (anticheat backoff).

@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use super::{ObjectGuid, Position, WorldPacket};
+use super::{ObjectGuid, Position, Protocol, WorldPacket};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MoveFlags(u32);
@@ -104,6 +104,130 @@ impl MovementInfo {
             jump_xy_speed: None,
             spline_elevation: None,
             time: 0,
+        }
+    }
+
+    /// Parse a 1.14 client movement body.
+    ///
+    /// Mirrors `ObjectUpdateBuilder`'s writer and HermesProxy's `ReadMovementInfoModern`
+    /// (`World/Objects/MovementInfo.cs:276`). Structurally different from vanilla, not just
+    /// renumbered:
+    ///
+    /// * the mover GUID leads the body, where vanilla sends none;
+    /// * flags come *before* the timestamp as three plain u32s (from 1.14.1 on; earlier builds
+    ///   bit-packed them after the position, so this is specific to our target build);
+    /// * pitch and spline elevation are unconditional, where vanilla gates them on flags;
+    /// * transport, fall and jump data are selected by a run of presence bits rather than by
+    ///   movement flags.
+    ///
+    /// The flag word is translated back to vanilla so everything downstream — anticheat, collision,
+    /// the movement state machine — keeps working on one representation.
+    pub fn read_modern(packet: &mut WorldPacket) -> Result<Self> {
+        use crate::protocol::bitbuf::BitReader;
+        use crate::protocol::updates::modern::block::from_modern_movement_flags;
+
+        let mut reader = BitReader::new(packet.contents());
+        macro_rules! need {
+            ($value:expr, $what:literal) => {
+                $value.ok_or_else(|| anyhow::anyhow!(concat!("truncated movement: ", $what)))?
+            };
+        }
+
+        let mut info = Self::new();
+
+        // MoverGUID. The counter is all we keep: the caller overrides this with the session's
+        // player anyway, and trusting a client-supplied mover would let one player move another.
+        let (_high, low) = need!(reader.read_packed_guid_128(), "mover guid");
+        info.mover_guid = ObjectGuid::new_player(low as u32);
+
+        info.flags = MoveFlags::from(from_modern_movement_flags(need!(
+            reader.read_u32(),
+            "flags"
+        )));
+        let _flags_extra = need!(reader.read_u32(), "flags extra");
+        let _flags_extra2 = need!(reader.read_u32(), "flags extra 2");
+
+        info.time = need!(reader.read_u32(), "move time");
+        let x = need!(reader.read_f32(), "position x");
+        let y = need!(reader.read_f32(), "position y");
+        let z = need!(reader.read_f32(), "position z");
+        let o = need!(reader.read_f32(), "orientation");
+        info.position = Position::new(x, y, z, o);
+
+        let _pitch = need!(reader.read_f32(), "pitch");
+        info.spline_elevation = Some(need!(reader.read_f32(), "spline elevation"));
+
+        let remove_forces = need!(reader.read_u32(), "remove forces count");
+        let _move_index = need!(reader.read_u32(), "move index");
+        for _ in 0..remove_forces {
+            need!(reader.read_packed_guid_128(), "removed force guid");
+        }
+
+        let has_transport = need!(reader.read_bit(), "has transport");
+        let has_fall = need!(reader.read_bit(), "has fall");
+        let _has_spline = need!(reader.read_bit(), "has spline");
+        let _height_change_failed = need!(reader.read_bit(), "height change failed");
+        let _remote_time_valid = need!(reader.read_bit(), "remote time valid");
+        let has_inertia = need!(reader.read_bit(), "has inertia");
+
+        if has_transport {
+            let (_high, low) = need!(reader.read_packed_guid_128(), "transport guid");
+            info.transport_guid = Some(ObjectGuid::new_player(low as u32));
+            let tx = need!(reader.read_f32(), "transport x");
+            let ty = need!(reader.read_f32(), "transport y");
+            let tz = need!(reader.read_f32(), "transport z");
+            let to = need!(reader.read_f32(), "transport o");
+            info.transport_position = Some(Position::new(tx, ty, tz, to));
+            let _seat = need!(reader.read_u8(), "transport seat");
+            info.transport_time = Some(need!(reader.read_u32(), "transport time"));
+
+            let has_prev_time = need!(reader.read_bit(), "has prev time");
+            let has_vehicle_id = need!(reader.read_bit(), "has vehicle id");
+            if has_prev_time {
+                need!(reader.read_u32(), "prev move time");
+            }
+            if has_vehicle_id {
+                need!(reader.read_u32(), "vehicle id");
+            }
+        }
+
+        // Inertia has no vanilla equivalent, but it still has to be consumed or everything after
+        // it is misread.
+        if has_inertia {
+            need!(reader.read_packed_guid_128(), "inertia guid");
+            need!(reader.read_f32(), "inertia force x");
+            need!(reader.read_f32(), "inertia force y");
+            need!(reader.read_f32(), "inertia force z");
+            need!(reader.read_u32(), "inertia lifetime");
+        }
+
+        if has_fall {
+            info.fall_time = Some(need!(reader.read_u32(), "fall time"));
+            info.jump_velocity = Some(need!(reader.read_f32(), "jump velocity"));
+
+            if need!(reader.read_bit(), "has fall direction") {
+                info.jump_sin_angle = Some(need!(reader.read_f32(), "jump sin"));
+                info.jump_cos_angle = Some(need!(reader.read_f32(), "jump cos"));
+                info.jump_xy_speed = Some(need!(reader.read_f32(), "jump speed"));
+            }
+        }
+
+        // The bit reader worked off a borrowed slice, so move the packet's own cursor to match --
+        // otherwise anything the caller reads afterwards re-reads the movement block.
+        let consumed = reader.consumed();
+        packet.advance(consumed);
+
+        Ok(info)
+    }
+
+    /// Parse a movement body in whichever layout the client speaks.
+    ///
+    /// The two layouts share no structure, so this is a branch rather than a translation; see
+    /// [`Self::read_modern`].
+    pub fn read_for(protocol: Protocol, packet: &mut WorldPacket) -> Result<Self> {
+        match protocol {
+            Protocol::Vanilla => Self::read_from_packet(packet),
+            Protocol::Modern => Self::read_modern(packet),
         }
     }
 

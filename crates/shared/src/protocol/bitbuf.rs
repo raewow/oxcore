@@ -27,6 +27,13 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    /// Bytes consumed so far, rounding a partially-read byte up to a whole one.
+    ///
+    /// Lets a caller that parsed a bit-packed prefix advance the underlying packet past it.
+    pub fn consumed(&self) -> usize {
+        self.byte + usize::from(self.bit != 0)
+    }
+
     pub fn read_bit(&mut self) -> Option<bool> {
         let value = *self.buf.get(self.byte)? & (1 << (7 - self.bit)) != 0;
         self.bit += 1;
