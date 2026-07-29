@@ -19,25 +19,27 @@ The server requires extracted game data files from the WoW client. You can use v
 
 ## Database Setup
 
-The server requires **four separate MySQL databases**:
+The server requires **five separate MySQL databases**:
 
 1. **auth** - Authentication and realm information
 2. **world** - Game content (NPCs, items, quests, etc.)
 3. **characters** - Player characters and account data
 4. **logs** - Server logs and statistics
+5. **web** - Player-portal sessions, identity tokens, and web-admin audit records
 
 > Note: This database was copied from vmangos, and currently is largely the same however the project will eventually deviate, include all 3 expansions data and I'm thinking of moving to postgres too.
 
 
 ### Setting Up the Database
 
-Create the four databases in MySQL first:
+Create the five databases in MySQL first:
 
 ```sql
 CREATE DATABASE world CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE auth CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE characters CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE logs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE web CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
 Then run the `db` tool to apply the base schema and any pending migrations:
@@ -58,6 +60,7 @@ cargo run --bin db -- status
 # Create a new migration file
 cargo run --bin db -- new world add_creature_gossip_option
 cargo run --bin db -- new characters add_character_pet
+cargo run --bin db -- new web add_web_notification
 
 # Show help
 cargo run --bin db -- help
@@ -65,7 +68,16 @@ cargo run --bin db -- help
 
 Migration files are created in `sql/migrations/` with the format `YYYYMMDDHHMMSS_<db>_<name>.sql`.
 
-The tool reads database connection URLs from the same `config.toml` used by the auth and world servers.
+The tool reads database connection URLs from the same `config.toml` used by the servers. The web
+portal requires both its existing auth database and its dedicated web database:
+
+```toml
+[web]
+auth_database_url = "mysql://root:root@127.0.0.1:3306/auth"
+web_database_url = "mysql://root:root@127.0.0.1:3306/web"
+```
+
+The `web` database currently has no base dump; its schema is created entirely through migrations.
 
 ### Build Commands
 

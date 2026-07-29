@@ -8,6 +8,7 @@ pub struct Config {
     pub character_url: String,
     pub auth_url: String,
     pub logs_url: String,
+    pub web_url: String,
     /// Absolute path to sql/base/
     pub base_dir: PathBuf,
     /// Absolute path to sql/migrations/
@@ -17,6 +18,12 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 struct RootConfig {
     world: WorldConfig,
+    web: WebConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct WebConfig {
+    web_database_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +66,7 @@ impl Config {
         let root = RootConfig::load(&path)
             .with_context(|| format!("Failed to load config: {}", path.display()))?;
         let w = root.world;
+        let web = root.web;
 
         let sql_dir = find_sql_dir();
 
@@ -67,6 +75,7 @@ impl Config {
             character_url: w.character_database_url,
             auth_url: w.login_database_url,
             logs_url: w.logs_database_url,
+            web_url: web.web_database_url,
             base_dir: sql_dir.join("base"),
             migrations_dir: sql_dir.join("migrations"),
         })

@@ -9,6 +9,7 @@ const DATABASES: &[(&str, fn(&Config) -> &str)] = &[
     ("auth", |c| &c.auth_url),
     ("characters", |c| &c.character_url),
     ("logs", |c| &c.logs_url),
+    ("web", |c| &c.web_url),
 ];
 
 pub async fn run(config: &Config, yes: bool) -> Result<()> {

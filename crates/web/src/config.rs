@@ -13,6 +13,8 @@ pub struct Config {
     pub bind_ip: IpAddr,
     pub port: u16,
     pub public_base_url: String,
+    pub auth_database_url: String,
+    pub web_database_url: String,
 }
 
 impl Config {
@@ -28,6 +30,16 @@ impl Config {
 
         url.parse::<axum::http::Uri>()
             .context("web.public_base_url must be a valid URI")?;
+        if !self.auth_database_url.starts_with("mysql://") {
+            anyhow::bail!("web.auth_database_url must be a MySQL connection URL");
+        }
+        if !self.web_database_url.starts_with("mysql://") {
+            anyhow::bail!("web.web_database_url must be a MySQL connection URL");
+        }
         Ok(())
+    }
+
+    pub fn secure_cookies(&self) -> bool {
+        self.public_base_url.starts_with("https://")
     }
 }

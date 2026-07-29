@@ -1,18 +1,20 @@
 use anyhow::{Context, Result};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::Router;
+use axum::routing::{get, post};
+use axum::{Extension, Router};
 use leptos::config::get_configuration;
 use leptos_axum::{generate_route_list, LeptosRoutes};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use crate::config::Config;
+use crate::state::AppState;
 use oxcore_web::{shell, App};
 
 pub async fn serve(config: Config) -> Result<()> {
     config.validate()?;
+    let state = AppState::connect(&config).await?;
 
     let address = config.socket_addr();
     // cargo-leptos injects its configuration through environment variables. Supplying this
@@ -27,12 +29,17 @@ pub async fn serve(config: Config) -> Result<()> {
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/auth/login", post(crate::auth::login))
+        .route("/auth/logout", post(crate::auth::logout))
+        .route("/account", get(crate::auth::account))
+        .route("/admin", get(crate::auth::admin))
         .leptos_routes(&leptos_options, routes, {
             let leptos_options = leptos_options.clone();
             move || shell(leptos_options.clone())
         })
         .fallback(leptos_axum::file_and_error_handler(shell))
         .with_state(leptos_options)
+        .layer(Extension(state))
         .layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(address)
@@ -50,9 +57,12 @@ async fn healthz() -> impl IntoResponse {
     StatusCode::NO_CONTENT
 }
 
-async fn readyz() -> impl IntoResponse {
-    // Database readiness is added with the account/session stores in Phase 2.
-    StatusCode::NO_CONTENT
+async fn readyz(Extension(state): Extension<AppState>) -> impl IntoResponse {
+    if state.ready().await {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
 }
 
 async fn shutdown_signal() {

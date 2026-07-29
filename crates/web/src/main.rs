@@ -1,5 +1,7 @@
+mod auth;
 mod config;
 mod server;
+mod state;
 
 use anyhow::{Context, Result};
 use oxcore_shared::config::{find_config_file, load_toml};
