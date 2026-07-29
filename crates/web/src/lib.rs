@@ -138,6 +138,8 @@ fn Account() -> impl IntoView {
 
 #[component]
 fn Security() -> impl IntoView {
+    let sessions = Resource::new(|| (), |_| portal::get_active_sessions());
+
     view! {
         <AuthShell title="Account security" subtitle="Changing your password signs out every portal session.">
             <form class="mt-8 space-y-5" action="/auth/change-password" method="post">
@@ -146,8 +148,47 @@ fn Security() -> impl IntoView {
                 <AuthField id="confirm-password" name="confirm_password" label="Confirm new password" input_type="password" autocomplete="new-password" />
                 <Button button_type="submit" class="w-full">"Update password"</Button>
             </form>
+            <section class="mt-10 border-t border-border pt-6">
+                <p class="font-medium text-foreground">"Active sessions"</p>
+                <p class="mt-2 text-xs leading-6 text-muted-foreground">"Revoking the current session signs you out immediately."</p>
+                <Suspense fallback=move || view! {
+                    <p class="mt-4 text-xs text-muted-foreground">"Loading sessions..."</p>
+                }>
+                    {move || sessions.get().map(render_active_sessions)}
+                </Suspense>
+            </section>
             <a class="mt-6 inline-block text-xs text-primary hover:underline" href="/account">"Return to account"</a>
         </AuthShell>
+    }
+}
+
+fn render_active_sessions(result: Result<Vec<portal::SessionSummary>, ServerFnError>) -> AnyView {
+    match result {
+        Ok(sessions) if sessions.is_empty() => {
+            view! { <p class="mt-4 text-xs text-muted-foreground">"No active sessions."</p> }.into_any()
+        }
+        Ok(sessions) => view! {
+            <ul class="mt-4 divide-y divide-border">
+                {sessions.into_iter().map(|session| {
+                    let label = if session.current { "Current browser" } else { "Other browser" };
+                    view! {
+                        <li class="flex items-center justify-between gap-4 py-3 text-xs">
+                            <div>
+                                <p class="font-medium text-foreground">{label}</p>
+                                <p class="mt-1 text-muted-foreground">"Last active: " {session.last_seen_at}</p>
+                            </div>
+                            <form action="/auth/revoke-session" method="post">
+                                <input type="hidden" name="session_id" value=session.id />
+                                <button class="text-primary hover:underline" type="submit">"Revoke"</button>
+                            </form>
+                        </li>
+                    }
+                }).collect_view()}
+            </ul>
+        }.into_any(),
+        Err(_) => view! {
+            <p class="mt-4 text-xs text-muted-foreground">"Sessions are temporarily unavailable."</p>
+        }.into_any(),
     }
 }
 

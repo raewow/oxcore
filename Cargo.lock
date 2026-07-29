@@ -2771,6 +2771,7 @@ dependencies = [
  "axum-extra",
  "base64 0.22.1",
  "console_error_panic_hook",
+ "hex",
  "leptos",
  "leptos_axum",
  "leptos_meta",

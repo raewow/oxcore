@@ -36,6 +36,11 @@ pub struct PasswordChangeForm {
     pub confirm_password: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SessionRevokeForm {
+    pub session_id: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Session {
     pub account_id: u32,
@@ -200,6 +205,47 @@ pub async fn change_password(
         .into_response()
 }
 
+pub async fn revoke_session(
+    Extension(state): Extension<AppState>,
+    jar: CookieJar,
+    Form(form): Form<SessionRevokeForm>,
+) -> Response {
+    if form.session_id.len() != 64 || !form.session_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let Some(cookie) = jar.get(SESSION_COOKIE) else {
+        return Redirect::to("/login").into_response();
+    };
+    let Some(session) = session_from_token(&state.web, cookie.value()).await else {
+        return Redirect::to("/login").into_response();
+    };
+
+    let current_session_id = session_token_hash_hex(cookie.value());
+    let result = sqlx::query(
+        "DELETE FROM `web_sessions` WHERE `account_id` = ? AND `token_hash` = UNHEX(?)",
+    )
+    .bind(session.account_id)
+    .bind(&form.session_id)
+    .execute(&*state.web)
+    .await;
+    let Ok(result) = result else {
+        return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    if result.rows_affected() != 1 {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+
+    if form.session_id.eq_ignore_ascii_case(&current_session_id) {
+        return (
+            jar.remove(Cookie::from(SESSION_COOKIE)),
+            Redirect::to("/login"),
+        )
+            .into_response();
+    }
+    Redirect::to("/security").into_response()
+}
+
 pub async fn admin(Extension(state): Extension<AppState>, jar: CookieJar) -> Response {
     let Some(session) = current_session(&state.web, &jar).await else {
         return Redirect::to("/").into_response();
@@ -269,6 +315,15 @@ pub async fn session_from_token(pool: &MySqlPool, token: &str) -> Option<Session
     .await
     .ok()??;
 
+    // Session activity is advisory metadata; an update failure must not turn a valid session into
+    // an authentication failure.
+    let _ = sqlx::query(
+        "UPDATE `web_sessions` SET `last_seen_at` = UTC_TIMESTAMP() WHERE `token_hash` = ?",
+    )
+    .bind(hash.as_slice())
+    .execute(pool)
+    .await;
+
     Some(Session { account_id })
 }
 
@@ -287,6 +342,10 @@ async fn has_gm_access(pool: &MySqlPool, account_id: u32) -> Result<bool> {
 
 fn token_hash(token: &str) -> [u8; 32] {
     Sha256::digest(token.as_bytes()).into()
+}
+
+pub fn session_token_hash_hex(token: &str) -> String {
+    hex::encode_upper(token_hash(token))
 }
 
 fn session_cookie(token: String, secure: bool) -> Cookie<'static> {

@@ -20,6 +20,15 @@ pub struct PortalCharacter {
     pub online: u8,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSummary {
+    pub id: String,
+    pub created_at: i64,
+    pub last_seen_at: i64,
+    pub expires_at: i64,
+    pub current: bool,
+}
+
 #[server]
 pub async fn get_portal_overview() -> Result<PortalOverview, ServerFnError> {
     #[cfg(feature = "ssr")]
@@ -40,6 +49,36 @@ pub async fn get_portal_overview() -> Result<PortalOverview, ServerFnError> {
         return load_overview(&state, session.account_id)
             .await
             .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_active_sessions() -> Result<Vec<SessionSummary>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use axum_extra::extract::cookie::CookieJar;
+        use leptos_axum::extract;
+
+        let state = expect_context::<crate::state::AppState>();
+        let jar: CookieJar = extract().await?;
+        let Some(cookie) = jar.get("oxcore_session") else {
+            return Err(ServerFnError::ServerError("Not authenticated".to_string()));
+        };
+        let Some(session) = crate::auth::session_from_token(&state.web, cookie.value()).await
+        else {
+            return Err(ServerFnError::ServerError("Not authenticated".to_string()));
+        };
+
+        return load_sessions(
+            &state,
+            session.account_id,
+            &crate::auth::session_token_hash_hex(cookie.value()),
+        )
+        .await
+        .map_err(|error| ServerFnError::ServerError(error.to_string()));
     }
 
     #[cfg(not(feature = "ssr"))]
@@ -100,4 +139,36 @@ async fn load_overview(
         email_verified,
         characters,
     })
+}
+
+#[cfg(feature = "ssr")]
+async fn load_sessions(
+    state: &crate::state::AppState,
+    account_id: u32,
+    current_session_id: &str,
+) -> anyhow::Result<Vec<SessionSummary>> {
+    use anyhow::Context;
+
+    let rows = sqlx::query_as::<_, (String, i64, i64, i64)>(
+        "SELECT HEX(`token_hash`), UNIX_TIMESTAMP(`created_at`), UNIX_TIMESTAMP(`last_seen_at`), \
+         UNIX_TIMESTAMP(`expires_at`) FROM `web_sessions` WHERE `account_id` = ? \
+         AND `expires_at` > UTC_TIMESTAMP() ORDER BY `last_seen_at` DESC",
+    )
+    .bind(account_id)
+    .fetch_all(&*state.web)
+    .await
+    .context("failed to load active sessions")?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, created_at, last_seen_at, expires_at)| SessionSummary {
+                current: id.eq_ignore_ascii_case(current_session_id),
+                id,
+                created_at,
+                last_seen_at,
+                expires_at,
+            },
+        )
+        .collect())
 }
