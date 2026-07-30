@@ -1,6 +1,0 @@
-node_modules/
-dist/
-*.log
-
-# Ad-hoc agent debug scripts and scratch output
-tmp_*

@@ -1,8 +1,0 @@
-allowBuilds:
-  better-sqlite3: true
-onlyBuiltDependencies:
-  - better-sqlite3
-  - esbuild
-  - tree-sitter
-  - tree-sitter-c
-  - tree-sitter-cpp
