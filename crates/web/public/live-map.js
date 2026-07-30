@@ -1,7 +1,7 @@
 (() => {
   const TILE_SIZE = 256;
   const WORLD_TILE_SIZE = 533.333333;
-  const BOUNDS = [[0, 0], [69 * TILE_SIZE, 85 * TILE_SIZE]];
+  const BOUNDS = [[-69 * TILE_SIZE, 0], [0, 85 * TILE_SIZE]];
   let map;
   let markers = new Map();
   let initialized = false;
@@ -20,8 +20,43 @@
     } else {
       return null;
     }
-    return [y * TILE_SIZE, x * TILE_SIZE];
+    // L.CRS.Simple negates the lat axis when projecting to pixel/tile space,
+    // so tile row y must be negated here to line up with the {x}_{y}.png
+    // filenames written by the extractor.
+    return [-y * TILE_SIZE, x * TILE_SIZE];
   }
+
+  async function loadValidTiles() {
+    try {
+      const response = await fetch("/assets/live-map/tiles/metadata.json", { credentials: "same-origin" });
+      if (!response.ok) return null;
+      const metadata = await response.json();
+      if (!Array.isArray(metadata.tiles)) return null;
+      return new Set(metadata.tiles.map(([x, y]) => `${x}_${y}`));
+    } catch {
+      return null;
+    }
+  }
+
+  // The two continents don't fill the rectangular tile grid, so most
+  // {x}_{y} combinations Leaflet would otherwise request have no image.
+  // Skip those instead of letting them 404, which was both spamming the
+  // console and stealing HTTP connections from the tiles that do exist.
+  const SparseTileLayer = L.TileLayer.extend({
+    initialize(url, options, validTiles) {
+      L.TileLayer.prototype.initialize.call(this, url, options);
+      this._validTiles = validTiles;
+    },
+    createTile(coords, done) {
+      const key = `${coords.x}_${coords.y}`;
+      if (this._validTiles && !this._validTiles.has(key)) {
+        const tile = document.createElement("div");
+        done(null, tile);
+        return tile;
+      }
+      return L.TileLayer.prototype.createTile.call(this, coords, done);
+    },
+  });
 
   function icon() {
     return L.divIcon({
@@ -57,9 +92,10 @@
     }
   }
 
-  function initialize() {
+  async function initialize() {
     if (initialized || !window.L || !document.getElementById("live-map")) return;
     initialized = true;
+    const validTiles = await loadValidTiles();
     map = L.map("live-map", {
       crs: L.CRS.Simple,
       minZoom: -4,
@@ -68,13 +104,15 @@
       maxBoundsViscosity: 1,
       attributionControl: false,
     });
-    L.tileLayer("/assets/live-map/tiles/{x}_{y}.png", {
+    new SparseTileLayer("/assets/live-map/tiles/{x}_{y}.png", {
       bounds: BOUNDS,
       tileSize: TILE_SIZE,
       noWrap: true,
+      minZoom: -4,
+      maxZoom: 2,
       minNativeZoom: 0,
       maxNativeZoom: 0,
-    }).addTo(map);
+    }, validTiles).addTo(map);
     map.fitBounds(BOUNDS);
     refresh();
     window.setInterval(refresh, 10000);
