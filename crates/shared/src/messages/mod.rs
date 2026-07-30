@@ -69,6 +69,12 @@ pub struct Recipient {
     pub guid: ObjectGuid,
     /// The map that player is on.
     pub map_id: u16,
+    /// The realm serving this player, used to qualify every 128-bit GUID in the body.
+    ///
+    /// Must match what the character list and name queries used, or the client treats the same
+    /// object as two different ones. Carried per-recipient rather than as a constant so a realm
+    /// with an id other than 1 is not silently wrong.
+    pub realm_id: u16,
 }
 
 impl ToWorldPacket for WorldPacket {

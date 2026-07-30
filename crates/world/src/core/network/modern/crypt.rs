@@ -46,10 +46,16 @@ impl WorldCrypt {
 
     /// Server-side crypt after the plaintext authentication exchange. The client advances the
     /// nonce sequence for all frames, including the two plaintext frames in each direction.
-    pub fn server_after_handshake(key: &[u8; 16]) -> Self {
+    pub fn server_after_handshake(key: &[u8; 16], plaintext_received: u64) -> Self {
         let mut crypt = Self::server(key);
+        // The GCM nonce is a per-direction packet counter, and both sides count the plaintext
+        // handshake frames too. We always send exactly two before encryption starts.
         crypt.out_counter = 2; // SMSG_AUTH_CHALLENGE, SMSG_ENTER_ENCRYPTED_MODE
-        crypt.in_counter = 2; // CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK
+                               // Inbound is *not* fixed: the client interleaves unsolicited packets into the handshake
+                               // (`CMSG_LOG_DISCONNECT` on a fresh instance socket, reliably). Each one advances its
+                               // counter, so assuming two here desyncs the cipher against a client that sent three, and
+                               // every packet it goes on to send fails to decrypt.
+        crypt.in_counter = plaintext_received;
         crypt
     }
 

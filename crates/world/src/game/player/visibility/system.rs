@@ -504,6 +504,27 @@ impl VisibilitySubsystem {
             packets_to_send.len()
         );
 
+        // Name every object in the batch. When a client dies on one of these the log otherwise
+        // says only "1 target", which is not enough to reproduce it -- and a create that kills a
+        // client is always a specific object, not creates in general.
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            for target in &targets_to_send {
+                tracing::debug!(
+                    "[VISIBILITY]   -> {:?} kind={} entry={:?}",
+                    target,
+                    describe_guid_kind(*target),
+                    world
+                        .managers
+                        .creature_mgr
+                        .with_creature(*target, |c| c.entry)
+                        .or_else(|| world
+                            .managers
+                            .gameobject_mgr
+                            .with_gameobject(*target, |g| g.entry)),
+                );
+            }
+        }
+
         // Compression only applies to the vanilla body, so the broadcaster picks per protocol.
         for update_msg in packets_to_send {
             broadcaster.send_update_object(&update_msg)?;
@@ -757,5 +778,22 @@ impl VisibilitySubsystem {
 impl Default for VisibilitySubsystem {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// A short label for what an object GUID refers to, for logs.
+///
+/// The `Debug` for `ObjectGuid` prints the raw number, which does not say whether a create was for
+/// a creature, a gameobject or a player -- the first thing worth knowing when one of them kills a
+/// client.
+fn describe_guid_kind(guid: ObjectGuid) -> &'static str {
+    if guid.is_player() {
+        "player"
+    } else if guid.is_unit() {
+        "creature"
+    } else if guid.is_game_object() {
+        "gameobject"
+    } else {
+        "other"
     }
 }

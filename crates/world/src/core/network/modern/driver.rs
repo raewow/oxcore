@@ -29,15 +29,23 @@ use crate::core::session::WorldSession;
 use crate::World;
 use oxcore_shared::protocol::{Opcode, Protocol, WorldPacket};
 
+use super::auth_crypto::{derive_continued_session_aes_key, verify_continued_session, DerivedKeys};
 use super::auth_seeds;
+use super::connect_to::{
+    connect_to_body, ConnectKeyStore, ConnectToKey, PendingInstance, CONNECTION_TYPE_INSTANCE,
+    CONNECT_TO_SERIAL_WORLD_ATTEMPT_1,
+};
 use super::crypt::WorldCrypt;
 use super::framing::{
     self, ModernPacket, CONNECTION_INITIALIZE_CLIENT, CONNECTION_INITIALIZE_SERVER,
 };
 use super::handshake::{auth_response_frame, HandshakeServer};
-use super::opcodes::{CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK, CMSG_PING, SMSG_PONG};
+use super::opcodes::{
+    CMSG_AUTH_CONTINUED_SESSION, CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK, CMSG_PING,
+    SMSG_PONG,
+};
 use super::packets::{
-    classic_available_classes, pong_body, AuthResponseSuccess, AuthSession,
+    classic_available_classes, pong_body, AuthContinuedSession, AuthResponseSuccess, AuthSession,
     EnterEncryptedModeSigner, Ping,
 };
 
@@ -125,7 +133,9 @@ where
     stream.flush().await?;
 
     // 4. Auth session -> verify.
+    let mut plaintext_received = 0u64;
     let session_packet = read_plaintext(stream, &mut buf).await?;
+    plaintext_received += 1;
     if session_packet.opcode != CMSG_AUTH_SESSION {
         bail!(
             "expected CMSG_AUTH_SESSION, got opcode 0x{:04X}",
@@ -164,26 +174,29 @@ where
     // 6. The ack is still plaintext (encryption turns on only afterwards). A client that rejects
     // the signature simply stops talking without closing, so cap the wait rather than parking the
     // connection task forever with nothing in the log.
-    let ack = tokio::time::timeout(ACK_TIMEOUT, read_plaintext(stream, &mut buf))
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "timed out after {:?} waiting for CMSG_ENTER_ENCRYPTED_MODE_ACK — the client \
-                 usually goes silent here when it rejects the enter-encrypted-mode signature",
-                ACK_TIMEOUT
-            )
-        })??;
+    tokio::time::timeout(
+        ACK_TIMEOUT,
+        read_plaintext_expecting(
+            stream,
+            &mut buf,
+            CMSG_ENTER_ENCRYPTED_MODE_ACK,
+            "CMSG_ENTER_ENCRYPTED_MODE_ACK",
+            &mut plaintext_received,
+        ),
+    )
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "timed out after {:?} waiting for CMSG_ENTER_ENCRYPTED_MODE_ACK — the client \
+             usually goes silent here when it rejects the enter-encrypted-mode signature",
+            ACK_TIMEOUT
+        )
+    })??;
     debug!("modern handshake: ack received");
-    if ack.opcode != CMSG_ENTER_ENCRYPTED_MODE_ACK {
-        bail!(
-            "expected CMSG_ENTER_ENCRYPTED_MODE_ACK, got opcode 0x{:04X}",
-            ack.opcode
-        );
-    }
 
     // 7. Encryption is now live. The client has already consumed nonce counters for both
     // plaintext handshake frames in each direction.
-    let mut crypt = WorldCrypt::server_after_handshake(&keys.aes_key);
+    let mut crypt = WorldCrypt::server_after_handshake(&keys.aes_key, plaintext_received);
     let info = AuthResponseSuccess {
         virtual_realm_address: ctx.virtual_realm_address,
         virtual_realm_name: "Oxcore".into(),
@@ -211,13 +224,198 @@ pub async fn serve_connection<S, P>(
     mut stream: S,
     ctx: &ModernAuthContext<'_, P>,
     world: Arc<World>,
+    role: ConnectionRole,
 ) -> Result<()>
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
     P: SessionKeyProvider,
 {
     let conn = run_auth(&mut stream, ctx).await?;
-    run_world_connection(stream, conn, world).await
+    run_world_connection(stream, conn, world, role).await
+}
+
+/// Run the instance-connection handshake.
+///
+/// Same shape as [`run_auth`] but the client presents `CMSG_AUTH_CONTINUED_SESSION` — a key it was
+/// handed in `SMSG_CONNECT_TO` — instead of a fresh `CMSG_AUTH_SESSION`, and the handshake ends
+/// with `SMSG_RESUME_COMMS` rather than `SMSG_AUTH_RESPONSE`. The account is identified by the key
+/// alone; there is no second digest verification, exactly as in the reference.
+pub async fn run_instance_auth<S>(
+    stream: &mut S,
+    keys_store: &ConnectKeyStore,
+    signer: &dyn EnterEncryptedModeSigner,
+) -> Result<(AuthedConnection, PendingInstance)>
+where
+    S: AsyncReadExt + AsyncWriteExt + Unpin,
+{
+    let mut buf: Vec<u8> = Vec::with_capacity(1024);
+
+    let mut greeting = CONNECTION_INITIALIZE_SERVER.as_bytes().to_vec();
+    greeting.push(b'\n');
+    stream.write_all(&greeting).await?;
+    stream.flush().await?;
+    read_client_initialize(stream).await?;
+
+    let handshake = HandshakeServer::new();
+    stream.write_all(&handshake.auth_challenge_frame()).await?;
+    stream.flush().await?;
+
+    let mut plaintext_received = 0u64;
+    let packet = read_plaintext(stream, &mut buf).await?;
+    plaintext_received += 1;
+    if packet.opcode != CMSG_AUTH_CONTINUED_SESSION {
+        bail!(
+            "expected CMSG_AUTH_CONTINUED_SESSION on the instance connection, got opcode 0x{:04X}",
+            packet.opcode
+        );
+    }
+    let continued = AuthContinuedSession::parse(&packet.body)?;
+
+    let key = ConnectToKey::from_raw(continued.key);
+    if key.connection_type != CONNECTION_TYPE_INSTANCE {
+        bail!("continued session key is not for an instance connection");
+    }
+    let pending = keys_store
+        .redeem(continued.key)
+        .context("unknown or already-used instance connect key")?;
+    debug!(account = %pending.account, "instance connection redeemed its connect key");
+
+    if !verify_continued_session(
+        &pending.session_key40,
+        continued.key,
+        handshake.server_challenge(),
+        &continued.local_challenge,
+        &continued.digest,
+    ) {
+        bail!(
+            "continued-session digest did not verify for account '{}'",
+            pending.account
+        );
+    }
+
+    // Keyed off the *realm* connection's 40-byte session key plus this connection's own
+    // challenges, so the two sockets get independent ciphers from shared material. This is a
+    // different derivation from the realm handshake's -- see the function's docs.
+    let aes_key = derive_continued_session_aes_key(
+        &pending.session_key40,
+        handshake.server_challenge(),
+        &continued.local_challenge,
+    );
+    let derived = DerivedKeys {
+        session_key: pending.session_key40,
+        aes_key,
+    };
+
+    stream
+        .write_all(&handshake.enter_encrypted_mode_frame(&derived, signer))
+        .await?;
+    stream.flush().await?;
+
+    tokio::time::timeout(
+        ACK_TIMEOUT,
+        read_plaintext_expecting(
+            stream,
+            &mut buf,
+            CMSG_ENTER_ENCRYPTED_MODE_ACK,
+            "CMSG_ENTER_ENCRYPTED_MODE_ACK on the instance connection",
+            &mut plaintext_received,
+        ),
+    )
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "timed out waiting for CMSG_ENTER_ENCRYPTED_MODE_ACK on the instance connection"
+        )
+    })??;
+
+    // Encryption is live. `SMSG_RESUME_COMMS` is empty and tells the client the world may start.
+    let mut crypt = WorldCrypt::server_after_handshake(&derived.aes_key, plaintext_received);
+    let frame = framing::encode(&mut crypt, Opcode::SMSG_RESUME_COMMS.modern(), &[]);
+    stream.write_all(&frame).await?;
+    stream.flush().await?;
+    debug!(account = %pending.account, "instance connection ready");
+
+    Ok((
+        AuthedConnection {
+            crypt,
+            account: pending.account.clone(),
+            account_id: pending.account_id,
+            session_key40: derived.session_key,
+        },
+        pending,
+    ))
+}
+
+/// Read plaintext packets until the expected opcode arrives, skipping the rest.
+///
+/// The client interleaves unsolicited packets into the handshake — most reliably
+/// `CMSG_LOG_DISCONNECT`, which it sends on a freshly opened instance socket to report why the
+/// *previous* connection ended. Treating the first packet as the ack turns that routine report into
+/// a failed handshake, which is exactly what stalled the world socket at 70%.
+async fn read_plaintext_expecting<S>(
+    stream: &mut S,
+    buf: &mut Vec<u8>,
+    expected: u16,
+    what: &str,
+    received: &mut u64,
+) -> Result<ModernPacket>
+where
+    S: AsyncReadExt + AsyncWriteExt + Unpin,
+{
+    /// Cap on skipped packets, so a client that never acks ends the connection rather than
+    /// spinning here forever.
+    const MAX_SKIPPED: usize = 16;
+
+    for _ in 0..MAX_SKIPPED {
+        let packet = read_plaintext(stream, buf).await?;
+        // Counted whether or not we act on it: the client's nonce advances regardless.
+        *received += 1;
+        if packet.opcode == expected {
+            return Ok(packet);
+        }
+        match Opcode::from_modern_wire(packet.opcode) {
+            Some(opcode) => {
+                debug!(?opcode, "skipping unsolicited packet while awaiting {what}")
+            }
+            None => debug!(
+                opcode = format!("0x{:04X}", packet.opcode),
+                "skipping unknown packet while awaiting {what}"
+            ),
+        }
+    }
+
+    bail!("gave up waiting for {what} after {MAX_SKIPPED} other packets")
+}
+
+/// Which of a modern client's two sockets this connection is.
+///
+/// The split is the client's, not ours: it serves the glue screen on one and the world on the
+/// other, and refuses world traffic on the wrong one.
+impl ConnectionRole {
+    /// Short label for logs. Both sockets run the same loop, so without this it is impossible to
+    /// tell from the log which one a packet arrived on -- or whether the world socket is receiving
+    /// anything at all.
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Realm { .. } => "realm",
+            Self::Instance { .. } => "instance",
+        }
+    }
+}
+
+pub enum ConnectionRole {
+    /// Glue screen and character list. Answers `CMSG_PLAYER_LOGIN` with `SMSG_CONNECT_TO` and runs
+    /// none of the login sequence itself.
+    Realm {
+        keys: Arc<ConnectKeyStore>,
+        signer: Arc<dyn EnterEncryptedModeSigner>,
+        /// Where to tell the client the world lives.
+        instance_address: std::net::SocketAddr,
+    },
+    /// The world. Replays the login the realm connection deferred.
+    Instance {
+        player_guid: oxcore_shared::protocol::ObjectGuid,
+    },
 }
 
 /// Run a modern gameplay connection through the shared `WorldSession` dispatcher.
@@ -225,14 +423,20 @@ pub async fn run_world_connection<S>(
     mut stream: S,
     mut conn: AuthedConnection,
     world: Arc<World>,
+    role: ConnectionRole,
 ) -> Result<()>
 where
     S: AsyncReadExt + AsyncWriteExt + Unpin,
 {
-    world
-        .session_mgr
-        .remove_session_for_account(conn.account_id)
-        .await;
+    // Only the realm connection evicts an existing session for the account -- that is a duplicate
+    // login, and the older one should go. The instance connection is a *continuation* of the realm
+    // one, so evicting here would tear down the very session that just handed us the connect key.
+    if matches!(role, ConnectionRole::Realm { .. }) {
+        world
+            .session_mgr
+            .remove_session_for_account(conn.account_id)
+            .await;
+    }
     let session_id = world.session_mgr.generate_session_id();
     let (packet_tx, mut packet_rx) = tokio::sync::mpsc::unbounded_channel();
     let session = Arc::new(WorldSession::new_with_protocol(
@@ -245,15 +449,90 @@ where
     ));
     world.session_mgr.add_session(session.clone());
 
+    // The realm connection deferred the login until the world socket existed; run it now.
+    //
+    // Calls the handler with the GUID directly rather than synthesising a `CMSG_PLAYER_LOGIN` to
+    // re-parse: the body layout is protocol-specific, and this session is modern, so a hand-built
+    // packet would have to reproduce a packed guid128 exactly to be read back as the number we
+    // already have.
+    if let ConnectionRole::Instance { player_guid } = &role {
+        debug!(account = %conn.account, ?player_guid, "instance connection replaying deferred login");
+        if let Err(e) = crate::handlers::character::handle_player_login_with_guid(
+            &session,
+            player_guid.raw(),
+            &world.databases,
+            &world,
+        )
+        .await
+        {
+            warn!(account = %conn.account, "deferred login failed: {e}");
+        }
+    }
+
     let mut buf = Vec::with_capacity(1024);
     let mut chunk = [0u8; 1024];
-    let result = loop {
-        while let Some((packet, consumed)) = framing::decode(&mut conn.crypt, &buf)? {
+    let result = 'connection: loop {
+        // Drain every whole packet the buffer holds, re-decoding each time round so that a
+        // `continue` below still makes progress.
+        loop {
+            // A decode failure here is almost always a desynced cipher rather than a malformed
+            // packet, and it ends the connection. Name it, or the socket just goes quiet.
+            let decoded = match framing::decode(&mut conn.crypt, &buf) {
+                Ok(decoded) => decoded,
+                Err(e) => {
+                    warn!(
+                        account = %conn.account,
+                        connection = role.label(),
+                        "failed to decode packet (likely a desynced cipher): {e}"
+                    );
+                    break 'connection Err(e);
+                }
+            };
+            let Some((packet, consumed)) = decoded else {
+                break;
+            };
             buf.drain(..consumed);
             let Some(opcode) = Opcode::from_modern_wire(packet.opcode) else {
-                debug!(account = %conn.account, opcode = format!("0x{:04X}", packet.opcode), "unknown modern opcode");
+                debug!(
+                    account = %conn.account,
+                    connection = role.label(),
+                    opcode = format!("0x{:04X}", packet.opcode),
+                    "unknown modern opcode"
+                );
                 continue;
             };
+            debug!(account = %conn.account, connection = role.label(), ?opcode, "received");
+            // On the realm socket a login request is answered by handing the client to the world
+            // socket, not by running the login sequence here -- the sequence is instance traffic.
+            if let (
+                Opcode::CMSG_PLAYER_LOGIN,
+                ConnectionRole::Realm {
+                    keys,
+                    signer,
+                    instance_address,
+                },
+            ) = (opcode, &role)
+            {
+                match handle_realm_player_login(
+                    &mut stream,
+                    &mut conn,
+                    &packet.body,
+                    keys,
+                    signer.as_ref(),
+                    *instance_address,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        debug!(account = %conn.account, "handed client to the instance connection")
+                    }
+                    Err(e) => {
+                        warn!(account = %conn.account, "could not hand off to the world: {e}")
+                    }
+                }
+                continue;
+            }
+
             let mut world_packet = WorldPacket::new(opcode);
             world_packet.write_bytes(&packet.body);
             if let Err(e) = route_packet(
@@ -282,7 +561,14 @@ where
                         debug!(?packet, "dropping packet without a modern opcode");
                         continue;
                     }
-                    let frame = framing::encode(&mut conn.crypt, packet.opcode().modern(), packet.contents());
+                    let frame =
+                        framing::encode(&mut conn.crypt, packet.opcode().modern(), packet.contents());
+                    tracing::trace!(
+                        connection = role.label(),
+                        opcode = ?packet.opcode(),
+                        bytes = frame.len(),
+                        "sent"
+                    );
                     stream.write_all(&frame).await?;
                     stream.flush().await?;
                 }
@@ -617,4 +903,49 @@ mod tests {
         // The server must reject rather than proceed to encrypted mode.
         assert!(server_task.await.unwrap().is_err());
     }
+}
+
+/// Answer a realm-socket `CMSG_PLAYER_LOGIN` with `SMSG_CONNECT_TO`.
+///
+/// Issues a single-use key naming the account and the chosen character, then points the client at
+/// the instance listener. The login sequence runs on the socket the client opens next.
+async fn handle_realm_player_login<S>(
+    stream: &mut S,
+    conn: &mut AuthedConnection,
+    body: &[u8],
+    keys: &ConnectKeyStore,
+    signer: &dyn EnterEncryptedModeSigner,
+    instance_address: std::net::SocketAddr,
+) -> Result<()>
+where
+    S: AsyncReadExt + AsyncWriteExt + Unpin,
+{
+    use oxcore_shared::protocol::bitbuf::BitReader;
+
+    // Modern sends the character as a packed 128-bit GUID; only the counter identifies the row.
+    let mut reader = BitReader::new(body);
+    let (_high, low) = reader
+        .read_packed_guid_128()
+        .context("CMSG_PLAYER_LOGIN body is not a packed guid128")?;
+    let player_guid = oxcore_shared::protocol::ObjectGuid::new_player(low as u32);
+
+    let key = keys.issue(PendingInstance {
+        account_id: conn.account_id,
+        account: conn.account.clone(),
+        session_key40: conn.session_key40,
+        player_guid,
+    });
+
+    let body = connect_to_body(
+        instance_address,
+        CONNECT_TO_SERIAL_WORLD_ATTEMPT_1,
+        key,
+        signer,
+    )
+    .context("failed to build SMSG_CONNECT_TO")?;
+
+    let frame = framing::encode(&mut conn.crypt, Opcode::SMSG_CONNECT_TO.modern(), &body);
+    stream.write_all(&frame).await?;
+    stream.flush().await?;
+    Ok(())
 }

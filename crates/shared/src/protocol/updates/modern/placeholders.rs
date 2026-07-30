@@ -25,6 +25,13 @@ const HONOR_NEXT_LEVEL: u32 = 5500;
 /// "No PvP tier", which the client reads as a sentinel rather than a count.
 const NO_PVP_TIER: u32 = u32::MAX;
 
+/// Slots in the default backpack. The client sizes its bag UI from this, so a zero leaves the
+/// player with no inventory at all.
+const NUM_BACKPACK_SLOTS: u32 = 16;
+
+/// Action bars the player has unlocked. Zero means the client has nowhere to draw abilities.
+const MULTI_ACTION_BARS: u32 = 7;
+
 /// Apply every placeholder the object's type calls for.
 pub fn apply(
     fields: &mut ModernFieldsArray,
@@ -75,14 +82,12 @@ fn apply_unit(fields: &mut ModernFieldsArray) {
 }
 
 fn apply_player(fields: &mut ModernFieldsArray, guid: ObjectGuid, realm_id: u16) {
-    // 1.14 expects every player to belong to a WoW account. Vanilla has no such GUID, so this
-    // derives a stable one from the character, as HermesProxy does for other players.
-    let account = ObjectGuid::from_raw(u64::from(guid.counter()));
-    let (high, low) = account.to_guid128(realm_id);
-    fields.set_modern(MODERN_PLAYER_WOW_ACCOUNT, low as u32);
-    fields.set_modern(MODERN_PLAYER_WOW_ACCOUNT + 1, (low >> 32) as u32);
-    fields.set_modern(MODERN_PLAYER_WOW_ACCOUNT + 2, high as u32);
-    fields.set_modern(MODERN_PLAYER_WOW_ACCOUNT + 3, (high >> 32) as u32);
+    // 1.14 expects every player to belong to a WoW account, a GUID type vanilla has no concept of.
+    // It must carry high-type WowAccount (29); routing it through `ObjectGuid::to_guid128` would
+    // stamp it Player (2), because that function only knows the vanilla high types. A GUID whose
+    // type contradicts the field it sits in is exactly the shape of bug that kills the client.
+    let (high, low) = global_guid128(HIGH_GUID_WOW_ACCOUNT, u64::from(guid.counter()));
+    write_guid128(fields, MODERN_PLAYER_WOW_ACCOUNT, high, low);
 
     fields.set_modern(
         MODERN_PLAYER_FIELD_VIRTUAL_PLAYER_REALM,
@@ -134,6 +139,31 @@ fn apply_active_player(fields: &mut ModernFieldsArray) {
         MODERN_ACTIVE_PLAYER_FIELD_PVP_LAST_WEEKS_TIER_MAX_FROM_WINS,
         NO_PVP_TIER,
     );
+
+    // Two byte-packed counts the client sizes UI from. Both live inside larger words, so they are
+    // written by offset rather than as whole fields.
+    fields.set_modern(MODERN_ACTIVE_PLAYER_FIELD_BYTES, MULTI_ACTION_BARS << 8);
+    fields.set_modern(MODERN_ACTIVE_PLAYER_FIELD_BYTES_6, NUM_BACKPACK_SLOTS << 16);
+}
+
+/// `HighGuidType703::WowAccount`. Has no vanilla counterpart, so it is named here rather than in
+/// the shared `HighGuid` enum, which models 1.12 only.
+const HIGH_GUID_WOW_ACCOUNT: u64 = 29;
+
+/// Build a realm-independent ("global") 128-bit GUID: type in the high word, counter in the low.
+///
+/// Mirrors HermesProxy's `WowGuid128.GlobalCreate`. Unlike a player or item GUID this carries no
+/// realm, so it cannot go through `ObjectGuid::to_guid128`.
+fn global_guid128(high_type: u64, counter: u64) -> (u64, u64) {
+    (high_type << 58, counter)
+}
+
+/// Write a 128-bit GUID across the four consecutive slots 1.14 gives it.
+fn write_guid128(fields: &mut ModernFieldsArray, base: u16, high: u64, low: u64) {
+    fields.set_modern(base, low as u32);
+    fields.set_modern(base + 1, (low >> 32) as u32);
+    fields.set_modern(base + 2, high as u32);
+    fields.set_modern(base + 3, (high >> 32) as u32);
 }
 
 /// `region << 24 | site << 16 | realm id`, matching what the bnet realm list advertises.
@@ -196,6 +226,33 @@ mod tests {
             1,
         );
         assert!(value_at(&fields, MODERN_UNIT_FIELD_DISPLAY_SCALE).is_some());
+    }
+
+    /// The client sizes its bag and action-bar UI from these two byte-packed counts. Zero means no
+    /// inventory and nowhere to draw abilities.
+    #[test]
+    fn active_player_gets_its_ui_counts() {
+        let mut fields = ModernFieldsArray::new(ModernObjectType::ActivePlayer, 1);
+        apply(
+            &mut fields,
+            ModernObjectType::ActivePlayer,
+            ObjectGuid::new_player(4),
+            1,
+        );
+
+        let bars = value_at(&fields, MODERN_ACTIVE_PLAYER_FIELD_BYTES).expect("action bars set");
+        assert_eq!(
+            (bars >> 8) & 0xFF,
+            MULTI_ACTION_BARS,
+            "MultiActionBars is byte 1"
+        );
+
+        let slots = value_at(&fields, MODERN_ACTIVE_PLAYER_FIELD_BYTES_6).expect("backpack set");
+        assert_eq!(
+            (slots >> 16) & 0xFF,
+            NUM_BACKPACK_SLOTS,
+            "NumBackpackSlots is byte 2"
+        );
     }
 
     /// Self-only multipliers exist only under ActivePlayer, so a plain Player must not claim them.

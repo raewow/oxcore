@@ -43,6 +43,36 @@ impl AuthChallenge {
     }
 }
 
+// ---- CMSG_AUTH_CONTINUED_SESSION (client -> server) ----
+
+/// The instance connection's auth: the key the realm connection handed out in `SMSG_CONNECT_TO`.
+///
+/// There is no realm-join ticket and no account name here — the key *is* the identity, which is why
+/// it must be single-use and unguessable. The digest is not verified: the reference accepts the key
+/// alone (`WorldSocket.HandleAuthContinuedSession`), since it was issued to an already
+/// authenticated realm connection moments earlier.
+#[derive(Debug, Clone)]
+pub struct AuthContinuedSession {
+    pub dos_response: u64,
+    /// The packed connect key, as issued.
+    pub key: u64,
+    pub local_challenge: [u8; 16],
+    pub digest: [u8; 24],
+}
+
+impl AuthContinuedSession {
+    /// Layout: `DosResponse(u64) ‖ Key(u64) ‖ LocalChallenge[16] ‖ Digest[24]`.
+    pub fn parse(body: &[u8]) -> Result<Self> {
+        let mut r = Reader::new(body);
+        Ok(Self {
+            dos_response: r.u64()?,
+            key: r.u64()?,
+            local_challenge: r.array::<16>()?,
+            digest: r.array::<24>()?,
+        })
+    }
+}
+
 // ---- CMSG_AUTH_SESSION (client -> server) ----
 
 /// The auth session the client sends to prove it holds the realm-join session key.

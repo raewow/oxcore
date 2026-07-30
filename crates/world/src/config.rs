@@ -21,6 +21,21 @@ pub struct Config {
     pub modern_world_enabled: bool,
     #[serde(default = "default_modern_world_port")]
     pub modern_world_port: u16,
+
+    /// Port the modern client opens its *world* (instance) socket on.
+    ///
+    /// A 1.14 client uses two sockets: `modern_world_port` serves the glue screen and character
+    /// list, and after picking a character it is sent here by `SMSG_CONNECT_TO`. World traffic
+    /// only ever flows on this one.
+    #[serde(default = "default_modern_instance_port")]
+    pub modern_instance_port: u16,
+
+    /// Address advertised to the client for the instance socket.
+    ///
+    /// Must be reachable *from the client*, since the client dials it directly — the bind IP is no
+    /// use if it is `0.0.0.0`. Defaults to loopback, which is right only for a local client.
+    #[serde(default = "default_modern_instance_address")]
+    pub modern_instance_address: std::net::Ipv4Addr,
     /// The client build the realm serves — must match the connecting client AND have an entry in
     /// the auth-seed table (`core::network::modern::auth_seeds`). 41794 = 1.14.1 Windows x64.
     #[serde(default = "default_modern_world_build")]
@@ -316,6 +331,14 @@ fn default_realm_name() -> String {
     "oxcore".to_string()
 }
 
+fn default_modern_instance_port() -> u16 {
+    8087
+}
+
+fn default_modern_instance_address() -> std::net::Ipv4Addr {
+    std::net::Ipv4Addr::LOCALHOST
+}
+
 fn default_modern_world_port() -> u16 {
     8086
 }
@@ -576,6 +599,8 @@ impl Default for Config {
             bind_ip: "0.0.0.0".to_string(),
             modern_world_enabled: false,
             modern_world_port: default_modern_world_port(),
+            modern_instance_port: default_modern_instance_port(),
+            modern_instance_address: default_modern_instance_address(),
             modern_world_build: default_modern_world_build(),
             modern_world_os: default_modern_world_os(),
             modern_world_signing_key: default_modern_world_signing_key(),

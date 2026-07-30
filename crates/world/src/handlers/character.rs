@@ -29,7 +29,8 @@ use oxcore_shared::messages::character::{
 use oxcore_shared::messages::create::SmsgOutOfRange;
 use oxcore_shared::messages::login::{
     CharacterEnumEntry, EquipmentSlot, SmsgBindPointUpdate, SmsgCharEnum, SmsgInitWorldStates,
-    SmsgInitializeFactionsEmpty, SmsgLoginSetTimeSpeed, SmsgLoginVerifyWorld, SmsgSetRestStart,
+    SmsgInitialSetup, SmsgInitializeFactionsEmpty, SmsgLoadCufProfiles, SmsgLoginSetTimeSpeed,
+    SmsgLoginVerifyWorld, SmsgSetAllTaskProgress, SmsgSetRestStart, SmsgWorldServerInfo,
 };
 use oxcore_shared::messages::movement::{SmsgForceMoveRoot, SmsgForceMoveUnroot};
 use oxcore_shared::messages::social::SmsgStandstateUpdate;
@@ -292,6 +293,7 @@ pub async fn handle_player_login_with_guid(
         let mut broadcaster = PlayerBroadcaster::new(packet_tx, guid);
         broadcaster.set_protocol(session.protocol());
         broadcaster.set_map_id(player_mut.map_id as u16);
+        broadcaster.set_realm_id(world.get_realm_id() as u16);
         player_mut.set_broadcaster(std::sync::Arc::new(broadcaster));
         info!(
             "[LOGIN] PlayerBroadcaster created and set for player {:?}",
@@ -877,6 +879,22 @@ pub async fn handle_player_login_with_guid(
         ),
     };
     session.send_msg(verify_world)?;
+
+    // 1.14 waits on four more packets here before it will finish loading; 1.12 has no equivalent
+    // and needs none of them, so they are modern-only and drop silently for a vanilla session.
+    // Order matches HermesProxy's `HandleLoginVerifyWorld`.
+    if session.protocol() == Protocol::Modern {
+        session.send_msg(SmsgWorldServerInfo {
+            difficulty_id: 0,
+            // Classic Era continents carry no instance group size; only instances do.
+            instance_group_size: None,
+        })?;
+        session.send_msg(SmsgSetAllTaskProgress)?;
+        session.send_msg(SmsgInitialSetup::default())?;
+        session.send_msg(SmsgLoadCufProfiles)?;
+        info!("[LOGIN] 1.1/11 modern enter-world packets sent");
+    }
+
     info!(
         "[LOGIN] 1/11 SMSG_LOGIN_VERIFY_WORLD: map={}, pos=({:.1}, {:.1}, {:.1})",
         character.map, character.position_x, character.position_y, character.position_z

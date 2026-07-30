@@ -33,6 +33,11 @@ pub struct PlayerBroadcaster {
     /// tick rate and bury everything else, which is exactly what happened the first time a 1.14
     /// client reached the world.
     unported_seen: RwLock<HashSet<Opcode>>,
+    /// Realm serving this player, used to qualify 128-bit GUIDs in modern bodies.
+    ///
+    /// Must match what the character list sent, or the client sees two different objects for the
+    /// same thing.
+    realm_id: AtomicU16,
     /// Map this player is on, needed by modern object-update headers.
     ///
     /// Atomic because it changes on teleport, long after the broadcaster is behind an `Arc`.
@@ -83,6 +88,11 @@ impl PlayerBroadcaster {
         self.map_id.store(map_id, Ordering::Relaxed);
     }
 
+    /// The realm this player is on.
+    pub fn set_realm_id(&self, realm_id: u16) {
+        self.realm_id.store(realm_id, Ordering::Relaxed);
+    }
+
     /// Encode `msg` for this player's protocol.
     ///
     /// `None` means the message has no encoding for that protocol yet — see
@@ -95,6 +105,7 @@ impl PlayerBroadcaster {
             Protocol::Modern => msg.to_modern_for(Recipient {
                 guid: self.self_guid,
                 map_id: self.map_id(),
+                realm_id: self.realm_id.load(Ordering::Relaxed),
             }),
         }
     }
@@ -187,6 +198,7 @@ impl PlayerBroadcaster {
             self_guid,
             protocol: Protocol::Vanilla,
             map_id: AtomicU16::new(0),
+            realm_id: AtomicU16::new(1),
             unported_seen: RwLock::new(HashSet::new()),
             listeners: Arc::new(RwLock::new(HashMap::new())),
             listener_snapshot: Arc::new(ArcSwap::new(Arc::new(Vec::new()))),

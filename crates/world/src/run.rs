@@ -16,6 +16,8 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
 use crate::config::{initialize_config_mgr, Config};
+use crate::core::network::modern::connect_to::ConnectKeyStore;
+use crate::core::network::modern::server::serve_modern_instance;
 use crate::core::network::modern::{
     serve_modern, EnterEncryptedModeSigner, ModernServerConfig, RsaSigner,
 };
@@ -169,22 +171,58 @@ pub async fn serve(
                     virtual_realm_address: 0x0101_0000 | (realm_id as u32 & 0xFFFF),
                     active_expansion: 0,
                     account_expansion: 0,
+                    instance_address: SocketAddr::from((
+                        config.modern_instance_address,
+                        config.modern_instance_port,
+                    )),
                 });
                 let modern_shutdown = shutdown_rx.resubscribe();
                 let modern_world = world.clone();
-                info!("Modern (1.14.x) world listener enabled on {}", modern_addr);
+                // Shared between the two listeners: the realm socket issues connect keys and the
+                // instance socket redeems them.
+                let connect_keys = ConnectKeyStore::new();
+                info!("Modern (1.14.x) realm listener enabled on {}", modern_addr);
+                {
+                    let keys = connect_keys.clone();
+                    let signer = signer.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = serve_modern(
+                            modern_addr,
+                            accounts,
+                            signer,
+                            modern_config,
+                            modern_world,
+                            keys,
+                            modern_shutdown,
+                        )
+                        .await
+                        {
+                            error!("Modern world listener error: {}", e);
+                        }
+                    });
+                }
+
+                let instance_addr: SocketAddr =
+                    format!("{}:{}", config.bind_ip, config.modern_instance_port)
+                        .parse()
+                        .context("Invalid modern instance bind address")?;
+                let instance_shutdown = shutdown_rx.resubscribe();
+                let instance_world = world.clone();
+                info!(
+                    "Modern (1.14.x) instance listener enabled on {} (advertised as {}:{})",
+                    instance_addr, config.modern_instance_address, config.modern_instance_port
+                );
                 tokio::spawn(async move {
-                    if let Err(e) = serve_modern(
-                        modern_addr,
-                        accounts,
+                    if let Err(e) = serve_modern_instance(
+                        instance_addr,
                         signer,
-                        modern_config,
-                        modern_world,
-                        modern_shutdown,
+                        instance_world,
+                        connect_keys,
+                        instance_shutdown,
                     )
                     .await
                     {
-                        error!("Modern world listener error: {}", e);
+                        error!("Modern instance listener error: {}", e);
                     }
                 });
             }

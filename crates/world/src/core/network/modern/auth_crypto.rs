@@ -81,6 +81,51 @@ pub fn verify_digest(
     constant_time_eq(&expected[..client_digest.len()], client_digest)
 }
 
+/// Derive the packet-cipher key for a **continued session** (the instance connection).
+///
+/// Not the same derivation as the realm connection's. There is no session-key expansion step: the
+/// 40-byte key the realm connection already produced is used directly as the HMAC key, mixed with
+/// *this* connection's challenges. Running the realm derivation here produces a plausible but wrong
+/// key, and the client answers by closing the socket without a word.
+///
+/// Mirrors `WorldSocket.HandleAuthContinuedSessionCallback`.
+pub fn derive_continued_session_aes_key(
+    session_key40: &[u8; 40],
+    server_challenge: &[u8],
+    local_challenge: &[u8],
+) -> [u8; 16] {
+    let enc = hmac_sha256(
+        session_key40,
+        &[local_challenge, server_challenge, &ENCRYPTION_KEY_SEED],
+    );
+    let mut aes_key = [0u8; 16];
+    aes_key.copy_from_slice(&enc[..16]);
+    aes_key
+}
+
+/// Whether a continued-session digest proves the client holds the realm connection's session key.
+///
+/// Note the extra input the realm handshake has no equivalent of: the connect key itself, so a
+/// digest cannot be replayed onto a different key.
+pub fn verify_continued_session(
+    session_key40: &[u8; 40],
+    connect_key: u64,
+    server_challenge: &[u8],
+    local_challenge: &[u8],
+    client_digest: &[u8],
+) -> bool {
+    let expected = hmac_sha256(
+        session_key40,
+        &[
+            &connect_key.to_le_bytes(),
+            local_challenge,
+            server_challenge,
+            &CONTINUED_SESSION_SEED,
+        ],
+    );
+    constant_time_eq(&expected[..client_digest.len()], client_digest)
+}
+
 /// The session key derived after a successful auth: the 40-byte continued-session key and the
 /// 16-byte AES key that keys the packet cipher.
 #[derive(Debug, Clone)]
@@ -225,6 +270,78 @@ mod tests {
         let a = expected_digest(&session_key(), &SEED, &LOCAL_CHALLENGE, &SERVER_CHALLENGE);
         let b = expected_digest(&session_key(), &SEED, &SERVER_CHALLENGE, &LOCAL_CHALLENGE);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    /// The instance connection must key straight off the realm's 40-byte session key, **not** run
+    /// the full realm derivation over it again.
+    ///
+    /// This is the bug that made the client close the instance socket without a word: both produce
+    /// a well-formed 16-byte key, so nothing fails locally — the client simply cannot decrypt and
+    /// hangs up. The two must not agree on the same input.
+    #[test]
+    fn continued_session_does_not_re_expand_the_session_key() {
+        let session_key40 =
+            derive_keys(&session_key(), &SERVER_CHALLENGE, &LOCAL_CHALLENGE).session_key;
+
+        let correct =
+            derive_continued_session_aes_key(&session_key40, &SERVER_CHALLENGE, &LOCAL_CHALLENGE);
+        // What the driver did at first: treat the 40-byte key as a fresh bnet session key.
+        let wrong = derive_keys(&session_key40, &SERVER_CHALLENGE, &LOCAL_CHALLENGE).aes_key;
+
+        assert_ne!(
+            correct, wrong,
+            "re-expanding the session key yields the wrong cipher key"
+        );
+    }
+
+    /// The realm handshake's final step is the same HMAC, so deriving from its own session key with
+    /// its own challenges reproduces its AES key. That shared step is why only the *input* differs.
+    #[test]
+    fn the_two_derivations_share_their_final_hmac() {
+        let realm = derive_keys(&session_key(), &SERVER_CHALLENGE, &LOCAL_CHALLENGE);
+        assert_eq!(
+            derive_continued_session_aes_key(
+                &realm.session_key,
+                &SERVER_CHALLENGE,
+                &LOCAL_CHALLENGE
+            ),
+            realm.aes_key
+        );
+    }
+
+    /// The connect key is mixed into the digest, so one cannot be replayed against another key.
+    #[test]
+    fn continued_session_digest_is_bound_to_its_connect_key() {
+        let session_key40 =
+            derive_keys(&session_key(), &SERVER_CHALLENGE, &LOCAL_CHALLENGE).session_key;
+        let digest = hmac_sha256(
+            &session_key40,
+            &[
+                &7u64.to_le_bytes(),
+                &LOCAL_CHALLENGE[..],
+                &SERVER_CHALLENGE[..],
+                &CONTINUED_SESSION_SEED,
+            ],
+        );
+
+        assert!(verify_continued_session(
+            &session_key40,
+            7,
+            &SERVER_CHALLENGE,
+            &LOCAL_CHALLENGE,
+            &digest
+        ));
+        assert!(
+            !verify_continued_session(
+                &session_key40,
+                8,
+                &SERVER_CHALLENGE,
+                &LOCAL_CHALLENGE,
+                &digest
+            ),
+            "a digest must not verify against a different connect key"
+        );
     }
 
     #[test]

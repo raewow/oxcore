@@ -11,6 +11,7 @@
 
 pub mod auth_crypto;
 pub mod auth_seeds;
+pub mod connect_to;
 pub mod crypt;
 pub mod driver;
 pub mod framing;

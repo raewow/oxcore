@@ -1021,11 +1021,20 @@ impl Opcode {
     pub const CMSG_ENTER_ENCRYPTED_MODE_ACK: Opcode = Opcode { modern: 0x3767, ..Opcode::NONE };
     pub const CMSG_AUTH_CONTINUED_SESSION: Opcode = Opcode { modern: 0x3766, ..Opcode::NONE };
     pub const SMSG_CONNECT_TO: Opcode = Opcode { modern: 0x304D, ..Opcode::NONE };
+    pub const SMSG_RESUME_COMMS: Opcode = Opcode { modern: 0x304B, ..Opcode::NONE };
+    pub const CMSG_CONNECT_TO_FAILED: Opcode = Opcode { modern: 0x35D4, ..Opcode::NONE };
 
     // Movement. 1.14 split vanilla's bidirectional MSG_MOVE_* pairs: the client still sends the
     // shared number, but the server answers observers on a dedicated SMSG. There is no vanilla
     // equivalent -- vanilla simply echoes the client's own opcode back to nearby players.
     pub const SMSG_MOVE_UPDATE: Opcode = Opcode { modern: 0x2DE0, ..Opcode::NONE };
+
+    // Enter-world packets with no 1.12 counterpart. The client waits on these before it will
+    // finish loading, which is why a login that looks complete server-side can still hang or die.
+    pub const SMSG_WORLD_SERVER_INFO: Opcode = Opcode { modern: 0x25AC, ..Opcode::NONE };
+    pub const SMSG_SET_ALL_TASK_PROGRESS: Opcode = Opcode { modern: 0x2789, ..Opcode::NONE };
+    pub const SMSG_INITIAL_SETUP: Opcode = Opcode { modern: 0x2580, ..Opcode::NONE };
+    pub const SMSG_LOAD_CUF_PROFILES: Opcode = Opcode { modern: 0x25B9, ..Opcode::NONE };
 
     // Glue screen. The client sends all of these unprompted at character select.
     pub const CMSG_SERVER_TIME_OFFSET_REQUEST: Opcode = Opcode { modern: 0x369B, ..Opcode::NONE };
@@ -2054,6 +2063,15 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::SMSG_WARDEN_DATA, "SMSG_WARDEN_DATA"),
     (Opcode::SMSG_WEATHER, "SMSG_WEATHER"),
     (Opcode::SMSG_MOVE_UPDATE, "SMSG_MOVE_UPDATE"),
+    (Opcode::SMSG_RESUME_COMMS, "SMSG_RESUME_COMMS"),
+    (Opcode::SMSG_WORLD_SERVER_INFO, "SMSG_WORLD_SERVER_INFO"),
+    (
+        Opcode::SMSG_SET_ALL_TASK_PROGRESS,
+        "SMSG_SET_ALL_TASK_PROGRESS",
+    ),
+    (Opcode::SMSG_INITIAL_SETUP, "SMSG_INITIAL_SETUP"),
+    (Opcode::SMSG_LOAD_CUF_PROFILES, "SMSG_LOAD_CUF_PROFILES"),
+    (Opcode::CMSG_CONNECT_TO_FAILED, "CMSG_CONNECT_TO_FAILED"),
     (
         Opcode::SMSG_ENTER_ENCRYPTED_MODE,
         "SMSG_ENTER_ENCRYPTED_MODE",
@@ -2232,8 +2250,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            589,
-            "expected 589 opcode constants; update this count deliberately when adding opcodes"
+            595,
+            "expected 595 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

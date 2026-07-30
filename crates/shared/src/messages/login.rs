@@ -933,3 +933,117 @@ mod tests {
         assert_eq!(packet.opcode(), Opcode::SMSG_INITIALIZE_FACTIONS);
     }
 }
+
+// =========================================================================
+// MODERN ENTER-WORLD PACKETS
+// =========================================================================
+//
+// These four have no 1.12 counterpart at all: the vanilla client finishes loading off
+// `SMSG_LOGIN_VERIFY_WORLD` alone, while 1.14 waits for them before it will hand control to the
+// player. HermesProxy sends all four immediately after the verify
+// (`World/Client/PacketHandlers/CharacterHandler.cs:210`), which is why they are grouped here
+// rather than scattered by subject.
+//
+// Because they are modern-only they implement `to_vanilla` as an empty body that is never sent —
+// the trait requires it, and the send path only reaches `to_modern` for a 1.14 session.
+
+/// `SMSG_WORLD_SERVER_INFO` — difficulty and realm-wide restrictions.
+///
+/// Everything except the difficulty is optional and gated behind presence bits; a Classic Era realm
+/// sends none of it.
+#[derive(Debug, Clone, Default)]
+pub struct SmsgWorldServerInfo {
+    pub difficulty_id: u32,
+    /// Present only inside instances, where 1.14 wants the raid/party size.
+    pub instance_group_size: Option<u32>,
+}
+
+impl ToWorldPacket for SmsgWorldServerInfo {
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_WORLD_SERVER_INFO)
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.difficulty_id);
+        writer.write_u8(0); // IsTournamentRealm
+        writer.write_bit(false); // XRealmPvpAlert
+        writer.write_bit(false); // RestrictedAccountMaxLevel
+        writer.write_bit(false); // RestrictedAccountMaxMoney
+        writer.write_bit(self.instance_group_size.is_some());
+        writer.flush_bits();
+
+        if let Some(size) = self.instance_group_size {
+            writer.write_u32(size);
+        }
+        Some(writer.finish(Opcode::SMSG_WORLD_SERVER_INFO))
+    }
+}
+
+/// `SMSG_SET_ALL_TASK_PROGRESS` — always empty for Classic Era, which has no tasks.
+#[derive(Debug, Clone, Default)]
+pub struct SmsgSetAllTaskProgress;
+
+impl ToWorldPacket for SmsgSetAllTaskProgress {
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_SET_ALL_TASK_PROGRESS)
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut packet = WorldPacket::new(Opcode::SMSG_SET_ALL_TASK_PROGRESS);
+        packet.write_u32(0); // Tasks.Count
+        Some(packet)
+    }
+}
+
+/// `SMSG_INITIAL_SETUP` — the expansion the realm serves.
+#[derive(Debug, Clone)]
+pub struct SmsgInitialSetup {
+    pub expansion_level: u8,
+    pub expansion_tier: u8,
+}
+
+impl Default for SmsgInitialSetup {
+    /// Classic Era: expansion 0, tier 0.
+    ///
+    /// HermesProxy computes this as `LegacyVersion.ExpansionVersion - 1`, which for a 1.12 realm
+    /// is 0.
+    fn default() -> Self {
+        Self {
+            expansion_level: 0,
+            expansion_tier: 0,
+        }
+    }
+}
+
+impl ToWorldPacket for SmsgInitialSetup {
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_INITIAL_SETUP)
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut packet = WorldPacket::new(Opcode::SMSG_INITIAL_SETUP);
+        packet.write_u8(self.expansion_level);
+        packet.write_u8(self.expansion_tier);
+        Some(packet)
+    }
+}
+
+/// `SMSG_LOAD_CUF_PROFILES` — saved raid-frame layouts, an opaque blob.
+///
+/// We persist none, so this is the empty profile list the client accepts as "no saved layouts".
+#[derive(Debug, Clone, Default)]
+pub struct SmsgLoadCufProfiles;
+
+impl ToWorldPacket for SmsgLoadCufProfiles {
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_LOAD_CUF_PROFILES)
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut packet = WorldPacket::new(Opcode::SMSG_LOAD_CUF_PROFILES);
+        // A zero-length profile list; the client reads a count first.
+        packet.write_u32(0);
+        Some(packet)
+    }
+}

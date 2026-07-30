@@ -239,9 +239,21 @@ pub async fn handle_worldport_ack(
     }
     update_object = update_object.add_block(UpdateBlockData::CreateObject2(player_block));
 
+    // Routed through the broadcaster, not the session, for the same reason the login self-create
+    // is: only the broadcaster knows the recipient, and on modern that decides `ThisIsYou`, the
+    // `ActivePlayer` field table and the map id in the header. Sending it via the session hands the
+    // player their own object as a plain `Player` on map 0 -- the same malformed self-object that
+    // breaks the client at login, just after a teleport instead.
     info!("[WORLDPORT-ACK] Sending SMSG_UPDATE_OBJECT with item + player CREATE_OBJECT2...");
-    session.send_msg(update_object)?;
-    info!("[WORLDPORT-ACK] ✓ SMSG_UPDATE_OBJECT sent - player should spawn now");
+    if let Some(broadcaster) = world.managers.player_mgr.get_broadcaster(player_guid) {
+        broadcaster.send_update_object(&update_object)?;
+        info!("[WORLDPORT-ACK] ✓ SMSG_UPDATE_OBJECT sent - player should spawn now");
+    } else {
+        tracing::warn!(
+            "[WORLDPORT-ACK] No broadcaster for {:?}; the player will not spawn",
+            player_guid
+        );
+    }
 
     // 4. SMSG_INIT_WORLD_STATES (critical - client needs this to exit loading)
     let zone = world

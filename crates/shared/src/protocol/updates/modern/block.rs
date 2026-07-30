@@ -88,6 +88,13 @@ pub struct ModernCreateData {
     pub position: Position,
     pub movement_flags: u32,
     pub speeds: Option<MovementSpeeds>,
+    /// Whether the source block actually carried position or movement data.
+    ///
+    /// Not the same as "has a position field": an item create has none at all. 1.14 gates both the
+    /// movement block and the stationary position on this, so writing a position for an object
+    /// that never had one adds 16 bytes the client does not read and desynchronises every block
+    /// after it.
+    pub has_position_data: bool,
     /// Set for the recipient's own object, so the client knows which one to attach the camera to.
     pub this_is_you: bool,
     /// Present while the object is auto-attacking, so the client can draw the swing animation.
@@ -148,10 +155,11 @@ impl ModernUpdateBlock {
     fn write_movement_update(&self, writer: &mut BitWriter, realm_id: u16) {
         let create = self.create.clone().unwrap_or_default();
 
-        // Units get a full movement block; everything else gets a bare position. Sending both, or
-        // neither, leaves the object at the origin.
-        let has_movement = self.object_type.is_unit();
-        let stationary = !has_movement;
+        // Units get a full movement block, other positioned objects a bare position -- but an
+        // object with no position data at all (an item, say) gets neither. Matches the reference's
+        // `MoveInfo != null` guard on both bits.
+        let has_movement = create.has_position_data && self.object_type.is_unit();
+        let stationary = create.has_position_data && !self.object_type.is_unit();
 
         writer.write_bit(false); // NoBirthAnim
         writer.write_bit(false); // EnablePortals
@@ -211,6 +219,23 @@ impl ModernUpdateBlock {
             let (high, low) = victim.to_guid128(realm_id);
             writer.write_packed_guid_128(high, low);
         }
+
+        // The ActivePlayer tail. Mandatory whenever the ActivePlayer create bit is set, and it
+        // closes the movement update -- the field masks start immediately after.
+        //
+        // Omitting it does not simply lose three bits: the client reads them out of the first byte
+        // of the field mask, which is the block count, and every field offset after that is wrong.
+        // That makes the recipient's own object unparseable while every other object in the same
+        // packet is fine.
+        if create.this_is_you {
+            writer.write_bit(false); // HasSceneInstanceIDs
+            writer.write_bit(false); // HasRuneState -- death knights, so never in Classic Era
+                                     // Action buttons live here in 1.14, not in their own packet, which is why the
+                                     // reference has no SMSG_UPDATE_ACTION_BUTTONS. Sending none is valid; wiring the
+                                     // player's real bar through means writing 132 i32s in this branch.
+            writer.write_bit(false); // HasActionButtons
+            writer.flush_bits();
+        }
     }
 
     /// `MovementInfo.WriteMovementInfoModern`.
@@ -227,7 +252,15 @@ impl ModernUpdateBlock {
         let (high, low) = self.guid.to_guid128(realm_id);
         writer.write_packed_guid_128(high, low); // MoverGUID
 
-        writer.write_u32(to_modern_movement_flags(create.movement_flags));
+        // The flag word must agree with the presence bits below. We write `HasFall = false` and no
+        // transport or spline blocks, so any flag claiming that data is present has to come out --
+        // a client told it is falling with no fall block reads the next field as a jump velocity.
+        const MODERN_FALLING: u32 = 0x0000_0800;
+        const MODERN_FALLING_FAR: u32 = 0x0000_1000;
+        const CONTRADICTS_OMITTED_BLOCKS: u32 = MODERN_FALLING | MODERN_FALLING_FAR;
+
+        let flags = to_modern_movement_flags(create.movement_flags) & !CONTRADICTS_OMITTED_BLOCKS;
+        writer.write_u32(flags);
         writer.write_u32(0); // FlagsExtra
         writer.write_u32(0); // FlagsExtra2
 
