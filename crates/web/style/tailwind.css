@@ -39,4 +39,19 @@
     color: var(--foreground);
     font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   }
+
+  .live-map-marker {
+    background: transparent;
+    border: 0;
+  }
+
+  .live-map-marker span {
+    display: block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #111827;
+    border-radius: 9999px;
+    background: #f2c14e;
+    box-shadow: 0 0 0 2px rgba(242, 193, 78, 0.3);
+  }
 }

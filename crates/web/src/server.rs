@@ -59,6 +59,10 @@ pub async fn serve(config: Config) -> Result<()> {
             post(crate::auth::update_admin_realm_role),
         )
         .route("/api/portal/overview", get(crate::portal::overview))
+        .route(
+            "/api/admin/live-map/players",
+            get(crate::portal::live_map_players),
+        )
         .leptos_routes_with_context(
             &leptos_options,
             routes,
@@ -112,7 +116,8 @@ async fn redirect_authenticated_auth_pages(
         let path = request.uri().path();
         let is_auth_page = matches!(path, "/login" | "/register" | "/recover");
         let is_account_page = matches!(path, "/account" | "/security" | "/activity" | "/support")
-            || path.starts_with("/characters/");
+            || path.starts_with("/characters/")
+            || path.starts_with("/admin");
 
         if is_auth_page || is_account_page {
             let authenticated = match session_cookie(request.headers()) {

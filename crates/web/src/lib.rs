@@ -97,6 +97,7 @@ pub fn App() -> impl IntoView {
                 <Route path=(StaticSegment("admin"), StaticSegment("accounts"), ParamSegment("account_id")) view=AdminAccountDetail />
                 <Route path=(StaticSegment("admin"), StaticSegment("audit-logs")) view=AdminAuditLog />
                 <Route path=(StaticSegment("admin"), StaticSegment("permissions")) view=Permissions />
+                <Route path=(StaticSegment("admin"), StaticSegment("live-map")) view=LiveMap />
             </Routes>
         </Router>
     }
@@ -352,6 +353,28 @@ fn Permissions() -> impl IntoView {
                 </section>
             </div>
         </main>
+    }
+}
+
+#[component]
+fn LiveMap() -> impl IntoView {
+    view! {
+        <main class="min-h-screen bg-background p-3 text-foreground sm:p-5">
+            <div class="mx-auto flex min-h-[calc(100vh-1.5rem)] max-w-[100rem] flex-col gap-3">
+                <header class="flex items-center justify-between border-b border-border pb-4">
+                    <div>
+                        <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/admin">"oxcore / GM tools"</a>
+                        <h1 class="mt-3 font-sans text-3xl font-semibold tracking-tight">"Live map"</h1>
+                    </div>
+                    <a class="text-xs text-muted-foreground hover:text-primary" href="/admin">"Return to overview"</a>
+                </header>
+                <p class="text-xs text-muted-foreground">"Online characters refresh every 10 seconds. Only Eastern Kingdoms and Kalimdor are shown."</p>
+                <div id="live-map" class="min-h-[70vh] flex-1 border border-border bg-[#001d29]" aria-label="Live player map"></div>
+            </div>
+        </main>
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+        <script src="/live-map.js" defer></script>
     }
 }
 

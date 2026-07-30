@@ -17,5 +17,8 @@ log.txt
 CLAUDE.md
 /reference/
 .cursor/
+# Generated live-map minimap tiles — Blizzard copyrighted artwork, never commit or redistribute
+/crates/web/public/assets/live-map/
+
 # Generated TLS certs, keys, and patch artifacts (bnet gen-certs) — never commit; contains private keys
 /certs/

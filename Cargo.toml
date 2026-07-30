@@ -2,6 +2,7 @@
 # The `world` binary is provided by the oxcore-world crate (crates/world/src/bin/world.rs).
 [workspace]
 members = ["crates/auth", "crates/bnet", "crates/db", "crates/dbc", "crates/map", "crates/patcher", "crates/shared", "crates/tui", "crates/web", "crates/world", "crates/runtime"]
+exclude = ["tools/extractor"]
 resolver = "2"
 
 [workspace.dependencies]

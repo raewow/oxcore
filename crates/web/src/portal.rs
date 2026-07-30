@@ -129,6 +129,18 @@ pub struct AdminSession {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveMapPlayer {
+    pub guid: u32,
+    pub name: String,
+    pub level: u8,
+    pub class: u8,
+    pub map: u32,
+    pub position_x: f32,
+    pub position_y: f32,
+    pub zone: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEntry {
     pub id: u64,
     pub occurred_at: i64,
@@ -599,6 +611,58 @@ pub async fn overview(
         Ok(overview) => axum::Json(overview).into_response(),
         Err(error) => {
             tracing::error!(target: "oxcore_web", %error, "portal overview query failed");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[cfg(feature = "ssr")]
+pub async fn live_map_players(
+    axum::Extension(state): axum::Extension<crate::state::AppState>,
+    jar: axum_extra::extract::cookie::CookieJar,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    let Some(cookie) = jar.get("oxcore_session") else {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Some(session) = crate::auth::session_from_token(&state.web, cookie.value()).await else {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    };
+    if crate::auth::highest_gm_level(&state.auth, session.account_id)
+        .await
+        .unwrap_or(0)
+        < 1
+    {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+
+    match sqlx::query_as::<_, (u32, String, u8, u8, u32, f32, f32, u32)>(
+        "SELECT `guid`, `name`, `level`, `class`, `map`, `position_x`, `position_y`, `zone` \
+         FROM `characters` WHERE `online` <> 0 ORDER BY `name`",
+    )
+    .fetch_all(&*state.characters)
+    .await
+    {
+        Ok(rows) => axum::Json(
+            rows.into_iter()
+                .map(
+                    |(guid, name, level, class, map, position_x, position_y, zone)| LiveMapPlayer {
+                        guid,
+                        name,
+                        level,
+                        class,
+                        map,
+                        position_x,
+                        position_y,
+                        zone,
+                    },
+                )
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(error) => {
+            tracing::error!(target: "oxcore_web", %error, "live map player query failed");
             axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
