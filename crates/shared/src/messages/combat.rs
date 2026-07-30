@@ -1,6 +1,8 @@
 //! Combat Messages - SMSG_ATTACKERSTATEUPDATE and related packets
 
 use super::ToWorldPacket;
+use crate::messages::update::DEFAULT_REALM_ID;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Hit info flags for SMSG_ATTACKERSTATEUPDATE
@@ -108,6 +110,18 @@ impl ToWorldPacket for SmsgAttackStart {
         packet.write_guid_raw(self.target_guid.raw());
         packet
     }
+
+    /// `SAttackStart::Write`, from JimsProxy `World/Server/Packets/CombatPackets.cs:71-79`.
+    ///
+    /// Same two GUIDs, packed as guid128 instead of written raw.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.attacker_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        let (high, low) = self.target_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        Some(writer.finish(Opcode::SMSG_ATTACKSTART))
+    }
 }
 
 /// SMSG_ATTACKSTOP - Notifies that an attack has stopped
@@ -125,6 +139,21 @@ impl ToWorldPacket for SmsgAttackStop {
         packet.write_packed_guid_raw(self.target_guid.raw());
         packet.write_u32(self.unk);
         packet
+    }
+
+    /// `SAttackStop::Write`, from JimsProxy `World/Server/Packets/CombatPackets.cs:95-105`.
+    ///
+    /// Vanilla's trailing u32 becomes a single `NowDead` bit. It is nonzero in vanilla exactly when
+    /// the target died, so the flag carries the same meaning.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.attacker_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        let (high, low) = self.target_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_bit(self.unk != 0); // NowDead
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_ATTACKSTOP))
     }
 }
 

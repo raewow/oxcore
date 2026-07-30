@@ -179,6 +179,19 @@ impl ToWorldPacket for SmsgGossipComplete {
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_GOSSIP_COMPLETE)
     }
+
+    /// Empty in vanilla, one flushed bit from 1.14.2 on — JimsProxy
+    /// `World/Server/Packets/NPCPackets.cs:183-194` gates it on `AddedInVersion(9,2,0, 1,14,2, ...)`
+    /// and our target build 42597 *is* 1.14.2, so the bit is present.
+    ///
+    /// Without it the client is left with an unclosed gossip window: the packet is one byte short of
+    /// what it reads.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_bit(false); // SuppressSound
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_GOSSIP_COMPLETE))
+    }
 }
 
 /// SMSG_SHOW_BANK (0x1B8) - Open bank window

@@ -208,6 +208,42 @@ impl ToWorldPacket for SmsgQuestgiverQuestComplete<'_> {
         }
         packet
     }
+
+    /// `QuestGiverQuestComplete::Write`, from JimsProxy
+    /// `World/Server/Packets/QuestPackets.cs:600-618`.
+    ///
+    /// 1.14 carries a *single* `ItemReward` rather than vanilla's list, so only the first reward item
+    /// makes it into the packet. The rest still reach the player — they arrive as inventory updates —
+    /// this message just names one of them for the "you receive" toast. Money also widens to i64.
+    ///
+    /// Note the reference writes four bits and then the item **without flushing**: `ItemInstance`
+    /// starts with a u32, whose write flushes the partial byte, so the layout still lands on a byte
+    /// boundary. Our `BitWriter` flushes on byte writes too, so the same code produces the same bytes.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.quest_id);
+        writer.write_u32(self.xp);
+        writer.write_i64(i64::from(self.money));
+        writer.write_u32(0); // SkillLineIDReward
+        writer.write_u32(0); // NumSkillUpsReward
+
+        writer.write_bit(false); // UseQuestReward
+        writer.write_bit(false); // LaunchGossip
+        writer.write_bit(false); // LaunchQuest
+        writer.write_bit(false); // HideChatMessage
+
+        // ItemInstance for the single reward slot.
+        let item_id = self.reward_items.first().map_or(0, |&(id, _)| id);
+        writer.write_u32(item_id);
+        writer.write_u32(0); // RandomPropertiesSeed
+        writer.write_u32(0); // RandomPropertiesID
+        writer.write_bit(false); // HasItemBonus
+        writer.flush_bits();
+        writer.write_bits(0, 6); // ItemModList count
+        writer.flush_bits();
+
+        Some(writer.finish(Opcode::SMSG_QUESTGIVER_QUEST_COMPLETE))
+    }
 }
 
 /// SMSG_QUESTUPDATE_ADD_ITEM - Item objective progress update
@@ -471,6 +507,56 @@ impl ToWorldPacket for SmsgQuestgiverRequestItemsV2<'_> {
 
         packet
     }
+
+    /// `QuestGiverRequestItems::Write`, from JimsProxy
+    /// `World/Server/Packets/QuestPackets.cs:423-462`.
+    ///
+    /// Vanilla's four opaque trailing flag words collapse into a single `StatusFlags`, the strings
+    /// move to the end behind 9- and 12-bit lengths, and each required item gains a `Flags` word.
+    /// `MoneyToGet` becomes signed.
+    ///
+    /// Vanilla's `flags2` is the completable indicator (`0x03` vs `0x00`); that is what `StatusFlags`
+    /// carries here, since it is the one of the four the client actually reads.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(0); // QuestGiverCreatureID -- the GUID carries the entry
+        writer.write_u32(self.quest_id);
+        writer.write_u32(0); // CompEmoteDelay -- vanilla always sends 0 here too
+        writer.write_u32(if self.completable {
+            self.complete_emote
+        } else {
+            self.incomplete_emote
+        });
+        writer.write_u32(0); // Flags
+        writer.write_u32(0); // FlagsEx
+        writer.write_u32(0); // SuggestPartyMembers
+        writer.write_i32(self.req_money as i32);
+        writer.write_i32(self.req_items.len() as i32);
+        writer.write_i32(0); // Currency count
+        writer.write_u32(if self.completable { 0x03 } else { 0x00 }); // StatusFlags
+
+        for item in self.req_items {
+            writer.write_u32(item.item_id); // ObjectID
+            writer.write_u32(item.count); // Amount
+            writer.write_u32(0); // Flags
+        }
+        // No currencies in Classic Era, so nothing follows.
+
+        writer.write_bit(self.close_on_cancel); // AutoLaunched
+        writer.flush_bits();
+
+        let title = self.title.as_bytes();
+        let completion = self.request_items_text.as_bytes();
+        writer.write_bits(title.len() as u32, 9);
+        writer.write_bits(completion.len() as u32, 12);
+
+        writer.write_bytes(title);
+        writer.write_bytes(completion);
+
+        Some(writer.finish(Opcode::SMSG_QUESTGIVER_REQUEST_ITEMS))
+    }
 }
 
 /// Reward item info
@@ -556,6 +642,166 @@ impl ToWorldPacket for SmsgQuestgiverOfferRewardV2<'_> {
 
         packet
     }
+
+    /// `QuestGiverOfferRewardMessage::Write` plus the nested `QuestGiverOfferReward::Write`, from
+    /// JimsProxy `World/Server/Packets/QuestPackets.cs:507-580`.
+    ///
+    /// The nesting is the notable part: the inner block — GUID, ids, flags, emotes, then the whole
+    /// reward array — is written *first*, and the outer message's portraits and six bit-packed string
+    /// lengths follow it, with the strings last. Vanilla interleaves text and rewards instead.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+
+        // --- QuestGiverOfferReward (the inner block) ---
+        let (high, low) = self.guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(0); // QuestGiverCreatureID -- the GUID already carries the entry
+        writer.write_u32(self.quest_id);
+        writer.write_u32(self.quest_flags.0); // Flags
+        writer.write_u32(0); // FlagsEx
+        writer.write_u32(0); // SuggestedPartyMembers
+
+        let emotes: Vec<(u32, u32)> = self
+            .offer_reward_emote
+            .iter()
+            .zip(&self.offer_reward_emote_delay)
+            .filter(|(emote, _)| **emote != 0)
+            .map(|(emote, delay)| (*emote, *delay))
+            .collect();
+        writer.write_i32(emotes.len() as i32);
+        for (emote, delay) in &emotes {
+            writer.write_u32(*emote);
+            writer.write_u32(*delay);
+        }
+
+        writer.write_bit(self.enable_next); // AutoLaunched
+        writer.write_bit(false); // Unused
+        writer.flush_bits();
+
+        write_modern_quest_rewards(
+            &mut writer,
+            self.reward_choices,
+            self.reward_items,
+            self.money_reward,
+            0,
+            self.rew_spell,
+        );
+
+        // --- QuestGiverOfferRewardMessage (the outer message) ---
+        writer.write_u32(0); // QuestPackageID
+        writer.write_u32(0); // PortraitGiver
+        writer.write_u32(0); // PortraitGiverMount
+        writer.write_u32(0); // PortraitGiverModelSceneID
+        writer.write_u32(0); // PortraitTurnIn
+
+        let title = self.title.as_bytes();
+        let reward_text = self.offer_reward_text.as_bytes();
+        writer.write_bits(title.len() as u32, 9);
+        writer.write_bits(reward_text.len() as u32, 12);
+        writer.write_bits(0, 10); // PortraitGiverText
+        writer.write_bits(0, 8); // PortraitGiverName
+        writer.write_bits(0, 10); // PortraitTurnInText
+        writer.write_bits(0, 8); // PortraitTurnInName
+        // No FlushBits here: the reference writes the strings straight after, and `write_bytes`
+        // flushes the partial byte itself.
+
+        writer.write_bytes(title);
+        writer.write_bytes(reward_text);
+
+        Some(writer.finish(Opcode::SMSG_QUESTGIVER_OFFER_REWARD))
+    }
+}
+
+// =============================================================================
+// Modern quest-reward encoding
+// =============================================================================
+
+/// Fixed array sizes 1.14 writes unconditionally in `QuestRewards`, from JimsProxy
+/// `World/Enums/QuestDefines.cs:14-21`.
+///
+/// These are *not* counts of what we have — the client reads exactly this many entries every time, so
+/// a short reward list is zero-padded. Getting one wrong shifts everything after it.
+const MODERN_REWARD_ITEM_COUNT: usize = 4;
+const MODERN_REWARD_CHOICE_COUNT: usize = 6;
+const MODERN_REWARD_REPUTATION_COUNT: usize = 5;
+const MODERN_REWARD_CURRENCY_COUNT: usize = 4;
+const MODERN_REWARD_DISPLAY_SPELL_COUNT: usize = 3;
+
+/// `QuestRewards::Write`, from JimsProxy `World/Server/Packets/QuestPackets.cs:174-221`.
+///
+/// Shared by the quest-details and offer-reward dialogs, which carry the identical block. Vanilla
+/// sends length-prefixed lists of `(item, count, display)`; 1.14 sends fixed-width arrays and splits
+/// the choice items into their own `QuestChoiceItem` shape with an `ItemInstance` inside.
+fn write_modern_quest_rewards(
+    writer: &mut BitWriter,
+    choices: &[RewardItemInfo],
+    items: &[RewardItemInfo],
+    money: u32,
+    xp: u32,
+    spell_completion_id: u32,
+) {
+    writer.write_u32(choices.len() as u32); // ChoiceItemCount
+    writer.write_u32(items.len() as u32); // ItemCount
+
+    for index in 0..MODERN_REWARD_ITEM_COUNT {
+        let item = items.get(index);
+        writer.write_u32(item.map_or(0, |i| i.item_id));
+        writer.write_u32(item.map_or(0, |i| i.count));
+    }
+
+    writer.write_u32(money);
+    writer.write_u32(xp);
+    writer.write_u64(0); // ArtifactXP -- retail only
+    writer.write_u32(0); // ArtifactCategoryID
+    writer.write_u32(0); // Honor
+    writer.write_u32(0); // Title
+    writer.write_u32(0); // FactionFlags
+
+    for _ in 0..MODERN_REWARD_REPUTATION_COUNT {
+        writer.write_u32(0); // FactionID
+        writer.write_i32(0); // FactionValue
+        writer.write_i32(0); // FactionOverride
+        // The reference's constructor seeds every cap at 7, so match it rather than zero.
+        writer.write_i32(7); // FactionCapIn
+    }
+
+    for _ in 0..MODERN_REWARD_DISPLAY_SPELL_COUNT {
+        writer.write_i32(0); // SpellCompletionDisplayID
+    }
+    writer.write_u32(spell_completion_id);
+
+    for _ in 0..MODERN_REWARD_CURRENCY_COUNT {
+        writer.write_u32(0); // CurrencyID
+        writer.write_u32(0); // CurrencyQty
+    }
+
+    writer.write_u32(0); // SkillLineID
+    writer.write_u32(0); // NumSkillUps
+    writer.write_u32(0); // TreasurePickerID
+
+    for index in 0..MODERN_REWARD_CHOICE_COUNT {
+        write_modern_quest_choice_item(writer, choices.get(index));
+    }
+
+    writer.write_bit(false); // IsBoostSpell
+    writer.flush_bits();
+}
+
+/// `QuestChoiceItem::Write` with the `ItemInstance` it contains
+/// (`QuestPackets.cs:238-243`, `ItemPackets.cs:424-437`, `ItemPackets.cs:528-535`).
+///
+/// An absent choice still writes the whole shape with zeros — the array is fixed-width.
+fn write_modern_quest_choice_item(writer: &mut BitWriter, choice: Option<&RewardItemInfo>) {
+    writer.write_bits(0, 2); // LootItemType: 0 = item
+    // ItemInstance
+    writer.write_u32(choice.map_or(0, |c| c.item_id));
+    writer.write_u32(0); // RandomPropertiesSeed
+    writer.write_u32(0); // RandomPropertiesID
+    writer.write_bit(false); // HasItemBonus
+    writer.flush_bits();
+    writer.write_bits(0, 6); // ItemModList count
+    writer.flush_bits();
+    writer.write_u32(choice.map_or(0, |c| c.count)); // Quantity
 }
 
 /// SMSG_QUESTGIVER_QUEST_DETAILS - Show quest details (V2)
@@ -643,6 +889,86 @@ impl ToWorldPacket for SmsgQuestgiverQuestDetailsV2<'_> {
         }
 
         packet
+    }
+
+    /// `QuestGiverQuestDetails::Write`, from JimsProxy
+    /// `World/Server/Packets/QuestPackets.cs:46-112`.
+    ///
+    /// A reshape. Everything variable-length moves to the end: all four counts and the fixed fields
+    /// come first, then the arrays, then a bit run holding *seven* string lengths at differing widths
+    /// (9, 12, 12, 10, 8, 10, 8) and four flags, then the reward block, then the strings themselves.
+    ///
+    /// Fields with no 1.12 source — quest packages, portraits, objective ids, the session bonus — are
+    /// written as the reference's defaults rather than guessed at. The `HIDDEN_REWARDS` flag is
+    /// honoured the same way `to_vanilla` honours it.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let hidden = self.quest_flags.has_flag(QuestFlags::HIDDEN_REWARDS);
+        let choices: &[RewardItemInfo] = if hidden { &[] } else { self.reward_choices };
+        let items: &[RewardItemInfo] = if hidden { &[] } else { self.reward_items };
+        let money = if hidden { 0 } else { self.money_reward };
+
+        let mut writer = BitWriter::new();
+        let (high, low) = self.guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // QuestGiverGUID
+        writer.write_packed_guid_128(0, 0); // InformUnit -- no quest-sharing source here
+
+        writer.write_u32(self.quest_id);
+        writer.write_i32(0); // QuestPackageID
+        writer.write_u32(0); // PortraitGiver
+        writer.write_u32(0); // PortraitGiverMount
+        writer.write_u32(0); // PortraitGiverModelSceneID
+        writer.write_u32(0); // PortraitTurnIn
+        writer.write_u32(self.quest_flags.0); // Flags
+        writer.write_u32(0); // FlagsEx
+        writer.write_u32(0); // SuggestedPartyMembers
+
+        // Emotes are a *counted* array here, where vanilla always writes QUEST_EMOTE_COUNT and pads.
+        let emotes: Vec<(u32, u32)> = self
+            .details_emote
+            .iter()
+            .zip(&self.details_emote_delay)
+            .filter(|(emote, _)| **emote != 0)
+            .map(|(emote, delay)| (*emote, *delay))
+            .collect();
+
+        writer.write_i32(0); // LearnSpells count
+        writer.write_i32(emotes.len() as i32);
+        // Objectives are the 1.14 quest-objective system, which has no 1.12 equivalent: vanilla
+        // carries objectives only as the display text below.
+        writer.write_i32(0); // Objectives count
+        writer.write_i32(0); // QuestStartItemID
+        writer.write_i32(0); // QuestSessionBonus
+
+        for (emote, delay) in &emotes {
+            writer.write_u32(*emote); // Type
+            writer.write_u32(*delay); // Delay
+        }
+
+        let title = self.title.as_bytes();
+        let description = self.details.as_bytes();
+        let log_description = self.objectives.as_bytes();
+
+        writer.write_bits(title.len() as u32, 9);
+        writer.write_bits(description.len() as u32, 12);
+        writer.write_bits(log_description.len() as u32, 12);
+        writer.write_bits(0, 10); // PortraitGiverText
+        writer.write_bits(0, 8); // PortraitGiverName
+        writer.write_bits(0, 10); // PortraitTurnInText
+        writer.write_bits(0, 8); // PortraitTurnInName
+        writer.write_bit(self.activate_accept); // AutoLaunched
+        writer.write_bit(false); // unused in client
+        writer.write_bit(false); // StartCheat
+        writer.write_bit(true); // DisplayPopup
+        writer.flush_bits();
+
+        write_modern_quest_rewards(&mut writer, choices, items, money, 0, self.rew_spell);
+
+        writer.write_bytes(title);
+        writer.write_bytes(description);
+        writer.write_bytes(log_description);
+        // The four portrait strings had zero lengths above, so nothing follows.
+
+        Some(writer.finish(Opcode::SMSG_QUESTGIVER_QUEST_DETAILS))
     }
 }
 
@@ -1243,5 +1569,136 @@ mod tests {
         };
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::MSG_QUEST_PUSH_RESULT);
+    }
+}
+
+#[cfg(test)]
+mod modern_quest_dialog_tests {
+    use super::*;
+
+    fn details(
+        choices: &[RewardItemInfo],
+        items: &[RewardItemInfo],
+        flags: QuestFlags,
+    ) -> WorldPacket {
+        SmsgQuestgiverQuestDetailsV2 {
+            guid: ObjectGuid::new_creature(197, 42),
+            quest_id: 5,
+            title: "Kobold Camp Cleanup",
+            details: "The kobolds have been troubling us.",
+            objectives: "Slay 10 kobolds.",
+            activate_accept: false,
+            quest_flags: flags,
+            reward_choices: choices,
+            reward_items: items,
+            money_reward: 120,
+            rew_spell: 0,
+            details_emote: [1, 0, 0, 0],
+            details_emote_delay: [0, 0, 0, 0],
+        }
+        .to_modern()
+        .expect("quest details must encode for modern")
+    }
+
+    /// The reward block is fixed-width: the client reads 4 items, 6 choices, 5 reputations and
+    /// 4 currencies every time regardless of what the quest actually gives. If the length tracked
+    /// the input, every field after the block would shift.
+    #[test]
+    fn the_reward_block_is_the_same_size_however_many_rewards_there_are() {
+        let one = RewardItemInfo {
+            item_id: 1,
+            count: 1,
+            display_id: 1,
+        };
+        let none = details(&[], &[], QuestFlags(0));
+        let some = details(&[one.clone()], &[one.clone(), one.clone()], QuestFlags(0));
+
+        assert_eq!(
+            none.size(),
+            some.size(),
+            "rewards must be zero-padded, not length-prefixed"
+        );
+    }
+
+    /// `HIDDEN_REWARDS` must blank the rewards on modern the same way it does on vanilla, or the
+    /// client spoils quests that are meant to conceal their payout.
+    #[test]
+    fn hidden_rewards_are_withheld_but_the_block_still_has_its_shape() {
+        let one = RewardItemInfo {
+            item_id: 1234,
+            count: 5,
+            display_id: 1,
+        };
+        let shown = details(&[], &[one.clone()], QuestFlags(0));
+        let hidden = details(&[], &[one], QuestFlags(QuestFlags::HIDDEN_REWARDS));
+
+        assert_eq!(shown.size(), hidden.size(), "same shape either way");
+        assert_ne!(
+            shown.contents(),
+            hidden.contents(),
+            "hiding must actually change the payload"
+        );
+        // The item id must not survive anywhere in the hidden body.
+        assert!(
+            !hidden
+                .contents()
+                .windows(4)
+                .any(|w| w == 1234u32.to_le_bytes()),
+            "hidden reward item leaked into the packet"
+        );
+    }
+
+    /// 1.14 moves every string to the end behind a bit-packed length. A body that does not grow by
+    /// the text length means the strings were dropped or written in the wrong place.
+    #[test]
+    fn strings_trail_the_body() {
+        let short = SmsgQuestgiverQuestDetailsV2 {
+            guid: ObjectGuid::new_creature(197, 42),
+            quest_id: 5,
+            title: "a",
+            details: "b",
+            objectives: "c",
+            activate_accept: false,
+            quest_flags: QuestFlags(0),
+            reward_choices: &[],
+            reward_items: &[],
+            money_reward: 0,
+            rew_spell: 0,
+            details_emote: [0; QUEST_EMOTE_COUNT],
+            details_emote_delay: [0; QUEST_EMOTE_COUNT],
+        }
+        .to_modern()
+        .unwrap();
+        let long = details(&[], &[], QuestFlags(0));
+
+        let extra = "Kobold Camp Cleanup".len() + "The kobolds have been troubling us.".len()
+            + "Slay 10 kobolds.".len()
+            - 3;
+        // The long case also carries one emote (two u32s) that the short case does not.
+        assert_eq!(long.size(), short.size() + extra + 8);
+    }
+
+    /// The turn-in dialog's completable flag is what the client uses to enable its Complete button.
+    #[test]
+    fn request_items_reports_completability() {
+        let build = |completable| {
+            SmsgQuestgiverRequestItemsV2 {
+                guid: ObjectGuid::new_creature(197, 42),
+                quest_id: 5,
+                title: "t",
+                request_items_text: "r",
+                complete_emote: 1,
+                incomplete_emote: 2,
+                completable,
+                close_on_cancel: true,
+                req_money: 0,
+                req_items: &[],
+            }
+            .to_modern()
+            .unwrap()
+        };
+
+        assert_ne!(build(true).contents(), build(false).contents());
+        assert_eq!(build(true).size(), build(false).size());
     }
 }

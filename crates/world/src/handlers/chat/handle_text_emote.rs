@@ -68,6 +68,7 @@ pub async fn handle_text_emote(
         text_emote,
         emote_num,
         target_name: target_name.as_deref(),
+        target_guid,
     };
 
     // Broadcast to nearby players (including self)

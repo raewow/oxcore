@@ -12,6 +12,8 @@
 
 use crate::game::chat::{ChatMsg, ChatTag, Language};
 use crate::messages::ToWorldPacket;
+use crate::messages::update::DEFAULT_REALM_ID;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::ObjectGuid;
 use crate::protocol::Opcode;
@@ -312,6 +314,21 @@ impl ToWorldPacket for SmsgEmote {
         packet.write_guid(self.guid);
         packet
     }
+
+    /// `EmoteMessage::Write`, from JimsProxy `World/Server/Packets/ChatPackets.cs:559-575`.
+    ///
+    /// The GUID moves *ahead* of the emote id, and two fields are appended: a spell-visual-kit list
+    /// (added in 1.14.0) and a sequence variation (added in 1.14.2). Build 42597 is 1.14.2, so both
+    /// are present — an empty list and a zero variation.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(self.emote_id);
+        writer.write_i32(0); // SpellVisualKitIDs count
+        writer.write_i32(0); // SequenceVariation
+        Some(writer.finish(Opcode::SMSG_EMOTE))
+    }
 }
 
 /// SMSG_TEXT_EMOTE - Text emote broadcast
@@ -334,7 +351,12 @@ pub struct SmsgTextEmote<'a> {
     /// Emote animation number
     pub emote_num: u32,
     /// Target name (None if no target)
+    ///
+    /// Vanilla identifies the target by name; 1.14 sends its GUID and resolves the name locally, so
+    /// both are carried here and each protocol writes the one it wants.
     pub target_name: Option<&'a str>,
+    /// Target GUID, empty when the emote has no target. Used only by the modern body.
+    pub target_guid: ObjectGuid,
 }
 
 impl ToWorldPacket for SmsgTextEmote<'_> {
@@ -354,6 +376,26 @@ impl ToWorldPacket for SmsgTextEmote<'_> {
         }
 
         packet
+    }
+
+    /// `STextEmote::Write`, from JimsProxy `World/Server/Packets/ChatPackets.cs:634-645`.
+    ///
+    /// 1.14 names the target by **GUID**, not by name — the client looks the name up itself — and adds
+    /// a source account GUID and a sound index. So the name this struct carries for vanilla is unused
+    /// here, and `target_guid` is what matters.
+    ///
+    /// The account GUID is sent empty: it identifies the emoting player's Battle.net account, which
+    /// has no 1.12 equivalent and which the client only uses for ignore checks.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // SourceGUID
+        writer.write_packed_guid_128(0, 0); // SourceAccountGUID
+        writer.write_i32(self.text_emote as i32); // EmoteID
+        writer.write_i32(self.emote_num as i32); // SoundIndex
+        let (high, low) = self.target_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // TargetGUID
+        Some(writer.finish(Opcode::SMSG_TEXT_EMOTE))
     }
 }
 
@@ -438,6 +480,7 @@ mod tests {
             text_emote: 1,
             emote_num: 2,
             target_name: None,
+            target_guid: ObjectGuid::empty(),
         };
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TEXT_EMOTE);
@@ -451,6 +494,7 @@ mod tests {
             text_emote: 1,
             emote_num: 2,
             target_name: Some("Target"),
+            target_guid: ObjectGuid::new_player(2),
         };
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_TEXT_EMOTE);
