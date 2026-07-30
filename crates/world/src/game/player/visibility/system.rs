@@ -424,6 +424,8 @@ impl VisibilitySubsystem {
 
         // Maximum uncompressed packet size before chunking (32KB like old world)
         const MAX_UNCOMPRESSED_PACKET_SIZE: usize = 0x8000; // 32KB
+                                                            // Full-width modern masks make some creates larger than their legacy estimate.
+        const MAX_BLOCKS_PER_PACKET: usize = 25;
 
         // Collect all update blocks first
         let mut all_blocks = Vec::new();
@@ -479,7 +481,8 @@ impl VisibilitySubsystem {
             };
 
             // Check if adding this block would exceed the limit
-            if current_size_estimate + block_size_estimate > MAX_UNCOMPRESSED_PACKET_SIZE
+            if (current_size_estimate + block_size_estimate > MAX_UNCOMPRESSED_PACKET_SIZE
+                || current_msg.blocks.len() >= MAX_BLOCKS_PER_PACKET)
                 && !current_msg.blocks.is_empty()
             {
                 // Send current packet and start a new one

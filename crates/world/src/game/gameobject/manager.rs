@@ -519,33 +519,12 @@ impl GameObjectManager {
         Some(SmsgUpdateObject::new().add_block(UpdateBlockData::CreateObject(block)))
     }
 
-    /// Build SMSG_GAMEOBJECT_QUERY_RESPONSE packet for a gameobject entry
-    pub fn build_gameobject_query_packet(
-        &self,
-        entry: u32,
-    ) -> Option<oxcore_shared::protocol::WorldPacket> {
-        use oxcore_shared::protocol::Opcode;
-
-        let template = self.templates.get(&entry)?;
-
-        let mut packet =
-            oxcore_shared::protocol::WorldPacket::new(Opcode::SMSG_GAMEOBJECT_QUERY_RESPONSE);
-        packet.write_u32(entry);
-        packet.write_u32(template.go_type);
-        packet.write_u32(template.display_id);
-        packet.write_cstring(&template.name);
-        packet.write_u8(0); // name2
-        packet.write_u8(0); // name3
-        packet.write_u8(0); // name4
-        packet.write_cstring(&template.icon_name);
-        // 1.12.1: No castBarCaption, no unk1 string, no size float
-        // (castBarCaption/unk1 were added in 2.x, size is "not in Zero")
-        // data fields (24 ints - client reads all 24 in 1.12.1)
-        for i in 0..24 {
-            packet.write_i32(template.data[i]);
-        }
-
-        Some(packet)
+    /// Look up a gameobject template for a query response.
+    ///
+    /// Returns the borrowed template rather than an encoded packet: the two protocols disagree
+    /// about the body shape, so only the send path can encode it.
+    pub fn gameobject_template_info(&self, entry: u32) -> Option<Arc<GameObjectTemplate>> {
+        self.templates.get(&entry).map(|t| Arc::clone(&t))
     }
 
     /// Send nearby gameobjects to a player (called during login)
@@ -614,12 +593,23 @@ impl GameObjectManager {
             }
         }
 
+        // Sent as messages so each client gets the body its protocol expects.
         for entry in unique_entries {
-            if let Some(query_packet) = self.build_gameobject_query_packet(entry) {
-                world
-                    .managers
-                    .broadcast_mgr
-                    .send_msg_to_player(player_guid, query_packet);
+            if let Some(template) = self.gameobject_template_info(entry) {
+                world.managers.broadcast_mgr.send_msg_to_player(
+                    player_guid,
+                    oxcore_shared::messages::query::SmsgGameObjectQueryResponse {
+                        entry,
+                        guid: (0, 0),
+                        template: Some(oxcore_shared::messages::query::GameObjectTemplateInfo {
+                            go_type: template.go_type,
+                            display_id: template.display_id,
+                            name: &template.name,
+                            icon_name: &template.icon_name,
+                            data: &template.data,
+                        }),
+                    },
+                );
             }
         }
 

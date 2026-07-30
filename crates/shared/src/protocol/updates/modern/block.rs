@@ -99,6 +99,8 @@ pub struct ModernCreateData {
     pub this_is_you: bool,
     /// Present while the object is auto-attacking, so the client can draw the swing animation.
     pub combat_victim: Option<ObjectGuid>,
+    /// Gameobject quaternion, carried both in public fields and the packed create payload.
+    pub rotation: Option<[f32; 4]>,
 }
 
 /// One object's block: a header, optionally a movement update, then its fields.
@@ -160,6 +162,8 @@ impl ModernUpdateBlock {
         // `MoveInfo != null` guard on both bits.
         let has_movement = create.has_position_data && self.object_type.is_unit();
         let stationary = create.has_position_data && !self.object_type.is_unit();
+        let has_rotation =
+            self.object_type == ModernObjectType::GameObject && create.rotation.is_some();
 
         writer.write_bit(false); // NoBirthAnim
         writer.write_bit(false); // EnablePortals
@@ -171,7 +175,7 @@ impl ModernUpdateBlock {
         writer.write_bit(false); // ServerTime
         writer.write_bit(false); // Vehicle
         writer.write_bit(false); // AnimKit
-        writer.write_bit(false); // Rotation
+        writer.write_bit(has_rotation); // Rotation
         writer.write_bit(false); // AreaTrigger
         writer.write_bit(false); // GameObject
         writer.write_bit(false); // SmoothPhasing
@@ -220,6 +224,10 @@ impl ModernUpdateBlock {
             writer.write_packed_guid_128(high, low);
         }
 
+        if let Some(rotation) = create.rotation.filter(|_| has_rotation) {
+            writer.write_i64(pack_gameobject_rotation(rotation));
+        }
+
         // The ActivePlayer tail. Mandatory whenever the ActivePlayer create bit is set, and it
         // closes the movement update -- the field masks start immediately after.
         //
@@ -261,7 +269,10 @@ impl ModernUpdateBlock {
 
         let flags = to_modern_movement_flags(create.movement_flags) & !CONTRADICTS_OMITTED_BLOCKS;
         writer.write_u32(flags);
-        writer.write_u32(0); // FlagsExtra
+        // HermesProxy substitutes this 1.14 default when the legacy movement state has no extra
+        // flags. A zero value reaches the client only through the unported legacy path and has
+        // proven unsafe for freshly visible creatures.
+        writer.write_u32(512); // FlagsExtra
         writer.write_u32(0); // FlagsExtra2
 
         writer.write_u32(0); // MoveTime
@@ -284,4 +295,18 @@ impl ModernUpdateBlock {
         writer.write_bit(false); // HasInertia, added in 1.14.1
         writer.flush_bits();
     }
+}
+
+/// `Quaternion.GetPackedRotation` from HermesProxy.
+fn pack_gameobject_rotation(rotation: [f32; 4]) -> i64 {
+    const PACK_YZ: i64 = 1 << 20;
+    const PACK_X: i64 = PACK_YZ << 1;
+    const PACK_YZ_MASK: i64 = (PACK_YZ << 1) - 1;
+    const PACK_X_MASK: i64 = (PACK_X << 1) - 1;
+
+    let sign = if rotation[3] >= 0.0 { 1 } else { -1 };
+    let x = ((rotation[0] * PACK_X as f32) as i64 * sign) & PACK_X_MASK;
+    let y = ((rotation[1] * PACK_YZ as f32) as i64 * sign) & PACK_YZ_MASK;
+    let z = ((rotation[2] * PACK_YZ as f32) as i64 * sign) & PACK_YZ_MASK;
+    z | (y << 21) | (x << 42)
 }

@@ -22,6 +22,7 @@ use oxcore_shared::messages::gossip::SmsgGossipComplete;
 use oxcore_shared::messages::quest::{
     MsgQuestPushResult, QuestObjectiveData, SmsgQuestQueryResponseV2,
 };
+use oxcore_shared::protocol::bitbuf::BitReader;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Handle CMSG_QUESTGIVER_STATUS_QUERY (0x182)
@@ -37,9 +38,7 @@ pub async fn handle_questgiver_status_query(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let quest_giver_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read quest giver GUID"))?;
+    let quest_giver_guid = read_questgiver_status_guid(session.protocol(), packet)?;
 
     debug!(
         "CMSG_QUESTGIVER_STATUS_QUERY: player={:?}, npc={:?}",
@@ -82,6 +81,49 @@ pub async fn handle_questgiver_status_query(
         .send_quest_giver_status(player_guid, quest_giver_guid, world);
 
     Ok(())
+}
+
+/// Query status uses a packed GUID128 on 1.14, while vanilla sends its packed GUID64 form.
+/// Object lookup remains on the legacy low word because the game world still stores 1.12 GUIDs.
+fn read_questgiver_status_guid(
+    protocol: oxcore_shared::protocol::Protocol,
+    packet: &mut WorldPacket,
+) -> Result<ObjectGuid> {
+    if protocol == oxcore_shared::protocol::Protocol::Modern {
+        let mut reader = BitReader::new(packet.contents());
+        let (high, low) = reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read modern quest giver GUID"))?;
+        Ok(legacy_guid_from_modern(high, low))
+    } else {
+        packet
+            .read_guid()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read quest giver GUID"))
+    }
+}
+
+/// Convert the subset of 1.14 GUID128 types that can be quest givers back to the legacy object
+/// keys used by the world managers. Modern map/server identity has no 1.12 equivalent.
+fn legacy_guid_from_modern(high: u64, low: u64) -> ObjectGuid {
+    if high == 0 && low == 0 {
+        return ObjectGuid::empty();
+    }
+
+    let guid_type = high >> 58;
+    let entry = ((high >> 6) & 0x7F_FFFF) as u32;
+    let counter = low as u32;
+
+    match guid_type {
+        2 => ObjectGuid::new_player(counter),
+        3 => ObjectGuid::new_item(counter),
+        8 => ObjectGuid::new_creature(entry, counter),
+        10 => ObjectGuid::new_pet(entry, counter),
+        11 => ObjectGuid::new_gameobject(entry, counter),
+        12 => ObjectGuid::new_dynamic_object(counter),
+        14 => ObjectGuid::new_corpse(counter),
+        // Preserve an unrecognised low word rather than rejecting the whole status request.
+        _ => ObjectGuid::from_raw(low),
+    }
 }
 
 /// Handle CMSG_QUEST_QUERY (0x5C)
@@ -990,6 +1032,7 @@ mod tests {
         MockQuestRepositoryTrait, QuestRepositoryTrait,
     };
     use oxcore_shared::database::Databases;
+    use oxcore_shared::protocol::bitbuf::BitWriter;
     use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
@@ -1047,6 +1090,22 @@ mod tests {
 
     fn test_creature_guid(entry: u32, counter: u32) -> ObjectGuid {
         ObjectGuid::new_creature(entry, counter)
+    }
+
+    #[test]
+    fn modern_questgiver_status_reads_packed_guid128() {
+        let expected = test_creature_guid(197, 42);
+        let (high, low) = expected.to_guid128(1);
+        let mut writer = BitWriter::new();
+        writer.write_packed_guid_128(high, low);
+        let mut packet = WorldPacket::new(Opcode::CMSG_QUESTGIVER_STATUS_QUERY);
+        packet.write_bytes(&writer.into_bytes());
+
+        assert_eq!(
+            read_questgiver_status_guid(oxcore_shared::protocol::Protocol::Modern, &mut packet)
+                .unwrap(),
+            expected
+        );
     }
 
     fn add_player(

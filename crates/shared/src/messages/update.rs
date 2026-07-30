@@ -29,6 +29,9 @@ use crate::messages::{Recipient, ToWorldPacket};
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::guid::ObjectGuid;
 use crate::protocol::position::Position;
+use crate::protocol::updates::modern::field_map::{
+    MODERN_GAMEOBJECT_BYTES_1, MODERN_GAMEOBJECT_PARENT_ROTATION,
+};
 use crate::protocol::updates::modern::{
     ModernCreateData, ModernObjectType, ModernUpdateBlock, ModernUpdateType,
 };
@@ -523,6 +526,12 @@ impl CreateObjectBlock {
         let object_type = ModernObjectType::from_vanilla(self.type_id, is_self);
 
         let mut block = ModernUpdateBlock::new(update_type, self.guid, object_type, realm_id);
+        let field_value = |index: u32| {
+            self.fields
+                .iter()
+                .chain(&self.required_fields)
+                .find_map(|&(field, value)| (field == index).then_some(value))
+        };
 
         let (position, movement_flags, speeds, has_position_data) = match &self.movement {
             Some(MovementBlockData::Position(position)) => (*position, 0, None, true),
@@ -542,6 +551,25 @@ impl CreateObjectBlock {
             has_position_data,
             this_is_you: is_self,
             combat_victim: self.melee_attacking_victim,
+            rotation: if object_type == ModernObjectType::GameObject {
+                use crate::protocol::update_fields::GAMEOBJECT_ROTATION;
+                Some([
+                    field_value(GAMEOBJECT_ROTATION)
+                        .map(f32::from_bits)
+                        .unwrap_or(0.0),
+                    field_value(GAMEOBJECT_ROTATION + 1)
+                        .map(f32::from_bits)
+                        .unwrap_or(0.0),
+                    field_value(GAMEOBJECT_ROTATION + 2)
+                        .map(f32::from_bits)
+                        .unwrap_or(0.0),
+                    field_value(GAMEOBJECT_ROTATION + 3)
+                        .map(f32::from_bits)
+                        .unwrap_or(1.0),
+                ])
+            } else {
+                None
+            },
         });
 
         for &(index, value) in self.fields.iter().chain(&self.required_fields) {
@@ -549,6 +577,31 @@ impl CreateObjectBlock {
         }
         for &(index, bytes) in &self.bytes_fields {
             block.fields.set_vanilla(index, u32::from_le_bytes(bytes));
+        }
+
+        if object_type == ModernObjectType::GameObject {
+            use crate::protocol::update_fields::{
+                GAMEOBJECT_ARTKIT, GAMEOBJECT_ROTATION, GAMEOBJECT_STATE, GAMEOBJECT_TYPE_ID,
+            };
+
+            for offset in 0..4u16 {
+                let vanilla_index = GAMEOBJECT_ROTATION + u32::from(offset);
+                let default = if offset == 3 {
+                    1.0f32.to_bits()
+                } else {
+                    0.0f32.to_bits()
+                };
+                block.fields.set_modern(
+                    MODERN_GAMEOBJECT_PARENT_ROTATION + offset,
+                    field_value(vanilla_index).unwrap_or(default),
+                );
+            }
+
+            let bytes_1 = field_value(GAMEOBJECT_STATE).unwrap_or(0) & 0xFF
+                | (field_value(GAMEOBJECT_TYPE_ID).unwrap_or(0) & 0xFF) << 8
+                | (field_value(GAMEOBJECT_ARTKIT).unwrap_or(0) & 0xFF) << 16
+                | 255 << 24;
+            block.fields.set_modern(MODERN_GAMEOBJECT_BYTES_1, bytes_1);
         }
 
         block

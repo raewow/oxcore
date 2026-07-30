@@ -8,6 +8,7 @@ use crate::core::session::WorldSession;
 use crate::game::items::manager::ItemTemplate;
 use crate::World;
 use oxcore_shared::database::{CharacterRepository, Databases};
+use oxcore_shared::messages::query::{GameObjectTemplateInfo, SmsgGameObjectQueryResponse};
 use oxcore_shared::protocol::bitbuf::BitReader;
 use oxcore_shared::protocol::{Protocol, WorldPacket};
 
@@ -62,24 +63,27 @@ fn read_creature_query_entry(protocol: Protocol, packet: &mut WorldPacket) -> Re
     Ok(entry)
 }
 
-fn read_gameobject_query_entry(protocol: Protocol, packet: &mut WorldPacket) -> Result<u32> {
+fn read_gameobject_query(
+    protocol: Protocol,
+    packet: &mut WorldPacket,
+) -> Result<(u32, (u64, u64))> {
     if protocol == Protocol::Modern {
         let mut reader = BitReader::new(packet.contents());
         let entry = reader.read_u32().ok_or_else(|| {
             anyhow::anyhow!("Failed to read gameobject entry from CMSG_GAMEOBJECT_QUERY")
         })?;
-        reader.read_packed_guid_128().ok_or_else(|| {
+        let guid = reader.read_packed_guid_128().ok_or_else(|| {
             anyhow::anyhow!("Failed to read gameobject GUID from CMSG_GAMEOBJECT_QUERY")
         })?;
-        Ok(entry)
+        Ok((entry, guid))
     } else {
         let entry = packet.read_u32().ok_or_else(|| {
             anyhow::anyhow!("Failed to read gameobject entry from CMSG_GAMEOBJECT_QUERY")
         })?;
-        packet.read_u64().ok_or_else(|| {
+        let guid = packet.read_u64().ok_or_else(|| {
             anyhow::anyhow!("Failed to read gameobject GUID from CMSG_GAMEOBJECT_QUERY")
         })?;
-        Ok(entry)
+        Ok((entry, (0, guid)))
     }
 }
 
@@ -644,27 +648,39 @@ pub async fn handle_gameobject_query(
     world: &World,
 ) -> Result<()> {
     // Hermes' modern QueryGameObject body uses a packed GUID128 after GameObjectID.
-    let entry = read_gameobject_query_entry(session.protocol(), packet)?;
+    let (entry, guid) = read_gameobject_query(session.protocol(), packet)?;
 
     tracing::debug!("CMSG_GAMEOBJECT_QUERY: entry={}", entry);
 
-    if let Some(query_packet) = world
+    // Sent as a message so the body matches the client's protocol: 1.14 wraps the template in a
+    // length-counted buffer and reads 35 data ints where 1.12 reads 24.
+    match world
         .managers
         .gameobject_mgr
-        .build_gameobject_query_packet(entry)
+        .gameobject_template_info(entry)
     {
-        session.send_packet(query_packet)?;
-    } else {
-        tracing::warn!(
-            "CMSG_GAMEOBJECT_QUERY: template not found for entry={}",
-            entry
-        );
-        // Send not-found response (entry | 0x80000000 signals "not found" to client)
-        let mut response = oxcore_shared::protocol::WorldPacket::new(
-            oxcore_shared::protocol::Opcode::SMSG_GAMEOBJECT_QUERY_RESPONSE,
-        );
-        response.write_u32(entry | 0x80000000);
-        session.send_packet(response)?;
+        Some(template) => session.send_msg(SmsgGameObjectQueryResponse {
+            entry,
+            guid,
+            template: Some(GameObjectTemplateInfo {
+                go_type: template.go_type,
+                display_id: template.display_id,
+                name: &template.name,
+                icon_name: &template.icon_name,
+                data: &template.data,
+            }),
+        })?,
+        None => {
+            tracing::warn!(
+                "CMSG_GAMEOBJECT_QUERY: template not found for entry={}",
+                entry
+            );
+            session.send_msg(SmsgGameObjectQueryResponse {
+                entry,
+                guid,
+                template: None,
+            })?;
+        }
     }
 
     Ok(())
@@ -733,8 +749,8 @@ mod tests {
         packet.write_bytes(&writer.into_bytes());
 
         assert_eq!(
-            read_gameobject_query_entry(Protocol::Modern, &mut packet).unwrap(),
-            54_321
+            read_gameobject_query(Protocol::Modern, &mut packet).unwrap(),
+            (54_321, (0x0100, 0x0200_01))
         );
     }
 
@@ -743,7 +759,7 @@ mod tests {
         let mut packet = WorldPacket::new(Opcode::CMSG_GAMEOBJECT_QUERY);
         packet.write_u32(7);
 
-        assert!(read_gameobject_query_entry(Protocol::Vanilla, &mut packet).is_err());
+        assert!(read_gameobject_query(Protocol::Vanilla, &mut packet).is_err());
     }
 
     #[test]

@@ -3122,6 +3122,11 @@ pub const GAME_OBJECT_FIELD_COUNT: u16 = 33;
 /// Total modern *dynamic* field slots for GameObject.
 pub const GAME_OBJECT_DYNAMIC_FIELD_COUNT: u16 = 1;
 
+/// `GAMEOBJECT_PARENTROTATION`, four consecutive quaternion components.
+pub const MODERN_GAMEOBJECT_PARENT_ROTATION: u16 = 17;
+/// `GAMEOBJECT_BYTES_1`: state, type, art kit, and percent health.
+pub const MODERN_GAMEOBJECT_BYTES_1: u16 = 23;
+
 /// Vanilla slot -> modern slot for GameObject objects.
 ///
 /// Index with a vanilla field number; [`UNMAPPED`] means the field does not
