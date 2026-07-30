@@ -42,6 +42,22 @@ pub async fn serve(config: Config) -> Result<()> {
             "/admin/accounts/{account_id}",
             post(crate::auth::update_admin_account),
         )
+        .route(
+            "/admin/accounts/{account_id}/ban",
+            post(crate::auth::update_admin_ban),
+        )
+        .route(
+            "/admin/accounts/{account_id}/mute",
+            post(crate::auth::update_admin_mute),
+        )
+        .route(
+            "/admin/accounts/{account_id}/sessions/revoke",
+            post(crate::auth::revoke_admin_session),
+        )
+        .route(
+            "/admin/accounts/{account_id}/realm-role",
+            post(crate::auth::update_admin_realm_role),
+        )
         .route("/api/portal/overview", get(crate::portal::overview))
         .leptos_routes_with_context(
             &leptos_options,

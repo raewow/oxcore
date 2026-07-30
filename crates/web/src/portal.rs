@@ -92,6 +92,51 @@ pub struct AdminAccountDetail {
     pub banned: u8,
     pub expansion: u8,
     pub last_ip: String,
+    pub muted_until: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RealmAccess {
+    pub realm_id: i32,
+    pub gmlevel: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminAccountPage {
+    pub accounts: Vec<AdminAccount>,
+    pub total: u64,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminCharacter {
+    pub guid: u32,
+    pub name: String,
+    pub race: u8,
+    pub class: u8,
+    pub level: u8,
+    pub online: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminSession {
+    pub account_id: u32,
+    pub id: String,
+    pub created_at: i64,
+    pub last_seen_at: i64,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEntry {
+    pub id: u64,
+    pub occurred_at: i64,
+    pub actor: Option<String>,
+    pub action: String,
+    pub target_type: String,
+    pub target_id: Option<String>,
+    pub reason: Option<String>,
 }
 
 pub const SECURITY_LEVELS: &[(u8, &str)] = &[
@@ -339,7 +384,8 @@ pub async fn get_admin_overview() -> Result<AdminOverview, ServerFnError> {
 #[server]
 pub async fn get_admin_accounts(
     search: Option<String>,
-) -> Result<Vec<AdminAccount>, ServerFnError> {
+    page: u32,
+) -> Result<AdminAccountPage, ServerFnError> {
     #[cfg(feature = "ssr")]
     {
         let (state, account_id, _) = authenticated_request().await?;
@@ -350,20 +396,45 @@ pub async fn get_admin_accounts(
         if level == 0 {
             return Err(ServerFnError::ServerError("Not authorized".to_string()));
         }
+        const PAGE_SIZE: u32 = 50;
+        let page = page.max(1);
         let search = search.unwrap_or_default();
         let pattern = format!("%{}%", search.trim());
-        return sqlx::query_as::<_, (u32, String, Option<String>, u8, u8, u8, i64)>(
-            "SELECT `id`, `username`, `email`, `gmlevel`, `locked`, `banned`, UNIX_TIMESTAMP(`last_login`) \
-             FROM `account` WHERE `username` LIKE ? OR CAST(`id` AS CHAR) LIKE ? OR `email` LIKE ? \
-             ORDER BY `id` DESC LIMIT 100",
+        let total = match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM `account` WHERE `username` LIKE ? OR CAST(`id` AS CHAR) LIKE ? OR `email` LIKE ?",
         )
         .bind(&pattern)
         .bind(&pattern)
         .bind(&pattern)
+        .fetch_one(&*state.auth)
+        .await {
+            Ok(total) => total as u64,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        let accounts = match sqlx::query_as::<_, (u32, String, Option<String>, u8, u8, u8, i64)>(
+            "SELECT `id`, `username`, `email`, `gmlevel`, `locked`, `banned`, UNIX_TIMESTAMP(`last_login`) \
+              FROM `account` WHERE `username` LIKE ? OR CAST(`id` AS CHAR) LIKE ? OR `email` LIKE ? \
+              ORDER BY `id` DESC LIMIT ? OFFSET ?",
+        )
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(PAGE_SIZE)
+        .bind((page - 1) * PAGE_SIZE)
         .fetch_all(&*state.auth)
-        .await
-        .map(|rows| rows.into_iter().map(|(id, username, email, gmlevel, locked, banned, last_login)| AdminAccount { id, username, email, gmlevel, locked, banned, last_login }).collect())
-        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+        .await {
+            Ok(accounts) => accounts,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        }
+        .into_iter()
+        .map(|(id, username, email, gmlevel, locked, banned, last_login)| AdminAccount { id, username, email, gmlevel, locked, banned, last_login })
+        .collect();
+        return Ok(AdminAccountPage {
+            accounts,
+            total,
+            page,
+            page_size: PAGE_SIZE,
+        });
     }
 
     #[cfg(not(feature = "ssr"))]
@@ -384,16 +455,128 @@ pub async fn get_admin_account(
         {
             return Err(ServerFnError::ServerError("Not authorized".to_string()));
         }
-        return sqlx::query_as::<_, (u32, String, Option<String>, u8, u8, u8, u8, String)>(
-            "SELECT `id`, `username`, `email`, `gmlevel`, `locked`, `banned`, `expansion`, `last_ip` FROM `account` WHERE `id` = ?",
+        return sqlx::query_as::<_, (u32, String, Option<String>, u8, u8, u8, u8, String, i64)>(
+            "SELECT `id`, `username`, `email`, `gmlevel`, `locked`, `banned`, `expansion`, `last_ip`, `mutetime` FROM `account` WHERE `id` = ?",
         )
         .bind(account_id)
         .fetch_optional(&*state.auth)
         .await
-        .map(|row| row.map(|(id, username, email, gmlevel, locked, banned, expansion, last_ip)| AdminAccountDetail { id, username, email, gmlevel, locked, banned, expansion, last_ip }))
+        .map(|row| row.map(|(id, username, email, gmlevel, locked, banned, expansion, last_ip, muted_until)| AdminAccountDetail { id, username, email, gmlevel, locked, banned, expansion, last_ip, muted_until }))
         .map_err(|error| ServerFnError::ServerError(error.to_string()));
     }
 
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_admin_account_characters(
+    account_id: u32,
+) -> Result<Vec<AdminCharacter>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, actor_id, _) = authenticated_request().await?;
+        require_gm_level(&state, actor_id, 1).await?;
+        return sqlx::query_as::<_, (u32, String, u8, u8, u8, u8)>(
+            "SELECT `guid`, `name`, `race`, `class`, `level`, `online` FROM `characters` WHERE `account` = ? ORDER BY `guid`",
+        )
+        .bind(account_id)
+        .fetch_all(&*state.characters)
+        .await
+        .map(|rows| rows.into_iter().map(|(guid, name, race, class, level, online)| AdminCharacter { guid, name, race, class, level, online }).collect())
+        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_admin_account_sessions(
+    account_id: u32,
+) -> Result<Vec<AdminSession>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, actor_id, _) = authenticated_request().await?;
+        require_gm_level(&state, actor_id, 3).await?;
+        return sqlx::query_as::<_, (String, i64, i64, i64)>(
+            "SELECT HEX(`token_hash`), UNIX_TIMESTAMP(`created_at`), UNIX_TIMESTAMP(`last_seen_at`), UNIX_TIMESTAMP(`expires_at`) FROM `web_sessions` WHERE `account_id` = ? ORDER BY `last_seen_at` DESC",
+        )
+        .bind(account_id)
+        .fetch_all(&*state.web)
+        .await
+        .map(|rows| rows.into_iter().map(|(id, created_at, last_seen_at, expires_at)| AdminSession { account_id, id, created_at, last_seen_at, expires_at }).collect())
+        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_admin_audit_log(
+    account_id: Option<u32>,
+) -> Result<Vec<AuditEntry>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, actor_id, _) = authenticated_request().await?;
+        require_gm_level(&state, actor_id, if account_id.is_some() { 1 } else { 4 }).await?;
+        let rows = match if let Some(account_id) = account_id {
+            sqlx::query_as::<_, (u64, i64, Option<String>, String, String, Option<String>, Option<String>)>(
+                "SELECT l.`id`, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `account` a ON a.`id` = l.`actor_account_id` WHERE l.`actor_account_id` = ? OR (l.`target_type` = 'account' AND l.`target_id` = CAST(? AS CHAR)) OR (l.`target_type` = 'realm_role' AND l.`target_id` LIKE CONCAT(CAST(? AS CHAR), ':%')) ORDER BY l.`occurred_at` DESC LIMIT 100",
+            ).bind(account_id).bind(account_id).bind(account_id).fetch_all(&*state.web).await
+        } else {
+            sqlx::query_as::<_, (u64, i64, Option<String>, String, String, Option<String>, Option<String>)>(
+                "SELECT l.`id`, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `account` a ON a.`id` = l.`actor_account_id` ORDER BY l.`occurred_at` DESC LIMIT 200",
+            ).fetch_all(&*state.web).await
+        } {
+            Ok(rows) => rows,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        return Ok(rows
+            .into_iter()
+            .map(
+                |(id, occurred_at, actor, action, target_type, target_id, reason)| AuditEntry {
+                    id,
+                    occurred_at,
+                    actor,
+                    action,
+                    target_type,
+                    target_id,
+                    reason,
+                },
+            )
+            .collect());
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_admin_account_realm_access(
+    account_id: u32,
+) -> Result<Vec<RealmAccess>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, actor_id, _) = authenticated_request().await?;
+        if crate::auth::highest_gm_level(&state.auth, actor_id)
+            .await
+            .unwrap_or(0)
+            == 0
+        {
+            return Err(ServerFnError::ServerError("Not authorized".to_string()));
+        }
+        return sqlx::query_as::<_, (i32, u8)>(
+            "SELECT `RealmID`, `gmlevel` FROM `account_access` WHERE `id` = ? ORDER BY `RealmID`",
+        )
+        .bind(account_id)
+        .fetch_all(&*state.auth)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(realm_id, gmlevel)| RealmAccess { realm_id, gmlevel })
+                .collect()
+        })
+        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
     #[cfg(not(feature = "ssr"))]
     unreachable!("server function body only runs on the server")
 }
@@ -500,4 +683,17 @@ async fn authenticated_request() -> Result<(crate::state::AppState, u32, String)
         return Err(ServerFnError::ServerError("Not authenticated".to_string()));
     };
     Ok((state, session.account_id, cookie.value().to_string()))
+}
+
+#[cfg(feature = "ssr")]
+async fn require_gm_level(
+    state: &crate::state::AppState,
+    account_id: u32,
+    required: u8,
+) -> Result<(), ServerFnError> {
+    match crate::auth::highest_gm_level(&state.auth, account_id).await {
+        Ok(level) if level >= required => Ok(()),
+        Ok(_) => Err(ServerFnError::ServerError("Not authorized".to_string())),
+        Err(error) => Err(ServerFnError::ServerError(error.to_string())),
+    }
 }

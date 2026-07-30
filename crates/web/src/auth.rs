@@ -54,8 +54,35 @@ pub struct AdminAccountForm {
     pub gmlevel: u8,
     #[serde(default)]
     pub locked: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdminBanForm {
     #[serde(default)]
-    pub banned: bool,
+    pub active: bool,
+    pub reason: String,
+    #[serde(default)]
+    pub duration_seconds: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdminMuteForm {
+    #[serde(default)]
+    pub active: bool,
+    pub reason: String,
+    #[serde(default)]
+    pub duration_seconds: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdminSessionRevokeForm {
+    pub session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdminRealmRoleForm {
+    pub realm_id: i32,
+    pub gmlevel: u8,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -377,16 +404,14 @@ pub async fn update_admin_account(
     if !email.is_empty() && !is_valid_email(email) {
         return axum::http::StatusCode::BAD_REQUEST.into_response();
     }
-    let result = sqlx::query(
-        "UPDATE `account` SET `email` = ?, `locked` = ?, `banned` = ?, `gmlevel` = ? WHERE `id` = ?",
-    )
-    .bind((!email.is_empty()).then_some(email))
-    .bind(form.locked)
-    .bind(form.banned)
-    .bind(form.gmlevel)
-    .bind(account_id)
-    .execute(&*state.auth)
-    .await;
+    let result =
+        sqlx::query("UPDATE `account` SET `email` = ?, `locked` = ?, `gmlevel` = ? WHERE `id` = ?")
+            .bind((!email.is_empty()).then_some(email))
+            .bind(form.locked)
+            .bind(form.gmlevel)
+            .bind(account_id)
+            .execute(&*state.auth)
+            .await;
     match result {
         Ok(result) if result.rows_affected() == 1 => {}
         Ok(_) => return axum::http::StatusCode::NOT_FOUND.into_response(),
@@ -395,7 +420,235 @@ pub async fn update_admin_account(
             return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     }
-    let _ = record_audit(&state.web, session.account_id, "account.updated", "account").await;
+    let _ = record_audit_for(
+        &state.web,
+        session.account_id,
+        "account.updated",
+        "account",
+        Some(&account_id.to_string()),
+        None,
+    )
+    .await;
+    Redirect::to(&format!("/admin/accounts/{account_id}")).into_response()
+}
+
+pub async fn update_admin_ban(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    axum::extract::Path(account_id): axum::extract::Path<u32>,
+    Form(form): Form<AdminBanForm>,
+) -> Response {
+    if !has_same_origin(&headers, &state) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(session) = current_session(&state.web, &jar).await else {
+        return Redirect::to("/login").into_response();
+    };
+    let Ok(actor_level) = highest_gm_level(&state.auth, session.account_id).await else {
+        return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    if actor_level < 3
+        || !can_manage_target(&state.auth, session.account_id, account_id, actor_level).await
+    {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let reason = form.reason.trim();
+    if (form.active && reason.is_empty()) || reason.len() > 255 {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let mut transaction = match state.auth.begin().await {
+        Ok(transaction) => transaction,
+        Err(_) => return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let result = if form.active {
+        sqlx::query("UPDATE `account` SET `banned` = 1 WHERE `id` = ?")
+            .bind(account_id)
+            .execute(&mut *transaction)
+            .await
+    } else {
+        sqlx::query("UPDATE `account` SET `banned` = 0 WHERE `id` = ?")
+            .bind(account_id)
+            .execute(&mut *transaction)
+            .await
+    };
+    if !matches!(result, Ok(result) if result.rows_affected() == 1) {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+    if form.active {
+        let expires_at = form.duration_seconds.min(i64::MAX as u64) as i64;
+        if sqlx::query("INSERT INTO `account_banned` (`id`, `bandate`, `unbandate`, `bannedby`, `banreason`, `active`, `realm`, `gmlevel`) VALUES (?, UNIX_TIMESTAMP(), IF(? = 0, 0, UNIX_TIMESTAMP() + ?), ?, ?, 1, -1, ?)")
+            .bind(account_id).bind(expires_at).bind(expires_at).bind(session.account_id.to_string()).bind(reason).bind(actor_level).execute(&mut *transaction).await.is_err() { return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
+    } else if sqlx::query(
+        "UPDATE `account_banned` SET `active` = 0 WHERE `id` = ? AND `active` = 1",
+    )
+    .bind(account_id)
+    .execute(&mut *transaction)
+    .await
+    .is_err()
+    {
+        return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    if transaction.commit().await.is_err() {
+        return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    let action = if form.active {
+        "account.banned"
+    } else {
+        "account.unbanned"
+    };
+    let _ = record_audit_for(
+        &state.web,
+        session.account_id,
+        action,
+        "account",
+        Some(&account_id.to_string()),
+        (!reason.is_empty()).then_some(reason),
+    )
+    .await;
+    Redirect::to(&format!("/admin/accounts/{account_id}")).into_response()
+}
+
+pub async fn update_admin_mute(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    axum::extract::Path(account_id): axum::extract::Path<u32>,
+    Form(form): Form<AdminMuteForm>,
+) -> Response {
+    if !has_same_origin(&headers, &state) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(session) = current_session(&state.web, &jar).await else {
+        return Redirect::to("/login").into_response();
+    };
+    let Ok(actor_level) = highest_gm_level(&state.auth, session.account_id).await else {
+        return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    if actor_level < 3
+        || !can_manage_target(&state.auth, session.account_id, account_id, actor_level).await
+    {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let reason = form.reason.trim();
+    if (form.active && (reason.is_empty() || form.duration_seconds == 0)) || reason.len() > 255 {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let expires_at = form.duration_seconds.min(i64::MAX as u64) as i64;
+    let result = sqlx::query("UPDATE `account` SET `mutetime` = IF(? = 1, UNIX_TIMESTAMP() + ?, 0), `mutereason` = IF(? = 1, ?, ''), `muteby` = IF(? = 1, ?, '') WHERE `id` = ?")
+        .bind(form.active).bind(expires_at).bind(form.active).bind(reason).bind(form.active).bind(session.account_id.to_string()).bind(account_id).execute(&*state.auth).await;
+    if !matches!(result, Ok(result) if result.rows_affected() == 1) {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+    let action = if form.active {
+        "account.muted"
+    } else {
+        "account.unmuted"
+    };
+    let _ = record_audit_for(
+        &state.web,
+        session.account_id,
+        action,
+        "account",
+        Some(&account_id.to_string()),
+        (!reason.is_empty()).then_some(reason),
+    )
+    .await;
+    Redirect::to(&format!("/admin/accounts/{account_id}")).into_response()
+}
+
+pub async fn revoke_admin_session(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    axum::extract::Path(account_id): axum::extract::Path<u32>,
+    Form(form): Form<AdminSessionRevokeForm>,
+) -> Response {
+    if !has_same_origin(&headers, &state) || !valid_session_id(&form.session_id) {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let Some(session) = current_session(&state.web, &jar).await else {
+        return Redirect::to("/login").into_response();
+    };
+    let Ok(actor_level) = highest_gm_level(&state.auth, session.account_id).await else {
+        return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    if actor_level < 3
+        || !can_manage_target(&state.auth, session.account_id, account_id, actor_level).await
+    {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let result = sqlx::query(
+        "DELETE FROM `web_sessions` WHERE `account_id` = ? AND `token_hash` = UNHEX(?)",
+    )
+    .bind(account_id)
+    .bind(&form.session_id)
+    .execute(&*state.web)
+    .await;
+    if !matches!(result, Ok(result) if result.rows_affected() == 1) {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+    let _ = record_audit_for(
+        &state.web,
+        session.account_id,
+        "session.revoked_by_admin",
+        "account",
+        Some(&account_id.to_string()),
+        None,
+    )
+    .await;
+    Redirect::to(&format!("/admin/accounts/{account_id}")).into_response()
+}
+
+pub async fn update_admin_realm_role(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    axum::extract::Path(account_id): axum::extract::Path<u32>,
+    Form(form): Form<AdminRealmRoleForm>,
+) -> Response {
+    if !has_same_origin(&headers, &state) || form.gmlevel > 7 {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let Some(session) = current_session(&state.web, &jar).await else {
+        return Redirect::to("/login").into_response();
+    };
+    let Ok(actor_level) = highest_gm_level(&state.auth, session.account_id).await else {
+        return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    if actor_level < 6
+        || form.gmlevel >= actor_level
+        || !can_manage_target(&state.auth, session.account_id, account_id, actor_level).await
+    {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let result = if form.gmlevel == 0 {
+        sqlx::query("DELETE FROM `account_access` WHERE `id` = ? AND `RealmID` = ?")
+            .bind(account_id)
+            .bind(form.realm_id)
+            .execute(&*state.auth)
+            .await
+    } else {
+        sqlx::query("INSERT INTO `account_access` (`id`, `RealmID`, `gmlevel`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `gmlevel` = VALUES(`gmlevel`)").bind(account_id).bind(form.realm_id).bind(form.gmlevel).execute(&*state.auth).await
+    };
+    if result.is_err() {
+        return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    let action = if form.gmlevel == 0 {
+        "realm_role.removed"
+    } else {
+        "realm_role.updated"
+    };
+    let target = format!("{account_id}:{}", form.realm_id);
+    let _ = record_audit_for(
+        &state.web,
+        session.account_id,
+        action,
+        "realm_role",
+        Some(&target),
+        None,
+    )
+    .await;
     Redirect::to(&format!("/admin/accounts/{account_id}")).into_response()
 }
 
@@ -458,16 +711,50 @@ async fn record_audit(
     action: &str,
     target_type: &str,
 ) -> Result<()> {
+    record_audit_for(pool, account_id, action, target_type, None, None).await
+}
+
+async fn record_audit_for(
+    pool: &MySqlPool,
+    account_id: u32,
+    action: &str,
+    target_type: &str,
+    target_id: Option<&str>,
+    reason: Option<&str>,
+) -> Result<()> {
     sqlx::query(
-        "INSERT INTO `web_audit_log` (`actor_account_id`, `action`, `target_type`) VALUES (?, ?, ?)",
+        "INSERT INTO `web_audit_log` (`actor_account_id`, `action`, `target_type`, `target_id`, `reason`) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(account_id)
     .bind(action)
     .bind(target_type)
+    .bind(target_id)
+    .bind(reason)
     .execute(pool)
     .await
     .context("failed to write web audit event")?;
     Ok(())
+}
+
+async fn can_manage_target(
+    pool: &MySqlPool,
+    actor_id: u32,
+    target_id: u32,
+    actor_level: u8,
+) -> bool {
+    if actor_id == target_id {
+        return false;
+    }
+    let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM `account` WHERE `id` = ?")
+        .bind(target_id)
+        .fetch_one(pool)
+        .await;
+    matches!(exists, Ok(1))
+        && matches!(highest_gm_level(pool, target_id).await, Ok(target_level) if target_level < actor_level)
+}
+
+fn valid_session_id(session_id: &str) -> bool {
+    session_id.len() == 64 && session_id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn has_same_origin(headers: &HeaderMap, state: &AppState) -> bool {

@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod components;
 
 #[cfg(feature = "ssr")]
@@ -93,6 +95,7 @@ pub fn App() -> impl IntoView {
                 <Route path=StaticSegment("admin") view=Admin />
                 <Route path=(StaticSegment("admin"), StaticSegment("accounts")) view=AccountManagement />
                 <Route path=(StaticSegment("admin"), StaticSegment("accounts"), ParamSegment("account_id")) view=AdminAccountDetail />
+                <Route path=(StaticSegment("admin"), StaticSegment("audit-logs")) view=AdminAuditLog />
                 <Route path=(StaticSegment("admin"), StaticSegment("permissions")) view=Permissions />
             </Routes>
         </Router>
@@ -354,7 +357,12 @@ fn Permissions() -> impl IntoView {
 
 #[component]
 fn AccountManagement() -> impl IntoView {
-    let accounts = Resource::new(|| (), |_| portal::get_admin_accounts(None));
+    let search = RwSignal::new(String::new());
+    let page = RwSignal::new(1_u32);
+    let accounts = Resource::new(
+        move || (search.get(), page.get()),
+        |(search, page)| portal::get_admin_accounts(Some(search), page),
+    );
     view! {
         <main class="min-h-screen bg-background p-3 text-foreground sm:p-5">
             <div class="flex min-h-[calc(100vh-1.5rem)] w-full flex-col gap-3 lg:flex-row">
@@ -375,9 +383,12 @@ fn AccountManagement() -> impl IntoView {
                 <section class="min-w-0 flex-1 px-2 py-5 sm:px-5 lg:px-8">
                     <p class="text-xs font-semibold uppercase tracking-[0.3em] text-primary">"Account management"</p>
                     <h1 class="mt-4 font-sans text-3xl font-semibold tracking-tight">"Accounts"</h1>
-                    <p class="mt-3 text-xs text-muted-foreground">"The latest 100 accounts. Credentials, session keys, and recovery secrets are never shown here."</p>
+                    <p class="mt-3 text-xs text-muted-foreground">"Search accounts by name, email, or ID. Credentials, session keys, and recovery secrets are never shown here."</p>
+                    <label class="mt-6 block max-w-md text-xs text-muted-foreground" for="account-search">"Search"
+                        <input class="mt-2 block w-full border border-input bg-input px-3 py-2 text-foreground" id="account-search" type="search" placeholder="Account name, email, or ID" on:input=move |event| { search.set(event_target_value(&event)); page.set(1); } />
+                    </label>
                     <Suspense fallback=move || view! { <p class="mt-8 text-xs text-muted-foreground">"Loading accounts..."</p> }>
-                        {move || accounts.get().map(render_admin_accounts)}
+                        {move || accounts.get().map(move |result| render_admin_accounts(result, page))}
                     </Suspense>
                 </section>
             </div>
@@ -385,9 +396,16 @@ fn AccountManagement() -> impl IntoView {
     }
 }
 
-fn render_admin_accounts(result: Result<Vec<portal::AdminAccount>, ServerFnError>) -> AnyView {
+fn render_admin_accounts(
+    result: Result<portal::AdminAccountPage, ServerFnError>,
+    page: RwSignal<u32>,
+) -> AnyView {
     match result {
-        Ok(accounts) => view! {
+        Ok(result) => {
+            let has_next = result.page as u64 * (result.page_size as u64) < result.total;
+            let current_page = result.page;
+            let accounts = result.accounts;
+            view! {
             <div class="mt-8 overflow-x-auto border border-border">
                 <table class="min-w-full text-left text-xs">
                     <thead class="border-b border-border bg-card text-muted-foreground"><tr><th class="px-4 py-3">"ID"</th><th class="px-4 py-3">"Account"</th><th class="px-4 py-3">"Email"</th><th class="px-4 py-3">"Role"</th><th class="px-4 py-3">"State"</th></tr></thead>
@@ -398,8 +416,16 @@ fn render_admin_accounts(result: Result<Vec<portal::AdminAccount>, ServerFnError
                     }).collect_view()}</tbody>
                 </table>
             </div>
-        }.into_any(),
-        Err(error) => view! { <p class="mt-8 text-xs text-destructive">{error.to_string()}</p> }.into_any(),
+            <div class="mt-4 flex items-center gap-3 text-xs">
+                <button class="border border-input px-3 py-2 disabled:opacity-50" disabled=current_page == 1 on:click=move |_| page.update(|value| *value = value.saturating_sub(1))>"Previous"</button>
+                <span class="text-muted-foreground">"Page " {current_page} " | " {result.total} " accounts"</span>
+                <button class="border border-input px-3 py-2 disabled:opacity-50" disabled=!has_next on:click=move |_| page.update(|value| *value += 1)>"Next"</button>
+            </div>
+        }.into_any()
+        }
+        Err(error) => {
+            view! { <p class="mt-8 text-xs text-destructive">{error.to_string()}</p> }.into_any()
+        }
     }
 }
 
@@ -420,6 +446,57 @@ fn AdminAccountDetail() -> impl IntoView {
             }
         },
     );
+    let realm_access = Resource::new(
+        move || {
+            params
+                .read()
+                .get("account_id")
+                .and_then(|id| id.parse::<u32>().ok())
+        },
+        |id| async move {
+            match id {
+                Some(id) => portal::get_admin_account_realm_access(id).await,
+                None => Ok(Vec::new()),
+            }
+        },
+    );
+    let characters = Resource::new(
+        move || {
+            params
+                .read()
+                .get("account_id")
+                .and_then(|id| id.parse::<u32>().ok())
+        },
+        |id| async move {
+            match id {
+                Some(id) => portal::get_admin_account_characters(id).await,
+                None => Ok(Vec::new()),
+            }
+        },
+    );
+    let sessions = Resource::new(
+        move || {
+            params
+                .read()
+                .get("account_id")
+                .and_then(|id| id.parse::<u32>().ok())
+        },
+        |id| async move {
+            match id {
+                Some(id) => portal::get_admin_account_sessions(id).await,
+                None => Ok(Vec::new()),
+            }
+        },
+    );
+    let audit = Resource::new(
+        move || {
+            params
+                .read()
+                .get("account_id")
+                .and_then(|id| id.parse::<u32>().ok())
+        },
+        |id| async move { portal::get_admin_audit_log(id).await },
+    );
     view! {
         <main class="min-h-screen bg-background p-5 text-foreground">
             <section class="mx-auto max-w-3xl py-8">
@@ -427,8 +504,49 @@ fn AdminAccountDetail() -> impl IntoView {
                 <Suspense fallback=move || view! { <p class="mt-8 text-xs text-muted-foreground">"Loading account..."</p> }>
                     {move || account.get().map(render_admin_account_detail)}
                 </Suspense>
+                <section class="mt-8 border-t border-border pt-6">
+                    <p class="text-xs font-medium text-foreground">"Realm-specific roles"</p>
+                    <Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading realm roles..."</p> }>
+                        {move || realm_access.get().map(render_realm_access)}
+                    </Suspense>
+                </section>
+                <section class="mt-8 border-t border-border pt-6"><p class="text-xs font-medium text-foreground">"Characters"</p><Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading characters..."</p> }>{move || characters.get().map(render_admin_characters)}</Suspense></section>
+                <section class="mt-8 border-t border-border pt-6"><p class="text-xs font-medium text-foreground">"Portal sessions"</p><Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading sessions..."</p> }>{move || sessions.get().map(render_admin_sessions)}</Suspense></section>
+                <section class="mt-8 border-t border-border pt-6"><p class="text-xs font-medium text-foreground">"Account audit history"</p><Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading audit history..."</p> }>{move || audit.get().map(render_audit_entries)}</Suspense></section>
             </section>
         </main>
+    }
+}
+
+fn render_admin_characters(result: Result<Vec<portal::AdminCharacter>, ServerFnError>) -> AnyView {
+    match result {
+        Ok(characters) if characters.is_empty() => view! { <p class="mt-3 text-xs text-muted-foreground">"No characters."</p> }.into_any(),
+        Ok(characters) => view! { <ul class="mt-3 divide-y divide-border text-xs">{characters.into_iter().map(|character| view! { <li class="flex justify-between py-2"><span>{character.name} " (" {character.guid} ")"</span><span>{"Level "} {character.level} {if character.online != 0 { " online" } else { " offline" }}</span></li> }).collect_view()}</ul> }.into_any(),
+        Err(error) => view! { <p class="mt-3 text-xs text-destructive">{error.to_string()}</p> }.into_any(),
+    }
+}
+
+fn render_admin_sessions(result: Result<Vec<portal::AdminSession>, ServerFnError>) -> AnyView {
+    match result {
+        Ok(sessions) if sessions.is_empty() => view! { <p class="mt-3 text-xs text-muted-foreground">"No portal sessions."</p> }.into_any(),
+        Ok(sessions) => view! { <ul class="mt-3 divide-y divide-border text-xs">{sessions.into_iter().map(|session| { let action = format!("/admin/accounts/{}/sessions/revoke", session.account_id); view! { <li class="flex items-center justify-between gap-3 py-2"><span class="text-muted-foreground">"Created " {session.created_at} " | last seen " {session.last_seen_at} " | expires " {session.expires_at}</span><form action=action method="post"><input name="session_id" type="hidden" value=session.id /><button class="text-destructive hover:underline" type="submit">"Revoke"</button></form></li> } }).collect_view()}</ul> }.into_any(),
+        Err(error) => view! { <p class="mt-3 text-xs text-destructive">{error.to_string()}</p> }.into_any(),
+    }
+}
+
+fn render_audit_entries(result: Result<Vec<portal::AuditEntry>, ServerFnError>) -> AnyView {
+    match result {
+        Ok(entries) if entries.is_empty() => view! { <p class="mt-3 text-xs text-muted-foreground">"No audit records."</p> }.into_any(),
+        Ok(entries) => view! { <ul class="mt-3 divide-y divide-border text-xs">{entries.into_iter().map(|entry| view! { <li class="py-2"><span class="font-medium">{entry.action}</span> " | " {entry.actor.unwrap_or_else(|| "system".to_string())} " | " {entry.occurred_at} {entry.reason.map(|reason| view! { <p class="mt-1 text-muted-foreground">{reason}</p> })}</li> }).collect_view()}</ul> }.into_any(),
+        Err(error) => view! { <p class="mt-3 text-xs text-destructive">{error.to_string()}</p> }.into_any(),
+    }
+}
+
+fn render_realm_access(result: Result<Vec<portal::RealmAccess>, ServerFnError>) -> AnyView {
+    match result {
+        Ok(access) if access.is_empty() => view! { <p class="mt-3 text-xs text-muted-foreground">"No realm-specific role assignments."</p> }.into_any(),
+        Ok(access) => view! { <ul class="mt-3 divide-y divide-border text-xs">{access.into_iter().map(|entry| view! { <li class="flex justify-between py-2"><span>"Realm " {entry.realm_id}</span><span>{entry.gmlevel} " " {security_level_name(entry.gmlevel)}</span></li> }).collect_view()}</ul> }.into_any(),
+        Err(error) => view! { <p class="mt-3 text-xs text-destructive">{error.to_string()}</p> }.into_any(),
     }
 }
 
@@ -468,9 +586,13 @@ fn render_admin_account_detail(
                         </select>
                     </label>
                     <label class="flex items-center gap-2 text-muted-foreground"><input name="locked" type="checkbox" value="true" checked=account.locked != 0 />"Locked"</label>
-                    <label class="flex items-center gap-2 text-muted-foreground"><input name="banned" type="checkbox" value="true" checked=account.banned != 0 />"Banned"</label>
                     <Button button_type="submit">"Save changes"</Button>
                 </form>
+                <section class="mt-8 grid gap-6 border-t border-border pt-6 text-xs sm:grid-cols-2">
+                    <form class="space-y-3" action=format!("/admin/accounts/{}/ban", account.id) method="post"><p class="font-medium">"Ban"</p><label class="flex gap-2"><input name="active" type="checkbox" value="true" checked=account.banned != 0 />"Active"</label><input class="w-full border border-input bg-input px-3 py-2" name="duration_seconds" type="number" min="0" placeholder="Seconds, 0 = permanent"/><input class="w-full border border-input bg-input px-3 py-2" name="reason" maxlength="255" placeholder="Reason"/><Button button_type="submit">"Update ban"</Button></form>
+                    <form class="space-y-3" action=format!("/admin/accounts/{}/mute", account.id) method="post"><p class="font-medium">"Mute"</p><label class="flex gap-2"><input name="active" type="checkbox" value="true" checked={account.muted_until > 0} />"Active"</label><input class="w-full border border-input bg-input px-3 py-2" name="duration_seconds" type="number" min="1" placeholder="Duration in seconds"/><input class="w-full border border-input bg-input px-3 py-2" name="reason" maxlength="255" placeholder="Reason"/><Button button_type="submit">"Update mute"</Button></form>
+                </section>
+                <form class="mt-8 space-y-3 border-t border-border pt-6 text-xs" action=format!("/admin/accounts/{}/realm-role", account.id) method="post"><p class="font-medium">"Set realm-specific role"</p><div class="flex gap-3"><input class="w-32 border border-input bg-input px-3 py-2" name="realm_id" type="number" placeholder="Realm ID" required/><select class="border border-input bg-input px-3 py-2" name="gmlevel">{(0_u8..=7).map(|level| view! { <option value=level>{level} " " {security_level_name(level)}</option> }).collect_view()}</select><Button button_type="submit">"Save role"</Button></div><p class="text-muted-foreground">"Set level 0 to remove the role."</p></form>
             }.into_any()
         }
         Ok(None) => {
@@ -480,6 +602,14 @@ fn render_admin_account_detail(
         Err(error) => {
             view! { <p class="mt-8 text-xs text-destructive">{error.to_string()}</p> }.into_any()
         }
+    }
+}
+
+#[component]
+fn AdminAuditLog() -> impl IntoView {
+    let audit = Resource::new(|| (), |_| portal::get_admin_audit_log(None));
+    view! {
+        <main class="min-h-screen bg-background p-5 text-foreground"><section class="mx-auto max-w-4xl py-8"><a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/admin">"GM tools"</a><h1 class="mt-5 font-sans text-3xl font-semibold tracking-tight">"Global audit log"</h1><p class="mt-3 text-xs text-muted-foreground">"Most recent portal and administration events."</p><Suspense fallback=move || view! { <p class="mt-8 text-xs text-muted-foreground">"Loading audit log..."</p> }>{move || audit.get().map(render_audit_entries)}</Suspense></section></main>
     }
 }
 
