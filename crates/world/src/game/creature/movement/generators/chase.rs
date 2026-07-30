@@ -4,6 +4,11 @@
 //! - Compares target's last-known position vs current position to decide repath
 //! - Only repaths when target has actually moved, not when contact point angle changes
 //! - 500ms minimum between full path recalculations to avoid jitter
+
+use super::super::generator::{MovementGenerator, MovementUpdate};
+use super::super::types::MovementGeneratorType;
+use oxcore_shared::protocol::{ObjectGuid, Position};
+
 pub struct ChaseMovementGenerator {
     pub target: ObjectGuid,
     target_position: Position,
