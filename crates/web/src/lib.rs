@@ -91,6 +91,7 @@ pub fn App() -> impl IntoView {
                 <Route path=StaticSegment("support") view=Support />
                 <Route path=StaticSegment("status") view=Status />
                 <Route path=StaticSegment("admin") view=Admin />
+                <Route path=(StaticSegment("admin"), StaticSegment("permissions")) view=Permissions />
             </Routes>
         </Router>
     }
@@ -270,12 +271,82 @@ fn Status() -> impl IntoView {
 fn Admin() -> impl IntoView {
     let overview = Resource::new(|| (), |_| portal::get_admin_overview());
     view! {
-        <AuthShell title="GM tools" subtitle="Game master account controls.">
-            <Suspense fallback=move || view! { <p class="mt-8 text-xs text-muted-foreground">"Loading operations..."</p> }>
-                {move || overview.get().map(render_admin_overview)}
-            </Suspense>
-            <a class="mt-6 inline-block text-xs text-primary hover:underline" href="/account">"Return to account"</a>
-        </AuthShell>
+        <main class="min-h-screen bg-background p-3 text-foreground sm:p-5">
+            <div class="flex min-h-[calc(100vh-1.5rem)] w-full flex-col gap-3 sm:min-h-[calc(100vh-2.5rem)] lg:flex-row">
+                <Card class="flex shrink-0 flex-col px-4 py-5 lg:w-56">
+                    <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/">"oxcore"</a>
+                    <p class="mt-4 text-xs text-muted-foreground">"GM tools"</p>
+                    <nav class="mt-4 grid gap-1 text-xs" aria-label="GM tools navigation">
+                        <a class="border border-primary/40 bg-primary/10 px-3 py-2 font-medium text-primary" href="/admin" aria-current="page">"Overview"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/accounts">"Account Management"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/chat">"Chat"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/moderation">"Moderation"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/live-map">"Live Map"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/audit-logs">"Audit Logs"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/permissions">"Permissions"</a>
+                    </nav>
+                    <a class="mt-8 px-3 py-2 text-xs text-muted-foreground hover:text-primary lg:mt-auto" href="/account">"Return to account"</a>
+                </Card>
+                <section class="min-w-0 flex-1 px-2 py-5 sm:px-5 lg:px-8">
+                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-primary">"Overview"</p>
+                    <h1 class="mt-4 font-sans text-3xl font-semibold tracking-tight">"GM tools"</h1>
+                    <p class="mt-3 text-xs text-muted-foreground">"Realm status and player support workload."</p>
+                    <Suspense fallback=move || view! { <p class="mt-8 text-xs text-muted-foreground">"Loading overview..."</p> }>
+                        {move || overview.get().map(render_admin_overview)}
+                    </Suspense>
+                </section>
+            </div>
+        </main>
+    }
+}
+
+#[component]
+fn Permissions() -> impl IntoView {
+    view! {
+        <main class="min-h-screen bg-background p-3 text-foreground sm:p-5">
+            <div class="flex min-h-[calc(100vh-1.5rem)] w-full flex-col gap-3 sm:min-h-[calc(100vh-2.5rem)] lg:flex-row">
+                <Card class="flex shrink-0 flex-col px-4 py-5 lg:w-56">
+                    <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/">"oxcore"</a>
+                    <p class="mt-4 text-xs text-muted-foreground">"GM tools"</p>
+                    <nav class="mt-4 grid gap-1 text-xs" aria-label="GM tools navigation">
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin">"Overview"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/accounts">"Account Management"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/chat">"Chat"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/moderation">"Moderation"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/live-map">"Live Map"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/audit-logs">"Audit Logs"</a>
+                        <a class="border border-primary/40 bg-primary/10 px-3 py-2 font-medium text-primary" href="/admin/permissions" aria-current="page">"Permissions"</a>
+                    </nav>
+                    <a class="mt-8 px-3 py-2 text-xs text-muted-foreground hover:text-primary lg:mt-auto" href="/account">"Return to account"</a>
+                </Card>
+                <section class="min-w-0 flex-1 px-2 py-5 sm:px-5 lg:px-8">
+                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-primary">"Permissions"</p>
+                    <h1 class="mt-4 font-sans text-3xl font-semibold tracking-tight">"Role permissions"</h1>
+                    <p class="mt-3 text-xs text-muted-foreground">"Static reference for the core security levels and their portal access thresholds."</p>
+                    <div class="mt-8 overflow-x-auto border border-border">
+                        <table class="min-w-full text-left text-xs">
+                            <thead class="border-b border-border bg-card text-muted-foreground">
+                                <tr>
+                                    <th class="px-4 py-3 font-medium">"Capability"</th>
+                                    {portal::SECURITY_LEVELS.iter().map(|(level, name)| view! { <th class="px-3 py-3 text-center font-medium">{level} " " {name}</th> }).collect_view()}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {portal::PORTAL_CAPABILITIES.iter().map(|(capability, minimum_level)| view! {
+                                    <tr class="border-b border-border last:border-b-0">
+                                        <td class="whitespace-nowrap px-4 py-3 font-medium text-foreground">{*capability}</td>
+                                        {portal::SECURITY_LEVELS.iter().map(move |(level, _)| {
+                                            let allowed = *level >= *minimum_level;
+                                            view! { <td class=if allowed { "border-l border-border px-3 py-3 text-center text-primary" } else { "border-l border-border px-3 py-3 text-center text-muted-foreground" }>{if allowed { "Allowed" } else { "-" }}</td> }
+                                        }).collect_view()}
+                                    </tr>
+                                }).collect_view()}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
     }
 }
 

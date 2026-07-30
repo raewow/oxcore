@@ -71,6 +71,30 @@ pub struct AdminOverview {
     pub open_support_tickets: u64,
 }
 
+pub const SECURITY_LEVELS: &[(u8, &str)] = &[
+    (0, "Player"),
+    (1, "Moderator"),
+    (2, "Ticketmaster"),
+    (3, "Gamemaster"),
+    (4, "Basic Admin"),
+    (5, "Developer"),
+    (6, "Administrator"),
+    (7, "Console"),
+];
+
+pub const PORTAL_CAPABILITIES: &[(&str, u8)] = &[
+    ("View accounts", 1),
+    ("Edit account profile fields", 3),
+    ("Manage account locks and bans", 3),
+    ("Assign roles", 6),
+    ("View chat", 1),
+    ("Moderate chat", 1),
+    ("View moderation records", 1),
+    ("Manage moderation actions", 3),
+    ("View live map", 1),
+    ("View audit logs", 4),
+];
+
 #[server]
 pub async fn get_portal_overview() -> Result<PortalOverview, ServerFnError> {
     #[cfg(feature = "ssr")]
@@ -231,7 +255,7 @@ pub async fn get_realm_status() -> Result<Vec<RealmStatus>, ServerFnError> {
     #[cfg(feature = "ssr")]
     {
         let state = expect_context::<crate::state::AppState>();
-        return sqlx::query_as::<_, (String, f32, u8)>(
+        return sqlx::query_as::<_, (String, f32, i64)>(
             "SELECT `name`, `population`, IF(`last_seen` > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 60 SECOND), 1, 0) \
              FROM `realmlist` ORDER BY `id`",
         )
@@ -288,6 +312,7 @@ pub async fn get_admin_overview() -> Result<AdminOverview, ServerFnError> {
     #[cfg(not(feature = "ssr"))]
     unreachable!("server function body only runs on the server")
 }
+
 
 #[cfg(feature = "ssr")]
 pub async fn overview(

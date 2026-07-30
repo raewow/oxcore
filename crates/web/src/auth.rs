@@ -465,38 +465,24 @@ pub async fn session_from_token(pool: &MySqlPool, token: &str) -> Option<Session
 }
 
 pub(crate) async fn has_gm_access(pool: &MySqlPool, account_id: u32) -> Result<bool> {
+    Ok(highest_gm_level(pool, account_id).await? > 0)
+}
+
+pub(crate) async fn highest_gm_level(pool: &MySqlPool, account_id: u32) -> Result<u8> {
     let account_level =
         sqlx::query_scalar::<_, u8>("SELECT `gmlevel` FROM `account` WHERE `id` = ?")
             .bind(account_id)
             .fetch_optional(pool)
             .await
             .context("failed to query GM access")?;
-    if account_level.unwrap_or(0) > 0 {
-        tracing::error!(
-            target: "oxcore_web",
-            account_id,
-            gmlevel = account_level.unwrap_or(0),
-            "portal GM authorization granted by account gmlevel"
-        );
-        return Ok(true);
-    }
-
-    let realm_access = sqlx::query_scalar::<_, i64>(
-        "SELECT EXISTS(SELECT 1 FROM `account_access` WHERE `id` = ? AND `gmlevel` > 0)",
+    let realm_level = sqlx::query_scalar::<_, u8>(
+        "SELECT `gmlevel` FROM `account_access` WHERE `id` = ? ORDER BY `gmlevel` DESC LIMIT 1",
     )
     .bind(account_id)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
     .context("failed to query realm GM access")?;
-    let allowed = realm_access != 0;
-    tracing::error!(
-        target: "oxcore_web",
-        account_id,
-        account_gmlevel = account_level.unwrap_or(0),
-        realm_access = allowed,
-        "portal GM authorization decision"
-    );
-    Ok(allowed)
+    Ok(account_level.unwrap_or(0).max(realm_level.unwrap_or(0)))
 }
 
 fn token_hash(token: &str) -> [u8; 32] {
