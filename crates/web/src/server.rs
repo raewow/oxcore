@@ -38,6 +38,10 @@ pub async fn serve(config: Config) -> Result<()> {
         .route("/auth/change-password", post(crate::auth::change_password))
         .route("/auth/revoke-session", post(crate::auth::revoke_session))
         .route("/support/create", post(crate::auth::create_support_ticket))
+        .route(
+            "/admin/accounts/{account_id}",
+            post(crate::auth::update_admin_account),
+        )
         .route("/api/portal/overview", get(crate::portal::overview))
         .leptos_routes_with_context(
             &leptos_options,

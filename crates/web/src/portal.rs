@@ -71,6 +71,29 @@ pub struct AdminOverview {
     pub open_support_tickets: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminAccount {
+    pub id: u32,
+    pub username: String,
+    pub email: Option<String>,
+    pub gmlevel: u8,
+    pub locked: u8,
+    pub banned: u8,
+    pub last_login: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminAccountDetail {
+    pub id: u32,
+    pub username: String,
+    pub email: Option<String>,
+    pub gmlevel: u8,
+    pub locked: u8,
+    pub banned: u8,
+    pub expansion: u8,
+    pub last_ip: String,
+}
+
 pub const SECURITY_LEVELS: &[(u8, &str)] = &[
     (0, "Player"),
     (1, "Moderator"),
@@ -313,6 +336,67 @@ pub async fn get_admin_overview() -> Result<AdminOverview, ServerFnError> {
     unreachable!("server function body only runs on the server")
 }
 
+#[server]
+pub async fn get_admin_accounts(
+    search: Option<String>,
+) -> Result<Vec<AdminAccount>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        let level = match crate::auth::highest_gm_level(&state.auth, account_id).await {
+            Ok(level) => level,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        if level == 0 {
+            return Err(ServerFnError::ServerError("Not authorized".to_string()));
+        }
+        let search = search.unwrap_or_default();
+        let pattern = format!("%{}%", search.trim());
+        return sqlx::query_as::<_, (u32, String, Option<String>, u8, u8, u8, i64)>(
+            "SELECT `id`, `username`, `email`, `gmlevel`, `locked`, `banned`, UNIX_TIMESTAMP(`last_login`) \
+             FROM `account` WHERE `username` LIKE ? OR CAST(`id` AS CHAR) LIKE ? OR `email` LIKE ? \
+             ORDER BY `id` DESC LIMIT 100",
+        )
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .fetch_all(&*state.auth)
+        .await
+        .map(|rows| rows.into_iter().map(|(id, username, email, gmlevel, locked, banned, last_login)| AdminAccount { id, username, email, gmlevel, locked, banned, last_login }).collect())
+        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_admin_account(
+    account_id: u32,
+) -> Result<Option<AdminAccountDetail>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, actor_id, _) = authenticated_request().await?;
+        if crate::auth::highest_gm_level(&state.auth, actor_id)
+            .await
+            .unwrap_or(0)
+            == 0
+        {
+            return Err(ServerFnError::ServerError("Not authorized".to_string()));
+        }
+        return sqlx::query_as::<_, (u32, String, Option<String>, u8, u8, u8, u8, String)>(
+            "SELECT `id`, `username`, `email`, `gmlevel`, `locked`, `banned`, `expansion`, `last_ip` FROM `account` WHERE `id` = ?",
+        )
+        .bind(account_id)
+        .fetch_optional(&*state.auth)
+        .await
+        .map(|row| row.map(|(id, username, email, gmlevel, locked, banned, expansion, last_ip)| AdminAccountDetail { id, username, email, gmlevel, locked, banned, expansion, last_ip }))
+        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
 
 #[cfg(feature = "ssr")]
 pub async fn overview(

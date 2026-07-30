@@ -91,6 +91,8 @@ pub fn App() -> impl IntoView {
                 <Route path=StaticSegment("support") view=Support />
                 <Route path=StaticSegment("status") view=Status />
                 <Route path=StaticSegment("admin") view=Admin />
+                <Route path=(StaticSegment("admin"), StaticSegment("accounts")) view=AccountManagement />
+                <Route path=(StaticSegment("admin"), StaticSegment("accounts"), ParamSegment("account_id")) view=AdminAccountDetail />
                 <Route path=(StaticSegment("admin"), StaticSegment("permissions")) view=Permissions />
             </Routes>
         </Router>
@@ -328,7 +330,7 @@ fn Permissions() -> impl IntoView {
                             <thead class="border-b border-border bg-card text-muted-foreground">
                                 <tr>
                                     <th class="px-4 py-3 font-medium">"Capability"</th>
-                                    {portal::SECURITY_LEVELS.iter().map(|(level, name)| view! { <th class="px-3 py-3 text-center font-medium">{level} " " {name}</th> }).collect_view()}
+                                    {portal::SECURITY_LEVELS.iter().map(|(level, name)| view! { <th class="px-3 py-3 text-center font-medium">{*level} " " {*name}</th> }).collect_view()}
                                 </tr>
                             </thead>
                             <tbody>
@@ -348,6 +350,145 @@ fn Permissions() -> impl IntoView {
             </div>
         </main>
     }
+}
+
+#[component]
+fn AccountManagement() -> impl IntoView {
+    let accounts = Resource::new(|| (), |_| portal::get_admin_accounts(None));
+    view! {
+        <main class="min-h-screen bg-background p-3 text-foreground sm:p-5">
+            <div class="flex min-h-[calc(100vh-1.5rem)] w-full flex-col gap-3 lg:flex-row">
+                <Card class="flex shrink-0 flex-col px-4 py-5 lg:w-56">
+                    <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/">"oxcore"</a>
+                    <p class="mt-4 text-xs text-muted-foreground">"GM tools"</p>
+                    <nav class="mt-4 grid gap-1 text-xs" aria-label="GM tools navigation">
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin">"Overview"</a>
+                        <a class="border border-primary/40 bg-primary/10 px-3 py-2 font-medium text-primary" href="/admin/accounts" aria-current="page">"Account Management"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/chat">"Chat"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/moderation">"Moderation"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/live-map">"Live Map"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/audit-logs">"Audit Logs"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/permissions">"Permissions"</a>
+                    </nav>
+                    <a class="mt-8 px-3 py-2 text-xs text-muted-foreground hover:text-primary lg:mt-auto" href="/account">"Return to account"</a>
+                </Card>
+                <section class="min-w-0 flex-1 px-2 py-5 sm:px-5 lg:px-8">
+                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-primary">"Account management"</p>
+                    <h1 class="mt-4 font-sans text-3xl font-semibold tracking-tight">"Accounts"</h1>
+                    <p class="mt-3 text-xs text-muted-foreground">"The latest 100 accounts. Credentials, session keys, and recovery secrets are never shown here."</p>
+                    <Suspense fallback=move || view! { <p class="mt-8 text-xs text-muted-foreground">"Loading accounts..."</p> }>
+                        {move || accounts.get().map(render_admin_accounts)}
+                    </Suspense>
+                </section>
+            </div>
+        </main>
+    }
+}
+
+fn render_admin_accounts(result: Result<Vec<portal::AdminAccount>, ServerFnError>) -> AnyView {
+    match result {
+        Ok(accounts) => view! {
+            <div class="mt-8 overflow-x-auto border border-border">
+                <table class="min-w-full text-left text-xs">
+                    <thead class="border-b border-border bg-card text-muted-foreground"><tr><th class="px-4 py-3">"ID"</th><th class="px-4 py-3">"Account"</th><th class="px-4 py-3">"Email"</th><th class="px-4 py-3">"Role"</th><th class="px-4 py-3">"State"</th></tr></thead>
+                    <tbody>{accounts.into_iter().map(|account| {
+                        let state = if account.banned != 0 { "Banned" } else if account.locked != 0 { "Locked" } else { "Active" };
+                        let email = account.email.unwrap_or_else(|| "-".to_string());
+                        view! { <tr class="border-b border-border last:border-b-0"><td class="px-4 py-3 text-muted-foreground">{account.id}</td><td class="px-4 py-3 font-medium text-foreground"><a class="hover:text-primary" href=format!("/admin/accounts/{}", account.id)>{account.username}</a></td><td class="px-4 py-3 text-muted-foreground">{email}</td><td class="px-4 py-3">{account.gmlevel}</td><td class="px-4 py-3">{state}</td></tr> }
+                    }).collect_view()}</tbody>
+                </table>
+            </div>
+        }.into_any(),
+        Err(error) => view! { <p class="mt-8 text-xs text-destructive">{error.to_string()}</p> }.into_any(),
+    }
+}
+
+#[component]
+fn AdminAccountDetail() -> impl IntoView {
+    let params = use_params_map();
+    let account = Resource::new(
+        move || {
+            params
+                .read()
+                .get("account_id")
+                .and_then(|id| id.parse::<u32>().ok())
+        },
+        |id| async move {
+            match id {
+                Some(id) => portal::get_admin_account(id).await,
+                None => Ok(None),
+            }
+        },
+    );
+    view! {
+        <main class="min-h-screen bg-background p-5 text-foreground">
+            <section class="mx-auto max-w-3xl py-8">
+                <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/admin/accounts">"Account management"</a>
+                <Suspense fallback=move || view! { <p class="mt-8 text-xs text-muted-foreground">"Loading account..."</p> }>
+                    {move || account.get().map(render_admin_account_detail)}
+                </Suspense>
+            </section>
+        </main>
+    }
+}
+
+fn render_admin_account_detail(
+    result: Result<Option<portal::AdminAccountDetail>, ServerFnError>,
+) -> AnyView {
+    match result {
+        Ok(Some(account)) => {
+            let email_input = account.email.clone().unwrap_or_default();
+            let email = account
+                .email
+                .unwrap_or_else(|| "No email address".to_string());
+            let state = if account.banned != 0 {
+                "Banned"
+            } else if account.locked != 0 {
+                "Locked"
+            } else {
+                "Active"
+            };
+            let action = format!("/admin/accounts/{}", account.id);
+            view! {
+                <h1 class="mt-5 font-sans text-3xl font-semibold tracking-tight">{account.username}</h1>
+                <dl class="mt-8 divide-y divide-border border-y border-border text-xs">
+                    <div class="flex justify-between gap-6 py-3"><dt class="text-muted-foreground">"Account ID"</dt><dd>{account.id}</dd></div>
+                    <div class="flex justify-between gap-6 py-3"><dt class="text-muted-foreground">"Email"</dt><dd>{email}</dd></div>
+                    <div class="flex justify-between gap-6 py-3"><dt class="text-muted-foreground">"Global security level"</dt><dd>{account.gmlevel}</dd></div>
+                    <div class="flex justify-between gap-6 py-3"><dt class="text-muted-foreground">"State"</dt><dd>{state}</dd></div>
+                    <div class="flex justify-between gap-6 py-3"><dt class="text-muted-foreground">"Last IP"</dt><dd>{account.last_ip}</dd></div>
+                    <div class="flex justify-between gap-6 py-3"><dt class="text-muted-foreground">"Expansion"</dt><dd>{account.expansion}</dd></div>
+                </dl>
+                <form class="mt-8 space-y-5 border-t border-border pt-6 text-xs" action=action method="post">
+                    <p class="font-medium text-foreground">"Edit account"</p>
+                    <label class="block text-muted-foreground" for="admin-email">"Email"<input class="mt-2 block w-full border border-input bg-input px-3 py-2 text-foreground" id="admin-email" name="email" type="email" value=email_input /></label>
+                    <label class="block text-muted-foreground" for="admin-gmlevel">"Global security level"
+                        <select class="mt-2 block border border-input bg-input px-3 py-2 text-foreground" id="admin-gmlevel" name="gmlevel">
+                            {(0_u8..=7).map(|level| view! { <option value=level selected=account.gmlevel == level>{level} " " {security_level_name(level)}</option> }).collect_view()}
+                        </select>
+                    </label>
+                    <label class="flex items-center gap-2 text-muted-foreground"><input name="locked" type="checkbox" value="true" checked=account.locked != 0 />"Locked"</label>
+                    <label class="flex items-center gap-2 text-muted-foreground"><input name="banned" type="checkbox" value="true" checked=account.banned != 0 />"Banned"</label>
+                    <Button button_type="submit">"Save changes"</Button>
+                </form>
+            }.into_any()
+        }
+        Ok(None) => {
+            view! { <p class="mt-8 text-xs text-muted-foreground">"Account not found."</p> }
+                .into_any()
+        }
+        Err(error) => {
+            view! { <p class="mt-8 text-xs text-destructive">{error.to_string()}</p> }.into_any()
+        }
+    }
+}
+
+fn security_level_name(level: u8) -> &'static str {
+    portal::SECURITY_LEVELS
+        .iter()
+        .find(|(value, _)| *value == level)
+        .map(|(_, name)| *name)
+        .unwrap_or("Unknown")
 }
 
 fn render_admin_overview(result: Result<portal::AdminOverview, ServerFnError>) -> AnyView {

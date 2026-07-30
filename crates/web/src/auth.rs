@@ -48,6 +48,16 @@ pub struct SupportTicketForm {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AdminAccountForm {
+    pub email: String,
+    pub gmlevel: u8,
+    #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
+    pub banned: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Session {
     pub account_id: u32,
@@ -332,6 +342,61 @@ pub async fn create_support_ticket(
     )
     .await;
     Redirect::to("/support").into_response()
+}
+
+pub async fn update_admin_account(
+    Extension(state): Extension<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    axum::extract::Path(account_id): axum::extract::Path<u32>,
+    Form(form): Form<AdminAccountForm>,
+) -> Response {
+    if !has_same_origin(&headers, &state) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(session) = current_session(&state.web, &jar).await else {
+        return Redirect::to("/login").into_response();
+    };
+    let actor_level = match highest_gm_level(&state.auth, session.account_id).await {
+        Ok(level) => level,
+        Err(_) => return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    if actor_level < 3 || form.gmlevel > 7 || account_id == session.account_id {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let target_level = match highest_gm_level(&state.auth, account_id).await {
+        Ok(level) => level,
+        Err(_) => return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    if target_level >= actor_level
+        || (form.gmlevel != target_level && (actor_level < 6 || form.gmlevel >= actor_level))
+    {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let email = form.email.trim();
+    if !email.is_empty() && !is_valid_email(email) {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let result = sqlx::query(
+        "UPDATE `account` SET `email` = ?, `locked` = ?, `banned` = ?, `gmlevel` = ? WHERE `id` = ?",
+    )
+    .bind((!email.is_empty()).then_some(email))
+    .bind(form.locked)
+    .bind(form.banned)
+    .bind(form.gmlevel)
+    .bind(account_id)
+    .execute(&*state.auth)
+    .await;
+    match result {
+        Ok(result) if result.rows_affected() == 1 => {}
+        Ok(_) => return axum::http::StatusCode::NOT_FOUND.into_response(),
+        Err(error) => {
+            tracing::error!(target: "oxcore_web", %error, account_id, "admin account update failed");
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
+    let _ = record_audit(&state.web, session.account_id, "account.updated", "account").await;
+    Redirect::to(&format!("/admin/accounts/{account_id}")).into_response()
 }
 
 pub async fn admin(Extension(state): Extension<AppState>, jar: CookieJar) -> Response {
