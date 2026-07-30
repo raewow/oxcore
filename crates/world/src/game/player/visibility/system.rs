@@ -15,7 +15,7 @@ use crate::World;
 use oxcore_shared::messages::create::SmsgOutOfRange;
 use oxcore_shared::messages::update::{SmsgUpdateObject, UpdateBlockData};
 use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Position, Protocol, WorldPacket};
 
 /// Minimum ticks between visibility updates (throttle)
 /// At 50ms per tick, 4 ticks = 200ms minimum between updates
@@ -389,6 +389,26 @@ impl VisibilitySubsystem {
             return Ok(());
         };
 
+        // Initial modern visibility is stable, but a standalone create after that bootstrap still
+        // crashes the client. Do not claim these deferred objects were delivered: each later
+        // visibility pass can retry them once the late-create body is fixed.
+        let defer_modern_appearances = broadcaster.protocol() == Protocol::Modern
+            && world
+                .managers
+                .player_mgr
+                .with_player_mut(viewer_guid, |player| {
+                    !player.visibility.objects_created.is_empty()
+                })
+                .unwrap_or(false);
+        if defer_modern_appearances {
+            tracing::debug!(
+                "[VISIBILITY] Deferring {} modern post-bootstrap CREATE_OBJECT2 target(s) for {:?}",
+                targets.len(),
+                viewer_guid
+            );
+            return Ok(());
+        }
+
         // Filter out objects that have already had CREATE_OBJECT2 sent (deduplication guard)
         let targets_to_send: Vec<ObjectGuid> = targets
             .iter()
@@ -533,17 +553,19 @@ impl VisibilitySubsystem {
             broadcaster.send_update_object(&update_msg)?;
         }
 
-        // Send movement sync packets for creatures that are currently mid-movement.
-        // CREATE_OBJECT2 includes position but no spline data, so without this the
-        // client shows moving creatures as standing still until their next movement.
-        for &target_guid in &targets_to_send {
-            if target_guid.is_unit() && !target_guid.is_player() {
-                if let Some(move_msg) = world
-                    .managers
-                    .creature_mgr
-                    .build_movement_sync_packet(target_guid)
-                {
-                    broadcaster.send_msg(&move_msg);
+        // The modern spline-sync body is not yet safe to replay for a creature that was already
+        // moving when it appeared. Its create carries the current position, so defer animation
+        // until the movement system emits that creature's next native move packet.
+        if broadcaster.protocol() == Protocol::Vanilla {
+            for &target_guid in &targets_to_send {
+                if target_guid.is_unit() && !target_guid.is_player() {
+                    if let Some(move_msg) = world
+                        .managers
+                        .creature_mgr
+                        .build_movement_sync_packet(target_guid)
+                    {
+                        broadcaster.send_msg(&move_msg);
+                    }
                 }
             }
         }
@@ -640,6 +662,23 @@ impl VisibilitySubsystem {
             return Ok(());
         }
 
+        let viewer_broadcaster = world.managers.player_mgr.get_broadcaster(viewer_guid);
+        let Some(broadcaster) = viewer_broadcaster else {
+            return Ok(());
+        };
+
+        // Recreating an object after a modern out-of-range notification crashes the 1.14 client.
+        // Keep it client-side until the removal/recreate transition is fully validated; the server
+        // still tracks the visibility delta, while the client may briefly retain a stale object.
+        if broadcaster.protocol() == Protocol::Modern {
+            tracing::debug!(
+                "[VISIBILITY] Deferring modern OUT_OF_RANGE for {:?}: {} targets",
+                viewer_guid,
+                targets.len()
+            );
+            return Ok(());
+        }
+
         // Remove disappeared objects from objects_created (so they can be re-created later)
         world
             .managers
@@ -649,11 +688,6 @@ impl VisibilitySubsystem {
                     player.visibility.objects_created.remove(&target);
                 }
             });
-
-        let viewer_broadcaster = world.managers.player_mgr.get_broadcaster(viewer_guid);
-        let Some(broadcaster) = viewer_broadcaster else {
-            return Ok(());
-        };
 
         // Build single SMSG_OUT_OF_RANGE with all GUIDs
         let world_guids: Vec<WorldObjectGuid> = targets

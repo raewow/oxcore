@@ -106,7 +106,8 @@ pub async fn dispatch_packet(
                     );
                 }
                 Opcode::CMSG_LOG_DISCONNECT => {
-                    tracing::trace!("modern client reported disconnect");
+                    let reason = packet.read_u32().unwrap_or(0);
+                    tracing::info!(reason, "modern client reported disconnect");
                 }
                 _ => {
                     debug!("Unhandled opcode {:?} in Authenticated state", opcode);
@@ -123,6 +124,10 @@ pub async fn dispatch_packet(
 
                     let pong = SmsgPong { sequence };
                     session.send_msg(pong)?;
+                }
+                Opcode::CMSG_LOG_DISCONNECT => {
+                    let reason = packet.read_u32().unwrap_or(0);
+                    tracing::info!(reason, "modern client reported disconnect");
                 }
 
                 // Social handlers
@@ -287,13 +292,76 @@ pub async fn dispatch_packet(
                 | Opcode::MSG_MOVE_START_TURN_RIGHT
                 | Opcode::MSG_MOVE_STOP_TURN
                 | Opcode::MSG_MOVE_SET_FACING
+                | Opcode::MSG_MOVE_SET_PITCH
                 | Opcode::MSG_MOVE_FALL_LAND => {
                     movement::handle_movement(session, opcode, packet, world).await?;
                 }
+                Opcode::CMSG_MOVE_INIT_ACTIVE_MOVER_COMPLETE => {
+                    packet.read_u32().ok_or_else(|| {
+                        anyhow::anyhow!("CMSG_MOVE_INIT_ACTIVE_MOVER_COMPLETE missing ticks")
+                    })?;
+                }
+                Opcode::CMSG_QUEUED_MESSAGES_END
+                | Opcode::CMSG_VIOLENCE_LEVEL
+                | Opcode::CMSG_LOADING_SCREEN_NOTIFY
+                | Opcode::CMSG_CHAT_REGISTER_ADDON_PREFIXES
+                | Opcode::CMSG_CHAT_UNREGISTER_ALL_ADDON_PREFIXES
+                | Opcode::CMSG_QUERY_COUNTDOWN_TIMER
+                | Opcode::CMSG_REQUEST_CEMETERY_LIST
+                | Opcode::CMSG_REQUEST_BATTLEFIELD_STATUS
+                | Opcode::CMSG_LFG_LIST_GET_STATUS
+                | Opcode::CMSG_BATTLE_PET_REQUEST_JOURNAL
+                | Opcode::CMSG_ARENA_TEAM_ACCEPT
+                | Opcode::CMSG_GUILD_SET_ACHIEVEMENT_TRACKING
+                | Opcode::CMSG_GM_TICKET_GET_CASE_STATUS => {}
 
                 // Query handlers
                 Opcode::CMSG_QUERY_TIME => {
                     query::handle_query_time(session).await?;
+                }
+                Opcode::CMSG_REQUEST_CATEGORY_COOLDOWNS => {
+                    send_empty_i32(session, Opcode::SMSG_SEND_SPELL_HISTORY)?;
+                }
+                Opcode::CMSG_REQUEST_FORCED_REACTIONS => {
+                    send_empty_i32(session, Opcode::SMSG_SET_FORCED_REACTIONS)?;
+                }
+                Opcode::CMSG_QUERY_NEXT_MAIL_TIME => {
+                    let mut response = WorldPacket::new(Opcode::SMSG_MAIL_QUERY_NEXT_TIME_RESULT);
+                    response.write_f32(0.0);
+                    response.write_i32(0);
+                    session.send_packet(response)?;
+                }
+                Opcode::CMSG_REQUEST_CONQUEST_FORMULA_CONSTANTS => {
+                    let mut response = WorldPacket::new(Opcode::SMSG_CONQUEST_FORMULA_CONSTANTS);
+                    response.write_i32(0);
+                    response.write_i32(0);
+                    response.write_f32(0.0);
+                    response.write_f32(0.0);
+                    response.write_f32(0.0);
+                    session.send_packet(response)?;
+                }
+                Opcode::CMSG_REQUEST_LFG_LIST_BLACKLIST => {
+                    send_empty_i32(session, Opcode::SMSG_LFG_LIST_UPDATE_BLACKLIST)?;
+                }
+                Opcode::CMSG_GUILD_BANK_REMAINING_WITHDRAW_MONEY_QUERY => {
+                    let mut response =
+                        WorldPacket::new(Opcode::SMSG_GUILD_BANK_REMAINING_WITHDRAW_MONEY);
+                    response.write_u64(0);
+                    session.send_packet(response)?;
+                }
+                Opcode::CMSG_CALENDAR_GET_NUM_PENDING => {
+                    let mut response = WorldPacket::new(Opcode::SMSG_CALENDAR_SEND_NUM_PENDING);
+                    response.write_u32(0);
+                    session.send_packet(response)?;
+                }
+                Opcode::CMSG_GET_ACCOUNT_CHARACTER_LIST => {
+                    let token = packet.read_u32().unwrap_or(0);
+                    let mut response =
+                        WorldPacket::new(Opcode::SMSG_GET_ACCOUNT_CHARACTER_LIST_RESULT);
+                    response.write_u32(token);
+                    response.write_u32(0);
+                    response.write_u8(0);
+                    session.send_packet(response)?;
                 }
                 Opcode::CMSG_NAME_QUERY => {
                     query::handle_name_query(session, packet, databases, world).await?;
@@ -536,6 +604,14 @@ pub async fn dispatch_packet(
                 // Quest handlers
                 Opcode::CMSG_QUESTGIVER_STATUS_QUERY => {
                     quest_handler::handle_questgiver_status_query(session, packet, world).await?;
+                }
+                Opcode::CMSG_QUESTGIVER_STATUS_MULTIPLE_QUERY => {
+                    // Oxcore has no cross-zone questgiver index yet. An explicit empty list
+                    // completes the modern client's initial marker sweep without fabricating
+                    // statuses for objects outside its visibility set.
+                    let mut response = WorldPacket::new(Opcode::SMSG_QUESTGIVER_STATUS_MULTIPLE);
+                    response.write_i32(0);
+                    session.send_packet(response)?;
                 }
                 Opcode::CMSG_QUESTGIVER_HELLO => {
                     quest_handler::handle_questgiver_hello(session, packet, world).await?;
@@ -803,4 +879,12 @@ pub async fn dispatch_packet(
     }
 
     Ok(())
+}
+
+/// Several modern bootstrap requests have a count-prefixed empty result when their backing system
+/// is unavailable. Returning that result is safer than leaving the client waiting indefinitely.
+fn send_empty_i32(session: &WorldSession, opcode: Opcode) -> Result<()> {
+    let mut response = WorldPacket::new(opcode);
+    response.write_i32(0);
+    session.send_packet(response)
 }
