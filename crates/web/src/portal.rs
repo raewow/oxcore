@@ -521,11 +521,11 @@ pub async fn get_admin_audit_log(
         require_gm_level(&state, actor_id, if account_id.is_some() { 1 } else { 4 }).await?;
         let rows = match if let Some(account_id) = account_id {
             sqlx::query_as::<_, (u64, i64, Option<String>, String, String, Option<String>, Option<String>)>(
-                "SELECT l.`id`, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `account` a ON a.`id` = l.`actor_account_id` WHERE l.`actor_account_id` = ? OR (l.`target_type` = 'account' AND l.`target_id` = CAST(? AS CHAR)) OR (l.`target_type` = 'realm_role' AND l.`target_id` LIKE CONCAT(CAST(? AS CHAR), ':%')) ORDER BY l.`occurred_at` DESC LIMIT 100",
+                "SELECT l.`id`, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `auth`.`account` a ON a.`id` = l.`actor_account_id` WHERE l.`actor_account_id` = ? OR (l.`target_type` = 'account' AND l.`target_id` = CAST(? AS CHAR)) OR (l.`target_type` = 'realm_role' AND l.`target_id` LIKE CONCAT(CAST(? AS CHAR), ':%')) ORDER BY l.`occurred_at` DESC LIMIT 100",
             ).bind(account_id).bind(account_id).bind(account_id).fetch_all(&*state.web).await
         } else {
             sqlx::query_as::<_, (u64, i64, Option<String>, String, String, Option<String>, Option<String>)>(
-                "SELECT l.`id`, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `account` a ON a.`id` = l.`actor_account_id` ORDER BY l.`occurred_at` DESC LIMIT 200",
+                "SELECT l.`id`, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `auth`.`account` a ON a.`id` = l.`actor_account_id` ORDER BY l.`occurred_at` DESC LIMIT 200",
             ).fetch_all(&*state.web).await
         } {
             Ok(rows) => rows,

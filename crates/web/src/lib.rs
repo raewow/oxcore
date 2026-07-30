@@ -499,21 +499,38 @@ fn AdminAccountDetail() -> impl IntoView {
     );
     view! {
         <main class="min-h-screen bg-background p-5 text-foreground">
-            <section class="mx-auto max-w-3xl py-8">
+            <div class="flex min-h-[calc(100vh-2.5rem)] w-full flex-col gap-3 lg:flex-row">
+                <Card class="flex shrink-0 flex-col px-4 py-5 lg:w-56">
+                    <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/">"oxcore"</a>
+                    <p class="mt-4 text-xs text-muted-foreground">"GM tools"</p>
+                    <nav class="mt-4 grid gap-1 text-xs" aria-label="GM tools navigation">
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin">"Overview"</a>
+                        <a class="border border-primary/40 bg-primary/10 px-3 py-2 font-medium text-primary" href="/admin/accounts">"Account Management"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/chat">"Chat"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/moderation">"Moderation"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/live-map">"Live Map"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/audit-logs">"Audit Logs"</a>
+                        <a class="px-3 py-2 text-muted-foreground hover:bg-input hover:text-foreground" href="/admin/permissions">"Permissions"</a>
+                    </nav>
+                </Card>
+            <section class="min-w-0 flex-1 py-3 sm:py-6">
                 <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/admin/accounts">"Account management"</a>
                 <Suspense fallback=move || view! { <p class="mt-8 text-xs text-muted-foreground">"Loading account..."</p> }>
                     {move || account.get().map(render_admin_account_detail)}
                 </Suspense>
-                <section class="mt-8 border-t border-border pt-6">
+                <div class="mt-8 grid gap-4 xl:grid-cols-2">
+                <section class="border border-border bg-card p-5">
                     <p class="text-xs font-medium text-foreground">"Realm-specific roles"</p>
                     <Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading realm roles..."</p> }>
                         {move || realm_access.get().map(render_realm_access)}
                     </Suspense>
                 </section>
-                <section class="mt-8 border-t border-border pt-6"><p class="text-xs font-medium text-foreground">"Characters"</p><Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading characters..."</p> }>{move || characters.get().map(render_admin_characters)}</Suspense></section>
-                <section class="mt-8 border-t border-border pt-6"><p class="text-xs font-medium text-foreground">"Portal sessions"</p><Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading sessions..."</p> }>{move || sessions.get().map(render_admin_sessions)}</Suspense></section>
-                <section class="mt-8 border-t border-border pt-6"><p class="text-xs font-medium text-foreground">"Account audit history"</p><Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading audit history..."</p> }>{move || audit.get().map(render_audit_entries)}</Suspense></section>
+                <section class="border border-border bg-card p-5"><p class="text-xs font-medium text-foreground">"Characters"</p><Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading characters..."</p> }>{move || characters.get().map(render_admin_characters)}</Suspense></section>
+                <section class="border border-border bg-card p-5"><p class="text-xs font-medium text-foreground">"Portal sessions"</p><Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading sessions..."</p> }>{move || sessions.get().map(render_admin_sessions)}</Suspense></section>
+                <section class="border border-border bg-card p-5 xl:col-span-2"><p class="text-xs font-medium text-foreground">"Account audit history"</p><Suspense fallback=move || view! { <p class="mt-3 text-xs text-muted-foreground">"Loading audit history..."</p> }>{move || audit.get().map(render_audit_entries)}</Suspense></section>
+                </div>
             </section>
+            </div>
         </main>
     }
 }
