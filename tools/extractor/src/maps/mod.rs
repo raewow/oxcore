@@ -56,7 +56,10 @@ pub fn extract(input: &Path, output: &Path, compress: bool, filter: Vec<u32>) ->
         }
     }
 
-    info!("✓ Extracted {} tile(s) from {} map(s)", extracted_tiles, total_tiles);
+    info!(
+        "✓ Extracted {} tile(s) from {} map(s)",
+        extracted_tiles, total_tiles
+    );
 
     Ok(())
 }
@@ -99,11 +102,7 @@ fn load_mpq_archives(input: &Path) -> Result<Vec<MpqArchive>> {
 }
 
 /// Get list of map IDs from Map.dbc
-fn get_map_list(
-    archives: &mut [MpqArchive],
-    output: &Path,
-    filter: &[u32],
-) -> Result<Vec<u32>> {
+fn get_map_list(archives: &mut [MpqArchive], output: &Path, filter: &[u32]) -> Result<Vec<u32>> {
     // Try to read Map.dbc from output directory first (if already extracted)
     let map_dbc_path = output.join("dbc/Map.dbc");
 
@@ -207,7 +206,13 @@ fn extract_map(
         let output_path = output.join(output_filename);
 
         // Convert ADT to map file
-        match converter::convert_adt(&adt_data, &output_path, tile_x as u32, tile_y as u32, config) {
+        match converter::convert_adt(
+            &adt_data,
+            &output_path,
+            tile_x as u32,
+            tile_y as u32,
+            config,
+        ) {
             Ok(_) => {
                 extracted_count += 1;
                 debug!("Converted: {}_{:02}_{:02}", map_name, tile_x, tile_y);

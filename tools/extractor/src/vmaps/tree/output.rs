@@ -86,7 +86,10 @@ fn write_header<W: Write>(writer: &mut W, header: &VmtreeHeader) -> Result<()> {
 }
 
 /// Write bounding box
-fn write_bounding_box<W: Write>(writer: &mut W, bbox: &crate::vmaps::types::BoundingBox) -> Result<()> {
+fn write_bounding_box<W: Write>(
+    writer: &mut W,
+    bbox: &crate::vmaps::types::BoundingBox,
+) -> Result<()> {
     writer.write_f32::<LittleEndian>(bbox.min.x)?;
     writer.write_f32::<LittleEndian>(bbox.min.y)?;
     writer.write_f32::<LittleEndian>(bbox.min.z)?;
@@ -143,7 +146,10 @@ fn write_nodes<W: Write>(writer: &mut W, nodes: &[BVHNode]) -> Result<()> {
                 // Padding to 40 bytes total (4 bytes)
                 writer.write_u32::<LittleEndian>(0)?;
             }
-            BVHNode::Leaf { bbox, triangle_indices } => {
+            BVHNode::Leaf {
+                bbox,
+                triangle_indices,
+            } => {
                 // Node type: 1 = leaf
                 writer.write_u8(1)?;
 
@@ -351,21 +357,19 @@ impl VMapTileWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use byteorder::{LittleEndian, ReadBytesExt};
     use crate::vmaps::tree::BVHTree;
+    use byteorder::{LittleEndian, ReadBytesExt};
     use glam::Vec3;
     use std::io::Cursor;
 
     #[test]
     fn test_vmtree_header() {
-        let triangles = vec![
-            TriangleData::new(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(1.0, 0.0, 0.0),
-                Vec3::new(0.0, 1.0, 0.0),
-                0,
-            ),
-        ];
+        let triangles = vec![TriangleData::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            0,
+        )];
 
         let tree = BVHTree::from_triangles(triangles).build();
         let header = VmtreeHeader::new(&tree);
@@ -411,14 +415,12 @@ mod tests {
     #[test]
     fn test_write_triangle() {
         let mut buffer = Vec::new();
-        let triangles = vec![
-            TriangleData::new(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(1.0, 0.0, 0.0),
-                Vec3::new(0.0, 1.0, 0.0),
-                42,
-            ),
-        ];
+        let triangles = vec![TriangleData::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            42,
+        )];
 
         write_triangles(&mut buffer, &triangles).unwrap();
 
@@ -437,13 +439,11 @@ mod tests {
     fn test_write_branch_node() {
         let mut buffer = Vec::new();
         let bbox = crate::vmaps::types::BoundingBox::new(Vec3::ZERO, Vec3::ONE);
-        let nodes = vec![
-            BVHNode::Branch {
-                bbox,
-                left: 1,
-                right: 2,
-            },
-        ];
+        let nodes = vec![BVHNode::Branch {
+            bbox,
+            left: 1,
+            right: 2,
+        }];
 
         write_nodes(&mut buffer, &nodes).unwrap();
 
@@ -458,12 +458,10 @@ mod tests {
     fn test_write_leaf_node() {
         let mut buffer = Vec::new();
         let bbox = crate::vmaps::types::BoundingBox::new(Vec3::ZERO, Vec3::ONE);
-        let nodes = vec![
-            BVHNode::Leaf {
-                bbox,
-                triangle_indices: vec![0, 1, 2],
-            },
-        ];
+        let nodes = vec![BVHNode::Leaf {
+            bbox,
+            triangle_indices: vec![0, 1, 2],
+        }];
 
         write_nodes(&mut buffer, &nodes).unwrap();
 

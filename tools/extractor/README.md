@@ -9,6 +9,7 @@ A unified command-line tool for extracting game data from World of Warcraft clie
 - **Camera Extraction** - Cinematic camera files
 - **VMap Extraction** - 3D geometry for collision and line-of-sight
 - **MMap Generation** - Navigation meshes for NPC pathfinding
+- **Live Map Tiles** - Vanilla Azeroth minimap PNG tiles for the web GM console
 
 ## Usage
 
@@ -40,6 +41,10 @@ extractor vmaps -i "C:\Games\WoW" -o "./output" 0 1 530
 
 # Assembly mode (skip extraction, build trees from existing data)
 extractor vmaps -a -i "C:\Games\WoW" -o "./output"
+
+# Build the web live-map tiles from the Vanilla client. Point output at the
+# portal public assets directory so cargo-leptos serves them at /assets/.
+extractor minimap -i "C:\Games\WoW" -o "../../crates/web/public/assets"
 
 # Generate MMaps (requires maps and vmaps)
 extractor mmaps -i "C:\Games\WoW" -o "./output" --debug-meshes

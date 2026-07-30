@@ -2,8 +2,8 @@
 //!
 //! Bounding Volume Hierarchy for spatial organization of collision geometry.
 
-use glam::Vec3;
 use crate::vmaps::types::BoundingBox;
+use glam::Vec3;
 
 /// Triangle data stored in BVH leaf nodes
 #[derive(Debug, Clone)]
@@ -86,7 +86,9 @@ impl BVHNode {
     /// Get triangle count for leaf nodes
     pub fn triangle_count(&self) -> usize {
         match self {
-            BVHNode::Leaf { triangle_indices, .. } => triangle_indices.len(),
+            BVHNode::Leaf {
+                triangle_indices, ..
+            } => triangle_indices.len(),
             BVHNode::Branch { .. } => 0,
         }
     }

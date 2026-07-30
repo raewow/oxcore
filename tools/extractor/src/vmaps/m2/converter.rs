@@ -80,7 +80,8 @@ impl M2File {
         // Write "GRP " chunk
         cursor.write_all(b"GRP ")?;
         let branches: u32 = 1;
-        let wsize = std::mem::size_of::<u32>() as u32 + std::mem::size_of::<u32>() as u32 * branches;
+        let wsize =
+            std::mem::size_of::<u32>() as u32 + std::mem::size_of::<u32>() as u32 * branches;
         cursor.write_u32::<LittleEndian>(wsize)?; // wsize = 8
         cursor.write_u32::<LittleEndian>(branches)?;
 
@@ -89,7 +90,8 @@ impl M2File {
 
         // Write "INDX" chunk
         cursor.write_all(b"INDX")?;
-        let indx_wsize = std::mem::size_of::<u32>() as u32 + std::mem::size_of::<u16>() as u32 * n_indexes;
+        let indx_wsize =
+            std::mem::size_of::<u32>() as u32 + std::mem::size_of::<u16>() as u32 * n_indexes;
         cursor.write_u32::<LittleEndian>(indx_wsize)?;
         cursor.write_u32::<LittleEndian>(n_indexes)?;
 
@@ -107,7 +109,8 @@ impl M2File {
 
         // Write "VERT" chunk
         cursor.write_all(b"VERT")?;
-        let vert_wsize = std::mem::size_of::<u32>() as u32 + std::mem::size_of::<f32>() as u32 * 3 * n_vertices;
+        let vert_wsize =
+            std::mem::size_of::<u32>() as u32 + std::mem::size_of::<f32>() as u32 * 3 * n_vertices;
         cursor.write_u32::<LittleEndian>(vert_wsize)?;
         cursor.write_u32::<LittleEndian>(n_vertices)?;
 

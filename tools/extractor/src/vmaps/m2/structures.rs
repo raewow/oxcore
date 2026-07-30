@@ -3,8 +3,8 @@
 //! Structures for parsing M2 (MD20) model files.
 //! Reference: mangos/contrib/vmap_extractor/vmapextract/model.h
 
-use glam::{Vec2, Vec3};
 use crate::vmaps::types::BoundingBox;
+use glam::{Vec2, Vec3};
 
 /// M2 Model File
 #[derive(Debug, Clone)]
@@ -63,7 +63,7 @@ impl M2File {
 /// M2 Main Header (MD20)
 #[derive(Debug, Clone)]
 pub struct M2Header {
-    pub magic: [u8; 4],          // 'MD20'
+    pub magic: [u8; 4], // 'MD20'
     pub version: u32,
     pub name_length: u32,
     pub name_offset: u32,
@@ -274,9 +274,9 @@ impl Default for M2Vertex {
 /// M2 Skin Profile (LOD level)
 #[derive(Debug, Clone)]
 pub struct M2SkinProfile {
-    pub vertices: Vec<u16>,       // Vertex indices
-    pub indices: Vec<u16>,        // Triangle indices
-    pub bones: Vec<[u8; 4]>,      // Bone indices for each submesh
+    pub vertices: Vec<u16>,  // Vertex indices
+    pub indices: Vec<u16>,   // Triangle indices
+    pub bones: Vec<[u8; 4]>, // Bone indices for each submesh
     pub submeshes: Vec<M2Submesh>,
     pub batches: Vec<M2Batch>,
 }

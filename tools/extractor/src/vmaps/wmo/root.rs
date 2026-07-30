@@ -9,8 +9,7 @@
 use std::collections::HashSet;
 
 use crate::vmaps::types::{
-    BoundingBox, WMODoodadData, WMODoodadDef, WMODoodadSet,
-    WMOGroupInfo, WMOMaterial,
+    BoundingBox, WMODoodadData, WMODoodadDef, WMODoodadSet, WMOGroupInfo, WMOMaterial,
 };
 
 /// WMO Root File

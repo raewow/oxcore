@@ -120,7 +120,8 @@ impl TerrainBuilder {
         }
 
         // Parse header offsets
-        let height_map_offset = u32::from_le_bytes([header[16], header[17], header[18], header[19]]);
+        let height_map_offset =
+            u32::from_le_bytes([header[16], header[17], header[18], header[19]]);
 
         if height_map_offset == 0 {
             // No height data - fill with zeros

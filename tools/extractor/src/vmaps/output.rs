@@ -221,10 +221,7 @@ mod tests {
         let temp_file = NamedTempFile::new()?;
         let mut writer = VMapWriter::new(temp_file.path())?;
 
-        let vertices = vec![
-            Vec3::new(1.0, 2.0, 3.0),
-            Vec3::new(4.0, 5.0, 6.0),
-        ];
+        let vertices = vec![Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0)];
 
         writer.write_vertices(&vertices)?;
         writer.finalize()?;
@@ -298,4 +295,3 @@ mod tests {
         Ok(())
     }
 }
-

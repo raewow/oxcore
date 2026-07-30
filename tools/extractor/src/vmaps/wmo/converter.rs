@@ -97,8 +97,8 @@ impl WMOGroup {
             // Write "INDX" chunk
             let n_indexes = (n_triangles * 3) as u32;
             writer.write_all(b"INDX")?;
-            let wsize = std::mem::size_of::<u32>() as u32
-                + std::mem::size_of::<u16>() as u32 * n_indexes;
+            let wsize =
+                std::mem::size_of::<u32>() as u32 + std::mem::size_of::<u16>() as u32 * n_indexes;
             writer.write_u32::<LittleEndian>(wsize)?;
             writer.write_u32::<LittleEndian>(n_indexes)?;
             for &idx in &self.indices {
@@ -178,8 +178,8 @@ impl WMOGroup {
             // Write "INDX" chunk
             let n_indexes = col_indices.len() as u32;
             writer.write_all(b"INDX")?;
-            let wsize = std::mem::size_of::<u32>() as u32
-                + std::mem::size_of::<u16>() as u32 * n_indexes;
+            let wsize =
+                std::mem::size_of::<u32>() as u32 + std::mem::size_of::<u16>() as u32 * n_indexes;
             writer.write_u32::<LittleEndian>(wsize)?;
             writer.write_u32::<LittleEndian>(n_indexes)?;
             for &idx in &col_indices {
@@ -213,11 +213,7 @@ impl WMOGroup {
 
     /// Legacy convert_to_vmap for backward compatibility (returns Vec<u8>)
     /// Now delegates to write_to_vmap
-    pub fn convert_to_vmap(
-        &self,
-        root: &WMORoot,
-        precise_vector_data: bool,
-    ) -> Result<Vec<u8>> {
+    pub fn convert_to_vmap(&self, root: &WMORoot, precise_vector_data: bool) -> Result<Vec<u8>> {
         if !self.has_collision() {
             return Ok(Vec::new());
         }

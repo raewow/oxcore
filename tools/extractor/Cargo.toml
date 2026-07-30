@@ -43,6 +43,7 @@ dashmap = "5.5"
 wow-mpq = "0.3"
 
 # World of Warcraft file format parsers
+wow-blp = "0.2"
 wow-m2 = "0.2"
 wow-wmo = "0.2"
 wow-wdt = "0.2"

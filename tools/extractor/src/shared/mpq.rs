@@ -4,8 +4,9 @@
 //! MPQ is Blizzard's archive format used in World of Warcraft.
 
 use anyhow::{Context, Result};
-use wow_mpq::Archive;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use wow_mpq::Archive;
 
 /// MPQ Archive
 pub struct MpqArchive {
@@ -34,7 +35,9 @@ impl MpqArchive {
     /// List all files in the archive
     pub fn list_files(&mut self) -> Result<Vec<String>> {
         // wow-mpq's list() method returns entries
-        let entries = self.archive.list()
+        let entries = self
+            .archive
+            .list()
             .with_context(|| format!("Failed to list files in archive: {}", self.path.display()))?;
         Ok(entries.iter().map(|e| e.name.clone()).collect())
     }
@@ -43,7 +46,8 @@ impl MpqArchive {
     pub fn has_file(&mut self, file_path: &str) -> bool {
         // Try to list and check if file exists
         // Note: This is inefficient but wow-mpq doesn't have a direct contains() method
-        self.archive.list()
+        self.archive
+            .list()
             .map(|entries| entries.iter().any(|e| e.name == file_path))
             .unwrap_or(false)
     }
@@ -75,10 +79,7 @@ pub struct MpqFile {
 impl MpqFile {
     /// Create a new MPQ file from data
     pub fn new(data: Vec<u8>) -> Self {
-        Self {
-            data,
-            position: 0,
-        }
+        Self { data, position: 0 }
     }
 
     /// Read bytes from the file
@@ -176,6 +177,21 @@ impl ArchiveSet {
     pub fn has_file(&self, file_path: &str) -> bool {
         // Try to read the file - if successful, it exists
         self.read_file(file_path).is_ok()
+    }
+
+    /// List the effective files from all archives, with later archives taking precedence.
+    pub fn list_files(&mut self) -> Result<Vec<String>> {
+        let mut seen = HashSet::new();
+        let mut files = Vec::new();
+        for archive in self.archives.iter_mut().rev() {
+            for entry in archive.list()? {
+                let key = entry.name.to_ascii_lowercase();
+                if seen.insert(key) {
+                    files.push(entry.name);
+                }
+            }
+        }
+        Ok(files)
     }
 }
 

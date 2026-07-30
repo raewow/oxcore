@@ -16,7 +16,7 @@ pub fn extract(input: &Path, output: &Path, filter: Vec<String>) -> Result<()> {
 
     // Collect all DBC files
     let mut dbc_files: HashSet<String> = HashSet::new();
-    
+
     // First, try to get files from listfile
     for archive in &mut archives {
         match archive.list_files() {
@@ -39,12 +39,12 @@ pub fn extract(input: &Path, output: &Path, filter: Vec<String>) -> Result<()> {
             }
         }
     }
-    
+
     // If no files found from listfile, try known DBC files directly
     if dbc_files.is_empty() {
         debug!("No files found in listfile, trying known DBC files...");
         let known_dbc_files = get_known_dbc_files();
-        
+
         for dbc_name in &known_dbc_files {
             // Apply filter if specified
             if !filter.is_empty() {
@@ -53,7 +53,7 @@ pub fn extract(input: &Path, output: &Path, filter: Vec<String>) -> Result<()> {
                     continue;
                 }
             }
-            
+
             // Try multiple path variations
             let paths = [
                 format!("DBFilesClient\\{}", dbc_name),
@@ -62,7 +62,7 @@ pub fn extract(input: &Path, output: &Path, filter: Vec<String>) -> Result<()> {
                 dbc_name.to_lowercase(),
                 format!("DBFilesClient\\{}", dbc_name.to_lowercase()),
             ];
-            
+
             // Check if file exists in any archive with any path variation
             for path in &paths {
                 for archive in &mut archives {
@@ -86,7 +86,7 @@ pub fn extract(input: &Path, output: &Path, filter: Vec<String>) -> Result<()> {
     let dbc_output = output.join("dbc");
     std::fs::create_dir_all(&dbc_output)
         .with_context(|| format!("Failed to create directory: {}", dbc_output.display()))?;
-    
+
     info!("Output directory: {}", dbc_output.display());
 
     // Extract each DBC file
@@ -130,7 +130,11 @@ pub fn extract(input: &Path, output: &Path, filter: Vec<String>) -> Result<()> {
         }
     }
 
-    info!("✓ Extracted {} DBC files to {}", extracted_count, dbc_output.display());
+    info!(
+        "✓ Extracted {} DBC files to {}",
+        extracted_count,
+        dbc_output.display()
+    );
 
     Ok(())
 }
@@ -183,7 +187,10 @@ fn load_mpq_archives(input: &Path) -> Result<Vec<MpqArchive>> {
                 if ext.to_string_lossy().to_lowercase() == "mpq" {
                     let file_name = path.file_name().unwrap().to_string_lossy();
                     // Skip if already loaded
-                    if mpq_files.iter().any(|&name| file_name.eq_ignore_ascii_case(name)) {
+                    if mpq_files
+                        .iter()
+                        .any(|&name| file_name.eq_ignore_ascii_case(name))
+                    {
                         continue;
                     }
                     debug!("Opening patch file: {}", path.display());
@@ -272,8 +279,8 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_extract_creates_output_directory() {

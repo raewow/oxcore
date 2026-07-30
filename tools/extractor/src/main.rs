@@ -15,12 +15,13 @@ use std::path::PathBuf;
 use tracing::{info, Level};
 use tracing_subscriber::EnvFilter;
 
+mod cameras;
 mod dbc;
 mod maps;
-mod cameras;
+mod minimaps;
+mod mmaps;
 mod shared;
 mod vmaps;
-mod mmaps;
 
 /// Unified WoW Data Extractor
 #[derive(Parser, Debug)]
@@ -35,7 +36,12 @@ struct Cli {
     /// Output directory for extracted files
     /// Note: DBC files will be placed in <output>/dbc/
     /// For the server, use: -o ../server/data (files will go to server/data/dbc/)
-    #[arg(short = 'o', long = "output", default_value = "./output", global = true)]
+    #[arg(
+        short = 'o',
+        long = "output",
+        default_value = "./output",
+        global = true
+    )]
     output: PathBuf,
 
     /// Enable verbose logging
@@ -93,6 +99,9 @@ enum Commands {
         maps: Vec<u32>,
     },
 
+    /// Extract the Vanilla Azeroth minimap tiles for the web live map
+    Minimap,
+
     /// Extract camera files
     Cameras,
 
@@ -127,7 +136,9 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Validate input is provided
-    let input = cli.input.ok_or_else(|| anyhow::anyhow!("Input path is required. Use -i/--input to specify the WoW Data directory"))?;
+    let input = cli.input.ok_or_else(|| {
+        anyhow::anyhow!("Input path is required. Use -i/--input to specify the WoW Data directory")
+    })?;
 
     // Initialize logging
     let level = if cli.verbose {
@@ -142,7 +153,7 @@ fn main() -> Result<()> {
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive(level.into())
-                .add_directive("wow_mpq=warn".parse().unwrap()) // Suppress noisy MPQ attribute logs
+                .add_directive("wow_mpq=warn".parse().unwrap()), // Suppress noisy MPQ attribute logs
         )
         .init();
 
@@ -196,6 +207,9 @@ fn main() -> Result<()> {
 
         Commands::Maps { compress, maps } => {
             maps::extract(&input, &cli.output, compress, maps)?;
+        }
+        Commands::Minimap => {
+            minimaps::extract(&input, &cli.output)?;
         }
 
         Commands::Cameras => {

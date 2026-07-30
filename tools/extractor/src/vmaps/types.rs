@@ -34,9 +34,7 @@ impl BoundingBox {
 
     /// Check if bounding box is valid (min <= max)
     pub fn is_valid(&self) -> bool {
-        self.min.x <= self.max.x
-            && self.min.y <= self.max.y
-            && self.min.z <= self.max.z
+        self.min.x <= self.max.x && self.min.y <= self.max.y && self.min.z <= self.max.z
     }
 
     /// Expand this bounding box to include another
@@ -273,10 +271,7 @@ mod tests {
 
     #[test]
     fn test_bounding_box_new() {
-        let bbox = BoundingBox::new(
-            Vec3::new(-1.0, -1.0, -1.0),
-            Vec3::new(1.0, 1.0, 1.0),
-        );
+        let bbox = BoundingBox::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
         assert!(bbox.is_valid());
         assert_eq!(bbox.center(), Vec3::ZERO);
         assert_eq!(bbox.size(), Vec3::splat(2.0));

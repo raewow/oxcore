@@ -1,31 +1,37 @@
 //! VMap (Visual Map) Geometry Extraction
 
-use anyhow::{Context, Result, bail};
-use std::collections::{HashSet, HashMap};
+use anyhow::{bail, Context, Result};
+use byteorder::{LittleEndian, ReadBytesExt};
+use indicatif::{ProgressBar, ProgressStyle};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use tracing::{info, warn, debug};
-use indicatif::{ProgressBar, ProgressStyle};
-use byteorder::{LittleEndian, ReadBytesExt};
+use tracing::{debug, info, warn};
 
-pub mod types;
-pub mod transform;
-pub mod wmo;
+pub mod assembly;
+pub mod dir_bin;
 pub mod m2;
 pub mod output;
 pub mod placement;
+pub mod transform;
 pub mod tree;
-pub mod assembly;
-pub mod dir_bin;
+pub mod types;
 pub mod vmo_converter;
+pub mod wmo;
 
-use crate::shared::mpq::ArchiveSet;
 use crate::shared::dbc_parser::DBCFile;
+use crate::shared::mpq::ArchiveSet;
 
 /// Extract VMap geometry data
-pub fn extract(input: &Path, output: &Path, assemble_only: bool, placement_only: bool, filter: Vec<u32>) -> Result<()> {
+pub fn extract(
+    input: &Path,
+    output: &Path,
+    assemble_only: bool,
+    placement_only: bool,
+    filter: Vec<u32>,
+) -> Result<()> {
     if assemble_only {
         info!("Assembling VMaps from existing data...");
         return assemble_vmaps(output, filter);
@@ -40,8 +46,7 @@ pub fn extract(input: &Path, output: &Path, assemble_only: bool, placement_only:
     // Create output directory structure
     let vmaps_dir = output.join("vmaps");
     let buildings_dir = vmaps_dir.join("Buildings");
-    fs::create_dir_all(&buildings_dir)
-        .context("Failed to create Buildings directory")?;
+    fs::create_dir_all(&buildings_dir).context("Failed to create Buildings directory")?;
 
     // Load MPQ archives
     info!("Loading MPQ archives from: {}", input.display());
@@ -68,8 +73,8 @@ pub fn extract(input: &Path, output: &Path, assemble_only: bool, placement_only:
     }
 
     // Create dir_bin writer for placement data
-    let dir_bin_writer = dir_bin::DirBinWriter::new(&dir_bin_path)
-        .context("Failed to create dir_bin writer")?;
+    let dir_bin_writer =
+        dir_bin::DirBinWriter::new(&dir_bin_path).context("Failed to create dir_bin writer")?;
     let unique_id_gen = dir_bin::UniqueIdGenerator::new();
 
     // Create M2 bounding box cache to avoid re-reading same files
@@ -80,14 +85,25 @@ pub fn extract(input: &Path, output: &Path, assemble_only: bool, placement_only:
     info!("Writing placement data to dir_bin...");
     for map_info in &map_list {
         info!("Processing map: {} (ID: {})", map_info.name, map_info.id);
-        process_map(&archives, &buildings_dir, map_info, &dir_bin_writer, &unique_id_gen, placement_only, &m2_bounds_cache)?;
+        process_map(
+            &archives,
+            &buildings_dir,
+            map_info,
+            &dir_bin_writer,
+            &unique_id_gen,
+            placement_only,
+            &m2_bounds_cache,
+        )?;
     }
 
     // Log cache stats
     let cache = m2_bounds_cache.lock().unwrap();
     let cache_hits = cache.len();
     let with_bounds = cache.values().filter(|v| v.is_some()).count();
-    info!("M2 cache: {} unique models, {} with bounds", cache_hits, with_bounds);
+    info!(
+        "M2 cache: {} unique models, {} with bounds",
+        cache_hits, with_bounds
+    );
 
     // Flush dir_bin to disk
     info!("Flushing dir_bin to disk...");
@@ -131,9 +147,9 @@ fn load_mpq_archives(input: &Path) -> Result<ArchiveSet> {
         "model.MPQ",
         "sound.MPQ",
         "speech.MPQ",
-        "terrain.MPQ",  // Contains WDT/ADT files
+        "terrain.MPQ", // Contains WDT/ADT files
         "texture.MPQ",
-        "wmo.MPQ",      // Contains WMO files
+        "wmo.MPQ", // Contains WMO files
         // Expansion archives (TBC/WotLK)
         "common.MPQ",
         "common-2.MPQ",
@@ -166,11 +182,12 @@ fn load_mpq_archives(input: &Path) -> Result<ArchiveSet> {
 fn load_map_list(archives: &ArchiveSet, filter: &[u32]) -> Result<Vec<MapInfo>> {
     info!("Loading Map.dbc...");
 
-    let dbc_data = archives.read_file("DBFilesClient\\Map.dbc")
+    let dbc_data = archives
+        .read_file("DBFilesClient\\Map.dbc")
         .context("Failed to read Map.dbc")?;
 
-    let dbc = DBCFile::from_bytes("Map.dbc".to_string(), &dbc_data)
-        .context("Failed to parse Map.dbc")?;
+    let dbc =
+        DBCFile::from_bytes("Map.dbc".to_string(), &dbc_data).context("Failed to parse Map.dbc")?;
 
     let mut maps = Vec::new();
     let filter_set: HashSet<u32> = filter.iter().copied().collect();
@@ -226,11 +243,7 @@ fn fix_name_case(name: &str) -> String {
 }
 
 /// Extract WMO and M2 models referenced by maps
-fn extract_models(
-    archives: &ArchiveSet,
-    buildings_dir: &Path,
-    maps: &[MapInfo],
-) -> Result<()> {
+fn extract_models(archives: &ArchiveSet, buildings_dir: &Path, maps: &[MapInfo]) -> Result<()> {
     info!("Extracting models...");
 
     let mut wmo_files = HashSet::new();
@@ -253,13 +266,19 @@ fn extract_models(
         }
     }
 
-    info!("Total found: {} WMO files and {} M2 files", wmo_files.len(), m2_files.len());
+    info!(
+        "Total found: {} WMO files and {} M2 files",
+        wmo_files.len(),
+        m2_files.len()
+    );
 
     // Extract WMO files
     let pb = ProgressBar::new(wmo_files.len() as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
-        .unwrap());
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+            .unwrap(),
+    );
 
     for wmo_path in &wmo_files {
         pb.set_message(format!("WMO: {}", wmo_path));
@@ -272,9 +291,11 @@ fn extract_models(
 
     // Extract M2 files
     let pb = ProgressBar::new(m2_files.len() as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
-        .unwrap());
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+            .unwrap(),
+    );
 
     for m2_path in &m2_files {
         pb.set_message(format!("M2: {}", m2_path));
@@ -315,13 +336,14 @@ fn scan_map_for_models(archives: &ArchiveSet, map_name: &str) -> Result<ModelRef
     };
 
     // Parse WDT using proper parser
-    let wdt = match crate::shared::formats::wdt::WDTFile::from_bytes(map_name.to_string(), &wdt_data) {
-        Ok(wdt) => wdt,
-        Err(e) => {
-            warn!("Failed to parse WDT for {}: {}", map_name, e);
-            return Ok(refs);
-        }
-    };
+    let wdt =
+        match crate::shared::formats::wdt::WDTFile::from_bytes(map_name.to_string(), &wdt_data) {
+            Ok(wdt) => wdt,
+            Err(e) => {
+                warn!("Failed to parse WDT for {}: {}", map_name, e);
+                return Ok(refs);
+            }
+        };
 
     let existing_tiles = wdt.get_existing_tiles();
     let tile_count = existing_tiles.len();
@@ -336,10 +358,16 @@ fn scan_map_for_models(archives: &ArchiveSet, map_name: &str) -> Result<ModelRef
     for (idx, (x, y)) in existing_tiles.iter().enumerate() {
         // Show progress every 50 tiles
         if idx % 50 == 0 {
-            info!("  Processing ADT tiles {}/{} for map {}", idx, total_tiles, map_name);
+            info!(
+                "  Processing ADT tiles {}/{} for map {}",
+                idx, total_tiles, map_name
+            );
         }
 
-        let adt_path = format!("World\\Maps\\{}\\{}_{:02}_{:02}.adt", map_name, map_name, x, y);
+        let adt_path = format!(
+            "World\\Maps\\{}\\{}_{:02}_{:02}.adt",
+            map_name, map_name, x, y
+        );
 
         if let Ok(adt_data) = archives.read_file(&adt_path) {
             // Use the proper ADTFile parser instead of custom parsing
@@ -349,7 +377,10 @@ fn scan_map_for_models(archives: &ArchiveSet, map_name: &str) -> Result<ModelRef
                     let m2_count = adt.model_names.len();
 
                     if wmo_count > 0 || m2_count > 0 {
-                        debug!("ADT {}_{:02}_{:02}: {} WMO, {} M2", map_name, x, y, wmo_count, m2_count);
+                        debug!(
+                            "ADT {}_{:02}_{:02}: {} WMO, {} M2",
+                            map_name, x, y, wmo_count, m2_count
+                        );
                     }
                     refs.wmo_files.extend(adt.wmo_names);
                     refs.m2_files.extend(adt.model_names);
@@ -509,10 +540,17 @@ fn parse_adt_models(data: &[u8]) -> Result<ModelRefs> {
     refs.m2_files.extend(m2_names.clone());
 
     if chunks_seen.len() > 0 && (wmo_names.len() > 0 || m2_names.len() > 0) {
-        info!("ADT chunks seen: {:?}, found {} WMO names, {} M2 names",
-              &chunks_seen[..chunks_seen.len().min(5)], wmo_names.len(), m2_names.len());
+        info!(
+            "ADT chunks seen: {:?}, found {} WMO names, {} M2 names",
+            &chunks_seen[..chunks_seen.len().min(5)],
+            wmo_names.len(),
+            m2_names.len()
+        );
     } else if chunks_seen.len() > 0 && wmo_names.is_empty() && m2_names.is_empty() {
-        warn!("ADT had chunks {:?} but no models found", &chunks_seen[..chunks_seen.len().min(5)]);
+        warn!(
+            "ADT had chunks {:?} but no models found",
+            &chunks_seen[..chunks_seen.len().min(5)]
+        );
     }
 
     Ok(refs)
@@ -524,13 +562,9 @@ fn parse_adt_models(data: &[u8]) -> Result<ModelRefs> {
 /// 1. Write root header: magic(8) + nVectors(u32,=0) + nGroups(u32) + RootWMOID(u32)
 /// 2. For each group: write group data directly to same file
 /// 3. Seek back and patch nVectors (offset 8) and real group count (offset 12)
-fn extract_wmo_file(
-    archives: &ArchiveSet,
-    buildings_dir: &Path,
-    wmo_path: &str,
-) -> Result<()> {
-    use std::io::{BufWriter, Seek, SeekFrom, Write};
+fn extract_wmo_file(archives: &ArchiveSet, buildings_dir: &Path, wmo_path: &str) -> Result<()> {
     use byteorder::WriteBytesExt;
+    use std::io::{BufWriter, Seek, SeekFrom, Write};
 
     // Get base filename (without extension)
     let base_name = Path::new(wmo_path)
@@ -593,7 +627,10 @@ fn extract_wmo_file(
                     Ok(group) => {
                         // Check ShouldSkip (matches MaNGOS)
                         if group.should_skip(&wmo_root) {
-                            debug!("    Skipped WMO group {} (flags=0x{:X})", group_filename, group.mogp_flags);
+                            debug!(
+                                "    Skipped WMO group {} (flags=0x{:X})",
+                                group_filename, group.mogp_flags
+                            );
                             real_n_groups -= 1;
                             continue;
                         }
@@ -602,7 +639,10 @@ fn extract_wmo_file(
                         match group.write_to_vmap(&mut writer, &wmo_root, true) {
                             Ok(n_col_triangles) => {
                                 wmo_n_vertices += n_col_triangles as i32;
-                                debug!("    ✓ Wrote group {} ({} col triangles)", group_filename, n_col_triangles);
+                                debug!(
+                                    "    ✓ Wrote group {} ({} col triangles)",
+                                    group_filename, n_col_triangles
+                                );
                             }
                             Err(e) => {
                                 warn!("    Failed to convert WMO group {}: {}", group_filename, e);
@@ -642,17 +682,17 @@ fn extract_wmo_file(
     if !file_ok {
         std::fs::remove_file(&output_path).ok();
     } else {
-        info!("  ✓ WMO extracted: {} groups, {} col triangles", real_n_groups, wmo_n_vertices);
+        info!(
+            "  ✓ WMO extracted: {} groups, {} col triangles",
+            real_n_groups, wmo_n_vertices
+        );
     }
 
     Ok(())
 }
 
 /// Extract M2 models used by gameobjects from DBC
-fn extract_gameobject_models(
-    archives: &ArchiveSet,
-    buildings_dir: &Path,
-) -> Result<()> {
+fn extract_gameobject_models(archives: &ArchiveSet, buildings_dir: &Path) -> Result<()> {
     info!("Extracting gameobject models...");
 
     // Read GameObjectDisplayInfo.dbc
@@ -694,9 +734,11 @@ fn extract_gameobject_models(
 
     // Extract each model
     let pb = ProgressBar::new(model_files.len() as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
-        .unwrap());
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+            .unwrap(),
+    );
 
     for m2_path in &model_files {
         // Skip if already extracted
@@ -721,11 +763,7 @@ fn extract_gameobject_models(
 }
 
 /// Extract a single M2 file and convert to VMAP format
-fn extract_m2_file(
-    archives: &ArchiveSet,
-    buildings_dir: &Path,
-    m2_path: &str,
-) -> Result<()> {
+fn extract_m2_file(archives: &ArchiveSet, buildings_dir: &Path, m2_path: &str) -> Result<()> {
     // Get output filename - normalize .mdx/.mdl to .m2 and apply FixNameCase to match MaNGOS
     // (reference: model.cpp:249-253 renames extension, adtfile.cpp:48 FixNameCase)
     let raw_filename = Path::new(m2_path)
@@ -753,21 +791,20 @@ fn extract_m2_file(
 
     // Read M2 file (handle both .m2 and .mdx extensions)
     // Archives typically have .m2 files, but ADT references may use .mdx
-    let m2_data = archives.read_file(m2_path)
-        .or_else(|_| {
-            // Try alternate extension
-            if m2_path.to_lowercase().ends_with(".mdx") {
-                // Path has .mdx, try .m2
-                let m2_alt = format!("{}.m2", &m2_path[..m2_path.len() - 4]);
-                archives.read_file(&m2_alt)
-            } else if m2_path.to_lowercase().ends_with(".m2") {
-                // Path has .m2, try .mdx
-                let mdx_alt = format!("{}.mdx", &m2_path[..m2_path.len() - 3]);
-                archives.read_file(&mdx_alt)
-            } else {
-                Err(anyhow::anyhow!("Unknown M2 file extension: {}", m2_path))
-            }
-        })?;
+    let m2_data = archives.read_file(m2_path).or_else(|_| {
+        // Try alternate extension
+        if m2_path.to_lowercase().ends_with(".mdx") {
+            // Path has .mdx, try .m2
+            let m2_alt = format!("{}.m2", &m2_path[..m2_path.len() - 4]);
+            archives.read_file(&m2_alt)
+        } else if m2_path.to_lowercase().ends_with(".m2") {
+            // Path has .m2, try .mdx
+            let mdx_alt = format!("{}.mdx", &m2_path[..m2_path.len() - 3]);
+            archives.read_file(&mdx_alt)
+        } else {
+            Err(anyhow::anyhow!("Unknown M2 file extension: {}", m2_path))
+        }
+    })?;
 
     info!("  Read {} bytes", m2_data.len());
 
@@ -795,8 +832,12 @@ fn extract_m2_file(
         }
     };
 
-    info!("  Parsed: {} vertices, {} bounding vertices, {} indices",
-        m2_file.vertices.len(), m2_file.bounding_vertices.len(), m2_file.indices.len());
+    info!(
+        "  Parsed: {} vertices, {} bounding vertices, {} indices",
+        m2_file.vertices.len(),
+        m2_file.bounding_vertices.len(),
+        m2_file.indices.len()
+    );
 
     // Drop m2_data immediately after parsing to free memory
     drop(m2_data);
@@ -824,7 +865,8 @@ fn extract_m2_file(
 /// Returns the collision box in model-space, or None if not available
 fn get_m2_collision_box(archives: &ArchiveSet, m2_path: &str) -> Option<types::BoundingBox> {
     // Try to read M2 file (handle .m2/.mdx extension swapping)
-    let m2_data = archives.read_file(m2_path)
+    let m2_data = archives
+        .read_file(m2_path)
         .or_else(|_| {
             // Try alternate extension
             if m2_path.to_lowercase().ends_with(".mdx") {
@@ -855,9 +897,8 @@ fn get_m2_collision_box(archives: &ArchiveSet, m2_path: &str) -> Option<types::B
     // Fall back: compute bounds from render vertices
     // This is what MaNGOS does for vanilla M2 models that have no valid header bounds
     if !m2_file.vertices.is_empty() {
-        let vertex_positions: Vec<glam::Vec3> = m2_file.vertices.iter()
-            .map(|v| v.position)
-            .collect();
+        let vertex_positions: Vec<glam::Vec3> =
+            m2_file.vertices.iter().map(|v| v.position).collect();
         let computed_bounds = transform::calculate_bounding_box(&vertex_positions);
         if computed_bounds.is_valid() {
             tracing::debug!(
@@ -889,9 +930,9 @@ fn process_map(
     skip_m2_bounds: bool,
     _m2_bounds_cache: &M2BoundsCache,
 ) -> Result<()> {
-    use crate::shared::formats::wdt::WDTFile;
     use crate::shared::formats::adt::ADTFile;
-    use crate::vmaps::placement::{extract_wmo_placements, extract_doodad_placements};
+    use crate::shared::formats::wdt::WDTFile;
+    use crate::vmaps::placement::{extract_doodad_placements, extract_wmo_placements};
     use crate::vmaps::transform::decode_scale;
     use crate::vmaps::types::BoundingBox;
     use std::path::Path;
@@ -907,14 +948,18 @@ fn process_map(
     };
 
     // Parse WDT to get tile list
-    let wdt = WDTFile::from_bytes(map.name.clone(), &wdt_data)
-        .context("Failed to parse WDT file")?;
+    let wdt =
+        WDTFile::from_bytes(map.name.clone(), &wdt_data).context("Failed to parse WDT file")?;
 
     let existing_tiles = wdt.get_existing_tiles();
     let has_global_wmo = !wdt.wmo_placements.is_empty();
 
-    info!("Map {} has {} tiles, {} global WMO placements",
-          map.name, existing_tiles.len(), wdt.wmo_placements.len());
+    info!(
+        "Map {} has {} tiles, {} global WMO placements",
+        map.name,
+        existing_tiles.len(),
+        wdt.wmo_placements.len()
+    );
 
     // Skip maps that have neither tiles nor global WMO
     if existing_tiles.is_empty() && !has_global_wmo {
@@ -925,11 +970,16 @@ fn process_map(
     let mut total_entries = 0usize;
 
     if has_global_wmo {
-        info!("  Processing {} global WMO placements (instance map)", wdt.wmo_placements.len());
+        info!(
+            "  Processing {} global WMO placements (instance map)",
+            wdt.wmo_placements.len()
+        );
 
         for modf in &wdt.wmo_placements {
             // Get WMO path from MWMO chunk
-            let wmo_path = wdt.wmo_names.get(modf.id as usize)
+            let wmo_path = wdt
+                .wmo_names
+                .get(modf.id as usize)
                 .ok_or_else(|| anyhow::anyhow!("Invalid WMO ID {} in MODF", modf.id))?;
 
             // Extract WMO file geometry (if not already extracted)
@@ -986,10 +1036,20 @@ fn process_map(
     let total_tiles = existing_tiles.len();
 
     for (idx, (tile_x, tile_y)) in existing_tiles.iter().copied().enumerate() {
-        info!("  Processing tile {}/{}: {}_{:02}_{:02}", idx + 1, total_tiles, map.name, tile_x, tile_y);
+        info!(
+            "  Processing tile {}/{}: {}_{:02}_{:02}",
+            idx + 1,
+            total_tiles,
+            map.name,
+            tile_x,
+            tile_y
+        );
 
         // Load ADT file
-        let adt_path = format!("World\\Maps\\{}\\{}_{:02}_{:02}.adt", map.name, map.name, tile_x, tile_y);
+        let adt_path = format!(
+            "World\\Maps\\{}\\{}_{:02}_{:02}.adt",
+            map.name, map.name, tile_x, tile_y
+        );
         let adt_data = match archives.read_file(&adt_path) {
             Ok(data) => data,
             Err(_) => {
@@ -1009,7 +1069,8 @@ fn process_map(
 
         // Extract placements (adt is dropped after this)
         let wmo_placements = extract_wmo_placements(&adt, map.id, tile_x as u32, tile_y as u32)?;
-        let doodad_placements = extract_doodad_placements(&adt, map.id, tile_x as u32, tile_y as u32)?;
+        let doodad_placements =
+            extract_doodad_placements(&adt, map.id, tile_x as u32, tile_y as u32)?;
 
         // Drop ADT data immediately after extracting what we need
         drop(adt);
@@ -1018,8 +1079,14 @@ fn process_map(
             continue; // No models in this tile
         }
 
-        debug!("Tile {}_{:02}_{:02}: {} WMOs, {} M2s",
-               map.name, tile_x, tile_y, wmo_placements.len(), doodad_placements.len());
+        debug!(
+            "Tile {}_{:02}_{:02}: {} WMOs, {} M2s",
+            map.name,
+            tile_x,
+            tile_y,
+            wmo_placements.len(),
+            doodad_placements.len()
+        );
 
         // Write WMO placements to dir_bin
         for wmo_placement in &wmo_placements {
@@ -1062,7 +1129,10 @@ fn process_map(
             } else {
                 total_entries += 1;
                 if total_entries % 100 == 1 {
-                    debug!("Wrote {} entries so far (last: WMO {})", total_entries, &model_name);
+                    debug!(
+                        "Wrote {} entries so far (last: WMO {})",
+                        total_entries, &model_name
+                    );
                 }
             }
         }
@@ -1142,10 +1212,12 @@ fn process_map(
                 total_entries += 1;
             }
         }
-
     }
 
-    info!("Wrote {} entries to dir_bin for map {}", total_entries, map.name);
+    info!(
+        "Wrote {} entries to dir_bin for map {}",
+        total_entries, map.name
+    );
     Ok(())
 }
 
@@ -1167,8 +1239,8 @@ fn assemble_vmaps(output: &Path, filter: Vec<u32>) -> Result<()> {
     }
 
     info!("Reading placement data from dir_bin...");
-    let entries = dir_bin::DirBinReader::read_all(&dir_bin_path)
-        .context("Failed to read dir_bin")?;
+    let entries =
+        dir_bin::DirBinReader::read_all(&dir_bin_path).context("Failed to read dir_bin")?;
 
     info!("Found {} placement entries", entries.len());
 
@@ -1181,15 +1253,17 @@ fn assemble_vmaps(output: &Path, filter: Vec<u32>) -> Result<()> {
         if !filter.is_empty() && !filter.contains(&entry.map_id) {
             continue;
         }
-        map_entries.entry(entry.map_id).or_insert_with(Vec::new).push(entry);
+        map_entries
+            .entry(entry.map_id)
+            .or_insert_with(Vec::new)
+            .push(entry);
     }
 
     info!("Processing {} maps", map_entries.len());
 
     // Collect all entries for .vmo conversion
-    let all_entries: Vec<&dir_bin::DirBinEntry> = map_entries.values()
-        .flat_map(|v| v.iter())
-        .collect();
+    let all_entries: Vec<&dir_bin::DirBinEntry> =
+        map_entries.values().flat_map(|v| v.iter()).collect();
 
     // Convert raw model files to server-compatible .vmo format
     info!("Converting raw models to .vmo format...");

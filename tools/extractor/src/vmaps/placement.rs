@@ -134,7 +134,7 @@ pub fn get_world_position(tile_x: u32, tile_y: u32, local_pos: Vec3) -> Vec3 {
     // The map center is at tile (32,32)
     const TILE_SIZE: f32 = 533.33333;
     const MAP_SIZE: f32 = TILE_SIZE * 64.0; // 64x64 tiles = 34133.33 yards
-    const MAP_HALF: f32 = MAP_SIZE / 2.0;   // 17066.67 yards
+    const MAP_HALF: f32 = MAP_SIZE / 2.0; // 17066.67 yards
 
     // Calculate world position
     // X axis: tile 0 = northwest (positive), tile 63 = southeast (negative)

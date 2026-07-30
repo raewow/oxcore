@@ -138,8 +138,9 @@ impl MMapWriter {
     pub fn new(output_dir: &Path) -> Result<Self> {
         // Create mmaps directory if it doesn't exist
         let mmaps_dir = output_dir.join("mmaps");
-        fs::create_dir_all(&mmaps_dir)
-            .with_context(|| format!("Failed to create mmaps directory: {}", mmaps_dir.display()))?;
+        fs::create_dir_all(&mmaps_dir).with_context(|| {
+            format!("Failed to create mmaps directory: {}", mmaps_dir.display())
+        })?;
 
         Ok(Self {
             output_dir: mmaps_dir,

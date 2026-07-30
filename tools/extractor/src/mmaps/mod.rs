@@ -3,9 +3,9 @@
 //! Generates navigation meshes for pathfinding using Recast/Detour.
 //! Output is compatible with MaNGOS server expectations.
 
+mod file_writer;
 mod terrain_builder;
 mod tile_builder;
-mod file_writer;
 
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -15,9 +15,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tracing::{debug, info, warn};
 
+use file_writer::{GridBounds, MMapWriter, NavMeshParams};
 use terrain_builder::{MeshData, TerrainBuilder};
 use tile_builder::TileBuilder;
-use file_writer::{GridBounds, MMapWriter, NavMeshParams};
 
 /// Generate navigation meshes for all maps
 pub fn generate(input: &Path, output: &Path, filter: Vec<u32>, debug_meshes: bool) -> Result<()> {
@@ -26,7 +26,10 @@ pub fn generate(input: &Path, output: &Path, filter: Vec<u32>, debug_meshes: boo
     let maps_dir = output.join("maps");
 
     if !maps_dir.exists() {
-        warn!("Maps directory not found: {}. Run 'maps' extraction first.", maps_dir.display());
+        warn!(
+            "Maps directory not found: {}. Run 'maps' extraction first.",
+            maps_dir.display()
+        );
         return Ok(());
     }
 
@@ -97,7 +100,11 @@ fn build_map(
     writer: &MMapWriter,
     debug_meshes: bool,
 ) -> Result<()> {
-    info!("[Map {:03}] Building {} tiles...", map_id, tile_coords.len());
+    info!(
+        "[Map {:03}] Building {} tiles...",
+        map_id,
+        tile_coords.len()
+    );
 
     // Calculate grid bounds
     let mut bounds = GridBounds::new();
@@ -179,10 +186,7 @@ fn build_tile(
     writer: &MMapWriter,
     debug_meshes: bool,
 ) -> Result<bool> {
-    debug!(
-        "[Map {:03}] Building tile [{},{}]",
-        map_id, tile_x, tile_y
-    );
+    debug!("[Map {:03}] Building tile [{},{}]", map_id, tile_x, tile_y);
 
     // Create terrain builder
     let mut terrain_builder = TerrainBuilder::new(false);

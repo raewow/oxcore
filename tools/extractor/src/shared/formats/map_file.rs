@@ -39,8 +39,8 @@ pub const MAP_LIQUID_TYPE_DEEP_WATER: u8 = 0x10;
 /// Main file header
 #[derive(Debug, Clone)]
 pub struct GridMapFileHeader {
-    pub map_magic: u32,           // "MAPS"
-    pub version_magic: u32,       // "z1.4"
+    pub map_magic: u32,     // "MAPS"
+    pub version_magic: u32, // "z1.4"
     pub area_map_offset: u32,
     pub area_map_size: u32,
     pub height_map_offset: u32,
@@ -71,9 +71,9 @@ impl GridMapFileHeader {
 /// Matches MaNGOS GridMapAreaHeader: fourcc(4) + flags(2) + gridArea(2) = 8 bytes
 #[derive(Debug, Clone)]
 pub struct GridMapAreaHeader {
-    pub fourcc: u32,              // "AREA"
-    pub flags: u16,               // Area flags (MAP_AREA_NO_AREA if uniform)
-    pub grid_area: u16,           // Single area ID if uniform
+    pub fourcc: u32,    // "AREA"
+    pub flags: u16,     // Area flags (MAP_AREA_NO_AREA if uniform)
+    pub grid_area: u16, // Single area ID if uniform
 }
 
 impl GridMapAreaHeader {
@@ -88,10 +88,10 @@ impl GridMapAreaHeader {
 /// Height map header
 #[derive(Debug, Clone)]
 pub struct GridMapHeightHeader {
-    pub fourcc: u32,              // "MHGT"
+    pub fourcc: u32, // "MHGT"
     pub flags: u32,
-    pub grid_height: f32,         // Minimum height
-    pub grid_max_height: f32,     // Maximum height
+    pub grid_height: f32,     // Minimum height
+    pub grid_max_height: f32, // Maximum height
 }
 
 impl GridMapHeightHeader {
@@ -109,10 +109,10 @@ impl GridMapHeightHeader {
 /// offsetX(1) + offsetY(1) + width(1) + height(1) + liquidLevel(4) = 16 bytes
 #[derive(Debug, Clone)]
 pub struct GridMapLiquidHeader {
-    pub fourcc: u32,              // "MLIQ"
-    pub flags: u8,                // MAP_LIQUID_NO_TYPE, MAP_LIQUID_NO_HEIGHT
-    pub liquid_flags: u8,         // Liquid type flags (water/ocean/magma/slime)
-    pub liquid_type: u16,         // Liquid entry ID
+    pub fourcc: u32,      // "MLIQ"
+    pub flags: u8,        // MAP_LIQUID_NO_TYPE, MAP_LIQUID_NO_HEIGHT
+    pub liquid_flags: u8, // Liquid type flags (water/ocean/magma/slime)
+    pub liquid_type: u16, // Liquid entry ID
     pub offset_x: u8,
     pub offset_y: u8,
     pub width: u8,
@@ -291,7 +291,7 @@ impl LiquidData {
 
     pub fn size(&self) -> usize {
         let base_size = (ADT_CELLS_PER_GRID * ADT_CELLS_PER_GRID * 2) + // entry (u16)
-                        (ADT_CELLS_PER_GRID * ADT_CELLS_PER_GRID);      // flags (u8)
+                        (ADT_CELLS_PER_GRID * ADT_CELLS_PER_GRID); // flags (u8)
 
         if self.height.is_some() {
             base_size + (ADT_GRID_SIZE + 1) * (ADT_GRID_SIZE + 1) * 4 // f32

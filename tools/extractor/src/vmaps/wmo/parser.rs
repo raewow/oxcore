@@ -11,8 +11,8 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 use crate::vmaps::types::{
     BoundingBox, WMOBatch, WMODoodadDef, WMODoodadSet, WMOGroupInfo, WMOMaterial,
 };
-use crate::vmaps::wmo::group::{WMOGroup, MOGPHeader};
-use crate::vmaps::wmo::root::{WMORoot, MOHDHeader};
+use crate::vmaps::wmo::group::{MOGPHeader, WMOGroup};
+use crate::vmaps::wmo::root::{MOHDHeader, WMORoot};
 
 // WMO Root chunk fourcc codes
 const MVER: &[u8; 4] = b"MVER"; // Version
@@ -90,12 +90,18 @@ impl WMORoot {
             match &fourcc {
                 MOTX => {
                     // Textures - skip for now
-                    cursor.seek(SeekFrom::Current(size as i64))
+                    cursor
+                        .seek(SeekFrom::Current(size as i64))
                         .with_context(|| format!("Failed to skip MOTX chunk (size: {})", size))?;
                 }
                 MOMT => {
                     root.materials = read_momt(&mut cursor, size, header.n_materials)
-                        .with_context(|| format!("Failed to read MOMT chunk (size: {}, expected materials: {})", size, header.n_materials))?;
+                        .with_context(|| {
+                            format!(
+                                "Failed to read MOMT chunk (size: {}, expected materials: {})",
+                                size, header.n_materials
+                            )
+                        })?;
                 }
                 MOGN => {
                     root.group_names = read_mogn(&mut cursor, size)
@@ -119,8 +125,14 @@ impl WMORoot {
                 }
                 _ => {
                     // Skip unknown chunks
-                    cursor.seek(SeekFrom::Current(size as i64))
-                        .with_context(|| format!("Failed to skip unknown chunk '{}' (size: {})", fourcc_str, size))?;
+                    cursor
+                        .seek(SeekFrom::Current(size as i64))
+                        .with_context(|| {
+                            format!(
+                                "Failed to skip unknown chunk '{}' (size: {})",
+                                fourcc_str, size
+                            )
+                        })?;
                 }
             }
 
@@ -148,7 +160,10 @@ impl WMOGroup {
         // Read MOGP chunk (this is a container for all subchunks)
         let (fourcc, mogp_size) = read_chunk_header(&mut cursor)?;
         if &fourcc != MOGP {
-            bail!("Expected MOGP chunk, got '{}'", String::from_utf8_lossy(&fourcc));
+            bail!(
+                "Expected MOGP chunk, got '{}'",
+                String::from_utf8_lossy(&fourcc)
+            );
         }
 
         let mogp_start = cursor.position();
@@ -218,13 +233,15 @@ impl WMOGroup {
 /// Read chunk header (fourcc + size)
 fn read_chunk_header(cursor: &mut Cursor<&[u8]>) -> Result<([u8; 4], u32)> {
     let mut fourcc = [0u8; 4];
-    cursor.read_exact(&mut fourcc)
+    cursor
+        .read_exact(&mut fourcc)
         .context("Failed to read chunk fourcc")?;
 
     // Reverse fourcc bytes (WMO files store them reversed)
     fourcc.reverse();
 
-    let size = cursor.read_u32::<LittleEndian>()
+    let size = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read chunk size")?;
 
     Ok((fourcc, size))
@@ -235,14 +252,18 @@ fn read_mver(cursor: &mut Cursor<&[u8]>) -> Result<u32> {
     let (fourcc, size) = read_chunk_header(cursor)?;
 
     if &fourcc != MVER {
-        bail!("Expected MVER chunk, got '{}'", String::from_utf8_lossy(&fourcc));
+        bail!(
+            "Expected MVER chunk, got '{}'",
+            String::from_utf8_lossy(&fourcc)
+        );
     }
 
     if size != 4 {
         bail!("Invalid MVER size: {} (expected 4)", size);
     }
 
-    cursor.read_u32::<LittleEndian>()
+    cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read version")
 }
 
@@ -251,51 +272,77 @@ fn read_mohd(cursor: &mut Cursor<&[u8]>) -> Result<MOHDHeader> {
     let (fourcc, size) = read_chunk_header(cursor)?;
 
     if &fourcc != MOHD {
-        bail!("Expected MOHD chunk, got '{}'", String::from_utf8_lossy(&fourcc));
+        bail!(
+            "Expected MOHD chunk, got '{}'",
+            String::from_utf8_lossy(&fourcc)
+        );
     }
 
     if size < 64 {
         bail!("MOHD chunk too small: {} (expected at least 64)", size);
     }
 
-    let n_materials = cursor.read_u32::<LittleEndian>()
+    let n_materials = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read n_materials")?;
-    let n_groups = cursor.read_u32::<LittleEndian>()
+    let n_groups = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read n_groups")?;
-    let n_portals = cursor.read_u32::<LittleEndian>()
+    let n_portals = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read n_portals")?;
-    let n_lights = cursor.read_u32::<LittleEndian>()
+    let n_lights = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read n_lights")?;
-    let n_models = cursor.read_u32::<LittleEndian>()
+    let n_models = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read n_models")?;
-    let n_doodads = cursor.read_u32::<LittleEndian>()
+    let n_doodads = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read n_doodads")?;
-    let n_sets = cursor.read_u32::<LittleEndian>()
+    let n_sets = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read n_sets")?;
-    let ambient_color = cursor.read_u32::<LittleEndian>()
+    let ambient_color = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read ambient_color")?;
-    let wmo_id = cursor.read_u32::<LittleEndian>()
+    let wmo_id = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read wmo_id")?;
 
     // Read bounding box
     let bbox_min = Vec3::new(
-        cursor.read_f32::<LittleEndian>().context("Failed to read bbox_min.x")?,
-        cursor.read_f32::<LittleEndian>().context("Failed to read bbox_min.y")?,
-        cursor.read_f32::<LittleEndian>().context("Failed to read bbox_min.z")?,
+        cursor
+            .read_f32::<LittleEndian>()
+            .context("Failed to read bbox_min.x")?,
+        cursor
+            .read_f32::<LittleEndian>()
+            .context("Failed to read bbox_min.y")?,
+        cursor
+            .read_f32::<LittleEndian>()
+            .context("Failed to read bbox_min.z")?,
     );
     let bbox_max = Vec3::new(
-        cursor.read_f32::<LittleEndian>().context("Failed to read bbox_max.x")?,
-        cursor.read_f32::<LittleEndian>().context("Failed to read bbox_max.y")?,
-        cursor.read_f32::<LittleEndian>().context("Failed to read bbox_max.z")?,
+        cursor
+            .read_f32::<LittleEndian>()
+            .context("Failed to read bbox_max.x")?,
+        cursor
+            .read_f32::<LittleEndian>()
+            .context("Failed to read bbox_max.y")?,
+        cursor
+            .read_f32::<LittleEndian>()
+            .context("Failed to read bbox_max.z")?,
     );
 
-    let flags = cursor.read_u32::<LittleEndian>()
+    let flags = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read flags")?;
 
     // Skip any remaining bytes in MOHD chunk (some files have larger MOHD)
     // We've read 64 bytes (9 u32s + 6 f32s + 1 u32), skip the rest
     if size > 64 {
-        cursor.seek(SeekFrom::Current((size - 64) as i64))
+        cursor
+            .seek(SeekFrom::Current((size - 64) as i64))
             .context("Failed to skip remaining MOHD data")?;
     }
 
@@ -421,7 +468,11 @@ fn read_modd(cursor: &mut Cursor<&[u8]>, size: u32) -> Result<Vec<WMODoodadDef>>
     const ENTRY_SIZE: u32 = 40;
 
     if size % ENTRY_SIZE != 0 {
-        bail!("MODD chunk size {} is not a multiple of entry size {}", size, ENTRY_SIZE);
+        bail!(
+            "MODD chunk size {} is not a multiple of entry size {}",
+            size,
+            ENTRY_SIZE
+        );
     }
 
     let n_doodads = size / ENTRY_SIZE;
@@ -432,7 +483,7 @@ fn read_modd(cursor: &mut Cursor<&[u8]>, size: u32) -> Result<Vec<WMODoodadDef>>
         // (upper 8 bits are flags/padding, lower 24 bits are name index)
         let name_and_flags = cursor.read_u32::<LittleEndian>()?;
         let name_index = name_and_flags & 0x00FFFFFF; // Extract lower 24 bits
-        let flags = (name_and_flags >> 24) & 0xFF;    // Extract upper 8 bits
+        let flags = (name_and_flags >> 24) & 0xFF; // Extract upper 8 bits
 
         let position = Vec3::new(
             cursor.read_f32::<LittleEndian>()?,

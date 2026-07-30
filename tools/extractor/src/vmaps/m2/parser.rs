@@ -3,7 +3,7 @@
 //! Parses M2 (MD20) model files from World of Warcraft.
 //! Reference: mangos/contrib/vmap_extractor/vmapextract/model.h
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use glam::{Vec2, Vec3};
 use std::io::{Cursor, Read, Seek, SeekFrom};
@@ -38,10 +38,17 @@ impl M2File {
         let name = if header.name_length > 0 && header.name_offset > 0 {
             const MAX_NAME_LENGTH: u32 = 1000; // Reasonable max name length
             if header.name_length > MAX_NAME_LENGTH {
-                bail!("M2 file has name too long: {} bytes (max: {}) - file may be corrupted",
-                    header.name_length, MAX_NAME_LENGTH);
+                bail!(
+                    "M2 file has name too long: {} bytes (max: {}) - file may be corrupted",
+                    header.name_length,
+                    MAX_NAME_LENGTH
+                );
             }
-            Self::read_string(data, header.name_offset as usize, header.name_length as usize)?
+            Self::read_string(
+                data,
+                header.name_offset as usize,
+                header.name_length as usize,
+            )?
         } else {
             String::new()
         };
@@ -51,8 +58,11 @@ impl M2File {
             // Safety check: prevent huge allocations from corrupted data
             const MAX_VERTICES: u32 = 1_000_000; // 1 million vertices max (reasonable limit)
             if header.n_vertices > MAX_VERTICES {
-                bail!("M2 file has too many vertices: {} (max: {}) - file may be corrupted", 
-                    header.n_vertices, MAX_VERTICES);
+                bail!(
+                    "M2 file has too many vertices: {} (max: {}) - file may be corrupted",
+                    header.n_vertices,
+                    MAX_VERTICES
+                );
             }
             Self::read_vertices(data, header.ofs_vertices, header.n_vertices)?
         } else {
@@ -77,7 +87,11 @@ impl M2File {
                         bounding_vertices: Vec::new(),
                     });
                 }
-                Self::read_bounding_vertices(data, header.ofs_bounding_vertices, header.n_bounding_vertices)?
+                Self::read_bounding_vertices(
+                    data,
+                    header.ofs_bounding_vertices,
+                    header.n_bounding_vertices,
+                )?
             } else {
                 Vec::new()
             };
@@ -95,7 +109,11 @@ impl M2File {
                         bounding_vertices: Vec::new(),
                     });
                 }
-                Self::read_bounding_triangles(data, header.ofs_bounding_triangles, header.n_bounding_triangles)?
+                Self::read_bounding_triangles(
+                    data,
+                    header.ofs_bounding_triangles,
+                    header.n_bounding_triangles,
+                )?
             } else {
                 Vec::new()
             };
@@ -338,16 +356,25 @@ impl M2File {
     fn read_vertices(data: &[u8], offset: u32, count: u32) -> Result<Vec<M2Vertex>> {
         // Safety check: verify offset is within bounds
         if offset as usize >= data.len() {
-            bail!("Vertex offset {} is beyond file size {}", offset, data.len());
+            bail!(
+                "Vertex offset {} is beyond file size {}",
+                offset,
+                data.len()
+            );
         }
-        
+
         // Safety check: verify we have enough data for all vertices
         // Each vertex is ~48 bytes (position 12 + bone_weights 4 + bone_indices 4 + normal 12 + tex_coords 16)
         const VERTEX_SIZE: usize = 48;
         let required_size = offset as usize + (count as usize * VERTEX_SIZE);
         if required_size > data.len() {
-            bail!("Not enough data for {} vertices at offset {} (need {} bytes, have {})",
-                count, offset, required_size, data.len());
+            bail!(
+                "Not enough data for {} vertices at offset {} (need {} bytes, have {})",
+                count,
+                offset,
+                required_size,
+                data.len()
+            );
         }
 
         let mut cursor = Cursor::new(data);
@@ -385,10 +412,7 @@ impl M2File {
                 bone_weights,
                 bone_indices,
                 normal: Vec3::new(norm_x, norm_y, norm_z),
-                tex_coords: [
-                    Vec2::new(tex0_u, tex0_v),
-                    Vec2::new(tex1_u, tex1_v),
-                ],
+                tex_coords: [Vec2::new(tex0_u, tex0_v), Vec2::new(tex1_u, tex1_v)],
             });
         }
 
@@ -399,15 +423,24 @@ impl M2File {
     pub fn read_bounding_vertices(data: &[u8], offset: u32, count: u32) -> Result<Vec<Vec3>> {
         // Safety check: verify offset is within bounds
         if offset as usize >= data.len() {
-            bail!("Bounding vertex offset {} is beyond file size {}", offset, data.len());
+            bail!(
+                "Bounding vertex offset {} is beyond file size {}",
+                offset,
+                data.len()
+            );
         }
-        
+
         // Safety check: verify we have enough data (each Vec3 is 12 bytes)
         const VEC3_SIZE: usize = 12;
         let required_size = offset as usize + (count as usize * VEC3_SIZE);
         if required_size > data.len() {
-            bail!("Not enough data for {} bounding vertices at offset {} (need {} bytes, have {})",
-                count, offset, required_size, data.len());
+            bail!(
+                "Not enough data for {} bounding vertices at offset {} (need {} bytes, have {})",
+                count,
+                offset,
+                required_size,
+                data.len()
+            );
         }
 
         let mut cursor = Cursor::new(data);
@@ -429,9 +462,13 @@ impl M2File {
     pub fn read_bounding_triangles(data: &[u8], offset: u32, count: u32) -> Result<Vec<u16>> {
         // Safety check: verify offset is within bounds
         if offset as usize >= data.len() {
-            bail!("Bounding triangle offset {} is beyond file size {}", offset, data.len());
+            bail!(
+                "Bounding triangle offset {} is beyond file size {}",
+                offset,
+                data.len()
+            );
         }
-        
+
         // Safety check: verify we have enough data (each index is 2 bytes)
         const INDEX_SIZE: usize = 2;
         let required_size = offset as usize + (count as usize * INDEX_SIZE);

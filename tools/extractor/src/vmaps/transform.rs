@@ -3,8 +3,8 @@
 //! Provides functions for transforming vertices, calculating bounding boxes,
 //! and converting between coordinate systems.
 
-use glam::{Mat3, Quat, Vec3};
 use crate::vmaps::types::BoundingBox;
+use glam::{Mat3, Quat, Vec3};
 
 /// Convert Euler angles (radians) to rotation matrix
 ///
@@ -29,12 +29,7 @@ pub fn euler_to_quat(rotation: Vec3) -> Quat {
 /// Transform a single vertex by scale, rotation, and translation
 ///
 /// Order of operations: scale -> rotate -> translate
-pub fn transform_vertex(
-    vertex: Vec3,
-    scale: f32,
-    rotation: &Mat3,
-    position: &Vec3,
-) -> Vec3 {
+pub fn transform_vertex(vertex: Vec3, scale: f32, rotation: &Mat3, position: &Vec3) -> Vec3 {
     rotation.mul_vec3(vertex * scale) + position
 }
 

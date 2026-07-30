@@ -182,7 +182,6 @@ pub struct DirBinReader;
 impl DirBinReader {
     /// Read all entries from a dir_bin file
     pub fn read_all(path: &std::path::Path) -> Result<Vec<DirBinEntry>> {
-
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
         let mut entries = Vec::new();

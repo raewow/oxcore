@@ -16,11 +16,11 @@ pub const ADT_GRID_SIZE: usize = ADT_CELLS_PER_GRID * ADT_CELL_SIZE; // 128
 // World space constants
 pub const TILESIZE: f32 = 533.33333;
 pub const CHUNKSIZE: f32 = TILESIZE / 16.0; // ~33.33
-pub const UNITSIZE: f32 = CHUNKSIZE / 8.0;  // ~4.17
+pub const UNITSIZE: f32 = CHUNKSIZE / 8.0; // ~4.17
 
 // Height map sizes
 pub const V9_SIZE: usize = ADT_GRID_SIZE + 1; // 129 (vertices)
-pub const V8_SIZE: usize = ADT_GRID_SIZE;     // 128 (cell centers)
+pub const V8_SIZE: usize = ADT_GRID_SIZE; // 128 (cell centers)
 
 /// ADT main header (MHDR chunk)
 #[derive(Debug, Clone)]
@@ -62,27 +62,27 @@ pub struct AdtMCNK {
     pub iy: u32,
     pub n_layers: u32,
     pub n_doodad_refs: u32,
-    pub offs_mcvt: u32,  // Height map offset (relative to MCNK start + 8)
-    pub offs_mcnr: u32,  // Normals offset
-    pub offs_mcly: u32,  // Texture layers offset
-    pub offs_mcrf: u32,  // Doodad refs offset
-    pub offs_mcal: u32,  // Alpha maps offset
+    pub offs_mcvt: u32, // Height map offset (relative to MCNK start + 8)
+    pub offs_mcnr: u32, // Normals offset
+    pub offs_mcly: u32, // Texture layers offset
+    pub offs_mcrf: u32, // Doodad refs offset
+    pub offs_mcal: u32, // Alpha maps offset
     pub size_mcal: u32,
-    pub offs_mcsh: u32,  // Shadow map offset
+    pub offs_mcsh: u32, // Shadow map offset
     pub size_mcsh: u32,
     pub area_id: u32,
     pub n_map_obj_refs: u32,
-    pub holes: u16,      // Terrain holes bitmask
+    pub holes: u16, // Terrain holes bitmask
     pub low_quality_texture_map: u16,
     pub pred_tex: u32,
     pub no_effect_doodad: u32,
     pub offs_mcse: u32,
     pub n_sound_emitters: u32,
-    pub offs_mclq: u32,  // Liquid offset
+    pub offs_mclq: u32, // Liquid offset
     pub size_mclq: u32,
     pub position: [f32; 3],
-    pub offs_mccv: u32,  // Vertex colors
-    pub offs_mclv: u32,  // Vertex lighting
+    pub offs_mccv: u32, // Vertex colors
+    pub offs_mclv: u32, // Vertex lighting
     pub unused: u32,
 }
 
@@ -95,7 +95,8 @@ pub struct AdtMCVT {
 
 impl AdtMCVT {
     /// Number of height values (145 for a standard chunk)
-    pub const NUM_HEIGHTS: usize = (ADT_CELL_SIZE + 1) * (ADT_CELL_SIZE + 1) + ADT_CELL_SIZE * ADT_CELL_SIZE;
+    pub const NUM_HEIGHTS: usize =
+        (ADT_CELL_SIZE + 1) * (ADT_CELL_SIZE + 1) + ADT_CELL_SIZE * ADT_CELL_SIZE;
 }
 
 /// Liquid data entry (old MCLQ format)
@@ -153,11 +154,11 @@ pub struct AdtMDDF {
 /// M2 Model Placement Entry
 #[derive(Debug, Clone)]
 pub struct M2Placement {
-    pub name_id: u32,      // Index into MMDX strings
-    pub unique_id: u32,    // Unique instance ID
+    pub name_id: u32,   // Index into MMDX strings
+    pub unique_id: u32, // Unique instance ID
     pub position: [f32; 3],
     pub rotation: [f32; 3], // Euler angles in radians
-    pub scale: u16,        // 1024 = 1.0x scale
+    pub scale: u16,         // 1024 = 1.0x scale
     pub flags: u16,
 }
 
@@ -170,16 +171,16 @@ pub struct AdtMODF {
 /// WMO Placement Entry
 #[derive(Debug, Clone)]
 pub struct WMOPlacement {
-    pub name_id: u32,      // Index into MWMO strings
-    pub unique_id: u32,    // Unique instance ID
+    pub name_id: u32,   // Index into MWMO strings
+    pub unique_id: u32, // Unique instance ID
     pub position: [f32; 3],
     pub rotation: [f32; 3], // Euler angles in radians
     pub bounding_box_min: [f32; 3],
     pub bounding_box_max: [f32; 3],
     pub flags: u16,
-    pub doodad_set: u16,   // Which doodad set to use
+    pub doodad_set: u16, // Which doodad set to use
     pub name_set: u16,
-    pub scale: u16,        // 1024 = 1.0x scale (added in later versions)
+    pub scale: u16, // 1024 = 1.0x scale (added in later versions)
 }
 
 /// Complete ADT file
@@ -190,12 +191,12 @@ pub struct ADTFile {
     pub mh2o: Option<AdtMH2O>,
 
     // Model/WMO filenames
-    pub model_names: Vec<String>,  // MMDX
-    pub wmo_names: Vec<String>,    // MWMO
+    pub model_names: Vec<String>, // MMDX
+    pub wmo_names: Vec<String>,   // MWMO
 
     // Model/WMO placements
-    pub mddf: Option<AdtMDDF>,     // M2 placements
-    pub modf: Option<AdtMODF>,     // WMO placements
+    pub mddf: Option<AdtMDDF>, // M2 placements
+    pub modf: Option<AdtMODF>, // WMO placements
 
     raw_data: Vec<u8>,
 }
@@ -331,7 +332,8 @@ impl ADTFile {
 /// Read a fourcc (4-character code)
 fn read_fourcc(cursor: &mut Cursor<&[u8]>) -> Result<[u8; 4]> {
     let mut fourcc = [0u8; 4];
-    cursor.read_exact(&mut fourcc)
+    cursor
+        .read_exact(&mut fourcc)
         .context("Failed to read fourcc")?;
     Ok(fourcc)
 }
@@ -345,7 +347,8 @@ fn read_mhdr(cursor: &mut Cursor<&[u8]>) -> Result<AdtMHDR> {
         bail!("Expected MHDR chunk, got '{}'", fourcc_str);
     }
 
-    let size = cursor.read_u32::<LittleEndian>()
+    let size = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read MHDR size")?;
 
     if size < 64 {
@@ -511,7 +514,10 @@ fn read_mclq(data: &[u8], offset: usize) -> Result<AdtMCLQ> {
     let height2 = cursor.read_f32::<LittleEndian>()?;
 
     // Read liquid data grid (9x9)
-    let mut liquid = [[LiquidData { light: 0, height: 0.0 }; ADT_CELL_SIZE + 1]; ADT_CELL_SIZE + 1];
+    let mut liquid = [[LiquidData {
+        light: 0,
+        height: 0.0,
+    }; ADT_CELL_SIZE + 1]; ADT_CELL_SIZE + 1];
     for y in 0..=ADT_CELL_SIZE {
         for x in 0..=ADT_CELL_SIZE {
             liquid[y][x] = LiquidData {

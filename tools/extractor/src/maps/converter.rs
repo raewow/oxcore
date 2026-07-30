@@ -10,7 +10,9 @@ use std::path::Path;
 use tracing::debug;
 
 use crate::shared::config::ExtractorConfig;
-use crate::shared::formats::adt::{ADTFile, ADT_CELLS_PER_GRID, ADT_CELL_SIZE, ADT_GRID_SIZE, V8_SIZE, V9_SIZE};
+use crate::shared::formats::adt::{
+    ADTFile, ADT_CELLS_PER_GRID, ADT_CELL_SIZE, ADT_GRID_SIZE, V8_SIZE, V9_SIZE,
+};
 use crate::shared::formats::map_file::*;
 
 /// Convert ADT data to map file
@@ -24,8 +26,7 @@ pub fn convert_adt(
     debug!("Converting ADT to {}", output_path.display());
 
     // Parse ADT file
-    let adt = ADTFile::from_bytes(adt_data.to_vec())
-        .with_context(|| "Failed to parse ADT file")?;
+    let adt = ADTFile::from_bytes(adt_data.to_vec()).with_context(|| "Failed to parse ADT file")?;
 
     // Extract data from ADT
     let area_data = extract_area_data(&adt)?;
@@ -259,7 +260,13 @@ fn extract_height_data(
                 }
             }
 
-            return Ok((header, HeightData::UInt8 { v9: v9_u8, v8: v8_u8 }));
+            return Ok((
+                header,
+                HeightData::UInt8 {
+                    v9: v9_u8,
+                    v8: v8_u8,
+                },
+            ));
         }
         // Try uint16 compression
         else if diff < config.float_to_int16_limit {
@@ -280,7 +287,13 @@ fn extract_height_data(
                 }
             }
 
-            return Ok((header, HeightData::UInt16 { v9: v9_u16, v8: v8_u16 }));
+            return Ok((
+                header,
+                HeightData::UInt16 {
+                    v9: v9_u16,
+                    v8: v8_u16,
+                },
+            ));
         }
     }
 
@@ -401,14 +414,26 @@ fn extract_liquid_data(
     for y in 0..ADT_GRID_SIZE {
         for x in 0..ADT_GRID_SIZE {
             if liquid_show[y][x] {
-                if min_x > x { min_x = x; }
-                if max_x < x { max_x = x; }
-                if min_y > y { min_y = y; }
-                if max_y < y { max_y = y; }
+                if min_x > x {
+                    min_x = x;
+                }
+                if max_x < x {
+                    max_x = x;
+                }
+                if min_y > y {
+                    min_y = y;
+                }
+                if max_y < y {
+                    max_y = y;
+                }
 
                 let h = liquid_height[y][x];
-                if max_height < h { max_height = h; }
-                if min_height > h { min_height = h; }
+                if max_height < h {
+                    max_height = h;
+                }
+                if min_height > h {
+                    min_height = h;
+                }
             } else {
                 // Set non-visible cells to minimum height
                 liquid_height[y][x] = config.use_min_height;
@@ -770,13 +795,19 @@ mod integration_tests {
             v9: Box::new([[0.0; V9_SIZE]; V9_SIZE]),
             v8: Box::new([[0.0; V8_SIZE]; V8_SIZE]),
         };
-        assert_eq!(float_data.size(), (V9_SIZE * V9_SIZE + V8_SIZE * V8_SIZE) * 4);
+        assert_eq!(
+            float_data.size(),
+            (V9_SIZE * V9_SIZE + V8_SIZE * V8_SIZE) * 4
+        );
 
         let uint16_data = HeightData::UInt16 {
             v9: Box::new([[0; V9_SIZE]; V9_SIZE]),
             v8: Box::new([[0; V8_SIZE]; V8_SIZE]),
         };
-        assert_eq!(uint16_data.size(), (V9_SIZE * V9_SIZE + V8_SIZE * V8_SIZE) * 2);
+        assert_eq!(
+            uint16_data.size(),
+            (V9_SIZE * V9_SIZE + V8_SIZE * V8_SIZE) * 2
+        );
 
         let uint8_data = HeightData::UInt8 {
             v9: Box::new([[0; V9_SIZE]; V9_SIZE]),

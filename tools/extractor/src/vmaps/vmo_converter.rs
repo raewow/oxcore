@@ -6,11 +6,11 @@
 //! Raw format (VMAPs05): Written by the extractor for WMO and M2 models
 //! Final format (VMAP_7.0): Chunk-based format read by the server (WorldModel::readFile)
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use glam::Vec3;
-use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::fs::File;
+use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::path::Path;
 use tracing::{debug, warn};
 
@@ -63,7 +63,9 @@ impl WmoLiquid {
     /// Get serialized size in bytes
     fn file_size(&self) -> u32 {
         // iTilesX(4) + iTilesY(4) + iCorner(12) + iType(4) + heights + flags
-        4 + 4 + 12 + 4
+        4 + 4
+            + 12
+            + 4
             + ((self.tiles_x + 1) * (self.tiles_y + 1)) * 4
             + (self.tiles_x * self.tiles_y)
     }
@@ -97,7 +99,11 @@ fn read_raw_model(path: &Path) -> Result<RawWorldModel> {
     let mut magic = [0u8; 8];
     reader.read_exact(&mut magic)?;
     if &magic != RAW_VMAP_MAGIC {
-        bail!("Invalid raw model magic in {}: {:?}", path.display(), &magic[..]);
+        bail!(
+            "Invalid raw model magic in {}: {:?}",
+            path.display(),
+            &magic[..]
+        );
     }
 
     // Skip nVectors (u32) - unused during read
@@ -121,7 +127,10 @@ fn read_raw_model(path: &Path) -> Result<RawWorldModel> {
         }
     }
 
-    Ok(RawWorldModel { root_wmo_id, groups })
+    Ok(RawWorldModel {
+        root_wmo_id,
+        groups,
+    })
 }
 
 /// Read a raw group (equivalent to MaNGOS GroupModel_Raw::Read)
@@ -151,7 +160,10 @@ fn read_raw_group<R: Read>(reader: &mut R) -> Result<RawGroupModel> {
     let mut chunk_id = [0u8; 4];
     reader.read_exact(&mut chunk_id)?;
     if &chunk_id != b"GRP " {
-        bail!("Expected GRP chunk, got {:?}", std::str::from_utf8(&chunk_id));
+        bail!(
+            "Expected GRP chunk, got {:?}",
+            std::str::from_utf8(&chunk_id)
+        );
     }
     let _block_size = reader.read_u32::<LittleEndian>()?;
     let branches = reader.read_u32::<LittleEndian>()?;
@@ -162,7 +174,10 @@ fn read_raw_group<R: Read>(reader: &mut R) -> Result<RawGroupModel> {
     // "INDX" chunk
     reader.read_exact(&mut chunk_id)?;
     if &chunk_id != b"INDX" {
-        bail!("Expected INDX chunk, got {:?}", std::str::from_utf8(&chunk_id));
+        bail!(
+            "Expected INDX chunk, got {:?}",
+            std::str::from_utf8(&chunk_id)
+        );
     }
     let _block_size = reader.read_u32::<LittleEndian>()?;
     let n_indexes = reader.read_u32::<LittleEndian>()?;
@@ -184,7 +199,10 @@ fn read_raw_group<R: Read>(reader: &mut R) -> Result<RawGroupModel> {
     // "VERT" chunk
     reader.read_exact(&mut chunk_id)?;
     if &chunk_id != b"VERT" {
-        bail!("Expected VERT chunk, got {:?}", std::str::from_utf8(&chunk_id));
+        bail!(
+            "Expected VERT chunk, got {:?}",
+            std::str::from_utf8(&chunk_id)
+        );
     }
     let _block_size = reader.read_u32::<LittleEndian>()?;
     let n_vectors = reader.read_u32::<LittleEndian>()?;
@@ -200,7 +218,10 @@ fn read_raw_group<R: Read>(reader: &mut R) -> Result<RawGroupModel> {
     let liquid = if liquid_flags & 1 != 0 {
         reader.read_exact(&mut chunk_id)?;
         if &chunk_id != b"LIQU" {
-            bail!("Expected LIQU chunk, got {:?}", std::str::from_utf8(&chunk_id));
+            bail!(
+                "Expected LIQU chunk, got {:?}",
+                std::str::from_utf8(&chunk_id)
+            );
         }
         let _block_size = reader.read_u32::<LittleEndian>()?;
 
@@ -279,9 +300,7 @@ fn write_vmo(model: &RawWorldModel, path: &Path) -> Result<()> {
         writer.write_all(b"GBIH")?;
 
         // Build BIH from group bounding boxes
-        let group_bounds: Vec<BoundingBox> = model.groups.iter()
-            .map(|g| g.bounds)
-            .collect();
+        let group_bounds: Vec<BoundingBox> = model.groups.iter().map(|g| g.bounds).collect();
 
         if group_bounds.is_empty() {
             // Empty BIH
@@ -353,14 +372,24 @@ fn write_group_model<W: Write>(writer: &mut W, group: &RawGroupModel) -> Result<
         empty_bih.write_to_file(writer)?;
     } else {
         // Build BIH from triangle bounding boxes
-        let tri_bounds: Vec<BoundingBox> = group.triangles.iter()
+        let tri_bounds: Vec<BoundingBox> = group
+            .triangles
+            .iter()
             .map(|tri| {
                 let v0 = group.vertices[tri.idx0 as usize];
                 let v1 = group.vertices[tri.idx1 as usize];
                 let v2 = group.vertices[tri.idx2 as usize];
                 BoundingBox::new(
-                    Vec3::new(v0.x.min(v1.x).min(v2.x), v0.y.min(v1.y).min(v2.y), v0.z.min(v1.z).min(v2.z)),
-                    Vec3::new(v0.x.max(v1.x).max(v2.x), v0.y.max(v1.y).max(v2.y), v0.z.max(v1.z).max(v2.z)),
+                    Vec3::new(
+                        v0.x.min(v1.x).min(v2.x),
+                        v0.y.min(v1.y).min(v2.y),
+                        v0.z.min(v1.z).min(v2.z),
+                    ),
+                    Vec3::new(
+                        v0.x.max(v1.x).max(v2.x),
+                        v0.y.max(v1.y).max(v2.y),
+                        v0.z.max(v1.z).max(v2.z),
+                    ),
                 )
             })
             .collect();
@@ -425,7 +454,7 @@ pub fn convert_all_models(
     let pb = indicatif::ProgressBar::new(total as u64);
     pb.set_style(
         indicatif::ProgressStyle::with_template(
-            "  Converting models [{bar:40}] {pos}/{len} ({eta})"
+            "  Converting models [{bar:40}] {pos}/{len} ({eta})",
         )
         .unwrap()
         .progress_chars("=> "),
@@ -498,7 +527,7 @@ mod tests {
             corner: Vec3::ZERO,
             liquid_type: 0,
             heights: vec![0.0; 12], // (2+1)*(3+1) = 12
-            flags: vec![0; 6],     // 2*3 = 6
+            flags: vec![0; 6],      // 2*3 = 6
         };
 
         // 4+4+12+4 + 12*4 + 6 = 24 + 48 + 6 = 78
@@ -536,7 +565,7 @@ mod tests {
         cursor.write_u32::<LittleEndian>(8).unwrap(); // blocksize
         cursor.write_u32::<LittleEndian>(1).unwrap(); // branches
         cursor.write_u32::<LittleEndian>(3).unwrap(); // branch value
-        // "INDX" chunk
+                                                      // "INDX" chunk
         cursor.write_all(b"INDX").unwrap();
         cursor.write_u32::<LittleEndian>(4 + 3 * 2).unwrap(); // blocksize
         cursor.write_u32::<LittleEndian>(3).unwrap(); // nindexes

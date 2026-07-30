@@ -3,9 +3,9 @@
 //! Group files contain the actual 3D geometry for sections of a building.
 //! Each WMO can have multiple groups (e.g., different rooms or sections).
 
-use glam::{Vec2, Vec3};
 use crate::vmaps::types::{BoundingBox, WMOBatch};
 use crate::vmaps::wmo::root::WMORoot;
+use glam::{Vec2, Vec3};
 
 /// WMO Group File
 ///

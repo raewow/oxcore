@@ -7,8 +7,8 @@ use glam::{Mat3, Vec3};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::vmaps::tree::{BVHTree, TriangleData};
 use crate::vmaps::transform::{decode_scale, euler_to_matrix, transform_vertices};
+use crate::vmaps::tree::{BVHTree, TriangleData};
 use crate::vmaps::types::{DoodadPlacement, WMOPlacement};
 
 /// Model instance with transformation
@@ -98,7 +98,10 @@ impl MapAssembly {
 
     /// Add a model instance to the appropriate tile
     pub fn add_instance(&mut self, tile: TileCoord, instance: ModelInstance) {
-        self.instances.entry(tile).or_insert_with(Vec::new).push(instance);
+        self.instances
+            .entry(tile)
+            .or_insert_with(Vec::new)
+            .push(instance);
     }
 
     /// Build BVH tree for a specific tile
@@ -156,7 +159,10 @@ pub fn assemble_tile_geometry(
             let i1 = indices[i + 1] as usize;
             let i2 = indices[i + 2] as usize;
 
-            if i0 >= world_vertices.len() || i1 >= world_vertices.len() || i2 >= world_vertices.len() {
+            if i0 >= world_vertices.len()
+                || i1 >= world_vertices.len()
+                || i2 >= world_vertices.len()
+            {
                 continue;
             }
 
@@ -268,14 +274,12 @@ mod tests {
         let mut assembly = MapAssembly::new(0);
         let tile = TileCoord::new(32, 32);
 
-        let triangles = vec![
-            TriangleData::new(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(1.0, 0.0, 0.0),
-                Vec3::new(0.0, 1.0, 0.0),
-                0,
-            ),
-        ];
+        let triangles = vec![TriangleData::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            0,
+        )];
 
         assembly.build_tile_tree(tile, triangles).unwrap();
 

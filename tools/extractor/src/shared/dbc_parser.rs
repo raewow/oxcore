@@ -42,7 +42,8 @@ pub struct DBCIterator<'a> {
 impl DBCFile {
     /// Open and parse a DBC file
     pub fn open(path: &Path) -> Result<Self> {
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
@@ -60,27 +61,37 @@ impl DBCFile {
 
         // Read and validate header
         let mut magic = [0u8; 4];
-        cursor.read_exact(&mut magic)
+        cursor
+            .read_exact(&mut magic)
             .context("Failed to read DBC magic bytes")?;
 
         if &magic != DBC_MAGIC {
-            bail!("Invalid DBC magic bytes. Expected 'WDBC', got '{}'",
-                String::from_utf8_lossy(&magic));
+            bail!(
+                "Invalid DBC magic bytes. Expected 'WDBC', got '{}'",
+                String::from_utf8_lossy(&magic)
+            );
         }
 
-        let record_count = cursor.read_u32::<LittleEndian>()
+        let record_count = cursor
+            .read_u32::<LittleEndian>()
             .context("Failed to read record count")?;
-        let field_count = cursor.read_u32::<LittleEndian>()
+        let field_count = cursor
+            .read_u32::<LittleEndian>()
             .context("Failed to read field count")?;
-        let record_size = cursor.read_u32::<LittleEndian>()
+        let record_size = cursor
+            .read_u32::<LittleEndian>()
             .context("Failed to read record size")?;
-        let string_size = cursor.read_u32::<LittleEndian>()
+        let string_size = cursor
+            .read_u32::<LittleEndian>()
             .context("Failed to read string size")?;
 
         // Validate header values
         if field_count * 4 != record_size {
-            bail!("Invalid DBC header: field_count * 4 ({}) != record_size ({})",
-                field_count * 4, record_size);
+            bail!(
+                "Invalid DBC header: field_count * 4 ({}) != record_size ({})",
+                field_count * 4,
+                record_size
+            );
         }
 
         // Calculate data sizes
@@ -88,12 +99,14 @@ impl DBCFile {
 
         // Read record data
         let mut record_data = vec![0u8; data_size];
-        cursor.read_exact(&mut record_data)
+        cursor
+            .read_exact(&mut record_data)
             .context("Failed to read record data")?;
 
         // Read string table
         let mut string_table = vec![0u8; string_size as usize];
-        cursor.read_exact(&mut string_table)
+        cursor
+            .read_exact(&mut string_table)
             .context("Failed to read string table")?;
 
         Ok(Self {
@@ -212,7 +225,8 @@ impl<'a> DBCRecord<'a> {
 
         // Find the null terminator
         let string_data = &self.file.string_table[string_offset..];
-        let null_pos = string_data.iter()
+        let null_pos = string_data
+            .iter()
             .position(|&c| c == 0)
             .unwrap_or(string_data.len());
 
@@ -252,7 +266,7 @@ mod tests {
 
         // Record data (1 record, 2 fields)
         data.extend_from_slice(&42u32.to_le_bytes()); // Field 0
-        data.extend_from_slice(&0u32.to_le_bytes());  // Field 1 (string offset)
+        data.extend_from_slice(&0u32.to_le_bytes()); // Field 1 (string offset)
 
         // String table
         data.push(0); // Empty string

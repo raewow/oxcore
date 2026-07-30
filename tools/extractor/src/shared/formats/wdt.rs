@@ -41,10 +41,10 @@ impl WdtMAINEntry {
 /// MODF structure - WMO instance placement (64 bytes)
 #[derive(Debug, Clone)]
 pub struct WdtMODF {
-    pub id: u32,           // WMO name index
-    pub unique_id: u32,    // Unique instance ID
-    pub position: [f32; 3], // X, Y, Z
-    pub rotation: [f32; 3], // Rotation
+    pub id: u32,              // WMO name index
+    pub unique_id: u32,       // Unique instance ID
+    pub position: [f32; 3],   // X, Y, Z
+    pub rotation: [f32; 3],   // Rotation
     pub bounds_min: [f32; 3], // Bounding box min
     pub bounds_max: [f32; 3], // Bounding box max
     pub flags: u16,
@@ -58,14 +58,15 @@ pub struct WDTFile {
     pub name: String,
     pub header: WdtMPHD,
     pub tiles: [[WdtMAINEntry; WDT_MAP_SIZE]; WDT_MAP_SIZE],
-    pub wmo_names: Vec<String>,     // MWMO chunk - global WMO filenames
+    pub wmo_names: Vec<String>,       // MWMO chunk - global WMO filenames
     pub wmo_placements: Vec<WdtMODF>, // MODF chunk - global WMO placements
 }
 
 impl WDTFile {
     /// Load a WDT file from disk
     pub fn load_file(path: &Path) -> Result<Self> {
-        let name = path.file_stem()
+        let name = path
+            .file_stem()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
@@ -112,8 +113,11 @@ impl WDTFile {
 
             if is_mver {
                 if size == 4 {
-                    mver_version = Some(cursor.read_u32::<LittleEndian>()
-                        .context("Failed to read MVER version")?);
+                    mver_version = Some(
+                        cursor
+                            .read_u32::<LittleEndian>()
+                            .context("Failed to read MVER version")?,
+                    );
                 } else {
                     // Skip invalid size
                     cursor.seek(std::io::SeekFrom::Current(size as i64))?;
@@ -158,7 +162,10 @@ impl WDTFile {
         // MVER is optional in some formats, but warn if version is unexpected
         if let Some(version) = mver_version {
             if version != 18 {
-                tracing::warn!("WDT file has version {} (expected 18), continuing anyway", version);
+                tracing::warn!(
+                    "WDT file has version {} (expected 18), continuing anyway",
+                    version
+                );
             }
         }
 
@@ -209,10 +216,12 @@ impl WDTFile {
 /// Read a chunk header (fourcc + size)
 fn read_chunk_header(cursor: &mut Cursor<&[u8]>) -> Result<([u8; 4], u32)> {
     let mut fourcc = [0u8; 4];
-    cursor.read_exact(&mut fourcc)
+    cursor
+        .read_exact(&mut fourcc)
         .context("Failed to read chunk fourcc")?;
 
-    let size = cursor.read_u32::<LittleEndian>()
+    let size = cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read chunk size")?;
 
     Ok((fourcc, size))
@@ -223,14 +232,18 @@ fn read_mver(cursor: &mut Cursor<&[u8]>) -> Result<u32> {
     let (fourcc, size) = read_chunk_header(cursor)?;
 
     if &fourcc != b"MVER" {
-        bail!("Expected MVER chunk, got '{}'", String::from_utf8_lossy(&fourcc));
+        bail!(
+            "Expected MVER chunk, got '{}'",
+            String::from_utf8_lossy(&fourcc)
+        );
     }
 
     if size != 4 {
         bail!("Invalid MVER chunk size: {}", size);
     }
 
-    cursor.read_u32::<LittleEndian>()
+    cursor
+        .read_u32::<LittleEndian>()
         .context("Failed to read version")
 }
 
@@ -275,10 +288,17 @@ fn read_main(cursor: &mut Cursor<&[u8]>) -> Result<[[WdtMAINEntry; WDT_MAP_SIZE]
 
     let expected_size = (WDT_MAP_SIZE * WDT_MAP_SIZE * 8) as u32; // 8 bytes per entry
     if size != expected_size {
-        bail!("Invalid MAIN chunk size: {} (expected {})", size, expected_size);
+        bail!(
+            "Invalid MAIN chunk size: {} (expected {})",
+            size,
+            expected_size
+        );
     }
 
-    let mut tiles = [[WdtMAINEntry { flags: 0, async_id: 0 }; WDT_MAP_SIZE]; WDT_MAP_SIZE];
+    let mut tiles = [[WdtMAINEntry {
+        flags: 0,
+        async_id: 0,
+    }; WDT_MAP_SIZE]; WDT_MAP_SIZE];
 
     for y in 0..WDT_MAP_SIZE {
         for x in 0..WDT_MAP_SIZE {
@@ -308,7 +328,8 @@ fn read_mwmo(cursor: &mut Cursor<&[u8]>, chunk_size: u32) -> Result<Vec<String>>
 
     // Read all bytes
     let mut buffer = vec![0u8; size as usize];
-    cursor.read_exact(&mut buffer)
+    cursor
+        .read_exact(&mut buffer)
         .context("Failed to read MWMO chunk data")?;
 
     // Parse null-terminated strings

@@ -11,6 +11,6 @@ pub mod builder;
 pub mod output;
 pub mod structures;
 
-pub use bih::{BIH, BuildStats as BIHBuildStats};
+pub use bih::{BuildStats as BIHBuildStats, BIH};
 pub use output::VMTREE_MAGIC;
 pub use structures::{BVHNode, BVHTree, TriangleData};

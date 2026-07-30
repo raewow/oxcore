@@ -25,9 +25,7 @@ pub fn build_map_tree(
     entries: &[DirBinEntry],
     buildings_dir: &Path,
 ) -> Result<PathBuf> {
-    let vmaps_dir = buildings_dir
-        .parent()
-        .context("Invalid buildings dir")?;
+    let vmaps_dir = buildings_dir.parent().context("Invalid buildings dir")?;
 
     info!(
         "Building map tree for map {} with {} entries",
@@ -170,7 +168,8 @@ pub fn build_map_tree(
                 .collect();
 
             if !tile_spawns.is_empty() {
-                let tile_path = vmaps_dir.join(format!("{:03}_{:02}_{:02}.vmtile", map_id, tile_x, tile_y));
+                let tile_path =
+                    vmaps_dir.join(format!("{:03}_{:02}_{:02}.vmtile", map_id, tile_x, tile_y));
                 VMapTileWriter::write(&tile_path, &tile_spawns)?;
                 debug!(
                     "Created vmtile: {} ({} spawns)",
@@ -179,11 +178,7 @@ pub fn build_map_tree(
                 );
             }
         }
-        info!(
-            "Created {} vmtile files for map {}",
-            tiles.len(),
-            map_id
-        );
+        info!("Created {} vmtile files for map {}", tiles.len(), map_id);
     }
 
     Ok(output_path)
@@ -367,12 +362,7 @@ mod tests {
 
     #[test]
     fn test_build_single_triangle() {
-        let triangles = vec![TriangleData::new(
-            Vec3::ZERO,
-            Vec3::X,
-            Vec3::Y,
-            0,
-        )];
+        let triangles = vec![TriangleData::new(Vec3::ZERO, Vec3::X, Vec3::Y, 0)];
 
         let tree = BVHTree::from_triangles(triangles).build();
 
@@ -427,7 +417,13 @@ mod tests {
         // Root is the last node added
         let root_idx = tree.nodes.len() - 1;
         let leaf_count = count_leaf_triangles(&tree, root_idx);
-        eprintln!("Total triangles: {}, Leaf count: {}, Nodes: {}, Root idx: {}", tree.triangle_count(), leaf_count, tree.node_count(), root_idx);
+        eprintln!(
+            "Total triangles: {}, Leaf count: {}, Nodes: {}, Root idx: {}",
+            tree.triangle_count(),
+            leaf_count,
+            tree.node_count(),
+            root_idx
+        );
         assert_eq!(leaf_count, 50);
     }
 
@@ -469,7 +465,9 @@ mod tests {
         }
 
         match &tree.nodes[node_idx] {
-            BVHNode::Leaf { triangle_indices, .. } => triangle_indices.len(),
+            BVHNode::Leaf {
+                triangle_indices, ..
+            } => triangle_indices.len(),
             BVHNode::Branch { left, right, .. } => {
                 count_leaf_triangles(tree, *left) + count_leaf_triangles(tree, *right)
             }
