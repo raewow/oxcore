@@ -602,16 +602,18 @@ pub struct SmsgActionButtons<'a> {
     pub buttons: &'a [ActionButton; 120],
 }
 
-/// No `to_modern` yet, deliberately.
+/// No `to_modern`, and there never will be: **1.14 has no action-buttons packet.**
 ///
-/// HermesProxy — the only reference verified against build 42597 — has no `SMSG_UPDATE_ACTION_BUTTONS`
-/// implementation at all, so there is nothing to transcribe. CypherCore has one, but it is retail:
-/// 132 buttons of `u64` plus a reason byte, against vanilla's 120 of `u32`. Both the count and the
-/// width would be guesses.
+/// The bar is part of the `ActivePlayer` create block instead — 132 × `i32` behind a
+/// `HasActionButtons` bit in its tail (JimsProxy
+/// `World/Objects/Version/V1_14_1_40688/ObjectUpdateBuilder.cs:534-570`, count from
+/// `World/Enums/PlayerDefines.cs:20`). The packed `action | type << 24` word is identical to
+/// vanilla's, so the values pass through untouched; only the slot count differs, 120 to 132.
 ///
-/// Getting either wrong desynchronises the stream for every packet that follows, which is a far
-/// worse failure than an empty action bar. Needs a capture from a live 1.14 client before it can be
-/// written; until then the defaulted `to_modern` declines and the send layer logs and drops it.
+/// So the modern bar is populated by `CreateObjectBlock::with_action_buttons` at the self-create,
+/// and the drop logged here is correct rather than a gap. Earlier notes claimed no reference body
+/// existed — that was true of upstream HermesProxy, which has no `SMSG_UPDATE_ACTION_BUTTONS`
+/// handler; the maintained fork does.
 impl ToWorldPacket for SmsgActionButtons<'_> {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ACTION_BUTTONS);
@@ -1044,6 +1046,36 @@ impl ToWorldPacket for SmsgLoadCufProfiles {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOAD_CUF_PROFILES);
         // A zero-length profile list; the client reads a count first.
         packet.write_u32(0);
+        Some(packet)
+    }
+}
+
+/// `SMSG_TIME_SYNC_REQUEST` — asks the client for its tick count so the server can track drift.
+///
+/// Modern-only: 1.12 has no time sync at all, which is why `to_vanilla` produces a packet with no
+/// vanilla opcode and the send layer never delivers it to a 1.12 session.
+///
+/// TrinityCore sends the first one as the *first* packet of `SendInitialPacketsBeforeAddToMap`
+/// (`Player.cpp:24920-24928`), then again after 5 s and every 10 s thereafter
+/// (`WorldSession.cpp:1815-1826`). The body is a single sequence index, per JimsProxy
+/// `World/Server/Packets/MiscPackets.cs:335-342`; the client echoes it back in
+/// `CMSG_TIME_SYNC_RESPONSE` alongside its own tick count.
+#[derive(Debug, Clone, Default)]
+pub struct SmsgTimeSyncRequest {
+    /// Increments per request, so a response can be matched to the request it answers.
+    pub sequence_index: u32,
+}
+
+impl ToWorldPacket for SmsgTimeSyncRequest {
+    fn to_vanilla(&self) -> WorldPacket {
+        // Unreachable in practice -- `Opcode::SMSG_TIME_SYNC_REQUEST` has no vanilla wire value, so
+        // the send path drops it for a 1.12 session before it gets here.
+        WorldPacket::new(Opcode::SMSG_TIME_SYNC_REQUEST)
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut packet = WorldPacket::new(Opcode::SMSG_TIME_SYNC_REQUEST);
+        packet.write_u32(self.sequence_index);
         Some(packet)
     }
 }

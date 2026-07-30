@@ -368,6 +368,11 @@ pub struct CreateObjectBlock {
     pub fields: Vec<(u32, u32)>,
     pub required_fields: Vec<(u32, u32)>, // Fields that must be sent even when value is 0
     pub bytes_fields: Vec<(u32, [u8; 4])>,
+    /// The recipient's action bar, vanilla-packed. Only read when this block describes the
+    /// recipient's own player: 1.14 carries the bar in the `ActivePlayer` create tail instead of a
+    /// separate `SMSG_ACTION_BUTTONS`, so there is nowhere else to put it. Ignored by `to_vanilla`,
+    /// which still sends the standalone packet.
+    pub action_buttons: Option<Vec<u32>>,
 }
 
 impl CreateObjectBlock {
@@ -382,7 +387,14 @@ impl CreateObjectBlock {
             fields: Vec::new(),
             required_fields: Vec::new(),
             bytes_fields: Vec::new(),
+            action_buttons: None,
         }
+    }
+
+    /// Attach the player's action bar, for the create block the player receives about itself.
+    pub fn with_action_buttons(mut self, buttons: Vec<u32>) -> Self {
+        self.action_buttons = Some(buttons);
+        self
     }
 
     pub fn with_flags(mut self, flags: u8) -> Self {
@@ -570,6 +582,7 @@ impl CreateObjectBlock {
             } else {
                 None
             },
+            action_buttons: self.action_buttons.clone(),
         });
 
         for &(index, value) in self.fields.iter().chain(&self.required_fields) {

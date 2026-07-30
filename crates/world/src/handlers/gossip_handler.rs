@@ -21,17 +21,9 @@ const INTERACTION_DISTANCE: f32 = 5.0;
 const UNIT_FLAG_NOT_SELECTABLE: u32 = 0x02000000;
 
 fn read_gossip_hello_guid(protocol: Protocol, packet: &mut WorldPacket) -> Result<ObjectGuid> {
-    if protocol == Protocol::Modern {
-        let mut reader = BitReader::new(packet.contents());
-        let (_, low) = reader
-            .read_packed_guid_128()
-            .ok_or_else(|| anyhow::anyhow!("Failed to read modern NPC GUID"))?;
-        Ok(ObjectGuid::from_raw(low))
-    } else {
-        packet
-            .read_guid()
-            .ok_or_else(|| anyhow::anyhow!("Failed to read NPC GUID"))
-    }
+    packet
+        .read_guid_for(protocol)
+        .ok_or_else(|| anyhow::anyhow!("Failed to read NPC GUID"))
 }
 
 fn read_npc_text_query(protocol: Protocol, packet: &mut WorldPacket) -> Result<u32> {
@@ -61,7 +53,7 @@ fn read_gossip_select_option(
 ) -> Result<(ObjectGuid, u32)> {
     if protocol == Protocol::Modern {
         let mut reader = BitReader::new(packet.contents());
-        let (_, low) = reader
+        let (high, low) = reader
             .read_packed_guid_128()
             .ok_or_else(|| anyhow::anyhow!("Failed to read modern NPC GUID"))?;
         let _gossip_id = reader
@@ -77,7 +69,7 @@ fn read_gossip_select_option(
         reader
             .read_string(code_length)
             .ok_or_else(|| anyhow::anyhow!("Failed to read promotion code"))?;
-        Ok((ObjectGuid::from_raw(low), option_id))
+        Ok((ObjectGuid::from_guid128(high, low), option_id))
     } else {
         let npc_guid = packet
             .read_guid()
@@ -542,7 +534,7 @@ pub async fn handle_banker_activate(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let banker_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read banker GUID"))?;
 
     let can_use_banker = world
@@ -650,17 +642,14 @@ mod tests {
 
     #[test]
     fn modern_gossip_hello_reads_packed_guid128() {
+        let expected = ObjectGuid::new_creature(197, 42);
+        let (high, low) = expected.to_guid128(1);
         let mut writer = BitWriter::new();
-        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        writer.write_packed_guid_128(high, low);
         let mut packet = WorldPacket::new(Opcode::CMSG_GOSSIP_HELLO);
         packet.write_bytes(&writer.into_bytes());
 
-        assert_eq!(
-            read_gossip_hello_guid(Protocol::Modern, &mut packet)
-                .unwrap()
-                .raw(),
-            0x0200_01
-        );
+        assert_eq!(read_gossip_hello_guid(Protocol::Modern, &mut packet).unwrap(), expected);
     }
 
     #[test]

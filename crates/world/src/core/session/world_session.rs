@@ -44,6 +44,9 @@ pub struct WorldSession {
     move_reject_time: AtomicU32,
     /// The logout flow has sent SMSG_FORCE_MOVE_ROOT and awaits its client ACK.
     pending_root_ack: AtomicBool,
+    /// Sequence index for the next `SMSG_TIME_SYNC_REQUEST`, mirroring TrinityCore's
+    /// `_timeSyncNextCounter`. Modern-only; a 1.12 client never sees a time sync.
+    time_sync_next_index: AtomicU32,
 }
 
 impl WorldSession {
@@ -85,6 +88,7 @@ impl WorldSession {
             player_guid: RwLock::new(None),
             logout_timer: RwLock::new(None),
             login_in_progress: AtomicBool::new(false),
+            time_sync_next_index: AtomicU32::new(0),
             auction_list_request_in_progress: AtomicBool::new(false),
             pending_teleport: Arc::new(RwLock::new(None)),
             pending_near_teleport: Arc::new(RwLock::new(None)),
@@ -205,10 +209,46 @@ impl WorldSession {
         self.packet_tx.clone()
     }
 
-    /// Send a packet to the client (internal use only)
-    /// External code should use send_msg for type-safe messaging
-    /// Note: This is now synchronous (unbounded channel send never blocks)
+    /// Send a hand-built packet to the client.
+    ///
+    /// **Refused for a modern session.** A `WorldPacket` assembled by a handler is vanilla bytes —
+    /// nothing in the type records which protocol produced it — and putting those on a 1.14
+    /// connection is silent corruption the client can only report as a disconnect. Only the opcode
+    /// having a modern wire value is not evidence the *body* is right.
+    ///
+    /// This is the session-level counterpart of `PlayerBroadcaster::accepts_prebuilt`, which has
+    /// guarded the broadcast path for a while; this path had no guard at all, which is Stage 0 item 1
+    /// of `docs/modern-opcode-plan.md`.
+    ///
+    /// Use [`Self::send_msg`] with a real `to_modern`, or — when the body genuinely is identical for
+    /// both clients — [`Self::send_packet_protocol_agnostic`].
     pub(crate) fn send_packet(&self, packet: WorldPacket) -> anyhow::Result<()> {
+        if self.protocol == Protocol::Modern {
+            tracing::warn!(
+                "Refusing hand-built {:?} for modern player {:?}: the body is vanilla-only. \
+                 Send the message type instead, or use send_packet_protocol_agnostic if the body \
+                 is verified identical for both protocols.",
+                packet.opcode(),
+                self.player_guid()
+            );
+            return Ok(());
+        }
+        self.deliver(packet)
+    }
+
+    /// Send a hand-built packet whose body is the same for both protocols.
+    ///
+    /// For the empty and count-prefixed replies the 1.14 client demands during its bootstrap sweep:
+    /// a bare `i32 0` is a bare `i32 0` either way. Every call site here has been checked against
+    /// the reference body — check yours before adding one, because this bypasses the guard in
+    /// [`Self::send_packet`] and a wrong body desynchronises every packet after it.
+    pub(crate) fn send_packet_protocol_agnostic(&self, packet: WorldPacket) -> anyhow::Result<()> {
+        self.deliver(packet)
+    }
+
+    /// Hand an already-encoded packet to the socket. No protocol check: the caller has established
+    /// that this body belongs on this connection.
+    fn deliver(&self, packet: WorldPacket) -> anyhow::Result<()> {
         tracing::trace!(
             "[PKT-OUT] opcode={:?} len={}",
             packet.opcode(),
@@ -237,7 +277,7 @@ impl WorldSession {
                 }
             },
         };
-        self.send_packet(packet)
+        self.deliver(packet)
     }
 
     /// Atomically try to mark login as in progress (prevents concurrent logins)
@@ -245,6 +285,16 @@ impl WorldSession {
         self.login_in_progress
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
+    }
+
+    /// Take the next time-sync sequence index, so a response can be matched to its request.
+    ///
+    /// Matches `WorldSession::SendTimeSync` (`WorldSession.cpp:1815-1826`), which increments after
+    /// each send. Resets are TrinityCore's `ResetTimeSync` on a non-seamless teleport; we do not
+    /// reset, so the index only ever grows -- the client echoes whatever it was given, so a
+    /// monotonic counter still matches responses uniquely.
+    pub fn next_time_sync_index(&self) -> u32 {
+        self.time_sync_next_index.fetch_add(1, Ordering::Relaxed)
     }
 
     /// Clear the login-in-progress flag

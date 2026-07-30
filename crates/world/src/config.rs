@@ -50,6 +50,20 @@ pub struct Config {
     /// Use the fixed legacy signing key expected by supported 1.14.x clients.
     #[serde(default)]
     pub modern_world_use_arctium_key: bool,
+    /// Path to a JSONL packet trace for modern connections. Empty disables it.
+    ///
+    /// Deliberately a separate file rather than more lines in `world.log`: a full per-packet trace
+    /// is the tool for decoding a body the client rejected, and `world.log` is already tens of
+    /// megabytes per session from vmap and navmesh chatter. Modelled on JimsProxy's structured
+    /// logging (`Framework/Logging/Log.cs`).
+    #[serde(default)]
+    pub modern_packet_log: String,
+    /// How many bytes of each packet body to record as hex, 0 for none.
+    ///
+    /// The opcode alone tells you *what* was sent; only the bytes tell you whether the body was
+    /// right. 64 is enough to check a header and the first fields of most bodies.
+    #[serde(default = "default_modern_packet_log_bytes")]
+    pub modern_packet_log_bytes: usize,
 
     // Directories
     #[serde(default = "default_data_dir")]
@@ -335,6 +349,10 @@ fn default_modern_instance_port() -> u16 {
     8087
 }
 
+fn default_modern_packet_log_bytes() -> usize {
+    64
+}
+
 fn default_modern_instance_address() -> std::net::Ipv4Addr {
     std::net::Ipv4Addr::LOCALHOST
 }
@@ -605,6 +623,8 @@ impl Default for Config {
             modern_world_os: default_modern_world_os(),
             modern_world_signing_key: default_modern_world_signing_key(),
             modern_world_use_arctium_key: false,
+            modern_packet_log: String::new(),
+            modern_packet_log_bytes: default_modern_packet_log_bytes(),
             data_dir: default_data_dir(),
             world_update_interval: default_world_update_interval(),
             spell_effect_delay_ms: default_spell_effect_delay_ms(),

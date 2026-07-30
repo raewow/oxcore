@@ -14,7 +14,7 @@ pub async fn handle_loot(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
     let target_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read target GUID"))?;
 
     // Delegate everything to LootSystem
@@ -88,7 +88,7 @@ pub async fn handle_loot_release(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
     let target_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read target GUID"))?;
 
     // Delegate to LootSystem

@@ -7,22 +7,12 @@ use tracing::debug;
 
 use crate::core::session::WorldSession;
 use crate::World;
-use oxcore_shared::protocol::bitbuf::BitReader;
-use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket, WorldPacketGuidExt};
 
 fn read_selection_target(protocol: Protocol, packet: &mut WorldPacket) -> Result<ObjectGuid> {
-    if protocol == Protocol::Modern {
-        let mut reader = BitReader::new(packet.contents());
-        let (_, low) = reader
-            .read_packed_guid_128()
-            .ok_or_else(|| anyhow::anyhow!("Failed to read modern target GUID"))?;
-        Ok(ObjectGuid::from_raw(low))
-    } else {
-        packet
-            .read_u64()
-            .map(ObjectGuid::from_raw)
-            .ok_or_else(|| anyhow::anyhow!("Failed to read target GUID"))
-    }
+    packet
+        .read_guid_for(protocol)
+        .ok_or_else(|| anyhow::anyhow!("Failed to read target GUID"))
 }
 
 fn read_stand_state(packet: &mut WorldPacket) -> Result<Option<u8>> {
@@ -100,17 +90,35 @@ mod tests {
 
     #[test]
     fn modern_selection_reads_packed_guid128() {
+        let expected = ObjectGuid::new_creature(299, 464);
+        let (high, low) = expected.to_guid128(1);
         let mut writer = BitWriter::new();
-        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        writer.write_packed_guid_128(high, low);
         let mut packet = WorldPacket::new(Opcode::CMSG_SET_SELECTION);
         packet.write_bytes(&writer.into_bytes());
 
         assert_eq!(
-            read_selection_target(Protocol::Modern, &mut packet)
-                .unwrap()
-                .raw(),
-            0x0200_01
+            read_selection_target(Protocol::Modern, &mut packet).unwrap(),
+            expected
         );
+    }
+
+    /// The bug this whole path existed to fix: the client names a creature with a full 128-bit GUID,
+    /// and taking its low half alone yields a bare counter that matches no object in the world.
+    /// `CMSG_SET_SELECTION target=464` in the log was this.
+    #[test]
+    fn modern_selection_keeps_the_creature_entry() {
+        let expected = ObjectGuid::new_creature(299, 464);
+        let (high, low) = expected.to_guid128(1);
+        let mut writer = BitWriter::new();
+        writer.write_packed_guid_128(high, low);
+        let mut packet = WorldPacket::new(Opcode::CMSG_SET_SELECTION);
+        packet.write_bytes(&writer.into_bytes());
+
+        let decoded = read_selection_target(Protocol::Modern, &mut packet).unwrap();
+        assert!(decoded.is_creature());
+        assert_eq!(decoded.entry(), 299);
+        assert_ne!(decoded.raw(), 464, "the low half alone is not a creature");
     }
 
     #[test]

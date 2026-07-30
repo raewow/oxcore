@@ -13,7 +13,7 @@ use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
 fn read_text_emote(protocol: Protocol, packet: &mut WorldPacket) -> Result<(u32, u32, ObjectGuid)> {
     if protocol == Protocol::Modern {
         let mut reader = BitReader::new(packet.contents());
-        let (_, low) = reader
+        let (high, low) = reader
             .read_packed_guid_128()
             .ok_or_else(|| anyhow!("Failed to read modern target GUID from CMSG_TEXT_EMOTE"))?;
         let text_emote = reader
@@ -22,7 +22,7 @@ fn read_text_emote(protocol: Protocol, packet: &mut WorldPacket) -> Result<(u32,
         let emote_num = reader
             .read_u32()
             .ok_or_else(|| anyhow!("Failed to read emote_num from CMSG_TEXT_EMOTE"))?;
-        Ok((text_emote, emote_num, ObjectGuid::from_raw(low)))
+        Ok((text_emote, emote_num, ObjectGuid::from_guid128(high, low)))
     } else {
         let text_emote = packet
             .read_u32()
@@ -87,8 +87,10 @@ mod tests {
 
     #[test]
     fn modern_text_emote_starts_with_packed_target_guid() {
+        let target = ObjectGuid::new_creature(299, 464);
+        let (high, low) = target.to_guid128(1);
         let mut writer = BitWriter::new();
-        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        writer.write_packed_guid_128(high, low);
         writer.write_u32(42);
         writer.write_u32(7);
         let mut packet = WorldPacket::new(Opcode::CMSG_TEXT_EMOTE);
@@ -96,7 +98,7 @@ mod tests {
 
         assert_eq!(
             read_text_emote(Protocol::Modern, &mut packet).unwrap(),
-            (42, 7, ObjectGuid::from_raw(0x0200_01))
+            (42, 7, target)
         );
     }
 }

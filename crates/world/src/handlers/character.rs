@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
+use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::common::packet_compression::compress_update_packet_if_needed;
 use crate::core::common::position::Position as WorldPosition;
 use crate::core::session::{SessionState, WorldSession};
@@ -30,6 +31,7 @@ use oxcore_shared::messages::create::SmsgOutOfRange;
 use oxcore_shared::messages::login::{
     CharacterEnumEntry, EquipmentSlot, SmsgBindPointUpdate, SmsgCharEnum, SmsgInitWorldStates,
     SmsgInitialSetup, SmsgInitializeFactionsEmpty, SmsgLoadCufProfiles, SmsgLoginSetTimeSpeed,
+    SmsgTimeSyncRequest,
     SmsgLoginVerifyWorld, SmsgSetAllTaskProgress, SmsgSetRestStart, SmsgWorldServerInfo,
 };
 use oxcore_shared::messages::movement::{SmsgForceMoveRoot, SmsgForceMoveUnroot};
@@ -892,6 +894,11 @@ pub async fn handle_player_login_with_guid(
         session.send_msg(SmsgSetAllTaskProgress)?;
         session.send_msg(SmsgInitialSetup::default())?;
         session.send_msg(SmsgLoadCufProfiles)?;
+        // The client needs a time-sync reference before it will trust its own movement clock.
+        // TrinityCore sends this first of all, ahead of add-to-map; here is the equivalent point.
+        session.send_msg(SmsgTimeSyncRequest {
+            sequence_index: session.next_time_sync_index(),
+        })?;
         info!("[LOGIN] 1.1/11 modern enter-world packets sent");
     }
 
@@ -1216,6 +1223,24 @@ pub async fn handle_player_login_with_guid(
 // TODO: this definitely should go elsewhere
 /// Build CREATE_OBJECT block for player creation
 /// Returns just the CreateObjectBlock to be added to an SMSG_UPDATE_OBJECT
+/// The player's action bar as vanilla-packed `action | type << 24` words.
+///
+/// One source for both protocols: `SMSG_ACTION_BUTTONS` writes these as u32 for a 1.12 client, and
+/// the `ActivePlayer` create tail writes the same words as i32 (zero-padded to 132) for a 1.14 one.
+/// JimsProxy does exactly this pass-through -- it reads the legacy packet and forwards the packed
+/// values untouched (`World/Client/PacketHandlers/CharacterHandler.cs:352-367`).
+fn packed_action_buttons(player: &Player) -> Vec<u32> {
+    player
+        .settings
+        .action_buttons
+        .iter()
+        .map(|slot| {
+            slot.map(|button| (button.action & 0x00FF_FFFF) | ((button.button_type as u32) << 24))
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
 pub fn build_player_create_block_for_player(
     player: &Player,
     world: &World,
@@ -1303,7 +1328,11 @@ pub fn build_player_create_block_for_player(
         CreateObjectBlock::new(world_guid, ObjectTypeId::Player, ObjectType::Player)
             .with_flags(update_flags::UPDATEFLAG_SELF)
             .with_movement(world_position, 0, None)
-            .set_fields(inventory_fields);
+            .set_fields(inventory_fields)
+            // 1.14 has no SMSG_ACTION_BUTTONS -- the bar rides in this block's ActivePlayer tail.
+            // Vanilla ignores the field and still gets the standalone packet, so both clients end
+            // up with the same bar from one source.
+            .with_action_buttons(packed_action_buttons(player));
 
     // Set inventory slot GUID fields using set_guid_field (ensures proper GUID handling)
     for (field_index, item_guid) in inventory_guid_fields {
@@ -2574,9 +2603,9 @@ pub async fn handle_char_rename(
     const CHARACTER_FLAG_RENAME_NEEDS_GM_REVIEW: u32 = 0x00008000;
 
     // 1. Parse packet
-    let (guid_u64, new_name) = if session.protocol() == Protocol::Modern {
+    let (guid, new_name) = if session.protocol() == Protocol::Modern {
         let mut reader = BitReader::new(packet.contents());
-        let (_, low) = reader
+        let (high, low) = reader
             .read_packed_guid_128()
             .ok_or_else(|| anyhow!("Failed to read modern GUID"))?;
         let length = reader
@@ -2586,17 +2615,19 @@ pub async fn handle_char_rename(
         let name = reader
             .read_string(length)
             .ok_or_else(|| anyhow!("Failed to read new name"))?;
-        (low, name)
+        // A character GUID is a player, whose legacy form is just its counter -- so taking the low
+        // half alone happens to work here. Go through the shared fold anyway, so this site does not
+        // read as a precedent for the object types where it does not.
+        (ObjectGuid::from_guid128(high, low), name)
     } else {
         let guid = packet
-            .read_packed_guid_raw()
+            .read_packed_guid()
             .ok_or_else(|| anyhow!("Failed to read GUID"))?;
         let name = packet
             .read_cstring()
             .ok_or_else(|| anyhow!("Failed to read new name"))?;
         (guid, name)
     };
-    let guid = ObjectGuid::from(guid_u64);
 
     debug!(
         "Character rename: guid={}, new_name={}, account={}",

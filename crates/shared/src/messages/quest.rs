@@ -20,7 +20,10 @@
 //! - [`SmsgQuestgiverQuestDetails`] - Show quest details
 //! - [`SmsgQuestQueryResponse`] - Quest information response
 
+use crate::messages::gossip::{write_modern_gossip_quest, GossipQuestData};
+use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::ObjectGuid;
 use crate::protocol::Opcode;
@@ -245,6 +248,26 @@ impl ToWorldPacket for SmsgQuestgiverStatus {
         packet.write_u32(self.status as u32);
         packet
     }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        // 1.14 replaces the legacy sequential dialog-status enum with a flag set. Sending the
+        // vanilla values makes, for example, Available (5) look like an invalid combination.
+        let status = match self.status {
+            DialogStatus::None => 0x000000,
+            DialogStatus::Unavailable => 0x000002,
+            DialogStatus::Chat => 0x000004, // Vanilla's low-level-available slot.
+            DialogStatus::Incomplete => 0x000020,
+            DialogStatus::RewardRep => 0x000100,
+            DialogStatus::Available => 0x000400,
+            DialogStatus::RewardOld => 0x000800,
+            DialogStatus::Reward2 => 0x001000,
+        };
+        let mut writer = BitWriter::new();
+        let (high, low) = self.guid.to_guid128(1);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(status);
+        Some(writer.finish(Opcode::SMSG_QUESTGIVER_STATUS))
+    }
 }
 
 /// SMSG_QUESTUPDATE_ADD_KILL - Kill objective progress update
@@ -323,6 +346,43 @@ impl ToWorldPacket for SmsgQuestgiverQuestListV2<'_> {
         }
 
         packet
+    }
+
+    /// `QuestGiverQuestListMessage::Write`, from JimsProxy
+    /// `World/Server/Packets/QuestPackets.cs:397-414`.
+    ///
+    /// Reordered rather than renumbered: the greeting moves to the *end*, behind an 11-bit length
+    /// prefix, and the quest count widens from u8 to i32 and moves ahead of the emote fields. Each
+    /// entry is the same `ClientGossipQuest` shape the gossip menu uses, so it shares that writer.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+
+        writer.write_u32(self.emote_delay);
+        writer.write_u32(self.emote);
+        writer.write_i32(self.quests.len() as i32);
+
+        let greeting = self.title.as_bytes();
+        writer.write_bits(greeting.len() as u32, 11);
+        writer.flush_bits();
+
+        for quest in self.quests {
+            write_modern_gossip_quest(
+                &mut writer,
+                &GossipQuestData {
+                    quest_id: quest.quest_id,
+                    icon: quest.icon,
+                    level: quest.level,
+                    title: quest.title.clone(),
+                },
+            );
+        }
+
+        // The greeting trails the list, where vanilla puts it right after the GUID.
+        writer.write_bytes(greeting);
+
+        Some(writer.finish(Opcode::SMSG_QUESTGIVER_QUEST_LIST))
     }
 }
 
@@ -606,6 +666,7 @@ pub struct SmsgQuestQueryResponseV2<'a> {
     pub method: u32,
     /// Quest level
     pub quest_level: u32,
+    pub min_level: u32,
     /// Zone or sort ID
     pub zone_or_sort: i32,
     /// Quest type
@@ -622,6 +683,7 @@ pub struct SmsgQuestQueryResponseV2<'a> {
     pub rew_money_max_level: u32,
     /// Reward spell
     pub rew_spell: u32,
+    pub rew_spell_cast: u32,
     /// Source item ID
     pub src_item_id: u32,
     /// Quest flags
@@ -642,6 +704,10 @@ pub struct SmsgQuestQueryResponseV2<'a> {
     pub point_y: f32,
     /// Point of interest option
     pub point_opt: u32,
+    pub suggested_players: u32,
+    pub limit_time: u32,
+    pub rew_rep_faction: [u32; 5],
+    pub rew_rep_value: [i32; 5],
     /// Quest title
     pub title: &'a str,
     /// Quest objectives summary
@@ -728,6 +794,156 @@ impl ToWorldPacket for SmsgQuestQueryResponseV2<'_> {
 
         packet
     }
+
+    /// 1.14's query response is a new template format rather than a widened vanilla body. Fields
+    /// with no 1.12 source use the same harmless defaults HermesProxy supplies.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.quest_id);
+        writer.write_bit(true); // Allow
+        writer.flush_bits();
+
+        writer.write_u32(self.quest_id);
+        writer.write_i32(self.method as i32);
+        writer.write_i32(self.quest_level as i32);
+        writer.write_i32(0); // QuestScalingFactionGroup
+        writer.write_i32(255); // QuestMaxScalingLevel
+        writer.write_u32(0); // QuestPackageID
+        writer.write_i32(self.min_level as i32);
+        writer.write_i32(self.zone_or_sort);
+        writer.write_u32(self.quest_type);
+        writer.write_u32(self.suggested_players);
+        writer.write_u32(self.next_quest_in_chain);
+        writer.write_u32(0); // RewardXPDifficulty
+        writer.write_f32(1.0); // RewardXPMultiplier
+        writer.write_i32(self.rew_or_req_money.max(0));
+        writer.write_u32(0); // RewardMoneyDifficulty
+        writer.write_f32(1.0); // RewardMoneyMultiplier
+        writer.write_u32(self.rew_money_max_level);
+        writer.write_u32(self.rew_spell);
+        writer.write_u32(0);
+        writer.write_u32(0); // RewardDisplaySpell
+        writer.write_u32(self.rew_spell_cast);
+        writer.write_u32(0); // RewardHonor
+        writer.write_f32(0.0); // RewardKillHonor
+        writer.write_i32(0); // RewardArtifactXPDifficulty
+        writer.write_f32(1.0); // RewardArtifactXPMultiplier
+        writer.write_i32(0); // RewardArtifactCategoryID
+        writer.write_u32(self.src_item_id);
+        writer.write_u32(self.quest_flags.0);
+        writer.write_u32(0); // FlagsEx
+        writer.write_u32(0); // FlagsEx2
+
+        for index in 0..QUEST_REWARDS_COUNT {
+            writer.write_u32(self.rew_item_id[index]);
+            writer.write_u32(self.rew_item_count[index]);
+            writer.write_i32(0); // ItemDrop
+            writer.write_i32(0); // ItemDropQuantity
+        }
+        for index in 0..QUEST_REWARD_CHOICES_COUNT {
+            writer.write_u32(self.rew_choice_item_id[index]);
+            writer.write_u32(self.rew_choice_item_count[index]);
+            writer.write_u32(0); // Choice.DisplayID
+        }
+
+        writer.write_u32(self.point_map_id);
+        writer.write_f32(self.point_x);
+        writer.write_f32(self.point_y);
+        writer.write_u32(self.point_opt);
+        writer.write_u32(0); // RewardTitle
+        writer.write_i32(0); // RewardArenaPoints
+        writer.write_u32(0); // RewardSkillLineID
+        writer.write_u32(0); // RewardNumSkillUps
+        writer.write_u32(0); // PortraitGiver
+        writer.write_u32(0); // PortraitGiverMount
+        writer.write_u32(0); // PortraitTurnIn
+        writer.write_i32(0); // Unknown_2_5_2
+        for index in 0..5 {
+            writer.write_u32(self.rew_rep_faction[index]);
+            writer.write_i32(self.rew_rep_value[index]);
+            writer.write_i32(0); // RewardFactionOverride
+            writer.write_i32(7); // RewardFactionCapIn
+        }
+        writer.write_u32(0); // RewardFactionFlags
+        for _ in 0..4 {
+            writer.write_u32(0); // RewardCurrencyID
+            writer.write_u32(0); // RewardCurrencyQty
+        }
+        writer.write_u32(890); // AcceptedSoundKitID
+        writer.write_u32(878); // CompleteSoundKitID
+        writer.write_u32(0); // AreaGroupID
+        writer.write_u32(self.limit_time);
+
+        let mut objectives: Vec<(u8, i32, i32)> = Vec::new();
+        if self.rep_objective_faction != 0 && self.rep_objective_value != 0 {
+            objectives.push((
+                6,
+                self.rep_objective_faction as i32,
+                self.rep_objective_value,
+            ));
+        }
+        if self.rew_or_req_money < 0 {
+            objectives.push((8, 0, -self.rew_or_req_money));
+        }
+        for objective in &self.objectives_data {
+            if objective.creature_or_go_id != 0 && objective.creature_or_go_count != 0 {
+                let (kind, object_id) = if objective.creature_or_go_id < 0 {
+                    (2, -objective.creature_or_go_id)
+                } else {
+                    (0, objective.creature_or_go_id)
+                };
+                objectives.push((kind, object_id, objective.creature_or_go_count as i32));
+            }
+        }
+        for objective in &self.objectives_data {
+            if objective.item_id != 0 && objective.item_count != 0 {
+                objectives.push((1, objective.item_id as i32, objective.item_count as i32));
+            }
+        }
+
+        writer.write_i32(objectives.len() as i32);
+        writer.write_i64(511); // AllowableRaces
+        writer.write_i32(0); // TreasurePickerID
+        writer.write_i32(0); // Expansion
+
+        writer.write_bits(self.title.len() as u32, 9); // LogTitle
+        writer.write_bits(self.objectives.len() as u32, 12); // LogDescription
+        writer.write_bits(self.details.len() as u32, 12); // QuestDescription
+        writer.write_bits(self.end_text.len() as u32, 9); // AreaDescription
+        writer.write_bits(0, 10); // PortraitGiverText
+        writer.write_bits(0, 8); // PortraitGiverName
+        writer.write_bits(0, 10); // PortraitTurnInText
+        writer.write_bits(0, 8); // PortraitTurnInName
+        writer.write_bits(0, 11); // QuestCompletionLog
+        writer.write_bit(false); // ReadyForTranslation
+        writer.flush_bits();
+
+        for (index, (kind, object_id, amount)) in objectives.iter().enumerate() {
+            let description = self
+                .objective_text
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or("");
+            writer.write_u32(index as u32);
+            writer.write_u8(*kind);
+            writer.write_u8(index as u8); // StorageIndex
+            writer.write_i32(*object_id);
+            writer.write_i32(*amount);
+            writer.write_u32(0); // Flags
+            writer.write_u32(0); // Flags2
+            writer.write_f32(0.0); // ProgressBarWeight
+            writer.write_i32(0); // VisualEffects.Count
+            writer.write_bits(description.len() as u32, 8);
+            writer.flush_bits();
+            writer.write_string_raw(description);
+        }
+
+        for text in [self.title, self.objectives, self.details, self.end_text] {
+            writer.write_string_raw(text);
+        }
+
+        Some(writer.finish(Opcode::SMSG_QUEST_QUERY_RESPONSE))
+    }
 }
 
 /// SMSG_QUEST_CONFIRM_ACCEPT - Quest confirm accept response
@@ -779,6 +995,7 @@ impl ToWorldPacket for MsgQuestPushResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::bitbuf::BitReader;
     use crate::protocol::Opcode;
 
     #[test]
@@ -883,6 +1100,19 @@ mod tests {
     }
 
     #[test]
+    fn modern_questgiver_status_uses_modern_flag_values() {
+        let packet = SmsgQuestgiverStatus {
+            guid: ObjectGuid::new_creature(197, 42),
+            status: DialogStatus::Available,
+        }
+        .to_modern()
+        .expect("modern status packet");
+        let mut reader = BitReader::new(packet.data());
+        assert!(reader.read_packed_guid_128().is_some());
+        assert_eq!(reader.read_u32(), Some(0x000400));
+    }
+
+    #[test]
     fn test_smsg_questupdate_add_kill() {
         let msg = SmsgQuestupdateAddKill {
             quest_id: 123,
@@ -919,6 +1149,7 @@ mod tests {
             quest_id: 123,
             method: 2,
             quest_level: 60,
+            min_level: 1,
             zone_or_sort: -42,
             quest_type: 81,
             rep_objective_faction: 77,
@@ -927,6 +1158,7 @@ mod tests {
             rew_or_req_money: 555,
             rew_money_max_level: 777,
             rew_spell: 888,
+            rew_spell_cast: 889,
             src_item_id: 999,
             quest_flags: QuestFlags::default(),
             rew_item_id: [1, 2, 3, 4],
@@ -937,6 +1169,10 @@ mod tests {
             point_x: 1.5,
             point_y: -2.5,
             point_opt: 22,
+            suggested_players: 1,
+            limit_time: 0,
+            rew_rep_faction: [0; 5],
+            rew_rep_value: [0; 5],
             title: "Quest title",
             objectives: "Quest objectives",
             details: "Quest details",
@@ -975,6 +1211,11 @@ mod tests {
             i32::from_le_bytes(packet.data()[24..28].try_into().unwrap()),
             -12
         );
+
+        let modern = msg.to_modern().expect("modern quest response");
+        assert_eq!(modern.opcode(), Opcode::SMSG_QUEST_QUERY_RESPONSE);
+        assert_eq!(&modern.data()[0..4], &123u32.to_le_bytes());
+        assert_eq!(modern.data()[4], 0x80, "Allow");
     }
 
     #[test]

@@ -55,7 +55,7 @@ pub async fn handle_reclaim_corpse(
         None => return Ok(()),
     };
 
-    let _corpse_guid = packet.read_guid_raw();
+    let _corpse_guid = packet.read_guid_for(session.protocol());
 
     // The corpse_guid is validated in the system
     world
@@ -82,11 +82,11 @@ pub async fn handle_resurrect_response(
         None => return Ok(()),
     };
 
-    let resurrector_guid = packet.read_guid_raw();
+    let resurrector_guid = packet.read_guid_for(session.protocol());
 
     let accept = packet.read_u8().unwrap_or(0) != 0;
 
-    if let Some(resurrector) = resurrector_guid.map(ObjectGuid::from_raw) {
+    if let Some(resurrector) = resurrector_guid {
         world
             .systems
             .death
@@ -112,7 +112,7 @@ pub async fn handle_spirit_healer_activate(
         None => return Ok(()),
     };
 
-    let _healer_guid = packet.read_guid_raw();
+    let _healer_guid = packet.read_guid_for(session.protocol());
 
     world
         .systems
@@ -213,7 +213,7 @@ pub async fn handle_area_spirit_healer_query(
     packet: &mut WorldPacket,
     _world: &World,
 ) -> Result<()> {
-    let healer_guid = match packet.read_guid_raw() {
+    let healer_guid = match packet.read_guid_for(session.protocol()) {
         Some(g) => g,
         None => return Ok(()),
     };
@@ -223,7 +223,7 @@ pub async fn handle_area_spirit_healer_query(
     const WAVE_INTERVAL_MS: u32 = 30_000;
 
     let mut reply = WorldPacket::new(Opcode::SMSG_AREA_SPIRIT_HEALER_TIME);
-    reply.write_u64(healer_guid);
+    reply.write_u64(healer_guid.raw());
     reply.write_u32(WAVE_INTERVAL_MS);
     session.send_packet(reply)?;
     Ok(())
@@ -246,7 +246,7 @@ pub async fn handle_area_spirit_healer_queue(
         Some(g) => g,
         None => return Ok(()),
     };
-    let _healer_guid = packet.read_guid_raw();
+    let _healer_guid = packet.read_guid_for(session.protocol());
 
     // Delegate to DeathSystem. The real BG wave system (Phase 8) will consume
     // this queue on its 30s timer. For now we just mark the player queued.

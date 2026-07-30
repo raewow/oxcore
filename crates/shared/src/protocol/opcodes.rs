@@ -195,27 +195,27 @@ impl Opcode {
     // Movement - Basic
     // ============================================================================
 
-    pub const MSG_MOVE_HEARTBEAT: Opcode = Opcode { vanilla: 0x00EE, ..Opcode::NONE }; // 238
-    pub const MSG_MOVE_START_FORWARD: Opcode = Opcode { vanilla: 0x00B5, ..Opcode::NONE }; // 181
-    pub const MSG_MOVE_START_BACKWARD: Opcode = Opcode { vanilla: 0x00B6, ..Opcode::NONE }; // 182
-    pub const MSG_MOVE_STOP: Opcode = Opcode { vanilla: 0x00B7, ..Opcode::NONE }; // 183
-    pub const MSG_MOVE_START_STRAFE_LEFT: Opcode = Opcode { vanilla: 0x00B8, ..Opcode::NONE }; // 184
-    pub const MSG_MOVE_START_STRAFE_RIGHT: Opcode = Opcode { vanilla: 0x00B9, ..Opcode::NONE }; // 185
-    pub const MSG_MOVE_STOP_STRAFE: Opcode = Opcode { vanilla: 0x00BA, ..Opcode::NONE }; // 186
-    pub const MSG_MOVE_JUMP: Opcode = Opcode { vanilla: 0x00BB, ..Opcode::NONE }; // 187
-    pub const MSG_MOVE_START_TURN_LEFT: Opcode = Opcode { vanilla: 0x00BC, ..Opcode::NONE }; // 188
-    pub const MSG_MOVE_START_TURN_RIGHT: Opcode = Opcode { vanilla: 0x00BD, ..Opcode::NONE }; // 189
-    pub const MSG_MOVE_STOP_TURN: Opcode = Opcode { vanilla: 0x00BE, ..Opcode::NONE }; // 190
-    pub const MSG_MOVE_SET_FACING: Opcode = Opcode { vanilla: 0x00DA, ..Opcode::NONE }; // 218
-    pub const MSG_MOVE_SET_PITCH: Opcode = Opcode { vanilla: 0x00DB, ..Opcode::NONE }; // 219
+    pub const MSG_MOVE_HEARTBEAT: Opcode = Opcode { vanilla: 0x00EE, modern: 0x3A0F }; // 238
+    pub const MSG_MOVE_START_FORWARD: Opcode = Opcode { vanilla: 0x00B5, modern: 0x39E4 }; // 181
+    pub const MSG_MOVE_START_BACKWARD: Opcode = Opcode { vanilla: 0x00B6, modern: 0x39E5 }; // 182
+    pub const MSG_MOVE_STOP: Opcode = Opcode { vanilla: 0x00B7, modern: 0x39E6 }; // 183
+    pub const MSG_MOVE_START_STRAFE_LEFT: Opcode = Opcode { vanilla: 0x00B8, modern: 0x39E7 }; // 184
+    pub const MSG_MOVE_START_STRAFE_RIGHT: Opcode = Opcode { vanilla: 0x00B9, modern: 0x39E8 }; // 185
+    pub const MSG_MOVE_STOP_STRAFE: Opcode = Opcode { vanilla: 0x00BA, modern: 0x39E9 }; // 186
+    pub const MSG_MOVE_JUMP: Opcode = Opcode { vanilla: 0x00BB, modern: 0x39EA }; // 187
+    pub const MSG_MOVE_START_TURN_LEFT: Opcode = Opcode { vanilla: 0x00BC, modern: 0x39EC }; // 188
+    pub const MSG_MOVE_START_TURN_RIGHT: Opcode = Opcode { vanilla: 0x00BD, modern: 0x39ED }; // 189
+    pub const MSG_MOVE_STOP_TURN: Opcode = Opcode { vanilla: 0x00BE, modern: 0x39EE }; // 190
+    pub const MSG_MOVE_SET_FACING: Opcode = Opcode { vanilla: 0x00DA, modern: 0x3A07 }; // 218
+    pub const MSG_MOVE_SET_PITCH: Opcode = Opcode { vanilla: 0x00DB, modern: 0x3A08 }; // 219
     pub const MSG_MOVE_WORLDPORT_ACK: Opcode = Opcode { vanilla: 0x00DC, ..Opcode::NONE }; // 220
-    pub const MSG_MOVE_FALL_LAND: Opcode = Opcode { vanilla: 0x00C9, ..Opcode::NONE }; // 201
+    pub const MSG_MOVE_FALL_LAND: Opcode = Opcode { vanilla: 0x00C9, modern: 0x39F9 }; // 201
 
     // ============================================================================
     // Movement - Advanced
     // ============================================================================
 
-    pub const CMSG_SET_ACTIVE_MOVER: Opcode = Opcode { vanilla: 0x026A, modern: 0x3A3B }; // 618
+    pub const CMSG_SET_ACTIVE_MOVER: Opcode = Opcode { vanilla: 0x026A, modern: 0x3A3A }; // 618
     pub const CMSG_MOVE_SPLINE_DONE: Opcode = Opcode { vanilla: 0x02C9, modern: 0x3A17 }; // 713
     pub const CMSG_MOVE_FALL_RESET: Opcode = Opcode { vanilla: 0x02CA, modern: 0x3A18 }; // 714
     pub const CMSG_MOVE_TIME_SKIPPED: Opcode = Opcode { vanilla: 0x02CE, modern: 0x3A1A }; // 718
@@ -735,6 +735,16 @@ impl Opcode {
     pub const SMSG_QUEST_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x005D, modern: 0x2A96 }; // 93
     pub const CMSG_QUESTGIVER_STATUS_QUERY: Opcode = Opcode { vanilla: 0x0182, modern: 0x349C }; // 386
     pub const SMSG_QUESTGIVER_STATUS: Opcode = Opcode { vanilla: 0x0183, modern: 0x2A9B }; // 387
+    // Time sync. Modern-only: 1.12 has no equivalent, so both are `Opcode::NONE` on the vanilla
+    // side. TrinityCore sends the request first in `SendInitialPacketsBeforeAddToMap`, then at 5 s
+    // and every 10 s (`Player.cpp:24920-24928`, `WorldSession.cpp:1815-1826`); the client answers
+    // with its own tick count so the server can measure clock drift.
+    pub const SMSG_TIME_SYNC_REQUEST: Opcode = Opcode { modern: 0x2DD2, ..Opcode::NONE };
+    pub const CMSG_TIME_SYNC_RESPONSE: Opcode = Opcode { modern: 0x3A3B, ..Opcode::NONE };
+    pub const CMSG_TIME_SYNC_RESPONSE_FAILED: Opcode = Opcode { modern: 0x3A3C, ..Opcode::NONE };
+    pub const CMSG_TIME_SYNC_RESPONSE_DROPPED: Opcode = Opcode { modern: 0x3A3D, ..Opcode::NONE };
+    pub const CMSG_QUESTGIVER_STATUS_MULTIPLE_QUERY: Opcode = Opcode { modern: 0x349D, ..Opcode::NONE };
+    pub const SMSG_QUESTGIVER_STATUS_MULTIPLE: Opcode = Opcode { modern: 0x2A91, ..Opcode::NONE };
     pub const CMSG_QUESTGIVER_HELLO: Opcode = Opcode { vanilla: 0x0184, modern: 0x3496 }; // 388
     pub const SMSG_QUESTGIVER_QUEST_LIST: Opcode = Opcode { vanilla: 0x0185, modern: 0x2A9A }; // 389
     pub const CMSG_QUESTGIVER_QUERY_QUEST: Opcode = Opcode { vanilla: 0x0186, modern: 0x3497 }; // 390
@@ -1046,6 +1056,39 @@ impl Opcode {
 
     // Transport diagnostic sent by the modern client while it disconnects.
     pub const CMSG_LOG_DISCONNECT: Opcode = Opcode { modern: 0x3769, ..Opcode::NONE };
+    pub const CMSG_QUEUED_MESSAGES_END: Opcode = Opcode { modern: 0x376C, ..Opcode::NONE };
+    pub const CMSG_MOVE_INIT_ACTIVE_MOVER_COMPLETE: Opcode = Opcode { modern: 0x3A45, ..Opcode::NONE };
+
+    // Client bootstrap and optional service requests. These are registered even where oxcore has
+    // no backing system, so it can return the protocol-defined empty response rather than leave a
+    // modern client waiting on an unresolved wire opcode.
+    pub const CMSG_REQUEST_CATEGORY_COOLDOWNS: Opcode = Opcode { modern: 0x3181, ..Opcode::NONE };
+    pub const SMSG_SEND_SPELL_HISTORY: Opcode = Opcode { modern: 0x2C2B, ..Opcode::NONE };
+    pub const CMSG_REQUEST_FORCED_REACTIONS: Opcode = Opcode { modern: 0x3207, ..Opcode::NONE };
+    pub const CMSG_QUERY_NEXT_MAIL_TIME: Opcode = Opcode { modern: 0x3538, ..Opcode::NONE };
+    pub const SMSG_MAIL_QUERY_NEXT_TIME_RESULT: Opcode = Opcode { modern: 0x274E, ..Opcode::NONE };
+    pub const CMSG_REQUEST_CONQUEST_FORMULA_CONSTANTS: Opcode = Opcode { modern: 0x32AC, ..Opcode::NONE };
+    pub const SMSG_CONQUEST_FORMULA_CONSTANTS: Opcode = Opcode { modern: 0x2780, ..Opcode::NONE };
+    pub const CMSG_REQUEST_LFG_LIST_BLACKLIST: Opcode = Opcode { modern: 0x329C, ..Opcode::NONE };
+    pub const SMSG_LFG_LIST_UPDATE_BLACKLIST: Opcode = Opcode { modern: 0x2A2A, ..Opcode::NONE };
+    pub const CMSG_GUILD_BANK_REMAINING_WITHDRAW_MONEY_QUERY: Opcode = Opcode { modern: 0x3083, ..Opcode::NONE };
+    pub const SMSG_GUILD_BANK_REMAINING_WITHDRAW_MONEY: Opcode = Opcode { modern: 0x29E0, ..Opcode::NONE };
+    pub const CMSG_CALENDAR_GET_NUM_PENDING: Opcode = Opcode { modern: 0x367C, ..Opcode::NONE };
+    pub const SMSG_CALENDAR_SEND_NUM_PENDING: Opcode = Opcode { modern: 0x2695, ..Opcode::NONE };
+    pub const CMSG_GET_ACCOUNT_CHARACTER_LIST: Opcode = Opcode { modern: 0x36BD, ..Opcode::NONE };
+    pub const SMSG_GET_ACCOUNT_CHARACTER_LIST_RESULT: Opcode = Opcode { modern: 0x275C, ..Opcode::NONE };
+    pub const CMSG_LOADING_SCREEN_NOTIFY: Opcode = Opcode { modern: 0x35F9, ..Opcode::NONE };
+    pub const CMSG_CHAT_REGISTER_ADDON_PREFIXES: Opcode = Opcode { modern: 0x37CD, ..Opcode::NONE };
+    pub const CMSG_CHAT_UNREGISTER_ALL_ADDON_PREFIXES: Opcode = Opcode { modern: 0x37CE, ..Opcode::NONE };
+    pub const CMSG_VIOLENCE_LEVEL: Opcode = Opcode { modern: 0x3188, ..Opcode::NONE };
+    pub const CMSG_QUERY_COUNTDOWN_TIMER: Opcode = Opcode { modern: 0x31AB, ..Opcode::NONE };
+    pub const CMSG_REQUEST_CEMETERY_LIST: Opcode = Opcode { modern: 0x3179, ..Opcode::NONE };
+    pub const CMSG_REQUEST_BATTLEFIELD_STATUS: Opcode = Opcode { modern: 0x35DD, ..Opcode::NONE };
+    pub const CMSG_LFG_LIST_GET_STATUS: Opcode = Opcode { modern: 0x360C, ..Opcode::NONE };
+    pub const CMSG_BATTLE_PET_REQUEST_JOURNAL: Opcode = Opcode { modern: 0x3625, ..Opcode::NONE };
+    pub const CMSG_ARENA_TEAM_ACCEPT: Opcode = Opcode { modern: 0x36B6, ..Opcode::NONE };
+    pub const CMSG_GUILD_SET_ACHIEVEMENT_TRACKING: Opcode = Opcode { modern: 0x306F, ..Opcode::NONE };
+    pub const CMSG_GM_TICKET_GET_CASE_STATUS: Opcode = Opcode { modern: 0x368F, ..Opcode::NONE };
 }
 
 /// Prints the constant's name — `CMSG_PING` rather than `Opcode(476)`. Every dispatcher logs
@@ -1531,10 +1574,6 @@ pub const ALL: &[(Opcode, &str)] = &[
         "SMSG_SET_FACTION_STANDING",
     ),
     (Opcode::SMSG_SET_FACTION_VISIBLE, "SMSG_SET_FACTION_VISIBLE"),
-    (
-        Opcode::SMSG_SET_FORCED_REACTIONS,
-        "SMSG_SET_FORCED_REACTIONS",
-    ),
     (Opcode::CMSG_SET_FACTION_ATWAR, "CMSG_SET_FACTION_ATWAR"),
     (
         Opcode::CMSG_SET_FACTION_INACTIVE,
@@ -1731,6 +1770,24 @@ pub const ALL: &[(Opcode, &str)] = &[
         "CMSG_QUESTGIVER_STATUS_QUERY",
     ),
     (Opcode::SMSG_QUESTGIVER_STATUS, "SMSG_QUESTGIVER_STATUS"),
+    (
+        Opcode::CMSG_QUESTGIVER_STATUS_MULTIPLE_QUERY,
+        "CMSG_QUESTGIVER_STATUS_MULTIPLE_QUERY",
+    ),
+    (Opcode::SMSG_TIME_SYNC_REQUEST, "SMSG_TIME_SYNC_REQUEST"),
+    (Opcode::CMSG_TIME_SYNC_RESPONSE, "CMSG_TIME_SYNC_RESPONSE"),
+    (
+        Opcode::CMSG_TIME_SYNC_RESPONSE_FAILED,
+        "CMSG_TIME_SYNC_RESPONSE_FAILED",
+    ),
+    (
+        Opcode::CMSG_TIME_SYNC_RESPONSE_DROPPED,
+        "CMSG_TIME_SYNC_RESPONSE_DROPPED",
+    ),
+    (
+        Opcode::SMSG_QUESTGIVER_STATUS_MULTIPLE,
+        "SMSG_QUESTGIVER_STATUS_MULTIPLE",
+    ),
     (Opcode::CMSG_QUESTGIVER_HELLO, "CMSG_QUESTGIVER_HELLO"),
     (
         Opcode::SMSG_QUESTGIVER_QUEST_LIST,
@@ -2107,6 +2164,111 @@ pub const ALL: &[(Opcode, &str)] = &[
         "CMSG_BATTLE_PAY_GET_PURCHASE_LIST",
     ),
     (Opcode::CMSG_LOG_DISCONNECT, "CMSG_LOG_DISCONNECT"),
+    (Opcode::CMSG_QUEUED_MESSAGES_END, "CMSG_QUEUED_MESSAGES_END"),
+    (
+        Opcode::CMSG_MOVE_INIT_ACTIVE_MOVER_COMPLETE,
+        "CMSG_MOVE_INIT_ACTIVE_MOVER_COMPLETE",
+    ),
+    (
+        Opcode::CMSG_REQUEST_CATEGORY_COOLDOWNS,
+        "CMSG_REQUEST_CATEGORY_COOLDOWNS",
+    ),
+    (Opcode::SMSG_SEND_SPELL_HISTORY, "SMSG_SEND_SPELL_HISTORY"),
+    (
+        Opcode::CMSG_REQUEST_FORCED_REACTIONS,
+        "CMSG_REQUEST_FORCED_REACTIONS",
+    ),
+    (
+        Opcode::SMSG_SET_FORCED_REACTIONS,
+        "SMSG_SET_FORCED_REACTIONS",
+    ),
+    (
+        Opcode::CMSG_QUERY_NEXT_MAIL_TIME,
+        "CMSG_QUERY_NEXT_MAIL_TIME",
+    ),
+    (
+        Opcode::SMSG_MAIL_QUERY_NEXT_TIME_RESULT,
+        "SMSG_MAIL_QUERY_NEXT_TIME_RESULT",
+    ),
+    (
+        Opcode::CMSG_REQUEST_CONQUEST_FORMULA_CONSTANTS,
+        "CMSG_REQUEST_CONQUEST_FORMULA_CONSTANTS",
+    ),
+    (
+        Opcode::SMSG_CONQUEST_FORMULA_CONSTANTS,
+        "SMSG_CONQUEST_FORMULA_CONSTANTS",
+    ),
+    (
+        Opcode::CMSG_REQUEST_LFG_LIST_BLACKLIST,
+        "CMSG_REQUEST_LFG_LIST_BLACKLIST",
+    ),
+    (
+        Opcode::SMSG_LFG_LIST_UPDATE_BLACKLIST,
+        "SMSG_LFG_LIST_UPDATE_BLACKLIST",
+    ),
+    (
+        Opcode::CMSG_GUILD_BANK_REMAINING_WITHDRAW_MONEY_QUERY,
+        "CMSG_GUILD_BANK_REMAINING_WITHDRAW_MONEY_QUERY",
+    ),
+    (
+        Opcode::SMSG_GUILD_BANK_REMAINING_WITHDRAW_MONEY,
+        "SMSG_GUILD_BANK_REMAINING_WITHDRAW_MONEY",
+    ),
+    (
+        Opcode::CMSG_CALENDAR_GET_NUM_PENDING,
+        "CMSG_CALENDAR_GET_NUM_PENDING",
+    ),
+    (
+        Opcode::SMSG_CALENDAR_SEND_NUM_PENDING,
+        "SMSG_CALENDAR_SEND_NUM_PENDING",
+    ),
+    (
+        Opcode::CMSG_GET_ACCOUNT_CHARACTER_LIST,
+        "CMSG_GET_ACCOUNT_CHARACTER_LIST",
+    ),
+    (
+        Opcode::SMSG_GET_ACCOUNT_CHARACTER_LIST_RESULT,
+        "SMSG_GET_ACCOUNT_CHARACTER_LIST_RESULT",
+    ),
+    (
+        Opcode::CMSG_LOADING_SCREEN_NOTIFY,
+        "CMSG_LOADING_SCREEN_NOTIFY",
+    ),
+    (
+        Opcode::CMSG_CHAT_REGISTER_ADDON_PREFIXES,
+        "CMSG_CHAT_REGISTER_ADDON_PREFIXES",
+    ),
+    (
+        Opcode::CMSG_CHAT_UNREGISTER_ALL_ADDON_PREFIXES,
+        "CMSG_CHAT_UNREGISTER_ALL_ADDON_PREFIXES",
+    ),
+    (Opcode::CMSG_VIOLENCE_LEVEL, "CMSG_VIOLENCE_LEVEL"),
+    (
+        Opcode::CMSG_QUERY_COUNTDOWN_TIMER,
+        "CMSG_QUERY_COUNTDOWN_TIMER",
+    ),
+    (
+        Opcode::CMSG_REQUEST_CEMETERY_LIST,
+        "CMSG_REQUEST_CEMETERY_LIST",
+    ),
+    (
+        Opcode::CMSG_REQUEST_BATTLEFIELD_STATUS,
+        "CMSG_REQUEST_BATTLEFIELD_STATUS",
+    ),
+    (Opcode::CMSG_LFG_LIST_GET_STATUS, "CMSG_LFG_LIST_GET_STATUS"),
+    (
+        Opcode::CMSG_BATTLE_PET_REQUEST_JOURNAL,
+        "CMSG_BATTLE_PET_REQUEST_JOURNAL",
+    ),
+    (Opcode::CMSG_ARENA_TEAM_ACCEPT, "CMSG_ARENA_TEAM_ACCEPT"),
+    (
+        Opcode::CMSG_GUILD_SET_ACHIEVEMENT_TRACKING,
+        "CMSG_GUILD_SET_ACHIEVEMENT_TRACKING",
+    ),
+    (
+        Opcode::CMSG_GM_TICKET_GET_CASE_STATUS,
+        "CMSG_GM_TICKET_GET_CASE_STATUS",
+    ),
 ];
 
 /// Marks an empty slot in the wire index tables. `u16::MAX` is safe as a sentinel because `ALL` is
@@ -2250,8 +2412,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            595,
-            "expected 595 opcode constants; update this count deliberately when adding opcodes"
+            630,
+            "expected 630 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 
@@ -2401,6 +2563,25 @@ mod tests {
         assert_eq!(Opcode::SMSG_CHAR_ENUM.modern(), 0x2583);
         assert_eq!(Opcode::CMSG_SERVER_TIME_OFFSET_REQUEST.modern(), 0x369B);
         assert_eq!(Opcode::CMSG_BATTLE_PAY_GET_PRODUCT_LIST.modern(), 0x36C2);
+    }
+
+    #[test]
+    fn observed_modern_bootstrap_and_movement_opcodes_resolve() {
+        for (wire, expected) in [
+            (0x376C, Opcode::CMSG_QUEUED_MESSAGES_END),
+            (0x3A45, Opcode::CMSG_MOVE_INIT_ACTIVE_MOVER_COMPLETE),
+            (0x39E4, Opcode::MSG_MOVE_START_FORWARD),
+            (0x39E6, Opcode::MSG_MOVE_STOP),
+            (0x39EA, Opcode::MSG_MOVE_JUMP),
+            (0x3A07, Opcode::MSG_MOVE_SET_FACING),
+            (0x3A08, Opcode::MSG_MOVE_SET_PITCH),
+            (0x3A0F, Opcode::MSG_MOVE_HEARTBEAT),
+            (0x3181, Opcode::CMSG_REQUEST_CATEGORY_COOLDOWNS),
+            (0x3538, Opcode::CMSG_QUERY_NEXT_MAIL_TIME),
+            (0x36BD, Opcode::CMSG_GET_ACCOUNT_CHARACTER_LIST),
+        ] {
+            assert_eq!(Opcode::from_modern_wire(wire), Some(expected));
+        }
     }
 
     #[test]

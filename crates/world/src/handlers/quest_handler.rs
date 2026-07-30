@@ -22,7 +22,6 @@ use oxcore_shared::messages::gossip::SmsgGossipComplete;
 use oxcore_shared::messages::quest::{
     MsgQuestPushResult, QuestObjectiveData, SmsgQuestQueryResponseV2,
 };
-use oxcore_shared::protocol::bitbuf::BitReader;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Handle CMSG_QUESTGIVER_STATUS_QUERY (0x182)
@@ -38,7 +37,7 @@ pub async fn handle_questgiver_status_query(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let quest_giver_guid = read_questgiver_status_guid(session.protocol(), packet)?;
+    let quest_giver_guid = read_questgiver_guid(session.protocol(), packet)?;
 
     debug!(
         "CMSG_QUESTGIVER_STATUS_QUERY: player={:?}, npc={:?}",
@@ -83,47 +82,18 @@ pub async fn handle_questgiver_status_query(
     Ok(())
 }
 
-/// Query status uses a packed GUID128 on 1.14, while vanilla sends its packed GUID64 form.
-/// Object lookup remains on the legacy low word because the game world still stores 1.12 GUIDs.
-fn read_questgiver_status_guid(
+/// Read a quest giver's GUID in whichever form the client speaks.
+///
+/// Thin wrapper over [`WorldPacketGuidExt::read_guid_for`] so every quest handler shares one error
+/// message. The 128-bit decode itself lives in `ObjectGuid::from_guid128`, next to its inverse, so
+/// the two directions are round-trip tested together.
+fn read_questgiver_guid(
     protocol: oxcore_shared::protocol::Protocol,
     packet: &mut WorldPacket,
 ) -> Result<ObjectGuid> {
-    if protocol == oxcore_shared::protocol::Protocol::Modern {
-        let mut reader = BitReader::new(packet.contents());
-        let (high, low) = reader
-            .read_packed_guid_128()
-            .ok_or_else(|| anyhow::anyhow!("Failed to read modern quest giver GUID"))?;
-        Ok(legacy_guid_from_modern(high, low))
-    } else {
-        packet
-            .read_guid()
-            .ok_or_else(|| anyhow::anyhow!("Failed to read quest giver GUID"))
-    }
-}
-
-/// Convert the subset of 1.14 GUID128 types that can be quest givers back to the legacy object
-/// keys used by the world managers. Modern map/server identity has no 1.12 equivalent.
-fn legacy_guid_from_modern(high: u64, low: u64) -> ObjectGuid {
-    if high == 0 && low == 0 {
-        return ObjectGuid::empty();
-    }
-
-    let guid_type = high >> 58;
-    let entry = ((high >> 6) & 0x7F_FFFF) as u32;
-    let counter = low as u32;
-
-    match guid_type {
-        2 => ObjectGuid::new_player(counter),
-        3 => ObjectGuid::new_item(counter),
-        8 => ObjectGuid::new_creature(entry, counter),
-        10 => ObjectGuid::new_pet(entry, counter),
-        11 => ObjectGuid::new_gameobject(entry, counter),
-        12 => ObjectGuid::new_dynamic_object(counter),
-        14 => ObjectGuid::new_corpse(counter),
-        // Preserve an unrecognised low word rather than rejecting the whole status request.
-        _ => ObjectGuid::from_raw(low),
-    }
+    packet
+        .read_guid_for(protocol)
+        .ok_or_else(|| anyhow::anyhow!("Failed to read quest giver GUID"))
 }
 
 /// Handle CMSG_QUEST_QUERY (0x5C)
@@ -204,9 +174,7 @@ pub async fn handle_questgiver_hello(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let quest_giver_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read quest giver GUID"))?;
+    let quest_giver_guid = read_questgiver_guid(session.protocol(), packet)?;
 
     info!(
         "CMSG_QUESTGIVER_HELLO: player={:?}, npc={:?}",
@@ -417,9 +385,7 @@ pub async fn handle_questgiver_query_quest(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let quest_giver_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read quest giver GUID"))?;
+    let quest_giver_guid = read_questgiver_guid(session.protocol(), packet)?;
 
     let quest_id = packet
         .read_u32()
@@ -484,9 +450,7 @@ pub async fn handle_questgiver_accept_quest(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let quest_giver_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read quest giver GUID"))?;
+    let quest_giver_guid = read_questgiver_guid(session.protocol(), packet)?;
 
     let quest_id = packet
         .read_u32()
@@ -520,9 +484,7 @@ pub async fn handle_questgiver_complete_quest(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let quest_giver_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read quest giver GUID"))?;
+    let quest_giver_guid = read_questgiver_guid(session.protocol(), packet)?;
 
     let quest_id = packet
         .read_u32()
@@ -718,9 +680,7 @@ pub async fn handle_questgiver_request_reward(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let quest_giver_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read quest giver GUID"))?;
+    let quest_giver_guid = read_questgiver_guid(session.protocol(), packet)?;
 
     let quest_id = packet
         .read_u32()
@@ -757,9 +717,7 @@ pub async fn handle_questgiver_choose_reward(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let quest_giver_guid = packet
-        .read_guid()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read quest giver GUID"))?;
+    let quest_giver_guid = read_questgiver_guid(session.protocol(), packet)?;
 
     let quest_id = packet
         .read_u32()
@@ -982,7 +940,7 @@ pub async fn handle_quest_push_result(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let _sender_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read sender GUID"))?;
 
     let msg = packet
@@ -1108,7 +1066,7 @@ mod tests {
         packet.write_bytes(&writer.into_bytes());
 
         assert_eq!(
-            read_questgiver_status_guid(oxcore_shared::protocol::Protocol::Modern, &mut packet)
+            read_questgiver_guid(oxcore_shared::protocol::Protocol::Modern, &mut packet)
                 .unwrap(),
             expected
         );

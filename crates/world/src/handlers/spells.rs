@@ -11,7 +11,8 @@ use crate::game::player::spells::state::{
 };
 use crate::World;
 use anyhow::Result;
-use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use oxcore_shared::protocol::bitbuf::BitReader;
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Protocol, WorldPacket};
 
 /// Parse SpellCastTargets from a CMSG_CAST_SPELL packet.
 ///
@@ -25,6 +26,128 @@ use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 /// - if DEST_LOCATION: packed GUID (transport) + 3x f32
 /// - if STRING: null-terminated string
 pub(crate) fn parse_spell_cast_targets(
+    protocol: Protocol,
+    packet: &mut WorldPacket,
+    caster_guid: ObjectGuid,
+) -> Result<SpellCastTargets> {
+    match protocol {
+        Protocol::Vanilla => parse_spell_cast_targets_vanilla(packet, caster_guid),
+        Protocol::Modern => parse_spell_cast_targets_modern(packet, caster_guid),
+    }
+}
+
+/// `SpellTargetData::Read` for build 42597, from JimsProxy
+/// `World/Server/Packets/SpellPackets.cs:1204-1235`.
+///
+/// This is a branch rather than a translation -- the two layouts share nothing beyond the concept:
+///
+/// * the flag word is **26 bits**, not a u16, and is followed by four presence bits and a 7-bit
+///   name length, all in one bit run;
+/// * the unit and item GUIDs are **unconditional**, where vanilla gates each on a flag;
+/// * there is no separate gameobject or corpse GUID -- they arrive in the unit slot;
+/// * source and destination locations each carry a transport GUID *and* a position;
+/// * orientation and map id are new, and hang off presence bits.
+fn parse_spell_cast_targets_modern(
+    packet: &mut WorldPacket,
+    caster_guid: ObjectGuid,
+) -> Result<SpellCastTargets> {
+    let mut reader = BitReader::new(packet.contents());
+
+    let target_flags = reader
+        .read_bits(26)
+        .ok_or_else(|| anyhow::anyhow!("Failed to read modern target_flags"))?;
+    let has_src = reader
+        .read_bit()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read HasSrcLocation"))?;
+    let has_dst = reader
+        .read_bit()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read HasDstLocation"))?;
+    let has_orientation = reader
+        .read_bit()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read HasOrientation"))?;
+    let has_map_id = reader
+        .read_bit()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read HasMapID"))?;
+    let name_length = reader
+        .read_bits(7)
+        .ok_or_else(|| anyhow::anyhow!("Failed to read target name length"))? as usize;
+
+    let unit = reader
+        .read_packed_guid_128()
+        .map(|(high, low)| ObjectGuid::from_guid128(high, low))
+        .ok_or_else(|| anyhow::anyhow!("Failed to read modern unit target GUID"))?;
+    let item = reader
+        .read_packed_guid_128()
+        .map(|(high, low)| ObjectGuid::from_guid128(high, low))
+        .ok_or_else(|| anyhow::anyhow!("Failed to read modern item target GUID"))?;
+
+    let mut read_location = |what: &str| -> Result<(f32, f32, f32)> {
+        // The transport GUID is read and discarded: vanilla's location block carries one too and
+        // the callers have never used it. It must still be consumed, or the position is read from
+        // the GUID's bytes.
+        reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read {what} transport GUID"))?;
+        let x = reader
+            .read_f32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read {what} x"))?;
+        let y = reader
+            .read_f32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read {what} y"))?;
+        let z = reader
+            .read_f32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read {what} z"))?;
+        Ok((x, y, z))
+    };
+
+    let src_position = has_src.then(|| read_location("src location")).transpose()?;
+    let dst_position = has_dst.then(|| read_location("dst location")).transpose()?;
+
+    if has_orientation {
+        reader
+            .read_f32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read target orientation"))?;
+    }
+    if has_map_id {
+        reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read target map id"))?;
+    }
+
+    let str_target = (name_length > 0)
+        .then(|| {
+            reader
+                .read_string(name_length)
+                .ok_or_else(|| anyhow::anyhow!("Failed to read target name"))
+        })
+        .transpose()?;
+
+    let consumed = reader.consumed();
+    packet.advance(consumed);
+
+    // A self-cast still arrives with the flag set and an empty unit GUID, so resolve it here the
+    // way the vanilla branch does.
+    let unit_target_guid = if target_flags == TARGET_FLAG_SELF || unit.is_empty() {
+        Some(caster_guid)
+    } else {
+        Some(unit)
+    };
+
+    Ok(SpellCastTargets {
+        target_flags,
+        unit_target_guid,
+        // 1.14 folds gameobject and corpse targets into the single unit slot, so mirror the GUID
+        // into whichever field its own type says it belongs in -- callers switch on these.
+        gameobject_target_guid: unit.is_game_object().then_some(unit),
+        item_target_guid: (!item.is_empty()).then_some(item),
+        corpse_target_guid: unit.is_corpse().then_some(unit),
+        src_position,
+        dst_position,
+        str_target,
+    })
+}
+
+fn parse_spell_cast_targets_vanilla(
     packet: &mut WorldPacket,
     caster_guid: ObjectGuid,
 ) -> Result<SpellCastTargets> {
@@ -161,7 +284,7 @@ pub async fn handle_cast_spell(
     }
 
     // Parse full SpellCastTargets from the packet
-    let targets = parse_spell_cast_targets(packet, player_guid)?;
+    let targets = parse_spell_cast_targets(session.protocol(), packet, player_guid)?;
 
     // Extract unit target for the current pipeline (will pass full targets later)
     let target_guid = targets.unit_target();
@@ -339,7 +462,7 @@ pub async fn handle_pet_cancel_aura(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let Some(pet_guid) = packet.read_guid_raw().map(ObjectGuid::from_raw) else {
+    let Some(pet_guid) = packet.read_guid_for(session.protocol()) else {
         return Ok(());
     };
     let Some(spell_id) = packet.read_u32() else {
@@ -477,7 +600,7 @@ mod tests {
         let mut packet = WorldPacket::new(Opcode::CMSG_USE_ITEM);
         packet.write_u16(TARGET_FLAG_SELF as u16);
 
-        let targets = parse_spell_cast_targets(&mut packet, caster).unwrap();
+        let targets = parse_spell_cast_targets(Protocol::Vanilla, &mut packet, caster).unwrap();
 
         assert_eq!(targets.target_flags, TARGET_FLAG_SELF);
         assert_eq!(targets.unit_target(), Some(caster));

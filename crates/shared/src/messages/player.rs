@@ -2,7 +2,8 @@
 //!
 //! Contains message types for player-specific packets like money updates.
 
-use crate::messages::ToWorldPacket;
+use crate::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
+use crate::messages::{Recipient, ToWorldPacket};
 use crate::protocol::guid::ObjectGuid;
 use crate::protocol::update_fields::PLAYER_FIELD_COINAGE;
 use crate::protocol::Opcode;
@@ -80,6 +81,35 @@ impl ToWorldPacket for SmsgPlayerMoneyUpdate {
         packet.write_u32(self.money);
 
         packet
+    }
+
+    /// Delegates to [`SmsgUpdateObject`] rather than hand-rolling a second modern encoder.
+    ///
+    /// This message *is* a values update — it just predates `SmsgUpdateObject` and open-codes the
+    /// vanilla body above. Building the block properly means the 1.14 field-slot map, mask width and
+    /// GUID widening all come from one place, so the coinage field cannot drift from every other
+    /// values update. Same reason `SMSG_OUT_OF_RANGE` delegates.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        self.as_update_object().to_modern()
+    }
+
+    fn to_modern_for(&self, recipient: Recipient) -> Option<WorldPacket> {
+        self.as_update_object().to_modern_for(recipient)
+    }
+}
+
+impl SmsgPlayerMoneyUpdate {
+    /// The equivalent `SMSG_UPDATE_OBJECT`: one values block setting `PLAYER_FIELD_COINAGE`.
+    ///
+    /// Typed `Player` so that the recipient — who is always the owner here — is promoted to
+    /// `ActivePlayer`, which is the only table coinage exists in on 1.14.
+    fn as_update_object(&self) -> SmsgUpdateObject {
+        SmsgUpdateObject::new()
+            .for_recipient(self.guid, 0)
+            .add_block(UpdateBlockData::Values(
+                ValuesUpdateBlock::new(self.guid, ObjectType::Player)
+                    .set_required(PLAYER_FIELD_COINAGE, self.money),
+            ))
     }
 }
 

@@ -158,13 +158,20 @@ impl PlayerBroadcaster {
         if self.unported_seen.write().insert(opcode) {
             tracing::warn!(
                 "No {:?} encoding for {:?}; dropping it for player {:?}. \
-                 Further drops of this opcode on this connection are silent.",
+                 Further drops of this opcode are logged at debug.",
                 self.protocol,
                 opcode,
                 self.self_guid
             );
         } else {
-            tracing::trace!("Dropping unported {:?} for {:?}", opcode, self.self_guid);
+            // Debug, not trace. The dedupe is keyed on the *opcode*, and several messages share
+            // one -- `SmsgPlayerMoneyUpdate` rides `SMSG_UPDATE_OBJECT`, for instance. Keying on
+            // the message type instead would need a name on the trait, and `&dyn ToWorldPacket`
+            // cannot report its concrete type. So the first drop of any opcode claims the warning
+            // for every message behind it, and going fully silent afterwards is what hid real
+            // object-update drops for a whole debugging session. One line per drop at debug is
+            // noisier but never lies about what is missing.
+            tracing::debug!("Dropping unported {:?} for {:?}", opcode, self.self_guid);
         }
     }
 

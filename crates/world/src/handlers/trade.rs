@@ -24,7 +24,7 @@ pub async fn handle_initiate_trade(
     };
 
     let target_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read target GUID"))?;
 
     debug!(

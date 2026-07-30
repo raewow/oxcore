@@ -73,7 +73,7 @@ pub async fn handle_use_item(
     };
 
     // CMSG_USE_ITEM carries the same target payload as CMSG_CAST_SPELL.
-    let targets = parse_spell_cast_targets(packet, player_guid)?;
+    let targets = parse_spell_cast_targets(session.protocol(), packet, player_guid)?;
 
     // Get item GUID from inventory
     let item_guid = match world.systems.inventory.get_item_at(player_guid, bag, slot) {
@@ -531,9 +531,8 @@ pub async fn handle_autoequip_item_slot(
     world: &World,
 ) -> Result<()> {
     let item_guid = packet
-        .read_packed_guid_raw()
+        .read_packed_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("Failed to read item guid"))?;
-    let item_guid = ObjectGuid::from(item_guid);
     let equip_slot = packet
         .read_u8()
         .ok_or_else(|| anyhow!("Failed to read equip slot"))?;
@@ -760,7 +759,7 @@ pub async fn handle_autoequip_ground_item(
     _world: &World,
 ) -> Result<()> {
     let _item_guid = packet
-        .read_packed_guid_raw()
+        .read_packed_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("Failed to read item guid"))?;
 
     let _player_guid = match session.player_guid() {
@@ -779,7 +778,7 @@ pub async fn handle_autostore_ground_item(
     _world: &World,
 ) -> Result<()> {
     let _item_guid = packet
-        .read_packed_guid_raw()
+        .read_packed_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("Failed to read item guid"))?;
 
     let _player_guid = match session.player_guid() {
@@ -1031,9 +1030,8 @@ pub async fn handle_buy_bank_slot(
     world: &World,
 ) -> Result<()> {
     let banker_guid = packet
-        .read_packed_guid_raw()
+        .read_packed_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("Failed to read banker guid"))?;
-    let banker_guid = ObjectGuid::from(banker_guid);
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
@@ -1067,7 +1065,7 @@ pub async fn handle_buyback_item(
     world: &World,
 ) -> Result<()> {
     let vendor_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("Failed to read vendor guid"))?;
     let slot = packet
         .read_u32()

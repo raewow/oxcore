@@ -10,7 +10,9 @@
 //! - [`SmsgNpcTextUpdate`] - NPC text/greeting response
 //! - [`SmsgShowBank`] - Open bank window
 
+use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::ObjectGuid;
 use crate::protocol::{Opcode, WorldPacket};
@@ -92,6 +94,79 @@ impl ToWorldPacket for SmsgGossipMessage {
 
         packet
     }
+
+    /// `GossipMessagePkt::Write`, from JimsProxy
+    /// `World/Server/Packets/NPCPackets.cs:43-91`.
+    ///
+    /// A reshape, not a renumber. Both counts move ahead of *both* lists; the option strings become
+    /// 12-bit length prefixes inside a bit run rather than null-terminated; and each option gains a
+    /// confirm string, a status field, an optional spell id and a treasure list. `GossipID` is a real
+    /// wire field here, where vanilla keeps the menu id server-side and sends only the text id.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.source_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+
+        writer.write_i32(self.menu_id as i32); // GossipID
+        writer.write_i32(0); // FriendshipFactionID -- no friendship factions in Classic Era
+        writer.write_i32(self.text_id as i32);
+
+        // Both counts precede both lists, where vanilla interleaves count-then-list twice.
+        writer.write_i32(self.options.len() as i32);
+        writer.write_i32(self.quests.len() as i32);
+
+        for option in &self.options {
+            writer.write_i32(option.index as i32);
+            writer.write_u8(option.icon);
+            // 1.14's `OptionFlags` occupies the byte vanilla used for the coded flag, and bit 0
+            // still means "prompt for text", so the value carries over.
+            writer.write_u8(u8::from(option.coded));
+            writer.write_i32(option.money as i32); // OptionCost
+            // Added in 1.14.1; build 42597 is 1.14.2, so the field is present. Zero is the
+            // client's "use the option text as written" default.
+            writer.write_u32(0); // Language
+
+            let text = option.text.as_bytes();
+            writer.write_bits(text.len() as u32, 12);
+            writer.write_bits(0, 12); // Confirm length -- no confirmation prompts yet
+            writer.write_bits(0, 2); // Status: 0 = available
+            writer.write_bit(false); // HasSpellID
+            writer.flush_bits();
+
+            writer.write_i32(0); // Treasure.Items count
+
+            writer.write_bytes(text);
+            // Confirm string omitted: its length was written as zero above.
+        }
+
+        for quest in &self.quests {
+            write_modern_gossip_quest(&mut writer, quest);
+        }
+
+        Some(writer.finish(Opcode::SMSG_GOSSIP_MESSAGE))
+    }
+}
+
+/// `ClientGossipQuest::Write`, from JimsProxy `World/Server/Packets/NPCPackets.cs:133-161`.
+///
+/// Shared by the gossip menu and the quest-giver list, which send the same entry shape.
+pub(crate) fn write_modern_gossip_quest(writer: &mut BitWriter, quest: &GossipQuestData) {
+    writer.write_u32(quest.quest_id);
+    writer.write_u32(0); // ContentTuningID -- a retail scaling concept with no Classic source
+    // Vanilla's `icon` is the dialog status the client draws, and 1.14 reads the same values in
+    // `QuestType`: 2 = available, 4 = already taken.
+    writer.write_i32(quest.icon as i32);
+    writer.write_i32(quest.level as i32);
+    writer.write_i32(255); // QuestMaxLevel -- the reference's default
+    writer.write_u32(8); // QuestFlags -- likewise
+    writer.write_u32(0); // QuestFlagsEx
+
+    let title = quest.title.as_bytes();
+    writer.write_bit(false); // Repeatable
+    // 9 bits, not 12: quest titles have their own narrower length field.
+    writer.write_bits(title.len() as u32, 9);
+    writer.flush_bits();
+    writer.write_bytes(title);
 }
 
 /// SMSG_GOSSIP_COMPLETE (0x17E) - Close gossip window
@@ -242,6 +317,40 @@ impl ToWorldPacket for SmsgNpcTextUpdate {
         }
 
         packet
+    }
+
+    /// `QueryNPCTextResponse::Write`, from JimsProxy
+    /// `World/Server/Packets/QueryPackets.cs:689-707`.
+    ///
+    /// **1.14 does not carry the text.** It sends eight `BroadcastTextID`s and the client resolves
+    /// each against its local `BroadcastText` DB2 — where vanilla sends the male and female strings
+    /// inline. So the male/female text, language and emote fields on this struct have nowhere to go.
+    ///
+    /// A vanilla `npc_text` row has no broadcast-text id and there is no derivable mapping, so the
+    /// ids are sent as zero rather than invented: a wrong id shows the wrong line of dialogue, which
+    /// is worse than none. The reply is still sent, and sent well-formed, because the client blocks
+    /// its gossip window on it — the window opens with an empty greeting instead of not opening.
+    ///
+    /// Populating this needs a `broadcast_text_id` column on `npc_text`, the same shape of problem
+    /// as the customization choices in `docs/modern-opcode-plan.md`.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        const TEXT_OPTIONS: usize = 8;
+
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.text_id);
+        // `Allow` gates the payload. True with zero ids keeps the fixed-size body the client
+        // expects; false makes it treat the text id as unknown.
+        writer.write_bit(true);
+        writer.write_i32((TEXT_OPTIONS * (4 + 4)) as i32);
+
+        for option in &self.options {
+            writer.write_f32(option.probability);
+        }
+        for _ in 0..TEXT_OPTIONS {
+            writer.write_u32(0); // BroadcastTextID -- see above
+        }
+
+        Some(writer.finish(Opcode::SMSG_NPC_TEXT_UPDATE))
     }
 }
 

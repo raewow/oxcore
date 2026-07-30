@@ -135,7 +135,7 @@ pub async fn handle_auction_list_bidder_items(
         return Ok(());
     }
     let auctioneer_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
     let paging_element_start_index = packet
         .read_u32()
@@ -225,10 +225,10 @@ pub async fn handle_auction_sell_item(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let auctioneer_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
     let item_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read item GUID"))?;
     let bid = packet.read_u32().unwrap_or(0);
     let buyout = packet.read_u32().unwrap_or(0);
@@ -587,7 +587,7 @@ pub async fn handle_auction_remove_item(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let auctioneer_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
     let auction_id = packet
         .read_u32()
@@ -747,7 +747,7 @@ pub async fn handle_auction_place_bid(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let auctioneer_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
     let auction_id = packet
         .read_u32()
@@ -1131,7 +1131,7 @@ pub async fn handle_auction_hello(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let auctioneer_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
 
     debug!(
@@ -1168,7 +1168,7 @@ pub async fn handle_auction_list_owner_items(
     }
 
     let auctioneer_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
     let listfrom = packet.read_u32().unwrap_or(0);
 
@@ -1305,7 +1305,7 @@ pub async fn handle_auction_list_items(
     }
 
     let auctioneer_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read auctioneer GUID"))?;
     let listfrom = packet.read_u32().unwrap_or(0);
     let search_name_raw = packet.read_string().unwrap_or_default();

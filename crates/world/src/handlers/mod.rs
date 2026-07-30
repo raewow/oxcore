@@ -93,7 +93,7 @@ pub async fn dispatch_packet(
                     if session.protocol() == oxcore_shared::protocol::Protocol::Modern {
                         let mut response = WorldPacket::new(Opcode::SMSG_SERVER_TIME_OFFSET);
                         response.write_u64(chrono::Utc::now().timestamp() as u64);
-                        session.send_packet(response)?;
+                        session.send_packet_protocol_agnostic(response)?;
                     }
                 }
                 Opcode::CMSG_UPDATE_VAS_PURCHASE_STATES
@@ -128,6 +128,20 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_LOG_DISCONNECT => {
                     let reason = packet.read_u32().unwrap_or(0);
                     tracing::info!(reason, "modern client reported disconnect");
+                }
+                // The client's answer to SMSG_TIME_SYNC_REQUEST: the sequence index we sent plus
+                // its own tick count. Read and discarded -- the value is only useful for measuring
+                // clock drift, which nothing consumes yet. The client needs the *request*, not a
+                // reply to its reply.
+                Opcode::CMSG_TIME_SYNC_RESPONSE => {
+                    let sequence_index = packet.read_u32().unwrap_or(0);
+                    let client_time = packet.read_u32().unwrap_or(0);
+                    debug!(sequence_index, client_time, "time sync response");
+                }
+                // Sent when the client drops or fails to answer a time sync. Harmless on its own.
+                Opcode::CMSG_TIME_SYNC_RESPONSE_FAILED
+                | Opcode::CMSG_TIME_SYNC_RESPONSE_DROPPED => {
+                    debug!(?opcode, "client could not answer a time sync");
                 }
 
                 // Social handlers
@@ -329,7 +343,7 @@ pub async fn dispatch_packet(
                     let mut response = WorldPacket::new(Opcode::SMSG_MAIL_QUERY_NEXT_TIME_RESULT);
                     response.write_f32(0.0);
                     response.write_i32(0);
-                    session.send_packet(response)?;
+                    session.send_packet_protocol_agnostic(response)?;
                 }
                 Opcode::CMSG_REQUEST_CONQUEST_FORMULA_CONSTANTS => {
                     let mut response = WorldPacket::new(Opcode::SMSG_CONQUEST_FORMULA_CONSTANTS);
@@ -338,7 +352,7 @@ pub async fn dispatch_packet(
                     response.write_f32(0.0);
                     response.write_f32(0.0);
                     response.write_f32(0.0);
-                    session.send_packet(response)?;
+                    session.send_packet_protocol_agnostic(response)?;
                 }
                 Opcode::CMSG_REQUEST_LFG_LIST_BLACKLIST => {
                     send_empty_i32(session, Opcode::SMSG_LFG_LIST_UPDATE_BLACKLIST)?;
@@ -347,12 +361,12 @@ pub async fn dispatch_packet(
                     let mut response =
                         WorldPacket::new(Opcode::SMSG_GUILD_BANK_REMAINING_WITHDRAW_MONEY);
                     response.write_u64(0);
-                    session.send_packet(response)?;
+                    session.send_packet_protocol_agnostic(response)?;
                 }
                 Opcode::CMSG_CALENDAR_GET_NUM_PENDING => {
                     let mut response = WorldPacket::new(Opcode::SMSG_CALENDAR_SEND_NUM_PENDING);
                     response.write_u32(0);
-                    session.send_packet(response)?;
+                    session.send_packet_protocol_agnostic(response)?;
                 }
                 Opcode::CMSG_GET_ACCOUNT_CHARACTER_LIST => {
                     let token = packet.read_u32().unwrap_or(0);
@@ -361,7 +375,7 @@ pub async fn dispatch_packet(
                     response.write_u32(token);
                     response.write_u32(0);
                     response.write_u8(0);
-                    session.send_packet(response)?;
+                    session.send_packet_protocol_agnostic(response)?;
                 }
                 Opcode::CMSG_NAME_QUERY => {
                     query::handle_name_query(session, packet, databases, world).await?;
@@ -611,7 +625,7 @@ pub async fn dispatch_packet(
                     // statuses for objects outside its visibility set.
                     let mut response = WorldPacket::new(Opcode::SMSG_QUESTGIVER_STATUS_MULTIPLE);
                     response.write_i32(0);
-                    session.send_packet(response)?;
+                    session.send_packet_protocol_agnostic(response)?;
                 }
                 Opcode::CMSG_QUESTGIVER_HELLO => {
                     quest_handler::handle_questgiver_hello(session, packet, world).await?;
@@ -844,14 +858,14 @@ pub async fn dispatch_packet(
                     let mut response = WorldPacket::new(Opcode::SMSG_BATTLEFIELD_STATUS);
                     response.write_u32(0); // queue slot
                     response.write_u32(0); // map (0 = no BG)
-                    session.send_packet(response)?;
+                    session.send_packet_protocol_agnostic(response)?;
                 }
                 Opcode::CMSG_MEETINGSTONE_INFO => {
                     // No LFG system - send "not in queue"
                     let mut response = WorldPacket::new(Opcode::SMSG_MEETINGSTONE_SETQUEUE);
                     response.write_u32(0); // area_id
                     response.write_u8(0); // status = None
-                    session.send_packet(response)?;
+                    session.send_packet_protocol_agnostic(response)?;
                 }
 
                 _ => {
@@ -886,5 +900,5 @@ pub async fn dispatch_packet(
 fn send_empty_i32(session: &WorldSession, opcode: Opcode) -> Result<()> {
     let mut response = WorldPacket::new(opcode);
     response.write_i32(0);
-    session.send_packet(response)
+    session.send_packet_protocol_agnostic(response)
 }

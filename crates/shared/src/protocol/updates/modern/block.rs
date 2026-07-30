@@ -101,7 +101,20 @@ pub struct ModernCreateData {
     pub combat_victim: Option<ObjectGuid>,
     /// Gameobject quaternion, carried both in public fields and the packed create payload.
     pub rotation: Option<[f32; 4]>,
+    /// The recipient's action bar, as vanilla-packed `action | type << 24` words.
+    ///
+    /// 1.14 has no `SMSG_ACTION_BUTTONS`: the bar rides in the `ActivePlayer` create tail instead.
+    /// `None` sets `HasActionButtons = false` and the client keeps whatever its local cache holds.
+    pub action_buttons: Option<Vec<u32>>,
 }
+
+/// Action-bar slots 1.14 expects in the create tail, from JimsProxy
+/// `World/Enums/PlayerDefines.cs:20` (`MaxActionButtons`).
+///
+/// Vanilla sends 120. The reference reads those, leaves the packed values untouched, and zero-pads
+/// to 132 (`World/Client/PacketHandlers/CharacterHandler.cs:352-367`), so the extra slots are the
+/// only difference between the two.
+pub const MODERN_ACTION_BUTTON_COUNT: usize = 132;
 
 /// One object's block: a header, optionally a movement update, then its fields.
 #[derive(Debug, Clone)]
@@ -235,14 +248,25 @@ impl ModernUpdateBlock {
         // of the field mask, which is the block count, and every field offset after that is wrong.
         // That makes the recipient's own object unparseable while every other object in the same
         // packet is fine.
+        //
+        // Transcribed from JimsProxy `ObjectUpdateBuilder.cs:534-570`.
         if create.this_is_you {
+            let action_buttons = create.action_buttons.as_deref();
+
             writer.write_bit(false); // HasSceneInstanceIDs
             writer.write_bit(false); // HasRuneState -- death knights, so never in Classic Era
-                                     // Action buttons live here in 1.14, not in their own packet, which is why the
-                                     // reference has no SMSG_UPDATE_ACTION_BUTTONS. Sending none is valid; wiring the
-                                     // player's real bar through means writing 132 i32s in this branch.
-            writer.write_bit(false); // HasActionButtons
+            writer.write_bit(action_buttons.is_some()); // HasActionButtons
             writer.flush_bits();
+
+            // Action buttons live here in 1.14 rather than in their own packet, which is why the
+            // reference has no `SMSG_UPDATE_ACTION_BUTTONS` to send. The count is fixed at 132 and
+            // the packed word is passed through unchanged, so a short bar is zero-padded rather
+            // than truncating the field.
+            if let Some(buttons) = action_buttons {
+                for index in 0..MODERN_ACTION_BUTTON_COUNT {
+                    writer.write_i32(buttons.get(index).copied().unwrap_or(0) as i32);
+                }
+            }
         }
     }
 
@@ -309,4 +333,82 @@ fn pack_gameobject_rotation(rotation: [f32; 4]) -> i64 {
     let y = ((rotation[1] * PACK_YZ as f32) as i64 * sign) & PACK_YZ_MASK;
     let z = ((rotation[2] * PACK_YZ as f32) as i64 * sign) & PACK_YZ_MASK;
     z | (y << 21) | (x << 42)
+}
+
+#[cfg(test)]
+mod action_button_tests {
+    use super::*;
+    use crate::protocol::updates::update_types::ObjectTypeId;
+
+    fn active_player_create(action_buttons: Option<Vec<u32>>) -> Vec<u8> {
+        let guid = ObjectGuid::new_player(4);
+        let mut block = ModernUpdateBlock::new(
+            ModernUpdateType::CreateObject2,
+            guid,
+            ModernObjectType::from_vanilla(ObjectTypeId::Player, true),
+            1,
+        );
+        block.create = Some(ModernCreateData {
+            has_position_data: true,
+            this_is_you: true,
+            action_buttons,
+            ..Default::default()
+        });
+
+        let mut writer = BitWriter::new();
+        block.write_to(&mut writer, 1);
+        writer.into_bytes()
+    }
+
+    /// 1.14 has no action-buttons packet; the bar is 132 × i32 in the create tail. The count is
+    /// fixed, so a 120-slot vanilla bar must be zero-padded rather than truncating the field —
+    /// getting the length wrong shifts every field mask that follows.
+    #[test]
+    fn a_short_bar_is_padded_to_the_fixed_count() {
+        let with_bar = active_player_create(Some(vec![0x0100_002A; 120]));
+        let without = active_player_create(None);
+
+        assert_eq!(
+            with_bar.len() - without.len(),
+            MODERN_ACTION_BUTTON_COUNT * 4,
+            "the tail must always carry {MODERN_ACTION_BUTTON_COUNT} buttons"
+        );
+    }
+
+    /// The packed `action | type << 24` word is identical in both protocols, so it passes through
+    /// untouched. A transform here would silently rewrite everyone's bars.
+    ///
+    /// The button block sits between the movement update and the field masks, not at the end of the
+    /// packet, so it is located by diffing against the no-bar encoding rather than from the tail.
+    #[test]
+    fn packed_words_pass_through_unchanged() {
+        let packed = 0x0100_002Au32; // action 42, type 1
+        let with_bar = active_player_create(Some(vec![packed]));
+        let without = active_player_create(None);
+
+        // The two encodings agree up to the byte holding the presence bits; the buttons start on the
+        // next byte boundary after it.
+        let diverge = with_bar
+            .iter()
+            .zip(&without)
+            .position(|(a, b)| a != b)
+            .expect("the HasActionButtons bit must change the encoding");
+        let buttons = &with_bar[diverge + 1..diverge + 1 + MODERN_ACTION_BUTTON_COUNT * 4];
+
+        assert_eq!(&buttons[..4], &packed.to_le_bytes(), "first slot verbatim");
+        assert_eq!(&buttons[4..8], &0u32.to_le_bytes(), "second slot padded");
+    }
+
+    /// Without a bar the presence bit must be clear and nothing written, or the client reads 528
+    /// bytes of field mask as buttons.
+    #[test]
+    fn no_bar_writes_no_buttons() {
+        let without = active_player_create(None);
+        let empty_bar = active_player_create(Some(Vec::new()));
+        assert_eq!(
+            empty_bar.len() - without.len(),
+            MODERN_ACTION_BUTTON_COUNT * 4,
+            "an empty-but-present bar still writes the full block"
+        );
+    }
 }

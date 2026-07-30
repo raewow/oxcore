@@ -77,7 +77,7 @@ pub async fn handle_get_mail_list(
     };
 
     // Read mailbox GUID (not used for validation in vanilla)
-    let _mailbox_guid = packet.read_packed_guid();
+    let _mailbox_guid = packet.read_packed_guid_for(session.protocol());
 
     let player_low = player_guid.low();
     let mail_repo = MailRepository::new(Arc::new(world.databases.character.clone()));

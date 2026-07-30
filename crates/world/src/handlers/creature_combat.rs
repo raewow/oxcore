@@ -14,21 +14,13 @@ use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
 use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::bitbuf::BitReader;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Protocol, WorldPacket};
 
 pub fn read_attack_swing_target(
     protocol: Protocol,
     packet: &mut WorldPacket,
 ) -> Option<ObjectGuid> {
-    if protocol == Protocol::Modern {
-        let mut reader = BitReader::new(packet.contents());
-        reader
-            .read_packed_guid_128()
-            .map(|(_, low)| ObjectGuid::from_raw(low))
-    } else {
-        packet.read_guid()
-    }
+    packet.read_guid_for(protocol)
 }
 
 /// Handle player attack swing (CMSG_ATTACKSWING)
@@ -370,17 +362,14 @@ mod tests {
 
     #[test]
     fn modern_attack_swing_reads_packed_guid128() {
+        let expected = ObjectGuid::new_creature(299, 464);
+        let (high, low) = expected.to_guid128(1);
         let mut writer = BitWriter::new();
-        writer.write_packed_guid_128(0x0100, 0x0200_01);
+        writer.write_packed_guid_128(high, low);
         let mut packet = WorldPacket::new(Opcode::CMSG_ATTACKSWING);
         packet.write_bytes(&writer.into_bytes());
 
-        assert_eq!(
-            read_attack_swing_target(Protocol::Modern, &mut packet)
-                .unwrap()
-                .raw(),
-            0x0200_01
-        );
+        assert_eq!(read_attack_swing_target(Protocol::Modern, &mut packet).unwrap(), expected);
     }
 
     #[test]

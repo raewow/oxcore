@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use tracing::{debug, info, trace};
 
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
+use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::common::{is_valid_map_coord, MovementInfo};
 use crate::core::session::WorldSession;
 use crate::game::creature::movement::packet_sender::{
@@ -351,10 +352,9 @@ pub async fn handle_move_teleport_ack(
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
-    let guid_raw = packet
-        .read_packed_guid_raw()
+    let mover = packet
+        .read_packed_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("MoveTeleportAck: missing guid"))?;
-    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
     if session.get_mover_from_guid(mover) != Some(player_guid) {
         return Ok(());
     }
@@ -449,17 +449,17 @@ pub fn handle_set_active_mover(
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
 
-    let guid_raw = packet
-        .read_guid_raw()
+    let mover = packet
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("SetActiveMover: missing guid"))?;
 
     // Empty guid: client is releasing the active mover.
-    if guid_raw == 0 {
+    if mover.is_empty() {
         session.set_client_mover_guid(None);
         return Ok(());
     }
 
-    let requested = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
+    let requested = mover;
 
     if requested.counter() != player_guid.counter() {
         debug!(
@@ -489,11 +489,10 @@ pub async fn handle_move_not_active_mover(
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
 
-    let old_mover_raw = packet
-        .read_packed_guid_raw()
-        .or_else(|| packet.read_guid_raw())
+    let old_mover = packet
+        .read_packed_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("NotActiveMover: missing guid"))?;
-    let _ = old_mover_raw;
+    let _ = old_mover;
 
     session.set_client_mover_guid(None);
 
@@ -531,14 +530,13 @@ pub fn handle_move_root_ack(
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
-    let guid_raw = packet
-        .read_packed_guid_raw()
+    let mover = packet
+        .read_packed_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("MoveRootAck: missing guid"))?;
     let counter = packet
         .read_u32()
         .ok_or_else(|| anyhow!("MoveRootAck: missing counter"))?;
 
-    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
     if counter != 0 || session.get_mover_from_guid(mover) != Some(player_guid) {
         return Ok(());
     }
@@ -556,15 +554,14 @@ pub async fn handle_move_knock_back_ack(
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
-    let guid_raw = packet
-        .read_packed_guid_raw()
+    let mover = packet
+        .read_packed_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("KnockBackAck: missing guid"))?;
     let counter = packet
         .read_u32()
         .ok_or_else(|| anyhow!("KnockBackAck: missing counter"))?;
     let mut movement_info = MovementInfo::read_for(session.protocol(), packet)?;
 
-    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
     if session.get_mover_from_guid(mover) != Some(player_guid) {
         return Ok(());
     }
@@ -685,8 +682,8 @@ pub fn handle_move_time_skipped(
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
 
-    let guid_raw = packet
-        .read_guid_raw()
+    let mover = packet
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("MoveTimeSkipped: missing guid"))?;
     let lag = packet
         .read_u32()
@@ -694,7 +691,6 @@ pub fn handle_move_time_skipped(
 
     // Only the player is a valid mover (no pet/possession), so resolve and bail
     // if the guid isn't controllable by this client.
-    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
     if session.get_mover_from_guid(mover).is_none() {
         return Ok(());
     }
@@ -826,8 +822,8 @@ pub fn handle_force_speed_change_ack(
     };
 
     // Wire format (1.12): packed guid, movement counter (u32), movement info, speed (f32).
-    let guid_raw = packet
-        .read_packed_guid_raw()
+    let mover = packet
+        .read_packed_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("SpeedChangeAck: missing guid"))?;
     let movement_counter = packet
         .read_u32()
@@ -840,7 +836,6 @@ pub fn handle_force_speed_change_ack(
     movement_info.mover_guid = player_guid;
 
     // Only the player is a valid mover (no pet/possession).
-    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
     if session.get_mover_from_guid(mover).is_none() {
         return Ok(());
     }
@@ -968,8 +963,8 @@ pub fn handle_movement_flag_change_ack(
     };
 
     // Wire format (1.12): packed guid, movement counter (u32), movement info, apply (u32).
-    let guid_raw = packet
-        .read_packed_guid_raw()
+    let mover = packet
+        .read_packed_guid_for(session.protocol())
         .ok_or_else(|| anyhow!("FlagChangeAck: missing guid"))?;
     let movement_counter = packet
         .read_u32()
@@ -979,7 +974,6 @@ pub fn handle_movement_flag_change_ack(
 
     movement_info.mover_guid = player_guid;
 
-    let mover = WorldObjectGuid::from_low((guid_raw & 0xFFFF_FFFF) as u32);
     if session.get_mover_from_guid(mover).is_none() {
         return Ok(());
     }

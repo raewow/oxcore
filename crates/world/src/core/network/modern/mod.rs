@@ -17,6 +17,7 @@ pub mod driver;
 pub mod framing;
 pub mod handshake;
 pub mod opcodes;
+pub mod packet_log;
 pub mod packets;
 pub mod rsa_signer;
 pub mod server;

@@ -40,6 +40,7 @@ use super::framing::{
     self, ModernPacket, CONNECTION_INITIALIZE_CLIENT, CONNECTION_INITIALIZE_SERVER,
 };
 use super::handshake::{auth_response_frame, HandshakeServer};
+use super::packet_log;
 use super::opcodes::{
     CMSG_AUTH_CONTINUED_SESSION, CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK, CMSG_PING,
     SMSG_PONG,
@@ -346,6 +347,39 @@ where
     ))
 }
 
+/// Inbound opcodes the 1.14 client sends during its bootstrap sweep that we knowingly do not act on.
+///
+/// Adapted from JimsProxy's `World/KnownBenignOpcodes.cs`, which exists for the same reason: without
+/// it, routine client noise and a genuinely unhandled packet look identical in the trace. These
+/// appear as `packet.ignored` rather than `packet.rx`.
+///
+/// Keep this in step with the no-op arm in `crate::handlers::dispatch_packet`.
+fn is_known_benign(opcode: Opcode) -> bool {
+    matches!(
+        opcode,
+        Opcode::CMSG_QUEUED_MESSAGES_END
+            | Opcode::CMSG_VIOLENCE_LEVEL
+            | Opcode::CMSG_LOADING_SCREEN_NOTIFY
+            | Opcode::CMSG_CHAT_REGISTER_ADDON_PREFIXES
+            | Opcode::CMSG_CHAT_UNREGISTER_ALL_ADDON_PREFIXES
+            | Opcode::CMSG_QUERY_COUNTDOWN_TIMER
+            | Opcode::CMSG_REQUEST_CEMETERY_LIST
+            | Opcode::CMSG_REQUEST_BATTLEFIELD_STATUS
+            | Opcode::CMSG_LFG_LIST_GET_STATUS
+            | Opcode::CMSG_BATTLE_PET_REQUEST_JOURNAL
+            | Opcode::CMSG_ARENA_TEAM_ACCEPT
+            | Opcode::CMSG_GUILD_SET_ACHIEVEMENT_TRACKING
+            | Opcode::CMSG_GM_TICKET_GET_CASE_STATUS
+            | Opcode::CMSG_UPDATE_VAS_PURCHASE_STATES
+            | Opcode::CMSG_GET_UNDELETE_CHARACTER_COOLDOWN_STATUS
+            | Opcode::CMSG_BATTLE_PAY_GET_PRODUCT_LIST
+            | Opcode::CMSG_BATTLE_PAY_GET_PURCHASE_LIST
+            | Opcode::CMSG_TIME_SYNC_RESPONSE
+            | Opcode::CMSG_TIME_SYNC_RESPONSE_FAILED
+            | Opcode::CMSG_TIME_SYNC_RESPONSE_DROPPED
+    )
+}
+
 /// Read plaintext packets until the expected opcode arrives, skipping the rest.
 ///
 /// The client interleaves unsolicited packets into the handshake — most reliably
@@ -469,6 +503,8 @@ where
         }
     }
 
+    packet_log::event("session.start", role.label(), &conn.account);
+
     let mut buf = Vec::with_capacity(1024);
     let mut chunk = [0u8; 1024];
     let result = 'connection: loop {
@@ -499,9 +535,27 @@ where
                     opcode = format!("0x{:04X}", packet.opcode),
                     "unknown modern opcode"
                 );
+                packet_log::packet(
+                    "packet.untranslated",
+                    role.label(),
+                    "?",
+                    packet.opcode,
+                    &packet.body,
+                );
                 continue;
             };
             debug!(account = %conn.account, connection = role.label(), ?opcode, "received");
+            packet_log::packet(
+                if is_known_benign(opcode) {
+                    "packet.ignored"
+                } else {
+                    "packet.rx"
+                },
+                role.label(),
+                opcode.name().unwrap_or("?"),
+                packet.opcode,
+                &packet.body,
+            );
             // On the realm socket a login request is answered by handing the client to the world
             // socket, not by running the login sequence here -- the sequence is instance traffic.
             if let (
@@ -561,6 +615,16 @@ where
                         debug!(?packet, "dropping packet without a modern opcode");
                         continue;
                     }
+                    // Traced *before* encryption: the ciphertext is useless for checking a body,
+                    // and this is the only point that still has the plaintext together with the
+                    // opcode it will be sent under.
+                    packet_log::packet(
+                        "packet.tx",
+                        role.label(),
+                        packet.opcode().name().unwrap_or("?"),
+                        packet.opcode().modern(),
+                        packet.contents(),
+                    );
                     let frame =
                         framing::encode(&mut conn.crypt, packet.opcode().modern(), packet.contents());
                     tracing::trace!(

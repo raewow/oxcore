@@ -24,7 +24,7 @@ pub async fn handle_list_inventory(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let vendor_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read vendor GUID"))?;
 
     debug!(
@@ -56,7 +56,7 @@ pub async fn handle_buy_item(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let vendor_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read vendor GUID"))?;
 
     let item_id = packet
@@ -96,11 +96,11 @@ pub async fn handle_sell_item(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let vendor_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read vendor GUID"))?;
 
     let item_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read item GUID"))?;
 
     let amount = packet.read_u8().unwrap_or(0);

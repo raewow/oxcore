@@ -140,6 +140,11 @@ pub async fn serve(
 
     // 4b. Modern (1.14.x) world listener (opt-in), running alongside the vanilla one.
     if config.modern_world_enabled {
+        // Before the listener starts, so the trace covers the first connection.
+        crate::core::network::modern::packet_log::init(
+            &config.modern_packet_log,
+            config.modern_packet_log_bytes,
+        );
         // The opcode table's modern column is generated for one build. A mismatch does not fail
         // loudly — the handshake opcodes happen to agree across nearby builds — it fails much later
         // as an unrecognised gameplay opcode, so say so up front.

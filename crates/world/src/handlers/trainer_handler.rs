@@ -27,7 +27,7 @@ pub async fn handle_trainer_list(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let trainer_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read trainer GUID"))?;
 
     info!(
@@ -194,7 +194,7 @@ pub async fn handle_trainer_buy_spell(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     let trainer_guid = packet
-        .read_guid()
+        .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read trainer GUID"))?;
 
     let spell_id = packet

@@ -135,6 +135,78 @@ impl ObjectGuid {
         (high, counter)
     }
 
+    /// Rebuild a legacy GUID from a 1.14 `ObjectGuid` high/low pair -- the inverse of
+    /// [`ObjectGuid::to_guid128`].
+    ///
+    /// Needed because every inbound modern packet names its target as a packed guid128, and the
+    /// whole server -- creature manager, gameobject manager, visibility, combat -- is keyed on the
+    /// legacy 64-bit form. Reading only the low half looks like it works, because a *player's*
+    /// legacy GUID is exactly its counter; for a creature it silently drops both the `Unit` high
+    /// bits and the entry, leaving a bare counter that matches nothing.
+    ///
+    /// Transcribed from JimsProxy `WowGuid64.Create(WowGuid128)` (`World/WowGuid64.cs:24-41`) with
+    /// the field extraction in `World/WowGuid128Extensions.cs:25-40`:
+    ///
+    /// ```text
+    /// highType = high >> 58        entry   = (high >> 6) & 0x7FFFFF
+    /// counter  = low               (Transport packs both into `high` instead)
+    /// ```
+    ///
+    /// Unknown or unrepresentable high types return [`ObjectGuid::empty`] rather than guessing:
+    /// this parses attacker-controlled input, and an empty GUID fails the caller's existence check
+    /// where a fabricated one might hit an unrelated object.
+    pub fn from_guid128(high: u64, low: u64) -> Self {
+        if high == 0 && low == 0 {
+            return Self::empty();
+        }
+
+        // `HighGuidType703`, per JimsProxy `World/Enums/ObjectType.cs:154-171`.
+        const PLAYER: u64 = 2;
+        const ITEM: u64 = 3;
+        const TRANSPORT: u64 = 6;
+        const CREATURE: u64 = 8;
+        const VEHICLE: u64 = 9;
+        const PET: u64 = 10;
+        const GAME_OBJECT: u64 = 11;
+        const DYNAMIC_OBJECT: u64 = 12;
+        const CORPSE: u64 = 14;
+
+        let high_type = high >> 58;
+
+        // Transport is its own layout -- `type << 58 | counter << 38 | entry`, with an empty low
+        // half -- so it cannot share the extraction below. A zero entry means `MoTransport`, which
+        // is how the reference tells the two apart.
+        if high_type == TRANSPORT {
+            let counter = ((high >> 38) & 0x000F_FFFF) as u32;
+            let entry = (high & 0xFFFF_FFFF) as u32;
+            return if entry != 0 {
+                Self::new_with_entry(HighGuid::Transport, entry, counter)
+            } else {
+                Self::new_without_entry(HighGuid::MoTransport, counter)
+            };
+        }
+
+        let entry = ((high >> 6) & 0x007F_FFFF) as u32;
+        // The legacy counter is 32 bits at most, and only 24 for the types that carry an entry.
+        // Truncating is what the reference does (`(uint)guid.GetCounter()`).
+        let counter = (low & 0xFFFF_FFFF) as u32;
+
+        match high_type {
+            PLAYER => Self::new_without_entry(HighGuid::Player, counter),
+            ITEM => Self::new_without_entry(HighGuid::Item, counter),
+            // 1.14 splits vehicles out of creatures; 1.12 has no such type, so they fold back
+            // together the way the reference folds them.
+            CREATURE | VEHICLE => Self::new_with_entry(HighGuid::Unit, entry, counter),
+            PET => Self::new_with_entry(HighGuid::Pet, entry, counter),
+            GAME_OBJECT => Self::new_with_entry(HighGuid::GameObject, entry, counter),
+            // Vanilla stores no entry for these two, so `to_guid128` wrote a zero and there is
+            // nothing to read back.
+            DYNAMIC_OBJECT => Self::new_without_entry(HighGuid::DynamicObject, counter),
+            CORPSE => Self::new_without_entry(HighGuid::Corpse, counter),
+            _ => Self::empty(),
+        }
+    }
+
     pub fn high(&self) -> HighGuid {
         let high_16 = ((self.guid >> 48) & 0xFFFF) as u16;
 
@@ -309,6 +381,82 @@ impl From<u64> for ObjectGuid {
 impl From<ObjectGuid> for u64 {
     fn from(guid: ObjectGuid) -> Self {
         guid.raw()
+    }
+}
+
+#[cfg(test)]
+mod guid128_tests {
+    use super::*;
+
+    const REALM: u16 = 1;
+
+    /// One test pins both directions, so `to_guid128` and `from_guid128` cannot drift apart.
+    #[test]
+    fn guid128_round_trips_for_every_representable_type() {
+        let cases = [
+            ObjectGuid::new_player(4),
+            ObjectGuid::new_item(0x00AB_CDEF),
+            ObjectGuid::new_creature(299, 0x0012_3456),
+            ObjectGuid::new_pet(517, 42),
+            ObjectGuid::new_gameobject(151955, 8171),
+            ObjectGuid::new_dynamic_object(77),
+            ObjectGuid::new_corpse(1234),
+            ObjectGuid::new_with_entry(HighGuid::Transport, 176080, 999),
+            ObjectGuid::new_without_entry(HighGuid::MoTransport, 555),
+        ];
+
+        for original in cases {
+            let (high, low) = original.to_guid128(REALM);
+            assert_eq!(
+                ObjectGuid::from_guid128(high, low),
+                original,
+                "{original} did not survive the 128-bit round trip"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_round_trips_as_empty() {
+        let (high, low) = ObjectGuid::empty().to_guid128(REALM);
+        assert_eq!((high, low), (0, 0));
+        assert!(ObjectGuid::from_guid128(0, 0).is_empty());
+    }
+
+    /// The bug this function exists to fix: taking the low half alone loses the type and the entry.
+    #[test]
+    fn low_half_alone_is_not_a_creature_guid() {
+        let creature = ObjectGuid::new_creature(299, 464);
+        let (high, low) = creature.to_guid128(REALM);
+
+        assert_eq!(ObjectGuid::from_raw(low).raw(), 464, "the observed symptom");
+        assert!(!ObjectGuid::from_raw(low).is_creature());
+
+        let decoded = ObjectGuid::from_guid128(high, low);
+        assert!(decoded.is_creature());
+        assert_eq!(decoded.entry(), 299);
+        assert_eq!(decoded.counter(), 464);
+    }
+
+    /// 1.14 has a `Vehicle` high type that 1.12 does not; it must land on `Unit`, not be dropped.
+    #[test]
+    fn vehicle_folds_into_unit() {
+        let vehicle_high = 9u64 << 58 | (u64::from(REALM) << 42) | (299u64 << 6);
+        let decoded = ObjectGuid::from_guid128(vehicle_high, 464);
+        assert!(decoded.is_creature());
+        assert_eq!(decoded.entry(), 299);
+    }
+
+    /// Attacker-controlled input: an unmapped high type must produce an empty GUID, never a
+    /// fabricated one that could collide with a real object.
+    #[test]
+    fn unknown_high_types_decode_to_empty() {
+        for high_type in [0u64, 1, 4, 5, 7, 13, 15, 33, 63] {
+            let high = high_type << 58 | (299u64 << 6);
+            assert!(
+                ObjectGuid::from_guid128(high, 464).is_empty(),
+                "high type {high_type} should not decode to a usable GUID"
+            );
+        }
     }
 }
 

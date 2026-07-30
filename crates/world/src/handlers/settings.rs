@@ -17,7 +17,7 @@
 use crate::core::session::WorldSession;
 use crate::World;
 use anyhow::Result;
-use oxcore_shared::protocol::{Opcode, WorldPacket};
+use oxcore_shared::protocol::{Opcode, Protocol, WorldPacket};
 use tracing::{debug, warn};
 
 /// Handle CMSG_COMPLETE_CINEMATIC (0x00FC)
@@ -96,12 +96,34 @@ pub async fn handle_set_action_button(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let slot = packet
-        .read_u8()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read slot"))?;
-    let packed_action = packet
-        .read_u32()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read packed_action"))?;
+    // The two layouts disagree on order *and* width, so this is a branch, not a translation.
+    // Vanilla packs the action and type into one u32 after the slot; 1.14 sends them as two u16s
+    // ahead of it (JimsProxy `World/Server/Packets/CharacterPackets.cs:755-769`). Reading a modern
+    // body the vanilla way puts the action in the slot and lands the slot inside the action.
+    let (slot, action, button_type) = if session.protocol() == Protocol::Modern {
+        let action = packet
+            .read_u16()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read action"))?;
+        let button_type = packet
+            .read_u16()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read button type"))?;
+        let slot = packet
+            .read_u8()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read slot"))?;
+        (slot, u32::from(action), button_type as u8)
+    } else {
+        let slot = packet
+            .read_u8()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read slot"))?;
+        let packed_action = packet
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read packed_action"))?;
+        (
+            slot,
+            packed_action & 0x00FF_FFFF,
+            ((packed_action >> 24) & 0xFF) as u8,
+        )
+    };
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
@@ -110,10 +132,6 @@ pub async fn handle_set_action_button(
             return Ok(());
         }
     };
-
-    // Parse the packed action
-    let action = packed_action & 0x00FFFFFF;
-    let button_type = ((packed_action >> 24) & 0xFF) as u8;
 
     debug!(
         "CMSG_SET_ACTION_BUTTON: player={}, slot={}, action={}, type={}",

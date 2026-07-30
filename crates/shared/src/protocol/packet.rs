@@ -254,7 +254,9 @@ impl WorldPacket {
     }
 }
 
+use super::bitbuf::BitReader;
 use super::guid::ObjectGuid;
+use super::Protocol;
 
 /// Extension trait for WorldPacket to add ObjectGuid support
 pub trait WorldPacketGuidExt {
@@ -263,6 +265,25 @@ pub trait WorldPacketGuidExt {
 
     /// Read a packed GUID from the packet
     fn read_packed_guid(&mut self) -> Option<ObjectGuid>;
+
+    /// Read a GUID in whichever form the session's protocol uses.
+    ///
+    /// The two are unrelated encodings, so this is a branch rather than a translation: 1.14 names
+    /// every object with a packed 128-bit GUID, which then has to be folded back to the legacy
+    /// 64-bit form the whole server is keyed on. Named and shaped like
+    /// [`MovementInfo::read_for`](super::movement::MovementInfo::read_for), which solved the same
+    /// problem for movement bodies.
+    ///
+    /// Use this at **every** inbound GUID read. Reading a modern body with [`Self::read_guid`]
+    /// does not fail loudly -- it returns a plausible-looking GUID built from the wrong bytes and
+    /// leaves the cursor in the wrong place, so the field after it is wrong too.
+    fn read_guid_for(&mut self, protocol: Protocol) -> Option<ObjectGuid>;
+
+    /// [`Self::read_guid_for`] for bodies whose vanilla form uses a *packed* GUID.
+    ///
+    /// Modern has only one GUID encoding, so the modern arm is identical; the vanilla arm is what
+    /// differs. Kept separate so each call site keeps documenting which vanilla layout it expects.
+    fn read_packed_guid_for(&mut self, protocol: Protocol) -> Option<ObjectGuid>;
 
     /// Write a GUID to the packet (u64, little-endian)
     fn write_guid(&mut self, guid: ObjectGuid);
@@ -288,11 +309,104 @@ impl WorldPacketGuidExt for WorldPacket {
         })
     }
 
+    fn read_guid_for(&mut self, protocol: Protocol) -> Option<ObjectGuid> {
+        match protocol {
+            Protocol::Vanilla => self.read_guid(),
+            Protocol::Modern => read_modern_guid(self),
+        }
+    }
+
+    fn read_packed_guid_for(&mut self, protocol: Protocol) -> Option<ObjectGuid> {
+        match protocol {
+            Protocol::Vanilla => self.read_packed_guid(),
+            Protocol::Modern => read_modern_guid(self),
+        }
+    }
+
     fn write_guid(&mut self, guid: ObjectGuid) {
         self.write_guid_raw(guid.raw());
     }
 
     fn write_packed_guid(&mut self, guid: ObjectGuid) {
         self.write_packed_guid_raw(guid.raw());
+    }
+}
+
+/// Read one packed guid128 from the packet's cursor and advance past it.
+///
+/// A packed guid128 is byte-oriented but variable-length, so it cannot go through the fixed-width
+/// `read_*` methods. Going via [`BitReader`] over [`WorldPacket::contents`] and then
+/// [`WorldPacket::advance`] is the pattern that keeps the cursor correct -- without the advance the
+/// guid parses but every field after it re-reads the guid's own bytes.
+fn read_modern_guid(packet: &mut WorldPacket) -> Option<ObjectGuid> {
+    let mut reader = BitReader::new(packet.contents());
+    let (high, low) = reader.read_packed_guid_128()?;
+    let consumed = reader.consumed();
+    packet.advance(consumed);
+    Some(ObjectGuid::from_guid128(high, low))
+}
+
+#[cfg(test)]
+mod guid_read_tests {
+    use super::*;
+    use crate::protocol::bitbuf::BitWriter;
+    use crate::protocol::guid::ObjectGuid;
+    use crate::protocol::Opcode;
+
+    fn modern_body(guid: ObjectGuid, trailing: u32) -> WorldPacket {
+        let mut writer = BitWriter::new();
+        let (high, low) = guid.to_guid128(1);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(trailing);
+        writer.finish(Opcode::CMSG_QUESTGIVER_HELLO)
+    }
+
+    #[test]
+    fn modern_read_recovers_the_creature_and_leaves_the_cursor_after_the_guid() {
+        let creature = ObjectGuid::new_creature(299, 464);
+        let mut packet = modern_body(creature, 0xDEAD_BEEF);
+
+        assert_eq!(packet.read_guid_for(Protocol::Modern), Some(creature));
+        // The reason the cursor matters: without the advance this reads the guid's own bytes back.
+        assert_eq!(packet.read_u32(), Some(0xDEAD_BEEF));
+    }
+
+    #[test]
+    fn vanilla_read_is_unchanged() {
+        let creature = ObjectGuid::new_creature(299, 464);
+        let mut packet = WorldPacket::new(Opcode::CMSG_QUESTGIVER_HELLO);
+        packet.write_guid(creature);
+        packet.write_u32(0xDEAD_BEEF);
+
+        assert_eq!(packet.read_guid_for(Protocol::Vanilla), Some(creature));
+        assert_eq!(packet.read_u32(), Some(0xDEAD_BEEF));
+    }
+
+    /// Attacker-controlled input: a truncated body must return `None`, not panic, and must not
+    /// consume anything it did not parse.
+    #[test]
+    fn truncated_modern_guid_errors_rather_than_panicking() {
+        let full = modern_body(ObjectGuid::new_creature(299, 464), 0);
+        let bytes = full.contents().to_vec();
+
+        for len in 0..bytes.len() {
+            let mut packet = WorldPacket::from_data(
+                Opcode::CMSG_QUESTGIVER_HELLO,
+                bytes[..len].to_vec().as_slice().into(),
+            );
+            // Either it parses (a short prefix can still be a valid guid) or it declines. Neither
+            // may panic.
+            let _ = packet.read_guid_for(Protocol::Modern);
+        }
+    }
+
+    #[test]
+    fn empty_guid_survives_both_directions() {
+        let mut packet = modern_body(ObjectGuid::empty(), 7);
+        assert_eq!(
+            packet.read_guid_for(Protocol::Modern),
+            Some(ObjectGuid::empty())
+        );
+        assert_eq!(packet.read_u32(), Some(7));
     }
 }
