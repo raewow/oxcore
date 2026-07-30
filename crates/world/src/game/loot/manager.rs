@@ -302,8 +302,7 @@ impl LootManager {
 
     /// Resolve which quest items `player` may see, counting them once.
     ///
-    /// Mirrors vmangos `Loot::FillNotNormalLootFor` -> `FillQuestLoot`: a quest drop only
-    /// becomes "unlooted loot" once a player who needs it opens the corpse.
+    /// A quest drop only becomes "unlooted loot" once a player who needs it opens the corpse.
     pub fn fill_quest_loot<F>(&self, source: ObjectGuid, player: ObjectGuid, allowed: F) -> Vec<u8>
     where
         F: FnMut(u32) -> bool,

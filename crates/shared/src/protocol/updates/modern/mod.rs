@@ -10,8 +10,7 @@
 //! * create blocks carry a bit-packed header and a movement block instead of vanilla's flag byte;
 //! * out-of-range and destroyed objects moved out of the block list into the packet header.
 //!
-//! Reference: HermesProxy `World/Objects/Version/V1_14_1_40688/ObjectUpdateBuilder.cs` and
-//! `World/Server/Packets/UpdatePackets.cs`. 40688 is the update-field table for build 42597.
+//! 40688 is the update-field table for build 42597.
 
 pub mod block;
 pub mod field_map;

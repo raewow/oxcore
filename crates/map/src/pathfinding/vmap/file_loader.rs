@@ -1,5 +1,4 @@
 //! VMap file loading (.vmtree, .vmtile, .vmo)
-//! Aligned with MaNGOS VMapManager2 and MapTree implementation
 
 use super::types::{BoundingBox, ModelInstance, ModelType};
 use anyhow::{Context, Result};
@@ -14,7 +13,7 @@ use tracing::{debug, info, warn};
 const VMAP_MAGIC: &[u8] = b"VMAP_7.0";
 const VMAP_VERSION: u32 = 7;
 
-/// Model flags (from MaNGOS ModelInstance.h)
+/// Model flags
 const MOD_HAS_BOUND: u32 = 1 << 2;
 
 /// VMap file loader
@@ -423,7 +422,7 @@ impl VMapFileLoader {
         let vert_count = file.read_u32::<LittleEndian>()?;
 
         if vert_count == 0 {
-            // Models without geometry end here (matches MaNGOS early return)
+            // Models without geometry end here
             return Ok(GroupModel {
                 bounding_box,
                 triangles: Vec::new(),

@@ -1,9 +1,7 @@
 //! Creature Combat Update System
 //!
 //! Updates creature combat timers and executes melee attacks each tick.
-//! This matches vmangos behavior where Unit::Update decrements timers and
-//! AI::DoMeleeAttackIfReady() calls UpdateMeleeAttackingState() which
-//! checks timer + range + executes attack all in one function.
+//! Decrements timers and checks timer + range + executes attack.
 //!
 //! By handling melee attacks here instead of through the AI decision pipeline,
 //! we eliminate the extra tick of latency from snapshot -> decision -> action -> execute.
@@ -34,10 +32,10 @@ pub fn update_creature_combat(world: &World, diff_ms: u32) {
 
 /// Update combat timers and execute melee attack for a single creature.
 ///
-/// Matches vmangos flow:
-/// 1. Decrement attack timer (Unit::Update)
-/// 2. If timer ready + has target: check range and execute attack (DoMeleeAttackIfReady)
-/// 3. If out of range: delay timer 100ms (DelayAutoAttacks)
+/// Update flow:
+/// 1. Decrement attack timer
+/// 2. If timer ready + has target: check range and execute attack
+/// 3. If out of range: delay timer 100ms
 fn update_single_creature_combat(world: &World, creature_guid: ObjectGuid, diff_ms: u32) {
     // Step 1: Decrement attack timer and gather attack data if ready
     let attack_data = world
@@ -96,7 +94,7 @@ fn update_single_creature_combat(world: &World, creature_guid: ObjectGuid, diff_
             target_guid,
         );
     } else {
-        // Out of range: delay 100ms before retrying (matches vmangos DelayAutoAttacks)
+        // Out of range: delay 100ms before retrying
         world
             .managers
             .creature_mgr
@@ -106,7 +104,7 @@ fn update_single_creature_combat(world: &World, creature_guid: ObjectGuid, diff_
     }
 }
 
-/// Out-of-range retry delay in ms. Matches vmangos DelayAutoAttacks().
+/// Out-of-range retry delay in ms.
 const OUT_OF_RANGE_DELAY_MS: u32 = 100;
 
 #[cfg(test)]
@@ -141,7 +139,7 @@ mod tests {
 
     #[test]
     fn test_out_of_range_delay_is_100ms() {
-        // Documents that the retry delay matches vmangos DelayAutoAttacks() = 100ms.
+        // Documents that the retry delay = 100ms.
         // If this changes, it should be a deliberate decision.
         assert_eq!(OUT_OF_RANGE_DELAY_MS, 100);
     }
@@ -149,8 +147,8 @@ mod tests {
     // --- Player delay constant (Fix C) ---
 
     #[test]
-    fn test_player_delay_constant_matches_vmangos() {
-        // The player system also uses 100ms (not 200ms) to match vmangos.
+    fn test_player_delay_constant_is_100ms() {
+        // The player system also uses 100ms (not 200ms).
         // Verified here to keep both sides of the fix visible in one place.
         assert_eq!(OUT_OF_RANGE_DELAY_MS, 100);
     }

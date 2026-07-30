@@ -6,12 +6,9 @@
 //! a second socket, presents that key in `CMSG_AUTH_CONTINUED_SESSION`, and *the world runs there*.
 //!
 //! This matters because most world packets — `SMSG_UPDATE_OBJECT` among them — are declared
-//! `ConnectionType.Instance` in the reference. Sending them down the realm socket leaves the client
+//! `ConnectionType::Instance`. Sending them down the realm socket leaves the client
 //! waiting on a connection that never opens, and then killing itself when world traffic arrives
 //! somewhere it does not belong.
-//!
-//! Reference: HermesProxy `World/Server/WorldSocket.cs` (`SendConnectToInstance`,
-//! `HandleAuthContinuedSession`) and `World/Server/Packets/AuthenticationPackets.cs` (`ConnectTo`).
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -37,7 +34,7 @@ const ADDRESS_TYPE_IPV4: u8 = 1;
 
 /// A connect key, packed the way the client echoes it back.
 ///
-/// Layout from HermesProxy's `ConnectToKey`: account id in the low 32 bits, connection type at bit
+/// Layout: account id in the low 32 bits, connection type at bit
 /// 32, and a random value above that. The client returns the whole `u64` verbatim, so the account
 /// and connection type survive the round trip without any server-side lookup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

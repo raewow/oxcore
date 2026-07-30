@@ -1,6 +1,6 @@
 //! Console Command System
 //!
-//! Provides MaNGOS-style console command functionality for server administration.
+//! Provides console command functionality for server administration.
 //! Commands are read from stdin and executed in the server update loop.
 //! This is a generic framework that can work with any server context.
 

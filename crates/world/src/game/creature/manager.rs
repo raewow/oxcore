@@ -245,7 +245,7 @@ impl CreatureManager {
         }
 
         // Critters must have unit_flags=0 (fully attackable/selectable)
-        // MaNGOS: critters (Rabbit, Squirrel, etc.) have unit_flags=0 in DB
+        // Critters (Rabbit, Squirrel, etc.) have unit_flags=0 in DB
         // The static_flags IMMUNE_TO_NPC/UNINTERACTIBLE are server-side AI flags
         // that should NOT translate to client unit_flags for critters
         const CREATURE_TYPE_CRITTER: u8 = 8;
@@ -311,7 +311,7 @@ impl CreatureManager {
     }
 
     /// Aggro nearby hostile creatures when the opener interacts with a lock game object
-    /// (chest, door, etc.). Mirrors `GameObject::DoAggroWhenOpening` from the C++ core.
+    /// (chest, door, etc.).
     pub fn do_aggro_when_opening(
         &self,
         opener_guid: ObjectGuid,
@@ -1147,7 +1147,7 @@ impl CreatureManager {
         );
 
         // Use unit_flags directly from DB - trust the database values
-        // MaNGOS loads unit_flags from DB and does NOT blanket-clear flags
+        // Load unit_flags from DB without blanket-clearing flags
         let unit_flags_val = creature.unit_flags;
 
         // UNIT_FIELD_BYTES_0: race/class/gender/power_type
@@ -1246,7 +1246,7 @@ impl CreatureManager {
             if let Some(target) = creature.combat.attacking {
                 let target_world_guid = WorldObjectGuid::from_raw(target.raw());
                 block = block.set_guid_field(UNIT_FIELD_TARGET, target_world_guid);
-                // MaNGOS adds UPDATEFLAG_MELEE_ATTACKING when unit has a victim.
+                // Add UPDATEFLAG_MELEE_ATTACKING when unit has a victim.
                 // The client expects a packed GUID of the victim after the ALL u32
                 // in the movement block. Without this, the creature's attack state
                 // is not properly communicated on CREATE.

@@ -57,7 +57,7 @@ fn get_unit_level(guid: ObjectGuid, world: &World) -> Option<u32> {
     None
 }
 
-/// Faithful `SpellCaster::GetLevelForTarget` port.
+/// Get the effective level for target-dependent calculations.
 pub fn get_level_for_target(
     source_guid: ObjectGuid,
     target_guid: Option<ObjectGuid>,
@@ -115,7 +115,7 @@ pub fn get_level_for_target(
     world.config.max_player_level.clamp(1, 255)
 }
 
-/// Faithful `SpellCaster::GetMeleeDamageSchoolMask` port.
+/// Get the melee damage school mask.
 pub fn get_melee_damage_school_mask(
     _source_guid: ObjectGuid,
     _attack_type: u8,
@@ -125,7 +125,6 @@ pub fn get_melee_damage_school_mask(
 }
 
 /// Creature rank spell damage modifier.
-/// Faithful `Creature::_GetSpellDamageMod` port.
 /// Returns configurable multiplier (defaults to 1.0 for all ranks).
 pub fn get_spell_damage_mod(rank: u8, world: &World) -> f32 {
     match rank {
@@ -139,7 +138,6 @@ pub fn get_spell_damage_mod(rank: u8, world: &World) -> f32 {
 }
 
 /// AP multiplier for weapon-damage-based spells.
-/// Faithful `SpellCaster::GetAPMultiplier` port.
 ///
 /// `att_type`: 0 = BASE_ATTACK, 1 = OFF_ATTACK, 2 = RANGED_ATTACK
 /// `normalized`: when true uses fixed normalized speeds (dagger=1.7, 1H=2.4, 2H=3.3, ranged=2.8)
@@ -169,7 +167,6 @@ pub fn get_ap_multiplier(
 }
 
 /// Calculate spell bonus with coefficient scaling and level penalty.
-/// Faithful `SpellCaster::SpellBonusWithCoeffs` port.
 ///
 /// `total` is running total, `benefit` is the flat bonus being scaled.
 pub fn spell_bonus_with_coeffs(
@@ -212,7 +209,6 @@ pub fn spell_bonus_with_coeffs(
     };
 
     // 3. Custom coefficient (from scripts) — currently no-op
-    //    Faithful `spellProto->CalculateCustomCoefficient(pCaster, damagetype, coeff, spell, donePart)`
     let coeff = coeff;
 
     total += benefit * coeff * lvl_penalty;
@@ -220,7 +216,6 @@ pub fn spell_bonus_with_coeffs(
 }
 
 /// Caster-side melee damage bonus calculation.
-/// Faithful `SpellCaster::MeleeDamageBonusDone` port.
 ///
 /// Calculates flat and percent damage bonuses from caster auras,
 /// victim auras, AP bonuses, creature type modifiers, and pet bonuses.
@@ -551,7 +546,6 @@ pub fn melee_damage_bonus_done(
 }
 
 /// Base healing bonus from +healing gear and stat conversion.
-/// Faithful `SpellCaster::SpellBaseHealingBonusDone` port.
 ///
 /// Sums AURA_MOD_HEALING_DONE values matching school mask,
 /// plus AURA_MOD_SPELL_HEALING_OF_STAT_PERCENT * spirit / 100 for players.
@@ -604,7 +598,6 @@ pub fn spell_base_healing_bonus_done(
 }
 
 /// Caster-side healing bonus calculation.
-/// Faithful `SpellCaster::SpellHealingBonusDone` port.
 ///
 /// Applies percent healing mods, scripted class overrides, base healing bonus
 /// from gear, coefficient scaling via `SpellBonusWithCoeffs`, and spell mods.
@@ -740,7 +733,6 @@ pub fn spell_healing_bonus_done(
 }
 
 /// Base damage bonus from +spell damage gear and stat conversion.
-/// Faithful `SpellCaster::SpellBaseDamageBonusDone` port.
 ///
 /// Sums AURA_MOD_DAMAGE_DONE values matching school mask and item class constraints,
 /// plus AURA_MOD_SPELL_DAMAGE_OF_STAT_PERCENT * spirit / 100 for players.
@@ -759,8 +751,7 @@ pub fn spell_base_damage_bonus_done(
         .manager()
         .with_player(caster_guid, |player| {
             // Flat damage-done auras matching school mask, excluding wand-only auras
-            // (EquippedItemClass == -1 && EquippedItemInventoryTypeMask == 0), matching
-            // SpellCaster::SpellBaseDamageBonusDone's mDamageDone loop.
+            // (EquippedItemClass == -1 && EquippedItemInventoryTypeMask == 0).
             let mut benefit = 0i32;
             for aura in player
                 .auras
@@ -799,7 +790,6 @@ pub fn spell_base_damage_bonus_done(
 }
 
 /// Caster-side spell damage bonus calculation.
-/// Faithful `SpellCaster::SpellDamageBonusDone` port.
 ///
 /// Applies percent damage mods, creature rank mod, versus/creature type bonuses,
 /// override class scripts, pet happiness, base damage bonus, coefficient scaling,
@@ -1065,7 +1055,6 @@ pub fn spell_damage_bonus_done(
 }
 
 /// Deal spell damage wrapper.
-/// Faithful `SpellCaster::DealSpellDamage` port.
 ///
 /// Validates the victim (alive, not taxi flying, not in evade mode),
 /// looks up the spell entry, creates clean damage info with crit, and
@@ -1126,8 +1115,7 @@ fn is_unit_alive(guid: ObjectGuid, world: &World) -> bool {
     }
 }
 
-/// Roll a partial block against a player victim for melee/ranged-class spell damage
-/// (faithful, simplified `Unit::CalculateAbsorbResistBlock` block component).
+/// Roll a partial block against a player victim for melee/ranged-class spell damage.
 ///
 /// Full blocks (`SPELL_ATTR_EX3_COMPLETELY_BLOCKED`) are already resolved as a miss during
 /// [`crate::game::player::spells::hit::roll_spell_hit`]; this only covers the partial block
@@ -1166,7 +1154,6 @@ fn roll_partial_block(victim_guid: ObjectGuid, damage: u32, dmg_class: u32, worl
 }
 
 /// Deal damage to a unit.
-/// Faithful `SpellCaster::DealDamage` port.
 ///
 /// Rolls partial block, applies absorb shields, mutates target health, sends the combat
 /// log, fires procs, and hands off to death processing on a killing blow. This is the
@@ -1183,7 +1170,7 @@ pub async fn deal_damage(
     dmg_class: u32,
     world: &World,
 ) -> u32 {
-    // Self-damage guard (mirrors C++: if pVictim == this, return 0)
+    // Self-damage guard
     if caster_guid == victim_guid {
         return 0;
     }
@@ -1266,7 +1253,7 @@ async fn deal_damage_to_player(
         world,
     );
 
-    // Cast pushback triggers even if damage was fully absorbed (MaNGOS behavior).
+    // Cast pushback triggers even if damage was fully absorbed.
     if damage > 0 && !died {
         let _ = world.systems.spells.apply_cast_pushback(target_guid, world);
     }
@@ -1443,8 +1430,6 @@ async fn deal_damage_to_creature(
 }
 
 /// Wake a sitting player when they take damage.
-///
-/// Mirrors the C++ hit-side stand-up behavior in `SpellCaster::ProcDamageAndSpell_real`.
 fn stand_player_up_on_damage(target_guid: ObjectGuid, world: &World) {
     use oxcore_shared::protocol::{Opcode, WorldPacket};
 
@@ -1578,7 +1563,6 @@ fn send_creature_killed_update(caster_guid: ObjectGuid, creature_guid: ObjectGui
 }
 
 /// Deal healing to a target unit.
-/// Faithful `SpellCaster::DealHeal` port.
 ///
 /// Applies the heal (clamped to max health), sends the combat log, and fires procs.
 /// Player targets only — creatures are not healed by player spells in vanilla.

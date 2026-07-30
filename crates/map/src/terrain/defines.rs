@@ -1,6 +1,4 @@
 //! Terrain file format constants and liquid types.
-//!
-//! Ported from MaNGOS `GridMapDefines.h`, `GridDefines.h` and `GridMap.h`.
 
 /// Side length of one grid in world units.
 pub const SIZE_OF_GRIDS: f32 = 533.33333;
@@ -132,8 +130,7 @@ impl LiquidData {
 
 /// Convert world coordinates to the terrain grid indices used by the `.map` files.
 ///
-/// The axes are swapped and mirrored relative to world space, matching
-/// `TerrainInfo::GetGrid`.
+/// The axes are swapped and mirrored relative to world space.
 pub fn terrain_grid_coords(x: f32, y: f32) -> Option<(usize, usize)> {
     let gx = (CENTER_GRID_ID as f32 - y / SIZE_OF_GRIDS) as i32;
     let gy = (CENTER_GRID_ID as f32 - x / SIZE_OF_GRIDS) as i32;

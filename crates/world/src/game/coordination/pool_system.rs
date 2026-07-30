@@ -1,5 +1,5 @@
-//! Spawn pool integration with the world (MaNGOS `PoolManager::SpawnPool`,
-//! `DespawnPool` and `UpdatePool`, driven from grid loading and respawns).
+//! Spawn pool integration with the world (SpawnPool, DespawnPool and UpdatePool,
+//! driven from grid loading and respawns).
 //!
 //! Pools decide *which* of their candidate spawns exist; the grid system is
 //! what actually instantiates them, so pooled objects follow the same lazy
@@ -110,7 +110,7 @@ impl PoolSystem {
     }
 
     /// Roll a pool's roster back to full and spawn every member whose grid is
-    /// already loaded (MaNGOS `SpawnPool`). For scripts and GM commands.
+    /// already loaded. For scripts and GM commands.
     pub fn spawn_pool(&self, pool_id: u32, instance_id: u32, world: &World) -> Vec<ObjectGuid> {
         self.manager.fill_roster(pool_id, instance_id);
 
@@ -124,7 +124,7 @@ impl PoolSystem {
             .collect()
     }
 
-    /// Clear a pool's roster and remove its objects (MaNGOS `DespawnPool`).
+    /// Clear a pool's roster and remove its objects.
     pub fn despawn_pool(&self, pool_id: u32, instance_id: u32, world: &World) {
         for despawn in self.manager.clear_roster(pool_id, instance_id) {
             self.despawn_member(&despawn, instance_id, world);

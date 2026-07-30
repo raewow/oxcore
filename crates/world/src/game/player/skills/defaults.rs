@@ -2,7 +2,7 @@ use super::constants::*;
 
 /// Weapon proficiency skill IDs for each class at character creation.
 ///
-/// Data sourced from SkillRaceClassInfo.dbc / MaNGOS Player.cpp CreatePlayer().
+/// Data sourced from SkillRaceClassInfo.dbc.
 /// Classes may learn additional proficiencies from trainers later.
 pub fn get_class_default_weapon_skills(class: u8) -> &'static [u16] {
     match class {

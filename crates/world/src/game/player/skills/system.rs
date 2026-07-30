@@ -494,7 +494,6 @@ impl SkillSystem {
 
     /// Update a skill by a fixed step, clamping to max.
     ///
-    /// Corresponds to C++ Player::UpdateSkill.
     /// Returns true if the skill was actually increased.
     pub fn update_skill(
         &self,
@@ -540,7 +539,6 @@ impl SkillSystem {
 
     /// Probabilistic skill update with a configurable chance.
     ///
-    /// Corresponds to C++ Player::UpdateSkillPro.
     /// `chance` is scaled by 10 (e.g. 750 = 75%).
     /// `step` is the number of points to add on success.
     /// Returns true if the skill was increased.
@@ -618,7 +616,6 @@ impl SkillSystem {
 
     /// Update a gathering skill (herbalism, mining, skinning, lockpicking).
     ///
-    /// Corresponds to C++ Player::UpdateGatherSkill.
     /// Uses skill difficulty bands and configurable chance reduction for
     /// skinning and mining based on skill value.
     pub fn update_gather_skill(
@@ -700,7 +697,6 @@ impl SkillSystem {
 
     /// Update crafting skill after a successful craft (spell cast).
     ///
-    /// Corresponds to C++ Player::UpdateCraftSkill.
     /// Looks up the spell in SkillLineAbility.dbc to find the associated
     /// skill, then rolls for a skill-up using the color-band thresholds
     /// stored in the DBC entry (min_value / max_value).
@@ -762,7 +758,6 @@ impl SkillSystem {
 
     /// Update fishing skill with its special chance formula.
     ///
-    /// Corresponds to C++ Player::UpdateFishingSkill.
     /// Chance is 100% below skill 75, then decreases as 2500 / (skillValue - 50).
     pub fn update_fishing_skill(&self, player_guid: ObjectGuid, world: &World) -> bool {
         // TODO: HasTrialRestrictions check - deferred until trial system exists

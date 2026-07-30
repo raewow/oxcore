@@ -17,7 +17,7 @@ use oxcore_shared::messages::movement::SmsgForceMoveUnroot;
 use oxcore_shared::messages::social::SmsgStandstateUpdate;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
-/// Restart a far teleport towards the player's homebind (`Player::TeleportToHomebind`).
+/// Restart a far teleport towards the player's homebind.
 ///
 /// Used when a teleport destination turns out to be unusable: the current teleport is
 /// abandoned and a fresh one to the bind point is queued for the next worldport ack.
@@ -396,7 +396,7 @@ pub async fn handle_move_teleport_ack(
     Ok(())
 }
 
-/// Validate incoming movement info before applying it (`WorldSession::VerifyMovementInfo`).
+/// Validate incoming movement info before applying it.
 ///
 /// Rejects positions that aren't finite/in-bounds, and for on-transport movement
 /// rejects oversized transport offsets or offsets that produce an invalid absolute
@@ -435,7 +435,7 @@ pub fn verify_movement_info(movement_info: &MovementInfo) -> bool {
     true
 }
 
-/// Handle CMSG_SET_ACTIVE_MOVER (`WorldSession::HandleSetActiveMoverOpcode`).
+/// Handle CMSG_SET_ACTIVE_MOVER.
 ///
 /// Records which unit the client believes it is controlling. Without pet
 /// possession / mind control, the only legal mover is the player itself; a
@@ -475,7 +475,7 @@ pub fn handle_set_active_mover(
     Ok(())
 }
 
-/// Handle CMSG_MOVE_NOT_ACTIVE_MOVER (`WorldSession::HandleMoveNotActiveMoverOpcode`).
+/// Handle CMSG_MOVE_NOT_ACTIVE_MOVER.
 ///
 /// The client gives up control of the active mover. We clear the active-mover
 /// GUID, validate the trailing movement info, apply the relocation and rebroadcast
@@ -645,7 +645,7 @@ pub async fn handle_move_spline_done(
         .await
 }
 
-/// Handle CMSG_MOUNTSPECIAL_ANIM (`WorldSession::HandleMountSpecialAnimOpcode`).
+/// Handle CMSG_MOUNTSPECIAL_ANIM.
 ///
 /// Broadcasts SMSG_MOUNTSPECIAL_ANIM (the mount's special animation) to nearby
 /// players so they see the animation.
@@ -668,7 +668,7 @@ pub fn handle_mount_special_anim(
     Ok(())
 }
 
-/// Handle CMSG_MOVE_TIME_SKIPPED (`WorldSession::HandleMoveTimeSkippedOpcode`).
+/// Handle CMSG_MOVE_TIME_SKIPPED.
 ///
 /// The client reports it skipped `lag` ms of movement time. The mover's stored
 /// timestamps advance by the same amount so later packets aren't judged against a
@@ -767,23 +767,21 @@ impl SpeedMoveType {
     }
 }
 
-/// Handle the `CMSG_FORCE_*_CHANGE_ACK` family
-/// (`WorldSession::HandleForceSpeedChangeAckOpcodes`).
+/// Handle the `CMSG_FORCE_*_CHANGE_ACK` family.
 ///
 /// The client acknowledges a server-forced speed/turn-rate change. The ack must match
 /// a change this server actually queued — same counter, same move type, same speed
 /// (within 0.01) — otherwise it is dropped. Only then is the authoritative value
 /// applied and nearby observers informed via the matching MSG_MOVE_SET_* opcode.
 ///
-/// Not ported: the anticheat `OnWrongAckData` reporting on a mismatched ack.
+/// Not ported: the anticheat OnWrongAckData reporting on a mismatched ack.
 /// Push a position an ack handler just accepted into the map.
 ///
-/// `HandleMoverRelocation` ends in `Player::SetPosition`, which relocates the
-/// player on the map (MovementHandler.cpp:1113). Updating only the player object
-/// leaves the map holding the old spot, and everything spatial reads it from
-/// there: grid activation stops following the player, so the grids they are
-/// walking into are never created and the visibility update — which waits on
-/// those grids — stalls with it.
+/// Push a position an ack handler just accepted into the map.
+/// Updating only the player object leaves the map holding the old spot, and
+/// everything spatial reads it from there: grid activation stops following
+/// the player, so the grids they are walking into are never created and the
+/// visibility update — which waits on those grids — stalls with it.
 fn apply_ack_relocation(
     player_guid: ObjectGuid,
     relocation: Option<(Position, u32, u32)>,
@@ -940,14 +938,13 @@ impl FlagChange {
     }
 }
 
-/// Handle the `CMSG_MOVE_*_ACK` flag-toggle family
-/// (`WorldSession::HandleMovementFlagChangeToggleAck`).
+/// Handle the `CMSG_MOVE_*_ACK` flag-toggle family.
 ///
 /// The client acknowledges a server-forced water-walk / feather-fall toggle. The ack
 /// must match a change this server queued (same counter, same flag) or it is dropped;
 /// the authoritative flag comes from the queued change, not from the client's payload.
 ///
-/// Not ported: anticheat tests, and the hover ack (the client has no hover ack opcode).
+/// Not ported: anticheat tests, and the hover ack.
 pub fn handle_movement_flag_change_ack(
     session: &WorldSession,
     opcode: Opcode,

@@ -127,7 +127,7 @@ impl ToWorldPacket for SmsgCreatureQueryResponse<'_> {
         packet
     }
 
-    /// `SMSG_QUERY_CREATURE_RESPONSE`, per HermesProxy `QueryPackets.cs:365`.
+    /// `SMSG_QUERY_CREATURE_RESPONSE`, per the 1.14 wire format.
     ///
     /// Restructured rather than renumbered. The four name slots (localisations) come first as
     /// bit-packed *lengths*, then the strings, then the flat fields. Display info moved into a
@@ -175,7 +175,7 @@ impl ToWorldPacket for SmsgCreatureQueryResponse<'_> {
         writer.flush_bits();
 
         // Only *non-empty* strings are written, even though every slot declared a length above.
-        // The asymmetry is deliberate and matches the reference: emitting a bare terminator for
+        // The asymmetry is deliberate: emitting a bare terminator for
         // each empty slot adds seven bytes the client does not read, and it then misparses the rest
         // of the template — and every response after it in the same burst.
         if !self.name.is_empty() {
@@ -346,8 +346,8 @@ impl ToWorldPacket for SmsgNameQueryResponse<'_> {
 
 /// Realm used to qualify GUIDs in modern bodies built here.
 ///
-/// Single-realm assumption, matching HermesProxy, which hardcodes the same. Thread a real value
-/// through before running a second realm — it must agree with what `SmsgCharEnum` sends.
+/// Single-realm assumption. Thread a real value through before running a second realm — it must
+/// agree with what `SmsgCharEnum` sends.
 const REALM_ID: u16 = 1;
 
 /// `region << 24 | site << 16 | realm id`, the same scheme the bnet realm list advertises.
@@ -519,14 +519,13 @@ mod tests {
         assert_eq!(data[7], 0x00);
     }
 
-    /// Byte-for-byte against HermesProxy's `PlayerGuidLookupData::Write`
-    /// (`World/Server/Packets/QueryPackets.cs:137`).
+    /// Byte-for-byte against `PlayerGuidLookupData::Write`.
     ///
     /// The bit block is the fragile part: one `IsDeleted` bit, a 6-bit name length, then five 7-bit
     /// declined-name lengths — 42 bits, so the flush pads out to six bytes. A miscount there shifts
     /// every following field and the client reads garbage rather than failing cleanly.
     #[test]
-    fn name_query_modern_body_matches_hermes_layout() {
+    fn name_query_modern_body_layout() {
         let msg = SmsgNameQueryResponse::new(ObjectGuid::from_low(42), "Kris", 1, 0, 1);
         let packet = msg.to_modern().expect("ported to modern");
 
@@ -626,7 +625,7 @@ impl ToWorldPacket for SmsgGameObjectQueryResponse<'_> {
         packet
     }
 
-    /// `SMSG_QUERY_GAME_OBJECT_RESPONSE`, per HermesProxy `QueryPackets.cs:464`.
+    /// `SMSG_QUERY_GAME_OBJECT_RESPONSE`, per the 1.14 wire format.
     ///
     /// The template goes into a length-counted sub-buffer, so a client that does not recognise the
     /// contents can still skip it. A zero length is how "not found" is expressed, alongside the

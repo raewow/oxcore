@@ -94,7 +94,7 @@ impl QuestSystem {
 
     /// Calculate quest giver status for a concrete creature or gameobject GUID.
     ///
-    /// Follows C++ ordering: script GetDialogStatus first (values 0-7 override),
+    /// Script GetDialogStatus first (values 0-7 override),
     /// then falls back to relation-based status computation.
     pub fn get_quest_giver_status_for_guid(
         &self,
@@ -253,11 +253,11 @@ impl QuestSystem {
                 }
             } else if self.can_see_start_quest(player_guid, &quest, world) {
                 // Prerequisites are satisfied but the player's level is too low:
-                // show a greyed "available later" marker (matches C++ DIALOG_STATUS_UNAVAILABLE).
+                // show a greyed "available later" marker (DIALOG_STATUS_UNAVAILABLE).
                 status = status.max(DialogStatus::Unavailable);
             }
             // Otherwise a prerequisite is unmet (e.g. an earlier quest in the chain):
-            // show no marker at all, matching C++ CanSeeStartQuest returning false.
+            // show no marker at all, matching CanSeeStartQuest returning false.
         }
 
         status
@@ -389,8 +389,8 @@ impl QuestSystem {
         self.can_take_quest_inner(player_guid, quest, world, true)
     }
 
-    /// Like `can_take_quest` but ignores the minimum-level requirement. Mirrors C++
-    /// `CanSeeStartQuest`: true when every prerequisite (class/race/skill/prev-quest/
+    /// Like `can_take_quest` but ignores the minimum-level requirement.
+    /// True when every prerequisite (class/race/skill/prev-quest/
     /// chain/reputation/exclusive group/etc.) is satisfied and only the player's level
     /// may still be too low. Used to decide whether a quest-giver shows a greyed
     /// "available later" marker versus no marker at all.
@@ -1231,7 +1231,7 @@ impl QuestSystem {
         // Sync any required items already in the player's bags, then mark the quest
         // complete on accept if it has no outstanding objectives. This covers
         // no-objective quests, deliver quests whose items are already carried, and
-        // auto-complete quests. Matches C++ AddQuest -> CanCompleteQuest -> SetQuestStatus(COMPLETE).
+        // auto-complete quests.
         // Determined before persisting so the saved row and the client quest-log slot
         // both reflect completion (otherwise the quest reverts to incomplete on relog).
         self.sync_item_objectives_from_inventory(player_guid, quest);
@@ -1739,7 +1739,7 @@ impl QuestSystem {
             return Ok(());
         }
 
-        // Auto-complete quest if possible (C++: CanCompleteQuest -> CompleteQuest)
+        // Auto-complete quest if possible
         let status = self.get_quest_status(player_guid, quest_id);
         if status != QuestStatus::Complete {
             if self.can_complete_quest(player_guid, &quest, world) {
@@ -2483,7 +2483,6 @@ impl QuestSystem {
     /// Handle item added to inventory — check quest item objectives.
     ///
     /// Called after any item enters the player's inventory (loot, buy, etc.).
-    /// Mirrors MaNGOS `Player::ItemAddedQuestCheck`.
     pub fn handle_item_added(&self, player_guid: ObjectGuid, item_id: u32, count: u32) {
         use super::types::{QuestSpecialFlags, QUEST_ITEM_OBJECTIVES_COUNT};
 
@@ -3069,7 +3068,7 @@ impl QuestSystem {
 
             // Self-heal: promote to Complete if the stored objectives are already met
             // (covers no-objective quests and rows persisted before completion-on-accept
-            // was tracked). Matches C++ recomputing quest status on load.
+            // was tracked).
             if progress.status != QuestStatus::Complete {
                 if let Some(template) = self.manager.get_quest_template(row.quest) {
                     if progress.is_complete(&template) || template.is_auto_complete() {

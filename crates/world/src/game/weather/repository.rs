@@ -89,7 +89,7 @@ impl WeatherRow {
     }
 }
 
-/// Chances over 100% are a data error; MaNGOS falls back to 25%.
+/// Chances over 100% are a data error; fall back to 25%.
 fn sanitize(zone: u32, season: usize, kind: &str, chance: u32) -> u32 {
     if chance > MAX_CHANCE {
         tracing::error!(

@@ -181,7 +181,7 @@ pub async fn give_starting_actions(
 
 /// Get equipment slot (0-18) for an item based on its inventory_type.
 /// Returns None if item should go in inventory slot instead.
-/// Based on MaNGOS ItemPrototype::GetAllowedEquipSlots.
+
 fn get_equipment_slot_for_item(inventory_type: u8, used_slots: &mut HashSet<u8>) -> Option<u8> {
     let slot = match inventory_type {
         1 => Some(0),  // INVTYPE_HEAD -> EQUIPMENT_SLOT_HEAD

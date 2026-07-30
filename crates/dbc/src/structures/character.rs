@@ -274,9 +274,9 @@ impl DbcEntry for BankBagSlotPricesEntry {
 /// Faction.dbc structure: ID, reputationListID, BaseRepValue[88] (8 races * 11 classes), and other fields
 /// For vanilla 1.12.1, the format string is approximately: "nii" + 88*i + other fields
 /// Simplified format: "nii" + 88*i = "nii" + 88*i = "nii" + 88*i
-/// Faction DBC entry structure (matches C++ FactionEntry)
+/// Faction DBC entry structure
 /// Format: ID, reputationListID, BaseRepRaceMask[4], BaseRepClassMask[4], BaseRepValue[4], ReputationFlags[4], team
-/// Note: The DBC may also have an 88-value array format, but we use the mask-based format to match C++ core
+/// Note: The DBC may also have an 88-value array format, but we use the mask-based format
 #[derive(Debug, Clone)]
 pub struct FactionDbcEntry {
     pub id: u32,
@@ -334,7 +334,7 @@ impl DbcEntry for FactionDbcEntry {
 
         let field_count = record.field_count() as usize;
 
-        // Read mask-based format (matches C++ core structure):
+        // Read mask-based format:
         // Fields 2-5: BaseRepRaceMask[4]
         // Fields 6-9: BaseRepClassMask[4]
         // Fields 10-13: BaseRepValue[4]
@@ -400,13 +400,13 @@ impl DbcEntry for FactionDbcEntry {
 #[derive(Debug, Clone)]
 pub struct ChrRacesEntry {
     pub id: u32,
-    /// Male model display ID (field 4: m_MaleDisplayId)
+    /// Male model display ID (field 4)
     pub model_m: u32,
-    /// Female model display ID (field 5: m_FemaleDisplayId)
+    /// Female model display ID (field 5)
     pub model_f: u32,
-    /// Resurrection sickness spell ID for this race (field 12: m_ResSicknessSpellId)
+    /// Resurrection sickness spell ID for this race (field 12)
     pub res_sickness_spell_id: u32,
-    /// Cinematic sequence ID for this race (field 16: m_cinematicSequenceId)
+    /// Cinematic sequence ID for this race (field 16)
     pub cinematic_sequence_id: u32,
 }
 
@@ -425,8 +425,8 @@ impl DbcEntry for ChrRacesEntry {
         // Field 3: ExplorationSoundId
         // Field 4: model_m (MaleDisplayId)
         // Field 5: model_f (FemaleDisplayId)
-        // Field 12: resSicknessSpellId (m_ResSicknessSpellId)
-        // Field 16: CinematicSequence (m_cinematicSequenceId)
+        // Field 12: resSicknessSpellId
+        // Field 16: CinematicSequence
 
         let model_m = record
             .get_u32(4)

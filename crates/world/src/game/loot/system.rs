@@ -59,7 +59,7 @@ impl LootSystem {
 
     /// Open loot through `SPELL_EFFECT_OPEN_LOCK`.
     ///
-    /// MaNGOS passes `LOOT_SKINNING` to `Player::SendLoot`, which the client-facing
+    /// Passes `LOOT_SKINNING` to `Player::SendLoot`, which the client-facing
     /// packet converts to `LOOT_PICKPOCKETING` (2).
     pub async fn handle_open_lock_loot(
         &self,
@@ -91,7 +91,7 @@ impl LootSystem {
                 player_guid,
                 target_guid
             );
-            // Send release so the client cursor resets cleanly (mirrors vmangos SendLootRelease)
+            // Send release so the client cursor resets cleanly
             let msg = SmsgLootReleaseResponse {
                 loot_guid: target_guid,
                 unknown: 1,
@@ -166,7 +166,7 @@ impl LootSystem {
     ) -> anyhow::Result<()> {
         use crate::game::inventory::types::AddItemResult;
 
-        // Look at the item without consuming it — vmangos only marks it looted once the
+        // Look at the item without consuming it — only mark it looted once the
         // item is actually stored, otherwise a full bag destroys the drop.
         let loot_item = self.manager.peek_item(target_guid, slot, player_guid);
 
@@ -493,7 +493,7 @@ impl LootSystem {
             .managers
             .creature_mgr
             .with_creature_mut(target_guid, |creature| {
-                // Allow JustDied and Corpse states — vmangos checks !creature->IsAlive()
+                // Allow JustDied and Corpse states — checks !creature->IsAlive()
                 // Dead state means the corpse was already removed (respawning), don't allow
                 let is_corpse = matches!(
                     creature.death_state,

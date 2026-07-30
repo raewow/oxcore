@@ -102,13 +102,11 @@ impl Default for ItemTemplate {
 
 impl ItemTemplate {
     /// Get the maximum stack size for this item
-    /// Matches MaNGOS GetMaxStackSize() behavior
     pub fn get_max_stack_size(&self) -> u32 {
         self.stackable
     }
 
     /// Get allowed equipment slots for this item based on inventory type
-    /// Maps to C++ ItemPrototype::GetAllowedEquipSlots
     /// Returns up to 4 possible slots (NULL_SLOT for unused entries)
     pub fn get_allowed_equip_slots(&self, class_id: u8, can_dual_wield: bool) -> [u8; 4] {
         let mut slots = [255u8; 4]; // NULL_SLOT = 255
@@ -201,7 +199,6 @@ impl ItemTemplate {
     }
 
     /// Get the proficiency skill required to equip this item
-    /// Maps to C++ ItemPrototype::GetProficiencySkill
     pub fn get_proficiency_skill(&self) -> u32 {
         const ITEM_CLASS_WEAPON: u32 = 2;
         const ITEM_CLASS_ARMOR: u32 = 4;
@@ -263,7 +260,6 @@ impl ItemTemplate {
     }
 
     /// Get the proficiency spell ID that teaches this item's proficiency
-    /// Maps to C++ ItemPrototype::GetProficiencySpell
     pub fn get_proficiency_spell(&self) -> u32 {
         const ITEM_CLASS_WEAPON: u32 = 2;
         const ITEM_CLASS_ARMOR: u32 = 4;
@@ -304,7 +300,6 @@ impl ItemTemplate {
     }
 
     /// Check if this item template fits the spell's equipment requirements
-    /// Maps to C++ Item::IsFitToSpellRequirements (static version)
     pub fn is_fit_to_spell_requirements(&self, spell: &oxcore_dbc::structures::SpellEntry) -> bool {
         // Check item class
         if spell.equipped_item_class != -1 {
@@ -337,7 +332,6 @@ impl ItemTemplate {
     }
 
     /// Check if an enchantment makes the item soulbound
-    /// Maps to C++ Item::IsBoundByEnchant
     /// Note: This requires SpellItemEnchantment DBC data which is not yet loaded
     pub fn is_bound_by_enchant(&self, _enchantments: &[(u32, u32, u32)]) -> bool {
         // TODO: Check SpellItemEnchantmentEntry for ENCHANTMENT_CAN_SOULBOUND flag
@@ -559,7 +553,7 @@ impl ItemManager {
                 row.try_get("spellcategorycooldown_5").unwrap_or(-1),
             ];
 
-            // Validate stackable value (matches MaNGOS ObjectMgr.cpp behavior)
+            // Validate stackable value
             if stackable == 0 {
                 tracing::warn!(
                     "Item (Entry: {}) has wrong value in stackable (0), replace by default 1.",
@@ -675,7 +669,6 @@ impl ItemManager {
     }
 
     /// Check whether `target` is a valid use-target for the given item entry.
-    /// Maps to C++ Item::IsTargetValidForItemUse.
     ///
     /// `target` is `None` when no unit is targeted; otherwise it is
     /// `(target_is_unit, target_entry, target_alive)`. Items with no

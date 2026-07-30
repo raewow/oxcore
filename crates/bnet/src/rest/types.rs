@@ -12,9 +12,9 @@ pub enum FormType {
     LoginForm,
 }
 
-// Field order in these two structs is load-bearing by imitation, not by protocol: Hermes
-// serializes them with `DataContractJsonSerializer`, which emits data members **alphabetically by
-// name**. Keeping serde's declaration order in step with that makes our form byte-identical to the
+// Field order in these two structs is load-bearing by imitation, not by protocol: the
+// login browser expects members alphabetically by name (matching DataContractJsonSerializer
+// output). Keeping serde's declaration order in step with that makes our form byte-identical to the
 // one the 1.14 login browser is known to accept, so key order is one fewer variable if it starts
 // rejecting the form again.
 #[derive(Debug, Clone, Serialize)]
@@ -40,7 +40,7 @@ pub struct FormInputs {
 }
 
 impl FormInputs {
-    /// The empty form Hermes nests inside every `LogonResult` — no inputs, and a null `type`
+    /// The empty form nested inside every `LogonResult` — no inputs, and a null `type`
     /// because its `FormInputs.Type` is a default-constructed string.
     pub fn empty() -> Self {
         Self {
@@ -129,7 +129,7 @@ pub fn login_error(error_code: &str, error_message: &str) -> axum::Json<LoginRes
 #[allow(non_snake_case)] // field names are fixed by the proto/JSON contract
 pub struct LoginResult {
     pub authentication_state: Option<AuthenticationState>,
-    /// Always present and always empty. Hermes initialises `LogonResult.AuthenticatorForm` to a
+    /// Always present and always empty. The `LogonResult.AuthenticatorForm` is initialised to a
     /// fresh `FormInputs`, so `DataContractJsonSerializer` emits a nested object rather than
     /// omitting the member; the login browser is fussy enough about this response's shape that we
     /// mirror it exactly rather than find out the hard way.
@@ -137,7 +137,7 @@ pub struct LoginResult {
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub login_ticket: Option<String>,
-    /// Only the SRP path produces evidence; Hermes has no such member, so it is omitted when
+    /// Only the SRP path produces evidence; the legacy login path has no such member, so it is omitted when
     /// unset rather than sent as null.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_evidence_M2: Option<String>,
@@ -232,7 +232,7 @@ pub fn login_form() -> FormInputs {
             },
         ],
         prompt: None,
-        // The bundled 1.14.2 browser uses the legacy plain-password login form. Including
+        // The 1.14.2 browser uses the legacy plain-password login form. Including
         // `srp_url` makes it reject the form before it renders credentials.
         srp_url: None,
     }

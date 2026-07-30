@@ -1,4 +1,4 @@
-//! Global weather chance table (MaNGOS `WeatherMgr`).
+//! Global weather chance table.
 
 use super::repository::WeatherRepository;
 use super::types::WeatherZoneChances;

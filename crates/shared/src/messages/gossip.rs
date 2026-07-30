@@ -156,8 +156,8 @@ pub(crate) fn write_modern_gossip_quest(writer: &mut BitWriter, quest: &GossipQu
     // `QuestType`: 2 = available, 4 = already taken.
     writer.write_i32(quest.icon as i32);
     writer.write_i32(quest.level as i32);
-    writer.write_i32(255); // QuestMaxLevel -- the reference's default
-    writer.write_u32(8); // QuestFlags -- likewise
+    writer.write_i32(255); // QuestMaxLevel
+    writer.write_u32(8); // QuestFlags
     writer.write_u32(0); // QuestFlagsEx
 
     let title = quest.title.as_bytes();
@@ -179,8 +179,7 @@ impl ToWorldPacket for SmsgGossipComplete {
         WorldPacket::new(Opcode::SMSG_GOSSIP_COMPLETE)
     }
 
-    /// Empty in vanilla, one flushed bit from 1.14.2 on — the 1.14 reference
-    /// `World/Server/Packets/NPCPackets.cs:183-194` gates it on `AddedInVersion(9,2,0, 1,14,2, ...)`
+    /// Empty in vanilla, one flushed bit from 1.14.2 on — gated on `AddedInVersion(9,2,0, 1,14,2, ...)`
     /// and our target build 42597 *is* 1.14.2, so the bit is present.
     ///
     /// Without it the client is left with an unclosed gossip window: the packet is one byte short of
@@ -300,7 +299,7 @@ impl ToWorldPacket for SmsgNpcTextUpdate {
         // Each option: probability(f32) + maleText(cstring) + femaleText(cstring)
         // + languageId(u32) + emoteDelay1(u32) + emoteId1(u32)
         // + emoteDelay2(u32) + emoteId2(u32) + emoteDelay3(u32) + emoteId3(u32)
-        // Matches vmangos QueryHandler.cpp::HandleNpcTextQueryOpcode
+        // Standard NPC text format
         for opt in &self.options {
             let male = if opt.male_text.is_empty() && opt.female_text.is_empty() {
                 "Greetings $N"
@@ -490,7 +489,7 @@ mod tests {
 
     #[test]
     fn smsg_npc_text_update_field_order() {
-        // Per-option layout (vmangos QueryHandler.cpp):
+        // Per-option layout:
         // probability(f32) + maleText(cstring) + femaleText(cstring) + languageId(u32)
         // + emoteDelay1(u32) + emoteId1(u32) + emoteDelay2(u32) + emoteId2(u32)
         // + emoteDelay3(u32) + emoteId3(u32)
@@ -542,7 +541,6 @@ mod tests {
     #[test]
     fn smsg_npc_text_update_empty_male_uses_female() {
         // When male_text is empty, female_text is written in the male slot
-        // (mirrors vmangos: if (maleText.empty()) data << femaleText)
         let mut options: [NpcTextOption; 8] = std::array::from_fn(|_| NpcTextOption::default());
         options[0] = NpcTextOption {
             probability: 1.0,

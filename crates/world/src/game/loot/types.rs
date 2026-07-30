@@ -18,7 +18,7 @@ pub struct Loot {
     pub being_looted: bool,
     /// Player currently looting
     pub looting_player: Option<ObjectGuid>,
-    /// Items still lootable by someone (vmangos `Loot::unlootedCount`).
+    /// Items still lootable by someone.
     ///
     /// Normal items count as soon as they are added. Quest items count only once an
     /// eligible player has actually been shown them (see [`Loot::fill_quest_loot`]),
@@ -26,7 +26,7 @@ pub struct Loot {
     pub unlooted_count: u32,
 
     // Player-dependent loot (different for each player)
-    /// Quest item slots already shown to a given player (vmangos `m_playerQuestItems`)
+    /// Quest item slots already shown to a given player
     pub player_quest_items: HashMap<ObjectGuid, Vec<u8>>,
     /// Free-for-all items per player
     pub player_ffa_items: HashMap<ObjectGuid, Vec<LootItem>>,
@@ -88,20 +88,20 @@ impl Loot {
         }
     }
 
-    /// Add a normal drop (vmangos `Loot::AddItem`, non-quest branch)
+    /// Add a normal drop (non-quest branch)
     pub fn add_item(&mut self, item: LootItem) {
         self.items.push(item);
         self.unlooted_count += 1;
     }
 
     /// Add a quest drop. Quest items are not counted here — only when an eligible
-    /// player is shown them (vmangos `Loot::AddItem`, quest branch).
+    /// player is shown them (quest branch).
     pub fn add_quest_item(&mut self, item: LootItem) {
         self.quest_items.push(item);
     }
 
     /// Resolve which quest items this player may see, counting them once
-    /// (vmangos `Loot::FillQuestLoot`).
+    /// Mark quest slot as visible for a player and count it once.
     ///
     /// `allowed` decides eligibility for an item id (i.e. the player has the quest).
     /// Returns the quest-item slots visible to this player; the result is cached so
@@ -137,7 +137,7 @@ impl Loot {
         self.player_quest_items.get(&player)
     }
 
-    /// Check if loot is empty (vmangos `Loot::isLooted`)
+    /// Check if loot is empty
     pub fn is_empty(&self) -> bool {
         self.gold == 0 && self.unlooted_count == 0
     }

@@ -6,7 +6,6 @@ use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Hit info flags for SMSG_ATTACKERSTATEUPDATE
-/// Values from MaNGOS UnitDefines.h (1.12.1 client)
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HitInfo {
@@ -51,9 +50,8 @@ pub enum VictimState {
 /// block amount only under `Block`. A mistranslated word makes the client read the wrong number of
 /// bytes and desynchronises everything after this packet.
 ///
-/// Translates by name, the way `to_modern_movement_flags` does and the way the 1.14 reference's
-/// `LegacyVersion.ConvertHitInfoFlags` does. Tables from
-/// the 1.14 reference (`HitInfoVanilla` and `HitInfo`).
+/// Translates by name, the way `to_modern_movement_flags` does. Tables from
+/// `HitInfoVanilla` and `HitInfo`.
 pub fn to_modern_hit_info(vanilla: u32) -> u32 {
     HIT_INFO_FLAGS
         .iter()
@@ -94,7 +92,6 @@ mod modern_hit_info {
 }
 
 /// SMSG_ATTACKERSTATEUPDATE - Main combat result packet
-/// Matches MaNGOS Unit::SendAttackStateUpdate() (Unit.cpp:4567-4603)
 #[derive(Debug, Clone)]
 pub struct SmsgAttackerStateUpdate {
     pub hit_info: u32,
@@ -157,12 +154,10 @@ impl ToWorldPacket for SmsgAttackerStateUpdate {
     /// The flags are translated by name first — see [`to_modern_hit_info`] — because they gate which
     /// of the conditional fields are present.
     ///
-    /// **A reference disagreement worth recording:** the 1.14 reference writes the trailing `ContentTuning`
-    /// block *inline* here as `(u8 type, u8 targetLevel, u8 expansion, i16 levelDelta, f32
-    /// playerItemLevel, f32 targetItemLevel)`, which is not the order its own
-    /// `ContentTuningParams::Write` uses, nor TrinityCore's (which is retail and has more fields
-    /// still). The inline form is used here because this message is on a path the fork exercises
-    /// against a real 1.14 client, so it is the only one of the three with evidence behind it.
+    /// **Note:** the trailing `ContentTuning` block is written *inline* here as
+    /// `(u8 type, u8 targetLevel, u8 expansion, i16 levelDelta, f32 playerItemLevel, f32
+    /// targetItemLevel)`. The inline form is used here because this message is on a path the fork
+    /// exercises against a real 1.14 client.
     fn to_modern(&self) -> Option<WorldPacket> {
         let flags = to_modern_hit_info(self.hit_info);
 
@@ -251,7 +246,7 @@ pub struct SmsgAttackStart {
 impl ToWorldPacket for SmsgAttackStart {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ATTACKSTART);
-        // MaNGOS uses full 8-byte GUIDs for SMSG_ATTACKSTART (not packed)
+        // Full 8-byte GUIDs for SMSG_ATTACKSTART (not packed)
         packet.write_guid_raw(self.attacker_guid.raw());
         packet.write_guid_raw(self.target_guid.raw());
         packet

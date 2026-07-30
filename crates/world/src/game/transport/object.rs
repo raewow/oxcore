@@ -33,14 +33,13 @@ pub struct Transport {
     /// Server clock (ms) when the transport was created, for `time_since_creation`.
     creation_time_ms: u32,
     /// Progress along the path; full time since start for MO transports, or time within the
-    /// cycle for looping ones (`m_pathProgress`).
+    /// cycle for looping ones.
     path_progress: u32,
-    /// The path progress the transport started at, added to `time_since_creation` each tick
-    /// (`m_startProgress`).
+/// The path progress the transport started at, added to `time_since_creation` each tick.
     start_progress: u32,
-    /// The keyframe the transport is currently on, carried across ticks (`m_currentFrame`).
+    /// The keyframe the transport is currently on, carried across ticks.
     frame_cursor: usize,
-    /// GUIDs of the units currently aboard (`m_passengers`), kept ordered like `std::set`.
+    /// GUIDs of the units currently aboard, kept ordered like `std::set`.
     passengers: BTreeSet<ObjectGuid>,
 }
 
@@ -66,8 +65,7 @@ impl Transport {
         }
     }
 
-    /// Board a unit, returning whether it was newly added (`GenericTransport::AddPassenger`,
-    /// the transport-owned `m_passengers.insert(...).second`).
+    /// Board a unit, returning whether it was newly added.
     ///
     /// The passenger's own boarding state - its transport offset, `MOVEFLAG_ONTRANSPORT` and
     /// back-reference - is written on the Unit by the caller once units carry that state.
@@ -75,9 +73,7 @@ impl Transport {
         self.passengers.insert(passenger)
     }
 
-    /// Remove a unit, returning whether it was aboard (`GenericTransport::RemovePassenger`,
-    /// the transport-owned erase; the C++ teleport-iterator dance guards against iterator
-    /// invalidation, which a `BTreeSet` does not need).
+    /// Remove a unit, returning whether it was aboard.
     pub fn remove_passenger(&mut self, passenger: ObjectGuid) -> bool {
         self.passengers.remove(&passenger)
     }
@@ -107,7 +103,7 @@ impl Transport {
         self.path_progress = progress;
     }
 
-    /// The path progress the transport started at (`m_startProgress`).
+    /// The path progress the transport started at.
     pub fn start_progress(&self) -> u32 {
         self.start_progress
     }
@@ -117,7 +113,7 @@ impl Transport {
         self.start_progress = progress;
     }
 
-    /// The keyframe cursor carried across ticks (`m_currentFrame`).
+    /// The keyframe cursor carried across ticks.
     pub fn frame_cursor(&self) -> usize {
         self.frame_cursor
     }

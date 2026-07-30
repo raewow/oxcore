@@ -6,8 +6,8 @@ use oxcore_shared::protocol::ObjectGuid;
 /// Keep contributors that dealt damage within the last 60 seconds.
 pub const CONTRIBUTOR_WINDOW_SECS: u64 = 60;
 
-/// Max number of distinct attackers we remember per victim. vmangos keeps an
-/// effectively-unbounded list; 20 is far more than typical practical combat.
+/// Max number of distinct attackers we remember per victim.
+/// 20 is far more than typical practical combat.
 const MAX_CONTRIBUTORS: usize = 20;
 
 /// A single attacker's damage contribution.

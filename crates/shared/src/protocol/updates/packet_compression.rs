@@ -5,26 +5,21 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use std::io::Write;
 
-/// Compression configuration matching core/mangos-classic behavior
+/// Compression configuration
 pub mod config {
     /// Compression threshold in bytes
-    /// - Core default: 128 bytes (CONFIG_UINT32_COMPRESSION_UPDATE_SIZE)
-    /// - Mangos-classic: 100 bytes (hardcoded)
-    /// Using 128 bytes to match core's default
     pub const COMPRESSION_THRESHOLD: usize = 128;
 
     /// Compression level (1 = Z_BEST_SPEED)
-    /// - Core default: 1 (CONFIG_UINT32_COMPRESSION_LEVEL)
-    /// - Mangos-classic default: 1 (CONFIG_UINT32_COMPRESSION)
     pub const COMPRESSION_LEVEL: u32 = 1;
 
-    /// Maximum safe packet size before warning (core checks for >= 900000)
+    /// Maximum safe packet size before warning
     pub const MAX_SAFE_PACKET_SIZE: usize = 900000;
 }
 
-/// Compress update packet if it exceeds the threshold (matching core/mangos-classic behavior)
+/// Compress update packet if it exceeds the threshold
 ///
-/// **Compression Process** (matching core/src/game/Objects/UpdateData.cpp):
+/// **Compression Process**:
 /// 1. Check if packet size > threshold (default: 128 bytes)
 /// 2. If yes:
 ///    - Compress using zlib deflate with level 1 (Z_BEST_SPEED)
@@ -34,9 +29,8 @@ pub mod config {
 ///    - Return packet unchanged with `SMSG_UPDATE_OBJECT` opcode
 ///
 /// **Compression Algorithm**:
-/// - Uses zlib deflate (same as core's `deflateInit` + `deflate`)
-/// - Compression level: 1 (Z_BEST_SPEED) to match core default
-/// - The core uses `deflateInit` which uses zlib format (with headers)
+/// - Uses zlib deflate
+/// - Compression level: 1 (Z_BEST_SPEED)
 ///
 /// **Format**:
 /// - Uncompressed: `SMSG_UPDATE_OBJECT` opcode + packet data
@@ -45,12 +39,12 @@ pub fn compress_update_packet_if_needed(packet: WorldPacket) -> Result<WorldPack
     let packet_bytes = packet.data();
     let uncompressed_size = packet_bytes.len();
 
-    // Check threshold (matching core: CONFIG_UINT32_COMPRESSION_UPDATE_SIZE)
+    // Check threshold
     if uncompressed_size <= config::COMPRESSION_THRESHOLD {
         return Ok(packet);
     }
 
-    // Warn if packet is very large (matching core check for >= 900000)
+    // Warn if packet is very large
     if uncompressed_size >= config::MAX_SAFE_PACKET_SIZE {
         tracing::warn!(
             "[CRASH-CLIENT] Too large packet: {} bytes",
@@ -59,11 +53,6 @@ pub fn compress_update_packet_if_needed(packet: WorldPacket) -> Result<WorldPack
     }
 
     // Compress using zlib deflate with level 1 (Z_BEST_SPEED)
-    // Core uses: deflateInit(&c_stream, sWorld.getConfig(CONFIG_UINT32_COMPRESSION_LEVEL))
-    // where CONFIG_UINT32_COMPRESSION_LEVEL defaults to 1
-    // Mangos-classic uses: deflateInit(&c_stream, sWorld.getConfig(CONFIG_UINT32_COMPRESSION))
-    // where CONFIG_UINT32_COMPRESSION defaults to 1
-    // Use Compression::fast() which is level 1 (Z_BEST_SPEED), matching core/mangos
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
     encoder
         .write_all(packet_bytes.as_ref())
@@ -73,9 +62,6 @@ pub fn compress_update_packet_if_needed(packet: WorldPacket) -> Result<WorldPack
         .map_err(|e| anyhow::anyhow!("Failed to finish compression: {}", e))?;
 
     // Create compressed packet: [uncompressed_size uint32] + [compressed_data]
-    // This matches core's format: packet->put<uint32>(0, pSize) then compressed data
-    // Core: packet->put<uint32>(0, pSize);
-    //       PacketCompressor::Compress(..., buf.contents(), pSize);
     let mut compressed_packet = WorldPacket::new(Opcode::SMSG_COMPRESSED_UPDATE_OBJECT);
     compressed_packet.write_u32(uncompressed_size as u32);
     compressed_packet.write_bytes(&compressed_data);

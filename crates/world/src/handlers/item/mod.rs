@@ -140,8 +140,7 @@ pub async fn handle_use_item(
     }
 
     // Validate the client-selected slot, then cast every on-use effect below.
-    // This mirrors Player::CastItemUseSpell: the slot is an anti-cheat check,
-    // not a request to suppress the item's other on-use spells.
+    // The slot is an anti-cheat check, not a request to suppress the item's other on-use spells.
     let spell_id = template.spell_id[spell_slot as usize];
     if spell_id == 0 {
         warn!("Item {} has no spell at slot {}", item_entry, spell_slot);
@@ -164,7 +163,7 @@ pub async fn handle_use_item(
     );
 
     // Item use breaks auras such as stealth that explicitly opt into the USE
-    // interrupt flag, matching Player::CastItemUseSpell.
+        // interrupt flag.
     world
         .systems
         .auras

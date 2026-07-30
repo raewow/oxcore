@@ -10,7 +10,7 @@
 //! Player membership is tracked in the per-zone script state so `Update` can
 //! report a player count and scripts can drive world events off it.
 //!
-//! Ported from MaNGOS `ZoneScript` / `ZoneScriptMgr`.
+//! Tracks player membership per zone so `Update` can report a player count.
 
 use anyhow::Result;
 use oxcore_shared::protocol::ObjectGuid;

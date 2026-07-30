@@ -290,9 +290,8 @@ impl QuestTemplate {
         matches!(self.method, QuestMethod::AutoComplete)
     }
 
-    /// Calculate XP reward value using the C++ XP decay formula.
+    /// Calculate XP reward value using the XP decay formula.
     ///
-    /// Mirrors `Quest::XPValue` in QuestDef.cpp:
     /// - If `rew_xp` is 0, returns 0 (no XP reward).
     /// - Otherwise, applies a level-delta multiplier:
     ///   player level ≤ quest level + 5 → 100%

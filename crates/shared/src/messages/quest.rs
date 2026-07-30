@@ -255,7 +255,7 @@ impl ToWorldPacket for SmsgQuestgiverQuestComplete<'_> {
     /// makes it into the packet. The rest still reach the player — they arrive as inventory updates —
     /// this message just names one of them for the "you receive" toast. Money also widens to i64.
     ///
-    /// Note the reference writes four bits and then the item **without flushing**: `ItemInstance`
+    /// The item is written with four bits followed by a u32 **without flushing**: `ItemInstance`
     /// starts with a u32, whose write flushes the partial byte, so the layout still lands on a byte
     /// boundary. Our `BitWriter` flushes on byte writes too, so the same code produces the same bytes.
     fn to_modern(&self) -> Option<WorldPacket> {
@@ -699,8 +699,7 @@ impl ToWorldPacket for SmsgQuestgiverOfferRewardV2<'_> {
         packet
     }
 
-    /// `QuestGiverOfferRewardMessage::Write` plus the nested `QuestGiverOfferReward::Write`, from
-    /// the 1.14 reference.
+    /// `QuestGiverOfferRewardMessage::Write` plus the nested `QuestGiverOfferReward::Write`.
     ///
     /// The nesting is the notable part: the inner block — GUID, ids, flags, emotes, then the whole
     /// reward array — is written *first*, and the outer message's portraits and six bit-packed string
@@ -758,7 +757,7 @@ impl ToWorldPacket for SmsgQuestgiverOfferRewardV2<'_> {
         writer.write_bits(0, 8); // PortraitGiverName
         writer.write_bits(0, 10); // PortraitTurnInText
         writer.write_bits(0, 8); // PortraitTurnInName
-        // No FlushBits here: the reference writes the strings straight after, and `write_bytes`
+        // No FlushBits here: the strings are written straight after, and `write_bytes`
         // flushes the partial byte itself.
 
         writer.write_bytes(title);
@@ -816,7 +815,7 @@ fn write_modern_quest_rewards(
         writer.write_u32(0); // FactionID
         writer.write_i32(0); // FactionValue
         writer.write_i32(0); // FactionOverride
-        // The reference's constructor seeds every cap at 7, so match it rather than zero.
+        // Every cap is seeded at 7, so match it rather than zero.
         writer.write_i32(7); // FactionCapIn
     }
 
@@ -842,8 +841,7 @@ fn write_modern_quest_rewards(
     writer.flush_bits();
 }
 
-/// `QuestChoiceItem::Write` with the `ItemInstance` it contains
-/// (`QuestPackets.cs:238-243`, `ItemPackets.cs:424-437`, `ItemPackets.cs:528-535`).
+/// `QuestChoiceItem::Write` with the `ItemInstance` it contains.
 ///
 /// An absent choice still writes the whole shape with zeros — the array is fixed-width.
 fn write_modern_quest_choice_item(writer: &mut BitWriter, choice: Option<&RewardItemInfo>) {
@@ -953,7 +951,7 @@ impl ToWorldPacket for SmsgQuestgiverQuestDetailsV2<'_> {
     /// (9, 12, 12, 10, 8, 10, 8) and four flags, then the reward block, then the strings themselves.
     ///
     /// Fields with no 1.12 source — quest packages, portraits, objective ids, the session bonus — are
-    /// written as the reference's defaults rather than guessed at. The `HIDDEN_REWARDS` flag is
+    /// written as defaults rather than guessed at. The `HIDDEN_REWARDS` flag is
     /// honoured the same way `to_vanilla` honours it.
     fn to_modern(&self) -> Option<WorldPacket> {
         let hidden = self.quest_flags.has_flag(QuestFlags::HIDDEN_REWARDS);
@@ -1176,7 +1174,7 @@ impl ToWorldPacket for SmsgQuestQueryResponseV2<'_> {
     }
 
     /// 1.14's query response is a new template format rather than a widened vanilla body. Fields
-    /// with no 1.12 source use the same harmless defaults HermesProxy supplies.
+    /// with no 1.12 source use harmless defaults.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
         writer.write_u32(self.quest_id);

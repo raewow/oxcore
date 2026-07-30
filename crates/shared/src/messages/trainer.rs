@@ -33,7 +33,7 @@ pub struct TrainerSpellData {
     pub req_spell_1: u32,
     /// Prerequisite spell 2 (chain node prev if req set, else 0)
     pub req_spell_2: u32,
-    /// Unknown (always 0 in reference)
+    /// Unknown (always 0)
     pub unknown: u32,
 }
 
@@ -158,8 +158,7 @@ mod tests {
 
     #[test]
     fn smsg_trainer_list_guid_is_unpacked() {
-        // Trainer GUID must be fixed 8 bytes (unpacked), matching vmangos
-        // NPCHandler.cpp: data << ObjectGuid(guid)
+        // Trainer GUID must be fixed 8 bytes (unpacked)
         let msg = SmsgTrainerList {
             trainer_guid: trainer_guid(),
             trainer_type: 0,
@@ -178,7 +177,7 @@ mod tests {
 
     #[test]
     fn smsg_trainer_list_field_order() {
-        // Full per-spell layout (vmangos SendTrainerSpellHelper):
+        // Full per-spell layout:
         // spell_id(u32) | state(u8) | cost(u32) | prof_avail(u32) | first_rank(u32)
         // | req_level(u8) | req_skill(u32) | req_skill_value(u32)
         // | req_spell_1(u32) | req_spell_2(u32) | unknown(u32)

@@ -244,7 +244,7 @@ impl ToWorldPacket for SmsgCharEnum<'_> {
             writer.write_packed_guid_128(0, 0); // GuildGuid
             writer.write_u32(character.character_flags); // Flags
                                                          // Flags2/Flags3 sit immediately after Flags, *before* the pet triple. These two
-                                                         // constants are the values HermesProxy sends for Classic; they are opaque to us.
+                                                          // constants are placeholder values for Classic; they are opaque to us.
             writer.write_u32(402_685_956); // Flags2
             writer.write_u32(855_688_192); // Flags3
             writer.write_u32(character.pet_info.map_or(0, |pet| pet.0));
@@ -262,7 +262,7 @@ impl ToWorldPacket for SmsgCharEnum<'_> {
             }
             writer.write_u64(chrono::Utc::now().timestamp() as u64);
             writer.write_u16(0);
-            writer.write_u32(55); // Unknown703, Hermes Classic placeholder
+            writer.write_u32(55); // Unknown703 placeholder
             writer.write_u32(11_400); // LastLoginVersion, Classic Era
             writer.write_u32(0);
             writer.write_i32(0);
@@ -307,7 +307,7 @@ mod modern_tests {
         assert_eq!(
             packet.contents(),
             &[
-                // Header bits, MSB-first: Success | IsNewPlayer. HermesProxy sets IsNewPlayer on
+                // Header bits, MSB-first: Success | IsNewPlayer. IsNewPlayer is set on
                 // every enumeration, so this byte is 0x88, not 0x80.
                 0x88, // Characters.Count = 0
                 0, 0, 0, 0, // MaxCharacterLevel = 1 (floor, no characters to raise it)
@@ -567,7 +567,6 @@ impl ToWorldPacket for SmsgInitialSpellsEmpty {
 /// Action button data
 ///
 /// Packed format: action (bits 0-23) | type (bits 24-31)
-/// Matches MaNGOS: `action | (type << 24)`
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ActionButton {
     /// Action ID (spell ID, item ID, macro ID, etc.) - uses lower 24 bits
@@ -605,15 +604,11 @@ pub struct SmsgActionButtons<'a> {
 /// No `to_modern`, and there never will be: **1.14 has no action-buttons packet.**
 ///
 /// The bar is part of the `ActivePlayer` create block instead — 132 × `i32` behind a
-/// `HasActionButtons` bit in its tail (the 1.14 reference
-/// `World/Objects/Version/V1_14_1_40688/ObjectUpdateBuilder.cs:534-570`, count from
-/// `World/Enums/PlayerDefines.cs:20`). The packed `action | type << 24` word is identical to
+/// `HasActionButtons` bit in its tail. The packed `action | type << 24` word is identical to
 /// vanilla's, so the values pass through untouched; only the slot count differs, 120 to 132.
 ///
 /// So the modern bar is populated by `CreateObjectBlock::with_action_buttons` at the self-create,
-/// and the drop logged here is correct rather than a gap. Earlier notes claimed no reference body
-/// existed — that was true of upstream HermesProxy, which has no `SMSG_UPDATE_ACTION_BUTTONS`
-/// handler; the maintained fork does.
+/// and the drop logged here is correct rather than a gap.
 impl ToWorldPacket for SmsgActionButtons<'_> {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ACTION_BUTTONS);
@@ -708,7 +703,7 @@ impl ToWorldPacket for SmsgTutorialFlags {
 /// Critical for client stability.
 #[derive(Debug, Clone)]
 pub struct SmsgLoginSetTimeSpeed {
-    /// Game time as MaNGOS-style packed bitfield (minutes/hours/weekday/day/month/year)
+    /// Game time as packed bitfield (minutes/hours/weekday/day/month/year)
     pub game_time: u32,
     /// Game speed (default 0.01666667 = 1/60)
     pub game_speed: f32,
@@ -723,7 +718,7 @@ impl Default for SmsgLoginSetTimeSpeed {
     }
 }
 
-/// Pack current UTC time into MaNGOS-style bitfield for SMSG_LOGIN_SETTIMESPEED.
+/// Pack current UTC time into bitfield for SMSG_LOGIN_SETTIMESPEED.
 ///
 /// Format:
 /// - bits 0-5: minutes (0-59)
@@ -783,9 +778,9 @@ impl ToWorldPacket for SmsgLoginSetTimeSpeed {
         packet
     }
 
-    /// The modern body gained a separate server time and two holiday offsets. HermesProxy mirrors
-    /// the single legacy time into both fields and leaves the offsets at zero — the legacy protocol
-    /// has nothing to fill them from, and the packed time format itself is unchanged.
+    /// The modern body gained a separate server time and two holiday offsets. The
+    /// single legacy time is mirrored into both fields and the offsets are left at zero — the legacy
+    /// protocol has nothing to fill them from, and the packed time format itself is unchanged.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
         writer.write_u32(self.game_time); // ServerTime
@@ -942,8 +937,7 @@ mod tests {
 //
 // These four have no 1.12 counterpart at all: the vanilla client finishes loading off
 // `SMSG_LOGIN_VERIFY_WORLD` alone, while 1.14 waits for them before it will hand control to the
-// player. HermesProxy sends all four immediately after the verify
-// (`World/Client/PacketHandlers/CharacterHandler.cs:210`), which is why they are grouped here
+// player. All four are sent immediately after the verify, which is why they are grouped here
 // rather than scattered by subject.
 //
 // Because they are modern-only they implement `to_vanilla` as an empty body that is never sent —
@@ -1008,8 +1002,7 @@ pub struct SmsgInitialSetup {
 impl Default for SmsgInitialSetup {
     /// Classic Era: expansion 0, tier 0.
     ///
-    /// HermesProxy computes this as `LegacyVersion.ExpansionVersion - 1`, which for a 1.12 realm
-    /// is 0.
+    /// Computed as `LegacyVersion.ExpansionVersion - 1`, which for a 1.12 realm is 0.
     fn default() -> Self {
         Self {
             expansion_level: 0,
@@ -1055,10 +1048,9 @@ impl ToWorldPacket for SmsgLoadCufProfiles {
 /// Modern-only: 1.12 has no time sync at all, which is why `to_vanilla` produces a packet with no
 /// vanilla opcode and the send layer never delivers it to a 1.12 session.
 ///
-/// TrinityCore sends the first one as the *first* packet of `SendInitialPacketsBeforeAddToMap`
-/// (`Player.cpp:24920-24928`), then again after 5 s and every 10 s thereafter
-/// (`WorldSession.cpp:1815-1826`). The body is a single sequence index, per the 1.14 wire format; the client echoes it back in
-/// `CMSG_TIME_SYNC_RESPONSE` alongside its own tick count.
+/// The first one is sent as the *first* packet of `SendInitialPacketsBeforeAddToMap`,
+/// then again after 5 s and every 10 s thereafter. The body is a single sequence index,
+/// per the 1.14 wire format; the client echoes it back in `CMSG_TIME_SYNC_RESPONSE` alongside its own tick count.
 #[derive(Debug, Clone, Default)]
 pub struct SmsgTimeSyncRequest {
     /// Increments per request, so a response can be matched to the request it answers.

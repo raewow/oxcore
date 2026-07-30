@@ -1,7 +1,6 @@
 //! A single terrain grid loaded from `maps/{map:03}{gy:02}{gx:02}.map`.
 //!
-//! Ported from MaNGOS `GridMap` (GridMap.cpp). Holds the area ids, the height
-//! mesh, and the liquid layer for one 533.33×533.33 grid.
+//! Holds the area ids, the height mesh, and the liquid layer for one 533.33×533.33 grid.
 
 use anyhow::{bail, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -64,7 +63,7 @@ pub struct GridMap {
     liquid_height: u8,
 }
 
-/// Hole lookup tables from `GridMap.cpp`.
+/// Hole lookup tables.
 const HOLETAB_H: [u16; 4] = [0x1111, 0x2222, 0x4444, 0x8888];
 const HOLETAB_V: [u16; 4] = [0x000F, 0x00F0, 0x0F00, 0xF000];
 
@@ -358,7 +357,7 @@ impl GridMap {
     /// Locate a position within the liquid height rectangle.
     ///
     /// Note the axis swap: the row index is offset by `liquid_off_y` and bounded
-    /// by `liquid_height`, matching `GridMap::getLiquidLevel`.
+    /// by `liquid_height`.
     fn liquid_sample_index(&self, x: f32, y: f32) -> Option<(usize, usize)> {
         let fx = MAP_RESOLUTION as f32 * (CENTER_GRID_ID as f32 - x / SIZE_OF_GRIDS);
         let fy = MAP_RESOLUTION as f32 * (CENTER_GRID_ID as f32 - y / SIZE_OF_GRIDS);
@@ -448,7 +447,7 @@ impl GridMap {
 
 /// Classify a Z against a liquid surface. Shared by the ADT and WMO paths.
 pub(crate) fn classify_depth(liquid_level: f32, z: f32) -> LiquidStatusFlags {
-    // Compared as tenths of a yard, matching the reference's integer check.
+    // Compared as tenths of a yard.
     let delta = ((liquid_level - z) * 10.0) as i32;
 
     if delta > 20 {
@@ -505,7 +504,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classify_depth_matches_reference_thresholds() {
+    fn classify_depth_matches_expected_thresholds() {
         // Surface 2.5 yards above the position -> fully submerged.
         assert_eq!(classify_depth(10.0, 7.5), LiquidStatusFlags::UNDER_WATER);
         // Surface 1 yard above -> in water but head is out.

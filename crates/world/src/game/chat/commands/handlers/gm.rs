@@ -12,7 +12,7 @@ use oxcore_shared::common::AccountType;
 use oxcore_shared::protocol::ObjectGuid;
 use oxcore_shared::protocol::{Opcode, Position, WorldPacket};
 
-/// Base movement speeds (from MaNGOS/Unit.cpp)
+/// Base movement speeds
 const BASE_RUN_SPEED: f32 = 7.0;
 
 /// Mod command - modifies player stats (speed, etc.)
@@ -148,7 +148,7 @@ pub async fn cmd_kill(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String
             Some(ctx.player_guid), // killer
         );
 
-        // Stop creature movement on death (vmangos: StopMoving in SetDeathState)
+        // Stop creature movement on death
         if let Some(ref info) = death_info {
             ctx.world.systems.creature_movement.send_stop_packet(
                 info.guid,
@@ -467,8 +467,7 @@ pub fn port_info() -> ChatCommandInfo {
     }
 }
 
-/// Weather change command - forces the weather in the GM's current zone
-/// (MaNGOS `.wchange`).
+/// Weather change command - forces the weather in the GM's current zone.
 pub async fn cmd_wchange(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {
     use crate::game::weather::WeatherType;
 

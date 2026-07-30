@@ -30,12 +30,9 @@ use oxcore_shared::protocol::{Opcode, WorldPacket};
 const MAX_AUCTION_PRICE: u32 = 2_000_000_000;
 
 /// Vanilla auctioneer NPC flag.
-///
-/// The Rust codebase does not yet have a shared NPC-flag enum, so this local
-/// constant keeps the hello handler aligned with the C++ gatekeeper branch.
 const NPC_FLAG_AUCTIONEER: u32 = 0x0000_0200;
 
-/// Valid auction durations in seconds (matching C++ MIN_AUCTION_TIME = 2h).
+/// Valid auction durations in seconds.
 const VALID_AUCTION_DURATIONS: [u32; 3] = [7200, 28800, 86400]; // 2h, 8h, 24h
 
 struct AuctionSearchParams {
@@ -212,7 +209,6 @@ pub async fn handle_auction_list_bidder_items(
 /// - buyout       (u32)
 /// - etime        (u32)  -- minutes
 ///
-/// Mirrors C++ `WorldSession::HandleAuctionSellItem`.
 /// Many item/inventory validations are TODO stubs because the inventory system
 /// is not fully ported.
 pub async fn handle_auction_sell_item(
@@ -439,7 +435,6 @@ pub async fn handle_auction_sell_item(
         // ITEM_FLAG_CONJURED = 0x2, or item has a limited duration.
         let is_conjured = item.flags & 0x2 != 0;
         // ITEM_FLAG_NO_TRADE: 0x4 (lootable bond), also check 0x10000 (bind on equip already equipped).
-        // C++ CanBeTraded() returns false when IS_BOUND and item.IsBoundByEnchant() etc.
         // Minimal Vanilla port: reject if flags indicate soulbound (0x1) or conjured (0x2).
         let is_bound = item.flags & 0x1 != 0;
         let has_duration = item.duration > 0;
@@ -576,7 +571,6 @@ pub async fn handle_auction_sell_item(
 /// - auctioneerGuid (packed u64)
 /// - auctionId     (u32)
 ///
-/// Mirrors C++ `WorldSession::HandleAuctionRemoveItem`.
 pub async fn handle_auction_remove_item(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -654,7 +648,7 @@ pub async fn handle_auction_remove_item(
     };
 
     // If there is an active bid, the owner must pay an auction cut and the bidder
-    // is refunded. If the owner cannot cover the cut, silently abort (matches C++).
+        // is refunded. If the owner cannot cover the cut, silently abort.
     if auction.has_bid() {
         let cut = auction.get_auction_cut(house_entry.cut_percent as f32, 1.0);
         let player_money = world.systems.inventory.get_money(player_guid).unwrap_or(0);
@@ -736,7 +730,6 @@ pub async fn handle_auction_remove_item(
 /// - auctionId     (u32)
 /// - price         (u32)
 ///
-/// Mirrors C++ `WorldSession::HandleAuctionPlaceBid`.
 pub async fn handle_auction_place_bid(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -905,7 +898,7 @@ pub async fn handle_auction_place_bid(
     }
 
     let player_money = world.systems.inventory.get_money(player_guid).unwrap_or(0);
-    // C++ silently returns without a packet when the player can't afford it.
+    // Silently returns without a packet when the player can't afford it.
     if price > player_money {
         return Ok(());
     }
@@ -1155,7 +1148,6 @@ pub async fn handle_auction_hello(
 /// - auctioneerGuid (packed u64)
 /// - listfrom     (u32) -- paging offset
 ///
-/// Mirrors C++ `WorldSession::HandleAuctionListOwnerItems`.
 /// Rejects duplicate in-flight requests, validates the auction house,
 /// clears feign-death auras, then enqueues an async owner-query task.
 pub async fn handle_auction_list_owner_items(
@@ -1294,7 +1286,6 @@ async fn execute_auction_list_owner_items_task(
 /// - quality        (u32)
 /// - usable         (u8)
 ///
-/// Mirrors C++ `WorldSession::HandleAuctionListItems`.
 pub async fn handle_auction_list_items(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -1317,7 +1308,7 @@ pub async fn handle_auction_list_items(
     let quality = packet.read_u32().unwrap_or(u32::MAX);
     let usable = packet.read_u8().unwrap_or(0);
 
-    // Reject invalid (non-UTF-8) search names; mirrors C++ Utf8toWStr failure branch.
+    // Reject invalid (non-UTF-8) search names.
     // Empty string is always valid.
     if !search_name_raw.is_empty() && search_name_raw.contains('\u{FFFD}') {
         return Ok(());

@@ -1,7 +1,4 @@
-//! One object's update block inside a modern `SMSG_UPDATE_OBJECT`.
-//!
-//! Transcribed from HermesProxy `ObjectUpdateBuilder.WriteToPacket` /`BuildMovementUpdate` and
-//! `MovementInfo.WriteMovementInfoModern` for build 40688.
+//! One object's update block inside a modern `SMSG_UPDATE_OBJECT` for build 40688.
 
 use super::fields::{ModernFieldsArray, ModernObjectType};
 use crate::protocol::bitbuf::BitWriter;
@@ -9,7 +6,7 @@ use crate::protocol::guid::ObjectGuid;
 use crate::protocol::position::Position;
 use crate::protocol::updates::movement_block::MovementSpeeds;
 
-/// Flight speed defaults, from HermesProxy's `ObjectUpdate.InitializePlaceholders`. Vanilla has no
+/// Flight speed defaults. Vanilla has no
 /// flight speeds at all, so these are the only source.
 const FLIGHT_SPEED: f32 = 7.0;
 const FLIGHT_BACK_SPEED: f32 = 4.5;
@@ -20,7 +17,7 @@ const FLIGHT_BACK_SPEED: f32 = 4.5;
 /// `Root` is 0x1000, which in 1.14 means `FallingFar` -- passing the word through unchanged makes
 /// every rooted creature appear to be plummeting.
 ///
-/// Matches HermesProxy's `CastFlags<T>`, which translates by enum member *name*: a vanilla flag
+/// Translates by enum member *name*: a vanilla flag
 /// with no identically-named modern member is dropped rather than remapped by value. That drops
 /// `Levitating`, `FixedZ`, `OnTransport` and `SplineEnabled`; the last two are carried by dedicated
 /// bits in the movement block instead, and `FixedZ` re-emerges as the hover animation bit.
@@ -110,8 +107,8 @@ pub struct ModernCreateData {
 
 /// Action-bar slots 1.14 expects in the create tail, per the 1.14 wire format (`MaxActionButtons`).
 ///
-/// Vanilla sends 120. The reference reads those, leaves the packed values untouched, and zero-pads
-/// to 132 (`World/Client/PacketHandlers/CharacterHandler.cs:352-367`), so the extra slots are the
+/// Vanilla sends 120. The reader leaves the packed values untouched and zero-pads
+/// to 132, so the extra slots are the
 /// only difference between the two.
 pub const MODERN_ACTION_BUTTON_COUNT: usize = 132;
 
@@ -170,8 +167,7 @@ impl ModernUpdateBlock {
         let create = self.create.clone().unwrap_or_default();
 
         // Units get a full movement block, other positioned objects a bare position -- but an
-        // object with no position data at all (an item, say) gets neither. Matches the reference's
-        // `MoveInfo != null` guard on both bits.
+        // object with no position data at all (an item, say) gets neither.
         let has_movement = create.has_position_data && self.object_type.is_unit();
         let stationary = create.has_position_data && !self.object_type.is_unit();
         let has_rotation =
@@ -207,7 +203,7 @@ impl ModernUpdateBlock {
             writer.write_f32(speeds.swim);
             writer.write_f32(speeds.swim_back);
             // Vanilla has no flight speeds -- flying mounts postdate 1.12 -- but the client still
-            // reads the slots, so send the defaults HermesProxy substitutes.
+            // reads the slots, so send the defaults.
             writer.write_f32(FLIGHT_SPEED);
             writer.write_f32(FLIGHT_BACK_SPEED);
             writer.write_f32(speeds.turn_rate);
@@ -257,8 +253,7 @@ impl ModernUpdateBlock {
             writer.write_bit(action_buttons.is_some()); // HasActionButtons
             writer.flush_bits();
 
-            // Action buttons live here in 1.14 rather than in their own packet, which is why the
-            // reference has no `SMSG_UPDATE_ACTION_BUTTONS` to send. The count is fixed at 132 and
+            // Action buttons live here in 1.14 rather than in their own packet. The count is fixed at 132 and
             // the packed word is passed through unchanged, so a short bar is zero-padded rather
             // than truncating the field.
             if let Some(buttons) = action_buttons {
@@ -269,8 +264,6 @@ impl ModernUpdateBlock {
         }
     }
 
-    /// `MovementInfo.WriteMovementInfoModern`.
-    ///
     /// From 1.14.1 on, the movement flags are three plain u32s ahead of the timestamp. Earlier
     /// builds bit-packed them (30 and 18 bits) after the position instead, so this layout is
     /// specific to our target build and would corrupt the stream on an older client.
@@ -292,7 +285,7 @@ impl ModernUpdateBlock {
 
         let flags = to_modern_movement_flags(create.movement_flags) & !CONTRADICTS_OMITTED_BLOCKS;
         writer.write_u32(flags);
-        // HermesProxy substitutes this 1.14 default when the legacy movement state has no extra
+        // This 1.14 default is substituted when the legacy movement state has no extra
         // flags. A zero value reaches the client only through the unported legacy path and has
         // proven unsafe for freshly visible creatures.
         writer.write_u32(512); // FlagsExtra
@@ -320,7 +313,7 @@ impl ModernUpdateBlock {
     }
 }
 
-/// `Quaternion.GetPackedRotation` from HermesProxy.
+/// Pack a gameobject rotation quaternion.
 fn pack_gameobject_rotation(rotation: [f32; 4]) -> i64 {
     const PACK_YZ: i64 = 1 << 20;
     const PACK_X: i64 = PACK_YZ << 1;

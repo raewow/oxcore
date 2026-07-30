@@ -122,7 +122,7 @@ impl ToWorldPacket for SmsgMailListResult<'_> {
                 packet.write_u32(0); // maxDurability
                 packet.write_u32(0); // durability
             } else {
-                // No item - write zeros with correct types matching MaNGOS format
+                // No item - write zeros with correct types
                 packet.write_u32(0); // item_entry
                 packet.write_u32(0); // enchant_id
                 packet.write_u32(0); // random_property_id

@@ -267,7 +267,6 @@ impl GossipSystem {
             }
             gossip_option::VENDOR | gossip_option::ARMORER => {
                 // Do NOT send SMSG_GOSSIP_COMPLETE — the vendor window replaces gossip.
-                // vmangos: SendListInventory() with no CloseGossip() before it.
                 info!(
                     "Vendor option selected for player {:?} from NPC {:?}",
                     player_guid, npc_guid
@@ -275,7 +274,6 @@ impl GossipSystem {
             }
             gossip_option::TRAINER => {
                 // Do NOT send SMSG_GOSSIP_COMPLETE — the trainer window replaces gossip.
-                // vmangos: SendTrainerList() with no CloseGossip() before it.
                 info!("Trainer option selected - would open trainer window");
             }
             gossip_option::TAXIVENDOR => {

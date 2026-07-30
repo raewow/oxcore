@@ -18,7 +18,7 @@ const SPELL_EFFECT_APPLY_AURA: u32 = 6;
 const SPELL_AURA_DUMMY: u32 = 4;
 const SPELL_AURA_GHOST: u32 = 95;
 
-/// Faithful `SpellChainNode` (MaNGOS `SpellMgr.h`): prev/first/req + 1-based rank.
+/// Spell chain node: prev/first/req + 1-based rank.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpellChainNode {
     pub prev: u32,
@@ -160,7 +160,6 @@ pub struct SpellTargetEntry {
 }
 
 /// Pet aura binding: a spell that grants a pet an aura.
-/// Port of MaNGOS `PetAura` (SpellMgr.h).
 #[derive(Debug, Clone, Default)]
 pub struct PetAura {
     pub remove_on_change_pet: bool,
@@ -685,7 +684,7 @@ impl SpellManager {
         *self.skill_race_class_info_by_skill.write() = by_skill;
     }
 
-    /// Rebuild the `prev`/`req` -> spell_id reverse-lookup map (MaNGOS `mSpellChainsNext`).
+    /// Rebuild the `prev`/`req` -> spell_id reverse-lookup map.
     fn rebuild_spell_chains_next(&self, chains: &HashMap<u32, SpellChainNode>) {
         let mut next: HashMap<u32, Vec<u32>> = HashMap::new();
         for (&spell_id, node) in chains {

@@ -335,8 +335,7 @@ pub struct StatModifier {
 // Visibility / Model Byte Flags (Stealth, Invisibility, Detect Amore)
 // =============================================================================
 //
-// Mirrors `Aura::HandleModStealth`, `Aura::HandleInvisibility`,
-// `Aura::HandleInvisibilityDetect`, `Aura::HandleDetectAmore` in SpellAuras.cpp.
+// HandleModStealth, HandleInvisibility, HandleInvisibilityDetect, HandleDetectAmore.
 
 /// UNIT_FIELD_BYTES_1 byte offset 3 (vis flag byte). Set while stealthed
 /// (`Aura::HandleModStealth`, `UNIT_BYTES_1_OFFSET_VIS_FLAG`).
@@ -350,7 +349,7 @@ pub const PLAYER_FIELD_BYTE2_INVISIBILITY_GLOW: u8 = 0x40; // set while SPELL_AU
 
 /// Recompute the `invisibility_mask` (bit per invisibility type 0-31) from the
 /// set of currently-active `SPELL_AURA_MOD_INVISIBILITY` misc values.
-/// Mirrors the "recalculate value at modifier remove" loop in `Aura::HandleInvisibility`.
+/// Recalculate value at modifier remove.
 pub fn recompute_invisibility_mask(active_misc_values: impl Iterator<Item = i32>) -> u32 {
     let mut mask = 0u32;
     for misc in active_misc_values {
@@ -362,7 +361,7 @@ pub fn recompute_invisibility_mask(active_misc_values: impl Iterator<Item = i32>
 }
 
 /// Recompute the `detect_invisibility_mask` from active `SPELL_AURA_MOD_INVISIBILITY_DETECTION` auras.
-/// Mirrors the same recalculation loop in `Aura::HandleInvisibilityDetect`.
+/// Recalculate detect invisibility mask from active detection auras.
 pub fn recompute_detect_invisibility_mask(active_misc_values: impl Iterator<Item = i32>) -> u32 {
     recompute_invisibility_mask(active_misc_values)
 }
@@ -371,8 +370,7 @@ pub fn recompute_detect_invisibility_mask(active_misc_values: impl Iterator<Item
 // Shapeshift Display IDs
 // =============================================================================
 //
-// Mirrors `GetShapeshiftDisplayInfo()` in SpellAuras.cpp. Only forms with a
-// hardcoded display id are covered (the rest keep the unit's native model).
+// Only forms with a hardcoded display id are covered (the rest keep the unit's native model).
 // `is_alliance` selects the alliance/horde variant where the form differs by faction.
 pub const FORM_CAT: u8 = 1;
 pub const FORM_TREE: u8 = 2;
@@ -435,7 +433,7 @@ mod tests {
 
     #[test]
     fn shapeshift_forms_match_the_reference_enum() {
-        // `ShapeshiftForm` in SharedDefines.h is written in hex; these are its decimal values.
+        // The ShapeshiftForm values are defined in hex; these are their decimal values.
         assert_eq!(FORM_DIREBEAR, 0x08);
         assert_eq!(FORM_CREATUREBEAR, 0x0E);
         assert_eq!(FORM_CREATURECAT, 0x0F);

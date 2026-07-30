@@ -16,7 +16,7 @@ pub const CORPSE_DECAY_BOSS: u32 = 3600_000; // 1 hour
 
 // Unit flags (UNIT_FIELD_FLAGS)
 pub const UNIT_FLAG_NOT_SELECTABLE: u32 = 0x02000000;
-pub const UNIT_FLAG_NOT_ATTACKABLE_1: u32 = 0x00000080; // Matches MaNGOS - prevents attack selection
+pub const UNIT_FLAG_NOT_ATTACKABLE_1: u32 = 0x00000080; // Prevents attack selection
 pub const UNIT_FLAG_IMMUNE_TO_PLAYER: u32 = 0x00000200; // Actually 0x100, but we use 0x80 instead
 
 // Dynamic flags (UNIT_DYNAMIC_FLAGS)
@@ -207,7 +207,7 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
                 creature.set_has_loot(true);
             });
 
-        // Send LOOTABLE dynamic flag update (vmangos: only DYNFLAG_LOOTABLE, no DYNFLAG_DEAD)
+        // Send LOOTABLE dynamic flag update (only DYNFLAG_LOOTABLE, no DYNFLAG_DEAD)
         // DYNFLAG_DEAD is feign-death only. Client recognizes real death via health=0 + BYTES_1=7.
         let flags = UNIT_DYNFLAG_LOOTABLE;
         tracing::info!("[DEATH] process_creature_death {:?}: sending lootable update, dynflags=0x{:04X} (LOOTABLE)", guid, flags);
@@ -301,7 +301,7 @@ fn send_death_packet(world: &World, guid: ObjectGuid) {
 /// Send complete death+loot update with ALL fields (health, flags, dynamic flags, etc.)
 /// This ensures the client sees the complete corpse state in one atomic update
 /// Send UNIT_DYNFLAG_LOOTABLE update after loot generation.
-/// vmangos: SetFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_LOOTABLE) — just the flag, nothing else.
+/// SetFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_LOOTABLE) — just the flag, nothing else.
 fn send_complete_loot_update(world: &World, guid: ObjectGuid, dynamic_flags: u32) {
     let world_guid = WorldObjectGuid::new_creature(guid.entry(), guid.counter());
     let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(

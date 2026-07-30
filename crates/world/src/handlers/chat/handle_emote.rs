@@ -10,7 +10,7 @@ use oxcore_shared::protocol::{Protocol, WorldPacket};
 
 fn read_emote_id(protocol: Protocol, packet: &mut WorldPacket) -> Result<Option<u32>> {
     if protocol == Protocol::Modern {
-        // CypherCore and TrinityCore both define modern CMSG_EMOTE as an empty body.
+        // Modern CMSG_EMOTE has an empty body.
         return Ok(None);
     }
 

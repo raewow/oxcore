@@ -1,7 +1,6 @@
 //! Derived stat calculations (pure functions)
 //!
-//! All formulas ported from server/src/world/game/stats/ (health_mana.rs, attack_power.rs, crit_dodge.rs)
-//! These are pure functions with no side effects.
+//! Derived stat calculations (pure functions with no side effects).
 
 // Class constants
 const CLASS_WARRIOR: u8 = 1;
@@ -210,8 +209,8 @@ pub fn armor_from_agility(agility: f32) -> f32 {
 
 /// Mana regen per 5 seconds from spirit (class-specific).
 ///
-/// The reference formulas produce mana per 2-second tick; convert their
-/// per-second result to MP5 because `calculate_mana_regen_rates` takes MP5.
+/// Produce mana per 2-second tick; convert the per-second result to MP5 because
+/// `calculate_mana_regen_rates` takes MP5.
 pub fn mana_regen_from_spirit(class: u8, spirit: f32) -> f32 {
     let regen_per_two_seconds = match class {
         CLASS_MAGE | CLASS_PRIEST => spirit / 4.0 + 12.5,
@@ -226,7 +225,7 @@ pub fn mana_regen_from_spirit(class: u8, spirit: f32) -> f32 {
 /// Final mana regeneration rates, expressed as mana per second.
 ///
 /// `spirit_regen_per_5` is the spirit component before aura modifiers. `flat_mp5`
-/// is converted to mana per second before being added, matching the C++ flow.
+/// is converted to mana per second before being added.
 pub fn calculate_mana_regen_rates(
     spirit_regen_per_5: f32,
     regen_multiplier: f32,
@@ -328,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mana_regen_from_spirit_matches_reference_class_rates() {
+    fn test_mana_regen_from_spirit_class_rates() {
         assert!((mana_regen_from_spirit(CLASS_SHAMAN, 100.0) - 92.5).abs() < 0.0001);
         assert!((mana_regen_from_spirit(CLASS_WARLOCK, 100.0) - 87.5).abs() < 0.0001);
         assert_eq!(mana_regen_from_spirit(CLASS_ROGUE, 100.0), 0.0);
@@ -336,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mage_mana_regen_from_spirit_is_reference_equivalent_per_second() {
+    fn test_mage_mana_regen_from_spirit_per_second() {
         let mage_mp5 = mana_regen_from_spirit(CLASS_MAGE, 100.0);
         let (full_regen, interrupt_regen) = calculate_mana_regen_rates(mage_mp5, 1.0, 0.0, 0.0);
 

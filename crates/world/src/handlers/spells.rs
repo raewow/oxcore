@@ -16,7 +16,7 @@ use oxcore_shared::protocol::{ObjectGuid, Opcode, Protocol, WorldPacket};
 
 /// Parse SpellCastTargets from a CMSG_CAST_SPELL packet.
 ///
-/// Format matches MaNGOS SpellCastTargets::read() for 1.12.x client:
+/// Format for 1.12.x client:
 /// - u32 target_flags
 /// - if UNIT|UNK2: packed GUID
 /// - if OBJECT: packed GUID
@@ -181,7 +181,7 @@ fn parse_spell_cast_targets_vanilla(
         targets.item_target_guid = packet.read_packed_guid();
     }
 
-    // Corpse target (packed GUID) — read before locations per MaNGOS order
+    // Corpse target (packed GUID) — read before locations
     if target_flags & (TARGET_FLAG_CORPSE | TARGET_FLAG_PVP_CORPSE) != 0 {
         targets.corpse_target_guid = packet.read_packed_guid();
     }
@@ -214,9 +214,8 @@ fn parse_spell_cast_targets_vanilla(
 
 /// Whether an implicit-target id is a client-chosen explicit unit target.
 ///
-/// Mirrors MaNGOS `Spells::IsExplicitlySelectedUnitTarget` (SpellEntry.h): the set of
-/// implicit targets where the client picks the unit, used to reject negative spells the
-/// player explicitly aimed at themselves.
+/// The set of implicit targets where the client picks the unit, used to reject
+/// negative spells the player explicitly aimed at themselves.
 fn is_explicitly_selected_unit_target(target: u32) -> bool {
     matches!(
         target,
@@ -249,7 +248,7 @@ pub async fn handle_cast_spell(
         None => return Ok(()),
     };
 
-    // Unknown spell id: drop the cast (MaNGOS early return), but loudly — a missing
+    // Unknown spell id: drop the cast, but loudly — a missing
     // spell_template row leaves the client waiting on a cast that never starts.
     let spell_entry = match world.managers.spell_mgr.get(spell_id) {
         Some(entry) => entry,
@@ -264,7 +263,7 @@ pub async fn handle_cast_spell(
     };
 
     // Guard: the player must actually know the spell and it must not be passive.
-    // MaNGOS treats a violation as a cheat attempt — log and drop, no client response.
+    // Treat a violation as a cheat attempt — log and drop, no client response.
     let knows_spell = world
         .systems
         .player
@@ -405,7 +404,7 @@ pub async fn handle_cancel_aura(
         None => return Ok(()),
     };
 
-    // Guard battery mirroring MaNGOS HandleCancelAuraOpcode (SpellHandler.cpp:333-405).
+    // Guard battery matching the original aura-cancel logic.
     // SPELL_ATTR_NO_AURA_CANCEL (0x80000000): aura is flagged un-cancellable by the client.
     if spell_entry.attributes & 0x8000_0000 != 0 {
         return Ok(());
@@ -422,7 +421,7 @@ pub async fn handle_cancel_aura(
     if spell_entry.is_passive_spell() {
         return Ok(());
     }
-    // Negative auras can't be cancelled by the client. MaNGOS allows an exception only for
+    // Negative auras can't be cancelled by the client. Exception only for
     // POSSESS auras while remote-controlled; we have no possession/remote-control mover, so a
     // normal self-mover player can never cancel a non-positive aura.
     if !spell_entry.is_positive_spell() {
@@ -518,7 +517,7 @@ fn is_player_mover(mover_guid: Option<ObjectGuid>, player_guid: ObjectGuid) -> b
     mover_guid == Some(player_guid)
 }
 
-/// Whether any of a spell's effects is an area-aura effect (MaNGOS `IsAreaAuraEffect`).
+/// Whether any of a spell's effects is an area-aura effect.
 fn spell_has_area_aura_effect(effects: &[u32; 3]) -> bool {
     effects.iter().any(|&e| {
         matches!(
@@ -533,7 +532,7 @@ fn spell_has_area_aura_effect(effects: &[u32; 3]) -> bool {
 }
 
 /// Whether the given spell's aura on the player was cast by the player themselves.
-/// Returns true if no holder is found (mirrors MaNGOS: the area-aura caster check only
+/// Returns true if no holder is found (the area-aura caster check only
 /// blocks when a holder exists with a different caster).
 fn aura_caster_is_self(player_guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
     world
@@ -606,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_unit_targets_match_mangos_set() {
+    fn explicit_unit_targets() {
         // Client-chosen unit targets (TARGET_UNIT_ENEMY/FRIEND/UNIT/PARTY/CHAIN_HEAL/
         // CASTER_TARGET_POSITION/RAID/RAID_AND_CLASS).
         for t in [6, 21, 25, 35, 45, 53, 57, 61] {

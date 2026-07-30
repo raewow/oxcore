@@ -37,15 +37,14 @@ pub struct WorldSession {
     pending_teleport: Arc<RwLock<Option<(u32, u32, Position)>>>,
     /// Pending same-map teleport destination, completed by MSG_MOVE_TELEPORT_ACK.
     pending_near_teleport: Arc<RwLock<Option<Position>>>,
-    /// GUID the client currently believes it is controlling (`m_clientMoverGuid`).
+    /// GUID the client currently believes it is controlling.
     /// `None`/empty means the player itself. Set via CMSG_SET_ACTIVE_MOVER.
     client_mover_guid: RwLock<Option<ObjectGuid>>,
-    /// Server time (ms) before which movement packets are rejected (`m_moveRejectTime`).
+    /// Server time (ms) before which movement packets are rejected.
     move_reject_time: AtomicU32,
     /// The logout flow has sent SMSG_FORCE_MOVE_ROOT and awaits its client ACK.
     pending_root_ack: AtomicBool,
-    /// Sequence index for the next `SMSG_TIME_SYNC_REQUEST`, mirroring TrinityCore's
-    /// `_timeSyncNextCounter`. Modern-only; a 1.12 client never sees a time sync.
+    /// Sequence index for the next `SMSG_TIME_SYNC_REQUEST`. Modern-only; a 1.12 client never sees a time sync.
     time_sync_next_index: AtomicU32,
 }
 
@@ -99,8 +98,7 @@ impl WorldSession {
     }
 
     /// GUID the client currently controls. Returns the player's own GUID when no
-    /// alternate mover has been set, matching `WorldSession::GetMover()` for the
-    /// common case (no pet possession / mind control yet).
+    /// alternate mover has been set.
     pub fn client_mover_guid(&self) -> Option<ObjectGuid> {
         match *self.client_mover_guid.read() {
             Some(guid) => Some(guid),
@@ -108,13 +106,12 @@ impl WorldSession {
         }
     }
 
-    /// Set the active mover GUID (`m_clientMoverGuid`). Pass `None` to clear.
+    /// Set the active mover GUID. Pass `None` to clear.
     pub fn set_client_mover_guid(&self, guid: Option<ObjectGuid>) {
         *self.client_mover_guid.write() = guid;
     }
 
-    /// Resolve a mover GUID the client claims to control, mirroring
-    /// `WorldSession::GetMoverFromGuid`. Without pet/possession support the only
+    /// Resolve a mover GUID the client claims to control. Without pet/possession support the only
     /// valid mover is the player itself.
     pub fn get_mover_from_guid(&self, guid: ObjectGuid) -> Option<ObjectGuid> {
         let player = self.player_guid()?;
@@ -130,7 +127,7 @@ impl WorldSession {
         None
     }
 
-    /// Current move-reject timestamp (`m_moveRejectTime`, ms).
+    /// Current move-reject timestamp (ms).
     pub fn move_reject_time(&self) -> u32 {
         self.move_reject_time.load(Ordering::Relaxed)
     }
@@ -140,8 +137,7 @@ impl WorldSession {
         self.move_reject_time.store(time_ms, Ordering::Relaxed);
     }
 
-    /// Reject incoming movement packets for the next `ms` milliseconds
-    /// (`WorldSession::RejectMovementPacketsFor`).
+    /// Reject incoming movement packets for the next `ms` milliseconds.
     pub fn reject_movement_packets_for(&self, ms: u32) {
         let timeout = crate::core::common::get_ms_time().wrapping_add(ms);
         if self.move_reject_time() < timeout {
@@ -289,9 +285,7 @@ impl WorldSession {
 
     /// Take the next time-sync sequence index, so a response can be matched to its request.
     ///
-    /// Matches `WorldSession::SendTimeSync` (`WorldSession.cpp:1815-1826`), which increments after
-    /// each send. Resets are TrinityCore's `ResetTimeSync` on a non-seamless teleport; we do not
-    /// reset, so the index only ever grows -- the client echoes whatever it was given, so a
+    /// Increments after each send. The client echoes whatever it was given, so a
     /// monotonic counter still matches responses uniquely.
     pub fn next_time_sync_index(&self) -> u32 {
         self.time_sync_next_index.fetch_add(1, Ordering::Relaxed)

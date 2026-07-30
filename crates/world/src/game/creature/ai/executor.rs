@@ -214,7 +214,7 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                     creature.ai_state = AIState::Combat;
                     creature.combat.in_combat = true;
                     creature.combat.attackers.insert(target_guid);
-                    // vmangos Unit::Attack sets the victim when combat starts. Without it
+                    // Set the victim when combat starts. Without it
                     // the creature has no attack target to swing at, and UNIT_FIELD_TARGET
                     // stays empty for clients that see it enter combat.
                     if creature.combat.attacking.is_none() {
@@ -1210,7 +1210,7 @@ pub fn scripted_do_cast_spell(
 ///
 /// Checks cooldown via the creature's AI state data, then delegates to
 /// execute_creature_spell_cast. Returns true if the cast was initiated.
-/// The cast_flags parameter follows C++ convention: bit 0 = CF_TRIGGERED.
+/// The cast_flags parameter: bit 0 = CF_TRIGGERED.
 /// Other TryToCast checks (LOS, range, movement, immunity) are not yet
 /// implemented for creature casters.
 pub fn do_cast_spell_if_can(

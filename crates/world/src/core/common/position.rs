@@ -14,15 +14,15 @@ pub const MAP_HALFSIZE: f32 = SIZE_OF_GRIDS * MAX_NUMBER_OF_GRIDS / 2.0;
 /// Largest X/Y coordinate a valid map position may hold.
 pub const MAX_MAP_COORD: f32 = MAP_HALFSIZE - 0.5;
 
-/// Height coordinates get a far wider bound than X/Y (`MaNGOS::IsValidZCoord`).
+/// Height coordinates get a far wider bound than X/Y.
 pub const MAX_Z_COORD: f32 = 400_000.0;
 
-/// Clamp a coordinate into the map bounds (`MaNGOS::NormalizeMapCoord`).
+/// Clamp a coordinate into the map bounds.
 pub fn normalize_map_coord(coord: f32) -> f32 {
     coord.clamp(-MAX_MAP_COORD, MAX_MAP_COORD)
 }
 
-/// Whether a position is usable (`MaNGOS::IsValidMapCoord`).
+/// Whether a position is usable.
 ///
 /// X/Y must be finite and inside the map, Z within the much wider height bound, and
 /// the orientation finite and within 4π.
@@ -37,10 +37,9 @@ pub fn is_valid_map_coord(x: f32, y: f32, z: f32, orientation: f32) -> bool {
         && orientation.abs() <= 4.0 * std::f32::consts::PI
 }
 
-/// Straight-line distance between two points in 3D (`Geometry::GetDistance3D`).
+/// Straight-line distance between two points in 3D.
 ///
-/// Clamped to zero so a non-finite computation can never yield a negative distance, matching
-/// the C++ `dist > 0 ? dist : 0` guard.
+/// Clamped to zero so a non-finite computation can never yield a negative distance.
 pub fn get_distance_3d(from: (f32, f32, f32), to: (f32, f32, f32)) -> f32 {
     let dx = from.0 - to.0;
     let dy = from.1 - to.1;

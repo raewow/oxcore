@@ -274,7 +274,6 @@ impl InventorySystem {
     }
 
     /// Validate whether an item can be unequipped
-    /// Maps to C++ Player::CanUnequipItem
     ///
     /// Checks:
     /// 1. Only applies to equipped items and bank bags
@@ -364,7 +363,6 @@ impl InventorySystem {
     }
 
     /// Validate whether an item can be stored in a bank slot
-    /// Maps to C++ Player::CanBankItem
     ///
     /// Checks:
     /// 1. Destination must be a bank position
@@ -393,7 +391,7 @@ impl InventorySystem {
 
         // Bank bag slots (63-68)
         if bag == INVENTORY_SLOT_BAG_0 && slot >= BANK_SLOT_BAG_START && slot < BANK_SLOT_BAG_END {
-            // In C++ this checks if the bank bag slot is purchased.
+            // This checks if the bank bag slot is purchased.
             // Since we don't have purchase tracking yet, we treat all bank bag slots as available.
             // When bank slot purchase is implemented, check purchase status here.
             return None; // OK
@@ -902,7 +900,6 @@ impl InventorySystem {
     }
 
     /// Delete item from all related tables (item_instance, character_inventory, auction, mail_items, character_gifts)
-    /// Maps to C++ Item::DeleteAllFromDB static method
     /// This is used when an item needs to be completely removed from the database
     /// (e.g., auction expired, mail deleted, etc.)
     pub async fn delete_item_all(&self, item_guid: ObjectGuid) -> Result<()> {
@@ -1463,7 +1460,7 @@ impl InventorySystem {
     /// Transfer an item from one player to another, preserving all properties
     ///
     /// This is used for trading, mailing, etc. The item is removed from the source player
-    /// and added to the target player with the SAME GUID (MaNGOS behavior).
+    /// and added to the target player with the SAME GUID.
     /// Keeping the same GUID avoids client cache conflicts and simplifies the transaction.
     pub async fn transfer_item(
         &self,
@@ -1522,7 +1519,7 @@ impl InventorySystem {
         };
 
         // 4. Update database: Change owner and slot
-        // MaNGOS-style: Keep the same GUID, just update owner and position
+        // Keep the same GUID, just update owner and position
         if let Err(e) = self
             .repository
             .update_item_owner(item_guid.low(), to_player.low())
@@ -1614,8 +1611,8 @@ impl InventorySystem {
 
     /// Destroy up to `count` items of a given entry, walking the player's stacks.
     ///
-    /// Faithful to C++ `Player::DestroyItemCount(entry, count, update)`. Returns the
-    /// number actually destroyed (less than `count` only if the player held fewer).
+    /// Destroy up to `count` items of a given entry, walking the player's stacks.
+    /// Returns the number actually destroyed (less than `count` only if the player held fewer).
     pub fn destroy_item_count(&self, player_guid: ObjectGuid, entry_id: u32, count: u32) -> u32 {
         if count == 0 {
             return 0;
@@ -2292,12 +2289,12 @@ impl InventorySystem {
 
     /// Consume a charge from a cast item and destroy it when fully expended.
     ///
-    /// Faithful port of C++ `Spell::TakeCastItem`. Walks the item template's five
-    /// spell slots: each slot that grants a spell with a non-zero charge count ticks
-    /// the item-instance charge one step toward zero (positive decrements, negative
-    /// increments). The new value is written back only for non-stackable items
-    /// (`stackable < 2`), matching MaNGOS. When the item is expendable (a template
-    /// charge is negative) and its charges are spent, the item is destroyed.
+    /// Walks the item template's five spell slots: each slot that grants a spell
+    /// with a non-zero charge count ticks the item-instance charge one step toward
+    /// zero (positive decrements, negative increments). The new value is written
+    /// back only for non-stackable items (`stackable < 2`). When the item is
+    /// expendable (a template charge is negative) and its charges are spent, the
+    /// item is destroyed.
     ///
     /// Returns true if the item was destroyed.
     pub async fn consume_cast_item(&self, player_guid: ObjectGuid, item_guid: ObjectGuid) -> bool {
@@ -3441,7 +3438,6 @@ impl InventorySystem {
     }
 
     /// Update item durations for a player, destroying expired items
-    /// Maps to C++ Item::UpdateDuration
     pub fn update_item_durations(&self, player_guid: ObjectGuid, diff_ms: u32) {
         if !self.cache.has_player_inventory(player_guid) {
             return;
@@ -3461,7 +3457,7 @@ impl InventorySystem {
             }
 
             // Convert diff from milliseconds to seconds (or keep as-is depending on how duration is stored)
-            // C++ uses seconds for duration, diff is typically in milliseconds from world update
+            // Duration is in seconds, diff is typically in milliseconds from world update
             let diff_seconds = diff_ms / 1000;
             if diff_seconds == 0 {
                 continue;

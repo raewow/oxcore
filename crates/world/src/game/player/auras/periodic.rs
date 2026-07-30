@@ -11,18 +11,17 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-/// Recompute an aura's periodic timer against a new duration (MaNGOS `Aura::UpdatePeriodicTimer`).
+/// Recompute an aura's periodic timer against a new duration.
 ///
 /// Called when a channeled aura's duration is refreshed against a dynamic object (or, via
-/// `SpellAuraHolder::RefreshAuraPeriodicTimers`, whenever the holder's duration changes) so the
+/// `refresh_aura_periodic_timers`, whenever the holder's duration changes) so the
 /// next tick lands at the same point within the period rather than resetting to a full period —
 /// avoids losing partial ticks. Only meaningful while the aura is actually periodic; callers
 /// should skip non-periodic auras (`periodic_interval_ms == 0`) themselves.
 ///
 /// `duration` and `periodic_interval_ms` are both milliseconds. Returns the new periodic-timer
-/// value (MaNGOS `m_periodicTimer`, i.e. "ms until next tick" counting down — note this module's
-/// own `AuraContainer::tick_periodic` counts up instead, so a caller wiring this in against that
-/// representation must invert appropriately).
+/// value ("ms until next tick" counting down — note `AuraContainer::tick_periodic` counts up
+/// instead, so a caller wiring this in against that representation must invert appropriately).
 pub fn update_periodic_timer(duration: i32, periodic_interval_ms: i32) -> i32 {
     if periodic_interval_ms <= 0 {
         return duration;
@@ -318,8 +317,7 @@ async fn handle_periodic_mana_leech(
     Ok(())
 }
 
-/// Handle periodic trigger spell (MaNGOS `SPELL_AURA_PERIODIC_TRIGGER_SPELL` case in
-/// `Aura::PeriodicTick`, which just calls `Aura::TriggerSpell()`).
+/// Handle periodic trigger spell (`SPELL_AURA_PERIODIC_TRIGGER_SPELL`).
 ///
 /// Examples: Lightning Shield charges triggering on melee, some trinket effects.
 ///
@@ -331,12 +329,12 @@ async fn handle_periodic_mana_leech(
 /// spell; a spell with two such effects at different indices with different trigger spells would
 /// pick the first match instead of the aura's own slot.
 ///
-/// The custom per-spell-ID special cases in the C++ (Firestone Passive weapon enchant, Brood
+/// The custom per-spell-ID special cases (Firestone Passive weapon enchant, Brood
 /// Affliction, Restoration, Frenzied Regeneration, Lightning Shield cleanup, etc.) and the
 /// channel-target redirection for channeled spells are not modeled — those need item/weapon
 /// state, motion/channel-target lookups, and per-spell-family branching not available from this
 /// snapshot; only the generic "cast the configured trigger spell on the aura's target" path is
-/// ported here.
+/// implemented.
 async fn handle_periodic_trigger_spell(
     target_guid: ObjectGuid,
     snapshot: &AuraTickSnapshot,
@@ -522,7 +520,7 @@ mod tests {
         }
     }
 
-    // ── update_periodic_timer (MaNGOS Aura::UpdatePeriodicTimer) ─────────────
+    // ── update_periodic_timer ────────────────────────────────────────────────
 
     #[test]
     fn update_periodic_timer_non_positive_interval_returns_duration() {
@@ -544,7 +542,7 @@ mod tests {
         assert_eq!(update_periodic_timer(2000, 3000), 2000);
     }
 
-    // ── periodic tick handlers (Aura::PeriodicTick cases) ────────────────────
+    // ── periodic tick handlers ───────────────────────────────────────────────
 
     #[tokio::test]
     async fn periodic_damage_reduces_target_health() {

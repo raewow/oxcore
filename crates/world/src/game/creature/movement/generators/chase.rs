@@ -1,16 +1,9 @@
 //! Chase movement generator - follows a target with distance-based repathing
 //!
-//! Matches vmangos TargetedMovementGenerator behavior:
-//! - 100ms recheck interval (m_checkDistanceTimer)
+//! - 100ms recheck interval
 //! - Compares target's last-known position vs current position to decide repath
 //! - Only repaths when target has actually moved, not when contact point angle changes
 //! - 500ms minimum between full path recalculations to avoid jitter
-
-use super::super::generator::{MovementGenerator, MovementUpdate};
-use super::super::types::MovementGeneratorType;
-use oxcore_shared::protocol::{ObjectGuid, Position};
-
-/// Chase movement - follows a target with melee-range awareness
 pub struct ChaseMovementGenerator {
     pub target: ObjectGuid,
     target_position: Position,
@@ -28,7 +21,6 @@ pub struct ChaseMovementGenerator {
     /// Distance check timer - how often we CHECK if target moved (counts down, 100ms interval)
     check_distance_timer: u32,
     /// Target position at the time of the last path calculation
-    /// (vmangos: m_fTargetLastX/Y/Z - set in _setTargetLocation)
     target_last_path_pos: Option<Position>,
     /// Transport the target is currently on, if any
     target_transport_guid: Option<ObjectGuid>,
@@ -41,7 +33,7 @@ pub struct ChaseMovementGenerator {
 /// Default combat reach for players (used when target reach is unknown)
 const DEFAULT_TARGET_COMBAT_REACH: f32 = 1.5;
 
-/// How often to check if target has moved (vmangos: m_checkDistanceTimer reset to 100ms)
+/// How often to check if target has moved (reset to 100ms)
 const CHECK_DISTANCE_INTERVAL: u32 = 100;
 
 impl ChaseMovementGenerator {
@@ -97,14 +89,13 @@ impl ChaseMovementGenerator {
     }
 
     /// Calculate contact point - the point on the target's boundary facing the chaser.
-    /// Matches MaNGOS GetContactPoint behavior.
     fn get_contact_point(&self) -> Position {
         let dx = self.creature_position.x - self.target_position.x;
         let dy = self.creature_position.y - self.target_position.y;
         let angle = dy.atan2(dx);
 
         // Distance from target center to the contact point
-        // MaNGOS: combatReach + targetCombatReach - targetBounding - ownerBounding - 1.0
+        // combatReach + targetCombatReach - targetBounding - ownerBounding - 1.0
         // Simplified: use combat reach sum minus some offset, min 0.5
         let contact_dist =
             (self.creature_combat_reach + DEFAULT_TARGET_COMBAT_REACH - 1.0).max(0.5);
@@ -118,8 +109,7 @@ impl ChaseMovementGenerator {
     }
 
     /// Check if the target has moved enough from its position at last path calculation
-    /// to warrant a repath. vmangos: compares m_fTargetLastX/Y/Z vs current target pos,
-    /// then checks allowed_dist = GetMaxChaseDistance.
+    /// to warrant a repath.
     fn target_moved_enough(&self) -> bool {
         let Some(last_pos) = self.target_last_path_pos else {
             return true; // Never pathed, need initial path
@@ -129,7 +119,6 @@ impl ChaseMovementGenerator {
         let dy = self.target_position.y - last_pos.y;
         let dist_sq = dx * dx + dy * dy;
 
-        // vmangos: allowed_dist = GetMaxChaseDistance which is combatReach + targetCombatReach + RECALCULATION_RANGE
         // We use a simpler threshold: repath when target moved > 2.0 yards from where it was
         // when we last calculated a path. This prevents constant repathing when the player
         // is strafing in small circles.
@@ -167,7 +156,7 @@ impl MovementGenerator for ChaseMovementGenerator {
             return MovementUpdate::Continue;
         }
 
-        // Reset timer (vmangos: m_checkDistanceTimer.Reset(100))
+        // Reset timer
         self.check_distance_timer = CHECK_DISTANCE_INTERVAL;
 
         let dx = self.creature_position.x - self.target_position.x;
@@ -189,7 +178,6 @@ impl MovementGenerator for ChaseMovementGenerator {
         self.reached_target = false;
 
         // Only repath if target has actually moved from where it was when we last pathed
-        // (vmangos: compares m_fTargetLastX/Y/Z vs i_target->GetPosition())
         if self.is_moving && (!self.target_moved_enough() || self.repath_cooldown_timer > 0) {
             return MovementUpdate::Continue;
         }

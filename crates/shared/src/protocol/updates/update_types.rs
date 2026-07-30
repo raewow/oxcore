@@ -1,7 +1,6 @@
-//! Update type enums and constants from UpdateData.h
+//! Update type enums and constants
 //!
-//! This module contains the core enums and constants used for update packets,
-//! ported from the C++ reference implementation.
+//! This module contains the core enums and constants used for update packets.
 
 /// Update type constants for different packet types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

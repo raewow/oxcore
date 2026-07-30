@@ -241,8 +241,7 @@ impl CorpseManager {
 
 /// Look up the display id (creature model) for a player corpse.
 ///
-/// Vanilla WoW has dedicated "corpse" models per race+gender. These values
-/// come from CreatureDisplayInfo.dbc and match vmangos.
+/// Vanilla WoW has dedicated "corpse" models per race+gender.
 fn corpse_display_id_for(race: u8, gender: u8) -> u32 {
     // Gender: 0 = male, 1 = female.
     let male = gender == 0;
@@ -311,7 +310,7 @@ fn corpse_display_id_for(race: u8, gender: u8) -> u32 {
 fn corpse_flag_bits(corpse: &Corpse) -> u32 {
     use crate::game::player::death::corpse::{corpse_flags, CorpseType};
 
-    let mut flags = corpse_flags::UNK2; // vmangos always sets this
+    let mut flags = corpse_flags::UNK2;
     if corpse.corpse_type == CorpseType::Bones {
         flags |= corpse_flags::BONES;
     }

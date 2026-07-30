@@ -28,7 +28,7 @@ impl TransportAnimation {
 
     /// Add a keyframe, keeping the path sorted by time and `total_time` at the latest.
     ///
-    /// The C++ path is a `map` keyed by time, so a keyframe at a time already present
+    /// The path is keyed by time, so a keyframe at a time already present
     /// replaces the existing one rather than being inserted alongside it.
     pub fn add_frame(&mut self, entry: TransportAnimationEntry) {
         if entry.time_seg > self.total_time {
@@ -47,7 +47,7 @@ impl TransportAnimation {
         &self.path
     }
 
-    /// Index of the first keyframe at or after `time` (the C++ `lower_bound`).
+    /// Index of the first keyframe at or after `time`.
     fn lower_bound(&self, time: u32) -> usize {
         self.path.partition_point(|frame| frame.time_seg < time)
     }
@@ -74,7 +74,6 @@ impl TransportAnimation {
 }
 
 /// The loaded animation paths of every transport, keyed by transport entry
-/// (`TransportMgr::m_transportAnimations`).
 #[derive(Debug, Default, Clone)]
 pub struct TransportAnimationManager {
     animations: std::collections::HashMap<u32, TransportAnimation>,

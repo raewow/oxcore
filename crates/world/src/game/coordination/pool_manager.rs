@@ -1,4 +1,4 @@
-//! Spawn pool state (port of MaNGOS `PoolManager` + `SpawnedPoolData`).
+//! Spawn pool state.
 //!
 //! The manager owns *which* pool members should exist; instantiating them is
 //! the world's job — grid loading spawns selected members, and the pool system
@@ -9,7 +9,7 @@ use super::pool_types::{pool_flags, PoolMember, PoolMemberKey, PoolMemberType, P
 use dashmap::DashMap;
 use oxcore_shared::protocol::ObjectGuid;
 
-/// Instance id shared by all continents (MaNGOS continent map persistent state).
+/// Instance id shared by all continents.
 pub const CONTINENT_INSTANCE: u32 = 0;
 
 /// Guard against `pool_pool` rows forming a cycle.
@@ -63,8 +63,8 @@ impl PoolManager {
 
     /// Load pools from repository data.
     ///
-    /// Every pool auto-spawns unless it is a member of another pool (MaNGOS
-    /// sets AUTO_SPAWN on load and clears it for nested pools); pools whose
+    /// Every pool auto-spawns unless it is a member of another pool
+    /// (AUTO_SPAWN is set on load and cleared for nested pools); pools whose
     /// chances cannot produce a pick are reported and disabled.
     pub fn load_from_repository(&self, data: PoolData) {
         self.pools.clear();
@@ -165,8 +165,7 @@ impl PoolManager {
         tracing::info!("PoolManager loaded {} pools", self.pools.len());
     }
 
-    /// Roll the continent rosters of every auto-spawn pool
-    /// (MaNGOS `PoolManager::Initialize`, called per map persistent state).
+    /// Roll the continent rosters of every auto-spawn pool.
     ///
     /// Instanced maps roll their own roster the first time a grid in that
     /// instance asks whether a pooled spawn may spawn.
@@ -356,8 +355,7 @@ impl PoolManager {
             .map(|key| (pool_id, instance_id, key))
     }
 
-    /// Re-roll a pool because one of its members is ready to respawn
-    /// (MaNGOS `PoolManager::UpdatePool`).
+    /// Re-roll a pool because one of its members is ready to respawn.
     ///
     /// If the trigger is rolled again it simply respawns; otherwise it leaves
     /// the roster and the newly rolled member takes its place. Only the
@@ -442,13 +440,12 @@ impl PoolManager {
         removed
     }
 
-    /// Fill a pool's roster for an instance back up to its limit
-    /// (MaNGOS `SpawnPool`).
+    /// Fill a pool's roster for an instance back up to its limit.
     pub fn fill_roster(&self, pool_id: u32, instance_id: u32) {
         self.roll_roster(pool_id, instance_id);
     }
 
-    /// Drop a pool's whole roster for an instance (MaNGOS `DespawnPool`).
+    /// Drop a pool's whole roster for an instance.
     /// Returns the members that have to be removed from the world.
     pub fn clear_roster(&self, pool_id: u32, instance_id: u32) -> Vec<PoolDespawn> {
         let keys = self

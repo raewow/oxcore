@@ -267,7 +267,7 @@ impl Creature {
             move_spline: MoveSpline::default(),
             wander_distance: 0.0,
             speed_walk: 1.0,    // Default rate, overridden by model_info
-            speed_run: 1.14286, // Default rate (vmangos DEFAULT_NPC_RUN_SPEED_RATE)
+            speed_run: 1.14286, // Default rate
             movement_paused: false,
             movement_info: MovementInfo::new(),
             following_target: None,
@@ -303,7 +303,6 @@ impl Creature {
     }
 
     /// Pause out-of-combat movement when a player interacts with us
-    /// (matches vmangos Creature::PauseOutOfCombatMovement behaviour)
     pub fn pause_out_of_combat_movement(&mut self) {
         self.pause_out_of_combat_movement_for(NPC_MOVEMENT_PAUSE_TIME);
     }
@@ -311,8 +310,7 @@ impl Creature {
     /// Pause out-of-combat movement for a specific duration.
     ///
     /// Creatures in combat ignore this, and only random or waypoint movement can be paused.
-    /// The paused flag is a local addition on top of the C++ behaviour: it also gates the
-    /// interaction flows that read [`Self::movement_paused`].
+    /// The paused flag gates the interaction flows that read [`Self::movement_paused`].
     pub fn pause_out_of_combat_movement_for(&mut self, pause_time_ms: u32) {
         if self.combat.in_combat {
             return;
@@ -383,7 +381,7 @@ impl Creature {
         self.combat.leave_combat();
         self.threat_manager.clear();
 
-        // Stop movement immediately on death (vmangos: MotionMaster.Clear + StopMoving in SetDeathState)
+        // Stop movement immediately on death
         // Snap position to current spline location so the stop packet doesn't teleport the corpse
         if self.move_spline.is_active() {
             self.position = self.move_spline.get_position();
@@ -441,7 +439,7 @@ impl Creature {
     ///
     /// Returns a *delay*, not a point in time: `Creature::SetDeathState`
     /// (Creature.cpp:2245-2259) scales the base delay by the spawn flags and only
-    /// then turns it into `m_respawnTime = time(nullptr) + respawnDelay`. Handing
+    /// then turns it into `time(nullptr) + respawnDelay`. Handing
     /// back an absolute timestamp here is what let the caller add "now" a second
     /// time, pushing every respawn decades into the future.
     pub fn calculate_respawn_delay_secs(

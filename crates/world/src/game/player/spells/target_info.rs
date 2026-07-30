@@ -1,15 +1,13 @@
 //! Per-target spell effect application.
 //!
-//! Faithful (simplified) port of MaNGOS `TargetInfo` / `Spell::DoAllEffectOnTarget`.
 //! Each unit hit by a spell gets exactly one `TargetInfo`: the hit/miss/resist outcome
 //! is resolved once for the whole target (not once per effect), the requested effect
 //! mask is carried across every effect applied to that target, and per-target proc
-//! flags/accumulated damage & healing are tracked the same way `m_procAttacker` /
-//! `m_procVictim` / `m_damage` / `m_healing` are threaded through the C++ function.
+//! flags/accumulated damage & healing are tracked across the effect pipeline.
 //!
 //! Effect handlers in `effects/*` still apply their own damage/heal immediately
 //! (via `caster::deal_damage` / `caster::deal_heal`) rather than being deferred to a
-//! single post-loop apply like the C++ does — see the module doc on
+//! single post-loop apply — see the module doc on
 //! [`apply_target_effects`] for why that divergence is intentional for now.
 
 use super::diminishing::{self, DiminishSnapshot};
@@ -21,8 +19,7 @@ use crate::World;
 use anyhow::Result;
 use oxcore_shared::protocol::ObjectGuid;
 
-// ─── MaNGOS spell attribute constants ─────────────────────────────────────────
-// Reference: SpellDefines.h
+// ─── Spell attribute constants ─────────────────────────────────────────
 
 /// SPELL_ATTR_NOT_IN_COMBAT_ONLY_PEACEFUL — spell cannot be used in combat.
 const SPELL_ATTR_NOT_IN_COMBAT_ONLY_PEACEFUL: u32 = 0x1000_0000; // bit 28
@@ -75,7 +72,7 @@ const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
 const SPELL_AURA_MOD_POSSESS_PET: u32 = 128;
 
 /// SPELL_EFFECT_PERSISTENT_AREA_AURA — applied once per aura holder, not per unit target
-/// here, so its bit is always stripped from the effect mask (matches MaNGOS chunk_0).
+/// here, so its bit is always stripped from the effect mask.
 const SPELL_EFFECT_PERSISTENT_AREA_AURA: u32 = 27;
 
 /// Per-target proc flags accumulated while applying a target's effects.
@@ -83,10 +80,6 @@ const SPELL_EFFECT_PERSISTENT_AREA_AURA: u32 = 27;
 pub use crate::game::player::auras::proc::proc_flags;
 
 /// Per-target bookkeeping for one spell cast against one unit target.
-///
-/// Equivalent of MaNGOS `TargetInfo` plus the `procAttacker`/`procVictim`/`procEx`/
-/// `m_damage`/`m_healing`/`m_absorbed` locals that `Spell::DoAllEffectOnTarget` threads
-/// through a single target's effect processing.
 #[derive(Debug, Clone)]
 pub struct TargetInfo {
     pub target_guid: ObjectGuid,
@@ -102,21 +95,20 @@ pub struct TargetInfo {
     /// Whether `miss_condition` has already been rolled for this cast. Delayed
     /// projectiles resolve at launch and carry this snapshot to impact.
     pub outcome_resolved: bool,
-    /// Set once this target's effects have been applied; a second call is a no-op
-    /// (mirrors `TargetInfo::processed`).
+    /// Set once this target's effects have been applied; a second call is a no-op.
     pub processed: bool,
-    /// Attacker-side proc flags for this target (`Spell::m_procAttacker` per-target view).
+    /// Attacker-side proc flags for this target.
     pub proc_attacker: u32,
-    /// Victim-side proc flags for this target (`Spell::m_procVictim` per-target view).
+    /// Victim-side proc flags for this target.
     pub proc_victim: u32,
-    /// Direct damage accumulated across this target's effects (`Spell::m_damage` equivalent).
+    /// Direct damage accumulated across this target's effects.
     pub damage: u32,
-    /// Healing accumulated across this target's effects (`Spell::m_healing` equivalent).
+    /// Healing accumulated across this target's effects.
     pub healing: u32,
-    /// Damage absorbed across this target's effects (`Spell::m_absorbed` equivalent).
+    /// Damage absorbed across this target's effects.
     pub absorbed: u32,
     /// Diminishing-returns decision sampled when this target was hit, shared by every
-    /// aura the hit applies (`Spell::m_diminishGroup` / `m_diminishLevel`).
+    /// aura the hit applies.
     pub diminishing: DiminishSnapshot,
 }
 
@@ -146,8 +138,7 @@ impl TargetInfo {
     }
 }
 
-/// Per-unit pre-effect processing (MaNGOS `Spell::DoSpellHitOnUnit` chunk_0,
-/// Spell.cpp lines 1531-1680).
+/// Per-unit pre-effect processing.
 ///
 /// Called on a landed hit, **before** dispatching individual effects.  Handles:
 ///
@@ -157,8 +148,8 @@ impl TargetInfo {
 ///
 /// 2. **Per-effect mechanic resistance** — each effect bit whose mechanic the
 ///    target resists is cleared.  When the mask becomes zero the hit is aborted.
-///    *Approximated:* the MaNGOS `Unit::IsEffectResist()` call is not yet ported;
-///    this step is omitted until that helper exists — see TODO.
+    ///    *Approximated:* the `Unit::IsEffectResist()` call is not yet ported;
+    ///    this step is omitted until that helper exists — see TODO.
 ///
 /// 3. **Delayed-spell immunity/evasion** — if the caster is not the target and
 ///    the spell has `speed > 0`, and the target is immune to the spell or its
@@ -188,8 +179,8 @@ impl TargetInfo {
 ///    *Approximated:* uses `enter_combat_on_miss`-style `apply_damage(0)`
 ///    and `add_threat` / `set_in_combat` for creatures when the gate passes.
 ///    The whole hostile/friendly block is skipped when caster and target are the
-///    same unit, matching the C++ `pRealCaster != unit` guard — a reflected cast
-///    lands back on its caster and must not put it in combat with itself.
+    ///    same unit — a reflected cast lands back on its caster and must not put it
+    ///    in combat with itself.
 ///
 /// 7. **Friendly-target assist/PvP** — when a friendly target is in combat and
 ///    the spell would generate threat, the caster enters assisted combat and
@@ -217,7 +208,6 @@ async fn do_spell_hit_on_unit(
     world: &World,
 ) -> Option<DiminishSnapshot> {
     // ── Step 3.  Zero effect mask: just flag combat if non-positive ────────────
-    // (C++ lines 1540-1545)
     if *effect_mask == 0 {
         if !spell_entry.is_positive_spell() {
             enter_combat_on_miss(caster_guid, target_guid, world);
@@ -259,13 +249,11 @@ async fn do_spell_hit_on_unit(
     }
 
     // ── Step 6a.  Hostile-side side effects ────────────────────────────────────
-    // (C++ lines 1568-1641)
     // TODO: `IsFriendlyTo(unit)` not ported — use `is_positive_spell()` as proxy.
     let caster_is_player = caster_guid.is_player();
 
-    // The whole hostile/friendly block is `if (pRealCaster && pRealCaster != unit)`: a unit
-    // never breaks its own stealth or enters combat with itself. This matters for reflected
-    // casts, which land back on the caster.
+    // A unit never breaks its own stealth or enters combat with itself. This matters for
+    // reflected casts, which land back on the caster.
     if caster_guid == target_guid {
         return Some(snapshot_diminishing_for_hit(
             spell_entry,
@@ -279,9 +267,9 @@ async fn do_spell_hit_on_unit(
     }
 
     if !spell_entry.is_positive_spell() {
-        // Auras cancelled by taking a hostile action (C++ lines 1572-1573). MaNGOS gates
-        // this on `m_damage`, the damage the delayed launch already accumulated; here the
-        // closest stand-in before effects run is "this spell deals direct damage".
+        // Auras cancelled by taking a hostile action. The reference implementation gates
+        // this on accumulated damage from the delayed launch; here the closest stand-in
+        // before effects run is "this spell deals direct damage".
         if spell_entry.is_direct_damage_spell() {
             remove_auras_with_interrupt_flag_from_target(
                 target_guid,
@@ -291,7 +279,7 @@ async fn do_spell_hit_on_unit(
             .await;
         }
 
-        // Stealth/invisibility removal on target (C++ lines 1575-1583)
+        // Stealth/invisibility removal on target.
         // Game-object caster check: if caster_guid is not a player, we approximate
         // as "caster is a game object" — traps etc. do not break stealth.
         let caster_is_object =
@@ -314,12 +302,11 @@ async fn do_spell_hit_on_unit(
             && !is_trap
             && !is_sap;
 
-        // Visibility to target (C++ lines 1600-1601) — approximated as always true
-        // until `IsVisibleForOrDetect` lands: `m_caster->IsVisibleForOrDetect(unit, unit, false)`.
+        // Visibility to target — approximated as always true until `IsVisibleForOrDetect` lands.
         let caster_visible_to_target = true;
 
         if can_enter_combat && caster_visible_to_target {
-            // Gate: not (triggered-by-aura without speed/threat)  (C++ lines 1603-1606)
+            // Gate: not (triggered-by-aura without speed/threat)
             let can_threat =
                 (!is_triggered || spell_entry.speed > 0.0 || has_direct_threat_effect(spell_entry))
                     && !spell_entry.has_attribute_ex(SPELL_ATTR_EX_NO_THREAT)
@@ -328,10 +315,10 @@ async fn do_spell_hit_on_unit(
 
             if can_threat {
                 // The caster can be detected but still be carrying a stealth aura, so a
-                // hostile action drops its own stealth/invisibility too (C++ 1609-1615).
+                // hostile action drops its own stealth/invisibility too.
                 remove_stealth_and_invisibility(caster_guid, spell_entry, world);
 
-                // Enter combat (C++ lines 1617-1627)
+                // Enter combat
                 if !spell_has_aura_type(spell_entry, SPELL_AURA_MOD_POSSESS)
                     && !spell_has_aura_type(spell_entry, SPELL_AURA_MOD_POSSESS_PET)
                 {
@@ -339,12 +326,11 @@ async fn do_spell_hit_on_unit(
                 }
                 set_caster_in_combat_with_victim(caster_guid, target_guid, world);
             } else if spell_entry.has_attribute_ex3(SPELL_ATTR_EX3_PVP_ENABLING) {
-                // PvP-enabling only (C++ lines 1629-1634)
+                // PvP-enabling only
                 set_out_of_combat(caster_guid, target_guid, world);
             }
         } else {
             // Fallthrough: spell did not pass the combat-entry gate
-            // (C++ lines 1635-1641)
             let not_only_peaceful = !spell_entry
                 .has_attribute(SPELL_ATTR_NOT_IN_COMBAT_ONLY_PEACEFUL)
                 || !spell_entry.has_attribute_ex(SPELL_ATTR_EX_ONLY_PEACEFUL_TARGETS);
@@ -354,15 +340,13 @@ async fn do_spell_hit_on_unit(
         }
     } else {
         // ── Step 6b.  Friendly-target side effects ────────────────────────────
-        // (C++ lines 1643-1678)
 
         // Delayed negative spells on friendly targets (post-duel) → evade
-        // (C++ lines 1645-1651)
         if is_delayed && !spell_entry.is_positive_spell() {
             return None;
         }
 
-        // Combat assist (C++ lines 1656-1667)
+        // Combat assist
         // TODO: `IsInCombat` check not directly exposed — approximated via
         // checking `in_combat` on the target.
         let target_in_combat = world
@@ -384,11 +368,10 @@ async fn do_spell_hit_on_unit(
         {
             assisted_combat(caster_guid, target_guid, world);
         }
-        // TODO: PvP flagging (C++ lines 1669-1675) — `UpdatePvP` not ported.
+        // TODO: PvP flagging — `UpdatePvP` not ported.
     }
 
     // ── Step 7.  Diminishing-returns snapshot ──────────────────────────────────
-    // (C++ lines 1681-1700)
     // Sampled once per unit hit rather than per aura: a spell whose effect mask applies
     // several auras must give all of them one level and charge the target only once.
     // Aura-holder creation is still done by the aura system as each effect is applied,
@@ -422,10 +405,9 @@ fn spell_applies_aura(spell_entry: &SpellEntry, effect_mask: u8) -> bool {
     })
 }
 
-/// Take the per-hit diminishing-returns snapshot and charge the target's counter
-/// (`m_diminishGroup` / `m_diminishLevel` in `Spell::DoSpellHitOnUnit`).
+/// Take the per-hit diminishing-returns snapshot and charge the target's counter.
 ///
-/// Divergences: `m_triggeredByAuraSpell` is approximated by `is_triggered`, and
+/// Divergences: aura-triggered status is approximated by `is_triggered`, and
 /// `caster->IsFriendlyTo(target)` by the spell's polarity, which is the same proxy the
 /// rest of this module uses. Only players and creatures carry DR state; any other caster
 /// or target kind is treated as having none.
@@ -500,8 +482,7 @@ fn has_direct_threat_effect(spell_entry: &SpellEntry) -> bool {
         .any(|&e| e == SPELL_EFFECT_ATTACK_ME || e == SPELL_EFFECT_THREAT_ALL)
 }
 
-/// Check whether the spell applies a specific aura type in any of its effect
-/// slots (MaNGOS: `m_spellInfo->HasAura(SPELL_AURA_MOD_POSSESS)` etc.).
+/// Check whether the spell applies a specific aura type in any of its effect slots.
 fn spell_has_aura_type(spell_entry: &SpellEntry, aura_type: u32) -> bool {
     spell_entry
         .effect_apply_aura_name
@@ -828,9 +809,7 @@ pub(super) fn target_is_immune_to_damage(
     }
 }
 
-/// Enter combat for a landed hit (MaNGOS: `unit->AttackedBy(pRealUnitCaster)`,
-/// `unit->AddThreat(pRealUnitCaster)`, `SetInCombatWithAggressor`,
-/// `SetInCombatWithVictim`).
+/// Enter combat for a landed hit.
 fn enter_combat_on_hit(caster_guid: ObjectGuid, target_guid: ObjectGuid, world: &World) {
     if target_guid.is_creature() {
         let timestamp = std::time::SystemTime::now()
@@ -859,8 +838,7 @@ fn enter_combat_on_hit(caster_guid: ObjectGuid, target_guid: ObjectGuid, world: 
     }
 }
 
-/// Flag the caster as being in combat with the victim (MaNGOS:
-/// `pRealUnitCaster->SetInCombatWithVictim(unit)`).
+/// Flag the caster as being in combat with the victim.
 pub(crate) fn set_caster_in_combat_with_victim(
     caster_guid: ObjectGuid,
     _target_guid: ObjectGuid,
@@ -888,8 +866,7 @@ pub(crate) fn set_caster_in_combat_with_victim(
     }
 }
 
-/// Clear the combat/aggressor relationship (MaNGOS:
-/// `SetOutOfCombatWithAggressor` / `SetOutOfCombatWithVictim`).
+/// Clear the combat/aggressor relationship.
 fn set_out_of_combat(caster_guid: ObjectGuid, target_guid: ObjectGuid, world: &World) {
     // Not all combat systems expose this directly; no-op is safe for PvP-enabling.
     let _ = (caster_guid, target_guid, world);

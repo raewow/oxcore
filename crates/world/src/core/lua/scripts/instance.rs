@@ -4,7 +4,7 @@
 //! and parsing the returned action tables.
 //!
 //! Instance scripts manage encounter state (boss kills, door states, etc.)
-//! using SetData/GetData pattern from MaNGOS.
+//! using SetData/GetData pattern.
 
 use super::super::super::common::ObjectGuid;
 use super::super::actions::{parse_actions, LuaAction};

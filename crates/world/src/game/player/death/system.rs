@@ -305,7 +305,7 @@ impl DeathSystem {
     pub fn handle_release_spirit(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         // Validate state — accept both Corpse and JustDied (the latter can happen
         // if the client sends CMSG_REPOP_REQUEST before the world tick advances
-        // JustDied -> Corpse, mirroring the VMaNGOS HandleRepopRequestOpcode guard).
+        // JustDied -> Corpse, matching expected state transitions).
         let death_state = world
             .systems
             .player
@@ -822,7 +822,7 @@ impl DeathSystem {
     ) -> Result<()> {
         // SMSG_CORPSE_RECLAIM_DELAY — greys out "Resurrect" button.
         // Use the escalating-delay ladder based on the player's recent-death
-        // window (vmangos behavior: 30s / 60s / 120s depending on how recently
+        // window: 30s / 60s / 120s depending on how recently
         // the last death occurred).
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -903,8 +903,7 @@ impl DeathSystem {
                     }
                 };
 
-                // Set health and mana. Reset rage (C++ ResurrectPlayer: SetPower(RAGE,0))
-                // and restore energy proportionally (SetPower(ENERGY, max*pct)).
+                // Set health and mana. Reset rage and restore energy proportionally.
                 player.stats.health = health;
                 player.power.set_mana(mana);
                 player.power.current[super::super::power::state::PowerType::Rage as usize] = 0;
@@ -1076,9 +1075,9 @@ impl DeathSystem {
             });
     }
 
-    /// Pick a self-resurrection spell id at death time, vmangos-style.
+    /// Pick a self-resurrection spell id at death time.
     ///
-    /// Priority (matches `SelectResurrectionSpellId` at vmangos Player.cpp:19905):
+    /// Priority:
     ///   1. Warlock Soulstone — a dummy aura on the player maps to a rez spell.
     ///      Each soulstone rank has its own aura→rez-spell pairing.
     ///   2. Shaman Reincarnation (spell 20608 learned, 21169 off-cooldown,
@@ -1133,7 +1132,7 @@ impl DeathSystem {
 
         // Reincarnation (Shaman): requires spell 20608 learned, 21169 not on
         // cooldown. Item check (17030 Ankh) is simplified for now — the real
-        // vmangos path consumes one Ankh from inventory on activation.
+        // The spell consumes one Ankh from inventory on activation.
         let has_reincarn = world
             .systems
             .player
@@ -1351,7 +1350,7 @@ impl DeathSystem {
     /// Apply a ghost-related aura (spell 8326 Ghost, spell 20584 Wisp Spirit)
     /// by directly inserting an AURA_GHOST entry into the player's aura
     /// container. We can't go through `SpellSystem::cast_spell` here because
-    /// this code path is sync. MaNGOS-style vanilla clients don't stream
+    /// this code path is sync. Vanilla clients don't stream
     /// per-aura packets (no SMSG_AURA_UPDATE in 1.12); the aura is read via
     /// UNIT_FIELD_AURA during the next visibility update.
     fn apply_ghost_aura(&self, player_guid: ObjectGuid, spell_id: u32, world: &World) {

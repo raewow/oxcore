@@ -1,7 +1,7 @@
 //! Corpse DB model.
 //!
-//! Maps to the `corpse` table in the characters database. Schema matches
-//! vmangos: minimal body record keyed by corpse GUID + owner player GUID.
+//! Maps to the `corpse` table in the characters database. Minimal body record
+//! keyed by corpse GUID + owner player GUID.
 //! Appearance/equipment are reconstructed at load time from the character row.
 
 use sqlx::FromRow;

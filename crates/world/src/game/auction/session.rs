@@ -17,14 +17,12 @@ use oxcore_shared::protocol::ObjectGuid;
 
 /// Send SMSG_AUCTION_COMMAND_RESULT to the client session.
 ///
-/// Mirrors C++ `WorldSession::SendAuctionCommandResult`.
-/// The `auction` parameter is `None` only when the auction pointer is null;
-/// callers must ensure `auction` is `Some` for `HigherBid` and `Ok+BidPlaced` branches,
-/// matching the C++ assumption that those branches unconditionally dereference `auc`.
+/// The `auction` parameter is `None` only when no auction is available;
+/// callers must ensure `auction` is `Some` for `HigherBid` and `Ok+BidPlaced` branches.
 ///
 /// Returns an error when the required auction data is missing for a branch that
-/// needs it (e.g. `HigherBid` without an `AuctionEntry`). This prevents the
-/// silent packet-truncation bug that the C++ code exhibits when `auc` is null.
+/// needs it (e.g. `HigherBid` without an `AuctionEntry`). This prevents silent
+/// packet truncation.
 pub fn send_auction_command_result(
     session: &WorldSession,
     auction: Option<&AuctionEntry>,
@@ -77,10 +75,8 @@ pub fn send_auction_command_result(
 
 /// Send SMSG_AUCTION_OWNER_NOTIFICATION to the client session.
 ///
-/// Mirrors C++ `WorldSession::SendAuctionOwnerNotification`.
-/// The `auction` pointer is assumed non-null (matching C++).
-/// `item_random_property_id` is the item's random property from the auction manager
-/// (looked up via `GetAItem` in C++); pass `0` when the item is not found.
+/// `auction` must not be `None`.
+/// `item_random_property_id` is the item's random property from the auction manager; pass `0` when the item is not found.
 pub fn send_auction_owner_notification(
     session: &WorldSession,
     auction: &AuctionEntry,
@@ -105,7 +101,6 @@ pub fn send_auction_owner_notification(
 
 /// Send SMSG_AUCTION_REMOVED_NOTIFICATION to the client session.
 ///
-/// Mirrors C++ `WorldSession::SendAuctionRemovedNotification`.
 /// Looks up the item to resolve randomPropertyId; passes 0 when the item is not found.
 pub fn send_auction_removed_notification(
     session: &WorldSession,
@@ -126,7 +121,6 @@ pub fn send_auction_removed_notification(
 
 /// Send SMSG_AUCTION_BIDDER_NOTIFICATION to the client session.
 ///
-/// Mirrors C++ `WorldSession::SendAuctionBidderNotification`.
 /// `won=true` for buyout/expiry win; `won=false` for outbid.
 /// `outbid_amount` is set to `auction.get_outbid_amount()` when outbid, `0` when won.
 pub fn send_auction_bidder_notification(
@@ -150,7 +144,6 @@ pub fn send_auction_bidder_notification(
 
 /// Validate auctioneer access and return the corresponding auction house entry.
 ///
-/// Mirrors C++ `WorldSession::GetCheckedAuctionHouseForAuctioneer`.
 /// Returns `None` if the player is not allowed to use the auction (GM/self without permission,
 /// or NPC the player cannot interact with).
 ///
@@ -168,7 +161,7 @@ pub fn get_checked_auction_house_for_auctioneer(
     if auctioneer_guid == player.guid {
         if player.auction_access_mode == 0 {
             // TODO: Check if player has "auction" command access (ChatHandler.FindCommand)
-            // C++ uses GetPlayer()->GetAuctionAccessMode() == 0 && !ChatHandler(...).FindCommand("auction")
+            // Check player's auction access mode and command permission
             // For now, default to denying when auction_access_mode == 0 and no command permission.
             tracing::debug!("{} attempt open auction in cheating way.", auctioneer_guid);
             return None;

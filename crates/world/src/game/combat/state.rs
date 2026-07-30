@@ -20,7 +20,7 @@ pub enum AttackOutcome {
 
 impl AttackOutcome {
     /// Convert outcome to hit info flags for SMSG_ATTACKERSTATEUPDATE
-    /// Values from MaNGOS UnitDefines.h (1.12.1 client)
+    /// Hit info flags for SMSG_ATTACKERSTATEUPDATE
     pub fn to_hit_info(&self) -> u32 {
         use oxcore_shared::messages::combat::HitInfo;
         let affects = HitInfo::AffectsVictim as u32;

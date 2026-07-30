@@ -3,19 +3,16 @@
 //! Lives in `oxcore-shared` so both the bnet login server and the account repository
 //! (`create_account`) can compute verifiers from one implementation.
 //!
-//! This is a faithful port of TrinityCore's `BnetSRP6v2<SHA256>`
-//! (`src/common/Cryptography/Authentication/SRP6.{h,cpp}`). It shares nothing with the vanilla
-//! SRP in `crates/auth` beyond the acronym: different prime, different generator handling,
-//! SHA-256 instead of SHA-1, a PBKDF2-derived private exponent, and a different evidence
-//! construction.
+//! This shares nothing with the vanilla SRP in `crates/auth` beyond the acronym: different prime,
+//! different generator handling, SHA-256 instead of SHA-1, a PBKDF2-derived private exponent, and
+//! a different evidence construction.
 //!
-//! ## Parameters (all transcribed verbatim from TrinityCore)
+//! ## Parameters
 //!
 //! - `N` — the RFC 5054 2048-bit group prime; `g = 2`.
 //! - `k = H(N ‖ g)` (SRP-6a), each padded big-endian to 256 bytes.
 //! - Hash `H` = SHA-256; salt = 32 bytes; PBKDF2-HMAC-SHA512 with 15000 iterations.
-//! - **All** BigNumber↔bytes conversions are **big-endian** (TrinityCore passes `false`, whose
-//!   default parameter name is `littleEndian`).
+//! - **All** BigNumber↔bytes conversions are **big-endian**.
 //!
 //! ## SRP username
 //!

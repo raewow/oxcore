@@ -49,7 +49,6 @@ impl AllowedBuilds {
             let integrity_hash_str = row.integrity_hash;
 
             // Parse OS (3-byte string stored as u32)
-            // C++: MANGOS_ASSERT(os.size() == 3); memcpy(&buildInfo.os, os.data(), 4);
             let os = if os_str.len() >= 3 {
                 let os_bytes = os_str.as_bytes();
                 u32::from_le_bytes([
@@ -63,7 +62,6 @@ impl AllowedBuilds {
             };
 
             // Parse platform (3-byte string stored as u32)
-            // C++: MANGOS_ASSERT(platform.size() == 3); memcpy(&buildInfo.platform, platform.data(), 4);
             let platform = if platform_str.len() >= 3 {
                 let platform_bytes = platform_str.as_bytes();
                 u32::from_le_bytes([
@@ -77,7 +75,6 @@ impl AllowedBuilds {
             };
 
             // Parse integrity hash (40 hex chars = 20 bytes)
-            // C++: if (!integrityHash.empty()) { MANGOS_ASSERT(integrityHash.size() == (20 * 2)); HexStrToByteArray(...); }
             let mut integrity_hash = [0u8; 20];
             if !integrity_hash_str.is_empty() {
                 let hash_str = integrity_hash_str.trim();

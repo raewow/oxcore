@@ -41,11 +41,9 @@ pub struct Grid {
     /// Loading priority (higher = load first)
     loading_priority: u8,
     /// Manual pin, e.g. a grid holding objects that must never despawn.
-    /// `GridInfo::i_unloadExplicitLock` (NGrid.h:55).
     unload_explicit_lock: bool,
     /// Number of active objects whose spawn point is in this grid. Keeps the
     /// grid loaded so reloading it cannot clone them.
-    /// `GridInfo::i_unloadActiveLockCount` (NGrid.h:56).
     unload_active_lock: u16,
 }
 
@@ -186,8 +184,7 @@ impl Grid {
 
     /// Start the idle countdown if the grid is active but holds no players.
     ///
-    /// The `Active -> Idle` edge in `GridStates::Update` (GridStates.cpp:42-56)
-    /// is driven by the player *count*, not by the event that emptied the grid.
+    /// The `Active -> Idle` edge is driven by the player *count*, not by the event that emptied the grid.
     /// A grid activated by a player standing in the grid next door never gets a
     /// leave event, so without this poll it would stay `Active` — and therefore
     /// never unloadable — for the lifetime of the map.
@@ -231,8 +228,6 @@ impl Grid {
     }
 
     /// Restart the idle countdown, keeping a grid alive while it is being used.
-    ///
-    /// `Map::ResetGridExpiry` (Map.cpp:403-406).
     pub fn reset_idle_timer(&mut self) {
         if self.idle_since.is_some() {
             self.idle_since = Some(Instant::now());

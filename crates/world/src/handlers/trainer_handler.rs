@@ -101,7 +101,7 @@ pub async fn send_trainer_list(
                     trigger_entry.spell_level as u8
                 };
 
-                // Skip spell if no valid level (same as VMaNGOS: else return;)
+                // Skip spell if no valid level
                 if req_level == 0 {
                     return None;
                 }
@@ -129,7 +129,7 @@ pub async fn send_trainer_list(
                 })?;
 
                 Some(TrainerSpellData {
-                    // Send the teaching spell id (npc_trainer.spell) — same as VMaNGOS tSpell->spell
+                    // Send the teaching spell id
                     spell_id: ts.spell_id,
                     state: state as u8,
                     cost: ts.cost,
@@ -363,7 +363,7 @@ pub async fn handle_trainer_buy_spell(
         .send_msg_to_player(player_guid, msg);
 
     // Send teaching spell cast animation (SMSG_SPELL_START + SMSG_SPELL_GO + SMSG_PLAY_SPELL_VISUAL).
-    // VMaNGOS: SpellVisual == 222 means the player is the caster; otherwise the trainer NPC casts on
+    // SpellVisual == 222 means the player is the caster; otherwise the trainer NPC casts on
     // the player.  We look up spell_visual from the teaching spell's DBC entry.
     let spell_visual = world
         .managers
@@ -413,7 +413,7 @@ pub(crate) struct TrainerAnimPackets {
 }
 
 /// Build the three animation packets for a trainer-teach cast.
-/// VMaNGOS: SpellVisual == 222 → player is caster; otherwise the trainer NPC casts on the player.
+/// SpellVisual == 222: player is caster; otherwise the trainer NPC casts on the player.
 pub(crate) fn build_trainer_anim_packets(
     player_guid: ObjectGuid,
     trainer_guid: ObjectGuid,
@@ -468,8 +468,8 @@ pub(crate) fn build_trainer_anim_packets(
 }
 
 /// Send SMSG_SPELL_START + SMSG_SPELL_GO + SMSG_PLAY_SPELL_VISUAL for the trainer teaching
-/// animation.  Mirrors VMaNGOS HandleTrainerBuySpellOpcode: if spell_visual == 222 the player
-/// is the caster (self-cast), otherwise the trainer NPC casts on the player.
+/// animation.  If spell_visual == 222 the player is the caster (self-cast), otherwise the
+/// trainer NPC casts on the player.
 fn send_trainer_spell_animation(
     world: &World,
     player_guid: ObjectGuid,

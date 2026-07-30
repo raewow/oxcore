@@ -15,7 +15,6 @@ use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 /// SMSG_LOG_XPGAIN - XP gain notification
 ///
 /// Sent when player gains experience from a kill or quest completion.
-/// Matches MaNGOS Player::SendLogXPGain() packet structure.
 ///
 /// Packet structure:
 /// - ObjectGuid victim (8 bytes) - creature GUID (empty for quest XP)
@@ -80,7 +79,6 @@ impl ToWorldPacket for SmsgLogXpGain {
 /// SMSG_LEVELUP_INFO - Level up notification
 ///
 /// Sent when player levels up. Contains new level and all stat/power gains.
-/// Matches MaNGOS Player::GiveLevel() SMSG_LEVELUP_INFO packet structure.
 ///
 /// Packet structure:
 /// - uint32 level - new level

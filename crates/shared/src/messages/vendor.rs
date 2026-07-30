@@ -48,7 +48,7 @@ impl ToWorldPacket for SmsgListInventory {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LIST_INVENTORY);
 
-        // Write vendor GUID (unpacked - matches MaNGOS behavior)
+        // Write vendor GUID (unpacked)
         packet.write_guid(self.vendor_guid);
 
         // Write item count (u8)

@@ -1,32 +1,27 @@
 //! Melee Attack Range Calculations
 //!
-//! Implements the MaNGOS melee reach formula:
+//! Melee reach formula:
 //!   reach = attacker_reach + target_reach + BASE_MELEERANGE_OFFSET
 //!   reach = max(reach, ATTACK_DISTANCE)
 //!   if both_moving: reach += LEEWAY_BONUS_RANGE
 //!   check: distance_2d(attacker, target) <= reach
-//!
-//! Reference: mangos/src/game/Objects/Unit.cpp GetCombatReachToTarget()
 
 use oxcore_shared::protocol::Position;
 
 /// Base melee range offset added to combined combat reaches (4/3 yards)
-/// Matches MaNGOS BASE_MELEERANGE_OFFSET
+/// Base melee range offset
 pub const BASE_MELEERANGE_OFFSET: f32 = 1.333333373069763;
 
 /// Minimum melee attack distance in yards
-/// Matches MaNGOS ATTACK_DISTANCE
 pub const ATTACK_DISTANCE: f32 = 5.0;
 
 /// Bonus range when both attacker and target are moving (yards)
-/// Matches MaNGOS LEEWAY_BONUS_RANGE
 pub const LEEWAY_BONUS_RANGE: f32 = 2.66;
 
 /// Default combat reach for players and creatures without model data
 pub const DEFAULT_COMBAT_REACH: f32 = 1.5;
 
 /// Maximum vertical (Z-axis) distance for melee attacks.
-/// Matches vmangos CanReachWithMeleeAutoAttackAtPosition Z check.
 pub const MELEE_Z_LIMIT: f32 = 5.0;
 
 /// Calculate the effective melee reach between two units.
@@ -45,10 +40,8 @@ pub fn get_melee_reach(attacker_reach: f32, target_reach: f32, both_moving: bool
 
 /// Check if attacker can reach target with melee.
 ///
-/// Uses the MaNGOS combat reach formula with 2D (XY) distance for horizontal
+/// Uses the combat reach formula with 2D (XY) distance for horizontal
 /// range and a separate Z-axis check for vertical distance.
-/// Matches vmangos CanReachWithMeleeAutoAttackAtPosition:
-///   (dx*dx + dy*dy < reach*reach) && ((dz*dz) < zReach)
 pub fn is_within_melee_range(
     attacker_pos: &Position,
     attacker_reach: f32,

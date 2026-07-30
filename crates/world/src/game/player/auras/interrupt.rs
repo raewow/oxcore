@@ -1,7 +1,7 @@
 //! Aura interrupt flags from Spell.dbc (SpellAuraInterruptFlags column)
 //!
 //! These flags determine when auras should be automatically removed.
-//! Matches MaNGOS AURA_INTERRUPT_FLAG_* values for vanilla 1.12.1.
+//! Maps to Spell.dbc AuraInterruptFlags values for vanilla 1.12.1.
 
 /// Aura interrupt flags from Spell.dbc (SpellAuraInterruptFlags column)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

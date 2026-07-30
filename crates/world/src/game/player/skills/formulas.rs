@@ -22,7 +22,7 @@ pub fn get_skill_max_for_level(level: u8) -> u16 {
 /// - Mono: fixed 1/1 (armor proficiencies)
 /// - Rank: tiered from SkillTiers.dbc (professions)
 ///
-/// Logic matches MaNGOS ObjectMgr::GetSkillRangeType():
+/// Skill range type based on category and tier presence:
 /// 1. If the skill's SkillRaceClassInfo entry references a SkillTiers entry -> Rank
 /// 2. If the skill category is Armor -> Mono
 /// 3. If the skill category is Languages -> Language
@@ -44,7 +44,7 @@ pub fn get_skill_range_type(category_id: u32, has_skill_tier: bool) -> SkillRang
 /// Returns a value scaled by 10 (e.g. 750 = 75% chance).
 /// The caller rolls 1-1000 and compares against this value.
 ///
-/// Logic matches MaNGOS SkillGainChance():
+/// Skill gain chance thresholds:
 /// - skillValue >= grayLevel  -> grey chance
 /// - skillValue >= greenLevel -> green chance
 /// - skillValue >= yellowLevel -> yellow chance
@@ -71,24 +71,18 @@ pub fn calculate_skill_gain_chance(
 }
 
 /// Determine whether a skill is a primary profession (SkillLine.dbc category == PROFESSION).
-///
-/// Matches C++ IsPrimaryProfessionSkill().
 pub fn is_primary_profession_skill(category_id: i32) -> bool {
     category_id == SKILL_CATEGORY_PROFESSION as i32
 }
 
 /// Determine whether a skill is a profession skill (primary profession or a secondary
 /// profession: fishing, cooking, first aid).
-///
-/// Matches C++ IsProfessionSkill().
 pub fn is_profession_skill(skill_id: u16, category_id: i32) -> bool {
     is_primary_profession_skill(category_id)
         || matches!(skill_id, SKILL_FISHING | SKILL_COOKING | SKILL_FIRST_AID)
 }
 
-/// Determine whether a skill is a profession or riding skill.
-///
-/// Matches C++ IsProfessionOrRidingSkill():
+/// Determine whether a skill is a profession or riding skill:
 /// - Primary profession: skill category == SKILL_CATEGORY_PROFESSION
 /// - Secondary: fishing, cooking, first aid
 /// - Riding: any riding skill

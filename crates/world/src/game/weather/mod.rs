@@ -1,4 +1,4 @@
-//! Zone weather system (port of MaNGOS `Weather.cpp` / `Weather.h`).
+//! Zone weather system.
 //!
 //! Weather is rolled per zone on a timer (`change_weather_interval`) from the
 //! seasonal chances in `game_weather`, and pushed to every player standing in

@@ -94,7 +94,6 @@ impl AuctionHouseObject {
 
     /// Clear stale IP locks and return entries whose expire_time has passed.
     ///
-    /// Mirrors C++ `AuctionHouseObject::Update` (AuctionHouseMgr.cpp:623-676).
     /// IP locks older than 5 minutes are cleared independently of expiry.
     /// Expired entries are removed from the in-memory map and returned to the caller
     /// for mail dispatch and DB deletion.
@@ -223,7 +222,7 @@ impl AuctionHouseManager {
     pub async fn load_auction_items(&self) -> Result<()> {
         let query_result = self.auction_repo.find_all_items_for_load().await;
 
-        // TODO: C++ treats null QueryResult the same as empty table; query failures follow that path too.
+        // TODO: null QueryResult is treated the same as empty table; query failures follow that path too.
         let rows = match query_result {
             Ok(rows) => rows,
             Err(_) => {
@@ -272,7 +271,7 @@ impl AuctionHouseManager {
     pub async fn load_auctions(&self) -> Result<()> {
         let query_result = self.auction_repo.find_all_for_load().await;
 
-        // TODO: C++ treats null QueryResult the same as empty table; query failures follow that path too.
+        // TODO: null QueryResult is treated the same as empty table; query failures follow that path too.
         let rows = match query_result {
             Ok(rows) => rows,
             Err(_) => {
@@ -340,7 +339,7 @@ impl AuctionHouseManager {
 
                 let subject = format!("{}:0:{}", auction.item_template, AUCTION_CANCELED);
 
-                // TODO: fix body — C++ passes empty mail body string.
+                // TODO: fix body — passes empty mail body string.
                 // TODO: Ownership/lifetime of pItem after MailDraft(...).AddItem(pItem) is not specified.
                 self.send_auction_mail_to_owner(
                     &subject,
@@ -469,8 +468,6 @@ impl AuctionHouseManager {
     }
 
     /// Maps a creature faction template ID to an auction house ID.
-    ///
-    /// Mirrors C++ `AuctionHouseMgr::GetAuctionHouseId` (AuctionHouseMgr.cpp:522-578).
     pub fn get_auction_house_id_from_faction_template(&self, faction_template_id: u32) -> u32 {
         const FACTION_MASK_ALLIANCE: u32 = 2;
         const FACTION_MASK_HORDE: u32 = 4;
@@ -506,9 +503,7 @@ impl AuctionHouseManager {
 
     /// Returns the auction house entry for a player, based on team and access mode.
     ///
-    /// Mirrors C++ `AuctionHouseMgr::GetAuctionHouseEntry` player branch (lines 594-610).
-    /// When cross-faction auction is enabled (CONFIG_BOOL_ALLOW_TWO_SIDE_INTERACTION_AUCTION),
-    /// returns house 1's entry for all players (matching C++ behaviour where houseId stays 1).
+    /// When cross-faction auction is enabled, returns house 1's entry for all players.
     pub fn get_auction_house_for_player(
         &self,
         team: oxcore_shared::game::chat::Team,
@@ -543,8 +538,7 @@ impl AuctionHouseManager {
 
     /// Returns the auction house entry for an NPC, based on faction template.
     ///
-    /// Mirrors C++ `AuctionHouseMgr::GetAuctionHouseEntry` creature branch (lines 586-592).
-    /// When cross-faction auction is enabled, returns house 1's entry (matching C++ houseId=1 path).
+    /// When cross-faction auction is enabled, returns house 1's entry.
     pub fn get_auction_house_for_npc(&self, faction_template_id: u32) -> Option<AuctionHouseEntry> {
         if self.allow_cross_faction_auction.load(Ordering::Relaxed) {
             return self.get_auction_house_entry(1);
@@ -555,8 +549,7 @@ impl AuctionHouseManager {
 
     /// Calculates auction deposit for a given item, time, and house entry.
     ///
-    /// Mirrors C++ `AuctionHouseMgr::GetAuctionDeposit` (AuctionHouseMgr.cpp:98-110).
-    /// Preserved behaviour claims:
+    /// Preserved behaviour:
     /// - integer division `(time / MIN_AUCTION_TIME)` before float cast → zero when time < 7200s.
     /// - unsigned wrapping on inner product `sell_price * count * (time / MIN_AUCTION_TIME)`.
     /// - deposit is scaled by `entry.deposit_percent / 100.0f`.
@@ -577,7 +570,7 @@ impl AuctionHouseManager {
             None => return 0,
         };
 
-        // C++ computes SellPrice * GetCount() * (time / MIN_AUCTION_TIME) as uint32 first.
+        // Computes SellPrice * GetCount() * (time / MIN_AUCTION_TIME) as uint32 first.
         let base = proto
             .sell_price
             .wrapping_mul(item.count)
@@ -603,8 +596,6 @@ impl AuctionHouseManager {
 
     /// Periodic tick: expire auctions and clear stale IP locks across all unique houses.
     ///
-    /// Mirrors C++ `AuctionHouseMgr::Update` (AuctionHouseMgr.cpp:495-499) which iterates
-    /// m_vRealAuctionHouses and delegates to `AuctionHouseObject::Update`.
     /// Houses sharing an Arc (cross-faction / linked mode) are deduplicated by pointer
     /// so each logical house is ticked exactly once.
     pub async fn update(&self) -> anyhow::Result<()> {
@@ -685,7 +676,6 @@ impl AuctionHouseManager {
 
     /// Refunds the bidder's current bid by mail when an owner cancels a live auction.
     ///
-    /// Mirrors C++ `WorldSession::SendAuctionCancelledToBidderMail`.
     pub async fn send_auction_cancelled_to_bidder_mail(
         &self,
         auction: &AuctionEntry,
@@ -736,7 +726,6 @@ impl AuctionHouseManager {
 
     /// Refunds the outbid bidder by mail when a higher bid is placed.
     ///
-    /// Mirrors C++ `WorldSession::SendAuctionOutbiddedMail`.
     /// Live `SmsgAuctionBidderNotification` to the online bidder is the caller's responsibility.
     pub async fn notify_bidder_outbid_or_won(&self, auction: &AuctionEntry) -> Result<()> {
         let bidder_guid_low = auction.bidder_guid.low();
@@ -799,7 +788,7 @@ impl AuctionHouseManager {
     /// Mails the auction item back to the owner when they cancel a live listing.
     ///
     /// Resolves the item from the item cache, mails it to the owner, then removes
-    /// it from the cache. Mirrors the owner-mail side of C++ `HandleAuctionRemoveItem`.
+    /// it from the cache.
     pub async fn send_auction_cancel_mail_to_owner(&self, auction: &AuctionEntry) -> Result<()> {
         let item_guid_low = auction.item_guid.low();
         let Some(pitem) = self.get_a_item(item_guid_low) else {
@@ -828,9 +817,8 @@ impl AuctionHouseManager {
 
     /// Sends the "auction sold" mail to the seller with the profit (bid + deposit - cut).
     ///
-    /// Mirrors C++ AuctionHouseMgr::SendAuctionSuccessfulMail. The online-owner
-    /// packet notification (SendAuctionOwnerNotification) is the caller's responsibility
-    /// because this manager has no session/broadcast access.
+    /// The online-owner packet notification (SendAuctionOwnerNotification) is the caller's
+    /// responsibility because this manager has no session/broadcast access.
     pub async fn send_auction_successful_mail(
         &self,
         auction: &AuctionEntry,
@@ -848,7 +836,7 @@ impl AuctionHouseManager {
         let subject = format!("{}:0:{}", auction.item_template, AUCTION_SUCCESSFUL);
 
         let auction_cut = auction.get_auction_cut(cut_percent, cut_rate);
-        // Body format matches C++: bidder as 16-wide right-aligned hex, then decimal fields.
+        // Body format: bidder as 16-wide right-aligned hex, then decimal fields.
         let body = format!(
             "{:>16x}:{}:{}:{}:{}",
             auction.bidder_guid.low(),
@@ -863,7 +851,7 @@ impl AuctionHouseManager {
         // TODO: if owner is online, send SendAuctionOwnerNotification(auction, sold=true)
         // via broadcast_mgr — needs caller to handle since manager has no session access.
 
-        // profit = bid + deposit - cut; wrapping matches C++ uint32 arithmetic.
+        // profit = bid + deposit - cut; wrapping matches uint32 arithmetic.
         let profit = auction
             .current_bid
             .wrapping_add(auction.deposit)
@@ -909,8 +897,7 @@ impl AuctionHouseManager {
 
     /// Delivers the won item to the bidder by mail, or destroys it when no account can be resolved.
     ///
-    /// Mirrors C++ AuctionHouseMgr::SendAuctionWonMail. Online bidder notification
-    /// (SendAuctionBidderNotification) is the caller's responsibility.
+    /// Online bidder notification (SendAuctionBidderNotification) is the caller's responsibility.
     pub async fn send_auction_won_mail(&self, auction: &AuctionEntry) -> Result<()> {
         let item_guid_low = auction.item_guid.low();
         let Some(pitem) = self.get_a_item(item_guid_low) else {
@@ -1011,8 +998,7 @@ impl AuctionHouseManager {
 
     /// Returns an expired listing's item to the seller by mail, or destroys it when no owner can be resolved.
     ///
-    /// Mirrors C++ AuctionHouseMgr::SendAuctionExpiredMail. Online owner notification
-    /// (SendAuctionOwnerNotification) is the caller's responsibility.
+    /// Online owner notification (SendAuctionOwnerNotification) is the caller's responsibility.
     pub async fn send_auction_expired_mail(&self, auction: &AuctionEntry) -> Result<()> {
         let item_guid_low = auction.item_guid.low();
         let Some(pitem) = self.get_a_item(item_guid_low) else {
@@ -1182,7 +1168,7 @@ impl AuctionHouseManager {
     }
 }
 
-/// Maps auction house id to faction team (C++ GetAuctionHouseTeam).
+    /// Maps auction house id to faction team.
 fn get_auction_house_team(house_id: u32) -> Team {
     match house_id {
         1 | 2 | 3 => Team::Alliance,

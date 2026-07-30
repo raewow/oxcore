@@ -1,15 +1,14 @@
 //! Area target gathering for area-effect spells.
 //!
-//! Ports `Spell::FillAreaTargets` together with the
-//! `SpellNotifierCreatureAndPlayer` policy it drives. Given a radius, a
+//! Area target gathering for area-effect spells, driven by the
+//! `SpellNotifierCreatureAndPlayer` policy. Given a radius, a
 //! *push-type* (how the search region is anchored and shaped relative to the
 //! caster / source point / destination point / explicit target) and a
 //! *target-mask* (which relationship a candidate must have with the caster), it
 //! gathers the matching units on the caster's map into a target list.
 //!
-//! The original C++ builds a grid notifier and hands it to
-//! `Cell::VisitAllObjects`. Here the grid iteration is provided by the map's
-//! spatial index ([`crate::World`] -> `Map::get_objects_in_range`); the notifier
+//! The grid iteration is provided by the map's spatial index
+//! ([`crate::World`] -> `Map::get_objects_in_range`); the notifier
 //! body (center resolution, mask filter, per-push geometry gate, append) is
 //! expressed as small pure helpers so it can be unit-tested against synthetic
 //! candidate sets without a live world.
@@ -21,7 +20,7 @@ use std::f32::consts::PI;
 
 /// How the area search region is anchored and shaped relative to the caster.
 ///
-/// Mirrors `SpellNotifyPushType`. Center-anchored variants gather every unit
+/// Center-anchored variants gather every unit
 /// within `radius` of a fixed point; [`SpellNotifyPushType::Cone`] instead keeps
 /// units inside a frontal arc of the caster.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,8 +111,8 @@ fn normalize_angle(mut angle: f32) -> f32 {
     angle
 }
 
-/// Frontal cone test, mirroring `Unit::isInFront`: `target` is inside the arc of
-/// width `arc` centered on the caster's facing and within `radius` (2D).
+/// Frontal cone test: `target` is inside the arc of width `arc` centered on the
+/// caster's facing and within `radius` (2D).
 pub fn is_in_cone(caster: Position, target: Position, radius: f32, arc: f32) -> bool {
     if !is_within_dist_2d(caster, target, radius) {
         return false;
@@ -178,9 +177,8 @@ fn passes_alive_gate(params: &AreaSearchParams, candidate: &AreaCandidate) -> bo
     candidate.is_alive || params.allow_dead_target || params.targets == SpellTargets::All
 }
 
-/// Pure port of the notifier's `Visit`: run every candidate through the alive
-/// gate, the target-mask filter and the push-type geometry gate, appending each
-/// survivor's GUID to `out` (matching the C++ `push_back`, order preserved).
+/// Run every candidate through the alive gate, the target-mask filter and
+/// the push-type geometry gate, appending each survivor's GUID to `out`.
 pub fn fill_area_targets_from_candidates(
     params: &AreaSearchParams,
     candidates: &[AreaCandidate],
@@ -205,7 +203,7 @@ pub fn fill_area_targets_from_candidates(
 }
 
 /// Resolve the search center for a center-based push type from the available
-/// anchor points, mirroring the notifier constructor's `switch (i_push_type)`.
+/// anchor points.
 ///
 /// Returns `None` when the anchor a push type needs is unavailable (e.g. a
 /// destination-centered search with no destination set), which leaves the target

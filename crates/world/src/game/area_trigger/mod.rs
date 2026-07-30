@@ -294,7 +294,6 @@ impl AreaTriggerManager {
 /// Works with both sphere triggers (radius > 0) and box triggers.
 /// The `delta` parameter adds tolerance (e.g. 5 yards for anti-cheat).
 ///
-/// Reference: MaNGOS ObjectMgr.cpp:6755-6795
 pub fn is_point_in_area_trigger_zone(
     trigger: &AreaTriggerEntry,
     map_id: u32,

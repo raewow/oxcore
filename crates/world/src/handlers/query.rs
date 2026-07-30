@@ -505,7 +505,7 @@ pub async fn handle_item_name_query(
         .read_u32()
         .ok_or_else(|| anyhow::anyhow!("Failed to read item ID from CMSG_ITEM_NAME_QUERY"))?;
 
-    // MaNGOS reads an item GUID after the item ID. Some clients/proxies omit it,
+    // Some clients/proxies send an item GUID after the item ID; others omit it,
     // so consume it only when present to keep the handler tolerant like item query.
     let _guid = if packet.data().remaining() >= 8 {
         packet.read_u64()

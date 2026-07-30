@@ -244,7 +244,7 @@ impl WorldPacket {
 
     /// Write packed XYZ coordinates (used in SMSG_MONSTER_MOVE for intermediate waypoints)
     ///
-    /// MaNGOS format: 11 bits X, 11 bits Y, 10 bits Z, packed into a single u32.
+    /// Packed format: 11 bits X, 11 bits Y, 10 bits Z, packed into a single u32.
     /// Values are quantized to 0.25 unit resolution.
     pub fn write_pack_xyz(&mut self, x: f32, y: f32, z: f32) {
         let packed: u32 = ((x / 0.25) as i32 as u32 & 0x7FF)

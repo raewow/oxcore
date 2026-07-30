@@ -139,11 +139,11 @@ pub fn roll_melee_hit_outcome(
 
 /// Roll creature auto-attack outcome against a player target.
 ///
-/// C++ `RollMeleeOutcomeAgainst` uses weapon-vs-defense skill deltas. For NPCs
-/// attacking players both skills are effectively level * 5, so each level is a
-/// 5 skill-point delta: miss/crit/avoidance shift by 0.2 percentage points per
-/// level. NPCs do not produce glancing blows against players; crushing starts
-/// when the NPC is at least 3 levels higher.
+/// Uses weapon-vs-defense skill deltas. For NPCs attacking players both skills
+/// are effectively level * 5, so each level is a 5 skill-point delta:
+/// miss/crit/avoidance shift by 0.2 percentage points per level. NPCs do not
+/// produce glancing blows against players; crushing starts when the NPC is at
+/// least 3 levels higher.
 pub fn roll_creature_melee_hit_outcome(
     attacker_level: u8,
     target_level: u8,
@@ -241,7 +241,6 @@ pub fn calculate_melee_damage(
 }
 
 /// Convert MeleeHitOutcome to hit info flags for SMSG_ATTACKERSTATEUPDATE
-/// Matches MaNGOS UnitDefines.h flag values for 1.12.1 client
 pub fn hit_outcome_to_hit_info(outcome: &MeleeHitOutcome) -> u32 {
     use oxcore_shared::messages::combat::HitInfo;
 
@@ -262,7 +261,6 @@ pub fn hit_outcome_to_hit_info(outcome: &MeleeHitOutcome) -> u32 {
 }
 
 /// Convert MeleeHitOutcome to victim state for SMSG_ATTACKERSTATEUPDATE
-/// Values from MaNGOS UnitDefines.h: UNAFFECTED=0, NORMAL=1, DODGE=2, PARRY=3, INTERRUPT=4, BLOCKS=5
 pub fn hit_outcome_to_victim_state(outcome: &MeleeHitOutcome) -> u32 {
     use oxcore_shared::messages::combat::VictimState;
 

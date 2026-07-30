@@ -1,9 +1,7 @@
 //! Charge movement generator - rapid movement toward a target used by SPELL_EFFECT_CHARGE.
 //!
-//! vmangos/MaNGOS implement charge inside `Spell::OnSpellLaunch` by calling
-//! `MotionMaster::MoveCharge`. The generator moves the creature straight to the
-//! target's last-known position and, on arrival, optionally flags the creature to
-//! begin auto-attacking that target.
+//! The generator moves the creature straight to the target's last-known position
+//! and, on arrival, optionally flags the creature to begin auto-attacking that target.
 
 use super::super::generator::{MovementGenerator, MovementUpdate};
 use super::super::types::MovementGeneratorType;

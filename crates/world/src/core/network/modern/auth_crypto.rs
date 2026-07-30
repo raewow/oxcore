@@ -1,8 +1,7 @@
 //! Modern (1.14.x) world auth crypto: the digest check that proves the client holds the bnet
 //! realm-join session key, and the derivation of the AES-128 key that keys [`super::crypt::WorldCrypt`].
 //!
-//! Ported from HermesProxy's modern server `WorldSocket.cs` (`HandleAuthSessionCallback`) and
-//! `SessionKeyGeneration.cs`. All three HMACs mix the client's `local_challenge` and the server's
+//! All three HMACs mix the client's `local_challenge` and the server's
 //! `server_challenge` in a **specific order that differs between them** — see each function. The
 //! input session key is the 64-byte `client_secret ‖ server_secret` minted at bnet realm-join and
 //! persisted to `account.sessionkey`.
@@ -15,7 +14,7 @@ use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Fixed 16-byte seed constants from TrinityCore/HermesProxy `WorldSocket`.
+/// Fixed 16-byte seed constants for the handshake.
 pub const AUTH_CHECK_SEED: [u8; 16] = [
     0xC5, 0xC6, 0x98, 0x95, 0x76, 0x3F, 0x1D, 0xCD, 0xB6, 0xA1, 0x37, 0x28, 0xB3, 0x12, 0xFF, 0x8A,
 ];
@@ -88,7 +87,7 @@ pub fn verify_digest(
 /// *this* connection's challenges. Running the realm derivation here produces a plausible but wrong
 /// key, and the client answers by closing the socket without a word.
 ///
-/// Mirrors `WorldSocket.HandleAuthContinuedSessionCallback`.
+/// Derives the AES key for a continued (instance) session.
 pub fn derive_continued_session_aes_key(
     session_key40: &[u8; 40],
     server_challenge: &[u8],
@@ -137,8 +136,7 @@ pub struct DerivedKeys {
 }
 
 /// Derive the continued-session key and the AES key from the bnet session key and the two
-/// challenges. Mirrors `HandleAuthSessionCallback`'s second half exactly, including the differing
-/// challenge orders between the two HMACs.
+/// challenges. The two HMACs use different challenge orders.
 pub fn derive_keys(
     session_key: &[u8],
     server_challenge: &[u8],
@@ -169,7 +167,7 @@ pub fn derive_keys(
     }
 }
 
-/// TrinityCore's `SessionKeyGenerator`: expand a 32-byte seed into `out.len()` bytes.
+/// Expand a 32-byte seed into `out.len()` bytes.
 ///
 /// `o1 = SHA256(seed[..16])`, `o2 = SHA256(seed[16..])`, then repeatedly
 /// `o0 = SHA256(o1 ‖ o0 ‖ o2)` (o0 starts all-zero), streaming 32 bytes at a time.

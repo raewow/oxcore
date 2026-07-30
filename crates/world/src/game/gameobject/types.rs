@@ -1,6 +1,4 @@
 //! GameObject types, states, and flags
-//!
-//! Pure data types matching the MaNGOS C++ definitions.
 
 /// GameObject types (31 total)
 /// Matches GameobjectTypes from GameObjectDefines.h

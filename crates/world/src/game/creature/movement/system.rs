@@ -444,7 +444,7 @@ impl MovementSystem {
                 is_walking,
             } => {
                 // Get creature map_id and compute real start position from active spline
-                // (MaNGOS: MoveSplineInit::Launch computes position from running spline)
+                // (MoveSplineInit::Launch computes position from running spline)
                 let (map_id, real_start) = world
                     .managers
                     .creature_mgr

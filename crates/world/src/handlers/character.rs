@@ -834,7 +834,7 @@ pub async fn handle_player_login_with_guid(
 
     // Restore persisted auras only after spells and inventory are available, then send their
     // initial state before the rest of the login packets. Auras with real-time durations lose
-    // the time spent offline, matching Player::_LoadAuras in the reference core.
+    // the time spent offline.
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -868,7 +868,7 @@ pub async fn handle_player_login_with_guid(
     tracing::info!("[LOGIN] Created movement buffer for player {}", guid);
 
     // 8. Send login packets using message structs
-    // Order is CRITICAL - must match MaNGOS/old world sequence
+    // Order is CRITICAL
 
     // 1/11. SMSG_LOGIN_VERIFY_WORLD - tells client where they are
     let verify_world = SmsgLoginVerifyWorld {
@@ -884,7 +884,7 @@ pub async fn handle_player_login_with_guid(
 
     // 1.14 waits on four more packets here before it will finish loading; 1.12 has no equivalent
     // and needs none of them, so they are modern-only and drop silently for a vanilla session.
-    // Order matches HermesProxy's `HandleLoginVerifyWorld`.
+
     if session.protocol() == Protocol::Modern {
         session.send_msg(SmsgWorldServerInfo {
             difficulty_id: 0,
@@ -895,7 +895,6 @@ pub async fn handle_player_login_with_guid(
         session.send_msg(SmsgInitialSetup::default())?;
         session.send_msg(SmsgLoadCufProfiles)?;
         // The client needs a time-sync reference before it will trust its own movement clock.
-        // TrinityCore sends this first of all, ahead of add-to-map; here is the equivalent point.
         session.send_msg(SmsgTimeSyncRequest {
             sequence_index: session.next_time_sync_index(),
         })?;
@@ -1143,7 +1142,7 @@ pub async fn handle_player_login_with_guid(
         player.visibility.update_in_progress = false;
     });
 
-    // 10/11. SMSG_UPDATE_OBJECT - send items first, then player (matches MaNGOS order)
+    // 10/11. SMSG_UPDATE_OBJECT - send items first, then player
 
     // Get player reference
     let player_ref = world
@@ -1193,7 +1192,6 @@ pub async fn handle_player_login_with_guid(
     );
 
     // Send the current weather of the zone the player logs into
-    // (MaNGOS sends it from Player::UpdateZone, which runs on login too).
     world.systems.weather.send_weather_to_player(guid, world);
 
     // Clear update_in_progress (already moved to before self-create send).
@@ -1227,8 +1225,6 @@ pub async fn handle_player_login_with_guid(
 ///
 /// One source for both protocols: `SMSG_ACTION_BUTTONS` writes these as u32 for a 1.12 client, and
 /// the `ActivePlayer` create tail writes the same words as i32 (zero-padded to 132) for a 1.14 one.
-/// the 1.14 reference does exactly this pass-through -- it reads the legacy packet and forwards the packed
-/// values untouched (`World/Client/PacketHandlers/CharacterHandler.cs:352-367`).
 fn packed_action_buttons(player: &Player) -> Vec<u32> {
     player
         .settings
@@ -2357,7 +2353,7 @@ pub async fn handle_char_create(
     .await?;
     let (stamina, intellect) = level_stats.unwrap_or((20, 20));
 
-    // 12. Calculate health bonus from stamina (MaNGOS formula)
+    // 12. Calculate health bonus from stamina
     // First 20 stamina: 1 HP each, above 20: 10 HP each
     let health_bonus = {
         let base_stam = (stamina as u32).min(20);
@@ -2365,7 +2361,7 @@ pub async fn handle_char_create(
         base_stam + (more_stam * 10)
     };
 
-    // 13. Calculate mana bonus from intellect (MaNGOS formula)
+    // 13. Calculate mana bonus from intellect
     // First 20 intellect: 1 mana each, above 20: 15 mana each
     let mana_bonus = {
         let base_int = (intellect as u32).min(20);
@@ -2801,7 +2797,7 @@ pub async fn handle_zoneupdate(
         );
     }
 
-    // --- Update rest state based on zone flags (MaNGOS Player.cpp:6737-6741) ---
+    // --- Update rest state based on zone flags ---
     // AREA_FLAG_CAPITAL (0x100): capital cities grant rest XP
     const AREA_FLAG_CAPITAL: u32 = 0x100;
 
@@ -2879,7 +2875,7 @@ pub async fn handle_zoneupdate(
         }
     }
 
-    // --- Zone weather (MaNGOS Player::UpdateZone) ---
+    // --- Zone weather ---
     world
         .systems
         .weather

@@ -2,7 +2,7 @@
 //!
 //! Covers the critical invariant fixed in this session:
 //! - TRAINER and VENDOR gossip options must NOT send SMSG_GOSSIP_COMPLETE before
-//!   their respective windows are opened (vmangos never calls CloseGossip() first).
+//!   their respective windows are opened (CloseGossip() is never called first).
 //! - BANKER must send SMSG_SHOW_BANK with the banker GUID.
 //! - Other options such as INNKEEPER must send SMSG_GOSSIP_COMPLETE.
 
@@ -150,7 +150,7 @@ async fn setup_with_option(
 // ========== TESTS ==========
 
 /// TRAINER option must NOT send SMSG_GOSSIP_COMPLETE.
-/// vmangos Player.cpp line 12297: SendTrainerList(guid) with no CloseGossip() before it.
+/// SendTrainerList(guid) with no CloseGossip() before it.
 /// The trainer window itself replaces the gossip UI on the client.
 #[tokio::test]
 async fn trainer_option_does_not_send_gossip_complete() {
@@ -166,7 +166,7 @@ async fn trainer_option_does_not_send_gossip_complete() {
 }
 
 /// VENDOR option must NOT send SMSG_GOSSIP_COMPLETE.
-/// vmangos Player.cpp line 12291: SendListInventory() with no CloseGossip() before it.
+/// SendListInventory() with no CloseGossip() before it.
 #[tokio::test]
 async fn vendor_option_does_not_send_gossip_complete() {
     let (system, guid, captured) = setup_with_option(gossip_option::VENDOR).await;

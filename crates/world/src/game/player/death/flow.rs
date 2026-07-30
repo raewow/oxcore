@@ -40,7 +40,7 @@ pub fn get_corpse_reclaim_delay(is_pvp_death: bool) -> u32 {
     }
 }
 
-/// vmangos reclaim-delay escalation: if the player has died recently, each
+/// Reclaim-delay escalation: if the player has died recently, each
 /// consecutive death adds to the corpse reclaim wait.
 ///
 /// Ladder, with `death_expire_time` = unix seconds when the "death streak"
@@ -51,7 +51,7 @@ pub fn get_corpse_reclaim_delay(is_pvp_death: bool) -> u32 {
 ///
 /// If `death_expire_time == 0` the player has no recent deaths; return 30s.
 pub fn compute_reclaim_delay(death_expire_time: u64, now: u64, is_pvp_death: bool) -> u32 {
-    // PvP always 120s, regardless of recent death count (matches vmangos).
+    // PvP always 120s, regardless of recent death count.
     if is_pvp_death {
         return CORPSE_RECLAIM_DELAY_PVP;
     }

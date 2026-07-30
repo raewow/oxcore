@@ -9,13 +9,13 @@ use std::time::Duration;
 use crate::grid::GridManager;
 use oxcore_shared::protocol::{ObjectGuid, Position};
 
-/// Visible distance on continents (`DEFAULT_VISIBILITY_DISTANCE`, ObjectDefines.h:30).
+/// Visible distance on continents.
 pub const DEFAULT_VISIBILITY_DISTANCE: f32 = 100.0;
-/// Visible distance inside instances (`DEFAULT_VISIBILITY_INSTANCE`).
+/// Visible distance inside instances.
 pub const DEFAULT_VISIBILITY_INSTANCE: f32 = 170.0;
-/// Visible distance in battlegrounds (`DEFAULT_VISIBILITY_BG`).
+/// Visible distance in battlegrounds.
 pub const DEFAULT_VISIBILITY_BG: f32 = 533.0;
-/// Hard ceiling on any visibility distance — one grid (`MAX_VISIBILITY_DISTANCE`).
+    /// Hard ceiling on any visibility distance — one grid.
 pub const MAX_VISIBILITY_DISTANCE: f32 = 533.33333;
 
 /// What kind of map this is, which sets its visibility defaults.
@@ -146,7 +146,6 @@ pub enum RelocateResult {
     /// The move crossed into a grid that is not loaded and was rejected. The
     /// caller should send the object back to its spawn point.
     ///
-    /// Mirrors `Map::CreatureCellRelocation` returning false (Map.cpp:1485-1508).
     Refused,
 }
 
@@ -199,7 +198,7 @@ pub struct Map {
     /// grid as creatures/gameobjects so visibility queries pick them up.
     corpses: DashMap<ObjectGuid, Position>,
     /// Objects that keep themselves and their surroundings loaded regardless of
-    /// player proximity (`Map::m_activeNonPlayers`, Map.h:693).
+    /// player proximity.
     active_objects: DashMap<ObjectGuid, Position>,
     /// Immutable per-map tuning, including the ramp bounds.
     config: MapConfig,
@@ -263,10 +262,7 @@ impl Map {
         f32::from_bits(self.grid_activation_distance.load(Ordering::Relaxed))
     }
 
-    /// Adjust both distances against the cost of the last tick.
-    ///
-    /// Port of the load-shedding ramp at the tail of `Map::Update`
-    /// (Map.cpp:1052-1081): one yard per tick, clamped to the configured bounds,
+    /// Adjust both distances against the cost of the last tick, clamped to the configured bounds,
     /// continents only.
     pub fn tune_distances(&self, tick_cost: Duration) {
         if !self.config.kind.is_continent() {
@@ -475,8 +471,7 @@ impl Map {
     /// Mark an object as active: it ticks and stays visible regardless of player
     /// proximity, and pins the grid holding its spawn point.
     ///
-    /// `Map::AddToActive` (Map.cpp:1924-1948). `spawn_pos` is the object's
-    /// *respawn* point, which is what the reference pins — reloading a grid whose
+    /// `spawn_pos` is the object's *respawn* point — reloading a grid whose
     /// active spawn is elsewhere would clone it.
     pub fn add_to_active(&self, guid: ObjectGuid, spawn_pos: Position) {
         use crate::grid_coords::world_to_grid;
@@ -491,8 +486,6 @@ impl Map {
     }
 
     /// Stop treating an object as active and release its spawn-grid pin.
-    ///
-    /// `Map::RemoveFromActive` (Map.cpp:1950-1984).
     pub fn remove_from_active(&self, guid: ObjectGuid) {
         use crate::grid_coords::world_to_grid;
 
@@ -511,8 +504,7 @@ impl Map {
     /// enough to see into it.
     ///
     /// Expands the grid's cell box by the visibility radius and tests every
-    /// player and active object against it. Port of `Map::ActiveObjectsNearGrid`
-    /// (Map.cpp:1886-1922) — without this a player standing just over a boundary
+    /// player and active object against it — without this a player standing just over a boundary
     /// does not keep the neighbouring grid alive, and it unloads under them.
     ///
     /// Must not be called while the grid lock is held.
@@ -550,9 +542,8 @@ impl Map {
     /// Run one pass of the grid state machine.
     ///
     /// Returns the work the world layer must do: creatures to quiesce in grids
-    /// that just went idle, and grids cleared for unload. Ported from
-    /// `GridStates.cpp:32-73`, with all three of the reference's guards —
-    /// unload locks, nearby players/active objects, and the idle timer.
+    /// that just went idle, and grids cleared for unload. Checks all three
+    /// guards — unload locks, nearby players/active objects, and the idle timer.
     pub fn update_grid_states(&self) -> GridStatePass {
         let mut pass = GridStatePass::default();
         let delay = self.config.grid_unload_delay;
@@ -679,12 +670,11 @@ impl Map {
 
     /// Activate the grids covering the activation radius around a position.
     ///
-    /// The box is derived from the corners of the radius, as
-    /// `Cell::CalculateCellArea` does (CellImpl.h:39-52). An earlier version used
-    /// `ceil(distance / GRID_SIZE) + 1` as a half-width, which is a cell-level
+    /// The box is derived from the corners of the radius.
+    /// An earlier version used `ceil(distance / GRID_SIZE) + 1` as a half-width, which is a cell-level
     /// expansion misapplied at grid level: it activated 5x5 = 25 grids per player
     /// even at short distances, spawning roughly an order of magnitude more
-    /// creatures than the reference.
+    /// creatures than necessary.
     fn activate_grids_around_position(&self, pos: Position) {
         let mut grid_mgr = self.grid_manager.write();
         self.activate_grids_locked(pos, &mut grid_mgr);
@@ -699,9 +689,8 @@ impl Map {
     /// created, so it never spawned anything — and `are_grids_loaded` waits on a
     /// grid that will never exist, freezing the visibility update with it.
     ///
-    /// The reference re-derives the area from the current position of every
-    /// player on every tick (`Map::Update`, Map.cpp:1006-1050). This is that
-    /// pass, under a single write lock for the whole map.
+    /// Re-derives the area from the current position of every
+    /// player on every tick, under a single write lock for the whole map.
     pub fn activate_grids_around_players(&self) {
         if self.players.is_empty() {
             return;
@@ -730,7 +719,7 @@ impl Map {
                 let needs_load = grid_mgr.get_or_activate_grid(gx, gy);
 
                 // Anyone standing within activation range keeps the grid alive,
-                // even when they are in the grid next door (Map.cpp:1419-1423).
+                // even when they are in the grid next door.
                 if let Some(grid) = grid_mgr.get_grid_mut(gx, gy) {
                     grid.reset_idle_timer();
                 }

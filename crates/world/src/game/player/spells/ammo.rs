@@ -1,4 +1,4 @@
-//! Ammo consumption for ranged spells (MaNGOS `Spell::TakeAmmo`).
+//! Ammo consumption for ranged spells.
 //!
 //! Responsible for deciding and applying the consumption of a single unit of
 //! ammunition (or durability / stack) when a ranged spell cast fires.
@@ -79,7 +79,7 @@ pub fn is_ammo_exempt_spell(spell_id: u32) -> bool {
     EXEMPT_SPELL_IDS.contains(&spell_id)
 }
 
-/// Pure decision cascade for `Spell::TakeAmmo`.
+/// Pure decision cascade for taking ammo.
 ///
 /// Encodes, in order:
 /// 1. non-player caster → [`AmmoAction::None`]
@@ -119,7 +119,7 @@ pub fn should_consume_ammo(input: &AmmoDecisionInput) -> AmmoAction {
     AmmoAction::ConsumeAmmo(input.player_ammo_id)
 }
 
-/// World-coupled `Spell::TakeAmmo` entry point.
+/// World-coupled entry point for ammo consumption.
 ///
 /// Resolves the caster's equipped ranged weapon and `PLAYER_AMMO_ID`, then
 /// delegates the branch cascade to [`should_consume_ammo`] and applies its
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn thrown_stack_count_zero_falls_through_to_destroy() {
-        // Matches the C++ else-branch: only `== 1` is durability loss.
+        // Only `== 1` triggers durability loss.
         let mut input = base_input();
         input.inventory_type_is_thrown = true;
         input.max_stack_count = 0;

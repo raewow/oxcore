@@ -75,11 +75,11 @@ pub fn diminishing_rate(level: u8) -> f32 {
 }
 
 /// The diminishing-returns decision taken once per unit hit, then reused by every aura
-/// that hit applies (`Spell::m_diminishGroup` / `m_diminishLevel`).
+/// that hit applies.
 ///
-/// MaNGOS deliberately samples this in `Spell::DoSpellHitOnUnit` rather than when each
-/// aura is added, because one spell may apply several auras that must all share a single
-/// level and a single counter increment.
+/// The snapshot is sampled before effect processing rather than when each aura is added,
+/// because one spell may apply several auras that must all share a single level and a
+/// single counter increment.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DiminishSnapshot {
     /// The group this spell diminishes on, or `None` when it has no DR.
@@ -94,7 +94,7 @@ pub struct DiminishSnapshot {
 
 impl DiminishSnapshot {
     /// Apply the snapshot to an aura duration (`Unit::ApplyDiminishingToDuration`).
-    /// Permanent auras (`None`) are never diminished, matching the C++ `duration == -1` guard.
+    /// Permanent auras (`None`) are never diminished.
     pub fn apply_to_duration(&self, duration_ms: Option<u32>) -> Option<u32> {
         let duration = duration_ms?;
         if !self.diminishes_duration {
@@ -104,7 +104,6 @@ impl DiminishSnapshot {
     }
 
     /// Whether this hit is fully diminished, i.e. its auras would land with zero duration.
-    /// MaNGOS drops the whole aura holder in that case.
     pub fn is_fully_diminished(&self) -> bool {
         self.diminishes_duration && diminishing_rate(self.level) <= 0.0
     }
@@ -149,11 +148,11 @@ pub struct DiminishingState {
 }
 
 impl DiminishingState {
-    /// Current diminishing level for a group (`Unit::GetDiminishing`).
+    /// Current diminishing level for a group.
     ///
-    /// Level 0 means "first application, full duration". Like the C++ this also performs
-    /// the lazy reset: once no aura of the group is active and 15 seconds have passed
-    /// since the last one dropped, the counter falls back to level 0.
+    /// Level 0 means "first application, full duration". Performs the lazy reset:
+    /// once no aura of the group is active and 15 seconds have passed since the
+    /// last one dropped, the counter falls back to level 0.
     pub fn get_diminishing(&mut self, group: DRGroup, now_ms: u64) -> u8 {
         let Some(state) = self.groups.get_mut(&group) else {
             return 0;
@@ -215,8 +214,7 @@ impl DiminishingState {
         false
     }
 
-    /// Snapshot the diminishing decision for one spell hit, then charge the target for it
-    /// (MaNGOS `Spell::DoSpellHitOnUnit`: `GetDiminishing` followed by `IncrDiminishing`).
+    /// Snapshot the diminishing decision for one spell hit, then charge the target for it.
     ///
     /// `applies_aura` mirrors `IsSpellAppliesAura(effectMask)` — a hit that applies no aura
     /// reads the level but never increments it. `caster_is_friendly` folds in the
@@ -265,7 +263,7 @@ impl DiminishingState {
     }
 }
 
-/// Classify a spell using the reference `SpellEntry::GetDiminishingReturnsGroup` order.
+/// Classify a spell into a diminishing returns group.
 pub fn get_dr_group_for_spell(spell: &SpellEntry, triggered_by_aura: bool) -> DRGroup {
     const ROGUE: u32 = 8;
     const HUNTER: u32 = 9;
@@ -384,7 +382,7 @@ mod tests {
         );
     }
 
-    /// A permanent aura has no duration to diminish (`duration == -1` in the C++).
+    /// A permanent aura has no duration to diminish.
     #[test]
     fn permanent_durations_are_never_diminished() {
         let mut state = DiminishingState::default();

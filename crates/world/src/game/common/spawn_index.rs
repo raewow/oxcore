@@ -2,10 +2,8 @@
 //!
 //! Grid loading needs "every spawn in grid (gx, gy)". Without an index that is a
 //! linear scan of the whole map's spawn list per grid load — tens of thousands of
-//! `world_to_grid` calls on a continent. The reference solves this with
-//! `MapPersistentState::GetCellObjectGuids`, a per-cell guid set built once at
-//! startup (MapPersistentStateMgr.h:110). This is the same idea at grid
-//! granularity.
+//! `world_to_grid` calls on a continent. This builds a per-grid guid set once at
+//! startup, at grid granularity.
 //!
 //! Kept as a free function rather than a manager method so it is unit-testable:
 //! `CreatureManager::new` requires a live database pool.

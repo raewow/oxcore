@@ -1,39 +1,37 @@
-//! Channeled aura-holder list maintenance (MaNGOS `Spell::RemoveChanneledAuraHolder`).
+//! Channeled aura-holder list maintenance.
 //!
 //! A channeled spell tracks the per-target aura holders it applied so they can be
 //! torn down atomically when the channel ends or is interrupted. While
-//! `Spell::update` walks the holders list (advancing a "current element" cursor),
-//! `RemoveChanneledAuraHolder` may be re-entered from the aura system to delete a
-//! holder that expired externally. The danger is iterator invalidation: if the
-//! removed holder is the one the update loop is currently visiting, the update
-//! cursor must advance via `erase` (its Rust analogue: keep the same index, which
-//! now points at the next element, or become `None` if the tail was removed).
+//! the update walks the holders list (advancing a "current element" cursor),
+//! a holder may be removed externally. The danger is iterator invalidation:
+//! if the removed holder is the one the update loop is currently visiting, the
+//! update cursor must advance (keep the same index, which now points at the
+//! next element, or become `None` if the tail was removed).
 //!
 //! The list and cursor are not part of the existing `ActiveCast` state in this
 //! crate yet; they live here as a small self-contained struct so the removal logic
-//! can be ported and unit-tested world-free.
+//! can be unit-tested world-free.
 
 /// Aura-holder identifier matching the aura container's keying: `(spell_id,
-/// effect_index)`. Replaces the C++ `SpellAuraHolder*` pointer used for equality
-/// in `std::find`.
+/// effect_index)`.
 pub type AuraHolderId = (u32, u8);
 
-/// The subset of the MaNGOS `AuraRemoveMode` enum that gates
+/// The subset of the `AuraRemoveMode` enum that gates
 /// `RemoveChanneledAuraHolder`. The three skip modes are handled elsewhere
-/// (`Spell::update` or this spell's own channel cleanup) and must not double-erase.
+/// (the update loop or this spell's own channel cleanup) and must not double-erase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuraRemoveMode {
-    /// `AURA_REMOVE_BY_CHANNEL` — originated from this spell's own channel cleanup.
+    /// Originated from this spell's own channel cleanup.
     ByChannel,
-    /// `AURA_REMOVE_BY_GROUP` — handled in `Spell::update`.
+    /// Handled in the update loop.
     ByGroup,
-    /// `AURA_REMOVE_BY_RANGE` — handled in `Spell::update`.
+    /// Handled in the update loop.
     ByRange,
     /// Any other removal cause; proceeds normally.
     Default,
 }
 
-/// `true` for the three removal modes that `RemoveChanneledAuraHolder` must skip.
+/// `true` for the three removal modes that must skip.
 /// `Default` (and any other non-listed mode) proceeds with the removal.
 pub fn should_skip_removal(mode: AuraRemoveMode) -> bool {
     matches!(
@@ -42,7 +40,7 @@ pub fn should_skip_removal(mode: AuraRemoveMode) -> bool {
     )
 }
 
-/// Combines the three skip-mode filters and the C++ `!holder` null guard into a
+/// Combines the three skip-mode filters and a null guard into a
 /// single pure proceed/skip decision. Returns `Some(id)` when the removal should
 /// go ahead, `None` when it must early-return (skip mode or null holder).
 ///
@@ -61,15 +59,13 @@ pub enum RemoveOutcome {
     /// skipped by a mode/null gate).
     NotFound,
     /// The holder was removed. `advanced_cursor` is `true` when the update
-    /// cursor was the removed element and advanced via `erase` (the C++
-    /// `iter == m_channeledUpdateIterator` branch); `false` when the cursor was
+    /// cursor was the removed element and was advanced; `false` when the cursor was
     /// untouched or merely shifted left to stay on the same element.
     Removed { advanced_cursor: bool },
 }
 
 /// Generic holders list with no cursor — the world-free substrate the pure
-/// removal helper operates on. `H` is the holder-identity type (pointer in C++,
-/// `AuraHolderId` here).
+/// removal helper operates on. `H` is the holder-identity type.
 #[derive(Debug, Clone, Default)]
 pub struct ChanneledHoldersList<H> {
     /// Holder identities in insertion order.
@@ -106,8 +102,8 @@ impl<H> ChanneledHoldersList<H> {
 }
 
 impl<H: PartialEq + Clone> ChanneledHoldersList<H> {
-    /// Remove a holder by equality (`std::find` analogue), advancing the update
-    /// cursor the way C++ `erase` does when the cursor was the removed element.
+    /// Remove a holder by equality, advancing the update
+    /// cursor when the cursor was the removed element.
     ///
     /// Cursor semantics, indexed to mirror `std::list::iterator`:
     /// - cursor `Some(c) == idx` (pointing at the removed element): after
@@ -174,9 +170,7 @@ impl ChanneledHolders {
         self.holders.push(holder);
     }
 
-    /// `Spell::AddChanneledAuraHolder` — adds a channeled aura holder with the
-    /// null/channeled guard. Does not perform `SetInUse(true)` (see the module-level
-    /// function for details).
+    /// Adds a channeled aura holder with the null/channeled guard.
     pub fn add_guarded(&mut self, holder_id: AuraHolderId, is_channeled: bool) -> bool {
         if holder_id.0 == 0 || !is_channeled {
             return false;
@@ -197,14 +191,14 @@ impl ChanneledHolders {
     }
 }
 
-/// `Spell::AddChanneledAuraHolder` — adds a channeled aura holder to the list.
+/// Adds a channeled aura holder to the list.
 ///
 /// Returns `false` if the holder was skipped (null spell_id or not channeled),
 /// `true` if it was added to the list.
 ///
-/// The C++ `SetInUse(true)` call on the holder is omitted because Rust's borrow
-/// checker prevents the delete-during-iteration problem that `SetInUse` protects
-/// against in C++ (see also `RemoveChanneledAuraHolder`).
+/// The `SetInUse(true)` call on the holder is omitted because Rust's borrow
+/// checker prevents the delete-during-iteration problem that it protects
+/// against.
 pub fn add_channeled_aura_holder(
     holders: &mut ChanneledHolders,
     holder_id: Option<AuraHolderId>,
@@ -216,14 +210,12 @@ pub fn add_channeled_aura_holder(
     holders.add_guarded(id, is_channeled)
 }
 
-/// Isolated port of `Spell::RemoveChanneledAuraHolder`.
-///
 /// Skips the three mode filters and the null-holder guard via [`gate_removal`],
 /// then runs the cursor-aware removal.
 ///
 /// `ActiveCast` does not yet own channeled-holder state and Rust aura holders do
-/// not track their C++ `in_use` flag, so this is deliberately not wired into the
-/// live spell/aura path and cannot perform `SetInUse(false)`.
+/// not track the `in_use` flag, so this is deliberately not wired into the
+/// live spell/aura path.
 pub fn remove_channeled_aura_holder(
     holders: &mut ChanneledHolders,
     holder_id: Option<AuraHolderId>,
@@ -258,7 +250,7 @@ mod tests {
 
     #[test]
     fn gate_skips_null_holder_and_skip_modes_proceeds_default() {
-        // null holder (the C++ `!holder` early-return) → skip.
+        // null holder → skip.
         assert_eq!(gate_removal(None, AuraRemoveMode::Default), None);
         // skip modes → skip even with a real holder.
         assert_eq!(

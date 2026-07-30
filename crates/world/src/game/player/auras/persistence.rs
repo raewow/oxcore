@@ -1,15 +1,12 @@
 //! Player aura persistence - load/save `character_aura` rows.
 //!
-//! Ports vMaNGOS `Player::_LoadAuras` / `Player::LoadAura` / `Player::_SaveAuras` /
-//! `Player::SaveAura` (src/game/Objects/Player.cpp:15440-15547, 16696-16798).
+//! Player aura persistence - load/save `character_aura` rows.
 //!
-//! ## Model mismatch with the reference
-//!
-//! vMaNGOS groups effects under one `SpellAuraHolder` per (caster, item, spell) and saves one
-//! DB row per holder with up to 3 effect slots packed in (`base_pointsN` / `periodic_timeN` /
-//! `effect_index_mask`). The Rust `AuraContainer` instead stores one [`Aura`] per
-//! `(spell_id, effect_index)`. To stay row-for-row compatible with the C++ schema and the
-//! `character_aura` table, saving groups the container's per-effect auras back into holders by
+//! The `SpellAuraHolder` model groups effects under one holder per (caster, item, spell) and
+//! saves one DB row per holder with up to 3 effect slots packed in (`base_pointsN` /
+//! `periodic_timeN` / `effect_index_mask`). The Rust `AuraContainer` stores one [`Aura`] per
+//! `(spell_id, effect_index)`. To stay compatible with the `character_aura` table, saving
+//! groups the container's per-effect auras back into holders by
 //! `(spell_id, caster_guid, cast_item_guid)` before writing a row, and loading reconstructs the
 //! per-effect auras from a row's `effect_index_mask`.
 
@@ -24,23 +21,21 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// SPELL_ATTR_EX4_AURA_EXPIRES_OFFLINE (0x00000004 in attributes_ex4) — aura's remaining
-/// duration is debited by offline time on next login. Matches `SpellEntry::HasRealTimeDuration`.
+/// duration is debited by offline time on next login.
 const SPELL_ATTR_EX4_AURA_EXPIRES_OFFLINE: u32 = 0x0000_0004;
 
 /// SPELL_ATTR_EX_NEGATIVE-ish polarity check is already exposed via `is_positive_spell`/
 /// `is_positive_effect` on `SpellEntry`; no local reimplementation needed.
 const IN_MILLISECONDS: i64 = 1000;
 
-/// Aura types that must never be persisted to `character_aura` — matches the
-/// `switch (holder->GetSpellProto()->EffectApplyAuraName[i])` bail-out in `Player::SaveAura`.
+/// Aura types that must never be persisted to `character_aura`.
 const SPELL_AURA_BIND_SIGHT: u32 = 1;
 const SPELL_AURA_MOD_POSSESS: u32 = 2;
 const SPELL_AURA_MOD_CHARM: u32 = 6;
 const SPELL_AURA_FAR_SIGHT: u32 = 76;
 const SPELL_AURA_AOE_CHARM: u32 = 177;
 
-/// AURA_INTERRUPT_LEAVE_WORLD_CANCELS (bit 19) | AURA_INTERRUPT_ENTER_WORLD_CANCELS (bit 22),
-/// from vMaNGOS `SpellAuraInterruptFlags`.
+/// AURA_INTERRUPT_LEAVE_WORLD_CANCELS (bit 19) | AURA_INTERRUPT_ENTER_WORLD_CANCELS (bit 22).
 const AURA_INTERRUPT_LEAVE_OR_ENTER_WORLD_CANCELS: u32 =
     crate::game::player::auras::interrupt::AuraInterruptFlags::LEAVE_WORLD_CANCELS.0
         | crate::game::player::auras::interrupt::AuraInterruptFlags::ENTER_WORLD_CANCELS.0;
@@ -54,8 +49,8 @@ const SPELL_AURA_MOD_SHAPESHIFT: u32 = 36;
 
 /// Load all saved auras for a player from `character_aura` and re-apply them.
 ///
-/// Matches `Player::_LoadAuras`. `timediff` is the number of seconds the character was
-/// offline (used to debit remaining duration for auras with `HasRealTimeDuration()`).
+/// `timediff` is the number of seconds the character was offline (used to debit remaining
+/// duration for auras with `HasRealTimeDuration()`).
 pub async fn load_auras(player_guid: ObjectGuid, timediff: u32, world: &World) -> Result<()> {
     let char_repo = CharacterRepository::new(Arc::new(world.databases.character.clone()));
     let rows = char_repo.find_auras(player_guid.counter()).await?;
@@ -64,8 +59,7 @@ pub async fn load_auras(player_guid: ObjectGuid, timediff: u32, world: &World) -
         load_aura(player_guid, row, timediff, world).await;
     }
 
-    // "if (GetClass() == CLASS_WARRIOR && !HasAuraType(SPELL_AURA_MOD_SHAPESHIFT))
-    //      CastSpell(this, SPELL_ID_PASSIVE_BATTLE_STANCE, true);"
+    // Warriors without a shapeshift aura get their passive battle stance cast.
     let (class, has_shapeshift) = world
         .systems
         .player
@@ -95,8 +89,7 @@ pub async fn load_auras(player_guid: ObjectGuid, timediff: u32, world: &World) -
             .await;
     }
 
-    // NOTE: "if (GetGroup()) SetGroupUpdateFlag(GROUP_UPDATE_FLAG_STATUS);" is not ported here —
-    // group aura-status sync is out of scope for aura persistence and belongs to the group
+    // NOTE: group aura-status sync is out of scope for aura persistence and belongs to the group
     // system's own login hook.
 
     Ok(())
@@ -104,13 +97,13 @@ pub async fn load_auras(player_guid: ObjectGuid, timediff: u32, world: &World) -
 
 /// Reconstruct and apply one saved aura holder row.
 ///
-/// Matches `Player::LoadAura`. Skipped (matching the reference's early `return`s) when:
+/// Skipped when:
 /// - the spell id is unknown,
 /// - the saved duration already ran out after debiting offline `timediff`.
 async fn load_aura(player_guid: ObjectGuid, row: &CharacterAuraRow, timediff: u32, world: &World) {
     let Some(spell_entry) = world.managers.spell_mgr.get(row.spell) else {
         tracing::error!(
-            "Player::_LoadAuras: Unknown spell (spellid {}), ignore.",
+            "Unknown spell (spellid {}), ignoring.",
             row.spell
         );
         return;
@@ -118,21 +111,18 @@ async fn load_aura(player_guid: ObjectGuid, row: &CharacterAuraRow, timediff: u3
 
     let mut duration = row.duration;
     if duration != -1 && spell_entry.attributes_ex4 & SPELL_ATTR_EX4_AURA_EXPIRES_OFFLINE != 0 {
-        // if (timediff > (INT_MAX / IN_MILLISECONDS)) return;
         if timediff as i64 > (i32::MAX as i64 / IN_MILLISECONDS) {
             return;
         }
-        // if (s.duration <= int32(timediff) * IN_MILLISECONDS) return;
         if duration as i64 <= timediff as i64 * IN_MILLISECONDS {
             return;
         }
         duration -= timediff as i32 * IN_MILLISECONDS as i32;
     }
 
-    // NOTE: the C++ special-case for SPELL_PLAYER_MUTED_VISUAL reads the session's live
-    // `m_muteTime`, which has no equivalent yet (no per-session mute-expiry state tracked in
-    // Rust). Left unported; this is a single cosmetic aura (chat-muted icon), not core aura
-    // logic.
+    // NOTE: SPELL_PLAYER_MUTED_VISUAL reads the session's live mute time, which has no
+    // equivalent yet (no per-session mute-expiry state tracked in Rust). This is a single
+    // cosmetic aura (chat-muted icon), not core aura logic.
 
     // prevent wrong values of remaincharges / stacks
     let charges = if spell_entry.proc_charges == 0 {
@@ -194,8 +184,8 @@ async fn load_aura(player_guid: ObjectGuid, row: &CharacterAuraRow, timediff: u3
             is_permanent: duration_ms.is_none(),
         };
 
-        // Go through the normal apply path (`Player::AddSpellAuraHolder`) rather than
-        // pushing straight into the container: a restored aura must re-run its effect
+        // Go through the normal apply path rather than pushing straight into the
+        // container: a restored aura must re-run its effect
         // handlers, or the character comes back without the state the aura owns —
         // a warrior's saved stance would leave `shapeshift_form` at 0, a movement
         // aura would not re-apply its speed, and so on.
@@ -225,14 +215,14 @@ async fn load_aura(player_guid: ObjectGuid, row: &CharacterAuraRow, timediff: u3
 
         if let Err(err) = applied {
             tracing::error!(
-                "Player::LoadAura: failed to apply spell {} effect {}: {err:#}",
+                "Failed to apply spell {} effect {}: {err:#}",
                 row.spell,
                 effect_index
             );
             continue;
         }
 
-        // `Aura::SetLoadedState` — restore the persisted counters the apply path
+        // Restore the persisted counters the apply path
         // recomputed from the spell template.
         world
             .systems
@@ -253,8 +243,8 @@ async fn load_aura(player_guid: ObjectGuid, row: &CharacterAuraRow, timediff: u3
 
 /// Save all of a player's currently-active, persistable auras to `character_aura`.
 ///
-/// Matches `Player::_SaveAuras`: deletes all existing rows for the character then re-inserts
-/// one row per (spell, caster, item) holder built from the still-active per-effect auras.
+/// Deletes all existing rows for the character then re-inserts one row per (spell, caster, item)
+/// holder built from the still-active per-effect auras.
 pub async fn save_auras(player_guid: ObjectGuid, world: &World) -> Result<()> {
     let char_repo = CharacterRepository::new(Arc::new(world.databases.character.clone()));
     char_repo.delete_auras(player_guid.counter()).await?;
@@ -274,8 +264,7 @@ pub async fn save_auras(player_guid: ObjectGuid, world: &World) -> Result<()> {
     Ok(())
 }
 
-/// One (spell, caster, item) holder's worth of per-effect aura snapshots, grouped back together
-/// the way vMaNGOS's `SpellAuraHolder` naturally holds them.
+/// One (spell, caster, item) holder's worth of per-effect aura snapshots.
 struct HolderSnapshot {
     spell_id: u32,
     caster_guid: ObjectGuid,
@@ -327,7 +316,7 @@ fn collect_holders_for_save(player_guid: ObjectGuid, world: &World) -> Vec<Holde
 
 /// Build a `character_aura` row for one holder, or `None` if it must not be saved.
 ///
-/// Matches `Player::SaveAura`'s skip conditions:
+/// Skip conditions:
 /// - holder's spell has `AURA_INTERRUPT_LEAVE_WORLD_CANCELS`/`ENTER_WORLD_CANCELS`,
 /// - holder is passive or the spell is channeled,
 /// - none of its effects apply a persistable aura type
@@ -350,9 +339,9 @@ fn save_aura(
         return None;
     }
 
-    // Single-target auras owned by someone else aren't saved for this character
-    // (holder->IsSingleTarget() && caster != this). We don't track single-target holder state
-    // yet, so this only guards on caster identity, matching the common case.
+    // Single-target auras owned by someone else aren't saved for this character.
+    // We don't track single-target holder state yet, so this only guards on caster identity,
+    // matching the common case.
     let owned_by_self = holder.caster_guid == player_guid;
 
     let mut base_points = [0.0f32; 3];
@@ -383,8 +372,7 @@ fn save_aura(
         return None;
     }
     if !owned_by_self {
-        // Not our own single-target aura; skip saving (best-effort match of
-        // "!holder->IsSingleTarget()" without full single-target-holder tracking).
+        // Not our own single-target aura; skip saving (without full single-target-holder tracking).
         return None;
     }
 
@@ -412,14 +400,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn interrupt_flag_bits_match_reference_leave_and_enter_world() {
+    fn interrupt_flag_bits_leave_and_enter_world() {
         // AURA_INTERRUPT_LEAVE_WORLD_CANCELS = 0x00080000 (bit 19)
         // AURA_INTERRUPT_ENTER_WORLD_CANCELS = 0x00400000 (bit 22)
         assert_eq!(AURA_INTERRUPT_LEAVE_OR_ENTER_WORLD_CANCELS, 0x0048_0000);
     }
 
     #[test]
-    fn banned_aura_types_match_spellauradefines() {
+    fn banned_aura_types_are_correct() {
         assert_eq!(SPELL_AURA_BIND_SIGHT, 1);
         assert_eq!(SPELL_AURA_MOD_POSSESS, 2);
         assert_eq!(SPELL_AURA_MOD_CHARM, 6);
@@ -428,14 +416,14 @@ mod tests {
     }
 
     #[test]
-    fn battle_stance_constants_match_reference() {
+    fn battle_stance_constants() {
         assert_eq!(CLASS_WARRIOR, 1);
         assert_eq!(SPELL_ID_PASSIVE_BATTLE_STANCE, 2457);
         assert_eq!(SPELL_AURA_MOD_SHAPESHIFT, 36);
     }
 
     #[test]
-    fn real_time_duration_attribute_bit_matches_reference() {
+    fn real_time_duration_attribute_bit() {
         // SPELL_ATTR_EX4_AURA_EXPIRES_OFFLINE = 0x00000004 (bit 2 of attributes_ex4)
         assert_eq!(SPELL_ATTR_EX4_AURA_EXPIRES_OFFLINE, 0x0000_0004);
     }

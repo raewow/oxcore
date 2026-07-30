@@ -1,9 +1,6 @@
-//! Per-map zone weather (MaNGOS `WeatherSystem`, hosted on `Map`).
+//! Per-map zone weather, hosted on `Map`.
 //!
-//! MaNGOS keeps one `WeatherSystem` per `Map` instance. Maps here are plain
-//! spatial data with no game systems attached, so the weather states live in
-//! this system keyed by `(map_id, instance_id, zone_id)` instead — the same
-//! granularity, just stored centrally.
+//! Weather states live in this system keyed by `(map_id, instance_id, zone_id)`.
 
 use super::manager::WeatherManager;
 use super::types::{season_for_yday, WeatherType};
@@ -46,8 +43,7 @@ impl WeatherSystem {
     }
 
     /// Tick every live zone weather; push changes to the players standing in
-    /// the zone. Zones that ran dry of players drop their state (MaNGOS frees
-    /// the `Weather` object in the same case).
+    /// the zone. Zones that ran dry of players drop their state.
     pub fn update(&self, diff: Duration, world: &World) -> anyhow::Result<()> {
         if !Self::enabled(world) {
             return Ok(());
@@ -91,8 +87,7 @@ impl WeatherSystem {
 
     /// Send the current weather of the player's zone to that one player.
     ///
-    /// Called on login and whenever the player enters a new zone
-    /// (MaNGOS `Player::UpdateZone`).
+    /// Called on login and whenever the player enters a new zone.
     pub fn send_weather_to_player(&self, player_guid: ObjectGuid, world: &World) {
         if !Self::enabled(world) {
             return;
@@ -233,7 +228,7 @@ fn weather_packet(weather: &ZoneWeather) -> SmsgWeather {
         weather_type: weather.weather_type().as_u32(),
         grade: weather.grade(),
         sound_id: weather.sound(),
-        // Smooth transitions, matching MaNGOS.
+        // Smooth transitions.
         instant_change: false,
     }
 }
@@ -247,7 +242,7 @@ fn change_interval(world: &World) -> Duration {
         .unwrap_or(DEFAULT_CHANGE_INTERVAL)
 }
 
-/// Players standing in one zone of one map (MaNGOS `Map::SendToPlayersInZone`).
+/// Players standing in one zone of one map.
 fn players_in_zone(world: &World, map_id: u32, instance_id: u32, zone_id: u32) -> Vec<ObjectGuid> {
     let Some(map) = world.managers.map_mgr.get_map(map_id, instance_id) else {
         return Vec::new();

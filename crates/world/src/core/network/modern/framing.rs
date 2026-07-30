@@ -9,8 +9,7 @@
 //! ```
 //!
 //! where `size` is the plaintext length (which AES-GCM preserves, so it is also the ciphertext
-//! length) and the ciphertext decrypts to `opcode (u16 LE) ‖ body`. Transcribed from HermesProxy's
-//! modern server `WorldSocket.cs`.
+//! length) and the ciphertext decrypts to `opcode (u16 LE) ‖ body`.
 
 use anyhow::{bail, Result};
 

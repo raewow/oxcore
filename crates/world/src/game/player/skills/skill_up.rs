@@ -2,7 +2,7 @@ use super::formulas::calculate_skill_gain_chance;
 
 /// Calculate the chance (0-100) that a weapon skill increases after a successful hit.
 ///
-/// The formula is ported from MaNGOS Player::UpdateCombatSkills() and has two regimes:
+/// The formula has two regimes:
 ///
 /// **Progress 1-90% (skill < 90% of max):**
 ///   chance = (max * 0.9 * 50) / current
@@ -64,8 +64,6 @@ pub fn calculate_weapon_skill_up_chance(
 
 /// Calculate the chance (0-100) that defense skill increases after being hit.
 ///
-/// The formula is ported from MaNGOS Player::UpdateCombatSkills() with is_defense=true:
-///
 ///   gray_level = max(1, player_level - 5)   (simplified gray level formula)
 ///   mob_level  = min(creature_level, player_level + 5)
 ///   lvl_diff   = max(3, mob_level - gray_level)
@@ -112,7 +110,7 @@ pub fn calculate_defense_skill_up_chance(
 /// Creatures at or below gray level give no experience and no skill gains.
 /// Simplified formula: max(1, level - 5)
 ///
-/// The full MaNGOS formula uses a lookup table:
+/// The full formula uses a lookup table:
 /// - Level 1-5:   gray = 0
 /// - Level 6-39:  gray = level - 5 - floor(level/10)
 /// - Level 40-59: gray = level - 1 - floor(level/5)

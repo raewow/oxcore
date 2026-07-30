@@ -34,7 +34,7 @@ impl ToWorldPacket for SmsgUpdateAccountData {
             // Empty data - just write size 0
             packet.write_u32(0);
         } else {
-            // Compress data like MaNGOS does
+            // Compress data
             match compress_account_data(&self.data) {
                 Ok(compressed) => {
                     packet.write_bytes(&compressed);

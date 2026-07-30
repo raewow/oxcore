@@ -1,8 +1,7 @@
 //! The gameobject model list extracted alongside the VMaps.
 //!
 //! `vmaps/temp_gameobject_models` maps a GameObjectDisplayInfo display id to the
-//! collision model file and its object-space bounding box. Ported from
-//! `LoadGameObjectModelList` (GameObjectModel.cpp).
+//! collision model file and its object-space bounding box.
 
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -39,7 +38,7 @@ impl GameObjectModelData {
 /// Load the display-id → model mapping.
 ///
 /// A missing file is not an error: it just means no gameobject collision is
-/// available, which is how the reference behaves too.
+/// available.
 pub fn load_gameobject_model_list(vmaps_dir: &Path) -> Result<HashMap<u32, GameObjectModelData>> {
     let path = vmaps_dir.join(GAMEOBJECT_MODELS_FILE);
 

@@ -164,7 +164,7 @@ impl PlayerSystem {
                             if should_send {
                                 p.combat.last_swing_error = 1;
                             }
-                            // Delay auto-attacks by 100ms (vmangos DelayAutoAttacks)
+                            // Delay auto-attacks by 100ms.
                             p.combat.main_hand_timer = 100;
                             should_send
                         })

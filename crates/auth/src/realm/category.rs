@@ -29,7 +29,6 @@ static REALM_CATEGORY_IDS: [[u8; MAX_REALM_ZONES]; 4] = [
 ];
 
 /// Get realm category ID by build and zone
-/// Matches the C++ GetRealmCategoryIdByBuildAndZone function
 pub fn get_realm_category_id_by_build_and_zone(
     _build: u16,
     realm_zone: u8,

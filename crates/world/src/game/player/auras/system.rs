@@ -720,8 +720,7 @@ impl AuraSystem {
     /// Refresh the remaining duration of an already-active spell's aura(s), without
     /// re-triggering apply effects or touching stack count.
     ///
-    /// Matches C++ `Unit::RefreshAura(spellId, duration)`: looks up the existing holder for
-    /// `spell_id` and overwrites its current duration, then notifies the client via
+    /// Refresh an already-active aura's duration for a given spell, then notifies the client via
     /// SMSG_UPDATE_AURA_DURATION. Does nothing if the spell has no active aura on this unit.
     pub async fn refresh_aura(
         &self,
@@ -1981,8 +1980,8 @@ impl AuraSystem {
                         None => continue,
                     };
 
-                    // Full eligibility (MaNGOS IsSpellProcEventCanTriggeredBy): proc-flag match,
-                    // cast-end pairing, school/family gates, and hit-outcome requirement.
+                    // Full eligibility: proc-flag match, cast-end pairing, school/family gates,
+                    // and hit-outcome requirement.
                     let proc_event = world.managers.spell_mgr.get_proc_event(aura.spell_id);
                     if !proc::is_spell_proc_event_can_triggered_by(
                         proc_event.as_ref(),
@@ -2499,13 +2498,12 @@ impl AuraSystem {
     // =========================================================================
     // Crowd-Control / Movement / Vision / Shapeshift special-case effects
     //
-    // Mirrors the per-aura-type `Aura::Handle*` methods in SpellAuras.cpp for
-    // effects that aren't covered by the generic stat-modifier / CC-unit-flag /
+    // Effects that aren't covered by the generic stat-modifier / CC-unit-flag /
     // movement-speed paths above. Only player targets are handled (creatures use
     // the simplified `apply_creature_aura` path in AuraSystem::apply_aura).
     // =========================================================================
 
-    /// Dispatch on aura apply. Mirrors the "AT APPLY" side of each `Aura::Handle*`.
+    /// Dispatch on aura apply.
     #[allow(clippy::too_many_arguments)]
     fn apply_special_effect(
         &self,
@@ -2576,22 +2574,22 @@ impl AuraSystem {
                 self.send_hover(target_guid, true, world);
             }
 
-            // --- Aura::HandleAuraModShapeshift ---
+            // --- AuraModShapeshift ---
             effects::AURA_MOD_SHAPESHIFT => {
                 self.apply_shapeshift(target_guid, misc_value as u8, world);
             }
 
-            // --- Aura::HandleAuraTransform ---
+            // --- AuraTransform ---
             effects::AURA_TRANSFORM => {
                 self.apply_transform(target_guid, spell_id, misc_value, world);
             }
 
-            // --- Aura::HandleForceReaction ---
+            // --- AuraForceReaction ---
             effects::AURA_FORCE_REACTION => {
                 self.apply_force_reaction(target_guid, misc_value, base_value, world);
             }
 
-            // --- Aura::HandleAuraModScale ---
+            // --- AuraModScale ---
             effects::AURA_MOD_SCALE => {
                 let pct = base_value as f32 / 100.0;
                 world
@@ -2695,13 +2693,11 @@ impl AuraSystem {
                 );
             }
 
-            // --- Aura::HandleAuraModDisarm ---
+            // --- AuraModDisarm ---
             effects::AURA_MOD_DISARM => {
                 // Unit flag itself is applied generically via cc_aura_unit_flag (system.rs
-                // apply_aura). C++ also resets the swing timer to BASE_ATTACK_TIME and
-                // unapplies weapon-dependent mods (_ApplyWeaponDependentAuraMods) — the
-                // latter has no equivalent hook in the current combat/stats system, so
-                // only the swing-timer reset is mirrored here.
+                // apply_aura). The swing timer is reset to BASE_ATTACK_TIME; weapon-dependent
+                // mods have no equivalent hook in the current combat/stats system.
                 world
                     .systems
                     .player
@@ -2908,8 +2904,7 @@ impl AuraSystem {
 
             effects::AURA_MOD_SCALE => {
                 // Recompute from remaining SPELL_AURA_MOD_SCALE auras rather than trying to
-                // invert a single multiplicative step (matches intent, not literal C++ code
-                // which uses an additive ApplyPercentModFloatValue on the raw field).
+                // invert a single multiplicative step.
                 let remaining_pct: i32 = world
                     .systems
                     .player
@@ -3039,7 +3034,7 @@ impl AuraSystem {
     }
 
     /// True if the player has at least one active aura of `aura_type` (used to gate
-    /// "remove effect only if last aura of this type" like the C++ `HasAuraType` checks).
+    /// "remove effect only if last aura of this type").
     fn player_has_aura_type(&self, target_guid: ObjectGuid, aura_type: u32, world: &World) -> bool {
         world
             .systems
@@ -3099,11 +3094,10 @@ impl AuraSystem {
 
     // ---- Shapeshift ----
 
-    /// Mirrors `Aura::HandleAuraModShapeshift` apply side: sets the shapeshift form,
-    /// swaps power type for forms that use rage/energy, and updates the display id
-    /// for forms with a hardcoded model. Does not yet implement `RemoveSpellsCausingAura`
-    /// (removing other shapeshift auras) or `CastSpell(9033)` (root/slow cleanse on
-    /// entering a travel-type form) — those need cross-aura removal / spell-cast hooks
+    /// Apply shapeshift: sets the shapeshift form, swaps power type for forms that use
+    /// rage/energy, and updates the display id for forms with a hardcoded model. Does
+    /// not yet implement removing other shapeshift auras or the root/slow cleanse on
+    /// entering a travel-type form — those need cross-aura removal / spell-cast hooks
     /// that aren't wired up from within AuraSystem yet.
     fn apply_shapeshift(&self, target_guid: ObjectGuid, form: u8, world: &World) {
         let is_alliance = world
@@ -3385,9 +3379,8 @@ impl AuraSystem {
             return;
         }
 
-        // misc_value is a creature_template entry. C++ uses `Creature::ChooseDisplayId`
-        // (randomizes gender-variant models); we don't have that helper here, so we
-        // just use the template's primary model id.
+        // misc_value is a creature_template entry. We use the template's primary model id
+        // (no random gender-variant model selection).
         let display_id = world
             .managers
             .creature_mgr
@@ -3464,8 +3457,8 @@ impl AuraSystem {
     ) {
         use oxcore_shared::game::reputation::ReputationRank;
         let faction_id = misc_value.max(0) as u32;
-        // C++ reads m_modifier.m_amount directly as `ReputationRank(uint32(m_amount))` — it's
-        // the 0..7 rank enum value itself, not a reputation point total.
+        // base_value is read directly as `ReputationRank` — it's the 0..7 rank enum value
+        // itself, not a reputation point total.
         let Some(rank) = ReputationRank::from_i32(base_value) else {
             tracing::warn!(
                 "[AURA] HandleForceReaction: invalid rank value {} for faction {}",
@@ -3955,7 +3948,7 @@ impl AuraSystem {
         }
     }
 
-    /// C++ sends the empathy field update directly to the player caster when applying.
+    /// Send the dynamic flags update to the player caster when applying.
     fn send_dynamic_flags_update(
         &self,
         recipient_guid: ObjectGuid,
@@ -4173,8 +4166,7 @@ fn apply_max_health_aura_modifier(
 
 /// Apply or reverse a flat health-regeneration aura.
 ///
-/// `AURA_MOD_REGEN` stores health restored per five seconds, matching
-/// `Aura::HandleModRegen` and `Player::RegenerateHealth` in C++.
+/// `AURA_MOD_REGEN` stores health restored per five seconds.
 fn apply_flat_health_regen_aura_modifier(
     power: &mut crate::game::player::power::PowerState,
     aura_type: u32,
@@ -4192,8 +4184,8 @@ fn apply_flat_health_regen_aura_modifier(
 
 /// Rebuild the multiplier used for spirit-based health regeneration.
 ///
-/// C++ applies each `AURA_MOD_HEALTH_REGEN_PERCENT` aura successively, rather
-/// than summing their percentages, so retain that multiplicative behavior.
+/// Each `AURA_MOD_HEALTH_REGEN_PERCENT` aura is applied successively, rather than summing
+/// their percentages, so retain that multiplicative behavior.
 fn apply_health_regen_percent_aura_modifier(
     power: &mut crate::game::player::power::PowerState,
     aura_type: u32,
@@ -4248,16 +4240,13 @@ fn modify_current_power_for_max_delta(
 
 /// Apply or reverse a school-resistance aura across every school in its bitmask.
 ///
-/// Mirrors MaNGOS `Aura::HandleAuraModResistance` / `HandleModResistancePercent` /
-/// `HandleModBaseResistance` / `HandleAuraModBaseResistancePercent`: `misc_value` is a spell
-/// school bitmask (bit `i` → school `i`, where 0 = physical/armor), and each set school gets a
-/// `HandleStatModifier(UNIT_MOD_RESISTANCE_START + i, <type>, amount, apply)` call. The four aura
-/// types differ only in which `UnitModifierType` they target (base vs total, flat vs percent).
+/// `misc_value` is a spell school bitmask (bit `i` → school `i`, where 0 = physical/armor),
+/// and each set school gets a stat modifier call. The four aura types differ only in which
+/// `UnitModifierType` they target (base vs total, flat vs percent).
 ///
 /// Returns `true` if `aura_type` is one of the four resistance forms (and was handled), `false`
-/// otherwise. Like the C++ handlers, a zero amount is a no-op. The player-only
-/// `ApplyResistanceBuffModsMod` UI hook and the Faerie Fire dispel-immunity side effect on
-/// `HandleAuraModResistance` are client-facing / dispel-system concerns and are not modeled here.
+/// otherwise. A zero amount is a no-op. The player-only UI hooks and dispel-system concerns are
+/// not modeled here.
 fn apply_resistance_aura_modifier(
     unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
     aura_type: u32,
@@ -4275,8 +4264,8 @@ fn apply_resistance_aura_modifier(
         _ => return false,
     };
 
-    // Zero-amount resistance auras are a no-op in C++ (`if (!m_modifier.m_amount) return;`) but
-    // still "belong" to the resistance path, so report handled to skip the stat fallback.
+    // Zero-amount resistance auras are a no-op but still "belong" to the resistance path,
+    // so report handled to skip the stat fallback.
     if amount == 0 {
         return true;
     }
@@ -4296,20 +4285,17 @@ fn apply_resistance_aura_modifier(
 
 /// Apply or reverse a primary-stat aura across the stat(s) named by `misc_value`.
 ///
-/// Mirrors MaNGOS `Aura::HandleAuraModStat` / `HandleModPercentStat` /
-/// `HandleModTotalPercentStat`. `misc_value` is a stat index (0=STR, 1=AGI, 2=STA, 3=INT, 4=SPI);
-/// a negative value means "all stats" (C++ accepts -1, and -2 for AURA_MOD_STAT), so each of the
-/// five stats gets a `HandleStatModifier(UNIT_MOD_STAT_START + i, <type>, amount, apply)` call. The
-/// three aura types differ only in which `UnitModifierType` they target:
+/// `misc_value` is a stat index (0=STR, 1=AGI, 2=STA, 3=INT, 4=SPI); a negative value means
+/// "all stats" (-1, and -2 for `AURA_MOD_STAT`), so each of the five stats gets a stat modifier
+/// call. The three aura types differ only in which `UnitModifierType` they target:
 /// - `AURA_MOD_STAT`             → `TotalValue` (flat)
-/// - `AURA_MOD_PERCENT_STAT`     → `BasePct`   (C++ uses BASE_PCT, not total)
+/// - `AURA_MOD_PERCENT_STAT`     → `BasePct`
 /// - `AURA_MOD_TOTAL_STAT_PERCENTAGE` → `TotalPct`
 ///
 /// Returns `true` if `aura_type` is one of the three primary-stat forms (and was handled). Out-of
-/// range `misc_value` (matching the C++ validity guards) is reported handled but applies nothing.
-/// The player-only `ApplyStatBuffMod` / `ApplyStatPercentBuffMod` UI hooks and the Stamina-driven
-/// current-HP rescale on `HandleModTotalPercentStat` are client-facing / derived-stat concerns and
-/// are handled by the stats recalculation, not modeled here.
+/// range `misc_value` (matching the validity guards) is reported handled but applies nothing.
+/// The player-only UI hooks and the Stamina-driven current-HP rescale are client-facing /
+/// derived-stat concerns and are handled by the stats recalculation, not modeled here.
 fn apply_primary_stat_aura_modifier(
     unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
     aura_type: u32,
@@ -4327,7 +4313,7 @@ fn apply_primary_stat_aura_modifier(
         _ => return false,
     };
 
-    // C++ guards: reject misc values below the all-stats sentinel or above the last stat (SPI=4).
+    // Reject misc values below the all-stats sentinel or above the last stat (SPI=4).
     if misc_value < min_misc || misc_value > 4 {
         return true;
     }
@@ -4346,17 +4332,15 @@ fn apply_primary_stat_aura_modifier(
 
 /// Apply or reverse a physical damage-done percent aura on the weapon-damage modifiers.
 ///
-/// Mirrors MaNGOS `Aura::HandleModDamagePercentDone` and `HandleModOffhandDamagePercent`:
 /// - `AURA_MOD_DAMAGE_PERCENT_DONE` with the physical school bit set (`SPELL_SCHOOL_MASK_NORMAL`,
 ///   bit 0) applies a `TOTAL_PCT` modifier to main-hand, off-hand and ranged weapon damage.
 /// - `AURA_MOD_OFFHAND_DAMAGE_PCT` applies a `TOTAL_PCT` modifier to off-hand damage only.
 ///
-/// Returns `true` if `aura_type` is one of those forms. The magic-school portion of
-/// `HandleModDamagePercentDone` is client-display only in C++ (the real magic bonus lives in
-/// `SpellDamageBonusDone`), so only the physical/weapon side is modeled here. The
-/// `_ApplyWeaponDependentAuraDamageMod` per-equipped-weapon path (spells that restrict to an item
-/// class) is not modeled — the percent applies to all weapon slots regardless of the spell's
-/// equipped-item requirement.
+/// Returns `true` if `aura_type` is one of those forms. The magic-school portion is
+/// client-display only (the real magic bonus lives in `SpellDamageBonusDone`), so only the
+/// physical/weapon side is modeled here. The per-equipped-weapon path (spells that restrict to
+/// an item class) is not modeled — the percent applies to all weapon slots regardless of the
+/// spell's equipped-item requirement.
 fn apply_damage_done_aura_modifier(
     unit_mods: &mut crate::game::player::stats::modifiers::UnitModifierGroup,
     aura_type: u32,
@@ -4598,7 +4582,7 @@ mod tests {
         assert_eq!(shapeshift_form_mask(0), 0);
     }
 
-    // ── apply_primary_stat_aura_modifier (Aura::HandleAuraModStat family) ─────
+    // ── apply_primary_stat_aura_modifier ──────────────────────────────────────
 
     #[test]
     fn flat_health_regen_aura_applies_and_reverses_hp5() {
@@ -4699,7 +4683,7 @@ mod tests {
 
     #[test]
     fn percent_primary_stat_aura_targets_base_pct() {
-        // C++ HandleModPercentStat uses BASE_PCT (not total) — regression guard.
+        // HandleModPercentStat uses BASE_PCT (not total) — regression guard.
         let mut unit_mods = UnitModifierGroup::new();
 
         assert!(apply_primary_stat_aura_modifier(
@@ -4742,7 +4726,7 @@ mod tests {
     #[test]
     fn primary_stat_aura_out_of_range_misc_is_handled_noop() {
         let mut unit_mods = UnitModifierGroup::new();
-        // misc_value 5 is past SPI (4); C++ logs an error and returns without applying.
+        // misc_value 5 is past SPI (4); logs an error and returns without applying.
         assert!(apply_primary_stat_aura_modifier(
             &mut unit_mods,
             effects::AURA_MOD_STAT,
@@ -4975,7 +4959,7 @@ mod tests {
         assert_eq!(power.current[3], 50);
     }
 
-    // ── apply_resistance_aura_modifier (Aura::HandleAuraModResistance family) ──
+    // ── apply_resistance_aura_modifier ─────────────────────────────────────────
 
     #[test]
     fn flat_resistance_aura_applies_per_school_and_reverses() {

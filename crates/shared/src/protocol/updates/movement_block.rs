@@ -42,7 +42,6 @@ impl MovementBlock {
     /// Write a movement block for an item (UPDATEFLAG_ALL)
     ///
     /// For items, the movement block is simple: just writes uint32(1)
-    /// See: core/src/game/Objects/Object.cpp:531-534
     pub fn write_for_item(packet: &mut WorldPacket) -> Result<()> {
         packet.write_u32(1);
         Ok(())
@@ -101,7 +100,7 @@ impl MovementBlock {
         packet.write_f32(speeds.turn_rate);
 
         // Movement block ends here - no extra u32 after speeds
-        // Reference core shows movement blocks are 52 bytes (not 56)
+        // Movement blocks are 52 bytes (not 56)
 
         Ok(())
     }

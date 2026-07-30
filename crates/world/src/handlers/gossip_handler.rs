@@ -432,7 +432,7 @@ pub async fn handle_gossip_select_option(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    // Hermes' modern body adds GossipID and bit-length-prefixes the promotion code.
+    // Modern body adds GossipID and bit-length-prefixes the promotion code.
     let (npc_guid, option_id) = read_gossip_select_option(session.protocol(), packet)?;
 
     debug!(
@@ -608,7 +608,7 @@ pub async fn handle_npc_text_query(
         });
         SmsgNpcTextUpdate { text_id, options }
     } else {
-        // Text not found - send default empty response (matches vmangos fallback)
+        // Text not found - send default empty response
         let options = std::array::from_fn(|_| NpcTextOption::default());
         SmsgNpcTextUpdate { text_id, options }
     };

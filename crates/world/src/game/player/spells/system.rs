@@ -39,7 +39,7 @@ use std::time::Duration;
 /// SPELL_PREVENTION_TYPE_SILENCE — silence-type spells check school lockout.
 const SPELL_PREVENTION_TYPE_SILENCE: u8 = 1;
 
-/// Whether a spell consumes combo points on completion (MaNGOS `SpellEntry::NeedsComboPoints`).
+/// Whether a spell consumes combo points on completion.
 ///
 /// `NeedsComboPoints() = AttributesEx & (FINISHING_MOVE_DAMAGE | FINISHING_MOVE_DURATION)`.
 fn spell_needs_combo_points(attributes_ex: u32) -> bool {
@@ -153,22 +153,17 @@ fn get_game_time_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// `Spell::handle_delayed`'s "earliest still-pending target" scan, factored out of the
-/// per-target bitfield loop so it can run over any set of remaining per-target delays.
-///
-/// Mirrors the C++ `next_time` accumulation: the smallest non-zero delay wins. `None`
-/// means every target has fired (finished — call `_handle_finish_phase` + `finish(true)`);
+/// Earliest still-pending target delay: the smallest non-zero delay wins. `None`
+/// means every target has fired (reschedule the delayed tick for the finish phase);
 /// `Some(t)` means reschedule the delayed tick for `t`.
 fn next_delayed_target_time(remaining_delays: &[u32]) -> Option<u32> {
     remaining_delays.iter().copied().filter(|&d| d > 0).min()
 }
 
-/// `Spell::_handle_immediate_phase`'s `m_needSpellLog` derivation: starts from
-/// `IsNeedSendToClient()` and is then cleared as soon as any effect slot is plain
-/// school damage (which logs through the damage packet instead of the generic
-/// spell-execute log). The C++ loop `continue`s past `Effect[j] == 0` before ever
-/// reaching the clear check, so an empty effect slot never affects the result here —
-/// see the claim's `danger` note ("the `Effect[j] == 0` disjunct is unreachable").
+/// Derivation: starts from `IsNeedSendToClient()` and is cleared as soon as any
+/// effect slot is plain school damage (which logs through the damage packet instead
+/// of the generic spell-execute log). An empty effect list never affects the result
+/// because zero-effect slots are skipped before the clear check.
 fn needs_spell_log(is_need_send_to_client: bool, effects: &[u32; 3]) -> bool {
     const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
     if !is_need_send_to_client {
@@ -194,9 +189,6 @@ fn clear_cast_item(
 }
 
 /// Whether a cast needs its client-visible spell packet/log handling.
-///
-/// Mirrors MaNGOS `Spell::IsNeedSendToClient`. The caller supplies the instance state so this
-/// remains a pure predicate.
 fn is_need_send_to_client(
     is_channeling_visual: bool,
     caster_in_world: bool,
@@ -468,10 +460,9 @@ fn on_spell_launch(
         entry.attributes,
     );
 
-    // MotionMaster::MoveCharge toward the target. The batching delay
-    // (m_delayed ? GetSpellBatchingEffectDelay(..) : 0) is always 0 here — spell batching is
-    // config-gated and unmodelled. Player charge movement has no MotionMaster path yet, so
-    // only creature casters drive the charge generator.
+    // MotionMaster::MoveCharge toward the target. The batching delay is always 0 here —
+    // spell batching is config-gated and unmodelled. Player charge movement has no
+    // MotionMaster path yet, so only creature casters drive the charge generator.
     let _ = charge_index;
     if caster_guid.is_creature_or_pet() {
         world
@@ -514,7 +505,6 @@ pub struct SpellSystem {
 ///
 /// Returns `(ammo_display_id, ammo_inventory_type)`. A missing ammo template
 /// retains the equipped weapon's inventory type, as required by the client.
-/// Mirrors MaNGOS `Spell::WriteAmmoToPacket` (Spell.cpp:4528-4594).
 fn resolve_ammo_for_caster(caster_guid: ObjectGuid, world: &World) -> (u32, u32) {
     const EQUIPMENT_SLOT_RANGED: u8 = 17;
 
@@ -679,7 +669,6 @@ impl SpellSystem {
     }
 
     /// Cast a spell with optional per-effect base point overrides.
-    /// Faithful `SpellCaster::CastCustomSpell` port.
     ///
     /// Used by proc/trigger systems to cast a spell with custom damage/heal values
     /// that override the DBC base points (e.g., Ignite, Seal damage procs).
@@ -788,7 +777,6 @@ impl SpellSystem {
         );
 
         // Step 3: Determine spell slot and handle all interruption logic
-        // (MaNGOS SpellCaster::SetCurrentCastedSpell)
         let slot = self.get_spell_slot(spell_id, world);
         self.set_current_casted_spell(caster_guid, spell_id, slot, world)
             .await?;
@@ -811,7 +799,7 @@ impl SpellSystem {
                 .await;
         }
 
-        // MaNGOS sends SPELL_START for every non-triggered cast, including instant
+        // SPELL_START is sent for every non-triggered cast, including instant
         // spells. The client uses it to start the cast animation before SPELL_GO.
         self.send_spell_start(
             caster_guid,
@@ -1332,20 +1320,18 @@ impl SpellSystem {
     /// Determine which spell slot a spell belongs in.
     ///
     /// This decodes the relevant spell-attribute bits and then delegates the
-    /// branch-priority decision to the faithful `Spell::GetCurrentContainer`
-    /// port ([`cast_pointers::current_container`]), which is the source of truth
-    /// for slot routing (melee → auto-repeat → channeled → generic).
+    /// branch-priority decision to [`cast_pointers::current_container`], which is
+    /// the source of truth for slot routing (melee → auto-repeat → channeled → generic).
     ///
     /// Cast-start channeled routing hazard: `current_container`'s channeled
     /// branch is gated on `(cast_time_ms == 0 || is_triggered || state == Casting)`.
     /// This helper is called at cast-*start* (from `set_current_casted_spell` in
     /// the cast pipeline) where the spell state is still `Preparing` and our
     /// `calculate_cast_time` can report a non-zero value — which would misroute a
-    /// channeled spell to Generic. In C++ the gate passes at prepare-time because
-    /// a channeled spell's `m_casttime` is 0 (a channeled spell channels, it does
-    /// not "cast"). We reproduce that faithful behaviour by passing
-    /// `cast_time_ms = 0`, so a channeled spell always lands in the Channeled
-    /// container here, exactly as the previous implementation did.
+    /// channeled spell to Generic. A channeled spell's cast time is 0 at prepare-time
+    /// (a channeled spell channels, it does not "cast"). We reproduce that behaviour
+    /// by passing `cast_time_ms = 0`, so a channeled spell always lands in the
+    /// Channeled container here.
     fn get_spell_slot(&self, spell_id: u32, world: &World) -> CurrentSpellType {
         let spell_entry = match world.managers.spell_mgr.get(spell_id) {
             Some(entry) => entry,
@@ -1365,7 +1351,7 @@ impl SpellSystem {
             is_next_melee_swing,
             is_auto_repeat,
             is_channeled,
-            // Channeled: C++ m_casttime == 0 at prepare-time — see the doc note above.
+            // Channeled: cast time is 0 at prepare-time — see the doc note above.
             0,
             // is_triggered_spell — irrelevant once cast_time_ms is 0.
             false,
@@ -1472,7 +1458,7 @@ impl SpellSystem {
                                 player.spells.clear_current_spell(slot);
                             });
 
-                        // Re-validate (MaNGOS CheckCast(false))
+                        // Re-validate before executing
                         let revalidate = validation::validate_cast(
                             caster_guid,
                             spell_id,
@@ -1537,8 +1523,8 @@ impl SpellSystem {
                         .unwrap_or(false);
 
                     if still_active {
-                        // MaNGOS Spell::update HasValidUnitPresentInTargetList: a channel whose
-                        // unit target has vanished or died must be cancelled, not ticked.
+                        // A channel whose unit target has vanished or died must be cancelled,
+                        // not ticked.
                         if !Self::is_channel_target_valid(target_guid, caster_guid, world) {
                             self.cancel_spell_in_slot(
                                 caster_guid,
@@ -1756,7 +1742,7 @@ impl SpellSystem {
                     target_guid,
                     is_triggered,
                 } => {
-                    // MaNGOS re-validates when cast timer expires (CheckCast(false)).
+                    // Re-validate when cast timer expires.
                     // Use is_triggered=true to skip GCD/cooldown/resource checks (already consumed).
                     // This re-check validates: target alive, caster alive, in range, not CC'd.
                     let revalidate = validation::validate_cast(
@@ -1844,14 +1830,11 @@ impl SpellSystem {
     /// then dispatches effects with hit/miss rolls applied.
     /// If the spell has a projectile speed, effects are deferred for travel time.
     ///
-    /// This plays the role of MaNGOS `Spell::handle_delayed` for the single-target-per-cast
-    /// model used here: instead of a per-target `timeDelay`/`processed` bitfield list ticked
-    /// down every server update, a projectile spell schedules one `DelayedEffect` event for
-    /// the whole cast and `next_delayed_target_time` collapses to "one timer, fire once it
-    /// elapses". `_handle_immediate_phase`'s one-time setup (threat, item targets, ground
-    /// SEND_EVENT/PERSISTENT_AREA_AURA effects) and `_handle_finish_phase`'s spell-execute
-    /// log both belong in `execute_spell_immediate`, run at the point the (single) delayed
-    /// tick fires — see the notes there for what is and isn't wired up yet.
+    /// A projectile spell schedules one `DelayedEffect` event for the whole cast
+    /// instead of a per-target tick list. `next_delayed_target_time` collapses to
+    /// "one timer, fire once it elapses". The one-time setup (threat, item targets,
+    /// ground effects) and spell-execute log both belong in `execute_spell_immediate`,
+    /// run at the point the delayed tick fires.
     async fn execute_spell(
         &self,
         caster_guid: ObjectGuid,
@@ -1935,23 +1918,15 @@ impl SpellSystem {
 
     /// Execute spell effects immediately (no travel time).
     ///
-    /// Covers the immediate-phase and finish-phase setup that MaNGOS splits into
-    /// `Spell::_handle_immediate_phase` (run once, before target effects) and
-    /// `Spell::_handle_finish_phase` (run once, after target effects):
-    ///
-    /// - Threat from the cast itself (`HandleThreatSpells`) is applied inside
-    ///   `EffectsDispatcher::dispatch_with_targets`, not split out as a separate
-    ///   pre-pass, since there is no per-target incremental loop to run it ahead of here.
+    /// - Threat from the cast itself is applied inside
+    ///   `EffectsDispatcher::dispatch_with_targets`.
     /// - Diminishing-returns state is tracked per-target on `player.combat.diminishing`
-    ///   (see `diminishing.rs`), not reset per-cast on a `Spell` instance, so there is no
-    ///   `m_diminishLevel`/`m_diminishGroup` reset to port here.
-    /// - Item-target effects (`m_UniqueItemInfo` / `DoAllEffectOnTarget`) and ground-only
-    ///   ground SEND_EVENT/PERSISTENT_AREA_AURA effects (`HandleEffects(null, null, null, ..)`)
+    ///   (see `diminishing.rs`), not reset per-cast.
+    /// - Item-target effects and ground-only SEND_EVENT/PERSISTENT_AREA_AURA effects
     ///   have no corresponding target-resolution path yet (`resolve_spell_targets` only
-    ///   resolves unit/GO targets) — genuinely unported, not just re-homed.
-    /// - `needs_spell_log` computes the MaNGOS `m_needSpellLog` flag from
-    ///   `IsNeedSendToClient` + effect list, then the finish phase builds and sends
-    ///   `SMSG_SPELLLOGEXECUTE` when that flag is set.
+    ///   resolves unit/GO targets).
+    /// - `needs_spell_log` computes the log flag from `IsNeedSendToClient` + effect list,
+    ///   then builds and sends `SMSG_SPELLLOGEXECUTE` when that flag is set.
     async fn execute_spell_immediate(
         &self,
         caster_guid: ObjectGuid,
@@ -2150,9 +2125,8 @@ impl SpellSystem {
         // Completion packet order matches Spell::cast: SMSG_SPELL_COOLDOWN, then the
         // success SMSG_CAST_RESULT, then SMSG_SPELL_GO.
         if !is_triggered {
-            // Spell::SendSpellCooldown: passive spells never go on cooldown.
-            // (The C++ also skips this for the "no cooldown" cheat option; that
-            // cheat flag isn't modelled in this codebase yet.)
+            // Passive spells never go on cooldown.
+            // (The "no cooldown" cheat flag isn't modelled in this codebase yet.)
             let sends_cooldown = world
                 .managers
                 .spell_mgr
@@ -2241,7 +2215,7 @@ impl SpellSystem {
             }
         }
 
-        // Reset main-hand attack timer after cast-time spells (MaNGOS behavior).
+        // Reset main-hand attack timer after cast-time spells.
         // Prevents players from getting a free swing immediately after a cast.
         if !is_triggered {
             if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
@@ -2262,8 +2236,8 @@ impl SpellSystem {
             }
         }
 
-        // Clear combo points after a finishing move completes (MaNGOS Spell::finish).
-        // MaNGOS keeps combo points if a negative spell missed an enemy; we do not yet track
+        // Clear combo points after a finishing move completes.
+        // Finishers keep combo points if a negative spell missed an enemy; we do not yet track
         // per-target miss conditions here (miss_targets is empty), so finishers always drop them.
         if caster_guid.is_player() {
             if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
@@ -2385,9 +2359,9 @@ impl SpellSystem {
 
     /// Whether a channeled spell's unit target is still present and alive.
     ///
-    /// MaNGOS cancels a channel via `HasValidUnitPresentInTargetList` when the target has
-    /// despawned or died. A self-channel or a channel with no unit target stays valid (those
-    /// are area/ground channels which do not depend on a single unit).
+    /// A channel whose unit target has despawned or died must be cancelled. A self-channel
+    /// or a channel with no unit target stays valid (those are area/ground channels which
+    /// do not depend on a single unit).
     fn is_channel_target_valid(
         target_guid: Option<ObjectGuid>,
         caster_guid: ObjectGuid,
@@ -2468,11 +2442,11 @@ impl SpellSystem {
         Ok(())
     }
 
-    /// Interrupt all non-melee spells (MaNGOS SpellCaster::InterruptNonMeleeSpells).
+    /// Interrupt all non-melee spells.
     ///
     /// Interrupts Generic, Autorepeat, and Channeled slots.
     /// If `spell_id` is Some(nonzero), only interrupts slots containing that spell.
-    /// Channeled spells are always interrupted (C++ ignores withDelayed for channeled).
+    /// Channeled spells are always interrupted (ignores withDelayed for channeled).
     pub async fn interrupt_non_melee_spells(
         &self,
         caster_guid: ObjectGuid,
@@ -2549,7 +2523,7 @@ impl SpellSystem {
         }
 
         if let Some((spell_id, was_channeling, was_preparing, was_triggered)) = cancelled_info {
-            // MaNGOS Spell::cancel PREPARING branch: reset GCD so the player isn't locked out
+            // The PREPARING cancel branch: reset GCD so the player isn't locked out
             // after cancelling a cast that hasn't fired yet.
             if was_preparing && !was_triggered {
                 let now = get_game_time_ms();
@@ -2562,8 +2536,7 @@ impl SpellSystem {
                     });
             }
 
-            // Send SMSG_CANCEL_AUTO_REPEAT for autorepeat spells on players,
-            // matching MaNGOS SpellCaster::InterruptSpell SendAutoRepeatCancel behaviour.
+            // Send SMSG_CANCEL_AUTO_REPEAT for autorepeat spells on players.
             if slot == CurrentSpellType::Autorepeat && caster_guid.is_player() {
                 use oxcore_shared::protocol::{Opcode, WorldPacket};
                 self.broadcast_mgr.send_msg_to_player(
@@ -2581,12 +2554,11 @@ impl SpellSystem {
             self.broadcast_mgr
                 .broadcast_msg_nearby(caster_guid, &msg, true);
 
-            // Also send SMSG_CAST_RESULT(SPELL_FAILED_INTERRUPTED) so the client cast bar clears
-            // (MaNGOS Spell::cancel sends SendCastResult on the PREPARING/DELAYED cancel path).
+            // Also send SMSG_CAST_RESULT(SPELL_FAILED_INTERRUPTED) so the client cast bar clears.
             self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted, world)?;
 
             // If cancelling a channel, send SMSG_CHANNEL_UPDATE with 0 remaining
-            // and remove auras applied by the cancelled channel (MaNGOS RemoveAurasByCasterSpell)
+            // and remove auras applied by the cancelled channel.
             if was_channeling {
                 self.send_channel_update(caster_guid, 0);
                 self.send_channel_state_update(caster_guid, None, 0);
@@ -2688,9 +2660,8 @@ impl SpellSystem {
 
     /// Apply cast pushback from taking damage while casting.
     ///
-    /// Delegates to the faithful `Spell::Delayed` / `Spell::DelayedChannel` ports
-    /// in [`super::delayed`]: the Generic (non-channeled) slot takes precedence,
-    /// falling back to the Channeled slot. Both apply the resist roll
+    /// Delegates to the ports in [`super::delayed`]: the Generic (non-channeled) slot
+    /// takes precedence, falling back to the Channeled slot. Both apply the resist roll
     /// (`SPELLMOD_NOT_LOSE_CASTING_TIME` + `SPELL_AURA_RESIST_PUSHBACK`) and the
     /// escalating per-hit delay driven by the cast's `delay_at_damage_count`.
     /// Returns the milliseconds of pushback/channel-reduction actually applied.
@@ -2718,7 +2689,7 @@ impl SpellSystem {
                 _ => return Ok(0),
             };
 
-        // Delegate to the faithful port for that slot. Each re-locks the player,
+        // Delegate to the port for that slot. Each re-locks the player,
         // escalates `count`, and mutates the cast timer in place.
         let (applied, delaytime) = match slot {
             CurrentSpellType::Generic => {
@@ -2731,8 +2702,7 @@ impl SpellSystem {
             }
         };
 
-        // Persist the escalated hit count so the next hit uses a larger delay
-        // (`Spell::m_delayAtDamageCount`).
+        // Persist the escalated hit count so the next hit uses a larger delay.
         if applied {
             world
                 .systems
@@ -2752,7 +2722,7 @@ impl SpellSystem {
     // Resource Consumption
     // =========================================================================
 
-    /// Consume the power cost of a spell cast (faithful `Spell::TakePower`).
+    /// Consume the power cost of a spell cast.
     ///
     /// `cast_item_guid` is the item the spell was cast from, if any: item casts pay
     /// no power. Triggered-by-aura and channeling-visual casts are already excluded
@@ -2764,7 +2734,7 @@ impl SpellSystem {
         cast_item_guid: Option<ObjectGuid>,
         world: &World,
     ) -> Result<()> {
-        // Item casts use no power (C++: `if (m_CastItem ...) return;`).
+        // Item casts use no power.
         if cast_item_guid.is_some() {
             return Ok(());
         }
@@ -2844,12 +2814,12 @@ impl SpellSystem {
         }
     }
 
-    /// Consume a spell's reagents on cast (faithful `Spell::TakeReagents`).
+    /// Consume a spell's reagents on cast.
     ///
     /// Player-only. Called for non-triggered casts, where `IgnoreItemRequirements`
     /// is always false (triggered casts have their reagents removed by the master
     /// spell). The cast-item / item-target reagent-overlap adjustments are deferred
-    /// until item-instance spell charges exist (see `TakeCastItem`).
+    /// until item-instance spell charges exist.
     fn take_reagents(&self, caster_guid: ObjectGuid, spell_id: u32, world: &World) {
         if !caster_guid.is_player() {
             return;
@@ -2878,12 +2848,11 @@ impl SpellSystem {
         }
     }
 
-    /// Restore power to a target from a spell, broadcasting the energize combat log
-    /// (faithful `SpellCaster::EnergizeBySpell` + `SpellCaster::SendEnergizeSpellLog`).
+    /// Restore power to a target from a spell, broadcasting the energize combat log.
     ///
     /// The `SMSG_SPELLENERGIZELOG` packet is sent to the caster's visibility set
-    /// (including the caster) *before* the power is modified — the C++ ordering, where
-    /// the log must precede `ModifyPower`.
+    /// (including the caster) *before* the power is modified — the log must precede
+    /// the power modification.
     pub fn energize_by_spell(
         &self,
         caster_guid: ObjectGuid,
@@ -2911,8 +2880,7 @@ impl SpellSystem {
             .restore_power(target_guid, power_type, amount, world)
     }
 
-    /// Broadcast `SMSG_SPELLLOGMISS` for a spell that missed a target
-    /// (faithful `SpellCaster::SendSpellMiss`).
+    /// Broadcast `SMSG_SPELLLOGMISS` for a spell that missed a target.
     pub fn send_spell_miss(
         &self,
         caster_guid: ObjectGuid,
@@ -2966,8 +2934,7 @@ impl SpellSystem {
             .broadcast_msg_nearby(caster_guid, &packet, true);
     }
 
-    /// Broadcast `SMSG_PROCRESIST` for a spell resisted by a target
-    /// (faithful `SpellCaster::SendSpellDamageResist`).
+    /// Broadcast `SMSG_PROCRESIST` for a spell resisted by a target.
     pub fn send_spell_damage_resist(
         &self,
         caster_guid: ObjectGuid,
@@ -2986,8 +2953,7 @@ impl SpellSystem {
             .broadcast_msg_nearby(caster_guid, &packet, true);
     }
 
-    /// Broadcast `SMSG_SPELLORDAMAGE_IMMUNE` for a spell a target was immune to
-    /// (faithful `SpellCaster::SendSpellOrDamageImmune`).
+    /// Broadcast `SMSG_SPELLORDAMAGE_IMMUNE` for a spell a target was immune to.
     pub fn send_spell_or_damage_immune(
         &self,
         caster_guid: ObjectGuid,
@@ -3006,7 +2972,7 @@ impl SpellSystem {
             .broadcast_msg_nearby(caster_guid, &packet, true);
     }
 
-    /// Calculate the power cost of a spell (faithful `Spell::CalculatePowerCost`).
+    /// Calculate the power cost of a spell.
     fn calculate_power_cost(
         &self,
         caster_guid: ObjectGuid,
@@ -3108,7 +3074,7 @@ impl SpellSystem {
     // GCD
     // =========================================================================
 
-    /// Apply Global Cooldown after casting (Player::AddGCD).
+    /// Apply Global Cooldown after casting.
     async fn apply_gcd(&self, caster_guid: ObjectGuid, spell_id: u32, world: &World) -> Result<()> {
         // Get spell entry
         let spell_entry = match world.managers.spell_mgr.get(spell_id) {
@@ -3161,9 +3127,8 @@ impl SpellSystem {
             return Ok(());
         }
 
-        // C++ subtracts CONFIG_UINT32_INTERVAL_MAPUPDATE here because GCD packets
-        // flush on map update; Rust tracks GCD against wall-clock game time, so
-        // there is no batching interval to subtract.
+        // GCD packets flush on map update in the reference implementation; Rust tracks
+        // GCD against wall-clock game time, so there is no batching interval to subtract.
 
         let gcd_ms = gcd_duration as u32;
         let now = get_game_time_ms();
@@ -3316,12 +3281,11 @@ impl SpellSystem {
     // Client Communication
     // =========================================================================
 
-    /// Spell::SendCastResult — build and send SMSG_CAST_RESULT for a cast rejection.
+    /// Build and send SMSG_CAST_RESULT for a cast rejection.
     ///
-    /// Mirrors the packet-builder overload: passive spells report DONT_REPORT
-    /// instead of the real reason; spells flagged DO_NOT_REPORT_SPELL_FAILURE
-    /// report OKAY; and specific errors carry extra arguments (spell focus,
-    /// equipped-item class/subclass, permanent-cooldown flag).
+    /// Passive spells report DONT_REPORT instead of the real reason; spells flagged
+    /// DO_NOT_REPORT_SPELL_FAILURE report OKAY; and specific errors carry extra
+    /// arguments (spell focus, equipped-item class/subclass, permanent-cooldown flag).
     fn send_cast_failure(
         &self,
         caster_guid: ObjectGuid,
@@ -3648,7 +3612,7 @@ impl SpellSystem {
     }
 
     /// Move a channelled spell with a cast time from the Generic slot to the Channeled slot
-    /// after the initial cast completes. (MaNGOS SpellCaster::MoveChannelledSpellWithCastTime)
+    /// after the initial cast completes.
     pub fn move_channelled_spell_with_cast_time(
         &self,
         caster_guid: ObjectGuid,
@@ -3828,7 +3792,7 @@ impl SpellSystem {
             }
         }
 
-        // 3. Slot-specific cross-breakage (matching MaNGOS SetCurrentCastedSpell logic)
+        // 3. Slot-specific cross-breakage
         match slot {
             CurrentSpellType::Generic => {
                 let should_interrupt_channel = match snap[CurrentSpellType::Channeled as usize] {
@@ -4120,7 +4084,7 @@ mod tests {
         assert!(!spell_needs_combo_points(0x0000_0001 | 0x0008_0000));
     }
 
-    // -- Spell::SendAllTargetsMiss: should_send_all_targets_miss --------------------------
+    // -- should_send_all_targets_miss --------------------------
 
     #[test]
     fn all_targets_miss_requires_live_caster_and_at_least_one_target() {
@@ -4148,7 +4112,7 @@ mod tests {
         assert!(should_send_all_targets_miss(true, &targets));
     }
 
-    // -- Spell::handle_delayed: next_delayed_target_time --------------------------------
+    // -- next_delayed_target_time --------------------------------
 
     #[test]
     fn next_delayed_target_time_picks_smallest_pending_delay() {
@@ -4160,8 +4124,7 @@ mod tests {
     #[test]
     fn next_delayed_target_time_ignores_processed_zero_entries() {
         // 0 stands in for an already-processed / no-delay target; it must never win
-        // as "next time" (the C++ only updates next_time for entries that failed the
-        // t_offset >= timeDelay check, i.e. still-pending ones).
+        // as "next time" (only updates for still-pending entries).
         assert_eq!(next_delayed_target_time(&[0, 0, 250]), Some(250));
     }
 
@@ -4172,7 +4135,7 @@ mod tests {
         assert_eq!(next_delayed_target_time(&[0, 0, 0]), None);
     }
 
-    // -- Spell::IsNeedSendToClient: is_need_send_to_client --------------------------------
+    // -- is_need_send_to_client --------------------------------
 
     #[test]
     fn need_send_to_client_short_circuits_channeling_visual() {
@@ -4236,11 +4199,11 @@ mod tests {
         ));
     }
 
-    // -- Spell::_handle_immediate_phase: needs_spell_log ---------------------------------
+    // -- needs_spell_log ---------------------------------
 
     #[test]
     fn needs_spell_log_false_when_not_client_visible() {
-        // IsNeedSendToClient() == false short-circuits m_needSpellLog to false regardless
+        // IsNeedSendToClient() == false short-circuits needs_spell_log to false regardless
         // of effects.
         assert!(!needs_spell_log(false, &[10, 0, 0])); // 10 = SPELL_EFFECT_HEAL
     }
@@ -4255,8 +4218,8 @@ mod tests {
 
     #[test]
     fn needs_spell_log_true_for_all_empty_effects() {
-        // Effect[j] == 0 is `continue`d past in the C++ loop before the clear check is
-        // ever reached, so an all-empty effect list leaves m_needSpellLog untouched.
+        // Effect[j] == 0 is skipped before the clear check is ever reached,
+        // so an all-empty effect list leaves needs_spell_log untouched.
         assert!(needs_spell_log(true, &[0, 0, 0]));
     }
 
@@ -4292,7 +4255,7 @@ mod tests {
         assert!(entries[2].is_empty());
     }
 
-    // -- Spell::ClearCastItem: clear_cast_item --------------------------------------------
+    // -- clear_cast_item --------------------------------------------
 
     #[test]
     fn clear_cast_item_clears_matching_item_target() {
@@ -4322,7 +4285,7 @@ mod tests {
         );
     }
 
-    // -- Spell::OnSpellLaunch --------------------------------------------------------------
+    // -- on_spell_launch --------------------------------------------------------------
 
     #[test]
     fn charge_effect_index_finds_first_charge_slot() {
@@ -4762,10 +4725,10 @@ mod tests {
         );
     }
 
-    // -- Spell::GetCurrentContainer: get_spell_slot -> current_container -----------------
+    // -- get_spell_slot -> current_container -----------------
     //
     // These prove that routing get_spell_slot (called at cast-START, spell state
-    // Preparing) through the faithful current_container port preserves the four
+    // Preparing) through current_container preserves the four
     // slot outcomes — in particular that a channeled spell is NOT misrouted to
     // Generic even though calculate_cast_time can report a non-zero cast time.
 
@@ -4849,7 +4812,7 @@ mod tests {
 
     #[tokio::test]
     async fn slot_routing_melee_takes_priority_over_channeled() {
-        // Faithful current_container order is melee -> autorepeat -> channeled ->
+        // current_container order is melee -> autorepeat -> channeled ->
         // generic. A (contrived) spell carrying both bits resolves to Melee.
         let world = launch_test_world();
         let mut spell = charge_spell(50040, [2, 0, 0]);

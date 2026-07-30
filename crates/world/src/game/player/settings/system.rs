@@ -293,7 +293,7 @@ impl SettingsSystem {
             })
             .unwrap_or([0u32; NUM_ACCOUNT_DATA_TYPES]);
 
-        // Realm 1: this system has no realm id in scope, and HermesProxy hardcodes 1 here too.
+        // Realm 1: this system has no realm id in scope, so hardcode 1 here.
         // It only qualifies the GUID-128, so it must agree with whatever `SmsgCharEnum` used —
         // both are 1 today. Thread a real realm id through `SystemManager` before running a
         // second realm.

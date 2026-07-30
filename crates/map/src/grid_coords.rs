@@ -94,14 +94,14 @@ pub fn world_to_cell_in_grid(x: f32, y: f32, _grid_x: u8, _grid_y: u8) -> (u8, u
 ///
 /// Two coordinate spaces exist and must not be confused:
 ///
-/// * *Spatial* — what [`world_to_grid`] returns. This is MaNGOS `ComputeGridPair`
-///   transposed: our `grid_x` is its `y_coord` and our `grid_y` is its `x_coord`.
+/// * *Spatial* — what [`world_to_grid`] returns, with axes swapped relative to the terrain
+///   space: our `grid_x` maps to terrain `y` and our `grid_y` maps to terrain `x`.
 /// * *Terrain/file* — `(32 - y/533.33, 32 - x/533.33)`, implemented by
 ///   [`crate::terrain::terrain_grid_coords`] and baked into the extractor's file
 ///   names.
 ///
-/// The bridge is `Map::EnsureGridCreated` (Map.cpp:329-335), which loads terrain and
-/// vmaps for `(63 - x_coord, 63 - y_coord)`.
+/// The bridge converts spatial to file indices: terrain and vmaps are loaded for
+/// `(63 - y_grid, 63 - x_grid)`.
 pub fn grid_to_terrain_tile(grid_x: u8, grid_y: u8) -> (i32, i32) {
     (63 - grid_y as i32, 63 - grid_x as i32)
 }
@@ -162,7 +162,7 @@ mod tests {
         for _ in 0..200 {
             let (x, y) = (next(), next());
 
-            // MaNGOS truncates where we floor, so the two spaces can disagree by
+            // Truncation vs flooring can cause the two spaces to disagree by
             // one index right on a grid boundary. Skip those.
             let on_boundary = |c: f32| {
                 let frac = (c / GRID_SIZE).fract().abs();

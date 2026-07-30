@@ -3,8 +3,7 @@
 //!
 //! This is what makes swimming, drowning, lava damage, and fishing work — the
 //! mirror timers and environment flags downstream are all driven from the
-//! `LiquidStatus` produced here. Ported from
-//! `Player::UpdateTerainEnvironmentFlags` / `TerrainInfo::getLiquidStatus`.
+//! `LiquidStatus` produced here.
 
 use oxcore_map::terrain::{LiquidData, TerrainInfo, MAP_ALL_LIQUIDS};
 use oxcore_map::VMapManager;
@@ -15,7 +14,7 @@ use crate::World;
 use super::system::LiquidStatus;
 
 /// Nudge the sample point up so a player resting exactly on the surface is
-/// classified consistently. Matches the reference's `z + 0.01f`.
+/// classified consistently.
 const Z_EPSILON: f32 = 0.01;
 
 /// Query the liquid at a position.

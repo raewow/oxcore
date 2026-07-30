@@ -1,4 +1,4 @@
-//! Channeled spell visual kit setup (MaNGOS `Spell::InitializeChanneledVisualTimer`).
+//! Channeled spell visual kit setup.
 //!
 //! Reads a spell's `custom` flags and `spell_visual` id and, when all three guards
 //! pass, produces the per-cast `ChannelVisualConfig` that the cast state would have
@@ -8,12 +8,11 @@
 use oxcore_dbc::structures::spell::SpellEntry;
 
 /// Custom-flag bitmask: when set, a channeling spell periodically re-sends its
-/// channel visual kit while channeling (MaNGOS `SPELL_CUSTOM_SEND_CHANNEL_VISUAL`,
-/// reference/core SpellDefines.h:975).
+/// channel visual kit while channeling (bit 11 of custom flags).
 pub const SPELL_CUSTOM_SEND_CHANNEL_VISUAL: u32 = 0x800;
 
 /// Fixed refresh interval (ms) for re-sending the channeled visual kit while it
-/// is active (MaNGOS `SPELL_CHANNEL_VISUAL_TIMER`, reference/core Spell.cpp:55).
+/// is active.
 pub const SPELL_CHANNEL_VISUAL_TIMER: u32 = 800;
 
 /// Per-cast output of `InitializeChanneledVisualTimer`: the channel kit id to play
@@ -23,13 +22,13 @@ pub const SPELL_CHANNEL_VISUAL_TIMER: u32 = 800;
 /// `channeled_visual_timer`, so this value cannot be applied or scheduled here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChannelVisualConfig {
-    /// `m_channeledVisualKit` — the `SpellVisual.dbc` channelKit id to play.
+    /// The `SpellVisual.dbc` channelKit id to play.
     pub kit: u32,
-    /// `m_channeledVisualTimer` — always `SPELL_CHANNEL_VISUAL_TIMER` on success.
+    /// Always `SPELL_CHANNEL_VISUAL_TIMER` on success.
     pub timer_ms: u32,
 }
 
-/// Pure decision logic for `Spell::InitializeChanneledVisualTimer` — no DB / DBC
+/// Pure decision logic for channel visual timer initialization — no DB / DBC
 /// access, fully unit-testable.
 ///
 /// Returns `Some(ChannelVisualConfig { kit, timer_ms: SPELL_CHANNEL_VISUAL_TIMER })`
@@ -38,8 +37,7 @@ pub struct ChannelVisualConfig {
 /// - `spell_visual` is non-zero,
 /// - `lookup(spell_visual)` returns `Some(channel_kit)` with `channel_kit != 0`.
 ///
-/// Otherwise returns `None`, matching the three early-return guards in the reference
-/// implementation (no assignment to the channel visual kit/timer).
+/// Otherwise returns `None`.
 pub fn compute_channel_visual(
     custom_flags: u32,
     spell_visual: u32,
@@ -61,13 +59,12 @@ pub fn compute_channel_visual(
     })
 }
 
-/// World-coupled entry mirroring `Spell::InitializeChanneledVisualTimer`: reads the
-/// `custom` and `spell_visual` fields from a spell entry and resolves the channel kit
-/// via a `SpellVisual.dbc` channelKit lookup.
+/// World-coupled entry: reads the `custom` and `spell_visual` fields from a spell
+/// entry and resolves the channel kit via a `SpellVisual.dbc` channelKit lookup.
 ///
 /// `lookup` yields the `channelKit` column of the `SpellVisual.dbc` entry for a
 /// `spell_visual` id (i.e. `pSpellVisual->channelKit`), or `None` when the entry is
-/// missing, which the reference code treats identically to a zero `channelKit`.
+/// missing, treated identically to a zero `channelKit`.
 ///
 /// The world crate has no `SpellVisual.dbc` store yet, so callers must supply this
 /// lookup. Persisting the returned configuration also requires cast-state fields.

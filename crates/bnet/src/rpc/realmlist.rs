@@ -5,7 +5,7 @@
 //!
 //! * each document is a UTF-8 string prefixed with a type tag (`JSONRealmListUpdates:` etc.),
 //! * compressed as `[u32 little-endian uncompressed-length][zlib bytes]`, where the uncompressed
-//!   length **includes a trailing NUL** (C++ compresses `json.length() + 1` bytes),
+//!   length **includes a trailing NUL**,
 //! * then handed back as the `blob_value` of a named response attribute.
 //!
 //! The JSON field names use the client-required camelCase spelling, serialized here by hand with
@@ -80,7 +80,7 @@ pub fn realm_id_from_address(addr: u64) -> u32 {
 /// that NUL.
 pub fn compress_json(prefixed: &str) -> Result<Vec<u8>> {
     let mut data = prefixed.as_bytes().to_vec();
-    data.push(0); // C++ compresses json.length()+1 bytes, i.e. the string and its NUL terminator.
+    data.push(0); // Include the NUL terminator in the compressed data
     let uncompressed_len = data.len() as u32;
 
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
@@ -201,8 +201,8 @@ pub fn parse_client_info(blob: &[u8]) -> Option<ClientInfo> {
     let json = &text[text.find(':')? + 1..];
 
     // Read one JSON value and ignore whatever follows. `from_str` rejects trailing bytes, and
-    // these documents are conventionally NUL-terminated (the server compresses `json.length()+1`
-    // bytes for the same reason), so a terminator or padding would otherwise fail the whole parse.
+    // these documents are conventionally NUL-terminated (the compressed data includes the
+    // NUL terminator), so a terminator or padding would otherwise fail the whole parse.
     let value: serde_json::Value = serde_json::Deserializer::from_str(json)
         .into_iter()
         .next()?

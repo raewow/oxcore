@@ -11,8 +11,8 @@ use anyhow::Result;
 
 /// Proc flags — bit flags indicating what combat event occurred.
 ///
-/// These MUST match the classic `ProcFlags` enum (SpellDefines.h) because they are matched
-/// against each spell's `proc_flags` field loaded from the DBC. A mismatched bit layout makes
+/// These MUST match the classic `ProcFlags` layout because they are matched against each spell's
+/// `proc_flags` field loaded from the DBC. A mismatched bit layout makes
 /// `spell.proc_flags & event_flags` silently fail, so procs never fire.
 pub mod proc_flags {
     pub const NONE: u32 = 0x00000000;
@@ -70,8 +70,7 @@ pub mod proc_flags_ex {
 
 use crate::game::spell::manager::SpellProcEventEntry;
 
-/// Whether a proc aura may trigger for a given combat event
-/// (MaNGOS `SpellMgr::IsSpellProcEventCanTriggeredBy`).
+/// Whether a proc aura may trigger for a given combat event.
 ///
 /// - `proc_event`: the aura spell's custom `spell_proc_event` config (None if unconfigured).
 /// - `aura_proc_flags`: the proc aura's own `proc_flags` (the "EventProcFlag").
@@ -155,12 +154,11 @@ pub fn is_spell_proc_event_can_triggered_by(
     false
 }
 
-/// Whether a single proc-type aura may fire for the given hit (MaNGOS `Aura::CanProcFrom`).
+/// Whether a single proc-type aura may fire for the given hit.
 ///
-/// Distinct from [`is_spell_proc_event_can_triggered_by`] (MaNGOS `SpellMgr::IsSpellProcEventCanTriggeredBy`,
-/// which gates the whole holder once); this re-checks per-aura against the *triggering* spell's
-/// class mask, called once per effect index from the proc-processing loop
-/// (MaNGOS `Unit::HandleTriggers`).
+/// Distinct from [`is_spell_proc_event_can_triggered_by`], which gates the whole holder once;
+/// this re-checks per-aura against the *triggering* spell's class mask, called once per effect
+/// index from the proc-processing loop.
 ///
 /// - `affect_mask`: `SpellMgr::GetSpellAffectMask(auraSpellId, effIndex)` — the aura's own
 ///   effect class mask (`spell_affect` table / `EffectItemType`), falling back to the aura
@@ -210,9 +208,8 @@ pub fn can_proc_from(
     }
 }
 
-/// The caster-side proc flag for completing a spell cast (MaNGOS `m_procAttacker`,
-/// `Spell::prepareDataForTriggerSystem`). Picks by damage class and polarity; the swing/trap/
-/// periodic refinements are omitted (handled where those flags matter).
+/// The caster-side proc flag for completing a spell cast. Picks by damage class and polarity;
+/// the swing/trap/periodic refinements are omitted (handled where those flags matter).
 pub fn spell_cast_attacker_proc_flag(
     dmg_class: u32,
     is_positive: bool,
@@ -251,7 +248,7 @@ pub fn spell_cast_attacker_proc_flag(
     }
 }
 
-/// Weapon attack type used to pick the melee swing sub-flag (MaNGOS `WeaponAttackType`).
+/// Weapon attack type used to pick the melee swing sub-flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WeaponAttackType {
     Base,
@@ -259,11 +256,10 @@ pub enum WeaponAttackType {
     Ranged,
 }
 
-/// Whether a completed cast may trigger procs at all (MaNGOS `Spell::prepareDataForTriggerSystem`,
-/// the `m_canTrigger` decision chain).
+/// Whether a completed cast may trigger procs at all.
 ///
-/// `has_trigger_source` covers both "triggered by an aura" (`m_triggeredByAuraSpell`) and the
-/// `SPELL_EFFECT_TRIGGER_SPELL` case that MaNGOS treats identically for this check.
+/// `has_trigger_source` covers both "triggered by an aura" and the
+/// `SPELL_EFFECT_TRIGGER_SPELL` case treated identically for this check.
 ///
 /// Approximation: the spell-family/spell-ID exceptions that re-enable proccing for specific
 /// triggered spells (mage/warlock/hunter/paladin/priest class-mask carve-outs, e.g. Holy Shock,
@@ -297,8 +293,7 @@ pub fn can_trigger_procs(
     is_not_a_proc
 }
 
-/// The main-hand/off-hand swing sub-flag ORed into the attacker's melee proc flags
-/// (MaNGOS `PROC_FLAG_MAIN_HAND_WEAPON_SWING` / `PROC_FLAG_OFF_HAND_WEAPON_SWING`).
+/// The main-hand/off-hand swing sub-flag ORed into the attacker's melee proc flags.
 fn melee_swing_sub_flag(attack_type: WeaponAttackType) -> u32 {
     use proc_flags as pf;
     match attack_type {
@@ -308,14 +303,13 @@ fn melee_swing_sub_flag(attack_type: WeaponAttackType) -> u32 {
     }
 }
 
-/// Full attacker/victim proc-flag pair for a completed cast (MaNGOS `m_procAttacker` /
-/// `m_procVictim`, `Spell::prepareDataForTriggerSystem`). Covers melee/ranged/default
+/// Full attacker/victim proc-flag pair for a completed cast. Covers melee/ranged/default
 /// dmg-class branches, the next-melee-swing and auto-repeat special cases, the
 /// periodic-treat-as override, and hunter trap activation ORing.
 ///
 /// `is_auto_repeat_ranged` corresponds to `SPELL_ATTR_EX2_AUTO_REPEAT`; `treat_as_periodic`
 /// to `SPELL_ATTR_EX3_TREAT_AS_PERIODIC`; `is_wand_id_2094_or_23577` special-cases the two
-/// legacy wand spell IDs that MaNGOS zeroes out under `SPELL_DAMAGE_CLASS_RANGED`.
+/// legacy wand spell IDs that are zeroed out under `SPELL_DAMAGE_CLASS_RANGED`.
 ///
 /// Approximation: the hunter-trap `PROC_FLAG_ON_TRAP_ACTIVATION` OR-in (`is_trap_spell`) is
 /// exposed as a plain bool since the CF_HUNTER_* class-mask bit layout isn't available here;
@@ -385,8 +379,7 @@ pub fn spell_attacker_victim_proc_flags(
     }
 }
 
-/// Per-effect negative-hit bitmask used to skip harmful procs on positive-only hits
-/// (MaNGOS `m_negativeEffectMask`, built in `Spell::prepareDataForTriggerSystem`).
+/// Per-effect negative-hit bitmask used to skip harmful procs on positive-only hits.
 ///
 /// `is_positive_effect(i)` should be `SpellEntry::IsPositiveEffect`. `is_school_damage_on_caster(i)`
 /// marks effect `i` as `SPELL_EFFECT_SCHOOL_DAMAGE` targeting `TARGET_UNIT_CASTER` (self-damage is
@@ -764,7 +757,7 @@ mod tests {
     #[test]
     fn proc_flags_match_classic_dbc_layout() {
         // These bit positions are what the spell DBC's proc_flags field uses; they must match
-        // SpellDefines.h ProcFlags exactly or DBC matching silently fails.
+        // exactly or DBC matching silently fails.
         assert_eq!(proc_flags::DEAL_MELEE_SWING, 0x00000004);
         assert_eq!(proc_flags::DEAL_MELEE_ABILITY, 0x00000010);
         assert_eq!(proc_flags::DEAL_HELPFUL_SPELL, 0x00004000);

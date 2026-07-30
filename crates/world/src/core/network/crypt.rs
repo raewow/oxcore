@@ -1,7 +1,6 @@
 //! AuthCrypt - packet header encryption/decryption
 //!
 //! Encrypts first 4 bytes of outgoing packets and decrypts first 6 bytes of incoming packets.
-//! Based on the MaNGOS AuthCrypt implementation.
 
 /// Authentication cryptography handler for WorldSocket
 ///

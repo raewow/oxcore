@@ -229,7 +229,6 @@ pub async fn handle_questgiver_hello(
         });
 
     // Movement pause for non-civilian, non-totem creatures
-    // (matches vmangos Creature::OnPlayerInteract behaviour)
     {
         const CREATURE_FLAG_EXTRA_CIVILIAN: u32 = 0x00000002;
         const CREATURE_TYPE_TOTEM: u8 = 11;
@@ -253,9 +252,6 @@ pub async fn handle_questgiver_hello(
     }
 
     // --- Interacting spells/auras cleanup ---
-    // Matches vmangos HandleQuestgiverHelloOpcode:
-    //   pPlayer->RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_QUEST | AURA_INTERRUPT_FLAG_SPEECH)
-    //   pPlayer->InterruptSpellsWithChannelFlags(AURA_INTERRUPT_FLAG_QUEST | AURA_INTERRUPT_FLAG_SPEECH)
     const INTERACT_INTERRUPT_FLAGS: u32 = 0x00000C00; // TALK (0x400) | USE (0x800)
 
     world

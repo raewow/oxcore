@@ -1,5 +1,4 @@
-//! Update field constants for Vanilla WoW 1.12.1
-//! Based on UpdateFields_1_12_1.h (Build 5875)
+//! Update field constants for Vanilla WoW 1.12.1 (Build 5875)
 //!
 //! All field numbers are absolute (not offsets) for direct use in update packets
 
@@ -230,7 +229,6 @@ pub const PLAYER_END: u32 = UNIT_END + 0x446;
 /// - Field 3-6: Property enchantments
 /// - Plus creator GUID and properties fields
 /// Slots 1-19 cover all equipment slots (head to tabard)
-/// Reference: UpdateFields_1_12_1.h line 169, UpdateFields_1_12_1.cpp line 162
 pub const PLAYER_VISIBLE_ITEM_1_0: u32 = UNIT_END + 0x48;
 
 /// MAX_VISIBLE_ITEM_OFFSET = 12 (for client builds > 1.5.1)

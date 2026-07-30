@@ -173,7 +173,7 @@ impl PowerState {
     }
 
     /// Add `delta` to current power, clamping to [0, max]. Returns the actual gain (negative = loss).
-    /// Matches C++ Unit::ModifyPower — callers use the return value to decide whether to broadcast.
+    /// Callers use the return value to decide whether to broadcast.
     pub fn modify_power(&mut self, power_type: PowerType, delta: i32) -> i32 {
         if delta == 0 {
             return 0;
@@ -198,7 +198,7 @@ impl PowerState {
     }
 
     /// Switch the active power type (shapeshift / form change).
-    /// Resets current and max power for the new type per C++ Unit::SetPowerType.
+    /// Resets current and max power for the new type.
     /// The caller (system layer) is responsible for broadcasting UNIT_FIELD_BYTES_0.
     pub fn set_power_type(&mut self, new_type: PowerType) {
         use super::regen::{MAX_ENERGY, MAX_FOCUS, MAX_HAPPINESS, MAX_RAGE};

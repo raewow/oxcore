@@ -3,7 +3,7 @@
 //! This module contains protocol-level chat types that are shared
 //! between the old world and new world implementations.
 
-/// Chat message types (MaNGOS-compatible values)
+/// Chat message types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum ChatMsg {
@@ -181,7 +181,7 @@ impl ChatMsg {
     }
 }
 
-/// Language types (MaNGOS-compatible)
+/// Language types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum Language {

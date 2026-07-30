@@ -131,7 +131,7 @@ impl ModernObjectType {
 ///
 /// Unlike vanilla's, this is always written at the object type's full width -- the client sizes its
 /// read from the leading block count, so trimming to the highest set bit would still parse, but
-/// HermesProxy sends full width and there is no reason to diverge.
+/// the mask is always sent at full width.
 #[derive(Debug, Clone)]
 pub struct ModernUpdateMask {
     blocks: Vec<u32>,

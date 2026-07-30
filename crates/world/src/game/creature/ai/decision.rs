@@ -193,7 +193,7 @@ pub fn basic_combat_behavior(input: &AIInput) -> Vec<AIAction> {
                             // In range — face target
                             // No StopMovement here: chase generator handles stopping
                             // Melee attacks are handled directly by combat_update.rs
-                            // (matches vmangos where DoMeleeAttackIfReady is separate from AI decisions)
+                            // (DoMeleeAttackIfReady is separate from AI decisions)
                             actions.push(AIAction::FaceTarget { target_guid });
                         }
                         // No else MoveToTarget — chase generator handles approach
@@ -309,8 +309,7 @@ pub fn process_basic_event(input: &AIInput, event: &AIEvent) -> Vec<AIAction> {
                 });
             }
         }
-        // A connecting swing and a missed one both start the fight (vmangos
-        // `Unit::Attack` -> `CreatureAI::AttackedBy`). A miss carries no damage,
+        // A connecting swing and a missed one both start the fight. A miss carries no damage,
         // so it seeds the same initial threat an aggro pull would.
         AIEvent::AttackedBy { attacker_guid } => {
             actions.extend(engage_attacker(input, *attacker_guid, INITIAL_AGGRO_THREAT));

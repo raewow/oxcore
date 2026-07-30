@@ -38,7 +38,7 @@ pub async fn handle_attack_swing(
     }
 
     // Check creature exists and is alive
-    // MaNGOS: sends SMSG_ATTACKSTOP + SMSG_ATTACKSWING_DEADTARGET when target is dead
+    // Sends SMSG_ATTACKSTOP + SMSG_ATTACKSWING_DEADTARGET when target is dead
     if !world.managers.creature_mgr.is_alive(target_guid) {
         tracing::info!(
             "[COMBAT] CMSG_ATTACKSWING on dead target {:?} from {:?} — sending DEADTARGET + ATTACKSTOP",
@@ -189,7 +189,7 @@ pub async fn execute_pending_attack_vs_creature(
         );
 
         // Trigger AI event. A swing that misses (or is dodged/parried/fully absorbed)
-        // still engages the creature — vmangos routes both through the victim's AI.
+        // still engages the creature — both route through the victim's AI.
         if !is_dead {
             let event = if actual_damage > 0 {
                 crate::game::creature::ai::AIEvent::DamageTaken {
@@ -237,7 +237,7 @@ pub async fn execute_pending_attack_vs_creature(
             // client places the creature at its actual death location before
             // processing the death animation.
 
-            // 1. ATTACKSTOP from both directions (MaNGOS Kill → AttackStop + CombatStop)
+            // 1. ATTACKSTOP from both directions
             send_attack_stop(world, attacker_guid, target_guid, true);
             send_creature_attack_stop(world, target_guid, attacker_guid, true);
 
@@ -480,8 +480,8 @@ fn send_health_update(world: &World, creature_guid: ObjectGuid) -> anyhow::Resul
 }
 
 /// Send death VALUES update on killing blow.
-/// Matches vmangos Kill(): only sends health=0 + stand_state=7 + clear target/flags.
-/// NOTE: vmangos does NOT set UNIT_DYNFLAG_DEAD on real death (only feign death).
+/// Only sends health=0 + stand_state=7 + clear target/flags.
+/// Does NOT set UNIT_DYNFLAG_DEAD on real death (only feign death).
 /// UNIT_DYNFLAG_LOOTABLE is set separately after loot generation.
 fn send_creature_killed_update(world: &World, creature_guid: ObjectGuid) -> anyhow::Result<()> {
     let (max_health, unit_flags) = world
@@ -490,7 +490,7 @@ fn send_creature_killed_update(world: &World, creature_guid: ObjectGuid) -> anyh
         .with_creature_mut(creature_guid, |c| (c.max_health, c.unit_flags))
         .unwrap_or((1, 0));
 
-    // Clear IN_COMBAT from unit flags (MaNGOS ClearInCombat)
+    // Clear IN_COMBAT from unit flags
     let cleared_flags = unit_flags & !crate::game::common::unit_flags::IN_COMBAT;
 
     tracing::debug!(
@@ -516,7 +516,7 @@ fn send_creature_killed_update(world: &World, creature_guid: ObjectGuid) -> anyh
 }
 
 /// Send SMSG_ATTACKSTOP - broadcast to nearby players so all clients update combat state.
-/// vmangos SendMeleeAttackStop always sends unk=0.
+/// Always sends unk=0.
 fn send_attack_stop(world: &World, attacker: ObjectGuid, target: ObjectGuid, _target_dead: bool) {
     let packet = SmsgAttackStop {
         attacker_guid: attacker,
@@ -530,7 +530,7 @@ fn send_attack_stop(world: &World, attacker: ObjectGuid, target: ObjectGuid, _ta
 }
 
 /// Send SMSG_ATTACKSTOP directly to the attacker player only (not broadcast).
-/// Used in HandleAttackSwingOpcode for dead targets — matches vmangos SendAttackStop().
+/// Used to send attack stop for dead targets.
 fn send_attack_stop_to_player(
     world: &World,
     attacker: ObjectGuid,

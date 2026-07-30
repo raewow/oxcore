@@ -3,12 +3,11 @@
 
 use oxcore_shared::protocol::ObjectGuid;
 
-/// Maximum bag size (36 slots) - matches MaNGOS MAX_BAG_SIZE
+/// Maximum bag size (36 slots)
 pub const MAX_BAG_SIZE: usize = 36;
 
 /// Bag - represents a container item that holds other items
 ///
-/// Based on Bag class from MaNGOS (src/game/Objects/Bag.h)
 /// Composition pattern: Bag wraps Item + array of slot pointers
 #[derive(Debug, Clone)]
 pub struct Bag {
@@ -94,7 +93,6 @@ impl Bag {
     }
 
     /// Check if bag is completely empty
-    /// Maps to C++ Bag::IsEmpty
     pub fn is_empty(&self) -> bool {
         self.slots[..self.actual_size as usize]
             .iter()
@@ -102,7 +100,6 @@ impl Bag {
     }
 
     /// Find the slot containing a specific item GUID
-    /// Maps to C++ Bag::GetSlotByItemGUID
     pub fn get_slot_by_guid(&self, guid: ObjectGuid) -> Option<u8> {
         self.slots[..self.actual_size as usize]
             .iter()
@@ -111,7 +108,6 @@ impl Bag {
     }
 
     /// Get item GUID at position (alias for get_slot)
-    /// Maps to C++ Bag::GetItemByPos
     pub fn get_item_by_pos(&self, slot: u8) -> Option<ObjectGuid> {
         self.get_slot(slot)
     }

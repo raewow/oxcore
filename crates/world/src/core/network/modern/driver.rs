@@ -240,7 +240,7 @@ where
 /// Same shape as [`run_auth`] but the client presents `CMSG_AUTH_CONTINUED_SESSION` — a key it was
 /// handed in `SMSG_CONNECT_TO` — instead of a fresh `CMSG_AUTH_SESSION`, and the handshake ends
 /// with `SMSG_RESUME_COMMS` rather than `SMSG_AUTH_RESPONSE`. The account is identified by the key
-/// alone; there is no second digest verification, exactly as in the reference.
+/// alone; there is no second digest verification.
 pub async fn run_instance_auth<S>(
     stream: &mut S,
     keys_store: &ConnectKeyStore,
@@ -349,7 +349,7 @@ where
 
 /// Inbound opcodes the 1.14 client sends during its bootstrap sweep that we knowingly do not act on.
 ///
-/// per the 1.14 wire format, which exists for the same reason: without
+/// Without
 /// it, routine client noise and a genuinely unhandled packet look identical in the trace. These
 /// appear as `packet.ignored` rather than `packet.rx`.
 ///

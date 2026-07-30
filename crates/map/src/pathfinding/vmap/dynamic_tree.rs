@@ -2,7 +2,7 @@
 //!
 //! Spawned gameobjects with collision (doors, bridges, gates) are not part of
 //! the static `.vmtile` geometry, so they live in a per-map dynamic tree that is
-//! queried alongside the static one. Ported from MaNGOS `DynamicMapTree`.
+//! queried alongside the static one.
 
 use parking_lot::RwLock;
 use std::collections::HashMap;

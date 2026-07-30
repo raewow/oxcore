@@ -44,7 +44,7 @@ impl ToWorldPacket for SmsgForceMoveRoot {
     }
 }
 
-/// `MoveSetFlag` (HermesProxy `MovementPackets.cs:390`): a packed 128-bit mover and a counter.
+/// `MoveSetFlag`: a packed 128-bit mover and a counter.
 ///
 /// The whole family of root/unroot/water-walk/hover messages shares this body; only the opcode
 /// differs.
@@ -215,7 +215,7 @@ impl SmsgMonsterMove {
     }
 
     /// Create a facing-only packet (no movement, just rotate)
-    /// MaNGOS includes the creature's current position as a waypoint even for facing-only moves.
+    /// The creature's current position is included as a waypoint even for facing-only moves.
     /// The 1.12.1 client requires at least one waypoint for non-stop move types.
     pub fn new_facing_angle(guid: ObjectGuid, position: Position, angle: f32) -> Self {
         Self {
@@ -232,12 +232,12 @@ impl SmsgMonsterMove {
     }
 
     /// Create a stop movement packet
-    /// vmangos: MoveSplineInit::Launch with SetStop() sends position + new splineId + move_type=1
+    /// MoveSplineInit::Launch with SetStop() sends position + new splineId + move_type=1
     pub fn new_stop(guid: ObjectGuid, position: Position) -> Self {
         Self {
             guid,
             position,
-            spline_id: rand::random(), // vmangos uses splineCounter++ (a new unique ID)
+            spline_id: rand::random(), // new unique ID
             move_type: 1,              // Stop
             facing_target: None,
             facing_angle: None,
@@ -259,7 +259,7 @@ impl ToWorldPacket for SmsgMonsterMove {
         packet.write_u32(self.spline_id);
         packet.write_u8(self.move_type);
 
-        // Stop (move_type=1): MaNGOS returns immediately after move_type byte
+        // Stop (move_type=1): return immediately after move_type byte
         if self.move_type == 1 {
             return packet;
         }
@@ -284,7 +284,7 @@ impl ToWorldPacket for SmsgMonsterMove {
         packet.write_u32(self.spline_flags);
         packet.write_u32(self.duration);
 
-        // MaNGOS linear path format (packet_builder.cpp:WriteLinearPath):
+        // Linear path format:
         // - count (number of waypoints excluding start, i.e. segments)
         // - destination (last waypoint) as full xyz
         // - intermediate waypoints as packed offsets from midpoint(start, dest)
@@ -314,8 +314,7 @@ impl ToWorldPacket for SmsgMonsterMove {
         packet
     }
 
-    /// `SMSG_ON_MONSTER_MOVE`, per HermesProxy `MovementPackets.cs:95` and the legacy conversion in
-    /// `MovementHandler.cs:383`.
+    /// `SMSG_ON_MONSTER_MOVE`, per the 1.14 wire format.
     ///
     /// Same information as vanilla, reordered and bit-packed: the facing data moves *after* the
     /// counts instead of sitting between the move type and the flags, and the waypoint count is a
@@ -344,7 +343,7 @@ impl ToWorldPacket for SmsgMonsterMove {
         };
 
         writer.write_bit(false); // CrzTeleport
-                                 // 2 means "no tolerance to apply" and is what HermesProxy sends for a pathless move.
+                                 // 2 means "no tolerance to apply" for a pathless move.
         writer.write_bits(if points.is_empty() { 2 } else { 0 }, 3);
 
         writer.write_u32(if is_stop {
@@ -388,7 +387,7 @@ impl ToWorldPacket for SmsgMonsterMove {
                 writer.write_f32(self.facing_angle.unwrap_or(0.0));
             }
             MODERN_SPLINE_TYPE_FACING_SPOT => {
-                // The reference writes the spot as a Vector3 here. The vanilla body carries one
+                // The spot is written as a Vector3 here. The vanilla body carries one
                 // too, but our struct never records it, so this sends the origin rather than
                 // omitting 12 bytes and desynchronising everything after it. No caller produces
                 // FacingSpot today; add the field before one does.
@@ -464,12 +463,12 @@ fn modern_spline_type(vanilla_move_type: u8) -> u8 {
 /// almost no bit positions. `Done` moves from `0x01` to `0x20`, `NoSpline` from `0x400` to `0x80`,
 /// and so on.
 ///
-/// The `Runmode`-only case is special-cased the way HermesProxy does it: real vanilla servers send
+/// The `Runmode`-only case is special-cased: real vanilla servers send
 /// exactly that flag for an ordinary creature move, and the modern client wants a specific set of
 /// flags rather than a literal translation of it.
 ///
 /// **Note for whoever verifies this against a live client:** our `spline_flags::WALKMODE` is
-/// `0x100`, but HermesProxy's vanilla table calls `0x100` `Runmode` and `spline_flags::RUNMODE` is
+/// `0x100`, but the vanilla table calls `0x100` `Runmode` and `spline_flags::RUNMODE` is
 /// `0`. Those two constants look inverted relative to what a real vanilla server sends. That is a
 /// pre-existing vanilla-side question and is deliberately not changed here, since the 1.12 client
 /// works today -- but it means a running creature may take the literal branch below and a walking
@@ -479,7 +478,7 @@ pub fn to_modern_spline_flags(vanilla: u32) -> u32 {
     /// sends for a normal move.
     const VANILLA_RUNMODE: u32 = 0x0000_0100;
 
-    /// What HermesProxy substitutes for that default: `Unknown5 | Steering | Unknown10`. Opaque
+    /// The substitute for that default: `Unknown5 | Steering | Unknown10`. Opaque
     /// but load-bearing -- without them the client will not animate the move.
     const MODERN_DEFAULT: u32 = 0x0100_0000 | 0x1000_0000 | 0x8000_0000;
 
@@ -652,8 +651,7 @@ impl ToWorldPacket for MsgMovementBroadcast {
         packet
     }
 
-    /// `SMSG_MOVE_UPDATE` (HermesProxy `MovementPackets.cs:42`): just a movement block, with the
-    /// mover named inside it.
+    /// `SMSG_MOVE_UPDATE`: just a movement block, with the mover named inside it.
     ///
     /// The knockback vector has no place in this body -- 1.14 sends knockbacks as their own
     /// message -- so it is dropped here. Observers see the destination but not the launch arc.

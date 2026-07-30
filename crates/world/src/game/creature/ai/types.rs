@@ -558,9 +558,9 @@ pub struct AIStateData {
     pub melee_enabled: bool,
     /// Whether combat movement (chasing) is enabled
     pub combat_movement_enabled: bool,
-    /// Creature spell list from creature_spells table (CreatureAI::m_CreatureSpells)
+    /// Creature spell list from creature_spells table
     pub spells_list: Vec<CreatureAISpellsEntry>,
-    /// Delay before next spell list update (CreatureAI::m_uiCastingDelay)
+    /// Delay before next spell list update
     pub casting_delay: u32,
 }
 

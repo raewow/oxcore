@@ -17,7 +17,7 @@ pub struct SmsgSpellStart {
     pub target_guid: Option<ObjectGuid>,
     /// When the spell is cast from an item, this is the item's GUID. The client
     /// expects the item GUID as the first packed GUID in the packet instead of
-    /// the caster's GUID (MaNGOS: `data << m_CastItem->GetPackGUID()`).
+    /// the caster's GUID (`cast_item_guid` overrides the first GUID slot).
     pub cast_item_guid: Option<ObjectGuid>,
     /// Projectile ammo display info: ammoDisplayID from WriteAmmoToPacket.
     /// 0 = no projectile.
@@ -56,11 +56,10 @@ fn next_cast_sequence() -> u64 {
 /// * hit and miss targets become guid128 lists *after* the target block, not before;
 /// * missile trajectory, immunities, heal prediction and power costs are all new.
 ///
-/// Fields with no vanilla source are written as the reference's defaults. `SpellXSpellVisualID` is
+/// Fields with no vanilla source are written as defaults. `SpellXSpellVisualID` is
 /// one of them, and it is the reason spell *animations* may not play: 1.14 selects the visual from a
-/// DB2 id keyed on spell, which a 1.12 spell table has no column for. HermesProxy looks it up from
-/// its own extracted data (`GameData.GetSpellVisual`). Sending zero is correct-but-silent rather
-/// than wrong — the cast still registers, the flourish is missing.
+/// DB2 id keyed on spell, which a 1.12 spell table has no column for. Sending zero is
+/// correct-but-silent rather than wrong — the cast still registers, the flourish is missing.
 #[allow(clippy::too_many_arguments)]
 fn write_modern_spell_cast_data(
     writer: &mut BitWriter,
@@ -232,8 +231,7 @@ pub struct SmsgSpellGo {
     pub target_guid: Option<ObjectGuid>,
     /// When the spell is cast from an item, this is the item's GUID. The client
     /// expects the item GUID as the first packed GUID and CAST_FLAG_UNKNOWN7
-    /// (0x0040) set in cast_flags (MaNGOS: `data << m_CastItem->GetPackGUID()`
-    /// and `castFlags |= CAST_FLAG_UNKNOWN7`).
+    /// (0x0040) set in cast_flags.
     pub cast_item_guid: Option<ObjectGuid>,
     /// Projectile ammo display info: ammoDisplayID from WriteAmmoToPacket.
     /// 0 = no projectile.
@@ -310,7 +308,7 @@ impl ToWorldPacket for SmsgSpellGo {
     /// `SpellGo::Write` for build 42597: the shared cast
     /// block, then a `HasLogData` bit and a flush.
     ///
-    /// Note the flush comes *after* the optional log data in the reference, so an absent log block
+    /// Note the flush comes *after* the optional log data, so an absent log block
     /// still costs the byte the bit is padded into — dropping it would leave the client one byte
     /// short.
     fn to_modern(&self) -> Option<WorldPacket> {
@@ -538,7 +536,7 @@ mod spell_packet_tests {
     }
 
     /// A reflected target carries an extra reflect-result byte after the miss reason,
-    /// and only that target does (MaNGOS `Spell::WriteSpellGoTargets`).
+    /// and only that target does.
     #[test]
     fn test_spell_go_reflect_miss_appends_reflect_result() {
         let caster = player_guid(10);
@@ -733,8 +731,7 @@ mod spell_packet_tests {
     }
 }
 
-/// Write the SpellCastTargets section to a spell packet.
-/// Matches MaNGOS SpellCastTargets::write() for vanilla 1.12.x.
+/// Write the SpellCastTargets section to a spell packet for vanilla 1.12.x.
 fn write_spell_cast_targets(packet: &mut WorldPacket, target_guid: Option<ObjectGuid>) {
     match target_guid {
         Some(guid) if guid.raw() != 0 => {
@@ -1108,7 +1105,6 @@ impl ToWorldPacket for SmsgSpellDelayed {
 }
 
 /// Per-effect execute-log data for SMSG_SPELLLOGEXECUTE.
-/// Mirrors MaNGOS `Spell::ExecuteLogInfo` at Spell.h:545-599.
 #[derive(Debug, Clone)]
 pub struct ExecuteLogInfo {
     pub target_guid: ObjectGuid,

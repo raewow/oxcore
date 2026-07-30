@@ -12,12 +12,9 @@ use oxcore_shared::protocol::ObjectGuid;
 /// before the creature reacts).
 pub const SPELL_ATTR_EX_ONLY_PEACEFUL_TARGETS: u32 = 0x0000_0100;
 
-/// Pure helper mirroring `World::GetDelayUntilNextSpellBatchingInterval`.
-///
 /// Returns `interval_ms - (now_ms % interval_ms)`, or `0` when batching is
-/// disabled (`interval_ms == 0`). `now_ms` is the wrapping 32-bit world timer
-/// used by the reference implementation (`WorldTimer::getMSTime()`), so the
-/// result is the milliseconds remaining until the next batching boundary.
+/// disabled (`interval_ms == 0`). `now_ms` is the wrapping 32-bit world timer,
+/// so the result is the milliseconds remaining until the next batching boundary.
 pub fn delay_until_next_batching_interval_ms(interval_ms: u32, now_ms: u32) -> u32 {
     if interval_ms == 0 {
         return 0;
@@ -27,7 +24,7 @@ pub fn delay_until_next_batching_interval_ms(interval_ms: u32, now_ms: u32) -> u
 
 /// Current world timer as a wrapping 32-bit millisecond counter.
 ///
-/// Mirrors `WorldTimer::getMSTime()`. The absolute epoch is irrelevant because
+/// The absolute epoch is irrelevant because
 /// spell batching only consumes the value modulo the configured interval.
 fn world_timer_ms() -> u32 {
     std::time::SystemTime::now()
@@ -36,8 +33,6 @@ fn world_timer_ms() -> u32 {
         .as_millis() as u32
 }
 
-/// Pure decision gate from `Spell::GetSpellBatchingEffectDelay`.
-///
 /// Returns the configured batching interval when the effect should be delayed,
 /// or `0` when it should apply immediately:
 ///
@@ -67,8 +62,6 @@ pub fn spell_batching_effect_delay_ms(
     interval_ms
 }
 
-/// World-coupled entry for `Spell::GetSpellBatchingEffectDelay`.
-///
 /// Reads the configured `Spell.EffectDelay` interval and the current world timer,
 /// applies the three early-exit branches, and returns the delay in milliseconds
 /// until the next batching boundary.
@@ -103,7 +96,7 @@ mod tests {
     fn delay_until_next_boundary_basic() {
         // interval 400, now 150 -> 250ms until next boundary.
         assert_eq!(delay_until_next_batching_interval_ms(400, 150), 250);
-        // On a boundary: result is the full interval (matches C++ formula).
+        // On a boundary: result is the full interval.
         assert_eq!(delay_until_next_batching_interval_ms(400, 400), 400);
         // At time 0: full interval.
         assert_eq!(delay_until_next_batching_interval_ms(400, 0), 400);

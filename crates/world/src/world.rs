@@ -518,8 +518,7 @@ impl World {
         // --- Phase: movement + maps ---
         let phase_maps = std::time::Instant::now();
         // Process creature movement FIRST so positions are current for combat
-        // and AI range checks (matches vmangos: Unit::Update does spline/movement
-        // before AI UpdateAI calls DoMeleeAttackIfReady)
+        // and AI range checks (unit movement update runs before AI)
         self.systems
             .creature_movement
             .update_creatures(diff_ms, self)?;
@@ -560,8 +559,7 @@ impl World {
         crate::game::gameobject::system::update_respawns(self);
 
         // Process creature combat timers and melee attacks
-        // Timer countdown + attack execution in one pass (matches vmangos
-        // Unit::Update timer decrement -> AI DoMeleeAttackIfReady order)
+        // Timer countdown + attack execution in one pass
         crate::game::creature::combat_update::update_creature_combat(self, diff_ms);
 
         // Process AI updates (after combat timers so AI sees current timer state)
@@ -585,7 +583,7 @@ impl World {
             }
         }
 
-        // Auction expiry tick - every 1200 ticks (~60s at 50ms) matching C++ WUPDATE_AUCTIONS
+        // Auction expiry tick - every 1200 ticks (~60s at 50ms)
         static AUCTION_UPDATE_COUNTER: std::sync::atomic::AtomicU32 =
             std::sync::atomic::AtomicU32::new(0);
         let auction_count =

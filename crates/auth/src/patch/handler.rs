@@ -34,8 +34,7 @@ impl PatchHandler {
     pub async fn transfer(mut self) -> Result<()> {
         info!("Starting patch transfer");
 
-        // Do 1 second sleep, similar to the one in game/WorldSocket.cpp
-        // Seems client have problems with too fast sends
+        // Do 1 second sleep to avoid sending data too quickly
         sleep(Duration::from_secs(1)).await;
 
         let mut buffer = vec![0u8; 4096]; // 4KB chunks (page size on most arch)

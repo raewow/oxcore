@@ -163,7 +163,6 @@ impl RealmList {
     }
 
     /// Get realm address (local if client is on same subnet, otherwise remote)
-    /// Matches C++ GetRealmAddress implementation
     fn get_realm_address(realm: &Realm, _client_ip: Option<&std::net::IpAddr>) -> String {
         // Simplified: always return remote address
         // Full implementation would check if client_ip is in local_subnet_mask
@@ -171,7 +170,6 @@ impl RealmList {
     }
 
     /// Build realm list packet for client
-    /// Matches the C++ LoadRealmlist implementation
     pub async fn build_packet(
         &self,
         client_build: u16,
@@ -189,8 +187,7 @@ impl RealmList {
 
         // For builds < 6299 (before 2.0.3), format is different
         if client_build < 6299 {
-            // Count eligible realms (C++: getEligibleRealmCount)
-            // Eligible = realms where allowedSecurityLevel <= accountSecurityLevel
+            // Count eligible realms where allowedSecurityLevel <= accountSecurityLevel
             let eligible_count = realms
                 .iter()
                 .filter(|realm| {
@@ -212,7 +209,6 @@ impl RealmList {
                     .copied()
                     .unwrap_or(account_default_security);
 
-                // C++: if (!securityLevel && i.second.allowedSecurityLevel > 0) continue;
                 // Don't display higher security realms for players with no security level
                 if account_security == 0 && realm.allowed_security_level > 0 {
                     continue; // Skip this realm entirely
@@ -295,7 +291,7 @@ impl RealmList {
                 buf.put_u8(0x00);
             }
 
-            // Add unused value at the end (matches C++: pkt << uint16(0x0002))
+            // Add unused value at the end
             buf.put_u16_le(0x0002);
         } else {
             // For builds >= 6299, use newer format

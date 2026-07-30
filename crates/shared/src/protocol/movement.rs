@@ -6,7 +6,7 @@ use super::{ObjectGuid, Position, Protocol, WorldPacket};
 pub struct MoveFlags(u32);
 
 impl MoveFlags {
-    // Vanilla 1.12.1 movement flags (from MaNGOS-classic MovementInfo.h)
+    // Vanilla 1.12.1 movement flags
     pub const NONE: MoveFlags = MoveFlags(0x00000000);
     pub const FORWARD: MoveFlags = MoveFlags(0x00000001);
     pub const BACKWARD: MoveFlags = MoveFlags(0x00000002);
@@ -109,8 +109,7 @@ impl MovementInfo {
 
     /// Parse a 1.14 client movement body.
     ///
-    /// Mirrors `ObjectUpdateBuilder`'s writer and HermesProxy's `ReadMovementInfoModern`
-    /// (`World/Objects/MovementInfo.cs:276`). Structurally different from vanilla, not just
+    /// Structurally different from vanilla, not just
     /// renumbered:
     ///
     /// * the mover GUID leads the body, where vanilla sends none;

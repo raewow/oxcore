@@ -2,9 +2,7 @@
 //!
 //! Vanilla objects carry a much smaller field set. Several of the fields 1.14 added are *divisors*
 //! or *scales*, so leaving them at their zero default is not a cosmetic gap -- the client renders a
-//! unit at zero scale and divides by a zero haste, and does not survive it. That is why HermesProxy
-//! has `ObjectUpdate.InitializePlaceholders`
-//! (`World/Server/Packets/UpdatePackets.cs:96`), which this transcribes.
+//! unit at zero scale and divides by a zero haste, and does not survive it.
 //!
 //! These apply to **create** blocks only. A values update carries just what changed, and the client
 //! already holds these from the create.
@@ -16,7 +14,7 @@ use crate::protocol::guid::ObjectGuid;
 /// Highest level a 1.12 character can reach, for `ACTIVE_PLAYER_FIELD_MAX_LEVEL`.
 const MAX_LEVEL: u32 = 60;
 
-/// `UNIT_FIELD_FLAGS_2` default. Opaque, but HermesProxy sends it on every unit.
+/// `UNIT_FIELD_FLAGS_2` default.
 const UNIT_FLAGS_2_DEFAULT: u32 = 2048;
 
 /// Honor needed for the next level. 1.14 divides by this, so zero is fatal.
@@ -56,7 +54,7 @@ pub fn apply(
 /// Applies to every unit, creatures included -- a creature with zero scale is just as broken as a
 /// player with one.
 fn apply_unit(fields: &mut ModernFieldsArray) {
-    // Power regen multipliers. HermesProxy fills six of the seven slots; the seventh has no power
+    // Power regen multipliers. Six of the seven slots are filled; the seventh has no power
     // type behind it in 1.12.
     for slot in 0..6 {
         fields.set_modern_f32(MODERN_UNIT_FIELD_MOD_POWER_REGEN + slot, 1.0);
@@ -94,7 +92,7 @@ fn apply_player(fields: &mut ModernFieldsArray, guid: ObjectGuid, realm_id: u16)
         virtual_realm_address(realm_id),
     );
     fields.set_modern(MODERN_PLAYER_FIELD_HONOR_LEVEL, 1);
-    // Only index 3 of the six, matching the reference.
+    // Only index 3 of the six.
     fields.set_modern_f32(MODERN_PLAYER_FIELD_AVG_ITEM_LEVEL + 3, 1.0);
 }
 
@@ -152,7 +150,7 @@ const HIGH_GUID_WOW_ACCOUNT: u64 = 29;
 
 /// Build a realm-independent ("global") 128-bit GUID: type in the high word, counter in the low.
 ///
-/// Mirrors HermesProxy's `WowGuid128.GlobalCreate`. Unlike a player or item GUID this carries no
+/// Unlike a player or item GUID this carries no
 /// realm, so it cannot go through `ObjectGuid::to_guid128`.
 fn global_guid128(high_type: u64, counter: u64) -> (u64, u64) {
     (high_type << 58, counter)

@@ -1,6 +1,6 @@
 //! Random movement generator - creatures wander around spawn point
 //!
-//! MaNGOS-style random wander behavior:
+//! Random wander behavior:
 //! - Pick random point within wander radius
 //! - Walk there at walking speed
 //! - Short 50ms hop between wander steps, then a 4-10 second break
@@ -84,8 +84,8 @@ impl RandomMovementGenerator {
 
     /// Launch a wander leg and schedule the pause that follows it.
     ///
-    /// The pause is scheduled at departure, matching the C++ generator: the timer only
-    /// ticks down once the spline has finalized, so it is spent after arrival either way.
+    /// The pause is scheduled at departure: the timer only ticks down once the spline
+    /// has finalized, so it is spent after arrival either way.
     fn start_random_movement(&mut self) -> Position {
         let destination = self.pick_random_destination();
         self.destination = Some(destination);
@@ -135,8 +135,8 @@ impl RandomMovementGenerator {
         }
     }
 
-    /// Shared body of initialize/reset: the C++ generator resets both through Initialize.
-    // ... the aliveness guard (`if !creature.IsAlive() return`) lives with the caller,
+    /// Shared body of initialize/reset.
+    // ... the aliveness guard lives with the caller,
     // which owns creature state.
     fn restart(&mut self) {
         self.destination = None;
@@ -192,7 +192,7 @@ impl MovementGenerator for RandomMovementGenerator {
             }
         }
 
-        // TODO: flying creatures follow a circular multi-point path in the C++ generator;
+        // TODO: flying creatures follow a circular multi-point path;
         // splines here carry a single destination, so they wander on the ground instead.
         let destination = self.start_random_movement();
 

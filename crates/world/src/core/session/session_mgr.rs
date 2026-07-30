@@ -103,7 +103,7 @@ impl SessionManager {
         self.by_account.contains_key(&account_id)
     }
 
-    /// Remove existing session for an account (following MaNGOS pattern)
+    /// Remove existing session for an account
     ///
     /// Returns:
     /// - `true` if no session exists or session was successfully removed

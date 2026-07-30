@@ -3,7 +3,7 @@ use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{ObjectGuid as SharedObjectGuid, Opcode, WorldPacket};
 
-/// `ItemInstance::Write` for build 42597.
+/// Serialize a 1.14 item instance for build 42597.
 ///
 /// Every 1.14 body that names an item embeds this rather than a bare item id. A 1.12 item has
 /// neither bonus lists nor modifications, so both sub-structures are written empty — but they are
@@ -27,7 +27,7 @@ pub(crate) fn write_modern_item_instance(
     writer.flush_bits();
 }
 
-/// 1.14 `ItemPushResult::DisplayType`, which replaces vanilla's three independent u32 flags.
+/// 1.14 DisplayType replaces vanilla's three independent u32 flags.
 const DISPLAY_TYPE_HIDDEN: u32 = 0;
 const DISPLAY_TYPE_RECEIVED: u32 = 1;
 const DISPLAY_TYPE_LOOT: u32 = 3;
@@ -138,10 +138,6 @@ impl ToWorldPacket for SmsgDestroyItem {
     }
 
     /// 1.14 has no `SMSG_DESTROY_OBJECT`; destruction is a list inside `SMSG_UPDATE_OBJECT`.
-    ///
-    /// HermesProxy does the same translation when it sees a legacy destroy
-    /// (`World/Client/PacketHandlers/UpdateHandler.cs:20`), which is why the shared opcode table
-    /// has no modern number for this one.
     fn to_modern(&self) -> Option<WorldPacket> {
         SmsgUpdateObject::new().destroy(self.item_guid).to_modern()
     }

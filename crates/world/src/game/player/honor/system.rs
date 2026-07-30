@@ -71,7 +71,7 @@ impl HonorSystem {
     /// `record_damage` for melee yet), we fall back to attributing the
     /// killing blow to the single `killer` if one was supplied.
     ///
-    /// Honor formula (simplified, matches vmangos' scale-down branch):
+    /// Honor formula (simplified scale-down branch):
     ///   base_honor = victim_level * 0.5 / contributor_count
     ///   per-attacker = base_honor * (attacker_damage / total_damage)
     ///
@@ -129,7 +129,7 @@ impl HonorSystem {
         }
 
         // Per-kill base honor: scale with victim level and contributor count.
-        // This is a simplified vmangos-compatible curve.
+        // This is a simplified honor curve.
         let base_honor = victim_base_honor(victim_level, contributors.len());
 
         let pool = Arc::new(world.databases.character.clone());
@@ -161,7 +161,7 @@ impl HonorSystem {
             // Log to character_honor_cp (fire and forget).
             let row = HonorCPRow {
                 guid: c.guid.counter(),
-                // victim_type: 4 = Player (matches vmangos ObjectTypeIDs).
+                // victim_type: 4 = Player.
                 victim_type: 4,
                 victim_id: victim.counter(),
                 cp: honor,
@@ -190,7 +190,7 @@ fn team_from_race(race: u8) -> u8 {
 }
 
 /// Compute the honor base for a kill given victim level and the group size of
-/// contributors. This is a simplified stand-in for the full vmangos formula.
+/// contributors. This is a simplified stand-in.
 fn victim_base_honor(victim_level: u8, contributor_count: usize) -> f32 {
     // Scales with victim level, divided across the party.
     let level_factor = (victim_level as f32).max(1.0) * 0.5;

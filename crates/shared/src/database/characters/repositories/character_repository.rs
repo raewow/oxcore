@@ -179,8 +179,7 @@ impl CharacterRepository {
         Ok(())
     }
 
-    /// Insert one saved aura holder row for a character.
-    /// Matches vMaNGOS `Player::_SaveAuras` insert statement (one row per spell holder).
+    /// Insert one saved aura holder row for a character (one row per spell holder).
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_aura(&self, row: &CharacterAuraRow) -> Result<()> {
         sqlx::query(
@@ -1158,7 +1157,7 @@ impl CharacterRepository {
                 .context(format!("Failed to delete from {table}"))?;
         }
 
-        // Oxcore does not populate Trinity's optional `character_deleted_items` table. Deleting
+        // Oxcore does not populate the optional `character_deleted_items` table. Deleting
         // a character must not fail when an existing database has not imported that legacy table.
 
         sqlx::query("DELETE FROM group_instance WHERE leader_guid = ?")

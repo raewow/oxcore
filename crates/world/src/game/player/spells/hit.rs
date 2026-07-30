@@ -1,7 +1,6 @@
 //! Spell Hit Resolution
 //!
 //! Determines whether a spell hits, misses, or is resisted.
-//! Equivalent to MaNGOS Unit::SpellHitResult() / MagicSpellHitResult().
 //!
 //! Vanilla WoW spell hit mechanics:
 //! - Base miss rate: 4% for same-level targets

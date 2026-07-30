@@ -1,7 +1,5 @@
 //! Per-map terrain access: lazily loaded `GridMap`s plus the combined
 //! terrain/VMap height and liquid queries.
-//!
-//! Ported from MaNGOS `TerrainInfo` / `TerrainManager` (GridMap.cpp).
 
 use dashmap::DashMap;
 use std::path::PathBuf;
@@ -89,7 +87,7 @@ impl TerrainInfo {
     ///
     /// Returns `INVALID_HEIGHT_VALUE` when neither source yields a height.
     ///
-    /// Note: unlike the reference this does not perform the upward-looking
+    /// Note: this does not perform the upward-looking
     /// retry, because the VMap height query has no signed search direction.
     pub fn get_height_static(
         &self,

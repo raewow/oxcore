@@ -86,7 +86,7 @@ pub fn perform_creature_melee_attack(
         None => return,
     };
 
-    // Range check using MaNGOS formula with 2D distance
+    // Range check using melee reach formula with 2D distance
     use super::melee_range::{self, DEFAULT_COMBAT_REACH};
     if !melee_range::is_within_melee_range(
         &creature_pos,

@@ -149,7 +149,6 @@ pub struct Player {
     /// Currently selected unit/object (for targeting, gossip, vendors)
     pub selection: Option<ObjectGuid>,
     /// Auction access mode: 0 = normal, 1 = neutral, -1 = enemy faction
-    /// (C++ Player::m_ExtraFlags PLAYER_EXTRA_AUCTION_NEUTRAL / PLAYER_EXTRA_AUCTION_ENEMY)
     pub auction_access_mode: i8,
     /// Account ID that owns this character (used for per-account DB tables such as tutorial flags).
     pub account_id: u32,

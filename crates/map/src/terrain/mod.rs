@@ -1,8 +1,7 @@
 //! Terrain (ADT) data: area ids, the height mesh, and the liquid layer.
 //!
 //! Reads the `maps/*.map` files produced by the extractor and combines them
-//! with VMap model geometry for height and liquid queries. Ported from MaNGOS
-//! `GridMap` / `TerrainInfo`.
+//! with VMap model geometry for height and liquid queries.
 
 pub mod defines;
 pub mod grid_map;

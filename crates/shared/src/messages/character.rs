@@ -4,8 +4,8 @@ use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{Opcode, WorldPacket};
 
-// Hermes maps the legacy response enum by name before serializing it for the modern client.
-// Oxcore's handlers retain legacy result values, so modern replies perform the same conversion.
+// The legacy response enum is mapped by name when serializing for the modern client.
+// Handlers retain legacy result values, so modern replies perform the same conversion.
 fn modern_response_code(result: u8) -> u8 {
     match result {
         // CHAR_CREATE_*: legacy 45..55, modern 23..33.
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn modern_delete_translates_legacy_success() {
         let packet = SmsgCharDelete { result: 0x39 }.to_modern().unwrap();
-        assert_eq!(packet.contents(), &[53]); // Hermes CharDeleteSuccess
+        assert_eq!(packet.contents(), &[53]); // CharDeleteSuccess
     }
 }
 

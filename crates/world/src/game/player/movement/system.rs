@@ -392,7 +392,7 @@ impl MovementSystem {
         // broadcast_movement_info.time is already correct from movement_info.clone()
 
         // Knockback observers receive the acknowledged launch vector after the
-        // movement block, matching MSG_MOVE_KNOCK_BACK in the reference core.
+        // movement block, matching MSG_MOVE_KNOCK_BACK behavior.
         let knockback = (opcode == Opcode::MSG_MOVE_KNOCK_BACK).then(|| KnockbackVector {
             cos_angle: broadcast_movement_info.jump_cos_angle.unwrap_or(0.0),
             sin_angle: broadcast_movement_info.jump_sin_angle.unwrap_or(0.0),

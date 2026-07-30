@@ -22,7 +22,7 @@ use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// Handle CMSG_AREATRIGGER — player enters an area trigger zone.
 ///
-/// Priority order (matching MaNGOS):
+/// Priority order:
 /// 1. Position validation (anti-cheat)
 /// 2. Quest triggers
 /// 3. Tavern triggers (set rest state)

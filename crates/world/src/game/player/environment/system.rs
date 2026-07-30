@@ -10,7 +10,6 @@ use super::rest;
 use super::state::*;
 
 /// Fallback model collision height, used when the player has no model data.
-/// Matches `Unit::m_modelCollisionHeight`'s initial value.
 pub const DEFAULT_COLLISION_HEIGHT: f32 = 2.0;
 
 /// EnvironmentSystem manages rest XP, mirror timers, and environmental hazards
@@ -510,8 +509,8 @@ pub fn update_environment_flags_internal(
     set_environment_flags(env, EnvironmentFlags::LIQUID, true, has_water_breathing);
 
     // Each flag's condition combines "is this liquid kind present here" with the
-    // depth test for that kind. Unlike the reference, an absent kind clears its
-    // flag rather than leaving the previous value: swimming straight from slime
+    // depth test for that kind. An absent kind clears its flag rather than leaving
+    // the previous value: swimming straight from slime
     // into water would otherwise keep IN_SLIME set and keep dealing damage.
     let any_liquid = type_flags
         & (MAP_LIQUID_TYPE_WATER
@@ -581,8 +580,8 @@ pub fn update_environment_flags_internal(
 /// the environmental timer. Leaving flips the timer to fast recovery rather than
 /// resetting it, which is what makes the breath bar refill when you surface.
 ///
-/// The reference also refreshes threat tables and cancels water-dependent auras
-/// here; those live in other systems and are not driven from this call.
+/// Threat tables and water-dependent auras are managed by other systems and are
+/// not driven from this call.
 fn set_environment_flags(
     env: &mut EnvironmentState,
     flags: EnvironmentFlags,

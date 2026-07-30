@@ -1,8 +1,8 @@
 //! MoveSpline - smooth path interpolation for creature movement
 //!
 //! Interpolates creature position along a sequence of waypoints over time.
-//! Uses per-segment timing proportional to segment length (matching MaNGOS)
-//! so creatures move at constant speed regardless of waypoint spacing.
+//! Uses per-segment timing proportional to segment length so creatures move at
+//! constant speed regardless of waypoint spacing.
 
 use oxcore_shared::protocol::Position;
 
@@ -41,7 +41,7 @@ impl MoveSpline {
 
         let velocity_inv = 1000.0 / velocity;
         let mut timestamps = Vec::with_capacity(waypoints.len());
-        let mut time: u32 = 1; // MaNGOS minimal_duration = 1
+        let mut time: u32 = 1; // minimal_duration = 1
 
         timestamps.push(0);
         for i in 1..waypoints.len() {

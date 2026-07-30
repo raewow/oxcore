@@ -364,7 +364,6 @@ impl DbcManager {
     }
 
     /// Get all SkillLineAbility entries linked to a given spell ID.
-    /// Corresponds to C++ SpellMgr::GetSkillLineAbilityMapBoundsBySpellId.
     pub fn get_skill_line_abilities_by_spell_id(
         &self,
         spell_id: u32,
@@ -381,7 +380,6 @@ impl DbcManager {
     }
 
     /// Get skill race class info entry for a skill/race/class combination
-    /// Matches C++ GetSkillRaceClassInfo()
     pub fn get_skill_race_class_info(
         &self,
         skill_id: u32,

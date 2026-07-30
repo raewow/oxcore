@@ -1,4 +1,4 @@
-//! Weather state for a single zone (MaNGOS `Weather`).
+//! Weather state for a single zone.
 
 use super::types::{
     season_name, sounds, WeatherState, WeatherType, WeatherZoneChances, WEATHER_SEASONS,
@@ -83,7 +83,7 @@ impl ZoneWeather {
 
     /// Roll the next weather. Returns true if and only if the weather changed.
     ///
-    /// Distribution (MaNGOS `Weather::ReGenerate`):
+    /// Distribution:
     ///   30% no change, 30% better / type change, 30% worse, 10% radical change.
     pub fn regenerate(&mut self, season: usize) -> bool {
         self.regenerate_with(season, &mut rand::thread_rng())

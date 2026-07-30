@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 
 /// Player rest state type (for rest experience bonus)
-/// Reference: MaNGOS Player.h:575-580
+/// Player environment flags mapped from ObjectGuid and movement state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum RestType {
@@ -42,7 +42,7 @@ pub struct EnvironmentState {
 }
 
 /// Mirror timer structure
-/// Based on C++ MirrorTimer class from vmangos
+/// Environment timer data loaded from DBC.
 ///
 /// The timer uses a scale system:
 /// - scale < 0: Timer is counting down (depleting)

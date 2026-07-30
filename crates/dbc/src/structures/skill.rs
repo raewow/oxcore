@@ -25,7 +25,7 @@ impl DbcEntry for SkillLineEntry {
         }
 
         // categoryId is stored as int32 in DBC, but DbcRecord only has get_u32
-        // We read as u32 and reinterpret as i32 (same as C++ does)
+        // We read as u32 and reinterpret as i32
         let category_id_u32 = record
             .get_u32(1)
             .context("Failed to read SkillLine categoryId")?;

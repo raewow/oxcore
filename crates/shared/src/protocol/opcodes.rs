@@ -23,7 +23,7 @@
 //!
 //! ## Which modern table
 //!
-//! The `modern` column is build **42597** (1.14.2), i.e. HermesProxy's `V2_5_3_41750` table. Builds
+//! The `modern` column is build **42597** (1.14.2). Builds
 //! renumber: 580 of the 1723 opcodes shared between 40688 and 41750 have different values, so this
 //! column is not portable to another build without regenerating it.
 
@@ -739,8 +739,9 @@ impl Opcode {
     pub const CMSG_QUESTGIVER_STATUS_QUERY: Opcode = Opcode { vanilla: 0x0182, modern: 0x349C }; // 386
     pub const SMSG_QUESTGIVER_STATUS: Opcode = Opcode { vanilla: 0x0183, modern: 0x2A9B }; // 387
     // Time sync. Modern-only: 1.12 has no equivalent, so both are `Opcode::NONE` on the vanilla
-    // side. TrinityCore sends the request first in `SendInitialPacketsBeforeAddToMap`, then at 5 s
-    // and every 10 s (`Player.cpp:24920-24928`, `WorldSession.cpp:1815-1826`); the client answers
+    // side. Modern-only: 1.12 has no equivalent, so both are `Opcode::NONE` on the vanilla
+    // side. The request is sent first in `SendInitialPacketsBeforeAddToMap`, then at 5 s
+    // and every 10 s; the client answers
     // with its own tick count so the server can measure clock drift.
     /// Sent when the client closes an interaction window (gossip, quest, vendor). Modern-only.
     pub const CMSG_CLOSE_INTERACTION: Opcode = Opcode { modern: 0x3493, ..Opcode::NONE };
@@ -2385,8 +2386,8 @@ mod tests {
     /// Two of these are harmless aliases; the rest are **wrong values** that happen not to have
     /// caused a visible failure yet. They are allow-listed so this guard can go in without a
     /// behaviour change, and each is individually testable against a live 1.12 client — fix them
-    /// one per commit, deleting the entry as you go. Correct values are HermesProxy's
-    /// `World/Enums/V1_12_1_5875/Opcode.cs`.
+    /// one per commit, deleting the entry as you go. Correct values are from
+    /// `V1_12_1_5875`.
     ///
     /// | value | constants | verdict |
     /// |---|---|---|

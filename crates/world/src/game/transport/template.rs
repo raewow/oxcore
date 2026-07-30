@@ -1,5 +1,4 @@
-//! The store of built transport paths, keyed by game-object entry (`TransportMgr`'s
-//! `m_transportTemplates` and the loading around it).
+//! The store of built transport paths, keyed by game-object entry.
 //!
 //! Each MO_TRANSPORT game object has one template: the keyframe path built by
 //! [`generate_waypoints`](super::waypoints::generate_waypoints) plus the derived motion
@@ -75,7 +74,7 @@ impl TransportTemplate {
     }
 }
 
-/// Owns every transport's built template (`TransportMgr::m_transportTemplates`).
+/// Owns every transport's built template.
 #[derive(Debug, Default, Clone)]
 pub struct TransportTemplateStore {
     templates: HashMap<u32, TransportTemplate>,
@@ -102,8 +101,7 @@ impl TransportTemplateStore {
     /// Build and store one transport's template from its taxi path (the body of the
     /// `LoadTransportTemplates` loop).
     ///
-    /// Returns whether a template was produced; a path that fails to generate is skipped,
-    /// mirroring the C++ `m_transportTemplates.erase(entry)`.
+    /// Returns whether a template was produced; a path that fails to generate is skipped.
     pub fn load_template(
         &mut self,
         entry: u32,

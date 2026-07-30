@@ -33,7 +33,7 @@ impl PathResult {
     }
 }
 
-/// Path type flags (matches MaNGOS PathType)
+/// Path type flags
 pub mod path_flags {
     pub const PATH_NORMAL: u32 = 0x0001;
     pub const PATH_NOT_USING_PATH: u32 = 0x0002;

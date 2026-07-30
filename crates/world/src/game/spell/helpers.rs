@@ -169,12 +169,12 @@ pub fn get_spell_specific(spell: &SpellEntry) -> SpellSpecific {
     SpellSpecific::Normal
 }
 
-/// Compare two spells by their effective aura rank (faithful MaNGOS `Spells::CompareAuraRanks`).
+/// Compare two spells by their effective aura rank.
 ///
 /// Returns `true` when the spells have different effective ranks for a matching effect,
 /// `false` when they are the same rank or cannot be compared.
 ///
-/// Matches C++: iterates effect slots looking for a matching effect type, then compares
+/// Iterates effect slots looking for a matching effect type, then compares
 /// base points. When both effects have negative base points (common for debuffs) the
 /// comparison is inverted — the more negative value ranks higher.
 pub fn compare_aura_ranks(spell1: &SpellEntry, spell2: &SpellEntry) -> bool {
@@ -186,7 +186,7 @@ pub fn compare_aura_ranks(spell1: &SpellEntry, spell2: &SpellEntry) -> bool {
         if spell1.effect[idx] != 0 && spell1.effect[idx] == spell2.effect[idx] {
             let diff = spell1.effect_base_points[idx] - spell2.effect_base_points[idx];
             if diff != 0 {
-                // C++: when both calculated values are negative, the comparison is inverted
+                // When both calculated values are negative, the comparison is inverted
                 // (e.g. -10 is a stronger debuff than -5, so -10 - (-5) = -5, but -(-5) = 5)
                 if spell1.effect_base_points[idx] < 0 && spell2.effect_base_points[idx] < 0 {
                     return diff != 0; // still different ranks
@@ -289,9 +289,9 @@ pub fn has_aura_or_triggers_another_spell_with_aura(
 /// `ABILITY_LEARNED_ON_GET_PROFESSION_SKILL` for `SkillLineAbilityEntry::learn_on_get_skill`.
 const ABILITY_LEARNED_ON_GET_PROFESSION_SKILL: u32 = 1;
 
-/// MaNGOS `SpellMgr::IsSkillBonusSpell` — whether `spell_id` is a profession
-/// skill-bonus spell (learned automatically when the profession skill reaches a
-/// certain value, rather than from a trainer or quest).
+/// Whether `spell_id` is a profession skill-bonus spell (learned automatically
+/// when the profession skill reaches a certain value, rather than from a trainer
+/// or quest).
 pub fn is_skill_bonus_spell(spell_id: u32, dbc: &DbcManager) -> bool {
     dbc.skill_line_ability
         .entries()
@@ -404,7 +404,7 @@ pub fn is_spell_with_delayable_effects(spell: &SpellEntry) -> bool {
 }
 
 /// Returns true when the given effect type can be delayed (batched).
-/// Mirrors `SpellEntry::IsDelayableEffect` from MaNGOS.
+/// Returns true when the given effect type can be delayed (batched).
 fn is_delayable_effect(effect: u32) -> bool {
     matches!(
         effect,

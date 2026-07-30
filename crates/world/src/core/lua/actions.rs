@@ -369,7 +369,7 @@ pub enum LuaAction {
 
     // ==================== Player-relative spawning ====================
     /// Spawn a creature at the triggering player's current position.
-    /// Equivalent to pPlayer->SummonCreature(entry, x, y, z, ...) in MaNGOS.
+    /// Equivalent to summoning a creature at the player's current position.
     SpawnCreatureAtPlayer {
         entry: u32,
         summon_type: SummonType,

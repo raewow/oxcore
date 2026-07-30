@@ -1,14 +1,9 @@
-//! Cached caster/target pointer refresh (MaNGOS `Spell::UpdateOriginalCasterPointer`
-//! and `Spell::UpdatePointers`).
+//! Cached caster/target pointer refresh.
 //!
-//! A `Spell` caches raw `Unit*`/`GameObject*`/`Item*` target pointers that can
-//! go stale during a time delay (`Spell::Delayed`); on the next update they are
-//! re-resolved from the matching GUIDs against the live world. Rust has no raw
-//! pointers, so the cached pointers are modelled here as `Option<ObjectGuid>`
-//! and the re-resolution is performed on demand by the world-coupled entries
-//! below. The *decisions* of which lookup branch to take are factored into pure
-//! helpers (no world access) so the full branch matrix is unit-testable without
-//! a DB.
+//! A spell cast caches target references as GUIDs; during a delayed cast they
+//! may need re-resolving from the live world. The *decisions* of which lookup
+//! branch to take are factored into pure helpers (no world access) so the full
+//! branch matrix is unit-testable without a DB.
 
 use crate::game::player::spells::state::{CurrentSpellType, SpellCastTargets, SpellState};
 use crate::World;
@@ -16,25 +11,22 @@ use oxcore_shared::protocol::{ObjectGuid, Position};
 
 // ─── Per-cast state (input/output) ───────────────────────────────────────────
 
-/// Inputs the caller gathers to refresh a cast's cached pointer state. Rust's
-/// `ActiveCast` does not carry original-caster fields, so the caller threads
-/// them through here instead.
+/// Inputs the caller gathers to refresh a cast's cached pointer state.
 #[derive(Debug, Clone, Copy)]
 pub struct CastPointerInput {
-    /// `m_caster->GetObjectGuid()` — the caster `WorldObject`'s own guid.
+    /// The caster's own GUID.
     pub caster_guid: ObjectGuid,
-    /// `m_casterUnit` — the `Unit*` the caster exposes. Identical to
+    /// The unit-level caster GUID. Identical to
     /// `caster_guid` for player / creature / pet casters; `None` for an
     /// unowned GameObject caster (the GO has no owning Unit).
     pub caster_unit_guid: Option<ObjectGuid>,
-    /// `m_originalCasterGUID` — the stored original-caster guid whose pointer
-    /// we refresh.
+    /// The stored original-caster GUID to refresh.
     pub original_caster_guid: ObjectGuid,
 }
 
 impl CastPointerInput {
-    /// Convenience for player / creature / pet casters, where `m_caster` and
-    /// `m_casterUnit` share the same guid.
+    /// Convenience for player / creature / pet casters, where the caster and
+    /// caster-unit guids are the same.
     pub fn for_unit(caster_guid: ObjectGuid, original_caster_guid: ObjectGuid) -> Self {
         Self {
             caster_guid,
@@ -45,18 +37,17 @@ impl CastPointerInput {
 }
 
 /// Refreshed cached pointer state for one cast. Each `Option<ObjectGuid>` is
-/// the Rust equivalent of the C++ cached pointer (`None` ↔ `nullptr`), plus
-/// two seam flags recording that both sub-steps of `Spell::UpdatePointers`
+/// a resolved target, plus two seam flags recording that both sub-steps
 /// ran in order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PointerRefresh {
-    /// Resolved `m_originalCaster`.
+    /// Resolved original caster.
     pub original_caster: Option<ObjectGuid>,
-    /// Resolved `m_unitTarget`.
+    /// Resolved unit target.
     pub unit_target: Option<ObjectGuid>,
-    /// Resolved `m_GOTarget`.
+    /// Resolved game object target.
     pub go_target: Option<ObjectGuid>,
-    /// Resolved `m_itemTarget` (only re-resolved when the caster is a Player).
+    /// Resolved item target (only re-resolved when the caster is a Player).
     pub item_target: Option<ObjectGuid>,
     /// Set once the original-caster refresh step ran (seam flag for tests).
     pub original_caster_refreshed: bool,
@@ -67,7 +58,7 @@ pub struct PointerRefresh {
 
 // ─── Pure decision logic ────────────────────────────────────────────────────
 
-/// Which resolution branch `Spell::UpdateOriginalCasterPointer` takes.
+/// Which resolution branch the original-caster refresh takes.
 ///
 /// Carrying the guid in the `GameObjectLookup` / `UnitLookup` variants keeps
 /// the branch selection pure: the world lookup is performed later, against
@@ -77,17 +68,15 @@ pub enum OriginalCasterResolution {
     /// `m_originalCasterGUID == m_caster->GetObjectGuid()` — the cached
     /// original-caster pointer is simply `m_casterUnit`.
     SameAsCaster,
-    /// `m_originalCasterGUID.IsGameObject()` — look the GO up via the caster's
+    /// The original caster is a game object — look it up via the caster's
     /// map, then read its owner.
     GameObjectLookup(ObjectGuid),
-    /// Otherwise — `ObjectAccessor::GetUnit(*m_caster, guid)` then validate
-    /// `unit->IsInWorld()`.
+    /// Otherwise — look up the unit and validate it is in the world.
     UnitLookup(ObjectGuid),
 }
 
-/// Pure branch selector for `Spell::UpdateOriginalCasterPointer`. Identifies
-/// which lookup branch to take from the stored GUIDs alone, with no world
-/// access.
+/// Identifies which lookup branch to take from the stored GUIDs alone, with
+/// no world access.
 pub fn resolve_original_caster_branch(
     original_caster_guid: ObjectGuid,
     caster_guid: ObjectGuid,
@@ -101,8 +90,8 @@ pub fn resolve_original_caster_branch(
     }
 }
 
-/// A world-free snapshot of the GUIDs `m_targets.Update(m_caster)` re-resolves.
-/// Held separately from `SpellCastTargets` so the pure helpers stay
+/// A world-free snapshot of the GUIDs that get re-resolved during a pointer
+/// refresh. Held separately from `SpellCastTargets` so the pure helpers stay
 /// world-independent.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TargetGuidSnapshot {
@@ -123,10 +112,8 @@ impl TargetGuidSnapshot {
     }
 }
 
-/// Pure transform of `m_targets.Update(m_caster)`: collects the stored GUIDs
-/// that need re-resolution (i.e. those present on the snapshot). Stale
-/// (`None`) GUIDs are preserved as `None` — equivalent to the C++ cached
-/// pointer remaining `nullptr`.
+/// Collects the stored GUIDs that need re-resolution (i.e. those present on
+/// the snapshot). Stale (`None`) GUIDs are preserved as `None`.
 pub fn target_guids_needing_resolution(snapshot: &TargetGuidSnapshot) -> Vec<ObjectGuid> {
     let mut out = Vec::new();
     if let Some(g) = snapshot.unit_target {
@@ -146,10 +133,9 @@ pub fn target_guids_needing_resolution(snapshot: &TargetGuidSnapshot) -> Vec<Obj
 
 // ─── World-coupled lookups ───────────────────────────────────────────────────
 
-/// Resolve a unit guid against the world (`ObjectAccessor::GetUnit`
-/// equivalent). Returns `Some(guid)` when the unit is present in its manager,
-/// which doubles as the MaNGOS `IsInWorld()` check for units — a guid not in
-/// its manager is treated as out-of-world and yields `None`.
+/// Resolve a unit guid against the world. Returns `Some(guid)` when the unit
+/// is present in its manager; a guid not in its manager is treated as
+/// out-of-world and yields `None`.
 fn lookup_unit_by_guid(guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
     if guid.is_player() {
         world
@@ -169,7 +155,7 @@ fn lookup_unit_by_guid(guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
     }
 }
 
-/// Approximation of `m_caster->IsInWorld()` used by the GameObject branch.
+/// Whether the caster is in-world, used by the GameObject branch.
 /// Players and creatures count as in-world while present in their managers;
 /// a gameobject caster additionally requires its `in_world` flag to be set.
 fn is_caster_in_world(caster_guid: ObjectGuid, world: &World) -> bool {
@@ -235,11 +221,10 @@ fn lookup_gameobject_on_caster_map(
         .flatten()
 }
 
-/// `Spell::UpdateOriginalCasterPointer` — world-coupled resolution of the
-/// cached original-caster pointer.
+/// World-coupled resolution of the cached original-caster pointer.
 ///
-/// Returns the resolved original-caster guid (`None` when the C++ pointer
-/// would be `null` — branch 2 with a caster not in world, a GO not present, or
+/// Returns the resolved original-caster guid (`None` when the caster is not
+/// in world, a GO is not present, or
 /// an unowned / out-of-world owner; branch 3 with a missing unit).
 pub fn update_original_caster_pointer(
     input: &CastPointerInput,
@@ -262,9 +247,9 @@ pub fn update_original_caster_pointer(
     }
 }
 
-/// `m_targets.Update` `m_unitTarget` resolution. MaNGOS uses `pCaster`
-/// directly when the stored unit-target GUID matches the caster (no map
-/// lookup needed), else `ObjectAccessor::GetUnit`.
+/// Resolve the unit target from its GUID. Uses
+/// the caster directly when the stored unit-target GUID matches the caster
+/// (no map lookup needed).
 fn resolve_unit_target(
     unit_target_guid: ObjectGuid,
     caster_guid: ObjectGuid,
@@ -276,7 +261,7 @@ fn resolve_unit_target(
     lookup_unit_by_guid(unit_target_guid, world)
 }
 
-/// `m_targets.Update` `m_GOTarget` resolution through the caster's map.
+/// Resolve the game object target from its GUID through the caster's map.
 fn resolve_go_target(
     go_target_guid: ObjectGuid,
     caster_guid: ObjectGuid,
@@ -285,9 +270,9 @@ fn resolve_go_target(
     lookup_gameobject_on_caster_map(caster_guid, go_target_guid, world)
 }
 
-/// `Spell::UpdatePointers` — first refresh the cached original-caster pointer
+/// First refresh the cached original-caster pointer
 /// via [`update_original_caster_pointer`], then re-resolve the stored unit /
-/// GO / item target GUIDs (the C++ `m_targets.Update(m_caster)` step).
+/// GO / item target GUIDs.
 pub fn update_pointers(
     input: &CastPointerInput,
     targets: &SpellCastTargets,
@@ -309,7 +294,7 @@ pub fn update_pointers(
         .go_target
         .and_then(|g| resolve_go_target(g, input.caster_guid, world));
     if input.caster_guid.is_player() {
-        // `m_itemTarget` is only re-resolved when the caster is a Player. The
+        // The item target is only re-resolved when the caster is a Player. The
         // cached item pointer is the stored GUID itself; full item resolution
         // (player inventory / trade-frame accessor) is not wired through the
         // manager `with_*` lookups yet.
@@ -318,20 +303,15 @@ pub fn update_pointers(
     refresh
 }
 
-// ─── `Spell::GetCurrentContainer` ────────────────────────────────────────────
+// ─── Spell slot classification ───────────────────────────────────────────────
 
-/// Pure classifier for `Spell::GetCurrentContainer` — maps a cast to one of the
-/// four `CurrentSpellTypes` slots via the fixed priority chain
-/// (melee → auto-repeat → channeled → generic).
+/// Maps a cast to one of the four `CurrentSpellTypes` slots via the fixed
+/// priority chain (melee → auto-repeat → channeled → generic).
 ///
-/// The three predicate inputs mirror the C++ member reads:
-/// * `is_next_melee_swing` ↔ `m_spellInfo->IsNextMeleeSwingSpell()`
-/// * `is_auto_repeat` ↔ `IsAutoRepeat()`
-/// * `is_channeled` ↔ `m_channeled`, gated by the compound channeled condition
-///   `(!m_casttime || m_IsTriggeredSpell || m_spellState == SPELL_STATE_CASTING)`.
-///
-/// Keeping the attribute-bit interpretation with the caller (where it already
-/// lives) leaves this helper a faithful transcription of the branch order.
+/// * `is_next_melee_swing` — whether the spell is a next-melee-swing spell
+/// * `is_auto_repeat` — whether auto-repeat is active
+/// * `is_channeled` — whether the cast is a channeled spell
+/// * `cast_time_ms` — the cast time in milliseconds
 pub fn current_container(
     is_next_melee_swing: bool,
     is_auto_repeat: bool,
@@ -355,18 +335,16 @@ pub fn current_container(
 
 // ─── Effective-source accessors ──────────────────────────────────────────────
 
-/// `Spell::GetAffectiveCasterObject` — resolves the effective source of the
-/// cast's *effects* (explicit caster, DoT/HoT applier, GO owner, or wild GO).
+/// Resolves the effective source of the cast's *effects* (explicit caster,
+/// DoT/HoT applier, GO owner, or wild GO).
 ///
-/// * empty `m_originalCasterGUID` → the formal caster (`m_caster`);
+/// * empty original-caster GUID → the formal caster;
 /// * a game-object original caster while the caster is in-world → that GO looked
 ///   up on the caster's map;
-/// * otherwise → the cached `m_originalCaster` unit (modelled here by
-///   re-running [`update_original_caster_pointer`], which resolves the same
-///   pointer the C++ `UpdatePointers` would have cached).
+/// * otherwise → the cached original-caster unit (re-derived via
+///   [`update_original_caster_pointer`]).
 ///
-/// `None` mirrors a `nullptr` return (missing GO, unowned / out-of-world owner,
-/// or an original caster no longer in world).
+/// Returns `None` when the resolved object cannot be found.
 pub fn get_affective_caster_object(input: &CastPointerInput, world: &World) -> Option<ObjectGuid> {
     if input.original_caster_guid.is_empty() {
         return Some(input.caster_guid);
@@ -381,20 +359,17 @@ pub fn get_affective_caster_object(input: &CastPointerInput, world: &World) -> O
     update_original_caster_pointer(input, world)
 }
 
-/// `Spell::GetAffectiveObject` — has no distinct definition in the reference
-/// tree (the name only appears in a Doxygen `@param` comment). The live
-/// substitute the notifier actually calls when no explicit original caster is
-/// supplied is `GetAffectiveCasterObject`, so this delegates to it.
+/// Delegates to [`get_affective_caster_object`] (the notifier uses this
+/// when no explicit original caster is supplied).
 pub fn get_affective_object(input: &CastPointerInput, world: &World) -> Option<ObjectGuid> {
     get_affective_caster_object(input, world)
 }
 
-/// `Spell::GetCastingObject` — resolves the cast's *visual / casting* object.
+/// Resolves the cast's *visual / casting* object.
 ///
-/// When `m_originalCasterGUID` is a game object it returns that GO looked up on
+/// When the original caster is a game object it returns that GO looked up on
 /// the caster's map (only while the caster is in-world, else `None`); for every
-/// other GUID it returns the formal caster (`m_caster`) unconditionally — the
-/// C++ non-GO path applies no in-world guard.
+/// other GUID it returns the formal caster unconditionally.
 pub fn get_casting_object(input: &CastPointerInput, world: &World) -> Option<ObjectGuid> {
     if input.original_caster_guid.is_game_object() {
         if is_caster_in_world(input.caster_guid, world) {
@@ -407,11 +382,10 @@ pub fn get_casting_object(input: &CastPointerInput, world: &World) -> Option<Obj
     }
 }
 
-/// `Spell::UpdateCastStartPosition` — records the caster position at cast start.
+/// Records the caster position at cast start.
 ///
 /// When the caster is on a transport (`transport_position` is `Some`), uses
-/// transport-relative offsets (`x/y/z/o`); otherwise uses the world
-/// `position`. Called at `prepare()` time.
+/// transport-relative offsets; otherwise uses the world `position`.
 pub fn update_cast_start_position(
     position: Position,
     transport_position: Option<Position>,
@@ -675,7 +649,7 @@ mod tests {
         assert_eq!(update_original_caster_pointer(&input, &world), None);
     }
 
-    // ── `Spell::UpdatePointers` (both steps, in order) ─────────────────────
+    // ── `update_pointers` (both steps, in order) ─────────────────────
 
     #[tokio::test]
     async fn update_pointers_runs_original_caster_then_targets() {
@@ -781,7 +755,7 @@ mod tests {
         assert_eq!(refresh.unit_target, Some(caster));
     }
 
-    // ── `Spell::GetCurrentContainer` (pure priority chain) ─────────────────
+    // ── `current_container` (pure priority chain) ─────────────────
 
     #[test]
     fn container_melee_wins_over_everything() {

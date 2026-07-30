@@ -4,7 +4,7 @@ use crate::protocol::ObjectGuid;
 use crate::protocol::Opcode;
 use crate::protocol::WorldPacket;
 
-// Inventory Result Error Codes - matching MaNGOS InventoryResult enum
+// Inventory Result Error Codes
 pub const EQUIP_ERR_OK: u8 = 0;
 pub const EQUIP_ERR_CANT_EQUIP_LEVEL_I: u8 = 1;
 pub const EQUIP_ERR_CANT_EQUIP_SKILL: u8 = 2;
@@ -89,7 +89,7 @@ pub const ERR_UNKNOWN: u8 = EQUIP_ERR_INT_BAG_ERROR;
 
 /// SMSG_INVENTORY_CHANGE_FAILURE packet
 ///
-/// Structure (matching MaNGOS):
+/// Structure:
 /// - uint8: error code (InventoryResult)
 /// - If error != EQUIP_ERR_OK:
 ///   - If error == EQUIP_ERR_CANT_EQUIP_LEVEL_I: uint32 required_level

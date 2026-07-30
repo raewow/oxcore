@@ -673,7 +673,7 @@ impl PlayerManager {
         let spellbook = self.collect_spells_for_save(player_guid);
 
         let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
-        // Delete all saved spells then re-insert (matches vMaNGOS _SaveSpells pattern)
+        // Delete all saved spells then re-insert.
         sqlx::query("DELETE FROM character_spell WHERE guid = ?")
             .bind(player_guid.counter())
             .execute(character_db)

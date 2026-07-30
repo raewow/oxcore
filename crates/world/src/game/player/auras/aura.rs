@@ -264,12 +264,12 @@ impl Aura {
         self.periodic_timer_ms = 0;
     }
 
-    /// Mirror `SpellAuraHolder::SetAuraMaxDuration` for this effect of a holder.
+    /// Set maximum duration for this aura effect.
     pub fn set_max_duration(&mut self, duration_ms: i32) {
         self.max_duration_ms = (duration_ms >= 0).then_some(duration_ms as u32);
 
         // A passive spell with no SpellDuration record remains permanent even if a caller
-        // supplies a positive cap. This is the C++ DurationIndex == 0 exception.
+        // supplies a positive cap (DurationIndex == 0).
         if duration_ms > 0 && !(self.is_passive() && self.duration_index == 0) {
             self.flags.is_permanent = false;
         }
@@ -290,20 +290,18 @@ impl Aura {
             super::periodic::update_periodic_timer(duration_ms, self.periodic_interval_ms as i32)
                 as u32;
 
-        // C++ stores time until the next tick; Rust stores elapsed time since the last one.
-        // A full interval remaining maps to zero elapsed, not to a complete interval elapsed.
+        // Stored as elapsed time since the last tick. A full interval remaining maps to zero
+        // elapsed, not to a complete interval elapsed.
         self.periodic_timer_ms = self.periodic_interval_ms.saturating_sub(until_next);
     }
 
     /// Refresh this aura using a freshly-cast application of the same spell/effect.
     ///
-    /// Mirrors `SpellAuraHolder::Refresh` / `Aura::Refresh` (SpellAuras.cpp:311-378): duration
-    /// and max duration are taken from the *new* cast (`reapplied`), not the old aura's stored
-    /// max — a spell recast with a different computed duration (haste change, different rank,
-    /// etc.) must adopt the new duration, not just reset the timer to the previous cap. The
-    /// periodic tick counter and timer restart from zero (`m_periodicTick = 0` +
-    /// `CalculatePeriodic`), and the effect value/misc value are taken over from the new
-    /// application (`m_modifier.m_amount`/`m_miscvalue` copied from `pHolderAura`).
+    /// Duration and max duration are taken from the *new* cast (`reapplied`), not the old aura's
+    /// stored max — a spell recast with a different computed duration (haste change, different
+    /// rank, etc.) must adopt the new duration, not just reset the timer to the previous cap.
+    /// The periodic tick counter and timer restart from zero, and the effect value/misc value
+    /// are taken over from the new application.
     pub fn refresh_with(&mut self, reapplied: &Aura) {
         self.duration_ms = reapplied.duration_ms;
         self.max_duration_ms = reapplied.max_duration_ms;
@@ -320,11 +318,11 @@ impl Aura {
     /// Whether this aura can be refreshed-in-place by a new application of the same spell
     /// from the same caster, rather than being stacked or replaced.
     ///
-    /// Mirrors `SpellAuraHolder::CanBeRefreshedBy` (SpellAuras.cpp:380-394): requires the same
-    /// caster and same spell id (checked by the caller via the `(spell_id, effect_index)` key
-    /// and `caster_guid` equality — see `AuraContainer::add_aura`), and requires the spell to
-    /// have neither a stack amount nor proc charges (both preclude simple refresh: a stackable
-    /// spell goes through `ModStackAmount`/`add_stack` instead, and a charge-based spell must
+    /// Requires the same caster and same spell id (checked by the caller via the
+    /// `(spell_id, effect_index)` key and `caster_guid` equality — see
+    /// `AuraContainer::add_aura`), and requires the spell to have neither a stack amount nor
+    /// proc charges (both preclude simple refresh: a stackable spell goes through
+    /// `ModStackAmount`/`add_stack` instead, and a charge-based spell must
     /// not have its charge count silently reset by a refresh).
     pub fn can_be_refreshed_by(&self, other_caster_guid: ObjectGuid) -> bool {
         if self.caster_guid != other_caster_guid {
@@ -393,12 +391,11 @@ mod tests {
         )
     }
 
-    // --- refresh_with: SpellAuraHolder::Refresh / Aura::Refresh (SpellAuras.cpp:311-378) ---
+    // --- refresh_with ---
 
     #[test]
     fn refresh_with_adopts_new_duration_not_old_max() {
-        // C++: m_duration = m_maxDuration = pRefreshWithHolder->GetAuraDuration()/GetAuraMaxDuration()
-        // i.e. the *new* cast's duration wins, not the existing aura's stored max.
+        // The *new* cast's duration wins, not the existing aura's stored max.
         let mut existing = make_aura(guid(1), 10, Some(5_000));
         existing.duration_ms = Some(1_234); // ticked down since it was applied
         let reapplied = make_aura(guid(1), 10, Some(8_000)); // e.g. recast with more haste/rank
@@ -435,7 +432,7 @@ mod tests {
         assert_eq!(existing.current_value(), 60); // 20 * 3 stacks
     }
 
-    // --- can_be_refreshed_by: SpellAuraHolder::CanBeRefreshedBy (SpellAuras.cpp:380-394) ---
+    // --- can_be_refreshed_by ---
 
     #[test]
     fn can_be_refreshed_by_same_caster_no_stacks_no_charges() {
@@ -451,8 +448,7 @@ mod tests {
 
     #[test]
     fn can_be_refreshed_by_false_when_stackable() {
-        // C++: `if (m_spellProto->StackAmount) return false;` — stackable auras go through
-        // ModStackAmount instead of a plain refresh.
+        // Stackable auras go through add_stack instead of a plain refresh.
         let mut aura = make_aura(guid(1), 10, Some(5_000));
         aura.max_stack_count = 5;
         assert!(!aura.can_be_refreshed_by(guid(1)));
@@ -460,8 +456,7 @@ mod tests {
 
     #[test]
     fn can_be_refreshed_by_false_when_has_charges() {
-        // C++: `if (m_spellProto->procCharges) return false;` — charge-based auras must not
-        // have their charge count reset by a plain refresh.
+        // Charge-based auras must not have their charge count reset by a plain refresh.
         let mut aura = make_aura(guid(1), 10, Some(5_000));
         aura.max_charges = 3;
         aura.charges = 3;
@@ -560,7 +555,7 @@ mod tests {
 
         aura.refresh_periodic_timer(7_000);
 
-        // C++ computes 1000 ms until the next tick; elapsed storage is 2000 ms.
+        // 1000 ms until the next tick means 2000 ms elapsed.
         assert_eq!(aura.periodic_timer_ms, 2_000);
     }
 

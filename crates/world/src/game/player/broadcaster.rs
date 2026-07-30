@@ -130,8 +130,8 @@ impl PlayerBroadcaster {
     ///
     /// `SMSG_COMPRESSED_UPDATE_OBJECT` wraps a *vanilla* body in zlib, so it is inseparable from
     /// the vanilla encoding — there is no way to compress first and choose a protocol later. A
-    /// modern client gets the uncompressed body, which is also what HermesProxy sends: it inflates
-    /// the legacy packet and forwards a plain `SMSG_UPDATE_OBJECT`.
+    /// A modern client gets the uncompressed body: it inflates the legacy packet and forwards a
+    /// plain `SMSG_UPDATE_OBJECT`.
     ///
     /// This exists because the visibility system is the one place that must compress, and routing
     /// it through the ordinary message path would silently drop every object update for a modern

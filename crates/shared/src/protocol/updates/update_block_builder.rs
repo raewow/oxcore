@@ -236,7 +236,7 @@ impl UpdateBlockBuilder {
 
     /// Set UPDATEFLAG_MELEE_ATTACKING with the victim's GUID.
     ///
-    /// MaNGOS adds this flag when a unit has a victim and is in melee attacking state.
+    /// Add this flag when a unit has a victim and is in melee attacking state.
     /// The client expects a packed GUID of the victim after the ALL u32 in the update block.
     pub fn with_melee_attacking(mut self, victim: ObjectGuid) -> Self {
         self.update_flags |= update_flags::UPDATEFLAG_MELEE_ATTACKING;
@@ -345,7 +345,7 @@ impl UpdateBlockBuilder {
             self.write_movement_block(buf, movement);
         }
 
-        // Post-movement flags (MaNGOS order: HIGHGUID, ALL, MELEE_ATTACKING, TRANSPORT)
+        // Post-movement flags (order: HIGHGUID, ALL, MELEE_ATTACKING, TRANSPORT)
         if self.update_flags & update_flags::UPDATEFLAG_HIGHGUID != 0 {
             buf.put_u32_le(0);
         }
@@ -391,7 +391,7 @@ impl UpdateBlockBuilder {
             self.write_movement_block_to_packet(packet, movement);
         }
 
-        // Post-movement flags (MaNGOS order: HIGHGUID, ALL, MELEE_ATTACKING, TRANSPORT)
+        // Post-movement flags (order: HIGHGUID, ALL, MELEE_ATTACKING, TRANSPORT)
         if self.update_flags & update_flags::UPDATEFLAG_HIGHGUID != 0 {
             packet.write_u32(0);
         }

@@ -2,7 +2,7 @@
 //!
 //! Unlike the vanilla RC4-drop cipher in [`crate::core::network::crypt`], the modern client
 //! encrypts each packet's `opcode ‖ body` with AES-128-GCM and prepends a plaintext size and the
-//! 12-byte GCM tag. Transcribed from HermesProxy's `PacketCrypt.cs` (`WorldCrypt`) / TrinityCore.
+//! 12-byte GCM tag.
 //!
 //! The nonce is `counter (u64 LE) ‖ tag-id (u32 LE)`, where the tag-id distinguishes the two
 //! directions — `"SRVR"` for server→client and `"CLNT"` for client→server — and the counter

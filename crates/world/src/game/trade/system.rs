@@ -534,7 +534,7 @@ impl TradeSystem {
 
         // 12. Check distance
         // TODO: Implement distance validation - for now we rely on client-side checks
-        // Per MaNGOS: should check GetDistance3dToCenter(trader) > TRADE_DISTANCE
+        // Should check GetDistance3dToCenter(trader) > TRADE_DISTANCE
 
         // 13. Check trial account
         // TODO: Check when account type is tracked

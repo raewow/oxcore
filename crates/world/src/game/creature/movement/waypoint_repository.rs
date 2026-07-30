@@ -1,6 +1,6 @@
 //! WaypointRepository - loads waypoint data from database
 //!
-//! MaNGOS stores waypoints in three tables:
+//! Waypoints are stored in two tables:
 //! - creature_movement: Per-GUID waypoints (FromGuid)
 //! - creature_movement_template: Per-entry waypoints (FromEntry)
 
@@ -77,8 +77,7 @@ impl WaypointRepository {
         grouped
     }
 
-    /// Convert one DB row into a waypoint, normalizing bad data the way the C++
-    /// loader does.
+    /// Convert one DB row into a waypoint, normalizing bad data.
     fn build_waypoint(row: WaypointRow) -> Waypoint {
         // The DB stores 100 to mean "no orientation override at this node".
         let orientation = row

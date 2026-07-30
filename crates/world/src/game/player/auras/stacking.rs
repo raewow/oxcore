@@ -96,14 +96,11 @@ pub fn exclusive_aura_can_apply(
 
 /// Determine the stack action based on existing and new aura data.
 ///
-/// The same-caster branch mirrors `SpellAuraHolder::CanBeRefreshedBy` +
-/// `SpellAuraHolder::ModStackAmount` (SpellAuras.cpp:380-394, 6897-6918): a holder can only be
-/// refreshed in place (duration reset, no new stack) when the spell has neither a stack amount
-/// nor proc charges. `existing_max_charges` corresponds to `m_spellProto->procCharges` — a
-/// charge-based aura (e.g. Enrage-style procs with limited charges) must never be silently
-/// refreshed by `CanBeRefreshedBy`, even if it also isn't stackable, since that would reset the
-/// charge count for free. Such auras fall through to plain replacement, same as C++ falling out
-/// of `CanBeRefreshedBy` into the `RemoveSpellAuraHolder` + re-add path.
+/// The same-caster branch: a holder can only be refreshed in place (duration reset, no new stack)
+/// when the spell has neither a stack amount nor proc charges. `existing_max_charges` corresponds
+/// to the spell's proc charges — a charge-based aura (e.g. Enrage-style procs with limited
+/// charges) must never be silently refreshed, even if it also isn't stackable, since that would
+/// reset the charge count for free. Such auras fall through to plain replacement.
 #[allow(clippy::too_many_arguments)]
 pub fn determine_stack_action(
     existing_spell_id: u32,
@@ -207,12 +204,11 @@ pub fn is_same_spell_different_rank(spell_a: u32, spell_b: u32) -> bool {
 /// Decide which of two auras competing for a limited visible buff/debuff slot should win,
 /// when the visible-slot cap (31 buffs / 16 debuffs) has been exceeded.
 ///
-/// Mirrors `SpellAuraHolder::IsMoreImportantVisualAuraThan` (SpellAuras.cpp:396-403). `self`
-/// wins the slot if `self_score > other_score`; ties are broken by apply time, with the more
-/// recently applied aura winning. `score` corresponds to `m_visibleSlotLimitScore`, computed by
-/// `CalculateForBuffLimit`/`CalculateForDebuffLimit` (out of scope here — no visible-slot-limit
-/// eviction path exists yet in `AuraContainer`, which currently just refuses new auras once all
-/// slots in a category are full instead of evicting a lower-priority one).
+/// `self` wins the slot if `self_score > other_score`; ties are broken by apply time, with the
+/// more recently applied aura winning. `score` is the visible-slot-limit priority score (out of
+/// scope here — no visible-slot-limit eviction path exists yet in `AuraContainer`, which
+/// currently just refuses new auras once all slots in a category are full instead of evicting a
+/// lower-priority one).
 pub fn is_more_important_visual_aura_than(
     self_score: i32,
     self_apply_time: u64,
@@ -255,7 +251,7 @@ mod tests {
         assert_ne!(action, StackAction::Blocked);
     }
 
-    // --- determine_stack_action: same spell, same caster (CanBeRefreshedBy / ModStackAmount) ---
+    // --- determine_stack_action: same spell, same caster ---
 
     #[test]
     fn same_caster_non_stackable_no_charges_refreshes() {
@@ -350,7 +346,7 @@ mod tests {
         );
     }
 
-    // --- is_more_important_visual_aura_than: SpellAuraHolder::IsMoreImportantVisualAuraThan ---
+    // --- is_more_important_visual_aura_than ---
 
     #[test]
     fn higher_score_wins_regardless_of_apply_time() {

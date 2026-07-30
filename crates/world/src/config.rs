@@ -54,8 +54,7 @@ pub struct Config {
     ///
     /// Deliberately a separate file rather than more lines in `world.log`: a full per-packet trace
     /// is the tool for decoding a body the client rejected, and `world.log` is already tens of
-    /// megabytes per session from vmap and navmesh chatter. Modelled on the 1.14 reference's structured
-    /// logging (`Framework/Logging/Log.cs`).
+    /// megabytes per session from vmap and navmesh chatter.
     #[serde(default)]
     pub modern_packet_log: String,
     /// How many bytes of each packet body to record as hex, 0 for none.
@@ -131,7 +130,7 @@ pub struct Config {
     #[serde(default = "default_allow_cross_faction_whispers")]
     pub allow_cross_faction_whispers: bool,
 
-    // Cross-Faction Interaction Settings (matches MaNGOS AllowTwoSide.Interaction.*)
+    // Cross-Faction Interaction Settings
     #[serde(default)]
     pub allow_cross_faction_chat: bool, // Say/Yell/Emote (default: false)
     #[serde(default)]
@@ -334,7 +333,7 @@ fn default_world_update_interval() -> u32 {
 }
 
 fn default_spell_effect_delay_ms() -> u32 {
-    400 // MaNGOS Spell.EffectDelay default
+    400 // Spell.EffectDelay default
 }
 
 fn default_realm_id() -> i32 {

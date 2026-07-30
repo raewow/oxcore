@@ -6,9 +6,9 @@ use anyhow::{Context, Result};
 /// Faction.dbc structure: ID, reputationListID, BaseRepValue[88] (8 races * 11 classes), and other fields
 /// For vanilla 1.12.1, the format string is approximately: "nii" + 88*i + other fields
 /// Simplified format: "nii" + 88*i = "nii" + 88*i = "nii" + 88*i
-/// Faction DBC entry structure (matches C++ FactionEntry)
+/// Faction DBC entry structure
 /// Format: ID, reputationListID, BaseRepRaceMask[4], BaseRepClassMask[4], BaseRepValue[4], ReputationFlags[4], team
-/// Note: The DBC may also have an 88-value array format, but we use the mask-based format to match C++ core
+/// Note: The DBC may also have an 88-value array format, but we use the mask-based format
 #[derive(Debug, Clone)]
 pub struct FactionDbcEntry {
     pub id: u32,
@@ -66,7 +66,7 @@ impl DbcEntry for FactionDbcEntry {
 
         let field_count = record.field_count() as usize;
 
-        // Read mask-based format (matches C++ core structure):
+        // Read mask-based format:
         // Fields 2-5: BaseRepRaceMask[4]
         // Fields 6-9: BaseRepClassMask[4]
         // Fields 10-13: BaseRepValue[4]

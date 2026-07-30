@@ -12,7 +12,7 @@ use oxcore_shared::protocol::{ObjectGuid, Position, Protocol, WorldPacket};
 pub struct MoveFlags(u32);
 
 impl MoveFlags {
-    // Vanilla 1.12.1 movement flags (from MaNGOS-classic MovementInfo.h)
+    // Vanilla 1.12.1 movement flags
     pub const NONE: MoveFlags = MoveFlags(0x00000000);
     pub const FORWARD: MoveFlags = MoveFlags(0x00000001);
     pub const BACKWARD: MoveFlags = MoveFlags(0x00000002);
@@ -127,20 +127,18 @@ impl MovementInfo {
         }
     }
 
-    /// Record that the unit is riding a transport at the given local offset
-    /// (`MovementInfo::SetTransportData`).
+    /// Record that the unit is riding a transport at the given local offset.
     ///
-    /// The `ONTRANSPORT` movement flag is set separately by the boarding code, matching the
-    /// C++ split between `SetTransportData` and `AddMovementFlag`.
+    /// The `ONTRANSPORT` movement flag is set separately by the boarding code.
     pub fn set_transport_data(&mut self, transport: ObjectGuid, offset: Position) {
         self.transport_guid = Some(transport);
         self.transport_position = Some(offset);
     }
 
-    /// Clear the unit's transport ride (`MovementInfo::ClearTransportData`).
+    /// Clear the unit's transport ride.
     ///
-    /// Drops the transport GUID and local offset; the C++ leaves the transport time and the
-    /// `ONTRANSPORT` flag to the caller, so those are untouched here.
+    /// Drops the transport GUID and local offset; the caller is responsible for the transport time and
+    /// `ONTRANSPORT` flag.
     pub fn clear_transport_data(&mut self) {
         self.transport_guid = None;
         self.transport_position = None;
@@ -346,7 +344,7 @@ mod tests {
     }
 }
 
-/// The world crate keeps its own `MovementInfo` (see the module header -- it was ported wholesale).
+/// The world crate keeps its own `MovementInfo`.
 /// The two are structurally identical, so parses done in `oxcore-shared` convert straight across.
 impl From<SharedMovementInfo> for MovementInfo {
     fn from(shared: SharedMovementInfo) -> Self {

@@ -129,9 +129,9 @@ pub struct StatsSystem {
 
 /// Combine an attack-power base (formula + equipped) with aura modifiers.
 ///
-/// Mirrors MaNGOS `HandleAttackPowerModifier`: flat AP mods (positive/negative) add to the base
-/// total, then the percent mods apply a multiplier — final = `(base + flat) * (1 + pct/100)`,
-/// clamped to non-negative. Used for both melee and ranged attack power.
+/// Flat AP mods (positive/negative) add to the base total, then the percent mods apply a
+/// multiplier — final = `(base + flat) * (1 + pct/100)`, clamped to non-negative. Used for both
+/// melee and ranged attack power.
 fn combine_attack_power(base: f32, flat: i32, pct: i32) -> i32 {
     ((base + flat as f32) * (1.0 + pct as f32 / 100.0)).max(0.0) as i32
 }
@@ -147,9 +147,9 @@ fn calculate_non_mana_max_power(unit_mods: &super::modifiers::UnitModifierGroup,
 
 /// Armor added by `AURA_MOD_RESISTANCE_OF_STAT_PERCENT` auras.
 ///
-/// In the reference core this currently supports only physical resistance (armor) and derives the
-/// bonus from Intellect. The active auras are read during recalculation, so applying/removing one
-/// needs no persistent unit-modifier entry.
+/// Currently supports only physical resistance (armor) and derives the bonus from Intellect.
+/// The active auras are read during recalculation, so applying/removing one needs no persistent
+/// unit-modifier entry.
 fn resistance_of_stat_armor_bonus(intellect: f32, auras: impl Iterator<Item = (i32, i32)>) -> f32 {
     const SCHOOL_MASK_NORMAL: i32 = 1;
 
@@ -453,7 +453,7 @@ impl StatsSystem {
 
             // 5. Attack power
             // Aura AP: flat mods add to the base + equipped total, then the percent mods
-            // apply a multiplier (matches MaNGOS HandleAttackPowerModifier flat vs AP_MOD_PCT
+            // apply a multiplier (flat vs percent AP modifier)
             // buckets — final = (base + flat) * (1 + pct/100)).
             {
                 use crate::game::player::auras::effects::{
@@ -949,7 +949,7 @@ impl StatsSystem {
 mod tests {
     use super::*;
 
-    // ── combine_attack_power (MaNGOS HandleAttackPowerModifier buckets) ───────
+    // ── combine_attack_power ──────────────────────────────────────────────────
 
     #[test]
     fn combine_attack_power_flat_only() {

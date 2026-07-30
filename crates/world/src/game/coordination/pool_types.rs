@@ -1,4 +1,4 @@
-//! Spawn pool data types (port of MaNGOS `PoolManager.h` `PoolGroup`/`PoolObject`).
+//! Spawn pool data types.
 //!
 //! A pool holds a set of candidate spawns and only ever keeps `max_limit` of
 //! them in the world at a time. Which candidates are picked is the pool's
@@ -70,8 +70,8 @@ impl PoolTemplate {
 
 /// Roster of one pool in one map instance.
 ///
-/// MaNGOS stores this in the map's persistent state, so every instance of a
-/// map rolls its own members; continents share instance 0.
+/// Stored per map instance, so each instance rolls its own members;
+/// continents share instance 0.
 #[derive(Debug, Default)]
 struct PoolInstance {
     /// Members the pool wants in the world in this instance
@@ -106,7 +106,7 @@ impl PoolState {
         }
     }
 
-    /// Add a member (MaNGOS `PoolGroup::AddEntry`).
+    /// Add a member.
     ///
     /// An explicit chance only means anything for pools that spawn a single
     /// member; everything else rolls with equal chance.
@@ -131,8 +131,8 @@ impl PoolState {
         self.member_count() == 0
     }
 
-    /// Chance integrity check (MaNGOS `PoolGroup::CheckPool`): with no
-    /// equal-chanced members the explicit chances must sum to 100 (or 0).
+    /// Chance integrity check: with no equal-chanced members the explicit chances
+    /// must sum to 100 (or 0).
     pub fn check_chances(&self) -> bool {
         if !self.equal_chanced.is_empty() {
             return true;
@@ -201,7 +201,7 @@ impl PoolState {
         inst.spawned.remove(&key)
     }
 
-    /// Exclude/allow a member for future rolls (MaNGOS `SetExcludeObject`).
+    /// Exclude/allow a member for future rolls.
     pub fn set_excluded(&mut self, key: PoolMemberKey, excluded: bool) {
         if excluded {
             self.excluded.insert(key);
@@ -210,8 +210,7 @@ impl PoolState {
         }
     }
 
-    /// Pick one member that is not on the instance's roster yet
-    /// (MaNGOS `PoolGroup::RollOne`).
+    /// Pick one member that is not on the instance's roster yet.
     ///
     /// `trigger` (the member that is being replaced) may be rolled again even
     /// though it is still on the roster — that is the "respawn in place" case.

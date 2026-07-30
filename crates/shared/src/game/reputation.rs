@@ -68,7 +68,6 @@ impl ReputationRank {
     }
 
     /// Convert absolute reputation value to rank
-    /// Matches C++ ReputationToRank() function from MaNGOS
     pub fn from_value(value: i32) -> Self {
         let mut limit = REPUTATION_CAP + 1; // 43000
 

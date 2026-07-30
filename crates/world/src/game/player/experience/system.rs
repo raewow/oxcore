@@ -44,7 +44,6 @@ pub fn calculate_xp_for_level(level: u8) -> u32 {
 /// Get the gray level threshold for a player
 ///
 /// Creatures at or below this level give no XP.
-/// Matches MaNGOS XP::GetGrayLevel()
 pub fn get_gray_level(player_level: u8) -> u8 {
     if player_level <= 5 {
         0
@@ -56,8 +55,6 @@ pub fn get_gray_level(player_level: u8) -> u8 {
 }
 
 /// Get the zero difference value for XP calculation
-///
-/// Matches MaNGOS XP::GetZeroDifference()
 pub fn get_zero_difference(player_level: u8) -> u8 {
     match player_level {
         0..=7 => 5,
@@ -76,8 +73,6 @@ pub fn get_zero_difference(player_level: u8) -> u8 {
 }
 
 /// Calculate XP for killing a creature
-///
-/// Based on MaNGOS Formulas.h XP::BaseGain() and XP::Gain()
 pub fn calculate_creature_xp(creature_level: u8, player_level: u8, is_elite: bool) -> u32 {
     if creature_level == 0 || player_level == 0 {
         return 0;
@@ -111,8 +106,6 @@ pub fn calculate_creature_xp(creature_level: u8, player_level: u8, is_elite: boo
 }
 
 /// Get XP color code for level difference display
-///
-/// Matches MaNGOS XP::GetColorCode()
 pub fn get_xp_color(player_level: u8, target_level: u8) -> XpColor {
     if target_level >= player_level.saturating_add(5) {
         XpColor::Red

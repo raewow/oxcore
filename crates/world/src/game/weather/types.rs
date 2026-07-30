@@ -1,4 +1,4 @@
-//! Weather types, states and chance tables (MaNGOS Weather.h / SharedDefines.h)
+//! Weather types, states and chance tables.
 
 /// Weather kind sent to the client in SMSG_WEATHER.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

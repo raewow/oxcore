@@ -1,7 +1,6 @@
 //! Modern (1.14.x) auth-handshake packet bodies.
 //!
-//! Layouts transcribed from HermesProxy's `AuthenticationPackets.cs`. These are the packet
-//! *bodies* (opcode-stripped); framing lives in [`super::framing`]. Only the handshake packets
+//! Modern (1.14.x) auth-handshake packet bodies (opcode-stripped); framing lives in [`super::framing`]. Only the handshake packets
 //! are modelled here — `SMSG_AUTH_RESPONSE` and the char-enum opcodes follow in a later milestone.
 //!
 //! Bit-packing note: the modern client bit-packs some fields, but every bit field in these packets
@@ -16,8 +15,7 @@ use oxcore_shared::protocol::bitbuf::BitWriter;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// The 16-byte seed mixed into the `SMSG_ENTER_ENCRYPTED_MODE` signature
-/// (`EnableEncryptionSeed`, from HermesProxy/TrinityCore).
+/// The 16-byte seed mixed into the `SMSG_ENTER_ENCRYPTED_MODE` signature.
 pub const ENABLE_ENCRYPTION_SEED: [u8; 16] = [
     0x90, 0x9C, 0xD0, 0x50, 0x5A, 0x2C, 0x14, 0xDD, 0x5C, 0x2C, 0xC0, 0x64, 0x14, 0xF3, 0xFE, 0xC9,
 ];
@@ -48,9 +46,8 @@ impl AuthChallenge {
 /// The instance connection's auth: the key the realm connection handed out in `SMSG_CONNECT_TO`.
 ///
 /// There is no realm-join ticket and no account name here — the key *is* the identity, which is why
-/// it must be single-use and unguessable. The digest is not verified: the reference accepts the key
-/// alone (`WorldSocket.HandleAuthContinuedSession`), since it was issued to an already
-/// authenticated realm connection moments earlier.
+/// it must be single-use and unguessable. The digest is not verified since the key was issued
+/// to an already authenticated realm connection moments earlier.
 #[derive(Debug, Clone)]
 pub struct AuthContinuedSession {
     pub dos_response: u64,
@@ -241,8 +238,7 @@ pub struct AuthResponseSuccess {
     pub available_classes: Vec<RaceClassAvailability>,
 }
 
-/// Serialize a successful `SMSG_AUTH_RESPONSE` body. Field order and bit-packing follow
-/// HermesProxy's `AuthResponse.Write` for the success path.
+/// Serialize a successful `SMSG_AUTH_RESPONSE` body.
 pub fn auth_response_success(info: &AuthResponseSuccess) -> Vec<u8> {
     let mut w = BitWriter::new();
     w.write_u32(AUTH_RESPONSE_OK);

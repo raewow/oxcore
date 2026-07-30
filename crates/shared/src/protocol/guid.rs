@@ -173,8 +173,7 @@ impl ObjectGuid {
         let high_type = high >> 58;
 
         // Transport is its own layout -- `type << 58 | counter << 38 | entry`, with an empty low
-        // half -- so it cannot share the extraction below. A zero entry means `MoTransport`, which
-        // is how the reference tells the two apart.
+        // half -- so it cannot share the extraction below. A zero entry means `MoTransport`.
         if high_type == TRANSPORT {
             let counter = ((high >> 38) & 0x000F_FFFF) as u32;
             let entry = (high & 0xFFFF_FFFF) as u32;
@@ -187,14 +186,14 @@ impl ObjectGuid {
 
         let entry = ((high >> 6) & 0x007F_FFFF) as u32;
         // The legacy counter is 32 bits at most, and only 24 for the types that carry an entry.
-        // Truncating is what the reference does (`(uint)guid.GetCounter()`).
+        // Truncate to 32 bits.
         let counter = (low & 0xFFFF_FFFF) as u32;
 
         match high_type {
             PLAYER => Self::new_without_entry(HighGuid::Player, counter),
             ITEM => Self::new_without_entry(HighGuid::Item, counter),
             // 1.14 splits vehicles out of creatures; 1.12 has no such type, so they fold back
-            // together the way the reference folds them.
+            // together.
             CREATURE | VEHICLE => Self::new_with_entry(HighGuid::Unit, entry, counter),
             PET => Self::new_with_entry(HighGuid::Pet, entry, counter),
             GAME_OBJECT => Self::new_with_entry(HighGuid::GameObject, entry, counter),
@@ -359,7 +358,7 @@ impl ObjectGuid {
 /// from and this returns the `(high, low)` pair directly.
 ///
 /// The 1.14 client keys its cast bar, sounds and visual chunks on this GUID and assumes it is
-/// **unique per cast**. the 1.14 reference learned that the hard way: reusing a deterministic id per
+/// **unique per cast**: reusing a deterministic id per
 /// (spell, caster) made "visual chunks drift, sounds clip, and target-frame cast bars ignore the
 /// dismiss on Kick interrupts". So
 /// `sequence` must differ for every cast, not merely for every spell.
