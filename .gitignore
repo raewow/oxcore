@@ -22,3 +22,5 @@ CLAUDE.md
 
 # Generated TLS certs, keys, and patch artifacts (bnet gen-certs) — never commit; contains private keys
 /certs/
+
+tools/
