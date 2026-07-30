@@ -11,7 +11,9 @@
 //! - [`SmsgDuelComplete`] - Notify players that a duel has completed
 //! - [`SmsgDuelWinner`] - Announce the duel winner
 
+use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::guid::ObjectGuid;
 use crate::protocol::Opcode;
 use crate::protocol::WorldPacket;
@@ -28,6 +30,22 @@ pub struct SmsgDuelRequested {
 }
 
 impl ToWorldPacket for SmsgDuelRequested {
+    /// The 1.14 `DuelRequested` body: the two GUIDs become guid128s and a **third** GUID follows,
+    /// naming the Battle.net game account of the player who asked for the duel.
+    ///
+    /// The third GUID is not optional padding -- it is read unconditionally, so omitting it leaves
+    /// the client short and it never raises the duel dialog. We send it empty because vanilla has no
+    /// Battle.net account behind a character; the client only uses it to group requests by account.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.arbiter_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        let (high, low) = self.initiator_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_packed_guid_128(0, 0); // RequestedByWowAccount -- no bnet account mapping
+        Some(writer.finish(Opcode::SMSG_DUEL_REQUESTED))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_DUEL_REQUESTED);
         packet.write_guid_raw(self.arbiter_guid.raw());
@@ -46,6 +64,11 @@ pub struct SmsgDuelCountdown {
 }
 
 impl ToWorldPacket for SmsgDuelCountdown {
+    /// The 1.14 `DuelCountdown` body is identical to vanilla: one u32 of milliseconds.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_DUEL_COUNTDOWN);
         packet.write_u32(self.countdown);
@@ -60,6 +83,11 @@ impl ToWorldPacket for SmsgDuelCountdown {
 pub struct SmsgDuelOutOfBounds {}
 
 impl ToWorldPacket for SmsgDuelOutOfBounds {
+    /// Empty body in 1.14 as well, so the vanilla packet is byte-identical.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_DUEL_OUTOFBOUNDS)
     }
@@ -72,6 +100,11 @@ impl ToWorldPacket for SmsgDuelOutOfBounds {
 pub struct SmsgDuelInBounds {}
 
 impl ToWorldPacket for SmsgDuelInBounds {
+    /// Empty body in 1.14 as well, so the vanilla packet is byte-identical.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_DUEL_INBOUNDS)
     }
@@ -87,6 +120,16 @@ pub struct SmsgDuelComplete {
 }
 
 impl ToWorldPacket for SmsgDuelComplete {
+    /// 1.14 carries the same flag as a single bit instead of a byte, so the body is one byte either
+    /// way -- but the bit sits in the *high* bit of that byte, and a vanilla `1` byte would read as
+    /// false. The flag itself keeps its meaning: set means the duel actually started.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_bit(self.completed); // Started
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_DUEL_COMPLETE))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_DUEL_COMPLETE);
         packet.write_u8(if self.completed { 1 } else { 0 });
@@ -108,6 +151,35 @@ pub struct SmsgDuelWinner<'a> {
 }
 
 impl ToWorldPacket for SmsgDuelWinner<'_> {
+    /// The 1.14 `DuelWinner` body, which rearranges every part of this message.
+    ///
+    /// Three traps, in order of how badly they read:
+    ///
+    /// * The flag is inverted. Vanilla writes `0` for a clean win; 1.14 carries a `Fled` bit, so
+    ///   passing `won` through unchanged announces "X has fled from Y" on every honest kill.
+    /// * The **beaten** name comes first, and its length is the first field of the bit run. Writing
+    ///   the winner first swaps the two names in the announcement.
+    /// * Both lengths are 6 bits and precede the two realm addresses; the string bytes come after
+    ///   them, not inline.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let beaten = self.loser_name.as_bytes();
+        let winner = self.winner_name.as_bytes();
+
+        writer.write_bits(beaten.len() as u32, 6);
+        writer.write_bits(winner.len() as u32, 6);
+        writer.write_bit(!self.won); // Fled
+        writer.flush_bits();
+
+        // Both players are on the realm serving this session; vanilla has no cross-realm duels.
+        writer.write_u32(0); // BeatenVirtualRealmAddress
+        writer.write_u32(0); // WinnerVirtualRealmAddress
+
+        writer.write_bytes(beaten);
+        writer.write_bytes(winner);
+        Some(writer.finish(Opcode::SMSG_DUEL_WINNER))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_DUEL_WINNER);
         packet.write_u8(if self.won { 0 } else { 1 });

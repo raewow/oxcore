@@ -1,6 +1,36 @@
-use crate::messages::update::SmsgUpdateObject;
+use crate::messages::update::{SmsgUpdateObject, DEFAULT_REALM_ID};
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{ObjectGuid as SharedObjectGuid, Opcode, WorldPacket};
+
+/// `ItemInstance::Write` for build 42597.
+///
+/// Every 1.14 body that names an item embeds this rather than a bare item id. A 1.12 item has
+/// neither bonus lists nor modifications, so both sub-structures are written empty — but they are
+/// still written: the client reads the presence bit and the 6-bit modification count
+/// unconditionally, so skipping them shifts every field after the instance.
+///
+/// The two counts live in separate bit runs, each closed by its own flush, because the presence bit
+/// and the count are not adjacent on the wire.
+pub(crate) fn write_modern_item_instance(
+    writer: &mut BitWriter,
+    item_id: u32,
+    random_properties_seed: u32,
+    random_properties_id: u32,
+) {
+    writer.write_u32(item_id);
+    writer.write_u32(random_properties_seed);
+    writer.write_u32(random_properties_id);
+    writer.write_bit(false); // HasItemBonus -- 1.12 has no item bonus lists
+    writer.flush_bits();
+    writer.write_bits(0, 6); // ItemModList count
+    writer.flush_bits();
+}
+
+/// 1.14 `ItemPushResult::DisplayType`, which replaces vanilla's three independent u32 flags.
+const DISPLAY_TYPE_HIDDEN: u32 = 0;
+const DISPLAY_TYPE_RECEIVED: u32 = 1;
+const DISPLAY_TYPE_LOOT: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct SmsgItemPushResult {
@@ -28,6 +58,69 @@ impl ToWorldPacket for SmsgItemPushResult {
         packet.write_u32(self.random_property_id);
         packet.write_u32(self.count);
         packet
+    }
+
+    /// `ItemPushResult::Write` for build 42597.
+    ///
+    /// Vanilla's three u32 booleans collapse into a 3-bit `DisplayText` selector plus a `Pushed`
+    /// bit, so they cannot be copied across one by one. The mapping is not arbitrary: an item that
+    /// came from an NPC and was not conjured is a "received" toast anchored to the pushing NPC,
+    /// anything with the chat flag clear is silently hidden, and everything else renders as loot.
+    /// Get it wrong and quest rewards either announce themselves twice or not at all.
+    ///
+    /// Two fields have no source in the 1.12 body and are sent as documented blanks:
+    ///
+    /// * `SlotInBag` is `-1`. Vanilla carries a slot-within-bag alongside the bag slot, but this
+    ///   struct never captured it, and `-1` is the value 1.14 reads as "no particular slot" — a
+    ///   real-looking `0` would make the client animate the wrong bag square.
+    /// * `QuantityInInventory` repeats `Quantity`. 1.12 sends only the per-pickup delta, so the
+    ///   over-head quest toast reads `n/N` with `n` counting this pickup alone rather than the
+    ///   running total.
+    ///
+    /// `ItemGUID` is empty for the same reason: the 1.12 body identifies the item by entry only, and
+    /// the client falls back to the entry when the GUID is absent.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.player_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // PlayerGUID
+
+        writer.write_u8(self.bagslot); // Slot
+        writer.write_i32(-1); // SlotInBag -- see above
+        writer.write_i32(0); // QuestLogItemID -- 1.12 never overrides the quest-credit item
+        writer.write_u32(self.count); // Quantity
+        writer.write_u32(self.count); // QuantityInInventory -- see above
+        writer.write_i32(0); // DungeonEncounterID
+        writer.write_i32(0); // BattlePetSpeciesID
+        writer.write_i32(0); // BattlePetBreedID
+        writer.write_u32(0); // BattlePetBreedQuality
+        writer.write_i32(0); // BattlePetLevel
+        writer.write_packed_guid_128(0, 0); // ItemGUID -- see above
+
+        let from_npc = self.received != 0;
+        let created = self.created != 0;
+        let display_type = if from_npc && !created {
+            DISPLAY_TYPE_RECEIVED
+        } else if self.show_in_chat == 0 {
+            DISPLAY_TYPE_HIDDEN
+        } else {
+            DISPLAY_TYPE_LOOT
+        };
+
+        writer.write_bit(display_type == DISPLAY_TYPE_RECEIVED); // Pushed
+        writer.write_bit(created); // Created
+        writer.write_bits(display_type, 3); // DisplayText
+        writer.write_bit(false); // IsBonusRoll -- no bonus rolls in Classic Era
+        writer.write_bit(false); // IsEncounterLoot
+        writer.flush_bits();
+
+        write_modern_item_instance(
+            &mut writer,
+            self.item_entry,
+            self.suffix_factor,
+            self.random_property_id,
+        );
+
+        Some(writer.finish(Opcode::SMSG_ITEM_PUSH_RESULT))
     }
 }
 
