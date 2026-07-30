@@ -581,7 +581,13 @@ impl SpellSystem {
     /// Send the remaining duration for an active channel to its caster.
     pub fn send_channel_update(&self, caster_guid: ObjectGuid, remaining_ms: u32) {
         self.broadcast_mgr
-            .send_msg_to_player(caster_guid, MsgChannelUpdate { remaining_ms });
+            .send_msg_to_player(
+                caster_guid,
+                MsgChannelUpdate {
+                    remaining_ms,
+                    caster_guid,
+                },
+            );
     }
 
     /// Create a new spell system

@@ -5,6 +5,9 @@
 //! - Environmental damage logging
 //! - Exploration experience
 
+use crate::messages::update::DEFAULT_REALM_ID;
+use crate::protocol::bitbuf::BitWriter;
+use crate::protocol::ObjectGuid;
 use crate::messages::ToWorldPacket;
 use crate::protocol::{Opcode, WorldPacket};
 
@@ -27,6 +30,23 @@ pub struct SmsgStartMirrorTimer {
 }
 
 impl ToWorldPacket for SmsgStartMirrorTimer {
+    /// `StartMirrorTimer::Write` for build 42597.
+    ///
+    /// Same five values, but the spell id moves **before** the paused flag and paused becomes a bit.
+    /// Vanilla writes paused as a byte then the spell id; sending that order leaves the client reading
+    /// the spell id as the pause state.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_i32(self.timer_type as i32);
+        writer.write_i32(self.current as i32);
+        writer.write_i32(self.max as i32);
+        writer.write_i32(self.scale);
+        writer.write_i32(self.spell_id as i32);
+        writer.write_bit(self.paused != 0);
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_START_MIRROR_TIMER))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_START_MIRROR_TIMER);
         packet.write_u32(self.timer_type);
@@ -48,6 +68,12 @@ pub struct SmsgStopMirrorTimer {
 }
 
 impl ToWorldPacket for SmsgStopMirrorTimer {
+    /// `StopMirrorTimer::Write` for build 42597:
+    /// identical to vanilla, one i32.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_STOP_MIRROR_TIMER);
         packet.write_u32(self.timer_type);
@@ -72,6 +98,24 @@ pub struct SmsgEnvironmentalDamageLog {
 }
 
 impl ToWorldPacket for SmsgEnvironmentalDamageLog {
+    /// `EnvironmentalDamageLog::Write` for build 42597.
+    ///
+    /// Resisted and absorbed **swap order** relative to vanilla, and a log-data bit is appended.
+    /// Swapping them back is not cosmetic: fire damage that was fully resisted would display as fully
+    /// absorbed.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = ObjectGuid::from_raw(self.guid).to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u8(self.damage_type);
+        writer.write_i32(self.damage as i32);
+        writer.write_i32(self.resist as i32); // Resisted comes first in 1.14
+        writer.write_i32(self.absorb as i32);
+        writer.write_bit(false); // HasLogData
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_ENVIRONMENTALDAMAGELOG))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ENVIRONMENTALDAMAGELOG);
         packet.write_u64(self.guid);
@@ -94,6 +138,12 @@ pub struct SmsgExplorationExperience {
 }
 
 impl ToWorldPacket for SmsgExplorationExperience {
+    /// `ExplorationExperience::Write` for build 42597:
+    /// identical to vanilla, area then experience.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_EXPLORATION_EXPERIENCE);
         packet.write_u32(self.area_id);

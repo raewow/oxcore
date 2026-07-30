@@ -98,7 +98,7 @@ pub async fn handle_set_action_button(
 ) -> Result<()> {
     // The two layouts disagree on order *and* width, so this is a branch, not a translation.
     // Vanilla packs the action and type into one u32 after the slot; 1.14 sends them as two u16s
-    // ahead of it (JimsProxy `World/Server/Packets/CharacterPackets.cs:755-769`). Reading a modern
+    // ahead of it for build 42597. Reading a modern
     // body the vanilla way puts the action in the slot and lands the slot inside the action.
     let (slot, action, button_type) = if session.protocol() == Protocol::Modern {
         let action = packet

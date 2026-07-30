@@ -95,8 +95,7 @@ impl ToWorldPacket for SmsgGossipMessage {
         packet
     }
 
-    /// `GossipMessagePkt::Write`, from JimsProxy
-    /// `World/Server/Packets/NPCPackets.cs:43-91`.
+    /// `GossipMessagePkt::Write`, per the 1.14 wire format.
     ///
     /// A reshape, not a renumber. Both counts move ahead of *both* lists; the option strings become
     /// 12-bit length prefixes inside a bit run rather than null-terminated; and each option gains a
@@ -147,7 +146,7 @@ impl ToWorldPacket for SmsgGossipMessage {
     }
 }
 
-/// `ClientGossipQuest::Write`, from JimsProxy `World/Server/Packets/NPCPackets.cs:133-161`.
+/// `ClientGossipQuest::Write`, per the 1.14 wire format.
 ///
 /// Shared by the gossip menu and the quest-giver list, which send the same entry shape.
 pub(crate) fn write_modern_gossip_quest(writer: &mut BitWriter, quest: &GossipQuestData) {
@@ -180,7 +179,7 @@ impl ToWorldPacket for SmsgGossipComplete {
         WorldPacket::new(Opcode::SMSG_GOSSIP_COMPLETE)
     }
 
-    /// Empty in vanilla, one flushed bit from 1.14.2 on — JimsProxy
+    /// Empty in vanilla, one flushed bit from 1.14.2 on — the 1.14 reference
     /// `World/Server/Packets/NPCPackets.cs:183-194` gates it on `AddedInVersion(9,2,0, 1,14,2, ...)`
     /// and our target build 42597 *is* 1.14.2, so the bit is present.
     ///
@@ -332,8 +331,7 @@ impl ToWorldPacket for SmsgNpcTextUpdate {
         packet
     }
 
-    /// `QueryNPCTextResponse::Write`, from JimsProxy
-    /// `World/Server/Packets/QueryPackets.cs:689-707`.
+    /// `QueryNPCTextResponse::Write`, per the 1.14 wire format.
     ///
     /// **1.14 does not carry the text.** It sends eight `BroadcastTextID`s and the client resolves
     /// each against its local `BroadcastText` DB2 — where vanilla sends the male and female strings

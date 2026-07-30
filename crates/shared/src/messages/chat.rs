@@ -10,7 +10,7 @@
 //! - [`SmsgChatRestricted`] - Player is muted/chat restricted
 //! - [`SmsgChatPlayerAmbiguous`] - Multiple players match whisper target
 
-use crate::game::chat::{ChatMsg, ChatTag, Language};
+use crate::game::chat::{to_modern_chat_type, ChatMsg, ChatTag, Language};
 use crate::messages::ToWorldPacket;
 use crate::messages::update::DEFAULT_REALM_ID;
 use crate::protocol::bitbuf::BitWriter;
@@ -141,6 +141,74 @@ impl<'a> SmsgMessageChat<'a> {
 }
 
 impl ToWorldPacket for SmsgMessageChat<'_> {
+    /// `ChatPkt::Write` for build 42597.
+    ///
+    /// One flat layout replaces vanilla's per-type branching. Vanilla writes a different field set for
+    /// a monster whisper than for a say; 1.14 writes **six GUIDs and five strings every time** and
+    /// lets the empty ones be empty. So the `match self.msgtype` above has no counterpart here.
+    ///
+    /// Two hazards:
+    ///
+    /// * the chat type is **renumbered**, not extended — see [`to_modern_chat_type`]. Vanilla `Say` is
+    ///   0 and 1.14 reads 0 as `System`.
+    /// * every string length is bit-packed at a *different* width (11/11/5/7/12), and the flags are 14
+    ///   bits. Getting one wrong shifts all five strings.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        /// `Language::AddonBfA` — 1.14's addon channel. Vanilla signals addon traffic with a chat
+        /// *type* of 0xFF; 1.14 signals it with a language instead, so the type becomes an ordinary
+        /// Say and the language carries the meaning.
+        const LANGUAGE_ADDON_MODERN: u32 = 35;
+
+        let is_addon = matches!(self.msgtype, ChatMsg::Addon);
+        let slash_cmd = to_modern_chat_type(self.msgtype)?;
+        let language = if is_addon {
+            LANGUAGE_ADDON_MODERN
+        } else {
+            self.language as u32
+        };
+
+        let sender_name = self.sender_name.unwrap_or("");
+        let channel = self.channel_name.unwrap_or("");
+
+        let mut writer = BitWriter::new();
+        writer.write_u8(slash_cmd);
+        writer.write_u32(language);
+
+        let (high, low) = self.sender_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // SenderGUID
+        writer.write_packed_guid_128(0, 0); // SenderGuildGUID
+        writer.write_packed_guid_128(0, 0); // SenderAccountGUID -- no bnet account mapping
+        let (high, low) = self
+            .target_guid
+            .unwrap_or_default()
+            .to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // TargetGUID
+        writer.write_u32(0); // TargetVirtualAddress
+        writer.write_u32(0); // SenderVirtualAddress
+        writer.write_packed_guid_128(0, 0); // PartyGUID
+        writer.write_u32(0); // AchievementID
+        writer.write_f32(0.0); // DisplayTime
+
+        // Five string lengths at five different widths, then the flags, all in one bit run.
+        writer.write_bits(sender_name.len() as u32, 11);
+        writer.write_bits(0, 11); // TargetName -- resolved client-side from TargetGUID
+        writer.write_bits(0, 5); // Prefix (addon) length
+        writer.write_bits(channel.len() as u32, 7);
+        writer.write_bits(self.message.len() as u32, 12);
+        writer.write_bits(u32::from(self.chat_tag as u8), 14); // ChatFlags
+        writer.write_bit(false); // HideChatLog
+        writer.write_bit(false); // FakeSenderName
+        writer.write_bit(false); // HasUnused_801
+        writer.write_bit(false); // HasChannelGUID
+        writer.flush_bits();
+
+        writer.write_bytes(sender_name.as_bytes());
+        // TargetName and Prefix declared zero-length above, so nothing goes here.
+        writer.write_bytes(channel.as_bytes());
+        writer.write_bytes(self.message.as_bytes());
+
+        Some(writer.finish(Opcode::SMSG_MESSAGECHAT))
+    }
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_MESSAGECHAT);
 
@@ -315,7 +383,7 @@ impl ToWorldPacket for SmsgEmote {
         packet
     }
 
-    /// `EmoteMessage::Write`, from JimsProxy `World/Server/Packets/ChatPackets.cs:559-575`.
+    /// `EmoteMessage::Write`, per the 1.14 wire format.
     ///
     /// The GUID moves *ahead* of the emote id, and two fields are appended: a spell-visual-kit list
     /// (added in 1.14.0) and a sequence variation (added in 1.14.2). Build 42597 is 1.14.2, so both
@@ -378,7 +446,7 @@ impl ToWorldPacket for SmsgTextEmote<'_> {
         packet
     }
 
-    /// `STextEmote::Write`, from JimsProxy `World/Server/Packets/ChatPackets.cs:634-645`.
+    /// `STextEmote::Write`, per the 1.14 wire format.
     ///
     /// 1.14 names the target by **GUID**, not by name — the client looks the name up itself — and adds
     /// a source account GUID and a sound index. So the name this struct carries for vanilla is unused
@@ -634,5 +702,77 @@ mod tests {
         // Verify name_len is at offset 13 (immediately after GUID), not offset 17
         let name_len = u32::from_le_bytes(data[13..17].try_into().unwrap());
         assert_eq!(name_len, 2, "name_len should be at offset 13 with value 2");
+    }
+}
+
+#[cfg(test)]
+mod modern_chat_tests {
+    use super::*;
+
+    fn say(text: &str) -> WorldPacket {
+        SmsgMessageChat {
+            msgtype: ChatMsg::Say,
+            language: Language::Common,
+            sender_guid: ObjectGuid::new_player(4),
+            sender_name: Some("Tester"),
+            target_guid: None,
+            channel_name: None,
+            player_rank: None,
+            message: text,
+            chat_tag: ChatTag::None,
+        }
+        .to_modern()
+        .expect("say must encode for modern")
+    }
+
+    /// The enums are renumbered, not extended. Vanilla `Say` is 0 and 1.14 reads 0 as `System`, so a
+    /// value-copied type routes every line to the wrong window.
+    #[test]
+    fn chat_types_are_renumbered_not_copied() {
+        assert_eq!(ChatMsg::Say as u8, 0, "vanilla Say");
+        assert_eq!(to_modern_chat_type(ChatMsg::Say), Some(1), "1.14 Say");
+        assert_eq!(ChatMsg::System as u8, 10, "vanilla System");
+        assert_eq!(to_modern_chat_type(ChatMsg::System), Some(0), "1.14 System");
+        // The first byte of the body is the translated type, not the vanilla one.
+        assert_eq!(say("hi").contents()[0], 1);
+    }
+
+    /// Per-swing combat spam has no 1.14 chat type -- it goes through the combat log. Inventing a
+    /// number would put it in an arbitrary window.
+    #[test]
+    fn vanilla_only_combat_types_are_declined() {
+        assert_eq!(to_modern_chat_type(ChatMsg::CombatSelfHits), None);
+        assert_eq!(to_modern_chat_type(ChatMsg::CombatPetMisses), None);
+    }
+
+    /// The message body's length is a 12-bit field, so the body must grow exactly with the text.
+    #[test]
+    fn the_body_grows_with_the_message() {
+        let short = say("hi").size();
+        let long = say("hello there").size();
+        assert_eq!(long - short, "hello there".len() - "hi".len());
+    }
+
+    /// 1.14 writes every GUID and string slot regardless of chat type, where vanilla branches per
+    /// type. A say and a whisper must therefore have the same shape.
+    #[test]
+    fn the_layout_does_not_branch_on_chat_type() {
+        let whisper = SmsgMessageChat {
+            msgtype: ChatMsg::Whisper,
+            language: Language::Common,
+            sender_guid: ObjectGuid::new_player(4),
+            sender_name: Some("Tester"),
+            target_guid: Some(ObjectGuid::new_player(5)),
+            channel_name: None,
+            player_rank: None,
+            message: "hi",
+            chat_tag: ChatTag::None,
+        }
+        .to_modern()
+        .unwrap();
+
+        // Only the target GUID differs in length between the two, so the whisper is longer by
+        // exactly the bytes that GUID packs into.
+        assert!(whisper.size() > say("hi").size());
     }
 }

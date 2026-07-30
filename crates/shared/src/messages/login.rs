@@ -605,7 +605,7 @@ pub struct SmsgActionButtons<'a> {
 /// No `to_modern`, and there never will be: **1.14 has no action-buttons packet.**
 ///
 /// The bar is part of the `ActivePlayer` create block instead — 132 × `i32` behind a
-/// `HasActionButtons` bit in its tail (JimsProxy
+/// `HasActionButtons` bit in its tail (the 1.14 reference
 /// `World/Objects/Version/V1_14_1_40688/ObjectUpdateBuilder.cs:534-570`, count from
 /// `World/Enums/PlayerDefines.cs:20`). The packed `action | type << 24` word is identical to
 /// vanilla's, so the values pass through untouched; only the slot count differs, 120 to 132.
@@ -1057,8 +1057,7 @@ impl ToWorldPacket for SmsgLoadCufProfiles {
 ///
 /// TrinityCore sends the first one as the *first* packet of `SendInitialPacketsBeforeAddToMap`
 /// (`Player.cpp:24920-24928`), then again after 5 s and every 10 s thereafter
-/// (`WorldSession.cpp:1815-1826`). The body is a single sequence index, per JimsProxy
-/// `World/Server/Packets/MiscPackets.cs:335-342`; the client echoes it back in
+/// (`WorldSession.cpp:1815-1826`). The body is a single sequence index, per the 1.14 wire format; the client echoes it back in
 /// `CMSG_TIME_SYNC_RESPONSE` alongside its own tick count.
 #[derive(Debug, Clone, Default)]
 pub struct SmsgTimeSyncRequest {

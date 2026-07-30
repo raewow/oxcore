@@ -215,7 +215,7 @@ impl Opcode {
     // Movement - Advanced
     // ============================================================================
 
-    pub const CMSG_SET_ACTIVE_MOVER: Opcode = Opcode { vanilla: 0x026A, modern: 0x3A3A }; // 618
+    pub const CMSG_SET_ACTIVE_MOVER: Opcode = Opcode { vanilla: 0x026A, modern: 0x3A3B }; // 618
     pub const CMSG_MOVE_SPLINE_DONE: Opcode = Opcode { vanilla: 0x02C9, modern: 0x3A17 }; // 713
     pub const CMSG_MOVE_FALL_RESET: Opcode = Opcode { vanilla: 0x02CA, modern: 0x3A18 }; // 714
     pub const CMSG_MOVE_TIME_SKIPPED: Opcode = Opcode { vanilla: 0x02CE, modern: 0x3A1A }; // 718
@@ -365,14 +365,14 @@ impl Opcode {
     pub const SMSG_CAST_RESULT: Opcode = Opcode { vanilla: 0x0130, modern: 0x2C57 }; // 304
     pub const SMSG_SPELL_COOLDOWN: Opcode = Opcode { vanilla: 0x0134, modern: 0x2C15 }; // 308
     pub const MSG_CHANNEL_START: Opcode = Opcode { vanilla: 0x0139, ..Opcode::NONE }; // 313
-    pub const MSG_CHANNEL_UPDATE: Opcode = Opcode { vanilla: 0x013A, ..Opcode::NONE }; // 314
+    pub const MSG_CHANNEL_UPDATE: Opcode = Opcode { vanilla: 0x013A, modern: 0x2C35 }; // 1.14 calls it SMSG_SPELL_CHANNEL_UPDATE // 314
     pub const SMSG_SPELL_INTERRUPTED: Opcode = Opcode { vanilla: 0x0152, ..Opcode::NONE }; // 338
     pub const SMSG_SPELL_DELAYED: Opcode = Opcode { vanilla: 0x01E2, modern: 0x2C3F }; // 482
     pub const SMSG_SPELL_FAILED_OTHER: Opcode = Opcode { vanilla: 0x02A6, modern: 0x2C55 }; // 678
     pub const SMSG_SPELL_UPDATE_CHAIN_TARGETS: Opcode = Opcode { vanilla: 0x0330, ..Opcode::NONE }; // 816
     pub const SMSG_SET_PROFICIENCY: Opcode = Opcode { vanilla: 0x0127, modern: 0x272C }; // 295
     pub const SMSG_INITIAL_SPELLS: Opcode = Opcode { vanilla: 0x012A, modern: 0x2C2A }; // 298
-    pub const SMSG_LEARNED_SPELL: Opcode = Opcode { vanilla: 0x012B, ..Opcode::NONE }; // 299
+    pub const SMSG_LEARNED_SPELL: Opcode = Opcode { vanilla: 0x012B, modern: 0x2C4D }; // 1.14 calls it SMSG_LEARNED_SPELLS // 299
     pub const SMSG_REMOVED_SPELL: Opcode = Opcode { vanilla: 0x0203, modern: 0x2C4E }; // 515
     pub const SMSG_SPELL_FAILURE: Opcode = Opcode { vanilla: 0x0133, modern: 0x2C53 }; // 307
     pub const SMSG_CLEAR_COOLDOWN: Opcode = Opcode { vanilla: 0x01DE, modern: 0x26B3 }; // 478
@@ -619,7 +619,10 @@ impl Opcode {
     pub const SMSG_EMOTE: Opcode = Opcode { vanilla: 0x0103, modern: 0x27C2 }; // 259
     pub const SMSG_PLAY_OBJECT_SOUND: Opcode = Opcode { vanilla: 0x0278, modern: 0x2765 }; // 632
     pub const SMSG_PLAY_SOUND: Opcode = Opcode { vanilla: 0x02D2, modern: 0x2763 }; // 722
-    pub const SMSG_PLAY_SPELL_VISUAL: Opcode = Opcode { vanilla: 0x01F3, modern: 0x2C45 }; // 499
+    pub const SMSG_PLAY_SPELL_VISUAL: Opcode = Opcode { vanilla: 0x01F3, modern: 0x2C49 }; // 499
+    // 0x2C49 is SMSG_PLAY_SPELL_VISUAL_KIT, not SMSG_PLAY_SPELL_VISUAL (0x2C45). The proxy
+    // translates the legacy message into the *kit* one, because vanilla's payload is a visual
+    // kit id. The name here is the vanilla one.
 
     // ============================================================================
     // Channel
@@ -739,10 +742,12 @@ impl Opcode {
     // side. TrinityCore sends the request first in `SendInitialPacketsBeforeAddToMap`, then at 5 s
     // and every 10 s (`Player.cpp:24920-24928`, `WorldSession.cpp:1815-1826`); the client answers
     // with its own tick count so the server can measure clock drift.
+    /// Sent when the client closes an interaction window (gossip, quest, vendor). Modern-only.
+    pub const CMSG_CLOSE_INTERACTION: Opcode = Opcode { modern: 0x3493, ..Opcode::NONE };
     pub const SMSG_TIME_SYNC_REQUEST: Opcode = Opcode { modern: 0x2DD2, ..Opcode::NONE };
-    pub const CMSG_TIME_SYNC_RESPONSE: Opcode = Opcode { modern: 0x3A3B, ..Opcode::NONE };
-    pub const CMSG_TIME_SYNC_RESPONSE_FAILED: Opcode = Opcode { modern: 0x3A3C, ..Opcode::NONE };
-    pub const CMSG_TIME_SYNC_RESPONSE_DROPPED: Opcode = Opcode { modern: 0x3A3D, ..Opcode::NONE };
+    pub const CMSG_TIME_SYNC_RESPONSE: Opcode = Opcode { modern: 0x3A3C, ..Opcode::NONE };
+    pub const CMSG_TIME_SYNC_RESPONSE_FAILED: Opcode = Opcode { modern: 0x3A3D, ..Opcode::NONE };
+    pub const CMSG_TIME_SYNC_RESPONSE_DROPPED: Opcode = Opcode { modern: 0x3A3E, ..Opcode::NONE };
     pub const CMSG_QUESTGIVER_STATUS_MULTIPLE_QUERY: Opcode = Opcode { modern: 0x349D, ..Opcode::NONE };
     pub const SMSG_QUESTGIVER_STATUS_MULTIPLE: Opcode = Opcode { modern: 0x2A91, ..Opcode::NONE };
     pub const CMSG_QUESTGIVER_HELLO: Opcode = Opcode { vanilla: 0x0184, modern: 0x3496 }; // 388
@@ -766,7 +771,7 @@ impl Opcode {
     pub const SMSG_QUESTUPDATE_FAILED: Opcode = Opcode { vanilla: 0x0196, modern: 0x2A8A }; // 406
     pub const SMSG_QUESTUPDATE_FAILEDTIMER: Opcode = Opcode { vanilla: 0x0197, modern: 0x2A8B }; // 407
     pub const SMSG_QUESTUPDATE_COMPLETE: Opcode = Opcode { vanilla: 0x0198, modern: 0x2A89 }; // 408
-    pub const SMSG_QUESTUPDATE_ADD_KILL: Opcode = Opcode { vanilla: 0x0199, ..Opcode::NONE }; // 409
+    pub const SMSG_QUESTUPDATE_ADD_KILL: Opcode = Opcode { vanilla: 0x0199, modern: 0x2A8C }; // 409 (1.14 calls it SMSG_QUEST_UPDATE_ADD_CREDIT)
     pub const SMSG_QUESTUPDATE_ADD_ITEM: Opcode = Opcode { vanilla: 0x019A, ..Opcode::NONE }; // 410
     pub const CMSG_QUEST_CONFIRM_ACCEPT: Opcode = Opcode { vanilla: 0x019B, modern: 0x349E }; // 411
     pub const SMSG_QUEST_CONFIRM_ACCEPT: Opcode = Opcode { vanilla: 0x019C, modern: 0x2A8F }; // 412
@@ -1086,7 +1091,7 @@ impl Opcode {
     pub const CMSG_REQUEST_BATTLEFIELD_STATUS: Opcode = Opcode { modern: 0x35DD, ..Opcode::NONE };
     pub const CMSG_LFG_LIST_GET_STATUS: Opcode = Opcode { modern: 0x360C, ..Opcode::NONE };
     pub const CMSG_BATTLE_PET_REQUEST_JOURNAL: Opcode = Opcode { modern: 0x3625, ..Opcode::NONE };
-    pub const CMSG_ARENA_TEAM_ACCEPT: Opcode = Opcode { modern: 0x36B6, ..Opcode::NONE };
+    pub const CMSG_ARENA_TEAM_ACCEPT: Opcode = Opcode { modern: 0x36B7, ..Opcode::NONE };
     pub const CMSG_GUILD_SET_ACHIEVEMENT_TRACKING: Opcode = Opcode { modern: 0x306F, ..Opcode::NONE };
     pub const CMSG_GM_TICKET_GET_CASE_STATUS: Opcode = Opcode { modern: 0x368F, ..Opcode::NONE };
 }
@@ -1774,6 +1779,7 @@ pub const ALL: &[(Opcode, &str)] = &[
         Opcode::CMSG_QUESTGIVER_STATUS_MULTIPLE_QUERY,
         "CMSG_QUESTGIVER_STATUS_MULTIPLE_QUERY",
     ),
+    (Opcode::CMSG_CLOSE_INTERACTION, "CMSG_CLOSE_INTERACTION"),
     (Opcode::SMSG_TIME_SYNC_REQUEST, "SMSG_TIME_SYNC_REQUEST"),
     (Opcode::CMSG_TIME_SYNC_RESPONSE, "CMSG_TIME_SYNC_RESPONSE"),
     (
@@ -2412,8 +2418,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            630,
-            "expected 630 opcode constants; update this count deliberately when adding opcodes"
+            631,
+            "expected 631 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

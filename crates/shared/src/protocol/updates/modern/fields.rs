@@ -211,7 +211,7 @@ impl ModernFieldsArray {
         // A few fields repacked their contents rather than just moving, so they bypass the map
         // entirely. See `repack` for why each one cannot be a slot move.
         if let Some(writes) = repack(self.object_type, vanilla_index, value) {
-            for (index, value) in writes {
+            for &(index, value) in writes.as_slice() {
                 self.set_modern(index, value);
             }
             return true;

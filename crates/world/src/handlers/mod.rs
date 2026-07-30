@@ -327,7 +327,10 @@ pub async fn dispatch_packet(
                 | Opcode::CMSG_BATTLE_PET_REQUEST_JOURNAL
                 | Opcode::CMSG_ARENA_TEAM_ACCEPT
                 | Opcode::CMSG_GUILD_SET_ACHIEVEMENT_TRACKING
-                | Opcode::CMSG_GM_TICKET_GET_CASE_STATUS => {}
+                | Opcode::CMSG_GM_TICKET_GET_CASE_STATUS
+                // The client telling us it closed a gossip/quest/vendor window. Nothing to do:
+                // interaction state is not tracked server-side.
+                | Opcode::CMSG_CLOSE_INTERACTION => {}
 
                 // Query handlers
                 Opcode::CMSG_QUERY_TIME => {

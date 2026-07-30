@@ -144,8 +144,7 @@ impl ObjectGuid {
     /// legacy GUID is exactly its counter; for a creature it silently drops both the `Unit` high
     /// bits and the entry, leaving a bare counter that matches nothing.
     ///
-    /// Transcribed from JimsProxy `WowGuid64.Create(WowGuid128)` (`World/WowGuid64.cs:24-41`) with
-    /// the field extraction in `World/WowGuid128Extensions.cs:25-40`:
+    /// The 1.14 field layout:
     ///
     /// ```text
     /// highType = high >> 58        entry   = (high >> 6) & 0x7FFFFF
@@ -160,7 +159,7 @@ impl ObjectGuid {
             return Self::empty();
         }
 
-        // `HighGuidType703`, per JimsProxy `World/Enums/ObjectType.cs:154-171`.
+        // `HighGuidType703`, per the 1.14 wire format.
         const PLAYER: u64 = 2;
         const ITEM: u64 = 3;
         const TRANSPORT: u64 = 6;
@@ -352,6 +351,34 @@ impl ObjectGuid {
 
         result
     }
+}
+
+/// Build a 1.14 `Cast` GUID: the identity of one spell cast.
+///
+/// Not a conversion — vanilla has no cast identity at all, so there is no 64-bit form to convert
+/// from and this returns the `(high, low)` pair directly.
+///
+/// The 1.14 client keys its cast bar, sounds and visual chunks on this GUID and assumes it is
+/// **unique per cast**. the 1.14 reference learned that the hard way: reusing a deterministic id per
+/// (spell, caster) made "visual chunks drift, sounds clip, and target-frame cast bars ignore the
+/// dismiss on Kick interrupts". So
+/// `sequence` must differ for every cast, not merely for every spell.
+///
+/// The layout is the map-specific one, with the spell id in the entry field and the cast source as
+/// the sub-type.
+pub fn cast_guid128(realm_id: u16, map_id: u16, spell_id: u32, sequence: u64) -> (u64, u64) {
+    /// `HighGuidType703::Cast`.
+    const CAST: u64 = 47;
+    /// `SpellCastSource::Normal`.
+    const SOURCE_NORMAL: u64 = 3;
+
+    let high = (CAST << 58)
+        | ((u64::from(realm_id) & 0x1FFF) << 42)
+        | ((u64::from(map_id) & 0x1FFF) << 29)
+        | ((u64::from(spell_id) & 0x7F_FFFF) << 6)
+        | SOURCE_NORMAL;
+    // The server-id field above the counter stays zero, as it does for every other GUID we build.
+    (high, sequence & 0xFF_FFFF_FFFF)
 }
 
 impl Default for ObjectGuid {

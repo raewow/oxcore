@@ -1,6 +1,10 @@
+use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
+use crate::protocol::guid::cast_guid128;
 use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// SMSG_SPELL_START (opcode 0x0131)
 /// Broadcast when a spell cast begins (cast bar appears).
@@ -21,6 +25,154 @@ pub struct SmsgSpellStart {
     /// Inventory type of the projectile (e.g. INVTYPE_THROWN, INVTYPE_AMMO).
     /// 0 = no projectile.
     pub ammo_inventory_type: u32,
+}
+
+// =============================================================================
+// Modern spell cast encoding
+// =============================================================================
+
+/// Cast sequence counter, so every cast gets a distinct `Cast` GUID.
+///
+/// The 1.14 client keys its cast bar, sounds and visual chunks on the cast GUID and assumes it is
+/// unique per cast; see [`cast_guid128`] for what happens when it is not. A process-global counter
+/// is enough — the GUID also carries the spell id and map, so collisions would need the same spell on
+/// the same map 2^40 casts apart.
+static CAST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+/// Take the next cast-sequence value. Every message that names a cast identity uses this, so no two
+/// casts anywhere share a `Cast` GUID.
+fn next_cast_sequence() -> u64 {
+    CAST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+}
+
+/// `SpellCastData::Write`, per the 1.14 wire format.
+///
+/// Shared by `SMSG_SPELL_START` and `SMSG_SPELL_GO`, which differ only in a trailing log-data bit.
+/// Almost nothing survives from the vanilla body unchanged:
+///
+/// * four GUIDs lead, not two — 1.14 adds a **cast identity** and an original-cast id;
+/// * the cast flags widen from u16 to two u32 words;
+/// * the counts move into one bit run at mixed widths (16/16/16/9/1/16/1/1);
+/// * hit and miss targets become guid128 lists *after* the target block, not before;
+/// * missile trajectory, immunities, heal prediction and power costs are all new.
+///
+/// Fields with no vanilla source are written as the reference's defaults. `SpellXSpellVisualID` is
+/// one of them, and it is the reason spell *animations* may not play: 1.14 selects the visual from a
+/// DB2 id keyed on spell, which a 1.12 spell table has no column for. HermesProxy looks it up from
+/// its own extracted data (`GameData.GetSpellVisual`). Sending zero is correct-but-silent rather
+/// than wrong — the cast still registers, the flourish is missing.
+#[allow(clippy::too_many_arguments)]
+fn write_modern_spell_cast_data(
+    writer: &mut BitWriter,
+    caster_guid: ObjectGuid,
+    cast_item_guid: Option<ObjectGuid>,
+    spell_id: u32,
+    cast_time_ms: u32,
+    target_guid: Option<ObjectGuid>,
+    hit_targets: &[ObjectGuid],
+    miss_targets: &[SpellMissTarget],
+) {
+    // Vanilla puts the cast item in the first GUID slot and flags it; 1.14 keeps the caster in both
+    // and carries the item in the target block instead, so the item does not displace the caster.
+    let (high, low) = caster_guid.to_guid128(DEFAULT_REALM_ID);
+    writer.write_packed_guid_128(high, low); // CasterGUID
+    writer.write_packed_guid_128(high, low); // CasterUnit
+
+    let sequence = next_cast_sequence();
+    // Map 0 is a placeholder: the cast GUID's map field is identity, not routing, and the message
+    // does not carry the caster's map. A wrong map makes the id no less unique.
+    let (cast_high, cast_low) = cast_guid128(DEFAULT_REALM_ID, 0, spell_id, sequence);
+    writer.write_packed_guid_128(cast_high, cast_low); // CastID
+    writer.write_packed_guid_128(0, 0); // OriginalCastID -- not a triggered cast
+
+    writer.write_i32(spell_id as i32);
+    writer.write_u32(0); // SpellXSpellVisualID -- see above
+    writer.write_u32(0); // CastFlags
+    writer.write_u32(0); // CastFlagsEx
+    writer.write_u32(cast_time_ms);
+
+    // MissileTrajectoryResult
+    writer.write_u32(0); // TravelTime
+    writer.write_f32(0.0); // Pitch
+
+    writer.write_u8(0); // DestLocSpellCastIndex
+
+    // CreatureImmunities
+    writer.write_u32(0); // School
+    writer.write_u32(0); // Value
+
+    // SpellHealPrediction
+    writer.write_u32(0); // Points
+    writer.write_u8(0); // Type
+    writer.write_packed_guid_128(0, 0); // BeaconGUID
+
+    writer.write_bits(hit_targets.len() as u32, 16);
+    writer.write_bits(miss_targets.len() as u32, 16);
+    writer.write_bits(miss_targets.len() as u32, 16); // MissStatus, one per miss target
+    writer.write_bits(0, 9); // RemainingPower count
+    writer.write_bit(false); // HasRemainingRunes -- death knights only
+    writer.write_bits(0, 16); // TargetPoints count
+    writer.write_bit(false); // HasAmmoDisplayId
+    writer.write_bit(false); // HasAmmoInventoryType
+    writer.flush_bits();
+
+    // Miss statuses are bit-packed and come before the target block.
+    for miss in miss_targets {
+        writer.write_bits(u32::from(miss.reason) & 0xF, 4);
+        if miss.reason == SPELL_MISS_REFLECT {
+            writer.write_bits(u32::from(miss.reflect_result) & 0xF, 4);
+        }
+    }
+    writer.flush_bits();
+
+    write_modern_spell_target_data(writer, target_guid, cast_item_guid);
+
+    for target in hit_targets {
+        let (high, low) = target.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+    }
+    for miss in miss_targets {
+        let (high, low) = miss.guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+    }
+    // No power costs, runes, target points or ammo: every one of those was declared absent above.
+}
+
+/// `SpellTargetData::Write`, per the 1.14 wire format.
+///
+/// The write counterpart of the read in `crates/world/src/handlers/spells.rs`
+/// (`parse_spell_cast_targets_modern`). They are in different crates because one is a message body
+/// and the other a handler; if you change one, change both — the layouts must stay mirrored.
+fn write_modern_spell_target_data(
+    writer: &mut BitWriter,
+    unit_target: Option<ObjectGuid>,
+    item_target: Option<ObjectGuid>,
+) {
+    /// `TARGET_FLAG_UNIT` and `TARGET_FLAG_ITEM`, which keep their vanilla values in 1.14.
+    const TARGET_FLAG_UNIT: u32 = 0x0002;
+    const TARGET_FLAG_ITEM: u32 = 0x0010;
+
+    let mut flags = 0;
+    if unit_target.is_some() {
+        flags |= TARGET_FLAG_UNIT;
+    }
+    if item_target.is_some() {
+        flags |= TARGET_FLAG_ITEM;
+    }
+
+    writer.write_bits(flags, 26);
+    writer.write_bit(false); // HasSrcLocation
+    writer.write_bit(false); // HasDstLocation
+    writer.write_bit(false); // HasOrientation
+    writer.write_bit(false); // HasMapID
+    writer.write_bits(0, 7); // Name length
+    writer.flush_bits();
+
+    // Both GUIDs are unconditional here, where vanilla gates each on its flag.
+    let (high, low) = unit_target.unwrap_or_default().to_guid128(DEFAULT_REALM_ID);
+    writer.write_packed_guid_128(high, low);
+    let (high, low) = item_target.unwrap_or_default().to_guid128(DEFAULT_REALM_ID);
+    writer.write_packed_guid_128(high, low);
 }
 
 impl ToWorldPacket for SmsgSpellStart {
@@ -48,6 +200,23 @@ impl ToWorldPacket for SmsgSpellStart {
             self.spell_id, self.caster_guid, self.target_guid, self.cast_flags, self.cast_time_ms,
             packet.data().as_ref().len(), packet.data().as_ref());
         packet
+    }
+
+    /// `SpellStart::Write` for build 42597: the shared
+    /// cast block and nothing else.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        write_modern_spell_cast_data(
+            &mut writer,
+            self.caster_guid,
+            self.cast_item_guid,
+            self.spell_id,
+            self.cast_time_ms,
+            self.target_guid,
+            &[],
+            &[],
+        );
+        Some(writer.finish(Opcode::SMSG_SPELL_START))
     }
 }
 
@@ -137,6 +306,29 @@ impl ToWorldPacket for SmsgSpellGo {
             packet.data().as_ref().len(), packet.data().as_ref());
         packet
     }
+
+    /// `SpellGo::Write` for build 42597: the shared cast
+    /// block, then a `HasLogData` bit and a flush.
+    ///
+    /// Note the flush comes *after* the optional log data in the reference, so an absent log block
+    /// still costs the byte the bit is padded into — dropping it would leave the client one byte
+    /// short.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        write_modern_spell_cast_data(
+            &mut writer,
+            self.caster_guid,
+            self.cast_item_guid,
+            self.spell_id,
+            0, // SPELL_GO carries no cast time; the cast has already completed
+            self.target_guid,
+            &self.hit_targets,
+            &self.miss_targets,
+        );
+        writer.write_bit(false); // HasLogData
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_SPELL_GO))
+    }
 }
 
 /// SMSG_PLAY_SPELL_VISUAL (opcode 0x01F3)
@@ -152,6 +344,24 @@ impl ToWorldPacket for SmsgPlaySpellVisual {
         packet.write_u64(self.caster_guid.raw());
         packet.write_u32(self.spell_visual_kit_id);
         packet
+    }
+
+    /// `PlaySpellVisualKit::Write`.
+    ///
+    /// Note the opcode changes message: vanilla's `SMSG_PLAY_SPELL_VISUAL` carries a visual *kit* id,
+    /// so the proxy forwards it as 1.14's `SMSG_PLAY_SPELL_VISUAL_KIT` rather than the
+    /// similarly-named `SMSG_PLAY_SPELL_VISUAL`. The opcode table
+    /// records that under the vanilla name.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.caster_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // Unit
+        writer.write_u32(self.spell_visual_kit_id); // KitRecID
+        writer.write_u32(0); // KitType
+        writer.write_u32(0); // Duration -- 0 lets the kit decide
+        writer.write_bit(false); // MountedVisual
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_PLAY_SPELL_VISUAL))
     }
 }
 
@@ -511,7 +721,11 @@ mod spell_packet_tests {
 
     #[test]
     fn test_channel_update_contains_remaining_duration() {
-        let packet = MsgChannelUpdate { remaining_ms: 1200 }.to_vanilla();
+        let packet = MsgChannelUpdate {
+            remaining_ms: 1200,
+            caster_guid: player_guid(1),
+        }
+        .to_vanilla();
         assert_eq!(packet.opcode(), Opcode::MSG_CHANNEL_UPDATE);
         let mut data = packet.data().clone();
         assert_eq!(data.get_u32_le(), 1200);
@@ -544,12 +758,32 @@ pub struct SmsgSpellFailure {
 }
 
 impl ToWorldPacket for SmsgSpellFailure {
+    /// `SpellFailure::Write` for build 42597: the caster,
+    /// a cast identity, the spell, its visual, then the reason **widened to u16**.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        self.write_modern_prefix(&mut writer);
+        writer.write_u16(u16::from(self.result));
+        Some(writer.finish(Opcode::SMSG_SPELL_FAILURE))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_FAILURE);
         packet.write_guid(self.caster_guid);
         packet.write_u32(self.spell_id);
         packet.write_u8(self.result);
         packet
+    }
+}
+
+impl SmsgSpellFailure {
+    fn write_modern_prefix(&self, writer: &mut BitWriter) {
+        let (high, low) = self.caster_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // CasterUnit
+        let (high, low) = cast_guid128(DEFAULT_REALM_ID, 0, self.spell_id, next_cast_sequence());
+        writer.write_packed_guid_128(high, low); // CastID
+        writer.write_u32(self.spell_id);
+        writer.write_u32(0); // SpellXSpellVisualID -- no 1.12 source
     }
 }
 
@@ -564,6 +798,9 @@ pub struct SmsgSpellFailedOther {
 /// Updates the remaining duration of a channeled spell; zero interrupts it.
 pub struct MsgChannelUpdate {
     pub remaining_ms: u32,
+    /// The channelling unit. Vanilla leaves it implicit — the packet goes only to the caster — but
+    /// 1.14 names it, so observers can be told about someone else's channel.
+    pub caster_guid: ObjectGuid,
 }
 
 impl ToWorldPacket for MsgChannelUpdate {
@@ -571,6 +808,16 @@ impl ToWorldPacket for MsgChannelUpdate {
         let mut packet = WorldPacket::new(Opcode::MSG_CHANNEL_UPDATE);
         packet.write_u32(self.remaining_ms);
         packet
+    }
+
+    /// `SpellChannelUpdate::Write`. 1.14 names the channelling unit,
+    /// where vanilla relies on the packet only ever going to the caster.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.caster_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_i32(self.remaining_ms as i32);
+        Some(writer.finish(Opcode::MSG_CHANNEL_UPDATE))
     }
 }
 
@@ -595,6 +842,20 @@ impl ToWorldPacket for SmsgSpellUpdateChainTargets {
 }
 
 impl ToWorldPacket for SmsgSpellFailedOther {
+    /// `SpellFailedOther::Write`: identical to `SMSG_SPELL_FAILURE`
+    /// except the reason stays a u8. Vanilla carries no reason at all here, so zero it.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.caster_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // CasterUnit
+        let (high, low) = cast_guid128(DEFAULT_REALM_ID, 0, self.spell_id, next_cast_sequence());
+        writer.write_packed_guid_128(high, low); // CastID
+        writer.write_u32(self.spell_id);
+        writer.write_u32(0); // SpellXSpellVisualID
+        writer.write_u8(0); // Reason -- vanilla sends none
+        Some(writer.finish(Opcode::SMSG_SPELL_FAILED_OTHER))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_FAILED_OTHER);
         packet.write_guid(self.caster_guid);
@@ -660,6 +921,27 @@ pub struct SmsgSpellCooldown {
 }
 
 impl ToWorldPacket for SmsgSpellCooldown {
+    /// `SpellCooldownPkt::Write` with `SpellCooldownStruct`
+    ///.
+    ///
+    /// Vanilla streams `(spell, ms)` pairs to the end of the packet with no count; 1.14 prefixes a
+    /// flags byte and an explicit count, and each entry gains a `ModRate` float. `ModRate` is the
+    /// cooldown-rate multiplier and **must be 1.0, not 0.0** — the client divides by it, so a zero
+    /// makes every cooldown either infinite or NaN.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.caster_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u8(0); // Flags
+        writer.write_i32(self.cooldowns.len() as i32);
+        for (spell_id, cooldown_ms) in &self.cooldowns {
+            writer.write_u32(*spell_id);
+            writer.write_u32(*cooldown_ms); // ForcedCooldown
+            writer.write_f32(1.0); // ModRate -- a divisor; see above
+        }
+        Some(writer.finish(Opcode::SMSG_SPELL_COOLDOWN))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_COOLDOWN);
         packet.write_packed_guid(self.caster_guid);
@@ -734,6 +1016,20 @@ impl ToWorldPacket for SmsgLearnedSpell {
         packet.write_u16(0); // unknown
         packet
     }
+
+    /// `LearnedSpells::Write`. 1.14 sends a *list*, so a single learned
+    /// spell is a list of one, plus an empty favourites list and a specialization id Classic has no
+    /// concept of.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_i32(1); // Spells count
+        writer.write_i32(0); // FavoriteSpellID count
+        writer.write_u32(0); // SpecializationID
+        writer.write_u32(self.spell_id);
+        writer.write_bit(false); // SuppressMessaging -- let the client announce the new spell
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_LEARNED_SPELL))
+    }
 }
 
 /// SMSG_REMOVED_SPELL (opcode 0x0203)
@@ -747,6 +1043,17 @@ impl ToWorldPacket for SmsgRemovedSpell {
         packet.write_u32(self.spell_id);
         packet
     }
+
+    /// `UnlearnedSpells::Write` -- 1.14's name for this message. A count,
+    /// the list, then a suppress-messaging bit.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_i32(1); // Spells count
+        writer.write_u32(self.spell_id);
+        writer.write_bit(false); // SuppressMessaging
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_REMOVED_SPELL))
+    }
 }
 
 /// SMSG_CLEAR_COOLDOWN (opcode 0x01DE)
@@ -756,6 +1063,17 @@ pub struct SmsgClearCooldown {
 }
 
 impl ToWorldPacket for SmsgClearCooldown {
+    /// `ClearCooldown::Write`. The caster GUID vanilla carries is gone:
+    /// 1.14 sends this only to the owner, and distinguishes pet cooldowns with a bit instead.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.spell_id);
+        writer.write_bit(false); // ClearOnHold
+        writer.write_bit(false); // IsPet
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_CLEAR_COOLDOWN))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CLEAR_COOLDOWN);
         packet.write_u32(self.spell_id);
@@ -772,6 +1090,15 @@ pub struct SmsgSpellDelayed {
 }
 
 impl ToWorldPacket for SmsgSpellDelayed {
+    /// `SpellDelayed::Write`: the same two fields, guid128 and i32.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.caster_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_i32(self.delay_ms as i32);
+        Some(writer.finish(Opcode::SMSG_SPELL_DELAYED))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPELL_DELAYED);
         packet.write_guid(self.caster_guid);
@@ -1415,5 +1742,90 @@ mod smsg_spell_log_execute_tests {
         let inner = packet.data();
         let inner = inner.as_ref();
         assert!(!inner.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod modern_spell_tests {
+    use super::*;
+
+    fn caster() -> ObjectGuid {
+        ObjectGuid::new_player(4)
+    }
+
+    fn go(hits: Vec<ObjectGuid>, misses: Vec<SpellMissTarget>) -> WorldPacket {
+        SmsgSpellGo {
+            caster_guid: caster(),
+            caster_guid_pack: caster(),
+            spell_id: 133,
+            cast_flags: 0,
+            hit_targets: hits,
+            miss_targets: misses,
+            target_guid: Some(ObjectGuid::new_creature(299, 464)),
+            cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
+        }
+        .to_modern()
+        .expect("spell go must encode for modern")
+    }
+
+    /// Every cast needs a distinct `Cast` GUID: the client keys its cast bar, sounds and visual
+    /// chunks on it, and a reused id makes visuals drift and interrupts fail to dismiss the bar.
+    #[test]
+    fn each_cast_gets_a_distinct_cast_guid() {
+        let first = go(vec![], vec![]);
+        let second = go(vec![], vec![]);
+        assert_ne!(
+            first.contents(),
+            second.contents(),
+            "two casts of the same spell must not share a cast GUID"
+        );
+    }
+
+    /// The cast GUID must carry the `Cast` high type (47) and the spell id in its entry field, or the
+    /// client cannot associate the cast with anything.
+    #[test]
+    fn the_cast_guid_has_the_cast_high_type_and_spell_id() {
+        let (high, _) = cast_guid128(1, 0, 133, 7);
+        assert_eq!(high >> 58, 47, "HighGuidType703::Cast");
+        assert_eq!((high >> 6) & 0x7F_FFFF, 133, "spell id in the entry field");
+        assert_eq!(high & 0x3F, 3, "SpellCastSource::Normal");
+    }
+
+    /// A reflected miss carries an extra 4-bit result; every other reason does not. Both are inside
+    /// one bit run, so getting the condition wrong shifts the target lists that follow.
+    #[test]
+    fn a_reflected_miss_carries_its_result_nibble() {
+        let target = ObjectGuid::new_creature(299, 464);
+        let plain = go(
+            vec![],
+            vec![SpellMissTarget {
+                guid: target,
+                reason: 1,
+                reflect_result: 0,
+            }],
+        );
+        let reflected = go(
+            vec![],
+            vec![SpellMissTarget {
+                guid: target,
+                reason: SPELL_MISS_REFLECT,
+                reflect_result: 2,
+            }],
+        );
+        // Both flush to a whole byte, so the sizes match; the bytes must not.
+        assert_ne!(plain.contents(), reflected.contents());
+    }
+
+    /// Hit and miss GUIDs follow the target block, and each is a packed guid128 rather than a raw u64.
+    #[test]
+    fn hit_targets_lengthen_the_body() {
+        let none = go(vec![], vec![]).size();
+        let one = go(vec![ObjectGuid::new_creature(299, 464)], vec![]).size();
+        assert!(
+            one > none,
+            "a hit target must add its packed GUID to the body"
+        );
     }
 }

@@ -30,7 +30,7 @@ use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::guid::ObjectGuid;
 use crate::protocol::position::Position;
 use crate::protocol::updates::modern::field_map::{
-    MODERN_GAMEOBJECT_BYTES_1, MODERN_GAMEOBJECT_PARENT_ROTATION,
+    MODERN_GAMEOBJECT_BYTES_1, MODERN_GAMEOBJECT_PARENTROTATION,
 };
 use crate::protocol::updates::modern::{
     ModernCreateData, ModernObjectType, ModernUpdateBlock, ModernUpdateType,
@@ -605,7 +605,7 @@ impl CreateObjectBlock {
                     0.0f32.to_bits()
                 };
                 block.fields.set_modern(
-                    MODERN_GAMEOBJECT_PARENT_ROTATION + offset,
+                    MODERN_GAMEOBJECT_PARENTROTATION + offset,
                     field_value(vanilla_index).unwrap_or(default),
                 );
             }

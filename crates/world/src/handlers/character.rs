@@ -1227,7 +1227,7 @@ pub async fn handle_player_login_with_guid(
 ///
 /// One source for both protocols: `SMSG_ACTION_BUTTONS` writes these as u32 for a 1.12 client, and
 /// the `ActivePlayer` create tail writes the same words as i32 (zero-padded to 132) for a 1.14 one.
-/// JimsProxy does exactly this pass-through -- it reads the legacy packet and forwards the packed
+/// the 1.14 reference does exactly this pass-through -- it reads the legacy packet and forwards the packed
 /// values untouched (`World/Client/PacketHandlers/CharacterHandler.cs:352-367`).
 fn packed_action_buttons(player: &Player) -> Vec<u32> {
     player

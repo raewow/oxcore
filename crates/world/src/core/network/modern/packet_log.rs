@@ -1,6 +1,6 @@
 //! Structured JSONL packet trace for modern connections.
 //!
-//! Transcribed from JimsProxy's structured logging (`Framework/Logging/Log.cs:59-250`): one JSON
+//! Transcribed from the 1.14 reference's structured logging: one JSON
 //! object per line, `{timestamp_ms, eventType, payload}`, with dotted-lowercase event names, written
 //! by a background thread so the hot path never blocks on the filesystem.
 //!

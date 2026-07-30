@@ -109,6 +109,11 @@ impl ToWorldPacket for SmsgQuestlogFull {
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_QUESTLOG_FULL)
     }
+
+    /// Empty in both protocols.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
 }
 
 /// SMSG_QUESTUPDATE_COMPLETE - Quest objective completed
@@ -125,6 +130,13 @@ impl ToWorldPacket for SmsgQuestupdateComplete {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTUPDATE_COMPLETE);
         packet.write_u32(self.quest_id);
         packet
+    }
+
+    /// `QuestUpdateStatus`, per the 1.14 wire format.:
+    /// the proxy forwards the quest id unchanged, so the body is identical to vanilla's and only the
+    /// opcode differs.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
     }
 }
 
@@ -143,6 +155,13 @@ impl ToWorldPacket for SmsgQuestupdateFailed {
         packet.write_u32(self.quest_id);
         packet
     }
+
+    /// `QuestUpdateStatus`, per the 1.14 wire format.:
+    /// the proxy forwards the quest id unchanged, so the body is identical to vanilla's and only the
+    /// opcode differs.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
 }
 
 /// SMSG_QUESTUPDATE_FAILEDTIMER - Quest timer expired
@@ -160,6 +179,13 @@ impl ToWorldPacket for SmsgQuestupdateFailedtimer {
         packet.write_u32(self.quest_id);
         packet
     }
+
+    /// `QuestUpdateStatus`, per the 1.14 wire format.:
+    /// the proxy forwards the quest id unchanged, so the body is identical to vanilla's and only the
+    /// opcode differs.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
 }
 
 /// SMSG_QUESTGIVER_QUEST_INVALID - Quest is invalid
@@ -176,6 +202,20 @@ impl ToWorldPacket for SmsgQuestgiverQuestInvalid {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_QUEST_INVALID);
         packet.write_u32(self.reason);
         packet
+    }
+
+    /// `QuestGiverInvalidQuest::Write`, per the 1.14 wire format.
+    ///
+    /// Gains a contribution-reward id and an optional override string. We send neither: the reason
+    /// code alone is what selects the client's own error text, which is what vanilla relies on.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.reason);
+        writer.write_i32(0); // ContributionRewardID
+        writer.write_bit(false); // SendErrorMessage -- use the client's text for this reason
+        writer.write_bits(0, 9); // ReasonText length
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_QUESTGIVER_QUEST_INVALID))
     }
 }
 
@@ -209,8 +249,7 @@ impl ToWorldPacket for SmsgQuestgiverQuestComplete<'_> {
         packet
     }
 
-    /// `QuestGiverQuestComplete::Write`, from JimsProxy
-    /// `World/Server/Packets/QuestPackets.cs:600-618`.
+    /// `QuestGiverQuestComplete::Write`, per the 1.14 wire format.
     ///
     /// 1.14 carries a *single* `ItemReward` rather than vanilla's list, so only the first reward item
     /// makes it into the packet. The rest still reach the player — they arrive as inventory updates —
@@ -333,6 +372,25 @@ impl ToWorldPacket for SmsgQuestupdateAddKill {
         packet.write_guid_raw(self.guid.raw());
         packet
     }
+
+    /// `QuestUpdateAddCredit::Write`, per the 1.14 wire format. 1.14 renamed the message
+    /// `SMSG_QUEST_UPDATE_ADD_CREDIT`; the opcode table carries the new wire value under the vanilla
+    /// name.
+    ///
+    /// Reordered and narrowed: the victim GUID leads, both counts drop to u16, and an objective type
+    /// byte is appended. `ObjectiveType` 0 is "kill a creature", which is the only thing vanilla
+    /// sends this message for — item pickups go through the quest-log objective fields instead.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // VictimGUID
+        writer.write_u32(self.quest_id);
+        writer.write_i32(self.entry as i32); // ObjectID
+        writer.write_u16(self.count.min(u32::from(u16::MAX)) as u16);
+        writer.write_u16(self.required_count.min(u32::from(u16::MAX)) as u16);
+        writer.write_u8(0); // ObjectiveType: monster kill
+        Some(writer.finish(Opcode::SMSG_QUESTUPDATE_ADD_KILL))
+    }
 }
 
 // ============================================================================
@@ -384,8 +442,7 @@ impl ToWorldPacket for SmsgQuestgiverQuestListV2<'_> {
         packet
     }
 
-    /// `QuestGiverQuestListMessage::Write`, from JimsProxy
-    /// `World/Server/Packets/QuestPackets.cs:397-414`.
+    /// `QuestGiverQuestListMessage::Write`, per the 1.14 wire format.
     ///
     /// Reordered rather than renumbered: the greeting moves to the *end*, behind an 11-bit length
     /// prefix, and the quest count widens from u8 to i32 and moves ahead of the emote fields. Each
@@ -508,8 +565,7 @@ impl ToWorldPacket for SmsgQuestgiverRequestItemsV2<'_> {
         packet
     }
 
-    /// `QuestGiverRequestItems::Write`, from JimsProxy
-    /// `World/Server/Packets/QuestPackets.cs:423-462`.
+    /// `QuestGiverRequestItems::Write`, per the 1.14 wire format.
     ///
     /// Vanilla's four opaque trailing flag words collapse into a single `StatusFlags`, the strings
     /// move to the end behind 9- and 12-bit lengths, and each required item gains a `Flags` word.
@@ -644,7 +700,7 @@ impl ToWorldPacket for SmsgQuestgiverOfferRewardV2<'_> {
     }
 
     /// `QuestGiverOfferRewardMessage::Write` plus the nested `QuestGiverOfferReward::Write`, from
-    /// JimsProxy `World/Server/Packets/QuestPackets.cs:507-580`.
+    /// the 1.14 reference.
     ///
     /// The nesting is the notable part: the inner block — GUID, ids, flags, emotes, then the whole
     /// reward array — is written *first*, and the outer message's portraits and six bit-packed string
@@ -716,8 +772,7 @@ impl ToWorldPacket for SmsgQuestgiverOfferRewardV2<'_> {
 // Modern quest-reward encoding
 // =============================================================================
 
-/// Fixed array sizes 1.14 writes unconditionally in `QuestRewards`, from JimsProxy
-/// `World/Enums/QuestDefines.cs:14-21`.
+/// Fixed array sizes 1.14 writes unconditionally in `QuestRewards`, per the 1.14 wire format.
 ///
 /// These are *not* counts of what we have — the client reads exactly this many entries every time, so
 /// a short reward list is zero-padded. Getting one wrong shifts everything after it.
@@ -727,7 +782,7 @@ const MODERN_REWARD_REPUTATION_COUNT: usize = 5;
 const MODERN_REWARD_CURRENCY_COUNT: usize = 4;
 const MODERN_REWARD_DISPLAY_SPELL_COUNT: usize = 3;
 
-/// `QuestRewards::Write`, from JimsProxy `World/Server/Packets/QuestPackets.cs:174-221`.
+/// `QuestRewards::Write`, per the 1.14 wire format.
 ///
 /// Shared by the quest-details and offer-reward dialogs, which carry the identical block. Vanilla
 /// sends length-prefixed lists of `(item, count, display)`; 1.14 sends fixed-width arrays and splits
@@ -891,8 +946,7 @@ impl ToWorldPacket for SmsgQuestgiverQuestDetailsV2<'_> {
         packet
     }
 
-    /// `QuestGiverQuestDetails::Write`, from JimsProxy
-    /// `World/Server/Packets/QuestPackets.cs:46-112`.
+    /// `QuestGiverQuestDetails::Write`, per the 1.14 wire format.
     ///
     /// A reshape. Everything variable-length moves to the end: all four counts and the fixed fields
     /// come first, then the arrays, then a bit run holding *seven* string lengths at differing widths

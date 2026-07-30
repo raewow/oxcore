@@ -349,7 +349,7 @@ where
 
 /// Inbound opcodes the 1.14 client sends during its bootstrap sweep that we knowingly do not act on.
 ///
-/// Adapted from JimsProxy's `World/KnownBenignOpcodes.cs`, which exists for the same reason: without
+/// per the 1.14 wire format, which exists for the same reason: without
 /// it, routine client noise and a genuinely unhandled packet look identical in the trace. These
 /// appear as `packet.ignored` rather than `packet.rx`.
 ///

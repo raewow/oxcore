@@ -108,8 +108,7 @@ pub struct ModernCreateData {
     pub action_buttons: Option<Vec<u32>>,
 }
 
-/// Action-bar slots 1.14 expects in the create tail, from JimsProxy
-/// `World/Enums/PlayerDefines.cs:20` (`MaxActionButtons`).
+/// Action-bar slots 1.14 expects in the create tail, per the 1.14 wire format (`MaxActionButtons`).
 ///
 /// Vanilla sends 120. The reference reads those, leaves the packed values untouched, and zero-pads
 /// to 132 (`World/Client/PacketHandlers/CharacterHandler.cs:352-367`), so the extra slots are the
@@ -249,7 +248,7 @@ impl ModernUpdateBlock {
         // That makes the recipient's own object unparseable while every other object in the same
         // packet is fine.
         //
-        // Transcribed from JimsProxy `ObjectUpdateBuilder.cs:534-570`.
+        // per the 1.14 wire format.
         if create.this_is_you {
             let action_buttons = create.action_buttons.as_deref();
 

@@ -54,7 +54,7 @@ pub struct Config {
     ///
     /// Deliberately a separate file rather than more lines in `world.log`: a full per-packet trace
     /// is the tool for decoding a body the client rejected, and `world.log` is already tens of
-    /// megabytes per session from vmap and navmesh chatter. Modelled on JimsProxy's structured
+    /// megabytes per session from vmap and navmesh chatter. Modelled on the 1.14 reference's structured
     /// logging (`Framework/Logging/Log.cs`).
     #[serde(default)]
     pub modern_packet_log: String,

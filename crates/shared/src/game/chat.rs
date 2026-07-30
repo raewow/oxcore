@@ -54,6 +54,80 @@ pub enum ChatMsg {
     BattlegroundLeader = 0x5D,
 }
 
+/// Translate a vanilla chat type to its 1.14 number.
+///
+/// **The two enums are completely renumbered, not merely extended.** Vanilla `Say` is 0 and `System`
+/// is 10; 1.14 has `System` at 0 and `Say` at 1, and every value between shifts. Passing the number
+/// through unchanged does not produce a wrong-looking line — it routes say to the system channel,
+/// party to say, guild to party, and so on for every message the player sees.
+///
+/// 1.14 also splits some vanilla types apart (`MonsterParty` moves from 48 to 13, wedged between the
+/// monster types) and adds a second whisper slot, so there is no arithmetic offset that works.
+/// Translated by name, from the 1.14 reference
+/// (`ChatMessageTypeVanilla` and `ChatMessageTypeModern`).
+///
+/// Deliberately **exhaustive, with no catch-all**: adding a variant to [`ChatMsg`] should be a
+/// compile error here, not a silent fallthrough to whatever the default arm said. A defaulted
+/// mapping is exactly the bug this function exists to prevent.
+///
+/// Returns `None` for a vanilla-only type with no 1.14 counterpart — the combat spam types, which the
+/// 1.14 client reports through the combat log instead. Dropping those is correct; guessing a number
+/// would put them in an arbitrary chat window.
+pub fn to_modern_chat_type(msgtype: ChatMsg) -> Option<u8> {
+    Some(match msgtype {
+        ChatMsg::System => 0,
+        ChatMsg::Say => 1,
+        ChatMsg::Party => 2,
+        ChatMsg::Raid => 3,
+        ChatMsg::Guild => 4,
+        ChatMsg::Officer => 5,
+        ChatMsg::Yell => 6,
+        ChatMsg::Whisper => 7,
+        ChatMsg::WhisperInform => 9,
+        ChatMsg::Emote => 10,
+        ChatMsg::TextEmote => 11,
+        ChatMsg::MonsterSay => 12,
+        ChatMsg::MonsterYell => 14,
+        ChatMsg::MonsterWhisper => 15,
+        ChatMsg::MonsterEmote => 16,
+        ChatMsg::Channel => 17,
+        ChatMsg::ChannelJoin => 18,
+        ChatMsg::ChannelLeave => 19,
+        ChatMsg::ChannelList => 20,
+        ChatMsg::ChannelNotice => 21,
+        ChatMsg::ChannelNoticeUser => 22,
+        ChatMsg::Afk => 23,
+        ChatMsg::Dnd => 24,
+        ChatMsg::Ignored => 25,
+        ChatMsg::Skill => 26,
+        ChatMsg::Loot => 27,
+        ChatMsg::CombatMiscInfo => 32,
+        ChatMsg::RaidLeader => 39,
+        ChatMsg::RaidWarning => 40,
+        ChatMsg::RaidBossEmote => 41,
+        ChatMsg::RaidBossWhisper => 42,
+        ChatMsg::Filtered => 43,
+        ChatMsg::Battleground => 62,
+        ChatMsg::BattlegroundLeader => 63,
+
+        // 1.14 routes per-swing combat spam through the combat log, not chat, so these have no
+        // counterpart. The client would still render a number we invented, in the wrong window.
+        ChatMsg::CombatSelfHits
+        | ChatMsg::CombatSelfMisses
+        | ChatMsg::CombatPetHits
+        | ChatMsg::CombatPetMisses
+        | ChatMsg::CombatPartyHits
+        | ChatMsg::CombatPartyMisses
+        | ChatMsg::CombatFriendlyPlayerHits
+        | ChatMsg::CombatFriendlyPlayerMisses
+        | ChatMsg::CombatHostilePlayerHits
+        | ChatMsg::CombatHostilePlayerMisses => return None,
+
+        // Addon traffic changes language rather than type; see `SmsgMessageChat::to_modern`.
+        ChatMsg::Addon => 1,
+    })
+}
+
 impl ChatMsg {
     pub fn from_u32(value: u32) -> Option<Self> {
         match value {

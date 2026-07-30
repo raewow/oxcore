@@ -36,8 +36,7 @@ pub(crate) fn parse_spell_cast_targets(
     }
 }
 
-/// `SpellTargetData::Read` for build 42597, from JimsProxy
-/// `World/Server/Packets/SpellPackets.cs:1204-1235`.
+/// `SpellTargetData::Read` for build 42597, per the 1.14 wire format.
 ///
 /// This is a branch rather than a translation -- the two layouts share nothing beyond the concept:
 ///

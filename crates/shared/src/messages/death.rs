@@ -2,6 +2,8 @@
 //!
 //! All packets involved in the death and resurrection cycle.
 
+use crate::messages::update::DEFAULT_REALM_ID;
+use crate::protocol::bitbuf::BitWriter;
 use crate::messages::ToWorldPacket;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
@@ -16,6 +18,12 @@ pub struct SmsgCorpseReclaimDelay {
 }
 
 impl ToWorldPacket for SmsgCorpseReclaimDelay {
+    /// `CorpseReclaimDelay::Write` for build 42597:
+    /// identical to vanilla, one u32.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CORPSE_RECLAIM_DELAY);
         packet.write_u32(self.delay_ms);
@@ -36,6 +44,28 @@ pub struct SmsgResurrectRequest {
 }
 
 impl ToWorldPacket for SmsgResurrectRequest {
+    /// `ResurrectRequest::Write` for build 42597.
+    ///
+    /// The name moves to the end behind an 11-bit length, and the two trailing bools become bits in
+    /// the same run. A realm address, pet number and spell id are new.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.caster_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(0); // CasterVirtualRealmAddress
+        writer.write_u32(0); // PetNumber -- only set when a pet resurrects its owner
+        writer.write_u32(0); // SpellID
+
+        let name = self.caster_name.as_bytes();
+        writer.write_bits(name.len() as u32, 11);
+        writer.write_bit(self.use_corpse_timer); // UseTimer
+        writer.write_bit(self.causes_sickness); // Sickness
+        writer.flush_bits();
+
+        writer.write_bytes(name);
+        Some(writer.finish(Opcode::SMSG_RESURRECT_REQUEST))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_RESURRECT_REQUEST);
         packet.write_u64(self.caster_guid.raw());
@@ -61,6 +91,15 @@ pub struct SmsgSpiritHealerConfirm {
 }
 
 impl ToWorldPacket for SmsgSpiritHealerConfirm {
+    /// `SpiritHealerConfirm::Write` for build 42597: the
+    /// same single GUID, packed as guid128.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.healer_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        Some(writer.finish(Opcode::SMSG_SPIRIT_HEALER_CONFIRM))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPIRIT_HEALER_CONFIRM);
         packet.write_u64(self.healer_guid.raw());

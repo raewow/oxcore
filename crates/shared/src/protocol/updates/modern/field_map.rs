@@ -72,6 +72,12 @@ pub const MODERN_UNIT_FIELD_HOVERHEIGHT: u16 = 196;
 pub const MODERN_UNIT_FIELD_SCALE_DURATION: u16 = 210;
 /// Modern `UNIT_FIELD_LOOK_AT_CONTROLLER_ID` (size 1).
 pub const MODERN_UNIT_FIELD_LOOK_AT_CONTROLLER_ID: u16 = 213;
+/// Modern `PLAYER_QUEST_LOG` (size 400).
+pub const MODERN_PLAYER_QUEST_LOG: u16 = 239;
+/// Modern `GAMEOBJECT_PARENTROTATION` (size 4).
+pub const MODERN_GAMEOBJECT_PARENTROTATION: u16 = 17;
+/// Modern `GAMEOBJECT_BYTES_1` (size 1).
+pub const MODERN_GAMEOBJECT_BYTES_1: u16 = 23;
 /// Modern `PLAYER_WOW_ACCOUNT` (size 4).
 pub const MODERN_PLAYER_WOW_ACCOUNT: u16 = 222;
 /// Modern `PLAYER_FIELD_VIRTUAL_PLAYER_REALM` (size 1).
@@ -101,11 +107,11 @@ pub const MODERN_ACTIVE_PLAYER_FIELD_MAX_LEVEL: u16 = 2898;
 /// Modern `ACTIVE_PLAYER_FIELD_MOD_PET_HASTE` (size 1).
 pub const MODERN_ACTIVE_PLAYER_FIELD_MOD_PET_HASTE: u16 = 2911;
 /// Modern `ACTIVE_PLAYER_FIELD_HONOR_NEXT_LEVEL` (size 1).
-pub const MODERN_ACTIVE_PLAYER_FIELD_HONOR_NEXT_LEVEL: u16 = 4678;
+pub const MODERN_ACTIVE_PLAYER_FIELD_HONOR_NEXT_LEVEL: u16 = 4679;
 /// Modern `ACTIVE_PLAYER_FIELD_PVP_TIER_MAX_FROM_WINS` (size 1).
-pub const MODERN_ACTIVE_PLAYER_FIELD_PVP_TIER_MAX_FROM_WINS: u16 = 4679;
+pub const MODERN_ACTIVE_PLAYER_FIELD_PVP_TIER_MAX_FROM_WINS: u16 = 4680;
 /// Modern `ACTIVE_PLAYER_FIELD_PVP_LAST_WEEKS_TIER_MAX_FROM_WINS` (size 1).
-pub const MODERN_ACTIVE_PLAYER_FIELD_PVP_LAST_WEEKS_TIER_MAX_FROM_WINS: u16 = 4680;
+pub const MODERN_ACTIVE_PLAYER_FIELD_PVP_LAST_WEEKS_TIER_MAX_FROM_WINS: u16 = 4681;
 /// Modern `ACTIVE_PLAYER_FIELD_BYTES` (size 1).
 pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES: u16 = 2756;
 /// Modern `ACTIVE_PLAYER_FIELD_BYTES_6` (size 1).
@@ -1819,10 +1825,10 @@ pub const PLAYER_MAP: [ModernSlot; 1282] = [
 ///
 /// The mask is always sent at full width for the object type, so this drives
 /// its block count even when only one field changed.
-pub const ACTIVE_PLAYER_FIELD_COUNT: u16 = 4682;
+pub const ACTIVE_PLAYER_FIELD_COUNT: u16 = 4683;
 
 /// Total modern *dynamic* field slots for ActivePlayer.
-pub const ACTIVE_PLAYER_DYNAMIC_FIELD_COUNT: u16 = 18;
+pub const ACTIVE_PLAYER_DYNAMIC_FIELD_COUNT: u16 = 19;
 
 /// Vanilla slot -> modern slot for ActivePlayer objects.
 ///
@@ -3121,11 +3127,6 @@ pub const GAME_OBJECT_FIELD_COUNT: u16 = 33;
 
 /// Total modern *dynamic* field slots for GameObject.
 pub const GAME_OBJECT_DYNAMIC_FIELD_COUNT: u16 = 1;
-
-/// `GAMEOBJECT_PARENTROTATION`, four consecutive quaternion components.
-pub const MODERN_GAMEOBJECT_PARENT_ROTATION: u16 = 17;
-/// `GAMEOBJECT_BYTES_1`: state, type, art kit, and percent health.
-pub const MODERN_GAMEOBJECT_BYTES_1: u16 = 23;
 
 /// Vanilla slot -> modern slot for GameObject objects.
 ///
