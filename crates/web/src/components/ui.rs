@@ -94,3 +94,33 @@ pub fn Input(
         </div>
     }
 }
+
+/// Centered card shell used by the auth pages (login/register/recover) and the
+/// signed-in account pages (account/security/activity/support/character).
+#[component]
+pub fn AuthShell(title: &'static str, subtitle: &'static str, children: Children) -> impl IntoView {
+    view! {
+        <main class="grid min-h-screen place-items-center bg-background px-6 py-12 text-foreground">
+            <Card class="w-full max-w-md px-4 py-8 sm:px-6">
+                <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/">"oxcore"</a>
+                <h1 class="mt-6 font-sans text-3xl font-semibold tracking-tight">{title}</h1>
+                <p class="mt-3 text-xs leading-6 text-muted-foreground">{subtitle}</p>
+                {children()}
+            </Card>
+        </main>
+    }
+}
+
+#[component]
+pub fn AuthField(
+    id: &'static str,
+    name: &'static str,
+    label: &'static str,
+    input_type: &'static str,
+    autocomplete: &'static str,
+) -> impl IntoView {
+    view! {
+        <Label for_id=id>{label}</Label>
+        <Input id=id name=name input_type=input_type autocomplete=autocomplete />
+    }
+}
