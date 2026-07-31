@@ -1,6 +1,6 @@
 //! Server-side spline state: where a unit is along its path at any moment.
 //!
-//! This is the faithful port of the C++ `MoveSpline`, built on the geometry primitives in
+//! This is the faithful port of the reference `MoveSpline`, built on the geometry primitives in
 //! [`super::spline_base`]. It is not yet wired into creature movement, which still uses the
 //! simpler linear [`super::spline::MoveSpline`].
 
@@ -28,7 +28,7 @@ fn terminal_fall_time() -> f32 {
     TERMINAL_VELOCITY / GRAVITY
 }
 
-/// Seconds needed to fall `path_length` yards (`Movement::computeFallTime`).
+/// Seconds needed to fall `path_length` yards.
 pub fn compute_fall_time(path_length: f32, is_safe_fall: bool) -> f32 {
     if path_length < 0.0 {
         return 0.0;
@@ -48,7 +48,7 @@ pub fn compute_fall_time(path_length: f32, is_safe_fall: bool) -> f32 {
     }
 }
 
-/// Yards fallen after `time_passed` seconds (`Movement::computeFallElevation`).
+/// Yards fallen after `time_passed` seconds.
 pub fn compute_fall_elevation(time_passed: f32, is_safe_fall: bool, start_velocity: f32) -> f32 {
     let terminal_velocity = if is_safe_fall {
         TERMINAL_SAFE_FALL_VELOCITY
@@ -134,10 +134,10 @@ impl fmt::Display for MoveSplineFlags {
     }
 }
 
-/// Names of the 32 raw spline flag bits, indexed by bit position (`g_SplineFlag_names`).
+/// Names of the 32 raw spline flag bits, indexed by bit position.
 ///
 /// Bits with no defined meaning keep their `Unknown<n>` label so the rendered string still
-/// accounts for every set bit, exactly as the C++ debug output does.
+/// accounts for every set bit, exactly as the reference debug output does.
 const SPLINE_FLAG_NAMES: [&str; 32] = [
     "Done",
     "Falling",
@@ -173,11 +173,11 @@ const SPLINE_FLAG_NAMES: [&str; 32] = [
     "Unknown31",
 ];
 
-/// Render the raw spline flag word as its set bit names (`MoveSplineFlag::ToString`).
+/// Render the raw spline flag word as its set bit names.
 ///
 /// Each set bit contributes a leading space then its name, low bit first, so the result is
 /// `" Done Falling"` for the two lowest bits and empty when nothing is set - matching the
-/// C++ `print_flags` output byte for byte.
+/// reference `print_flags` output byte for byte.
 pub fn format_move_spline_flags(raw: u32) -> String {
     let mut out = String::new();
     for (bit, name) in SPLINE_FLAG_NAMES.iter().enumerate() {
@@ -210,7 +210,7 @@ impl MoveSplineInitArgs {
 
     /// Whether every intermediate point fits the MONSTER_MOVE packet's 11-bit offsets.
     ///
-    /// Catmull-Rom paths send absolute points, so they are exempt. The C++ core has this
+    /// Catmull-Rom paths send absolute points, so they are exempt. The reference core has this
     /// check commented out of `Validate`; it is kept callable here for the same reason it
     /// exists - the packet writer needs it.
     pub fn check_path_bounds(&self) -> bool {
@@ -783,7 +783,7 @@ mod tests {
         assert!(compute_fall_elevation(2.0, false, 0.0) > compute_fall_elevation(1.0, false, 0.0));
 
         // The safe-fall flag only clamps the starting velocity: past terminal time the
-        // C++ formula uses the unsafe terminal velocity either way, so a fall starting
+        // formula uses the unsafe terminal velocity either way, so a fall starting
         // from rest is identical with and without it.
         assert_eq!(
             compute_fall_elevation(5.0, true, 0.0),

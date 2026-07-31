@@ -18,7 +18,6 @@ use crate::game::ItemManager;
 const MAX_KEYRING_SIZE: u8 = 32;
 
 /// Check if a bag+slot pair is a valid inventory position.
-/// Maps to C++ Player::IsInventoryPos
 pub fn is_inventory_pos(bag: u8, slot: u8) -> bool {
     if bag == INVENTORY_SLOT_BAG_0 && slot == NULL_SLOT {
         return true;
@@ -39,7 +38,6 @@ pub fn is_inventory_pos(bag: u8, slot: u8) -> bool {
 }
 
 /// Check if a bag+slot pair is a valid equipment position.
-/// Maps to C++ Player::IsEquipmentPos
 pub fn is_equipment_pos(bag: u8, slot: u8) -> bool {
     if bag == INVENTORY_SLOT_BAG_0 && slot < 19 {
         return true;
@@ -96,7 +94,7 @@ impl CanStoreResult {
     }
 }
 
-/// Dedicated can-store checker that mirrors C++ Player::_CanStoreItem and friends.
+/// Dedicated can-store checker mirroring the reference player can-store flows.
 ///
 /// Created per check so that intermediate state (no_similar_count, dest vector)
 /// is fresh every invocation and no mutable borrow conflicts arise.
@@ -967,7 +965,7 @@ impl<'a> CanStoreChecker<'a> {
         }
 
         // Simplified batch check: just run can_store_item for each
-        // and aggregate. C++ does a more complex space simulation.
+        // and aggregate. The reference does a more complex space simulation.
         let mut total_count: u32 = 0;
         for item_opt in items {
             let item = match item_opt {
@@ -1005,7 +1003,7 @@ impl<'a> CanStoreChecker<'a> {
         }
 
         // Fallback to regular can_store with NULL_BAG/NULL_SLOT
-        // The C++ version simulates slot-by-slot filling, but the
+        // The reference version simulates slot-by-slot filling, but the
         // simpler approach of checking if there's enough free space
         // works for the common cases.
         let free = self.cache.count_total_free_slots(self.player_guid);
@@ -1018,7 +1016,6 @@ impl<'a> CanStoreChecker<'a> {
 }
 
 /// Check if two items can be merged (same entry, not unique).
-/// Maps to C++ Item::CanBeMergedPartlyWith
 fn can_be_merged_partly_with(
     other_entry: u32,
     other_count: u32,

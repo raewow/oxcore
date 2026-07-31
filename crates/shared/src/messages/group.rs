@@ -450,7 +450,7 @@ impl ToWorldPacket for SmsgGroupList<'_> {
     ///   0x80`); 1.14 sends a subgroup byte and a `GroupMemberFlags` byte where assistant is `0x01`.
     /// * **Loot settings are optional, not unconditional.** They follow the member list behind a
     ///   presence bit, and the three presence bits are written *before* the members.
-    /// * **A sequence number gates the whole update** — see [`PARTY_UPDATE_SEQUENCE`].
+    /// * **A sequence number gates the whole update** — see `PARTY_UPDATE_SEQUENCE`.
     ///
     /// An empty member list is the disband path: 1.14 expresses it as a party update carrying the
     /// `Destroyed` flag and `MyIndex` of -1, with none of the optional blocks.
@@ -592,7 +592,7 @@ impl ToWorldPacket for SmsgPartyCommandResult<'_> {
 
     /// `PartyCommandResult::Write`. Vanilla's two 32-bit enums become a 4-bit command and a 6-bit
     /// result packed alongside the name's 9-bit length, and the **result enum is renumbered** — see
-    /// [`to_modern_party_result`], which is where the real hazard in this message lives.
+    /// `to_modern_party_result`, which is where the real hazard in this message lives.
     ///
     /// The command enum is *not* renumbered (invite is still 0, leave still 2), so it is cast. It
     /// only has 4 bits now, so a command above 15 would wrap into the result field.
@@ -965,24 +965,24 @@ impl ToWorldPacket for SmsgPartyMemberStats<'_> {
 
         let has = |flag: u32| (self.update_mask & flag) != 0;
 
-        let positive = if has(AURAS) {
+        let positive: &[u32] = if has(AURAS) {
             self.auras.unwrap_or(&[])
         } else {
             &[]
         };
-        let negative = if has(AURAS_NEGATIVE) {
+        let negative: &[u32] = if has(AURAS_NEGATIVE) {
             self.negative_auras.unwrap_or(&[])
         } else {
             &[]
         };
         let has_auras = has(AURAS) || has(AURAS_NEGATIVE);
 
-        let pet_positive = if has(PET_AURAS) {
+        let pet_positive: &[u32] = if has(PET_AURAS) {
             self.pet_auras.unwrap_or(&[])
         } else {
             &[]
         };
-        let pet_negative = if has(PET_AURAS_NEGATIVE) {
+        let pet_negative: &[u32] = if has(PET_AURAS_NEGATIVE) {
             self.pet_negative_auras.unwrap_or(&[])
         } else {
             &[]
@@ -1252,6 +1252,42 @@ impl ToWorldPacket for MsgRaidReadyCheck {
         }
         packet
     }
+
+    /// `ReadyCheckStarted::Write` and `ReadyCheckResponse::Write`.
+    ///
+    /// 1.14 **splits this opcode in two.** Vanilla distinguishes "a ready check started" from "a
+    /// player answered" by body length alone — the answer has a trailing byte, the start does not —
+    /// which is why the vanilla struct makes the answer an `Option`. 1.14 gives each its own opcode,
+    /// so the `Option` selects the opcode rather than a trailing field. Sending a response body
+    /// under the start opcode does not misparse; it starts a second ready check.
+    ///
+    /// Both forms name the party, which vanilla never does. See `modern_party_guid` for why that
+    /// GUID is synthesised and why it has to be the same one the party update sent.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (party_high, party_low) = modern_party_guid();
+        let (high, low) = self.player_guid.to_guid128(DEFAULT_REALM_ID);
+
+        match self.ready {
+            None => {
+                writer.write_u8(0); // PartyIndex -- see `SmsgGroupList::to_modern`
+                writer.write_packed_guid_128(party_high, party_low);
+                writer.write_packed_guid_128(high, low); // InitiatorGUID
+                // Duration drives the countdown on the ready-check frame and has no vanilla source.
+                // 35s is the client's own default window, so this matches what a native server
+                // would put here rather than inventing a timeout of our own.
+                writer.write_u64(35_000);
+                Some(writer.finish(Opcode::MSG_RAID_READY_CHECK))
+            }
+            Some(ready) => {
+                writer.write_packed_guid_128(party_high, party_low);
+                writer.write_packed_guid_128(high, low); // Player
+                writer.write_bit(ready);
+                writer.flush_bits();
+                Some(writer.finish(Opcode::SMSG_READY_CHECK_RESPONSE))
+            }
+        }
+    }
 }
 
 /// MSG_MINIMAP_PING - Send minimap ping to group
@@ -1274,6 +1310,17 @@ impl ToWorldPacket for MsgMinimapPing {
         packet.write_f32(self.x);
         packet.write_f32(self.y);
         packet
+    }
+
+    /// `MinimapPing::Write`. Same three fields in the same order; only the GUID's encoding changes,
+    /// from a raw 64-bit value to a packed 128-bit one.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.player_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // SenderGUID
+        writer.write_f32(self.x);
+        writer.write_f32(self.y);
+        Some(writer.finish(Opcode::MSG_MINIMAP_PING))
     }
 }
 
@@ -1300,6 +1347,24 @@ impl ToWorldPacket for MsgRandomRoll {
         packet.write_u32(self.roll);
         packet.write_u64(self.player_guid.raw());
         packet
+    }
+
+    /// `RandomRoll::Write`. The roller's GUID moves from **last to first** and gains a companion
+    /// account GUID; the three numbers keep their order behind them. Leaving the GUID where vanilla
+    /// puts it would have the client read the low half of the roll range as the roller.
+    ///
+    /// The account GUID is sent empty: it identifies the roller's game account for Battle.net
+    /// features that Classic Era does not have, and vanilla has no account identity on the wire at
+    /// all.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.player_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // Roller
+        writer.write_packed_guid_128(0, 0); // RollerWowAccount -- see above
+        writer.write_i32(self.min as i32);
+        writer.write_i32(self.max as i32);
+        writer.write_i32(self.roll as i32);
+        Some(writer.finish(Opcode::MSG_RANDOM_ROLL))
     }
 }
 

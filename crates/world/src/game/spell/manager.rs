@@ -62,7 +62,6 @@ pub struct SpellLearnSpellNode {
 }
 
 impl SpellArea {
-    /// Port of `SpellArea::IsFitToRequirements` (SpellMgr.cpp:3050).
     /// Checks whether a player meets all area/spell requirements.
     /// Player-specific data (gender, race, quests, auras) is passed explicitly
     /// so the function works without a direct dependency on the Player type.
@@ -180,14 +179,12 @@ pub struct SpellTargetPosition {
     pub orientation: f32,
 }
 
-/// Port of `SpellEntry::IsExplicitPositiveTarget` — target modes where the
-/// spell expects an explicit (client-provided) friendly target.
+/// Target modes where the spell expects an explicit (client-provided) friendly target.
 fn is_explicit_positive_target(target_a: u32) -> bool {
     matches!(target_a, 21 | 35 | 45 | 57 | 61)
 }
 
-/// Port of `SpellEntry::IsAreaEffectPossitiveTarget` — target modes that
-/// auto-select friendly units in an area (party, raid, friend-AoE).
+/// Target modes that auto-select friendly units in an area (party, raid, friend-AoE).
 fn is_area_positive_target(target: u32) -> bool {
     matches!(target, 20 | 30 | 31 | 33 | 34 | 37 | 56 | 61)
 }
@@ -396,7 +393,7 @@ impl SpellManager {
 
     /// Load spell rank chains: talent ranks + skill-ability forward-rank chains (both derived
     /// from DBC data), merged/overridden by the `spell_chain` SQL table (custom cases).
-    /// Faithful `SpellMgr::LoadSpellChains` port (validation logging trimmed to warnings).
+    /// Faithful port of the reference load (validation logging trimmed to warnings).
     pub async fn load_spell_chains(&self, world_db: &MySqlPool, dbc: &DbcManager) -> Result<()> {
         self.load_skill_line_ability_maps(dbc);
         self.load_skill_race_class_info_map(dbc);
@@ -646,7 +643,6 @@ impl SpellManager {
         true
     }
 
-    /// Port of `SpellMgr::LoadSkillLineAbilityMaps` (SpellMgr.cpp:2746).
     /// Indexes every SkillLineAbility DBC entry by both spell and skill ID.
     pub fn load_skill_line_ability_maps(&self, dbc: &DbcManager) {
         let mut by_spell = HashMap::new();
@@ -667,7 +663,6 @@ impl SpellManager {
         *self.skill_line_abilities_by_skill.write() = by_skill;
     }
 
-    /// Port of `SpellMgr::LoadSkillRaceClassInfoMap` (SpellMgr.cpp:2770).
     /// Indexes entries only for skills defined by SkillLine DBC data.
     pub fn load_skill_race_class_info_map(&self, dbc: &DbcManager) {
         let mut by_skill = HashMap::new();
@@ -698,8 +693,6 @@ impl SpellManager {
         *self.spell_chains_next.write() = next;
     }
 
-    /// Port of `SpellMgr::SelectAuraRankForLevel`.
-    ///
     /// Selects the appropriate rank of a positive aura spell for a target of
     /// the given `level`. Falls back down the spell chain (from higher ranks
     /// to lower) until it finds one the target qualifies for (level + 10 >=
@@ -761,7 +754,6 @@ impl SpellManager {
     }
 
     /// Get the rank (1-based) of a spell within its spell chain, or 0 if it has no chain data.
-    /// Faithful `SpellMgr::GetSpellRank`.
     pub fn get_spell_rank(&self, spell_id: u32) -> u8 {
         self.spell_chains
             .read()
@@ -790,8 +782,8 @@ impl SpellManager {
         self.spell_proc_events.get(&spell_id).map(|r| r.clone())
     }
 
-    /// Get the `spell_threat` flat/pct/AP bonus entry for a spell, if any
-    /// (`SpellMgr::GetSpellThreatEntry`). Consumed by `Spell::HandleThreatSpells`.
+    /// Get the `spell_threat` flat/pct/AP bonus entry for a spell, if any.
+    /// Consumed by the threat-spell handler.
     pub fn get_spell_threat_entry(&self, spell_id: u32) -> Option<SpellThreatEntry> {
         self.spell_threats.get(&spell_id).map(|r| r.clone())
     }
@@ -842,8 +834,6 @@ impl SpellManager {
         results
     }
 
-    /// Port of `SpellMgr::LoadSpellLearnSkills`.
-    ///
     /// Scans every loaded spell for `SPELL_EFFECT_SKILL` (118) and populates
     /// `spell_learn_skills[spell_id]` with the skill, step, and character points
     /// (1 for ordinary skills, `step * 75` for riding).
@@ -879,8 +869,6 @@ impl SpellManager {
         info!("Loaded {} Spell Learn Skills from templates", count);
     }
 
-    /// Port of `SpellMgr::LoadSpellEnchantCharges`.
-    ///
     /// Loads `spell_enchant_charges` from the SQL table, validating each spell
     /// exists in the loaded spell list. Missing spells are logged but not fatal.
     async fn load_spell_enchant_charges(&self, world_db: &MySqlPool) -> Result<()> {
@@ -926,8 +914,6 @@ impl SpellManager {
         Ok(())
     }
 
-    /// Port of `SpellMgr::LoadSpellPetAuras`.
-    ///
     /// Loads `spell_pet_auras` SQL table, validating each spell exists and has
     /// a dummy aura/effect. Creates `PetAura` entries keyed by spell ID.
     async fn load_spell_pet_auras(&self, world_db: &MySqlPool) -> Result<()> {
@@ -1000,10 +986,9 @@ impl SpellManager {
     }
 
     // ═════════════════════════════════════════════════════════════════
-    // Ports of remaining SpellMgr loaders & query functions
+    // Remaining loader & query functions
     // ═════════════════════════════════════════════════════════════════
 
-    /// Port of `SpellMgr::LoadSpellCones` (SpellMgr.cpp:2363).
     async fn load_spell_cones(&self, world_db: &MySqlPool) -> Result<()> {
         let mut cones = HashMap::new();
         let mut count = 0u32;
@@ -1051,7 +1036,6 @@ impl SpellManager {
         Ok(())
     }
 
-    /// Port of `SpellMgr::LoadSpellAreas` (SpellMgr.cpp:2418).
     async fn load_spell_areas(
         &self,
         world_db: &MySqlPool,
@@ -1188,7 +1172,6 @@ impl SpellManager {
             && matches!(area.gender, 0..=2)
     }
 
-    /// Port of `SpellMgr::LoadExistingSpellIds` (SpellMgr.cpp:3103).
     /// Populates `existing_spell_ids` with all spell IDs from `spell_template`.
     async fn load_existing_spell_ids(&self, world_db: &MySqlPool) -> Result<()> {
         let mut ids = Vec::new();
@@ -1213,7 +1196,6 @@ impl SpellManager {
         *self.existing_spell_ids.write() = ids.into_iter().collect();
     }
 
-    /// Port of `SpellMgr::IsSpellValid` (SpellMgr.cpp:2289).
     /// Validates a spell entry — checks CREATE_ITEM effects have valid item
     /// prototypes and LEARN_SPELL effects target valid spells.
     pub fn is_spell_valid(&self, spell_info: Option<&SpellEntry>, _msg: bool) -> bool {
@@ -1261,7 +1243,6 @@ impl SpellManager {
             .is_some_and(|spell| self.is_spell_valid(Some(&spell), msg))
     }
 
-    /// Port of `SpellMgr::GetRequiredAreaForSpell` (SpellMgr.cpp:2706).
     /// Returns the area ID required by a spell, or 0 if none.
     pub fn get_required_area_for_spell(&self, spell_id: u32) -> u32 {
         let areas = self.spell_areas.read();
@@ -1278,7 +1259,6 @@ impl SpellManager {
         }
     }
 
-    /// Port of `SpellMgr::GetSpellAllowedInLocationError` (SpellMgr.cpp:2641).
     /// Checks battleground-only attributes, hardcoded spell IDs, and spell_area
     /// requirements. Player-specific checks (gender, race, quests, auras) are
     /// gated by `player_data` — pass `None` to skip those checks.
@@ -1368,7 +1348,6 @@ impl SpellManager {
             .any(|sa| sa.spell == spell_id)
     }
 
-    /// Port of `SpellMgr::CheckUsedSpells` (SpellMgr.cpp:2797).
     /// Validates that spells referenced in a given table exist.
     pub async fn check_used_spells(&self, world_db: &MySqlPool, table: &str) -> Result<()> {
         let query = format!(
@@ -1406,18 +1385,16 @@ impl SpellManager {
         Ok(())
     }
 
-    /// Port of `SpellMgr::AssignInternalSpellFlags` (SpellMgr.cpp:3461).
     /// Pre-computes internal classification flags on each loaded SpellEntry.
     /// NOTE: The `internal` field on `Arc<SpellEntry>` cannot be mutated through
     /// a shared reference in the current architecture. Flags are computed on
-    /// demand as methods (e.g. `SpellEntry::is_reflectable_spell()`) — this
+    /// demand as functions (e.g. `hit::is_reflectable_spell`) — this
     /// stub exists for API completeness.
     pub fn assign_internal_spell_flags(&self) {
         let count = self.spells.len();
         info!(">> assign_internal_spell_flags: {count} spells (flags computed on-demand)");
     }
 
-    /// Port of `SpellMgr::LoadSpellLearnSpells` (SpellMgr.cpp:1927).
     /// Loads `spell_learn_spell` SQL table and also scans DBC for
     /// `SPELL_EFFECT_LEARN_SPELL` auto-learn entries.
     async fn load_spell_learn_spells(&self, world_db: &MySqlPool) -> Result<()> {
@@ -1496,7 +1473,6 @@ impl SpellManager {
         Ok(())
     }
 
-    /// Port of `SpellMgr::LoadSpellScriptTarget` (SpellMgr.cpp:2036).
     /// Loads `spell_script_target` SQL table — validates targets exist and
     /// spell has a script-referencing target mode.
     async fn load_spell_script_targets(&self, world_db: &MySqlPool) -> Result<()> {

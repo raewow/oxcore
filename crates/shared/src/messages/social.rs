@@ -11,8 +11,53 @@
 //! - [`SmsgStandstateUpdate`] - Stand state animation update (sit, stand, kneel, etc.)
 
 use crate::game::social::{FriendInfo, FriendStatus, FriendsResult};
+use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{HighGuid, ObjectGuid, Opcode, WorldPacket};
+
+/// `region << 24 | site << 16 | realm id`, the same scheme the bnet realm list advertises.
+const VIRTUAL_REALM_ADDRESS: u32 = 0x0101_0000 | DEFAULT_REALM_ID as u32;
+
+// `SocialFlag`, per the 1.14 wire format. Same bit values as this server's own `SocialFlag`, but
+// 1.14 needs them *on the wire*: one contact list serves both relationships, and this word is the
+// only thing that says which one a body is.
+const SOCIAL_FLAG_FRIEND: u32 = 0x01;
+const SOCIAL_FLAG_IGNORED: u32 = 0x02;
+
+/// `ContactInfo::Write`, per the 1.14 wire format.
+///
+/// Shared by the friend list and the ignore list, which 1.14 serves from one message.
+///
+/// Every field is unconditional here, where vanilla omits area, level and class for anyone offline.
+/// Skipping them for an offline contact would leave the client reading the next contact's GUID out
+/// of the middle of this one's numbers.
+///
+/// The account GUID and the note are sent empty: vanilla has no account identity on the wire, and
+/// friend notes arrive two expansions later.
+fn write_modern_contact(
+    writer: &mut BitWriter,
+    guid: ObjectGuid,
+    type_flags: u32,
+    status: u8,
+    area: u32,
+    level: u32,
+    class: u32,
+) {
+    let (high, low) = guid.to_guid128(DEFAULT_REALM_ID);
+    writer.write_packed_guid_128(high, low);
+    writer.write_packed_guid_128(0, 0); // WowAccountGuid
+    writer.write_u32(VIRTUAL_REALM_ADDRESS);
+    writer.write_u32(VIRTUAL_REALM_ADDRESS); // NativeRealmAddr -- single realm, so the same address
+    writer.write_u32(type_flags);
+    writer.write_u8(status);
+    writer.write_u32(area);
+    writer.write_u32(level);
+    writer.write_u32(class);
+    writer.write_bits(0, 10); // Note length
+    writer.write_bit(false); // Mobile -- the companion app postdates this client
+    writer.flush_bits();
+}
 
 /// SMSG_FRIEND_LIST - Complete friend list with status information
 ///
@@ -52,6 +97,45 @@ impl ToWorldPacket for SmsgFriendList<'_> {
 
         packet
     }
+
+    /// `ContactList::Write`, under a different opcode: 1.14 has **no friend-list message**. Friends
+    /// and ignores are one contact list distinguished by a leading flags word, which is why this
+    /// finishes as `SMSG_CONTACT_LIST` rather than the opcode the struct is named for.
+    ///
+    /// `FriendStatus` keeps vanilla's values (offline 0, online 1, AFK 2, DND 4), so the status byte
+    /// carries over unchanged.
+    ///
+    /// The GUIDs and the infos are zipped rather than indexed in parallel: the count is written
+    /// before the entries, so a length mismatch between the two slices has to shorten the count too
+    /// or the client reads one contact past the end of the body.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let count = self.friend_guids.len().min(self.friend_infos.len());
+
+        let mut writer = BitWriter::new();
+        writer.write_u32(SOCIAL_FLAG_FRIEND);
+        writer.write_bits(count as u32, 8);
+        writer.flush_bits();
+
+        for (&guid_low, info) in self
+            .friend_guids
+            .iter()
+            .zip(self.friend_infos.iter())
+            .take(count)
+        {
+            let guid = ObjectGuid::new_without_entry(HighGuid::Player, guid_low);
+            write_modern_contact(
+                &mut writer,
+                guid,
+                SOCIAL_FLAG_FRIEND,
+                info.status as u8,
+                info.area,
+                info.level,
+                info.class,
+            );
+        }
+
+        Some(writer.finish(Opcode::SMSG_CONTACT_LIST))
+    }
 }
 
 /// SMSG_FRIEND_STATUS - Friend status updates
@@ -89,6 +173,38 @@ impl ToWorldPacket for SmsgFriendStatus {
 
         packet
     }
+
+    /// `FriendStatusPkt::Write`.
+    ///
+    /// The result code is **not** renumbered — 1.14 reads the same `FriendsResult` values vanilla
+    /// sends (added-online 6, removed 5, and so on) — so it is cast rather than translated.
+    ///
+    /// The status block is unconditional, where vanilla appends it only for the two online results.
+    /// A removal or an offline notification therefore still has to carry a status, area, level and
+    /// class; omitting them for those results truncates the body and the client drops the update, so
+    /// the friend stays listed as online forever.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let info = self.friend_info.as_ref();
+
+        let mut writer = BitWriter::new();
+        writer.write_u8(self.result.as_u8());
+
+        let (high, low) = self.friend_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_packed_guid_128(0, 0); // WowAccountGuid -- no account identity in vanilla
+        writer.write_u32(VIRTUAL_REALM_ADDRESS);
+
+        writer.write_u8(info.map_or(0, |info| info.status as u8));
+        writer.write_u32(info.map_or(0, |info| info.area));
+        writer.write_u32(info.map_or(0, |info| info.level));
+        writer.write_u32(info.map_or(0, |info| info.class));
+
+        writer.write_bits(0, 10); // Notes length -- friend notes postdate this client
+        writer.write_bit(false); // Mobile
+        writer.flush_bits();
+
+        Some(writer.finish(Opcode::SMSG_FRIEND_STATUS))
+    }
 }
 
 /// SMSG_IGNORE_LIST - Complete ignore list
@@ -112,6 +228,26 @@ impl ToWorldPacket for SmsgIgnoreList<'_> {
         }
 
         packet
+    }
+
+    /// `ContactList::Write` again, tagged `Ignored` instead of `Friend` — see
+    /// [`SmsgFriendList::to_modern`]. 1.14 has no separate ignore-list message; the flags word is
+    /// the *only* thing that stops the client filing these players as friends.
+    ///
+    /// Each contact still carries the full status/area/level/class block even though an ignore entry
+    /// has none of it. Those are the zeros the client expects for someone it is not tracking.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(SOCIAL_FLAG_IGNORED);
+        writer.write_bits(self.ignore_guids.len() as u32, 8);
+        writer.flush_bits();
+
+        for &ignore_guid_low in self.ignore_guids {
+            let guid = ObjectGuid::new_without_entry(HighGuid::Player, ignore_guid_low);
+            write_modern_contact(&mut writer, guid, SOCIAL_FLAG_IGNORED, 0, 0, 0, 0);
+        }
+
+        Some(writer.finish(Opcode::SMSG_CONTACT_LIST))
     }
 }
 
@@ -138,6 +274,19 @@ pub struct SmsgWho<'a> {
     pub total_online: usize,
 }
 
+/// Not ported to 1.14: this struct is missing the two things the 1.14 body is built around.
+///
+/// * **The request id.** 1.14's who request carries an id that the response must echo, and the
+///   client matches the answer to the outstanding query by that id alone — a response carrying the
+///   wrong one is discarded in full, so there is no partial-credit version of this message. The id
+///   arrives on the request and nothing on this struct remembers it.
+/// * **A GUID per player.** Each entry embeds the same player-lookup block a name query answers,
+///   which is keyed on the player's GUID; [`WhoPlayerInfo`] has a name but no GUID, and the client
+///   needs the GUID for the right-click actions (whisper, invite, add friend) that are the point of
+///   the who list. Gender is likewise absent.
+///
+/// Unblocking it needs the request id threaded onto this struct and a GUID (and gender) on
+/// [`WhoPlayerInfo`]. Both are available where the message is built; neither is reachable from here.
 impl ToWorldPacket for SmsgWho<'_> {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_WHO);

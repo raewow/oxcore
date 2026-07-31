@@ -45,10 +45,9 @@ impl MovementSystem {
 
     /// Teleport a creature back to its spawn point after a refused relocation.
     ///
-    /// Port of `Map::CreatureRespawnRelocation` (Map.cpp:1510-1535): stop moving,
-    /// snap to the respawn coordinates, and re-seat it in the grid there. Unlike
-    /// evade this does not *walk* home — the creature is standing in unloaded
-    /// space, so nothing would drive the movement.
+    /// Stops movement, snaps to the respawn coordinates, and re-seats the creature
+    /// in the grid there. Unlike evade this does not *walk* home — the creature is
+    /// standing in unloaded space, so nothing would drive the movement.
     fn relocate_to_home(
         guid: ObjectGuid,
         current_pos: Position,
@@ -444,7 +443,7 @@ impl MovementSystem {
                 is_walking,
             } => {
                 // Get creature map_id and compute real start position from active spline
-                // (MoveSplineInit::Launch computes position from running spline)
+                // (the launch computes position from a running spline)
                 let (map_id, real_start) = world
                     .managers
                     .creature_mgr

@@ -1,11 +1,11 @@
-//! Ship and zeppelin path traversal (`ShipTransport`, game object type 15).
+//! Ship and zeppelin path traversal (game object type 15).
 //!
 //! A ship replays the keyframe schedule built by [`super::schedule`]: as time advances it
 //! walks a cursor along the keyframes, pausing at stop frames and moving between them. That
 //! cursor logic - which keyframe is current at a given path progress, and whether the ship is
 //! moving or waiting - is pure and ported here. Evaluating the actual position along the
 //! segment's spline, the cross-map teleports and the passenger repositioning that
-//! `ShipTransport::Update` also does need the spline geometry and Map subsystems and stay in
+//! the full update also does need the spline geometry and Map subsystems and stay in
 //! the (blocked) full update.
 
 use crate::game::creature::movement::spline_base::{SplineBase, Vec3};
@@ -25,7 +25,7 @@ pub enum FramePhase {
 }
 
 /// Classify `path_progress` (ms within the path period) against a single keyframe's timing
-/// windows, mirroring the two range checks at the top of `ShipTransport::Update`'s loop.
+/// windows, mirroring the two range checks at the top of the update loop.
 pub fn classify_frame(frame: &KeyFrame, path_progress: u32) -> FramePhase {
     if path_progress >= frame.arrive_time && path_progress < frame.departure_time {
         FramePhase::WaitingHere
@@ -36,7 +36,7 @@ pub fn classify_frame(frame: &KeyFrame, path_progress: u32) -> FramePhase {
     }
 }
 
-/// Advance the keyframe cursor one step along the cyclic path (`ShipTransport::MoveToNextWayPoint`).
+/// Advance the keyframe cursor one step along the cyclic path.
 ///
 /// The path loops, so stepping off the last keyframe wraps back to the first.
 pub fn move_to_next_waypoint(cursor: usize, keyframe_count: usize) -> usize {
@@ -56,7 +56,7 @@ pub struct ShipFrameState {
 }
 
 /// Advance the keyframe cursor to the frame current at `path_progress`
-/// (the `while(true)` loop in `ShipTransport::Update`, without the teleport and spline work).
+/// (the update's advance loop, without the teleport and spline work).
 ///
 /// Starting from `cursor`, steps forward over frames already behind - cyclically, since the
 /// path loops - until it lands on the stop frame it is waiting at or the segment it is
@@ -110,13 +110,14 @@ pub struct ShipMotion {
 }
 
 /// Where the ship is along its path at `path_progress` (ms within the period), evaluating the
-/// current segment's spline (the position block of `ShipTransport::Update`).
+/// current segment's spline.
 ///
-/// Advances the keyframe cursor to the current frame, then - only while moving, as the C++
-/// guards with `IsMoving() && pathProgress` - finds how far along the segment the ship is via
-/// [`calculate_segment_pos`](super::segment::calculate_segment_pos) and reads the position and
-/// tangent off that segment's spline, facing `atan2(dir.y, dir.x) + PI`. Returns `None` when
-/// the ship is paused at a stop (its position is unchanged) or the spline cannot be evaluated.
+/// Advances the keyframe cursor to the current frame, then - only while moving, as the
+/// reference guards with `IsMoving() && pathProgress` - finds how far along the segment the
+/// ship is via [`calculate_segment_pos`](super::segment::calculate_segment_pos) and reads the
+/// position and tangent off that segment's spline, facing `atan2(dir.y, dir.x) + PI`.
+/// Returns `None` when the ship is paused at a stop (its position is unchanged) or the spline
+/// cannot be evaluated.
 pub fn ship_position(
     keyframes: &[KeyFrame],
     splines: &[SplineBase],

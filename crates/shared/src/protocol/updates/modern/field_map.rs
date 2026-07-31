@@ -7,7 +7,7 @@
 //! be built from the vanilla field writes the game systems already emit, by translating each slot
 //! number through the table for the object's type.
 //!
-//! Source: HermesProxy `V1_12_1_5875/UpdateFields.cs` and `V1_14_1_40688/UpdateFields.cs`, joined
+//! Source: the vanilla (1.12.1/5875) and modern (1.14.1/40688) update-field tables, joined
 //! by field name. 40688 is the correct modern table for build 42597.
 
 /// Where one vanilla field slot lands in the modern layout.

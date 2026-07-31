@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 /// Number of spell schools in vanilla WoW.
 pub const NUM_SPELL_SCHOOLS: usize = 7;
 
-/// Number of concurrent spell slots (matches MaNGOS CURRENT_SPELL_TYPES).
+/// Number of concurrent spell slots.
 pub const NUM_CURRENT_SPELLS: usize = 4;
 
 /// `SPELL_ATTR_EX3_NOT_A_PROC`: the spell must not be treated as a proc.
@@ -36,7 +36,7 @@ pub fn is_triggered_spell_with_redundant_data(
         || (is_triggered_spell && (mana_cost != 0 || mana_cost_percentage != 0))
 }
 
-/// Which slot a spell occupies. MaNGOS allows concurrent spells in different slots:
+/// Which slot a spell occupies. Concurrent spells can occupy different slots:
 /// e.g., Heroic Strike (Melee) while auto-attacking, Auto-Shot (Autorepeat) while casting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -51,7 +51,7 @@ pub enum CurrentSpellType {
     Generic = 3,
 }
 
-/// Spell cast state machine (matches MaNGOS SpellState).
+/// Spell cast state machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpellState {
     /// Cast bar running (non-channeled) — waiting for timer to complete
@@ -83,8 +83,7 @@ pub struct SpellsState {
     pub spellbook: Vec<u32>,
 
     // === Active Casts ===
-    /// Concurrent spell slots matching MaNGOS CURRENT_SPELL_TYPES.
-    /// Multiple spells can be active simultaneously in different slots:
+    /// Concurrent spell slots. Multiple spells can be active simultaneously in different slots:
     /// [0] Melee (Heroic Strike), [1] Autorepeat (Auto-Shot), [2] Channeled (Mind Flay), [3] Generic (Fireball)
     pub current_spells: [Option<ActiveCast>; NUM_CURRENT_SPELLS],
 
@@ -122,7 +121,6 @@ pub struct SpellsState {
     pub cast_counter: u32,
 
     /// Active dynamic objects created by the player's spells (GUID list).
-    /// Matches MaNGOS m_spellDynObjects.
     pub spell_dyn_objects: Vec<ObjectGuid>,
 
     pub delayed_effects: Vec<DelayedSpellEffect>,
@@ -286,13 +284,12 @@ impl SpellsState {
         self.gcd_end = now + duration_ms as u64;
     }
 
-    /// Reset GCD (MaNGOS ResetGCD without spell entry — clears all GCD).
+    /// Reset GCD, clearing it entirely.
     pub fn reset_gcd(&mut self) {
         self.gcd_end = 0;
     }
 
     /// Format all active cooldowns, GCD, and lockouts into human-readable lines.
-    /// Faithful `SpellCaster::PrintCooldownList` port.
     ///
     /// Returns a Vec of display strings; callers send them via chat or log.
     pub fn format_cooldown_list(&self, now: u64) -> Vec<String> {
@@ -310,7 +307,7 @@ impl SpellsState {
         let mut cd_count = 0u32;
         let perm_cd_count = self.permanent_cooldowns.len() as u32;
 
-        // GCD (Rust uses a single gcd_end vs C++ per-category map)
+        // GCD (a single gcd_end covers all categories)
         if self.gcd_end > now {
             let remaining_ms = self.gcd_end - now;
             lines.push(format!("GCD: {}ms remaining", remaining_ms));
@@ -368,7 +365,7 @@ impl SpellsState {
         lines
     }
 
-    /// Check if any school in the given mask is locked out (MaNGOS CheckLockout).
+    /// Check if any school in the given mask is locked out.
     pub fn check_lockout_by_mask(&self, school_mask: u32, now: u64) -> bool {
         for (i, &lockout_end) in self.school_lockouts.iter().enumerate() {
             if lockout_end > now && (school_mask & (1 << i)) != 0 {
@@ -378,7 +375,7 @@ impl SpellsState {
         false
     }
 
-    /// Lock out all schools in the given mask (MaNGOS LockOutSpells).
+    /// Lock out all schools in the given mask.
     pub fn lock_out_spells(&mut self, school_mask: u32, duration_ms: u32, now: u64) {
         for school in 0..NUM_SPELL_SCHOOLS {
             if (school_mask & (1 << school)) != 0 {
@@ -387,21 +384,21 @@ impl SpellsState {
         }
     }
 
-    /// Remove a spell's category cooldown (MaNGOS RemoveSpellCategoryCooldown).
+    /// Remove a spell's category cooldown.
     pub fn remove_spell_category_cooldown(&mut self, category: u32) {
         self.category_cooldowns.remove(&category);
     }
 
     // =========================================================================
-    // Dynamic Object Methods (MaNGOS SpellCaster DynObject helpers)
+    // Dynamic Object Methods
     // =========================================================================
 
-    /// Add a dynamic object GUID to the list (MaNGOS AddDynObject).
+    /// Add a dynamic object GUID to the list.
     pub fn add_dyn_object(&mut self, guid: ObjectGuid) {
         self.spell_dyn_objects.push(guid);
     }
 
-    /// Get all GUIDs for dynamic objects matching a spell and effect index (MaNGOS GetDynObjects).
+    /// Get all GUIDs for dynamic objects matching a spell and effect index.
     pub fn get_dyn_objects(&self, spell_id: u32, effect_index: u8) -> Vec<ObjectGuid> {
         self.spell_dyn_objects
             .iter()
@@ -415,19 +412,19 @@ impl SpellsState {
             .collect()
     }
 
-    /// Get the first dynamic object GUID matching a spell and effect index (MaNGOS GetDynObject).
+    /// Get the first dynamic object GUID matching a spell and effect index.
     /// Returns None if not found.
     pub fn get_dyn_object(&self, spell_id: u32, effect_index: u8) -> Option<ObjectGuid> {
         // Stub: returns first GUID regardless (actual map lookup deferred).
         self.spell_dyn_objects.first().copied()
     }
 
-    /// Get first dynamic object GUID matching a spell (MaNGOS GetDynObject by spellId only).
+    /// Get first dynamic object GUID matching a spell.
     pub fn get_dyn_object_by_spell(&self, spell_id: u32) -> Option<ObjectGuid> {
         self.spell_dyn_objects.first().copied()
     }
 
-    /// Remove all dynamic objects matching a spell_id (MaNGOS RemoveDynObject).
+    /// Remove all dynamic objects matching a spell_id.
     /// Returns the removed GUIDs so the caller can delete the actual DynamicObjects.
     pub fn remove_dyn_object(&mut self, spell_id: u32) -> Vec<ObjectGuid> {
         let (remaining, removed): (Vec<_>, Vec<_>) =
@@ -439,7 +436,7 @@ impl SpellsState {
         removed
     }
 
-    /// Remove a specific dynamic object by GUID (MaNGOS RemoveDynObjectWithGUID).
+    /// Remove a specific dynamic object by GUID.
     /// Returns true if the GUID was found and removed.
     pub fn remove_dyn_object_with_guid(&mut self, guid: ObjectGuid) -> bool {
         let len_before = self.spell_dyn_objects.len();
@@ -447,7 +444,7 @@ impl SpellsState {
         self.spell_dyn_objects.len() < len_before
     }
 
-    /// Remove all dynamic objects (MaNGOS RemoveAllDynObjects).
+    /// Remove all dynamic objects.
     /// Returns the removed GUIDs so the caller can delete the actual DynamicObjects.
     pub fn remove_all_dyn_objects(&mut self) -> Vec<ObjectGuid> {
         std::mem::take(&mut self.spell_dyn_objects)
@@ -500,7 +497,7 @@ impl SpellsState {
             || self.current_spells[CurrentSpellType::Channeled as usize].is_some()
     }
 
-    /// Check if any non-melee spell slot is active (MaNGOS SpellCaster::IsNonMeleeSpellCasted).
+    /// Check if any non-melee spell slot is active.
     pub fn is_non_melee_spell_casted(
         &self,
         with_delayed: bool,
@@ -532,7 +529,7 @@ impl SpellsState {
         false
     }
 
-    /// Check if the Melee slot has a pending next-swing spell (MaNGOS SpellCaster::IsNextSwingSpellCasted).
+    /// Check if the Melee slot has a pending next-swing spell.
     /// Returns the spell_id if present, caller must check IsNextMeleeSwingSpell on the spell entry.
     pub fn get_next_swing_spell_id(&self) -> Option<u32> {
         self.current_spells[CurrentSpellType::Melee as usize]
@@ -557,7 +554,7 @@ impl SpellsState {
         None
     }
 
-    /// Find an active cast by spell_id across all slots (MaNGOS SpellCaster::FindCurrentSpellBySpellId).
+    /// Find an active cast by spell_id across all slots.
     pub fn find_spell_by_id(&self, spell_id: u32) -> Option<&ActiveCast> {
         for slot in [
             CurrentSpellType::Generic,
@@ -576,7 +573,6 @@ impl SpellsState {
 }
 
 // === Target Flags (from CMSG_CAST_SPELL) ===
-// Matching MaNGOS TARGET_FLAG_* values
 
 /// No explicit target (self-cast)
 pub const TARGET_FLAG_SELF: u32 = 0x0000;
@@ -613,7 +609,7 @@ pub const TARGET_FLAG_CORPSE_ALLY: u32 = 0x8000;
 /// Parsed spell cast targets from the client packet.
 ///
 /// Contains the target mask and resolved target data sent by the client
-/// in CMSG_CAST_SPELL. Follows the MaNGOS SpellCastTargets format.
+/// in CMSG_CAST_SPELL.
 #[derive(Debug, Clone, Default)]
 pub struct SpellCastTargets {
     /// Bitmask of TARGET_FLAG_* values indicating which fields are present
@@ -642,9 +638,8 @@ impl SpellCastTargets {
 
     /// Set the unit target and flag `TARGET_FLAG_UNIT`.
     ///
-    /// Mirrors MaNGOS `SpellCastTargets::setUnitTarget`, which also copies the
-    /// target's position into the destination. In the GUID-based model there is
-    /// no live `Unit` pointer, so the caller supplies the target's position.
+    /// Also copies the target's position into the destination; the caller supplies
+    /// it because the GUID-based model keeps no live unit reference.
     pub fn set_unit_target(&mut self, guid: ObjectGuid, x: f32, y: f32, z: f32) {
         self.dst_position = Some((x, y, z));
         self.unit_target_guid = Some(guid);
@@ -663,26 +658,21 @@ impl SpellCastTargets {
         self.target_flags |= TARGET_FLAG_SOURCE_LOCATION;
     }
 
-    /// Set the GameObject target GUID.
-    ///
-    /// Mirrors MaNGOS `setGOTarget`, which deliberately leaves the target mask
-    /// untouched (the `TARGET_FLAG_GAMEOBJECT` bit is commented out upstream).
+    /// Set the GameObject target GUID, leaving the target mask untouched.
     pub fn set_go_target(&mut self, guid: ObjectGuid) {
         self.gameobject_target_guid = Some(guid);
     }
 
     /// Set the item target GUID and flag `TARGET_FLAG_ITEM`.
     ///
-    /// MaNGOS also caches the item entry (`m_itemTargetEntry`); here the entry is
-    /// resolved from the item when the effect runs, so only the GUID is stored.
+    /// The item entry is resolved from the item when the effect runs,
+    /// so only the GUID is stored.
     pub fn set_item_target(&mut self, guid: ObjectGuid) {
         self.item_target_guid = Some(guid);
         self.target_flags |= TARGET_FLAG_ITEM;
     }
 
-    /// Set the corpse target GUID.
-    ///
-    /// Mirrors MaNGOS `setCorpseTarget`, which sets no target mask flag.
+    /// Set the corpse target GUID, setting no target mask flag.
     pub fn set_corpse_target(&mut self, guid: ObjectGuid) {
         self.corpse_target_guid = Some(guid);
     }
@@ -700,7 +690,7 @@ pub struct ActiveCast {
     /// Target GUID (None for self-cast or AoE without explicit target)
     pub target_guid: Option<ObjectGuid>,
 
-    /// Current state of this cast (matches MaNGOS SpellState)
+    /// Current state of this cast
     pub state: SpellState,
 
     /// Which slot this cast occupies
@@ -717,8 +707,8 @@ pub struct ActiveCast {
     /// Total pushback accumulated from damage (capped at original_cast_time * some factor)
     pub total_pushback_ms: u32,
 
-    /// Running count of damage hits that have triggered pushback for this cast
-    /// (`Spell::m_delayAtDamageCount`). Each hit escalates the next pushback delay.
+    /// Running count of damage hits that have triggered pushback for this cast.
+    /// Each hit escalates the next pushback delay.
     pub delay_at_damage_count: u32,
 
     /// Whether this is a channeled spell
@@ -1038,11 +1028,11 @@ pub enum SpellCastError {
     OutOfRange,
     /// Target is too close (minimum range not met)
     TooClose,
-    /// Caster is not facing the target (SPELL_CUSTOM_FACE_TARGET or combat-range spells)
+    /// Caster is not facing the target (face-target or combat-range spells)
     NotInFront,
     /// Skill/level too low to open the lock or use the ability (SPELL_FAILED_LOW_CASTLEVEL)
     LowCastLevel,
-    // ── CheckCast / CheckPetCast errors ───────────────────────────────────
+    // ── Pre-cast validation errors ────────────────────────────────────────
     NotStanding,
     AffectingCombat,
     OnlyStealthed,
@@ -1060,7 +1050,7 @@ pub enum SpellCastError {
     TargetsDead,
     DamageImmune,
     AlreadyBeingTamed,
-    // ── Item check errors (CheckItems) ─────────────────────────────────────
+    // ── Item check errors ──────────────────────────────────────────────────
     AlreadyAtFullHealth,
     AlreadyAtFullPower,
     CantBeDisenchanted,
@@ -1858,11 +1848,11 @@ mod tests {
         assert!(!state.is_casting());
     }
 
-    // ===== SpellCastTargets setters (mirror MaNGOS SpellCastTargets::set*) =====
+    // ===== SpellCastTargets setters =====
 
     #[test]
     fn test_default_cast_targets_is_empty() {
-        // Mirrors the MaNGOS constructor: no flags, no targets, no positions.
+        // Default: no flags, no targets, no positions.
         let t = SpellCastTargets::default();
         assert_eq!(t.target_flags, TARGET_FLAG_SELF);
         assert_eq!(t.unit_target_guid, None);
@@ -1901,7 +1891,7 @@ mod tests {
 
     #[test]
     fn test_set_go_target_leaves_mask_untouched() {
-        // MaNGOS setGOTarget stores the GUID but sets no mask flag.
+        // Stores the GUID but sets no mask flag.
         let mut t = SpellCastTargets::default();
         t.set_go_target(player(99));
         assert_eq!(t.gameobject_target_guid, Some(player(99)));
@@ -1926,7 +1916,7 @@ mod tests {
 
     #[test]
     fn test_setters_accumulate_flags() {
-        // Multiple setters OR their flags together, matching the C++ |= semantics.
+        // Multiple setters OR their flags together.
         let mut t = SpellCastTargets::default();
         t.set_unit_target(player(1), 0.0, 0.0, 0.0);
         t.set_item_target(player(2));

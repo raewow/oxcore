@@ -455,10 +455,10 @@ impl GridSystem {
         }
 
         // VMap/MMap tiles are deliberately *not* released per grid.
-        // `MMapManager::unload_tile` reparses every remaining tile on the map to
-        // rebuild the merged navmesh, and `VMapManager` has no per-tile unload at
-        // all. Grid churn is frequent, so both tile sets are held until the map
-        // itself is torn down via `unload_map`.
+        // Unloading a map tile reparses every remaining tile to rebuild the merged
+        // navmesh, and there is no per-tile unload for VMaps at all. Grid churn is
+        // frequent, so both tile sets are held until the map itself is torn down
+        // via `unload_map`.
 
         if creature_count > 0 || go_count > 0 {
             tracing::info!(

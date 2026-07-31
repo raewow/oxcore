@@ -308,10 +308,8 @@ impl Srp6 {
     /// Get strong session key as hex string
     pub fn get_strong_session_key(&self) -> String {
         if let Some(server) = &self.server {
-            // C++ stores K as BigNumber, which reverses bytes in SetBinary()
-            // So we need to reverse the session key bytes to match
-            // C++: K.SetBinary(vK, 40) reverses bytes at line 60: t[i] = bytes[len - 1 - i]
-            // Then AsHexStr() returns the BigNumber as hex
+            // The stored session key hex is byte-reversed relative to the raw key bytes,
+            // so reverse before hex-encoding to match the stored form.
             let mut session_key_bytes = server.session_key().to_vec();
             session_key_bytes.reverse();
             hex::encode_upper(&session_key_bytes)

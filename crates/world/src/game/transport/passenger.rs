@@ -6,10 +6,10 @@
 
 use oxcore_shared::protocol::Position;
 
-/// Wrap an orientation into [0, 2π) (`Geometry::NormalizeOrientation`).
+/// Wrap an orientation into [0, 2π).
 pub fn normalize_orientation(orientation: f32) -> f32 {
     let two_pi = std::f32::consts::TAU;
-    // Matches the C++ emulation of fmod for negatives.
+    // Matches the reference emulation of fmod for negatives.
     if orientation < 0.0 {
         two_pi - (-orientation % two_pi)
     } else {
@@ -36,14 +36,12 @@ impl TransportFrame {
         }
     }
 
-    /// A passenger's absolute orientation from its transport-local one
-    /// (`CalculatePassengerOrientation`).
+    /// A passenger's absolute orientation from its transport-local one.
     pub fn passenger_orientation(&self, local_orientation: f32) -> f32 {
         normalize_orientation(self.orientation + local_orientation)
     }
 
-    /// World position of a passenger from its transport-local offset
-    /// (`CalculatePassengerPosition`).
+    /// World position of a passenger from its transport-local offset.
     ///
     /// Rotates the offset by the transport's facing and adds the transport's position;
     /// the orientation is composed with the transport's.
@@ -58,8 +56,8 @@ impl TransportFrame {
         }
     }
 
-    /// Transport-local offset of a passenger from its world position
-    /// (`CalculatePassengerOffset`). The inverse of [`Self::passenger_position`].
+    /// Transport-local offset of a passenger from its world position.
+    /// The inverse of [`Self::passenger_position`].
     pub fn passenger_offset(&self, world: Position) -> Position {
         let dx = world.x - self.x;
         let dy = world.y - self.y;

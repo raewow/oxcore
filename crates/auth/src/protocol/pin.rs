@@ -9,7 +9,6 @@ pub struct PinData {
 }
 
 /// Verify PIN entry data using grid remapping
-/// This matches the C++ implementation in AuthSocket::VerifyPinData
 pub fn verify_pin_data(
     pin: u32,
     client_data: &PinData,

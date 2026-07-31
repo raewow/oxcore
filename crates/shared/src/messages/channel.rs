@@ -8,10 +8,27 @@
 //! - [`SmsgChannelList`] - List of channel members
 
 use crate::game::chat::ChatNotify;
+use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::ObjectGuid;
 use crate::protocol::Opcode;
 use crate::protocol::WorldPacket;
+
+/// `region << 24 | site << 16 | realm id`, the same scheme the bnet realm list advertises.
+const VIRTUAL_REALM_ADDRESS: u32 = 0x0101_0000 | DEFAULT_REALM_ID as u32;
+
+/// 1.14's `ChannelFlags`, which is **not** the flag set 1.12 sends.
+///
+/// The two enums share a width and nothing else: 1.12's bits mean custom / trade / not-LFG /
+/// general / city / LFG, and 1.14's mean auto-join / zone-based / read-only / allow-item-links /
+/// only-in-cities / linked-channel. `0x01` is "custom" in one and "auto-join" in the other, so
+/// passing the byte through would assert channel behaviour we never computed — a custom channel
+/// would come back flagged auto-join and the client would rejoin it on every zone change.
+///
+/// There is no name-level correspondence to translate through either, so nothing is carried. Zero
+/// means "an ordinary channel", which is what every channel this server serves actually is.
+const CHANNEL_FLAGS_NONE: u32 = 0;
 
 /// SMSG_CHANNEL_NOTIFY - Channel notification packet
 ///
@@ -483,6 +500,100 @@ impl ToWorldPacket for SmsgChannelNotify<'_> {
 
         packet
     }
+
+    /// `ChannelNotifyJoined::Write` and `ChannelNotifyLeft::Write`.
+    ///
+    /// **1.14 has no general-purpose channel notify.** Vanilla funnels thirty-two different
+    /// notifications through one opcode with a type byte and a per-type tail; 1.14 lifted the two
+    /// that change channel membership — "you joined" and "you left" — into their own opcodes and
+    /// dropped the rest. The client renders the remainder (someone was kicked, the owner changed,
+    /// you lack permission) from the chat stream instead, so they are not missing information, just
+    /// carried elsewhere.
+    ///
+    /// Everything except the two membership notices therefore returns `None`. That is a real
+    /// difference in the protocol, not an unfinished port: there is no 1.14 body for them to go in.
+    ///
+    /// Deliberately exhaustive with no catch-all, so a new [`ChatNotify`] variant has to be
+    /// classified here rather than silently joining the dropped set.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let name = self.channel_name.as_bytes();
+        let mut writer = BitWriter::new();
+
+        match self.notify_type {
+            ChatNotify::YouJoinedNotice => {
+                writer.write_bits(name.len() as u32, 7);
+                // Welcome message length. Vanilla has no channel MOTD, so this stays zero and no
+                // string follows it -- but the field is read either way, and both lengths are part
+                // of one bit run that the u32 below flushes.
+                writer.write_bits(0, 11);
+
+                writer.write_u32(CHANNEL_FLAGS_NONE);
+
+                // 1.14 splits vanilla's single trailing word into a flags word and a channel id.
+                // `data.flags` is what the join path fills with the channel's id -- see
+                // `SmsgChannelNotify::you_joined`'s caller -- and the id is the field that matters:
+                // the client binds a built-in channel to its slot by id. If that field ever starts
+                // carrying actual flags, this line has to move to `CHANNEL_FLAGS_NONE` above, and
+                // the two would need translating rather than copying.
+                writer.write_i32(self.data.flags.unwrap_or(0) as i32);
+
+                writer.write_u64(0); // InstanceID -- channels are not instanced in Classic Era
+                // ChannelGUID: 1.14 names the channel object with a GUID built from the map, zone
+                // and channel id. Vanilla has no channel object and this message carries neither
+                // map nor zone, so it is sent empty rather than assembled from values we would be
+                // making up.
+                writer.write_packed_guid_128(0, 0);
+
+                writer.write_bytes(name);
+                // Welcome message omitted: its length was written as zero above.
+
+                Some(writer.finish(Opcode::SMSG_CHANNEL_NOTIFY_JOINED))
+            }
+
+            ChatNotify::YouLeftNotice => {
+                writer.write_bits(name.len() as u32, 7);
+                // Suspended distinguishes a kick/ban from an ordinary leave; vanilla's "you left"
+                // is only ever the ordinary one.
+                writer.write_bit(false);
+                writer.write_i32(self.data.flags.unwrap_or(0) as i32); // ChatChannelID
+                writer.write_bytes(name);
+
+                Some(writer.finish(Opcode::SMSG_CHANNEL_NOTIFY_LEFT))
+            }
+
+            // No 1.14 counterpart -- see above.
+            ChatNotify::JoinedNotice
+            | ChatNotify::LeftNotice
+            | ChatNotify::WrongPasswordNotice
+            | ChatNotify::NotMemberNotice
+            | ChatNotify::NotModeratorNotice
+            | ChatNotify::PasswordChangedNotice
+            | ChatNotify::OwnerChangedNotice
+            | ChatNotify::PlayerNotFoundNotice
+            | ChatNotify::NotOwnerNotice
+            | ChatNotify::ChannelOwnerNotice
+            | ChatNotify::ModeChangeNotice
+            | ChatNotify::AnnouncementsOnNotice
+            | ChatNotify::AnnouncementsOffNotice
+            | ChatNotify::ModerationOnNotice
+            | ChatNotify::ModerationOffNotice
+            | ChatNotify::MutedNotice
+            | ChatNotify::PlayerKickedNotice
+            | ChatNotify::BannedNotice
+            | ChatNotify::PlayerBannedNotice
+            | ChatNotify::PlayerUnbannedNotice
+            | ChatNotify::PlayerNotBannedNotice
+            | ChatNotify::PlayerAlreadyMemberNotice
+            | ChatNotify::InviteNotice
+            | ChatNotify::InviteWrongFactionNotice
+            | ChatNotify::WrongFactionNotice
+            | ChatNotify::InvalidNameNotice
+            | ChatNotify::NotModeratedNotice
+            | ChatNotify::PlayerInvitedNotice
+            | ChatNotify::PlayerInviteBannedNotice
+            | ChatNotify::ThrottledNotice => None,
+        }
+    }
 }
 
 /// Channel member info for SMSG_CHANNEL_LIST
@@ -535,6 +646,43 @@ impl ToWorldPacket for SmsgChannelList<'_> {
         }
 
         packet
+    }
+
+    /// `ChannelListResponse::Write`.
+    ///
+    /// The channel name **moves to the end of the header**: 1.14 writes its 7-bit length up front
+    /// alongside a display bit, then the flags and the member count, and only then the name bytes,
+    /// with the member list after that. Vanilla leads with the name as a C string. Writing the name
+    /// where vanilla puts it makes the client read the first few characters as its flags and count.
+    ///
+    /// Each member gains a realm address between the GUID and the flags byte.
+    ///
+    /// `Display` controls whether the client prints the roster or just refreshes it silently.
+    /// Vanilla has no such bit and only ever sends this list in answer to an explicit request, so
+    /// `true` is what the request asked for.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let name = self.channel_name.as_bytes();
+
+        let mut writer = BitWriter::new();
+        writer.write_bit(true); // Display -- see above
+        writer.write_bits(name.len() as u32, 7);
+
+        // See `CHANNEL_FLAGS_NONE`: the 1.12 and 1.14 flag sets are unrelated enums, so
+        // `self.channel_flags` is deliberately not forwarded.
+        writer.write_u32(CHANNEL_FLAGS_NONE);
+        writer.write_i32(self.members.len() as i32);
+        writer.write_bytes(name);
+
+        for member in self.members {
+            let (high, low) = member.guid.to_guid128(DEFAULT_REALM_ID);
+            writer.write_packed_guid_128(high, low);
+            writer.write_u32(VIRTUAL_REALM_ADDRESS);
+            // Member flags (owner / moderator / muted) keep vanilla's bit values, so this byte
+            // carries over unchanged -- unlike the channel flags above.
+            writer.write_u8(member.flags);
+        }
+
+        Some(writer.finish(Opcode::SMSG_CHANNEL_LIST))
     }
 }
 

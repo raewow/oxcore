@@ -1,8 +1,7 @@
-//! Transport ownership and the boarding orchestration (`TransportMgr` + `GenericTransport`
-//! passenger handling).
+//! Transport ownership and the boarding orchestration.
 //!
 //! [`TransportManager`] owns the live [`Transport`] objects and drives the two-sided boarding
-//! that C++ `GenericTransport::AddPassenger`/`RemovePassenger` perform: updating the
+//! the transports perform: updating the
 //! transport's passenger set *and* the rider's own transport state. Riders reach the manager
 //! through the [`TransportPassenger`] trait, so a creature and a player board by the same
 //! code path despite storing their movement state differently.
@@ -64,11 +63,10 @@ pub trait TransportPassenger {
     /// The rider's stored transport-local offset, if it is on a transport.
     fn transport_offset(&self) -> Option<Position>;
 
-    /// Record boarding: transport GUID, local offset and the `ONTRANSPORT` flag together
-    /// (`SetTransportData` + `AddMovementFlag(MOVEFLAG_ONTRANSPORT)`).
+    /// Record boarding: transport GUID, local offset and the `ONTRANSPORT` flag together.
     fn set_transport_ride(&mut self, transport: ObjectGuid, offset: Position);
 
-    /// Clear the transport ride and the `ONTRANSPORT` flag (`ClearTransportData`).
+    /// Clear the transport ride and the `ONTRANSPORT` flag.
     fn clear_transport_ride(&mut self);
 }
 
@@ -146,7 +144,7 @@ impl TransportPassenger for Player {
     }
 }
 
-/// Owns the live transports and orchestrates boarding (`TransportMgr`).
+/// Owns the live transports and orchestrates boarding.
 #[derive(Debug, Default, Clone)]
 pub struct TransportManager {
     transports: HashMap<ObjectGuid, Transport>,
@@ -184,19 +182,17 @@ impl TransportManager {
         self.transports.values().filter(move |t| t.map_id == map_id)
     }
 
-    /// Create a transport from its template and register it on `map_id`
-    /// (`TransportMgr::CreateTransport` + `ShipTransport::Create`).
+    /// Create a transport from its template and register it on `map_id`.
     ///
     /// The transport spawns at the first keyframe of its path that lies on this map, facing
     /// that keyframe's orientation, with its path cursor set to that keyframe's arrival so the
     /// tick picks up where the schedule places it. Its GUID is a mobile-transport GUID keyed
     /// by the template entry, as ships are single, shared objects. Returns `None` if the path
-    /// never visits this map, or if the start position is off the map (`IsPositionValid`).
-    /// `now_ms` is the current server clock, for the transport's creation time. Instance
-    /// placement (`GetContinentInstanceId`, the instanceable guard) is the map layer's
-    /// concern; like the creature spawner this uses the continent path. The game-object
-    /// template fields (scale, faction, flags, display) stay in the template, per the slim
-    /// object model this codebase uses.
+    /// never visits this map, or if the start position is off the map. `now_ms` is the
+    /// current server clock, for the transport's creation time. Instance placement (the
+    /// instanceable guard) is the map layer's concern; like the creature spawner this uses
+    /// the continent path. The game-object template fields (scale, faction, flags, display)
+    /// stay in the template, per the slim object model this codebase uses.
     pub fn create_transport(
         &mut self,
         template: &TransportTemplate,
@@ -214,8 +210,8 @@ impl TransportManager {
             return None;
         }
 
-        // A mobile transport's GUID is HIGHGUID_MO_TRANSPORT with the template entry as its
-        // low part (Object::_Create(entry, HIGHGUID_MO_TRANSPORT)).
+        // A mobile transport's GUID uses the mobile-transport type with the template entry
+        // as its low part.
         let guid = ObjectGuid::new_without_entry(HighGuid::MoTransport, template.entry);
 
         let mut transport = Transport::new(guid, template.entry, map_id, position, now_ms);
@@ -225,15 +221,14 @@ impl TransportManager {
         Some(guid)
     }
 
-    /// Advance a ship transport's position for the current time (the movement path of
-    /// `ShipTransport::Update`).
+    /// Advance a ship transport's position for the current time.
     ///
     /// Recomputes path progress from how long the transport has existed plus its start
     /// progress, wrapped over the path period, then places the transport at the spline point
     /// that progress maps to and carries the keyframe cursor forward. Returns the new position
     /// when the transport moved, or `None` when it is paused at a stop or the path has no
-    /// period. The cross-map teleport branch (a teleport keyframe -> `TeleportTransport`) and
-    /// the passenger-reposition loop are handled separately; this is the on-map motion.
+    /// period. The cross-map teleport branch (a teleport keyframe) and the passenger-reposition
+    /// loop are handled separately; this is the on-map motion.
     pub fn tick_ship_movement(
         &mut self,
         transport_guid: ObjectGuid,
@@ -275,8 +270,7 @@ impl TransportManager {
         Some(transport.position)
     }
 
-    /// Spawn every template's transport that belongs on `map_id`
-    /// (`TransportMgr::SpawnTransportsOnMap`).
+    /// Spawn every template's transport that belongs on `map_id`.
     ///
     /// Skips continent transports already spawned elsewhere (they are shared across continent
     /// instances), creates the rest, and marks each created template spawned. Returns the
@@ -309,7 +303,7 @@ impl TransportManager {
         spawned
     }
 
-    /// Board a passenger onto a transport (`GenericTransport::AddPassenger`).
+    /// Board a passenger onto a transport.
     ///
     /// Adds the rider to the transport's passenger set and, if it was newly boarded, records
     /// the ride on the rider itself. When the rider is changing transports and `adjust_coords`
@@ -339,7 +333,7 @@ impl TransportManager {
         boarded
     }
 
-    /// Remove a passenger from a transport (`GenericTransport::RemovePassenger`).
+    /// Remove a passenger from a transport.
     ///
     /// Removes the rider from the passenger set and, if it was aboard, clears its transport
     /// state. Returns whether the rider was aboard, or `false` if no such transport exists.
@@ -359,15 +353,15 @@ impl TransportManager {
         removed
     }
 
-    /// Board a follower alongside the unit it is following (`AddFollowerToTransport`).
+    /// Board a follower alongside the unit it is following.
     ///
     /// A follower (a pet, a summoned guardian) does not compute its own offset: it inherits
     /// the leader's transport offset and is teleported onto the leader's world position, so it
     /// rides in the same spot. Returns whether the transport exists.
     ///
-    /// The C++ splits the teleport by rider type (a creature `NearTeleportTo`, a player
-    /// `Relocate` + `SendHeartBeat`); both set the follower's position, which is what is done
-    /// here - the heartbeat/broadcast is the map/network layer's job.
+    /// The reference splits the teleport by rider type; both paths set the follower's
+    /// position, which is what is done here - the heartbeat/broadcast is the map/network
+    /// layer's job.
     pub fn board_follower<L: TransportPassenger, F: TransportPassenger>(
         &mut self,
         transport_guid: ObjectGuid,
@@ -379,18 +373,19 @@ impl TransportManager {
         }
 
         // AddPassenger(follower); the offset it would compute is overwritten below, matching
-        // the C++ order, so coordinate adjustment is skipped here.
+        // the reference order, so coordinate adjustment is skipped here.
         self.board(transport_guid, follower, false);
 
         // The follower rides in the leader's slot and stands on the leader's position; done
-        // unconditionally, as the C++ does after AddPassenger even for an already-aboard unit.
+        // unconditionally, as the reference does after AddPassenger even for an already-aboard
+        // unit.
         let leader_offset = leader.transport_offset().unwrap_or_default();
         follower.set_transport_ride(transport_guid, leader_offset);
         follower.set_world_position(leader.world_position());
         true
     }
 
-    /// Remove a follower and return it to its leader (`RemoveFollowerFromTransport`).
+    /// Remove a follower and return it to its leader.
     ///
     /// Takes the follower off the transport and teleports it onto the leader's world position.
     /// Returns whether the follower was aboard.
@@ -402,20 +397,19 @@ impl TransportManager {
     ) -> bool {
         let removed = self.unboard(transport_guid, follower);
         // The follower is teleported to the leader regardless of whether it was aboard,
-        // matching the C++ which relocates after RemovePassenger unconditionally.
+        // matching the reference which relocates after RemovePassenger unconditionally.
         follower.set_world_position(leader.world_position());
         removed
     }
 
-    /// Place one passenger in the world from its transport-local offset
-    /// (`GenericTransport::UpdatePassengerPosition`).
+    /// Place one passenger in the world from its transport-local offset.
     ///
     /// Transforms the rider's stored offset into world coordinates against the transport,
     /// skipping a rider that is mid-teleport onto a different map and refusing a position that
     /// falls off the map (the rider stays put rather than being flung to bad coordinates).
     /// On success the rider's stored coordinates are updated; the grid-cell move and
-    /// visibility broadcast a full `Map::CreatureRelocation`/`PlayerRelocation` performs, and
-    /// the `ctime` reset, belong to the map layer and are not done here.
+    /// visibility broadcast a full relocation performs, and the `ctime` reset, belong to
+    /// the map layer and are not done here.
     pub fn reposition_passenger<P: TransportPassenger>(
         &self,
         transport_guid: ObjectGuid,

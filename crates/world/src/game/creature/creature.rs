@@ -437,11 +437,10 @@ impl Creature {
 
     /// Respawn delay in seconds, with the spawn flags applied to `spawntimesecs`.
     ///
-    /// Returns a *delay*, not a point in time: `Creature::SetDeathState`
-    /// (Creature.cpp:2245-2259) scales the base delay by the spawn flags and only
-    /// then turns it into `time(nullptr) + respawnDelay`. Handing
-    /// back an absolute timestamp here is what let the caller add "now" a second
-    /// time, pushing every respawn decades into the future.
+    /// Returns a *delay*, not a point in time: the reference flow scales the base
+    /// delay by the spawn flags and only then turns it into an absolute respawn
+    /// time. Handing back an absolute timestamp here is what let the caller add
+    /// "now" a second time, pushing every respawn decades into the future.
     pub fn calculate_respawn_delay_secs(
         &self,
         base_time_secs: u32,

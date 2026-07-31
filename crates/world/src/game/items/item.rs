@@ -45,7 +45,6 @@ impl ItemTargetType {
 }
 
 /// A single required-target rule for an item.
-/// Maps to C++ `ItemRequiredTarget`.
 #[derive(Debug, Clone, Copy)]
 pub struct ItemRequiredTarget {
     pub target_type: ItemTargetType,
@@ -61,9 +60,8 @@ impl ItemRequiredTarget {
     }
 
     /// Check whether a candidate target satisfies this rule.
-    /// Maps to C++ ItemRequiredTarget::IsFitToRequirements.
     ///
-    /// `target_is_unit` is true only for creatures (C++ TYPEID_UNIT); players
+    /// `target_is_unit` is true only for creatures; players
     /// and other object types never satisfy a required-target rule.
     pub fn is_fit_to_requirements(
         &self,
@@ -163,7 +161,6 @@ impl Item {
     }
 
     /// Update loot persistence state.
-    /// Maps to C++ Item::SetLootState.
     pub fn set_loot_state(&mut self, state: ItemLootUpdateState) {
         match state {
             ItemLootUpdateState::None | ItemLootUpdateState::New => {
@@ -356,7 +353,6 @@ impl Item {
     }
 
     /// Set enchantment duration for a specific slot
-    /// Maps to C++ Item::SetEnchantmentDuration
     pub fn set_enchantment_duration(&mut self, slot: usize, duration: u32) {
         if slot < self.enchantments.len() {
             let (id, _, charges) = self.enchantments[slot];
@@ -367,7 +363,6 @@ impl Item {
     }
 
     /// Set enchantment charges for a specific slot
-    /// Maps to C++ Item::SetEnchantmentCharges
     pub fn set_enchantment_charges(&mut self, slot: usize, charges: u32) {
         if slot < self.enchantments.len() {
             let (id, duration, _) = self.enchantments[slot];
@@ -378,7 +373,6 @@ impl Item {
     }
 
     /// Clear enchantment at a specific slot
-    /// Maps to C++ Item::ClearEnchantment
     pub fn clear_enchantment(&mut self, slot: usize) {
         if slot < self.enchantments.len() {
             self.enchantments[slot] = (0, 0, 0);
@@ -386,14 +380,12 @@ impl Item {
     }
 
     /// Check if item is soulbound
-    /// Maps to C++ Item::IsSoulBound
     pub fn is_soulbound(&self) -> bool {
         const ITEM_DYNFLAG_BOUND: u32 = 0x0001;
         (self.flags & ITEM_DYNFLAG_BOUND) != 0
     }
 
     /// Check if item can be traded
-    /// Maps to C++ Item::CanBeTraded
     pub fn can_be_traded(&self) -> bool {
         // Cannot trade if soulbound
         if self.is_soulbound() {
@@ -416,13 +408,11 @@ impl Item {
     }
 
     /// Check if item is bound to a different player
-    /// Maps to C++ Item::IsBindedNotWith
     pub fn is_bound_to_other_player(&self, player_guid: ObjectGuid) -> bool {
         self.is_soulbound() && self.owner_guid != player_guid
     }
 
     /// Check if item is limited to another map or zone
-    /// Maps to C++ Item::IsLimitedToAnotherMapOrZone
     /// Note: ItemTemplate currently doesn't have Map/Area fields, so this always returns false
     pub fn is_limited_to_another_map_or_zone(&self, _cur_map_id: u32, _cur_zone_id: u32) -> bool {
         // TODO: Add Map/Area fields to ItemTemplate when needed
@@ -430,7 +420,6 @@ impl Item {
     }
 
     /// Change item entry ID (used for item transformations)
-    /// Maps to C++ Item::ChangeEntry
     pub fn change_entry(&mut self, new_entry: u32) {
         self.entry = new_entry;
     }

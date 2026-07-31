@@ -29,7 +29,7 @@ pub enum WaypointPathOrigin {
 }
 
 impl std::fmt::Display for WaypointPathOrigin {
-    /// Human-readable origin (`WaypointManager::GetOriginString`).
+    /// Human-readable origin.
     ///
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
@@ -90,9 +90,9 @@ impl WaypointManager {
         self.guid_waypoints.contains_key(&spawn_id) || self.template_waypoints.contains_key(&entry)
     }
 
-    /// Drop every loaded path (`WaypointManager::Cleanup`).
+    /// Drop every loaded path.
     ///
-    /// The C++ cleanup also issues database deletes; in this port the manager is
+    /// The reference cleanup also issues database deletes; in this port the manager is
     /// state-only, so persisting the deletion is the repository's responsibility.
     pub fn cleanup(&self) {
         self.guid_waypoints.clear();
@@ -148,7 +148,7 @@ impl WaypointManager {
             wait_time: 0,
             wander_distance: 0.0,
             script_id: 0,
-            // C++ inserts new nodes with the 100 sentinel: no forced orientation.
+            // New nodes use the 100 sentinel: no forced orientation.
             orientation: None,
         };
 
@@ -180,7 +180,7 @@ impl WaypointManager {
 
     /// Drop an entire path.
     ///
-    /// C++ only clears the node map, keeping the (now empty) entry alive because the
+    /// The reference only clears the node map, keeping the (now empty) entry alive because the
     /// generators hold raw pointers into it. `Arc` makes removal safe here.
     pub fn delete_path(&self, origin: WaypointPathOrigin, key: u32) -> bool {
         self.paths(origin)
@@ -260,7 +260,7 @@ impl WaypointManager {
 
     /// Attach a movement script to a node.
     ///
-    /// Returns whether the node was found. The C++ counterpart instead returns whether
+    /// Returns whether the node was found. The reference counterpart instead returns whether
     /// the script id is a known `creature_movement_scripts` entry; there is no such
     /// registry in this port, so that validity check is not modeled. The persisting
     /// UPDATE remains the repository's job.

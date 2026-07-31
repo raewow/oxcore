@@ -1,7 +1,7 @@
 //! Spell Modifiers
 //!
-//! Spell modifiers come from talents (SPELL_AURA_ADD_FLAT_MODIFIER / ADD_PCT_MODIFIER)
-//! and some auras. They modify properties of spells the player casts.
+//! Spell modifiers come from talents (flat/pct modifier auras) and some auras.
+//! They modify properties of spells the player casts.
 
 use crate::dbc::structures::SpellEntry;
 use crate::game::player::spells::state::{SpellMod, SpellModOp, SpellModType};
@@ -19,33 +19,30 @@ const POWER_HEALTH: u32 = 0xFFFF_FFFE;
 const MAX_POWERS: u32 = 5;
 
 /// Caster state needed to compute a spell's power cost.
-///
-/// Mirrors the `Unit*` getters read by C++ `Spell::CalculatePowerCost`.
 pub struct PowerCostContext {
-    /// `caster->GetHealth()` — used by USE_ALL_MANA health spells.
+    /// Current health — used by USE_ALL_MANA health spells.
     pub health: u32,
-    /// `caster->GetCreateHealth()` — base (create) health for percentage-of-health costs.
+    /// Base (create) health for percentage-of-health costs.
     pub create_health: u32,
-    /// `caster->GetCreateMana()` — base (create) mana for percentage-of-mana costs.
+    /// Base (create) mana for percentage-of-mana costs.
     pub create_mana: u32,
-    /// `caster->GetPower(powerType)` — current pool for USE_ALL_MANA non-health spells.
+    /// Current power pool — used for USE_ALL_MANA non-health spells.
     pub current_power: u32,
-    /// `caster->GetMaxPower(powerType)` — max pool for percentage costs on rage/focus/energy/happiness.
+    /// Max power pool — for percentage costs on rage/focus/energy/happiness.
     pub max_power: u32,
-    /// `caster->GetLevel()` — used by creature-level scaling.
+    /// Caster level — used by creature-level scaling.
     pub level: u32,
-    /// `caster->GetSpellRank(spellInfo)` — drives the per-level cost term.
+    /// Spell rank — drives the per-level cost term.
     pub spell_rank: u32,
 }
 
 /// Calculate the power cost of a spell.
 ///
-/// Faithful port of C++ `Spell::CalculatePowerCost`. Returns the amount of the
-/// spell's `power_type` that the cast will consume.
+/// Returns the amount of the spell's `power_type` that the cast will consume.
 ///
 /// `is_item_cast` is true when the spell is cast from an item (charges/use), which
 /// always costs no power. `cost_modifiers` are the caster's active spell modifiers,
-/// from which `SpellModOp::Cost` entries are applied (`SPELLMOD_COST`).
+/// from which `SpellModOp::Cost` entries are applied.
 ///
 /// The school-indexed percentage multiplier defaults to zero and is supplied by
 /// [`calculate_power_cost_with_school_multiplier`] when active auras affect the spell school.
@@ -101,7 +98,7 @@ pub fn calculate_power_cost_with_school_multiplier(
         }
     }
 
-    // SPELLMOD_COST from talents/auras. (School-indexed flat unit-mod deferred.)
+    // Cost spell mods from talents/auras. (School-indexed flat unit-mod deferred.)
     power_cost = apply_spell_modifiers_to_value(
         cost_modifiers,
         SpellModOp::Cost,
@@ -118,8 +115,8 @@ pub fn calculate_power_cost_with_school_multiplier(
         }
     }
 
-    // `UNIT_FIELD_POWER_COST_MULTIPLIER` stores the active aura total divided by 100;
-    // Spell::CalculatePowerCost applies it as `1 + multiplier`.
+    // The power-cost multiplier stores the active aura total divided by 100; it is
+    // applied as `1 + multiplier`.
     power_cost = (power_cost as f32 * (1.0 + school_cost_pct as f32 / 100.0)) as i32;
 
     power_cost.max(0) as u32
@@ -127,8 +124,8 @@ pub fn calculate_power_cost_with_school_multiplier(
 
 /// Add a spell modifier (from a talent or aura being applied).
 ///
-/// Called by AuraSystem when applying SPELL_AURA_ADD_FLAT_MODIFIER (107)
-/// or SPELL_AURA_ADD_PCT_MODIFIER (108) auras.
+/// Called by AuraSystem when applying a flat-modifier aura (107)
+/// or pct-modifier aura (108).
 ///
 /// Parameters:
 /// - `op`: Which property to modify (from spell DBC effect_misc_value)
@@ -140,7 +137,7 @@ pub fn calculate_power_cost_with_school_multiplier(
 /// - `source_aura_slot`: The aura slot for removal tracking
 ///
 /// `spell_family_mask` is the source spell effect's class mask
-/// (`EffectItemType[effect_index]`), matching `SpellModifier` construction.
+/// (`effect_item_type[effect_index]`), matching how the modifier mask is built.
 pub fn add_spell_modifier(
     player_guid: ObjectGuid,
     op: SpellModOp,
@@ -310,7 +307,7 @@ fn does_modifier_apply(
 
 /// Calculate modified cast time for a spell.
 ///
-/// Applies SPELLMOD_CASTTIME flat/percentage modifiers from talents and auras,
+/// Applies cast-time flat/percentage modifiers from talents and auras,
 /// respecting the spell family name/flags filter.
 pub fn calculate_modified_cast_time(
     player_guid: ObjectGuid,
@@ -340,7 +337,7 @@ pub fn calculate_modified_cast_time(
 
 /// Calculate modified cooldown for a spell.
 ///
-/// Applies SPELLMOD_COOLDOWN flat/percentage modifiers from talents and auras,
+/// Applies cooldown flat/percentage modifiers from talents and auras,
 /// respecting the spell family name/flags filter.
 pub fn calculate_modified_cooldown(
     player_guid: ObjectGuid,
@@ -370,7 +367,7 @@ pub fn calculate_modified_cooldown(
 
 /// Calculate modified GCD for a spell.
 ///
-/// Applies SPELLMOD_GLOBAL_COOLDOWN flat/percentage modifiers from talents and
+/// Applies global-cooldown flat/percentage modifiers from talents and
 /// auras, respecting the spell family name/flags filter. The caller clamps the
 /// hasted 1.5s GCD to [1000, 1500] separately.
 pub fn calculate_modified_gcd(

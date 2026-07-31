@@ -587,7 +587,6 @@ impl InventoryCache {
     }
 
     /// Find items by entry within a specific bag
-    /// Maps to C++ Bag::GetItemByEntry
     pub fn find_items_by_entry_in_bag(
         &self,
         player_guid: ObjectGuid,
@@ -617,7 +616,6 @@ impl InventoryCache {
     }
 
     /// Count items by entry within a specific bag, excluding a specific item
-    /// Maps to C++ Bag::GetItemCount
     pub fn count_items_by_entry_in_bag(
         &self,
         player_guid: ObjectGuid,
@@ -652,7 +650,6 @@ impl InventoryCache {
     }
 
     /// Get slot number of an item within a specific bag by its GUID
-    /// Maps to C++ Bag::GetSlotByItemGUID
     pub fn get_bag_slot_by_item_guid(
         &self,
         player_guid: ObjectGuid,

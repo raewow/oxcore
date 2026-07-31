@@ -19,14 +19,13 @@ use std::sync::Arc;
 /// until then.
 const SPELL_ATTR_COOLDOWN_ON_EVENT: u32 = 0x0200_0000;
 
-/// `Spell::SendSpellCooldown` — decide whether a cast should record/announce
+/// Decide whether a cast should record/announce
 /// a cooldown at all, and whether it should be flagged as event-triggered
 /// (permanent until the triggering event fires).
 ///
-/// Passive spells never go on cooldown. The C++ also skips this for casters
-/// with the "no cooldown" cheat option enabled; that cheat flag has no
-/// equivalent in this codebase yet, so it is not modelled here — see the
-/// `blocked` note on the port-harness task.
+/// Passive spells never go on cooldown. A "no cooldown" cheat option that
+/// also skips this has no equivalent in this codebase yet, so it is not
+/// modelled here — see the `blocked` note on the port-harness task.
 pub fn should_apply_spell_cooldown(spell: &SpellEntry) -> bool {
     !spell.is_passive_spell()
 }
@@ -49,7 +48,7 @@ fn get_game_time_ms(world: &World) -> u64 {
 ///
 /// Cooldown sources:
 /// 1. Per-spell cooldown (from Spell.dbc RecoveryTime field), modified by
-///    active SPELLMOD_COOLDOWN talents/auras.
+///    active cooldown-modifier talents/auras.
 /// 2. Category cooldown (from Spell.dbc CategoryRecoveryTime field)
 ///    - Spells in the same category share a cooldown
 ///    - Example: Health Potion and Mana Potion share the "Potion" category
@@ -64,7 +63,7 @@ pub fn apply_cooldown(caster_guid: ObjectGuid, spell_id: u32, world: &World) -> 
         return Ok((0, 0));
     };
 
-    // Apply SPELLMOD_COOLDOWN flat/percentage modifiers.
+    // Apply cooldown-modifier flat/percentage modifiers.
     let spell_cooldown_ms = modifiers::calculate_modified_cooldown(
         caster_guid,
         entry.recovery_time,
@@ -462,7 +461,7 @@ mod tests {
     #[test]
     fn passive_spells_never_get_a_cooldown() {
         let mut passive = make_spell_entry(1);
-        passive.attributes = 0x40; // SPELL_ATTR_PASSIVE
+        passive.attributes = 0x40; // passive attribute bit
         assert!(!should_apply_spell_cooldown(&passive));
     }
 

@@ -286,7 +286,7 @@ pub fn has_aura_or_triggers_another_spell_with_aura(
     false
 }
 
-/// `ABILITY_LEARNED_ON_GET_PROFESSION_SKILL` for `SkillLineAbilityEntry::learn_on_get_skill`.
+/// The `learn_on_get_skill` value meaning "learned on getting the profession skill".
 const ABILITY_LEARNED_ON_GET_PROFESSION_SKILL: u32 = 1;
 
 /// Whether `spell_id` is a profession skill-bonus spell (learned automatically
@@ -302,7 +302,6 @@ pub fn is_skill_bonus_spell(spell_id: u32, dbc: &DbcManager) -> bool {
         })
 }
 
-/// Port of `SpellInternal::IsSpellWithDelayableEffects` (SpellMgr.cpp:3294).
 /// Returns true when every effect in the spell can be delayed (batched). CC
 /// spells, channeled, next-melee-swing and ranged spells are handled specially.
 pub fn is_spell_with_delayable_effects(spell: &SpellEntry) -> bool {

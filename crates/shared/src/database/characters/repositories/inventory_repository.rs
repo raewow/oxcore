@@ -298,7 +298,6 @@ impl InventoryRepository {
     }
 
     /// Delete item from all related tables (item_instance, character_inventory, auction, mail_items, character_gifts)
-    /// Maps to C++ Item::DeleteAllFromDB static method
     pub async fn delete_item_all(&self, item_guid: u32) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 

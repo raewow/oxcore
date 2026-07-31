@@ -321,8 +321,6 @@ impl ToWorldPacket for SmsgMailListResult<'_> {
     }
 }
 
-/// `ItemInstance::Write` for build 42597.
-///
 /// A bare item id with no bonuses or modifications, which is all a 1.12 item has.
 fn write_modern_item_instance(writer: &mut BitWriter, item_id: u32) {
     writer.write_u32(item_id);
@@ -370,6 +368,16 @@ pub struct SmsgItemTextQueryResponse<'a> {
     pub text: &'a str,
 }
 
+/// Left unported: the 1.14 client never asks for this, and its body is unverified.
+///
+/// Item text is a 1.12-era indirection — the mail list sends a text id and the client fetches the
+/// letter separately. 1.14 carries the letter inline in the mail list instead and has no reason to
+/// send `CMSG_ITEM_TEXT_QUERY`, so nothing on a modern session can trigger this response. The
+/// opcode still exists in the 1.14 table, but its body could not be established from a known-good
+/// 1.14 encoding, and inventing one for a request that never arrives would be pure risk.
+///
+/// The consequence is recorded on `SmsgMailListResult::to_modern`: mail bodies reach a 1.14 client
+/// empty.
 impl ToWorldPacket for SmsgItemTextQueryResponse<'_> {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_TEXT_QUERY_RESPONSE);

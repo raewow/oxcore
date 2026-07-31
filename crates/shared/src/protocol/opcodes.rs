@@ -831,7 +831,7 @@ impl Opcode {
     pub const CMSG_PETITION_SIGN: Opcode = Opcode { vanilla: 0x01C0, modern: 0x3532 }; // 448
     pub const SMSG_PETITION_SIGN_RESULTS: Opcode = Opcode { vanilla: 0x01C1, modern: 0x2743 }; // 449
     pub const MSG_PETITION_DECLINE: Opcode = Opcode { vanilla: 0x01C2, ..Opcode::NONE }; // 450
-    pub const SMSG_PETITION_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x01C3, ..Opcode::NONE }; // 451
+    pub const SMSG_PETITION_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x01C3, modern: 0x291B }; // 451
     pub const CMSG_TURN_IN_PETITION: Opcode = Opcode { vanilla: 0x01C4, modern: 0x3534 }; // 452
     pub const SMSG_TURN_IN_PETITION_RESULTS: Opcode = Opcode { vanilla: 0x01C5, modern: 0x2745 }; // 453
     pub const CMSG_OFFER_PETITION: Opcode = Opcode { vanilla: 0x01C7, modern: 0x32F4 }; // 455
@@ -858,7 +858,7 @@ impl Opcode {
     // Auction House
     // ============================================================================
 
-    pub const MSG_AUCTION_HELLO: Opcode = Opcode { vanilla: 0x0255, ..Opcode::NONE }; // 597
+    pub const MSG_AUCTION_HELLO: Opcode = Opcode { vanilla: 0x0255, modern: 0x26E5 }; // 597
     pub const CMSG_AUCTION_SELL_ITEM: Opcode = Opcode { vanilla: 0x0256, modern: 0x34CB }; // 598
     pub const CMSG_AUCTION_REMOVE_ITEM: Opcode = Opcode { vanilla: 0x0257, modern: 0x34CC }; // 599
     pub const CMSG_AUCTION_LIST_ITEMS: Opcode = Opcode { vanilla: 0x0258, modern: 0x34CD }; // 600
@@ -1102,6 +1102,14 @@ impl Opcode {
     pub const CMSG_ARENA_TEAM_ACCEPT: Opcode = Opcode { modern: 0x36B7, ..Opcode::NONE };
     pub const CMSG_GUILD_SET_ACHIEVEMENT_TRACKING: Opcode = Opcode { modern: 0x306F, ..Opcode::NONE };
     pub const CMSG_GM_TICKET_GET_CASE_STATUS: Opcode = Opcode { modern: 0x368F, ..Opcode::NONE };
+
+    // Auction notifications. Vanilla funnels every one of these through two opcodes and lets the
+    // payload say what happened; 1.14 gives each outcome its own opcode, so the vanilla message
+    // picks one of these at encode time. None has a vanilla number of its own.
+    pub const SMSG_AUCTION_WON_NOTIFICATION: Opcode = Opcode { modern: 0x26E8, ..Opcode::NONE };
+    pub const SMSG_AUCTION_OUTBID_NOTIFICATION: Opcode = Opcode { modern: 0x26E9, ..Opcode::NONE };
+    pub const SMSG_AUCTION_CLOSED_NOTIFICATION: Opcode = Opcode { modern: 0x26EA, ..Opcode::NONE };
+    pub const SMSG_AUCTION_OWNER_BID_NOTIFICATION: Opcode = Opcode { modern: 0x26EB, ..Opcode::NONE };
 }
 
 /// Prints the constant's name — `CMSG_PING` rather than `Opcode(476)`. Every dispatcher logs
@@ -2293,6 +2301,22 @@ pub const ALL: &[(Opcode, &str)] = &[
         Opcode::CMSG_GM_TICKET_GET_CASE_STATUS,
         "CMSG_GM_TICKET_GET_CASE_STATUS",
     ),
+    (
+        Opcode::SMSG_AUCTION_WON_NOTIFICATION,
+        "SMSG_AUCTION_WON_NOTIFICATION",
+    ),
+    (
+        Opcode::SMSG_AUCTION_OUTBID_NOTIFICATION,
+        "SMSG_AUCTION_OUTBID_NOTIFICATION",
+    ),
+    (
+        Opcode::SMSG_AUCTION_CLOSED_NOTIFICATION,
+        "SMSG_AUCTION_CLOSED_NOTIFICATION",
+    ),
+    (
+        Opcode::SMSG_AUCTION_OWNER_BID_NOTIFICATION,
+        "SMSG_AUCTION_OWNER_BID_NOTIFICATION",
+    ),
 ];
 
 /// Marks an empty slot in the wire index tables. `u16::MAX` is safe as a sentinel because `ALL` is
@@ -2436,8 +2460,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            635,
-            "expected 635 opcode constants; update this count deliberately when adding opcodes"
+            639,
+            "expected 639 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

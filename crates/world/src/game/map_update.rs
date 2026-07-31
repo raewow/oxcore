@@ -53,7 +53,6 @@ pub async fn update_all_maps(
 
         // Shed load by shrinking how far players see and how far grids stay
         // active when a map's tick gets expensive; grow back when it is cheap.
-        // Port of the ramp at the tail of `Map::Update` (Map.cpp:1052-1081).
         map.tune_distances(started.elapsed());
     }
 

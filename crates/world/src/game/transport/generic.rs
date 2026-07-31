@@ -1,11 +1,10 @@
-//! State and timing shared by every transport (`GenericTransport`).
+//! State and timing shared by every transport.
 //!
-//! The full `GenericTransport` is a GameObject with a passenger set and a path cursor; only
+//! The full transport is a GameObject with a passenger set and a path cursor; only
 //! the infra-free timing is ported here. Passenger management and map relocation follow once
 //! the Object/Map subsystems exist.
 
-/// Milliseconds elapsed between two wrapping 32-bit millisecond clocks
-/// (`WorldTimer::getMSTimeDiff`).
+/// Milliseconds elapsed between two wrapping 32-bit millisecond clocks.
 ///
 /// The server clock is a `uint32` of milliseconds that wraps roughly every 49 days. When
 /// `old` reads larger than `now` the clock has either wrapped or drifted backwards, so the
@@ -20,7 +19,7 @@ fn ms_time_diff(old_ms: u32, now_ms: u32) -> u32 {
     }
 }
 
-/// Milliseconds since the transport was created (`GenericTransport::GetTimeSinceCreation`).
+/// Milliseconds since the transport was created.
 ///
 /// `creation_ms` is the server clock when the transport spawned and `now_ms` the current
 /// clock; both are the wrapping 32-bit millisecond timer.
@@ -41,7 +40,7 @@ mod tests {
     #[test]
     fn a_wrapped_clock_reads_the_short_way_around() {
         // Created just before the u32 wrap, now just after: a few ms elapsed, not ~4 billion.
-        // The C++ wrap formula ((0xFFFFFFFF - old) + new) is one short of the true modular
+        // The wrap formula ((0xFFFFFFFF - old) + new) is one short of the true modular
         // distance (which would be 3 here); reproducing that off-by-one keeps us faithful.
         assert_eq!(time_since_creation(0xFFFF_FFFE, 1), 2);
     }

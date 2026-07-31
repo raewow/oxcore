@@ -1,5 +1,4 @@
-//! Building a transport's keyframe path from its taxi-path nodes
-//! (`TransportMgr::GenerateWaypoints`).
+//! Building a transport's keyframe path from its taxi-path nodes.
 //!
 //! A transport follows a taxi path: a list of nodes with positions, map ids and action
 //! flags. This turns that node list into the keyframe schedule the transport replays -
@@ -16,7 +15,7 @@ use crate::game::creature::movement::spline_base::{EvaluationMode, SplineBase, V
 use super::passenger::normalize_orientation;
 use super::schedule::{compute_schedule, KeyFrame, ScheduleProfile};
 
-/// One node of a transport's taxi path (`TaxiPathNodeEntry`, the fields this port reads).
+/// One node of a transport's taxi path.
 #[derive(Debug, Clone, Copy)]
 pub struct TaxiPathNode {
     pub map_id: u32,
@@ -50,29 +49,28 @@ pub struct TransportPath {
     /// The keyframes, with distances, timing and facings filled in.
     pub keyframes: Vec<KeyFrame>,
     /// The per-segment Catmull-Rom splines the keyframes' legs are evaluated on, indexed by
-    /// each keyframe's `spline_id` (the C++ per-keyframe `Spline` pointers).
+    /// each keyframe's `spline_id`.
     pub segment_splines: Vec<SplineBase>,
-    /// Cruise speed in yards/sec (`goInfo->moTransport.moveSpeed`).
+    /// Cruise speed in yards/sec.
     pub speed: f32,
-    /// Acceleration in yards/sec^2 (`goInfo->moTransport.accelRate`).
+    /// Acceleration in yards/sec^2.
     pub accel: f32,
-    /// Time to accelerate from a stop to cruise (`transportTemplate.accelTime`).
+    /// Time to accelerate from a stop to cruise.
     pub accel_time: f32,
-    /// Distance covered while accelerating (`transportTemplate.accelDist`).
+    /// Distance covered while accelerating.
     pub accel_dist: f32,
-    /// Total time to traverse the whole path, in milliseconds (`transportTemplate.pathTime`).
+    /// Total time to traverse the whole path, in milliseconds.
     pub path_time: u32,
-    /// The maps this path visits (`transportTemplate.mapsUsed`).
+    /// The maps this path visits.
     pub maps_used: BTreeSet<u32>,
 }
 
-/// Build the keyframe path for a transport from its taxi-path `nodes` and motion `profile`
-/// (`TransportMgr::GenerateWaypoints`).
+/// Build the keyframe path for a transport from its taxi-path `nodes` and motion `profile`.
 ///
-/// Returns `None` when the path is too short to form a keyframe (the C++ path-id guard and
-/// the non-empty-keyframes assert). The per-keyframe `Spline` pointer and the path-303/293
-/// mid-course `Update` refresh the C++ also sets are runtime/DBC concerns not reproduced
-/// here; the instanceable/`inInstance` decision needs map data and is left to the caller,
+/// Returns `None` when the path is too short to form a keyframe (the path-id guard and
+/// the non-empty-keyframes assert). The per-keyframe spline pointer and the path-303/293
+/// mid-course refresh are runtime/DBC concerns not reproduced here; the
+/// instanceable decision needs map data and is left to the caller,
 /// which gets the visited maps in `maps_used`.
 pub fn generate_waypoints(
     nodes: &[TaxiPathNode],
@@ -156,8 +154,8 @@ pub fn generate_waypoints(
 /// Build the Catmull-Rom spline used to give each node its facing.
 ///
 /// The path points are bracketed by three extrapolated guard points (front, and two past the
-/// end) so the spline's derivative can be evaluated at every real node, exactly as the C++
-/// `SplineRawInitializer` sets up.
+/// end) so the spline's derivative can be evaluated at every real node, exactly as the
+/// reference raw initializer sets up.
 fn build_orientation_spline(nodes: &[TaxiPathNode]) -> SplineBase {
     let mut points: Vec<Vec3> = nodes.iter().map(TaxiPathNode::pos).collect();
 
@@ -178,8 +176,7 @@ fn build_orientation_spline(nodes: &[TaxiPathNode]) -> SplineBase {
 /// Fill in each keyframe's `dist_from_prev` from the Catmull-Rom distance between the nodes.
 ///
 /// The path is cut into segments at teleport frames; each segment gets its own spline, and a
-/// keyframe's distance is the spline arc length of the leg leaving it. Ports the segment loop
-/// of `GenerateWaypoints`.
+/// keyframe's distance is the spline arc length of the leg leaving it.
 fn measure_segment_distances(keyframes: &mut [KeyFrame], spline_path: &[Vec3]) -> Vec<SplineBase> {
     let count = keyframes.len();
     let mut splines: Vec<SplineBase> = Vec::new();
@@ -278,7 +275,7 @@ mod tests {
     #[test]
     fn a_straight_path_faces_along_its_direction_of_travel() {
         let path = generate_waypoints(&straight_line(), &profile()).unwrap();
-        // Travelling +x, the tangent is +x; the C++ formula atan2(0, +) + PI gives PI.
+        // Travelling +x, the tangent is +x; the formula atan2(0, +) + PI gives PI.
         for k in &path.keyframes {
             assert!(
                 (k.initial_orientation - std::f32::consts::PI).abs() < 1e-3,

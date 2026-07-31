@@ -188,7 +188,7 @@ impl ReputationSystem {
         world: &World,
     ) -> Result<()> {
         // TODO: Implement spillover using DBC or database
-        // For now, skip spillover since we don't have ObjectMgr in world
+        // For now, skip spillover since we don't have an object manager in world
         // This functionality needs to be re-implemented using DBC data or the world database
         let _ = (player_guid, faction_id, delta, world);
         Ok(())
@@ -409,9 +409,8 @@ impl ReputationSystem {
     /// Send SMSG_SET_FORCED_REACTIONS for all forced reaction entries.
     ///
     /// Sends unconditionally (even when empty) so that removing the last forced
-    /// reaction (e.g. `Aura::HandleForceReaction` on remove) correctly clears the
-    /// client's cached override — matching the C++ `SendForceReactions()`, which
-    /// always builds and sends the packet.
+    /// reaction correctly clears the client's cached override — the packet is
+    /// always built and sent.
     pub fn send_forced_reactions(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         let reactions = world
             .systems
@@ -468,7 +467,7 @@ impl ReputationSystem {
                     // Overwrite standing from DB
                     state.standing = *standing;
 
-                    // Apply flags with validation (matching C++ LoadFromDB)
+                    // Apply flags with validation
                     let db_flags_u32 = *db_flags as u32;
                     if (db_flags_u32 & FACTION_FLAG_VISIBLE) != 0 {
                         if !state.is_invisible_forced() && !state.is_hidden() {

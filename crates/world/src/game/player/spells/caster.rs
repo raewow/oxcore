@@ -600,7 +600,7 @@ pub fn spell_base_healing_bonus_done(
 /// Caster-side healing bonus calculation.
 ///
 /// Applies percent healing mods, scripted class overrides, base healing bonus
-/// from gear, coefficient scaling via `SpellBonusWithCoeffs`, and spell mods.
+/// from gear, coefficient scaling via `spell_bonus_with_coeffs`, and spell mods.
 pub fn spell_healing_bonus_done(
     caster_guid: ObjectGuid,
     victim_guid: ObjectGuid,
@@ -1010,7 +1010,7 @@ pub fn spell_damage_bonus_done(
 
     // Pet bonus damage (placeholder — not yet implemented)
 
-    // Coefficient scaling via SpellBonusWithCoeffs
+    // Coefficient scaling via spell_bonus_with_coeffs
     done_total = spell_bonus_with_coeffs(
         spell_proto,
         effect_index,
@@ -1117,10 +1117,10 @@ fn is_unit_alive(guid: ObjectGuid, world: &World) -> bool {
 
 /// Roll a partial block against a player victim for melee/ranged-class spell damage.
 ///
-/// Full blocks (`SPELL_ATTR_EX3_COMPLETELY_BLOCKED`) are already resolved as a miss during
-/// [`crate::game::player::spells::hit::roll_spell_hit`]; this only covers the partial block
-/// that vanilla applies to melee/ranged-class spell damage that landed. Non-melee/ranged
-/// spells and creature victims never block.
+/// Full blocks (spells with the completely-blocked `attributes_ex3` flag) are already
+/// resolved as a miss during [`crate::game::player::spells::hit::roll_spell_hit`]; this only
+/// covers the partial block that vanilla applies to melee/ranged-class spell damage that
+/// landed. Non-melee/ranged spells and creature victims never block.
 fn roll_partial_block(victim_guid: ObjectGuid, damage: u32, dmg_class: u32, world: &World) -> u32 {
     if !matches!(
         dmg_class,
@@ -1678,8 +1678,8 @@ fn rand_dither(v: f32) -> i32 {
 }
 
 /// Extra "done" bonus added to a school-absorb shield's magnitude on real apply.
-/// Faithful `Aura::HandleSchoolAbsorb` (apply branch only; the C++ side does nothing
-/// on remove).
+/// Faithful to the school-absorb handling (apply branch only; nothing happens on
+/// remove).
 ///
 /// Certain absorb shields (Power Word: Shield, Frost/Fire Ward, Shadow Ward) get a
 /// flat 10% bonus from the caster's +healing (PW:S) or +spell damage (wards) for the
@@ -1728,11 +1728,10 @@ pub fn school_absorb_bonus_done(
     rand_dither(done_actual_benefit)
 }
 
-/// Applies the caster's `SPELLMOD_RESIST_MISS_CHANCE` spell modifiers to a reflect
-/// chance value. Faithful `Aura::HandleReflectSpellsSchool` (real apply/remove only).
+/// Applies the caster's `ResistMissChance` spell modifiers to a reflect chance value.
 ///
-/// The C++ version calls `Player::ApplySpellMod` in-place on `m_modifier.m_amount`,
-/// letting talents/items that boost "resist miss chance" scale this aura's own
+/// The original implementation calls the spell-modifier apply in-place on the aura's
+/// amount, letting talents/items that boost "resist miss chance" scale this aura's own
 /// reflect % up or down. Returns the adjusted amount (base_amount + spellmod delta).
 pub fn reflect_spells_school_bonus(
     caster_guid: ObjectGuid,

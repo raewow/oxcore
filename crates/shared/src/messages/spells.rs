@@ -19,7 +19,7 @@ pub struct SmsgSpellStart {
     /// expects the item GUID as the first packed GUID in the packet instead of
     /// the caster's GUID (`cast_item_guid` overrides the first GUID slot).
     pub cast_item_guid: Option<ObjectGuid>,
-    /// Projectile ammo display info: ammoDisplayID from WriteAmmoToPacket.
+    /// Projectile ammo display info: ammoDisplayID.
     /// 0 = no projectile.
     pub ammo_display_id: u32,
     /// Inventory type of the projectile (e.g. INVTYPE_THROWN, INVTYPE_AMMO).
@@ -45,7 +45,7 @@ fn next_cast_sequence() -> u64 {
     CAST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
 }
 
-/// `SpellCastData::Write`, per the 1.14 wire format.
+/// The spell-cast data block, per the 1.14 wire format.
 ///
 /// Shared by `SMSG_SPELL_START` and `SMSG_SPELL_GO`, which differ only in a trailing log-data bit.
 /// Almost nothing survives from the vanilla body unchanged:
@@ -137,7 +137,7 @@ fn write_modern_spell_cast_data(
     // No power costs, runes, target points or ammo: every one of those was declared absent above.
 }
 
-/// `SpellTargetData::Write`, per the 1.14 wire format.
+/// The spell-target data block, per the 1.14 wire format.
 ///
 /// The write counterpart of the read in `crates/world/src/handlers/spells.rs`
 /// (`parse_spell_cast_targets_modern`). They are in different crates because one is a message body
@@ -201,7 +201,7 @@ impl ToWorldPacket for SmsgSpellStart {
         packet
     }
 
-    /// `SpellStart::Write` for build 42597: the shared
+    /// For build 42597: the shared
     /// cast block and nothing else.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
@@ -233,7 +233,7 @@ pub struct SmsgSpellGo {
     /// expects the item GUID as the first packed GUID and CAST_FLAG_UNKNOWN7
     /// (0x0040) set in cast_flags.
     pub cast_item_guid: Option<ObjectGuid>,
-    /// Projectile ammo display info: ammoDisplayID from WriteAmmoToPacket.
+    /// Projectile ammo display info: ammoDisplayID.
     /// 0 = no projectile.
     pub ammo_display_id: u32,
     /// Inventory type of the projectile (e.g. INVTYPE_THROWN, INVTYPE_AMMO).
@@ -251,7 +251,7 @@ pub struct SpellMissTarget {
     pub reflect_result: u8,
 }
 
-/// `SpellMissInfo::SPELL_MISS_REFLECT` — the only miss reason carrying a trailing result byte.
+/// SPELL_MISS_REFLECT — the only miss reason carrying a trailing result byte.
 const SPELL_MISS_REFLECT: u8 = 11;
 
 // CAST_FLAG_UNKNOWN7: signals that the first packed GUID is a cast item, not
@@ -305,7 +305,7 @@ impl ToWorldPacket for SmsgSpellGo {
         packet
     }
 
-    /// `SpellGo::Write` for build 42597: the shared cast
+    /// For build 42597: the shared cast
     /// block, then a `HasLogData` bit and a flush.
     ///
     /// Note the flush comes *after* the optional log data, so an absent log block
@@ -344,8 +344,6 @@ impl ToWorldPacket for SmsgPlaySpellVisual {
         packet
     }
 
-    /// `PlaySpellVisualKit::Write`.
-    ///
     /// Note the opcode changes message: vanilla's `SMSG_PLAY_SPELL_VISUAL` carries a visual *kit* id,
     /// so the proxy forwards it as 1.14's `SMSG_PLAY_SPELL_VISUAL_KIT` rather than the
     /// similarly-named `SMSG_PLAY_SPELL_VISUAL`. The opcode table
@@ -755,7 +753,7 @@ pub struct SmsgSpellFailure {
 }
 
 impl ToWorldPacket for SmsgSpellFailure {
-    /// `SpellFailure::Write` for build 42597: the caster,
+    /// For build 42597: the caster,
     /// a cast identity, the spell, its visual, then the reason **widened to u16**.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
@@ -807,7 +805,7 @@ impl ToWorldPacket for MsgChannelUpdate {
         packet
     }
 
-    /// `SpellChannelUpdate::Write`. 1.14 names the channelling unit,
+    /// 1.14 names the channelling unit,
     /// where vanilla relies on the packet only ever going to the caster.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
@@ -839,7 +837,7 @@ impl ToWorldPacket for SmsgSpellUpdateChainTargets {
 }
 
 impl ToWorldPacket for SmsgSpellFailedOther {
-    /// `SpellFailedOther::Write`: identical to `SMSG_SPELL_FAILURE`
+    /// Identical to `SMSG_SPELL_FAILURE`
     /// except the reason stays a u8. Vanilla carries no reason at all here, so zero it.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
@@ -871,7 +869,7 @@ pub const SPELL_RESULT_STATUS_OKAY: u8 = 0;
 pub const SPELL_RESULT_STATUS_FAIL: u8 = 2;
 
 impl SmsgCastResult {
-    /// General builder matching `WorldPackets::Spell::CastResult::AppendBodyTo`:
+    /// General builder for the CastResult body:
     /// `spell_id(u32) + result(u8)`, and on FAIL `failure_reason(u8)` followed by
     /// `arg1(u32)` when either argument is present, then `arg2(u32)` when present.
     pub fn build(
@@ -918,9 +916,6 @@ pub struct SmsgSpellCooldown {
 }
 
 impl ToWorldPacket for SmsgSpellCooldown {
-    /// `SpellCooldownPkt::Write` with `SpellCooldownStruct`
-    ///.
-    ///
     /// Vanilla streams `(spell, ms)` pairs to the end of the packet with no count; 1.14 prefixes a
     /// flags byte and an explicit count, and each entry gains a `ModRate` float. `ModRate` is the
     /// cooldown-rate multiplier and **must be 1.0, not 0.0** — the client divides by it, so a zero
@@ -1014,7 +1009,7 @@ impl ToWorldPacket for SmsgLearnedSpell {
         packet
     }
 
-    /// `LearnedSpells::Write`. 1.14 sends a *list*, so a single learned
+    /// 1.14 sends a *list*, so a single learned
     /// spell is a list of one, plus an empty favourites list and a specialization id Classic has no
     /// concept of.
     fn to_modern(&self) -> Option<WorldPacket> {
@@ -1041,7 +1036,7 @@ impl ToWorldPacket for SmsgRemovedSpell {
         packet
     }
 
-    /// `UnlearnedSpells::Write` -- 1.14's name for this message. A count,
+    /// 1.14 calls this message UnlearnedSpells. A count,
     /// the list, then a suppress-messaging bit.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
@@ -1060,7 +1055,7 @@ pub struct SmsgClearCooldown {
 }
 
 impl ToWorldPacket for SmsgClearCooldown {
-    /// `ClearCooldown::Write`. The caster GUID vanilla carries is gone:
+    /// The caster GUID vanilla carries is gone:
     /// 1.14 sends this only to the owner, and distinguishes pet cooldowns with a bit instead.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
@@ -1087,7 +1082,7 @@ pub struct SmsgSpellDelayed {
 }
 
 impl ToWorldPacket for SmsgSpellDelayed {
-    /// `SpellDelayed::Write`: the same two fields, guid128 and i32.
+    /// The same two fields, guid128 and i32.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
         let (high, low) = self.caster_guid.to_guid128(DEFAULT_REALM_ID);
@@ -1153,7 +1148,7 @@ pub struct SmsgSpellLogExecute;
 
 impl SmsgSpellLogExecute {
     /// Build the packet. Returns `None` when every effect index has an empty log
-    /// (the C++ function returns without sending in that case).
+    /// (nothing is sent in that case).
     pub fn build(
         caster_guid: ObjectGuid,
         spell_id: u32,

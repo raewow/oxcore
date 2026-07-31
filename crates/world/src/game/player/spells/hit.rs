@@ -40,7 +40,7 @@ impl SpellHitOutcome {
     }
 
     /// Wire-level `SpellMissInfo` for this outcome. Landed outcomes map to `None`
-    /// (the C++ `SPELL_MISS_NONE`), which is what the reflect-result byte carries when
+    /// (the miss-info `None` value), which is what the reflect-result byte carries when
     /// a reflected spell lands on its caster.
     pub fn to_miss_info(self) -> SpellMissInfo {
         match self {
@@ -86,7 +86,7 @@ const SPELL_ATTR_NO_IMMUNITIES: u32 = 0x2000_0000;
 /// SPELL_ATTR_EX_NO_REFLECTION (bit 7).
 const SPELL_ATTR_EX_NO_REFLECTION: u32 = 0x0000_0080;
 
-/// Whether a spell can be reflected at all (MaNGOS `SpellEntry::IsReflectableSpell`).
+/// Whether a spell can be reflected at all.
 ///
 /// The caster/victim-aware overload additionally rejects spells that are positive
 /// toward this victim; `roll_spell_hit` has already returned on that case before this
@@ -99,9 +99,9 @@ pub fn is_reflectable_spell(spell: &crate::dbc::structures::SpellEntry) -> bool 
         && spell.attributes_ex & SPELL_ATTR_EX_NO_REFLECTION == 0
 }
 
-/// Total reflect chance percent the victim has against this spell's school
-/// (MaNGOS `SpellCaster::SpellHitResult`: `SPELL_AURA_REFLECT_SPELLS` flat plus every
-/// `SPELL_AURA_REFLECT_SPELLS_SCHOOL` whose misc value overlaps the spell school mask).
+/// Total reflect chance percent the victim has against this spell's school:
+/// the reflect-spells flat bonus plus every school-reflect aura whose misc value
+/// overlaps the spell school mask.
 fn victim_reflect_chance(victim_guid: ObjectGuid, school_mask: u32, world: &World) -> i32 {
     use crate::game::player::auras::effects::{AURA_REFLECT_SPELLS, AURA_REFLECT_SPELLS_SCHOOL};
 
@@ -127,7 +127,7 @@ fn victim_reflect_chance(victim_guid: ObjectGuid, school_mask: u32, world: &Worl
     }
 }
 
-/// Magic spell hit chance as a percentage in [1, 99] (MaNGOS `MagicSpellHitChance`).
+/// Magic spell hit chance as a percentage in [1, 99].
 ///
 /// Base hit by level difference: 96% at equal level, −1%/level up to +2, then a steeper
 /// −`lchance`/level (7 vs players, 11 vs creatures). Floored at 22% before adding the
@@ -165,8 +165,8 @@ fn magic_hit_chance_pct(
     mod_hit.clamp(1.0, 99.0)
 }
 
-/// Average resist fraction in [0, 0.75] (MaNGOS `GetSpellResistChance`, player-vs-target
-/// case without innate level resist or spell penetration): `resistance * 0.15 / caster_level`.
+/// Average resist fraction in [0, 0.75] for the player-vs-target case without innate
+/// level resist or spell penetration: `resistance * 0.15 / caster_level`.
 fn average_resist_fraction(caster_level: i32, resistance: u32, school: u8) -> f32 {
     if school == 0 || resistance == 0 || caster_level <= 0 {
         return 0.0;
@@ -174,7 +174,7 @@ fn average_resist_fraction(caster_level: i32, resistance: u32, school: u8) -> f3
     (resistance as f32 * 0.15 / caster_level as f32).clamp(0.0, 0.75)
 }
 
-/// Melee/ranged spell miss chance percent (MaNGOS `MeleeSpellMissChance`).
+/// Melee/ranged spell miss chance percent.
 ///
 /// `skill_diff` = attacker weapon skill − victim defense skill (positive favours the attacker).
 /// Base 5% miss, adjusted by skill difference (PvP 0.04/pt; PvE 0.1/pt, or 0.2/pt when the
@@ -320,7 +320,7 @@ fn get_defense_skill_value(
         .unwrap_or(0)
 }
 
-/// Melee/ranged spell hit roll (MaNGOS `MeleeSpellHitResult`): a single-roll table of
+/// Melee/ranged spell hit roll: a single-roll table of
 /// miss → dodge → parry → block. Crit is rolled separately during damage. Dodge/parry/block
 /// are read from real player victims; creature avoidance is not modelled yet (treated as 0),
 /// so creature victims face only the skill-based miss. Outcomes collapse to Hit/Miss because
@@ -414,7 +414,7 @@ fn roll_melee_spell_hit(
         return SpellHitOutcome::Miss;
     }
 
-    // SPELL_ATTR_NO_ACTIVE_DEFENSE (0x00200000): cannot be dodged/parried/blocked.
+    // No-active-defense flag (0x00200000): cannot be dodged/parried/blocked.
     if spell.attributes & 0x0020_0000 != 0 {
         return SpellHitOutcome::Hit;
     }
@@ -457,7 +457,7 @@ fn roll_melee_spell_hit(
         }
     }
 
-    // Full block only applies to spells flagged SPELL_ATTR_EX3_COMPLETELY_BLOCKED (0x08);
+    // Full block only applies to spells flagged completely-blocked (0x08);
     // other spells take a partial block during damage calculation instead.
     if can_block && spell.attributes_ex3 & 0x0000_0008 != 0 {
         threshold += block.max(0.0);
@@ -472,7 +472,7 @@ fn roll_melee_spell_hit(
 /// Roll spell hit for a target.
 ///
 /// Returns the outcome (hit, miss, resist, immune, reflect).
-/// Routes by the spell's damage class (MaNGOS `SpellHitResult`): NONE never misses,
+/// Routes by the spell's damage class: NONE never misses,
 /// MELEE/RANGED use the melee table (not yet ported — treated as a hit), MAGIC uses the
 /// level-based hit roll plus resistance.
 pub fn roll_spell_hit(
@@ -486,19 +486,19 @@ pub fn roll_spell_hit(
         None => return SpellHitOutcome::Hit, // Unknown spell = auto-hit
     };
 
-    // Self-cast and positive spells can never miss (MaNGOS SpellHitResult early returns).
+    // Self-cast and positive spells can never miss.
     if caster_guid == target_guid || spell_entry.is_positive_spell() {
         return SpellHitOutcome::Hit;
     }
 
     // Damage immunity is checked before the reflect roll so an invulnerable victim does
-    // not burn a reflect charge (MaNGOS `IsImmuneToDamage` precedes the reflect block).
+    // not burn a reflect charge.
     if super::target_info::target_is_immune_to_damage(target_guid, &spell_entry, world) {
         return SpellHitOutcome::Immune;
     }
 
-    // Try victim reflect. `m_canReflect` is `IsReflectableSpell(caster, victim)`, which
-    // this point has already satisfied for the positive-spell half.
+    // Try victim reflect. The spell is reflectable (checked above), and the caster-victim
+    // positive half of that check has already been satisfied by the early returns.
     if is_reflectable_spell(&spell_entry) {
         let school_mask = 1u32.checked_shl(spell_entry.school).unwrap_or(0);
         let reflect_chance = victim_reflect_chance(target_guid, school_mask, world);
@@ -507,8 +507,7 @@ pub fn roll_spell_hit(
         }
     }
 
-    // Route by damage class. NONE never misses; melee/ranged use the (un-ported) melee
-    // table — MeleeSpellHitResult (dodge/parry/block) is a separate task, so auto-hit here.
+    // Route by damage class. NONE never misses; melee/ranged use the melee hit table.
     match spell_entry.dmg_class {
         SPELL_DAMAGE_CLASS_NONE => return SpellHitOutcome::Hit,
         SPELL_DAMAGE_CLASS_MELEE | SPELL_DAMAGE_CLASS_RANGED => {
@@ -569,7 +568,7 @@ pub fn roll_spell_hit(
         0u32 // TODO: creature resistances
     };
 
-    // Step 1: Hit roll (level-based, MagicSpellHitChance). Binary spells fold the average
+    // Step 1: Hit roll (level-based). Binary spells fold the average
     // resist into the hit chance; non-binary spells roll partial resist on the damage after.
     let is_binary = school != 0 && is_binary_spell(spell_id, world);
     let resist_avg = average_resist_fraction(caster_level, target_resistance, school);
@@ -637,7 +636,7 @@ fn is_binary_spell(spell_id: u32, world: &World) -> bool {
 /// Roll for partial resistance.
 /// Returns the percentage of damage resisted (0, 25, 50, 75, or 100).
 ///
-/// Centered on the average resist fraction (`GetSpellResistChance`), distributed across the
+/// Centered on the average resist fraction, distributed across the
 /// five possible outcomes using a weighted table.
 fn roll_partial_resist(caster_level: i32, resistance: u32, school: u8) -> u8 {
     let avg_resist = average_resist_fraction(caster_level, resistance, school);

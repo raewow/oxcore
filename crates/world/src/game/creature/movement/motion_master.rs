@@ -233,7 +233,7 @@ impl MotionMaster {
         self.generators.get_mut(&gen_type)
     }
 
-    /// The idle generator is a shared static in C++ and is never retired.
+    /// The idle generator is a shared static and is never retired.
     fn is_static(gen_type: MovementGeneratorType) -> bool {
         gen_type == MovementGeneratorType::Idle
     }
@@ -439,7 +439,7 @@ impl MotionMaster {
             return;
         }
 
-        // Don't recreate if already chasing same target - the C++ generator is rebuilt on
+        // Don't recreate if already chasing same target - the generator is rebuilt on
         // every call, which would reset chase state on each AI tick here.
         if let Some(gen) = self.generators.get_mut(&MovementGeneratorType::Chase) {
             if let Some(chase) = gen.as_any_mut().downcast_mut::<ChaseMovementGenerator>() {
@@ -454,7 +454,7 @@ impl MotionMaster {
 
     /// Start returning home.
     ///
-    /// This is the uncharmed branch of the C++ targeted-home flow. The LOST_CONTROL guard
+    /// This is the uncharmed branch of the targeted-home flow. The LOST_CONTROL guard
     /// and the charmed branches (stay put, or follow the owner) need charm state the caller
     /// owns, so they route through [`Self::move_idle`] / [`Self::move_follow`] instead.
     pub fn return_home(
@@ -745,14 +745,14 @@ impl MotionMaster {
         tracing::error!("[MOTION] creature attempted taxi flight (path {path} node {pathnode})");
     }
 
-    /// Jump movement does not exist in 1.12 - the C++ body is commented out for this core.
+    /// Jump movement does not exist in 1.12 - the reference body is commented out for this core.
     pub fn move_jump(&mut self) {}
 
     /// Charge movement toward a target unit, used by SPELL_EFFECT_CHARGE.
     ///
     /// `delay` is a spell-batching arrival delay (ms); it is currently unmodelled.
     /// `trigger_auto_attack` flags the creature to begin attacking the target on arrival.
-    /// `use_combat_reach` is preserved for parity with the C++ signature but ignored here.
+    /// `use_combat_reach` is preserved for parity with the reference signature but ignored here.
     pub fn move_charge(
         &mut self,
         target: ObjectGuid,
@@ -857,7 +857,7 @@ impl MotionMaster {
 
     /// Pop the chase/follow generators parked beneath an expiring generator.
     ///
-    /// The C++ guard also skips this when the expiring generator is a distancing one; that
+    /// The guard also skips this when the expiring generator is a distancing one; that
     /// type has no equivalent here, so the guard is always satisfied.
     fn take_stored_targeted_generators(
         &mut self,
@@ -878,7 +878,7 @@ impl MotionMaster {
     /// Clean motion generators immediately.
     ///
     /// Generators are finalized only after the stack has been rebuilt, because finalizing
-    /// can push new movement (via movement-inform callbacks in the C++ AI).
+    /// can push new movement (via movement-inform callbacks in the AI).
     pub fn direct_clean(&mut self, creature_guid: ObjectGuid, reset: bool, all: bool) {
         let mut retired = self.take_generators_for_clean(all);
 
@@ -993,7 +993,7 @@ impl MotionMaster {
 
     /// Make idle the active movement.
     ///
-    /// C++ pushes the shared idle generator on top of the stack; idle is the lowest
+    /// The shared idle generator is pushed on top of the stack; idle is the lowest
     /// priority in this type-keyed model, so the equivalent is to drop everything above it.
     pub fn move_idle(&mut self, creature_guid: ObjectGuid) {
         if self.top_type() != Some(MovementGeneratorType::Idle) {

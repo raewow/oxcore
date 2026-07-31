@@ -270,11 +270,9 @@ impl AuraContainer {
 
     /// Refresh the remaining duration of an already-active aura (any effect of the spell).
     ///
-    /// Matches C++ `Unit::RefreshAura(spellId, duration)` -> `SpellAuraHolder::SetAuraDuration`:
-    /// only the *current* remaining duration is overwritten, `max_duration_ms` is untouched
+    /// Only the *current* remaining duration is overwritten, `max_duration_ms` is untouched
     /// (so a subsequent natural refresh still caps at the original max). A permanent aura
-    /// (`duration_ms == None`) is left untouched, matching `UpdateAuraDuration`'s guard against
-    /// holders with no aura slot / permanent auras.
+    /// (`duration_ms == None`) is left untouched.
     ///
     /// Returns the slot of the refreshed aura, or `None` if no aura for this spell is active.
     pub fn refresh_aura(&mut self, spell_id: u32, duration_ms: i32) -> Option<u8> {
@@ -291,7 +289,7 @@ impl AuraContainer {
         slot
     }
 
-    /// Mirrors `SpellAuraHolder::RefreshAuraPeriodicTimers` for every effect in a spell holder.
+    /// Refresh periodic timers for every effect of a spell.
     pub fn refresh_aura_periodic_timers(&mut self, spell_id: u32, duration_ms: i32) {
         for effect_index in 0..3u8 {
             if let Some(aura) = self.auras.get_mut(&(spell_id, effect_index)) {
@@ -300,7 +298,7 @@ impl AuraContainer {
         }
     }
 
-    /// Mirrors `SpellAuraHolder::SetAuraMaxDuration` for every effect in a spell holder.
+    /// Set the max duration for every effect of a spell.
     pub fn set_aura_max_duration(&mut self, spell_id: u32, duration_ms: i32) {
         for effect_index in 0..3u8 {
             if let Some(aura) = self.auras.get_mut(&(spell_id, effect_index)) {
@@ -345,9 +343,9 @@ impl AuraContainer {
         self.remove_auras_by_type_filtered(aura_type, false)
     }
 
-    /// Remove every non-passive aura of a type, leaving passives in place
-    /// (`Unit::RemoveNonPassiveSpellsCausingAura`). Passive invisibility — racial and
-    /// permanent effects — survives a hostile hit that strips ordinary invisibility.
+    /// Remove every non-passive aura of a type, leaving passives in place.
+    /// Passive invisibility — racial and permanent effects — survives a hostile hit that
+    /// strips ordinary invisibility.
     pub fn remove_non_passive_auras_by_type(&mut self, aura_type: u32) -> Vec<(Aura, u8)> {
         self.remove_auras_by_type_filtered(aura_type, true)
     }
@@ -429,9 +427,8 @@ impl AuraContainer {
 
     /// Whether an active immunity aura rejects one spell effect.
     ///
-    /// Immunities only reject effects with opposite polarity, matching the
-    /// reference rule that a friendly immunity aura does not block friendly
-    /// effects (and vice versa).
+    /// Immunities only reject effects with opposite polarity: a friendly immunity aura
+    /// does not block friendly effects (and vice versa).
     pub fn is_immune_to_spell_effect(
         &self,
         effect: u32,
@@ -530,7 +527,7 @@ impl AuraContainer {
     }
 
     /// Get total modifier for auras of a given type with an exact misc_value match.
-    /// Used for: MOD_STAT (misc_value = stat index 0-4), MOD_POWER_REGEN (misc_value = power type).
+    /// Used for: stat modifiers (misc_value = stat index 0-4), power regen (misc_value = power type).
     pub fn get_total_aura_modifier_by_misc(&self, aura_type: u32, misc_value: i32) -> i32 {
         self.auras
             .values()
@@ -550,8 +547,8 @@ impl AuraContainer {
     }
 
     /// Get total modifier for auras of a given type where `misc_value & misc_mask != 0`.
-    /// Used for school-mask queries: e.g. fire resistance modifier where misc_mask = SPELL_SCHOOL_MASK_FIRE.
-    /// Matches C++ Unit::GetTotalAuraModifierByMiscMask — bitmask overlap, not equality.
+    /// Used for school-mask queries: e.g. fire resistance modifier (misc_mask = fire school).
+    /// Uses bitmask overlap, not equality.
     pub fn get_total_aura_modifier_by_misc_mask(&self, aura_type: u32, misc_mask: u32) -> i32 {
         if misc_mask == 0 {
             return 0;
@@ -565,7 +562,7 @@ impl AuraContainer {
 
     /// Get multiplicative modifier for auras of a given type where `misc_value & misc_mask != 0`.
     /// Used for school-mask queries: e.g. percent damage done by spell school.
-    /// Matches C++ Unit::GetTotalAuraMultiplierByMiscMask — bitmask overlap, not equality.
+    /// Uses bitmask overlap, not equality.
     /// Returns product of (100 + value) / 100 for matching auras.
     pub fn get_total_aura_multiplier_by_misc_mask(&self, aura_type: u32, misc_mask: u32) -> f32 {
         if misc_mask == 0 {

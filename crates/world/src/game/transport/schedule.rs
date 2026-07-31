@@ -1,6 +1,6 @@
 //! The keyframe schedule of a transport path: when it arrives at and departs each node.
 //!
-//! `TransportMgr::GenerateWaypoints` builds a transport's path in two halves. The first
+//! A transport's path is built in two halves. The first
 //! half turns DBC taxi-path nodes into keyframes and measures the distance between them
 //! with Catmull-Rom splines - that needs the DBC store and the spline geometry and is not
 //! ported here. The second half is pure kinematics over those distances: it works out how
@@ -31,7 +31,7 @@ impl ScheduleProfile {
     }
 }
 
-/// One node of a transport path (`KeyFrame`).
+/// One node of a transport path.
 ///
 /// The `dist_from_prev` and stop/delay fields are the inputs the schedule is computed from;
 /// everything else is filled in by [`compute_schedule`].
@@ -39,16 +39,16 @@ impl ScheduleProfile {
 pub struct KeyFrame {
     /// Spline distance from the previous keyframe (input; the first keyframe's is 0).
     pub dist_from_prev: f32,
-    /// Whether the transport halts here (`Node->actionFlag == 2`).
+    /// Whether the transport halts here (action flag 2).
     pub is_stop_frame: bool,
-    /// How long the transport waits at this node, in seconds (`Node->delay`).
+    /// How long the transport waits at this node, in seconds.
     pub delay_secs: u32,
 
     /// Distance from this keyframe back to the next stop already passed.
     pub dist_since_stop: f32,
     /// Distance from this keyframe forward to the next stop.
     pub dist_until_stop: f32,
-    /// Distance to the following keyframe (this keyframe's `NextDistFromPrev`).
+    /// Distance to the following keyframe.
     pub next_dist_from_prev: f32,
     /// Seconds from this keyframe forward to the next stop.
     pub time_to: f32,
@@ -58,20 +58,19 @@ pub struct KeyFrame {
     pub arrive_time: u32,
     /// Absolute time the transport leaves this keyframe, in milliseconds.
     pub departure_time: u32,
-    /// The following keyframe's `arrive_time` (this keyframe's `NextArriveTime`).
+    /// The following keyframe's `arrive_time`.
     pub next_arrive_time: u32,
 
-    /// Whether the path teleports away from this keyframe rather than moving on (`Teleport`).
+    /// Whether the path teleports away from this keyframe rather than moving on.
     pub teleport: bool,
-    /// Whether the client must be sent a fresh create block here (`Update`).
+    /// Whether the client must be sent a fresh create block here.
     pub update: bool,
-    /// Facing the transport holds at this node, from the orientation spline
-    /// (`InitialOrientation`).
+    /// Facing the transport holds at this node, from the orientation spline.
     pub initial_orientation: f32,
-    /// 1-based index of this keyframe within its spline segment (`Index`).
+    /// 1-based index of this keyframe within its spline segment.
     pub index: u32,
-    /// Which segment spline this keyframe's leg is evaluated on (the C++ `Spline` pointer,
-    /// as an index into the path's segment splines).
+    /// Which segment spline this keyframe's leg is evaluated on (an index into the path's
+    /// segment splines).
     pub spline_id: usize,
     /// Map this keyframe's node is on.
     pub map_id: u32,
@@ -82,7 +81,7 @@ pub struct KeyFrame {
 }
 
 impl KeyFrame {
-    /// A keyframe with its inputs set and its computed fields left at the C++ defaults.
+    /// A keyframe with its inputs set and its computed fields left at their defaults.
     pub fn new(dist_from_prev: f32, is_stop_frame: bool, delay_secs: u32) -> Self {
         Self {
             dist_from_prev,
@@ -113,9 +112,9 @@ impl KeyFrame {
 const IN_MILLISECONDS: f32 = 1000.0;
 
 /// Fill in the timing schedule of `keyframes` from their distances and the transport's
-/// `profile`, and return the total path time in milliseconds (`transportTemplate.pathTime`).
+/// `profile`, and return the total path time in milliseconds.
 ///
-/// This is the second half of `TransportMgr::GenerateWaypoints`, from the point where the
+/// This is the second half of the path generation, from the point where the
 /// spline distances are known. Keyframes form a closed loop - the last returns to the first
 /// by teleport - so every accumulation wraps modulo the keyframe count.
 pub fn compute_schedule(profile: &ScheduleProfile, keyframes: &mut [KeyFrame]) -> u32 {
@@ -185,7 +184,7 @@ pub fn compute_schedule(profile: &ScheduleProfile, keyframes: &mut [KeyFrame]) -
 
 /// Index of the first and last stop keyframes, defaulting both to 0 when there are none.
 ///
-/// Matches `GenerateWaypoints`: the first keyframe counts as a stop up front, and a path
+/// The first keyframe counts as a stop up front, and a path
 /// with no stop frames at all collapses both to keyframe 0.
 fn find_stops(keyframes: &[KeyFrame]) -> (usize, usize) {
     let mut first_stop: i32 = -1;

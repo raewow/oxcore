@@ -1,7 +1,7 @@
-//! Bonus-flat threat application per target (MaNGOS `Spell::HandleThreatSpells`).
+//! Bonus-flat threat application per target.
 //!
-//! Reads the `spell_threat` flat bonus for the cast spell and, for every hit target
-//! in `m_UniqueTargetInfo`, either distributes that bonus to mobs hostile toward the
+//! Reads the `spell_threat` flat bonus for the cast spell and, for every hit target,
+//! either distributes that bonus to mobs hostile toward the
 //! target (beneficial spells) or adds it directly to the target's threat list
 //! (harmful spells). The bonus is written straight into the affected creatures'
 //! [`ThreatManager`]s; the returned list records what was applied for inspection.
@@ -13,10 +13,10 @@ use crate::game::spell::manager::SpellThreatEntry;
 use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
 
-/// `SPELL_EFFECT_SCHOOL_DAMAGE` — school-damage effect targeting the caster counts as
-/// negative for `m_negativeEffectMask` even though `IsPositiveEffect` may read positive.
+/// School-damage effect targeting the caster counts as
+/// negative even though the per-effect polarity check may read it positive.
 const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
-/// `TARGET_UNIT_CASTER` implicit-target A value.
+/// Implicit-target A value for targeting the caster.
 const TARGET_UNIT_CASTER: u32 = 1;
 
 #[cfg(doc)]
@@ -37,7 +37,7 @@ pub enum Polarity {
     Mixed,
 }
 
-/// `m_spellInfo->Effect[i]`-derived active-effect bitmask: bit `i` set iff
+/// Active-effect bitmask: bit `i` set iff
 /// `effects[i] != 0`, for `i` in `0..MAX_EFFECT_INDEX` (3 effects).
 pub fn build_effect_mask(effects: &[u32; 3]) -> u8 {
     let mut mask = 0u8;
@@ -49,7 +49,6 @@ pub fn build_effect_mask(effects: &[u32; 3]) -> u8 {
     mask
 }
 
-/// `SpellThreatEntry::CanCauseThreatOnMask(mask)` =
 /// `((~inverseEffectMask) & mask) != 0`. A target's own effect mask qualifies when
 /// at least one of its effect bits is outside the threat entry's inverse mask.
 pub fn can_cause_threat_on_mask(inverse_effect_mask: u32, mask: u8) -> bool {
@@ -84,8 +83,7 @@ pub struct ThreatApplication {
 }
 
 /// Resolve a spell's `effect` array from the world's `SpellManager`, defaulting to
-/// an all-zero array when the spell is unknown (matches the C++ reading
-/// `m_spellInfo->Effect[i]` off the loaded spell proto).
+/// an all-zero array when the spell is unknown.
 fn spell_effects(spell_id: u32, world: &World) -> [u32; 3] {
     world
         .managers
@@ -95,7 +93,7 @@ fn spell_effects(spell_id: u32, world: &World) -> [u32; 3] {
         .unwrap_or([0; 3])
 }
 
-/// `m_casterUnit != null` — the caster resolves to a loaded player or creature.
+/// The caster resolves to a loaded player or creature.
 fn caster_exists(caster_guid: ObjectGuid, world: &World) -> bool {
     if caster_guid.is_player() {
         world
@@ -115,9 +113,9 @@ fn caster_exists(caster_guid: ObjectGuid, world: &World) -> bool {
     }
 }
 
-/// Resolve a non-caster target via `ObjectAccessor::GetUnit` — present in the world
+/// Resolve a non-caster target — present in the world
 /// as a loaded unit. The caster target is always considered resolved (it is
-/// `m_casterUnit` itself).
+/// the caster itself).
 fn target_resolved(target_guid: ObjectGuid, is_caster_self: bool, world: &World) -> bool {
     if is_caster_self {
         return true;
@@ -140,7 +138,7 @@ fn target_resolved(target_guid: ObjectGuid, is_caster_self: bool, world: &World)
     }
 }
 
-/// `Unit::CanHaveThreatList()` — only creatures carry a threat list; players never do.
+/// Only creatures carry a threat list; players never do.
 fn can_have_threat_list(target_guid: ObjectGuid, world: &World) -> bool {
     target_guid.is_creature()
         && world
@@ -150,7 +148,7 @@ fn can_have_threat_list(target_guid: ObjectGuid, world: &World) -> bool {
             .is_some()
 }
 
-/// Negative path: `target->AddThreat(caster, threat, ...)` — add the flat bonus onto
+/// Negative path: add the flat bonus onto
 /// the hostile creature's threat list toward the caster.
 fn add_direct_threat(caster_guid: ObjectGuid, target_guid: ObjectGuid, threat: f32, world: &World) {
     world
@@ -161,16 +159,16 @@ fn add_direct_threat(caster_guid: ObjectGuid, target_guid: ObjectGuid, threat: f
         });
 }
 
-/// Positive path: `assisted->GetHostileRefManager().threatAssist(caster, threat, spell)`.
+/// Positive path: split the flat bonus evenly across every creature that is
+/// threatening the assisted unit.
 ///
-/// The assisted unit's hostile-ref manager holds a reference from every creature that
-/// is threatening it. `threatAssist` splits the flat bonus evenly across those
-/// references and adds each share to the corresponding creature's threat list,
-/// attributed to the caster (the healer/buffer). We model that by scanning for the
-/// creatures that currently have `assisted` on their threat list.
+/// The assisted unit is threatened by a set of creatures; each share is added to the
+/// corresponding creature's threat list, attributed to the caster (the healer/buffer).
+/// We model that by scanning for the creatures that currently have `assisted` on
+/// their threat list.
 ///
-/// Approximation: the per-ref `ThreatCalcHelper::calcThreat` school/aura scaling is
-/// not applied — only the flat `threat / count` share is distributed.
+/// Approximation: the per-creature school/aura scaling of the share is not applied —
+/// only the flat `threat / count` share is distributed.
 fn apply_assist_threat(
     caster_guid: ObjectGuid,
     assisted_guid: ObjectGuid,
@@ -200,19 +198,16 @@ fn apply_assist_threat(
     }
 }
 
-/// Faithful port of `Spell::HandleThreatSpells`.
-///
 /// Applies the `spell_threat` flat bonus for this cast to every eligible hit target:
-/// the negative path adds threat directly onto a hostile creature's threat list
-/// (`Unit::AddThreat`), while the positive path distributes the bonus to the mobs
-/// fighting the assisted ally (`HostileRefManager::threatAssist`). The returned
-/// [`ThreatApplication`] list records what was applied.
+/// the negative path adds threat directly onto a hostile creature's threat list,
+/// while the positive path distributes the bonus to the mobs fighting the assisted
+/// ally. The returned [`ThreatApplication`] list records what was applied.
 ///
-/// `negative_effect_mask` carries `m_negativeEffectMask`; it is not yet a field on
-/// `ActiveCast`/`TargetInfo`, so it is threaded in as a parameter.
-/// `threat_entry`/`inverse_effect_mask` stand in for
-/// `sSpellMgr.GetSpellThreatEntry(id)` and its `inverseEffectMask` member — the
-/// `SpellManager` getter is not exposed yet.
+/// `negative_effect_mask` is not yet a field on `ActiveCast`/`TargetInfo`, so it is
+/// threaded in as a parameter.
+/// `threat_entry`/`inverse_effect_mask` stand in for the loaded spell-threat entry
+/// and its `inverse_effect_mask` member — the `SpellManager` getter is not exposed
+/// yet.
 // TODO: fold `inverse_effect_mask` onto `SpellThreatEntry` once it is loaded from data,
 // then drop the parameter here and in `apply_cast_threat`.
 pub fn handle_threat_spells(
@@ -268,8 +263,7 @@ pub fn handle_threat_spells(
         }
 
         if positive {
-            // Positive path: `GetHostileRefManager().threatAssist(caster, threat, spell)`
-            // distributes the flat bonus to mobs hostile toward the target.
+            // Positive path: distribute the flat bonus to mobs hostile toward the target.
             apply_assist_threat(caster_guid, ihit.target_guid, threat, world);
             applications.push(ThreatApplication {
                 target_guid: ihit.target_guid,
@@ -278,7 +272,7 @@ pub fn handle_threat_spells(
             });
         } else {
             // Negative path: skip targets that cannot carry a threat list, then
-            // `AddThreat(caster, threat, false, school_mask, spell)`.
+            // add the threat directly.
             if !can_have_threat_list(ihit.target_guid, world) {
                 continue;
             }
@@ -304,16 +298,14 @@ pub fn handle_threat_spells(
 
 /// Once-per-cast entry point that wires [`handle_threat_spells`] into the live effect
 /// pipeline. Called from `EffectsDispatcher::dispatch_with_targets` after every target's
-/// effects have been applied — mirroring `Spell::HandleThreatSpells()` running once at
-/// the tail of `Spell::_handle_immediate_phase`, not per target.
+/// effects have been applied — once per cast, not per target.
 ///
 /// Resolves the `spell_threat` flat bonus from the [`crate::game::spell::manager::SpellManager`]
-/// and derives `m_negativeEffectMask` from the spell proto's per-effect positivity
-/// (school-damage-on-caster effects counting as negative, matching
-/// `Spell::prepareDataForTriggerSystem`). The C++ `SpellThreatEntry::inverseEffectMask`
-/// is not modelled on the Rust [`SpellThreatEntry`] yet, so `0` is passed
-/// (`CanCauseThreatOnMask` then reduces to "any active effect bit set"). If no threat
-/// entry is configured for the spell this returns without touching the threat system.
+/// and derives the negative-effect mask from the spell proto's per-effect positivity
+/// (school-damage-on-caster effects counting as negative). The threat entry's
+/// `inverse_effect_mask` is not modelled on the Rust [`SpellThreatEntry`] yet, so `0`
+/// is passed (any active effect bit set then qualifies). If no threat entry is
+/// configured for the spell this returns without touching the threat system.
 pub(crate) fn apply_cast_threat(
     caster_guid: ObjectGuid,
     spell_id: u32,
@@ -626,7 +618,7 @@ mod tests {
     #[tokio::test]
     async fn caster_null_returns_empty() {
         let world = test_world();
-        // Caster guid never registered → `m_casterUnit` is null.
+        // Caster guid never registered → resolves to no caster.
         let caster = ObjectGuid::new_player(99);
         let target = ObjectGuid::new_creature(1, 1);
         let apps = handle_threat_spells(
@@ -847,7 +839,7 @@ mod tests {
         let present = ObjectGuid::new_creature(1, 1);
         let absent = ObjectGuid::new_creature(1, 2);
         add_creature(&world, present, 1);
-        // `absent` is never registered → ObjectAccessor::GetUnit returns null.
+        // `absent` is never registered → resolves to no unit.
 
         let apps = handle_threat_spells(
             caster,

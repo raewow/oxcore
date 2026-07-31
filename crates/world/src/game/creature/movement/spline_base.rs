@@ -90,7 +90,7 @@ impl fmt::Display for EvaluationMode {
 /// Weighted sum of four control points against a basis matrix.
 ///
 /// `weights[j]` is the dot product of (t³, t², t, 1) with column `j`, which is the
-/// row-vector-times-matrix product the C++ core performs.
+/// row-vector-times-matrix product the reference core performs.
 fn evaluate_basis(vertices: &[Vec3], t: f32, coeffs: &[[f32; 4]; 4]) -> Vec3 {
     let tvec = [t * t * t, t * t, t, 1.0];
     combine(vertices, &tvec, coeffs)
@@ -157,7 +157,7 @@ impl SplineBase {
 
     /// Position at parameter `u` within segment `index`, or `None` if out of range.
     ///
-    /// The C++ core asserts on a bad index; returning `None` keeps a malformed path from
+    /// The reference core asserts on a bad index; returning `None` keeps a malformed path from
     /// taking the server down.
     pub fn evaluate(&self, index: usize, u: f32) -> Option<Vec3> {
         match self.mode {
@@ -328,7 +328,7 @@ impl SplineBase {
     }
 
     /// Build a Catmull-Rom spline directly from points that already include their guard
-    /// points, with valid segments `[1, len-2)` (the C++ `SplineRawInitializer`).
+    /// points, with valid segments `[1, len-2)`.
     ///
     /// Unlike [`Self::init_spline`], this does not synthesize the leading and trailing guard
     /// points - the caller has already prepended and appended them, as the transport
@@ -425,7 +425,7 @@ impl SplineBase {
 
 /// A [`SplineBase`] with a cumulative length (or time) recorded at each index.
 ///
-/// The C++ core parameterizes this on the length type; only the `int32` instantiation is
+/// The reference core parameterizes this on the length type; only the `int32` instantiation is
 /// used, where the "lengths" are actually millisecond timestamps.
 #[derive(Debug, Default, Clone)]
 pub struct Spline {
@@ -487,7 +487,7 @@ impl Spline {
     /// Record cumulative lengths using a caller-supplied per-segment cost.
     ///
     /// The value returned must never decrease; a negative value means the accumulator
-    /// overflowed and saturates, as it does in C++.
+    /// overflowed and saturates, as it does in the reference implementation.
     pub fn init_lengths_with<F>(&mut self, mut cost: F)
     where
         F: FnMut(&Self, usize) -> i32,

@@ -18,8 +18,7 @@ fn compress_movement_data(data: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// MovementData handles compressed movement update packets
-/// Equivalent to the C++ MovementData class
-/// Available for SUPPORTED_CLIENT_BUILD > CLIENT_BUILD_1_7_1 (which includes 1.12.1)
+/// Available for client builds newer than 1.7.1 (which includes 1.12.1)
 #[derive(Debug, Clone)]
 pub struct MovementData {
     /// Buffer containing accumulated movement packets

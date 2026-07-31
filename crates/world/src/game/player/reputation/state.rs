@@ -290,7 +290,6 @@ impl FactionEntry {
     }
 
     /// Get index that fits the given race and class masks.
-    /// Matches C++ GetIndexFitTo().
     ///
     /// Tests all 4 mask slots. A mask of 0 matches everything (wildcard).
     /// Returns the first matching index, or -1 if no match.

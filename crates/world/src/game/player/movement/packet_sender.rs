@@ -315,7 +315,7 @@ mod tests {
             MovementChangeType::SpeedChangeRun
         ));
 
-        // Within the 0.01 tolerance the C++ core allows.
+        // Speeds within the 0.01 tolerance match.
         assert!(state.find_pending_speed_change(
             14.005,
             counter,

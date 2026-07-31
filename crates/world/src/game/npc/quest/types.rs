@@ -322,7 +322,6 @@ impl QuestTemplate {
 
     /// Get reward or required money.
     ///
-    /// Mirrors `Quest::GetRewOrReqMoney` in QuestDef.cpp:
     /// - Negative/zero values (required money) returned unchanged.
     /// - Positive values (reward money) scaled by `rate_drop_money`.
     pub fn get_reward_or_req_money(&self, rate_drop_money: f32) -> i32 {
@@ -335,7 +334,6 @@ impl QuestTemplate {
 
     /// Get max-level gold reward at completion.
     ///
-    /// Mirrors `Quest::GetRewMoneyMaxLevelAtComplete` in QuestDef.cpp:
     /// - Before patch 1.10 (wow_patch < 110): returns 0 if `no_quest_xp_to_gold` is true;
     ///   otherwise returns scaled `rew_money_max_level`.
     /// - Patch 1.10+ (wow_patch >= 110): always returns scaled `rew_money_max_level`.
@@ -356,7 +354,6 @@ impl QuestTemplate {
 
     /// Check if the quest can be completed in a raid group.
     ///
-    /// Mirrors `Quest::IsAllowedInRaid` in QuestDef.cpp:
     /// - Returns true if quest type is `Raid`, or quest flags include `RAID`,
     ///   or the global `ignore_raid` config is true.
     pub fn is_allowed_in_raid(&self, ignore_raid: bool) -> bool {

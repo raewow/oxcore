@@ -190,9 +190,8 @@ impl PowerSystem {
             }
         }
 
-        // Health regen (Player::RegenerateHealth). Skipped when at max health.
-        // Full implementation also requires MOD_REGEN_DURING_COMBAT and
-        // MOD_HEALTH_REGEN_IN_COMBAT aura totals.
+        // Health regen. Skipped when at max health.
+        // Full implementation also requires the in-combat regen aura totals.
         {
             let cur_health = player.stats.health;
             let max_health = player.stats.max_health;
@@ -206,20 +205,20 @@ impl PowerSystem {
                 if is_polymorphed {
                     add_value = max_health as f32 / 10.0;
                 } else if !in_combat {
-                    // Spirit-based regen out of combat (MOD_REGEN_DURING_COMBAT talent variant
+                    // Spirit-based regen out of combat (the talent variant
                     // is omitted until aura totals are wired in).
                     add_value =
                         regen::calculate_health_regen_per_tick(player.stats.spirit, player.level);
                     add_value *= player.power.health_regen_multiplier;
-                    // C++ IsStandingUp is true only for standing and dead units.
+                    // Only standing and dead units get the seated regen bonus.
                     if player.stand_state != 0 && player.stand_state != 7 {
                         add_value *= 1.5;
                     }
-                    // MOD_REGEN stores health restored per five seconds.
+                    // Health regen bonus is stored per five seconds.
                     add_value += 2.0 * (player.power.health_regen_per_5 / 5.0);
                 }
 
-                // Always-active combat regen bonus (SPELL_AURA_MOD_HEALTH_REGEN_IN_COMBAT).
+                // Always-active combat regen bonus.
                 // 2.0 because the tick fires every 2 seconds; the aura stores HP per 5 sec
                 // so we scale: rate * 2 * (total / 5). Defaults to 0 until aura totals wired.
                 let mod_regen_in_combat: f32 = 0.0;
@@ -272,13 +271,13 @@ impl PowerSystem {
         Ok(success)
     }
 
-    /// Spend power for a finished spell cast (faithful `Spell::TakePower` deduction).
+    /// Spend power for a finished spell cast.
     ///
     /// Unlike [`consume_power`], this never fails: it deducts the amount clamped at
-    /// zero (mirroring C++ `Unit::ModifyPower`), since the affordability check already
+    /// zero, since the affordability check already
     /// happened during cast validation. When `reset_mana_timer` is true and the power
     /// is mana, the five-second-rule timer is reset (caller decides based on the
-    /// spell's `DONT_BLOCK_MANA_REGEN` attribute and a positive cost).
+    /// spell's do-not-block-mana-regen attribute and a positive cost).
     pub fn spend_spell_power(
         &self,
         player_guid: ObjectGuid,

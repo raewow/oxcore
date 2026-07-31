@@ -111,7 +111,7 @@ pub const MAX_HAPPINESS: u32 = 1050000;
 /// Note: Health regen is typically handled in the stats or combat system
 
 /// Calculate health regen per tick (2 seconds) from spirit.
-/// Matches C++ Player::GetRegenHPPerSpirit — coefficient scales with level.
+/// The coefficient scales with level.
 /// Returns f32 because callers use a carry accumulator for fractional amounts.
 pub fn calculate_health_regen_per_tick(spirit: u32, level: u8) -> f32 {
     let hp_per_spirit: f32 = if level < 20 {
@@ -146,13 +146,13 @@ mod tests {
 
     #[test]
     fn rage_from_damage_dealt_uses_reference_conversion_and_tenths() {
-        // C++ Player::RewardRage: uint32((damage / rageConversion * 7.5) * 10).
+        // uint32((damage / rageConversion * 7.5) * 10).
         assert_eq!(rage_from_damage_dealt(100, 60), 32);
     }
 
     #[test]
     fn rage_from_damage_taken_uses_reference_conversion_and_tenths() {
-        // C++ Player::RewardRage: uint32((damage / rageConversion * 2.5) * 10).
+        // uint32((damage / rageConversion * 2.5) * 10).
         assert_eq!(rage_from_damage_taken(100, 60), 10);
     }
 

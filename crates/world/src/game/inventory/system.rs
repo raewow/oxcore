@@ -2881,7 +2881,6 @@ impl InventorySystem {
 
     /// Build CREATE_OBJECT blocks for all player items
     /// Returns the number of item blocks created
-    /// Matches mangos-classic Player::BuildCreateUpdateBlockForPlayer() item sending
     pub fn build_item_create_blocks(
         &self,
         player_guid: ObjectGuid,

@@ -9,6 +9,25 @@
 //! - [`SmsgGmTicketGetTicket`] - Response to ticket query
 //! - [`SmsgGmTicketUpdateText`] - Response to ticket text update
 //! - [`SmsgGmTicketDeleteTicket`] - Response to ticket deletion
+//!
+//! ## None of these are ported to 1.14
+//!
+//! 1.14 replaced the GM ticket system outright rather than reshaping it. A 1.14 client does not
+//! open a ticket and then poll it; it submits a one-shot support complaint
+//! (`CMSG_SUPPORT_TICKET_SUBMIT_COMPLAINT`, carrying the reported player, a complaint category and
+//! a note) and afterwards asks only for a case status. The create / query / update / delete
+//! round-trip that these five messages answer has no client on the modern side to receive it —
+//! the client never sends the requests that produce them, so encoding the responses would be
+//! encoding for nobody.
+//!
+//! Of the vanilla opcodes only the system-status one still exists in the 1.14 table. Its 1.14 body
+//! could not be established from a known-good 1.14 encoding, and it is a packet that tells the
+//! client whether to *offer* the ticket UI at all — so writing a plausible one and being wrong
+//! would open a ticket window that no other message in this module can service. It is left
+//! unported for that reason, not because the field is complicated.
+//!
+//! Porting this system properly means handling the complaint opcode on the way in and answering
+//! with a case status on the way out; it is not a re-encoding of these bodies.
 
 use crate::messages::ToWorldPacket;
 use crate::protocol::Opcode;
@@ -23,6 +42,8 @@ pub struct SmsgGmTicketSystemStatus {
     pub status: u32,
 }
 
+/// Unported. The opcode survives into 1.14 but its body is unverified, and this packet decides
+/// whether the client offers a ticket UI that nothing else here can serve. See the module note.
 impl ToWorldPacket for SmsgGmTicketSystemStatus {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GMTICKET_SYSTEMSTATUS);
@@ -40,6 +61,8 @@ pub struct SmsgGmTicketCreate {
     pub result: u32,
 }
 
+/// Unported: no 1.14 opcode. A 1.14 client submits a support complaint and is never told a ticket
+/// id, so there is nothing for this reply to answer. See the module note.
 impl ToWorldPacket for SmsgGmTicketCreate {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GMTICKET_CREATE);
@@ -71,6 +94,8 @@ pub struct SmsgGmTicketGetTicket {
     pub ticket: Option<TicketData>,
 }
 
+/// Unported: no 1.14 opcode. 1.14 does not let a player read back an open ticket — there is no
+/// stored ticket to read, only a submitted complaint. See the module note.
 impl ToWorldPacket for SmsgGmTicketGetTicket {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GMTICKET_GETTICKET);
@@ -99,6 +124,8 @@ pub struct SmsgGmTicketUpdateText {
     pub result: u32,
 }
 
+/// Unported: no 1.14 opcode. A 1.14 complaint is submitted once and cannot be edited, so there is
+/// no update to acknowledge. See the module note.
 impl ToWorldPacket for SmsgGmTicketUpdateText {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GMTICKET_UPDATETEXT);
@@ -116,6 +143,8 @@ pub struct SmsgGmTicketDeleteTicket {
     pub result: u32,
 }
 
+/// Unported: no 1.14 opcode. Nothing on the modern side can request a ticket deletion, so nothing
+/// can receive the reply. See the module note.
 impl ToWorldPacket for SmsgGmTicketDeleteTicket {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GMTICKET_DELETETICKET);

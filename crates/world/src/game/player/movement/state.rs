@@ -63,9 +63,9 @@ pub struct MovementState {
     pub last_movement_time: u32,
     /// Water walking enabled (ghost form, Path of Frost, etc.)
     pub water_walking: bool,
-    /// Hover enabled (Levitate-like auras): SPELL_AURA_HOVER
+    /// Hover enabled (Levitate-like auras)
     pub hover: bool,
-    /// Feather fall enabled (Slow Fall, Levitate): SPELL_AURA_FEATHER_FALL
+    /// Feather fall enabled (Slow Fall, Levitate)
     pub feather_fall: bool,
     /// Counter assigned to controller-bound forced movement packets.
     pub movement_counter: u32,
@@ -128,7 +128,7 @@ impl MovementState {
 
     /// Consume the queued speed change matching this ack, if any.
     ///
-    /// Speeds are compared with the same 0.01 tolerance the C++ core uses.
+    /// Speeds are compared with a 0.01 tolerance.
     pub fn find_pending_speed_change(
         &mut self,
         speed_received: f32,

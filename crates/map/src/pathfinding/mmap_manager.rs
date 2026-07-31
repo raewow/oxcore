@@ -102,7 +102,7 @@ impl MMapManager {
             return false;
         }
 
-        // Read and validate .mmap header (dtNavMeshParams: origin[3], tileWidth, tileHeight, maxTiles, maxPolys = 28 bytes)
+        // Read and validate .mmap header (origin[3], tileWidth, tileHeight, maxTiles, maxPolys = 28 bytes)
         match std::fs::File::open(&path) {
             Ok(mut file) => {
                 use byteorder::{LittleEndian, ReadBytesExt};
@@ -154,7 +154,7 @@ impl MMapManager {
             }
         }
 
-        // Format matches C++/extractor: mmaps/{mapId:03}{y:02}{x:02}.mmtile
+        // Filename format: mmaps/{mapId:03}{y:02}{x:02}.mmtile
         let filename = format!("{:03}{:02}{:02}.mmtile", map_id, y, x);
         let path = self.mmaps_dir.join(&filename);
 

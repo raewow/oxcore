@@ -18,11 +18,10 @@ pub use guid::ObjectGuid;
 use std::sync::OnceLock;
 use std::time::Instant;
 
-/// Monotonic server clock millisecond counter, mirroring `WorldTimer::getMSTime()`.
+/// Monotonic server clock millisecond counter.
 ///
-/// Returns milliseconds since the first call (process start), wrapping at u32 like
-/// the C++ implementation. Used for movement reject windows and other ms-grained
-/// server-side timers.
+/// Returns milliseconds since the first call (process start), wrapping at u32. Used for
+/// movement reject windows and other ms-grained server-side timers.
 pub fn get_ms_time() -> u32 {
     static START: OnceLock<Instant> = OnceLock::new();
     let start = START.get_or_init(Instant::now);

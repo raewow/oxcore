@@ -235,7 +235,6 @@ impl AuthLogonProofS {
 }
 
 /// XFER_INIT packet structure (S -> C)
-/// Matches the C++ XFER_INIT structure
 #[derive(Debug)]
 pub struct XferInit {
     pub cmd: u8,            // XFER_INITIATE
@@ -247,9 +246,8 @@ pub struct XferInit {
 
 impl XferInit {
     pub fn new(file_size: u64, md5: [u8; 16]) -> Self {
-        // The C++ code does: memcpy(&xferh, "0\x05Patch", 7);
-        // This means: [0, 0x05, 'P', 'a', 't', 'c', 'h']
-        // But the struct only has 5 bytes for fileName, so it's: [0, 0x05, 'P', 'a', 't']
+        // The wire header begins "0\x05Patch", i.e. [0, 0x05, 'P', 'a', 't', 'c', 'h']
+        // The struct only has 5 bytes for fileName, so it's: [0, 0x05, 'P', 'a', 't']
         let mut file_name = [0u8; 5];
         file_name[0] = 0;
         file_name[1] = 0x05;
@@ -276,7 +274,6 @@ impl XferInit {
 }
 
 /// Client reconnect proof packet (C -> S)
-/// C++: sAuthReconnectProof_C
 #[derive(Debug)]
 pub struct AuthReconnectProofC {
     pub cmd: u8,

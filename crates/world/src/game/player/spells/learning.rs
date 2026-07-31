@@ -17,8 +17,6 @@ const SPELL_EFFECT_SKILL: u32 = 118;
 const EFFECT_INDEX_1: usize = 1;
 
 /// Whether casting `spell_id` teaches a profession or riding skill.
-///
-/// Matches C++ `SpellMgr::IsProfessionOrRidingSpell`.
 pub fn is_profession_or_riding_spell(spell_id: u32, world: &World) -> bool {
     let Some(entry) = world.managers.spell_mgr.get(spell_id) else {
         return false;
@@ -36,8 +34,6 @@ pub fn is_profession_or_riding_spell(spell_id: u32, world: &World) -> bool {
 }
 
 /// Whether casting `spell_id` teaches a profession skill (primary or secondary).
-///
-/// Matches C++ `SpellMgr::IsProfessionSpell`.
 pub fn is_profession_spell(spell_id: u32, world: &World) -> bool {
     let Some(entry) = world.managers.spell_mgr.get(spell_id) else {
         return false;
@@ -55,8 +51,6 @@ pub fn is_profession_spell(spell_id: u32, world: &World) -> bool {
 }
 
 /// Whether casting `spell_id` teaches a primary profession skill.
-///
-/// Matches C++ `SpellMgr::IsPrimaryProfessionSpell`.
 pub fn is_primary_profession_spell(spell_id: u32, world: &World) -> bool {
     let Some(entry) = world.managers.spell_mgr.get(spell_id) else {
         return false;
@@ -74,8 +68,6 @@ pub fn is_primary_profession_spell(spell_id: u32, world: &World) -> bool {
 }
 
 /// Whether `spell_id` is the first (rank 1) spell of a primary profession chain.
-///
-/// Matches C++ `SpellMgr::IsPrimaryProfessionFirstRankSpell`.
 pub fn is_primary_profession_first_rank_spell(spell_id: u32, world: &World) -> bool {
     is_primary_profession_spell(spell_id, world)
         && world.managers.spell_mgr.get_spell_rank(spell_id) == 1

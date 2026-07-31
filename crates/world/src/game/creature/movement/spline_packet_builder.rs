@@ -8,8 +8,7 @@ use super::move_spline::{MoveSpline, SplineFacing};
 use super::spline_base::{EvaluationMode, Vec3};
 use oxcore_shared::protocol::WorldPacket;
 
-/// Cap on intermediate points in a single MONSTER_MOVE packet
-/// (`CONFIG_UINT32_MAX_POINTS_PER_MVT_PACKET`).
+/// Cap on intermediate points in a single MONSTER_MOVE packet.
 pub const MAX_POINTS_PER_PACKET: usize = 20;
 
 /// How the client should orient the unit while it follows the spline.
@@ -180,7 +179,7 @@ pub fn write_monster_move(
     }
 
     write_linear_path(spline, data, first_point)
-    // The C++ builder rewrites the duration field afterwards for a split path. That
+    // The reference builder rewrites the duration field afterwards for a split path. That
     // patch needs a positioned write the packet API does not expose, so a split path
     // currently carries the whole-spline duration.
 }
@@ -354,7 +353,7 @@ mod tests {
 
         assert_eq!(read_u32(&bytes, HEADER_LEN), 2);
         assert_eq!(read_f32(&bytes, HEADER_LEN + 4), 30.0);
-        // C++ guards the offset loop with `last_idx > 1`, which is false here, so the
+        // The reference guards the offset loop with `last_idx > 1`, which is false here, so the
         // middle point is not sent at all.
         assert_eq!(bytes.len(), HEADER_LEN + 4 + 12);
     }

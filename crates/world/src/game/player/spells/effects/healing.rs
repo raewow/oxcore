@@ -9,11 +9,11 @@ use anyhow::Result;
 use oxcore_shared::messages::spells::ExecuteLogData;
 use oxcore_shared::protocol::{Opcode, WorldPacket};
 
-/// Apply a critical-heal bonus to a heal amount (faithful `SpellCaster::SpellCriticalHealingBonus`).
+/// Apply a critical-heal bonus to a heal amount.
 ///
 /// Melee/ranged-class heals crit for +100% (double); all other classes crit for +50%
-/// (the `damage / 2` integer halving the C++ uses). The `MOD_CRIT_PERCENT_VERSUS`
-/// aura multiplier is deferred until that aura type is ported.
+/// (the `damage / 2` integer halving). The crit-chance-versus-% aura multiplier is
+/// deferred until that aura type is ported.
 fn spell_critical_healing_bonus(dmg_class: u32, heal: u32) -> u32 {
     const SPELL_DAMAGE_CLASS_MELEE: u32 = 2;
     const SPELL_DAMAGE_CLASS_RANGED: u32 = 3;
@@ -26,7 +26,7 @@ fn spell_critical_healing_bonus(dmg_class: u32, heal: u32) -> u32 {
     heal + crit_bonus
 }
 
-/// SPELL_EFFECT_HEAL (10)
+/// Heal effect (10)
 ///
 /// Direct heal (Flash Heal, Healing Touch, etc.)
 ///
@@ -34,7 +34,7 @@ fn spell_critical_healing_bonus(dmg_class: u32, heal: u32) -> u32 {
 /// 1. Base value with dice roll + level scaling
 /// 2. + healing_power * coefficient (from DBC or cast_time / 3500)
 /// 3. Roll crit (spell_crit_pct)
-/// 4. If crit: apply SpellCriticalHealingBonus (+50%, or +100% for melee/ranged-class heals)
+/// 4. If crit: apply the crit-heal bonus (+50%, or +100% for melee/ranged-class heals)
 pub async fn effect_heal(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
@@ -174,7 +174,7 @@ pub async fn effect_heal(input: &EffectInput, world: &World) -> Result<EffectRes
     Ok(result)
 }
 
-/// SPELL_EFFECT_HEAL_MAX_HEALTH (67)
+/// Heal-to-full-health effect (67)
 ///
 /// Heals target to full health (Lay on Hands).
 pub async fn effect_heal_max_health(input: &EffectInput, world: &World) -> Result<EffectResult> {
@@ -207,7 +207,7 @@ pub async fn effect_heal_max_health(input: &EffectInput, world: &World) -> Resul
     Ok(EffectResult::with_healing(healed))
 }
 
-/// SPELL_EFFECT_HEAL_MECHANICAL (75)
+/// Heal-mechanical effect (75)
 ///
 /// Heals mechanical units (repair abilities).
 /// Target creature type is checked by targetCreatureType field.
@@ -245,7 +245,7 @@ pub async fn effect_heal_mechanical(input: &EffectInput, world: &World) -> Resul
     Ok(EffectResult::with_healing(healed))
 }
 
-/// SPELL_EFFECT_SPIRIT_HEAL (117)
+/// Spirit-heal effect (117)
 ///
 /// Spirit healer resurrection heal.
 /// Only works on dead players with "Waiting to Resurrect" aura.

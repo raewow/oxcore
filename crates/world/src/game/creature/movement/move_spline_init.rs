@@ -1,7 +1,7 @@
 //! Building and launching a spline.
 //!
 //! Collects path, speed and facing into [`MoveSplineInitArgs`], then works out the
-//! movement-flag transition a launch implies. The world-facing half of the C++ `Launch`
+//! movement-flag transition a launch implies. The world-facing half of a launch
 //! (transport passenger moves, the MONSTER_MOVE broadcast) is not ported - see the module
 //! notes on [`LaunchPlan`].
 
@@ -21,14 +21,14 @@ const MASK_MOVING: u32 = 0x0000_0001 // forward
     | 0x0000_0040 // pitch up
     | 0x0000_4000; // falling far
 
-/// Source of spline ids. C++ uses a thread-local counter starting at 1.
+/// Source of spline ids. Uses a thread-local counter starting at 1.
 static SPLINE_COUNTER: AtomicU32 = AtomicU32::new(1);
 
 fn next_spline_id() -> u32 {
     SPLINE_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Which speed applies to a unit moving with these flags (`SelectSpeedType`).
+/// Which speed applies to a unit moving with these flags.
 pub fn select_speed_type(move_flags: u32) -> MoveType {
     let flags = MoveFlags::from(move_flags);
 
@@ -47,7 +47,7 @@ pub fn select_speed_type(move_flags: u32) -> MoveType {
     }
 }
 
-/// Wrap an angle into [0, 2π), as `G3D::wrap` does.
+/// Wrap an angle into [0, 2π).
 fn wrap_angle(angle: f32) -> f32 {
     let two_pi = std::f32::consts::TAU;
     let wrapped = angle % two_pi;
@@ -100,7 +100,7 @@ pub struct MoveSplineInit {
 
 impl MoveSplineInit {
     /// Start from the unit's current movement flags, mixing existing state into the new
-    /// spline the way the C++ constructor does.
+    /// spline the way the reference constructor does.
     pub fn new(current_move_flags: u32) -> Self {
         let flags = MoveFlags::from(current_move_flags);
         let walking = flags.has_flag(MoveFlags::WALK_MODE);
@@ -188,11 +188,11 @@ impl MoveSplineInit {
     }
 
     /// Work out the flag transition and finish the args, ready for
-    /// `MoveSpline::initialize`.
+    /// initialization.
     ///
     /// `real_position` is where the unit actually is now - the caller resolves that,
     /// since mid-spline it has to be computed rather than read. Returns `None` when the
-    /// args don't describe a usable spline, matching the C++ `Validate` early-out.
+    /// args don't describe a usable spline, matching the reference `Validate` early-out.
     pub fn prepare(
         &mut self,
         real_position: Vec3,

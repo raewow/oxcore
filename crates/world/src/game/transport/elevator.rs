@@ -1,11 +1,11 @@
-//! Elevator and tram motion (`ElevatorTransport`, game object type 11).
+//! Elevator and tram motion (game object type 11).
 //!
 //! Unlike ships, elevators do not follow taxi-path splines. They replay a canned animation:
 //! a table of `(time, position)` keyframes ([`super::animation`]) looped over a fixed period.
 //! Their local position at any moment is a straight linear interpolation between the two
 //! bracketing keyframes, computed here. Turning that local position into a world position
 //! (the object's rotation, the vanilla Y-flip and the stationary offset) and relocating the
-//! object and its passengers belong to `ElevatorTransport::Update`, which needs the Object
+//! object and its passengers belong to the full `Update`, which needs the Object
 //! and Map subsystems and is not yet ported.
 
 use crate::game::creature::movement::spline_base::Vec3;
@@ -24,14 +24,13 @@ pub fn path_progress(total_time: u32, time_since_creation: u32) -> Option<u32> {
     }
 }
 
-/// The elevator's position in its own local frame at `path_progress`
-/// (the interpolation in `ElevatorTransport::Update`).
+/// The elevator's position in its own local frame at `path_progress`.
 ///
 /// Linearly interpolates between the keyframes bracketing `path_progress` by the fraction of
 /// the way between their times. Two keyframes sharing a position (a pause in the animation)
 /// yield that position directly. Returns `None` when `path_progress` is not bracketed by two
-/// keyframes - before the first or after the last - matching the C++ guard that both a prev
-/// and a next node exist.
+/// keyframes - before the first or after the last - matching the reference guard that both a
+/// prev and a next node exist.
 pub fn interpolate_local_position(anim: &TransportAnimation, path_progress: u32) -> Option<Vec3> {
     let prev = anim.prev_anim_node(path_progress)?;
     let next = anim.next_anim_node(path_progress)?;

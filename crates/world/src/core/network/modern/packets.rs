@@ -193,7 +193,7 @@ pub struct RaceClassAvailability {
     pub classes: Vec<ClassAvailability>,
 }
 
-/// Classic Era race/class choices advertised by HermesProxy during modern authentication.
+/// Classic Era race/class choices advertised during modern authentication.
 pub fn classic_available_classes() -> Vec<RaceClassAvailability> {
     const CLASSIC: &[(u8, &[u8])] = &[
         (1, &[1, 2, 4, 5, 8, 9]),
@@ -247,7 +247,7 @@ pub fn auth_response_success(info: &AuthResponseSuccess) -> Vec<u8> {
     w.flush_bits();
 
     w.write_u32(info.virtual_realm_address);
-    w.write_i32(1); // VirtualRealms.Count: Hermes includes the home realm.
+    w.write_i32(1); // VirtualRealms.Count: includes the home realm.
     w.write_u32(0); // TimeRested
     w.write_u8(info.active_expansion);
     w.write_u8(info.account_expansion);

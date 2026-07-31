@@ -74,9 +74,9 @@ impl ToWorldPacket for SmsgShowTaxinodes {
     ///   follow". Vanilla always names both, so the bit is always set.
     /// * Both list lengths are written **before** the GUID and current node, and the mask bytes
     ///   come after them. Vanilla interleaves the GUID and node ahead of the mask.
-    /// * The mask is a plain byte-per-8-nodes bitmap here. Vanilla widens each of those bytes to
-    ///   a `u32`, so the vanilla body is four times as long and its bits sit at multiples of 32;
-    ///   copying its words over would scatter the known nodes across the map.
+    /// * The mask is a plain byte-per-8-nodes bitmap here, where vanilla sends the same bits as
+    ///   eight `u32` words. `TaxiMask::as_bytes` writes the words little-endian, which puts node
+    ///   `n` at the same wire position under both encodings.
     ///
     /// 1.14 splits the mask into "can land" and "can use", which lets a server temporarily bar a
     /// node the player already knows. Vanilla has no such distinction, so both lists are the same.
@@ -86,7 +86,7 @@ impl ToWorldPacket for SmsgShowTaxinodes {
         writer.flush_bits();
 
         // Trailing zero bytes are trimmed; the client treats any node past the end as not known.
-        let nodes = self.taxi_mask.0;
+        let nodes = self.taxi_mask.as_bytes();
         let len = nodes
             .iter()
             .rposition(|&byte| byte != 0)
