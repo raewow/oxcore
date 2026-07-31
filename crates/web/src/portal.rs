@@ -202,6 +202,20 @@ pub async fn get_portal_overview() -> Result<PortalOverview, ServerFnError> {
 }
 
 #[server]
+pub async fn has_admin_access() -> Result<bool, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        return crate::auth::has_gm_access(&state.auth, account_id)
+            .await
+            .map_err(|error| ServerFnError::ServerError(error.to_string()));
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
 pub async fn get_active_sessions() -> Result<Vec<SessionSummary>, ServerFnError> {
     #[cfg(feature = "ssr")]
     {

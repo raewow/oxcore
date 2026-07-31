@@ -58,6 +58,7 @@ fn test_item_template(entry: u32) -> ItemTemplate {
         spell_cooldown: [0; 5],
         spell_category: [0; 5],
         spell_category_cooldown: [0; 5],
+        ..Default::default()
     }
 }
 

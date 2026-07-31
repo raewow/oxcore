@@ -354,6 +354,28 @@ impl ObjectGuid {
 
 /// Build a 1.14 `Cast` GUID: the identity of one spell cast.
 ///
+/// Build the `LootObject` GUID that names one open loot window.
+///
+/// **Not the same GUID as the corpse or chest being looted.** 1.14 gives the loot itself an identity
+/// of high type 15 and keys the loot frame on it: the response names both the owner and this object,
+/// and every later `CMSG_LOOT_ITEM` / `CMSG_LOOT_RELEASE` refers back to it. Sending the owner GUID
+/// in both fields leaves the client with a loot object it has no record of, and it declines to open
+/// the window at all rather than reporting an error.
+///
+/// The layout is the map-specific one with an unusual twist: the *legacy* high-guid word goes in the
+/// server-id field, so a 1.12 GUID is recoverable from the pair without a side table. Its low half is
+/// therefore not a bare counter, which is why this cannot round-trip through
+/// [`ObjectGuid::from_guid128`].
+pub fn loot_guid128(source: &ObjectGuid) -> (u64, u64) {
+    const LOOT_OBJECT_TYPE: u64 = 15;
+    let legacy_high = (source.raw() >> 48) & 0xFFFF;
+    let high = LOOT_OBJECT_TYPE << 58
+        | ((1u64 & 0x1FFF) << 42) // realm 1, matching `to_guid128`'s caller-wide default
+        | ((source.entry() as u64 & 0x7FFFFF) << 6);
+    let low = ((legacy_high & 0xFF_FFFF) << 40) | (source.counter() as u64 & 0xFF_FFFF_FFFF);
+    (high, low)
+}
+
 /// Not a conversion — vanilla has no cast identity at all, so there is no 64-bit form to convert
 /// from and this returns the `(high, low)` pair directly.
 ///

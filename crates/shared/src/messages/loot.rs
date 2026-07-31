@@ -1,6 +1,7 @@
 use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
+use crate::protocol::guid::loot_guid128;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// `ItemInstance::Write` for build 42597.
@@ -38,9 +39,6 @@ pub struct LootResponseItem {
 }
 
 impl ToWorldPacket for SmsgLootResponse {
-    /// `LootResponse::Write` with `LootItemData` (the 1.14 reference
-    ///, `:143-155`).
-    ///
     /// 1.14 names **two** GUIDs — the looted object's owner and a separate loot object — where vanilla
     /// sends one. We have only the one, so it fills both: Classic Era has no distinct loot object, and
     /// an empty second GUID makes the client discard the window.
@@ -51,7 +49,8 @@ impl ToWorldPacket for SmsgLootResponse {
         let mut writer = BitWriter::new();
         let (high, low) = self.loot_guid.to_guid128(DEFAULT_REALM_ID);
         writer.write_packed_guid_128(high, low); // Owner
-        writer.write_packed_guid_128(high, low); // LootObj -- see above
+        let (loot_high, loot_low) = loot_guid128(&self.loot_guid);
+        writer.write_packed_guid_128(loot_high, loot_low); // LootObj
 
         writer.write_u8(0); // FailureReason -- success
         writer.write_u8(self.loot_type); // AcquireReason

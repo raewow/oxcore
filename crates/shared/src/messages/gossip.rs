@@ -297,7 +297,8 @@ impl ToWorldPacket for SmsgGossipPoi {
 pub struct NpcTextOption {
     /// Probability weight for random selection
     pub probability: f32,
-    /// Broadcast text ID for localization (server-side only, not sent in packet)
+    /// Broadcast text id. Vanilla resolves it server-side into the strings below; 1.14 sends the id
+    /// itself and asks for the row separately.
     pub broadcast_text_id: u32,
     /// Male text
     pub male_text: String,
@@ -381,16 +382,13 @@ impl ToWorldPacket for SmsgNpcTextUpdate {
     /// `QueryNPCTextResponse::Write`, per the 1.14 wire format.
     ///
     /// **1.14 does not carry the text.** It sends eight `BroadcastTextID`s and the client resolves
-    /// each against its local `BroadcastText` DB2 — where vanilla sends the male and female strings
-    /// inline. So the male/female text, language and emote fields on this struct have nowhere to go.
+    /// each against its `BroadcastText` DB2 — where vanilla sends the male and female strings inline.
+    /// So the male/female text, language and emote fields on this struct have nowhere to go here.
     ///
-    /// A vanilla `npc_text` row has no broadcast-text id and there is no derivable mapping, so the
-    /// ids are sent as zero rather than invented: a wrong id shows the wrong line of dialogue, which
-    /// is worse than none. The reply is still sent, and sent well-formed, because the client blocks
-    /// its gossip window on it — the window opens with an empty greeting instead of not opening.
-    ///
-    /// Populating this needs a `broadcast_text_id` column on `npc_text`, the same shape of problem
-    /// as the customization choices in `docs/modern-opcode-plan.md`.
+    /// The client does not have those rows either: an Era client's DB2 has no vanilla NPC dialogue in
+    /// it. It asks for each id it does not know via `CMSG_DB_QUERY_BULK`, and the server answers with
+    /// the row, so the id only has to be one *we* can resolve. `npc_text.broadcast_text_id` is exactly
+    /// that, and the same value drives the vanilla path's text lookup — the two cannot drift.
     fn to_modern(&self) -> Option<WorldPacket> {
         const TEXT_OPTIONS: usize = 8;
 
@@ -404,8 +402,8 @@ impl ToWorldPacket for SmsgNpcTextUpdate {
         for option in &self.options {
             writer.write_f32(option.probability);
         }
-        for _ in 0..TEXT_OPTIONS {
-            writer.write_u32(0); // BroadcastTextID -- see above
+        for option in &self.options {
+            writer.write_u32(option.broadcast_text_id);
         }
 
         Some(writer.finish(Opcode::SMSG_NPC_TEXT_UPDATE))

@@ -107,8 +107,8 @@ const AURA_FLAG_POSITIVE: u16 = 0x100;
 /// and the player retries an invite that can never succeed.
 ///
 /// Translated by name from the [`crate::game::group`] `ERR_*` constants, which are what every caller
-/// passes. Note that those constants are themselves numbered differently from the reference 1.12
-/// table (this server has no `NOT_IN_GROUP`, and puts wrong-faction/ignoring-you/not-leader at
+/// passes. Note that those constants are themselves numbered differently from the 1.12 table (this
+/// server has no `NOT_IN_GROUP`, and puts wrong-faction/ignoring-you/not-leader at
 /// 5/6/7); the mapping below follows the constant *names*, so it stays correct regardless.
 ///
 /// Returns `None` for a value that is not one of the constants. Dropping the packet costs the player

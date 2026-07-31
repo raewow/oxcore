@@ -359,9 +359,8 @@ impl TransportManager {
     /// the leader's transport offset and is teleported onto the leader's world position, so it
     /// rides in the same spot. Returns whether the transport exists.
     ///
-    /// The reference splits the teleport by rider type; both paths set the follower's
-    /// position, which is what is done here - the heartbeat/broadcast is the map/network
-    /// layer's job.
+    /// The teleport is split by rider type; both paths set the follower's position, which
+    /// is what is done here - the heartbeat/broadcast is the map/network layer's job.
     pub fn board_follower<L: TransportPassenger, F: TransportPassenger>(
         &mut self,
         transport_guid: ObjectGuid,

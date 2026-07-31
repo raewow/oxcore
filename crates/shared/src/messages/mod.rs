@@ -105,6 +105,7 @@ pub mod environment;
 pub mod errors;
 pub mod experience;
 pub mod gossip;
+pub mod hotfix;
 pub mod group;
 pub mod guild;
 pub mod instance;

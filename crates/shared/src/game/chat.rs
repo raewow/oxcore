@@ -63,8 +63,7 @@ pub enum ChatMsg {
 ///
 /// 1.14 also splits some vanilla types apart (`MonsterParty` moves from 48 to 13, wedged between the
 /// monster types) and adds a second whisper slot, so there is no arithmetic offset that works.
-/// Translated by name, from the 1.14 reference
-/// (`ChatMessageTypeVanilla` and `ChatMessageTypeModern`).
+/// Translated by name, from the `ChatMessageTypeVanilla` and `ChatMessageTypeModern` sets.
 ///
 /// Deliberately **exhaustive, with no catch-all**: adding a variant to [`ChatMsg`] should be a
 /// compile error here, not a silent fallthrough to whatever the default arm said. A defaulted

@@ -35,7 +35,7 @@ pub fn handle_complete_cinematic(
 
 /// Handle CMSG_NEXT_CINEMATIC_CAMERA (0x00FB)
 ///
-/// Empty in reference server; client-side cinematic camera advance notification.
+/// Empty body; client-side cinematic camera advance notification.
 pub fn handle_next_cinematic_camera(
     _session: &WorldSession,
     _packet: &mut WorldPacket,

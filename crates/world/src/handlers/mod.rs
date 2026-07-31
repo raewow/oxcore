@@ -24,6 +24,7 @@ pub mod loot;
 pub mod mail;
 pub mod movement;
 pub mod player_handler;
+pub mod hotfix;
 pub mod query;
 pub mod quest_handler;
 pub mod reputation;
@@ -332,6 +333,11 @@ pub async fn dispatch_packet(
                 // interaction state is not tracked server-side.
                 | Opcode::CMSG_CLOSE_INTERACTION => {}
 
+                // The 1.14 client's only route to item data and NPC dialogue.
+                Opcode::CMSG_DB_QUERY_BULK => {
+                    hotfix::handle_db_query_bulk(session, packet, world).await?;
+                }
+
                 // Query handlers
                 Opcode::CMSG_QUERY_TIME => {
                     query::handle_query_time(session).await?;
@@ -623,12 +629,7 @@ pub async fn dispatch_packet(
                     quest_handler::handle_questgiver_status_query(session, packet, world).await?;
                 }
                 Opcode::CMSG_QUESTGIVER_STATUS_MULTIPLE_QUERY => {
-                    // Oxcore has no cross-zone questgiver index yet. An explicit empty list
-                    // completes the modern client's initial marker sweep without fabricating
-                    // statuses for objects outside its visibility set.
-                    let mut response = WorldPacket::new(Opcode::SMSG_QUESTGIVER_STATUS_MULTIPLE);
-                    response.write_i32(0);
-                    session.send_packet_protocol_agnostic(response)?;
+                    quest_handler::handle_questgiver_status_multiple_query(session, world).await?;
                 }
                 Opcode::CMSG_QUESTGIVER_HELLO => {
                     quest_handler::handle_questgiver_hello(session, packet, world).await?;

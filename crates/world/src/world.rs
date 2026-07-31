@@ -16,7 +16,7 @@ use crate::game::coordination::{LinkingManager, PoolManager};
 use crate::game::corpse::CorpseManager;
 use crate::game::creature::{AddonManager, CreatureManager, WaypointManager};
 use crate::game::gameobject::GameObjectManager;
-use crate::game::items::ItemManager;
+use crate::game::items::{HotfixStore, ItemManager};
 use crate::game::player::{PlayerManager, PlayerSystem};
 use crate::game::spell::SpellManager;
 use crate::game::SystemManager;
@@ -54,6 +54,8 @@ pub struct Managers {
     pub gameobject_mgr: Arc<GameObjectManager>,
     pub corpse_mgr: Arc<CorpseManager>,
     pub item_mgr: Arc<ItemManager>,
+    /// DB2 records the 1.14 client asks for by table and record id; empty for vanilla-only servers.
+    pub hotfix_store: Arc<HotfixStore>,
     pub map_mgr: Arc<MapManager>,
     pub broadcast_mgr: Arc<BroadcastManager>,
     pub pool_mgr: Arc<PoolManager>,
@@ -103,6 +105,21 @@ pub struct World {
 }
 
 impl World {
+    /// The generation stamp on every DB2 hotfix reply.
+    ///
+    /// The client caches records against it and re-fetches when it changes. Our rows come from
+    /// `item_template`, which is read once at startup and never revised while the world runs, so the
+    /// process start time is both stable within a session and new after a restart — which is exactly
+    /// when a row may have changed underneath a client that cached it.
+    pub fn hotfix_timestamp(&self) -> u32 {
+        static STARTED_AT: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+        *STARTED_AT.get_or_init(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_secs() as u32)
+        })
+    }
+
     pub fn new(
         databases: Arc<Databases>,
         config: Arc<Config>,
@@ -116,6 +133,7 @@ impl World {
         let gameobject_mgr = Arc::new(GameObjectManager::new(Arc::new(databases.world.clone())));
         let corpse_mgr = Arc::new(CorpseManager::new());
         let item_mgr = Arc::new(ItemManager::new());
+        let hotfix_store = Arc::new(HotfixStore::load(&data_dir));
         let map_mgr = Arc::new(MapManager::new());
 
         // Create VMap manager for collision/LOS
@@ -194,6 +212,7 @@ impl World {
                 gameobject_mgr,
                 corpse_mgr,
                 item_mgr,
+                hotfix_store,
                 map_mgr,
                 broadcast_mgr,
                 pool_mgr,
@@ -919,6 +938,7 @@ impl Clone for World {
                 gameobject_mgr: Arc::clone(&self.managers.gameobject_mgr),
                 corpse_mgr: Arc::clone(&self.managers.corpse_mgr),
                 item_mgr: Arc::clone(&self.managers.item_mgr),
+                hotfix_store: Arc::clone(&self.managers.hotfix_store),
                 map_mgr: Arc::clone(&self.managers.map_mgr),
                 broadcast_mgr: Arc::clone(&self.managers.broadcast_mgr),
                 pool_mgr: Arc::clone(&self.managers.pool_mgr),

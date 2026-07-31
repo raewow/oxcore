@@ -24,7 +24,7 @@
 //!
 //! `M1 = H(broken(A) ‖ broken(B) ‖ broken(S))`, `M2 = H(broken(A) ‖ broken(M1) ‖ broken(S))`,
 //! where `broken(n)` is `n` big-endian in `(bits(n)+8)/8` bytes — one extra leading zero byte
-//! whenever the bit length is an exact multiple of 8 (an OpenSSL BN quirk Blizzard preserved).
+//! whenever the bit length is an exact multiple of 8 (a quirk Blizzard's client depends on).
 //! The session key is the raw premaster secret `S`, **not** hashed.
 //!
 //! ## Interop caveat
@@ -79,8 +79,8 @@ fn to_fixed_be(n: &BigUint, width: usize) -> Vec<u8> {
 }
 
 /// The "broken" evidence encoding: `n` big-endian in `(bits(n)+8)/8` bytes. This is one byte
-/// wider than the minimal encoding whenever `bits(n)` is a multiple of 8, matching OpenSSL's
-/// `BN_num_bytes(bn) + 1` behaviour that Blizzard's client depends on.
+/// wider than the minimal encoding whenever `bits(n)` is a multiple of 8, the width that
+/// Blizzard's client depends on.
 fn broken(n: &BigUint) -> Vec<u8> {
     let width = ((n.bits() as usize) + 8) >> 3;
     to_fixed_be(n, width)

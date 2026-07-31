@@ -52,6 +52,34 @@ pub struct ItemTemplate {
     pub spell_cooldown: [i32; 5],
     pub spell_category: [u32; 5],
     pub spell_category_cooldown: [i32; 5],
+    // Fields the 1.12 client never asked for, but which the 1.14 client's `Item`/`ItemSparse` DB2
+    // rows carry. They exist as `item_template` columns either way; before the modern port nothing
+    // read them, so they were never loaded.
+    pub description: String,
+    pub flags: u32,
+    pub extra_flags: u32,
+    pub allowable_class: i32,
+    pub allowable_race: i32,
+    pub required_skill: u16,
+    pub required_skill_rank: u16,
+    pub required_spell: u32,
+    pub required_honor_rank: u32,
+    pub required_city_rank: u32,
+    pub required_reputation_faction: u16,
+    pub required_reputation_rank: u16,
+    pub range_mod: f32,
+    pub bonding: u8,
+    pub page_text: u32,
+    pub page_language: u8,
+    pub page_material: u8,
+    pub lock_id: u32,
+    pub material: i8,
+    pub sheath: u8,
+    pub random_property: u32,
+    pub set_id: u32,
+    pub area_bound: u32,
+    pub map_bound: i16,
+    pub duration: u32,
 }
 
 impl Default for ItemTemplate {
@@ -96,6 +124,31 @@ impl Default for ItemTemplate {
             spell_cooldown: [0; 5],
             spell_category: [0; 5],
             spell_category_cooldown: [0; 5],
+            description: String::new(),
+            flags: 0,
+            extra_flags: 0,
+            allowable_class: -1,
+            allowable_race: -1,
+            required_skill: 0,
+            required_skill_rank: 0,
+            required_spell: 0,
+            required_honor_rank: 0,
+            required_city_rank: 0,
+            required_reputation_faction: 0,
+            required_reputation_rank: 0,
+            range_mod: 0.0,
+            bonding: 0,
+            page_text: 0,
+            page_language: 0,
+            page_material: 0,
+            lock_id: 0,
+            material: 0,
+            sheath: 0,
+            random_property: 0,
+            set_id: 0,
+            area_bound: 0,
+            map_bound: 0,
+            duration: 0,
         }
     }
 }
@@ -423,7 +476,12 @@ impl ItemManager {
                      spellcooldown_1, spellcooldown_2, spellcooldown_3, spellcooldown_4, spellcooldown_5,
                      spellcategory_1, spellcategory_2, spellcategory_3, spellcategory_4, spellcategory_5,
                      spellcategorycooldown_1, spellcategorycooldown_2, spellcategorycooldown_3,
-                     spellcategorycooldown_4, spellcategorycooldown_5
+                     spellcategorycooldown_4, spellcategorycooldown_5,
+                     description, flags, extra_flags, allowable_class, allowable_race,
+                     required_skill, required_skill_rank, required_spell, required_honor_rank,
+                     required_city_rank, required_reputation_faction, required_reputation_rank,
+                     range_mod, bonding, page_text, page_language, page_material, lock_id,
+                     material, sheath, random_property, set_id, area_bound, map_bound, duration
                FROM item_template WHERE patch = 0",
         )
         .fetch_all(pool)
@@ -508,6 +566,31 @@ impl ItemManager {
             let frost_res: i16 = row.try_get("frost_res")?;
             let shadow_res: i16 = row.try_get("shadow_res")?;
             let arcane_res: i16 = row.try_get("arcane_res")?;
+            let description: String = row.try_get("description")?;
+            let flags: u32 = row.try_get("flags")?;
+            let extra_flags: u32 = u32::from(row.try_get::<u8, _>("extra_flags")?);
+            let allowable_class: i32 = row.try_get("allowable_class")?;
+            let allowable_race: i32 = row.try_get("allowable_race")?;
+            let required_skill: u16 = row.try_get("required_skill")?;
+            let required_skill_rank: u16 = row.try_get("required_skill_rank")?;
+            let required_spell: u32 = u32::from(row.try_get::<u16, _>("required_spell")?);
+            let required_honor_rank: u32 = row.try_get("required_honor_rank")?;
+            let required_city_rank: u32 = row.try_get("required_city_rank")?;
+            let required_reputation_faction: u16 = row.try_get("required_reputation_faction")?;
+            let required_reputation_rank: u16 = row.try_get("required_reputation_rank")?;
+            let range_mod: f32 = row.try_get("range_mod")?;
+            let bonding: u8 = row.try_get("bonding")?;
+            let page_text: u32 = row.try_get("page_text")?;
+            let page_language: u8 = row.try_get("page_language")?;
+            let page_material: u8 = row.try_get("page_material")?;
+            let lock_id: u32 = row.try_get("lock_id")?;
+            let material: i8 = row.try_get("material")?;
+            let sheath: u8 = row.try_get("sheath")?;
+            let random_property: u32 = row.try_get("random_property")?;
+            let set_id: u32 = row.try_get("set_id")?;
+            let area_bound: u32 = row.try_get("area_bound")?;
+            let map_bound: i16 = row.try_get("map_bound")?;
+            let duration: u32 = row.try_get("duration")?;
 
             // Read spell data (default to 0 for all fields)
             let spell_id = [
@@ -610,6 +693,31 @@ impl ItemManager {
                 spell_cooldown,
                 spell_category,
                 spell_category_cooldown,
+                description,
+                flags,
+                extra_flags,
+                allowable_class,
+                allowable_race,
+                required_skill,
+                required_skill_rank,
+                required_spell,
+                required_honor_rank,
+                required_city_rank,
+                required_reputation_faction,
+                required_reputation_rank,
+                range_mod,
+                bonding,
+                page_text,
+                page_language,
+                page_material,
+                lock_id,
+                material,
+                sheath,
+                random_property,
+                set_id,
+                area_bound,
+                map_bound,
+                duration,
             };
 
             self.add_template(template);

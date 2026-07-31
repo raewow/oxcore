@@ -580,7 +580,8 @@ impl Opcode {
     pub const SMSG_OPEN_CONTAINER: Opcode = Opcode { vanilla: 0x0113, modern: 0x2DA6 }; // 275
     pub const CMSG_AUTOEQUIP_GROUND_ITEM: Opcode = Opcode { vanilla: 0x0106, ..Opcode::NONE }; // 262
     pub const CMSG_AUTOSTORE_GROUND_ITEM: Opcode = Opcode { vanilla: 0x0107, ..Opcode::NONE }; // 263
-    pub const CMSG_AUTOSTORE_LOOT_ITEM: Opcode = Opcode { vanilla: 0x0108, ..Opcode::NONE }; // 264
+    // 1.14 calls this `CMSG_LOOT_ITEM`; it is the click that takes one item out of an open window.
+    pub const CMSG_AUTOSTORE_LOOT_ITEM: Opcode = Opcode { vanilla: 0x0108, modern: 0x320E }; // 264
     pub const CMSG_STORE_LOOT_IN_SLOT: Opcode = Opcode { vanilla: 0x0109, ..Opcode::NONE }; // 265
     pub const CMSG_AUTOEQUIP_ITEM: Opcode = Opcode { vanilla: 0x010A, modern: 0x3998 }; // 266
     pub const CMSG_AUTOSTORE_BAG_ITEM: Opcode = Opcode { vanilla: 0x010B, modern: 0x3999 }; // 267

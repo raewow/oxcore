@@ -1,31 +1,55 @@
 use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
 
-use crate::components::ui::{AuthField, AuthShell, Button};
+use crate::components::ui::{AuthField, AuthShell, Button, Card};
 use crate::portal;
 
 #[component]
 pub fn Account() -> impl IntoView {
     let overview = Resource::new(|| (), |_| portal::get_portal_overview());
+    let is_admin = Resource::new(|| (), |_| portal::has_admin_access());
 
     view! {
-        <AuthShell title="Your account" subtitle="Account controls and character information will appear here.">
-            <Suspense fallback=move || view! {
-                <div class="mt-8 border-y border-border py-5 text-xs text-muted-foreground">"Loading account..."</div>
-            }>
-                {move || overview.get().map(render_portal_overview)}
-            </Suspense>
-            <form class="mt-6" action="/auth/logout" method="post">
-                <Button button_type="submit">"Sign out"</Button>
-            </form>
-            <a class="mt-5 inline-block text-xs text-primary hover:underline" href="/security">
-                "Change password"
-            </a>
-            <div class="mt-4 flex gap-4 text-xs">
-                <a class="text-primary hover:underline" href="/activity">"Account activity"</a>
-                <a class="text-primary hover:underline" href="/support">"Support tickets"</a>
+        <main class="min-h-screen bg-background px-6 py-12 text-foreground">
+            <div class="mx-auto w-full max-w-3xl">
+                <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/">"oxcore"</a>
+                <h1 class="mt-6 font-sans text-3xl font-semibold tracking-tight">"Your account"</h1>
+                <p class="mt-3 text-xs leading-6 text-muted-foreground">"Account controls and character information."</p>
+                <div class="mt-8 grid gap-4 sm:grid-cols-2">
+                    <Suspense fallback=move || view! {
+                        <Card class="px-4 py-5 sm:col-span-2"><p class="text-xs text-muted-foreground">"Loading account..."</p></Card>
+                    }>
+                        {move || overview.get().map(render_portal_overview)}
+                    </Suspense>
+                    <Card class="px-4 py-5">
+                        <p class="font-medium text-foreground">"Security"</p>
+                        <p class="text-xs text-muted-foreground">"Change your password or sign out of the portal."</p>
+                        <div class="flex flex-col items-start gap-3">
+                            <a class="text-primary hover:underline" href="/security">"Change password"</a>
+                            <form action="/auth/logout" method="post">
+                                <Button button_type="submit">"Sign out"</Button>
+                            </form>
+                        </div>
+                    </Card>
+                    <Card class="px-4 py-5">
+                        <p class="font-medium text-foreground">"More"</p>
+                        <p class="text-xs text-muted-foreground">"Review recent activity, open a support request, or manage the server."</p>
+                        <div class="flex flex-col items-start gap-3">
+                            <a class="text-primary hover:underline" href="/activity">"Account activity"</a>
+                            <a class="text-primary hover:underline" href="/support">"Support tickets"</a>
+                            <Suspense fallback=move || view! { <></> }>
+                                {move || is_admin.get().map(|result| match result {
+                                    Ok(true) => view! {
+                                        <a class="text-primary hover:underline" href="/admin">"Admin panel"</a>
+                                    }.into_any(),
+                                    _ => view! { <></> }.into_any(),
+                                })}
+                            </Suspense>
+                        </div>
+                    </Card>
+                </div>
             </div>
-        </AuthShell>
+        </main>
     }
 }
 
@@ -202,6 +226,7 @@ fn render_portal_overview(result: Result<portal::PortalOverview, ServerFnError>)
             } else {
                 "Verification pending"
             };
+            let character_count = overview.characters.len();
             let characters = overview.characters.into_iter().map(|character| {
                 view! {
                     <li class="flex items-center justify-between border-t border-border py-3 first:border-t-0">
@@ -218,25 +243,34 @@ fn render_portal_overview(result: Result<portal::PortalOverview, ServerFnError>)
                 }
             });
             view! {
-                <div class="mt-8 space-y-6 text-xs">
-                    <section class="border-y border-border py-5">
+                <>
+                    <Card class="px-4 py-5">
                         <p class="text-muted-foreground">"Signed in as"</p>
-                        <p class="mt-1 font-sans text-lg font-semibold text-foreground">{overview.username}</p>
-                        <p class="mt-3 text-muted-foreground">{email}</p>
-                        <p class="mt-1 text-primary">{email_status}</p>
-                    </section>
-                    <section>
-                        <p class="font-medium text-foreground">"Characters"</p>
-                        <ul class="mt-3">{characters.collect_view()}</ul>
-                    </section>
-                </div>
+                        <p class="font-sans text-lg font-semibold text-foreground">{overview.username}</p>
+                        <div class="text-muted-foreground">
+                            <p>{email}</p>
+                            <p class="text-primary">{email_status}</p>
+                        </div>
+                    </Card>
+                    <Card class="px-4 py-5">
+                        <div class="flex items-baseline justify-between gap-4">
+                            <p class="font-medium text-foreground">"Characters"</p>
+                            <p class="text-muted-foreground">{character_count} " total"</p>
+                        </div>
+                        {if character_count == 0 {
+                            view! { <p class="text-xs text-muted-foreground">"No characters on this account yet."</p> }.into_any()
+                        } else {
+                            view! { <ul class="divide-y divide-border">{characters.collect_view()}</ul> }.into_any()
+                        }}
+                    </Card>
+                </>
             }
             .into_any()
         }
         Err(_) => view! {
-            <div class="mt-8 border-y border-border py-5 text-xs text-muted-foreground">
-                "Account details are temporarily unavailable."
-            </div>
+            <Card class="px-4 py-5 sm:col-span-2">
+                <p class="text-xs text-muted-foreground">"Account details are temporarily unavailable."</p>
+            </Card>
         }
         .into_any(),
     }

@@ -215,7 +215,7 @@ impl CreatureManager {
 
     /// Translate static_flags1 (server-side flags) to unit_flags (client-visible flags)
     ///
-    /// Based on legacy_world toggle_unit_flags_from_static_flags() with special handling:
+    /// With special handling:
     /// - Critters (type=8) and guards always have NOT_SELECTABLE removed
     /// - Creatures with NPC flags always have NOT_SELECTABLE removed
     fn compute_unit_flags_from_static(

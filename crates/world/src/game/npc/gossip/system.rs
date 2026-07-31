@@ -26,6 +26,11 @@ pub struct GossipSystem {
 }
 
 impl GossipSystem {
+    /// The loaded gossip tables, for callers that need a raw lookup rather than a menu.
+    pub fn manager(&self) -> &Arc<GossipManager> {
+        &self.manager
+    }
+
     /// Create a new gossip system
     pub fn new(
         manager: Arc<GossipManager>,

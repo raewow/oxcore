@@ -20,7 +20,8 @@ use crate::game::player::spells::state::CurrentSpellType;
 use crate::World;
 use oxcore_shared::messages::gossip::SmsgGossipComplete;
 use oxcore_shared::messages::quest::{
-    MsgQuestPushResult, QuestObjectiveData, SmsgQuestQueryResponseV2,
+    DialogStatus as QuestGiverDialogStatus, MsgQuestPushResult, QuestGiverStatusEntry,
+    QuestObjectiveData, SmsgQuestQueryResponseV2, SmsgQuestgiverStatusMultiple,
 };
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, Protocol, WorldPacket};
 
@@ -80,6 +81,105 @@ pub async fn handle_questgiver_status_query(
         .send_quest_giver_status(player_guid, quest_giver_guid, world);
 
     Ok(())
+}
+
+/// Handle CMSG_QUESTGIVER_STATUS_MULTIPLE_QUERY
+///
+/// This is how the modern client paints **every** quest marker it draws. It does not derive markers
+/// from the create block or from per-NPC status replies: it sweeps with this query and repaints from
+/// the answer, so an empty list leaves every marker frozen at whatever it was when the NPC came into
+/// view. That looks like "the ! never turns into a ?" and like "the follow-up quest never appears".
+///
+/// The answer covers the player's own visibility set, which is the same set the client is asking
+/// about — it only draws markers on things it can see.
+pub async fn handle_questgiver_status_multiple_query(
+    session: &WorldSession,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+
+    let visible: Vec<ObjectGuid> = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| {
+            player
+                .visibility
+                .visible_objects
+                .iter()
+                .copied()
+                .filter(|guid| guid.is_creature() || guid.is_game_object())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let player_faction = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |p| get_faction_for_race(p.race));
+
+    let mut statuses = Vec::new();
+    for guid in visible {
+        // A hostile questgiver shows nothing, matching the single-GUID query above. Leaving it out
+        // entirely would be wrong: the client repaints from this list, so an omitted NPC keeps its
+        // stale marker rather than losing it.
+        let hostile = guid.is_creature()
+            && player_faction.is_some_and(|faction| {
+                world
+                    .managers
+                    .creature_mgr
+                    .get_creature(guid)
+                    .is_some_and(|c| is_hostile_faction(c.faction, faction, true))
+            });
+
+        let status = if hostile {
+            QuestGiverDialogStatus::None
+        } else {
+            match world
+                .systems
+                .quest
+                .get_quest_giver_status_for_guid(guid, player_guid, world)
+            {
+                // Not a questgiver at all -- most of the visibility set. Saying nothing about it is
+                // correct here; the client only tracks markers it was told about.
+                None => continue,
+                Some(status) => to_message_status(status),
+            }
+        };
+
+        statuses.push(QuestGiverStatusEntry { guid, status });
+    }
+
+    debug!(
+        "CMSG_QUESTGIVER_STATUS_MULTIPLE_QUERY: player={:?}, {} questgiver(s)",
+        player_guid,
+        statuses.len()
+    );
+
+    session.send_msg(SmsgQuestgiverStatusMultiple {
+        statuses: &statuses,
+    })?;
+
+    Ok(())
+}
+
+/// Bridge the quest system's own `DialogStatus` to the wire enum.
+///
+/// The two are separate types with the same variants; a `From` impl would live in whichever crate
+/// owns neither, so the mapping is spelled out where it is used.
+fn to_message_status(status: crate::game::npc::quest::types::DialogStatus) -> QuestGiverDialogStatus {
+    use crate::game::npc::quest::types::DialogStatus as Local;
+    match status {
+        Local::None => QuestGiverDialogStatus::None,
+        Local::Unavailable => QuestGiverDialogStatus::Unavailable,
+        Local::Chat => QuestGiverDialogStatus::Chat,
+        Local::Incomplete => QuestGiverDialogStatus::Incomplete,
+        Local::RewardRep => QuestGiverDialogStatus::RewardRep,
+        Local::Available => QuestGiverDialogStatus::Available,
+        Local::RewardOld => QuestGiverDialogStatus::RewardOld,
+        Local::Reward2 => QuestGiverDialogStatus::Reward2,
+    }
 }
 
 /// Read a quest giver's GUID in whichever form the client speaks.

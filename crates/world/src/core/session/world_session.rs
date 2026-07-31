@@ -235,8 +235,9 @@ impl WorldSession {
     /// Send a hand-built packet whose body is the same for both protocols.
     ///
     /// For the empty and count-prefixed replies the 1.14 client demands during its bootstrap sweep:
-    /// a bare `i32 0` is a bare `i32 0` either way. Every call site here has been checked against
-    /// the reference body — check yours before adding one, because this bypasses the guard in
+    /// a bare `i32 0` is a bare `i32 0` either way. Every call site here has been checked to send a
+    /// body that is genuinely identical for both protocols — check yours before adding one, because
+    /// this bypasses the guard in
     /// [`Self::send_packet`] and a wrong body desynchronises every packet after it.
     pub(crate) fn send_packet_protocol_agnostic(&self, packet: WorldPacket) -> anyhow::Result<()> {
         self.deliver(packet)

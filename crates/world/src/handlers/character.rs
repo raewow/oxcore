@@ -2035,7 +2035,7 @@ async fn logout_persist_and_teardown(
     player_guid: ObjectGuid,
     save_context: &str,
 ) -> Result<()> {
-    // Save auras before removing the player from systems, matching Player::_SaveAuras.
+    // Save auras before removing the player from systems.
     world.systems.auras.on_logout(player_guid, world).await?;
 
     // Save all player data to database (BEFORE removing from systems)

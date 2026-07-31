@@ -965,7 +965,7 @@ impl<'a> CanStoreChecker<'a> {
         }
 
         // Simplified batch check: just run can_store_item for each
-        // and aggregate. The reference does a more complex space simulation.
+        // and aggregate, rather than simulating the whole space at once.
         let mut total_count: u32 = 0;
         for item_opt in items {
             let item = match item_opt {
@@ -1003,9 +1003,8 @@ impl<'a> CanStoreChecker<'a> {
         }
 
         // Fallback to regular can_store with NULL_BAG/NULL_SLOT
-        // The reference version simulates slot-by-slot filling, but the
-        // simpler approach of checking if there's enough free space
-        // works for the common cases.
+        // A slot-by-slot filling simulation is skipped: checking if there's enough free
+        // space works for the common cases.
         let free = self.cache.count_total_free_slots(self.player_guid);
         if free >= total_count {
             CanStoreResult::ok()

@@ -232,6 +232,10 @@ pub struct SmsgQuestgiverQuestComplete<'a> {
     pub money: u32,
     /// Fixed reward items
     pub reward_items: &'a [(u32, u32)],
+    /// Whether the quest giver has a follow-up quest to offer straight away
+    pub launch_quest: bool,
+    /// Whether the quest giver should fall back to its gossip menu
+    pub launch_gossip: bool,
 }
 
 impl ToWorldPacket for SmsgQuestgiverQuestComplete<'_> {
@@ -258,6 +262,12 @@ impl ToWorldPacket for SmsgQuestgiverQuestComplete<'_> {
     /// The item is written with four bits followed by a u32 **without flushing**: `ItemInstance`
     /// starts with a u32, whose write flushes the partial byte, so the layout still lands on a byte
     /// boundary. Our `BitWriter` flushes on byte writes too, so the same code produces the same bytes.
+    ///
+    /// `LaunchQuest` and `LaunchGossip` tell the client what happens to the quest-giver frame once the
+    /// turn-in toast clears. Setting `LaunchQuest` with nothing to follow is actively harmful: the
+    /// client waits for a quest dialog that never comes, then retries the whole
+    /// hello → complete → request-reward → choose-reward chain every ~100 ms to recover. Both must be
+    /// false when the giver has neither a follow-up quest nor a gossip menu.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
         writer.write_u32(self.quest_id);
@@ -267,8 +277,8 @@ impl ToWorldPacket for SmsgQuestgiverQuestComplete<'_> {
         writer.write_u32(0); // NumSkillUpsReward
 
         writer.write_bit(false); // UseQuestReward
-        writer.write_bit(false); // LaunchGossip
-        writer.write_bit(false); // LaunchQuest
+        writer.write_bit(self.launch_gossip);
+        writer.write_bit(self.launch_quest);
         writer.write_bit(false); // HideChatMessage
 
         // ItemInstance for the single reward slot.
@@ -325,23 +335,67 @@ impl ToWorldPacket for SmsgQuestgiverStatus {
     }
 
     fn to_modern(&self) -> Option<WorldPacket> {
-        // 1.14 replaces the legacy sequential dialog-status enum with a flag set. Sending the
-        // vanilla values makes, for example, Available (5) look like an invalid combination.
-        let status = match self.status {
-            DialogStatus::None => 0x000000,
-            DialogStatus::Unavailable => 0x000002,
-            DialogStatus::Chat => 0x000004, // Vanilla's low-level-available slot.
-            DialogStatus::Incomplete => 0x000020,
-            DialogStatus::RewardRep => 0x000100,
-            DialogStatus::Available => 0x000400,
-            DialogStatus::RewardOld => 0x000800,
-            DialogStatus::Reward2 => 0x001000,
-        };
         let mut writer = BitWriter::new();
-        let (high, low) = self.guid.to_guid128(1);
+        let (high, low) = self.guid.to_guid128(DEFAULT_REALM_ID);
         writer.write_packed_guid_128(high, low);
-        writer.write_u32(status);
+        writer.write_u32(modern_dialog_status(self.status));
         Some(writer.finish(Opcode::SMSG_QUESTGIVER_STATUS))
+    }
+}
+
+/// One questgiver's marker, for [`SmsgQuestgiverStatusMultiple`].
+#[derive(Debug, Clone)]
+pub struct QuestGiverStatusEntry {
+    pub guid: ObjectGuid,
+    pub status: DialogStatus,
+}
+
+/// SMSG_QUESTGIVER_STATUS_MULTIPLE - every visible questgiver's marker at once
+///
+/// Modern only; 1.12 has no batch form and repaints one NPC at a time. The 1.14 client drives *all*
+/// of its markers from this message, so a short or empty list does not mean "no change" — it means
+/// the omitted NPCs keep whatever marker they last had.
+#[derive(Debug, Clone)]
+pub struct SmsgQuestgiverStatusMultiple<'a> {
+    pub statuses: &'a [QuestGiverStatusEntry],
+}
+
+impl ToWorldPacket for SmsgQuestgiverStatusMultiple<'_> {
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_i32(self.statuses.len() as i32);
+        for entry in self.statuses {
+            let (high, low) = entry.guid.to_guid128(DEFAULT_REALM_ID);
+            writer.write_packed_guid_128(high, low);
+            writer.write_u32(modern_dialog_status(entry.status));
+        }
+        Some(writer.finish(Opcode::SMSG_QUESTGIVER_STATUS_MULTIPLE))
+    }
+
+    /// No vanilla counterpart, so this is the count-only body a 1.12 client would ignore anyway.
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_STATUS_MULTIPLE);
+        packet.write_i32(0);
+        packet
+    }
+}
+
+/// Translate vanilla's sequential dialog-status enum into 1.14's flag set.
+///
+/// 1.14 turned the status into a bit per marker kind and inserted several new ones, so the numbering
+/// no longer lines up at all: vanilla's `Available` (5) reads as an invalid combination of
+/// `Unavailable | LowLevelAvailable` if passed through. Shared by the single and batch messages so
+/// the two cannot disagree about what a marker means.
+fn modern_dialog_status(status: DialogStatus) -> u32 {
+    match status {
+        DialogStatus::None => 0x000000,
+        DialogStatus::Unavailable => 0x000002,
+        DialogStatus::Chat => 0x000004, // Vanilla's low-level-available slot.
+        DialogStatus::Incomplete => 0x000020,
+        DialogStatus::RewardRep => 0x000100,
+        DialogStatus::Available => 0x000400,
+        DialogStatus::RewardOld => 0x000800,
+        DialogStatus::Reward2 => 0x001000,
     }
 }
 
@@ -514,6 +568,14 @@ pub struct SmsgQuestgiverRequestItemsV2<'a> {
     pub req_items: &'a [RequestItemInfo],
 }
 
+/// `StatusFlags` for `SMSG_QUESTGIVER_REQUEST_ITEMS`, which gates the Complete button.
+///
+/// Only bit `0x04` distinguishes the two; the rest are on in both cases and enable the frame's
+/// ordinary controls. They are constants rather than a computed mask because the client is the only
+/// consumer and it only ever sees these two.
+const STATUS_FLAGS_CAN_COMPLETE: u32 = 0xDF;
+const STATUS_FLAGS_INCOMPLETE: u32 = 0xDB;
+
 impl ToWorldPacket for SmsgQuestgiverRequestItemsV2<'_> {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_QUESTGIVER_REQUEST_ITEMS);
@@ -571,13 +633,16 @@ impl ToWorldPacket for SmsgQuestgiverRequestItemsV2<'_> {
     /// move to the end behind 9- and 12-bit lengths, and each required item gains a `Flags` word.
     /// `MoneyToGet` becomes signed.
     ///
-    /// Vanilla's `flags2` is the completable indicator (`0x03` vs `0x00`); that is what `StatusFlags`
-    /// carries here, since it is the one of the four the client actually reads.
+    /// `StatusFlags` is **not** vanilla's flag word passed through. It is a bit set the client reads
+    /// to decide which controls the frame gets, and it has exactly two useful values: `0xDF` when the
+    /// quest can be handed in and `0xDB` when it cannot. Forwarding vanilla's `0x03`/`0x00` leaves
+    /// nearly every bit clear, and the client responds by drawing the frame with no completion text
+    /// and no Complete button — it looks like a dialog that failed to load rather than a parse error.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
         let (high, low) = self.guid.to_guid128(DEFAULT_REALM_ID);
         writer.write_packed_guid_128(high, low);
-        writer.write_u32(0); // QuestGiverCreatureID -- the GUID carries the entry
+        writer.write_u32(self.guid.entry()); // QuestGiverCreatureID
         writer.write_u32(self.quest_id);
         writer.write_u32(0); // CompEmoteDelay -- vanilla always sends 0 here too
         writer.write_u32(if self.completable {
@@ -591,7 +656,11 @@ impl ToWorldPacket for SmsgQuestgiverRequestItemsV2<'_> {
         writer.write_i32(self.req_money as i32);
         writer.write_i32(self.req_items.len() as i32);
         writer.write_i32(0); // Currency count
-        writer.write_u32(if self.completable { 0x03 } else { 0x00 }); // StatusFlags
+        writer.write_u32(if self.completable {
+            STATUS_FLAGS_CAN_COMPLETE
+        } else {
+            STATUS_FLAGS_INCOMPLETE
+        });
 
         for item in self.req_items {
             writer.write_u32(item.item_id); // ObjectID
@@ -710,7 +779,7 @@ impl ToWorldPacket for SmsgQuestgiverOfferRewardV2<'_> {
         // --- QuestGiverOfferReward (the inner block) ---
         let (high, low) = self.guid.to_guid128(DEFAULT_REALM_ID);
         writer.write_packed_guid_128(high, low);
-        writer.write_u32(0); // QuestGiverCreatureID -- the GUID already carries the entry
+        writer.write_u32(self.guid.entry()); // QuestGiverCreatureID
         writer.write_u32(self.quest_id);
         writer.write_u32(self.quest_flags.0); // Flags
         writer.write_u32(0); // FlagsEx
@@ -1418,6 +1487,8 @@ mod tests {
             xp: 1000,
             money: 500,
             reward_items: &[(456, 2)],
+            launch_quest: false,
+            launch_gossip: false,
         };
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_COMPLETE);
@@ -1627,6 +1698,7 @@ mod tests {
 #[cfg(test)]
 mod modern_quest_dialog_tests {
     use super::*;
+    use crate::protocol::bitbuf::BitReader;
 
     fn details(
         choices: &[RewardItemInfo],
@@ -1730,7 +1802,12 @@ mod modern_quest_dialog_tests {
         assert_eq!(long.size(), short.size() + extra + 8);
     }
 
-    /// The turn-in dialog's completable flag is what the client uses to enable its Complete button.
+    /// The turn-in dialog's `StatusFlags` word is what the client uses to enable its Complete button.
+    ///
+    /// Pinned to the literal `0xDF`/`0xDB` rather than just "the two differ" because the failure this
+    /// guards against passed that weaker check: forwarding vanilla's `0x03`/`0x00` also produces two
+    /// distinct packets, and the client answers it by drawing a turn-in frame with no completion text
+    /// and no Complete button.
     #[test]
     fn request_items_reports_completability() {
         let build = |completable| {
@@ -1750,7 +1827,21 @@ mod modern_quest_dialog_tests {
             .unwrap()
         };
 
-        assert_ne!(build(true).contents(), build(false).contents());
+        let status_flags = |completable| {
+            let packet = build(completable);
+            let mut reader = BitReader::new(packet.contents());
+            let (high, low) = reader.read_packed_guid_128().unwrap();
+            assert_eq!(ObjectGuid::from_guid128(high, low).entry(), 197);
+            // QuestGiverCreatureID, then the nine words between it and StatusFlags.
+            assert_eq!(reader.read_u32().unwrap(), 197);
+            for _ in 0..9 {
+                reader.read_u32().unwrap();
+            }
+            reader.read_u32().unwrap()
+        };
+
+        assert_eq!(status_flags(true), 0xDF);
+        assert_eq!(status_flags(false), 0xDB);
         assert_eq!(build(true).size(), build(false).size());
     }
 }

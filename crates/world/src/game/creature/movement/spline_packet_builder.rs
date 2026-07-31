@@ -179,9 +179,8 @@ pub fn write_monster_move(
     }
 
     write_linear_path(spline, data, first_point)
-    // The reference builder rewrites the duration field afterwards for a split path. That
-    // patch needs a positioned write the packet API does not expose, so a split path
-    // currently carries the whole-spline duration.
+    // Rewriting the duration field afterwards for a split path needs a positioned write the
+    // packet API does not expose, so a split path currently carries the whole-spline duration.
 }
 
 /// Write the spline block used when creating the unit for a client mid-movement.
@@ -353,7 +352,7 @@ mod tests {
 
         assert_eq!(read_u32(&bytes, HEADER_LEN), 2);
         assert_eq!(read_f32(&bytes, HEADER_LEN + 4), 30.0);
-        // The reference guards the offset loop with `last_idx > 1`, which is false here, so the
+        // The offset loop is guarded by `last_idx > 1`, which is false here, so the
         // middle point is not sent at all.
         assert_eq!(bytes.len(), HEADER_LEN + 4 + 12);
     }

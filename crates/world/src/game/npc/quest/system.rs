@@ -11,6 +11,7 @@ use tracing::{debug, info, warn};
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::common::update_fields::PLAYER_QUEST_LOG_1_1;
+use crate::game::creature::ai::NPC_FLAG_GOSSIP;
 use crate::game::creature::CreatureManager;
 use crate::game::inventory::{AddItemResult, GoldResult, InventorySystem};
 use crate::game::items::ItemManager;
@@ -1050,7 +1051,7 @@ impl QuestSystem {
             // NOTE: the icon here is not the minimap/head dialog status - the client uses it
             // to split the gossip quest list into "Current Quests" (CHAT/INCOMPLETE/REWARD_REP)
             // and "Available Quests" (AVAILABLE). Using REWARD2 here makes the client treat a
-            // completed quest as a new one to pick up. Matches Player::PrepareQuestMenu.
+            // completed quest as a new one to pick up, matching `prepare_quest_menu`.
             if status == QuestStatus::Complete && !rewarded_quests.contains(&quest_id) {
                 // Active quest, ready to turn in
                 seen.insert(quest_id);
@@ -1824,6 +1825,26 @@ impl QuestSystem {
     }
 
     /// Handle quest reward selection
+    /// Map a chosen reward item back to its slot in the quest's choice list.
+    ///
+    /// The modern client answers the reward dialog with the item it picked rather than the index
+    /// vanilla sends. An item that is not on the list resolves to slot 0, which is also what a quest
+    /// with no choice rewards sends, so the caller needs no special case for either.
+    pub fn resolve_reward_choice_index(&self, quest_id: u32, item_id: u32) -> u32 {
+        if item_id == 0 {
+            return 0;
+        }
+        self.manager
+            .get_quest_template(quest_id)
+            .and_then(|quest| {
+                quest
+                    .rew_choice_item_id
+                    .iter()
+                    .position(|&candidate| candidate == item_id)
+            })
+            .unwrap_or(0) as u32
+    }
+
     pub async fn handle_quest_reward(
         &self,
         player_guid: ObjectGuid,
@@ -2107,11 +2128,28 @@ impl QuestSystem {
             .filter(|(id, _)| **id != 0)
             .map(|(id, count)| (*id, *count))
             .collect();
+        // The modern client uses these to decide what replaces the turn-in frame. Claiming a
+        // follow-up that never arrives makes it retry the whole turn-in chain in a tight loop, so
+        // only set `launch_quest` when this same giver really does offer the next quest.
+        let launch_quest = quest.next_quest_in_chain != 0
+            && self.quest_giver_can_start_or_finish(
+                quest_giver_guid,
+                quest.next_quest_in_chain,
+                world,
+            );
+        let launch_gossip = !launch_quest
+            && self
+                .creature_mgr
+                .get_creature(quest_giver_guid)
+                .is_some_and(|c| c.npc_flags & NPC_FLAG_GOSSIP != 0);
+
         let complete_msg = SmsgQuestgiverQuestComplete {
             quest_id,
             xp: xp_reward,
             money: (money.max(0) as u32).saturating_add(max_level_gold_reward),
             reward_items: &reward_items,
+            launch_quest,
+            launch_gossip,
         };
         self.broadcast_mgr
             .send_msg_to_player(player_guid, complete_msg);

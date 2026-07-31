@@ -1,6 +1,6 @@
 //! Server-side spline state: where a unit is along its path at any moment.
 //!
-//! This is the faithful port of the `MoveSpline` movement state, built on the geometry primitives in
+//! This is the `MoveSpline` movement state, built on the geometry primitives in
 //! [`super::spline_base`]. It is not yet wired into creature movement, which still uses the
 //! simpler linear [`super::spline::MoveSpline`].
 
@@ -176,8 +176,7 @@ const SPLINE_FLAG_NAMES: [&str; 32] = [
 /// Render the raw spline flag word as its set bit names.
 ///
 /// Each set bit contributes a leading space then its name, low bit first, so the result is
-/// `" Done Falling"` for the two lowest bits and empty when nothing is set - matching the
-/// reference `print_flags` output byte for byte.
+/// `" Done Falling"` for the two lowest bits and empty when nothing is set.
 pub fn format_move_spline_flags(raw: u32) -> String {
     let mut out = String::new();
     for (bit, name) in SPLINE_FLAG_NAMES.iter().enumerate() {
