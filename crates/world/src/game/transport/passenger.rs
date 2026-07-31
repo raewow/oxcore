@@ -9,7 +9,7 @@ use oxcore_shared::protocol::Position;
 /// Wrap an orientation into [0, 2π).
 pub fn normalize_orientation(orientation: f32) -> f32 {
     let two_pi = std::f32::consts::TAU;
-    // Matches the reference emulation of fmod for negatives.
+    // Negative orientations wrap by subtracting from 2π (fmod semantics for negatives).
     if orientation < 0.0 {
         two_pi - (-orientation % two_pi)
     } else {

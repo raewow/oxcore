@@ -2,7 +2,7 @@
 //!
 //! Reads a spell's `custom` flags and `spell_visual` id and, when all three guards
 //! pass, produces the per-cast `ChannelVisualConfig` that the cast state would have
-//! stored as `m_channeledVisualKit` / `m_channeledVisualTimer`. The decision logic is
+//! stored as the channel kit and its refresh timer. The decision logic is
 //! split into a pure, DB-free helper so it can be unit-tested directly.
 
 use oxcore_dbc::structures::spell::SpellEntry;

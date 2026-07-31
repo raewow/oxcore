@@ -18,7 +18,7 @@ use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Dynamic flags for a real corpse. The client identifies real death from zero
 /// health and the dead stand state; UNIT_DYNFLAG_DEAD is for feign death only.
-/// Tapped flags are viewer-specific in the reference server, so they cannot be
+/// Tapped flags are viewer-specific, so they cannot be
 /// included in a broadcast update.
 fn corpse_dynamic_flags(has_loot: bool) -> u32 {
     use super::death::UNIT_DYNFLAG_LOOTABLE;

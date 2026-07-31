@@ -3125,7 +3125,7 @@ impl SpellSystem {
             return Ok(());
         }
 
-        // GCD packets flush on map update in the reference implementation; Rust tracks
+        // GCD packets flush on map update; Rust tracks
         // GCD against wall-clock game time, so there is no batching interval to subtract.
 
         let gcd_ms = gcd_duration as u32;

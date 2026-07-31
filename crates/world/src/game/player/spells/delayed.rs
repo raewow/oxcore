@@ -1,10 +1,9 @@
 //! Spell cast pushback from damage taken.
 //!
 //! Two flavours, both triggered when a casting player takes damage:
-//! - [`delayed`] (`Spell::Delayed`) extends the cast bar of a preparing,
-//!   non-channeled spell.
-//! - [`delayed_channel`] (`Spell::DelayedChannel`) shortens the remaining
-//!   duration of an active channeled spell, interrupting it if it hits zero.
+//! - [`delayed`] extends the cast bar of a preparing, non-channeled spell.
+//! - [`delayed_channel`] shortens the remaining duration of an active channeled
+//!   spell, interrupting it if it hits zero.
 
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::player::spells::modifiers::apply_spell_modifiers_to_value;
@@ -14,11 +13,11 @@ use oxcore_shared::messages::spells::SmsgSpellDelayed;
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::ObjectGuid;
 
-/// `SPELL_INTERRUPT_FLAG_DAMAGE_PUSHBACK` — spell loses casting time on damage.
-/// Spelled out as a bit so callers can also test it directly on `SpellEntry::interrupt_flags`.
+/// Damage-pushback interrupt flag bit (0x02): spell loses casting time on damage.
+/// Spelled out as a bit so callers can also test it directly on `interrupt_flags`.
 const SPELL_INTERRUPT_FLAG_DAMAGE_PUSHBACK: u32 = 0x02;
 
-/// `SPELL_AURA_RESIST_PUSHBACK` — Concentration Aura-style reduction to cast pushback.
+/// Resist-pushback aura type (68): Concentration Aura-style reduction to cast pushback.
 const SPELL_AURA_RESIST_PUSHBACK: u32 = 68;
 
 /// Snapshot of the per-cast fields the decision reads.
@@ -28,26 +27,27 @@ const SPELL_AURA_RESIST_PUSHBACK: u32 = 68;
 /// and threads it through each call.
 #[derive(Debug, Clone, Copy)]
 pub struct DelayCastInput {
-    /// `m_spellInfo->Id`.
+    /// The spell's id.
     pub spell_id: u32,
-    /// `m_spellState`.
+    /// The cast state.
     pub state: SpellState,
-    /// `m_timer` (current remaining cast time, ms).
+    /// Current remaining cast time, ms.
     pub timer: u32,
-    /// `m_casttime` (original cast time of this cast, ms).
+    /// Original cast time of this cast, ms.
     pub casttime: u32,
-    /// `m_spellInfo->InterruptFlags`.
+    /// The spell's interrupt flags.
     pub interrupt_flags: u32,
-    /// `m_spellInfo->SpellFamilyName` — gates the `SPELLMOD_NOT_LOSE_CASTING_TIME` modifiers.
+    /// The spell's family name — gates the not-lose-casting-time modifiers.
     pub spell_family_name: u32,
-    /// `m_spellInfo->SpellFamilyFlags`.
+    /// The spell's family flags.
     pub spell_family_flags: u64,
     /// Running count of damage hits that have already triggered pushback for this cast.
     /// Starts at 0; each call computes its delay from this count and then increments it.
     pub delay_at_damage_count: u32,
-    /// `resistChance` after `SPELLMOD_NOT_LOSE_CASTING_TIME` has been applied to a base of 100.
+    /// The resist chance after the not-lose-casting-time modifier was applied to
+    /// a base of 100.
     pub resist_chance_after_spell_mods: i32,
-    /// `m_casterUnit->GetTotalAuraModifier(SPELL_AURA_RESIST_PUSHBACK)`.
+    /// The caster's total resist-pushback aura modifier.
     pub resist_pushback_aura_mod: i32,
 }
 
@@ -60,9 +60,9 @@ pub struct PushbackDecision {
     pub resisted: bool,
     /// Per-hit `delaytime` (0 when an early guard fired before a delay was computed).
     pub delaytime: u32,
-    /// New `m_timer` after pushback (clamped to `casttime`).
+    /// New timer after pushback (clamped to `casttime`).
     pub new_timer: u32,
-    /// `m_delayAtDamageCount` after this call (incremented only when a delay is computed).
+    /// New running damage-count after this call (incremented only when a delay is computed).
     pub new_count: u32,
 }
 
@@ -90,7 +90,7 @@ impl PushbackDecision {
     }
 }
 
-/// Pure `GetNextDelayAtDamageMsTime`: `(1000 - count*200).max(200)`.
+/// Pure per-hit delay: `(1000 - count*200).max(200)`.
 ///
 /// For `count` starting at 0 this yields 1000, 800, 600, 400, 200, 200, ...
 /// Rather than mutating a counter, the pure helper takes the current count and
@@ -100,24 +100,22 @@ pub fn get_next_delay_at_damage_ms_time(count: u32) -> u32 {
     1000u32.saturating_sub(count.saturating_mul(200)).max(200)
 }
 
-/// Pure clamp for `m_timer += delaytime`: returns the new timer, never exceeding `casttime`.
+/// Pure clamp for `timer += delaytime`: returns the new timer, never exceeding `casttime`.
 ///
 /// If `timer + delaytime` would overshoot `casttime`, the timer is pinned at `casttime`.
 pub fn apply_pushback_to_timer(timer: u32, casttime: u32, delaytime: u32) -> u32 {
     timer.saturating_add(delaytime).min(casttime)
 }
 
-/// Pure `roll_chance_i` predicate with the supplied `irand(0,99)` roll.
+/// Pure resist-roll predicate over a 0..=99 roll.
 ///
 /// Returns true when `chance > roll` (i.e. the pushback is resisted).
 pub fn roll_chance_i_with(chance: i32, roll: i32) -> bool {
     chance > roll
 }
 
-/// Pure final resist chance after the aura modifier.
-///
-/// Mirrors `resistChance += GetTotalAuraModifier(SPELL_AURA_RESIST_PUSHBACK) - 100`:
-/// the caster's pushback-resist aura total above 100 increases the resist chance.
+/// Pure final resist chance after the aura modifier: the caster's
+/// pushback-resist aura total above 100 increases the resist chance.
 pub fn compute_resist_chance(
     resist_chance_after_spell_mods: i32,
     resist_pushback_aura_mod: i32,
@@ -125,20 +123,20 @@ pub fn compute_resist_chance(
     resist_chance_after_spell_mods + (resist_pushback_aura_mod - 100)
 }
 
-/// `m_spellInfo->InterruptFlags & SPELL_INTERRUPT_FLAG_DAMAGE_PUSHBACK`.
+/// Whether the spell's interrupt flags carry the damage-pushback bit.
 pub fn has_damage_pushback_flag(interrupt_flags: u32) -> bool {
     interrupt_flags & SPELL_INTERRUPT_FLAG_DAMAGE_PUSHBACK != 0
 }
 
-/// Pure decision mirroring the body of the original method.
+/// Pure decision for a single damage event.
 ///
-/// Order of guards, faithful to the spec:
+/// Order of guards:
 /// 1. If the cast is already delayed, no pushback (can't time-back a delayed cast).
 /// 2. If the spell is not flagged for damage pushback, no pushback.
 /// 3. Roll the resist chance; on success the pushback is resisted (no delay).
 /// 4. Compute the per-hit delay from the running count and apply it to the timer.
 ///
-/// `roll` is `irand(0,99)` — supply a fixed value for deterministic tests.
+/// `roll` is a 0..=99 roll — supply a fixed value for deterministic tests.
 pub fn push_back_decision(input: &DelayCastInput, roll: i32) -> PushbackDecision {
     if input.state == SpellState::Delayed {
         return PushbackDecision::passthrough(input.timer, input.delay_at_damage_count);
@@ -170,8 +168,8 @@ pub fn push_back_decision(input: &DelayCastInput, roll: i32) -> PushbackDecision
     }
 }
 
-/// `Player::ApplySpellMod(m_spellInfo->Id, SPELLMOD_NOT_LOSE_CASTING_TIME, &resistChance)` —
-/// applied to an initial base of 100, returning the post-modifier value.
+/// Applies the not-lose-casting-time spell modifiers to an initial base of 100,
+/// returning the post-modifier value.
 pub fn apply_not_lose_casting_time_mod(
     modifiers: &[SpellMod],
     spell_family_name: u32,
@@ -193,7 +191,7 @@ pub fn apply_not_lose_casting_time_mod(
 /// caller owns `delay_at_damage_count` and must persist the returned
 /// `decision.new_count` between calls for the same cast.
 ///
-/// Mirrors every branch of the original method's guards and arithmetic.
+/// Mirrors every branch of the cast pushback guards and arithmetic.
 pub fn delayed(
     caster_guid: ObjectGuid,
     delay_at_damage_count: &mut u32,
@@ -231,14 +229,14 @@ pub fn delayed(
                 }
             };
 
-            // Step 1: resistChance = 100; Step 2: ApplySpellMod with SPELLMOD_NOT_LOSE_CASTING_TIME.
+            // Start from a 100 base and apply the not-lose-casting-time modifiers.
             let resist_chance_after_spell_mods = apply_not_lose_casting_time_mod(
                 &player.spells.spell_modifiers,
                 spell_entry.spell_family_name,
                 spell_entry.spell_family_flags,
             );
 
-            // Step 3: += GetTotalAuraModifier(SPELL_AURA_RESIST_PUSHBACK) - 100.
+            // Add the caster's resist-pushback aura modifier (over a base of 100).
             let resist_pushback_aura_mod = player
                 .auras
                 .container
@@ -257,7 +255,7 @@ pub fn delayed(
                 resist_pushback_aura_mod,
             };
 
-            // `irand(0,99)`.
+            // 0..=99 roll.
             let roll = (rand::random::<u32>() % 100) as i32;
             let decision = push_back_decision(&input, roll);
 
@@ -297,28 +295,29 @@ pub fn delayed(
 }
 
 // =============================================================================
-// Spell::DelayedChannel — channel-duration reduction on damage pushback.
+// Channel-delay pushback — channel-duration reduction on damage pushback.
 // =============================================================================
 
 /// Snapshot of the per-cast fields the channel-delay decision reads.
 ///
 /// Unlike [`DelayCastInput`], there is no `casttime` (the channel only ever
-/// shrinks toward zero) and no `interrupt_flags` gate: `Spell::DelayedChannel`
-/// never checks `SPELL_INTERRUPT_FLAG_DAMAGE_PUSHBACK`, its caller context
-/// (a channeled spell in `SPELL_STATE_CASTING`) is the only gate.
+/// shrinks toward zero) and no `interrupt_flags` gate: the channel-delay path
+/// never checks the damage-pushback interrupt flag; its caller context (a
+/// channeled spell in the casting state) is the only gate.
 #[derive(Debug, Clone, Copy)]
 pub struct ChannelDelayInput {
-    /// `m_spellInfo->Id`.
+    /// The spell's id.
     pub spell_id: u32,
-    /// `m_spellState` — must equal `SPELL_STATE_CASTING` for a delay to apply.
+    /// The cast state — must equal `SpellState::Casting` for a delay to apply.
     pub state: SpellState,
-    /// `m_timer` (remaining channel duration, ms).
+    /// Remaining channel duration, ms.
     pub timer: u32,
     /// Running count of damage hits that have already triggered pushback for this cast.
     pub delay_at_damage_count: u32,
-    /// `resistChance` after `SPELLMOD_NOT_LOSE_CASTING_TIME` has been applied to a base of 100.
+    /// The resist chance after the not-lose-casting-time modifier was applied to
+    /// a base of 100.
     pub resist_chance_after_spell_mods: i32,
-    /// `m_casterUnit->GetTotalAuraModifier(SPELL_AURA_RESIST_PUSHBACK)`.
+    /// The caster's total resist-pushback aura modifier.
     pub resist_pushback_aura_mod: i32,
 }
 
@@ -332,13 +331,12 @@ pub struct ChannelDelayDecision {
     /// Amount of channel time actually removed (clamped to the remaining timer).
     /// This is the value propagated to target aura holders and dynamic objects.
     pub delaytime: u32,
-    /// New `m_timer` after the reduction (0 when the channel is exhausted).
+    /// New timer after the reduction (0 when the channel is exhausted).
     pub new_timer: u32,
-    /// `m_delayAtDamageCount` after this call (incremented only when a delay is computed).
+    /// New running damage-count after this call (incremented only when a delay is computed).
     pub new_count: u32,
-    /// True when `new_timer` reached 0 — the channel should be interrupted
-    /// (`InterruptSpell(CURRENT_CHANNELED_SPELL)`); otherwise the client receives
-    /// a `SendChannelUpdate(new_timer)`.
+    /// True when `new_timer` reached 0 — the channel should be interrupted;
+    /// otherwise the client receives a channel-update with the new timer.
     pub interrupt: bool,
 }
 
@@ -368,10 +366,10 @@ impl ChannelDelayDecision {
     }
 }
 
-/// Pure clamp for the channel-shortening branch.
-///
-/// Mirrors `if (m_timer < delaytime) { delaytime = m_timer; m_timer = 0; } else
-/// m_timer -= delaytime;`. Returns `(new_timer, applied_delaytime)` where
+/// Pure clamp for the channel-shortening branch: when the remaining timer is
+/// smaller than the requested delay, the delay is clamped to the timer and the
+/// timer zeroed; otherwise the delay is subtracted. Returns
+/// `(new_timer, applied_delaytime)` where
 /// `applied_delaytime` is the amount actually removed (never more than the
 /// remaining timer), which the original propagates to targets/dynamic objects.
 pub fn clamp_channel_delay(timer: u32, delaytime: u32) -> (u32, u32) {
@@ -382,15 +380,15 @@ pub fn clamp_channel_delay(timer: u32, delaytime: u32) -> (u32, u32) {
     }
 }
 
-/// Pure decision mirroring the body of `Spell::DelayedChannel`.
+/// Pure channel-delay decision.
 ///
-/// Order of guards, faithful to the spec:
-/// 1. If the channel is not in `SPELL_STATE_CASTING`, no delay.
+/// Order of guards:
+/// 1. If the channel is not casting, no delay.
 /// 2. Roll the resist chance; on success the pushback is resisted (no delay).
 /// 3. Compute the per-hit delay from the running count, subtract it from the
 ///    timer (clamped to zero), and flag interruption if the timer is exhausted.
 ///
-/// `roll` is `irand(0,99)` — supply a fixed value for deterministic tests.
+/// `roll` is a 0..=99 roll — supply a fixed value for deterministic tests.
 pub fn delayed_channel_decision(input: &ChannelDelayInput, roll: i32) -> ChannelDelayDecision {
     if input.state != SpellState::Casting {
         return ChannelDelayDecision::passthrough(input.timer, input.delay_at_damage_count);
@@ -419,7 +417,7 @@ pub fn delayed_channel_decision(input: &ChannelDelayInput, roll: i32) -> Channel
     }
 }
 
-/// World-coupled entry mirroring `Spell::DelayedChannel`.
+/// World-coupled entry.
 ///
 /// Shortens the remaining duration of the caster's active channeled spell when
 /// the caster (a player) takes damage. The caller owns `delay_at_damage_count`
@@ -427,12 +425,11 @@ pub fn delayed_channel_decision(input: &ChannelDelayInput, roll: i32) -> Channel
 /// cast.
 ///
 /// The timer reduction is applied to the Channeled slot's active cast. The
-/// remaining original side effects are not yet wired (missing primitives, and
-/// the channeled event queue is owned by the cast system): propagating the delay
-/// to each hit target's aura holders (`DelaySpellAuraHolder`) and persistent
-/// dynamic objects (`DynamicObject::Delay`), the `SendChannelUpdate` client
-/// packet, and the `InterruptSpell(CURRENT_CHANNELED_SPELL)` on a zeroed timer —
-/// the latter is surfaced via `decision.interrupt` for the caller to act on.
+/// remaining side effects are not yet wired (missing primitives, and the
+/// channeled event queue is owned by the cast system): propagating the delay to
+/// each hit target's aura holders and persistent dynamic objects, the
+/// channel-update client packet, and the interrupt on a zeroed timer — the
+/// latter is surfaced via `decision.interrupt` for the caller to act on.
 pub fn delayed_channel(
     caster_guid: ObjectGuid,
     delay_at_damage_count: &mut u32,
@@ -455,7 +452,7 @@ pub fn delayed_channel(
                     None => return ChannelDelayDecision::passthrough(0, *delay_at_damage_count),
                 };
 
-            // getState() != SPELL_STATE_CASTING → early return.
+            // Not in the casting state → early return.
             if active.state != SpellState::Casting {
                 return ChannelDelayDecision::passthrough(
                     active.cast_time_remaining_ms,
@@ -464,7 +461,7 @@ pub fn delayed_channel(
             }
 
             // Spell entry is only needed for the family fields that gate the
-            // SPELLMOD_NOT_LOSE_CASTING_TIME modifiers.
+            // not-lose-casting-time modifiers.
             let spell_entry = match world.managers.spell_mgr.get(active.spell_id) {
                 Some(entry) => entry,
                 None => {
@@ -475,8 +472,8 @@ pub fn delayed_channel(
                 }
             };
 
-            // resistChance = 100; ApplySpellMod(SPELLMOD_NOT_LOSE_CASTING_TIME);
-            // += GetTotalAuraModifier(SPELL_AURA_RESIST_PUSHBACK) - 100.
+            // Start from a 100 base, apply the not-lose-casting-time modifiers,
+            // then add the caster's resist-pushback aura modifier.
             let resist_chance_after_spell_mods = apply_not_lose_casting_time_mod(
                 &player.spells.spell_modifiers,
                 spell_entry.spell_family_name,
@@ -496,7 +493,7 @@ pub fn delayed_channel(
                 resist_pushback_aura_mod,
             };
 
-            // `irand(0,99)`.
+            // 0..=99 roll.
             let roll = (rand::random::<u32>() % 100) as i32;
             let decision = delayed_channel_decision(&input, roll);
 
@@ -516,9 +513,9 @@ pub fn delayed_channel(
                     }
                 );
 
-                // Not yet wired: DelaySpellAuraHolder per hit target,
-                // DynamicObject::Delay for persistent area auras, and
-                // InterruptSpell(CURRENT_CHANNELED_SPELL) on interrupt.
+                // Not yet wired: aura-holder delay per hit target,
+                // dynamic-object delay for persistent area auras, and
+                // the channel interrupt on a zeroed timer.
             }
 
             decision
@@ -712,7 +709,7 @@ mod tests {
         assert!(!has_damage_pushback_flag(0x10));
     }
 
-    // === Spell::DelayedChannel ===
+    // === Channel-delay pushback ===
 
     fn channel_input(timer: u32, count: u32) -> ChannelDelayInput {
         ChannelDelayInput {

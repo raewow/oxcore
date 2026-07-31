@@ -160,8 +160,8 @@ pub fn is_spell_proc_event_can_triggered_by(
 /// this re-checks per-aura against the *triggering* spell's class mask, called once per effect
 /// index from the proc-processing loop.
 ///
-/// - `affect_mask`: `SpellMgr::GetSpellAffectMask(auraSpellId, effIndex)` — the aura's own
-///   effect class mask (`spell_affect` table / `EffectItemType`), falling back to the aura
+/// - `affect_mask`: the aura's own effect class mask (`spell_affect` table /
+///   `EffectItemType`), falling back to the aura
 ///   spell's `spell_proc_event.spellFamilyMask[effIndex]` when the affect mask is zero (the
 ///   caller is expected to have already applied that fallback, since neither table is modeled
 ///   as a first-class lookup here yet).

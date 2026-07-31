@@ -324,7 +324,7 @@ async fn handle_periodic_mana_leech(
 /// Approximation: `AuraTickSnapshot` does not carry the effect index the aura lives on, so the
 /// triggered spell id is recovered by scanning the spell's three effect slots for the one whose
 /// `effect_apply_aura_name` is `AURA_PERIODIC_TRIGGER_SPELL` (matching the code that assigned
-/// this aura type) rather than reading `EffectTriggerSpell[m_effIndex]` directly. This is exact
+/// this aura type) rather than reading `EffectTriggerSpell[effIndex]` directly. This is exact
 /// for the overwhelming majority of spells, which only place one periodic-trigger effect per
 /// spell; a spell with two such effects at different indices with different trigger spells would
 /// pick the first match instead of the aura's own slot.

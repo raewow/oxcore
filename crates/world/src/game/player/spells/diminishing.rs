@@ -86,14 +86,14 @@ pub struct DiminishSnapshot {
     pub group: DRGroup,
     /// The target's level in that group *before* this hit incremented it.
     pub level: u8,
-    /// Whether `Unit::ApplyDiminishingToDuration` would actually shorten this hit's
-    /// durations. False for a group with no DR, for a friendly (non-reflected) caster,
+    /// Whether this hit's auras would have their durations shortened.
+    /// False for a group with no DR, for a friendly (non-reflected) caster,
     /// and for a `DRTYPE_PLAYER` group outside a player-versus-player pair.
     pub diminishes_duration: bool,
 }
 
 impl DiminishSnapshot {
-    /// Apply the snapshot to an aura duration (`Unit::ApplyDiminishingToDuration`).
+    /// Apply the snapshot to an aura duration.
     /// Permanent auras (`None`) are never diminished.
     pub fn apply_to_duration(&self, duration_ms: Option<u32>) -> Option<u32> {
         let duration = duration_ms?;
@@ -167,8 +167,8 @@ impl DiminishingState {
         state.level
     }
 
-    /// Raise the diminishing level for a group by one, capped at immunity
-    /// (`Unit::IncrDiminishing`). A group seen for the first time goes straight to level 1,
+    /// Raise the diminishing level for a group by one, capped at immunity.
+    /// A group seen for the first time goes straight to level 1,
     /// because the hit doing the incrementing has already consumed level 0.
     pub fn incr_diminishing(&mut self, group: DRGroup, now_ms: u64) {
         let state = self.groups.entry(group).or_insert(DRState {
@@ -180,7 +180,7 @@ impl DiminishingState {
         state.last_applied_ms = now_ms;
     }
 
-    /// Track an aura of this group being applied (`Unit::ApplyDiminishingAura(group, true)`).
+    /// Track an aura of this group being applied.
     /// The reset timer only starts once the last aura of the group has dropped.
     pub fn add_aura(&mut self, group: DRGroup, now_ms: u64) {
         let state = self.groups.entry(group).or_insert(DRState {

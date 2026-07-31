@@ -278,7 +278,7 @@ pub fn validate_cast(
                 }
 
                 // Check if target is dead (unless spell targets dead)
-                // SPELL_ATTR_EX2_CAN_TARGET_DEAD = 0x00000800
+                // can-target-dead attribute = 0x00000800
                 let can_target_dead = (spell_data.attributes_ex2 & 0x00000800) != 0;
                 if !can_target_dead {
                     let target_dead = if target.is_player() {
@@ -424,13 +424,13 @@ pub fn can_cast_while_moving(spell_id: u32, world: &World) -> bool {
         return true; // Instant cast = can move
     }
 
-    // Check SPELL_ATTR_EX5_USABLE_WHILE_MOVING or similar flags
+    // Check the usable-while-moving attribute or similar flags
     // For vanilla 1.12.1, there's no such flag - cast-time spells always cancel on move
     false
 }
 
-/// Convert SpellCastError to the vanilla 1.12.1 client SpellCastResult enum value.
-/// Values from mangos/src/game/Spells/SpellDefines.h (vanilla 1.12.x build).
+/// Convert SpellCastError to the vanilla 1.12.1 client spell-cast-failed result
+/// byte value.
 pub fn spell_cast_error_to_u8(error: SpellCastError) -> u8 {
     use SpellCastError::*;
     match error {
@@ -505,9 +505,9 @@ pub fn spell_cast_error_to_u8(error: SpellCastError) -> u8 {
     }
 }
 
-// ─── Spell::IgnoreItemRequirements ───────────────────────────────────────────
+// ─── IgnoreItemRequirements ──────────────────────────────────────────────────
 //
-// C++ lines 7062–7077. Pure boolean; determines whether reagent/item checks
+// Pure boolean; determines whether reagent/item checks
 // should be skipped for a triggered spell.
 //
 // Rules (in order):
@@ -536,9 +536,9 @@ pub fn ignore_item_requirements(
     }
 }
 
-// ─── Spell::CheckPower ───────────────────────────────────────────────────────
+// ─── CheckPower ──────────────────────────────────────────────────────────────
 //
-// C++ lines 7022–7060. Validates that the caster has enough of the required
+// Validates that the caster has enough of the required
 // power resource to cast the spell.
 //
 // Bypasses (all return Ok immediately):
@@ -558,13 +558,13 @@ pub fn check_power(
     has_caster_unit: bool,
     // spell requires combo points (NeedsComboPoints())
     needs_combo_points: bool,
-    // effect 0 uses an explicitly selected unit target (IsExplicitlySelectedUnitTarget)
+    // effect 0 uses an explicitly selected unit target
     effect_0_explicit_unit_target: bool,
     unit_target_guid: Option<ObjectGuid>,
     combo_target_guid: Option<ObjectGuid>,
     // CLASS_WARRIOR = 1 in vanilla
     caster_class: u8,
-    // powerType from SpellEntry: 0=mana,1=rage,2=focus,3=energy,4=happiness,-2=health
+    // powerType from the spell entry: 0=mana,1=rage,2=focus,3=energy,4=happiness,-2=health
     power_type: i32,
     power_cost: i32,
     caster_health: u32,
@@ -618,9 +618,9 @@ pub fn check_power(
     SpellCastError::None
 }
 
-// ─── Spell::CheckTamingSpell ──────────────────────────────────────────────────
+// ─── CheckTamingSpell ────────────────────────────────────────────────────────
 //
-// C++ lines 6829–6852. Validates all preconditions for taming a creature.
+// Validates all preconditions for taming a creature.
 // Returns a PetTameFailure reason; None means success (PETTAME_NONE).
 //
 // Checks (in order):
@@ -685,24 +685,24 @@ pub fn check_taming_spell(
     None
 }
 
-// ─── Spell::CheckRange ───────────────────────────────────────────────────────
+// ─── CheckRange ──────────────────────────────────────────────────────────────
 //
-// C++ lines 6854–6946. Validates spell range against target.
+// Validates spell range against target.
 //
 // Special range indices:
 //   SELF_ONLY (1): always OK
-//   COMBAT (2): melee range — facing check + CanReachWithMeleeSpellAttack
+//   COMBAT (2): melee range — facing check + melee-spell reach
 //
 // Generic range:
 //   range_mod = strict ? (player 1.25 / non-player 0.0) : (player 6.25 / non-player 2.25)
 //              + leeway_bonus (both units moving)
-//   max_range from DBC + SPELLMOD_RANGE + range_mod
-//   GO target: IsAtInteractDistance(max_range)
+//   max_range from DBC + range modifier + range_mod
+//   GO target: within interact distance (max_range)
 //   Unit target: dist > max → OutOfRange; dist < min → TooClose; face check if CUSTOM flag
 //   Dest location: 3D dist check vs max/min
 //
 // Caller is responsible for pet implicit-target replacement (if any effect uses
-// TARGET_UNIT_CASTER_PET, substitute pet for unit_target before calling).
+// the caster's-pet implicit target, substitute pet for unit_target before calling).
 
 pub const RANGE_INDEX_SELF: u32 = 1;
 pub const RANGE_INDEX_COMBAT: u32 = 2;
@@ -719,7 +719,7 @@ pub struct CheckRangeInput {
     pub combat_range_mod: f32,
     pub can_reach_melee: bool,
     // Generic-range fields
-    // max/min from DBC, SPELLMOD_RANGE already applied by caller
+    // max/min from DBC, range modifier already applied by caller
     pub max_range: f32,
     pub min_range: f32,
     // GO target: Some(true) = in range, Some(false) = out of range, None = no GO target
@@ -801,24 +801,24 @@ pub fn check_range(input: &CheckRangeInput) -> SpellCastError {
     SpellCastError::None
 }
 
-// ─── Spell::CheckCasterAuras ─────────────────────────────────────────────────
+// ─── CheckCasterAuras ────────────────────────────────────────────────────────
 //
-// C++ lines 6559–6676. Checks whether any unit-state aura (stun, fear, silence,
+// Checks whether any unit-state aura (stun, fear, silence,
 // pacify, confuse) prevents the cast, accounting for any immunity the spell
 // being cast might grant.
 //
 // Bypasses:
 //   - no caster unit
-//   - spell ignores caster/target restrictions (IsIgnoringCasterAndTargetRestrictions)
+//   - spell ignores caster/target restrictions
 //
-// Immunity mask building (SPELL_ATTR_EX_IMMUNITY_PURGES_EFFECT):
+// Immunity mask building (immunity-purges-effect attribute):
 //   Reads the spell's own effect aura names to build school/mechanic/dispel immunity
 //   masks. These are passed in pre-built by the caller.
 //
 // Prevention logic (in priority order):
 //   1. STUNNED + (instant OR has STUN interrupt flag) → Stunned
 //   2. CONFUSED → Confused
-//   3. FLEEING → Fleeing (build ≤1.6.1: also set if has SPELL_AURA_MOD_FEAR aura)
+//   3. FLEEING → Fleeing (build ≤1.6.1: also set if has a fear aura)
 //   4. PreventionType==SILENCE + (SILENCED flag OR school lockout) → Silenced
 //   5. PreventionType==PACIFY + PACIFIED flag → Pacified
 //
@@ -844,18 +844,18 @@ pub struct CasterAuraCheckInput {
     pub dispel_immune: u32,
 }
 
-// UNIT_FLAG constants (from MaNGOS UnitDefines.h)
+// Unit-flag constants used by the caster-aura checks.
 const UNIT_FLAG_STUNNED: u32 = 0x00040000;
 const UNIT_FLAG_CONFUSED: u32 = 0x00000004;
 const UNIT_FLAG_FLEEING: u32 = 0x00000800;
 const UNIT_FLAG_SILENCED: u32 = 0x00002000;
 const UNIT_FLAG_PACIFIED: u32 = 0x00020000;
 
-// MECHANIC bit positions (1-indexed in C++: 1 << (MECHANIC_X - 1))
-const MECHANIC_STUN_BIT: u32 = 1 << 11; // MECHANIC_STUN = 12
-const MECHANIC_FEAR_BIT: u32 = 1 << 7; // MECHANIC_FEAR = 8
+// Mechanic bit positions (1-indexed: 1 << (mechanic - 1)).
+const MECHANIC_STUN_BIT: u32 = 1 << 11; // stun mechanic = 12
+const MECHANIC_FEAR_BIT: u32 = 1 << 7; // fear mechanic = 8
                                        // CONFUSED_MECHANIC_MASK covers disoriented + confused mechanics
-const CONFUSED_MECHANIC_MASK: u32 = (1 << 4) | (1 << 22); // MECHANIC_DISORIENTED=5, MECHANIC_CONFUSED=23
+const CONFUSED_MECHANIC_MASK: u32 = (1 << 4) | (1 << 22); // disoriented = 5, confused = 23
 
 const SPELL_PREVENTION_TYPE_SILENCE: u8 = 1;
 const SPELL_PREVENTION_TYPE_PACIFY: u8 = 2;
@@ -909,12 +909,12 @@ fn mechanic_immune_bit(mechanic_immune: u32, bit: u32) -> u32 {
     mechanic_immune & bit
 }
 
-// ─── Spell::CheckItems ───────────────────────────────────────────────────────
+// ─── CheckItems ──────────────────────────────────────────────────────────────
 //
-// C++ lines 7079–7459. Validates item and equipment requirements before a spell fires.
+// Validates item and equipment requirements before a spell fires.
 // All deep inventory lookups are pre-resolved by the caller into this struct.
 //
-// Sections (in C++ order):
+// Sections (in order):
 //   1. Creature weapon-disarm check for WEAPON_DAMAGE effects
 //   2. Non-player → Ok
 //   3. Cast-item checks (trade, inventory, charges, consumable full-resource)
@@ -945,9 +945,9 @@ pub struct CastItemData {
     pub is_in_trade: bool,
     pub is_in_inventory: bool,
     pub proto_exists: bool,
-    /// GetSpellCharges for spell slots 0..4; 0 means that slot is not a charge spell
+    /// Spell charges for spell slots 0..4; 0 means that slot is not a charge spell
     pub charges: [i32; 5],
-    /// proto->Spells[s].SpellCharges for spell slots 0..4
+    /// Item-spell charges from the item proto for spell slots 0..4
     pub proto_spell_charges: [i32; 5],
     /// True if the item class is ITEM_CLASS_CONSUMABLE
     pub is_consumable: bool,
@@ -970,10 +970,10 @@ pub struct ItemTargetData {
 #[derive(Debug, Clone)]
 pub struct EnchantItemData {
     pub target_exists: bool,
-    pub item_level_ok: bool, // item.GetProto()->ItemLevel >= spell.baseLevel
+    pub item_level_ok: bool, // item's item level >= spell base level
     pub owner_is_caster: bool,
-    pub own_item_only_attr: bool, // SPELL_ATTR_EX2_ENCHANT_OWN_ITEM_ONLY
-    pub enchant_can_soulbound: bool, // pEnchant->slot & ENCHANTMENT_CAN_SOULBOUND
+    pub own_item_only_attr: bool,      // own-item-only enchant attribute
+    pub enchant_can_soulbound: bool,   // enchantment slot allows soulbound items
     pub enchant_entry_exists: bool,
 }
 
@@ -984,7 +984,7 @@ pub struct DisenchantData {
     pub owner_is_caster: bool,
     pub proto_exists: bool,
     pub has_disenchant_id: bool,
-    pub flagged_no_disenchant: bool, // ITEM_FLAG_NO_DISENCHANT
+    pub flagged_no_disenchant: bool, // no-disenchant item flag
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1006,8 +1006,8 @@ pub struct WeaponDamageRangedData {
     /// For gun/bow/xbow: PLAYER_AMMO_ID != 0
     pub ammo_id_set: bool,
     pub ammo_proto_exists: bool,
-    pub ammo_needs_exotic: bool, // SPELL_ATTR_NEED_EXOTIC_AMMO on the spell
-    pub ammo_is_exotic: bool,    // ITEM_FLAG_EXOTIC on ammo proto
+    pub ammo_needs_exotic: bool, // need-exotic-ammo attribute on the spell
+    pub ammo_is_exotic: bool,    // exotic item flag on ammo proto
     pub ammo_is_projectile_class: bool,
     pub ammo_matches_weapon: bool, // arrow for bow/xbow, bullet for gun
     pub ammo_has_count: bool,      // player has at least 1 ammo
@@ -1029,9 +1029,9 @@ pub struct CheckItemsInput {
     pub totem: [u32; 2],
 
     pub requires_spell_focus: bool,
-    pub held_item_only_attr: bool,     // SPELL_ATTR_HELD_ITEM_ONLY
-    pub requires_main_hand_attr: bool, // SPELL_ATTR_EX3_REQUIRES_MAIN_HAND_WEAPON (build > 1.5.1)
-    pub requires_offhand_attr: bool,   // SPELL_ATTR_EX3_REQUIRES_OFFHAND_WEAPON (build > 1.9.4)
+    pub held_item_only_attr: bool,     // held-item-only attribute
+    pub requires_main_hand_attr: bool, // requires-main-hand-weapon attribute (build > 1.5.1)
+    pub requires_offhand_attr: bool,   // requires-offhand-weapon attribute (build > 1.9.4)
 
     // === Section 1: Creature weapon ===
     pub creature_has_weapon_but_disarmed: bool,
@@ -1047,7 +1047,7 @@ pub struct CheckItemsInput {
     pub item_target_guid_set: bool,
     pub item_target: Option<ItemTargetData>,
     pub item_target_is_trade_mask: bool, // (target_mask & TARGET_FLAG_TRADE_ITEM) != 0
-    // When no item target: Some(bool) = HasItemFitToSpellRequirements, None = non-player
+    // When no item target: Some(bool) = item-fit-to-spell-requirements result, None = non-player
     pub player_has_fit_equipment: Option<bool>,
 
     // === Section 5: Spell focus ===
@@ -1389,13 +1389,13 @@ pub fn check_items(input: &CheckItemsInput) -> SpellCastError {
     SpellCastError::None
 }
 
-// ─── Spell::CheckCast ────────────────────────────────────────────────────────
+// ─── CheckCast ───────────────────────────────────────────────────────────────
 //
-// C++ lines 5347–6479. The master pre-cast validation gate. Delegates to all
+// The master pre-cast validation gate. Delegates to all
 // sub-validation functions. All world-state lookups are pre-resolved by the
 // caller into CheckCastInput.
 //
-// Section order (mirrors C++ exactly):
+// Section order:
 //   0. GM cheat bypass
 //   1. Standing check (non-triggered)
 //   2. Player cooldown (non-triggered, player only)
@@ -1408,7 +1408,7 @@ pub fn check_items(input: &CheckItemsInput) -> SpellCastError {
 //   8. NO_ACTIVE_PETS player gate
 //   9. Unit target block: aura-applies checks, death-only, level range,
 //      LoS, combat, rank, creature type, targeting mode, immune, facing
-//  10. Pet-target effect block (TARGET_UNIT_CASTER_PET)
+//  10. Pet-target effect block (caster's-pet implicit target)
 //  11. GO target immunity check
 //  12. Dest LoS (empty targets)
 //  13. Zone/location gate
@@ -1421,7 +1421,7 @@ pub fn check_items(input: &CheckItemsInput) -> SpellCastError {
 //  20. Per-effect switch (pre-resolved by caller into `per_effect_results`)
 //
 // Gaps (not yet wired to world state):
-//  - Loatheb SPELL_AURA_OVERRIDE_CLASS_SCRIPTS (class-specific heal/dispel block)
+//  - Loatheb override-class-scripts aura (class-specific heal/dispel block)
 //  - OPEN_LOCK BattleGround flag/banner checks
 //  - CHARGE path-finding (PATHFIND_INCOMPLETE → NOPATH)
 //  - LEAP/BLINK battleground state checks
@@ -1453,13 +1453,13 @@ pub struct CheckCastInput {
     pub spell_allow_while_dead: bool,
 
     // === Section 4: GCD / BG / combat / mask / shapeshift (strict, non-triggered) ===
-    pub gcd_active: bool,         // HasGCD(spell), strict only
+    pub gcd_active: bool,         // GCD active for the spell, strict only
     pub battleground_ended: bool, // bg status == STATUS_WAIT_LEAVE
     pub caster_is_in_combat: bool,
     pub spell_is_non_combat: bool,
     pub explicit_target_mask_valid: bool, // ValidateExplicitTargetMask result
-    pub is_client_started: bool,          // m_isClientStarted flag
-    pub shapeshift_error: SpellCastError, // GetErrorAtShapeshiftedCast (SpellCastError::None = ok)
+    pub is_client_started: bool,          // client-started flag
+    pub shapeshift_error: SpellCastError, // error from the shapeshifted-cast check (None = ok)
     pub spell_only_stealthed: bool,
     pub caster_has_stealth_aura: bool,
 
@@ -1491,12 +1491,12 @@ pub struct CheckCastInput {
     pub targets_empty: bool,
 
     // Unit target: aura-applies block (positive spell, applies-aura, non-AoE)
-    pub spell_applies_aura_non_aoe: bool, // IsSpellAppliesAura && !IsAoE
+    pub spell_applies_aura_non_aoe: bool, // applies-aura spell and not area-of-effect
     pub target_aura_bounced: bool,
     pub target_is_shapeshifted: bool,
     pub target_is_mounted: bool,
-    pub spell_interrupt_shapeshifting: bool, // HasAuraInterruptFlag(SHAPESHIFTING_CANCELS)
-    pub spell_interrupt_mount: bool,         // HasAuraInterruptFlag(MOUNT_CANCELS)
+    pub spell_interrupt_shapeshifting: bool, // aura-interrupt flag for shapeshifting
+    pub spell_interrupt_mount: bool,         // aura-interrupt flag for mounting
 
     // Unit target: general state
     pub spell_death_only: bool,
@@ -1520,33 +1520,33 @@ pub struct CheckCastInput {
     pub target_tapped_by_others: bool,
     pub spell_only_on_player: bool,
     pub target_is_player: bool,
-    pub spell_is_aoe: bool, // IsAreaOfEffectSpell() — exempts ONLY_ON_PLAYER gate
+    pub spell_is_aoe: bool, // Whether the spell is area-of-effect — exempts the only-on-player gate
 
     // Unit target: creature type and targeting mode
-    pub target_creature_type_ok: bool, // CheckTargetCreatureType
-    pub target_is_valid_help: bool,    // IsValidHelpfulTarget (explicit positive effects)
-    pub target_is_valid_attack: bool,  // IsValidAttackTarget (explicit negative effects)
-    pub has_explicit_positive_effect: bool, // any IsExplicitPositiveTarget in effects
+    pub target_creature_type_ok: bool, // Whether the target passes the creature-type check
+    pub target_is_valid_help: bool,    // Whether the target is a valid help target (explicit positive effects)
+    pub target_is_valid_attack: bool,  // Whether the target is a valid attack target (explicit negative effects)
+    pub has_explicit_positive_effect: bool, // whether any effect explicitly targets something positive
     pub has_explicit_negative_effect: bool,
     pub caster_is_creature_with_owner: bool, // for pet/charmed extra check
-    pub spell_is_positive_simple: bool,      // IsPositiveSpell() no target context
+    pub spell_is_positive_simple: bool,      // Whether the spell is positive, with no target context
     pub spell_has_dispel: bool,
 
     // Unit target: immune, facing, positive context
     pub target_immune_to_spell: bool,
-    pub spell_is_positive_for_target: bool, // IsPositiveSpell(caster, target)
+    pub spell_is_positive_for_target: bool, // Whether the spell is positive for this target
     pub spell_is_from_behind: bool,
     pub caster_is_behind_target: bool,
-    pub spell_target_faces_caster: bool, // Attributes == 0x150010 special check
+    pub spell_target_faces_caster: bool, // Attributes == 0x150010 behind-target special check
     pub target_faces_caster: bool,
 
     // Unit target: pet-target effect block
-    pub has_pet_target_effect: bool, // any EffectImplicitTargetA == TARGET_UNIT_CASTER_PET
+    pub has_pet_target_effect: bool, // whether any implicit-target field is the caster's pet
     pub pet_exists: bool,
     pub pet_is_alive: bool,
     pub pet_in_los: bool,
-    pub is_triggered_by_aura_spell: bool, // m_triggeredByAuraSpell != nullptr
-    pub target_alive_state_ok: bool,      // CanTargetAliveState for explicit non-pet effects
+    pub is_triggered_by_aura_spell: bool, // whether the spell is triggered by an aura
+    pub target_alive_state_ok: bool,      // whether explicit non-pet effects accept the target's alive state
 
     // GO target
     pub go_immune_under_immunity: bool,
@@ -1555,7 +1555,7 @@ pub struct CheckCastInput {
     pub dest_in_los: bool,
 
     // === Section 13: Zone ===
-    pub location_error: SpellCastError, // GetSpellAllowedInLocationError
+    pub location_error: SpellCastError, // error from the zone/location gate
 
     // === Section 14: Mounted ===
     pub caster_is_mounted: bool,
@@ -1567,7 +1567,7 @@ pub struct CheckCastInput {
     // Caller must invoke each sub-function and pass the result.
     pub items_result: SpellCastError, // check_items result (non-passive)
     pub range_result: SpellCastError, // check_range result (non-triggered)
-    pub bg_spell_check: SpellCastError, // bg->CheckSpellCast (None if not in BG)
+    pub bg_spell_check: SpellCastError, // battleground cast check (None if not in BG)
     pub power_result: SpellCastError, // check_power result (non-triggered)
     pub aura_result: SpellCastError,  // check_caster_auras result (non-triggered)
 
@@ -1763,7 +1763,7 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
             }
         }
 
-        // Pet-target effect check (TARGET_UNIT_CASTER_PET)
+        // Pet-target effect check (caster's-pet implicit target)
         if input.has_pet_target_effect {
             if !input.pet_exists {
                 return if input.is_triggered_by_aura_spell {
@@ -1862,7 +1862,7 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
         if input.caster_is_taxiing {
             return SpellCastError::NotOnTaxi;
         }
-        // Non-taxiing: the C++ unmounts the player (side effect, not modelled here)
+        // Non-taxiing: unmounting the player is a side effect not modelled here.
     }
 
     // 15. CheckItems (non-passive) — pre-computed by caller
@@ -1925,12 +1925,12 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
     SpellCastError::None
 }
 
-// ─── PlayerAI::CanCastSpell ──────────────────────────────────────────────────
+// ─── PlayerAiCanCastSpell ────────────────────────────────────────────────────
 //
-// C++ PlayerAI.cpp 39–81. Whether an AI-controlled player may cast `pSpell` at
-// `pTarget`. Pure over pre-resolved caster/target/spell state.
+// Whether an AI-controlled player may cast the spell at the target.
+// Pure over pre-resolved caster/target/spell state.
 //
-// Order (mirrors C++):
+// Order:
 //   1. No target → false.
 //   2. Non-triggered gate: react-state, silence/pacify prevention, power.
 //   3. Range: if a range entry exists, out-of-range/too-close (skipped for self)
@@ -1940,11 +1940,11 @@ pub fn check_cast(input: &CheckCastInput) -> SpellCastError {
 pub struct PlayerAiCanCastInput {
     pub target_exists: bool,
     pub is_triggered: bool,
-    /// checkControlled arg — selects the stricter react-state mask.
+    /// Whether to use the stricter lost-control react-state mask.
     pub check_controlled: bool,
-    /// HasUnitState(UNIT_STATE_CAN_NOT_REACT).
+    /// Caster has the cannot-react unit state.
     pub caster_cannot_react: bool,
-    /// HasUnitState(UNIT_STATE_CAN_NOT_REACT_OR_LOST_CONTROL).
+    /// Caster has the cannot-react-or-lost-control unit state.
     pub caster_cannot_react_or_lost_control: bool,
     pub spell_prevention_type: u8,
     pub caster_silenced: bool,
@@ -1952,9 +1952,9 @@ pub struct PlayerAiCanCastInput {
     pub caster_power: u32,
     pub spell_mana_cost: u32,
     pub target_is_self: bool,
-    /// sSpellRangeStore.LookupEntry(rangeIndex) resolved to a range entry.
+    /// Whether a range entry exists for the spell's range index.
     pub has_range_entry: bool,
-    /// GetCombatDistance(pTarget).
+    /// Distance to the target.
     pub distance: f32,
     pub max_range: f32,
     pub min_range: f32,
@@ -2003,9 +2003,9 @@ pub fn player_ai_can_cast_spell(input: &PlayerAiCanCastInput) -> bool {
     false
 }
 
-// ─── Spell::CheckPetCast ─────────────────────────────────────────────────────
+// ─── CheckPetCast ─────────────────────────────────────────────────────────────
 //
-// C++ lines 6481–6557. Pet-cast wrapper that validates pet-specific preconditions
+// Pet-cast wrapper that validates pet-specific preconditions
 // then delegates to check_cast(strict=true). All world-state lookups are
 // pre-resolved by the caller.
 //
@@ -2020,16 +2020,16 @@ pub struct CheckPetCastInput {
 
     // Pet / charmed caster block (only evaluated when caster is pet/charmed creature)
     pub caster_is_pet_or_charmed: bool,
-    pub owner_is_alive: bool, // GetCharmerOrOwner()->IsAlive(); true if no owner
-    pub target_resolved: bool, // after fallback: m_targets.getUnitTarget() exists
-    pub effects_need_unit_target: bool, // any EffectImplicitTargetA in target-requiring set
-    pub target_is_explicitly_selected: bool, // IsExplicitlySelectedUnitTarget(effect[0])
-    pub target_is_targetable: bool, // IsTargetableBy(caster, false, true, positive)
+    pub owner_is_alive: bool,            // owner alive; true when there is no owner
+    pub target_resolved: bool,           // whether a unit target resolved (after fallback)
+    pub effects_need_unit_target: bool,  // any implicit-target field in target-requiring set
+    pub target_is_explicitly_selected: bool, // whether the unit target was explicitly selected
+    pub target_is_targetable: bool,      // whether the target is targetable by the caster
     pub caster_is_hostile_to_target: bool,
     pub spell_is_positive_for_target: bool,
-    pub check_valid_attack_target: bool, // true unless any effect = TARGET_UNIT/_CONE/_SRC
-    pub target_is_valid_attack: bool,    // IsValidAttackTarget
-    pub spell_is_ready: bool,            // IsSpellReady
+    pub check_valid_attack_target: bool, // true unless any effect uses a unit/cone/source implicit-target form
+    pub target_is_valid_attack: bool,    // whether the target is a valid attack target
+    pub spell_is_ready: bool,            // whether the spell is ready (off cooldown)
 
     // Pre-computed full CheckCast(true) result — caller builds CheckCastInput and runs check_cast
     pub check_cast_result: SpellCastError,
@@ -2091,9 +2091,9 @@ pub fn check_pet_cast(input: &CheckPetCastInput) -> SpellCastError {
 
 // Additional SpellCastError variants used by check_cast / check_pet_cast
 // (wire codes added to spell_cast_error_to_u8)
-// ─── Spell::ValidateExplicitTargetMask ───────────────────────────────────────
+// ─── ValidateExplicitTargetMask ──────────────────────────────────────────────
 //
-// C++ lines 6678–6757. Anticheat check: validates that the client's target mask
+// Anticheat check: validates that the client's target mask
 // is consistent with what the spell's spell info permits. Player casters only —
 // non-player casters always pass.
 //
@@ -2104,15 +2104,15 @@ pub fn check_pet_cast(input: &CheckPetCastInput) -> SpellCastError {
 //
 // Both are anticheat events (logged). Returns false on any violation.
 //
-// SpellEntry::Targets unit/item/etc flag values match the SpellCastTargets
-// packet flag values in vanilla (direct bitmask comparison in C++).
+// Spell target-mask unit/item/etc flag values match the SpellCastTargets
+// packet flag values in vanilla (direct bitmask comparison).
 use crate::game::player::spells::state::{
     TARGET_FLAG_CORPSE_ALLY, TARGET_FLAG_CORPSE_ENEMY, TARGET_FLAG_DEST_LOCATION, TARGET_FLAG_ITEM,
     TARGET_FLAG_LOCKED, TARGET_FLAG_OBJECT, TARGET_FLAG_SOURCE_LOCATION, TARGET_FLAG_TRADE_ITEM,
     TARGET_FLAG_UNIT, TARGET_FLAG_UNIT_MINIPET,
 };
 
-// SpellEntry::Targets extended unit/corpse flags (same bit range as packet flags)
+// Spell target-mask extended unit/corpse flags (same bit range as packet flags)
 const SPELL_TARGET_UNIT_RAID: u32 = 0x00000004;
 const SPELL_TARGET_UNIT_PARTY: u32 = 0x00000008;
 const SPELL_TARGET_UNIT_ENEMY: u32 = 0x00000080;
@@ -2157,7 +2157,7 @@ pub fn validate_explicit_target_mask(
         }
     }
 
-    // Check that required flags from expectedTargetMask are present in client mask
+    // Check that required flags from the expected target mask are present in the client mask
     let all_unit_flags = TARGET_FLAG_UNIT
         | SPELL_TARGET_UNIT_RAID
         | SPELL_TARGET_UNIT_PARTY
@@ -2218,25 +2218,25 @@ pub fn validate_explicit_target_mask(
     true
 }
 
-// ─── Spell::CanOpenLock ──────────────────────────────────────────────────────
+// ─── CanOpenLock ─────────────────────────────────────────────────────────────
 //
-// C++ lines 7864–7918. Validates whether the spell can open a given lock, and
+// Validates whether the spell can open a given lock, and
 // computes the effective skill values for the "orange" skill-chance check in
 // CheckCast's OPEN_LOCK case.
 //
 // Returns Ok(OpenLockResult) on success, Err(SpellCastError) on failure.
 //
-// Checks (per 8 lock slots in order):
-//   LOCK_KEY_ITEM: if cast-item entry matches slot's item index → succeed immediately.
-//   LOCK_KEY_SKILL: if spell's EffectMiscValue[eff] matches slot index:
-//       skillValue = (cast_item or non-player) ? 0 : player.GetSkillValue(skillId)
-//       skillValue += spell_skill_bonus
-//       if skillValue < reqSkillValue → LowCastLevel
+// Checks (per the 8 lock slots, in order):
+//   LOCK_KEY_ITEM: if cast-item entry matches the slot's item index → succeed immediately.
+//   LOCK_KEY_SKILL: if the spell effect's misc value matches the slot index:
+//       skill_value = (cast_item or non-player) ? 0 : player's skill value for the lock's skill
+//       skill_value += spell_skill_bonus
+//       if skill_value < req_skill_value → LowCastLevel
 //       else → succeed
 //   No matching slot → BadTargets (locked, no valid key/skill)
 //
 // Caller must pre-resolve the LockEntry from DBC (pass None if lockId not found).
-// Caller pre-computes skill_id and is_blasting_type from SkillByLockType(LockType(index)).
+// Caller pre-computes skill_id and is_blasting_type from the lock type's associated skill.
 // LOCKTYPE_BLASTING (seaforium charges) is treated as having a skill even when skill_id==SKILL_NONE.
 
 pub const LOCK_KEY_NONE: u8 = 0;
@@ -2248,7 +2248,7 @@ pub struct LockEntrySlot {
     pub key_type: u8,
     pub index: u32, // item entry (LOCK_KEY_ITEM) or LockType index (LOCK_KEY_SKILL)
     pub required_skill: i32,
-    pub skill_id: u32,          // result of SkillByLockType(index); 0 = SKILL_NONE
+    pub skill_id: u32,          // result of the lock type's associated skill; 0 = SKILL_NONE
     pub is_blasting_type: bool, // LockType(index) == LOCKTYPE_BLASTING
 }
 
@@ -2267,13 +2267,13 @@ pub struct OpenLockResult {
 pub fn can_open_lock(
     lock_id: u32,
     lock_entry: Option<&LockEntry>,
-    // m_spellInfo->EffectMiscValue[effIndex] — must match slot index for LOCK_KEY_SKILL
+    // Spell-effect misc value — must match the slot index for LOCK_KEY_SKILL
     effect_misc_value: u32,
-    // m_currentBasePoints[effIndex] — skill bonus from the cast spell
+    // Per-effect base points — skill bonus from the cast spell
     spell_skill_bonus: i32,
     cast_item_entry: Option<u32>,
-    // Player's GetSkillValue(skill_id). None for non-player casters or when using cast-item
-    // (in those cases the C++ uses 0 as the base skill value).
+    // Player's skill value for the given skill id. None for non-player casters or
+    // when using a cast-item (in those cases 0 is used as the base skill value).
     get_player_skill: Option<&dyn Fn(u32) -> i32>,
 ) -> Result<OpenLockResult, SpellCastError> {
     if lock_id == 0 {

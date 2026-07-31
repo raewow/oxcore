@@ -37,11 +37,10 @@ impl UpdateMask {
     }
 
     /// Set a field value by field index
-    /// If value is 0, the field is not added to the mask (matching reference core behavior)
+    /// If value is 0, the field is not added to the mask.
     /// Use set_field_required() if you need to include 0 values (e.g., OBJECT_FIELD_ENTRY for players)
     pub fn set_field(&mut self, field_index: u32, value: u32) {
-        // Reference core's _SetCreateBits only sets bits if value != 0
-        // Skip 0 values to match reference core behavior
+        // Skip 0 values, as they carry no update information.
         if value != 0 {
             self.fields.insert(field_index, value);
         }
@@ -54,12 +53,11 @@ impl UpdateMask {
     }
 
     /// Set a GUID field (takes 2 consecutive field indices)
-    /// Low part is always included. High part is only included if non-zero (matching reference core behavior)
+    /// Low part is always included. High part is only included if non-zero.
     pub fn set_guid(&mut self, field_index: u32, guid_low: u32, guid_high: u32) {
         // Low part is always included (required field)
         self.fields.insert(field_index, guid_low);
-        // High part is only included if non-zero (matching reference core behavior)
-        // This matches how the working core handles GUID fields - it skips the high part if it's 0
+        // High part is only included if non-zero; it is skipped when it carries no data.
         if guid_high != 0 {
             self.fields.insert(field_index + 1, guid_high);
         }

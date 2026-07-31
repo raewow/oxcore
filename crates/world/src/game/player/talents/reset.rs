@@ -21,7 +21,7 @@ const MONTH_SECONDS: u64 = 30 * 24 * 3600; // 2,592,000
 /// Each month (30 days) without a reset, the multiplier decays by 1.
 /// The multiplier never drops below the configured minimum (default 2).
 ///
-/// Ported from MaNGOS Player::GetResetTalentsCost() (Player.cpp:3050-3100).
+/// Cost formula for a talent reset.
 ///
 /// # Arguments
 /// * `multiplier` - Current reset cost multiplier (0 = first reset)
@@ -53,8 +53,7 @@ pub fn calculate_reset_cost(
 /// decreases by 1. A minimum floor is enforced if the multiplier was
 /// already at or above that floor before decay.
 ///
-/// Ported from MaNGOS Player::UpdateResetTalentsMultiplier()
-/// (Player.cpp:3110-3140).
+/// Multiplier decay over elapsed time.
 ///
 /// # Arguments
 /// * `multiplier` - Current multiplier value

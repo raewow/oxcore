@@ -472,10 +472,9 @@ impl LiquidStatus {
 
 /// Update a player's environment flags from the liquid at their position.
 ///
-/// Ported from `Player::UpdateTerainEnvironmentFlags`. Each flag has its own
-/// condition rather than being derived from a single liquid kind, because the
-/// thresholds differ: you burn in lava while merely standing on it, but only
-/// drown once your head is under the surface.
+/// Each flag has its own condition rather than being derived from a single liquid
+/// kind, because the thresholds differ: you burn in lava while merely standing on
+/// it, but only drown once your head is under the surface.
 ///
 /// `collision_height` is the player's model collision height; the swim threshold
 /// is derived from it the way the client does.
@@ -575,7 +574,7 @@ pub fn update_environment_flags_internal(
 /// Apply or clear environment flags, running the mirror-timer side effects that
 /// each transition triggers.
 ///
-/// Ported from `Player::SetEnvironmentFlags`. Entering deep sea starts draining
+/// Entering deep sea starts draining
 /// the fatigue timer; submerging drains breath; touching magma or slime drains
 /// the environmental timer. Leaving flips the timer to fast recovery rather than
 /// resetting it, which is what makes the breath bar refill when you surface.

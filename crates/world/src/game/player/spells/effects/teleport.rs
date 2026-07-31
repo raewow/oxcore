@@ -8,14 +8,15 @@ use crate::World;
 use anyhow::Result;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
-/// TARGET_LOCATION_CASTER_HOME_BIND from MaNGOS (Hearthstone / recall)
+/// Caster-home-bind target id (9) — Hearthstone / recall.
 const TARGET_LOCATION_CASTER_HOME_BIND: u32 = 9;
-/// TARGET_LOCATION_DATABASE from MaNGOS (coordinates in spell_target_position table)
+/// Database-location target id (17) — coordinates in the spell-target-position table.
 const TARGET_LOCATION_DATABASE: u32 = 17;
-/// TARGET_ENUM_UNITS_SCRIPT_AOE_AT_SRC_LOC — also uses spell_target_position in this context
+/// Script-AoE-at-source target id (7) — also uses the spell-target-position
+/// table in this context.
 const TARGET_ENUM_UNITS_SCRIPT_AOE_AT_SRC_LOC: u32 = 7;
 
-/// SPELL_EFFECT_TELEPORT_UNITS (5)
+/// Teleport-units effect (5)
 ///
 /// Teleport the target to a specific location.
 /// Used for Hearthstone, portals, and recall spells.
@@ -160,7 +161,7 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
     Ok(EffectResult::empty())
 }
 
-/// SPELL_EFFECT_BIND (11)
+/// Bind effect (11)
 ///
 /// Bind the target to a location (Hearthstone).
 /// Sets the player's home location.
@@ -196,7 +197,7 @@ pub async fn effect_bind(input: &EffectInput, world: &World) -> Result<EffectRes
     Ok(EffectResult::empty())
 }
 
-/// SPELL_EFFECT_TELEPORT_UNITS_FACE_CASTER (43)
+/// Teleport-units-facing-caster effect (43)
 ///
 /// Teleport target to caster and make them face the caster.
 /// Used for some special teleport effects.
@@ -227,7 +228,7 @@ pub async fn effect_teleport_units_face_caster(
     Ok(EffectResult::empty())
 }
 
-/// SPELL_EFFECT_STUCK (84)
+/// Stuck effect (84)
 ///
 /// Teleport player to their Hearthstone location (unstuck).
 /// Emergency teleport for stuck players.
@@ -241,7 +242,7 @@ pub async fn effect_stuck(input: &EffectInput, world: &World) -> Result<EffectRe
     Ok(EffectResult::empty())
 }
 
-/// SPELL_EFFECT_SUMMON_PLAYER (85)
+/// Summon-player effect (85)
 ///
 /// Summon a player to the caster's location.
 /// Used by meeting stones and summon spells.
@@ -269,7 +270,7 @@ pub async fn effect_summon_player(input: &EffectInput, world: &World) -> Result<
     Ok(EffectResult::empty())
 }
 
-/// SPELL_EFFECT_SEND_TAXI (123)
+/// Send-taxi effect (123)
 ///
 /// Send the player on a taxi/flight path.
 /// Used for flight masters.
@@ -290,7 +291,7 @@ pub async fn effect_send_taxi(input: &EffectInput, world: &World) -> Result<Effe
     Ok(EffectResult::empty())
 }
 
-/// SPELL_EFFECT_PLAYER_PULL (124)
+/// Player-pull effect (124)
 ///
 /// Pull the player toward the caster.
 /// Opposite of knockback.

@@ -195,7 +195,7 @@ impl UnitModifierGroup {
                 }
             }
             UnitModifierType::BasePct | UnitModifierType::TotalPct => {
-                // Percentage modifiers: matches C++ ApplyPercentModFloatVar
+                // Percentage modifiers: matches ApplyPercentModFloatVar
                 let mut amount = amount;
                 if amount == -100.0 {
                     amount = -99.99;

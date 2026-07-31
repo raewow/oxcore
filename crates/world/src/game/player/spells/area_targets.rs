@@ -61,8 +61,8 @@ pub enum SpellTargets {
 
 /// Default cone arc for [`SpellNotifyPushType::Cone`].
 ///
-/// The notifier's cone case calls the in-front check with the default arc of
-/// `M_PI` (a 180-degree frontal hemisphere).
+/// The cone case calls the in-front check with the default arc of
+/// pi (a 180-degree frontal hemisphere).
 pub const DEFAULT_CONE_ARC: f32 = PI;
 
 /// An abstracted unit candidate, mirroring the fields the visitation
@@ -171,7 +171,7 @@ pub fn passes_push_geometry(params: &AreaSearchParams, candidate_pos: Position) 
 
 /// Whether the alive gate admits this candidate.
 ///
-/// The notifier skips dead units unless the spell allows dead targets; the
+/// The visitation skips dead units unless the spell allows dead targets; the
 /// all-targets mask also lets dead (still-in-world) units through.
 fn passes_alive_gate(params: &AreaSearchParams, candidate: &AreaCandidate) -> bool {
     candidate.is_alive || params.allow_dead_target || params.targets == SpellTargets::All

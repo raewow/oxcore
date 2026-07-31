@@ -145,7 +145,7 @@ impl TalentSystem {
     /// Removes all talent effects, clears talent data, refunds points,
     /// and charges gold (unless no_cost is true).
     ///
-    /// Ported from MaNGOS Player::resetTalents() (Player.cpp:3340-3420).
+    /// Reset flow for the player's talents.
     ///
     /// # Arguments
     /// * `player_guid` - The player resetting talents

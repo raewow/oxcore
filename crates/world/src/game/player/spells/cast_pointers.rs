@@ -65,8 +65,8 @@ pub struct PointerRefresh {
 /// this decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OriginalCasterResolution {
-    /// `m_originalCasterGUID == m_caster->GetObjectGuid()` — the cached
-    /// original-caster pointer is simply `m_casterUnit`.
+    /// `original_caster_guid == caster_guid` — the cached
+    /// original-caster pointer is simply the caster unit.
     SameAsCaster,
     /// The original caster is a game object — look it up via the caster's
     /// map, then read its owner.
@@ -843,7 +843,7 @@ mod tests {
     #[tokio::test]
     async fn affective_caster_go_original_caster_not_in_world_is_none() {
         let world = test_world();
-        // Caster not registered → not in world → falls through to m_originalCaster,
+        // Caster not registered → not in world → falls through to original_caster,
         // which for a GO guid with an out-of-world caster is null.
         let caster = ObjectGuid::new_player(72);
         let go_guid = ObjectGuid::new_gameobject(8, 8);

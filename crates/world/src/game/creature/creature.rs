@@ -321,13 +321,13 @@ impl Creature {
         self.motion_master.add_pause_time(pause_time_ms);
 
         self.movement_paused = true;
-        self.motion_master.flags.insert(2); // MotionMasterFlags::PAUSED = 0x02
+        self.motion_master.flags.insert(2); // 0x02 = movement paused flag
     }
 
     /// Resume out-of-combat movement after interaction ends
     pub fn resume_out_of_combat_movement(&mut self) {
         self.movement_paused = false;
-        self.motion_master.flags.remove(2); // MotionMasterFlags::PAUSED = 0x02
+        self.motion_master.flags.remove(2); // 0x02 = movement paused flag
     }
 
     /// Register a follower that is tracking this creature.
@@ -437,7 +437,7 @@ impl Creature {
 
     /// Respawn delay in seconds, with the spawn flags applied to `spawntimesecs`.
     ///
-    /// Returns a *delay*, not a point in time: the reference flow scales the base
+    /// Returns a *delay*, not a point in time: the flow scales the base
     /// delay by the spawn flags and only then turns it into an absolute respawn
     /// time. Handing back an absolute timestamp here is what let the caller add
     /// "now" a second time, pushing every respawn decades into the future.

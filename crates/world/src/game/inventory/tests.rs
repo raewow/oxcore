@@ -1557,6 +1557,7 @@ mod integration_tests {
             spell_cooldown: [0; 5],
             spell_category: [0; 5],
             spell_category_cooldown: [0; 5],
+            ..Default::default()
         }
     }
 

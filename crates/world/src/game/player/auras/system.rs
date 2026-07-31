@@ -32,7 +32,7 @@ use anyhow::Result;
 
 /// Stateless aura system - operates on player.auras via PlayerManager.
 /// The DR group an aura should remember so it can release the target's counter when it
-/// drops (`Unit::ApplyDiminishingAura(group, false)`).
+/// drops.
 ///
 /// Only the first effect slot records it: one cast holds the group once, however many
 /// aura effects it applied.
@@ -111,7 +111,7 @@ impl AuraSystem {
         }
 
         // Diminishing returns. The group/level were sampled once when the spell hit this
-        // target (`Spell::DoSpellHitOnUnit`), so every aura of the cast is reduced by the
+        // target, so every aura of the cast is reduced by the
         // same rate; here we only apply it. This runs before the creature branch because
         // `DRTYPE_ALL` groups — the stun family — diminish on creatures too.
         // `DIMINISHING_LIMITONLY` carries no rate; it only caps the duration.
@@ -255,9 +255,8 @@ impl AuraSystem {
 
                 player.auras.needs_client_update = true;
 
-                // Hold the group's reset window open while this aura is up
-                // (`Unit::ApplyDiminishingAura(group, true)`); the matching decrement runs
-                // in the removal path.
+                // Hold the group's reset window open while this aura is up; the matching
+                // decrement runs in the removal path.
                 if let Some(group) = dr_group_to_track {
                     player.combat.diminishing.add_aura(group, applied_at_ms);
                 }
@@ -3789,8 +3788,7 @@ impl AuraSystem {
         creature_mgr.with_creature_mut(creature_guid, |creature| {
             let _ = creature.add_aura(aura);
 
-            // Hold the group's reset window open while this aura is up
-            // (`Unit::ApplyDiminishingAura(group, true)`).
+            // Hold the group's reset window open while this aura is up.
             if let Some(group) = dr_group_to_track {
                 creature.combat.diminishing.add_aura(group, applied_at_ms);
             }
@@ -3900,8 +3898,7 @@ impl AuraSystem {
                 return;
             };
 
-            // Release the group's counter so its 15-second reset window can start
-            // (`Unit::ApplyDiminishingAura(group, false)`).
+            // Release the group's counter so its 15-second reset window can start.
             if let Some(group) = aura.diminishing_group {
                 creature
                     .combat

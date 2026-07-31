@@ -393,7 +393,7 @@ impl SpellManager {
 
     /// Load spell rank chains: talent ranks + skill-ability forward-rank chains (both derived
     /// from DBC data), merged/overridden by the `spell_chain` SQL table (custom cases).
-    /// Faithful port of the reference load (validation logging trimmed to warnings).
+    /// Faithful port of the chain-loading logic (validation logging trimmed to warnings).
     pub async fn load_spell_chains(&self, world_db: &MySqlPool, dbc: &DbcManager) -> Result<()> {
         self.load_skill_line_ability_maps(dbc);
         self.load_skill_race_class_info_map(dbc);

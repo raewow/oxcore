@@ -745,14 +745,14 @@ impl MotionMaster {
         tracing::error!("[MOTION] creature attempted taxi flight (path {path} node {pathnode})");
     }
 
-    /// Jump movement does not exist in 1.12 - the reference body is commented out for this core.
+    /// Jump movement does not exist in 1.12 and is not implemented for this core.
     pub fn move_jump(&mut self) {}
 
     /// Charge movement toward a target unit, used by SPELL_EFFECT_CHARGE.
     ///
     /// `delay` is a spell-batching arrival delay (ms); it is currently unmodelled.
     /// `trigger_auto_attack` flags the creature to begin attacking the target on arrival.
-    /// `use_combat_reach` is preserved for parity with the reference signature but ignored here.
+    /// `use_combat_reach` is preserved for parity with the movement signature but ignored here.
     pub fn move_charge(
         &mut self,
         target: ObjectGuid,

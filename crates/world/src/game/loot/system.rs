@@ -59,8 +59,7 @@ impl LootSystem {
 
     /// Open loot through `SPELL_EFFECT_OPEN_LOCK`.
     ///
-    /// Passes `LOOT_SKINNING` to `Player::SendLoot`, which the client-facing
-    /// packet converts to `LOOT_PICKPOCKETING` (2).
+    /// Passes a loot type the client-facing packet converts to `LOOT_PICKPOCKETING` (2).
     pub async fn handle_open_lock_loot(
         &self,
         player_guid: ObjectGuid,

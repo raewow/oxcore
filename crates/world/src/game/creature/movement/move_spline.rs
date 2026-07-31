@@ -1,6 +1,6 @@
 //! Server-side spline state: where a unit is along its path at any moment.
 //!
-//! This is the faithful port of the reference `MoveSpline`, built on the geometry primitives in
+//! This is the faithful port of the `MoveSpline` movement state, built on the geometry primitives in
 //! [`super::spline_base`]. It is not yet wired into creature movement, which still uses the
 //! simpler linear [`super::spline::MoveSpline`].
 
@@ -137,7 +137,7 @@ impl fmt::Display for MoveSplineFlags {
 /// Names of the 32 raw spline flag bits, indexed by bit position.
 ///
 /// Bits with no defined meaning keep their `Unknown<n>` label so the rendered string still
-/// accounts for every set bit, exactly as the reference debug output does.
+/// accounts for every set bit, exactly as the debug output does.
 const SPLINE_FLAG_NAMES: [&str; 32] = [
     "Done",
     "Falling",
@@ -210,8 +210,8 @@ impl MoveSplineInitArgs {
 
     /// Whether every intermediate point fits the MONSTER_MOVE packet's 11-bit offsets.
     ///
-    /// Catmull-Rom paths send absolute points, so they are exempt. The reference core has this
-    /// check commented out of `Validate`; it is kept callable here for the same reason it
+    /// Catmull-Rom paths send absolute points, so they are exempt. This check is normally
+    /// disabled in `Validate`; it is kept callable here for the same reason it
     /// exists - the packet writer needs it.
     pub fn check_path_bounds(&self) -> bool {
         const MAX_OFFSET: f32 = ((1 << 11) / 2) as f32;

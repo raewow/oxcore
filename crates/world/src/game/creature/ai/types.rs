@@ -102,8 +102,7 @@ pub enum AIEvent {
 
     /// Someone started attacking us without (yet) dealing damage — a swing that
     /// missed, was dodged/parried, or the initial `CMSG_ATTACKSWING`.
-    /// Mirrors `Unit::Attack` calling `CreatureAI::AttackedBy`: the creature
-    /// engages the attacker even when nothing connects.
+    /// The creature engages the attacker even when nothing connects.
     AttackedBy { attacker_guid: ObjectGuid },
 
     /// Damage was dealt to a target

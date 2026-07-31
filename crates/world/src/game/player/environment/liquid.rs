@@ -47,7 +47,7 @@ pub fn query_liquid_status(
 /// Refresh a player's liquid-derived environment flags from their position.
 ///
 /// Called from the movement system after the player's position is updated, and
-/// on login, mirroring where the reference triggers its area check.
+/// on login, mirroring where the area check is triggered.
 pub fn update_player_liquid_status(
     player_guid: ObjectGuid,
     world: &World,

@@ -66,7 +66,7 @@ pub struct StatsState {
 
 impl StatsState {
     /// Add `delta` to current health, clamping to [0, max_health]. Returns actual gain (negative = loss).
-    /// Matches C++ Unit::ModifyHealth — callers use the return value to decide broadcasts / death checks.
+    /// Health-modify semantics — callers use the return value to decide broadcasts / death checks.
     pub fn modify_health(&mut self, delta: i32) -> i32 {
         if delta == 0 {
             return 0;

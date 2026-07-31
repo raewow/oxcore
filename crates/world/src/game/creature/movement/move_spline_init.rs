@@ -100,7 +100,7 @@ pub struct MoveSplineInit {
 
 impl MoveSplineInit {
     /// Start from the unit's current movement flags, mixing existing state into the new
-    /// spline the way the reference constructor does.
+    /// spline the way the constructor does.
     pub fn new(current_move_flags: u32) -> Self {
         let flags = MoveFlags::from(current_move_flags);
         let walking = flags.has_flag(MoveFlags::WALK_MODE);
@@ -192,7 +192,7 @@ impl MoveSplineInit {
     ///
     /// `real_position` is where the unit actually is now - the caller resolves that,
     /// since mid-spline it has to be computed rather than read. Returns `None` when the
-    /// args don't describe a usable spline, matching the reference `Validate` early-out.
+    /// args don't describe a usable spline, matching the `Validate` early-out.
     pub fn prepare(
         &mut self,
         real_position: Vec3,

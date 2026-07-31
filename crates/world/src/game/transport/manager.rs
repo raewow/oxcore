@@ -372,13 +372,11 @@ impl TransportManager {
             return false;
         }
 
-        // AddPassenger(follower); the offset it would compute is overwritten below, matching
-        // the reference order, so coordinate adjustment is skipped here.
+        // The offset `board` would compute is overwritten below, so coordinate adjustment is skipped.
         self.board(transport_guid, follower, false);
 
         // The follower rides in the leader's slot and stands on the leader's position; done
-        // unconditionally, as the reference does after AddPassenger even for an already-aboard
-        // unit.
+        // unconditionally, even for a follower that was already aboard.
         let leader_offset = leader.transport_offset().unwrap_or_default();
         follower.set_transport_ride(transport_guid, leader_offset);
         follower.set_world_position(leader.world_position());
@@ -396,8 +394,7 @@ impl TransportManager {
         follower: &mut F,
     ) -> bool {
         let removed = self.unboard(transport_guid, follower);
-        // The follower is teleported to the leader regardless of whether it was aboard,
-        // matching the reference which relocates after RemovePassenger unconditionally.
+        // The follower is teleported to the leader regardless of whether it was aboard.
         follower.set_world_position(leader.world_position());
         removed
     }

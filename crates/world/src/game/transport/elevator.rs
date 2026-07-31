@@ -29,8 +29,7 @@ pub fn path_progress(total_time: u32, time_since_creation: u32) -> Option<u32> {
 /// Linearly interpolates between the keyframes bracketing `path_progress` by the fraction of
 /// the way between their times. Two keyframes sharing a position (a pause in the animation)
 /// yield that position directly. Returns `None` when `path_progress` is not bracketed by two
-/// keyframes - before the first or after the last - matching the reference guard that both a
-/// prev and a next node exist.
+/// keyframes - before the first or after the last - so both a prev and a next node exist.
 pub fn interpolate_local_position(anim: &TransportAnimation, path_progress: u32) -> Option<Vec3> {
     let prev = anim.prev_anim_node(path_progress)?;
     let next = anim.next_anim_node(path_progress)?;

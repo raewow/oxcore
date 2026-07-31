@@ -21,7 +21,7 @@ const SPELL_ATTR_EX3_NO_RES_TIMER: u32 = 0x0004_0000;
 ///
 /// The caster is always a player in this pipeline, so the packet's name
 /// field is sent empty — the client resolves the name from the caster GUID
-/// itself, matching the reference client's player-caster branch.
+/// itself, matching the client's player-caster branch.
 pub async fn effect_resurrect(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = match input.target_guid {
         Some(guid) => guid,
@@ -85,8 +85,7 @@ pub async fn effect_resurrect(input: &EffectInput, world: &World) -> Result<Effe
         })
         .unwrap_or((1, 0));
 
-    // SendResurrectRequest(pTarget, sickness) passes
-    // `m_casterUnit && m_casterUnit->IsSpiritHealer()` as `sickness` — always
+    // Sickness is passed as the spirit-healer check result — always
     // false here since the caster in this pipeline is always a player.
     let causes_sickness = false;
 

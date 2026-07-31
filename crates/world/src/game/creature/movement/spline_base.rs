@@ -90,7 +90,7 @@ impl fmt::Display for EvaluationMode {
 /// Weighted sum of four control points against a basis matrix.
 ///
 /// `weights[j]` is the dot product of (t³, t², t, 1) with column `j`, which is the
-/// row-vector-times-matrix product the reference core performs.
+/// row-vector-times-matrix product being performed.
 fn evaluate_basis(vertices: &[Vec3], t: f32, coeffs: &[[f32; 4]; 4]) -> Vec3 {
     let tvec = [t * t * t, t * t, t, 1.0];
     combine(vertices, &tvec, coeffs)
@@ -157,7 +157,7 @@ impl SplineBase {
 
     /// Position at parameter `u` within segment `index`, or `None` if out of range.
     ///
-    /// The reference core asserts on a bad index; returning `None` keeps a malformed path from
+    /// Returning `None` on a bad index keeps a malformed path from
     /// taking the server down.
     pub fn evaluate(&self, index: usize, u: f32) -> Option<Vec3> {
         match self.mode {
@@ -425,8 +425,7 @@ impl SplineBase {
 
 /// A [`SplineBase`] with a cumulative length (or time) recorded at each index.
 ///
-/// The reference core parameterizes this on the length type; only the `int32` instantiation is
-/// used, where the "lengths" are actually millisecond timestamps.
+/// The length type is fixed to `int32`; the "lengths" are actually millisecond timestamps.
 #[derive(Debug, Default, Clone)]
 pub struct Spline {
     base: SplineBase,
@@ -487,7 +486,7 @@ impl Spline {
     /// Record cumulative lengths using a caller-supplied per-segment cost.
     ///
     /// The value returned must never decrease; a negative value means the accumulator
-    /// overflowed and saturates, as it does in the reference implementation.
+    /// overflowed and saturates.
     pub fn init_lengths_with<F>(&mut self, mut cost: F)
     where
         F: FnMut(&Self, usize) -> i32,

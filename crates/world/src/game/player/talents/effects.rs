@@ -115,8 +115,7 @@ pub async fn apply_talent_rank(
 /// has learned, removes the associated passive auras, spell modifiers,
 /// and any learned talent-granted spells.
 ///
-/// Ported from MaNGOS Player::resetTalents() removal loop
-/// (Player.cpp:3350-3420).
+/// Removal loop for the talent reset.
 ///
 /// # Arguments
 /// * `player_guid` - The player being reset
@@ -183,7 +182,7 @@ pub async fn remove_all_talent_effects(
 /// This iterates through all learned talents and applies the spell
 /// associated with each talent's current rank.
 ///
-/// Ported from MaNGOS Player::_LoadTalents() post-processing.
+/// Reapply-on-login post-processing for talent effects.
 pub async fn reapply_all_talent_effects(
     player_guid: ObjectGuid,
     state: &TalentState,

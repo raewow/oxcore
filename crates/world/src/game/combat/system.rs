@@ -374,7 +374,7 @@ impl CombatSystem {
 
     /// Called when a player logs in
     pub fn on_player_login(&self, _guid: ObjectGuid) -> Result<()> {
-        // Combat state is already initialized in Player::new
+        // Combat state is already initialized by the player system.
         Ok(())
     }
 

@@ -82,7 +82,7 @@ pub struct PowerState {
     /// From talents/auras like Meditation, Arcane Meditation
     pub casting_regen_pct: f32,
 
-    /// Fractional health regen carried between ticks (Player::m_carryHealthRegen).
+    /// Fractional health regen carried between ticks.
     /// Accumulates sub-integer regen so nothing is silently lost.
     pub carry_health_regen: f32,
 }

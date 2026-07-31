@@ -8,7 +8,7 @@ use super::state::TalentState;
 ///   - Level 30 = 21 points
 ///   - Level 60 = 51 points (max in vanilla)
 ///
-/// Ported from MaNGOS Player::CalculateTalentsPoints() (Player.cpp:3180-3198).
+/// Points formula for a given level.
 ///
 /// # Arguments
 /// * `level` - Player's current level (1-60)
@@ -30,7 +30,7 @@ pub fn calculate_total_talent_points(level: u8, rate: f32) -> u32 {
 /// Recalculates free = total - used, handling the edge case where
 /// a config change or level reduction leaves used > total.
 ///
-/// Ported from MaNGOS Player::UpdateFreeTalentPoints() (Player.cpp:3200-3240).
+/// Free-points refresh logic.
 ///
 /// # Arguments
 /// * `state` - Mutable reference to player's talent state
@@ -83,7 +83,7 @@ pub fn update_free_talent_points(
 /// Called from the level-up handler when a player reaches a new level.
 /// If the player is level 10 or above, they gain a free talent point.
 ///
-/// Ported from MaNGOS Player::InitTalentForLevel() (Player.cpp:3170-3178).
+/// Level-up talent-point grant.
 ///
 /// # Arguments
 /// * `state` - Mutable reference to player's talent state

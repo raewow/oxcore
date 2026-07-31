@@ -45,8 +45,7 @@ pub enum TalentLearnResult {
 /// This is a pure function with no side effects. It does not modify
 /// any state - the caller is responsible for applying the result.
 ///
-/// Ported from MaNGOS Player::LearnTalent() validation logic
-/// (Player.cpp:3250-3340).
+/// Validation logic for learning a talent.
 ///
 /// # Arguments
 /// * `state` - Player's current talent state (read-only)

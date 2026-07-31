@@ -148,14 +148,14 @@ impl<H: PartialEq + Clone> ChanneledHoldersList<H> {
 }
 
 /// Concrete channeled-holders state: the holder list plus the
-/// `m_channeledUpdateIterator` cursor (as an index, since a borrowed cursor
+/// channeled-update-iterator cursor (as an index, since a borrowed cursor
 /// cannot live alongside mutation of the backing `Vec`).
 #[derive(Debug, Clone, Default)]
 pub struct ChanneledHolders {
-    /// Tracked holder identities (`m_channeledHolders`).
+    /// Tracked holder identities.
     pub holders: Vec<AuraHolderId>,
-    /// Index of the holder the update loop is currently visiting
-    /// (`m_channeledUpdateIterator`); `None` means not iterating / `end()`.
+    /// Index of the holder the update loop is currently visiting;
+    /// `None` means not iterating / `end()`.
     pub update_index: Option<usize>,
 }
 
@@ -537,7 +537,7 @@ mod tests {
         assert_eq!(cursor, None);
     }
 
-    // ── add_channeled_aura_holder (Spell::AddChanneledAuraHolder) ───
+    // ── add_channeled_aura_holder ───
 
     #[test]
     fn add_null_holder_is_noop() {

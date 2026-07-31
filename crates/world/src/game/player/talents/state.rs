@@ -19,8 +19,8 @@ pub const MAX_TALENT_COLUMNS: usize = 4;
 /// Per-player talent state, embedded in the Player struct.
 ///
 /// Tracks all talent allocations, free points, and reset cost data.
-/// Corresponds to C++ fields: m_talents, m_freeTalentPoints,
-/// m_usedTalentCount, m_resetTalentsMultiplier, m_resetTalentsTime.
+/// Corresponding reference fields: talents map, free-talent-points count,
+/// used-talent count, reset-cost multiplier, reset timestamp.
 #[derive(Debug, Clone)]
 pub struct TalentState {
     /// Map of talent_id -> current rank (1-5).

@@ -64,8 +64,8 @@ pub struct EffectInput {
     /// Casting time in milliseconds (from DBC, for fallback coefficient calc)
     pub casting_time_ms: u32,
     /// Diminishing-returns decision sampled once when this target was hit
-    /// (`Spell::m_diminishGroup` / `m_diminishLevel`). Aura effects apply it to the
-    /// duration they request so that every aura of one cast is diminished identically.
+    /// (the group and level). Aura effects apply it to the duration they request
+    /// so that every aura of one cast is diminished identically.
     pub diminishing: crate::game::player::spells::diminishing::DiminishSnapshot,
 }
 
@@ -272,13 +272,13 @@ impl EffectsDispatcher {
 
     /// Dispatch with pre-resolved targets (used when target resolution already happened).
     ///
-    /// `custom_base_points`: optional per-effect base point overrides (MaNGOS CastCustomSpell).
+    /// `custom_base_points`: optional per-effect base point overrides.
     /// When Some, each Some(v) replaces the DBC effect_base_points value for that effect index.
     ///
     /// Builds one [`crate::game::player::spells::target_info::TargetInfo`] per unique unit
     /// target (effect mask = which of the 3 effects apply to it) and processes each target
-    /// once via `target_info::apply_target_effects`, matching MaNGOS's per-target
-    /// `DoAllEffectOnTarget` model instead of rolling a fresh hit per effect per target.
+    /// once via `target_info::apply_target_effects`, matching the per-target
+    /// apply-effects model instead of rolling a fresh hit per effect per target.
     pub async fn dispatch_with_targets(
         &self,
         caster_guid: ObjectGuid,
@@ -347,7 +347,7 @@ impl EffectsDispatcher {
             results.append(&mut target_results);
         }
 
-        // `Spell::HandleThreatSpells()` — run once per cast after every target's effects
+        // Threat spells — run once per cast after every target's effects
         // have been applied (not per target), distributing the spell's `spell_threat`
         // flat bonus across the resolved target set.
         crate::game::player::spells::threat_bonus::apply_cast_threat(
@@ -357,8 +357,8 @@ impl EffectsDispatcher {
             world,
         );
 
-        // `Spell::HandleAddTargetTriggerAuras` — run once per cast after every target's
-        // effects have been applied, checking for SPELL_AURA_ADD_TARGET_TRIGGER auras on
+        // Add-target-trigger auras — run once per cast after every target's
+        // effects have been applied, checking for add-target-trigger auras on
         // the caster that may cast additional spells on the hit targets.
         if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
             let _ = crate::game::player::spells::effects::aura::handle_add_target_trigger_auras(
@@ -547,7 +547,7 @@ pub enum SpellEffectType {
     // Movement effects
     Leap = 29,
     Pull = 70,
-    // --- Missing effects added for MaNGOS parity ---
+    // --- Missing effects covered for parity ---
     // Summon effects
     SummonType = 28,    // Generic summon dispatcher (pets, totems, guardians)
     SummonPet = 56,     // Summon hunter/warlock pet
@@ -688,7 +688,7 @@ impl SpellEffectType {
             // Movement effects
             29 => Some(Leap),
             70 => Some(Pull),
-            // Missing effects for MaNGOS parity
+            // Missing effects covered for parity
             28 => Some(SummonType),
             48 => Some(Stealth),
             55 => Some(SummonDeadPet),
@@ -832,7 +832,7 @@ pub async fn dispatch_effect(
         Leap => movement::effect_leap(input, world).await,
         Pull => movement::effect_pull(input, world).await,
         Charge2 => movement::effect_charge(input, world).await, // Same as Charge
-        // --- Stub effects for MaNGOS parity ---
+        // --- Stub effects for parity ---
         SummonPet => summon::effect_summon_pet(input, world).await,
         SummonDeadPet => summon::effect_summon_dead_pet(input, world).await,
         TameCreature => summon::effect_tame_creature(input, world).await,

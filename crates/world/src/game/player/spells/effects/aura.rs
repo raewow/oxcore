@@ -11,9 +11,10 @@ use anyhow::Result;
 use oxcore_shared::protocol::ObjectGuid;
 use rand::Rng;
 
-/// SPELL_AURA_ADD_TARGET_TRIGGER (109) — aura triggers a spell when the caster's spell hits a target.
+/// Add-target-trigger aura type (109): aura triggers a spell when the caster's spell hits a target.
 const SPELL_AURA_ADD_TARGET_TRIGGER: u32 = 109;
-/// SPELL_ATTR_EX4_CLASS_TRIGGER_ONLY_ON_TARGET (bit 1) — only trigger if target matches caster's current target.
+/// Class-trigger-only-on-target attribute bit (0x0000_0002): only trigger if the
+/// target matches the caster's current target.
 const SPELL_ATTR_EX4_CLASS_TRIGGER_ONLY_ON_TARGET: u32 = 0x0000_0002;
 
 /// Area aura target types
@@ -26,7 +27,7 @@ pub enum AreaAuraTargetType {
     Raid,
 }
 
-/// SPELL_EFFECT_APPLY_AURA (6)
+/// Apply-aura effect (6)
 ///
 /// Applies a buff/debuff aura to the target.
 /// This is the bridge between the spell system and the aura system.
@@ -84,8 +85,8 @@ pub async fn effect_apply_aura(input: &EffectInput, world: &World) -> Result<Eff
     );
 
     // Determine if positive or negative based on attributes
-    // Most buffs are positive (food, drink, stat buffs). A spell is negative if it has
-    // SPELL_ATTR_EX_NEGATIVE (0x80000000 in attributes_ex) set.
+    // Most buffs are positive (food, drink, stat buffs). A spell is negative when
+    // its negative-attribute bit (0x80000000 in attributes_ex) is set.
     let is_positive = (spell_entry.attributes_ex & 0x80000000) == 0;
     let flags = AuraFlags {
         is_positive,
@@ -122,7 +123,7 @@ pub async fn effect_apply_aura(input: &EffectInput, world: &World) -> Result<Eff
     Ok(EffectResult::empty())
 }
 
-/// SPELL_EFFECT_PERSISTENT_AREA_AURA (27)
+/// Persistent-area-aura effect (27)
 ///
 /// Creates a persistent ground effect (Consecration, Blizzard, etc.).
 /// Spawns a DynamicObject that periodically applies auras to targets in range.
@@ -166,7 +167,7 @@ pub async fn effect_persistent_area_aura(
     effect_apply_aura(input, world).await
 }
 
-/// SPELL_EFFECT_APPLY_AREA_AURA_PARTY (35)
+/// Party area-aura effect (35)
 ///
 /// Applies an aura to all party members within range.
 pub async fn effect_apply_area_aura_party(
@@ -176,7 +177,7 @@ pub async fn effect_apply_area_aura_party(
     apply_area_aura(input, world, AreaAuraTargetType::Party).await
 }
 
-/// SPELL_EFFECT_APPLY_AREA_AURA_PET (119)
+/// Pet area-aura effect (119)
 ///
 /// Applies an aura to the caster's pet.
 pub async fn effect_apply_area_aura_pet(
@@ -186,7 +187,7 @@ pub async fn effect_apply_area_aura_pet(
     apply_area_aura(input, world, AreaAuraTargetType::Pet).await
 }
 
-/// SPELL_EFFECT_APPLY_AREA_AURA_FRIEND (128)
+/// Friend area-aura effect (128)
 ///
 /// Applies an aura to all friendly units within range.
 pub async fn effect_apply_area_aura_friend(
@@ -196,7 +197,7 @@ pub async fn effect_apply_area_aura_friend(
     apply_area_aura(input, world, AreaAuraTargetType::Friend).await
 }
 
-/// SPELL_EFFECT_APPLY_AREA_AURA_ENEMY (129)
+/// Enemy area-aura effect (129)
 ///
 /// Applies an aura to all enemy units within range.
 pub async fn effect_apply_area_aura_enemy(
@@ -206,7 +207,7 @@ pub async fn effect_apply_area_aura_enemy(
     apply_area_aura(input, world, AreaAuraTargetType::Enemy).await
 }
 
-/// SPELL_EFFECT_APPLY_AREA_AURA_RAID (132)
+/// Raid area-aura effect (132)
 ///
 /// Applies an aura to all raid members within range.
 pub async fn effect_apply_area_aura_raid(
@@ -286,7 +287,6 @@ async fn apply_area_aura(
 }
 
 /// Check whether an ADD_TARGET_TRIGGER aura's spell entry affects the cast spell.
-/// Faithful port of MaNGOS `IsAffectedOnSpell` used in `HandleAddTargetTriggerAuras`.
 fn is_affected_on_spell(aura_spell_entry: &SpellEntry, cast_spell_entry: &SpellEntry) -> bool {
     aura_spell_entry.spell_family_name == 0
         || (aura_spell_entry.spell_family_name == cast_spell_entry.spell_family_name
@@ -295,11 +295,11 @@ fn is_affected_on_spell(aura_spell_entry: &SpellEntry, cast_spell_entry: &SpellE
                     != 0))
 }
 
-/// Handle SPELL_AURA_ADD_TARGET_TRIGGER auras on the caster.
+/// Handle add-target-trigger auras on the caster.
 ///
-/// Iterates the caster's `SPELL_AURA_ADD_TARGET_TRIGGER` auras; for each aura that
+/// Iterates the caster's add-target-trigger auras; for each aura that
 /// affects the cast spell, iterates the hit targets and conditionally casts the
-/// triggered spell. Faithful Rust port of MaNGOS `Spell::HandleAddTargetTriggerAuras`.
+/// triggered spell.
 pub async fn handle_add_target_trigger_auras(
     caster_guid: ObjectGuid,
     spell_entry: &SpellEntry,

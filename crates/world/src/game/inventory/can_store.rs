@@ -94,7 +94,7 @@ impl CanStoreResult {
     }
 }
 
-/// Dedicated can-store checker mirroring the reference player can-store flows.
+/// Dedicated can-store checker mirroring the player can-store flows.
 ///
 /// Created per check so that intermediate state (no_similar_count, dest vector)
 /// is fresh every invocation and no mutable borrow conflicts arise.

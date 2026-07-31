@@ -63,8 +63,8 @@ impl MovementSystem {
 
         let Some(home) = home else { return };
 
-        // Force the move: `relocate` would refuse this too, and the reference
-        // loads the destination grid rather than leaving the creature adrift.
+        // Force the move: `relocate` would refuse this too, and the destination
+        // grid must be loaded rather than leaving the creature adrift.
         map.remove_creature(guid, current_pos);
         map.add_creature(guid, home);
 

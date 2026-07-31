@@ -146,6 +146,21 @@ impl Opcode {
     pub const SMSG_QUERY_TIME_RESPONSE: Opcode = Opcode { vanilla: 0x01CF, modern: 0x26DC }; // 463
 
     // ============================================================================
+    // DB2 hotfixes (modern only)
+    // ============================================================================
+    //
+    // 1.14 has no item query at all -- `CMSG_ITEM_QUERY_SINGLE` and its response are absent from the
+    // opcode table. Item names, icons, tooltips and NPC dialogue reach the client as DB2 records
+    // instead: it asks for a batch of record ids from one table and the server answers each with a
+    // `SMSG_DB_REPLY` carrying the row inline. Vanilla has no counterpart to any of these.
+
+    pub const CMSG_DB_QUERY_BULK: Opcode = Opcode { modern: 0x35E5, ..Opcode::NONE };
+    pub const SMSG_DB_REPLY: Opcode = Opcode { modern: 0x290E, ..Opcode::NONE };
+    pub const CMSG_HOTFIX_REQUEST: Opcode = Opcode { modern: 0x35E6, ..Opcode::NONE };
+    pub const SMSG_AVAILABLE_HOTFIXES: Opcode = Opcode { modern: 0x290F, ..Opcode::NONE };
+    pub const SMSG_HOTFIX_CONNECT: Opcode = Opcode { modern: 0x2911, ..Opcode::NONE };
+
+    // ============================================================================
     // Tutorial & Account Data
     // ============================================================================
 
@@ -1162,6 +1177,11 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::SMSG_LOGIN_VERIFY_WORLD, "SMSG_LOGIN_VERIFY_WORLD"),
     (Opcode::CMSG_QUERY_TIME, "CMSG_QUERY_TIME"),
     (Opcode::SMSG_QUERY_TIME_RESPONSE, "SMSG_QUERY_TIME_RESPONSE"),
+    (Opcode::CMSG_DB_QUERY_BULK, "CMSG_DB_QUERY_BULK"),
+    (Opcode::SMSG_DB_REPLY, "SMSG_DB_REPLY"),
+    (Opcode::CMSG_HOTFIX_REQUEST, "CMSG_HOTFIX_REQUEST"),
+    (Opcode::SMSG_AVAILABLE_HOTFIXES, "SMSG_AVAILABLE_HOTFIXES"),
+    (Opcode::SMSG_HOTFIX_CONNECT, "SMSG_HOTFIX_CONNECT"),
     (Opcode::SMSG_TUTORIAL_FLAGS, "SMSG_TUTORIAL_FLAGS"),
     (Opcode::CMSG_TUTORIAL_FLAG, "CMSG_TUTORIAL_FLAG"),
     (Opcode::CMSG_TUTORIAL_CLEAR, "CMSG_TUTORIAL_CLEAR"),
@@ -2460,8 +2480,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            639,
-            "expected 639 opcode constants; update this count deliberately when adding opcodes"
+            644,
+            "expected 644 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

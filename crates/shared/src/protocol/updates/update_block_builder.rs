@@ -298,7 +298,7 @@ impl UpdateBlockBuilder {
     }
 
     /// Replace the internal UpdateMask with a pre-populated one.
-    /// Useful when fields are populated by external logic (e.g., Player::populate_create_fields).
+    /// Useful when fields are populated by external logic.
     pub fn with_mask(mut self, mask: UpdateMask) -> Self {
         self.mask = mask;
         self
