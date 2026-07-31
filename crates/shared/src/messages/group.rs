@@ -23,9 +23,161 @@
 //! - [`MsgRandomRoll`] - Broadcast random roll result
 
 use crate::game::group::group_update_flags;
-use crate::game::group::{CachedGroup, LootMethod};
+use crate::game::group::{CachedGroup, GroupMember, LootMethod};
+use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+// =========================================================================
+// SHARED 1.14 GROUP ENCODING PIECES
+// =========================================================================
+
+/// `HighGuidType703::Party` — the object-type field of a 1.14 party GUID.
+const HIGH_GUID_TYPE_PARTY: u64 = 27;
+
+/// The 1.14 GUID that names the party a message is about.
+///
+/// 1.12 has no party object and sends no party GUID, so there is nothing to translate — the value
+/// is synthesised here. Every message that names a party must synthesise the **same** one: the
+/// client keys its party frame, ready checks and raid marks off this GUID, and a ready check
+/// carrying a party GUID the party update never introduced is silently discarded. That is why this
+/// is one shared constant rather than something derived per group.
+///
+/// A single global value is safe because a client is only ever in one party, so its own party is
+/// the only one it can ever see named. The counter is arbitrary — it only has to be non-zero, since
+/// an all-zero GUID reads as "no party".
+const fn modern_party_guid() -> (u64, u64) {
+    (HIGH_GUID_TYPE_PARTY << 58, 1000)
+}
+
+/// Monotonic source for `PartyUpdate::SequenceNum`.
+///
+/// 1.14 stamps every party update with a sequence number and the client keeps the highest it has
+/// seen, so a body that repeats or lowers the number is dropped: the party frame would freeze at
+/// whatever the first update said and never show a join, a leave or a leader change again. Vanilla
+/// has no such field and [`CachedGroup`] carries no counter, so the value is generated here.
+///
+/// Global rather than per-group on purpose. The client only compares numbers within its own party,
+/// so any strictly increasing sequence works, and a process-wide counter is strictly increasing by
+/// construction without needing state we do not have.
+static PARTY_UPDATE_SEQUENCE: AtomicU32 = AtomicU32::new(1);
+
+fn next_party_update_sequence() -> i32 {
+    PARTY_UPDATE_SEQUENCE.fetch_add(1, Ordering::Relaxed) as i32
+}
+
+// `GroupFlags`, per the 1.14 wire format. Unrelated to anything vanilla sends: 1.12 signals "raid"
+// with a leading bool and has no flags word at all.
+const GROUP_FLAG_RAID: u16 = 0x002;
+const GROUP_FLAG_DESTROYED: u16 = 0x010;
+const GROUP_FLAG_EVERYONE_ASSISTANT: u16 = 0x040;
+
+// `GroupType`, per the 1.14 wire format.
+const GROUP_TYPE_NONE: u8 = 0;
+const GROUP_TYPE_NORMAL: u8 = 1;
+
+// `GroupMemberFlags`, per the 1.14 wire format.
+//
+// **Not the same encoding as vanilla's flags byte.** 1.12 packs the subgroup into the low nibble of
+// one byte and sets 0x80 for assistant; 1.14 sends the subgroup as its own byte and uses 0x01 for
+// assistant in a separate one. Copying vanilla's packed byte across would mark nobody an assistant
+// and set the main-tank/main-assist bits from the subgroup index instead.
+const GROUP_MEMBER_FLAG_ASSISTANT: u8 = 0x01;
+const GROUP_MEMBER_FLAG_MAIN_TANK: u8 = 0x02;
+const GROUP_MEMBER_FLAG_MAIN_ASSIST: u8 = 0x04;
+
+// `DifficultyModern`. Classic Era has exactly one dungeon difficulty and one raid size, so these are
+// the only two values a 1.12 group can be in.
+const DIFFICULTY_NORMAL: u32 = 1;
+const DIFFICULTY_RAID40: u32 = 9;
+
+// `AuraFlagsModern`. 1.12 separates positive and negative auras into two masks; 1.14 sends one aura
+// list and distinguishes them with these bits, so the split has to be re-encoded rather than copied.
+const AURA_FLAG_NEGATIVE: u16 = 0x010;
+const AURA_FLAG_POSITIVE: u16 = 0x100;
+
+/// Translate a vanilla party-command result to its 1.14 number.
+///
+/// **The two enums are renumbered, not extended.** 1.14 inserts `TargetNotInInstance` at 3, which
+/// pushes `GroupFull` and everything after it up by one, and reorders `NotLeader` ahead of
+/// `PlayerWrongFaction`. Passing the number through unchanged does not fail visibly — it prints a
+/// confidently wrong line: "Your party is full." where the server meant "%s is already in a group.",
+/// and the player retries an invite that can never succeed.
+///
+/// Translated by name from the [`crate::game::group`] `ERR_*` constants, which are what every caller
+/// passes. Note that those constants are themselves numbered differently from the reference 1.12
+/// table (this server has no `NOT_IN_GROUP`, and puts wrong-faction/ignoring-you/not-leader at
+/// 5/6/7); the mapping below follows the constant *names*, so it stays correct regardless.
+///
+/// Returns `None` for a value that is not one of the constants. Dropping the packet costs the player
+/// a feedback line; guessing a number spends the same packet asserting an error that never happened.
+fn to_modern_party_result(result: u32) -> Option<u8> {
+    use crate::game::group::{
+        ERR_ALREADY_IN_GROUP_S, ERR_BAD_PLAYER_NAME_S, ERR_GROUP_FULL, ERR_IGNORING_YOU_S,
+        ERR_NOT_LEADER, ERR_PARTY_RESULT_OK, ERR_PLAYER_WRONG_FACTION, ERR_TARGET_NOT_IN_GROUP_S,
+    };
+
+    Some(match result {
+        ERR_PARTY_RESULT_OK => 0,
+        ERR_BAD_PLAYER_NAME_S => 1,
+        ERR_TARGET_NOT_IN_GROUP_S => 2,
+        // 3 is `TargetNotInInstance`, added in 1.14; everything below shifts up past it.
+        ERR_GROUP_FULL => 4,
+        ERR_ALREADY_IN_GROUP_S => 5,
+        // 6 is `NotInGroup`, which this server's constant set does not have.
+        ERR_NOT_LEADER => 7,
+        ERR_PLAYER_WRONG_FACTION => 8,
+        ERR_IGNORING_YOU_S => 9,
+        _ => return None,
+    })
+}
+
+/// `PartyPlayerInfo::Write`, per the 1.14 wire format.
+///
+/// Two differences bite here. The name's length is a 6-bit field written *before* the GUID while the
+/// bytes go last, so the whole entry shifts if the width is wrong; and the recipient is a normal
+/// entry in this list, where vanilla omits them and lets the client insert itself.
+fn write_modern_party_member(writer: &mut BitWriter, group: &CachedGroup, member: &GroupMember) {
+    let name = member.name.as_bytes();
+    writer.write_bits(name.len() as u32, 6);
+    // VoiceStateID length, biased by one — the client reads `len - 1` bytes, so 1 means "empty".
+    // Classic Era has no voice chat, so there is never a string to follow.
+    writer.write_bits(1, 6);
+    writer.write_bit(false); // FromSocialQueue
+    writer.write_bit(false); // VoiceChatSilenced
+    // Byte-sized writes flush the 14 bits above; the name bytes land after every fixed field.
+
+    let (high, low) = member.guid.to_guid128(DEFAULT_REALM_ID);
+    writer.write_packed_guid_128(high, low);
+
+    // `GroupMemberOnlineStatus` keeps vanilla's bit values (online 0x01, dead 0x04, AFK 0x40, DND
+    // 0x80), so the status carries over unchanged. Only the *width* grew, and this field stayed a
+    // byte, so the truncation is the same one vanilla does.
+    writer.write_u8(member.status.as_u16() as u8);
+    writer.write_u8(member.subgroup);
+
+    let mut flags = 0u8;
+    if member.assistant {
+        flags |= GROUP_MEMBER_FLAG_ASSISTANT;
+    }
+    if !member.guid.is_empty() && group.main_tank_guid == member.guid {
+        flags |= GROUP_MEMBER_FLAG_MAIN_TANK;
+    }
+    if !member.guid.is_empty() && group.main_assistant_guid == member.guid {
+        flags |= GROUP_MEMBER_FLAG_MAIN_ASSIST;
+    }
+    writer.write_u8(flags);
+
+    writer.write_u8(0); // RolesAssigned -- tank/healer/dps roles arrive with LFG, after Classic Era
+    // ClassId: 1.12's group list carries no class, and the client fills it from the name query it
+    // already sends for each member. Sending a guess here paints the wrong class icon and, worse,
+    // conflicts with the name-query answer that follows.
+    writer.write_u8(0);
+
+    writer.write_bytes(name);
+}
 
 /// SMSG_LOOT_START_ROLL - Start a loot roll for an item
 ///
@@ -43,6 +195,18 @@ pub struct SmsgLootRollStarted {
     pub roll_type: u8,
 }
 
+/// Not ported to 1.14: the loot-roll set only works as a set, and three of its four messages are
+/// missing data the 1.14 bodies require.
+///
+/// 1.14 replaces vanilla's loose item fields with an embedded `ItemInstance` in every roll message,
+/// including the ones that end a roll. [`SmsgLootRoll`] and [`SmsgLootRollWon`] carry neither the
+/// loot object GUID nor the item id, and [`SmsgLootAllPassed`] carries no item id — so a roll could
+/// be started on a 1.14 client but never updated, resolved or dismissed, leaving the roll frame
+/// stuck on screen with a live timer. This one *is* encodable except for `MapID`, which vanilla does
+/// not send either; porting it alone would trade a missing frame for a stuck one.
+///
+/// Unblocking all four needs the loot object GUID and the item id (and ideally the map id) on the
+/// three follow-up structs; none of them are reachable from what is here.
 impl ToWorldPacket for SmsgLootRollStarted {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_START_ROLL);
@@ -70,6 +234,8 @@ pub struct SmsgLootRoll {
     pub roll_type: u8,
 }
 
+/// Not ported to 1.14: 1.14's roll broadcast embeds an `ItemInstance` and names the loot object,
+/// and this struct has neither the item id nor the loot GUID. See [`SmsgLootRollStarted`].
 impl ToWorldPacket for SmsgLootRoll {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_ROLL);
@@ -93,6 +259,8 @@ pub struct SmsgLootRollWon {
     pub roll_type: u8,
 }
 
+/// Not ported to 1.14: same gap as [`SmsgLootRoll`] — 1.14 needs the loot object GUID and a full
+/// `ItemInstance` for the item that was won, and neither is on this struct.
 impl ToWorldPacket for SmsgLootRollWon {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_ROLL_WON);
@@ -114,6 +282,9 @@ pub struct SmsgLootAllPassed {
     pub item_slot: u32,
 }
 
+/// Not ported to 1.14: 1.14 identifies the passed-on item with an embedded `ItemInstance`, and this
+/// struct has only the loot GUID and a slot index — no item id to put in it. See
+/// [`SmsgLootRollStarted`].
 impl ToWorldPacket for SmsgLootAllPassed {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_ALL_PASSED);
@@ -139,7 +310,55 @@ impl ToWorldPacket for SmsgGroupInvite<'_> {
         packet.write_string(self.inviter_name);
         packet
     }
+
+    /// `PartyInvite::Write`. Vanilla's whole body is the inviter's name; 1.14 wraps that name in six
+    /// leading bits, a realm block, two GUIDs and four LFG fields.
+    ///
+    /// The name's 6-bit length is written *before* the realm block but the bytes go after every
+    /// fixed field, so the string is not where a vanilla reader would look for it. `CanAccept` must
+    /// be set: with it clear the popup appears with no accept button and the invite can only be
+    /// declined.
+    ///
+    /// The inviter GUID is sent empty. Vanilla names the inviter only by name, and the client uses
+    /// the name for the popup text; the GUID feeds cross-realm and Battle.net paths that Classic Era
+    /// has none of.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let name = self.inviter_name.as_bytes();
+
+        writer.write_bit(true); // CanAccept
+        writer.write_bit(false); // MightCRZYou -- no cross-realm zones
+        writer.write_bit(false); // IsXRealm
+        writer.write_bit(false); // MustBeBNetFriend
+        writer.write_bit(false); // AllowMultipleRoles
+        writer.write_bit(false); // QuestSessionActive
+        writer.write_bits(name.len() as u32, 6);
+
+        // VirtualRealmInfo: the address, then a name block of two bits and two 8-bit lengths. Both
+        // realm names are sent empty -- the client only renders them for a cross-realm invite, and
+        // `IsLocal` says this is not one.
+        writer.write_u32(VIRTUAL_REALM_ADDRESS);
+        writer.write_bit(true); // IsLocal
+        writer.write_bit(false); // IsInternalRealm
+        writer.write_bits(0, 8); // RealmNameActual length
+        writer.write_bits(0, 8); // RealmNameNormalized length
+        writer.flush_bits();
+
+        writer.write_packed_guid_128(0, 0); // InviterGUID -- see above
+        writer.write_packed_guid_128(0, 0); // InviterBNetAccountId
+        writer.write_u16(4904); // Unk1
+        writer.write_u32(0); // ProposedRoles
+        writer.write_i32(0); // LfgSlots count
+        writer.write_i32(0); // LfgCompletedMask
+
+        writer.write_bytes(name);
+
+        Some(writer.finish(Opcode::SMSG_GROUP_INVITE))
+    }
 }
+
+/// `region << 24 | site << 16 | realm id`, the same scheme the bnet realm list advertises.
+const VIRTUAL_REALM_ADDRESS: u32 = 0x0101_0000 | DEFAULT_REALM_ID as u32;
 
 /// SMSG_GROUP_LIST - Send complete group roster information
 ///
@@ -219,6 +438,104 @@ impl ToWorldPacket for SmsgGroupList<'_> {
 
         packet
     }
+
+    /// `PartyUpdate::Write`. The most heavily restructured body in this module.
+    ///
+    /// Four things differ from vanilla and each is silently wrong if missed:
+    ///
+    /// * **The recipient is in the list.** Vanilla omits them and the client inserts itself from its
+    ///   own state; 1.14 sends every member and reads `MyIndex` to find which one is the viewer.
+    ///   Keeping vanilla's filter would leave the player absent from their own party frame.
+    /// * **Subgroup and assistant split apart.** Vanilla packs both into one byte (`subgroup |
+    ///   0x80`); 1.14 sends a subgroup byte and a `GroupMemberFlags` byte where assistant is `0x01`.
+    /// * **Loot settings are optional, not unconditional.** They follow the member list behind a
+    ///   presence bit, and the three presence bits are written *before* the members.
+    /// * **A sequence number gates the whole update** — see [`PARTY_UPDATE_SEQUENCE`].
+    ///
+    /// An empty member list is the disband path: 1.14 expresses it as a party update carrying the
+    /// `Destroyed` flag and `MyIndex` of -1, with none of the optional blocks.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let members = &self.group.members;
+        let destroyed = members.is_empty();
+
+        let mut party_flags = 0u16;
+        if destroyed {
+            party_flags |= GROUP_FLAG_DESTROYED;
+        } else {
+            if self.group.is_raid {
+                party_flags |= GROUP_FLAG_RAID;
+            }
+            if members.iter().all(|m| m.assistant) {
+                party_flags |= GROUP_FLAG_EVERYONE_ASSISTANT;
+            }
+        }
+
+        let mut writer = BitWriter::new();
+        writer.write_u16(party_flags);
+        // PartyIndex 0 is the real party; 1 is the battleground raid, which this server does not
+        // form here. It also selects which party GUID the client matches, so it must stay 0
+        // everywhere -- see `modern_party_guid`.
+        writer.write_u8(0);
+        writer.write_u8(if destroyed {
+            GROUP_TYPE_NONE
+        } else {
+            GROUP_TYPE_NORMAL
+        });
+
+        let my_index = members
+            .iter()
+            .position(|m| m.guid == self.member_guid)
+            .map_or(-1, |index| index as i32);
+        writer.write_i32(my_index);
+
+        let (party_high, party_low) = if destroyed {
+            (0, 0)
+        } else {
+            modern_party_guid()
+        };
+        writer.write_packed_guid_128(party_high, party_low);
+
+        writer.write_i32(next_party_update_sequence());
+
+        let (leader_high, leader_low) = if destroyed {
+            (0, 0)
+        } else {
+            self.group.leader_guid.to_guid128(DEFAULT_REALM_ID)
+        };
+        writer.write_packed_guid_128(leader_high, leader_low);
+
+        writer.write_i32(members.len() as i32);
+        writer.write_bit(false); // HasLfgInfos -- no dungeon finder in Classic Era
+        writer.write_bit(!destroyed); // HasLootSettings
+        writer.write_bit(!destroyed); // HasDifficultySettings
+        writer.flush_bits();
+
+        for member in members {
+            write_modern_party_member(&mut writer, self.group, member);
+        }
+
+        if !destroyed {
+            // PartyLootSettings. As in vanilla, the looter GUID is only meaningful under master
+            // loot; the client draws the crown from it and would put one on a stale player
+            // otherwise.
+            writer.write_u8(self.group.loot_method as u8);
+            let (looter_high, looter_low) = if self.group.loot_method == LootMethod::MasterLooter {
+                self.group.looter_guid.to_guid128(DEFAULT_REALM_ID)
+            } else {
+                (0, 0)
+            };
+            writer.write_packed_guid_128(looter_high, looter_low);
+            writer.write_u8(self.group.loot_threshold);
+
+            // PartyDifficultySettings. Vanilla sends a single difficulty byte and only when the
+            // group is non-empty; 1.14 always reads three ints here.
+            writer.write_u32(DIFFICULTY_NORMAL); // DungeonDifficultyID
+            writer.write_u32(DIFFICULTY_RAID40); // RaidDifficultyID
+            writer.write_u32(0); // LegacyRaidDifficultyID -- no legacy raids exist yet
+        }
+
+        Some(writer.finish(Opcode::SMSG_GROUP_LIST))
+    }
 }
 
 /// SMSG_GROUP_SET_LEADER - Notify group members of leader change
@@ -236,6 +553,17 @@ impl ToWorldPacket for SmsgGroupSetLeader<'_> {
         let mut packet = WorldPacket::new(Opcode::SMSG_GROUP_SET_LEADER);
         packet.write_string(self.leader_name);
         packet
+    }
+
+    /// `GroupNewLeader::Write`. The name loses its null terminator and gains a 9-bit length, and a
+    /// party index byte now leads the body.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u8(0); // PartyIndex -- the real party; see `SmsgGroupList::to_modern`
+        let name = self.leader_name.as_bytes();
+        writer.write_bits(name.len() as u32, 9);
+        writer.write_bytes(name);
+        Some(writer.finish(Opcode::SMSG_GROUP_SET_LEADER))
     }
 }
 
@@ -260,6 +588,29 @@ impl ToWorldPacket for SmsgPartyCommandResult<'_> {
         packet.write_string(self.member_name);
         packet.write_u32(self.result);
         packet
+    }
+
+    /// `PartyCommandResult::Write`. Vanilla's two 32-bit enums become a 4-bit command and a 6-bit
+    /// result packed alongside the name's 9-bit length, and the **result enum is renumbered** — see
+    /// [`to_modern_party_result`], which is where the real hazard in this message lives.
+    ///
+    /// The command enum is *not* renumbered (invite is still 0, leave still 2), so it is cast. It
+    /// only has 4 bits now, so a command above 15 would wrap into the result field.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let result = to_modern_party_result(self.result)?;
+        let name = self.member_name.as_bytes();
+
+        let mut writer = BitWriter::new();
+        writer.write_bits(name.len() as u32, 9);
+        writer.write_bits(self.operation & 0xF, 4);
+        writer.write_bits(u32::from(result), 6);
+        // 19 bits; the u32 below flushes them out to three bytes.
+
+        writer.write_u32(0); // ResultData -- only LFG results populate it
+        writer.write_packed_guid_128(0, 0); // ResultGUID -- vanilla names the target by name only
+        writer.write_bytes(name);
+
+        Some(writer.finish(Opcode::SMSG_PARTY_COMMAND_RESULT))
     }
 }
 
@@ -595,6 +946,187 @@ impl ToWorldPacket for SmsgPartyMemberStats<'_> {
 
         packet
     }
+
+    /// `PartyMemberPartialState::Write`. Vanilla's 32-bit update mask becomes a run of presence
+    /// bits, one per optional field, in an order that is **not** the mask's bit order.
+    ///
+    /// Three traps:
+    ///
+    /// * **The pet block comes before the affected GUID**, not after it. Every other field follows
+    ///   the GUID. Writing the pet where vanilla's ordering suggests puts the whole tail one block
+    ///   out of place, and the client attributes the stats to the wrong unit.
+    /// * **The positive and negative aura masks merge into one list.** Vanilla sends two bitmasks
+    ///   with the spell ids implied by set bits; 1.14 sends a counted list of entries that each
+    ///   carry a `Negative`/`Positive` flag, so the split has to be re-encoded rather than copied.
+    /// * **Health and power widen unevenly.** Health becomes 32-bit while power stays 16-bit, so a
+    ///   uniform widening desynchronises everything after the health fields.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        use group_update_flags::*;
+
+        let has = |flag: u32| (self.update_mask & flag) != 0;
+
+        let positive = if has(AURAS) {
+            self.auras.unwrap_or(&[])
+        } else {
+            &[]
+        };
+        let negative = if has(AURAS_NEGATIVE) {
+            self.negative_auras.unwrap_or(&[])
+        } else {
+            &[]
+        };
+        let has_auras = has(AURAS) || has(AURAS_NEGATIVE);
+
+        let pet_positive = if has(PET_AURAS) {
+            self.pet_auras.unwrap_or(&[])
+        } else {
+            &[]
+        };
+        let pet_negative = if has(PET_AURAS_NEGATIVE) {
+            self.pet_negative_auras.unwrap_or(&[])
+        } else {
+            &[]
+        };
+        let has_pet_auras = has(PET_AURAS) || has(PET_AURAS_NEGATIVE);
+        let has_pet = has(PET_GUID)
+            || has(PET_NAME)
+            || has(PET_MODEL_ID)
+            || has(PET_CUR_HP)
+            || has(PET_MAX_HP)
+            || has_pet_auras;
+
+        let mut writer = BitWriter::new();
+
+        writer.write_bit(false); // ForEnemyChanged
+        writer.write_bit(false); // SetPvPInactive
+        writer.write_bit(false); // Unk901_1
+        writer.write_bit(false); // HasPartyType
+        writer.write_bit(has(STATUS));
+        writer.write_bit(has(POWER_TYPE));
+        writer.write_bit(false); // HasOverrideDisplayPower
+        writer.write_bit(has(CUR_HP));
+        writer.write_bit(has(MAX_HP));
+        writer.write_bit(has(CUR_POWER));
+        writer.write_bit(has(MAX_POWER));
+        writer.write_bit(has(LEVEL));
+        writer.write_bit(false); // HasSpec -- talent specs are a later expansion's concept
+        writer.write_bit(has(ZONE));
+        writer.write_bit(false); // HasWmoGroupID
+        writer.write_bit(false); // HasWmoDoodadPlacementID
+        writer.write_bit(has(POSITION));
+        writer.write_bit(false); // HasVehicleSeatRecID
+        writer.write_bit(has_auras);
+        writer.write_bit(has_pet);
+        writer.write_bit(false); // HasPhase
+        writer.write_bit(false); // HasUnk901_2
+        writer.flush_bits();
+
+        if has_pet {
+            // PartyMemberPetStats::WritePartial -- its own presence-bit run, and the pet's name is
+            // written straight after that run, ahead of the pet GUID.
+            writer.write_bit(has(PET_GUID));
+            writer.write_bit(has(PET_NAME));
+            writer.write_bit(has(PET_MODEL_ID));
+            writer.write_bit(has(PET_MAX_HP));
+            writer.write_bit(has(PET_CUR_HP));
+            writer.write_bit(has_pet_auras);
+            writer.flush_bits();
+
+            if has(PET_NAME) {
+                let pet_name = self.pet_name.unwrap_or("").as_bytes();
+                writer.write_bits(pet_name.len() as u32, 8);
+                writer.write_bytes(pet_name);
+            }
+            if has(PET_GUID) {
+                let (high, low) = self
+                    .pet_guid
+                    .unwrap_or_else(ObjectGuid::empty)
+                    .to_guid128(DEFAULT_REALM_ID);
+                writer.write_packed_guid_128(high, low);
+            }
+            if has(PET_MODEL_ID) {
+                writer.write_u32(u32::from(self.pet_model_id.unwrap_or(0)));
+            }
+            if has(PET_MAX_HP) {
+                writer.write_u32(u32::from(self.pet_max_hp.unwrap_or(0)));
+            }
+            if has(PET_CUR_HP) {
+                writer.write_u32(u32::from(self.pet_cur_hp.unwrap_or(0)));
+            }
+            if has_pet_auras {
+                writer.write_i32((pet_positive.len() + pet_negative.len()) as i32);
+                for &spell_id in pet_positive {
+                    write_modern_party_aura(&mut writer, spell_id, AURA_FLAG_POSITIVE);
+                }
+                for &spell_id in pet_negative {
+                    write_modern_party_aura(&mut writer, spell_id, AURA_FLAG_NEGATIVE);
+                }
+            }
+            // The pet's power type and power have no home in the 1.14 body; the client reads pet
+            // power off the pet's own object update instead. Dropping them is not a data loss.
+        }
+
+        let (high, low) = self.player_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // AffectedGUID -- after the pet block, see above
+
+        if has(STATUS) {
+            // `GroupMemberOnlineStatus` widened to 16 bits but kept vanilla's bit values.
+            writer.write_u16(u16::from(self.status.unwrap_or(0)));
+        }
+        if has(POWER_TYPE) {
+            writer.write_u8(self.power_type.unwrap_or(0));
+        }
+        if has(CUR_HP) {
+            writer.write_u32(self.health.unwrap_or(0));
+        }
+        if has(MAX_HP) {
+            writer.write_u32(self.max_health.unwrap_or(0));
+        }
+        if has(CUR_POWER) {
+            writer.write_u16(self.cur_power.unwrap_or(0).min(u16::MAX as u32) as u16);
+        }
+        if has(MAX_POWER) {
+            writer.write_u16(self.max_power.unwrap_or(0).min(u16::MAX as u32) as u16);
+        }
+        if has(LEVEL) {
+            writer.write_u16(u16::from(self.level.unwrap_or(0)));
+        }
+        if has(ZONE) {
+            writer.write_u16(self.zone_id.unwrap_or(0).min(u16::MAX as u32) as u16);
+        }
+        if has(POSITION) {
+            // 1.14 reads three signed shorts holding the world coordinate truncated to an integer --
+            // the party frame only needs enough precision to place a dot on the zone map. Vanilla
+            // sends X and Y; Z has no vanilla source, and 0 is what the client treats as "unknown".
+            writer.write_i16(self.position_x.unwrap_or(0.0) as i16);
+            writer.write_i16(self.position_y.unwrap_or(0.0) as i16);
+            writer.write_i16(0);
+        }
+        if has_auras {
+            writer.write_i32((positive.len() + negative.len()) as i32);
+            for &spell_id in positive {
+                write_modern_party_aura(&mut writer, spell_id, AURA_FLAG_POSITIVE);
+            }
+            for &spell_id in negative {
+                write_modern_party_aura(&mut writer, spell_id, AURA_FLAG_NEGATIVE);
+            }
+        }
+
+        Some(writer.finish(Opcode::SMSG_PARTY_MEMBER_STATS))
+    }
+}
+
+/// `PartyMemberAuraStates::Write`, per the 1.14 wire format.
+///
+/// Shared by the member's own auras and the pet's, which send the same entry shape.
+///
+/// `ActiveFlags` is a per-effect-index bitmask, not a boolean; vanilla's group aura masks say only
+/// that the aura is present, so bit 0 is what "it is applied" translates to.
+fn write_modern_party_aura(writer: &mut BitWriter, spell_id: u32, aura_flags: u16) {
+    writer.write_u32(spell_id);
+    writer.write_u16(aura_flags);
+    writer.write_u32(1); // ActiveFlags
+    writer.write_i32(0); // Points count -- vanilla sends no aura effect values in this message
 }
 
 /// SMSG_GROUP_DESTROYED - Notify player that group was disbanded
@@ -607,6 +1139,15 @@ impl ToWorldPacket for SmsgGroupDestroyed {
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_GROUP_DESTROYED)
     }
+
+    /// Empty in both protocols, so the vanilla body is byte-identical.
+    ///
+    /// 1.14 does not clear the party frame from this alone — it acts on the party update carrying
+    /// the `Destroyed` flag (see [`SmsgGroupList::to_modern`]). Sending this too is harmless and
+    /// matches what the disband path already does for vanilla.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
 }
 
 /// SMSG_GROUP_UNINVITE - Notify player they were kicked from group
@@ -618,6 +1159,12 @@ pub struct SmsgGroupUninvite;
 impl ToWorldPacket for SmsgGroupUninvite {
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_GROUP_UNINVITE)
+    }
+
+    /// Empty in both protocols, so the vanilla body is byte-identical. This is the packet that makes
+    /// the client say it was removed from the party, so it must not be sent on a voluntary leave.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
     }
 }
 
@@ -647,6 +1194,41 @@ impl ToWorldPacket for MsgRaidTargetUpdate {
             }
         }
         packet
+    }
+
+    /// `SendRaidTargetUpdateAll::Write`.
+    ///
+    /// 1.14 splits this message in two: a single-mark form that names who placed the mark, and a
+    /// whole-table form that does not. Vanilla's delta form carries no setter GUID at all, so the
+    /// single form is not encodable from what we have — and it does not need to be. This struct
+    /// always carries the full eight-slot table regardless of `mode`, and the whole-table form is a
+    /// complete state sync: sending it is correct whether one mark changed or all of them did.
+    ///
+    /// The per-entry order is **reversed** from vanilla: 1.14 writes the target GUID and *then* the
+    /// symbol index, where vanilla leads with the index. Getting that backwards puts every mark on
+    /// the wrong unit rather than failing to parse. The list is also explicitly counted instead of
+    /// running to the end of the packet.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u8(0); // PartyIndex -- the real party; see `SmsgGroupList::to_modern`
+
+        let count = self
+            .target_icons
+            .iter()
+            .filter(|target| !target.is_empty())
+            .count();
+        writer.write_i32(count as i32);
+
+        for (index, target) in self.target_icons.iter().enumerate() {
+            if target.is_empty() {
+                continue;
+            }
+            let (high, low) = target.to_guid128(DEFAULT_REALM_ID);
+            writer.write_packed_guid_128(high, low);
+            writer.write_u8(index as u8); // Symbol
+        }
+
+        Some(writer.finish(Opcode::MSG_RAID_TARGET_UPDATE))
     }
 }
 

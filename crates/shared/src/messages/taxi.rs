@@ -10,7 +10,9 @@
 //! - [`SmsgActivateTaxiReply`] - Response to a taxi activation request
 
 use crate::game::taxi::{TaxiMask, TAXI_MASK_SIZE};
+use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::guid::ObjectGuid;
 use crate::protocol::Opcode;
 use crate::protocol::WorldPacket;
@@ -27,6 +29,21 @@ pub struct SmsgTaxinodeStatus {
 }
 
 impl ToWorldPacket for SmsgTaxinodeStatus {
+    /// 1.14 replaces the trailing known/unknown byte with a 2-bit `TaxiNodeStatus` code.
+    ///
+    /// The codes are 0 = None, 1 = Learned, 2 = Unlearned, 3 = NotEligible, so the false case is
+    /// **2, not 0**. Passing vanilla's `0` through tells the client there is no flight point on
+    /// this NPC at all, and it silently declines to open the flight map instead of showing the
+    /// node greyed out.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.creature_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_bits(if self.is_known { 1 } else { 2 }, 2);
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_TAXINODE_STATUS))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_TAXINODE_STATUS);
         packet.write_guid_raw(self.creature_guid.raw());
@@ -49,6 +66,44 @@ pub struct SmsgShowTaxinodes {
 }
 
 impl ToWorldPacket for SmsgShowTaxinodes {
+    /// The 1.14 layout front-loads both list lengths and splits the mask into two lists.
+    ///
+    /// Three things differ from vanilla and all three are silent failures if got wrong:
+    ///
+    /// * The leading `1` word becomes a single bit meaning "a flight master and current node
+    ///   follow". Vanilla always names both, so the bit is always set.
+    /// * Both list lengths are written **before** the GUID and current node, and the mask bytes
+    ///   come after them. Vanilla interleaves the GUID and node ahead of the mask.
+    /// * The mask is a plain byte-per-8-nodes bitmap here. Vanilla widens each of those bytes to
+    ///   a `u32`, so the vanilla body is four times as long and its bits sit at multiples of 32;
+    ///   copying its words over would scatter the known nodes across the map.
+    ///
+    /// 1.14 splits the mask into "can land" and "can use", which lets a server temporarily bar a
+    /// node the player already knows. Vanilla has no such distinction, so both lists are the same.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_bit(true); // HasWindowInfo
+        writer.flush_bits();
+
+        // Trailing zero bytes are trimmed; the client treats any node past the end as not known.
+        let nodes = self.taxi_mask.0;
+        let len = nodes
+            .iter()
+            .rposition(|&byte| byte != 0)
+            .map_or(0, |i| i + 1);
+
+        writer.write_i32(len as i32); // CanLandNodes count
+        writer.write_i32(len as i32); // CanUseNodes count
+
+        let (high, low) = self.creature_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(self.current_node);
+
+        writer.write_bytes(&nodes[..len]);
+        writer.write_bytes(&nodes[..len]);
+        Some(writer.finish(Opcode::SMSG_SHOWTAXINODES))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SHOWTAXINODES);
         packet.write_u32(1);
@@ -71,6 +126,11 @@ impl ToWorldPacket for SmsgShowTaxinodes {
 pub struct SmsgNewTaxiPath {}
 
 impl ToWorldPacket for SmsgNewTaxiPath {
+    /// Empty body in 1.14 as well, so the vanilla packet is byte-identical.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_NEW_TAXI_PATH)
     }
@@ -86,6 +146,18 @@ pub struct SmsgActivateTaxiReply {
 }
 
 impl ToWorldPacket for SmsgActivateTaxiReply {
+    /// 1.14 packs the reply into 4 bits where vanilla spends a whole u32 on it.
+    ///
+    /// The numbering is unchanged — 0 = Ok through 12 = NotStanding, the same set the `ERR_TAXI*`
+    /// constants below name — so the value carries over as-is. The mask keeps a bad caller from
+    /// bleeding high bits into whatever follows; every defined code already fits in 4 bits.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_bits(self.reply & 0xF, 4);
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_ACTIVATETAXIREPLY))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ACTIVATETAXIREPLY);
         packet.write_u32(self.reply);

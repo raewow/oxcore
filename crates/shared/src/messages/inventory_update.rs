@@ -17,7 +17,8 @@
 //! # Ok::<(), ()>(())
 //! ```
 
-use crate::messages::ToWorldPacket;
+use crate::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
+use crate::messages::{Recipient, ToWorldPacket};
 use crate::protocol::update_fields::{
     PLAYER_FIELD_BANKBAG_SLOT_1, PLAYER_FIELD_BANK_SLOT_1, PLAYER_FIELD_BUYBACK_PRICE_1,
     PLAYER_FIELD_BUYBACK_TIMESTAMP_1, PLAYER_FIELD_INV_SLOT_HEAD, PLAYER_FIELD_PACK_SLOT_1,
@@ -25,6 +26,56 @@ use crate::protocol::update_fields::{
 };
 use crate::protocol::updates::update_mask::UpdateMask;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
+
+/// The vanilla player field holding the item GUID for one `(bag, slot)` pair, if there is one.
+///
+/// Shared by the modern encoders below. They do not hand-build a 1.14 field write: they restate the
+/// update in vanilla field numbers and let the 1.14 slot map translate, which is the same path
+/// every other object update takes and keeps the numbering in exactly one place.
+///
+/// **Only equipment and equipped-bag slots (0-22) survive that translation today.** The generated
+/// 1.12 -> 1.14 slot map joins the two field tables by name, and 1.14 merges vanilla's four
+/// separately-named arrays -- equipped, backpack, bank, bank bags -- into one contiguous inventory
+/// array. Only the first array's name matched, so backpack, bank and bank-bag writes are dropped on
+/// the way out. Those return `None` here rather than silently mapping to a neighbouring slot: a
+/// wrong index would put an item GUID in some unrelated field, which is far worse than a missing
+/// update. Widening this needs the slot map extended, not a formula guessed at here.
+fn equipment_slot_field(bag: u8, slot: u8) -> Option<u32> {
+    // A bag other than 255 addresses a slot inside a container object, which is a separate object's
+    // fields entirely and never appears on the player.
+    // `INVENTORY_SLOT_START` is one past the last slot vanilla stores in the equipped array: 19
+    // equipment slots plus the 4 equipped bag slots.
+    if bag != 255 || slot >= INVENTORY_SLOT_START {
+        return None;
+    }
+    Some(PLAYER_FIELD_INV_SLOT_HEAD + (slot as u32 * 2))
+}
+
+/// Restate a set of slot writes as a modern `SMSG_UPDATE_OBJECT` on the player's own object.
+///
+/// The player is always the recipient of their own inventory update, so the block is tagged with
+/// their GUID: 1.14 splits the player field table in two and the inventory array only exists on the
+/// self-only half. Without that tag every write below is discarded as an unknown field.
+///
+/// `None` when nothing survived the slot filter, so an update that is entirely backpack or bank
+/// slots is dropped outright rather than sent as an update block with an empty field mask.
+fn modern_slot_update(
+    player_guid: ObjectGuid,
+    updates: impl IntoIterator<Item = (u8, u8, Option<ObjectGuid>)>,
+) -> Option<SmsgUpdateObject> {
+    let mut block = ValuesUpdateBlock::new(player_guid, ObjectType::Player);
+    let mut any = false;
+    for (bag, slot, item_guid) in updates {
+        let Some(field) = equipment_slot_field(bag, slot) else {
+            continue;
+        };
+        // An empty slot is written as an all-zero GUID rather than omitted: the client keeps the
+        // previous item in a field it is not told about, so clearing has to be an explicit write.
+        block = block.set_guid_field(field, item_guid.unwrap_or_default());
+        any = true;
+    }
+    any.then(|| SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block)))
+}
 
 const MAX_VISIBLE_ITEM_OFFSET: u32 = 12;
 const EQUIPMENT_SLOT_COUNT: u8 = 19;
@@ -76,6 +127,23 @@ impl SmsgInventorySlotUpdate {
 }
 
 impl ToWorldPacket for SmsgInventorySlotUpdate {
+    /// Both protocols express this as a field update on the player; only the slot numbering and the
+    /// packet framing differ, and both of those are handled by the shared update encoder.
+    ///
+    /// See `equipment_slot_field` for which slots make it across.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        modern_slot_update(self.player_guid, [(self.bag, self.slot, self.item_guid)])?
+            .for_recipient(self.player_guid, 0)
+            .to_modern()
+    }
+
+    /// Preferred over [`ToWorldPacket::to_modern`] when the send path knows the recipient: it
+    /// carries the real map id and realm, which the modern header and every GUID in the body need.
+    fn to_modern_for(&self, recipient: Recipient) -> Option<WorldPacket> {
+        modern_slot_update(self.player_guid, [(self.bag, self.slot, self.item_guid)])?
+            .to_modern_for(recipient)
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
         packet.write_u32(1);
@@ -149,6 +217,13 @@ pub struct SmsgBuybackSlotUpdate {
     pub timestamp: u32,
 }
 
+/// No `to_modern`: none of the three fields this writes has a 1.14 slot to write into.
+///
+/// The buyback item, price and expiry live in vanilla-only player fields; the generated 1.12 ->
+/// 1.14 slot map has no counterpart for any of them, so encoding this would produce an update block
+/// with an empty field mask -- a packet that costs bandwidth and changes nothing. Restoring the
+/// buyback tab for a 1.14 client is a slot-map question, not a message-encoding one, so this is
+/// left unported rather than shipped as a no-op.
 impl ToWorldPacket for SmsgBuybackSlotUpdate {
     fn to_vanilla(&self) -> WorldPacket {
         debug_assert!(
@@ -206,6 +281,20 @@ impl SmsgInventorySlotsUpdate {
 }
 
 impl ToWorldPacket for SmsgInventorySlotsUpdate {
+    /// Every slot in one block, exactly as vanilla does -- a swap must not arrive as two packets or
+    /// the client briefly shows the item in both places, or in neither.
+    ///
+    /// See `equipment_slot_field` for which slots make it across.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        modern_slot_update(self.player_guid, self.updates.iter().copied())?
+            .for_recipient(self.player_guid, 0)
+            .to_modern()
+    }
+
+    fn to_modern_for(&self, recipient: Recipient) -> Option<WorldPacket> {
+        modern_slot_update(self.player_guid, self.updates.iter().copied())?.to_modern_for(recipient)
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);
         packet.write_u32(1);
@@ -292,6 +381,14 @@ impl SmsgVisibleItemUpdate {
     }
 }
 
+/// No `to_modern`: 1.14 restructured the visible-item fields, so they cannot be slot-translated.
+///
+/// Vanilla spends 12 field slots per equipment slot on the visible item -- entry, then eleven
+/// enchantment slots; 1.14 replaces that with a much smaller per-slot record. The generated slot map
+/// leaves the whole vanilla range unmapped because there is no field-for-field correspondence to
+/// map, and writing the entry into whatever 1.14 slot happens to sit at the same offset would
+/// scribble over an unrelated field. Porting this means a hand-written repack against the real 1.14
+/// visible-item layout, not an index translation.
 impl ToWorldPacket for SmsgVisibleItemUpdate {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_OBJECT);

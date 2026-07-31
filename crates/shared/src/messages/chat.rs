@@ -298,6 +298,12 @@ impl ToWorldPacket for SmsgMessageChat<'_> {
 #[derive(Debug, Clone, Copy)]
 pub struct SmsgChatWrongFaction;
 
+/// No `to_modern`: the 1.14 opcode table has no cross-faction-whisper error.
+///
+/// The opcode was removed: the 1.14 table has every other chat error in this family -- not found,
+/// ambiguous, restricted, not in party -- but nothing for a cross-faction whisper, so there is no
+/// opcode to send a body under. A 1.14 client can only be told the target does not exist, which is
+/// [`SmsgChatPlayerNotFound`]; callers that want any feedback here must send that instead.
 impl ToWorldPacket for SmsgChatWrongFaction {
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_CHAT_WRONG_FACTION)
@@ -317,6 +323,20 @@ pub struct SmsgChatPlayerNotFound<'a> {
 }
 
 impl ToWorldPacket for SmsgChatPlayerNotFound<'_> {
+    /// The name loses its null terminator and gains a 9-bit length prefix.
+    ///
+    /// The prefix is a byte *count*, not a character count, and it is the whole body's framing: a
+    /// stray trailing NUL would be counted as part of the name and the client would render the
+    /// error with an invisible character appended, so `write_string_raw` is used rather than
+    /// `write_cstring`.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_bits(self.name.len() as u32, 9);
+        writer.flush_bits();
+        writer.write_string_raw(self.name);
+        Some(writer.finish(Opcode::SMSG_CHAT_PLAYER_NOT_FOUND))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHAT_PLAYER_NOT_FOUND);
         packet.write_cstring(self.name);
@@ -333,6 +353,14 @@ impl ToWorldPacket for SmsgChatPlayerNotFound<'_> {
 #[derive(Debug, Clone, Copy)]
 pub struct SmsgChatRestricted;
 
+/// No `to_modern`: the 1.14 body carries a restriction reason this struct does not have.
+///
+/// The opcode still exists in 1.14, but where vanilla sends an empty packet that means only "you
+/// are muted", the 1.14 body selects *which* restriction message to print. This struct is a unit
+/// type and the vanilla wire format carries nothing to derive that from, so any value written here
+/// would be invented -- and the wrong one tells the player the wrong thing about why they cannot
+/// talk. Porting this needs a reason on the struct first, which in turn needs the sending code to
+/// distinguish the cases.
 impl ToWorldPacket for SmsgChatRestricted {
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_CHAT_RESTRICTED)
@@ -352,6 +380,21 @@ pub struct SmsgChatPlayerAmbiguous<'a> {
 }
 
 impl ToWorldPacket for SmsgChatPlayerAmbiguous<'_> {
+    /// Same shape as [`SmsgChatPlayerNotFound`]: a 9-bit byte count, then the raw name.
+    ///
+    /// **Unverified.** The 1.14 opcode exists and the body is a single player name, but no
+    /// authoritative field list for it was available; this mirrors the sibling name-carrying chat
+    /// error, whose 9 bits are sized exactly for a player name. If a 1.14 client mis-renders this
+    /// one error toast, this is the reason -- it cannot affect anything else, since each packet is
+    /// framed independently.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_bits(self.name.len() as u32, 9);
+        writer.flush_bits();
+        writer.write_string_raw(self.name);
+        Some(writer.finish(Opcode::SMSG_CHAT_PLAYER_AMBIGUOUS))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_CHAT_PLAYER_AMBIGUOUS);
         packet.write_cstring(self.name);

@@ -25,6 +25,16 @@ pub struct SmsgUpdateAccountData {
     pub data: Vec<u8>,
 }
 
+/// Not ported to 1.14: the modern body names an owner and a modification time that this struct
+/// does not carry.
+///
+/// 1.14 reads a packed player GUID and an `i64` timestamp before the size word, then the data type
+/// as bits — 4 of them, since this build tracks more than 8 account data types. Both leading fields
+/// are load-bearing: the client keys its cache on the GUID and compares the timestamp against what
+/// `SMSG_ACCOUNT_DATA_TIMES` promised, so a zero there makes it re-request the blob forever.
+///
+/// [`SmsgAccountDataTimes`] below solves the same problem by carrying the GUID and realm on the
+/// struct; this message needs the same treatment plus a timestamp before it can be encoded.
 impl ToWorldPacket for SmsgUpdateAccountData {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_ACCOUNT_DATA);
@@ -133,6 +143,11 @@ pub struct SmsgUpdateAccountDataComplete {
     pub status: u32,
 }
 
+/// Not ported to 1.14: the opcode was retired and has no replacement.
+///
+/// 1.14 has no "account data update complete" message — the client treats the echoed
+/// `SMSG_UPDATE_ACCOUNT_DATA` as its acknowledgement — so there is no body to encode and no opcode
+/// to send it under.
 impl ToWorldPacket for SmsgUpdateAccountDataComplete {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_ACCOUNT_DATA_COMPLETE);

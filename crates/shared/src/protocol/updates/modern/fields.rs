@@ -317,6 +317,65 @@ impl ModernFieldsArray {
 mod tests {
     use super::*;
 
+    /// 1.14 folds vanilla's six separately-named inventory arrays into one contiguous array, and
+    /// only the equipment one shares a name -- so the generator's name join resolved that and
+    /// silently dropped backpack, bank, bank-bag, buyback and keyring. Items in those slots simply
+    /// never reached a 1.14 client.
+    ///
+    /// The section starts are **not** a running total of the vanilla sizes: 1.14 reserves more room
+    /// per section than 1.12 uses. This test pins the real starts, because the plausible-looking
+    /// arithmetic is the wrong one.
+    #[test]
+    fn every_inventory_section_maps_to_its_own_start() {
+        use crate::protocol::update_fields::{
+            PLAYER_FIELD_BANKBAG_SLOT_1, PLAYER_FIELD_BANK_SLOT_1, PLAYER_FIELD_INV_SLOT_HEAD,
+            PLAYER_FIELD_KEYRING_SLOT_1, PLAYER_FIELD_PACK_SLOT_1,
+            PLAYER_FIELD_VENDORBUYBACK_SLOT_1,
+        };
+
+        /// Modern `ACTIVE_PLAYER_FIELD_INV_SLOT_HEAD`.
+        const BASE: u16 = 760;
+        /// A 1.14 GUID occupies four u32 slots where a vanilla one occupies two.
+        const STRIDE: u16 = 4;
+
+        let start_of = |vanilla_index: u32| match field_map::ACTIVE_PLAYER_MAP[vanilla_index as usize]
+        {
+            ModernSlot::GuidLow(base) => base,
+            other => panic!("expected a GUID low half, got {other:?}"),
+        };
+
+        for (vanilla, section_start) in [
+            (PLAYER_FIELD_INV_SLOT_HEAD, 0),
+            (PLAYER_FIELD_PACK_SLOT_1, 23),
+            (PLAYER_FIELD_BANK_SLOT_1, 47),
+            (PLAYER_FIELD_BANKBAG_SLOT_1, 75),
+            (PLAYER_FIELD_VENDORBUYBACK_SLOT_1, 82),
+            (PLAYER_FIELD_KEYRING_SLOT_1, 94),
+        ] {
+            assert_eq!(start_of(vanilla), BASE + section_start * STRIDE);
+        }
+
+        // The trap: concatenating vanilla's lengths puts bank slot 0 at entry 23 + 16 = 39, eight
+        // entries early -- inside the backpack. Items would appear, in the wrong bag.
+        assert_ne!(start_of(PLAYER_FIELD_BANK_SLOT_1), BASE + 39 * STRIDE);
+    }
+
+    /// A bank item still has to widen to 128 bits like any other GUID: both vanilla halves point at
+    /// one modern base, and the encoder needs both before it can build the value.
+    #[test]
+    fn a_bank_slot_still_writes_both_guid_halves() {
+        use crate::protocol::update_fields::PLAYER_FIELD_BANK_SLOT_1;
+
+        let low = field_map::ACTIVE_PLAYER_MAP[PLAYER_FIELD_BANK_SLOT_1 as usize];
+        let high = field_map::ACTIVE_PLAYER_MAP[PLAYER_FIELD_BANK_SLOT_1 as usize + 1];
+        assert!(matches!(low, ModernSlot::GuidLow(948)));
+        assert!(matches!(high, ModernSlot::GuidHigh(948)));
+
+        // The second bank entry steps by the modern stride, not the vanilla one.
+        let next = field_map::ACTIVE_PLAYER_MAP[PLAYER_FIELD_BANK_SLOT_1 as usize + 2];
+        assert!(matches!(next, ModernSlot::GuidLow(952)));
+    }
+
     #[test]
     fn type_mask_accumulates_the_inheritance_chain() {
         assert_eq!(ModernObjectType::Object.type_mask(), 0x001);

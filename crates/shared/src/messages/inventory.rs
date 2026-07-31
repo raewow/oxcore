@@ -148,6 +148,13 @@ pub struct SmsgOpenContainer {
     pub item_guid: SharedObjectGuid,
 }
 
+/// No `to_modern`: the 1.14 opcode exists but its body layout could not be established.
+///
+/// Unlike the sibling item messages, no authoritative field list for the 1.14 body was available,
+/// and a bare "it is probably just the widened GUID" guess is not safe here -- the 1.14 item
+/// messages that *are* documented all append fields the vanilla body has no trace of, so a
+/// GUID-only body is as likely to be short as it is to be right. This needs a real layout before it
+/// can be written.
 impl ToWorldPacket for SmsgOpenContainer {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_OPEN_CONTAINER);
@@ -160,6 +167,19 @@ impl ToWorldPacket for SmsgOpenContainer {
 pub struct SmsgDurabilityDamageDeath;
 
 impl ToWorldPacket for SmsgDurabilityDamageDeath {
+    /// Vanilla's empty packet gains a percentage in 1.14, because the client now prints the number
+    /// in the on-death message instead of hardcoding it.
+    ///
+    /// The value is not carried on the wire in 1.12 and this struct is a unit type, so it is
+    /// restated here rather than derived: it must match the rate the death handler actually applies
+    /// to equipment, which is a flat 10% of maximum durability per item. If that rate is ever made
+    /// configurable, this literal becomes a lie the client repeats to the player.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(10); // Percent -- see above
+        Some(writer.finish(Opcode::SMSG_DURABILITY_DAMAGE_DEATH))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_DURABILITY_DAMAGE_DEATH)
     }
@@ -174,6 +194,28 @@ pub struct SmsgItemEnchantTimeUpdate {
 }
 
 impl ToWorldPacket for SmsgItemEnchantTimeUpdate {
+    /// **The slot and the duration swap places.** 1.14 writes `item, duration, slot, owner`; vanilla
+    /// writes `item, slot, duration, owner`. Both are u32, so sending them in vanilla order does not
+    /// fail to parse -- it tells the client that a temporary enchant in slot *(duration)* has
+    /// *(slot)* milliseconds left, which typically reads as an enchant that expires instantly.
+    ///
+    /// The trailing GUID is the item's **owner**, not the enchanter, despite this struct naming it
+    /// `caster_guid`; that is what the vanilla body carries there too. When it is absent the empty
+    /// GUID is still written, because 1.14 reads it unconditionally.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.item_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(self.duration); // DurationLeft -- ahead of the slot, see above
+        writer.write_u32(self.slot);
+        let (high, low) = self
+            .caster_guid
+            .unwrap_or_default()
+            .to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // OwnerGuid
+        Some(writer.finish(Opcode::SMSG_ITEM_ENCHANT_TIME_UPDATE))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_ENCHANT_TIME_UPDATE);
         packet.write_guid_raw(self.item_guid.raw());
@@ -194,6 +236,11 @@ pub struct SmsgItemNameQueryResponse<'a> {
     pub name: &'a str,
 }
 
+/// No `to_modern`: 1.14 never asks the question, so there is nothing to answer.
+///
+/// The 1.14 opcode table has no item-name query response at all. A 1.14 client resolves item names
+/// from its own local item data and never sends the request, so this message is unreachable on a
+/// modern session rather than merely unported.
 impl ToWorldPacket for SmsgItemNameQueryResponse<'_> {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_NAME_QUERY_RESPONSE);
@@ -338,6 +385,12 @@ pub struct SmsgItemQuerySingleResponse {
     pub quality2: u32,
 }
 
+/// No `to_modern`: same reason as [`SmsgItemNameQueryResponse`] -- 1.14 has no item query.
+///
+/// The whole item template is client-side data in 1.14; the opcode pair was removed and the client
+/// never sends the request. Every 1.14 message that names an item embeds only an item id and lets
+/// the client look the rest up, which is why `write_modern_item_instance` is so much smaller than
+/// this struct.
 impl ToWorldPacket for SmsgItemQuerySingleResponse {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_QUERY_SINGLE_RESPONSE);
@@ -522,6 +575,12 @@ pub struct SmsgBuyBankSlotResult {
     pub result: u8,
 }
 
+/// No `to_modern`: 1.14 removed the reply and drives the bank UI from object fields instead.
+///
+/// The 1.14 opcode table keeps `CMSG_BUY_BANK_SLOT` but has no result opcode for it. The client
+/// learns the purchase happened from the bank-slot count on its own player object, so the correct
+/// modern behaviour is to send that field update -- not to invent a body for a message the client
+/// has no handler for.
 impl ToWorldPacket for SmsgBuyBankSlotResult {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_BUY_BANK_SLOT_RESULT);
@@ -536,6 +595,14 @@ pub struct SmsgReadItemOk {
 }
 
 impl ToWorldPacket for SmsgReadItemOk {
+    /// The same single GUID, widened to 128 bits and packed.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.item_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        Some(writer.finish(Opcode::SMSG_READ_ITEM_OK))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_READ_ITEM_OK);
         packet.write_guid_raw(self.item_guid.raw());
@@ -549,6 +616,29 @@ pub struct SmsgReadItemFailed {
 }
 
 impl ToWorldPacket for SmsgReadItemFailed {
+    /// 1.14 appends a retry delay and a 2-bit failure subcode to the GUID vanilla sends alone.
+    ///
+    /// Both are new fields with no vanilla source. The delay is 0 because vanilla's failure is
+    /// permanent rather than "try again in N seconds", and the subcode is the generic
+    /// cannot-read case -- vanilla has exactly one failure and does not say which of the 1.14
+    /// subcases it is.
+    ///
+    /// The subcode occupies 2 bits of a byte the client reads whole, so the run is closed
+    /// explicitly: the body is one byte longer than the fields suggest.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        /// The 1.14 subcode meaning "this item cannot be read", as opposed to the
+        /// still-being-generated and language-barrier cases vanilla has no equivalent for.
+        const SUBCODE_CANT_READ: u32 = 2;
+
+        let mut writer = BitWriter::new();
+        let (high, low) = self.item_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(0); // Delay -- see above
+        writer.write_bits(SUBCODE_CANT_READ, 2);
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_READ_ITEM_FAILED))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_READ_ITEM_FAILED);
         packet.write_guid_raw(self.item_guid.raw());

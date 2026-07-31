@@ -106,6 +106,34 @@ impl ToWorldPacket for SmsgSetFactionStanding {
 
         packet
     }
+
+    /// The modern body brackets the same list with two bonus multipliers up front and a
+    /// "play the reputation-gain animation" bit at the end.
+    ///
+    /// The standings themselves need no arithmetic: both protocols carry the **absolute** standing,
+    /// not a delta against the faction's base value, the same convention `SmsgInitializeFactions`
+    /// uses above. Subtracting a base here would drop every reputation to near zero on the client
+    /// while the server still thought it was correct.
+    ///
+    /// Skipping the two leading floats is the dangerous omission — the client would read the first
+    /// four bytes of the pair list as a bonus multiplier and the entry count from a standing.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_f32(0.0); // ReferAFriendBonus -- no recruit-a-friend in vanilla
+        writer.write_f32(0.0); // BonusFromAchievementSystem -- no achievements in vanilla
+
+        writer.write_i32(self.factions.len() as i32);
+        for (rep_list_id, absolute_standing) in &self.factions {
+            writer.write_i32(*rep_list_id as i32);
+            writer.write_i32(*absolute_standing);
+        }
+
+        // Vanilla has no way to say "update this quietly", and every send here is a real gain or
+        // loss the player should see animate on the reputation bar.
+        writer.write_bit(true); // ShowVisual
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_SET_FACTION_STANDING))
+    }
 }
 
 /// SMSG_SET_FORCED_REACTIONS - Sets forced reactions for specific factions
@@ -118,6 +146,11 @@ pub struct SmsgSetForcedReactions {
 }
 
 impl ToWorldPacket for SmsgSetForcedReactions {
+    /// 1.14 reads the same count-then-pairs body, only as signed words, so the bytes are identical.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SET_FORCED_REACTIONS);
         packet.write_u32(self.forced_reactions.len() as u32);
@@ -141,6 +174,14 @@ pub struct SmsgSetFactionVisible {
 }
 
 impl ToWorldPacket for SmsgSetFactionVisible {
+    /// Identical to vanilla in 1.14: one u32 reputation list index.
+    ///
+    /// 1.14 hides a faction with a separate opcode rather than a flag in this one, so this message
+    /// only ever means "show it" — which is all vanilla can say here anyway.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SET_FACTION_VISIBLE);
         packet.write_u32(self.reputation_list_id);

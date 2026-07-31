@@ -202,6 +202,14 @@ pub struct SmsgShowBank {
 }
 
 impl ToWorldPacket for SmsgShowBank {
+    /// The same single GUID in 1.14, packed as a guid128.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.banker_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        Some(writer.finish(Opcode::SMSG_SHOW_BANK))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SHOW_BANK);
         packet.write_guid(self.banker_guid);
@@ -230,7 +238,47 @@ pub struct SmsgGossipPoi {
     pub name: String,
 }
 
+/// Longest POI name 1.14 can express: the length field is 6 bits.
+const MODERN_POI_NAME_MAX: usize = 63;
+
 impl ToWorldPacket for SmsgGossipPoi {
+    /// The 1.14 layout adds a height, moves the flags to the end and packs them.
+    ///
+    /// Field by field against vanilla:
+    ///
+    /// * The position gains a **Z**. Vanilla map pins are two-dimensional, so it is zero — but the
+    ///   field is read unconditionally, and omitting it slides the icon into the Z and the
+    ///   importance into the icon, planting a quest-marker pin as a flight point.
+    /// * `flags` no longer sits between the icon and the data word; it moves to the end as a 14-bit
+    ///   field. Vanilla POI flags are small values, so the width is not a practical limit, but the
+    ///   *position* change means writing them where vanilla did corrupts everything after.
+    /// * `data` is the 1.14 `Importance` field, which is where it already ended up in vanilla's
+    ///   ordering — only its neighbours moved.
+    /// * The name length is 6 bits and precedes the string bytes rather than terminating them.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.poi_id);
+        writer.write_f32(self.x);
+        writer.write_f32(self.y);
+        writer.write_f32(0.0); // Z -- vanilla POIs are flat map pins
+        writer.write_u32(self.icon);
+        writer.write_u32(self.data); // Importance
+        // A later addition with no vanilla source; the client accepts zero.
+        writer.write_u32(0);
+
+        // Clamped rather than masked: a length that disagrees with the bytes that follow would
+        // leave the client reading the tail of the name as the next packet.
+        let name = self.name.as_bytes();
+        let name = &name[..name.len().min(MODERN_POI_NAME_MAX)];
+
+        writer.write_bits(self.flags, 14);
+        writer.write_bits(name.len() as u32, 6);
+        writer.flush_bits();
+
+        writer.write_bytes(name);
+        Some(writer.finish(Opcode::SMSG_GOSSIP_POI))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GOSSIP_POI);
         packet.write_u32(self.poi_id);

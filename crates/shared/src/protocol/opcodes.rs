@@ -646,6 +646,9 @@ impl Opcode {
     pub const CMSG_CHANNEL_UNBAN: Opcode = Opcode { vanilla: 0x00A6, modern: 0x37E2 }; // 166
     pub const CMSG_CHANNEL_ANNOUNCEMENTS: Opcode = Opcode { vanilla: 0x00A7, modern: 0x37E3 }; // 167
     pub const CMSG_CHANNEL_MODERATE: Opcode = Opcode { vanilla: 0x00A8, ..Opcode::NONE }; // 168
+    // 1.14 lifts "you joined" and "you left" out of the catch-all notify into their own opcodes.
+    pub const SMSG_CHANNEL_NOTIFY_JOINED: Opcode = Opcode { modern: 0x2BC1, ..Opcode::NONE };
+    pub const SMSG_CHANNEL_NOTIFY_LEFT: Opcode = Opcode { modern: 0x2BC2, ..Opcode::NONE };
 
     // ============================================================================
     // Social - Who & Friends
@@ -659,6 +662,8 @@ impl Opcode {
     pub const CMSG_ADD_FRIEND: Opcode = Opcode { vanilla: 0x0069, modern: 0x36D6 }; // 105
     pub const CMSG_DEL_FRIEND: Opcode = Opcode { vanilla: 0x006A, modern: 0x36D7 }; // 106
     pub const SMSG_IGNORE_LIST: Opcode = Opcode { vanilla: 0x006B, ..Opcode::NONE }; // 107
+    // 1.14 merges the friend list and the ignore list into one contact list, tagged by a flags word.
+    pub const SMSG_CONTACT_LIST: Opcode = Opcode { modern: 0x2783, ..Opcode::NONE };
     pub const CMSG_ADD_IGNORE: Opcode = Opcode { vanilla: 0x006C, modern: 0x36DA }; // 108
     pub const CMSG_DEL_IGNORE: Opcode = Opcode { vanilla: 0x006D, modern: 0x36DB }; // 109
 
@@ -679,7 +684,7 @@ impl Opcode {
     pub const CMSG_LOOT_METHOD: Opcode = Opcode { vanilla: 0x007A, modern: 0x364B }; // 122
     pub const CMSG_GROUP_DISBAND: Opcode = Opcode { vanilla: 0x007B, ..Opcode::NONE }; // 123
     pub const SMSG_GROUP_DESTROYED: Opcode = Opcode { vanilla: 0x007C, modern: 0x278D }; // 124
-    pub const SMSG_GROUP_LIST: Opcode = Opcode { vanilla: 0x007D, ..Opcode::NONE }; // 125
+    pub const SMSG_GROUP_LIST: Opcode = Opcode { vanilla: 0x007D, modern: 0x25EE }; // 125 // 1.14 calls it SMSG_PARTY_UPDATE
     pub const SMSG_PARTY_MEMBER_STATS: Opcode = Opcode { vanilla: 0x007E, modern: 0x274F }; // 126
     pub const SMSG_PARTY_COMMAND_RESULT: Opcode = Opcode { vanilla: 0x007F, modern: 0x278F }; // 127
     pub const CMSG_GROUP_CHANGE_SUB_GROUP: Opcode = Opcode { vanilla: 0x027E, modern: 0x364F }; // 638
@@ -688,10 +693,12 @@ impl Opcode {
     pub const CMSG_GROUP_RAID_CONVERT: Opcode = Opcode { vanilla: 0x028E, modern: 0x3651 }; // 654
     pub const CMSG_REQUEST_PARTY_MEMBER_STATS: Opcode = Opcode { vanilla: 0x027F, modern: 0x3656 }; // 639
     pub const SMSG_PARTY_MEMBER_STATS_FULL: Opcode = Opcode { vanilla: 0x02F2, modern: 0x2750 }; // 754
-    pub const MSG_RAID_TARGET_UPDATE: Opcode = Opcode { vanilla: 0x0321, ..Opcode::NONE }; // 801
-    pub const MSG_RAID_READY_CHECK: Opcode = Opcode { vanilla: 0x0322, ..Opcode::NONE }; // 802
-    pub const MSG_MINIMAP_PING: Opcode = Opcode { vanilla: 0x01D5, ..Opcode::NONE }; // 469
-    pub const MSG_RANDOM_ROLL: Opcode = Opcode { vanilla: 0x01FB, ..Opcode::NONE }; // 507
+    pub const MSG_RAID_TARGET_UPDATE: Opcode = Opcode { vanilla: 0x0321, modern: 0x2627 }; // 801 // 1.14 calls it SMSG_SEND_RAID_TARGET_UPDATE_ALL
+    pub const MSG_RAID_READY_CHECK: Opcode = Opcode { vanilla: 0x0322, modern: 0x25EF }; // 802 // 1.14 calls it SMSG_READY_CHECK_STARTED
+    // 1.14 answers a ready check on its own opcode; 1.12 reuses MSG_RAID_READY_CHECK for both.
+    pub const SMSG_READY_CHECK_RESPONSE: Opcode = Opcode { modern: 0x25F0, ..Opcode::NONE };
+    pub const MSG_MINIMAP_PING: Opcode = Opcode { vanilla: 0x01D5, modern: 0x26C6 }; // 469 // 1.14 calls it SMSG_MINIMAP_PING
+    pub const MSG_RANDOM_ROLL: Opcode = Opcode { vanilla: 0x01FB, modern: 0x2629 }; // 507 // 1.14 calls it SMSG_RANDOM_ROLL
 
     // ============================================================================
     // Loot
@@ -1679,6 +1686,11 @@ pub const ALL: &[(Opcode, &str)] = &[
         "CMSG_CHANNEL_ANNOUNCEMENTS",
     ),
     (Opcode::CMSG_CHANNEL_MODERATE, "CMSG_CHANNEL_MODERATE"),
+    (
+        Opcode::SMSG_CHANNEL_NOTIFY_JOINED,
+        "SMSG_CHANNEL_NOTIFY_JOINED",
+    ),
+    (Opcode::SMSG_CHANNEL_NOTIFY_LEFT, "SMSG_CHANNEL_NOTIFY_LEFT"),
     (Opcode::CMSG_WHO, "CMSG_WHO"),
     (Opcode::SMSG_WHO, "SMSG_WHO"),
     (Opcode::CMSG_FRIEND_LIST, "CMSG_FRIEND_LIST"),
@@ -1687,6 +1699,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::CMSG_ADD_FRIEND, "CMSG_ADD_FRIEND"),
     (Opcode::CMSG_DEL_FRIEND, "CMSG_DEL_FRIEND"),
     (Opcode::SMSG_IGNORE_LIST, "SMSG_IGNORE_LIST"),
+    (Opcode::SMSG_CONTACT_LIST, "SMSG_CONTACT_LIST"),
     (Opcode::CMSG_ADD_IGNORE, "CMSG_ADD_IGNORE"),
     (Opcode::CMSG_DEL_IGNORE, "CMSG_DEL_IGNORE"),
     (Opcode::CMSG_GROUP_INVITE, "CMSG_GROUP_INVITE"),
@@ -1731,6 +1744,10 @@ pub const ALL: &[(Opcode, &str)] = &[
     ),
     (Opcode::MSG_RAID_TARGET_UPDATE, "MSG_RAID_TARGET_UPDATE"),
     (Opcode::MSG_RAID_READY_CHECK, "MSG_RAID_READY_CHECK"),
+    (
+        Opcode::SMSG_READY_CHECK_RESPONSE,
+        "SMSG_READY_CHECK_RESPONSE",
+    ),
     (Opcode::MSG_MINIMAP_PING, "MSG_MINIMAP_PING"),
     (Opcode::MSG_RANDOM_ROLL, "MSG_RANDOM_ROLL"),
     (Opcode::CMSG_LOOT, "CMSG_LOOT"),
@@ -2419,8 +2436,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            631,
-            "expected 631 opcode constants; update this count deliberately when adding opcodes"
+            635,
+            "expected 635 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

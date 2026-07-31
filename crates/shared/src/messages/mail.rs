@@ -10,9 +10,39 @@
 //! - [`SmsgItemTextQueryResponse`] - Response to item text query
 
 use crate::game::mail::{Mail, MailMessageType, MailResponseResult, MailResponseType};
+use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::Opcode;
 use crate::protocol::WorldPacket;
+
+/// The attachment id 1.14 uses for a mail's single item.
+///
+/// 1.12 does not number attachments — a mail holds at most one item and the take-item request
+/// identifies it by mail id alone. 1.14 addresses attachments by id, so both the mail list and the
+/// take-item result must name the *same* one or the client asks for an attachment the server has
+/// never heard of.
+const SINGLE_ATTACHMENT_ID: u32 = 1;
+
+/// A 1.12 inventory-result code as 1.14 numbers it.
+///
+/// The enum was renumbered: 1.14 inserted `CantTradeGold` at 29, so every code from vanilla's
+/// `NotEnoughMoney` (29) upward shifted one higher while keeping its name. Passing a vanilla code
+/// through unchanged shows the message for the neighbouring error — "you don't have enough money"
+/// becomes "not a bag", and so on for the entire upper half of the range.
+///
+/// This takes the raw u32 the struct stores. The enum-typed translation, which the compiler can
+/// check for exhaustiveness, lives with the auction command result in
+/// [`crate::messages::auction`]; keep the two in step.
+fn modern_equip_error(vanilla: u32) -> u32 {
+    /// `SpellFailedReagentsGeneric`, the last code the two protocols agree on.
+    const LAST_SHARED_CODE: u32 = 28;
+    if vanilla <= LAST_SHARED_CODE {
+        vanilla
+    } else {
+        vanilla + 1
+    }
+}
 
 /// SMSG_SEND_MAIL_RESULT - Result of sending mail
 ///
@@ -57,6 +87,43 @@ impl ToWorldPacket for SmsgSendMailResult {
         }
 
         packet
+    }
+
+    /// `MailCommandResult` in 1.14.
+    ///
+    /// Vanilla's trailing fields are conditional — the equip error only when the result is
+    /// `EquipError`, the attachment id and count only for `ItemTaken`. 1.14 writes all six u32s
+    /// unconditionally and lets the client pick which ones matter, so the omitted ones become
+    /// explicit zeroes. Sending vanilla's short body leaves the client reading past the end.
+    ///
+    /// The action and error numbers are the same in both protocols. The equip error is **not** —
+    /// see [`modern_equip_error`].
+    ///
+    /// The attachment id is forced to the same synthetic id the mail list hands out, because 1.12
+    /// answers with an item GUID that means nothing to a client addressing attachments by id.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.mail_id);
+        writer.write_u32(self.response_type as u32); // Command
+        writer.write_u32(self.result as u32); // ErrorCode
+
+        // BagResult -- only read when ErrorCode is EquipError.
+        let bag_result = if self.result == MailResponseResult::EquipError {
+            modern_equip_error(self.equip_error.unwrap_or(0))
+        } else {
+            0
+        };
+        writer.write_u32(bag_result);
+
+        let (attach_id, quantity) = if self.response_type == MailResponseType::ItemTaken {
+            (SINGLE_ATTACHMENT_ID, self.item_count.unwrap_or(0))
+        } else {
+            (0, 0)
+        };
+        writer.write_u32(attach_id);
+        writer.write_u32(quantity); // QtyInInventory
+
+        Some(writer.finish(Opcode::SMSG_SEND_MAIL_RESULT))
     }
 }
 
@@ -155,6 +222,116 @@ impl ToWorldPacket for SmsgMailListResult<'_> {
 
         packet
     }
+
+    /// `MailListResult` with `MailListEntry` and `MailAttachedItem` in 1.14.
+    ///
+    /// Three shape changes, each of which silently corrupts the rest of the body if missed:
+    ///
+    /// - The count is an i32 and is followed by a second i32 total, where vanilla sends a single
+    ///   u8. Vanilla's 254-mail cap is kept so both protocols show the same mailbox.
+    /// - Money and COD widen to u64, and the COD moves *ahead* of the money.
+    /// - The attachment is no longer an always-present zero-filled block: 1.14 sends a real count
+    ///   and only the items that exist, so an empty mail writes a count of zero and nothing else.
+    ///   Emitting vanilla's zeroed placeholder item would hang a phantom attachment on every mail.
+    ///
+    /// Subject and body move to the end behind 8- and 13-bit lengths, and the sender is now either
+    /// a 128-bit GUID or a numeric id, selected by a bit rather than by the sender type.
+    ///
+    /// **The body text is always empty.** 1.12 does not put the letter in this packet — it stores
+    /// the text under `item_text_id` and expects the client to fetch it with `CMSG_ITEM_TEXT_QUERY`,
+    /// which the 1.14 client never sends because it expects the text inline. Mail opens with its
+    /// subject, money and attachment intact and a blank letter; filling it needs the text to reach
+    /// this message, which the struct has no field for.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        let delivered_mails: Vec<&Mail> = self
+            .mails
+            .iter()
+            .filter(|m| !m.is_expired() && m.is_delivered())
+            .take(254)
+            .collect();
+
+        let mut writer = BitWriter::new();
+        writer.write_i32(delivered_mails.len() as i32);
+        writer.write_i32(delivered_mails.len() as i32); // TotalNumRecords -- no paging in 1.12
+
+        for mail in delivered_mails {
+            let is_player_sender = mail.message_type == MailMessageType::Normal;
+            let attachment = if mail.has_items {
+                mail.items.first()
+            } else {
+                None
+            };
+
+            writer.write_i32(mail.id as i32);
+            writer.write_u8(mail.message_type as u8); // SenderType
+            writer.write_u64(u64::from(mail.cod));
+            writer.write_i32(mail.stationery as i32);
+            writer.write_u64(u64::from(mail.money)); // SentMoney
+            writer.write_u32(u32::from(mail.check_mask.as_u8())); // Flags
+
+            let days_until_expire = if mail.expire_time > now {
+                (mail.expire_time - now) as f32 / 86400.0
+            } else {
+                0.0
+            };
+            writer.write_f32(days_until_expire);
+            writer.write_i32(mail.mail_template_id as i32);
+            writer.write_i32(i32::from(attachment.is_some()));
+
+            let subject = mail.subject.as_bytes();
+            writer.write_bit(is_player_sender); // has SenderCharacter
+            writer.write_bit(!is_player_sender); // has AltSenderID
+            writer.write_bits(subject.len() as u32, 8);
+            writer.write_bits(0, 13); // Body -- see above
+            writer.flush_bits();
+
+            if let Some(item) = attachment {
+                writer.write_u8(0); // Position
+                writer.write_i32(SINGLE_ATTACHMENT_ID as i32); // AttachID
+                writer.write_u32(1); // Count -- 1.12 mails carry a single item
+                writer.write_i32(0); // Charges
+                writer.write_u32(0); // MaxDurability
+                writer.write_u32(0); // Durability
+                write_modern_item_instance(&mut writer, item.item_id);
+                writer.write_bits(0, 4); // Enchants count
+                writer.write_bits(0, 2); // Gems count
+                writer.write_bit(true); // Unlocked
+                writer.flush_bits();
+            }
+
+            if is_player_sender {
+                use crate::protocol::guid::{HighGuid, ObjectGuid};
+                let sender = ObjectGuid::new_without_entry(HighGuid::Player, mail.sender_guid);
+                let (high, low) = sender.to_guid128(DEFAULT_REALM_ID);
+                writer.write_packed_guid_128(high, low);
+            } else {
+                // Creature, gameobject and auction mail identify their sender by entry.
+                writer.write_u32(mail.sender_guid);
+            }
+
+            writer.write_bytes(subject);
+        }
+
+        Some(writer.finish(Opcode::SMSG_MAIL_LIST_RESULT))
+    }
+}
+
+/// `ItemInstance::Write` for build 42597.
+///
+/// A bare item id with no bonuses or modifications, which is all a 1.12 item has.
+fn write_modern_item_instance(writer: &mut BitWriter, item_id: u32) {
+    writer.write_u32(item_id);
+    writer.write_u32(0); // RandomPropertiesSeed
+    writer.write_u32(0); // RandomPropertiesID
+    writer.write_bit(false); // HasItemBonus
+    writer.flush_bits();
+    writer.write_bits(0, 6); // ItemModList count
+    writer.flush_bits();
 }
 
 /// SMSG_RECEIVED_MAIL - Notification that mail was received
@@ -169,6 +346,15 @@ impl ToWorldPacket for SmsgReceivedMail {
         let mut packet = WorldPacket::new(Opcode::SMSG_RECEIVED_MAIL);
         packet.write_u32(0); // Always 0
         packet
+    }
+
+    /// `NotifyReceivedMail` in 1.14. Same four bytes, but they are a **float** delay in seconds
+    /// rather than vanilla's unused u32 — zero means the mail is already deliverable, which is what
+    /// vanilla's constant zero amounts to. The two happen to encode identically, but only for zero.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_f32(0.0); // Delay
+        Some(writer.finish(Opcode::SMSG_RECEIVED_MAIL))
     }
 }
 

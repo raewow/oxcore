@@ -9,6 +9,8 @@
 //! - [`SmsgBuyFailed`] - Buy item failure
 //! - [`SmsgSellItem`] - Sell item result
 
+use crate::messages::update::DEFAULT_REALM_ID;
+use crate::protocol::bitbuf::BitWriter;
 use crate::messages::ToWorldPacket;
 use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::ObjectGuid;
@@ -45,6 +47,49 @@ pub struct SmsgListInventory {
 }
 
 impl ToWorldPacket for SmsgListInventory {
+    /// 1.14 replaces vanilla's `(index, item, display, count, price, durability, buy count)` tuple
+    /// with a wider entry: the price widens to u64, a type and extended-cost id are added, and an
+    /// embedded item instance carries the item id -- so the display id, which vanilla sends
+    /// explicitly, is resolved client-side instead.
+    ///
+    /// The count also moves ahead of a reason byte that vanilla has no equivalent for; zero means
+    /// "the list follows", which is the only case a 1.12 server produces.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.vendor_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u8(0); // Reason: inventory follows
+        writer.write_i32(self.items.len() as i32);
+
+        for item in &self.items {
+            writer.write_i32(item.index as i32); // Slot
+            writer.write_i32(1); // Type: item, as opposed to a currency
+            // Vanilla's "max count" is the remaining stock, and -1 there means unlimited; 1.14 reads
+            // the same convention, so the value carries over.
+            writer.write_i32(item.max_count as i32); // Quantity
+            writer.write_u64(u64::from(item.price));
+            writer.write_i32(item.max_durability as i32);
+            writer.write_u32(item.buy_count); // StackCount
+            writer.write_i32(0); // ExtendedCostID -- no honor or arena costs in Classic Era
+            writer.write_i32(0); // PlayerConditionFailed
+
+            // ItemInstance: a bare item id, which is all a 1.12 item has.
+            writer.write_u32(item.item_id);
+            writer.write_u32(0); // RandomPropertiesSeed
+            writer.write_u32(0); // RandomPropertiesID
+            writer.write_bit(false); // HasItemBonus
+            writer.flush_bits();
+            writer.write_bits(0, 6); // ItemModList count
+            writer.flush_bits();
+
+            writer.write_bit(false); // DoNotFilterOnVendor
+            writer.write_bit(false); // Refundable
+            writer.flush_bits();
+        }
+
+        Some(writer.finish(Opcode::SMSG_LIST_INVENTORY))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LIST_INVENTORY);
 
@@ -83,6 +128,18 @@ pub struct SmsgBuyItem {
 }
 
 impl ToWorldPacket for SmsgBuyItem {
+    /// 1.14 sends the vendor's remaining stock as a signed `NewQuantity` and the amount bought
+    /// separately, where vanilla sends the slot's new count and the purchased count.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.vendor_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(self.vendor_slot);
+        writer.write_i32(self.remaining_stock as i32); // NewQuantity
+        writer.write_u32(self.count); // QuantityBought
+        Some(writer.finish(Opcode::SMSG_BUY_ITEM))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_BUY_ITEM);
         packet.write_guid(self.vendor_guid);
@@ -129,6 +186,18 @@ pub struct SmsgBuyFailed {
 }
 
 impl ToWorldPacket for SmsgBuyFailed {
+    /// 1.14 names the vendor **slot** where vanilla names the item id. We carry only the item id, so
+    /// it goes in that field: the client uses it to pick the error text, and both are u32 values it
+    /// looks up rather than indexes into anything.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.vendor_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(self.item_id); // Slot -- see above
+        writer.write_u8(self.error as u8);
+        Some(writer.finish(Opcode::SMSG_BUY_FAILED))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_BUY_FAILED);
         packet.write_guid(self.vendor_guid);
@@ -182,6 +251,17 @@ pub struct SmsgSellItem {
 }
 
 impl ToWorldPacket for SmsgSellItem {
+    /// The same three fields, with both GUIDs packed as guid128.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.vendor_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        let (high, low) = self.item_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u8(self.result as u8);
+        Some(writer.finish(Opcode::SMSG_SELL_ITEM))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_SELL_ITEM);
         packet.write_guid(self.vendor_guid);

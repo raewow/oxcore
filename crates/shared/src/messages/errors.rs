@@ -1,3 +1,4 @@
+use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::ObjectGuid;
@@ -134,6 +135,35 @@ impl SmsgInventoryChangeFailure {
 }
 
 impl ToWorldPacket for SmsgInventoryChangeFailure {
+    /// 1.14 writes **both** item GUIDs unconditionally where vanilla gates each on the error code,
+    /// and adds a container-subclass byte. The trailing extra field is still error-specific, so the
+    /// required level is written only for the two level errors -- sending it always would leave the
+    /// client reading four bytes that are not there.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        /// `InventoryResult::CantEquipLevel`, the only vanilla error carrying a required level.
+        const CANT_EQUIP_LEVEL: u8 = 0x0C;
+
+        let mut writer = BitWriter::new();
+        writer.write_u8(self.error); // BagResult, signed on the wire but the values are all positive
+        let (high, low) = self
+            .src_item_guid
+            .unwrap_or_default()
+            .to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        let (high, low) = self
+            .dst_item_guid
+            .unwrap_or_default()
+            .to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u8(0); // ContainerBSlot -- bag subclass, only read for bind-confirm errors
+
+        if self.error == CANT_EQUIP_LEVEL {
+            writer.write_i32(self.required_level.unwrap_or(0) as i32);
+        }
+
+        Some(writer.finish(Opcode::SMSG_INVENTORY_CHANGE_FAILURE))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INVENTORY_CHANGE_FAILURE);
         packet.write_u8(self.error);
@@ -173,6 +203,18 @@ pub struct SmsgItemCooldown {
 }
 
 impl ToWorldPacket for SmsgItemCooldown {
+    /// Same two fields plus a cooldown duration 1.14 expects but vanilla never sent -- the 1.12
+    /// client reads the remaining time from the item's own fields instead. Zero means "use the
+    /// spell's own cooldown", which is what vanilla behaviour amounts to.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.item_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(self.spell_id);
+        writer.write_u32(0); // Cooldown
+        Some(writer.finish(Opcode::SMSG_ITEM_COOLDOWN))
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_ITEM_COOLDOWN);
         packet.write_guid_raw(self.item_guid.raw());
