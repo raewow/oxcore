@@ -8,6 +8,7 @@ use crate::components::ui::Card;
 pub enum AdminSection {
     Overview,
     Accounts,
+    Characters,
     Chat,
     Moderation,
     LiveMap,
@@ -20,6 +21,7 @@ impl AdminSection {
         match self {
             AdminSection::Overview => "/admin",
             AdminSection::Accounts => "/admin/accounts",
+            AdminSection::Characters => "/admin/characters",
             AdminSection::Chat => "/admin/chat",
             AdminSection::Moderation => "/admin/moderation",
             AdminSection::LiveMap => "/admin/live-map",
@@ -31,7 +33,8 @@ impl AdminSection {
     fn label(self) -> &'static str {
         match self {
             AdminSection::Overview => "Overview",
-            AdminSection::Accounts => "Account Management",
+            AdminSection::Accounts => "Accounts",
+            AdminSection::Characters => "Characters",
             AdminSection::Chat => "Chat",
             AdminSection::Moderation => "Moderation",
             AdminSection::LiveMap => "Live Map",
@@ -44,6 +47,7 @@ impl AdminSection {
 const NAV_SECTIONS: &[AdminSection] = &[
     AdminSection::Overview,
     AdminSection::Accounts,
+    AdminSection::Characters,
     AdminSection::Chat,
     AdminSection::Moderation,
     AdminSection::LiveMap,

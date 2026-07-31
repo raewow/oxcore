@@ -120,6 +120,36 @@ pub struct AdminCharacter {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminCharacterPage {
+    pub characters: Vec<AdminCharacter>,
+    pub total: u64,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminCharacterDetail {
+    pub guid: u32,
+    pub name: String,
+    pub account: u32,
+    pub account_username: Option<String>,
+    pub race: u8,
+    pub class: u8,
+    pub gender: u8,
+    pub level: u8,
+    pub online: u8,
+    pub zone: u32,
+    pub map: u32,
+    pub position_x: f32,
+    pub position_y: f32,
+    pub position_z: f32,
+    pub money: u32,
+    pub played_time_total: u32,
+    pub create_time: i64,
+    pub logout_time: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminSession {
     pub account_id: u32,
     pub id: String,
@@ -161,6 +191,64 @@ pub const SECURITY_LEVELS: &[(u8, &str)] = &[
     (6, "Administrator"),
     (7, "Console"),
 ];
+
+pub fn class_name(class: u8) -> &'static str {
+    match class {
+        1 => "Warrior",
+        2 => "Paladin",
+        3 => "Hunter",
+        4 => "Rogue",
+        5 => "Priest",
+        7 => "Shaman",
+        8 => "Mage",
+        9 => "Warlock",
+        11 => "Druid",
+        _ => "Unknown class",
+    }
+}
+
+pub fn race_name(race: u8) -> &'static str {
+    match race {
+        1 => "Human",
+        2 => "Orc",
+        3 => "Dwarf",
+        4 => "Night Elf",
+        5 => "Undead",
+        6 => "Tauren",
+        7 => "Gnome",
+        8 => "Troll",
+        _ => "Unknown race",
+    }
+}
+
+pub fn gender_name(gender: u8) -> &'static str {
+    match gender {
+        0 => "Male",
+        1 => "Female",
+        _ => "Unknown",
+    }
+}
+
+pub fn format_played_time(total_seconds: u32) -> String {
+    let hours = total_seconds / 3_600;
+    let days = hours / 24;
+    format!("{days}d {}h", hours % 24)
+}
+
+pub fn format_money(copper: u32) -> String {
+    let gold = copper / 10_000;
+    let silver = (copper % 10_000) / 100;
+    let copper = copper % 100;
+    format!("{gold}g {silver}s {copper}c")
+}
+
+pub fn format_timestamp(unix_seconds: i64) -> String {
+    if unix_seconds <= 0 {
+        "Never".to_string()
+    } else {
+        unix_seconds.to_string()
+    }
+}
 
 pub const PORTAL_CAPABILITIES: &[(&str, u8)] = &[
     ("View accounts", 1),
@@ -517,6 +605,130 @@ pub async fn get_admin_account_characters(
 }
 
 #[server]
+pub async fn get_admin_characters(
+    search: Option<String>,
+    page: u32,
+) -> Result<AdminCharacterPage, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, actor_id, _) = authenticated_request().await?;
+        require_gm_level(&state, actor_id, 1).await?;
+        const PAGE_SIZE: u32 = 50;
+        let page = page.max(1);
+        let search = search.unwrap_or_default();
+        let pattern = format!("%{}%", search.trim());
+        let total = match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM `characters` WHERE `name` LIKE ? OR CAST(`guid` AS CHAR) LIKE ?",
+        )
+        .bind(&pattern)
+        .bind(&pattern)
+        .fetch_one(&*state.characters)
+        .await
+        {
+            Ok(total) => total as u64,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        let characters = match sqlx::query_as::<_, (u32, String, u8, u8, u8, u8)>(
+            "SELECT `guid`, `name`, `race`, `class`, `level`, `online` FROM `characters` \
+             WHERE `name` LIKE ? OR CAST(`guid` AS CHAR) LIKE ? ORDER BY `guid` LIMIT ? OFFSET ?",
+        )
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(PAGE_SIZE)
+        .bind((page - 1) * PAGE_SIZE)
+        .fetch_all(&*state.characters)
+        .await
+        {
+            Ok(characters) => characters,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        }
+        .into_iter()
+        .map(|(guid, name, race, class, level, online)| AdminCharacter {
+            guid,
+            name,
+            race,
+            class,
+            level,
+            online,
+        })
+        .collect();
+        return Ok(AdminCharacterPage {
+            characters,
+            total,
+            page,
+            page_size: PAGE_SIZE,
+        });
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
+pub async fn get_admin_character_detail(
+    guid: u32,
+) -> Result<Option<AdminCharacterDetail>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use sqlx::Row;
+
+        let (state, actor_id, _) = authenticated_request().await?;
+        require_gm_level(&state, actor_id, 1).await?;
+        let row = match sqlx::query(
+            "SELECT `guid`, `name`, `account`, `race`, `class`, `gender`, `level`, `online`, \
+             `zone`, `map`, `position_x`, `position_y`, `position_z`, `money`, `played_time_total`, \
+             `create_time`, `logout_time` FROM `characters` WHERE `guid` = ?",
+        )
+        .bind(guid)
+        .fetch_optional(&*state.characters)
+        .await
+        {
+            Ok(row) => row,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let create_time = row.get::<u64, _>("create_time") as i64;
+        let logout_time = row.get::<u64, _>("logout_time") as i64;
+        let account = row.get::<u32, _>("account");
+        let account_username = match sqlx::query_scalar::<_, String>(
+            "SELECT `username` FROM `account` WHERE `id` = ?",
+        )
+        .bind(account)
+        .fetch_optional(&*state.auth)
+        .await
+        {
+            Ok(username) => username,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        return Ok(Some(AdminCharacterDetail {
+            guid: row.get::<u32, _>("guid"),
+            name: row.get::<String, _>("name"),
+            account,
+            account_username,
+            race: row.get::<u8, _>("race"),
+            class: row.get::<u8, _>("class"),
+            gender: row.get::<u8, _>("gender"),
+            level: row.get::<u8, _>("level"),
+            online: row.get::<u8, _>("online"),
+            zone: row.get::<u32, _>("zone"),
+            map: row.get::<u32, _>("map"),
+            position_x: row.get::<f32, _>("position_x"),
+            position_y: row.get::<f32, _>("position_y"),
+            position_z: row.get::<f32, _>("position_z"),
+            money: row.get::<u32, _>("money"),
+            played_time_total: row.get::<u32, _>("played_time_total"),
+            create_time,
+            logout_time,
+        }));
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+#[server]
 pub async fn get_admin_account_sessions(
     account_id: u32,
 ) -> Result<Vec<AdminSession>, ServerFnError> {
@@ -547,7 +759,7 @@ pub async fn get_admin_audit_log(
         require_gm_level(&state, actor_id, if account_id.is_some() { 1 } else { 4 }).await?;
         let rows = match if let Some(account_id) = account_id {
             sqlx::query_as::<_, (u64, i64, Option<String>, String, String, Option<String>, Option<String>)>(
-                "SELECT l.`id`, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `auth`.`account` a ON a.`id` = l.`actor_account_id` WHERE l.`actor_account_id` = ? OR (l.`target_type` = 'account' AND l.`target_id` = CAST(? AS CHAR)) OR (l.`target_type` = 'realm_role' AND l.`target_id` LIKE CONCAT(CAST(? AS CHAR), ':%')) ORDER BY l.`occurred_at` DESC LIMIT 100",
+                "SELECT l.`id`, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `auth`.`account` a ON a.`id` = l.`actor_account_id` WHERE l.`actor_account_id` = ? OR (l.`target_type` = 'account' AND l.`target_id` = CAST(? AS CHAR) COLLATE utf8mb4_unicode_ci) OR (l.`target_type` = 'realm_role' AND l.`target_id` LIKE CONCAT(CAST(? AS CHAR) COLLATE utf8mb4_unicode_ci, ':%')) ORDER BY l.`occurred_at` DESC LIMIT 100",
             ).bind(account_id).bind(account_id).bind(account_id).fetch_all(&*state.web).await
         } else {
             sqlx::query_as::<_, (u64, i64, Option<String>, String, String, Option<String>, Option<String>)>(

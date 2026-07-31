@@ -15,7 +15,7 @@ pub fn AccountManagement() -> impl IntoView {
     );
     view! {
         <AdminShell active=AdminSection::Accounts>
-            <p class="text-xs font-semibold uppercase tracking-[0.3em] text-primary">"Account management"</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.3em] text-primary">"Accounts"</p>
             <h1 class="mt-4 font-sans text-3xl font-semibold tracking-tight">"Accounts"</h1>
             <p class="mt-3 text-xs text-muted-foreground">"Search accounts by name, email, or ID. Credentials, session keys, and recovery secrets are never shown here."</p>
             <label class="mt-6 block max-w-md text-xs text-muted-foreground" for="account-search">"Search"
@@ -131,7 +131,7 @@ pub fn AdminAccountDetail() -> impl IntoView {
     );
     view! {
         <AdminShell active=AdminSection::Accounts>
-            <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/admin/accounts">"Account management"</a>
+            <a class="text-xs font-semibold uppercase tracking-[0.3em] text-primary" href="/admin/accounts">"Accounts"</a>
             <Suspense fallback=move || view! { <p class="mt-8 text-xs text-muted-foreground">"Loading account..."</p> }>
                 {move || account.get().map(render_admin_account_detail)}
             </Suspense>
@@ -153,7 +153,7 @@ pub fn AdminAccountDetail() -> impl IntoView {
 fn render_admin_characters(result: Result<Vec<portal::AdminCharacter>, ServerFnError>) -> AnyView {
     match result {
         Ok(characters) if characters.is_empty() => view! { <p class="mt-3 text-xs text-muted-foreground">"No characters."</p> }.into_any(),
-        Ok(characters) => view! { <ul class="mt-3 divide-y divide-border text-xs">{characters.into_iter().map(|character| view! { <li class="flex justify-between py-2"><span>{character.name} " (" {character.guid} ")"</span><span>{"Level "} {character.level} {if character.online != 0 { " online" } else { " offline" }}</span></li> }).collect_view()}</ul> }.into_any(),
+        Ok(characters) => view! { <ul class="mt-3 divide-y divide-border text-xs">{characters.into_iter().map(|character| view! { <li class="flex justify-between py-2"><a class="font-medium text-foreground hover:text-primary" href=format!("/admin/characters/{}", character.guid)>{character.name}</a><span>{"Level "} {character.level} {if character.online != 0 { " online" } else { " offline" }}</span></li> }).collect_view()}</ul> }.into_any(),
         Err(error) => view! { <p class="mt-3 text-xs text-destructive">{error.to_string()}</p> }.into_any(),
     }
 }

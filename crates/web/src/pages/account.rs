@@ -233,7 +233,7 @@ fn render_portal_overview(result: Result<portal::PortalOverview, ServerFnError>)
                         <div>
                             <a class="font-medium text-foreground hover:text-primary" href=format!("/characters/{}", character.guid)>{character.name}</a>
                             <p class="mt-1 text-muted-foreground">
-                                "Level " {character.level} " " {class_name(character.class)} " - " {race_name(character.race)}
+                                "Level " {character.level} " " {portal::class_name(character.class)} " - " {portal::race_name(character.race)}
                             </p>
                         </div>
                         <span class=if character.online == 0 { "text-muted-foreground" } else { "text-primary" }>
@@ -310,49 +310,14 @@ fn render_character_detail(
         Ok(Some(character)) => view! {
             <dl class="mt-8 divide-y divide-border text-xs">
                 <div class="py-3"><dt class="text-muted-foreground">"Name"</dt><dd class="mt-1 font-medium text-foreground">{character.name}</dd></div>
-                <div class="py-3"><dt class="text-muted-foreground">"Class"</dt><dd class="mt-1 text-foreground">"Level " {character.level} " " {class_name(character.class)}</dd></div>
-                <div class="py-3"><dt class="text-muted-foreground">"Race"</dt><dd class="mt-1 text-foreground">{race_name(character.race)}</dd></div>
+                <div class="py-3"><dt class="text-muted-foreground">"Class"</dt><dd class="mt-1 text-foreground">"Level " {character.level} " " {portal::class_name(character.class)}</dd></div>
+                <div class="py-3"><dt class="text-muted-foreground">"Race"</dt><dd class="mt-1 text-foreground">{portal::race_name(character.race)}</dd></div>
                 <div class="py-3"><dt class="text-muted-foreground">"Status"</dt><dd class="mt-1 text-foreground">{if character.online == 0 { "Offline" } else { "Online" }}</dd></div>
-                <div class="py-3"><dt class="text-muted-foreground">"Played"</dt><dd class="mt-1 text-foreground">{format_played_time(character.played_time_total)}</dd></div>
+                <div class="py-3"><dt class="text-muted-foreground">"Played"</dt><dd class="mt-1 text-foreground">{portal::format_played_time(character.played_time_total)}</dd></div>
                 <div class="py-3"><dt class="text-muted-foreground">"Copper"</dt><dd class="mt-1 text-foreground">{character.money}</dd></div>
             </dl>
         }.into_any(),
         Ok(None) => view! { <p class="mt-8 text-xs text-muted-foreground">"Character not found."</p> }.into_any(),
         Err(_) => view! { <p class="mt-8 text-xs text-muted-foreground">"Character details are temporarily unavailable."</p> }.into_any(),
-    }
-}
-
-fn format_played_time(total_seconds: u32) -> String {
-    let hours = total_seconds / 3_600;
-    let days = hours / 24;
-    format!("{days}d {}h", hours % 24)
-}
-
-fn class_name(class: u8) -> &'static str {
-    match class {
-        1 => "Warrior",
-        2 => "Paladin",
-        3 => "Hunter",
-        4 => "Rogue",
-        5 => "Priest",
-        7 => "Shaman",
-        8 => "Mage",
-        9 => "Warlock",
-        11 => "Druid",
-        _ => "Unknown class",
-    }
-}
-
-fn race_name(race: u8) -> &'static str {
-    match race {
-        1 => "Human",
-        2 => "Orc",
-        3 => "Dwarf",
-        4 => "Night Elf",
-        5 => "Undead",
-        6 => "Tauren",
-        7 => "Gnome",
-        8 => "Troll",
-        _ => "Unknown race",
     }
 }

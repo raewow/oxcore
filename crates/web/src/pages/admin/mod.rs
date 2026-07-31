@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod audit;
+pub mod characters;
 pub mod live_map;
 pub mod overview;
 pub mod permissions;
