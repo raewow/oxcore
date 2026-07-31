@@ -21,6 +21,10 @@ pub const SMSG_ENTER_ENCRYPTED_MODE: u16 = Opcode::SMSG_ENTER_ENCRYPTED_MODE.mod
 pub const CMSG_ENTER_ENCRYPTED_MODE_ACK: u16 = Opcode::CMSG_ENTER_ENCRYPTED_MODE_ACK.modern();
 /// Server → client: the auth response (realm/character enablement).
 pub const SMSG_AUTH_RESPONSE: u16 = Opcode::SMSG_AUTH_RESPONSE.modern();
+/// Server → client: realm feature flags and character-creation bounds, sent once right after the
+/// auth response and before the client requests the character list.
+pub const SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN: u16 =
+    Opcode::SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN.modern();
 /// Server → client: redirect to an instance socket.
 pub const SMSG_CONNECT_TO: u16 = Opcode::SMSG_CONNECT_TO.modern();
 /// Client → server: the continued-session handshake on an instance socket.
@@ -43,6 +47,7 @@ mod tests {
         assert_eq!(SMSG_ENTER_ENCRYPTED_MODE, 0x3049);
         assert_eq!(CMSG_ENTER_ENCRYPTED_MODE_ACK, 0x3767);
         assert_eq!(SMSG_AUTH_RESPONSE, 0x256D);
+        assert_eq!(SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN, 0x25BD);
         assert_eq!(SMSG_CONNECT_TO, 0x304D);
         assert_eq!(CMSG_AUTH_CONTINUED_SESSION, 0x3766);
         assert_eq!(CMSG_PING, 0x3768);
@@ -62,6 +67,10 @@ mod tests {
                 CMSG_ENTER_ENCRYPTED_MODE_ACK,
             ),
             ("SMSG_AUTH_RESPONSE", SMSG_AUTH_RESPONSE),
+            (
+                "SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN",
+                SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN,
+            ),
             ("SMSG_CONNECT_TO", SMSG_CONNECT_TO),
             ("CMSG_AUTH_CONTINUED_SESSION", CMSG_AUTH_CONTINUED_SESSION),
             ("CMSG_PING", CMSG_PING),

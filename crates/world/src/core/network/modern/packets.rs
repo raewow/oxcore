@@ -301,6 +301,59 @@ pub fn auth_response_success(info: &AuthResponseSuccess) -> Vec<u8> {
     w.into_bytes()
 }
 
+/// The realm/character-creation bounds we report in `SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN`.
+///
+/// Sent once, right after the auth response and before the client requests the character list.
+/// Without `max_characters_per_realm`, the client has no signal for whether it may create another
+/// character on this realm and hides the character-select screen's Create button entirely,
+/// independent of the account's actual character count.
+#[derive(Debug, Clone, Copy)]
+pub struct FeatureSystemStatusGlueScreen {
+    pub max_characters_per_realm: i32,
+    pub minimum_expansion_level: i32,
+    pub maximum_expansion_level: i32,
+}
+
+/// Serialize `SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN`.
+///
+/// Every store/billing/kiosk/live-region feature flag is sent false: none of that exists on this
+/// server, and the client only needs the bit correctly cleared, not populated. The two dynamic
+/// lists (live-region copy source realms, game rule values) are always empty, so their loops
+/// contribute nothing.
+pub fn feature_system_status_glue_screen_body(info: &FeatureSystemStatusGlueScreen) -> Vec<u8> {
+    let mut w = BitWriter::new();
+
+    // BpayStoreEnabled, BpayStoreAvailable, BpayStoreDisabledByParentalControls,
+    // CharUndeleteEnabled, CommerceSystemEnabled, an unnamed bit, WillKickFromWorld,
+    // IsExpansionPreorderInStore, KioskModeEnabled, CompetitiveModeEnabled, TrialBoostEnabled,
+    // TokenBalanceEnabled, four LiveRegion* bits, an unnamed checkout-related bit, and
+    // EuropaTicketSystemStatus-present -- 18 bits, all clear.
+    for _ in 0..18 {
+        w.write_bit(false);
+    }
+    w.flush_bits();
+
+    w.write_u32(0); // TokenPollTimeSeconds
+    w.write_u32(0); // KioskSessionMinutes
+    w.write_i64(0); // TokenBalanceAmount
+    w.write_i32(info.max_characters_per_realm);
+    w.write_i32(0); // LiveRegionCharacterCopySourceRegions.Count
+    w.write_u32(0); // BpayStoreProductDeliveryDelay
+    w.write_i32(0); // ActiveCharacterUpgradeBoostType
+    w.write_i32(0); // ActiveClassTrialBoostType
+    w.write_i32(info.minimum_expansion_level);
+    w.write_i32(info.maximum_expansion_level);
+
+    // Present from 1.14.1; our build (1.14.2/42597) always satisfies this.
+    w.write_i32(0); // ActiveSeason
+    w.write_i32(0); // GameRuleValues.Count
+    // Present from 1.14.2, which our build is.
+    w.write_i16(50); // MaxPlayerNameQueriesPerPacket
+    // PlayerNameQueryTelemetryInterval is gated to 1.14.4+; our build is 1.14.2, so it is omitted.
+
+    w.into_bytes()
+}
+
 // ---- CMSG_PING / SMSG_PONG ----
 
 /// The client's latency ping: an echo serial and its measured latency (ms).
@@ -560,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn classic_availability_matches_hermes_character_creation_matrix() {
+    fn classic_availability_matches_the_expected_character_creation_matrix() {
         let available = classic_available_classes();
         assert_eq!(available.len(), 8);
         assert_eq!(available[0].race_id, 1);
@@ -573,5 +626,34 @@ mod tests {
             vec![1, 2, 4, 5, 8, 9]
         );
         assert_eq!(available[7].race_id, 8);
+    }
+
+    /// The bug this fixes: without `MaxCharactersOnThisRealm`, the client hides the
+    /// character-select screen's Create button entirely, independent of the account's actual
+    /// character count.
+    #[test]
+    fn feature_system_status_glue_screen_lays_out_the_expected_fields() {
+        let info = FeatureSystemStatusGlueScreen {
+            max_characters_per_realm: 10,
+            minimum_expansion_level: 0,
+            maximum_expansion_level: 2,
+        };
+        let body = feature_system_status_glue_screen_body(&info);
+
+        assert_eq!(&body[0..3], &[0, 0, 0]); // 18 feature-flag bits, all clear
+        assert_eq!(&body[3..7], &0u32.to_le_bytes()); // TokenPollTimeSeconds
+        assert_eq!(&body[7..11], &0u32.to_le_bytes()); // KioskSessionMinutes
+        assert_eq!(&body[11..19], &0i64.to_le_bytes()); // TokenBalanceAmount
+        assert_eq!(&body[19..23], &10i32.to_le_bytes()); // MaxCharactersPerRealm
+        assert_eq!(&body[23..27], &0i32.to_le_bytes()); // LiveRegionCharacterCopySourceRegions.Count
+        assert_eq!(&body[27..31], &0u32.to_le_bytes()); // BpayStoreProductDeliveryDelay
+        assert_eq!(&body[31..35], &0i32.to_le_bytes()); // ActiveCharacterUpgradeBoostType
+        assert_eq!(&body[35..39], &0i32.to_le_bytes()); // ActiveClassTrialBoostType
+        assert_eq!(&body[39..43], &0i32.to_le_bytes()); // MinimumExpansionLevel
+        assert_eq!(&body[43..47], &2i32.to_le_bytes()); // MaximumExpansionLevel
+        assert_eq!(&body[47..51], &0i32.to_le_bytes()); // ActiveSeason
+        assert_eq!(&body[51..55], &0i32.to_le_bytes()); // GameRuleValues.Count
+        assert_eq!(&body[55..57], &50i16.to_le_bytes()); // MaxPlayerNameQueriesPerPacket
+        assert_eq!(body.len(), 57);
     }
 }

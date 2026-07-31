@@ -1123,7 +1123,7 @@ impl CreatureManager {
     pub fn build_create_msg(
         &self,
         guid: ObjectGuid,
-        _world: &crate::World,
+        world: &crate::World,
     ) -> Option<oxcore_shared::messages::update::SmsgUpdateObject> {
         use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
         use crate::core::common::position::Position as WorldPosition;
@@ -1240,6 +1240,19 @@ impl CreatureManager {
 
         // Dynamic flags (CRITICAL: includes LOOTABLE for dead creatures with loot)
         block = block.set_field(UNIT_DYNAMIC_FLAGS, dynamic_flags);
+
+        // 1.14 multiplies OBJECT_FIELD_SCALE_X by a separate per-display-id model scale
+        // (CreatureDisplayInfo.CreatureModelScale) that vanilla has no field for and which the
+        // create block otherwise defaults to 1.0 -- wrong for any display id whose real scale
+        // factor isn't 1.0 (the starting wolves render tiny because of this).
+        let display_scale = world
+            .dbc
+            .read()
+            .get_creature_display_info(creature.display_id)
+            .map(|info| info.creature_model_scale)
+            .filter(|scale| *scale > 0.0)
+            .unwrap_or(1.0);
+        block = block.with_display_scale(display_scale);
 
         // Set UNIT_FIELD_TARGET and UPDATEFLAG_MELEE_ATTACKING if creature is in combat
         if creature.combat.in_combat {

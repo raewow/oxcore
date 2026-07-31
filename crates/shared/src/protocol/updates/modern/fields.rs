@@ -211,8 +211,8 @@ impl ModernFieldsArray {
         // A few fields repacked their contents rather than just moving, so they bypass the map
         // entirely. See `repack` for why each one cannot be a slot move.
         if let Some(writes) = repack(self.object_type, vanilla_index, value) {
-            for &(index, value) in writes.as_slice() {
-                self.set_modern(index, value);
+            for (&(index, value), &mask) in writes.as_slice().iter().zip(writes.masks()) {
+                self.set_modern_masked(index, value, mask);
             }
             return true;
         }
@@ -273,8 +273,19 @@ impl ModernFieldsArray {
 
     /// Set a field by its modern slot number, for values with no vanilla origin.
     pub fn set_modern(&mut self, index: u16, value: u32) {
+        self.set_modern_masked(index, value, u32::MAX);
+    }
+
+    /// Set only the bits marked in `mask`, preserving the rest of the slot's current value.
+    ///
+    /// Used when two different vanilla fields both contribute bytes to the same modern slot (for
+    /// example the shapeshift-form byte moving from vanilla `UNIT_FIELD_BYTES_1` into modern
+    /// `UNIT_FIELD_BYTES_2`, which also receives `SheatheState` from vanilla's own
+    /// `UNIT_FIELD_BYTES_2`). Neither vanilla write may clobber the other's bytes, and vanilla
+    /// fields can arrive in either order.
+    pub fn set_modern_masked(&mut self, index: u16, value: u32, mask: u32) {
         if let Some(cell) = self.values.get_mut(index as usize) {
-            *cell = value;
+            *cell = (*cell & !mask) | (value & mask);
             self.mask.set(index);
         }
     }

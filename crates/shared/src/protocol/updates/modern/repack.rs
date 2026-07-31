@@ -9,15 +9,17 @@
 //! are handled deliberately instead.
 
 use super::field_map::{
-    MODERN_PLAYER_QUEST_LOG, MODERN_UNIT_FIELD_ATTACK_POWER_MOD_NEG,
-    MODERN_UNIT_FIELD_ATTACK_POWER_MOD_POS, MODERN_UNIT_FIELD_BYTES_0,
+    MODERN_OBJECT_DYNAMIC_FLAGS, MODERN_PLAYER_QUEST_LOG, MODERN_PLAYER_VISIBLE_ITEM,
+    MODERN_UNIT_FIELD_ATTACK_POWER_MOD_NEG, MODERN_UNIT_FIELD_ATTACK_POWER_MOD_POS,
+    MODERN_UNIT_FIELD_BYTES_0, MODERN_UNIT_FIELD_BYTES_1, MODERN_UNIT_FIELD_BYTES_2,
     MODERN_UNIT_FIELD_DISPLAY_POWER, MODERN_UNIT_FIELD_RANGED_ATTACK_POWER_MOD_NEG,
-    MODERN_UNIT_FIELD_RANGED_ATTACK_POWER_MOD_POS,
+    MODERN_UNIT_FIELD_RANGED_ATTACK_POWER_MOD_POS, MODERN_UNIT_NPC_FLAGS,
 };
 use super::fields::ModernObjectType;
 use crate::protocol::update_fields::{
-    PLAYER_QUEST_LOG_1_1, UNIT_FIELD_ATTACK_POWER_MODS, UNIT_FIELD_BYTES_0,
-    UNIT_FIELD_RANGED_ATTACK_POWER_MODS,
+    PLAYER_QUEST_LOG_1_1, PLAYER_VISIBLE_ITEM_1_0, UNIT_DYNAMIC_FLAGS,
+    UNIT_FIELD_ATTACK_POWER_MODS, UNIT_FIELD_BYTES_0, UNIT_FIELD_BYTES_1, UNIT_FIELD_BYTES_2,
+    UNIT_FIELD_RANGED_ATTACK_POWER_MODS, UNIT_NPC_FLAGS,
 };
 
 /// Modern slot writes produced from one vanilla field write.
@@ -28,6 +30,10 @@ use crate::protocol::update_fields::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Writes {
     slots: [(u16, u32); MAX_WRITES],
+    /// Per-slot write mask, `u32::MAX` (the whole word) for every write made through `new`. A
+    /// narrower mask means the write shares its modern slot with another vanilla field and must
+    /// not clobber the bytes that field owns -- see `set_modern_masked`.
+    masks: [u32; MAX_WRITES],
     len: usize,
 }
 
@@ -39,12 +45,33 @@ impl Writes {
         buffer[..slots.len()].copy_from_slice(slots);
         Self {
             slots: buffer,
+            masks: [u32::MAX; MAX_WRITES],
+            len: slots.len(),
+        }
+    }
+
+    /// Like `new`, but each write only replaces the bits set in its mask, preserving the rest of
+    /// the modern slot's current value. See the `masks` field doc for why this exists.
+    fn new_masked(slots: &[(u16, u32, u32)]) -> Self {
+        let mut buffer = [(0u16, 0u32); MAX_WRITES];
+        let mut masks = [u32::MAX; MAX_WRITES];
+        for (i, &(index, value, mask)) in slots.iter().enumerate() {
+            buffer[i] = (index, value);
+            masks[i] = mask;
+        }
+        Self {
+            slots: buffer,
+            masks,
             len: slots.len(),
         }
     }
 
     pub fn as_slice(&self) -> &[(u16, u32)] {
         &self.slots[..self.len]
+    }
+
+    pub fn masks(&self) -> &[u32] {
+        &self.masks[..self.len]
     }
 }
 
@@ -56,6 +83,86 @@ const VANILLA_QUEST_LOG_STRIDE: u32 = 3;
 const MODERN_QUEST_LOG_STRIDE: u16 = 16;
 /// Offset of `EndTime` within a modern quest-log slot (`+2 + 12`).
 const MODERN_QUEST_LOG_END_TIME: u16 = 14;
+
+/// Vanilla visible-item geometry: 19 equipment slots of 12 named fields each (creator guid,
+/// entry+enchants, properties, pad). oxcore only ever populates the first three -- entry, perm
+/// enchant, temp enchant -- of which `visible_item_slot` maps the first two.
+const VANILLA_VISIBLE_ITEM_SLOTS: u32 = 19;
+const VANILLA_VISIBLE_ITEM_STRIDE: u32 = 12;
+
+/// 1.14 visible-item geometry: 19 slots of 2 (ItemID, enchant/appearance), per the 1.14 wire
+/// format -- `PLAYER_VISIBLE_ITEM` is size 38.
+const MODERN_VISIBLE_ITEM_STRIDE: u16 = 2;
+
+/// Translate vanilla NPC-flag bits to their modern positions.
+///
+/// The bits renumber from `Vendor` onward: vanilla `Vendor = 0x4` is 1.14's `Unk1`, vanilla
+/// `Innkeeper = 0x80` is 1.14's `Vendor`, and so on for every flag past `Trainer`. A raw copy does
+/// not merely mislabel one flag -- it sets a *different* interaction icon than the one the NPC
+/// actually has (or none at all for `Vendor`), which is why vendor windows never opened: the
+/// client never saw the `Vendor` bit at the position it checks. `Gossip` and `QuestGiver` happen
+/// to share their vanilla and modern bit positions, which is why gossip-only NPCs were unaffected.
+/// Translated by name, the way `to_modern_movement_flags` and `to_modern_hit_info` translate their
+/// own renumbered flag words.
+fn to_modern_npc_flags(vanilla: u32) -> u32 {
+    const BITS: &[(u32, u32)] = &[
+        (0x0000_0001, 0x0000_0001), // Gossip
+        (0x0000_0002, 0x0000_0002), // QuestGiver
+        (0x0000_0004, 0x0000_0080), // Vendor
+        (0x0000_0008, 0x0000_2000), // FlightMaster
+        (0x0000_0010, 0x0000_0010), // Trainer
+        (0x0000_0020, 0x0000_4000), // SpiritHealer
+        (0x0000_0040, 0x0000_8000), // SpiritGuide
+        (0x0000_0080, 0x0001_0000), // Innkeeper
+        (0x0000_0100, 0x0002_0000), // Banker
+        (0x0000_0200, 0x0004_0000), // Petitioner
+        (0x0000_0400, 0x0008_0000), // TabardDesigner
+        (0x0000_0800, 0x0010_0000), // BattleMaster
+        (0x0000_1000, 0x0020_0000), // Auctioneer
+        (0x0000_2000, 0x0040_0000), // StableMaster
+        (0x0000_4000, 0x0000_1000), // Repair
+    ];
+    BITS.iter()
+        .fold(0, |acc, &(v, m)| if vanilla & v != 0 { acc | m } else { acc })
+}
+
+/// Translate vanilla unit dynamic-flag bits to their modern positions.
+///
+/// 1.14 renumbers these too, not just relocates the field: vanilla `Lootable = 0x1` is 1.14's
+/// `HideModel`, and 1.14's `Lootable` is `0x4`. A raw copy leaves a dead, lootable creature's
+/// `Lootable` bit unset on the client, so no loot cue or window ever appears even though the
+/// server correctly marked the corpse lootable. `TappedByPlayer` has no modern counterpart at all
+/// and is dropped rather than guessed at.
+fn to_modern_dynamic_flags(vanilla: u32) -> u32 {
+    const BITS: &[(u32, u32)] = &[
+        (0x01, 0x04), // Lootable
+        (0x02, 0x08), // TrackUnit
+        (0x04, 0x10), // Tapped
+        (0x10, 0x20), // EmpathyInfo
+        (0x20, 0x40), // AppearDead
+        (0x40, 0x80), // ReferAFriendLinked
+    ];
+    BITS.iter()
+        .fold(0, |acc, &(v, m)| if vanilla & v != 0 { acc | m } else { acc })
+}
+
+/// Split a vanilla field index into its visible-item `(slot, offset)`, or `None` if it is not one
+/// with a modern counterpart. Modern has room for two fields per slot (ItemID, one enchant), so
+/// only vanilla offset 0 (entry) and offset 1 (perm enchant) map; offset 2 (temp enchant) falls
+/// through to the ordinary map and is dropped, the same way the spell-visual flourish is dropped
+/// elsewhere in this port rather than guessed at.
+fn visible_item_slot(vanilla_index: u32) -> Option<(u16, u32)> {
+    let relative = vanilla_index.checked_sub(PLAYER_VISIBLE_ITEM_1_0)?;
+    let slot = relative / VANILLA_VISIBLE_ITEM_STRIDE;
+    if slot >= VANILLA_VISIBLE_ITEM_SLOTS {
+        return None;
+    }
+    let offset = relative % VANILLA_VISIBLE_ITEM_STRIDE;
+    if offset > 1 {
+        return None;
+    }
+    Some((slot as u16, offset))
+}
 
 /// Translate a vanilla field whose contents, not just position, changed in 1.14.
 ///
@@ -90,6 +197,56 @@ pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> 
                 ),
                 (MODERN_UNIT_FIELD_DISPLAY_POWER, power_type),
             ])
+        }
+
+        // Vanilla packs [StandState, 0, ShapeshiftForm, 0]. Modern's BYTES_1 has no shapeshift
+        // form at all -- it packs (StandState, PetLoyaltyIndex, VisFlags, AnimTier) -- so only
+        // StandState (byte 0) goes there. The shapeshift form moves to byte 3 of modern BYTES_2,
+        // which vanilla's own UNIT_FIELD_BYTES_2 write also contributes to below; both writes are
+        // masked to their own byte so neither can clobber the other regardless of write order.
+        UNIT_FIELD_BYTES_1 => {
+            let stand_state = value & 0xFF;
+            let shapeshift_form = (value >> 16) & 0xFF;
+            Writes::new_masked(&[
+                (MODERN_UNIT_FIELD_BYTES_1, stand_state, 0x0000_00FF),
+                (MODERN_UNIT_FIELD_BYTES_2, shapeshift_form << 24, 0xFF00_0000),
+            ])
+        }
+
+        // Vanilla packs (SheatheState, misc aura-icon flag, 0, 0); modern packs (SheatheState,
+        // PvpFlags, PetFlags, ShapeshiftForm). Only SheatheState (byte 0) has a clean modern
+        // counterpart -- the misc flag byte does not correspond to PvpFlags, so it is dropped
+        // rather than misencoded. Masked to byte 0 so it cannot clobber the shapeshift form the
+        // UNIT_FIELD_BYTES_1 case above writes into byte 3 of this same modern slot.
+        UNIT_FIELD_BYTES_2 => {
+            let sheathe_state = value & 0xFF;
+            Writes::new_masked(&[(MODERN_UNIT_FIELD_BYTES_2, sheathe_state, 0x0000_00FF)])
+        }
+
+        // The flag *bits* renumber in 1.14, not just the field position -- see
+        // `to_modern_npc_flags` for why a raw copy broke vendor windows specifically.
+        UNIT_NPC_FLAGS => Writes::new(&[(MODERN_UNIT_NPC_FLAGS, to_modern_npc_flags(value))]),
+
+        // Same hazard as NPC flags: the bits renumber as well as the field moving to the shared
+        // Object block. See `to_modern_dynamic_flags` for why this broke loot visibility.
+        UNIT_DYNAMIC_FLAGS => Writes::new(&[(
+            MODERN_OBJECT_DYNAMIC_FLAGS,
+            to_modern_dynamic_flags(value),
+        )]),
+
+        // Vanilla names 19 x 12 individual fields; 1.14 has one 19 x 2 array. Restricted to the
+        // player chain the same way the quest log is: these indices are past a creature's field
+        // table, and being explicit keeps a future creature field at the same number from being
+        // mistaken for visible-item data.
+        index
+            if matches!(
+                object_type,
+                ModernObjectType::Player | ModernObjectType::ActivePlayer
+            ) && visible_item_slot(index).is_some() =>
+        {
+            let (slot, offset) = visible_item_slot(index)?;
+            let target = MODERN_PLAYER_VISIBLE_ITEM + slot * MODERN_VISIBLE_ITEM_STRIDE + offset as u16;
+            Writes::new(&[(target, value)])
         }
 
         // Vanilla stores the positive and negative modifiers as two u16s sharing one slot; 1.14
@@ -315,5 +472,152 @@ mod tests {
             100
         )
         .is_none());
+    }
+
+    /// The bug this fixes: a vendor's `Vendor` bit (vanilla `0x4`) lands on modern's `Unk1`
+    /// instead of modern's `Vendor` bit (`0x80`), so the client never recognizes the NPC as a
+    /// vendor and shows no window at all.
+    #[test]
+    fn npc_flags_move_the_vendor_bit() {
+        let writes = repack(ModernObjectType::Unit, UNIT_NPC_FLAGS, 0x4).expect("transformed");
+        assert_eq!(writes.as_slice(), [(MODERN_UNIT_NPC_FLAGS, 0x80)]);
+    }
+
+    /// Gossip and quest-giver happen to share their vanilla and modern bit positions, so a gossip
+    /// NPC combined with a vendor must still carry both correctly rather than only the coincidence.
+    #[test]
+    fn npc_flags_combine_gossip_and_vendor() {
+        let vanilla = 0x1 | 0x4; // Gossip | Vendor
+        let writes = repack(ModernObjectType::Unit, UNIT_NPC_FLAGS, vanilla).expect("transformed");
+        assert_eq!(writes.as_slice(), [(MODERN_UNIT_NPC_FLAGS, 0x1 | 0x80)]);
+    }
+
+    /// The bug this fixes: a dead creature's `Lootable` bit (vanilla `0x1`) lands on modern's
+    /// `HideModel` instead of modern's `Lootable` bit (`0x4`), so the client never shows a loot
+    /// cue even though the server marked the corpse lootable.
+    #[test]
+    fn dynamic_flags_move_the_lootable_bit() {
+        let writes =
+            repack(ModernObjectType::Unit, UNIT_DYNAMIC_FLAGS, 0x1).expect("transformed");
+        assert_eq!(writes.as_slice(), [(MODERN_OBJECT_DYNAMIC_FLAGS, 0x4)]);
+    }
+
+    /// `TappedByPlayer` (vanilla `0x8`) has no modern counterpart and must be dropped, not guessed.
+    #[test]
+    fn dynamic_flags_drop_tapped_by_player() {
+        let writes =
+            repack(ModernObjectType::Unit, UNIT_DYNAMIC_FLAGS, 0x8).expect("transformed");
+        assert_eq!(writes.as_slice(), [(MODERN_OBJECT_DYNAMIC_FLAGS, 0)]);
+    }
+
+    /// The bug this fixes: a warrior's shapeshift form (vanilla `UNIT_FIELD_BYTES_1` byte 2) has
+    /// no counterpart in modern `BYTES_1` at all -- it moves to byte 3 of modern `BYTES_2` -- so a
+    /// raw copy silently drops it and the client shows no stance selected.
+    #[test]
+    fn bytes_1_sends_stand_state_and_moves_shapeshift_form_to_bytes_2() {
+        let stand_state = 0u32;
+        let shapeshift_form = 17u32; // Battle Stance
+        let vanilla = stand_state | (shapeshift_form << 16);
+        let writes = repack(ModernObjectType::Player, UNIT_FIELD_BYTES_1, vanilla)
+            .expect("transformed");
+        assert_eq!(
+            writes.as_slice(),
+            [
+                (MODERN_UNIT_FIELD_BYTES_1, stand_state),
+                (MODERN_UNIT_FIELD_BYTES_2, shapeshift_form << 24),
+            ]
+        );
+        assert_eq!(writes.masks(), [0x0000_00FF, 0xFF00_0000]);
+    }
+
+    #[test]
+    fn bytes_2_sends_only_sheathe_state_masked_to_byte_0() {
+        let vanilla = 1 | (0x10 << 8); // sheathed, plus vanilla's misc aura-icon byte
+        let writes = repack(ModernObjectType::Player, UNIT_FIELD_BYTES_2, vanilla)
+            .expect("transformed");
+        assert_eq!(writes.as_slice(), [(MODERN_UNIT_FIELD_BYTES_2, 1)]);
+        assert_eq!(writes.masks(), [0x0000_00FF]);
+    }
+
+    /// The two vanilla fields share one modern slot and must merge regardless of which arrives
+    /// first -- game systems write `UNIT_FIELD_BYTES_1` and `UNIT_FIELD_BYTES_2` independently, so
+    /// nothing guarantees an order. This exercises the real merge path through
+    /// `ModernFieldsArray::set_vanilla`, not just the two `Writes` in isolation.
+    #[test]
+    fn shapeshift_form_and_sheathe_state_merge_regardless_of_order() {
+        use super::super::fields::ModernFieldsArray;
+
+        let shapeshift_form = 17u32; // Battle Stance
+        let bytes_1 = 0u32 | (shapeshift_form << 16);
+        let bytes_2 = 1u32; // sheathed
+
+        let mut forward = ModernFieldsArray::new(ModernObjectType::ActivePlayer, 1);
+        forward.set_vanilla(UNIT_FIELD_BYTES_1, bytes_1);
+        forward.set_vanilla(UNIT_FIELD_BYTES_2, bytes_2);
+
+        let mut reverse = ModernFieldsArray::new(ModernObjectType::ActivePlayer, 1);
+        reverse.set_vanilla(UNIT_FIELD_BYTES_2, bytes_2);
+        reverse.set_vanilla(UNIT_FIELD_BYTES_1, bytes_1);
+
+        let expected = 1u32 | (shapeshift_form << 24);
+        assert_eq!(
+            forward.modern_value(MODERN_UNIT_FIELD_BYTES_2),
+            Some(expected)
+        );
+        assert_eq!(
+            reverse.modern_value(MODERN_UNIT_FIELD_BYTES_2),
+            Some(expected)
+        );
+    }
+
+    /// The bug this fixes: `PLAYER_VISIBLE_ITEM_<n>_0` (the item entry) never joins modern's
+    /// single `PLAYER_VISIBLE_ITEM` array by name, so every equipped item was silently dropped and
+    /// no equipped items rendered on other players.
+    #[test]
+    fn visible_item_entry_maps_into_the_modern_array() {
+        let writes = repack(ModernObjectType::ActivePlayer, PLAYER_VISIBLE_ITEM_1_0, 12345)
+            .expect("slot 0 entry must map");
+        assert_eq!(writes.as_slice(), [(MODERN_PLAYER_VISIBLE_ITEM, 12345)]);
+    }
+
+    #[test]
+    fn visible_item_perm_enchant_maps_to_the_second_modern_field() {
+        let writes = repack(
+            ModernObjectType::ActivePlayer,
+            PLAYER_VISIBLE_ITEM_1_0 + 1,
+            999,
+        )
+        .expect("slot 0 enchant must map");
+        assert_eq!(writes.as_slice(), [(MODERN_PLAYER_VISIBLE_ITEM + 1, 999)]);
+    }
+
+    /// The strides differ (12 vanilla, 2 modern), so slot n does not land at n * 12.
+    #[test]
+    fn visible_item_slots_use_the_modern_stride() {
+        let slot_3_entry = PLAYER_VISIBLE_ITEM_1_0 + 3 * VANILLA_VISIBLE_ITEM_STRIDE;
+        let writes = repack(ModernObjectType::ActivePlayer, slot_3_entry, 42)
+            .expect("slot 3 must map");
+        assert_eq!(
+            writes.as_slice(),
+            [(MODERN_PLAYER_VISIBLE_ITEM + 3 * MODERN_VISIBLE_ITEM_STRIDE, 42)]
+        );
+    }
+
+    /// Temp enchant (offset 2) has nowhere to go in modern's two-field-per-slot array and must be
+    /// dropped, not folded into the perm-enchant field where it could overwrite a real value.
+    #[test]
+    fn visible_item_temp_enchant_is_not_mapped() {
+        assert!(repack(
+            ModernObjectType::ActivePlayer,
+            PLAYER_VISIBLE_ITEM_1_0 + 2,
+            777
+        )
+        .is_none());
+    }
+
+    /// A creature field at the same index must not be rewritten as visible-item data.
+    #[test]
+    fn visible_item_indices_are_player_only() {
+        assert!(repack(ModernObjectType::Unit, PLAYER_VISIBLE_ITEM_1_0, 12345).is_none());
     }
 }

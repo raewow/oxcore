@@ -1,7 +1,6 @@
 // Minimal reconstruction of the Battle.net (BGS) RPC wire types needed for the login
-// handshake, transcribed from CypherCore's generated protobuf (field numbers and types are
-// load-bearing; the proto package name is not, so everything lives in one package to keep the
-// generated Rust paths flat).
+// handshake (field numbers and types are load-bearing; the proto package name is not, so
+// everything lives in one package to keep the generated Rust paths flat).
 //
 // proto2 because the real protocol is proto2: every field is optional on the wire, and we want
 // tolerant decoding of whatever the client sends.
@@ -169,9 +168,7 @@ message GetAllValuesForAttributeResponse {
 
 // ---------------------------------------------------------------------------
 // account.v1 — AccountService. After OnLogonComplete the client immediately asks for its account
-// and game-account state (methods 30 and 31) and disconnects if either is refused. Field numbers
-// are taken from TrinityCore's generated `account_types.pb.h` / `account_service.pb.h`; the
-// response contents mirror HermesProxy's `Services/Account.cs`.
+// and game-account state (methods 30 and 31) and disconnects if either is refused.
 // ---------------------------------------------------------------------------
 
 // Which slices of the account the client is asking for. Only the ones we answer are modelled.
@@ -254,9 +251,9 @@ message GetAccountStateResponse {
 }
 
 // The id fields are decoded but unused: this server has exactly one game account per bnet account,
-// so the session already knows which one is meant. (Worth noting because TrinityCore's current
-// proto numbers these `account_id = 1, game_account_id = 2`, while the 1.14.2 client puts the game
-// account in field 1 — ignoring both sidesteps the disagreement.)
+// so the session already knows which one is meant. (Worth noting: other proto numberings for this
+// message put the game account in field 2, but the 1.14.2 client sends it in field 1 --
+// ignoring both fields sidesteps the disagreement.)
 message GetGameAccountStateRequest {
     optional EntityId account_id = 1;
     optional EntityId game_account_id = 2;

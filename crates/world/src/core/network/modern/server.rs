@@ -37,6 +37,9 @@ pub struct ModernServerConfig {
     /// Active/account expansion levels for `SMSG_AUTH_RESPONSE` (0 for Classic Era).
     pub active_expansion: u8,
     pub account_expansion: u8,
+    /// Sent in `SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN` as `MaxCharactersOnThisRealm`; without it
+    /// the client hides the character-select screen's Create button entirely.
+    pub characters_per_realm: u32,
     /// Address the client is told to open its world (instance) socket to.
     ///
     /// Must be reachable *by the client*, not by the server: it goes out in `SMSG_CONNECT_TO` and
@@ -94,6 +97,7 @@ pub async fn serve_modern(
                 virtual_realm_address: config.virtual_realm_address,
                 active_expansion: config.active_expansion,
                 account_expansion: config.account_expansion,
+                characters_per_realm: config.characters_per_realm,
             };
 
             match run_auth(&mut stream, &ctx).await {

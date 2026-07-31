@@ -16,10 +16,14 @@
 use super::auth_crypto::{derive_keys, verify_digest, DerivedKeys};
 use super::crypt::WorldCrypt;
 use super::framing;
-use super::opcodes::{SMSG_AUTH_CHALLENGE, SMSG_AUTH_RESPONSE, SMSG_ENTER_ENCRYPTED_MODE};
+use super::opcodes::{
+    SMSG_AUTH_CHALLENGE, SMSG_AUTH_RESPONSE, SMSG_ENTER_ENCRYPTED_MODE,
+    SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN,
+};
 use super::packets::{
-    auth_response_success, enter_encrypted_mode, AuthChallenge, AuthResponseSuccess, AuthSession,
-    EnterEncryptedModeSigner,
+    auth_response_success, enter_encrypted_mode, feature_system_status_glue_screen_body,
+    AuthChallenge, AuthResponseSuccess, AuthSession, EnterEncryptedModeSigner,
+    FeatureSystemStatusGlueScreen,
 };
 
 /// Server-side handshake state: the challenges we generated for this connection.
@@ -156,6 +160,16 @@ impl HandshakeServer {
 pub fn auth_response_frame(crypt: &mut WorldCrypt, info: &AuthResponseSuccess) -> Vec<u8> {
     let body = auth_response_success(info);
     framing::encode(crypt, SMSG_AUTH_RESPONSE, &body)
+}
+
+/// The `SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN` frame, sent right after `SMSG_AUTH_RESPONSE` and
+/// before the client requests the character list -- see [`FeatureSystemStatusGlueScreen`] for why.
+pub fn feature_system_status_glue_screen_frame(
+    crypt: &mut WorldCrypt,
+    info: &FeatureSystemStatusGlueScreen,
+) -> Vec<u8> {
+    let body = feature_system_status_glue_screen_body(info);
+    framing::encode(crypt, SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN, &body)
 }
 
 impl Default for HandshakeServer {

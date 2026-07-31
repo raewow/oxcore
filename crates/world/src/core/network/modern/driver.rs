@@ -39,7 +39,7 @@ use super::crypt::WorldCrypt;
 use super::framing::{
     self, ModernPacket, CONNECTION_INITIALIZE_CLIENT, CONNECTION_INITIALIZE_SERVER,
 };
-use super::handshake::{auth_response_frame, HandshakeServer};
+use super::handshake::{auth_response_frame, feature_system_status_glue_screen_frame, HandshakeServer};
 use super::packet_log;
 use super::opcodes::{
     CMSG_AUTH_CONTINUED_SESSION, CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK, CMSG_PING,
@@ -47,7 +47,7 @@ use super::opcodes::{
 };
 use super::packets::{
     classic_available_classes, pong_body, AuthContinuedSession, AuthResponseSuccess, AuthSession,
-    EnterEncryptedModeSigner, Ping,
+    EnterEncryptedModeSigner, FeatureSystemStatusGlueScreen, Ping,
 };
 
 /// Resolves a realm-join ticket (a game-account name) to that account's 64-byte bnet session key.
@@ -91,6 +91,9 @@ pub struct ModernAuthContext<'a, P: SessionKeyProvider> {
     pub virtual_realm_address: u32,
     pub active_expansion: u8,
     pub account_expansion: u8,
+    /// Sent in `SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN` as `MaxCharactersOnThisRealm`; without it
+    /// the client hides the character-select screen's Create button entirely.
+    pub characters_per_realm: u32,
 }
 
 /// A successfully authenticated modern connection, handed to the gameplay layer.
@@ -208,6 +211,22 @@ where
     };
     stream
         .write_all(&auth_response_frame(&mut crypt, &info))
+        .await?;
+    stream.flush().await?;
+
+    // Without this, the client has no signal for whether it may create another character on this
+    // realm and hides the character-select screen's Create button entirely -- see
+    // `FeatureSystemStatusGlueScreen`'s doc comment.
+    let glue_screen = FeatureSystemStatusGlueScreen {
+        max_characters_per_realm: i32::try_from(ctx.characters_per_realm).unwrap_or(i32::MAX),
+        minimum_expansion_level: 0,
+        maximum_expansion_level: i32::from(ctx.active_expansion),
+    };
+    stream
+        .write_all(&feature_system_status_glue_screen_frame(
+            &mut crypt,
+            &glue_screen,
+        ))
         .await?;
     stream.flush().await?;
 
@@ -789,6 +808,7 @@ mod tests {
                 virtual_realm_address: 0x0101_0001,
                 active_expansion: 0,
                 account_expansion: 0,
+                characters_per_realm: 10,
             };
             run_auth(&mut server, &ctx).await
         });
@@ -926,6 +946,7 @@ mod tests {
                 virtual_realm_address: 1,
                 active_expansion: 0,
                 account_expansion: 0,
+                characters_per_realm: 10,
             };
             run_auth(&mut server, &ctx).await
         });

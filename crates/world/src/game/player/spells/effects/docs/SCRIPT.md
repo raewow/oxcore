@@ -164,7 +164,7 @@ void Spell::EffectSendEvent(SpellEffectIndex effIdx)
 - Event ID from `EffectMiscValue[effIdx]`
 - Gets gameobject target if no focus object
 - First tries `ScriptMgr::OnProcessEvent()`:
-  - Allows custom C++ script handling
+  - Allows a custom script handler to intercept the event
   - Returns true if handled by script
 - If not handled by script, starts DB scripts via `ScriptsStart()`:
   - Uses `sEventScripts` script map
@@ -371,8 +371,7 @@ void Spell::EffectNostalrius(SpellEffectIndex effIdx)
   - Server-specific mechanics
   - Development/testing tools
 - Implementation would be added by server developers
-- Not part of standard MaNGOS/TrinityCore
-- Used by Nostalrius and similar private servers
+- Not part of the standard spell-effect set; a server-defined extension
 
 ## Dependencies
 

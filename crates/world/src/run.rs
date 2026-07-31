@@ -176,6 +176,7 @@ pub async fn serve(
                     virtual_realm_address: 0x0101_0000 | (realm_id as u32 & 0xFFFF),
                     active_expansion: 0,
                     account_expansion: 0,
+                    characters_per_realm: config.characters_per_realm,
                     instance_address: SocketAddr::from((
                         config.modern_instance_address,
                         config.modern_instance_port,

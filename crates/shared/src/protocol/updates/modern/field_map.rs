@@ -7,8 +7,9 @@
 //! be built from the vanilla field writes the game systems already emit, by translating each slot
 //! number through the table for the object's type.
 //!
-//! Source: the vanilla (1.12.1/5875) and modern (1.14.1/40688) update-field tables, joined
-//! by field name. 40688 is the correct modern table for build 42597.
+//! Source: the 1.12.1 and 2.5.3/build-41750 update-field enum dumps, joined by field name.
+//! 41750 is the correct modern table for build 42597, not 40688, despite 42597 being a 1.14
+//! client -- see `updatefield_gen.py`'s `MODERN_SRC` comment for why.
 
 /// Where one vanilla field slot lands in the modern layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +41,10 @@ pub const MODERN_UNIT_FIELD_BYTES_1: u16 = 114;
 pub const MODERN_UNIT_FIELD_BYTES_2: u16 = 168;
 /// Modern `UNIT_FIELD_DISPLAY_POWER` (size 1).
 pub const MODERN_UNIT_FIELD_DISPLAY_POWER: u16 = 53;
+/// Modern `UNIT_NPC_FLAGS` (size 2).
+pub const MODERN_UNIT_NPC_FLAGS: u16 = 126;
+/// Modern `OBJECT_DYNAMIC_FLAGS` (size 1).
+pub const MODERN_OBJECT_DYNAMIC_FLAGS: u16 = 5;
 /// Modern `UNIT_FIELD_ATTACK_POWER_MOD_POS` (size 1).
 pub const MODERN_UNIT_FIELD_ATTACK_POWER_MOD_POS: u16 = 170;
 /// Modern `UNIT_FIELD_ATTACK_POWER_MOD_NEG` (size 1).
@@ -74,6 +79,8 @@ pub const MODERN_UNIT_FIELD_SCALE_DURATION: u16 = 210;
 pub const MODERN_UNIT_FIELD_LOOK_AT_CONTROLLER_ID: u16 = 213;
 /// Modern `PLAYER_QUEST_LOG` (size 400).
 pub const MODERN_PLAYER_QUEST_LOG: u16 = 239;
+/// Modern `PLAYER_VISIBLE_ITEM` (size 38).
+pub const MODERN_PLAYER_VISIBLE_ITEM: u16 = 639;
 /// Modern `GAMEOBJECT_PARENTROTATION` (size 4).
 pub const MODERN_GAMEOBJECT_PARENTROTATION: u16 = 17;
 /// Modern `GAMEOBJECT_BYTES_1` (size 1).
@@ -476,11 +483,11 @@ pub const UNIT_MAP: [ModernSlot; 188] = [
     ModernSlot::Plain(116),
     ModernSlot::Plain(117),
     UNMAPPED,
-    ModernSlot::Plain(5),
+    UNMAPPED,
     ModernSlot::Plain(49),
     ModernSlot::Plain(119),
     ModernSlot::Plain(125),
-    ModernSlot::Plain(126),
+    UNMAPPED,
     ModernSlot::Plain(128),
     UNMAPPED,
     ModernSlot::Plain(130),
@@ -497,7 +504,7 @@ pub const UNIT_MAP: [ModernSlot; 188] = [
     ModernSlot::Plain(151),
     ModernSlot::Plain(166),
     ModernSlot::Plain(167),
-    ModernSlot::Plain(168),
+    UNMAPPED,
     ModernSlot::Plain(169),
     UNMAPPED,
     ModernSlot::Plain(172),
@@ -680,11 +687,11 @@ pub const PLAYER_MAP: [ModernSlot; 1282] = [
     ModernSlot::Plain(116),
     ModernSlot::Plain(117),
     UNMAPPED,
-    ModernSlot::Plain(5),
+    UNMAPPED,
     ModernSlot::Plain(49),
     ModernSlot::Plain(119),
     ModernSlot::Plain(125),
-    ModernSlot::Plain(126),
+    UNMAPPED,
     ModernSlot::Plain(128),
     UNMAPPED,
     ModernSlot::Plain(130),
@@ -701,7 +708,7 @@ pub const PLAYER_MAP: [ModernSlot; 1282] = [
     ModernSlot::Plain(151),
     ModernSlot::Plain(166),
     ModernSlot::Plain(167),
-    ModernSlot::Plain(168),
+    UNMAPPED,
     ModernSlot::Plain(169),
     UNMAPPED,
     ModernSlot::Plain(172),
@@ -1978,11 +1985,11 @@ pub const ACTIVE_PLAYER_MAP: [ModernSlot; 1282] = [
     ModernSlot::Plain(116),
     ModernSlot::Plain(117),
     UNMAPPED,
-    ModernSlot::Plain(5),
+    UNMAPPED,
     ModernSlot::Plain(49),
     ModernSlot::Plain(119),
     ModernSlot::Plain(125),
-    ModernSlot::Plain(126),
+    UNMAPPED,
     ModernSlot::Plain(128),
     UNMAPPED,
     ModernSlot::Plain(130),
@@ -1999,7 +2006,7 @@ pub const ACTIVE_PLAYER_MAP: [ModernSlot; 1282] = [
     ModernSlot::Plain(151),
     ModernSlot::Plain(166),
     ModernSlot::Plain(167),
-    ModernSlot::Plain(168),
+    UNMAPPED,
     ModernSlot::Plain(169),
     UNMAPPED,
     ModernSlot::Plain(172),

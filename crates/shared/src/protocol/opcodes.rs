@@ -108,6 +108,11 @@ impl Opcode {
     pub const SMSG_AUTH_CHALLENGE: Opcode = Opcode { vanilla: 0x01EC, modern: 0x3048 };
     pub const SMSG_AUTH_RESPONSE: Opcode = Opcode { vanilla: 0x01EE, modern: 0x256D };
     pub const SMSG_PONG: Opcode = Opcode { vanilla: 0x001D, modern: 0x304E };
+    /// Sent once, right after the auth response and before the client requests the character
+    /// list. Carries `MaxCharactersOnThisRealm` and the expansion-level bounds; without it the
+    /// client has no signal for whether character creation is available and hides the Create
+    /// button on the character-select screen regardless of the account's actual character count.
+    pub const SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN: Opcode = Opcode { modern: 0x25BD, ..Opcode::NONE };
 
     // ============================================================================
     // Character Management
@@ -1153,6 +1158,10 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::CMSG_AUTH_SESSION, "CMSG_AUTH_SESSION"),
     (Opcode::SMSG_AUTH_CHALLENGE, "SMSG_AUTH_CHALLENGE"),
     (Opcode::SMSG_AUTH_RESPONSE, "SMSG_AUTH_RESPONSE"),
+    (
+        Opcode::SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN,
+        "SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN",
+    ),
     (Opcode::SMSG_PONG, "SMSG_PONG"),
     (Opcode::CMSG_CHAR_CREATE, "CMSG_CHAR_CREATE"),
     (Opcode::CMSG_CHAR_ENUM, "CMSG_CHAR_ENUM"),
@@ -2481,8 +2490,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            644,
-            "expected 644 opcode constants; update this count deliberately when adding opcodes"
+            645,
+            "expected 645 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

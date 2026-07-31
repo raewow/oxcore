@@ -170,8 +170,8 @@ shape, different header crypto, a second "instance connect" socket). Nothing in 
 handles that yet, so the client stops there. After that comes the `to_vanilla`/`to_classic`
 message split.
 
-**Unverified against a live client.** Every wire detail is transcribed faithfully from TrinityCore
-and CypherCore and is self-consistent under test, but no retail client has exercised it. The likely
+**Unverified against a live client.** Every wire detail is self-consistent under test, but no
+retail client has exercised it. The likely
 first failure points are the certificate signature scheme, the SRP6v2 details, the REST
 request-correlation assumption, the RPC framing, the Logon/VerifyWebCredentials callback ordering,
 and the realm-list JSON/attribute contract. The client gives no error on a mismatch — it just
