@@ -22,7 +22,7 @@ use oxcore_shared::messages::gossip::SmsgGossipComplete;
 use oxcore_shared::messages::quest::{
     MsgQuestPushResult, QuestObjectiveData, SmsgQuestQueryResponseV2,
 };
-use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, Protocol, WorldPacket};
 
 /// Handle CMSG_QUESTGIVER_STATUS_QUERY (0x182)
 ///
@@ -704,6 +704,10 @@ pub async fn handle_questgiver_request_reward(
 /// Sent when player clicks "Complete" on the quest reward dialog.
 /// This is the final step in quest turn-in where the player selects their reward.
 /// Packet format: GUID (packed), quest_id (u32), reward_index (u32)
+///
+/// 1.14 answers with the reward *item* instead of its slot index — the trailing field is a
+/// `QuestChoiceItem`, not a `u32` — so the item has to be mapped back to an index before the shared
+/// quest system sees it.
 pub async fn handle_questgiver_choose_reward(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -719,7 +723,20 @@ pub async fn handle_questgiver_choose_reward(
         .read_u32()
         .ok_or_else(|| anyhow::anyhow!("Failed to read quest ID"))?;
 
-    let reward_choice = packet.read_u32().unwrap_or(0);
+    let reward_choice = match session.protocol() {
+        Protocol::Vanilla => packet.read_u32().unwrap_or(0),
+        Protocol::Modern => {
+            // `QuestChoiceItem`: a 2-bit loot type padded out to a whole byte, then the
+            // `ItemInstance` whose first word is the item id. Everything after that word is the
+            // client echoing back what we offered, so it can be ignored.
+            packet.advance(1);
+            let item_id = packet.read_u32().unwrap_or(0);
+            world
+                .systems
+                .quest
+                .resolve_reward_choice_index(quest_id, item_id)
+        }
+    };
 
     info!(
         "CMSG_QUESTGIVER_CHOOSE_REWARD: player={:?}, npc={:?}, quest={}, reward={}",

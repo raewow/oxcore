@@ -180,8 +180,8 @@ impl MovementSystem {
                     .get_or_create_map(map_id, instance_id);
 
                 // A creature may not wander into an unloaded grid — nothing there
-                // would ever tick or unload it. Send it home instead, as
-                // CreatureRespawnRelocation does (Map.cpp:1510-1535).
+                // would ever tick or unload it. Send it home instead, as the
+                // respawn relocation does.
                 if map.relocate_creature(guid, current_pos, new_pos) == RelocateResult::Refused {
                     Self::relocate_to_home(guid, current_pos, &map, world);
                 }

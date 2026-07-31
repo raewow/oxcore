@@ -175,7 +175,7 @@ pub fn enter_encrypted_mode_hash(aes_key: &[u8; 16], enabled: bool) -> [u8; 32] 
 
 // ---- SMSG_AUTH_RESPONSE (server -> client) ----
 
-/// `BattlenetRpcErrorCode::Ok`, the success result for `SMSG_AUTH_RESPONSE`.
+/// The success result for `SMSG_AUTH_RESPONSE`.
 pub const AUTH_RESPONSE_OK: u32 = 0;
 
 /// One class a race may create, with the expansion levels gating it.

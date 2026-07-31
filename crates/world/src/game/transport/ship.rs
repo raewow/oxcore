@@ -113,7 +113,7 @@ pub struct ShipMotion {
 /// current segment's spline.
 ///
 /// Advances the keyframe cursor to the current frame, then - only while moving, as the
-/// reference guards with `IsMoving() && pathProgress` - finds how far along the segment the
+/// reference guards with its moving flag - finds how far along the segment the
 /// ship is via [`calculate_segment_pos`](super::segment::calculate_segment_pos) and reads the
 /// position and tangent off that segment's spline, facing `atan2(dir.y, dir.x) + PI`.
 /// Returns `None` when the ship is paused at a stop (its position is unchanged) or the spline

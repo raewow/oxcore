@@ -143,7 +143,7 @@ impl<'a> CanStoreChecker<'a> {
         self.get_proto(entry)
     }
 
-    // ── _CanTakeMoreSimilarItems ──────────────────────────────────────
+    // ── can_take_more_similar_items ───────────────────────────────────
 
     /// Check if the player can carry more of a unique/quest item.
     /// Returns ERR_OK if fine, or the specific error + count of items that can't be carried.
@@ -183,7 +183,7 @@ impl<'a> CanStoreChecker<'a> {
         }
     }
 
-    // ── _CanStoreItem_InSpecificSlot ──────────────────────────────────
+    // ── can_store_item_in_specific_slot ───────────────────────────────
 
     /// Check if an item can be stored in a specific bag+slot.
     fn can_store_item_in_specific_slot(
@@ -289,7 +289,7 @@ impl<'a> CanStoreChecker<'a> {
         InventoryResult::Ok
     }
 
-    // ── _CanStoreItem_InBag ───────────────────────────────────────────
+    // ── can_store_item_in_bag ─────────────────────────────────────────
 
     /// Check if an item can be stored in a specific bag (searching its slots).
     fn can_store_item_in_bag(
@@ -333,7 +333,7 @@ impl<'a> CanStoreChecker<'a> {
 
         // specialized bag mode: non_specialized=false means we want bags that match the item's bag_family.
         // non_specialized=true means we want plain containers (class=container, subclass=container).
-        let is_plain_container = p_bag_proto.item_class == 1 && p_bag_proto.item_subclass == 0; // ITEM_CLASS_CONTAINER=1, ITEM_SUBCLASS_CONTAINER=0
+        let is_plain_container = p_bag_proto.item_class == 1 && p_bag_proto.item_subclass == 0; // container class=1, container subclass=0
 
         if non_specialized != is_plain_container {
             *bag_slot = bag;
@@ -402,7 +402,7 @@ impl<'a> CanStoreChecker<'a> {
         InventoryResult::Ok
     }
 
-    // ── _CanStoreItem_InInventorySlots ────────────────────────────────
+    // ── can_store_item_in_inventory_slots ─────────────────────────────
 
     /// Search a range of main-inventory slots for space.
     fn can_store_item_in_inventory_slots(
@@ -471,7 +471,7 @@ impl<'a> CanStoreChecker<'a> {
         InventoryResult::Ok
     }
 
-    // ── _CanStoreItem (top-level) ─────────────────────────────────────
+    // ── can_store_item (top-level) ────────────────────────────────────
 
     /// Top-level check: can an item be stored at (bag, slot)?
     ///

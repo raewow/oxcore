@@ -21,57 +21,55 @@ use oxcore_shared::protocol::ObjectGuid;
 
 // ─── Spell attribute constants ─────────────────────────────────────────
 
-/// SPELL_ATTR_NOT_IN_COMBAT_ONLY_PEACEFUL — spell cannot be used in combat.
+/// Cannot be used in combat.
 const SPELL_ATTR_NOT_IN_COMBAT_ONLY_PEACEFUL: u32 = 0x1000_0000; // bit 28
 
-/// SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED — does not break stealth.
+/// Does not break stealth.
 const SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED: u32 = 0x0000_0020; // bit 5
 
-/// SPELL_ATTR_EX_NO_THREAT — no threat generated.
+/// No threat generated.
 const SPELL_ATTR_EX_NO_THREAT: u32 = 0x0000_0400; // bit 10
 
-/// SPELL_ATTR_EX_ONLY_PEACEFUL_TARGETS — target must not be in combat.
+/// Target must not be in combat.
 const SPELL_ATTR_EX_ONLY_PEACEFUL_TARGETS: u32 = 0x0000_0100; // bit 8
 
-/// SPELL_ATTR_EX_THREAT_ONLY_ON_MISS — threat only when spell misses.
+/// Threat only when the spell misses.
 const SPELL_ATTR_EX_THREAT_ONLY_ON_MISS: u32 = 0x0020_0000; // bit 21
 
-/// SPELL_ATTR_EX2_ALLOW_WHILE_INVISIBLE — does not break invisibility.
+/// Does not break invisibility.
 const SPELL_ATTR_EX2_ALLOW_WHILE_INVISIBLE: u32 = 0x0000_4000; // bit 14
 
-/// SPELL_ATTR_EX2_NOT_AN_ACTION — not considered an action.
+/// Not considered an action.
 const SPELL_ATTR_EX2_NOT_AN_ACTION: u32 = 0x1000_0000; // bit 28
 
-/// SPELL_ATTR_EX2_NO_INITIAL_THREAT — no initial threat on cast.
+/// No initial threat on cast.
 const SPELL_ATTR_EX2_NO_INITIAL_THREAT: u32 = 0x0040_0000; // bit 22
 
-/// SPELL_ATTR_EX3_PVP_ENABLING — counts as hostile for PvP even without combat.
+/// Counts as hostile for PvP even without combat.
 const SPELL_ATTR_EX3_PVP_ENABLING: u32 = 0x0000_0001; // bit 0
 
-/// SPELL_ATTR_NO_IMMUNITIES — bypasses damage and school immunities.
+/// Bypasses damage and school immunities.
 const SPELL_ATTR_NO_IMMUNITIES: u32 = 0x2000_0000;
 
-/// AURA_INTERRUPT_HOSTILE_ACTION_RECEIVED_CANCELS — aura drops when its bearer is hit by a
-/// hostile spell.
+/// Aura drops when its bearer is hit by a hostile spell.
 const AURA_INTERRUPT_HOSTILE_ACTION_RECEIVED_CANCELS: u32 = 0x0000_0001;
 
 // ─── Aura type constants ──────────────────────────────────────────────────────
-// Reference: SpellAuraDefines.h
 
-/// SPELL_AURA_MOD_POSSESS = 2
+/// Possess aura type (2).
 const SPELL_AURA_MOD_POSSESS: u32 = 2;
-/// SPELL_AURA_MOD_STEALTH = 16
+/// Stealth aura type (16).
 const SPELL_AURA_MOD_STEALTH: u32 = 16;
-/// SPELL_AURA_MOD_INVISIBILITY = 18
+/// Invisibility aura type (18).
 const SPELL_AURA_MOD_INVISIBILITY: u32 = 18;
-/// SPELL_EFFECT_DISPEL = 38
+/// Dispel effect (38).
 const SPELL_EFFECT_DISPEL: u32 = 38;
-/// SPELL_EFFECT_SCHOOL_DAMAGE = 2
+/// School-damage effect (2).
 const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
-/// SPELL_AURA_MOD_POSSESS_PET = 128
+/// Possess-pet aura type (128).
 const SPELL_AURA_MOD_POSSESS_PET: u32 = 128;
 
-/// SPELL_EFFECT_PERSISTENT_AREA_AURA — applied once per aura holder, not per unit target
+/// Persistent-area-aura effect: applied once per aura holder, not per unit target
 /// here, so its bit is always stripped from the effect mask.
 const SPELL_EFFECT_PERSISTENT_AREA_AURA: u32 = 27;
 
@@ -87,10 +85,9 @@ pub struct TargetInfo {
     pub effect_mask: u8,
     /// Hit/miss/resist/immune outcome, resolved once for the whole target.
     pub miss_condition: SpellHitOutcome,
-    /// Outcome of the *reflected* cast back onto the caster (`TargetInfo::reflectResult`).
-    /// Only meaningful when `miss_condition` is [`SpellHitOutcome::Reflect`]; `Hit` stands
-    /// for the C++ `SPELL_MISS_NONE` default and means the reflected spell lands on the
-    /// caster.
+    /// Outcome of the *reflected* cast back onto the caster.
+    /// Only meaningful when `miss_condition` is [`SpellHitOutcome::Reflect`]; `Hit` means
+    /// the reflected spell lands on the caster.
     pub reflect_result: SpellHitOutcome,
     /// Whether `miss_condition` has already been rolled for this cast. Delayed
     /// projectiles resolve at launch and carry this snapshot to impact.
@@ -143,39 +140,37 @@ impl TargetInfo {
 /// Called on a landed hit, **before** dispatching individual effects.  Handles:
 ///
 /// 1. **Zero-effect-mask** — when `effect_mask` is zero but the spell is not
-///    positive toward the target, still flags combat via `AttackedBy` (here:
-///    `apply_damage(0)` for creatures, `in_combat = true` for players).
+///    positive toward the target, still flags combat (here: `apply_damage(0)`
+///    for creatures, `in_combat = true` for players).
 ///
 /// 2. **Per-effect mechanic resistance** — each effect bit whose mechanic the
 ///    target resists is cleared.  When the mask becomes zero the hit is aborted.
-    ///    *Approximated:* the `Unit::IsEffectResist()` call is not yet ported;
+    ///    *Approximated:* the per-effect mechanic-resist check is not yet ported;
     ///    this step is omitted until that helper exists — see TODO.
 ///
 /// 3. **Delayed-spell immunity/evasion** — if the caster is not the target and
 ///    the spell has `speed > 0`, and the target is immune to the spell or its
-///    damage school, the hit is aborted (`SPELL_MISS_IMMUNE`).  Also, delayed
-///    negative spells against friendly targets (post-duel) are aborted
-///    (`SPELL_MISS_EVADE`).  *Approximated:* `IsImmuneToDamage`/`IsImmuneToSpell`
-///    are not ported; the immunity branches are structured but inert until those
-///    dependency APIs land.
+///    damage school, the hit is aborted as immune.  Also, delayed negative spells
+///    against friendly targets (post-duel) are aborted as evaded.  *Approximated:*
+///    the immunity checks are not ported; the immunity branches are structured
+///    but inert until those dependency APIs land.
 ///
-/// 4. **Stealth/invisibility removal** — on hostile hits, removes
-///    `SPELL_AURA_MOD_STEALTH` and non-passive `SPELL_AURA_MOD_INVISIBILITY` from
-///    the target, unless the spell's `AttributesEx`/`AttributesEx2` carry the
-///    `ALLOW_WHILE_STEALTHED` / `ALLOW_WHILE_INVISIBLE` flags.  Game-object
-///    casters (traps, etc.) skip stealth removal.  The same removal runs against
-///    the *caster* once the hit passes the threat gate.  Direct-damage hits also
-///    drop the target's `HOSTILE_ACTION_RECEIVED_CANCELS` auras (player targets
-///    only, since interrupt-flag removal is not generalised to creatures yet).
+/// 4. **Stealth/invisibility removal** — on hostile hits, removes stealth and
+///    non-passive invisibility auras from the target, unless the spell's
+///    `attributes_ex`/`attributes_ex2` carry the allow-while-stealthed /
+///    allow-while-invisible flags.  Game-object casters (traps, etc.) skip stealth
+///    removal.  The same removal runs against the *caster* once the hit passes the
+///    threat gate.  Direct-damage hits also drop the target's
+///    hostile-action-received-cancels auras (player targets only, since
+///    interrupt-flag removal is not generalised to creatures yet).
 ///
 /// 5. **Visibility check for delayed spells** — a delayed spell targeting the
 ///    explicit unit target that has become non-visible to the caster is evaded.
-///    *Approximated:* `IsVisibleForOrDetect` not ported; skip until visibility
+///    *Approximated:* visibility detection not ported; skip until the visibility
 ///    API lands.
 ///
-/// 6. **Combat/threat entry** — complex attribute-gated combat start with
-///    `AttackedBy`, `AddThreat`, `SetInCombatWithAggressor`/`SetInCombatWithVictim`,
-///    stealth removal from the *caster*, and related PvP-enabling fallthrough.
+/// 6. **Combat/threat entry** — complex attribute-gated combat start, stealth
+///    removal from the *caster*, and related PvP-enabling fallthrough.
 ///    *Approximated:* uses `enter_combat_on_miss`-style `apply_damage(0)`
 ///    and `add_threat` / `set_in_combat` for creatures when the gate passes.
 ///    The whole hostile/friendly block is skipped when caster and target are the
@@ -184,14 +179,13 @@ impl TargetInfo {
 ///
 /// 7. **Friendly-target assist/PvP** — when a friendly target is in combat and
 ///    the spell would generate threat, the caster enters assisted combat and
-///    distributes assist-threat.  PvP flagging (`UpdatePvP`) is not ported.
+///    distributes assist-threat.  PvP flagging is not ported.
 ///
 /// 8. **Diminishing-returns snapshot + aura-holder creation** — stashes the DR
-///    group/level for the hit and creates an empty `SpellAuraHolder` when the
-///    spell applies auras.  *Aura-holder creation not yet wired;* the `effectMask`
-///    argument to `DoSpellHitOnUnit` starts as the set of bits that survived resist
-///    checks, and later `HandleEffects` runs only for those bits.  This function
-///    modifies `effect_mask` in-place.
+///    group/level for the hit and creates an empty aura holder when the spell
+///    applies auras.  *Aura-holder creation not yet wired;* the effect mask starts
+///    as the set of bits that survived resist checks, and later effect handling
+///    runs only for those bits.  This function modifies `effect_mask` in-place.
 ///
 /// # Returns
 /// `None` — hit should be aborted (all effects resisted, delayed-spell immune
@@ -249,7 +243,7 @@ async fn do_spell_hit_on_unit(
     }
 
     // ── Step 6a.  Hostile-side side effects ────────────────────────────────────
-    // TODO: `IsFriendlyTo(unit)` not ported — use `is_positive_spell()` as proxy.
+    // TODO: friendly-to-target check not ported — use `is_positive_spell()` as proxy.
     let caster_is_player = caster_guid.is_player();
 
     // A unit never breaks its own stealth or enters combat with itself. This matters for
@@ -267,9 +261,9 @@ async fn do_spell_hit_on_unit(
     }
 
     if !spell_entry.is_positive_spell() {
-        // Auras cancelled by taking a hostile action. The reference implementation gates
-        // this on accumulated damage from the delayed launch; here the closest stand-in
-        // before effects run is "this spell deals direct damage".
+        // Auras cancelled by taking a hostile action. The original gates this on
+        // accumulated damage from the delayed launch; here the closest stand-in before
+        // effects run is "this spell deals direct damage".
         if spell_entry.is_direct_damage_spell() {
             remove_auras_with_interrupt_flag_from_target(
                 target_guid,
@@ -289,12 +283,12 @@ async fn do_spell_hit_on_unit(
             remove_stealth_and_invisibility(target_guid, spell_entry, world);
         }
 
-        // Delayed-spell visibility check (C++ lines 1585-1594)
-        // TODO: `IsVisibleForOrDetect` not ported — skip until it lands.
+        // Delayed-spell visibility check
+        // TODO: visibility detection not ported — skip until it lands.
 
-        // Combat/threat entry main gate (C++ lines 1596-1641)
+        // Combat/threat entry main gate
         let is_sap =
-            spell_entry.spell_family_name == 8 && (spell_entry.spell_family_flags & 0x80) != 0; // CF_ROGUE_SAP approximation
+            spell_entry.spell_family_name == 8 && (spell_entry.spell_family_flags & 0x80) != 0; // Rogue-sap spell approximation
         let is_trap = !caster_is_player && target_guid.is_player();
 
         let can_enter_combat = (!spell_entry.is_positive_spell()
@@ -302,7 +296,7 @@ async fn do_spell_hit_on_unit(
             && !is_trap
             && !is_sap;
 
-        // Visibility to target — approximated as always true until `IsVisibleForOrDetect` lands.
+        // Visibility to target — approximated as always true until visibility detection lands.
         let caster_visible_to_target = true;
 
         if can_enter_combat && caster_visible_to_target {
@@ -347,7 +341,7 @@ async fn do_spell_hit_on_unit(
         }
 
         // Combat assist
-        // TODO: `IsInCombat` check not directly exposed — approximated via
+        // TODO: the in-combat check is not directly exposed — approximated via
         // checking `in_combat` on the target.
         let target_in_combat = world
             .managers
@@ -368,7 +362,7 @@ async fn do_spell_hit_on_unit(
         {
             assisted_combat(caster_guid, target_guid, world);
         }
-        // TODO: PvP flagging — `UpdatePvP` not ported.
+        // TODO: PvP flagging not ported.
     }
 
     // ── Step 7.  Diminishing-returns snapshot ──────────────────────────────────
@@ -387,7 +381,7 @@ async fn do_spell_hit_on_unit(
     ))
 }
 
-/// Whether any effect in `effect_mask` applies an aura (`SpellEntry::IsSpellAppliesAura`).
+/// Whether any effect in `effect_mask` applies an aura.
 fn spell_applies_aura(spell_entry: &SpellEntry, effect_mask: u8) -> bool {
     const SPELL_EFFECT_APPLY_AURA: u32 = 6;
     const SPELL_EFFECT_PERSISTENT_AREA_AURA_EFFECT: u32 = 27;
@@ -408,7 +402,7 @@ fn spell_applies_aura(spell_entry: &SpellEntry, effect_mask: u8) -> bool {
 /// Take the per-hit diminishing-returns snapshot and charge the target's counter.
 ///
 /// Divergences: aura-triggered status is approximated by `is_triggered`, and
-/// `caster->IsFriendlyTo(target)` by the spell's polarity, which is the same proxy the
+/// the friendly-to-target check by the spell's polarity, which is the same proxy the
 /// rest of this module uses. Only players and creatures carry DR state; any other caster
 /// or target kind is treated as having none.
 fn snapshot_diminishing_for_hit(
@@ -471,8 +465,7 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// `SpellEntry::HasDirectThreatIncreaseEffect()` — true when any effect type
-/// carries immediate threat (SPELL_EFFECT_ATTACK_ME, etc.).
+/// True when any effect type carries immediate threat (attack-me, threat-all, etc.).
 fn has_direct_threat_effect(spell_entry: &SpellEntry) -> bool {
     const SPELL_EFFECT_ATTACK_ME: u32 = 74;
     const SPELL_EFFECT_THREAT_ALL: u32 = 116;
@@ -504,25 +497,24 @@ fn first_effect_target_a(spell_entry: &SpellEntry, effect_mask: u8) -> Option<u3
 fn is_friendly_target(target_a: u32) -> bool {
     matches!(
         target_a,
-        1   // TARGET_UNIT_FRIEND
-            | 6   // TARGET_UNIT_FRIEND_AREA (deprecated)
-            | 11  // TARGET_UNIT_FRIEND_AREA
-            | 24  // TARGET_UNIT_FRIEND_AREA
-            | 44  // TARGET_UNIT_FRIEND_AREA
-            | 45  // TARGET_UNIT_FRIEND_AREA
-            | 52  // TARGET_UNIT_FRIEND_AREA
-            | 53  // TARGET_UNIT_FRIEND_AREA
-            | 54 // TARGET_UNIT_FRIEND_AREA
+        1   // unit-friend
+            | 6   // friendly-area (deprecated)
+            | 11  // friendly-area
+            | 24  // friendly-area
+            | 44  // friendly-area
+            | 45  // friendly-area
+            | 52  // friendly-area
+            | 53  // friendly-area
+            | 54  // friendly-area
     )
 }
 
 /// Remove a specific aura type from a unit target if possible.
 /// Drop the unit's stealth and invisibility for a hostile action, honouring the spell's
-/// opt-outs (`RemoveSpellsCausingAura(MOD_STEALTH)` /
-/// `RemoveNonPassiveSpellsCausingAura(MOD_INVISIBILITY)`).
+/// opt-outs (remove-stealth / remove-non-passive-invisibility).
 ///
-/// Note the asymmetry the C++ has: stealth is removed outright, but only *non-passive*
-/// invisibility is, so permanent/racial invisibility survives.
+/// Note the asymmetry: stealth is removed outright, but only *non-passive* invisibility
+/// is, so permanent/racial invisibility survives.
 fn remove_stealth_and_invisibility(unit_guid: ObjectGuid, spell: &SpellEntry, world: &World) {
     if !spell.has_attribute_ex(SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED) {
         remove_aura_type_from_target(unit_guid, SPELL_AURA_MOD_STEALTH, world);
@@ -533,7 +525,7 @@ fn remove_stealth_and_invisibility(unit_guid: ObjectGuid, spell: &SpellEntry, wo
 }
 
 /// Remove every aura on a unit whose spell carries any of `interrupt_flags`
-/// (`Unit::RemoveAurasWithInterruptFlags`).
+/// (interrupt-flag aura removal).
 ///
 /// Creature targets are skipped: the aura system's interrupt-flag removal is player-only,
 /// so creature auras are left alone until that path is generalised.
@@ -872,9 +864,8 @@ fn set_out_of_combat(caster_guid: ObjectGuid, target_guid: ObjectGuid, world: &W
     let _ = (caster_guid, target_guid, world);
 }
 
-/// Place the caster into assisted combat alongside the friendly target
-/// (MaNGOS: `pRealUnitCaster->SetInCombatWithAssisted(unit)`,
-/// `unit->GetHostileRefManager().threatAssist(...)`).
+/// Place the caster into assisted combat alongside the friendly target, distributing
+/// assist threat.
 fn assisted_combat(caster_guid: ObjectGuid, _target_guid: ObjectGuid, world: &World) {
     if caster_guid.is_creature() {
         let timestamp = std::time::SystemTime::now()
@@ -899,21 +890,20 @@ fn assisted_combat(caster_guid: ObjectGuid, _target_guid: ObjectGuid, world: &Wo
     // threatAssist not yet wired for non-creature targets.
 }
 
-/// Apply a spell's effects to a single target (faithful `Spell::DoAllEffectOnTarget`).
+/// Apply a spell's effects to a single target.
 ///
 /// Resolves the hit outcome once, strips persistent-area-aura bits from the effect
 /// mask (those are applied once per aura holder elsewhere), and on a hit dispatches
 /// every requested effect for this target, accumulating damage/healing into `target`.
 ///
-/// Divergence from the C++: effect handlers (`effects::damage`, `effects::healing`, ...)
-/// already call the real `caster::deal_damage` / `caster::deal_heal` themselves as they
-/// run, instead of this function collecting `m_damage`/`m_healing` and applying them once
-/// at the end. `target.damage` / `target.healing` are still accumulated here for
-/// target-level visibility (and so `proc_attacker`/`proc_victim` can be set the way
-/// MaNGOS sets them once per target), but they are not re-applied — doing so would
-/// double-apply damage that the effect handler already dealt. Migrating every damage/heal
-/// effect handler to a "compute only" model so this function can be the single apply
-/// point is future work.
+/// Divergence: effect handlers (`effects::damage`, `effects::healing`, ...) already
+/// call the real `caster::deal_damage` / `caster::deal_heal` themselves as they run,
+/// instead of this function collecting damage/healing and applying them once at the
+/// end. `target.damage` / `target.healing` are still accumulated here for target-level
+/// visibility (and so `proc_attacker`/`proc_victim` can be set once per target), but
+/// they are not re-applied — doing so would double-apply damage that the effect handler
+/// already dealt. Migrating every damage/heal effect handler to a "compute only" model
+/// so this function can be the single apply point is future work.
 pub async fn apply_target_effects(
     target: &mut TargetInfo,
     caster_guid: ObjectGuid,
@@ -951,7 +941,7 @@ pub async fn apply_target_effects(
 
     // Game objects are spell targets but not units: they do not receive hit rolls,
     // combat processing, diminishing returns, or proc flags. Dispatch their effects
-    // directly, as `Spell::EffectOpenLock` does for a GO target in the reference core.
+    // directly, as the open-lock effect does for a GO target.
     if target.target_guid.is_game_object() {
         for effect_index in 0..3usize {
             if target.effect_mask & (1 << effect_index) == 0 {
@@ -1021,8 +1011,7 @@ pub async fn apply_target_effects(
     }
 
     // The unit that actually receives the effects. A reflected spell bounces back onto
-    // its caster (`unitTarget = m_casterUnit` in `Spell::DoAllEffectOnTarget`); every
-    // other outcome applies to the registered target.
+    // its caster; every other outcome applies to the registered target.
     let mut hit_target_guid = target.target_guid;
     let is_reflected = target.miss_condition == SpellHitOutcome::Reflect;
 
@@ -1066,7 +1055,7 @@ pub async fn apply_target_effects(
 
             fire_spell_hit_ai_event(caster_guid, hit_target_guid, spell_id, &spell_entry, world);
 
-            // Per-unit pre-effect processing (DoSpellHitOnUnit chunk_0):
+            // Per-unit pre-effect processing:
             // combat entry, stealth removal, resist checks, DR snapshot, etc.
             let is_delayed = spell_entry.speed > 0.0;
             match do_spell_hit_on_unit(
@@ -1088,9 +1077,9 @@ pub async fn apply_target_effects(
         }
     }
 
-    // A fully diminished hit lands no auras at all: MaNGOS deletes the holder before it is
-    // added. Nothing else in the effect mask can run either, because the same mask is what
-    // marked this hit as aura-applying.
+    // A fully diminished hit lands no auras at all: the aura holder is dropped before it
+    // is added. Nothing else in the effect mask can run either, because the same mask is
+    // what marked this hit as aura-applying.
     if target.diminishing.is_fully_diminished()
         && spell_applies_aura(&spell_entry, target.effect_mask)
     {
@@ -1105,8 +1094,8 @@ pub async fn apply_target_effects(
 
     // Per-target proc flags: helpful spells proc DEAL/TAKE_HELPFUL, harmful spells proc
     // DEAL/TAKE_HARMFUL (+ TAKEN_ANY_DAMAGE on the victim side). Simplified stand-in for
-    // MaNGOS's `m_procAttacker`/`m_procVictim` (which start from attack-type-derived flags
-    // and get adjusted by NEGATIVE_TRIGGER_MASK / secondary-target rules).
+    // the original attack-type-derived flags (which get adjusted by negative-trigger and
+    // secondary-target rules).
     if spell_entry.is_positive_spell() {
         target.proc_attacker = proc_flags::DEAL_HELPFUL_SPELL;
         target.proc_victim = proc_flags::TAKE_HELPFUL_SPELL;
@@ -1179,17 +1168,16 @@ pub async fn apply_target_effects(
     Ok(results)
 }
 
-/// Resolve the outcome of a reflected spell landing back on its caster
-/// (the reflect block of MaNGOS `Spell::AddUnitTarget`).
+/// Resolve the outcome of a reflected spell landing back on its caster.
 ///
-/// MaNGOS records `SPELL_MISS_IMMUNE` when there is no unit caster to take the spell back
-/// (`!m_casterUnit || m_originalCasterGUID.IsGameObject()`); otherwise it re-runs
-/// `SpellHitResult` with the caster as its own victim. That self-target path short-circuits
-/// after the immunity checks, so it reduces to "immune, or it lands". A second reflect is
-/// therefore impossible and the C++ `REFLECT -> PARRY` downgrade is unreachable here.
+/// The outcome is immune when there is no unit caster to take the spell back (a
+/// game-object caster, say); otherwise the hit is re-rolled with the caster as its own
+/// victim. That self-target path short-circuits after the immunity checks, so it reduces
+/// to "immune, or it lands". A second reflect is therefore impossible and a
+/// reflect-to-parry downgrade is unreachable here.
 ///
 /// Simplification: only damage immunity is consulted, matching the immunity surface
-/// `roll_spell_hit` itself uses; the full `IsImmuneToSpell` check is not ported yet.
+/// `roll_spell_hit` itself uses; the full spell-immunity check is not ported yet.
 fn resolve_reflect_result(
     caster_guid: ObjectGuid,
     spell: &SpellEntry,
@@ -1204,12 +1192,11 @@ fn resolve_reflect_result(
     SpellHitOutcome::Hit
 }
 
-/// Put the caster and a non-positive-spell miss target into combat (MaNGOS: `unit->AttackedBy`,
-/// `AddThreat`, `SetInCombatWithAggressor`/`SetInCombatWithVictim` on a miss/resist/immune).
+/// Put the caster and a non-positive-spell miss target into combat on a miss/resist/immune.
 ///
-/// Simplified: mirrors `AttackedBy` plus the initial `AddThreat` so the creature AI has
-/// an active victim to chase, without double-counting damage threat (which is added when
-/// a hit lands). Full `SPELL_ATTR_EX_FAILURE_BREAKS_STEALTH`/stealth-removal handling is
+/// Simplified: mirrors the attacked-by handling plus the initial threat so the creature
+/// AI has an active victim to chase, without double-counting damage threat (which is
+/// added when a hit lands). Full failure-breaks-stealth / stealth-removal handling is
 /// not ported yet.
 fn enter_combat_on_miss(caster_guid: ObjectGuid, target_guid: ObjectGuid, world: &World) {
     if target_guid.is_creature() {
@@ -1225,14 +1212,14 @@ fn enter_combat_on_miss(caster_guid: ObjectGuid, target_guid: ObjectGuid, world:
             .managers
             .creature_mgr
             .with_creature_mut(target_guid, |creature| {
-                // `Unit::AttackedBy` causes CreatureAI::AttackStart, which adds initial
-                // threat. The AI snapshot selects targets from ThreatManager, not the
+                // Being attacked makes the creature AI start attacking, which adds initial
+                // threat. The AI snapshot selects targets from the threat manager, not the
                 // legacy combat threat list populated by apply_damage(0).
                 creature.threat_manager.add_threat(caster_guid, 1.0);
                 creature.combat.add_threat(caster_guid, 1.0, timestamp);
             });
-        // `AttackedBy` is what makes the AI enter combat *and* set an attack target;
-        // seeding threat alone leaves the creature chasing without a victim.
+        // The attacked-by event is what makes the AI enter combat *and* set an attack
+        // target; seeding threat alone leaves the creature chasing without a victim.
         crate::game::creature::ai::queue_event(
             world,
             target_guid,
@@ -1464,9 +1451,9 @@ mod tests {
 
     #[test]
     fn is_friendly_target_accepts_friend_types() {
-        assert!(is_friendly_target(1)); // TARGET_UNIT_FRIEND
-        assert!(is_friendly_target(11)); // TARGET_UNIT_FRIEND_AREA
-        assert!(!is_friendly_target(16)); // TARGET_ENUM_UNITS_ENEMY_AOE_AT_DEST_LOC
+        assert!(is_friendly_target(1)); // friendly-unit target
+        assert!(is_friendly_target(11)); // friendly-area target
+        assert!(!is_friendly_target(16)); // enemy-aoe-at-dest target
         assert!(!is_friendly_target(0));
         assert!(!is_friendly_target(99));
     }
@@ -1477,10 +1464,10 @@ mod tests {
         // No threat effects by default
         assert!(!has_direct_threat_effect(&entry));
 
-        entry.effect[0] = 74; // SPELL_EFFECT_ATTACK_ME
+        entry.effect[0] = 74; // attack-me effect
         assert!(has_direct_threat_effect(&entry));
 
-        entry.effect[0] = 116; // SPELL_EFFECT_THREAT_ALL
+        entry.effect[0] = 116; // threat-all effect
         assert!(has_direct_threat_effect(&entry));
     }
 
@@ -1970,7 +1957,7 @@ mod tests {
     }
 
     /// One cast whose effect mask applies two auras must charge the counter once and hand
-    /// both auras the same level — the reason MaNGOS samples DR on hit, not on aura add.
+    /// both auras the same level — the reason DR is sampled on hit, not on aura add.
     #[tokio::test]
     async fn a_multi_aura_cast_charges_the_counter_once() {
         const SPELL_EFFECT_APPLY_AURA: u32 = 6;
@@ -2095,7 +2082,7 @@ mod tests {
     /// reflected by a victim carrying a 100% reflect aura.
     fn reflectable_spell(id: u32) -> SpellEntry {
         let mut spell = harmful_spell(id);
-        spell.dmg_class = 1; // SPELL_DAMAGE_CLASS_MAGIC
+        spell.dmg_class = 1; // magic damage class
         spell
     }
 
@@ -2136,7 +2123,7 @@ mod tests {
         }
         spell.dmg_class = 1;
 
-        // IS_ABILITY, PASSIVE, NO_IMMUNITIES on Attributes; NO_REFLECTION on AttributesEx.
+        // Ability, passive, and no-immunities attributes; no-reflection on AttributesEx.
         for attr in [0x0000_0010u32, 0x0000_0040, 0x2000_0000] {
             let mut other = spell.clone();
             other.attributes |= attr;
@@ -2168,7 +2155,7 @@ mod tests {
         assert_eq!(
             info.reflect_result,
             SpellHitOutcome::Hit,
-            "a caster with no immunity takes the reflected spell (SPELL_MISS_NONE)"
+            "a caster with no immunity takes the reflected spell"
         );
 
         let results = results.expect("reflected effects should dispatch");
@@ -2245,7 +2232,7 @@ mod tests {
         world.managers.spell_mgr.add_spell(spell.clone());
 
         // The victim would reflect every cast, but it is also immune to the damage:
-        // MaNGOS returns SPELL_MISS_IMMUNE before ever rolling reflect.
+        // an immune victim returns immune before ever rolling reflect.
         give_reflect_aura(&world, target, 100, 1 << spell.school);
         world
             .systems
@@ -2449,7 +2436,7 @@ mod tests {
         let world = test_world();
         let mut spell = harmful_spell(106);
         // Make the spell apply MOD_POSSESS aura
-        spell.effect[0] = 6; // SPELL_EFFECT_APPLY_AURA
+        spell.effect[0] = 6; // apply-aura effect
         spell.effect_apply_aura_name[0] = SPELL_AURA_MOD_POSSESS;
         let mut mask = 0b001;
 
@@ -2469,7 +2456,7 @@ mod tests {
             result.is_some(),
             "possess should continue with effect application"
         );
-        // Combat entry should be skipped (AttackedBy not called for possess).
+        // Combat entry should be skipped for possess spells.
     }
 
     #[tokio::test]

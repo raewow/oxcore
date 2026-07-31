@@ -698,8 +698,8 @@ impl SpellManager {
     /// to lower) until it finds one the target qualifies for (level + 10 >=
     /// spellLevel). Returns `None` when no rank in the chain fits.
     ///
-    /// Approximations: `IsPassiveSpell` uses the `SPELL_ATTR_PASSIVE` bit;
-    /// `IsExplicitPositiveTarget` and `IsAreaEffectPossitiveTarget` are
+    /// Approximations: passivity uses the `SPELL_ATTR_PASSIVE` bit;
+    /// explicit-positive and area-positive targets are
     /// ported as `is_explicit_positive_target` / `is_area_positive_target`
     /// checking the same target-mode values.
     pub fn select_aura_rank_for_level(

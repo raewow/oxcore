@@ -8,7 +8,7 @@
 //! gathers the matching units on the caster's map into a target list.
 //!
 //! The grid iteration is provided by the map's spatial index
-//! ([`crate::World`] -> `Map::get_objects_in_range`); the notifier
+//! ([`crate::World`] -> `Map::get_objects_in_range`); the visitation
 //! body (center resolution, mask filter, per-push geometry gate, append) is
 //! expressed as small pure helpers so it can be unit-tested against synthetic
 //! candidate sets without a live world.
@@ -61,11 +61,11 @@ pub enum SpellTargets {
 
 /// Default cone arc for [`SpellNotifyPushType::Cone`].
 ///
-/// The notifier's `PUSH_CONE` case calls `Unit::isInFront` with the default arc
-/// of `M_PI` (a 180-degree frontal hemisphere).
+/// The notifier's cone case calls the in-front check with the default arc of
+/// `M_PI` (a 180-degree frontal hemisphere).
 pub const DEFAULT_CONE_ARC: f32 = PI;
 
-/// An abstracted unit candidate, mirroring the fields the notifier's `Visit`
+/// An abstracted unit candidate, mirroring the fields the visitation
 /// callback reads from each grid entry. Keeping this world-free lets the filter
 /// policy be exercised directly in tests.
 #[derive(Debug, Clone, Copy)]
@@ -89,7 +89,7 @@ pub struct AreaSearchParams {
     pub caster_position: Position,
     /// Whether the effective caster is player-controlled (affects `AoeDamage`).
     pub caster_is_player_controlled: bool,
-    /// `SpellEntry::IsAllowingDeadTarget()` — permits dead candidates.
+    /// Whether the spell permits dead candidates.
     pub allow_dead_target: bool,
 }
 
@@ -126,7 +126,7 @@ pub fn is_in_cone(caster: Position, target: Position, radius: f32, arc: f32) -> 
     diff <= arc / 2.0
 }
 
-/// The target-mask branch of the notifier's `Visit`. Decides whether a candidate
+/// The target-mask branch of the visitation. Decides whether a candidate
 /// with the given relationship flags is eligible for `targets`.
 pub fn passes_target_mask(
     targets: SpellTargets,
@@ -149,7 +149,7 @@ pub fn passes_target_mask(
     }
 }
 
-/// The push-type geometry branch of the notifier's `Visit`. Decides whether a
+/// The push-type geometry branch of the visitation. Decides whether a
 /// candidate at `candidate_pos` lies inside the search region.
 pub fn passes_push_geometry(params: &AreaSearchParams, candidate_pos: Position) -> bool {
     match params.push_type {
@@ -172,7 +172,7 @@ pub fn passes_push_geometry(params: &AreaSearchParams, candidate_pos: Position) 
 /// Whether the alive gate admits this candidate.
 ///
 /// The notifier skips dead units unless the spell allows dead targets; the
-/// `SPELL_TARGETS_ALL` mask also lets dead (still-in-world) units through.
+/// all-targets mask also lets dead (still-in-world) units through.
 fn passes_alive_gate(params: &AreaSearchParams, candidate: &AreaCandidate) -> bool {
     candidate.is_alive || params.allow_dead_target || params.targets == SpellTargets::All
 }
@@ -224,17 +224,17 @@ pub fn resolve_center(
     }
 }
 
-/// `Spell::FillAreaTargets`: gather units in an area on the caster's map into
-/// `out`, wiring the pure policy above to the live map spatial index.
+/// Gather units in an area on the caster's map into `out`, wiring the pure
+/// policy above to the live map spatial index.
 ///
 /// `original_caster`, when present, supplies the position and relationship
-/// reference used in place of `caster_guid` (matching the notifier's affective
-/// caster substitution).
+/// reference used in place of `caster_guid` (matching the effective-caster
+/// substitution).
 ///
 /// Relationship resolution here reuses the coarse creature/player heuristic that
 /// the rest of the spell target code relies on ([`caster_relation`]); it is a
 /// placeholder pending faction-template support and is intentionally the same
-/// approximation used by `Spell::SetTargetMap`.
+/// approximation used by the target-resolution pipeline.
 #[allow(clippy::too_many_arguments)]
 pub fn fill_area_targets(
     world: &World,
@@ -282,7 +282,7 @@ pub fn fill_area_targets(
     };
 
     // Grid visitation: gather the player and creature entries around the center,
-    // then materialize the Unit candidates the notifier would have seen.
+    // then materialize the unit candidates the visitation would have seen.
     let map = match unit_map_location(effective_caster, world) {
         Some((map_id, instance_id)) => world
             .managers

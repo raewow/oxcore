@@ -41,18 +41,17 @@ const SPELL_PREVENTION_TYPE_SILENCE: u8 = 1;
 
 /// Whether a spell consumes combo points on completion.
 ///
-/// `NeedsComboPoints() = AttributesEx & (FINISHING_MOVE_DAMAGE | FINISHING_MOVE_DURATION)`.
+/// True when either finishing-move attribute bit (damage or duration) is set.
 fn spell_needs_combo_points(attributes_ex: u32) -> bool {
     const FINISHING_MOVE_DAMAGE: u32 = 0x0010_0000;
     const FINISHING_MOVE_DURATION: u32 = 0x0040_0000;
     attributes_ex & (FINISHING_MOVE_DAMAGE | FINISHING_MOVE_DURATION) != 0
 }
 
-/// `SpellEntry::IsNextMeleeSwingSpell` — the spell is queued in the melee slot and fires
-/// on the caster's next main-hand swing instead of casting straight away (Heroic Strike,
-/// Raptor Strike, Slam, ...).
+/// A spell queued in the melee slot fires on the caster's next main-hand swing instead
+/// of casting straight away (Heroic Strike, Raptor Strike, Slam, ...).
 ///
-/// `Attributes & (SPELL_ATTR_ON_NEXT_SWING_NO_DAMAGE | SPELL_ATTR_ON_NEXT_SWING)`.
+/// Tests the next-swing attribute bits.
 pub fn is_next_melee_swing_spell(spell: &SpellEntry) -> bool {
     spell_is_next_melee_swing(spell.attributes)
 }
@@ -160,7 +159,7 @@ fn next_delayed_target_time(remaining_delays: &[u32]) -> Option<u32> {
     remaining_delays.iter().copied().filter(|&d| d > 0).min()
 }
 
-/// Derivation: starts from `IsNeedSendToClient()` and is cleared as soon as any
+/// Derivation: starts from the client-visibility flag and is cleared as soon as any
 /// effect slot is plain school damage (which logs through the damage packet instead
 /// of the generic spell-execute log). An empty effect list never affects the result
 /// because zero-effect slots are skipped before the clear check.
@@ -174,7 +173,7 @@ fn needs_spell_log(is_need_send_to_client: bool, effects: &[u32; 3]) -> bool {
 
 /// Clear the cast item and, when it is also the item target, clear that target by GUID identity.
 ///
-/// Rust stores item references as GUIDs rather than the C++ `Item*` pointers, so matching GUIDs
+/// Rust stores item references as GUIDs rather than pointers, so matching GUIDs
 /// are the equivalent identity check.
 fn clear_cast_item(
     cast_item_guid: Option<ObjectGuid>,
@@ -208,8 +207,8 @@ fn is_need_send_to_client(
         || (!is_triggered_by_aura_spell && !is_triggered_spell)
 }
 
-/// Whether the caster can still be addressed by the world, matching `IsInWorld()` for the
-/// object kinds supported by this spell pipeline.
+/// Whether the caster can still be addressed by the world, for the object kinds
+/// supported by this spell pipeline.
 fn caster_is_in_world(caster_guid: ObjectGuid, world: &World) -> bool {
     if caster_guid.is_player() {
         world
@@ -235,8 +234,8 @@ fn caster_is_in_world(caster_guid: ObjectGuid, world: &World) -> bool {
     }
 }
 
-/// `Spell::SendAllTargetsMiss` only emits its aggregate log when every registered target
-/// missed. `SpellMissInfo::None` is the reference implementation's landed-hit sentinel.
+/// Only emits the aggregate log when every registered target missed; `SpellMissInfo::None`
+/// is the landed-hit sentinel.
 fn should_send_all_targets_miss(
     caster_in_world: bool,
     targets: &[(ObjectGuid, hit::SpellMissInfo)],
@@ -256,7 +255,7 @@ fn missing_script_target_error(is_triggered: bool) -> SpellCastError {
     }
 }
 
-// --- Spell::OnSpellLaunch: launch-time special-case handling ---------------------------
+// --- OnSpellLaunch: launch-time special-case handling ---------------------------
 
 const SPELL_EFFECT_OPEN_LOCK: u32 = 33;
 const SPELL_EFFECT_OPEN_LOCK_ITEM: u32 = 59;
@@ -268,7 +267,7 @@ const SPELL_ATTR_EX2_ACTIVE_THREAT: u32 = 0x4000_0000;
 /// Combat-timer length applied to a PvP caster on cast (`UNIT_PVP_COMBAT_TIMER`, 5.5s).
 const UNIT_PVP_COMBAT_TIMER: u32 = 5500;
 
-/// First effect slot carrying `SPELL_EFFECT_CHARGE` (`chargeEffectIndex`), if any.
+/// First effect slot carrying `SPELL_EFFECT_CHARGE`, if any.
 fn charge_effect_index(effects: &[u32; 3]) -> Option<usize> {
     effects.iter().position(|&e| e == SPELL_EFFECT_CHARGE)
 }
@@ -281,8 +280,8 @@ fn opens_lock(effects: &[u32; 3]) -> bool {
         .any(|&e| e == SPELL_EFFECT_OPEN_LOCK || e == SPELL_EFFECT_OPEN_LOCK_ITEM)
 }
 
-/// `triggerAutoAttack`: a charge into a hostile, non-positive spell that does not itself
-/// cancel auto-attack starts an auto-attack on arrival.
+/// A charge into a hostile, non-positive spell that does not itself cancel auto-attack
+/// starts an auto-attack on arrival.
 fn charge_triggers_auto_attack(target_is_caster: bool, is_positive: bool, attributes: u32) -> bool {
     !target_is_caster && !is_positive && (attributes & SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT) == 0
 }
@@ -297,8 +296,8 @@ fn starts_pvp_combat_timer(
     has_active_threat && (!target_is_caster || caster_in_combat)
 }
 
-/// Post-charge attack-timer delay, `200 + 40 * distance` ms (truncated to match the C++
-/// float→uint conversion), so the caster doesn't swing the instant it lands.
+/// Post-charge attack-timer delay, `200 + 40 * distance` ms (truncated to an integer),
+/// so the caster doesn't swing the instant it lands.
 fn charge_attack_timer_delay(distance: f32) -> u32 {
     (200.0 + 40.0 * distance.max(0.0)) as u32
 }
@@ -384,11 +383,11 @@ fn unit_faction(guid: ObjectGuid, world: &World) -> u32 {
     }
 }
 
-/// `Spell::OnSpellLaunch` — launch-time special-case handling, run once as the cast fires
-/// and before per-target effects. No-ops without a live caster unit; may aggro hostiles
-/// when opening a lock GO, start a PvP combat timer for `ACTIVE_THREAT` spells, and drive
-/// the charge effect (attack-timer delay + charge movement) itself rather than leaving it
-/// to the effect handler.
+/// Launch-time special-case handling, run once as the cast fires and before per-target
+/// effects. No-ops without a live caster unit; may aggro hostiles when opening a lock GO,
+/// start a PvP combat timer for active-threat spells, and drive the charge effect
+/// (attack-timer delay + charge movement) itself rather than leaving it to the effect
+/// handler.
 fn on_spell_launch(
     caster_guid: ObjectGuid,
     spell_id: u32,
@@ -435,11 +434,11 @@ fn on_spell_launch(
         unit_target == caster_guid,
         unit_in_combat(caster_guid, world),
     ) {
-        // Unit::SetInCombatWithVictim(unitTarget, false, UNIT_PVP_COMBAT_TIMER).
+        // Flag the caster in combat with the target on the PvP combat timer.
         set_caster_in_combat_with_victim(caster_guid, unit_target, world);
     }
 
-    // Charge is resolved here instead of in EffectCharge; nothing to do without one.
+    // Charge is resolved here instead of in the effect handler; nothing to do without one.
     let charge_index = match charge_effect_index(&entry.effect) {
         Some(i) => i,
         None => return,
@@ -782,8 +781,8 @@ impl SpellSystem {
             .await?;
 
         // Step 4: Apply GCD and cast-start aura interrupts. Power/reagents/cast items
-        // are NOT taken here — Spell::cast takes them at cast completion, so an
-        // interrupted or cancelled cast costs nothing (see take_spell_costs).
+        // are NOT taken here — they are taken at cast completion, so an interrupted
+        // or cancelled cast costs nothing (see take_spell_costs).
         if !is_triggered {
             self.apply_gcd(caster_guid, spell_id, world).await?;
 
@@ -793,7 +792,7 @@ impl SpellSystem {
                 .auras
                 .remove_auras_with_interrupt_flag(
                     caster_guid,
-                    0x00400000, // AURA_INTERRUPT_FLAG_CAST (bit 22)
+                    0x00400000, // cast-interrupt aura flag (bit 22)
                     world,
                 )
                 .await;
@@ -812,8 +811,8 @@ impl SpellSystem {
         );
 
         // On-next-swing spells (Heroic Strike, Raptor Strike, Slam, ...) do not cast here.
-        // `Spell::update` explicitly skips the melee slot while the spell sits in it; the
-        // cast is fired from `Unit::AttackerStateUpdate` on the next main-hand swing.
+        // The melee slot is explicitly skipped while the spell sits in it; the cast is
+        // fired on the next main-hand swing.
         if slot == CurrentSpellType::Melee {
             self.park_next_swing_spell(caster_guid, spell_id, is_triggered, cast_targets, world);
             return Ok(SpellCastResult::Success);
@@ -825,10 +824,10 @@ impl SpellSystem {
         // Note: the success SMSG_CAST_RESULT is NOT sent at cast start. The client treats
         // it as "cast executed" and detaches its pending cast, so sending it before
         // SMSG_SPELL_START suppresses the cast bar. It belongs at cast completion, right
-        // before SMSG_SPELL_GO (Spell::cast: cooldown -> take power -> cast result -> go).
+        // before SMSG_SPELL_GO (cooldown -> take power -> cast result -> go).
 
         if is_channeled {
-            // Channeled: Spell::cast runs at channel start, so costs are taken now
+            // Channeled: the cast runs at channel start, so costs are taken now
             if !is_triggered {
                 self.take_spell_costs(caster_guid, spell_id, cast_item_guid, world)
                     .await?;
@@ -892,7 +891,7 @@ impl SpellSystem {
     }
 
     /// Take power and reagents at cast completion, right before effects are handled.
-    /// Cast items are consumed after `SMSG_SPELL_GO`, matching `Spell::TakeCastItem`.
+    /// Cast items are consumed after `SMSG_SPELL_GO`.
     async fn take_spell_costs(
         &self,
         caster_guid: ObjectGuid,
@@ -922,7 +921,7 @@ impl SpellSystem {
 
     /// Hold an on-next-swing spell in the melee slot until the caster's next main-hand
     /// swing. Unlike [`Self::start_cast`] no `CastFinish` event is scheduled — the melee
-    /// slot has no timer, `Unit::AttackerStateUpdate` is what eventually casts it.
+    /// slot has no timer; the next main-hand swing is what eventually casts it.
     fn park_next_swing_spell(
         &self,
         caster_guid: ObjectGuid,
@@ -959,11 +958,11 @@ impl SpellSystem {
             });
     }
 
-    /// `Unit::AttackerStateUpdate`'s melee-slot branch — fire the queued on-next-swing
-    /// spell in place of this main-hand white swing.
+    /// Melee-slot branch of the next-main-hand-swing handler — fire the queued
+    /// on-next-swing spell in place of this main-hand white swing.
     ///
     /// Returns `true` when a queued spell consumed the swing, in which case the caller
-    /// must skip the normal weapon hit (the C++ early `return` after `spell->cast()`).
+    /// must skip the normal weapon hit (the early return after the cast).
     pub async fn cast_queued_melee_spell(
         &self,
         caster_guid: ObjectGuid,
@@ -995,7 +994,7 @@ impl SpellSystem {
         let (vx, vy, vz) = unit_position(victim_guid, world).unwrap_or_default();
         cast_targets.set_unit_target(victim_guid, vx, vy, vz);
 
-        // `Spell::cast` re-checks power and target state: the swing can land many seconds
+        // The cast re-checks power and target state: the swing can land many seconds
         // after the ability was queued, by which time the rage may already be spent.
         let recheck = validation::validate_cast(
             caster_guid,
@@ -1007,8 +1006,8 @@ impl SpellSystem {
         )?;
         if recheck != SpellCastError::None {
             self.send_cast_failure(caster_guid, cast.spell_id, recheck, world)?;
-            // The C++ path clears the melee slot in `Spell::finish(false)` and returns
-            // without a white swing, so a failed queued ability still eats the swing.
+            // A failed cast clears the melee slot and returns without a white swing,
+            // so a failed queued ability still eats the swing.
             return Ok(true);
         }
 
@@ -1210,7 +1209,7 @@ impl SpellSystem {
                     .set_current_spell(CurrentSpellType::Channeled, active);
             });
 
-        // A channel executes immediately (Spell::cast runs at channel start), so the
+        // A channel executes immediately (its cast runs at channel start), so the
         // success cast result is sent now, before the channel packets.
         if !is_triggered && caster_guid.is_player() {
             self.broadcast_mgr
@@ -1242,8 +1241,8 @@ impl SpellSystem {
 
         self.send_channel_state_update(caster_guid, target_guid, spell_id);
 
-        // Spell::InitializeChanneledVisualTimer: a handful of channeled spells (Tranquility,
-        // Starshards) periodically re-send their visual kit. Wired against the real spell
+        // Channeled visual timer: a handful of channeled spells (Tranquility, Starshards)
+        // periodically re-send their visual kit. Wired against the real spell
         // entry, but the lookup always misses today because this codebase has no
         // SpellVisual.dbc store (channelKit column) yet — flagged as follow-up work.
         if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
@@ -1340,10 +1339,10 @@ impl SpellSystem {
 
         let is_next_melee_swing = is_next_melee_swing_spell(&spell_entry);
 
-        // Auto-repeat spells (Auto-Shot, Wand): SPELL_ATTR_EX2_AUTOREPEAT_FLAG = 0x00000020
+        // Auto-repeat spells (Auto-Shot, Wand): autorepeat flag bit 0x00000020
         let is_auto_repeat = (spell_entry.attributes_ex2 & 0x00000020) != 0;
 
-        // Channeled spells: SPELL_ATTR_EX_CHANNELED_1 = 0x04, SPELL_ATTR_EX_CHANNELED_2 = 0x40
+        // Channeled spells: channeled attribute bits 0x04 / 0x40
         let is_channeled =
             (spell_entry.attributes_ex & 0x04) != 0 || (spell_entry.attributes_ex & 0x40) != 0;
 
@@ -1366,8 +1365,7 @@ impl SpellSystem {
             Some(entry) => entry,
             None => return false,
         };
-        // SPELL_ATTR_EX_CHANNELED_1 = 0x04
-        // SPELL_ATTR_EX_CHANNELED_2 = 0x40
+        // Channeled attribute bits: 0x04 / 0x40
         (spell_entry.attributes_ex & 0x04) != 0 || (spell_entry.attributes_ex & 0x40) != 0
     }
 
@@ -1925,7 +1923,7 @@ impl SpellSystem {
     /// - Item-target effects and ground-only SEND_EVENT/PERSISTENT_AREA_AURA effects
     ///   have no corresponding target-resolution path yet (`resolve_spell_targets` only
     ///   resolves unit/GO targets).
-    /// - `needs_spell_log` computes the log flag from `IsNeedSendToClient` + effect list,
+    /// - `needs_spell_log` computes the log flag from the client-visibility check + effect list,
     ///   then builds and sends `SMSG_SPELLLOGEXECUTE` when that flag is set.
     async fn execute_spell_immediate(
         &self,
@@ -1985,7 +1983,7 @@ impl SpellSystem {
             outcomes.insert((caster_guid, spell_id), effect_results.targets.clone());
         }
 
-        // `_handle_finish_phase`: emit the spell-execute log when the cast is client-visible
+        // Finish phase: emit the spell-execute log when the cast is client-visible
         // and isn't a plain school-damage nuke (those log via the damage packet instead).
         if let Some(entry) = world.managers.spell_mgr.get(spell_id) {
             // This pipeline does not retain either the visual-only channel state or aura-origin
@@ -2122,8 +2120,8 @@ impl SpellSystem {
             .map(spell_go_target_lists)
             .unwrap_or((fallback_hit_targets, Vec::new()));
 
-        // Completion packet order matches Spell::cast: SMSG_SPELL_COOLDOWN, then the
-        // success SMSG_CAST_RESULT, then SMSG_SPELL_GO.
+        // Completion packet order: SMSG_SPELL_COOLDOWN, then the success SMSG_CAST_RESULT,
+        // then SMSG_SPELL_GO.
         if !is_triggered {
             // Passive spells never go on cooldown.
             // (The "no cooldown" cheat flag isn't modelled in this codebase yet.)
@@ -2172,7 +2170,7 @@ impl SpellSystem {
             caster_guid,
             caster_guid_pack: caster_guid,
             spell_id,
-            // Spell::SendSpellGo uses UNKNOWN9, distinct from the UNKNOWN2 flag
+            // SMSG_SPELL_GO uses UNKNOWN9, distinct from the UNKNOWN2 flag
             // carried by SMSG_SPELL_START.
             cast_flags: CAST_FLAG_UNKNOWN9 | if is_ranged { CAST_FLAG_AMMO } else { 0 },
             hit_targets,
@@ -2185,7 +2183,7 @@ impl SpellSystem {
         self.broadcast_mgr
             .broadcast_msg_nearby(caster_guid, &msg, true);
 
-        // `Spell::handle_immediate` sends SPELL_GO before executing EffectOpenLock.
+        // SPELL_GO is sent before executing the open-lock effect.
         // The client keeps an opened chest in-use until it receives that completion packet.
         if let Some(go_guid) = cast_targets.gameobject_target_guid {
             if world
@@ -2277,13 +2275,13 @@ impl SpellSystem {
 
         use crate::game::player::auras::proc::{proc_flags_ex, spell_cast_attacker_proc_flag};
 
-        const SUPPRESS_CASTER_PROCS: u32 = 0x0001_0000; // SPELL_ATTR_EX3_SUPPRESS_CASTER_PROCS
+        const SUPPRESS_CASTER_PROCS: u32 = 0x0001_0000;
         if entry.attributes_ex3 & SUPPRESS_CASTER_PROCS != 0 {
             return;
         }
 
         let is_auto_repeat = (entry.attributes_ex2 & 0x0000_0020) != 0;
-        let is_heal = entry.effect.iter().any(|&e| e == 10); // SPELL_EFFECT_HEAL
+        let is_heal = entry.effect.iter().any(|&e| e == 10); // heal effect
         let proc_attacker = spell_cast_attacker_proc_flag(
             entry.dmg_class,
             entry.is_positive_spell(),
@@ -2325,13 +2323,13 @@ impl SpellSystem {
 
         use crate::game::player::auras::proc::{proc_flags_ex, spell_cast_attacker_proc_flag};
 
-        const SUPPRESS_CASTER_PROCS: u32 = 0x0001_0000; // SPELL_ATTR_EX3_SUPPRESS_CASTER_PROCS
+        const SUPPRESS_CASTER_PROCS: u32 = 0x0001_0000;
         if entry.attributes_ex3 & SUPPRESS_CASTER_PROCS != 0 {
             return;
         }
 
         let is_auto_repeat = (entry.attributes_ex2 & 0x0000_0020) != 0;
-        let is_heal = entry.effect.iter().any(|&e| e == 10); // SPELL_EFFECT_HEAL
+        let is_heal = entry.effect.iter().any(|&e| e == 10); // heal effect
         let proc_attacker = spell_cast_attacker_proc_flag(
             entry.dmg_class,
             entry.is_positive_spell(),
@@ -2662,7 +2660,7 @@ impl SpellSystem {
     ///
     /// Delegates to the ports in [`super::delayed`]: the Generic (non-channeled) slot
     /// takes precedence, falling back to the Channeled slot. Both apply the resist roll
-    /// (`SPELLMOD_NOT_LOSE_CASTING_TIME` + `SPELL_AURA_RESIST_PUSHBACK`) and the
+    /// (the not-lose-casting-time spell mod plus the resist-pushback aura) and the
     /// escalating per-hit delay driven by the cast's `delay_at_damage_count`.
     /// Returns the milliseconds of pushback/channel-reduction actually applied.
     pub fn apply_cast_pushback(&self, target_guid: ObjectGuid, world: &World) -> Result<u32> {
@@ -3098,7 +3096,7 @@ impl SpellSystem {
             return Ok(());
         }
 
-        // Apply SPELLMOD_GLOBAL_COOLDOWN modifiers (self-only, player-only mods).
+        // Apply global-cooldown spell mods (self-only, player-only mods).
         gcd_duration = modifiers::calculate_modified_gcd(
             caster_guid,
             gcd_duration.max(0) as u32,
@@ -3108,7 +3106,7 @@ impl SpellSystem {
         ) as i32;
 
         // Haste scaling applies only to the standard 1.5s global cooldown on
-        // non-melee/non-ranged, non-ability spells: scale by UNIT_MOD_CAST_SPEED
+        // non-melee/non-ranged, non-ability spells: scale by cast-speed modifier
         // then clamp to [1000, 1500]. Cast-speed haste is not modelled yet, so the
         // multiplier defaults to 1.0 (a caster with no haste), leaving 1500 intact.
         if spell_entry.start_recovery_category == SPELLCATEGORY_GLOBAL
@@ -3118,7 +3116,7 @@ impl SpellSystem {
             && spell_entry.attributes & SPELL_ATTR_USES_RANGED_SLOT == 0
             && spell_entry.attributes & SPELL_ATTR_IS_ABILITY == 0
         {
-            let cast_speed_mult = 1.0_f32; // TODO: UNIT_MOD_CAST_SPEED haste
+            let cast_speed_mult = 1.0_f32; // TODO: cast-speed haste
             gcd_duration = (gcd_duration as f32 * cast_speed_mult) as i32;
             gcd_duration = gcd_duration.clamp(1000, 1500);
         }
@@ -3319,7 +3317,7 @@ impl SpellSystem {
         let failure_reason = validation::spell_cast_error_to_u8(reason_error);
 
         // Optional per-error arguments. Some(_) is written even when the value is
-        // 0 — the C++ optional's presence, not its value, gates serialization.
+        // 0 — the optional's presence, not its value, gates serialization.
         let (arg1, arg2) = if let Some(e) = spell_entry.as_ref() {
             match error {
                 SpellCastError::NotReady | SpellCastError::SpellOnCooldown => {
@@ -3409,7 +3407,7 @@ impl SpellSystem {
     /// IsNoMovementSpellCasted: check if a currently casting spell has movement interrupt flags.
     pub fn is_no_movement_spell_casted(&self, caster_guid: ObjectGuid, world: &World) -> bool {
         let spell_interrupt_flag_movement: u32 = 0x00000008; // SPELL_INTERRUPT_FLAG_MOVEMENT
-        let aura_interrupt_moving_cancels: u32 = 0x00000400; // AURA_INTERRUPT_MOVING_CANCELS
+        let aura_interrupt_moving_cancels: u32 = 0x00000400; // moving-cancels aura interrupt flag
 
         world
             .systems
@@ -3895,9 +3893,9 @@ mod tests {
 
     #[test]
     fn next_melee_swing_reads_the_attributes_field() {
-        // Heroic Strike (78) — SPELL_ATTR_ON_NEXT_SWING_NO_DAMAGE among its attributes.
+        // Heroic Strike (78) — the next-swing-no-damage attribute among its attributes.
         assert!(spell_is_next_melee_swing(0x0005_0014));
-        // SPELL_ATTR_ON_NEXT_SWING on its own (Raptor Strike / Slam family).
+        // The next-swing attribute on its own (Raptor Strike / Slam family).
         assert!(spell_is_next_melee_swing(0x0000_0400));
         // Battle Stance (2457) is not a swing ability. The bits live in `Attributes`,
         // never in `AttributesEx` — reading the wrong field made Heroic Strike cast
@@ -4065,9 +4063,9 @@ mod tests {
 
     #[test]
     fn finisher_attributes_need_combo_points() {
-        // SPELL_ATTR_EX_FINISHING_MOVE_DAMAGE (e.g. Eviscerate, Sinister Strike finishers)
+        // Finishing-move-damage attribute (e.g. Eviscerate, Sinister Strike finishers)
         assert!(spell_needs_combo_points(0x0010_0000));
-        // SPELL_ATTR_EX_FINISHING_MOVE_DURATION (e.g. Kidney Shot, Rupture)
+        // Finishing-move-duration attribute (e.g. Kidney Shot, Rupture)
         assert!(spell_needs_combo_points(0x0040_0000));
         // Both bits set
         assert!(spell_needs_combo_points(0x0050_0000));
@@ -4130,7 +4128,7 @@ mod tests {
 
     #[test]
     fn next_delayed_target_time_none_when_all_processed() {
-        // next_time stays 0 -> spell is finished: _handle_finish_phase then finish(true).
+        // next_time stays 0 -> spell is finished: the finish phase then finishes it.
         assert_eq!(next_delayed_target_time(&[]), None);
         assert_eq!(next_delayed_target_time(&[0, 0, 0]), None);
     }
@@ -4203,9 +4201,9 @@ mod tests {
 
     #[test]
     fn needs_spell_log_false_when_not_client_visible() {
-        // IsNeedSendToClient() == false short-circuits needs_spell_log to false regardless
+        // Not client-visible short-circuits needs_spell_log to false regardless
         // of effects.
-        assert!(!needs_spell_log(false, &[10, 0, 0])); // 10 = SPELL_EFFECT_HEAL
+        assert!(!needs_spell_log(false, &[10, 0, 0])); // 10 = heal effect
     }
 
     #[test]
@@ -4227,8 +4225,8 @@ mod tests {
     fn needs_spell_log_true_for_other_client_visible_effects() {
         // A heal or proc-style effect that isn't plain school damage still needs the
         // generic spell-execute log entry.
-        assert!(needs_spell_log(true, &[10, 0, 0])); // SPELL_EFFECT_HEAL
-        assert!(needs_spell_log(true, &[6, 10, 0])); // e.g. APPLY_AURA + HEAL
+        assert!(needs_spell_log(true, &[10, 0, 0])); // heal effect
+        assert!(needs_spell_log(true, &[6, 10, 0])); // e.g. apply-aura + heal
     }
 
     #[test]
@@ -4735,7 +4733,7 @@ mod tests {
     #[tokio::test]
     async fn slot_routing_channeled_spell_goes_to_channeled_at_cast_start() {
         let world = launch_test_world();
-        // SPELL_ATTR_EX_CHANNELED_1 = 0x04
+        // Channeled attribute bit 0x04
         let mut spell = charge_spell(50001, [2, 0, 0]);
         spell.attributes_ex = 0x04;
         world.managers.spell_mgr.add_spell(spell);
@@ -4745,7 +4743,7 @@ mod tests {
             "channeled spell must land in the Channeled slot at cast-start"
         );
 
-        // SPELL_ATTR_EX_CHANNELED_2 = 0x40 routes identically.
+        // Channeled attribute bit 0x40 routes identically.
         let mut spell2 = charge_spell(50002, [2, 0, 0]);
         spell2.attributes_ex = 0x40;
         world.managers.spell_mgr.add_spell(spell2);
@@ -4758,7 +4756,7 @@ mod tests {
     #[tokio::test]
     async fn slot_routing_melee_spell_goes_to_melee() {
         let world = launch_test_world();
-        // SPELL_ATTR_ON_NEXT_SWING_NO_DAMAGE = 0x004 (Heroic Strike)
+        // Next-swing-no-damage attribute = 0x004 (Heroic Strike)
         let mut spell = charge_spell(50010, [2, 0, 0]);
         spell.attributes = 0x0000_0004;
         world.managers.spell_mgr.add_spell(spell);
@@ -4767,7 +4765,7 @@ mod tests {
             CurrentSpellType::Melee,
         );
 
-        // SPELL_ATTR_ON_NEXT_SWING = 0x400
+        // Next-swing attribute = 0x400
         let mut spell2 = charge_spell(50011, [2, 0, 0]);
         spell2.attributes = 0x0000_0400;
         world.managers.spell_mgr.add_spell(spell2);
@@ -4780,7 +4778,7 @@ mod tests {
     #[tokio::test]
     async fn slot_routing_autorepeat_spell_goes_to_autorepeat() {
         let world = launch_test_world();
-        // SPELL_ATTR_EX2_AUTOREPEAT_FLAG = 0x20
+        // Autorepeat flag bit = 0x20
         let mut spell = charge_spell(50020, [2, 0, 0]);
         spell.attributes_ex2 = 0x20;
         world.managers.spell_mgr.add_spell(spell);

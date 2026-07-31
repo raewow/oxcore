@@ -300,7 +300,6 @@ impl GridSystem {
             // Quiesce before draining: a creature that is mid-fight when its
             // grid disappears would otherwise be dropped still in combat, with
             // its threat list pointing at a player who is no longer there.
-            // `ObjectGridStoper` (ObjectGridLoader.cpp:359-384).
             self.quiesce_grid(grid_x, grid_y, world, map);
 
             self.unload_grid(map_id, grid_x, grid_y, world, map).await?;
@@ -414,7 +413,6 @@ impl GridSystem {
         // A creature that wandered in from elsewhere is sent home instead of
         // despawned: its spawn point lives in another grid, which would otherwise
         // stop producing spawns until that grid itself cycled.
-        // `ObjectGridRespawnMover` (ObjectGridLoader.cpp:36-81).
         let mut relocated = 0usize;
         for guid in unloaded.creatures {
             if Self::move_to_home_grid(guid, (grid_x, grid_y), world, map) {

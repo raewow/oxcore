@@ -1,7 +1,6 @@
 //! Spell Target Resolution
 //!
 //! Resolves implicit targets from SpellEntry to concrete target lists per effect.
-//! Equivalent to MaNGOS Spell::FillTargetMap() / SetTargetMap().
 //!
 //! Each spell effect has two implicit target fields (target_a, target_b) that
 //! describe HOW targets are selected. The client-provided SpellCastTargets
@@ -17,7 +16,7 @@ use crate::World;
 use oxcore_shared::protocol::{ObjectGuid, Position};
 use std::collections::HashMap;
 
-/// MaNGOS implicit target types (from SpellEntry effect_implicit_target fields)
+/// Implicit target types (the spell effect's implicit-target field values)
 ///
 /// Only the most common vanilla-relevant values are handled.
 #[repr(u32)]
@@ -376,16 +375,15 @@ fn resolve_spell_targets_inner(
         None => return resolved,
     };
 
-    // Scalar cast state consumed by `check_target` (Spell::CheckTarget). Some
-    // members are not reachable from this function's inputs and are populated
+    // Scalar cast state consumed by `check_target`. Some members are not
+    // reachable from this function's inputs and are populated
     // faithfully-but-conservatively:
-    // - `cast_item_present` (m_CastItem): the launching item isn't threaded into
-    //   target resolution yet; treated as absent. ...
-    // - `is_triggered` (m_IsTriggeredSpell): trigger context isn't available
-    //   here; treated as a non-triggered cast. ...
-    // - `ignore_caster_target_restrictions`
-    //   (IsIgnoringCasterAndTargetRestrictions): not ported on SpellEntry;
-    //   treated as false. ...
+    // - `cast_item_present`: the launching item isn't threaded into target
+    //   resolution yet; treated as absent. ...
+    // - `is_triggered`: trigger context isn't available here; treated as a
+    //   non-triggered cast. ...
+    // - `ignore_caster_target_restrictions`: not ported on SpellEntry; treated
+    //   as false. ...
     let check_ctx = CheckTargetContext {
         caster_guid,
         caster_is_unit: caster_guid.is_player() || caster_guid.is_creature_or_pet(),
@@ -448,10 +446,10 @@ fn resolve_spell_targets_inner(
         targets.sort_by_key(|g| g.raw());
         targets.dedup_by_key(|g| g.raw());
 
-        // Per-target validity gate: Spell::CheckTarget runs on every candidate
-        // before AddUnitTarget in cmangos. Only Unit candidates (players and
-        // creatures/pets) are filtered; game-object / item GUIDs have no
-        // Unit-level checks and are passed through untouched.
+        // Per-target validity gate: every candidate unit is checked before being
+        // registered. Only unit candidates (players and creatures/pets) are
+        // filtered; game-object / item GUIDs have no unit-level checks and are
+        // passed through untouched.
         targets.retain(|&guid| {
             if guid.is_player() || guid.is_creature_or_pet() {
                 check_target(&spell_entry, effect_idx, guid, &check_ctx, world)
@@ -936,7 +934,7 @@ fn get_effect_radius(
 }
 
 /// Find the closest configured script target in the caster's map and phase.
-/// A valid explicit unit target takes precedence, matching `CheckScriptTargeting`.
+/// A valid explicit unit target takes precedence.
 fn find_script_target(
     spell_id: u32,
     effect_idx: usize,
@@ -978,7 +976,7 @@ fn find_script_target(
     let mut closest: Option<(ObjectGuid, f32)> = None;
     for entry in entries {
         match entry.type_ {
-            // SPELL_TARGET_TYPE_GAMEOBJECT
+            // Gameobject target type
             0 if allow_gameobjects => {
                 for gameobject in world.managers.gameobject_mgr.iter_gameobjects() {
                     let go = gameobject.value();
@@ -995,7 +993,7 @@ fn find_script_target(
                     }
                 }
             }
-            // SPELL_TARGET_TYPE_CREATURE and SPELL_TARGET_TYPE_DEAD
+            // Creature and dead-creature target types
             1 | 2 if allow_units => {
                 for creature in world.managers.creature_mgr.iter_creatures() {
                     let target = creature.value();
@@ -1019,8 +1017,8 @@ fn find_script_target(
                     }
                 }
             }
-            // SPELL_TARGET_TYPE_PLAYER has no template entry. The source core
-            // uses entry zero for players, so reject malformed nonzero records.
+            // The player target type has no template entry. Entry zero is used
+            // for players, so reject malformed nonzero records.
             3 if allow_units && entry.target_id == 0 => {
                 for guid in world.managers.player_mgr.collect_online_guids() {
                     let Some((map, instance, phase, position)) = unit_world_context(guid, world)
@@ -1281,12 +1279,10 @@ const SPELL_CURSE_OF_DOOM: u32 = 603;
 const SPELL_DISMISS_PET: u32 = 2641;
 /// Taming Lesson: bypasses the creature-type restriction entirely.
 const SPELL_TAMING_LESSON: u32 = 23356;
-/// Bitmask covering all 11 vanilla creature types (CREATURE_TYPE_BEAST..GAS_CLOUD).
+/// Bitmask covering all 11 vanilla creature types.
 const CREATURE_TYPE_MASK_ALL: u32 = 0x7FF;
 
-/// Port of `Spell::CheckTargetCreatureType`.
-///
-/// Returns whether `target_guid` satisfies the spell's `TargetCreatureType`
+/// Checks whether `target_guid` satisfies the spell's `TargetCreatureType`
 /// mask, applying the vanilla per-spell special cases. Callers treat `false`
 /// as "invalid / immune target" and drop the candidate.
 pub fn check_target_creature_type(
@@ -1299,8 +1295,8 @@ pub fn check_target_creature_type(
         return true;
     }
 
-    // `GetCharmerOrOwnerPlayerOrPlayerItself() != null` is approximated here as
-    // "is a player or a player pet"; charmed creatures are not tracked yet.
+    // "Is a player or a player pet" approximates whether the target is
+    // player-controlled; charmed creatures are not tracked yet.
     let target_is_player_controlled = target_guid.is_player() || target_guid.is_pet();
 
     let spell_creature_target_mask = match resolve_creature_target_mask(
@@ -1351,8 +1347,8 @@ fn creature_type_allows(spell_mask: u32, target_mask: u32) -> bool {
     target_mask == 0 || (spell_mask & target_mask) != 0
 }
 
-/// `Unit::GetCreatureTypeMask()` — `1 << (creature_type - 1)`, or 0 for players
-/// and unknown/typeless units.
+/// The creature-type mask for a unit: `1 << (creature_type - 1)`, or 0 for
+/// players and unknown/typeless units.
 fn creature_type_mask(guid: ObjectGuid, world: &World) -> u32 {
     if !guid.is_creature_or_pet() {
         return 0;
@@ -1371,7 +1367,7 @@ fn creature_type_mask(guid: ObjectGuid, world: &World) -> u32 {
         .unwrap_or(0)
 }
 
-/// `Unit::HasAura(spell_id)` for either a player or a creature/pet unit.
+/// Whether a player or creature/pet unit has an aura for `spell_id`.
 fn unit_has_aura(guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
     if guid.is_player() {
         world
@@ -1389,7 +1385,8 @@ fn unit_has_aura(guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
     }
 }
 
-/// `SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED` — casting the spell does not break stealth.
+/// Allow-while-stealthed attribute bit (0x0002_0000): casting the spell does
+/// not break stealth.
 const SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED: u32 = 0x0002_0000;
 
 // Spell icons whose spells are exempt from breaking the caster's stealth outright.
@@ -1403,12 +1400,10 @@ const IMPROVED_SAP_RANK_1: u32 = 14076;
 const IMPROVED_SAP_RANK_2: u32 = 14094;
 const IMPROVED_SAP_RANK_3: u32 = 14095;
 
-/// Port of `Spell::ShouldRemoveStealthAuras`.
-///
 /// Decides whether starting this cast should break the caster's stealth. The
 /// caller passes `!should_remove_stealth_auras(..)` as the `skip_stealth` flag
 /// to the stealth-aura removal — i.e. stealth is removed when this returns
-/// `true`. `is_triggered_spell` mirrors `Spell::m_IsTriggeredSpell`.
+/// `true`.
 pub fn should_remove_stealth_auras(
     spell_entry: &crate::dbc::structures::SpellEntry,
     caster_guid: ObjectGuid,
@@ -1444,9 +1439,9 @@ pub fn should_remove_stealth_auras(
     true
 }
 
-/// The deterministic gate of `ShouldRemoveStealthAuras`: whether a cast enters
-/// the stealth-removal path at all. Triggered spells, spells flagged
-/// `ALLOW_WHILE_STEALTHED`, and the dedicated stealth spells (Shadowmeld,
+/// The deterministic gate of the stealth-removal decision: whether a cast
+/// enters the stealth-removal path at all. Triggered spells, spells flagged
+/// allow-while-stealthed, and the dedicated stealth spells (Shadowmeld,
 /// Camouflage, Vanish) never break stealth. Sap is intentionally not exempt —
 /// it enters the path and is handled by the Improved Sap chance.
 fn spell_breaks_stealth_by_default(
@@ -1468,7 +1463,7 @@ fn spell_breaks_stealth_by_default(
 
 /// The chance (in percent) that Improved Sap lets the caster keep stealth,
 /// given which rank aura is present. Ranks are mutually exclusive in practice
-/// and checked rank-1-first, matching the C++ if/else-if chain.
+/// and checked rank-1-first, matching the if/else-if chain.
 fn improved_sap_retain_chance(has_rank1: bool, has_rank2: bool, has_rank3: bool) -> Option<u32> {
     if has_rank1 {
         Some(30)
@@ -1486,29 +1481,29 @@ fn roll_chance_u(chance: u32) -> bool {
     chance > rand::random::<u32>() % 100
 }
 
-/// `Spell::IsAreaAuraEffect` — whether a single effect value is one of the five
-/// `SPELL_EFFECT_APPLY_AREA_AURA_*` variants. Used (per effect, not "any effect")
-/// by `FillTargetMap`'s caster pre-registration and target-reuse gating.
+/// Whether a single effect value is one of the five area-aura effect variants.
+/// Used (per effect, not "any effect") by the caster pre-registration and
+/// target-reuse gating.
 fn is_area_aura_effect(effect: u32) -> bool {
     matches!(
         effect,
-        35   // APPLY_AREA_AURA_PARTY
-            | 119  // APPLY_AREA_AURA_PET
-            | 128  // APPLY_AREA_AURA_FRIEND
-            | 129  // APPLY_AREA_AURA_ENEMY
-            | 132 // APPLY_AREA_AURA_RAID
+        35   // area aura: party
+            | 119  // area aura: pet
+            | 128  // area aura: friend
+            | 129  // area aura: enemy
+            | 132 // area aura: raid
     )
 }
 
-/// Port of the `Spell::FillTargetMap` caster self-registration gate (chunk_0).
+/// The caster self-registration gate.
 ///
 /// When casting with a unit caster, an effect whose implicit targets don't need
 /// resolving because the caster itself is always the target (area auras) or
 /// where the effect inherently targets the caster's own presence (spawn,
 /// language, quest-complete) is pre-registered immediately, bypassing the
-/// normal `SetTargetMap` dispatch entirely.
+/// normal implicit-target dispatch entirely.
 ///
-/// `effect` is `m_spellInfo->Effect[i]` for the effect slot being processed.
+/// `effect` is the spell's effect value for the effect slot being processed.
 pub fn effect_self_registers_caster(effect: u32) -> bool {
     const SPELL_EFFECT_SPAWN: u32 = 56;
     const SPELL_EFFECT_LANGUAGE: u32 = 27;
@@ -1521,7 +1516,7 @@ pub fn effect_self_registers_caster(effect: u32) -> bool {
 }
 
 /// One already-resolved effect's implicit target pair and effect value, as
-/// recorded on a prior loop iteration of `FillTargetMap`. Used by
+/// recorded on a prior loop iteration of target resolution. Used by
 /// [`can_reuse_targets`] to decide whether effect `i` can copy effect `j`'s
 /// target list instead of recomputing it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1531,13 +1526,14 @@ pub struct EffectTargetShape {
     pub target_b: u32,
 }
 
-/// Port of the `Spell::FillTargetMap` target-reuse gate (chunk_0).
+/// The target-reuse gate.
 ///
-/// `MaxAffectedTargets > 1` spells try to reuse an earlier effect's resolved
-/// target list instead of re-running implicit-target resolution, provided the
-/// two effects share the same implicit-target pair, effect `j` is a real
-/// effect (not `SPELL_EFFECT_NONE`), and neither effect is an area aura
-/// (area auras always pre-register just the caster, so reuse would be wrong).
+/// Spells with more than one max-affected target try to reuse an earlier
+/// effect's resolved target list instead of re-running implicit-target
+/// resolution, provided the two effects share the same implicit-target pair,
+/// effect `j` is a real effect (not the none effect), and neither effect is an
+/// area aura (area auras always pre-register just the caster, so reuse would be
+/// wrong).
 pub fn can_reuse_targets(
     max_affected_targets: u32,
     effect_i: EffectTargetShape,
@@ -1552,9 +1548,8 @@ pub fn can_reuse_targets(
         && !is_area_aura_effect(effect_j.effect)
 }
 
-/// A minimal miss-condition + effect-mask view of one `m_UniqueTargetInfo`
-/// entry, sufficient for the post-loop attribute checks in
-/// `FillTargetMap:chunk_1`.
+/// A minimal miss-condition view of one resolved target entry, sufficient for
+/// the post-loop attribute checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TargetHitInfo {
     pub target_guid: ObjectGuid,
@@ -1569,8 +1564,6 @@ pub struct SpellEffectTarget {
     pub deleted: bool,
 }
 
-/// Port of `Spell::HaveTargetsForEffect`.
-///
 /// Returns whether any non-deleted entry in the unit, game-object, or item
 /// target lists applies to `effect_index`. Indices outside an eight-bit effect
 /// mask cannot have a matching target.
@@ -1591,15 +1584,14 @@ pub fn have_targets_for_effect(
         .any(|target| !target.deleted && target.effect_mask & effect_bit != 0)
 }
 
-/// `SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE` — abort the cast if every
-/// registered target was immune.
+/// Fail-on-all-targets-immune attribute bit (0x0000_0080): abort the cast if
+/// every registered target was immune.
 const SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE: u32 = 0x0000_0080;
-/// `SPELL_ATTR_EX_REQUIRE_ALL_TARGETS` — abort (silently, effect-mask cleared)
-/// if the explicit unit target missed.
+/// Require-all-targets attribute bit (0x0004_0000): abort (silently,
+/// effect-mask cleared) if the explicit unit target missed.
 const SPELL_ATTR_EX_REQUIRE_ALL_TARGETS: u32 = 0x0004_0000;
 
-/// Port of the `SPELL_ATTR_EX2_FAIL_ON_ALL_TARGETS_IMMUNE` post-loop check in
-/// `Spell::FillTargetMap` (chunk_1).
+/// The fail-on-all-targets-immune post-loop check.
 ///
 /// Returns `true` when the cast must be aborted: the attribute is set, the
 /// target list is non-empty, and every target's miss condition is
@@ -1618,8 +1610,7 @@ pub fn all_targets_immune_should_fail(attributes_ex2: u32, targets: &[TargetHitI
         })
 }
 
-/// Port of the `SPELL_ATTR_EX_REQUIRE_ALL_TARGETS` post-loop check in
-/// `Spell::FillTargetMap` (chunk_1).
+/// The require-all-targets post-loop check.
 ///
 /// Returns `true` when the cast must silently drop every effect (the caller
 /// zeroes every effect mask and returns early): the attribute is set and the
@@ -1642,23 +1633,25 @@ pub fn explicit_target_miss_should_clear_all(
 }
 
 // Implicit target-type ids referenced by `check_target` special-cases.
-/// `TARGET_UNIT_CASTER` — the effect always targets the caster; skips the
-/// creature-type filter and exempts `ONLY_ON_PLAYER`.
+/// The "caster" implicit-target id (1): the effect always targets the caster;
+/// skips the creature-type filter and the only-on-player attribute.
 const TARGET_UNIT_CASTER: u32 = 1;
-/// `TARGET_UNIT_SCRIPT_NEAR_CASTER` — script-selected unit target.
+/// Script-selected unit target id (38).
 const TARGET_UNIT_SCRIPT_NEAR_CASTER: u32 = 38;
-/// `TARGET_GAMEOBJECT_SCRIPT_NEAR_CASTER` — script-selected gameobject target.
+/// Script-selected gameobject target id (40).
 const TARGET_GAMEOBJECT_SCRIPT_NEAR_CASTER: u32 = 40;
-/// `TARGET_LOCATION_SCRIPT_NEAR_CASTER` — script-selected location target.
+/// Script-selected location target id (46).
 const TARGET_LOCATION_SCRIPT_NEAR_CASTER: u32 = 46;
 
-/// `SPELL_ATTR_EX3_NOT_ON_AOE_IMMUNE` — cannot hit creatures flagged immune to AoE.
+/// Not-on-AoE-immune attribute bit (0x0000_0200): cannot hit creatures flagged
+/// immune to AoE.
 const SPELL_ATTR_EX3_NOT_ON_AOE_IMMUNE: u32 = 0x0000_0200;
-/// `SPELL_ATTR_EX3_ONLY_ON_PLAYER` — the spell may only affect player targets.
+/// Only-on-player attribute bit (0x0008_0000): the spell may only affect player
+/// targets.
 const SPELL_ATTR_EX3_ONLY_ON_PLAYER: u32 = 0x0008_0000;
 
-/// `Spell::IsScriptTarget` — implicit-target ids that are resolved by script and
-/// therefore bypass the `UNIT_FLAG_NOT_SELECTABLE` rejection.
+/// Whether an implicit-target id is resolved by script and therefore bypasses
+/// the not-selectable flag rejection.
 fn is_script_target(raw_target: u32) -> bool {
     matches!(
         raw_target,
@@ -1669,12 +1662,12 @@ fn is_script_target(raw_target: u32) -> bool {
 }
 
 /// Whether the per-effect creature-type filter is skipped for this effect: it is
-/// skipped when the effect's implicit target A is `TARGET_UNIT_CASTER`.
+/// skipped when the effect's implicit target A is the caster target.
 fn creature_type_check_skipped(target_a_raw: u32) -> bool {
     target_a_raw == TARGET_UNIT_CASTER
 }
 
-/// Pure `UNIT_FLAG_NOT_SELECTABLE` rejection decision from the selectability
+/// Pure not-selectable flag rejection decision from the selectability
 /// block: a not-selectable target is rejected unless the spell is triggered on
 /// its own explicit unit target, or either implicit target is a script target.
 fn not_selectable_rejects(
@@ -1690,9 +1683,9 @@ fn not_selectable_rejects(
         && !is_script_target(target_b_raw)
 }
 
-/// Pure `SPELL_ATTR_EX3_ONLY_ON_PLAYER` rejection decision: a non-player target
+/// Pure only-on-player rejection decision: a non-player target
 /// is rejected when the attribute is set and the effect's implicit target A is
-/// neither `TARGET_UNIT_SCRIPT_NEAR_CASTER` nor `TARGET_UNIT_CASTER`.
+/// neither a script-selected unit target nor the caster target.
 fn only_on_player_rejects(target_is_player: bool, attributes_ex3: u32, target_a_raw: u32) -> bool {
     !target_is_player
         && attributes_ex3 & SPELL_ATTR_EX3_ONLY_ON_PLAYER != 0
@@ -1706,24 +1699,23 @@ fn is_possess_or_charm_aura(aura_name: u32) -> bool {
     aura_name == AURA_MOD_POSSESS || aura_name == AURA_MOD_CHARM
 }
 
-/// The scalar `Spell` member state that `check_target` reads about the *cast*
-/// (as opposed to the candidate target). Mirrors the `m_*` fields the C++
-/// `Spell::CheckTarget` dereferences.
+/// The scalar cast state that `check_target` reads about the *cast* (as opposed
+/// to the candidate target).
 #[derive(Debug, Clone, Copy)]
 pub struct CheckTargetContext {
-    /// `m_caster` — the casting object.
+    /// The casting object.
     pub caster_guid: ObjectGuid,
-    /// Whether `m_casterUnit` is non-null (the caster is a Unit, not a pure
-    /// GameObject/DynamicObject caster). Positive-spell and possess/charm blocks
-    /// only run for unit casters.
+    /// Whether the caster is a Unit (a player or creature/pet), as opposed to a
+    /// pure GameObject/DynamicObject caster. Positive-spell and possess/charm
+    /// blocks only run for unit casters.
     pub caster_is_unit: bool,
-    /// `m_CastItem != nullptr` — the cast was launched from an item.
+    /// Whether the cast was launched from an item.
     pub cast_item_present: bool,
-    /// `m_IsTriggeredSpell`.
+    /// Whether the spell is a triggered cast.
     pub is_triggered: bool,
-    /// `m_targets.getUnitTarget()` — the explicit unit target from the client.
+    /// The explicit unit target from the client.
     pub explicit_unit_target: Option<ObjectGuid>,
-    /// `m_spellInfo->IsIgnoringCasterAndTargetRestrictions()`.
+    /// Whether the spell ignores caster and target restrictions.
     pub ignore_caster_target_restrictions: bool,
 }
 
@@ -1747,7 +1739,7 @@ fn unit_level(guid: ObjectGuid, world: &World) -> u32 {
     }
 }
 
-/// Read a unit's `UNIT_FIELD_FLAGS`, or 0 if unknown.
+/// Read a unit's unit flags, or 0 if unknown.
 fn unit_flags_of(guid: ObjectGuid, world: &World) -> u32 {
     if guid.is_player() {
         world
@@ -1767,22 +1759,20 @@ fn unit_flags_of(guid: ObjectGuid, world: &World) -> u32 {
     }
 }
 
-/// Port of `Spell::CheckTarget(Unit* target, SpellEffectIndex eff)`.
-///
-/// Per-effect Unit filter used while filling the target map: returns `false` to
+/// Per-effect unit filter used while filling the target map: returns `false` to
 /// reject a candidate `target_guid` for effect `eff`, `true` to keep it.
 ///
 /// Approximations (infrastructure not yet ported, flagged with `// ...`):
-/// - `SelectAuraRankForLevel` (positive player-buff rank gating) — treated as a
+/// - Rank-appropriate aura selection for positive player buffs — treated as a
 ///   pass; rank selection is not modelled yet.
 /// - Duel opponent restriction — duels are not tracked; the check is skipped.
-/// - GM invisibility (`VISIBILITY_OFF`) and the GM + non-positive rejection —
-///   GM state is not tracked on Player; players are treated as non-GM.
-/// - `GetCharmerGuid` / `GetCharmerOrOwnerGuid` — charm ownership is not tracked;
-///   treated as no charmer/owner.
-/// - `Creature::IsImmuneToAoe` — AoE immunity data is not ported; treated as not
+/// - GM invisibility and the GM + non-positive rejection — GM state is not
+///   tracked on Player; players are treated as non-GM.
+/// - Charm ownership — charm ownership is not tracked; treated as no
+///   charmer/owner.
+/// - Creature AoE immunity — AoE immunity data is not ported; treated as not
 ///   immune.
-/// - `SpellScript::OnCheckTarget` — no script hook system; the default `true`
+/// - Script on-check-target hook — no script hook system; the default `true`
 ///   result is used.
 pub fn check_target(
     spell_entry: &crate::dbc::structures::SpellEntry,
@@ -1807,8 +1797,8 @@ pub fn check_target(
             && !ctx.is_triggered
             && !target_is_explicit
         {
-            // SelectAuraRankForLevel is not ported; the passed spell is assumed
-            // to already be the correct rank for the target's level. ...
+            // Rank-appropriate aura selection is not ported; the passed spell is
+            // assumed to already be the correct rank for the target's level. ...
         }
 
         // Duel restriction (targetOwner in a duel whose opponent isn't the
@@ -1825,7 +1815,7 @@ pub fn check_target(
     // Selectability / spawning block, skipped for the caster itself, for a
     // target owned/charmed by the caster, and when the spell ignores caster and
     // target restrictions.
-    let target_owner_is_caster = false; // GetCharmerOrOwnerGuid() == caster: charm ownership not tracked. ...
+    let target_owner_is_caster = false; // Charm ownership not tracked. ...
     if !target_is_caster && !target_owner_is_caster && !ctx.ignore_caster_target_restrictions {
         let flags = unit_flags_of(target_guid, world);
         if flags & unit_flags::SPAWNING != 0 {
@@ -1844,7 +1834,7 @@ pub fn check_target(
 
     // Player-target GM / visibility restrictions.
     if !target_is_caster && target_guid.is_player() {
-        // GM invisibility (VISIBILITY_OFF) and the GM + non-positive rejection
+        // GM invisibility and the GM + non-positive rejection
         // both depend on GM state that is not tracked; players are treated as
         // visible non-GMs, so neither rejection fires. ...
     }
@@ -1854,7 +1844,7 @@ pub fn check_target(
         if target_is_caster {
             return false;
         }
-        // GetCharmerGuid() != 0 rejection: charm state is not tracked. ...
+        // Already-charmed rejection: charm state is not tracked. ...
         let level_cap = spell_entry.effect_base_points[eff];
         if unit_level(target_guid, world) as i32 > level_cap {
             return false;
@@ -1865,7 +1855,7 @@ pub fn check_target(
     if spell_entry.attributes_ex3 & SPELL_ATTR_EX3_NOT_ON_AOE_IMMUNE != 0
         && target_guid.is_creature()
     {
-        let immune_to_aoe = false; // Creature::IsImmuneToAoe not ported. ...
+        let immune_to_aoe = false; // Creature AoE immunity not ported. ...
         if immune_to_aoe {
             return false;
         }
@@ -1880,29 +1870,25 @@ pub fn check_target(
         return false;
     }
 
-    // m_spellScript->OnCheckTarget would run here; no script hook system yet, so
-    // the default result stands. ...
+    // The script on-check-target hook would run here; no script hook system yet,
+    // so the default result stands. ...
     true
 }
 
-/// The scalar `Spell` / cast parameters read by [`fill_raid_or_party_targets`],
-/// mirroring the C++ arguments plus the `m_caster` / `m_spellInfo->spellLevel`
-/// member state it consults.
+/// The scalar cast parameters read by [`fill_raid_or_party_targets`].
 #[derive(Debug, Clone, Copy)]
 pub struct RaidPartyFillParams {
-    /// `m_caster` — used for the hostility and distance gates.
+    /// Used for the hostility and distance gates.
     pub caster_guid: ObjectGuid,
-    /// Distance limit for the `IsWithinDistInMap` gate on non-caster units.
+    /// Distance limit for the within-distance gate on non-caster units.
     pub radius: f32,
-    /// `raid`: include every subgroup when true; otherwise only the anchor's
-    /// subgroup.
+    /// Include every subgroup when true; otherwise only the anchor's subgroup.
     pub raid: bool,
-    /// `withPets`: also append each eligible player's pet.
+    /// Also append each eligible player's pet.
     pub with_pets: bool,
-    /// `withcaster`: allow the caster itself to be appended without a distance
-    /// check.
+    /// Allow the caster itself to be appended without a distance check.
     pub with_caster: bool,
-    /// `m_spellInfo->spellLevel` — the level gate is `level + 10 >= spellLevel`.
+    /// The level gate is `level + 10 >= spell_level`.
     pub spell_level: u32,
 }
 
@@ -1945,8 +1931,8 @@ fn unit_map(guid: ObjectGuid, world: &World) -> Option<(u32, u32)> {
     }
 }
 
-/// `Unit::IsWithinDistInMap` — same map/instance and within `radius` (centre
-/// distance; combat-reach padding is not modelled). ...
+/// Same map/instance and within `radius` (centre distance; combat-reach
+/// padding is not modelled). ...
 fn is_within_dist_in_map(
     caster: ObjectGuid,
     target: ObjectGuid,
@@ -1960,7 +1946,8 @@ fn is_within_dist_in_map(
     }
 }
 
-/// `Unit::GetCharmerOrOwnerPlayerOrPlayerItself`.
+/// The player that charmed or owns a unit, or the unit itself when it is a
+/// player.
 fn charmer_or_owner_player_or_self(guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
     if guid.is_player() {
         Some(guid)
@@ -1973,7 +1960,7 @@ fn charmer_or_owner_player_or_self(guid: ObjectGuid, world: &World) -> Option<Ob
     }
 }
 
-/// `Unit::GetPet` for player-owned runtime pets.
+/// The player's active runtime pet, if any.
 fn unit_pet(owner: ObjectGuid, world: &World) -> Option<ObjectGuid> {
     world
         .systems
@@ -1983,12 +1970,10 @@ fn unit_pet(owner: ObjectGuid, world: &World) -> Option<ObjectGuid> {
         .flatten()
 }
 
-/// Port of `Spell::FillRaidOrPartyTargets`.
-///
 /// Appends the caster's party/raid (or, with no group, the solo owner/self
 /// chain) to `out`, applying the subgroup, level, hostility and distance gates.
 ///
-/// Approximations (flagged with `// ...`): pet resolution (`GetPet`) and non-player
+/// Approximations (flagged with `// ...`): pet resolution and non-player
 /// charm/owner resolution are not tracked; hostility uses the coarse
 /// [`is_hostile`] heuristic (players are never hostile to one another here);
 /// distance is centre-to-centre without combat-reach padding.
@@ -2029,7 +2014,7 @@ pub fn fill_raid_or_party_targets(
     }
 }
 
-/// Append `unit` (and, when `withPets`, its pet) to `out` if it passes the
+/// Append `unit` (and, when requested, its pet) to `out` if it passes the
 /// caster/distance gate. Shared by both the group and solo paths.
 fn push_unit_and_pet(
     unit: ObjectGuid,
@@ -2055,12 +2040,12 @@ fn push_unit_and_pet(
     }
 }
 
-// ─── SetTargetMap helper constants ─────────────────────────────────────────────
+// ─── Chain-target helper constants ──────────────────────────────────────────
 
-/// Maximum distance for a chain spell hop (between targets) from CHAIN_SPELL_JUMP_RADIUS.
+/// Maximum distance for a chain spell hop between targets.
 const CHAIN_SPELL_JUMP_RADIUS: f32 = 10.0;
 
-// ─── SetTargetMap new target-mode helpers ─────────────────────────────────────
+// ─── Chain / single-target helpers ──────────────────────────────────────────
 
 /// Get a pet or charmed unit GUID for the caster.
 fn caster_pet_or_charm(caster_guid: ObjectGuid, world: &World) -> Option<ObjectGuid> {
@@ -2277,7 +2262,7 @@ fn resolve_party_member(
     }
 }
 
-/// Resolve TARGET_LOCATION_CASTER_DEST (18) inner switch.
+/// Resolve the caster-destination implicit target (18) inner switch.
 fn resolve_caster_dest(
     spell_entry: &crate::dbc::structures::SpellEntry,
     effect_idx: usize,
@@ -2359,9 +2344,9 @@ mod tests {
     /// with a default radius (effect_radius_index 0 → 10.0 yds).
     fn aoe_enemy_spell(id: u32) -> SpellEntry {
         let mut effect = [0u32; 3];
-        effect[0] = 2; // SPELL_EFFECT_SCHOOL_DAMAGE
+        effect[0] = 2; // school damage
         let mut target_a = [0u32; 3];
-        target_a[0] = 16; // TARGET_ENUM_UNITS_ENEMY_AOE_AT_DEST_LOC (AllEnemyInAreaInstant)
+        target_a[0] = 16; // enemy AoE at destination
         SpellEntry {
             id,
             name: format!("AoE{id}"),
@@ -2465,38 +2450,38 @@ mod tests {
 
     fn script_near_caster_spell(id: u32) -> SpellEntry {
         let mut spell = aoe_enemy_spell(id);
-        spell.effect_implicit_target_a[0] = 38; // TARGET_UNIT_SCRIPT_NEAR_CASTER
+        spell.effect_implicit_target_a[0] = 38; // script-selected unit target
         spell
     }
 
     fn gameobject_script_near_caster_spell(id: u32) -> SpellEntry {
         let mut spell = script_near_caster_spell(id);
-        spell.effect_implicit_target_a[0] = 40; // TARGET_GAMEOBJECT_SCRIPT_NEAR_CASTER
+        spell.effect_implicit_target_a[0] = 40; // script-selected gameobject target
         spell
     }
 
     fn location_script_near_caster_spell(id: u32) -> SpellEntry {
         let mut spell = script_near_caster_spell(id);
-        spell.effect_implicit_target_a[0] = 46; // TARGET_LOCATION_SCRIPT_NEAR_CASTER
+        spell.effect_implicit_target_a[0] = 46; // script-selected location target
         spell
     }
 
     fn script_aoe_at_source_spell(id: u32) -> SpellEntry {
         let mut spell = aoe_enemy_spell(id);
-        spell.effect_implicit_target_a[0] = 7; // TARGET_ENUM_UNITS_SCRIPT_AOE_AT_SRC_LOC
+        spell.effect_implicit_target_a[0] = 7; // script AoE at source
         spell
     }
 
     fn script_aoe_at_destination_spell(id: u32, effect: u32) -> SpellEntry {
         let mut spell = aoe_enemy_spell(id);
         spell.effect[0] = effect;
-        spell.effect_implicit_target_a[0] = 8; // TARGET_ENUM_UNITS_SCRIPT_AOE_AT_DEST_LOC
+        spell.effect_implicit_target_a[0] = 8; // script AoE at destination
         spell
     }
 
     fn script_cone_spell(id: u32) -> SpellEntry {
         let mut spell = aoe_enemy_spell(id);
-        spell.effect_implicit_target_a[0] = 60; // TARGET_ENUM_UNITS_SCRIPT_IN_CONE_60
+        spell.effect_implicit_target_a[0] = 60; // script cone (60)
         spell
     }
 
@@ -2635,7 +2620,7 @@ mod tests {
         world.managers.spell_mgr.set_spell_script_targets_for_test(
             spell_id,
             vec![SpellTargetEntry {
-                type_: 1, // SPELL_TARGET_TYPE_CREATURE
+                type_: 1, // creature target type
                 target_id: 9000,
                 condition_id: 0,
                 can_focus: false,
@@ -2699,7 +2684,7 @@ mod tests {
         world.managers.spell_mgr.set_spell_script_targets_for_test(
             spell_id,
             vec![SpellTargetEntry {
-                type_: 2, // SPELL_TARGET_TYPE_DEAD
+                type_: 2, // dead-creature target type
                 target_id: 9007,
                 condition_id: 0,
                 can_focus: false,
@@ -2741,7 +2726,7 @@ mod tests {
         world.managers.spell_mgr.set_spell_script_targets_for_test(
             spell_id,
             vec![SpellTargetEntry {
-                type_: 0, // SPELL_TARGET_TYPE_GAMEOBJECT
+                type_: 0, // gameobject target type
                 target_id: entry,
                 condition_id: 0,
                 can_focus: false,
@@ -2811,7 +2796,7 @@ mod tests {
         add_test_player(&world, caster, 0, 0);
         let template = GameObjectTemplate {
             entry: 8001,
-            go_type: 8, // GAMEOBJECT_TYPE_SPELL_FOCUS
+            go_type: 8, // spell-focus gameobject type
             display_id: 0,
             name: "Focus".to_string(),
             icon_name: String::new(),
@@ -2875,7 +2860,7 @@ mod tests {
         world.managers.spell_mgr.set_spell_script_targets_for_test(
             spell_id,
             vec![SpellTargetEntry {
-                type_: 1, // SPELL_TARGET_TYPE_CREATURE
+                type_: 1, // creature target type
                 target_id: 9001,
                 condition_id: 0,
                 can_focus: false,
@@ -2905,7 +2890,7 @@ mod tests {
         world.managers.spell_mgr.set_spell_script_targets_for_test(
             spell_id,
             vec![SpellTargetEntry {
-                type_: 1, // SPELL_TARGET_TYPE_CREATURE
+                type_: 1, // creature target type
                 target_id: 9002,
                 condition_id: 0,
                 can_focus: false,
@@ -2973,7 +2958,7 @@ mod tests {
         world.managers.spell_mgr.set_spell_script_targets_for_test(
             spell_id,
             vec![SpellTargetEntry {
-                type_: 1, // SPELL_TARGET_TYPE_CREATURE
+                type_: 1, // creature target type
                 target_id: 9004,
                 condition_id: 0,
                 can_focus: false,
@@ -3004,7 +2989,7 @@ mod tests {
         world.managers.condition_mgr.add_for_test(
             1,
             ConditionEntry {
-                kind: 41,             // CONDITION_HEALTH_PERCENT
+                kind: 41,             // health-percent condition
                 values: [5, 2, 0, 0], // <= 5%
                 flags: 0,
             },
@@ -3186,7 +3171,7 @@ mod tests {
         assert!(spell_breaks_stealth_by_default(false, 0, 0));
         // Triggered spells never break stealth.
         assert!(!spell_breaks_stealth_by_default(true, 0, 0));
-        // ALLOW_WHILE_STEALTHED spells never break stealth.
+        // Allow-while-stealthed spells never break stealth.
         assert!(!spell_breaks_stealth_by_default(
             false,
             SPELL_ATTR_EX_ALLOW_WHILE_STEALTHED,
@@ -3258,21 +3243,21 @@ mod tests {
 
     #[test]
     fn area_aura_effects_are_detected() {
-        assert!(is_area_aura_effect(35)); // PARTY
-        assert!(is_area_aura_effect(119)); // PET
-        assert!(is_area_aura_effect(128)); // FRIEND
-        assert!(is_area_aura_effect(129)); // ENEMY
-        assert!(is_area_aura_effect(132)); // RAID
-        assert!(!is_area_aura_effect(2)); // SCHOOL_DAMAGE
+        assert!(is_area_aura_effect(35)); // area aura: party
+        assert!(is_area_aura_effect(119)); // area aura: pet
+        assert!(is_area_aura_effect(128)); // area aura: friend
+        assert!(is_area_aura_effect(129)); // area aura: enemy
+        assert!(is_area_aura_effect(132)); // area aura: raid
+        assert!(!is_area_aura_effect(2)); // school damage
     }
 
     #[test]
     fn caster_self_registration_gate() {
         // Area auras and spawn/language/quest-complete effects self-register.
         assert!(effect_self_registers_caster(35));
-        assert!(effect_self_registers_caster(56)); // SPAWN
-        assert!(effect_self_registers_caster(27)); // LANGUAGE
-        assert!(effect_self_registers_caster(24)); // QUEST_COMPLETE
+        assert!(effect_self_registers_caster(56)); // spawn
+        assert!(effect_self_registers_caster(27)); // language
+        assert!(effect_self_registers_caster(24)); // quest-complete
                                                    // An ordinary damage effect does not.
         assert!(!effect_self_registers_caster(2));
     }
@@ -3280,7 +3265,7 @@ mod tests {
     #[test]
     fn target_reuse_requires_matching_pair_and_no_area_aura() {
         let base = EffectTargetShape {
-            effect: 2, // SCHOOL_DAMAGE
+            effect: 2, // school damage
             target_a: 6,
             target_b: 0,
         };
@@ -3295,7 +3280,7 @@ mod tests {
             ..base
         };
         assert!(!can_reuse_targets(3, base, mismatched));
-        // Effect j is SPELL_EFFECT_NONE: no reuse (nothing to copy).
+        // Effect j has no effect value: no reuse (nothing to copy).
         let none_effect = EffectTargetShape { effect: 0, ..base };
         assert!(!can_reuse_targets(3, base, none_effect));
         // Either effect being an area aura disables reuse.
@@ -3667,8 +3652,8 @@ mod tests {
     }
 
     /// Resolution now runs each resolved candidate through `check_target`: an
-    /// ONLY_ON_PLAYER spell drops a non-player candidate that plain resolution
-    /// would otherwise include.
+    /// An only-on-player spell drops a non-player candidate that plain
+    /// resolution would otherwise include.
     #[tokio::test]
     async fn resolve_filters_targets_through_check_target() {
         let world = test_world();
@@ -3685,18 +3670,18 @@ mod tests {
             "baseline enemy AoE should resolve the nearby creature"
         );
 
-        // ONLY_ON_PLAYER: check_target now rejects the non-player candidate.
+        // Only-on-player: check_target now rejects the non-player candidate.
         let mut only_player = aoe_enemy_spell(52001);
         only_player.attributes_ex3 = SPELL_ATTR_EX3_ONLY_ON_PLAYER;
         world.managers.spell_mgr.add_spell(only_player);
         let resolved2 = resolve_spell_targets(52001, &SpellCastTargets::default(), caster, &world);
         assert!(
             !resolved2.effect_targets[0].contains(&creature),
-            "check_target must drop the creature for an ONLY_ON_PLAYER spell"
+            "check_target must drop the creature for an only-on-player spell"
         );
     }
 
-    /// A party target mode (TARGET_ALL_PARTY_AROUND_CASTER = 20) now routes
+    /// A party target mode (party-around-caster, 20) now routes
     /// through `fill_raid_or_party_targets`, gathering the caster's group.
     #[tokio::test]
     async fn resolve_party_mode_routes_through_fill_raid_or_party_targets() {
@@ -3714,7 +3699,7 @@ mod tests {
         world.systems.group.add_player_to_group_test(leader, 600);
         world.systems.group.add_player_to_group_test(member, 600);
 
-        // Party-targeted spell: TARGET_ALL_PARTY_AROUND_CASTER (20).
+        // Party-targeted spell: party-around-caster (20).
         let mut spell = aoe_enemy_spell(52002);
         spell.effect_implicit_target_a[0] = 20;
         world.managers.spell_mgr.add_spell(spell);
@@ -3731,35 +3716,35 @@ mod tests {
     }
 }
 
-// ─── Spell::CanAutoCast ─────────────────────────────────────────────────────
+// ─── CanAutoCast ────────────────────────────────────────────────────────────
 //
-// C++ lines 6800–6868. Decides whether a pet-controlled spell can be auto-cast
-// on `target_guid`. Returns true when the spell would land on the target.
+// Decides whether a pet-controlled spell can be auto-cast on `target_guid`.
+// Returns true when the spell would land on the target.
 //
-// Order (mirrors C++):
+// Order:
 //   1. No caster unit → false
-//   2. SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT (0x0000_4000) with active victim → false
-//   3. Imp Fire Shield (family WARLOCK, Imp Buffs family flags, visual 289):
+//   2. Cancels-auto-attack-combat attribute (0x0000_4000) with active victim → false
+//   3. Imp Fire Shield (Warlock family, Imp Buffs family flags, visual 289):
 //      target must have an attacker → false when none
 //   4. Non-damage spells: for each aura-apply effect skip if target already has
-//      the aura (redundant buff), speed aura (SPELL_AURA_MOD_INCREASE_SPEED)
-//      while already in melee range of a victim, or stun aura on already-stunned
+//      the aura (redundant buff), speed aura (increase-speed aura type) while
+//      already in melee range of a victim, or stun aura on an already-stunned
 //      target.
 //   5. Full-health heal spell → false
-//   6. CheckPetCast → if OK or just UNIT_NOT_INFRONT, run FillTargetMap and
+//   6. Pet-cast check → if OK or just not-in-front, run target resolution and
 //      check whether target_guid appears in the resolved target list.
 
-/// SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT — pet auto-attack should not be
-/// cancelled by auto-cast spells like Prowl.
+/// Cancels-auto-attack-combat attribute bit (0x0000_4000): pet auto-attack
+/// should not be cancelled by auto-cast spells like Prowl.
 pub const SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT: u32 = 0x0000_4000;
 
-/// SPELLFAMILY_WARLOCK
+/// Warlock spell-family id.
 const SPELLFAMILY_WARLOCK: u32 = 3;
-/// CF_WARLOCK_IMP_BUFFS — family flag used by Fire Shield
+/// Imp Buffs family flag (0x0000_0080) used by Fire Shield.
 const CF_WARLOCK_IMP_BUFFS: u64 = 0x0000_0080;
-/// SPELL_EFFECT_HEAL
+/// Heal effect id.
 const SPELL_EFFECT_HEAL: u32 = 8;
-/// SPELL_EFFECT_HEAL_MAX_HEALTH
+/// Heal-max-health effect id.
 const SPELL_EFFECT_HEAL_MAX_HEALTH: u32 = 128;
 
 #[derive(Debug, Clone)]
@@ -3784,9 +3769,9 @@ pub struct CanAutoCastInput {
     pub target_has_attacker: bool,
     pub caster_in_melee_of_victim: bool,
     pub target_is_stunned: bool,
-    // CheckPetCast result
-    pub check_pet_cast_result: u8, // 0 = ok, 1 = UNIT_NOT_INFRONT, other = failure
-    // FillTargetMap result: whether target_guid appears in the resolved set
+    // Pet-cast check result
+    pub check_pet_cast_result: u8, // 0 = ok, 1 = not-in-front, other = failure
+    // Target-resolution result: whether target_guid appears in the resolved set
     pub target_in_resolved_list: bool,
 }
 
@@ -3796,7 +3781,7 @@ pub fn can_auto_cast(input: &CanAutoCastInput) -> bool {
         return false;
     }
 
-    // 2. ATTRIB_CANCELS_AUTO_ATTACK combat victim check
+    // 2. Cancels-auto-attack combat victim check
     if (input.spell_attributes & SPELL_ATTR_CANCELS_AUTO_ATTACK_COMBAT) != 0
         && input.caster_has_victim
     {
@@ -3817,7 +3802,7 @@ pub fn can_auto_cast(input: &CanAutoCastInput) -> bool {
     if !input.has_school_damage_effect {
         for j in 0..3 {
             if input.effects[j] == 29 {
-                // SPELL_EFFECT_APPLY_AURA
+                // Apply-aura effect
                 if input.stack_amount <= 1 {
                     if input.target_has_aura[j] {
                         return false;
@@ -3849,7 +3834,7 @@ pub fn can_auto_cast(input: &CanAutoCastInput) -> bool {
         return false;
     }
 
-    // 6. CheckPetCast → FillTargetMap
+    // 6. Pet-cast check → resolved target list
     if input.check_pet_cast_result == 0 || input.check_pet_cast_result == 1 {
         if input.target_in_resolved_list {
             return true;
@@ -3926,7 +3911,7 @@ mod can_auto_cast_tests {
     #[test]
     fn redundant_aura_blocks_autocast() {
         let mut i = base_input();
-        i.effects[0] = 29; // APPLY_AURA
+        i.effects[0] = 29; // apply aura
         i.stack_amount = 1;
         i.target_has_aura[0] = true;
         assert!(!can_auto_cast(&i));
