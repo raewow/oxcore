@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use leptos_meta::{Script, Stylesheet};
 
 use crate::pages::admin::shell::{AdminSection, AdminShell};
 
@@ -11,8 +12,8 @@ pub fn LiveMap() -> impl IntoView {
             <p class="mt-3 text-xs text-muted-foreground">"Online characters refresh every 10 seconds. Only Eastern Kingdoms and Kalimdor are shown."</p>
             <div id="live-map" class="mt-6 min-h-[70vh] border border-border bg-[#001d29]" aria-label="Live player map"></div>
         </AdminShell>
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
-        <script src="/live-map.js" defer></script>
+        <Stylesheet href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <Script defer="defer" src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" />
+        <Script defer="defer" src="/live-map.js" />
     }
 }

@@ -42,21 +42,23 @@
   // {x}_{y} combinations Leaflet would otherwise request have no image.
   // Skip those instead of letting them 404, which was both spamming the
   // console and stealing HTTP connections from the tiles that do exist.
-  const SparseTileLayer = L.TileLayer.extend({
-    initialize(url, options, validTiles) {
-      L.TileLayer.prototype.initialize.call(this, url, options);
-      this._validTiles = validTiles;
-    },
-    createTile(coords, done) {
-      const key = `${coords.x}_${coords.y}`;
-      if (this._validTiles && !this._validTiles.has(key)) {
-        const tile = document.createElement("div");
-        done(null, tile);
-        return tile;
-      }
-      return L.TileLayer.prototype.createTile.call(this, coords, done);
-    },
-  });
+  function sparseTileLayer() {
+    return L.TileLayer.extend({
+      initialize(url, options, validTiles) {
+        L.TileLayer.prototype.initialize.call(this, url, options);
+        this._validTiles = validTiles;
+      },
+      createTile(coords, done) {
+        const key = `${coords.x}_${coords.y}`;
+        if (this._validTiles && !this._validTiles.has(key)) {
+          const tile = document.createElement("div");
+          done(null, tile);
+          return tile;
+        }
+        return L.TileLayer.prototype.createTile.call(this, coords, done);
+      },
+    });
+  }
 
   function icon() {
     return L.divIcon({
@@ -93,7 +95,14 @@
   }
 
   async function initialize() {
-    if (initialized || !window.L || !document.getElementById("live-map")) return;
+    if (initialized || !document.getElementById("live-map")) return;
+    if (!window.L) {
+      // The script can load before Leaflet (e.g. after a client-side route
+      // change where deferred scripts run asynchronously), so retry until it
+      // is available rather than crashing on `L.TileLayer.extend`.
+      window.setTimeout(initialize, 100);
+      return;
+    }
     initialized = true;
     const validTiles = await loadValidTiles();
     map = L.map("live-map", {
@@ -104,7 +113,7 @@
       maxBoundsViscosity: 1,
       attributionControl: false,
     });
-    new SparseTileLayer("/assets/live-map/tiles/{x}_{y}.png", {
+    new (sparseTileLayer())("/assets/live-map/tiles/{x}_{y}.png", {
       bounds: BOUNDS,
       tileSize: TILE_SIZE,
       noWrap: true,

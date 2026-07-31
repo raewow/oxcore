@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -8,6 +8,10 @@ use axum::{Extension, Router};
 use leptos::config::get_configuration;
 use leptos::prelude::provide_context;
 use leptos_axum::{generate_route_list, LeptosRoutes};
+use std::path::PathBuf;
+use tower::ServiceBuilder;
+use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -28,6 +32,17 @@ pub async fn serve(config: Config) -> Result<()> {
             .leptos_options;
     leptos_options.site_addr = address;
     let routes = generate_route_list(App);
+
+    let assets_service = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=604800, stale-while-revalidate=86400"),
+        ))
+        .service(
+            ServeDir::new(PathBuf::from(&*leptos_options.site_root).join("assets"))
+                .precompressed_gzip()
+                .precompressed_br(),
+        );
 
     let app = Router::new()
         .route("/healthz", get(healthz))
@@ -75,6 +90,7 @@ pub async fn serve(config: Config) -> Result<()> {
                 move || shell(leptos_options.clone())
             },
         )
+        .nest_service("/assets", assets_service)
         .fallback(leptos_axum::file_and_error_handler(shell))
         .with_state(leptos_options)
         .layer(Extension(state.clone()))
