@@ -25,12 +25,19 @@ static AURA_CAST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 /// The input collapses passive/hidden auras to `0` before this ever sees them (see
 /// `encode_aura_flags_vanilla`), so modern's `Passive` bit cannot be recovered here -- that
 /// distinction is lost upstream of this translator, not by it.
-fn to_modern_aura_flags(vanilla: u8) -> u16 {
+///
+/// `has_duration` raises modern's `Duration` bit (0x04): a timed aura without it shows no timer and
+/// can be skipped from the buff bar entirely. `NoCaster` (0x01) is always set -- vanilla's aura
+/// packet carries no caster, so the modern client must be told the cast unit is absent rather than
+/// left expecting one it will never receive.
+fn to_modern_aura_flags(vanilla: u8, has_duration: bool) -> u16 {
     const POSITIVE: u16 = 0x100;
     const NEGATIVE: u16 = 0x10;
     const CANCELABLE: u16 = 0x02;
+    const DURATION: u16 = 0x04;
+    const NO_CASTER: u16 = 0x01;
 
-    let mut modern = 0;
+    let mut modern = NO_CASTER;
     if vanilla & 0x02 != 0 {
         modern |= NEGATIVE;
     } else if vanilla & 0x01 != 0 {
@@ -38,6 +45,9 @@ fn to_modern_aura_flags(vanilla: u8) -> u16 {
     }
     if vanilla & 0x08 != 0 {
         modern |= CANCELABLE;
+    }
+    if has_duration {
+        modern |= DURATION;
     }
     modern
 }
@@ -123,8 +133,14 @@ impl ToWorldPacket for SmsgAuraUpdate {
             writer.write_packed_guid_128(high, low); // CastID
             writer.write_u32(self.spell_id);
             writer.write_u32(0); // SpellXSpellVisualID -- no 1.12 source, see SmsgSpellGo
-            writer.write_u16(to_modern_aura_flags(self.aura_flags));
-            writer.write_u32(0); // ActiveFlags
+            writer.write_u16(to_modern_aura_flags(
+                self.aura_flags,
+                self.max_duration_ms.is_some(),
+            ));
+            // Vanilla carries no per-effect data, but the 1.14 client treats ActiveFlags=0 as "this
+            // aura has no active effects" and skips it from the visible aura list (JimsProxy
+            // clamps to effect 0 for the same reason). Mark the primary effect active.
+            writer.write_u32(1); // ActiveFlags
             writer.write_u16(u16::from(self.level)); // CastLevel, widens from u8
             writer.write_u8(self.stacks); // Applications
             writer.write_i32(0); // ContentTuningID
@@ -315,7 +331,7 @@ mod modern_aura_tests {
     /// does, so a raw copy would show a debuff as player-cancelable and never mark it negative.
     #[test]
     fn negative_moves_to_its_modern_bit() {
-        assert_eq!(to_modern_aura_flags(0x02), 0x10);
+        assert_eq!(to_modern_aura_flags(0x02, false), 0x10 | 0x01);
     }
 
     /// A cancelable positive buff (oxcore's `0x09` = `EF_FLAG_0 | CANCELABLE`) must set both
@@ -323,19 +339,54 @@ mod modern_aura_tests {
     /// cancel; losing `Positive` would mis-color the icon.
     #[test]
     fn a_cancelable_positive_buff_sets_both_modern_bits() {
-        assert_eq!(to_modern_aura_flags(0x09), 0x100 | 0x02);
+        assert_eq!(to_modern_aura_flags(0x09, false), 0x100 | 0x02 | 0x01);
     }
 
     /// A plain positive buff with no cancel bit must not spuriously set `Cancelable`.
     #[test]
     fn a_plain_positive_buff_sets_only_positive() {
-        assert_eq!(to_modern_aura_flags(0x01), 0x100);
+        assert_eq!(to_modern_aura_flags(0x01, false), 0x100 | 0x01);
+    }
+
+    /// A timed aura must set modern's `Duration` bit or the client shows no timer (and can skip the
+    /// aura from the buff bar entirely); a permanent one must not.
+    #[test]
+    fn duration_flag_follows_duration_presence() {
+        assert_ne!(to_modern_aura_flags(0x09, true) & 0x04, 0);
+        assert_eq!(to_modern_aura_flags(0x09, false) & 0x04, 0);
+    }
+
+    /// Vanilla's aura packet carries no caster, so the modern client must be told the cast unit is
+    /// absent via `NoCaster`, or it waits on a GUID that never arrives.
+    #[test]
+    fn no_caster_is_always_set() {
+        assert_ne!(to_modern_aura_flags(0x00, false) & 0x01, 0);
+    }
+
+    /// ActiveFlags=0 means "this aura has no active effects" to the 1.14 client, which then skips it
+    /// from the visible aura list -- the very symptom of "aura applied server-side but no icon".
+    /// The body must carry at least the primary effect as active, per JimsProxy's clamp.
+    #[test]
+    fn active_flags_never_zero_for_a_live_aura() {
+        let packet = aura(1459, None, None);
+        let mut reader = crate::protocol::bitbuf::BitReader::new(packet.contents());
+        reader.read_bit(); // UpdateAll
+        assert_eq!(reader.read_bits(9), Some(1), "one aura in the list");
+        let slot = reader.read_u8();
+        assert_eq!(slot, Some(3));
+        assert_eq!(reader.read_bit(), Some(true), "HasAuraData");
+        reader.read_packed_guid_128(); // CastID
+        reader.read_u32(); // SpellID
+        reader.read_u32(); // SpellXSpellVisualID
+        reader.read_bits(16); // Flags
+        assert_eq!(reader.read_u32(), Some(1), "ActiveFlags must be nonzero");
     }
 
     /// Passive/hidden auras collapse to zero before reaching this function (see
-    /// `encode_aura_flags_vanilla`), and zero must translate to zero, not to some inferred bit.
+    /// `encode_aura_flags_vanilla`), so zero must translate to nothing but the always-present
+    /// `NoCaster` — never to an inferred positive/negative/cancelable bit.
     #[test]
-    fn zero_flags_translate_to_zero() {
-        assert_eq!(to_modern_aura_flags(0x00), 0x00);
+    fn zero_flags_translate_to_no_caster_only() {
+        assert_eq!(to_modern_aura_flags(0x00, false), 0x01);
     }
 }
