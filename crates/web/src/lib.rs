@@ -23,6 +23,7 @@ use crate::pages::account::{Account, Activity, CharacterDetail, Security, Status
 use crate::pages::admin::accounts::{AccountManagement, AdminAccountDetail};
 use crate::pages::admin::audit::AdminAuditLog;
 use crate::pages::admin::characters::{AdminCharacterDetail, AdminCharacters};
+use crate::pages::admin::chat::AdminChat;
 use crate::pages::admin::live_map::LiveMap;
 use crate::pages::admin::overview::Admin;
 use crate::pages::admin::permissions::Permissions;
@@ -107,6 +108,7 @@ pub fn App() -> impl IntoView {
                 <Route path=(StaticSegment("admin"), StaticSegment("characters")) view=AdminCharacters />
                 <Route path=(StaticSegment("admin"), StaticSegment("characters"), ParamSegment("guid")) view=AdminCharacterDetail />
                 <Route path=(StaticSegment("admin"), StaticSegment("audit-logs")) view=AdminAuditLog />
+                <Route path=(StaticSegment("admin"), StaticSegment("chat")) view=AdminChat />
                 <Route path=(StaticSegment("admin"), StaticSegment("permissions")) view=Permissions />
                 <Route path=(StaticSegment("admin"), StaticSegment("live-map")) view=LiveMap />
             </Routes>

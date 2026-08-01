@@ -107,3 +107,14 @@ player_limit = 0
 # Weather
 activate_weather = true          # Enable the zone weather system
 change_weather_interval = 600000 # milliseconds between weather rolls (10 minutes)
+
+[web]
+# Browser-facing player portal and administration console. TLS should terminate at a reverse
+# proxy in production; bind this service to a private interface in that deployment.
+bind_ip = "0.0.0.0"
+port = 8080
+public_base_url = "http://127.0.0.1:8080"
+auth_database_url = "mysql://root:root@127.0.0.1:3306/auth"
+character_database_url = "mysql://root:root@127.0.0.1:3306/characters"
+web_database_url = "mysql://root:root@127.0.0.1:3306/web"
+logs_database_url = "mysql://root:root@127.0.0.1:3306/logs"

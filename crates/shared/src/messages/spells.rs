@@ -6,12 +6,53 @@ use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// SMSG_SPELL_PREPARE (modern-only; 1.14 build 42597 wire number 0x2C38)
+///
+/// The modern client acknowledges every cast press with a locally-tracked pending cast keyed on
+/// the `CastID` *it* minted (sent in `CMSG_CAST_SPELL`/`CMSG_USE_ITEM`). This packet links that
+/// client-generated id to the server's own cast id, which `SMSG_SPELL_START`/`SMSG_SPELL_GO`
+/// then carry — without the link, the client never resolves its pending press and the cast
+/// bar/animation state machine hangs.
+///
+/// Vanilla has no such message: a 1.12 client keys casts directly on the ids the server already
+/// sends. This message is therefore never sent to a vanilla session, and `to_vanilla` is
+/// unreachable in practice; it exists only to satisfy the trait.
+pub struct SmsgSpellPrepare {
+    /// The cast id the *client* minted and echoed in its `CMSG_CAST_SPELL`/`CMSG_USE_ITEM`.
+    pub client_cast_id: (u64, u64),
+    /// The server's own cast id (a modern `Cast` GUID128, see [`cast_guid128`]). Must be the same
+    /// value the following `SMSG_SPELL_START`/`SMSG_SPELL_GO` carry.
+    pub server_cast_id: (u64, u64),
+}
+
+impl ToWorldPacket for SmsgSpellPrepare {
+    fn to_vanilla(&self) -> WorldPacket {
+        // Unreachable for vanilla sessions — see the struct doc. Return an empty packet rather
+        // than write a body that has no meaning on the 1.12 wire.
+        WorldPacket::new(Opcode::SMSG_SPELL_PREPARE)
+    }
+
+    /// Two packed GUID128s: `ClientCastID` then `ServerCastID`, per JimsProxy's `SpellPrepare`.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.client_cast_id;
+        writer.write_packed_guid_128(high, low);
+        let (high, low) = self.server_cast_id;
+        writer.write_packed_guid_128(high, low);
+        Some(writer.finish(Opcode::SMSG_SPELL_PREPARE))
+    }
+}
+
 /// SMSG_SPELL_START (opcode 0x0131)
 /// Broadcast when a spell cast begins (cast bar appears).
 pub struct SmsgSpellStart {
     pub caster_guid: ObjectGuid,
     pub caster_guid_pack: ObjectGuid,
     pub spell_id: u32,
+    /// The modern `SpellXSpellVisualID`: the DB2 visual id the client resolves to play the cast's
+    /// visuals. For a modern client press this is the value it echoed in `CMSG_CAST_SPELL`
+    /// (`ModernSpellCastRequest::spell_visual_id`); `0` (no modern origin) plays no animation.
+    pub spell_visual_id: u32,
     pub cast_flags: u16,
     pub cast_time_ms: u32,
     pub target_guid: Option<ObjectGuid>,
@@ -67,16 +108,20 @@ pub fn next_cast_sequence() -> u64 {
 /// * hit and miss targets become guid128 lists *after* the target block, not before;
 /// * missile trajectory, immunities, heal prediction and power costs are all new.
 ///
-/// Fields with no vanilla source are written as defaults. `SpellXSpellVisualID` is
-/// one of them, and it is the reason spell *animations* may not play: 1.14 selects the visual from a
-/// DB2 id keyed on spell, which a 1.12 spell table has no column for. Sending zero is
-/// correct-but-silent rather than wrong — the cast still registers, the flourish is missing.
+/// Fields with no vanilla source are written as defaults. `SpellXSpellVisualID` is the exception:
+/// it is what makes the 1.14 client actually *play* the cast's visuals. The client resolves it from
+/// its own DB2 and sends it back in `CMSG_CAST_SPELL`, so a native server echoes that value (see
+/// `handlers/spells.rs`). Sending zero — the value this function gets for casts with no modern
+/// origin — is correct-but-silent: the cast registers and the damage applies, the flourish is
+/// missing. A guessed spell-id would be worse than zero, since the visual id is a DB2 row id
+/// unrelated to the spell id (e.g. Fireball 133 → 236677).
 #[allow(clippy::too_many_arguments)]
 fn write_modern_spell_cast_data(
     writer: &mut BitWriter,
     caster_guid: ObjectGuid,
     cast_item_guid: Option<ObjectGuid>,
     spell_id: u32,
+    spell_visual_id: u32,
     cast_time_ms: u32,
     target_guid: Option<ObjectGuid>,
     hit_targets: &[ObjectGuid],
@@ -96,7 +141,7 @@ fn write_modern_spell_cast_data(
     writer.write_packed_guid_128(0, 0); // OriginalCastID -- not a triggered cast
 
     writer.write_i32(spell_id as i32);
-    writer.write_u32(0); // SpellXSpellVisualID -- see above
+    writer.write_u32(spell_visual_id); // SpellXSpellVisualID -- see above
     writer.write_u32(0); // CastFlags
     writer.write_u32(0); // CastFlagsEx
     writer.write_u32(cast_time_ms);
@@ -221,6 +266,7 @@ impl ToWorldPacket for SmsgSpellStart {
             self.caster_guid,
             self.cast_item_guid,
             self.spell_id,
+            self.spell_visual_id,
             self.cast_time_ms,
             self.target_guid,
             &[],
@@ -237,6 +283,9 @@ pub struct SmsgSpellGo {
     pub caster_guid: ObjectGuid,
     pub caster_guid_pack: ObjectGuid,
     pub spell_id: u32,
+    /// Same semantics as `SmsgSpellStart::spell_visual_id`; must match the value START carried so
+    /// the completion resolves the same visual the cast bar opened under.
+    pub spell_visual_id: u32,
     pub cast_flags: u16,
     pub hit_targets: Vec<ObjectGuid>,
     pub miss_targets: Vec<SpellMissTarget>,
@@ -333,6 +382,7 @@ impl ToWorldPacket for SmsgSpellGo {
             self.caster_guid,
             self.cast_item_guid,
             self.spell_id,
+            self.spell_visual_id,
             0, // SPELL_GO carries no cast time; the cast has already completed
             self.target_guid,
             &self.hit_targets,
@@ -430,6 +480,7 @@ mod spell_packet_tests {
             caster_guid: caster,
             caster_guid_pack: caster,
             spell_id: 1234,
+            spell_visual_id: 0,
             cast_flags: 0x0100,
             hit_targets: vec![],
             miss_targets: vec![],
@@ -474,6 +525,7 @@ mod spell_packet_tests {
             caster_guid: caster,
             caster_guid_pack: caster,
             spell_id: 8690,
+            spell_visual_id: 0,
             cast_flags: 0x0002,
             hit_targets: vec![],
             miss_targets: vec![],
@@ -520,6 +572,7 @@ mod spell_packet_tests {
             caster_guid: caster,
             caster_guid_pack: caster,
             spell_id: 1234,
+            spell_visual_id: 0,
             cast_flags: 0,
             hit_targets: vec![],
             miss_targets: vec![SpellMissTarget {
@@ -563,6 +616,7 @@ mod spell_packet_tests {
             caster_guid: caster,
             caster_guid_pack: caster,
             spell_id: 1234,
+            spell_visual_id: 0,
             cast_flags: 0,
             hit_targets: vec![],
             miss_targets: vec![
@@ -610,6 +664,7 @@ mod spell_packet_tests {
             caster_guid: caster,
             caster_guid_pack: caster,
             spell_id: 8690,
+            spell_visual_id: 0,
             cast_flags,
             hit_targets: vec![],
             miss_targets: vec![],
@@ -636,6 +691,7 @@ mod spell_packet_tests {
             caster_guid: caster,
             caster_guid_pack: caster,
             spell_id: 8690,
+            spell_visual_id: 0,
             cast_flags: 0x0002,
             cast_time_ms: 10000,
             target_guid: None,
@@ -664,6 +720,7 @@ mod spell_packet_tests {
             caster_guid: caster,
             caster_guid_pack: caster,
             spell_id: 8690,
+            spell_visual_id: 0,
             cast_flags: 0x0002,
             cast_time_ms: 10000,
             target_guid: None,
@@ -690,6 +747,7 @@ mod spell_packet_tests {
             caster_guid: caster,
             caster_guid_pack: caster,
             spell_id: 8690,
+            spell_visual_id: 0,
             cast_flags,
             cast_time_ms: 10000,
             target_guid: None,
@@ -927,6 +985,55 @@ impl SmsgCastResult {
     /// Build a plain failure SMSG_CAST_RESULT with no extra arguments.
     pub fn failure(spell_id: u32, error_code: u8) -> WorldPacket {
         Self::build(spell_id, SPELL_RESULT_STATUS_FAIL, error_code, None, None)
+    }
+}
+
+/// SMSG_CAST_FAILED (1.14 build 42597 wire number 0x2C57, the same value our table calls
+/// `SMSG_CAST_RESULT`)
+///
+/// The modern failure body is a different shape from vanilla's `SMSG_CAST_RESULT`: it leads with
+/// the cast's `CastID` (the same id the client's pending press was acknowledged under, see
+/// [`SmsgSpellPrepare`]), then the spell, its visual, the reason widened to u32, and the two
+/// optional failure arguments as signed i32 always present (`-1` = none). `SmsgCastResult` can't
+/// express that — it builds a vanilla-shaped body and is dropped unported on the modern wire — so
+/// a modern rejection leaves the client's pending press unresolved and the cast bar/button stuck.
+/// This type exists to send a real modern failure.
+pub struct SmsgCastFailed {
+    /// The cast identity this failure resolves. Must be the id the client's pending press was
+    /// linked to: the server's own cast id if `SMSG_SPELL_PREPARE` was sent, or the client's own
+    /// cast id when rejecting before any PREPARE (see JimsProxy's `SendCastFailedWithoutPrepare`).
+    pub cast_id: (u64, u64),
+    pub spell_id: u32,
+    pub failure_reason: u8,
+    pub arg1: Option<u32>,
+    pub arg2: Option<u32>,
+}
+
+impl ToWorldPacket for SmsgCastFailed {
+    /// Reuse the vanilla `SMSG_CAST_RESULT` shape (spell + status + reason + optional args).
+    fn to_vanilla(&self) -> WorldPacket {
+        SmsgCastResult::build(
+            self.spell_id,
+            SPELL_RESULT_STATUS_FAIL,
+            self.failure_reason,
+            self.arg1,
+            self.arg2,
+        )
+    }
+
+    /// `CastID(guid128) + SpellID(u32) + SpellXSpellVisualID(u32) + Reason(u32) + FailedArg1(i32) +
+    /// FailedArg2(i32)`, per JimsProxy's `CastFailed`. Both args are always written; absent ones are
+    /// `-1`.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.cast_id;
+        writer.write_packed_guid_128(high, low); // CastID
+        writer.write_u32(self.spell_id);
+        writer.write_u32(0); // SpellXSpellVisualID -- no 1.12 source
+        writer.write_u32(u32::from(self.failure_reason)); // Reason
+        writer.write_i32(self.arg1.map(|v| v as i32).unwrap_or(-1)); // FailedArg1
+        writer.write_i32(self.arg2.map(|v| v as i32).unwrap_or(-1)); // FailedArg2
+        Some(writer.finish(Opcode::SMSG_CAST_RESULT))
     }
 }
 
@@ -1773,6 +1880,7 @@ mod modern_spell_tests {
             caster_guid: caster(),
             caster_guid_pack: caster(),
             spell_id: 133,
+            spell_visual_id: 0,
             cast_flags: 0,
             hit_targets: hits,
             miss_targets: misses,
@@ -1814,6 +1922,7 @@ mod modern_spell_tests {
             caster_guid: caster(),
             caster_guid_pack: caster(),
             spell_id: 133,
+            spell_visual_id: 0,
             cast_flags: 0,
             cast_time_ms: 0,
             target_guid: Some(ObjectGuid::new_creature(299, 464)),
@@ -1887,5 +1996,53 @@ mod modern_spell_tests {
             one > none,
             "a hit target must add its packed GUID to the body"
         );
+    }
+
+    // ===== SMSG_SPELL_PREPARE tests =====
+
+    /// The modern PREPARE body is two packed GUID128s — ClientCastID then ServerCastID. It must
+    /// round-trip: the client sends the *client* id in CMSG_CAST_SPELL and the server echoes it
+    /// here paired with its own id, so a parse of this body must recover both.
+    #[test]
+    fn spell_prepare_round_trips_both_cast_ids() {
+        let client_cast_id = (0x1122_3344_5566_7788u64, 0x99AA_BBCC_DDEE_FF00u64);
+        let (server_high, server_low) = cast_guid128(DEFAULT_REALM_ID, 0, 133, 0xDEAD_BEEF);
+        let msg = SmsgSpellPrepare {
+            client_cast_id,
+            server_cast_id: (server_high, server_low),
+        };
+
+        let pkt = msg.to_modern().expect("modern encoding must exist");
+        assert_eq!(pkt.opcode(), Opcode::SMSG_SPELL_PREPARE);
+
+        let mut reader = crate::protocol::bitbuf::BitReader::new(pkt.contents());
+        assert_eq!(
+            reader.read_packed_guid_128(),
+            Some(client_cast_id),
+            "the client's own cast id must lead the body"
+        );
+        assert_eq!(
+            reader.read_packed_guid_128(),
+            Some((server_high, server_low)),
+            "the server cast id must follow the client's"
+        );
+        assert_eq!(
+            reader.consumed(),
+            pkt.contents().len(),
+            "the whole body must be consumed"
+        );
+    }
+
+    /// A vanilla session must never receive PREPARE — there is no such message on the 1.12 wire —
+    /// so `to_vanilla` is a placeholder. Guard against regressions that would send a real body.
+    #[test]
+    fn spell_prepare_has_no_vanilla_form() {
+        let msg = SmsgSpellPrepare {
+            client_cast_id: (1, 2),
+            server_cast_id: (3, 4),
+        };
+        assert!(!Opcode::SMSG_SPELL_PREPARE.has_vanilla());
+        let pkt = msg.to_vanilla();
+        assert_eq!(pkt.contents().len(), 0, "vanilla body must be empty");
     }
 }

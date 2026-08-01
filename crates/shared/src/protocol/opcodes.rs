@@ -380,6 +380,7 @@ impl Opcode {
     pub const CMSG_CANCEL_CHANNELLING: Opcode = Opcode { vanilla: 0x013B, modern: 0x3265 }; // 315 (alias)
     pub const CMSG_USE_ITEM: Opcode = Opcode { vanilla: 0x00AB, modern: 0x3290 }; // 171
     pub const CMSG_NEW_SPELL_SLOT: Opcode = Opcode { vanilla: 0x012D, ..Opcode::NONE }; // 301
+    pub const SMSG_SPELL_PREPARE: Opcode = Opcode { modern: 0x2C38, ..Opcode::NONE }; // 1.14 only
     pub const SMSG_SPELL_START: Opcode = Opcode { vanilla: 0x0131, modern: 0x2C3A }; // 305
     pub const SMSG_SPELL_GO: Opcode = Opcode { vanilla: 0x0132, modern: 0x2C39 }; // 306
     pub const SMSG_CAST_RESULT: Opcode = Opcode { vanilla: 0x0130, modern: 0x2C57 }; // 304
@@ -1476,6 +1477,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::CMSG_CANCEL_CHANNELLING, "CMSG_CANCEL_CHANNELLING"),
     (Opcode::CMSG_USE_ITEM, "CMSG_USE_ITEM"),
     (Opcode::CMSG_NEW_SPELL_SLOT, "CMSG_NEW_SPELL_SLOT"),
+    (Opcode::SMSG_SPELL_PREPARE, "SMSG_SPELL_PREPARE"),
     (Opcode::SMSG_SPELL_START, "SMSG_SPELL_START"),
     (Opcode::SMSG_SPELL_GO, "SMSG_SPELL_GO"),
     (Opcode::SMSG_CAST_RESULT, "SMSG_CAST_RESULT"),

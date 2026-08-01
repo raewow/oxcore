@@ -17,6 +17,7 @@ use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
 
 use super::commands::{self, CommandRegistry};
+use super::log::{ChatLogEntry, ChatLogger};
 use super::types::*;
 use super::validation;
 
@@ -29,6 +30,7 @@ pub struct ChatSystem {
     broadcast_mgr: Arc<dyn BroadcastManagerTrait>,
     player_mgr: Arc<PlayerManager>,
     command_registry: CommandRegistry,
+    chat_logger: Option<Arc<ChatLogger>>,
 }
 
 impl ChatSystem {
@@ -49,7 +51,15 @@ impl ChatSystem {
             broadcast_mgr,
             player_mgr,
             command_registry,
+            chat_logger: None,
         }
+    }
+
+    /// Attach a persistent chat logger. Every successfully delivered message is
+    /// queued for the `logs.chat_log` table from then on.
+    pub fn with_chat_logger(mut self, logger: Arc<ChatLogger>) -> Self {
+        self.chat_logger = Some(logger);
+        self
     }
 
     pub fn with_flood_config(
@@ -824,6 +834,15 @@ impl ChatSystem {
         self.broadcast_mgr
             .broadcast_msg_to_players(&member_guids, &packet);
 
+        self.log_message(
+            "Channel",
+            Some(channel_name.to_string()),
+            sender_guid,
+            None,
+            None,
+            &clean_message,
+        );
+
         Ok(())
     }
 
@@ -881,23 +900,54 @@ impl ChatSystem {
         message: &str,
         social_system: &crate::game::social::SocialSystem,
     ) -> Result<(), ChatError> {
+        self.send_whisper_impl(sender_guid, target_name, message, social_system, false, true)
+            .await
+    }
+
+    /// Whisper sent on behalf of a GM (from the admin panel). Bypasses the sender's
+    /// flood protection and skips the "player not found" client notification — there
+    /// is no client to notify and the caller records delivery state itself.
+    pub async fn send_whisper_as_gm(
+        &self,
+        sender_guid: ObjectGuid,
+        target_name: &str,
+        message: &str,
+        social_system: &crate::game::social::SocialSystem,
+    ) -> Result<(), ChatError> {
+        self.send_whisper_impl(sender_guid, target_name, message, social_system, true, false)
+            .await
+    }
+
+    async fn send_whisper_impl(
+        &self,
+        sender_guid: ObjectGuid,
+        target_name: &str,
+        message: &str,
+        social_system: &crate::game::social::SocialSystem,
+        bypass_flood_protection: bool,
+        notify_target_not_found: bool,
+    ) -> Result<(), ChatError> {
         let clean_message = validation::strip_invisible_chars(message);
         validation::validate_message(&clean_message)?;
 
         // Check flood protection - if it fails, error packet already sent
-        if let Err(_) = self.check_flood_protection(sender_guid) {
-            return Ok(()); // Silent fail, error already sent to client
+        if !bypass_flood_protection {
+            if let Err(_) = self.check_flood_protection(sender_guid) {
+                return Ok(()); // Silent fail, error already sent to client
+            }
         }
 
         // Find target player
         let target_guid = match self.find_player_by_name(target_name) {
             Some(guid) => guid,
             None => {
-                // Target not found - send error notification to sender
-                let not_found_msg = SmsgChatPlayerNotFound { name: target_name };
-                self.broadcast_mgr
-                    .send_msg_to_player(sender_guid, not_found_msg);
-                return Ok(());
+                if notify_target_not_found {
+                    // Target not found - send error notification to sender
+                    let not_found_msg = SmsgChatPlayerNotFound { name: target_name };
+                    self.broadcast_mgr
+                        .send_msg_to_player(sender_guid, not_found_msg);
+                }
+                return Err(ChatError::TargetNotFound);
             }
         };
 
@@ -941,6 +991,15 @@ impl ChatSystem {
 
         self.broadcast_mgr
             .send_msg_to_player(sender_guid, inform_packet);
+
+        self.log_message(
+            "Whisper",
+            None,
+            sender_guid,
+            Some(target_guid),
+            Some(target_name_actual),
+            &clean_message,
+        );
 
         Ok(())
     }
@@ -1042,6 +1101,8 @@ impl ChatSystem {
             }
         }
 
+        self.log_message("Say", None, sender_guid, None, None, &clean_message);
+
         Ok(())
     }
 
@@ -1142,6 +1203,8 @@ impl ChatSystem {
             }
         }
 
+        self.log_message("Yell", None, sender_guid, None, None, &clean_message);
+
         Ok(())
     }
 
@@ -1181,6 +1244,8 @@ impl ChatSystem {
         // Broadcast to nearby players (exclude sender)
         self.broadcast_mgr
             .broadcast_msg_nearby(sender_guid, &packet, false);
+
+        self.log_message("Emote", None, sender_guid, None, None, &clean_message);
 
         Ok(())
     }
@@ -1228,6 +1293,15 @@ impl ChatSystem {
                     .send_msg_to_player(member.guid, packet.clone());
             }
         }
+
+        self.log_message(
+            "Party",
+            Some(format!("group:{}", group.id)),
+            sender_guid,
+            None,
+            None,
+            &clean_message,
+        );
 
         Ok(())
     }
@@ -1284,6 +1358,20 @@ impl ChatSystem {
             }
         }
 
+        let raid_label = match msg_type {
+            ChatMsg::RaidLeader => "RaidLeader",
+            ChatMsg::RaidWarning => "RaidWarning",
+            _ => "Raid",
+        };
+        self.log_message(
+            raid_label,
+            Some(format!("group:{}", group.id)),
+            sender_guid,
+            None,
+            None,
+            &clean_message,
+        );
+
         Ok(())
     }
 
@@ -1331,6 +1419,15 @@ impl ChatSystem {
             self.broadcast_mgr
                 .send_msg_to_player(*member_guid, packet.clone());
         }
+
+        self.log_message(
+            "Guild",
+            Some(guild_data.info.name.clone()),
+            sender_guid,
+            None,
+            None,
+            &clean_message,
+        );
 
         Ok(())
     }
@@ -1386,6 +1483,15 @@ impl ChatSystem {
                 .send_msg_to_player(*member_guid, packet.clone());
         }
 
+        self.log_message(
+            "Officer",
+            Some(guild_data.info.name.clone()),
+            sender_guid,
+            None,
+            None,
+            &clean_message,
+        );
+
         Ok(())
     }
 
@@ -1407,6 +1513,52 @@ impl ChatSystem {
             }
         }
         None
+    }
+
+    // ========== CHAT LOGGING ==========
+
+    /// Resolve the (account, map, position) context of a sender for the chat log.
+    fn player_log_context(&self, guid: ObjectGuid) -> (u32, u32, Position) {
+        let (account, map, position) = match self.player_mgr.get_player(guid) {
+            Some(player) => (
+                player.account_id,
+                player.map_id,
+                player.movement.position,
+            ),
+            None => (0, 0, Position::default()),
+        };
+        (account, map, position)
+    }
+
+    /// Queue a structured chat-log row for the given message (no-op when logging is
+    /// disabled or no sender context is available).
+    fn log_message(
+        &self,
+        channel_type: &'static str,
+        channel_name: Option<String>,
+        sender_guid: ObjectGuid,
+        target_guid: Option<ObjectGuid>,
+        target_name: Option<String>,
+        message: &str,
+    ) {
+        let Some(logger) = &self.chat_logger else {
+            return;
+        };
+        let (sender_account, map, position) = self.player_log_context(sender_guid);
+        logger.log(ChatLogEntry {
+            channel_type,
+            channel_name,
+            sender_guid: sender_guid.low(),
+            sender_name: self.get_player_name(sender_guid),
+            sender_account,
+            target_guid: target_guid.map(|g| g.low()),
+            target_name,
+            message: message.to_string(),
+            map,
+            pos_x: position.x,
+            pos_y: position.y,
+            pos_z: position.z,
+        });
     }
 
     pub fn get_channel_members(&self, team: Team, channel_name: &str) -> Vec<ObjectGuid> {

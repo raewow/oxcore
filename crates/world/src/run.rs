@@ -57,6 +57,7 @@ fn build_world_config(config: &Config) -> Config {
     world_config.quest_low_level_hide_diff = config.quest_low_level_hide_diff;
     world_config.realm_id = config.realm_id;
     world_config.realm_name = config.realm_name.clone();
+    world_config.chat_log_enabled = config.chat_log_enabled;
     world_config
 }
 
@@ -255,6 +256,9 @@ pub async fn serve(
             error!("World socket manager error: {}", e);
         }
     });
+
+    // 6b. GM chat outbox poller: delivers messages queued by the web admin panel.
+    crate::game::chat::log::spawn_chat_outbox_poller(world.clone(), shutdown_rx.resubscribe());
 
     // 7. Shutdown watcher: orderly teardown when the shared signal fires.
     let world_sd = world.clone();

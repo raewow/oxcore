@@ -161,6 +161,11 @@ pub struct Config {
     #[serde(default)]
     pub chat_strict_link_checking_kick: bool, // Kick player for invalid links (default: false)
 
+    /// Persist every delivered chat message to the `logs.chat_log` table. The web
+    /// admin panel's chat monitoring reads this table (default: true).
+    #[serde(default = "default_true")]
+    pub chat_log_enabled: bool,
+
     // Visibility Settings
     // How far objects are shown to a player, per map kind. Raising these costs
     // create/destroy packet volume and spawned creature count roughly with the
@@ -674,6 +679,7 @@ impl Default for Config {
             chat_flood_protection_window: default_chat_flood_protection_window(),
             chat_flood_mute_time: default_chat_flood_mute_time(),
             chat_strict_link_checking_kick: false,
+            chat_log_enabled: default_true(),
             visibility_distance_continents: default_visibility_continents(),
             visibility_distance_instances: default_visibility_instances(),
             visibility_distance_bg: default_visibility_bg(),

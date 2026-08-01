@@ -127,6 +127,105 @@ pub struct AdminCharacterPage {
     pub page_size: u32,
 }
 
+// ========== Chat monitoring ==========
+
+/// One chat message as stored in `logs.chat_log`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub id: u64,
+    pub time: i64,
+    pub channel_type: String,
+    pub channel_name: Option<String>,
+    pub sender_guid: Option<u32>,
+    pub sender_name: Option<String>,
+    pub sender_account: Option<u32>,
+    pub target_guid: Option<u32>,
+    pub target_name: Option<String>,
+    pub message: String,
+    pub map: Option<u32>,
+}
+
+/// Aggregated view of one `(channel_type, channel_name)` conversation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatChannelSummary {
+    pub channel_type: String,
+    pub channel_name: Option<String>,
+    pub message_count: u64,
+    pub participants: u64,
+    pub last_message_at: i64,
+}
+
+/// A player that has spoken in `chat_log`, for the participant lookup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatParticipant {
+    pub guid: Option<u32>,
+    pub name: String,
+    pub account: Option<u32>,
+    pub message_count: u64,
+    pub last_seen: i64,
+}
+
+/// Overview for the channels tab: total volume plus per-conversation summaries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatOverview {
+    pub total_messages: u64,
+    pub channels: Vec<ChatChannelSummary>,
+}
+
+/// Everything the chat page needs to render a player dive-in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatPlayerDetail {
+    pub name: String,
+    pub account_id: Option<u32>,
+    pub messages: Vec<ChatMessage>,
+    pub channels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendChatResult {
+    pub accepted: bool,
+    pub note: String,
+}
+
+/// Map a `chat_log` SELECT row onto [`ChatMessage`]. Column order is shared by every
+/// chat query in this module; keep them in sync.
+#[cfg(feature = "ssr")]
+fn chat_row(
+    (id, time, channel_type, channel_name, sender_guid, sender_name, sender_account, target_guid, target_name, message, map): (
+        u64,
+        i64,
+        String,
+        Option<String>,
+        Option<u32>,
+        Option<String>,
+        Option<u32>,
+        Option<u32>,
+        Option<String>,
+        String,
+        Option<u32>,
+    ),
+) -> ChatMessage {
+    ChatMessage {
+        id,
+        time,
+        channel_type,
+        channel_name,
+        sender_guid,
+        sender_name,
+        sender_account,
+        target_guid,
+        target_name,
+        message,
+        map,
+    }
+}
+
+/// Column list shared by every `chat_log` SELECT. Keep in sync with [`chat_row`].
+#[cfg(feature = "ssr")]
+const CHAT_LOG_COLUMNS: &str =
+    "`id`, UNIX_TIMESTAMP(`time`), `channel_type`, `channel_name`, `sender_guid`, `sender_name`, \
+     `sender_account`, `target_guid`, `target_name`, `message`, `map`";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminCharacterDetail {
     pub guid: u32,
@@ -488,6 +587,422 @@ pub async fn get_admin_overview() -> Result<AdminOverview, ServerFnError> {
         return Ok(AdminOverview {
             realms,
             open_support_tickets,
+        });
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+// ========== Chat monitoring server functions ==========
+
+/// Per-conversation volume for the chat page's channel browser.
+#[server]
+pub async fn get_chat_overview() -> Result<ChatOverview, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        require_gm_level(&state, account_id, 1).await?;
+        let total_messages = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM `chat_log`")
+            .fetch_one(&*state.logs)
+            .await
+            .unwrap_or(0) as u64;
+        let channels = match sqlx::query_as::<_, (String, Option<String>, i64, i64, i64)>(
+            "SELECT `channel_type`, `channel_name`, COUNT(*), COUNT(DISTINCT `sender_name`), \
+             UNIX_TIMESTAMP(MAX(`time`)) FROM `chat_log` GROUP BY `channel_type`, `channel_name` \
+             ORDER BY MAX(`id`) DESC LIMIT 150",
+        )
+        .fetch_all(&*state.logs)
+        .await
+        {
+            Ok(rows) => rows
+                .into_iter()
+                .map(
+                    |(channel_type, channel_name, message_count, participants, last_message_at)| {
+                        ChatChannelSummary {
+                            channel_type,
+                            channel_name,
+                            message_count: message_count as u64,
+                            participants: participants as u64,
+                            last_message_at,
+                        }
+                    },
+                )
+                .collect(),
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        return Ok(ChatOverview {
+            total_messages,
+            channels,
+        });
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+/// Message history for one conversation. `before_id` gives older-than pagination.
+#[server]
+pub async fn get_chat_channel(
+    channel_type: String,
+    channel_name: Option<String>,
+    before_id: u64,
+    limit: u32,
+) -> Result<Vec<ChatMessage>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        require_gm_level(&state, account_id, 1).await?;
+        let limit = limit.clamp(1, 500);
+        let mut qb = sqlx::QueryBuilder::new("SELECT ");
+        qb.push(CHAT_LOG_COLUMNS);
+        qb.push(" FROM `chat_log` WHERE `channel_type` = ");
+        qb.push_bind(&channel_type);
+        match &channel_name {
+            Some(name) if !name.is_empty() => {
+                qb.push(" AND `channel_name` = ");
+                qb.push_bind(name);
+            }
+            _ => {
+                qb.push(" AND `channel_name` IS NULL");
+            }
+        }
+        if before_id > 0 {
+            qb.push(" AND `id` < ");
+            qb.push_bind(before_id);
+        }
+        qb.push(" ORDER BY `id` DESC LIMIT ");
+        qb.push_bind(limit);
+        let rows = match qb
+            .build_query_as::<(
+                u64,
+                i64,
+                String,
+                Option<String>,
+                Option<u32>,
+                Option<String>,
+                Option<u32>,
+                Option<u32>,
+                Option<String>,
+                String,
+                Option<u32>,
+            )>()
+            .fetch_all(&*state.logs)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        return Ok(rows.into_iter().map(chat_row).collect());
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+/// Participant lookup: everyone who has spoken, newest activity first.
+#[server]
+pub async fn get_chat_participants(
+    search: Option<String>,
+) -> Result<Vec<ChatParticipant>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        require_gm_level(&state, account_id, 1).await?;
+        let pattern = format!("%{}%", search.unwrap_or_default().trim());
+        let rows = match sqlx::query_as::<_, (Option<u32>, String, Option<u32>, i64, i64)>(
+            "SELECT `sender_guid`, `sender_name`, MAX(`sender_account`), COUNT(*), \
+             UNIX_TIMESTAMP(MAX(`time`)) FROM `chat_log` WHERE `sender_name` LIKE ? \
+             GROUP BY `sender_guid`, `sender_name` ORDER BY MAX(`id`) DESC LIMIT 200",
+        )
+        .bind(&pattern)
+        .fetch_all(&*state.logs)
+        .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        return Ok(rows
+            .into_iter()
+            .map(|(guid, name, account, message_count, last_seen)| ChatParticipant {
+                guid,
+                name,
+                account,
+                message_count: message_count as u64,
+                last_seen,
+            })
+            .collect());
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+/// Full history for one player, across every channel/group/guild they spoke in.
+#[server]
+pub async fn get_player_chat(name: String) -> Result<ChatPlayerDetail, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        require_gm_level(&state, account_id, 1).await?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(ServerFnError::ServerError(
+                "Enter a player name".to_string(),
+            ));
+        }
+        let mut qb = sqlx::QueryBuilder::new("SELECT ");
+        qb.push(CHAT_LOG_COLUMNS);
+        qb.push(" FROM `chat_log` WHERE `sender_name` = ");
+        qb.push_bind(name);
+        qb.push(" OR `target_name` = ");
+        qb.push_bind(name);
+        qb.push(" ORDER BY `id` DESC LIMIT 300");
+        let rows = match qb
+            .build_query_as::<(
+                u64,
+                i64,
+                String,
+                Option<String>,
+                Option<u32>,
+                Option<String>,
+                Option<u32>,
+                Option<u32>,
+                Option<String>,
+                String,
+                Option<u32>,
+            )>()
+            .fetch_all(&*state.logs)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        let messages: Vec<ChatMessage> = rows.into_iter().map(chat_row).collect();
+
+        let account_from_characters = sqlx::query_scalar::<_, i64>(
+            "SELECT `account` FROM `characters` WHERE `name` = ?",
+        )
+        .bind(name)
+        .fetch_optional(&*state.characters)
+        .await
+        .ok()
+        .flatten()
+        .map(|account| account as u32);
+        let account_id = messages
+            .iter()
+            .find_map(|message| message.sender_account)
+            .or(account_from_characters);
+
+        let mut channels: Vec<String> = messages
+            .iter()
+            .filter_map(|message| message.channel_name.clone())
+            .collect();
+        channels.sort();
+        channels.dedup();
+
+        return Ok(ChatPlayerDetail {
+            name: name.to_string(),
+            account_id,
+            messages,
+            channels,
+        });
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+/// Every message touching any character on an account (all their groups/guilds).
+#[server]
+pub async fn get_account_chat(account_id: u32) -> Result<Vec<ChatMessage>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, actor_id, _) = authenticated_request().await?;
+        require_gm_level(&state, actor_id, 1).await?;
+        let guids = match sqlx::query_scalar::<_, u32>(
+            "SELECT `guid` FROM `characters` WHERE `account` = ?",
+        )
+        .bind(account_id)
+        .fetch_all(&*state.characters)
+        .await
+        {
+            Ok(guids) => guids,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+
+        let mut qb = sqlx::QueryBuilder::new("SELECT ");
+        qb.push(CHAT_LOG_COLUMNS);
+        qb.push(" FROM `chat_log` WHERE `sender_account` = ");
+        qb.push_bind(account_id);
+        if !guids.is_empty() {
+            qb.push(" OR `target_guid` IN (");
+            let mut separated = qb.separated(", ");
+            for guid in &guids {
+                separated.push_bind(guid);
+            }
+            qb.push(")");
+        }
+        qb.push(" ORDER BY `id` DESC LIMIT 500");
+        let rows = match qb
+            .build_query_as::<(
+                u64,
+                i64,
+                String,
+                Option<String>,
+                Option<u32>,
+                Option<String>,
+                Option<u32>,
+                Option<u32>,
+                Option<String>,
+                String,
+                Option<u32>,
+            )>()
+            .fetch_all(&*state.logs)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        return Ok(rows.into_iter().map(chat_row).collect());
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+/// Online characters of the acting GM account, available as in-game senders.
+#[server]
+pub async fn get_gm_characters() -> Result<Vec<PortalCharacter>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        require_gm_level(&state, account_id, 1).await?;
+        let rows = match sqlx::query_as::<_, PortalCharacter>(
+            "SELECT `guid`, `name`, `race`, `class`, `level`, `online` FROM `characters` \
+             WHERE `account` = ? AND `online` <> 0 ORDER BY `guid`",
+        )
+        .bind(account_id)
+        .fetch_all(&*state.characters)
+        .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
+        return Ok(rows);
+    }
+
+    #[cfg(not(feature = "ssr"))]
+    unreachable!("server function body only runs on the server")
+}
+
+/// Queue a GM chat message for the world server to deliver as the chosen character.
+#[server]
+pub async fn send_chat_message(
+    sender_guid: u32,
+    channel_type: String,
+    channel_name: Option<String>,
+    target_name: Option<String>,
+    message: String,
+) -> Result<SendChatResult, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        let (state, account_id, _) = authenticated_request().await?;
+        require_gm_level(&state, account_id, 1).await?;
+        let message = message.trim();
+        if message.is_empty() || message.len() > 512 {
+            return Ok(SendChatResult {
+                accepted: false,
+                note: "Message must be 1-512 characters".to_string(),
+            });
+        }
+
+        let sender_online = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM `characters` WHERE `guid` = ? AND `account` = ? AND `online` <> 0",
+        )
+        .bind(sender_guid)
+        .bind(account_id)
+        .fetch_one(&*state.characters)
+        .await
+        .unwrap_or(0)
+            > 0;
+        if !sender_online {
+            return Ok(SendChatResult {
+                accepted: false,
+                note: "The selected sender character is not online. Log that character in first."
+                    .to_string(),
+            });
+        }
+
+        match channel_type.as_str() {
+            "Whisper" => {
+                let target = target_name.unwrap_or_default().trim().to_string();
+                if target.is_empty() {
+                    return Ok(SendChatResult {
+                        accepted: false,
+                        note: "A whisper target is required".to_string(),
+                    });
+                }
+                if let Err(error) = sqlx::query(
+                    "INSERT INTO `chat_outbox` (`sender_account`, `sender_guid`, `channel_type`, `target_name`, `message`) \
+                     VALUES (?, ?, 'Whisper', ?, ?)",
+                )
+                .bind(account_id)
+                .bind(sender_guid)
+                .bind(&target)
+                .bind(message)
+                .execute(&*state.logs)
+                .await
+                {
+                    return Err(ServerFnError::ServerError(error.to_string()));
+                }
+            }
+            "Channel" => {
+                let channel = channel_name.unwrap_or_default().trim().to_string();
+                if channel.is_empty() {
+                    return Ok(SendChatResult {
+                        accepted: false,
+                        note: "A channel name is required".to_string(),
+                    });
+                }
+                if let Err(error) = sqlx::query(
+                    "INSERT INTO `chat_outbox` (`sender_account`, `sender_guid`, `channel_type`, `channel_name`, `message`) \
+                     VALUES (?, ?, 'Channel', ?, ?)",
+                )
+                .bind(account_id)
+                .bind(sender_guid)
+                .bind(&channel)
+                .bind(message)
+                .execute(&*state.logs)
+                .await
+                {
+                    return Err(ServerFnError::ServerError(error.to_string()));
+                }
+            }
+            "Say" => {
+                if let Err(error) = sqlx::query(
+                    "INSERT INTO `chat_outbox` (`sender_account`, `sender_guid`, `channel_type`, `message`) \
+                     VALUES (?, ?, 'Say', ?)",
+                )
+                .bind(account_id)
+                .bind(sender_guid)
+                .bind(message)
+                .execute(&*state.logs)
+                .await
+                {
+                    return Err(ServerFnError::ServerError(error.to_string()));
+                }
+            }
+            _ => {
+                return Ok(SendChatResult {
+                    accepted: false,
+                    note: "Unsupported chat type".to_string(),
+                });
+            }
+        }
+        return Ok(SendChatResult {
+            accepted: true,
+            note: "Queued for delivery".to_string(),
         });
     }
 
@@ -889,6 +1404,103 @@ pub async fn live_map_players(
         .into_response(),
         Err(error) => {
             tracing::error!(target: "oxcore_web", %error, "live map player query failed");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// Query params for the live chat feed endpoint.
+#[derive(Debug, serde::Deserialize)]
+pub struct ChatLiveParams {
+    /// Only messages with `id > since`. Omit/0 to fetch the most recent `limit`.
+    pub since: Option<u64>,
+    pub channel_type: Option<String>,
+    pub channel_name: Option<String>,
+    pub player: Option<String>,
+    pub limit: Option<u32>,
+}
+
+/// Polled every ~1.5s by `chat-live.js`. Returns new messages (or, on first load,
+/// the most recent batch in descending order so the client can render them reversed).
+#[cfg(feature = "ssr")]
+pub async fn chat_live_feed(
+    axum::Extension(state): axum::Extension<crate::state::AppState>,
+    jar: axum_extra::extract::cookie::CookieJar,
+    axum::extract::Query(params): axum::extract::Query<ChatLiveParams>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    let Some(cookie) = jar.get("oxcore_session") else {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Some(session) = crate::auth::session_from_token(&state.web, cookie.value()).await else {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    };
+    if crate::auth::highest_gm_level(&state.auth, session.account_id)
+        .await
+        .unwrap_or(0)
+        < 1
+    {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+
+    let mut qb = sqlx::QueryBuilder::new("SELECT ");
+    qb.push(CHAT_LOG_COLUMNS);
+    qb.push(" FROM `chat_log` WHERE 1=1");
+    let since = params.since.unwrap_or(0);
+    if since > 0 {
+        qb.push(" AND `id` > ");
+        qb.push_bind(since);
+    }
+    if let Some(channel_type) = params.channel_type.as_deref() {
+        if !channel_type.is_empty() {
+            qb.push(" AND `channel_type` = ");
+            qb.push_bind(channel_type);
+        }
+    }
+    if let Some(channel_name) = params.channel_name.as_deref() {
+        if !channel_name.is_empty() {
+            qb.push(" AND `channel_name` = ");
+            qb.push_bind(channel_name);
+        }
+    }
+    if let Some(player) = params.player.as_deref() {
+        if !player.is_empty() {
+            qb.push(" AND (`sender_name` = ");
+            qb.push_bind(player);
+            qb.push(" OR `target_name` = ");
+            qb.push_bind(player);
+            qb.push(")");
+        }
+    }
+    let limit = params.limit.unwrap_or(300).clamp(1, 1000);
+    if since > 0 {
+        qb.push(" ORDER BY `id` ASC LIMIT ");
+    } else {
+        qb.push(" ORDER BY `id` DESC LIMIT ");
+    }
+    qb.push_bind(limit);
+
+    match qb
+        .build_query_as::<(
+            u64,
+            i64,
+            String,
+            Option<String>,
+            Option<u32>,
+            Option<String>,
+            Option<u32>,
+            Option<u32>,
+            Option<String>,
+            String,
+            Option<u32>,
+        )>()
+        .fetch_all(&*state.logs)
+        .await
+    {
+        Ok(rows) => axum::Json(rows.into_iter().map(chat_row).collect::<Vec<_>>()).into_response(),
+        Err(error) => {
+            tracing::error!(target: "oxcore_web", %error, "chat live feed query failed");
             axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }

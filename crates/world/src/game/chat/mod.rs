@@ -8,6 +8,7 @@
 //! - Command system for GM and player commands
 
 pub mod commands;
+pub mod log;
 pub mod system;
 pub mod types;
 pub mod validation;

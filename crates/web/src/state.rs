@@ -11,6 +11,7 @@ pub struct AppState {
     pub auth: Arc<MySqlPool>,
     pub characters: Arc<MySqlPool>,
     pub web: Arc<MySqlPool>,
+    pub logs: Arc<MySqlPool>,
     pub secure_cookies: bool,
     pub public_origin: String,
 }
@@ -35,11 +36,18 @@ impl AppState {
             .connect(&config.character_database_url)
             .await
             .context("failed to connect to the characters database")?;
+        let logs = MySqlPoolOptions::new()
+            .max_connections(10)
+            .min_connections(1)
+            .connect(&config.logs_database_url)
+            .await
+            .context("failed to connect to the logs database")?;
 
         Ok(Self {
             auth: Arc::new(auth),
             characters: Arc::new(characters),
             web: Arc::new(web),
+            logs: Arc::new(logs),
             secure_cookies: config.secure_cookies(),
             public_origin: config.public_base_url.trim_end_matches('/').to_string(),
         })
@@ -52,5 +60,6 @@ impl AppState {
                 .await
                 .is_ok()
             && sqlx::query("SELECT 1").execute(&*self.web).await.is_ok()
+            && sqlx::query("SELECT 1").execute(&*self.logs).await.is_ok()
     }
 }

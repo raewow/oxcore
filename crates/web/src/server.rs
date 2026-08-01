@@ -78,6 +78,7 @@ pub async fn serve(config: Config) -> Result<()> {
             "/api/admin/live-map/players",
             get(crate::portal::live_map_players),
         )
+        .route("/api/admin/chat/live", get(crate::portal::chat_live_feed))
         .leptos_routes_with_context(
             &leptos_options,
             routes,

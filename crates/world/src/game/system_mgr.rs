@@ -107,6 +107,8 @@ impl SystemManager {
     pub fn new(
         character_pool: Arc<sqlx::MySqlPool>,
         world_pool: Arc<sqlx::MySqlPool>,
+        logs_pool: Arc<sqlx::MySqlPool>,
+        chat_log_enabled: bool,
         broadcast_mgr: Arc<BroadcastManager>,
         item_mgr: Arc<ItemManager>,
         player_system: Arc<PlayerSystem>,
@@ -136,7 +138,12 @@ impl SystemManager {
             item_mgr.clone(),
         ));
 
-        let chat = Arc::new(ChatSystem::new(broadcast_mgr.clone(), player_mgr.clone()));
+        let chat = if chat_log_enabled {
+            let logger = Arc::new(crate::game::chat::log::ChatLogger::new((*logs_pool).clone()));
+            Arc::new(ChatSystem::new(broadcast_mgr.clone(), player_mgr.clone()).with_chat_logger(logger))
+        } else {
+            Arc::new(ChatSystem::new(broadcast_mgr.clone(), player_mgr.clone()))
+        };
 
         let inventory = Arc::new(InventorySystem::new(
             inventory_repo,
