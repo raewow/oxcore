@@ -30,8 +30,7 @@ use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::guid::ObjectGuid;
 use crate::protocol::position::Position;
 use crate::protocol::updates::modern::field_map::{
-    MODERN_GAMEOBJECT_BYTES_1, MODERN_GAMEOBJECT_PARENTROTATION, MODERN_UNIT_FIELD_DISPLAY_SCALE,
-    MODERN_UNIT_FIELD_NATIVE_X_DISPLAY_SCALE,
+    MODERN_GAMEOBJECT_BYTES_1, MODERN_GAMEOBJECT_PARENTROTATION,
 };
 use crate::protocol::updates::modern::{
     ModernCreateData, ModernObjectType, ModernUpdateBlock, ModernUpdateType,
@@ -374,12 +373,6 @@ pub struct CreateObjectBlock {
     /// separate `SMSG_ACTION_BUTTONS`, so there is nowhere else to put it. Ignored by `to_vanilla`,
     /// which still sends the standalone packet.
     pub action_buttons: Option<Vec<u32>>,
-    /// Per-display-id model scale (`CreatureDisplayInfo.CreatureModelScale`), which 1.14 multiplies
-    /// against `OBJECT_FIELD_SCALE_X` client-side. Vanilla has no source for this -- it is not the
-    /// template scale -- so it has no vanilla field index and cannot go through `fields`. `None`
-    /// leaves the create block's placeholder default of `1.0`, which is wrong for any display id
-    /// whose real scale factor isn't `1.0`. Ignored by `to_vanilla`.
-    pub display_scale: Option<f32>,
 }
 
 impl CreateObjectBlock {
@@ -395,21 +388,12 @@ impl CreateObjectBlock {
             required_fields: Vec::new(),
             bytes_fields: Vec::new(),
             action_buttons: None,
-            display_scale: None,
         }
     }
 
     /// Attach the player's action bar, for the create block the player receives about itself.
     pub fn with_action_buttons(mut self, buttons: Vec<u32>) -> Self {
         self.action_buttons = Some(buttons);
-        self
-    }
-
-    /// Override 1.14's per-display model scale, which otherwise defaults to `1.0` regardless of
-    /// the object's actual display id. See the `display_scale` field doc for why this can't go
-    /// through `set_field` like an ordinary vanilla-sourced value.
-    pub fn with_display_scale(mut self, scale: f32) -> Self {
-        self.display_scale = Some(scale);
         self
     }
 
@@ -606,18 +590,6 @@ impl CreateObjectBlock {
         }
         for &(index, bytes) in &self.bytes_fields {
             block.fields.set_vanilla(index, u32::from_le_bytes(bytes));
-        }
-
-        // Overrides `placeholders::apply`'s 1.0 default with the display id's real model scale.
-        // Must come after the field loop above (nothing here writes to these two slots), the same
-        // "caller wins" ordering the create block's own doc comment establishes.
-        if let Some(scale) = self.display_scale {
-            block
-                .fields
-                .set_modern_f32(MODERN_UNIT_FIELD_DISPLAY_SCALE, scale);
-            block
-                .fields
-                .set_modern_f32(MODERN_UNIT_FIELD_NATIVE_X_DISPLAY_SCALE, scale);
         }
 
         if object_type == ModernObjectType::GameObject {

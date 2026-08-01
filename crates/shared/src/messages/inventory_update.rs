@@ -33,22 +33,30 @@ use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 /// update in vanilla field numbers and let the 1.14 slot map translate, which is the same path
 /// every other object update takes and keeps the numbering in exactly one place.
 ///
-/// **Only equipment and equipped-bag slots (0-22) survive that translation today.** The generated
-/// 1.12 -> 1.14 slot map joins the two field tables by name, and 1.14 merges vanilla's four
-/// separately-named arrays -- equipped, backpack, bank, bank bags -- into one contiguous inventory
-/// array. Only the first array's name matched, so backpack, bank and bank-bag writes are dropped on
-/// the way out. Those return `None` here rather than silently mapping to a neighbouring slot: a
-/// wrong index would put an item GUID in some unrelated field, which is far worse than a missing
-/// update. Widening this needs the slot map extended, not a formula guessed at here.
+/// Equipment, backpack, bank and bank-bag slots all survive that translation: the generator's
+/// `ALIASES` table joins each of vanilla's four separately-named arrays to its section of 1.14's one
+/// contiguous inventory array (`ACTIVE_PLAYER_FIELD_INV_SLOT_HEAD`), the same fix that restored
+/// backpack/bank/bank-bag/buyback/keyring updates after they were found silently dropped (see
+/// `docs/modern-opcode-plan.md`'s "inventory slot map" section). Buyback and keyring have no field
+/// here because nothing calls this for those slots -- `SmsgBuybackSlotUpdate` is unported for an
+/// unrelated reason (its price/timestamp fields have no 1.14 counterpart at all).
 fn equipment_slot_field(bag: u8, slot: u8) -> Option<u32> {
     // A bag other than 255 addresses a slot inside a container object, which is a separate object's
     // fields entirely and never appears on the player.
-    // `INVENTORY_SLOT_START` is one past the last slot vanilla stores in the equipped array: 19
-    // equipment slots plus the 4 equipped bag slots.
-    if bag != 255 || slot >= INVENTORY_SLOT_START {
+    if bag != 255 {
         return None;
     }
-    Some(PLAYER_FIELD_INV_SLOT_HEAD + (slot as u32 * 2))
+    if slot < INVENTORY_SLOT_START {
+        Some(PLAYER_FIELD_INV_SLOT_HEAD + (slot as u32 * 2))
+    } else if slot < INVENTORY_SLOT_END {
+        Some(PLAYER_FIELD_PACK_SLOT_1 + ((slot - INVENTORY_SLOT_START) as u32 * 2))
+    } else if slot < BANK_SLOT_END {
+        Some(PLAYER_FIELD_BANK_SLOT_1 + ((slot - BANK_SLOT_START) as u32 * 2))
+    } else if slot < BANK_BAG_SLOT_END {
+        Some(PLAYER_FIELD_BANKBAG_SLOT_1 + ((slot - BANK_BAG_SLOT_START) as u32 * 2))
+    } else {
+        None
+    }
 }
 
 /// Restate a set of slot writes as a modern `SMSG_UPDATE_OBJECT` on the player's own object.
@@ -475,5 +483,43 @@ mod tests {
         // buyback field offset rather than the normal inventory field range.
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_OBJECT);
         assert!(!packet.data().is_empty());
+    }
+
+    /// The bug this fixes: `equipment_slot_field` used to return `None` for every slot past
+    /// equipment (>= 23), so a backpack/bank/bank-bag move silently sent no modern update at all --
+    /// the client's bag never changed, whether the item was picked up, moved, or sold to a vendor
+    /// (selling clears the source slot through this same path).
+    #[test]
+    fn backpack_bank_and_bank_bag_slots_now_produce_a_modern_update() {
+        let player_guid = ObjectGuid::new_without_entry(HighGuid::Player, 1);
+        let item_guid = ObjectGuid::new_without_entry(HighGuid::Item, 42);
+
+        for slot in [23u8, 38, 39, 62, 63, 68] {
+            let update = SmsgInventorySlotUpdate {
+                player_guid,
+                bag: 255,
+                slot,
+                item_guid: Some(item_guid),
+            };
+            assert!(
+                update.to_modern().is_some(),
+                "slot {slot} should produce a modern update"
+            );
+        }
+    }
+
+    /// A bag other than 255 addresses a container object's own fields, not the player's -- there is
+    /// no vanilla field for it here regardless of slot number.
+    #[test]
+    fn a_container_slot_has_no_player_field() {
+        assert_eq!(equipment_slot_field(0, 0), None);
+    }
+
+    /// Buyback and keyring slots (69+) have no field here; `SmsgBuybackSlotUpdate` handles buyback
+    /// separately, and keyring has no live caller yet, but both must stay `None` rather than alias
+    /// onto the bank-bag range.
+    #[test]
+    fn slots_past_bank_bags_have_no_field() {
+        assert_eq!(equipment_slot_field(255, BANK_BAG_SLOT_END), None);
     }
 }

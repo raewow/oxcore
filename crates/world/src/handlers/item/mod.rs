@@ -4,13 +4,13 @@ use tracing::{info, warn};
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::inventory::types::EquipResult;
 use crate::game::player::auras::interrupt::AuraInterruptFlags;
-use crate::handlers::spells::parse_spell_cast_targets;
+use crate::handlers::spells::{parse_modern_spell_cast_request, parse_spell_cast_targets};
 use crate::World;
 use oxcore_shared::game::inventory::{
     is_bag_pos, is_bank_pos, is_equipment_pos, INVENTORY_SLOT_BAG_0,
 };
 use oxcore_shared::messages::SmsgReadItemOk;
-use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
 
 const NPC_FLAG_BANKER: u32 = 0x0000_0100;
 const BUY_BANK_SLOT_NOT_BANKER: u8 = 2;
@@ -56,24 +56,43 @@ pub async fn handle_use_item(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    // Read packet data
-    let bag = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read bag"))?;
-    let slot = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read slot"))?;
-    let spell_slot = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read spell slot"))?;
-
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
         None => return Ok(()),
     };
 
-    // CMSG_USE_ITEM carries the same target payload as CMSG_CAST_SPELL.
-    let targets = parse_spell_cast_targets(session.protocol(), packet, player_guid)?;
+    // Vanilla: bag (u8), slot (u8), spell_slot (u8), then the same SpellCastTargets shape
+    // CMSG_CAST_SPELL uses. Modern's UseItem instead sends PackSlot/Slot (the same addressing,
+    // different name), the item's own packed GUID, then the full SpellCastRequest block -- no
+    // spell_slot at all, so effect index 0 (the item's primary use effect) is the only choice.
+    let (bag, slot, spell_slot, targets) = match session.protocol() {
+        Protocol::Vanilla => {
+            let bag = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read bag"))?;
+            let slot = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read slot"))?;
+            let spell_slot = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read spell slot"))?;
+            let targets = parse_spell_cast_targets(Protocol::Vanilla, packet, player_guid)?;
+            (bag, slot, spell_slot, targets)
+        }
+        Protocol::Modern => {
+            let bag = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read PackSlot"))?;
+            let slot = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read Slot"))?;
+            packet
+                .read_packed_guid_for(Protocol::Modern)
+                .ok_or_else(|| anyhow!("Failed to read CastItem"))?;
+            let request = parse_modern_spell_cast_request(packet, player_guid)?;
+            (bag, slot, 0u8, request.targets)
+        }
+    };
 
     // Get item GUID from inventory
     let item_guid = match world.systems.inventory.get_item_at(player_guid, bag, slot) {

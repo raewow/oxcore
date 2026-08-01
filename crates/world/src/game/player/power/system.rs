@@ -669,13 +669,13 @@ mod tests {
         assert_eq!(player.stats.health, 1_000);
     }
 
-    #[test]
-    fn passive_health_regen_broadcasts_health_update() {
+    #[tokio::test]
+    async fn passive_health_regen_broadcasts_health_update() {
         let world = test_world();
         let mut broadcast_mgr = MockBroadcastManagerTrait::new();
         let guid = ObjectGuid::new_player(1);
         broadcast_mgr
-            .expect_broadcast_nearby_packet()
+            .expect_broadcast_msg_nearby()
             .withf(move |sender_guid, _, include_self| *sender_guid == guid && *include_self)
             .times(1)
             .returning(|_, _, _| ());

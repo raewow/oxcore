@@ -314,7 +314,7 @@ impl VendorSystem {
         player_guid: ObjectGuid,
         vendor_guid: ObjectGuid,
         item_guid: ObjectGuid,
-        amount: u8,
+        amount: u32,
     ) -> Result<()> {
         info!(
             "Player {:?} selling item {:?} x{} to vendor {:?}",
@@ -393,11 +393,7 @@ impl VendorSystem {
         };
 
         // The 1.12 client sends zero to sell the entire stack.
-        let sell_count = if amount == 0 {
-            stack_count
-        } else {
-            amount as u32
-        };
+        let sell_count = if amount == 0 { stack_count } else { amount };
         if sell_count > stack_count {
             let msg = SmsgSellItem {
                 vendor_guid,

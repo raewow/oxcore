@@ -14,6 +14,34 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// cannot exhaust each other's sequence space.
 static AURA_CAST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
+/// Translate `encode_aura_flags_vanilla`'s byte to modern's `AuraFlags` bit positions.
+///
+/// Same hazard as NPC flags, unit dynamic flags, movement flags and hit info elsewhere in this
+/// port: the flag *bits* renumber between protocols, not just the field. Vanilla's `Negative` is
+/// `0x02`, which is modern's `Cancelable`; modern's own `Negative` is `0x10`. A raw copy would not
+/// merely mislabel the aura -- it would show a debuff as cancelable-by-the-player and never mark it
+/// negative, changing how the client colors and right-click-cancels the icon.
+///
+/// The input collapses passive/hidden auras to `0` before this ever sees them (see
+/// `encode_aura_flags_vanilla`), so modern's `Passive` bit cannot be recovered here -- that
+/// distinction is lost upstream of this translator, not by it.
+fn to_modern_aura_flags(vanilla: u8) -> u16 {
+    const POSITIVE: u16 = 0x100;
+    const NEGATIVE: u16 = 0x10;
+    const CANCELABLE: u16 = 0x02;
+
+    let mut modern = 0;
+    if vanilla & 0x02 != 0 {
+        modern |= NEGATIVE;
+    } else if vanilla & 0x01 != 0 {
+        modern |= POSITIVE;
+    }
+    if vanilla & 0x08 != 0 {
+        modern |= CANCELABLE;
+    }
+    modern
+}
+
 /// SMSG_AURA_UPDATE (opcode 0x0495)
 ///
 /// Sent when an aura is applied, updated, or removed on a target.
@@ -95,7 +123,7 @@ impl ToWorldPacket for SmsgAuraUpdate {
             writer.write_packed_guid_128(high, low); // CastID
             writer.write_u32(self.spell_id);
             writer.write_u32(0); // SpellXSpellVisualID -- no 1.12 source, see SmsgSpellGo
-            writer.write_u16(u16::from(self.aura_flags)); // widens from u8
+            writer.write_u16(to_modern_aura_flags(self.aura_flags));
             writer.write_u32(0); // ActiveFlags
             writer.write_u16(u16::from(self.level)); // CastLevel, widens from u8
             writer.write_u8(self.stacks); // Applications
@@ -281,5 +309,33 @@ mod modern_aura_tests {
             bytes.ends_with(&tail),
             "the packed unit GUID must be the last thing in the body"
         );
+    }
+
+    /// The bug this fixes: vanilla's `Negative` bit (`0x02`) sits where modern's `Cancelable` bit
+    /// does, so a raw copy would show a debuff as player-cancelable and never mark it negative.
+    #[test]
+    fn negative_moves_to_its_modern_bit() {
+        assert_eq!(to_modern_aura_flags(0x02), 0x10);
+    }
+
+    /// A cancelable positive buff (oxcore's `0x09` = `EF_FLAG_0 | CANCELABLE`) must set both
+    /// modern bits, not just one -- losing `Cancelable` would make the client refuse a right-click
+    /// cancel; losing `Positive` would mis-color the icon.
+    #[test]
+    fn a_cancelable_positive_buff_sets_both_modern_bits() {
+        assert_eq!(to_modern_aura_flags(0x09), 0x100 | 0x02);
+    }
+
+    /// A plain positive buff with no cancel bit must not spuriously set `Cancelable`.
+    #[test]
+    fn a_plain_positive_buff_sets_only_positive() {
+        assert_eq!(to_modern_aura_flags(0x01), 0x100);
+    }
+
+    /// Passive/hidden auras collapse to zero before reaching this function (see
+    /// `encode_aura_flags_vanilla`), and zero must translate to zero, not to some inferred bit.
+    #[test]
+    fn zero_flags_translate_to_zero() {
+        assert_eq!(to_modern_aura_flags(0x00), 0x00);
     }
 }

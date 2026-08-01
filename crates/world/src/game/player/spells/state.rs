@@ -739,6 +739,11 @@ pub struct ActiveCast {
     /// Carried so ground-targeted AoE and item/GO effects keep their data when the cast
     /// resolves later (cast-time / channel / delayed projectile).
     pub cast_targets: SpellCastTargets,
+
+    /// The identity `send_spell_start` used for this cast's `SMSG_SPELL_START`, so the
+    /// eventual `SMSG_SPELL_GO` (fired on the next main-hand swing, for on-swing spells parked
+    /// here) can share it. `None` for triggered casts, which sent no START to match.
+    pub cast_sequence: Option<u64>,
 }
 
 impl ActiveCast {
@@ -772,6 +777,7 @@ impl ActiveCast {
             start_position_y: y,
             start_position_z: z,
             cast_targets: SpellCastTargets::default(),
+            cast_sequence: None,
         }
     }
 
@@ -811,6 +817,7 @@ impl ActiveCast {
             start_position_y: y,
             start_position_z: z,
             cast_targets: SpellCastTargets::default(),
+            cast_sequence: None,
         }
     }
 
@@ -1149,6 +1156,10 @@ pub enum SpellEventType {
         slot: CurrentSpellType,
         cast_item_guid: Option<ObjectGuid>,
         cast_targets: SpellCastTargets,
+        /// The identity `send_spell_start` used for this cast's `SMSG_SPELL_START`, carried across
+        /// the cast-time wait so the eventual `SMSG_SPELL_GO` shares it. `None` for triggered casts,
+        /// which sent no START to match.
+        cast_sequence: Option<u64>,
     },
     /// Channel tick — execute one channel tick
     ChannelTick {
@@ -1366,6 +1377,7 @@ mod tests {
             slot: CurrentSpellType::Generic,
             cast_item_guid: None,
             cast_targets: SpellCastTargets::default(),
+            cast_sequence: None,
         }
     }
 

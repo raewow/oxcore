@@ -52,7 +52,11 @@ impl<'a> BitReader<'a> {
         Some(value)
     }
 
-    fn align(&mut self) {
+    /// Advance to the start of the next byte if a bit run left the cursor mid-byte. A no-op if
+    /// already byte-aligned. Byte-level reads call this themselves; expose it for callers that
+    /// need to force alignment between two bit runs with no byte read in between (the 1.14 wire
+    /// format does this at the top of each `SpellWeight` entry, `ResetBitPos` in the reference).
+    pub fn align(&mut self) {
         if self.bit != 0 {
             self.byte += 1;
             self.bit = 0;

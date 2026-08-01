@@ -32,7 +32,13 @@ pub(crate) fn parse_spell_cast_targets(
 ) -> Result<SpellCastTargets> {
     match protocol {
         Protocol::Vanilla => parse_spell_cast_targets_vanilla(packet, caster_guid),
-        Protocol::Modern => parse_spell_cast_targets_modern(packet, caster_guid),
+        Protocol::Modern => {
+            let mut reader = BitReader::new(packet.contents());
+            let targets = parse_spell_cast_targets_modern_reader(&mut reader, caster_guid)?;
+            let consumed = reader.consumed();
+            packet.advance(consumed);
+            Ok(targets)
+        }
     }
 }
 
@@ -46,12 +52,14 @@ pub(crate) fn parse_spell_cast_targets(
 /// * there is no separate gameobject or corpse GUID -- they arrive in the unit slot;
 /// * source and destination locations each carry a transport GUID *and* a position;
 /// * orientation and map id are new, and hang off presence bits.
-fn parse_spell_cast_targets_modern(
-    packet: &mut WorldPacket,
+///
+/// Takes an existing reader rather than owning one: this block is preceded by a much larger
+/// preamble on `CMSG_CAST_SPELL` and `CMSG_USE_ITEM` (see [`parse_modern_spell_cast_request`]),
+/// and the bit cursor must carry over from there rather than restart at the packet's own byte 0.
+fn parse_spell_cast_targets_modern_reader(
+    reader: &mut BitReader<'_>,
     caster_guid: ObjectGuid,
 ) -> Result<SpellCastTargets> {
-    let mut reader = BitReader::new(packet.contents());
-
     let target_flags = reader
         .read_bits(26)
         .ok_or_else(|| anyhow::anyhow!("Failed to read modern target_flags"))?;
@@ -121,9 +129,6 @@ fn parse_spell_cast_targets_modern(
         })
         .transpose()?;
 
-    let consumed = reader.consumed();
-    packet.advance(consumed);
-
     // A self-cast still arrives with the flag set and an empty unit GUID, so resolve it here the
     // way the vanilla branch does.
     let unit_target_guid = if target_flags == TARGET_FLAG_SELF || unit.is_empty() {
@@ -143,6 +148,154 @@ fn parse_spell_cast_targets_modern(
         src_position,
         dst_position,
         str_target,
+    })
+}
+
+/// The result of parsing a modern `SpellCastRequest` body (`CMSG_CAST_SPELL`, `CMSG_USE_ITEM`).
+pub(crate) struct ModernSpellCastRequest {
+    /// The cast identity the *client* generated for this press. Modern acknowledges every cast
+    /// with `SMSG_SPELL_PREPARE`, echoing this back paired with the server's own cast id -- without
+    /// it, the client's locally-tracked pending cast never links to the `CastID` `SMSG_SPELL_START`
+    /// / `SMSG_SPELL_GO` carry, and the cast bar/animation state machine never resolves.
+    pub cast_id: (u64, u64),
+    pub spell_id: u32,
+    pub targets: SpellCastTargets,
+}
+
+/// A hostile or corrupt packet could otherwise claim a huge reagent/currency/weight count and make
+/// us loop absurdly before the read naturally fails; real casts never carry more than a handful.
+const MAX_SPELL_CAST_LIST_ENTRIES: u32 = 64;
+
+/// Parse the `SpellCastRequest` body shared by `CMSG_CAST_SPELL` and `CMSG_USE_ITEM` on the modern
+/// wire, starting at `CastID` and continuing through the target block. Vanilla has nothing
+/// resembling this structure -- its callers read `spell_id` (or `bag`/`slot`/`spell_slot`) directly
+/// before the target block, so this function has no vanilla counterpart to call instead.
+///
+/// This was previously not parsed *at all*: both callers read a bare vanilla-shaped preamble
+/// regardless of protocol, so on a modern connection the "spell_id" they extracted was actually the
+/// low bytes of this block's packed `CastID`, and every read after it was misaligned by the whole
+/// width of this structure. Every cast and every item use was affected.
+pub(crate) fn parse_modern_spell_cast_request(
+    packet: &mut WorldPacket,
+    caster_guid: ObjectGuid,
+) -> Result<ModernSpellCastRequest> {
+    use oxcore_shared::protocol::movement::MovementInfo;
+
+    let mut reader = BitReader::new(packet.contents());
+
+    let cast_id = reader
+        .read_packed_guid_128()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read CastID"))?;
+    reader
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read Misc[0]"))?;
+    reader
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read Misc[1]"))?;
+    let spell_id = reader
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read SpellID"))?;
+    reader
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read SpellXSpellVisualID"))?;
+
+    // MissileTrajectoryRequest: Pitch, Speed.
+    reader
+        .read_f32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read missile pitch"))?;
+    reader
+        .read_f32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read missile speed"))?;
+
+    reader
+        .read_packed_guid_128()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read CraftingNPC"))?;
+
+    // Optional reagents: {ItemID, Slot, Count} (i32 x3) each. Always present for a normal cast,
+    // just empty -- crafting orders are the only source of a nonzero count.
+    let reagent_count = reader
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read optional reagent count"))?
+        .min(MAX_SPELL_CAST_LIST_ENTRIES);
+    for _ in 0..reagent_count {
+        reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read reagent ItemID"))?;
+        reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read reagent Slot"))?;
+        reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read reagent Count"))?;
+    }
+
+    // Optional currencies: {CurrencyID, Slot, Count} (i32 x3) each.
+    let currency_count = reader
+        .read_u32()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read optional currency count"))?
+        .min(MAX_SPELL_CAST_LIST_ENTRIES);
+    for _ in 0..currency_count {
+        reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read currency CurrencyID"))?;
+        reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read currency Slot"))?;
+        reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read currency Count"))?;
+    }
+
+    // SendCastFlags (5 bits) + HasMoveUpdate (1 bit) + WeightCount (2 bits) = exactly one byte, so
+    // the target block below starts byte-aligned without an explicit flush.
+    reader
+        .read_bits(5)
+        .ok_or_else(|| anyhow::anyhow!("Failed to read SendCastFlags"))?;
+    let has_move_update = reader
+        .read_bit()
+        .ok_or_else(|| anyhow::anyhow!("Failed to read HasMoveUpdate"))?;
+    let weight_count = reader
+        .read_bits(2)
+        .ok_or_else(|| anyhow::anyhow!("Failed to read WeightCount"))?
+        .min(MAX_SPELL_CAST_LIST_ENTRIES);
+
+    let targets = parse_spell_cast_targets_modern_reader(&mut reader, caster_guid)?;
+
+    // An embedded movement update (the player moved since their last ack) reuses the same layout
+    // as a standalone movement opcode, mover GUID included -- read it with the existing modern
+    // movement parser rather than a third copy of that logic. It operates on `WorldPacket`, not
+    // this reader, so hand off the packet's cursor and reclaim a fresh reader afterwards.
+    if has_move_update {
+        let consumed = reader.consumed();
+        packet.advance(consumed);
+        MovementInfo::read_modern(packet)
+            .map_err(|e| anyhow::anyhow!("Failed to read embedded move update: {e}"))?;
+        reader = BitReader::new(packet.contents());
+    }
+
+    // SpellWeight (crafting order priority): {Type: 2 bits, ID: i32, Quantity: u32}, each entry
+    // realigned to a byte boundary first regardless of where the previous one (or the target
+    // block, for the first entry) left the cursor.
+    for _ in 0..weight_count {
+        reader.align();
+        reader
+            .read_bits(2)
+            .ok_or_else(|| anyhow::anyhow!("Failed to read SpellWeight Type"))?;
+        reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read SpellWeight ID"))?;
+        reader
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read SpellWeight Quantity"))?;
+    }
+
+    let consumed = reader.consumed();
+    packet.advance(consumed);
+
+    Ok(ModernSpellCastRequest {
+        cast_id,
+        spell_id,
+        targets,
     })
 }
 
@@ -238,15 +391,29 @@ pub async fn handle_cast_spell(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    // Vanilla 1.12.x format: spell_id (u32), then SpellCastTargets
-    let spell_id = packet
-        .read_u32()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read spell_id"))?;
-
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
         None => return Ok(()),
     };
+
+    // Vanilla: spell_id (u32), then SpellCastTargets. Modern's CMSG_CAST_SPELL leads with a much
+    // larger SpellCastRequest block (client cast identity, misc fields, missile trajectory,
+    // crafting reagents/currencies, then the target block) -- see
+    // `parse_modern_spell_cast_request` for why this must be a real branch, not a shared read.
+    let (spell_id, targets, client_cast_id) = match session.protocol() {
+        Protocol::Vanilla => {
+            let spell_id = packet
+                .read_u32()
+                .ok_or_else(|| anyhow::anyhow!("Failed to read spell_id"))?;
+            let targets = parse_spell_cast_targets(session.protocol(), packet, player_guid)?;
+            (spell_id, targets, None)
+        }
+        Protocol::Modern => {
+            let request = parse_modern_spell_cast_request(packet, player_guid)?;
+            (request.spell_id, request.targets, Some(request.cast_id))
+        }
+    };
+    let _ = client_cast_id; // wired up to SMSG_SPELL_PREPARE separately
 
     // Unknown spell id: drop the cast, but loudly — a missing
     // spell_template row leaves the client waiting on a cast that never starts.
@@ -280,9 +447,6 @@ pub async fn handle_cast_spell(
         );
         return Ok(());
     }
-
-    // Parse full SpellCastTargets from the packet
-    let targets = parse_spell_cast_targets(session.protocol(), packet, player_guid)?;
 
     // Extract unit target for the current pipeline (will pass full targets later)
     let target_guid = targets.unit_target();
@@ -590,7 +754,123 @@ pub async fn handle_cancel_auto_repeat_spell(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxcore_shared::protocol::bitbuf::BitWriter;
     use oxcore_shared::protocol::Opcode;
+
+    /// Build a well-formed modern `SpellCastRequest` body: a self-cast Fireball with no reagents,
+    /// currencies, movement update or crafting weights -- the shape every ordinary player cast
+    /// takes. Mirrors the client write side field-for-field, since nothing in this codebase writes
+    /// this body (only the server-side reader exists).
+    fn modern_cast_spell_body(client_cast_id: (u64, u64), spell_id: u32) -> Vec<u8> {
+        let mut w = BitWriter::new();
+        w.write_packed_guid_128(client_cast_id.0, client_cast_id.1); // CastID
+        w.write_u32(0); // Misc[0]
+        w.write_u32(0); // Misc[1]
+        w.write_u32(spell_id);
+        w.write_u32(0); // SpellXSpellVisualID
+        w.write_f32(0.0); // MissileTrajectory.Pitch
+        w.write_f32(0.0); // MissileTrajectory.Speed
+        w.write_packed_guid_128(0, 0); // CraftingNPC
+        w.write_u32(0); // optionalReagents count
+        w.write_u32(0); // optionalCurrencies count
+        w.write_bits(0, 5); // SendCastFlags
+        w.write_bit(false); // HasMoveUpdate
+        w.write_bits(0, 2); // weightCount
+        w.flush_bits(); // byte-aligned: 5 + 1 + 2 bits is exactly one byte
+
+        // SpellTargetData: all-empty resolves to a self-cast via the unit-GUID-empty fallback,
+        // the same way the vanilla TARGET_FLAG_SELF case does.
+        w.write_bits(0, 26); // target_flags
+        w.write_bit(false); // HasSrcLocation
+        w.write_bit(false); // HasDstLocation
+        w.write_bit(false); // HasOrientation
+        w.write_bit(false); // HasMapID
+        w.write_bits(0, 7); // name length
+        w.flush_bits();
+        w.write_packed_guid_128(0, 0); // unit target
+        w.write_packed_guid_128(0, 0); // item target
+
+        w.into_bytes()
+    }
+
+    /// The bug this fixes: `handle_cast_spell` used to read a bare vanilla-shaped `spell_id: u32`
+    /// regardless of protocol, so on a modern connection it actually read the low bytes of this
+    /// body's packed `CastID` -- and everything after that was misaligned by the whole width of
+    /// this structure. Every modern cast was affected.
+    #[test]
+    fn parses_a_modern_cast_spell_request_end_to_end() {
+        let caster = ObjectGuid::new_player(7);
+        let client_cast_id = (0x1122_3344_5566_7788u64, 0x99AA_BBCC_DDEE_FF00u64);
+        let body = modern_cast_spell_body(client_cast_id, 133); // Fireball
+
+        let mut packet = WorldPacket::new(Opcode::CMSG_CAST_SPELL);
+        packet.write_bytes(&body);
+
+        let request = parse_modern_spell_cast_request(&mut packet, caster).unwrap();
+
+        assert_eq!(request.spell_id, 133);
+        assert_eq!(request.cast_id, client_cast_id);
+        assert_eq!(
+            request.targets.unit_target(),
+            Some(caster),
+            "an all-empty target block must resolve to a self-cast"
+        );
+        // The whole body must be consumed -- a short read here would misalign whatever the caller
+        // reads next from the same packet.
+        assert_eq!(packet.contents().len(), 0);
+    }
+
+    /// Trailing `SpellWeight` entries (crafting order priority) must each realign to a byte
+    /// boundary before their 2-bit `Type` field, matching the reference's `ResetBitPos()` -- and
+    /// still leave the packet's cursor at the very end, not one entry short.
+    #[test]
+    fn parses_trailing_spell_weight_entries() {
+        let mut w = BitWriter::new();
+        w.write_packed_guid_128(0, 1); // CastID
+        w.write_u32(0); // Misc[0]
+        w.write_u32(0); // Misc[1]
+        w.write_u32(133); // SpellID
+        w.write_u32(0); // SpellXSpellVisualID
+        w.write_f32(0.0);
+        w.write_f32(0.0);
+        w.write_packed_guid_128(0, 0); // CraftingNPC
+        w.write_u32(0); // reagents
+        w.write_u32(0); // currencies
+        w.write_bits(0, 5); // SendCastFlags
+        w.write_bit(false); // HasMoveUpdate
+        w.write_bits(2, 2); // weightCount = 2
+        w.flush_bits();
+        // Target block, all-empty.
+        w.write_bits(0, 26);
+        w.write_bit(false);
+        w.write_bit(false);
+        w.write_bit(false);
+        w.write_bit(false);
+        w.write_bits(0, 7);
+        w.flush_bits();
+        w.write_packed_guid_128(0, 0);
+        w.write_packed_guid_128(0, 0);
+        // Two SpellWeight entries, each realigned first.
+        for _ in 0..2 {
+            w.write_bits(1, 2); // Type
+            w.flush_bits();
+            w.write_i32(5); // ID
+            w.write_u32(3); // Quantity
+        }
+
+        let mut packet = WorldPacket::new(Opcode::CMSG_CAST_SPELL);
+        packet.write_bytes(&w.into_bytes());
+
+        let caster = ObjectGuid::new_player(1);
+        let request = parse_modern_spell_cast_request(&mut packet, caster).unwrap();
+
+        assert_eq!(request.spell_id, 133);
+        assert_eq!(
+            packet.contents().len(),
+            0,
+            "both weight entries must be consumed"
+        );
+    }
 
     #[test]
     fn parses_self_target_for_item_use_packets() {

@@ -8,7 +8,7 @@ use tracing::debug;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
 use crate::World;
-use oxcore_shared::protocol::WorldPacket;
+use oxcore_shared::protocol::{Protocol, WorldPacket};
 
 /// Handle CMSG_LIST_INVENTORY (0x19E)
 ///
@@ -85,7 +85,10 @@ pub async fn handle_buy_item(
 /// Handle CMSG_SELL_ITEM (0x1A7)
 ///
 /// Sent when player sells an item to a vendor.
-/// Packet format: vendor_guid (u64), item_guid (u64), amount (u8)
+/// Vanilla packet format: vendor_guid (u64), item_guid (u64), amount (u8).
+/// Modern widens the trailing count to a u32 -- reading it as a byte silently truncates any stack
+/// sell of 256 or more (common for ammo/reagent stacks), since the low byte still happens to match
+/// for smaller counts.
 pub async fn handle_sell_item(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -103,7 +106,11 @@ pub async fn handle_sell_item(
         .read_guid_for(session.protocol())
         .ok_or_else(|| anyhow::anyhow!("Failed to read item GUID"))?;
 
-    let amount = packet.read_u8().unwrap_or(0);
+    let amount = if session.protocol() == Protocol::Modern {
+        packet.read_u32().unwrap_or(0)
+    } else {
+        u32::from(packet.read_u8().unwrap_or(0))
+    };
 
     debug!(
         "CMSG_SELL_ITEM: player={:?}, vendor={:?}, item={:?}, amount={}",

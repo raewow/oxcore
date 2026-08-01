@@ -1062,7 +1062,7 @@ pub fn execute_creature_spell_cast(
     target_guid: Option<ObjectGuid>,
     triggered: bool,
 ) {
-    use oxcore_shared::messages::spells::SmsgSpellGo;
+    use oxcore_shared::messages::spells::{next_cast_sequence, SmsgSpellGo};
     use oxcore_shared::messages::ToWorldPacket;
 
     // Validate spell exists
@@ -1118,6 +1118,9 @@ pub fn execute_creature_spell_cast(
         cast_item_guid: None,
         ammo_display_id: 0,
         ammo_inventory_type: 0,
+        // No paired SPELL_START is sent for creature casts, so there is nothing to match --
+        // a fresh identity is correct here.
+        cast_sequence: next_cast_sequence(),
     };
     broadcast_around_creature(world, creature_guid, &msg);
 

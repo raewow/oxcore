@@ -270,7 +270,6 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    #[test]
     /// The instance connection must key straight off the realm's 40-byte session key, **not** run
     /// the full realm derivation over it again.
     ///

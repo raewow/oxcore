@@ -25,6 +25,14 @@ pub struct SmsgSpellStart {
     /// Inventory type of the projectile (e.g. INVTYPE_THROWN, INVTYPE_AMMO).
     /// 0 = no projectile.
     pub ammo_inventory_type: u32,
+    /// Identifies this cast, for modern's `CastID`. See [`next_cast_sequence`].
+    ///
+    /// `SMSG_SPELL_START` and `SMSG_SPELL_GO` for the *same* cast must carry the same value: the
+    /// client opens its cast bar under START's `CastID` and expects GO to close that same bar, not
+    /// announce an unrelated one. The caller must compute this once per cast (via
+    /// [`next_cast_sequence`]) and pass it to both messages -- neither message may mint its own,
+    /// which is what made every instant cast register as two different, un-paired casts.
+    pub cast_sequence: u64,
 }
 
 // =============================================================================
@@ -39,9 +47,12 @@ pub struct SmsgSpellStart {
 /// the same map 2^40 casts apart.
 static CAST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-/// Take the next cast-sequence value. Every message that names a cast identity uses this, so no two
-/// casts anywhere share a `Cast` GUID.
-fn next_cast_sequence() -> u64 {
+/// Take the next cast-sequence value.
+///
+/// Call this **once per cast**, not once per message: `SmsgSpellStart` and `SmsgSpellGo` both carry
+/// a `cast_sequence` field precisely so the caller can pass the same value to both and the client
+/// sees one cast, not two.
+pub fn next_cast_sequence() -> u64 {
     CAST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
 }
 
@@ -70,6 +81,7 @@ fn write_modern_spell_cast_data(
     target_guid: Option<ObjectGuid>,
     hit_targets: &[ObjectGuid],
     miss_targets: &[SpellMissTarget],
+    cast_sequence: u64,
 ) {
     // Vanilla puts the cast item in the first GUID slot and flags it; 1.14 keeps the caster in both
     // and carries the item in the target block instead, so the item does not displace the caster.
@@ -77,10 +89,9 @@ fn write_modern_spell_cast_data(
     writer.write_packed_guid_128(high, low); // CasterGUID
     writer.write_packed_guid_128(high, low); // CasterUnit
 
-    let sequence = next_cast_sequence();
     // Map 0 is a placeholder: the cast GUID's map field is identity, not routing, and the message
     // does not carry the caster's map. A wrong map makes the id no less unique.
-    let (cast_high, cast_low) = cast_guid128(DEFAULT_REALM_ID, 0, spell_id, sequence);
+    let (cast_high, cast_low) = cast_guid128(DEFAULT_REALM_ID, 0, spell_id, cast_sequence);
     writer.write_packed_guid_128(cast_high, cast_low); // CastID
     writer.write_packed_guid_128(0, 0); // OriginalCastID -- not a triggered cast
 
@@ -214,6 +225,7 @@ impl ToWorldPacket for SmsgSpellStart {
             self.target_guid,
             &[],
             &[],
+            self.cast_sequence,
         );
         Some(writer.finish(Opcode::SMSG_SPELL_START))
     }
@@ -239,6 +251,9 @@ pub struct SmsgSpellGo {
     /// Inventory type of the projectile (e.g. INVTYPE_THROWN, INVTYPE_AMMO).
     /// 0 = no projectile.
     pub ammo_inventory_type: u32,
+    /// Must equal the `cast_sequence` of the `SmsgSpellStart` this GO completes. See that field's
+    /// doc comment.
+    pub cast_sequence: u64,
 }
 
 /// A target omitted from the successful-hit list and its spell miss result.
@@ -322,6 +337,7 @@ impl ToWorldPacket for SmsgSpellGo {
             self.target_guid,
             &self.hit_targets,
             &self.miss_targets,
+            self.cast_sequence,
         );
         writer.write_bit(false); // HasLogData
         writer.flush_bits();
@@ -421,6 +437,7 @@ mod spell_packet_tests {
             cast_item_guid: None,
             ammo_display_id: 0,
             ammo_inventory_type: 0,
+            cast_sequence: 0,
         };
         let pkt = msg.to_vanilla();
         let mut data = pkt.data().clone();
@@ -464,6 +481,7 @@ mod spell_packet_tests {
             cast_item_guid: Some(item),
             ammo_display_id: 0,
             ammo_inventory_type: 0,
+            cast_sequence: 0,
         };
         let pkt = msg.to_vanilla();
         let mut data = pkt.data().clone();
@@ -513,6 +531,7 @@ mod spell_packet_tests {
             cast_item_guid: None,
             ammo_display_id: 0,
             ammo_inventory_type: 0,
+            cast_sequence: 0,
         };
         let mut data = msg.to_vanilla().data().clone();
 
@@ -562,6 +581,7 @@ mod spell_packet_tests {
             cast_item_guid: None,
             ammo_display_id: 0,
             ammo_inventory_type: 0,
+            cast_sequence: 0,
         };
         let mut data = msg.to_vanilla().data().clone();
 
@@ -597,6 +617,7 @@ mod spell_packet_tests {
             cast_item_guid: None,
             ammo_display_id: 123,
             ammo_inventory_type: 26,
+            cast_sequence: 0,
         };
 
         let without_ammo = go(0x0002).to_vanilla();
@@ -621,6 +642,7 @@ mod spell_packet_tests {
             cast_item_guid: None,
             ammo_display_id: 0,
             ammo_inventory_type: 0,
+            cast_sequence: 0,
         };
         let pkt = msg.to_vanilla();
         let mut data = pkt.data().clone();
@@ -648,6 +670,7 @@ mod spell_packet_tests {
             cast_item_guid: Some(item),
             ammo_display_id: 0,
             ammo_inventory_type: 0,
+            cast_sequence: 0,
         };
         let pkt = msg.to_vanilla();
         let mut data = pkt.data().clone();
@@ -673,6 +696,7 @@ mod spell_packet_tests {
             cast_item_guid: None,
             ammo_display_id: 123,
             ammo_inventory_type: 26,
+            cast_sequence: 0,
         };
 
         let without_ammo = start(0x0002).to_vanilla();
@@ -1744,7 +1768,7 @@ mod modern_spell_tests {
         ObjectGuid::new_player(4)
     }
 
-    fn go(hits: Vec<ObjectGuid>, misses: Vec<SpellMissTarget>) -> WorldPacket {
+    fn go(hits: Vec<ObjectGuid>, misses: Vec<SpellMissTarget>, cast_sequence: u64) -> WorldPacket {
         SmsgSpellGo {
             caster_guid: caster(),
             caster_guid_pack: caster(),
@@ -1756,6 +1780,7 @@ mod modern_spell_tests {
             cast_item_guid: None,
             ammo_display_id: 0,
             ammo_inventory_type: 0,
+            cast_sequence,
         }
         .to_modern()
         .expect("spell go must encode for modern")
@@ -1763,14 +1788,56 @@ mod modern_spell_tests {
 
     /// Every cast needs a distinct `Cast` GUID: the client keys its cast bar, sounds and visual
     /// chunks on it, and a reused id makes visuals drift and interrupts fail to dismiss the bar.
+    /// The message itself no longer guarantees this -- the caller must pass a fresh
+    /// `next_cast_sequence()` value per cast, which this asserts produces distinct GUIDs.
     #[test]
     fn each_cast_gets_a_distinct_cast_guid() {
-        let first = go(vec![], vec![]);
-        let second = go(vec![], vec![]);
+        let first = go(vec![], vec![], next_cast_sequence());
+        let second = go(vec![], vec![], next_cast_sequence());
         assert_ne!(
             first.contents(),
             second.contents(),
             "two casts of the same spell must not share a cast GUID"
+        );
+    }
+
+    /// The bug this fixes: `SmsgSpellStart::to_modern` and `SmsgSpellGo::to_modern` used to mint
+    /// their own cast sequence independently, so a spell's START and GO never shared a `CastID`.
+    /// The client opens its cast bar under START's id and expects GO to close that same bar --
+    /// a mismatched id meant GO did not register as completing the cast START began.
+    #[test]
+    fn start_and_go_share_the_cast_id_when_given_the_same_sequence() {
+        use crate::protocol::bitbuf::BitReader;
+
+        let sequence = next_cast_sequence();
+        let start = SmsgSpellStart {
+            caster_guid: caster(),
+            caster_guid_pack: caster(),
+            spell_id: 133,
+            cast_flags: 0,
+            cast_time_ms: 0,
+            target_guid: Some(ObjectGuid::new_creature(299, 464)),
+            cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
+            cast_sequence: sequence,
+        }
+        .to_modern()
+        .expect("spell start must encode for modern");
+        let go = go(vec![], vec![], sequence);
+
+        // The cast block opens with CasterGUID, CasterUnit, then CastID -- skip the first two to
+        // reach the one that must match.
+        let cast_id = |packet: &crate::protocol::WorldPacket| {
+            let mut reader = BitReader::new(packet.contents());
+            reader.read_packed_guid_128().expect("CasterGUID");
+            reader.read_packed_guid_128().expect("CasterUnit");
+            reader.read_packed_guid_128().expect("CastID")
+        };
+        assert_eq!(
+            cast_id(&start),
+            cast_id(&go),
+            "SPELL_START and SPELL_GO for the same cast must carry the same CastID"
         );
     }
 
@@ -1796,6 +1863,7 @@ mod modern_spell_tests {
                 reason: 1,
                 reflect_result: 0,
             }],
+            1,
         );
         let reflected = go(
             vec![],
@@ -1804,6 +1872,7 @@ mod modern_spell_tests {
                 reason: SPELL_MISS_REFLECT,
                 reflect_result: 2,
             }],
+            1,
         );
         // Both flush to a whole byte, so the sizes match; the bytes must not.
         assert_ne!(plain.contents(), reflected.contents());
@@ -1812,8 +1881,8 @@ mod modern_spell_tests {
     /// Hit and miss GUIDs follow the target block, and each is a packed guid128 rather than a raw u64.
     #[test]
     fn hit_targets_lengthen_the_body() {
-        let none = go(vec![], vec![]).size();
-        let one = go(vec![ObjectGuid::new_creature(299, 464)], vec![]).size();
+        let none = go(vec![], vec![], 1).size();
+        let one = go(vec![ObjectGuid::new_creature(299, 464)], vec![], 1).size();
         assert!(
             one > none,
             "a hit target must add its packed GUID to the body"

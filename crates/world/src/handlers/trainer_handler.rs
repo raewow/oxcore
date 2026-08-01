@@ -8,7 +8,9 @@ use crate::core::session::WorldSession;
 use crate::game::broadcast_mgr::broadcast_around_creature;
 use crate::game::npc::trainer::types::TrainerSpellState;
 use crate::World;
-use oxcore_shared::messages::spells::{SmsgPlaySpellVisual, SmsgSpellGo, SmsgSpellStart};
+use oxcore_shared::messages::spells::{
+    next_cast_sequence, SmsgPlaySpellVisual, SmsgSpellGo, SmsgSpellStart,
+};
 use oxcore_shared::messages::trainer::{
     SmsgTrainerBuyFailed, SmsgTrainerBuySucceeded, SmsgTrainerList, TrainerBuyError,
     TrainerSpellData,
@@ -429,6 +431,10 @@ pub(crate) fn build_trainer_anim_packets(
         trainer_guid
     };
 
+    // START and GO must share one cast identity, or the client's cast bar (opened under START's
+    // CastID) does not recognize GO as the completion of the same cast.
+    let cast_sequence = next_cast_sequence();
+
     let spell_start = SmsgSpellStart {
         caster_guid,
         caster_guid_pack: caster_guid,
@@ -439,6 +445,7 @@ pub(crate) fn build_trainer_anim_packets(
         cast_item_guid: None,
         ammo_display_id: 0,
         ammo_inventory_type: 0,
+        cast_sequence,
     };
 
     let spell_go = SmsgSpellGo {
@@ -452,6 +459,7 @@ pub(crate) fn build_trainer_anim_packets(
         cast_item_guid: None,
         ammo_display_id: 0,
         ammo_inventory_type: 0,
+        cast_sequence,
     };
 
     let spell_visual = SmsgPlaySpellVisual {

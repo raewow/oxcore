@@ -19,7 +19,7 @@ use crate::game::player::auras::proc;
 use crate::game::player::movement::MovementControllerSender;
 use crate::game::player::spells::diminishing::{DRGroup, DiminishSnapshot};
 use crate::World;
-use oxcore_shared::messages::auras::SmsgUpdateAuraDuration;
+use oxcore_shared::messages::auras::{SmsgAuraUpdate, SmsgUpdateAuraDuration};
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
@@ -2140,19 +2140,27 @@ impl AuraSystem {
             return Ok(()); // Only 48 visible aura slots
         }
 
-        let aura_data: Option<(u32, u8, u8, u8)> = world
+        let aura_data: Option<(u32, u8, u8, u8, Option<u32>, Option<u32>)> = world
             .systems
             .player
             .manager()
             .with_player_mut(target_guid, |player| {
                 player.auras.container.get_aura_at_slot(slot).map(|aura| {
                     let flags = encode_aura_flags_vanilla(aura);
-                    (aura.spell_id, flags, player.level, aura.stack_count)
+                    (
+                        aura.spell_id,
+                        flags,
+                        player.level,
+                        aura.stack_count,
+                        aura.duration_ms,
+                        aura.max_duration_ms,
+                    )
                 })
             })
             .flatten();
 
-        let (spell_id, flags, level, stacks) = aura_data.unwrap_or((0, 0, 0, 0));
+        let (spell_id, flags, level, stacks, duration_ms, max_duration_ms) =
+            aura_data.unwrap_or((0, 0, 0, 0, None, None));
 
         let mut block = ValuesUpdateBlock::new(target_guid, ObjectType::Player);
 
@@ -2213,6 +2221,25 @@ impl AuraSystem {
         );
         self.broadcast_mgr
             .broadcast_msg_nearby(target_guid, &packet, true);
+
+        // 1.14 removed the aura fields from the Unit descriptor entirely -- the block above carries
+        // no aura data to a modern client no matter how it is translated. SMSG_AURA_UPDATE is the
+        // only channel a modern client has for aura state at all, so it must be sent regardless of
+        // protocol, not only as a modern-specific addition: the same dedicated packet is also
+        // vanilla's real mechanism for updating the buff/debuff bar, the update-field write above
+        // existing to catch up players who sync the object fresh.
+        let aura_update = SmsgAuraUpdate {
+            target_guid,
+            slot,
+            spell_id,
+            aura_flags: flags,
+            level,
+            stacks,
+            duration_ms,
+            max_duration_ms,
+        };
+        self.broadcast_mgr
+            .broadcast_msg_nearby(target_guid, &aura_update, true);
 
         Ok(())
     }

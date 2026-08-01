@@ -23,9 +23,10 @@ use crate::World;
 use anyhow::Result;
 use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
 use oxcore_shared::messages::spells::{
-    ExecuteLogInfo, MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown, SmsgSpellFailure,
-    SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellStart, SmsgSpellUpdateChainTargets, SpellMissTarget,
-    SPELL_RESULT_STATUS_FAIL, SPELL_RESULT_STATUS_OKAY,
+    next_cast_sequence, ExecuteLogInfo, MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown,
+    SmsgSpellFailure, SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellStart,
+    SmsgSpellUpdateChainTargets, SpellMissTarget, SPELL_RESULT_STATUS_FAIL,
+    SPELL_RESULT_STATUS_OKAY,
 };
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
@@ -628,12 +629,17 @@ impl SpellSystem {
     /// Cast a spell with the full client-provided targets (unit/GO/item/corpse + source/dest
     /// positions). Used by the CMSG_CAST_SPELL handler so ground-targeted AoE keeps its
     /// destination position through the pipeline.
+    /// `cast_sequence` should be the client's own cast identity turned into a server sequence
+    /// (see `handlers/spells.rs`'s `SMSG_SPELL_PREPARE` send), so `SMSG_SPELL_START`/`SMSG_SPELL_GO`
+    /// carry the same `CastID` this cast was already acknowledged under. `None` for calls with no
+    /// originating client request (item procs, triggers), which mint their own on first use.
     pub fn cast_spell_with_targets<'a>(
         &'a self,
         caster_guid: ObjectGuid,
         spell_id: u32,
         cast_targets: SpellCastTargets,
         is_triggered: bool,
+        cast_sequence: Option<u64>,
         world: &'a World,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
     {
@@ -643,6 +649,7 @@ impl SpellSystem {
             cast_targets,
             is_triggered,
             None,
+            cast_sequence,
             world,
         ))
     }
@@ -720,6 +727,7 @@ impl SpellSystem {
             spell_id,
             &cast_targets,
             true,
+            None,
             None,
             None,
             world,
@@ -800,7 +808,7 @@ impl SpellSystem {
 
         // SPELL_START is sent for every non-triggered cast, including instant
         // spells. The client uses it to start the cast animation before SPELL_GO.
-        self.send_spell_start(
+        let cast_sequence = self.send_spell_start(
             caster_guid,
             spell_id,
             cast_time_ms,
@@ -814,7 +822,14 @@ impl SpellSystem {
         // The melee slot is explicitly skipped while the spell sits in it; the cast is
         // fired on the next main-hand swing.
         if slot == CurrentSpellType::Melee {
-            self.park_next_swing_spell(caster_guid, spell_id, is_triggered, cast_targets, world);
+            self.park_next_swing_spell(
+                caster_guid,
+                spell_id,
+                is_triggered,
+                cast_targets,
+                cast_sequence,
+                world,
+            );
             return Ok(SpellCastResult::Success);
         }
 
@@ -842,6 +857,7 @@ impl SpellSystem {
                 is_triggered,
                 cast_item_guid,
                 cast_targets,
+                cast_sequence,
                 world,
             )
             .await?;
@@ -869,6 +885,7 @@ impl SpellSystem {
                 is_triggered,
                 cast_item_guid,
                 resolved_targets.as_ref(),
+                cast_sequence,
                 world,
             )
             .await?;
@@ -882,6 +899,7 @@ impl SpellSystem {
                 slot,
                 cast_item_guid,
                 cast_targets,
+                cast_sequence,
                 world,
             )
             .await?;
@@ -928,6 +946,7 @@ impl SpellSystem {
         spell_id: u32,
         is_triggered: bool,
         cast_targets: SpellCastTargets,
+        cast_sequence: Option<u64>,
         world: &World,
     ) {
         let target_guid = cast_targets.unit_target();
@@ -952,6 +971,7 @@ impl SpellSystem {
                     z,
                 );
                 active.cast_targets = cast_targets;
+                active.cast_sequence = cast_sequence;
                 player
                     .spells
                     .set_current_spell(CurrentSpellType::Melee, active);
@@ -1033,6 +1053,7 @@ impl SpellSystem {
             cast.is_triggered,
             None,
             resolved_targets.as_ref(),
+            cast.cast_sequence,
             world,
         )
         .await?;
@@ -1041,6 +1062,7 @@ impl SpellSystem {
     }
 
     /// Start a cast-time spell and create its ActiveCast.
+    #[allow(clippy::too_many_arguments)]
     async fn start_cast(
         &self,
         caster_guid: ObjectGuid,
@@ -1050,6 +1072,7 @@ impl SpellSystem {
         slot: CurrentSpellType,
         cast_item_guid: Option<ObjectGuid>,
         cast_targets: SpellCastTargets,
+        cast_sequence: Option<u64>,
         world: &World,
     ) -> Result<()> {
         let target_guid = cast_targets.unit_target();
@@ -1091,6 +1114,7 @@ impl SpellSystem {
                     slot,
                     cast_item_guid,
                     cast_targets,
+                    cast_sequence,
                 },
             );
         }
@@ -1100,6 +1124,12 @@ impl SpellSystem {
 
     /// Broadcast the start packet for a normal spell cast. Triggered spells have
     /// no client-side cast animation and therefore intentionally omit it.
+    ///
+    /// Returns the cast identity used, or `None` if no START was sent (triggered spells). The
+    /// caller must pass this same value to the eventual `SMSG_SPELL_GO` for this cast --
+    /// `SmsgSpellStart` and `SmsgSpellGo` no longer mint their own, because the client keys its
+    /// cast bar on `CastID` and a GO carrying a different one does not register as completing the
+    /// cast the client's bar is waiting on.
     fn send_spell_start(
         &self,
         caster_guid: ObjectGuid,
@@ -1109,9 +1139,9 @@ impl SpellSystem {
         cast_item_guid: Option<ObjectGuid>,
         is_triggered: bool,
         world: &World,
-    ) {
+    ) -> Option<u64> {
         if is_triggered {
-            return;
+            return None;
         }
 
         const CAST_FLAG_UNKNOWN2: u16 = 0x0002;
@@ -1129,6 +1159,7 @@ impl SpellSystem {
         } else {
             (0, 0)
         };
+        let cast_sequence = next_cast_sequence();
         let msg = SmsgSpellStart {
             caster_guid,
             caster_guid_pack: caster_guid,
@@ -1139,12 +1170,15 @@ impl SpellSystem {
             cast_item_guid,
             ammo_display_id,
             ammo_inventory_type,
+            cast_sequence,
         };
         self.broadcast_mgr
             .broadcast_msg_nearby(caster_guid, &msg, true);
+        Some(cast_sequence)
     }
 
     /// Start a channeled spell. Creates ActiveCast in channel mode.
+    #[allow(clippy::too_many_arguments)]
     async fn start_channel(
         &self,
         caster_guid: ObjectGuid,
@@ -1154,6 +1188,7 @@ impl SpellSystem {
         is_triggered: bool,
         cast_item_guid: Option<ObjectGuid>,
         cast_targets: SpellCastTargets,
+        cast_sequence: Option<u64>,
         world: &World,
     ) -> Result<()> {
         let resolved = crate::game::player::spells::targets::resolve_spell_targets(
@@ -1309,6 +1344,7 @@ impl SpellSystem {
             cast_item_guid,
             ammo_display_id,
             ammo_inventory_type,
+            cast_sequence: cast_sequence.unwrap_or_else(next_cast_sequence),
         };
         self.broadcast_mgr
             .broadcast_msg_nearby(caster_guid, &msg, true);
@@ -1432,6 +1468,7 @@ impl SpellSystem {
                     slot,
                     cast_item_guid,
                     cast_targets,
+                    cast_sequence,
                 } => {
                     // Verify the spell is still in the slot (wasn't cancelled)
                     let still_active = world
@@ -1495,6 +1532,7 @@ impl SpellSystem {
                             is_triggered,
                             cast_item_guid,
                             resolved_targets.as_ref(),
+                            cast_sequence,
                             world,
                         )
                         .await?;
@@ -1571,6 +1609,7 @@ impl SpellSystem {
                             spell_id,
                             &cast_targets,
                             false,
+                            None,
                             None,
                             None,
                             world,
@@ -1781,6 +1820,7 @@ impl SpellSystem {
                         is_triggered,
                         None,
                         resolved_targets.as_ref(),
+                        None,
                         world,
                     )
                     .await?;
@@ -1810,6 +1850,7 @@ impl SpellSystem {
                         spell_id,
                         &cast_targets,
                         false,
+                        None,
                         None,
                         None,
                         world,
@@ -2082,6 +2123,15 @@ impl SpellSystem {
     }
 
     /// Finish a spell cast. Broadcasts SMSG_SPELL_GO, applies cooldown.
+    ///
+    /// `cast_sequence` should be the value `send_spell_start` returned for this same cast, so
+    /// SPELL_GO's `CastID` matches the one SPELL_START opened the client's cast bar under. Threaded
+    /// through for instant casts, ordinary cast-time casts (via the `CastFinish` event) and
+    /// on-next-swing melee casts (via `ActiveCast::cast_sequence`). `None` mints a fresh one
+    /// instead -- correct for triggered spells (no SPELL_START was sent to match) and the honest
+    /// current gap for channel completion, whose own SPELL_GO already fired with the right identity
+    /// at channel start and does not need a second one here.
+    #[allow(clippy::too_many_arguments)]
     async fn finish_cast(
         &self,
         caster_guid: ObjectGuid,
@@ -2090,6 +2140,7 @@ impl SpellSystem {
         is_triggered: bool,
         cast_item_guid: Option<ObjectGuid>,
         resolved_targets: Option<&crate::game::player::spells::targets::ResolvedTargets>,
+        cast_sequence: Option<u64>,
         world: &World,
     ) -> Result<()> {
         let target_guid = cast_targets.unit_target();
@@ -2179,6 +2230,7 @@ impl SpellSystem {
             cast_item_guid,
             ammo_display_id,
             ammo_inventory_type,
+            cast_sequence: cast_sequence.unwrap_or_else(next_cast_sequence),
         };
         self.broadcast_mgr
             .broadcast_msg_nearby(caster_guid, &msg, true);
@@ -3599,7 +3651,7 @@ impl SpellSystem {
                 .unwrap_or_default();
 
             if ok {
-                self.finish_cast(caster_guid, spell_id, &targets, false, None, None, world)
+                self.finish_cast(caster_guid, spell_id, &targets, false, None, None, None, world)
                     .await?;
             } else {
                 self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted, world)?;
