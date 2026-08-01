@@ -625,6 +625,7 @@ impl SpellSystem {
             is_triggered,
             None,
             None,
+            None,
             world,
         ))
     }
@@ -636,6 +637,8 @@ impl SpellSystem {
     /// (see `handlers/spells.rs`'s `SMSG_SPELL_PREPARE` send), so `SMSG_SPELL_START`/`SMSG_SPELL_GO`
     /// carry the same `CastID` this cast was already acknowledged under. `None` for calls with no
     /// originating client request (item procs, triggers), which mint their own on first use.
+    /// `spell_visual_id` is the modern `SpellXSpellVisualID` the client echoed in its cast request,
+    /// without which the client plays no animations for this cast; `None` (no modern origin) sends 0.
     pub fn cast_spell_with_targets<'a>(
         &'a self,
         caster_guid: ObjectGuid,
@@ -643,6 +646,7 @@ impl SpellSystem {
         cast_targets: SpellCastTargets,
         is_triggered: bool,
         cast_sequence: Option<u64>,
+        spell_visual_id: Option<u32>,
         world: &'a World,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
     {
@@ -653,6 +657,7 @@ impl SpellSystem {
             is_triggered,
             None,
             cast_sequence,
+            spell_visual_id,
             world,
         ))
     }
@@ -665,6 +670,7 @@ impl SpellSystem {
         item_guid: ObjectGuid,
         is_triggered: bool,
         cast_sequence: Option<u64>,
+        spell_visual_id: Option<u32>,
         world: &'a World,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
     {
@@ -675,6 +681,7 @@ impl SpellSystem {
             is_triggered,
             Some(item_guid),
             cast_sequence,
+            spell_visual_id,
             world,
         ))
     }
@@ -735,6 +742,7 @@ impl SpellSystem {
             None,
             None,
             None,
+            None,
             world,
         )
         .await?;
@@ -750,6 +758,7 @@ impl SpellSystem {
         is_triggered: bool,
         cast_item_guid: Option<ObjectGuid>,
         cast_sequence: Option<u64>,
+        spell_visual_id: Option<u32>,
         world: &World,
     ) -> Result<SpellCastResult> {
         let target_guid = cast_targets.unit_target();
@@ -839,6 +848,7 @@ impl SpellSystem {
             cast_item_guid,
             is_triggered,
             cast_sequence,
+            spell_visual_id,
             world,
         );
 
@@ -852,6 +862,7 @@ impl SpellSystem {
                 is_triggered,
                 cast_targets,
                 cast_sequence,
+                spell_visual_id,
                 world,
             );
             return Ok(SpellCastResult::Success);
@@ -882,6 +893,7 @@ impl SpellSystem {
                 cast_item_guid,
                 cast_targets,
                 cast_sequence,
+                spell_visual_id,
                 world,
             )
             .await?;
@@ -910,6 +922,7 @@ impl SpellSystem {
                 cast_item_guid,
                 resolved_targets.as_ref(),
                 cast_sequence,
+                spell_visual_id,
                 world,
             )
             .await?;
@@ -924,6 +937,7 @@ impl SpellSystem {
                 cast_item_guid,
                 cast_targets,
                 cast_sequence,
+                spell_visual_id,
                 world,
             )
             .await?;
@@ -971,6 +985,7 @@ impl SpellSystem {
         is_triggered: bool,
         cast_targets: SpellCastTargets,
         cast_sequence: Option<u64>,
+        spell_visual_id: Option<u32>,
         world: &World,
     ) {
         let target_guid = cast_targets.unit_target();
@@ -996,6 +1011,7 @@ impl SpellSystem {
                 );
                 active.cast_targets = cast_targets;
                 active.cast_sequence = cast_sequence;
+                active.spell_visual_id = spell_visual_id;
                 player
                     .spells
                     .set_current_spell(CurrentSpellType::Melee, active);
@@ -1078,6 +1094,7 @@ impl SpellSystem {
             None,
             resolved_targets.as_ref(),
             cast.cast_sequence,
+            cast.spell_visual_id,
             world,
         )
         .await?;
@@ -1097,6 +1114,7 @@ impl SpellSystem {
         cast_item_guid: Option<ObjectGuid>,
         cast_targets: SpellCastTargets,
         cast_sequence: Option<u64>,
+        spell_visual_id: Option<u32>,
         world: &World,
     ) -> Result<()> {
         let target_guid = cast_targets.unit_target();
@@ -1122,6 +1140,7 @@ impl SpellSystem {
                     z,
                 );
                 active.cast_targets = cast_targets.clone();
+                active.spell_visual_id = spell_visual_id;
                 player.spells.set_current_spell(slot, active);
             });
 
@@ -1139,6 +1158,7 @@ impl SpellSystem {
                     cast_item_guid,
                     cast_targets,
                     cast_sequence,
+                    spell_visual_id,
                 },
             );
         }
@@ -1169,6 +1189,7 @@ impl SpellSystem {
         cast_item_guid: Option<ObjectGuid>,
         is_triggered: bool,
         cast_sequence: Option<u64>,
+        spell_visual_id: Option<u32>,
         world: &World,
     ) -> Option<u64> {
         if is_triggered {
@@ -1195,6 +1216,7 @@ impl SpellSystem {
             caster_guid,
             caster_guid_pack: caster_guid,
             spell_id,
+            spell_visual_id: spell_visual_id.unwrap_or(0),
             cast_flags,
             cast_time_ms,
             target_guid,
@@ -1220,6 +1242,7 @@ impl SpellSystem {
         cast_item_guid: Option<ObjectGuid>,
         cast_targets: SpellCastTargets,
         cast_sequence: Option<u64>,
+        spell_visual_id: Option<u32>,
         world: &World,
     ) -> Result<()> {
         let resolved = crate::game::player::spells::targets::resolve_spell_targets(
@@ -1368,6 +1391,7 @@ impl SpellSystem {
             caster_guid,
             caster_guid_pack: caster_guid,
             spell_id,
+            spell_visual_id: spell_visual_id.unwrap_or(0),
             cast_flags: if is_ranged { CAST_FLAG_AMMO } else { 0 },
             hit_targets: target_guid.into_iter().collect(),
             miss_targets: Vec::new(),
@@ -1500,6 +1524,7 @@ impl SpellSystem {
                     cast_item_guid,
                     cast_targets,
                     cast_sequence,
+                    spell_visual_id,
                 } => {
                     // Verify the spell is still in the slot (wasn't cancelled)
                     let still_active = world
@@ -1564,6 +1589,7 @@ impl SpellSystem {
                             cast_item_guid,
                             resolved_targets.as_ref(),
                             cast_sequence,
+                            spell_visual_id,
                             world,
                         )
                         .await?;
@@ -1640,6 +1666,7 @@ impl SpellSystem {
                             spell_id,
                             &cast_targets,
                             false,
+                            None,
                             None,
                             None,
                             None,
@@ -1852,6 +1879,7 @@ impl SpellSystem {
                         None,
                         resolved_targets.as_ref(),
                         None,
+                        None,
                         world,
                     )
                     .await?;
@@ -1881,6 +1909,7 @@ impl SpellSystem {
                         spell_id,
                         &cast_targets,
                         false,
+                        None,
                         None,
                         None,
                         None,
@@ -2172,6 +2201,7 @@ impl SpellSystem {
         cast_item_guid: Option<ObjectGuid>,
         resolved_targets: Option<&crate::game::player::spells::targets::ResolvedTargets>,
         cast_sequence: Option<u64>,
+        spell_visual_id: Option<u32>,
         world: &World,
     ) -> Result<()> {
         let target_guid = cast_targets.unit_target();
@@ -2252,6 +2282,7 @@ impl SpellSystem {
             caster_guid,
             caster_guid_pack: caster_guid,
             spell_id,
+            spell_visual_id: spell_visual_id.unwrap_or(0),
             // SMSG_SPELL_GO uses UNKNOWN9, distinct from the UNKNOWN2 flag
             // carried by SMSG_SPELL_START.
             cast_flags: CAST_FLAG_UNKNOWN9 | if is_ranged { CAST_FLAG_AMMO } else { 0 },
@@ -3733,7 +3764,7 @@ impl SpellSystem {
                 .unwrap_or_default();
 
             if ok {
-                self.finish_cast(caster_guid, spell_id, &targets, false, None, None, None, world)
+                self.finish_cast(caster_guid, spell_id, &targets, false, None, None, None, None, world)
                     .await?;
             } else {
                 self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted, world)?;

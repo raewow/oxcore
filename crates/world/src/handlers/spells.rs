@@ -162,6 +162,11 @@ pub(crate) struct ModernSpellCastRequest {
     /// / `SMSG_SPELL_GO` carry, and the cast bar/animation state machine never resolves.
     pub cast_id: (u64, u64),
     pub spell_id: u32,
+    /// The modern `SpellXSpellVisualID` the client derived from its own DB2 for this press. The
+    /// server echoes it back in `SMSG_SPELL_START`/`SMSG_SPELL_GO` so the client plays the cast's
+    /// animations -- it is a DB2 row id unrelated to the spell id (Fireball 133 → 236677), so it
+    /// cannot be guessed. See `SmsgSpellStart::spell_visual_id`.
+    pub spell_visual_id: u32,
     pub targets: SpellCastTargets,
 }
 
@@ -198,7 +203,7 @@ pub(crate) fn parse_modern_spell_cast_request(
     let spell_id = reader
         .read_u32()
         .ok_or_else(|| anyhow::anyhow!("Failed to read SpellID"))?;
-    reader
+    let spell_visual_id = reader
         .read_u32()
         .ok_or_else(|| anyhow::anyhow!("Failed to read SpellXSpellVisualID"))?;
 
@@ -298,6 +303,7 @@ pub(crate) fn parse_modern_spell_cast_request(
     Ok(ModernSpellCastRequest {
         cast_id,
         spell_id,
+        spell_visual_id,
         targets,
     })
 }
@@ -403,17 +409,22 @@ pub async fn handle_cast_spell(
     // larger SpellCastRequest block (client cast identity, misc fields, missile trajectory,
     // crafting reagents/currencies, then the target block) -- see
     // `parse_modern_spell_cast_request` for why this must be a real branch, not a shared read.
-    let (spell_id, targets, client_cast_id) = match session.protocol() {
+    let (spell_id, targets, client_cast_id, spell_visual_id) = match session.protocol() {
         Protocol::Vanilla => {
             let spell_id = packet
                 .read_u32()
                 .ok_or_else(|| anyhow::anyhow!("Failed to read spell_id"))?;
             let targets = parse_spell_cast_targets(session.protocol(), packet, player_guid)?;
-            (spell_id, targets, None)
+            (spell_id, targets, None, 0)
         }
         Protocol::Modern => {
             let request = parse_modern_spell_cast_request(packet, player_guid)?;
-            (request.spell_id, request.targets, Some(request.cast_id))
+            (
+                request.spell_id,
+                request.targets,
+                Some(request.cast_id),
+                request.spell_visual_id,
+            )
         }
     };
 
@@ -512,6 +523,13 @@ pub async fn handle_cast_spell(
             targets,
             false, // not triggered
             server_sequence,
+            // The modern client echoes its own DB2 visual id; echo it back so the cast's
+            // animations actually play. Vanilla has no such concept (0).
+            if session.protocol() == Protocol::Modern {
+                Some(spell_visual_id)
+            } else {
+                None
+            },
             world,
         )
         .await?;

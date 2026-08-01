@@ -744,6 +744,11 @@ pub struct ActiveCast {
     /// eventual `SMSG_SPELL_GO` (fired on the next main-hand swing, for on-swing spells parked
     /// here) can share it. `None` for triggered casts, which sent no START to match.
     pub cast_sequence: Option<u64>,
+
+    /// The modern `SpellXSpellVisualID` for this cast, echoed from the client's cast request so
+    /// `SMSG_SPELL_GO` plays the same visual `SMSG_SPELL_START` opened the bar under. `None` for
+    /// casts with no modern origin (0 on the wire). See `SmsgSpellStart::spell_visual_id`.
+    pub spell_visual_id: Option<u32>,
 }
 
 impl ActiveCast {
@@ -778,6 +783,7 @@ impl ActiveCast {
             start_position_z: z,
             cast_targets: SpellCastTargets::default(),
             cast_sequence: None,
+            spell_visual_id: None,
         }
     }
 
@@ -818,6 +824,7 @@ impl ActiveCast {
             start_position_z: z,
             cast_targets: SpellCastTargets::default(),
             cast_sequence: None,
+            spell_visual_id: None,
         }
     }
 
@@ -1160,6 +1167,9 @@ pub enum SpellEventType {
         /// the cast-time wait so the eventual `SMSG_SPELL_GO` shares it. `None` for triggered casts,
         /// which sent no START to match.
         cast_sequence: Option<u64>,
+        /// The modern `SpellXSpellVisualID` from the originating client press, carried across the
+        /// cast-time wait so the completion GO echoes it. `None` for casts with no modern origin.
+        spell_visual_id: Option<u32>,
     },
     /// Channel tick — execute one channel tick
     ChannelTick {
@@ -1378,6 +1388,7 @@ mod tests {
             cast_item_guid: None,
             cast_targets: SpellCastTargets::default(),
             cast_sequence: None,
+            spell_visual_id: None,
         }
     }
 

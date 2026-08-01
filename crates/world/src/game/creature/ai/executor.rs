@@ -1111,6 +1111,7 @@ pub fn execute_creature_spell_cast(
         caster_guid: creature_guid,
         caster_guid_pack: creature_guid,
         spell_id,
+        spell_visual_id: 0,
         cast_flags: if triggered { 0x0002 } else { 0x0000 },
         hit_targets,
         miss_targets: Vec::new(),

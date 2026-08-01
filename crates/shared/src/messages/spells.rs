@@ -1960,6 +1960,67 @@ mod modern_spell_tests {
         assert_eq!(high & 0x3F, 3, "SpellCastSource::Normal");
     }
 
+    /// The modern client plays a cast's animations from `SpellXSpellVisualID`, which it derives
+    /// from its own DB2 and echoes in CMSG_CAST_SPELL. The START/GO must write that value back on
+    /// the wire — writing 0 is what produced casts that dealt damage but played no animation. This
+    /// pins the field in its slot (u32 immediately after SpellID) for both messages.
+    #[test]
+    fn the_spell_visual_id_is_echoed_into_start_and_go() {
+        use crate::protocol::bitbuf::BitReader;
+
+        let sequence = next_cast_sequence();
+        let visual_id = 236_677u32; // Fireball 133's SpellXSpellVisualID, per JimsProxy's CSV
+
+        let read_visual = |packet: &crate::protocol::WorldPacket| {
+            let mut reader = BitReader::new(packet.contents());
+            // Four GUIDs lead the cast block: CasterGUID, CasterUnit, CastID, OriginalCastID.
+            for _ in 0..4 {
+                reader.read_packed_guid_128().expect("a leading GUID");
+            }
+            assert_eq!(
+                reader.read_u32().expect("SpellID"),
+                133,
+                "SpellID must precede the visual id"
+            );
+            reader.read_u32().expect("SpellXSpellVisualID")
+        };
+
+        let start = SmsgSpellStart {
+            caster_guid: caster(),
+            caster_guid_pack: caster(),
+            spell_id: 133,
+            spell_visual_id: visual_id,
+            cast_flags: 0,
+            cast_time_ms: 0,
+            target_guid: None,
+            cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
+            cast_sequence: sequence,
+        }
+        .to_modern()
+        .expect("spell start must encode for modern");
+        let go = SmsgSpellGo {
+            caster_guid: caster(),
+            caster_guid_pack: caster(),
+            spell_id: 133,
+            spell_visual_id: visual_id,
+            cast_flags: 0,
+            hit_targets: vec![],
+            miss_targets: vec![],
+            target_guid: None,
+            cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
+            cast_sequence: sequence,
+        }
+        .to_modern()
+        .expect("spell go must encode for modern");
+
+        assert_eq!(read_visual(&start), visual_id);
+        assert_eq!(read_visual(&go), visual_id);
+    }
+
     /// A reflected miss carries an extra 4-bit result; every other reason does not. Both are inside
     /// one bit run, so getting the condition wrong shifts the target lists that follow.
     #[test]

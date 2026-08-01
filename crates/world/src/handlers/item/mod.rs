@@ -66,7 +66,7 @@ pub async fn handle_use_item(
     // CMSG_CAST_SPELL uses. Modern's UseItem instead sends PackSlot/Slot (the same addressing,
     // different name), the item's own packed GUID, then the full SpellCastRequest block -- no
     // spell_slot at all, so effect index 0 (the item's primary use effect) is the only choice.
-    let (bag, slot, spell_slot, targets, client_cast_id, request_spell_id) =
+    let (bag, slot, spell_slot, targets, client_cast_id, request_spell_id, request_spell_visual_id) =
         match session.protocol() {
             Protocol::Vanilla => {
                 let bag = packet
@@ -79,7 +79,7 @@ pub async fn handle_use_item(
                     .read_u8()
                     .ok_or_else(|| anyhow!("Failed to read spell slot"))?;
                 let targets = parse_spell_cast_targets(Protocol::Vanilla, packet, player_guid)?;
-                (bag, slot, spell_slot, targets, None, None)
+                (bag, slot, spell_slot, targets, None, None, 0)
             }
             Protocol::Modern => {
                 let bag = packet
@@ -92,7 +92,15 @@ pub async fn handle_use_item(
                     .read_packed_guid_for(Protocol::Modern)
                     .ok_or_else(|| anyhow!("Failed to read CastItem"))?;
                 let request = parse_modern_spell_cast_request(packet, player_guid)?;
-                (bag, slot, 0u8, request.targets, Some(request.cast_id), Some(request.spell_id))
+                (
+                    bag,
+                    slot,
+                    0u8,
+                    request.targets,
+                    Some(request.cast_id),
+                    Some(request.spell_id),
+                    request.spell_visual_id,
+                )
             }
         };
 
@@ -236,6 +244,11 @@ pub async fn handle_use_item(
                 item_guid,
                 on_use_count > 0,
                 server_sequence,
+                if session.protocol() == Protocol::Modern {
+                    Some(request_spell_visual_id)
+                } else {
+                    None
+                },
                 world,
             )
             .await?;
