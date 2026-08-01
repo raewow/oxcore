@@ -11,7 +11,10 @@ use crate::game::player::spells::state::{
 };
 use crate::World;
 use anyhow::Result;
+use oxcore_shared::messages::spells::next_cast_sequence;
+use oxcore_shared::messages::update::DEFAULT_REALM_ID;
 use oxcore_shared::protocol::bitbuf::BitReader;
+use oxcore_shared::protocol::guid::cast_guid128;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Protocol, WorldPacket};
 
 /// Parse SpellCastTargets from a CMSG_CAST_SPELL packet.
@@ -413,7 +416,17 @@ pub async fn handle_cast_spell(
             (request.spell_id, request.targets, Some(request.cast_id))
         }
     };
-    let _ = client_cast_id; // wired up to SMSG_SPELL_PREPARE separately
+
+    // The modern client keys its pending press on the cast id IT minted; this server must echo it
+    // back paired with its own cast id before START/GO (which carry only the server id) will
+    // resolve that press. Mint the server id up front and send SMSG_SPELL_PREPARE right away, so a
+    // rejection below can reference the same id and the client's cast bar never hangs.
+    let server_sequence = client_cast_id.map(|_| next_cast_sequence());
+    let server_cast_id =
+        server_sequence.map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
+    if let (Some(client_id), Some(server_id)) = (client_cast_id, server_cast_id) {
+        world.systems.spells.send_spell_prepare(player_guid, client_id, server_id);
+    }
 
     // Unknown spell id: drop the cast, but loudly — a missing
     // spell_template row leaves the client waiting on a cast that never starts.
@@ -424,6 +437,13 @@ pub async fn handle_cast_spell(
                 "CMSG_CAST_SPELL: spell {} not in spell_template, cast by {:?} dropped",
                 spell_id,
                 player_guid
+            );
+            world.systems.spells.send_cast_result_with_cast_id(
+                player_guid,
+                spell_id,
+                crate::game::player::spells::state::SpellCastError::SpellNotKnown,
+                server_cast_id,
+                world,
             );
             return Ok(());
         }
@@ -459,10 +479,11 @@ pub async fn handle_cast_spell(
         && !spell_entry.is_positive_spell()
     {
         // SpellCastError::InvalidTarget maps to SPELL_FAILED_BAD_TARGETS (0x0A).
-        world.systems.spells.send_cast_result(
+        world.systems.spells.send_cast_result_with_cast_id(
             player_guid,
             spell_id,
             crate::game::player::spells::state::SpellCastError::InvalidTarget,
+            server_cast_id,
             world,
         );
         return Ok(());
@@ -490,6 +511,7 @@ pub async fn handle_cast_spell(
             spell_id,
             targets,
             false, // not triggered
+            server_sequence,
             world,
         )
         .await?;

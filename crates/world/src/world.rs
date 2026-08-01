@@ -192,6 +192,8 @@ impl World {
         let systems = Arc::new(SystemManager::new(
             Arc::clone(&character_pool),
             Arc::clone(&world_pool),
+            Arc::new(databases.logs.clone()),
+            config.chat_log_enabled,
             Arc::clone(&broadcast_mgr),
             Arc::clone(&item_mgr),
             Arc::clone(&player_system),

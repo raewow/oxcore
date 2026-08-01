@@ -23,15 +23,17 @@ use crate::World;
 use anyhow::Result;
 use oxcore_shared::game::inventory::INVENTORY_SLOT_BAG_0;
 use oxcore_shared::messages::spells::{
-    next_cast_sequence, ExecuteLogInfo, MsgChannelUpdate, SmsgCastResult, SmsgSpellCooldown,
-    SmsgSpellFailure, SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellStart,
-    SmsgSpellUpdateChainTargets, SpellMissTarget, SPELL_RESULT_STATUS_FAIL,
+    next_cast_sequence, ExecuteLogInfo, MsgChannelUpdate, SmsgCastFailed, SmsgCastResult,
+    SmsgSpellCooldown, SmsgSpellFailure, SmsgSpellGo, SmsgSpellLogExecute, SmsgSpellPrepare,
+    SmsgSpellStart, SmsgSpellUpdateChainTargets, SpellMissTarget, SPELL_RESULT_STATUS_FAIL,
     SPELL_RESULT_STATUS_OKAY,
 };
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
+use oxcore_shared::messages::update::DEFAULT_REALM_ID;
 use oxcore_shared::messages::ToWorldPacket;
+use oxcore_shared::protocol::guid::cast_guid128;
 use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -622,6 +624,7 @@ impl SpellSystem {
             cast_targets,
             is_triggered,
             None,
+            None,
             world,
         ))
     }
@@ -661,6 +664,7 @@ impl SpellSystem {
         cast_targets: SpellCastTargets,
         item_guid: ObjectGuid,
         is_triggered: bool,
+        cast_sequence: Option<u64>,
         world: &'a World,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
     {
@@ -670,6 +674,7 @@ impl SpellSystem {
             cast_targets,
             is_triggered,
             Some(item_guid),
+            cast_sequence,
             world,
         ))
     }
@@ -744,6 +749,7 @@ impl SpellSystem {
         cast_targets: SpellCastTargets,
         is_triggered: bool,
         cast_item_guid: Option<ObjectGuid>,
+        cast_sequence: Option<u64>,
         world: &World,
     ) -> Result<SpellCastResult> {
         let target_guid = cast_targets.unit_target();
@@ -759,8 +765,17 @@ impl SpellSystem {
         )?;
 
         if validate_result != SpellCastError::None {
-            // Send failure to client
-            self.send_cast_failure(caster_guid, spell_id, validate_result, world)?;
+            // Send failure to client. Modern references the same cast id the handler's
+            // SMSG_SPELL_PREPARE announced, so the client's pending press resolves.
+            let cast_id = cast_sequence
+                .map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
+            self.send_cast_failure_with_cast_id(
+                caster_guid,
+                spell_id,
+                validate_result,
+                cast_id,
+                world,
+            )?;
             return Ok(SpellCastResult::Failed(validate_result));
         }
 
@@ -772,7 +787,15 @@ impl SpellSystem {
         ) {
             let error = missing_script_target_error(is_triggered);
             if error != SpellCastError::DontReport {
-                self.send_cast_failure(caster_guid, spell_id, error, world)?;
+                let cast_id = cast_sequence
+                    .map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
+                self.send_cast_failure_with_cast_id(
+                    caster_guid,
+                    spell_id,
+                    error,
+                    cast_id,
+                    world,
+                )?;
             }
             return Ok(SpellCastResult::Failed(error));
         }
@@ -815,6 +838,7 @@ impl SpellSystem {
             target_guid,
             cast_item_guid,
             is_triggered,
+            cast_sequence,
             world,
         );
 
@@ -1125,6 +1149,12 @@ impl SpellSystem {
     /// Broadcast the start packet for a normal spell cast. Triggered spells have
     /// no client-side cast animation and therefore intentionally omit it.
     ///
+    /// `cast_sequence` is the server's cast identity for this cast: pass `Some` when the cast
+    /// originated from a modern client press that was already acknowledged with `SMSG_SPELL_PREPARE`
+    /// (see `handlers/spells.rs`), so this START and the eventual GO carry the same `CastID` the
+    /// PREPARE announced. `None` for casts with no originating client request (item procs,
+    /// triggers), which mint their own here.
+    ///
     /// Returns the cast identity used, or `None` if no START was sent (triggered spells). The
     /// caller must pass this same value to the eventual `SMSG_SPELL_GO` for this cast --
     /// `SmsgSpellStart` and `SmsgSpellGo` no longer mint their own, because the client keys its
@@ -1138,6 +1168,7 @@ impl SpellSystem {
         target_guid: Option<ObjectGuid>,
         cast_item_guid: Option<ObjectGuid>,
         is_triggered: bool,
+        cast_sequence: Option<u64>,
         world: &World,
     ) -> Option<u64> {
         if is_triggered {
@@ -1159,7 +1190,7 @@ impl SpellSystem {
         } else {
             (0, 0)
         };
-        let cast_sequence = next_cast_sequence();
+        let cast_sequence = cast_sequence.unwrap_or_else(next_cast_sequence);
         let msg = SmsgSpellStart {
             caster_guid,
             caster_guid_pack: caster_guid,
@@ -3343,6 +3374,21 @@ impl SpellSystem {
         error: SpellCastError,
         world: &World,
     ) -> Result<()> {
+        self.send_cast_failure_with_cast_id(caster_guid, spell_id, error, None, world)
+    }
+
+    /// Like [`Self::send_cast_failure`], but the modern body carries `cast_id` -- the cast identity
+    /// the client's pending press was acknowledged under. Pass `Some` after an `SMSG_SPELL_PREPARE`
+    /// for this cast (the server cast id), so the failure resolves the press; `None` (a freshly
+    /// minted id) is the fallback for casts with no originating client request.
+    fn send_cast_failure_with_cast_id(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        error: SpellCastError,
+        cast_id: Option<(u64, u64)>,
+        world: &World,
+    ) -> Result<()> {
         const SPELL_ATTR_COOLDOWN_ON_EVENT: u32 = 0x0200_0000;
         const SPELL_ATTR_EX2_DO_NOT_REPORT_SPELL_FAILURE: u32 = 0x0000_0080;
 
@@ -3393,14 +3439,19 @@ impl SpellSystem {
             (None, None)
         };
 
-        let packet = SmsgCastResult::build(
+        // Modern needs a real SMSG_CAST_FAILED body or the rejection is dropped and the client's
+        // pending press stays unresolved. Vanilla gets the same SMSG_CAST_RESULT shape as before.
+        let cast_id = cast_id.unwrap_or_else(|| {
+            cast_guid128(DEFAULT_REALM_ID, 0, spell_id, next_cast_sequence())
+        });
+        let msg = SmsgCastFailed {
+            cast_id,
             spell_id,
-            SPELL_RESULT_STATUS_FAIL,
             failure_reason,
             arg1,
             arg2,
-        );
-        self.broadcast_mgr.send_msg_to_player(caster_guid, packet);
+        };
+        self.broadcast_mgr.send_msg_to_player(caster_guid, msg);
 
         Ok(())
     }
@@ -3415,6 +3466,37 @@ impl SpellSystem {
         world: &World,
     ) {
         let _ = self.send_cast_failure(caster_guid, spell_id, error, world);
+    }
+
+    /// Send a modern `SMSG_CAST_FAILED` referencing `cast_id` — the identity the client's pending
+    /// press was acknowledged under (the client's own cast id when no `SMSG_SPELL_PREPARE` was
+    /// sent, the server cast id after one). Vanilla recipients get the ordinary
+    /// `SMSG_CAST_RESULT` body; `cast_id` is ignored there.
+    pub fn send_cast_result_with_cast_id(
+        &self,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        error: SpellCastError,
+        cast_id: Option<(u64, u64)>,
+        world: &World,
+    ) {
+        let _ = self.send_cast_failure_with_cast_id(caster_guid, spell_id, error, cast_id, world);
+    }
+
+    /// Send `SMSG_SPELL_PREPARE` (modern only), linking the client's pending press to the server
+    /// cast id that `SMSG_SPELL_START`/`SMSG_SPELL_GO` for this cast will carry. Vanilla has no
+    /// such message; the client keys casts directly on the ids the server already sends.
+    pub fn send_spell_prepare(
+        &self,
+        caster_guid: ObjectGuid,
+        client_cast_id: (u64, u64),
+        server_cast_id: (u64, u64),
+    ) {
+        let msg = SmsgSpellPrepare {
+            client_cast_id,
+            server_cast_id,
+        };
+        self.broadcast_mgr.send_msg_to_player(caster_guid, msg);
     }
 
     // =========================================================================

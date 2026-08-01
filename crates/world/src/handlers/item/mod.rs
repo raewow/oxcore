@@ -9,6 +9,7 @@ use crate::World;
 use oxcore_shared::game::inventory::{
     is_bag_pos, is_bank_pos, is_equipment_pos, INVENTORY_SLOT_BAG_0,
 };
+use oxcore_shared::messages::spells::next_cast_sequence;
 use oxcore_shared::messages::SmsgReadItemOk;
 use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
 
@@ -65,34 +66,35 @@ pub async fn handle_use_item(
     // CMSG_CAST_SPELL uses. Modern's UseItem instead sends PackSlot/Slot (the same addressing,
     // different name), the item's own packed GUID, then the full SpellCastRequest block -- no
     // spell_slot at all, so effect index 0 (the item's primary use effect) is the only choice.
-    let (bag, slot, spell_slot, targets) = match session.protocol() {
-        Protocol::Vanilla => {
-            let bag = packet
-                .read_u8()
-                .ok_or_else(|| anyhow!("Failed to read bag"))?;
-            let slot = packet
-                .read_u8()
-                .ok_or_else(|| anyhow!("Failed to read slot"))?;
-            let spell_slot = packet
-                .read_u8()
-                .ok_or_else(|| anyhow!("Failed to read spell slot"))?;
-            let targets = parse_spell_cast_targets(Protocol::Vanilla, packet, player_guid)?;
-            (bag, slot, spell_slot, targets)
-        }
-        Protocol::Modern => {
-            let bag = packet
-                .read_u8()
-                .ok_or_else(|| anyhow!("Failed to read PackSlot"))?;
-            let slot = packet
-                .read_u8()
-                .ok_or_else(|| anyhow!("Failed to read Slot"))?;
-            packet
-                .read_packed_guid_for(Protocol::Modern)
-                .ok_or_else(|| anyhow!("Failed to read CastItem"))?;
-            let request = parse_modern_spell_cast_request(packet, player_guid)?;
-            (bag, slot, 0u8, request.targets)
-        }
-    };
+    let (bag, slot, spell_slot, targets, client_cast_id, request_spell_id) =
+        match session.protocol() {
+            Protocol::Vanilla => {
+                let bag = packet
+                    .read_u8()
+                    .ok_or_else(|| anyhow!("Failed to read bag"))?;
+                let slot = packet
+                    .read_u8()
+                    .ok_or_else(|| anyhow!("Failed to read slot"))?;
+                let spell_slot = packet
+                    .read_u8()
+                    .ok_or_else(|| anyhow!("Failed to read spell slot"))?;
+                let targets = parse_spell_cast_targets(Protocol::Vanilla, packet, player_guid)?;
+                (bag, slot, spell_slot, targets, None, None)
+            }
+            Protocol::Modern => {
+                let bag = packet
+                    .read_u8()
+                    .ok_or_else(|| anyhow!("Failed to read PackSlot"))?;
+                let slot = packet
+                    .read_u8()
+                    .ok_or_else(|| anyhow!("Failed to read Slot"))?;
+                packet
+                    .read_packed_guid_for(Protocol::Modern)
+                    .ok_or_else(|| anyhow!("Failed to read CastItem"))?;
+                let request = parse_modern_spell_cast_request(packet, player_guid)?;
+                (bag, slot, 0u8, request.targets, Some(request.cast_id), Some(request.spell_id))
+            }
+        };
 
     // Get item GUID from inventory
     let item_guid = match world.systems.inventory.get_item_at(player_guid, bag, slot) {
@@ -189,6 +191,33 @@ pub async fn handle_use_item(
         .remove_auras_with_interrupt_flag(player_guid, AuraInterruptFlags::USE.0, world)
         .await?;
 
+    // The modern client keys its pending press on the cast id IT minted; echo it back paired with
+    // the server's own cast id (SMSG_SPELL_PREPARE) before the first spell's START/GO, which carry
+    // only the server id, or the press never resolves. `request_spell_id` is the spell the client
+    // actually requested (the modern UseItem block names it); fall back to the primary on-use spell.
+    let server_sequence = client_cast_id.map(|_| next_cast_sequence());
+    let primary_spell_id = request_spell_id.unwrap_or_else(|| {
+        (0..5)
+            .map(|i| (template.spell_id[i], i))
+            .find(|(id, i)| *id != 0 && template.spell_trigger[*i] == 0)
+            .map(|(id, _)| id)
+            .unwrap_or(0)
+    });
+    let server_cast_id = server_sequence.map(|seq| {
+        oxcore_shared::protocol::guid::cast_guid128(
+            oxcore_shared::messages::update::DEFAULT_REALM_ID,
+            0,
+            primary_spell_id,
+            seq,
+        )
+    });
+    if let (Some(client_id), Some(server_id)) = (client_cast_id, server_cast_id) {
+        world
+            .systems
+            .spells
+            .send_spell_prepare(player_guid, client_id, server_id);
+    }
+
     let mut on_use_count = 0;
     for index in 0..5 {
         let spell_id = template.spell_id[index];
@@ -206,6 +235,7 @@ pub async fn handle_use_item(
                 targets.clone(),
                 item_guid,
                 on_use_count > 0,
+                server_sequence,
                 world,
             )
             .await?;
