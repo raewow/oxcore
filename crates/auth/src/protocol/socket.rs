@@ -316,7 +316,12 @@ impl AuthSocket {
         };
 
         if let Some(account) = account_result {
-            self.account_id = Some(account.id);
+            self.account_id = Some(
+                account
+                    .id
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("account id outside u32 range"))?,
+            );
             self.last_ip = account.last_ip.clone();
             self.email = account.email.clone();
             self.lock_flags = account.locked as u32;
@@ -333,7 +338,16 @@ impl AuthSocket {
             self.security_info = account.security.clone().unwrap_or_default();
 
             // Check account ban
-            let account_ban_result = self.database.accounts.is_account_banned(account.id).await?;
+            let account_ban_result = self
+                .database
+                .accounts
+                .is_account_banned(
+                    account
+                        .id
+                        .try_into()
+                        .map_err(|_| anyhow::anyhow!("account id outside u32 range"))?,
+                )
+                .await?;
 
             if account_ban_result.is_some() {
                 warn!("Banned account {} tried to login", self.login);
@@ -456,7 +470,13 @@ impl AuthSocket {
                     }
                 }
 
-                self.load_account_security_levels(account.id).await?;
+                self.load_account_security_levels(
+                    account
+                        .id
+                        .try_into()
+                        .map_err(|_| anyhow::anyhow!("account id outside u32 range"))?,
+                )
+                .await?;
 
                 self.srp = Some(srp);
                 self.status = AuthStatus::LogonProof;
@@ -641,14 +661,14 @@ impl AuthSocket {
         if self.prompt_pin && proof.security_flags.is_some() && proof.security_flags.unwrap() != 0 {
             if let Some(pin_data) = &proof.pin_data {
                 let security_result = sqlx::query(
-                    "SELECT `security`, `geolock_pin`, `totp_secret` FROM `account` WHERE `id` = ?",
+                    "SELECT security, geolock_pin, totp_secret FROM auth.account WHERE id = $1",
                 )
-                .bind(self.account_id.unwrap_or(0))
+                .bind(i64::from(self.account_id.unwrap_or(0)))
                 .fetch_optional(self.database.pool())
                 .await?;
 
                 if let Some(row) = security_result {
-                    let _account_security: u8 = row.get(0);
+                    let _account_security: i16 = row.get(0);
                     let geolock_pin: Option<String> = row.get(1);
                     let totp_secret: Option<String> = row.get(2);
 
@@ -1150,10 +1170,17 @@ impl AuthSocket {
 
         for row in rows {
             if row.realm_id < 0 {
-                self.account_default_security_level = row.gmlevel;
+                self.account_default_security_level = row
+                    .gmlevel
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("GM level outside u8 range"))?;
             } else {
-                self.account_security_on_realm
-                    .insert(row.realm_id as u32, row.gmlevel);
+                self.account_security_on_realm.insert(
+                    row.realm_id as u32,
+                    row.gmlevel
+                        .try_into()
+                        .map_err(|_| anyhow::anyhow!("GM level outside u8 range"))?,
+                );
             }
         }
 

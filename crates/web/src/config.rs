@@ -32,8 +32,8 @@ impl Config {
 
         url.parse::<axum::http::Uri>()
             .context("web.public_base_url must be a valid URI")?;
-        if !self.auth_database_url.starts_with("mysql://") {
-            anyhow::bail!("web.auth_database_url must be a MySQL connection URL");
+        if !self.auth_database_url.starts_with("postgres://") {
+            anyhow::bail!("web.auth_database_url must be a PostgreSQL connection URL");
         }
         if !self.web_database_url.starts_with("postgres://") {
             anyhow::bail!("web.web_database_url must be a PostgreSQL connection URL");

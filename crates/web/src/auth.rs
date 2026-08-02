@@ -11,7 +11,7 @@ use oxcore_shared::crypto::srp6v2;
 use rand::RngCore;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use sqlx::{MySqlPool, PgPool};
+use sqlx::PgPool;
 
 use crate::state::AppState;
 
@@ -157,10 +157,10 @@ pub async fn register(
     };
 
     if let Err(error) =
-        sqlx::query("UPDATE `account` SET `email` = ?, `reg_mail` = ? WHERE `id` = ?")
+        sqlx::query("UPDATE auth.account SET email = $1, reg_mail = $2 WHERE id = $3")
             .bind(&form.email)
             .bind(&form.email)
-            .bind(account_id)
+            .bind(i64::from(account_id))
             .execute(&*state.auth)
             .await
     {
@@ -223,9 +223,9 @@ pub async fn change_password(
     };
 
     let username = match sqlx::query_scalar::<_, String>(
-        "SELECT `username` FROM `account` WHERE `id` = ?",
+        "SELECT username FROM auth.account WHERE id = $1",
     )
-    .bind(session.account_id)
+    .bind(i64::from(session.account_id))
     .fetch_optional(&*state.auth)
     .await
     {
@@ -396,11 +396,11 @@ pub async fn update_admin_account(
         return axum::http::StatusCode::BAD_REQUEST.into_response();
     }
     let result =
-        sqlx::query("UPDATE `account` SET `email` = ?, `locked` = ?, `gmlevel` = ? WHERE `id` = ?")
+        sqlx::query("UPDATE auth.account SET email = $1, locked = $2, gmlevel = $3 WHERE id = $4")
             .bind((!email.is_empty()).then_some(email))
-            .bind(form.locked)
-            .bind(form.gmlevel)
-            .bind(account_id)
+            .bind(i16::from(form.locked))
+            .bind(i16::from(form.gmlevel))
+            .bind(i64::from(account_id))
             .execute(&*state.auth)
             .await;
     match result {
@@ -453,13 +453,13 @@ pub async fn update_admin_ban(
         Err(_) => return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let result = if form.active {
-        sqlx::query("UPDATE `account` SET `banned` = 1 WHERE `id` = ?")
-            .bind(account_id)
+        sqlx::query("UPDATE auth.account SET banned = 1 WHERE id = $1")
+            .bind(i64::from(account_id))
             .execute(&mut *transaction)
             .await
     } else {
-        sqlx::query("UPDATE `account` SET `banned` = 0 WHERE `id` = ?")
-            .bind(account_id)
+        sqlx::query("UPDATE auth.account SET banned = 0 WHERE id = $1")
+            .bind(i64::from(account_id))
             .execute(&mut *transaction)
             .await
     };
@@ -468,15 +468,19 @@ pub async fn update_admin_ban(
     }
     if form.active {
         let expires_at = form.duration_seconds.min(i64::MAX as u64) as i64;
-        if sqlx::query("INSERT INTO `account_banned` (`id`, `bandate`, `unbandate`, `bannedby`, `banreason`, `active`, `realm`, `gmlevel`) VALUES (?, UNIX_TIMESTAMP(), IF(? = 0, 0, UNIX_TIMESTAMP() + ?), ?, ?, 1, -1, ?)")
-            .bind(account_id).bind(expires_at).bind(expires_at).bind(session.account_id.to_string()).bind(reason).bind(actor_level).execute(&mut *transaction).await.is_err() { return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
-    } else if sqlx::query(
-        "UPDATE `account_banned` SET `active` = 0 WHERE `id` = ? AND `active` = 1",
-    )
-    .bind(account_id)
-    .execute(&mut *transaction)
-    .await
-    .is_err()
+        let now = sqlx::types::chrono::Utc::now().timestamp();
+        let unban = if expires_at == 0 {
+            0
+        } else {
+            now.saturating_add(expires_at)
+        };
+        if sqlx::query("INSERT INTO auth.account_banned (id, bandate, unbandate, bannedby, banreason, active, realm, gmlevel) VALUES ($1, $2, $3, $4, $5, 1, -1, $6)")
+            .bind(i64::from(account_id)).bind(now).bind(unban).bind(session.account_id.to_string()).bind(reason).bind(i16::from(actor_level)).execute(&mut *transaction).await.is_err() { return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
+    } else if sqlx::query("UPDATE auth.account_banned SET active = 0 WHERE id = $1 AND active = 1")
+        .bind(i64::from(account_id))
+        .execute(&mut *transaction)
+        .await
+        .is_err()
     {
         return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
@@ -526,8 +530,8 @@ pub async fn update_admin_mute(
         return axum::http::StatusCode::BAD_REQUEST.into_response();
     }
     let expires_at = form.duration_seconds.min(i64::MAX as u64) as i64;
-    let result = sqlx::query("UPDATE `account` SET `mutetime` = IF(? = 1, UNIX_TIMESTAMP() + ?, 0), `mutereason` = IF(? = 1, ?, ''), `muteby` = IF(? = 1, ?, '') WHERE `id` = ?")
-        .bind(form.active).bind(expires_at).bind(form.active).bind(reason).bind(form.active).bind(session.account_id.to_string()).bind(account_id).execute(&*state.auth).await;
+    let result = sqlx::query("UPDATE auth.account SET mutetime = CASE WHEN $1 THEN EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT + $2 ELSE 0 END, mutereason = CASE WHEN $1 THEN $3 ELSE '' END, muteby = CASE WHEN $1 THEN $4 ELSE '' END WHERE id = $5")
+        .bind(form.active).bind(expires_at).bind(reason).bind(session.account_id.to_string()).bind(i64::from(account_id)).execute(&*state.auth).await;
     if !matches!(result, Ok(result) if result.rows_affected() == 1) {
         return axum::http::StatusCode::NOT_FOUND.into_response();
     }
@@ -610,13 +614,13 @@ pub async fn update_admin_realm_role(
         return axum::http::StatusCode::FORBIDDEN.into_response();
     }
     let result = if form.gmlevel == 0 {
-        sqlx::query("DELETE FROM `account_access` WHERE `id` = ? AND `RealmID` = ?")
-            .bind(account_id)
+        sqlx::query("DELETE FROM auth.account_access WHERE id = $1 AND \"RealmID\" = $2")
+            .bind(i64::from(account_id))
             .bind(form.realm_id)
             .execute(&*state.auth)
             .await
     } else {
-        sqlx::query("INSERT INTO `account_access` (`id`, `RealmID`, `gmlevel`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `gmlevel` = VALUES(`gmlevel`)").bind(account_id).bind(form.realm_id).bind(form.gmlevel).execute(&*state.auth).await
+        sqlx::query("INSERT INTO auth.account_access (id, \"RealmID\", gmlevel) VALUES ($1, $2, $3) ON CONFLICT (id, \"RealmID\") DO UPDATE SET gmlevel = EXCLUDED.gmlevel").bind(i64::from(account_id)).bind(form.realm_id).bind(i16::from(form.gmlevel)).execute(&*state.auth).await
     };
     if result.is_err() {
         return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -709,17 +713,12 @@ async fn record_audit_for(
     Ok(())
 }
 
-async fn can_manage_target(
-    pool: &MySqlPool,
-    actor_id: u32,
-    target_id: u32,
-    actor_level: u8,
-) -> bool {
+async fn can_manage_target(pool: &PgPool, actor_id: u32, target_id: u32, actor_level: u8) -> bool {
     if actor_id == target_id {
         return false;
     }
-    let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM `account` WHERE `id` = ?")
-        .bind(target_id)
+    let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM auth.account WHERE id = $1")
+        .bind(i64::from(target_id))
         .fetch_one(pool)
         .await;
     matches!(exists, Ok(1))
@@ -782,25 +781,29 @@ pub async fn session_from_token(pool: &PgPool, token: &str) -> Option<Session> {
     Some(Session { account_id })
 }
 
-pub(crate) async fn has_gm_access(pool: &MySqlPool, account_id: u32) -> Result<bool> {
+pub(crate) async fn has_gm_access(pool: &PgPool, account_id: u32) -> Result<bool> {
     Ok(highest_gm_level(pool, account_id).await? > 0)
 }
 
-pub(crate) async fn highest_gm_level(pool: &MySqlPool, account_id: u32) -> Result<u8> {
+pub(crate) async fn highest_gm_level(pool: &PgPool, account_id: u32) -> Result<u8> {
     let account_level =
-        sqlx::query_scalar::<_, u8>("SELECT `gmlevel` FROM `account` WHERE `id` = ?")
-            .bind(account_id)
+        sqlx::query_scalar::<_, i16>("SELECT gmlevel FROM auth.account WHERE id = $1")
+            .bind(i64::from(account_id))
             .fetch_optional(pool)
             .await
             .context("failed to query GM access")?;
-    let realm_level = sqlx::query_scalar::<_, u8>(
-        "SELECT `gmlevel` FROM `account_access` WHERE `id` = ? ORDER BY `gmlevel` DESC LIMIT 1",
+    let realm_level = sqlx::query_scalar::<_, i16>(
+        "SELECT gmlevel FROM auth.account_access WHERE id = $1 ORDER BY gmlevel DESC LIMIT 1",
     )
-    .bind(account_id)
+    .bind(i64::from(account_id))
     .fetch_optional(pool)
     .await
     .context("failed to query realm GM access")?;
-    Ok(account_level.unwrap_or(0).max(realm_level.unwrap_or(0)))
+    Ok(account_level
+        .unwrap_or(0)
+        .max(realm_level.unwrap_or(0))
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("stored GM level is outside u8 range"))?)
 }
 
 fn token_hash(token: &str) -> [u8; 32] {

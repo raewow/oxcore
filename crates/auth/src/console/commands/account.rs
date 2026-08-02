@@ -92,12 +92,12 @@ async fn cmd_setgm(ctx: &CommandContext<'_, AuthServer>, parts: &[&str]) -> Resu
     ctx.context
         .database
         .accounts
-        .set_gmlevel(account.id, gmlevel)
+        .set_gmlevel(account.id.try_into()?, gmlevel)
         .await?;
     ctx.context
         .database
         .accounts
-        .upsert_account_access(account.id, gmlevel, -1)
+        .upsert_account_access(account.id.try_into()?, gmlevel, -1)
         .await?;
 
     Ok(format!(

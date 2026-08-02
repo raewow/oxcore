@@ -1,7 +1,7 @@
 //! End-to-end test of the REST SRP login, driving the axum router in-process (no TLS, no
 //! socket) with the shared [`SrpClient`] as the peer.
 //!
-//! Requires the dev MySQL from docker-compose, so it is `#[ignore]` by default. Run with:
+//! Requires the dev PostgreSQL database, so it is `#[ignore]` by default. Run with:
 //!   cargo test -p oxcore-bnet --test login_flow -- --ignored --nocapture
 
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use oxcore_shared::crypto::srp6v2::{Challenge, SrpClient};
 use serde_json::{json, Value};
 use tower::ServiceExt; // for `oneshot`
 
-const DB_URL: &str = "mysql://root:root@127.0.0.1:3306/auth";
+const DB_URL: &str = "postgres://postgres:postgres@127.0.0.1:5432/oxcore";
 const USER: &str = "LOGINFLOW";
 const PASSWORD: &str = "correct horse";
 
@@ -65,12 +65,12 @@ fn challenge_from_json(v: &Value) -> Challenge {
 }
 
 #[tokio::test]
-#[ignore = "needs the dev MySQL container"]
+#[ignore = "needs the dev PostgreSQL database"]
 async fn full_rest_srp_login() {
     let db = Database::connect(DB_URL).await.expect("connect to auth db");
 
     // Fresh account with both verifiers.
-    sqlx::query("DELETE FROM account WHERE username = ?")
+    sqlx::query("DELETE FROM auth.account WHERE username = $1")
         .bind(USER)
         .execute(db_pool(&db))
         .await
@@ -116,9 +116,9 @@ async fn full_rest_srp_login() {
 
     // Ticket persisted.
     let stored: (Option<String>, i64) = sqlx::query_as(
-        "SELECT bnet_login_ticket, bnet_login_ticket_expiry FROM account WHERE id = ?",
+        "SELECT bnet_login_ticket, bnet_login_ticket_expiry FROM auth.account WHERE id = $1",
     )
-    .bind(account_id)
+    .bind(i64::from(account_id))
     .fetch_one(db_pool(&db))
     .await
     .unwrap();
@@ -159,7 +159,7 @@ async fn full_rest_srp_login() {
     .await;
     assert_eq!(no_challenge["error_code"], "NO_CHALLENGE");
 
-    sqlx::query("DELETE FROM account WHERE username = ?")
+    sqlx::query("DELETE FROM auth.account WHERE username = $1")
         .bind(USER)
         .execute(db_pool(&db))
         .await
@@ -169,6 +169,6 @@ async fn full_rest_srp_login() {
 /// The `Database` holds a repository, not the pool directly; grab a pool for raw assertions via
 /// a fresh short-lived query helper. Simplest is a second connection, but reusing the account
 /// repository's pool keeps it to one. Exposed for the test via a tiny accessor.
-fn db_pool(db: &Database) -> &sqlx::MySqlPool {
+fn db_pool(db: &Database) -> &sqlx::PgPool {
     db.accounts.pool()
 }

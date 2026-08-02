@@ -511,8 +511,8 @@ pub async fn get_realm_status() -> Result<Vec<RealmStatus>, ServerFnError> {
     {
         let state = expect_context::<crate::state::AppState>();
         return sqlx::query_as::<_, (String, f32, i64)>(
-            "SELECT `name`, `population`, IF(`last_seen` > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 60 SECOND), 1, 0) \
-             FROM `realmlist` ORDER BY id",
+            "SELECT name, population, CASE WHEN last_seen > CURRENT_TIMESTAMP - INTERVAL '60 seconds' THEN 1 ELSE 0 END \
+             FROM auth.realmlist ORDER BY id",
         )
         .fetch_all(&*state.auth)
         .await
@@ -895,7 +895,7 @@ pub async fn get_admin_accounts(
         let search = search.unwrap_or_default();
         let pattern = format!("%{}%", search.trim());
         let total = match sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM `account` WHERE `username` LIKE ? OR CAST(id AS CHAR) LIKE ? OR `email` LIKE ?",
+            "SELECT COUNT(*) FROM auth.account WHERE username LIKE $1 OR CAST(id AS TEXT) LIKE $2 OR email LIKE $3",
         )
         .bind(&pattern)
         .bind(&pattern)
@@ -905,23 +905,23 @@ pub async fn get_admin_accounts(
             Ok(total) => total as u64,
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
-        let accounts = match sqlx::query_as::<_, (u32, String, Option<String>, u8, u8, u8, i64)>(
-            "SELECT id, `username`, `email`, `gmlevel`, `locked`, `banned`, UNIX_TIMESTAMP(`last_login`) \
-              FROM `account` WHERE `username` LIKE ? OR CAST(id AS CHAR) LIKE ? OR `email` LIKE ? \
-              ORDER BY id DESC LIMIT ? OFFSET ?",
+        let accounts = match sqlx::query_as::<_, (i64, String, Option<String>, i16, i16, i16, i64)>(
+            "SELECT id, username, email, gmlevel, locked, banned, EXTRACT(EPOCH FROM last_login)::BIGINT \
+              FROM auth.account WHERE username LIKE $1 OR CAST(id AS TEXT) LIKE $2 OR email LIKE $3 \
+              ORDER BY id DESC LIMIT $4 OFFSET $5",
         )
         .bind(&pattern)
         .bind(&pattern)
         .bind(&pattern)
-        .bind(PAGE_SIZE)
-        .bind((page - 1) * PAGE_SIZE)
+        .bind(i64::from(PAGE_SIZE))
+        .bind(i64::from((page - 1) * PAGE_SIZE))
         .fetch_all(&*state.auth)
         .await {
             Ok(accounts) => accounts,
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         }
         .into_iter()
-        .map(|(id, username, email, gmlevel, locked, banned, last_login)| AdminAccount { id, username, email, gmlevel, locked, banned, last_login })
+        .map(|(id, username, email, gmlevel, locked, banned, last_login)| AdminAccount { id: id.try_into().unwrap_or_default(), username, email, gmlevel: gmlevel.try_into().unwrap_or_default(), locked: locked.try_into().unwrap_or_default(), banned: banned.try_into().unwrap_or_default(), last_login })
         .collect();
         return Ok(AdminAccountPage {
             accounts,
@@ -949,13 +949,13 @@ pub async fn get_admin_account(
         {
             return Err(ServerFnError::ServerError("Not authorized".to_string()));
         }
-        return sqlx::query_as::<_, (u32, String, Option<String>, u8, u8, u8, u8, String, i64)>(
-            "SELECT id, `username`, `email`, `gmlevel`, `locked`, `banned`, `expansion`, `last_ip`, `mutetime` FROM `account` WHERE id = ?",
+        return sqlx::query_as::<_, (i64, String, Option<String>, i16, i16, i16, i16, String, i64)>(
+            "SELECT id, username, email, gmlevel, locked, banned, expansion, last_ip, mutetime FROM auth.account WHERE id = $1",
         )
-        .bind(account_id)
+        .bind(i64::from(account_id))
         .fetch_optional(&*state.auth)
         .await
-        .map(|row| row.map(|(id, username, email, gmlevel, locked, banned, expansion, last_ip, muted_until)| AdminAccountDetail { id, username, email, gmlevel, locked, banned, expansion, last_ip, muted_until }))
+        .map(|row| row.map(|(id, username, email, gmlevel, locked, banned, expansion, last_ip, muted_until)| AdminAccountDetail { id: id.try_into().unwrap_or_default(), username, email, gmlevel: gmlevel.try_into().unwrap_or_default(), locked: locked.try_into().unwrap_or_default(), banned: banned.try_into().unwrap_or_default(), expansion: expansion.try_into().unwrap_or_default(), last_ip, muted_until }))
         .map_err(|error| ServerFnError::ServerError(error.to_string()));
     }
 
@@ -1072,15 +1072,16 @@ pub async fn get_admin_character_detail(
         let create_time = row.get::<u64, _>("create_time") as i64;
         let logout_time = row.get::<u64, _>("logout_time") as i64;
         let account = row.get::<u32, _>("account");
-        let account_username =
-            match sqlx::query_scalar::<_, String>("SELECT `username` FROM `account` WHERE id = ?")
-                .bind(account)
-                .fetch_optional(&*state.auth)
-                .await
-            {
-                Ok(username) => username,
-                Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
-            };
+        let account_username = match sqlx::query_scalar::<_, String>(
+            "SELECT username FROM auth.account WHERE id = $1",
+        )
+        .bind(i64::from(account))
+        .fetch_optional(&*state.auth)
+        .await
+        {
+            Ok(username) => username,
+            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+        };
         return Ok(Some(AdminCharacterDetail {
             guid: row.get::<u32, _>("guid"),
             name: row.get::<String, _>("name"),
@@ -1155,9 +1156,9 @@ pub async fn get_admin_audit_log(
             let actor = match row.actor_account_id {
                 Some(account_id) => {
                     sqlx::query_scalar::<_, String>(
-                        "SELECT `username` FROM `account` WHERE `id` = ?",
+                        "SELECT username FROM auth.account WHERE id = $1",
                     )
-                    .bind(account_id)
+                    .bind(i64::from(account_id))
                     .fetch_optional(&*state.auth)
                     .await?
                 }
@@ -1193,15 +1194,15 @@ pub async fn get_admin_account_realm_access(
         {
             return Err(ServerFnError::ServerError("Not authorized".to_string()));
         }
-        return sqlx::query_as::<_, (i32, u8)>(
-            "SELECT `RealmID`, `gmlevel` FROM `account_access` WHERE id = ? ORDER BY `RealmID`",
+        return sqlx::query_as::<_, (i32, i16)>(
+            "SELECT \"RealmID\", gmlevel FROM auth.account_access WHERE id = $1 ORDER BY \"RealmID\"",
         )
-        .bind(account_id)
+        .bind(i64::from(account_id))
         .fetch_all(&*state.auth)
         .await
         .map(|rows| {
             rows.into_iter()
-                .map(|(realm_id, gmlevel)| RealmAccess { realm_id, gmlevel })
+                .map(|(realm_id, gmlevel)| RealmAccess { realm_id, gmlevel: gmlevel.try_into().unwrap_or_default() })
                 .collect()
         })
         .map_err(|error| ServerFnError::ServerError(error.to_string()));
@@ -1348,9 +1349,9 @@ async fn load_overview(
     use anyhow::Context;
 
     let (username, email, email_verified) = sqlx::query_as::<_, (String, Option<String>, bool)>(
-        "SELECT `username`, `email`, `email_verif` FROM `account` WHERE id = ?",
+        "SELECT username, email, email_verif FROM auth.account WHERE id = $1",
     )
-    .bind(account_id)
+    .bind(i64::from(account_id))
     .fetch_optional(&*state.auth)
     .await
     .context("failed to load portal account")?

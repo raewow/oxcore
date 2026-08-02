@@ -32,7 +32,7 @@ enum Command {
     Status,
     /// Create a new migration file
     New {
-        /// Database: world, auth, or characters (web uses `db pg new web`)
+        /// Database: world or characters (PostgreSQL schemas use `db pg new`)
         db: String,
         /// Migration name (snake_case description)
         name: String,

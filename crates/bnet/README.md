@@ -85,7 +85,7 @@ In your `config.toml`, under `[bnet]`:
 
 ```toml
 [bnet]
-login_database_url = "mysql://user:pass@127.0.0.1/oxcore_auth"
+login_database_url = "postgres://user:pass@127.0.0.1/oxcore"
 external_hostname  = "oxcore.localhost"   # MUST equal the cert host and <portal>+<suffix>
 bnet_port          = 1119
 login_port         = 8081

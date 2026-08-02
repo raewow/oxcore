@@ -24,7 +24,7 @@ pub struct DatabaseUrls {
 pub struct Databases {
     pub world: MySqlPool,
     pub character: MySqlPool,
-    pub auth: MySqlPool,
+    pub auth: PgPool,
     pub logs: PgPool,
 }
 
@@ -67,7 +67,7 @@ impl Databases {
             .connect(character_url)
             .await
             .context("Failed to connect to Character database")?;
-        let auth = MySqlPoolOptions::new()
+        let auth = PgPoolOptions::new()
             .max_connections(10)
             .min_connections(2)
             .acquire_timeout(std::time::Duration::from_secs(30))
@@ -128,7 +128,7 @@ impl Databases {
     }
 
     /// Get a reference to the auth database pool
-    pub fn auth(&self) -> &MySqlPool {
+    pub fn auth(&self) -> &PgPool {
         &self.auth
     }
 

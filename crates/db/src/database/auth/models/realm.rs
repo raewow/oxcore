@@ -5,7 +5,7 @@ use sqlx::FromRow;
 /// Contains realm server information for the realm selection screen.
 #[derive(FromRow, Debug, Clone)]
 pub struct RealmRow {
-    pub id: u32,
+    pub id: i64,
     pub name: String,
     pub address: String,
     #[sqlx(rename = "localAddress")]
@@ -13,15 +13,15 @@ pub struct RealmRow {
     #[sqlx(rename = "localSubnetMask")]
     pub local_subnet_mask: String,
     pub port: i32,
-    pub icon: u8,
-    pub realmflags: u8,
-    pub timezone: u8,
+    pub icon: i16,
+    pub realmflags: i16,
+    pub timezone: i16,
     #[sqlx(rename = "allowedSecurityLevel")]
-    pub allowed_security_level: u8,
+    pub allowed_security_level: i16,
     pub population: f32,
-    pub gamebuild_min: u32,
-    pub gamebuild_max: u32,
-    pub flag: u8,
+    pub gamebuild_min: i64,
+    pub gamebuild_max: i64,
+    pub flag: i16,
     pub realmbuilds: String,
     pub last_seen: Option<DateTime<Utc>>,
 }
@@ -30,20 +30,20 @@ pub struct RealmRow {
 /// Tracks character counts per realm for each account (shown on realm selection screen).
 #[derive(FromRow, Debug, Clone)]
 pub struct RealmCharactersRow {
-    pub realmid: u32,
-    pub acctid: u64,
-    pub numchars: u8,
+    pub realmid: i64,
+    pub acctid: i64,
+    pub numchars: i16,
 }
 
 /// Represents a row from the `allowed_clients` table in the auth database.
 /// Defines which client builds (versions) are allowed to connect to the server.
 #[derive(FromRow, Debug, Clone)]
 pub struct AllowedClientRow {
-    pub major_version: u8,
-    pub minor_version: u8,
-    pub bugfix_version: u8,
+    pub major_version: i16,
+    pub minor_version: i16,
+    pub bugfix_version: i16,
     pub hotfix_version: String, // CHAR(1) in SQL
-    pub build: u32,             // MEDIUMINT UNSIGNED
+    pub build: i32,
     pub os: String,
     pub platform: String,
     pub integrity_hash: String,

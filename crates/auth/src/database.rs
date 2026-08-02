@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::info;
 
@@ -8,7 +8,7 @@ use oxcore_db::database::auth::repositories::*;
 
 #[derive(Clone)]
 pub struct Database {
-    pool: Arc<MySqlPool>,
+    pool: Arc<PgPool>,
     pub accounts: AccountRepository,
     pub ip_bans: IpBanRepository,
     pub realms: RealmRepository,
@@ -19,7 +19,7 @@ impl Database {
         info!("Connecting to database...");
 
         let pool = Arc::new(
-            MySqlPool::connect(&config.login_database_url)
+            PgPool::connect(&config.login_database_url)
                 .await
                 .context("Failed to connect to database")?,
         );
@@ -34,7 +34,7 @@ impl Database {
         })
     }
 
-    pub fn pool(&self) -> &MySqlPool {
+    pub fn pool(&self) -> &PgPool {
         &self.pool
     }
 

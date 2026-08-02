@@ -9,7 +9,7 @@ use crate::config::Config;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub auth: Arc<MySqlPool>,
+    pub auth: Arc<PgPool>,
     pub characters: Arc<MySqlPool>,
     pub web: Arc<PgPool>,
     pub logs: Arc<PgPool>,
@@ -19,7 +19,7 @@ pub struct AppState {
 
 impl AppState {
     pub async fn connect(config: &Config) -> Result<Self> {
-        let auth = MySqlPoolOptions::new()
+        let auth = PgPoolOptions::new()
             .max_connections(10)
             .min_connections(1)
             .connect(&config.auth_database_url)

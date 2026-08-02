@@ -57,6 +57,15 @@ pub struct Config {
     pub log_file_level: u8,
 }
 
+impl Config {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if !self.login_database_url.starts_with("postgres://") {
+            anyhow::bail!("bnet.login_database_url must be a PostgreSQL connection URL");
+        }
+        Ok(())
+    }
+}
+
 fn default_bind_ip() -> String {
     "0.0.0.0".to_string()
 }

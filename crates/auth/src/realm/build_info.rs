@@ -89,9 +89,9 @@ impl AllowedBuilds {
             }
 
             let build_info = RealmBuildInfo {
-                major_version: row.major_version,
-                minor_version: row.minor_version,
-                bugfix_version: row.bugfix_version,
+                major_version: row.major_version.try_into()?,
+                minor_version: row.minor_version.try_into()?,
+                bugfix_version: row.bugfix_version.try_into()?,
                 hotfix_version: row.hotfix_version.chars().next().unwrap_or(' '),
                 build,
                 os,

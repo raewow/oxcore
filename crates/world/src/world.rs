@@ -754,7 +754,9 @@ impl World {
         let heartbeat_interval = crate::config::get_config_mgr()
             .get()
             .realm_heartbeat_interval;
-        let heartbeat_pool = self.databases.auth.clone();
+        let heartbeat_repo = oxcore_db::database::RealmRepository::new(std::sync::Arc::new(
+            self.databases.auth.clone(),
+        ));
         let heartbeat_realm_id = self.get_realm_id();
 
         let handle = tokio::spawn(async move {
@@ -762,12 +764,7 @@ impl World {
                 tokio::time::interval(std::time::Duration::from_secs(heartbeat_interval));
             loop {
                 interval.tick().await;
-                if let Err(e) =
-                    sqlx::query("UPDATE `realmlist` SET `last_seen` = NOW() WHERE `id` = ?")
-                        .bind(heartbeat_realm_id)
-                        .execute(&heartbeat_pool)
-                        .await
-                {
+                if let Err(e) = heartbeat_repo.heartbeat(heartbeat_realm_id).await {
                     tracing::error!("Failed to update realm heartbeat: {}", e);
                 }
             }
@@ -855,20 +852,18 @@ impl World {
         }
         // TODO magic string and swap to repository - create some realm system in core to handle this and heartbeat
         let builds = "5875 6005 6141";
-        match sqlx::query(
-            "UPDATE `realmlist` SET `name` = ?, `realmflags` = `realmflags` & ~(2), `population` = 0, `realmbuilds` = ?, `last_seen` = NOW() WHERE `id` = ?"
-        )
-        .bind(&config.realm_name)
-        .bind(builds)
-        .bind(self.get_realm_id())
-        .execute(&self.databases.auth).await
+        match oxcore_db::database::RealmRepository::new(std::sync::Arc::new(
+            self.databases.auth.clone(),
+        ))
+        .set_online(self.get_realm_id(), &config.realm_name, builds)
+        .await
         {
             Ok(result) => {
-                if result.rows_affected() > 0 {
+                if result > 0 {
                     tracing::info!(
                         "Realm {} set to online in realmlist ({} rows affected)",
                         self.get_realm_id(),
-                        result.rows_affected()
+                        result
                     );
                 } else {
                     tracing::error!(

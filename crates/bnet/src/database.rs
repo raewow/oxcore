@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use oxcore_db::database::auth::repositories::{AccountRepository, RealmRepository};
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 
 #[derive(Clone)]
 pub struct Database {
@@ -19,7 +19,7 @@ pub struct Database {
 impl Database {
     pub async fn connect(login_database_url: &str) -> Result<Self> {
         let pool = Arc::new(
-            MySqlPool::connect(login_database_url)
+            PgPool::connect(login_database_url)
                 .await
                 .context("Failed to connect to auth database")?,
         );
@@ -30,13 +30,13 @@ impl Database {
     /// tests and by handlers that may never touch the database on a given connection.
     pub fn connect_lazy(login_database_url: &str) -> Result<Self> {
         let pool = Arc::new(
-            MySqlPool::connect_lazy(login_database_url)
+            PgPool::connect_lazy(login_database_url)
                 .context("Failed to prepare lazy auth database pool")?,
         );
         Ok(Self::from_pool(pool))
     }
 
-    fn from_pool(pool: Arc<MySqlPool>) -> Self {
+    fn from_pool(pool: Arc<PgPool>) -> Self {
         Self {
             accounts: AccountRepository::new(pool.clone()),
             realms: RealmRepository::new(pool),

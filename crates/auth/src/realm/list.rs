@@ -72,15 +72,15 @@ impl RealmList {
             let port: u16 = row.port.max(0) as u16;
             let last_seen_utc = row.last_seen;
 
-            let valid_flags = row.realmflags & REALM_FLAG_VALID_MASK;
-            let mut flag = if row.realmflags != valid_flags {
+            let valid_flags = (row.realmflags as u8) & REALM_FLAG_VALID_MASK;
+            let mut flag = if row.realmflags as u8 != valid_flags {
                 error!(
                     "Realm {} has invalid flags, masking to valid flags",
                     row.name
                 );
                 valid_flags
             } else {
-                row.realmflags
+                row.realmflags as u8
             };
 
             let now = Utc::now();
@@ -117,16 +117,16 @@ impl RealmList {
             );
 
             realms.push(Realm {
-                id: row.id,
+                id: row.id.try_into()?,
                 name: row.name.clone(),
                 address: realm_address,
                 local_address: format!("{}:{}", row.local_address, port),
                 local_subnet_mask: local_subnet_mask_u32,
                 port,
-                icon: row.icon,
+                icon: row.icon.try_into()?,
                 flag,
-                timezone: row.timezone,
-                allowed_security_level: row.allowed_security_level,
+                timezone: row.timezone.try_into()?,
+                allowed_security_level: row.allowed_security_level.try_into()?,
                 population: row.population,
                 realm_builds: row.realmbuilds,
                 realm_builds_set,

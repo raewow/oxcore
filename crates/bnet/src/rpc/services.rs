@@ -625,7 +625,7 @@ impl Services {
         let descriptors: Vec<RealmDescriptor> = realms
             .iter()
             .map(|r| RealmDescriptor {
-                id: r.id,
+                id: r.id.try_into().unwrap_or_default(),
                 name: r.name.clone(),
                 address: r.address.clone(),
                 port: r.port as u16,
@@ -652,7 +652,12 @@ impl Services {
         {
             Ok(rows) => rows
                 .iter()
-                .map(|c| (realmlist::wow_realm_address(c.realmid), c.numchars as u32))
+                .map(|c| {
+                    (
+                        realmlist::wow_realm_address(c.realmid.try_into().unwrap_or_default()),
+                        c.numchars as u32,
+                    )
+                })
                 .collect(),
             Err(e) => {
                 warn!("character-count lookup failed, sending empty list: {e}");

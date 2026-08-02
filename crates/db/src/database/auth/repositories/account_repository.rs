@@ -1,518 +1,246 @@
 use super::super::models::account::*;
 use anyhow::{anyhow, Context, Result};
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use wow_srp::normalized_string::NormalizedString;
 use wow_srp::server::SrpVerifier;
 
+const ACCOUNT_COLUMNS: &str = "id, username, gmlevel, sessionkey, v, s, reg_mail, token_key, email, joindate, last_ip, last_attempt_ip, last_local_ip, failed_logins, locked, lock_country, last_login, last_pwd_reset, online, expansion, mutetime, mutereason, muteby, locale, os, platform, recruiter, current_realm, banned, mail_verif, remember_token, flags, security, pass_verif, email_verif, email_check, nostalrius_token, nostalrius_token_enabled, nostalrius_email, nostalrius_reason, geolock_pin, totp_secret";
 #[derive(Clone)]
 pub struct AccountRepository {
-    pool: Arc<MySqlPool>,
+    pool: Arc<PgPool>,
 }
-
 impl AccountRepository {
-    pub fn new(pool: Arc<MySqlPool>) -> Self {
+    pub fn new(pool: Arc<PgPool>) -> Self {
         Self { pool }
     }
-
-    /// The underlying connection pool, for callers that need raw queries against the same auth
-    /// database (e.g. integration tests).
-    pub fn pool(&self) -> &MySqlPool {
+    pub fn pool(&self) -> &PgPool {
         &self.pool
     }
-
-    // ========== QUERY METHODS (Read Operations) ==========
-
-    /// Look up the Battle.net (SRP6v2) credentials for a login. Returns the account id, the
-    /// canonical (uppercased) username, and the stored salt/verifier bytes, or `None` if the
-    /// account does not exist or has no bnet credentials set.
     pub async fn find_bnet_credentials(&self, login: &str) -> Result<Option<BnetCredentials>> {
-        let username = login.to_uppercase();
-        let row: Option<(u32, String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT `id`, `username`, `bnet_salt`, `bnet_verifier` FROM `account` \
-             WHERE `username` = ?",
+        let row: Option<(i64, String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT id, username, bnet_salt, bnet_verifier FROM auth.account WHERE username = $1",
         )
-        .bind(&username)
+        .bind(login.to_uppercase())
         .fetch_optional(&*self.pool)
-        .await
-        .context("Failed to look up bnet credentials")?;
-
-        let Some((id, username, Some(salt_hex), Some(verifier_hex))) = row else {
-            return Ok(None);
-        };
-
-        let salt_vec = hex::decode(&salt_hex).context("stored bnet_salt is not valid hex")?;
-        let salt: [u8; 32] = salt_vec
-            .try_into()
-            .map_err(|_| anyhow!("stored bnet_salt is not 32 bytes"))?;
-        let verifier =
-            hex::decode(&verifier_hex).context("stored bnet_verifier is not valid hex")?;
-
-        Ok(Some(BnetCredentials {
-            id,
-            username,
-            salt,
-            verifier,
-        }))
-    }
-
-    /// Resolve a Battle.net login ticket to its account, rejecting tickets that are unknown or
-    /// past their stored expiry. Used by BGS `VerifyWebCredentials` to consume the ticket the
-    /// client obtained from the REST web-auth flow.
-    pub async fn find_by_login_ticket(&self, ticket: &str) -> Result<Option<BnetTicketAccount>> {
-        let now = chrono::Utc::now().timestamp();
-        let row: Option<(u32, String)> = sqlx::query_as(
-            "SELECT `id`, `username` FROM `account` \
-             WHERE `bnet_login_ticket` = ? AND `bnet_login_ticket_expiry` > ?",
-        )
-        .bind(ticket)
-        .bind(now)
-        .fetch_optional(&*self.pool)
-        .await
-        .context("Failed to look up account by login ticket")?;
-
-        Ok(row.map(|(id, username)| BnetTicketAccount { id, username }))
-    }
-
-    /// Find account by username (for authentication)
-    pub async fn find_by_username(&self, username: &str) -> Result<Option<AccountRow>> {
-        sqlx::query_as::<_, AccountRow>(
-            r#"SELECT `id`, `username`, `gmlevel`, `sessionkey`, `v`, `s`, `reg_mail`, `token_key`,
-               `email`, `joindate`, `last_ip`, `last_attempt_ip`, `last_local_ip`, `failed_logins`,
-               `locked`, `lock_country`, `last_login`, `last_pwd_reset`, `online`, `expansion`,
-               `mutetime`, `mutereason`, `muteby`, `locale`, `os`, `platform`, `recruiter`,
-               `current_realm`, `banned`, `mail_verif`, `remember_token`, `flags`, `security`,
-               `pass_verif`, `email_verif`, `email_check`, `nostalrius_token`,
-               `nostalrius_token_enabled`, `nostalrius_email`, `nostalrius_reason`,
-               `geolock_pin`, `totp_secret`
-               FROM `account`
-               WHERE `username` = ?"#,
-        )
-        .bind(username)
-        .fetch_optional(&*self.pool)
-        .await
-        .map_err(|e| anyhow!("Failed to find account by username: {:#}", e))
-    }
-
-    /// Find account by ID
-    pub async fn find_by_id(&self, id: u32) -> Result<Option<AccountRow>> {
-        sqlx::query_as::<_, AccountRow>(
-            r#"SELECT `id`, `username`, `gmlevel`, `sessionkey`, `v`, `s`, `reg_mail`, `token_key`,
-               `email`, `joindate`, `last_ip`, `last_attempt_ip`, `last_local_ip`, `failed_logins`,
-               `locked`, `lock_country`, `last_login`, `last_pwd_reset`, `online`, `expansion`,
-               `mutetime`, `mutereason`, `muteby`, `locale`, `os`, `platform`, `recruiter`,
-               `current_realm`, `banned`, `mail_verif`, `remember_token`, `flags`, `security`,
-               `pass_verif`, `email_verif`, `email_check`, `nostalrius_token`,
-               `nostalrius_token_enabled`, `nostalrius_email`, `nostalrius_reason`,
-               `geolock_pin`, `totp_secret`
-               FROM `account`
-               WHERE `id` = ?"#,
-        )
-        .bind(id)
-        .fetch_optional(&*self.pool)
-        .await
-        .map_err(|e| anyhow!("Failed to find account by ID: {:#}", e))
-    }
-
-    /// Check if account is banned (active ban check)
-    pub async fn is_account_banned(&self, account_id: u32) -> Result<Option<AccountBannedRow>> {
-        sqlx::query_as::<_, AccountBannedRow>(
-            r#"SELECT `banid`, `id`, `bandate`, `unbandate`, `bannedby`, `banreason`, `active`, `realm`, `gmlevel`
-               FROM `account_banned`
-               WHERE `id` = ? AND `active` = 1
-               AND (`unbandate` = `bandate` OR `unbandate` > UNIX_TIMESTAMP())"#,
-        )
-        .bind(account_id as i64)
-        .fetch_optional(&*self.pool)
-        .await
-        .context("Failed to check account ban status")
-    }
-
-    /// Find all account access records for an account
-    pub async fn find_account_access(&self, account_id: u32) -> Result<Vec<AccountAccessRow>> {
-        sqlx::query_as::<_, AccountAccessRow>(
-            "SELECT `id`, `gmlevel`, `RealmID` FROM `account_access` WHERE `id` = ?",
-        )
-        .bind(account_id)
-        .fetch_all(&*self.pool)
-        .await
-        .context("Failed to find account access records")
-    }
-
-    /// Get account login info for authentication challenge
-    /// Returns minimal account data needed for SRP6 authentication
-    pub async fn find_for_login(&self, username: &str) -> Result<Option<AccountLoginInfo>> {
-        let result = sqlx::query_as::<_, AccountLoginInfo>(
-            r#"SELECT `id`, `locked`, `last_ip`, `v`, `s`, `security`, `email_verif`,
-               `geolock_pin`, `email`, UNIX_TIMESTAMP(`joindate`) as `joindate_ts`, `online`
-               FROM `account` WHERE `username` = ?"#,
-        )
-        .bind(username)
-        .fetch_optional(&*self.pool)
-        .await;
-
-        if let Err(ref e) = result {
-            tracing::error!(
-                "Database error in find_for_login for username '{}': {:?}",
+        .await?;
+        row.map(|(id, username, salt, verifier)| {
+            let salt: [u8; 32] = hex::decode(salt.ok_or_else(|| anyhow!("missing bnet salt"))?)?
+                .try_into()
+                .map_err(|_| anyhow!("stored bnet salt is not 32 bytes"))?;
+            Ok(BnetCredentials {
+                id: id
+                    .try_into()
+                    .map_err(|_| anyhow!("account id outside u32 range"))?,
                 username,
-                e
-            );
-        }
-
-        result.context("Failed to find account for login")
+                salt,
+                verifier: hex::decode(verifier.ok_or_else(|| anyhow!("missing bnet verifier"))?)?,
+            })
+        })
+        .transpose()
     }
-
-    /// Get session authentication info for world server login
-    /// Returns minimal account data needed for CMSG_AUTH_SESSION handling.
+    pub async fn find_by_login_ticket(&self, ticket: &str) -> Result<Option<BnetTicketAccount>> {
+        let row: Option<(i64,String)> = sqlx::query_as("SELECT id, username FROM auth.account WHERE bnet_login_ticket = $1 AND bnet_login_ticket_expiry > $2").bind(ticket).bind(chrono::Utc::now().timestamp()).fetch_optional(&*self.pool).await?;
+        row.map(|(id, username)| {
+            Ok(BnetTicketAccount {
+                id: id
+                    .try_into()
+                    .map_err(|_| anyhow!("account id outside u32 range"))?,
+                username,
+            })
+        })
+        .transpose()
+    }
+    pub async fn find_by_username(&self, username: &str) -> Result<Option<AccountRow>> {
+        sqlx::query_as(&format!(
+            "SELECT {ACCOUNT_COLUMNS} FROM auth.account WHERE username = $1"
+        ))
+        .bind(username)
+        .fetch_optional(&*self.pool)
+        .await
+        .context("Failed to find account")
+    }
+    pub async fn find_by_id(&self, id: u32) -> Result<Option<AccountRow>> {
+        sqlx::query_as(&format!(
+            "SELECT {ACCOUNT_COLUMNS} FROM auth.account WHERE id = $1"
+        ))
+        .bind(i64::from(id))
+        .fetch_optional(&*self.pool)
+        .await
+        .context("Failed to find account")
+    }
+    pub async fn is_account_banned(&self, id: u32) -> Result<Option<AccountBannedRow>> {
+        sqlx::query_as("SELECT banid, id, bandate, unbandate, bannedby, banreason, active, realm, gmlevel FROM auth.account_banned WHERE id = $1 AND active = 1 AND (unbandate = bandate OR unbandate > EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT)").bind(i64::from(id)).fetch_optional(&*self.pool).await.context("Failed to check ban")
+    }
+    pub async fn find_account_access(&self, id: u32) -> Result<Vec<AccountAccessRow>> {
+        sqlx::query_as("SELECT id, gmlevel, \"RealmID\" FROM auth.account_access WHERE id = $1")
+            .bind(i64::from(id))
+            .fetch_all(&*self.pool)
+            .await
+            .context("Failed to load access")
+    }
+    pub async fn find_for_login(&self, username: &str) -> Result<Option<AccountLoginInfo>> {
+        sqlx::query_as("SELECT id, locked, last_ip, v, s, security, email_verif, geolock_pin, email, EXTRACT(EPOCH FROM joindate)::BIGINT AS joindate_ts, online FROM auth.account WHERE username = $1").bind(username).fetch_optional(&*self.pool).await.context("Failed to find login")
+    }
     pub async fn find_for_world_auth(&self, username: &str) -> Result<Option<SessionAuthInfo>> {
-        sqlx::query_as::<_, SessionAuthInfo>(
-            r#"SELECT `id`, `username`, `gmlevel`, `sessionkey`, `last_ip`, `locked`,
-                      `expansion`, `mutetime`, `locale`
-               FROM `account`
-               WHERE `username` = ?"#,
-        )
-        .bind(username)
-        .fetch_optional(&*self.pool)
-        .await
-        .context("Failed to find account for world auth")
+        sqlx::query_as("SELECT id, username, gmlevel, sessionkey, last_ip, locked, expansion, mutetime, locale FROM auth.account WHERE username = $1").bind(username).fetch_optional(&*self.pool).await.context("Failed to find world auth")
     }
-
-    /// Get failed login count by username
     pub async fn get_failed_logins_by_username(&self, username: &str) -> Result<Option<u32>> {
-        sqlx::query_scalar::<_, u32>("SELECT `failed_logins` FROM `account` WHERE `username` = ?")
-            .bind(username)
-            .fetch_optional(&*self.pool)
-            .await
-            .context("Failed to get failed logins by username")
+        let value: Option<i64> =
+            sqlx::query_scalar("SELECT failed_logins FROM auth.account WHERE username = $1")
+                .bind(username)
+                .fetch_optional(&*self.pool)
+                .await?;
+        value
+            .map(|x| {
+                x.try_into()
+                    .map_err(|_| anyhow!("failed login count outside u32 range"))
+            })
+            .transpose()
     }
-
-    /// Get session key and account ID for reconnect authentication
     pub async fn find_session_key(&self, username: &str) -> Result<Option<(String, u32)>> {
-        sqlx::query_as::<_, (String, u32)>(
-            "SELECT `sessionkey`, `id` FROM `account` WHERE `username` = ?",
-        )
-        .bind(username)
-        .fetch_optional(&*self.pool)
-        .await
-        .context("Failed to get session key for reconnect")
+        let row: Option<(Option<String>, i64)> =
+            sqlx::query_as("SELECT sessionkey, id FROM auth.account WHERE username = $1")
+                .bind(username)
+                .fetch_optional(&*self.pool)
+                .await?;
+        row.map(|(key, id)| {
+            Ok((
+                key.unwrap_or_default(),
+                id.try_into()
+                    .map_err(|_| anyhow!("account id outside u32 range"))?,
+            ))
+        })
+        .transpose()
     }
-
-    // ========== COMMAND METHODS (Write Operations) ==========
-
-    /// Create a new account, computing credentials for both clients: the vanilla SRP6 verifier
-    /// (`v`/`s`, SHA-1) for the 1.12 client and the Battle.net SRP6v2 verifier
-    /// (`bnet_verifier`/`bnet_salt`, SHA-256) for the 1.14.x client. A single password sets
-    /// both, so the account works from either client.
     pub async fn create_account(&self, username: &str, password: &str) -> Result<u32> {
-        let username_norm =
-            NormalizedString::new(username).map_err(|e| anyhow!("Invalid username: {}", e))?;
-        let password_norm =
-            NormalizedString::new(password).map_err(|e| anyhow!("Invalid password: {}", e))?;
-
-        let verifier = SrpVerifier::from_username_and_password(username_norm, password_norm);
-        let stored_username = verifier.username().to_string();
-
-        if self.find_by_username(&stored_username).await?.is_some() {
-            return Err(anyhow!("Account '{}' already exists", stored_username));
-        }
-        let salt_hex = hex::encode_upper(verifier.salt());
-        let v_hex = hex::encode_upper(verifier.password_verifier());
-
-        // Bnet identity is the account username; register() applies HEX(SHA256(UPPER(..))).
-        let bnet = oxcore_shared::crypto::srp6v2::register(&stored_username, password);
-        let bnet_salt_hex = hex::encode_upper(bnet.salt);
-        let bnet_verifier_hex = hex::encode_upper(&bnet.verifier);
-
-        let result = sqlx::query(
-            "INSERT INTO `account` (`username`, `v`, `s`, `bnet_srp_version`, `bnet_salt`, \
-             `bnet_verifier`) VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&stored_username)
-        .bind(&v_hex)
-        .bind(&salt_hex)
-        .bind(oxcore_shared::crypto::srp6v2::SRP_VERSION as u8)
-        .bind(&bnet_salt_hex)
-        .bind(&bnet_verifier_hex)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to create account")?;
-
-        Ok(result.last_insert_id() as u32)
+        let user = NormalizedString::new(username).map_err(|e| anyhow!("Invalid username: {e}"))?;
+        let pass = NormalizedString::new(password).map_err(|e| anyhow!("Invalid password: {e}"))?;
+        let verifier = SrpVerifier::from_username_and_password(user, pass);
+        let name = verifier.username().to_string();
+        let bnet = oxcore_shared::crypto::srp6v2::register(&name, password);
+        let id: i64 = sqlx::query_scalar("INSERT INTO auth.account (username, v, s, bnet_srp_version, bnet_salt, bnet_verifier) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id").bind(&name).bind(hex::encode_upper(verifier.password_verifier())).bind(hex::encode_upper(verifier.salt())).bind(oxcore_shared::crypto::srp6v2::SRP_VERSION as i16).bind(hex::encode_upper(bnet.salt)).bind(hex::encode_upper(bnet.verifier)).fetch_one(&*self.pool).await.context("Failed to create account")?;
+        id.try_into()
+            .map_err(|_| anyhow!("account id outside u32 range"))
     }
-
-    /// Replace both the vanilla SRP6 and Battle.net SRP6v2 credentials for an account.
-    ///
-    /// A portal password change must keep the two client protocols in sync, so all verifier
-    /// columns are updated in one transaction rather than reusing the Bnet-only helper below.
-    pub async fn set_password(
-        &self,
-        account_id: u32,
-        username: &str,
-        password: &str,
-    ) -> Result<()> {
-        let username_norm =
-            NormalizedString::new(username).map_err(|e| anyhow!("Invalid username: {}", e))?;
-        let password_norm =
-            NormalizedString::new(password).map_err(|e| anyhow!("Invalid password: {}", e))?;
-        let verifier = SrpVerifier::from_username_and_password(username_norm, password_norm);
-        let stored_username = verifier.username().to_string();
-        let bnet = oxcore_shared::crypto::srp6v2::register(&stored_username, password);
-
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .context("Failed to begin password change")?;
-        let result = sqlx::query(
-            "UPDATE `account` SET `v` = ?, `s` = ?, `bnet_srp_version` = ?, \
-             `bnet_salt` = ?, `bnet_verifier` = ?, `last_pwd_reset` = NOW() \
-             WHERE `id` = ? AND `username` = ?",
-        )
-        .bind(hex::encode_upper(verifier.password_verifier()))
-        .bind(hex::encode_upper(verifier.salt()))
-        .bind(oxcore_shared::crypto::srp6v2::SRP_VERSION as u8)
-        .bind(hex::encode_upper(bnet.salt))
-        .bind(hex::encode_upper(bnet.verifier))
-        .bind(account_id)
-        .bind(stored_username)
-        .execute(&mut *transaction)
-        .await
-        .context("Failed to update account password")?;
-
+    pub async fn set_password(&self, id: u32, username: &str, password: &str) -> Result<()> {
+        let u = NormalizedString::new(username).map_err(|e| anyhow!("Invalid username: {e}"))?;
+        let p = NormalizedString::new(password).map_err(|e| anyhow!("Invalid password: {e}"))?;
+        let v = SrpVerifier::from_username_and_password(u, p);
+        let b = oxcore_shared::crypto::srp6v2::register(v.username(), password);
+        let result=sqlx::query("UPDATE auth.account SET v=$1,s=$2,bnet_srp_version=$3,bnet_salt=$4,bnet_verifier=$5,last_pwd_reset=CURRENT_TIMESTAMP WHERE id=$6 AND username=$7").bind(hex::encode_upper(v.password_verifier())).bind(hex::encode_upper(v.salt())).bind(oxcore_shared::crypto::srp6v2::SRP_VERSION as i16).bind(hex::encode_upper(b.salt)).bind(hex::encode_upper(b.verifier)).bind(i64::from(id)).bind(v.username()).execute(&*self.pool).await?;
         if result.rows_affected() != 1 {
             return Err(anyhow!("Account no longer exists or username changed"));
         }
-        transaction
-            .commit()
-            .await
-            .context("Failed to commit password change")?;
         Ok(())
     }
-
-    /// Update the Battle.net (SRP6v2) credentials for an existing account, e.g. after a
-    /// password change. The vanilla `v`/`s` are updated separately by the caller.
     pub async fn set_bnet_credentials(&self, username: &str, password: &str) -> Result<()> {
-        let stored_username = username.to_uppercase();
-        let bnet = oxcore_shared::crypto::srp6v2::register(&stored_username, password);
-
-        sqlx::query(
-            "UPDATE `account` SET `bnet_srp_version` = ?, `bnet_salt` = ?, `bnet_verifier` = ? \
-             WHERE `username` = ?",
-        )
-        .bind(oxcore_shared::crypto::srp6v2::SRP_VERSION as u8)
-        .bind(hex::encode_upper(bnet.salt))
-        .bind(hex::encode_upper(&bnet.verifier))
-        .bind(&stored_username)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to update bnet credentials")?;
-
+        let name = username.to_uppercase();
+        let b = oxcore_shared::crypto::srp6v2::register(&name, password);
+        sqlx::query("UPDATE auth.account SET bnet_srp_version=$1,bnet_salt=$2,bnet_verifier=$3 WHERE username=$4").bind(oxcore_shared::crypto::srp6v2::SRP_VERSION as i16).bind(hex::encode_upper(b.salt)).bind(hex::encode_upper(b.verifier)).bind(name).execute(&*self.pool).await?;
         Ok(())
     }
-
-    /// Store a freshly issued login ticket and its expiry (unix seconds) for an account.
-    pub async fn store_bnet_login_ticket(
-        &self,
-        account_id: u32,
-        ticket: &str,
-        expiry_unix: i64,
-    ) -> Result<()> {
+    pub async fn store_bnet_login_ticket(&self, id: u32, ticket: &str, expiry: i64) -> Result<()> {
         sqlx::query(
-            "UPDATE `account` SET `bnet_login_ticket` = ?, `bnet_login_ticket_expiry` = ? \
-             WHERE `id` = ?",
+            "UPDATE auth.account SET bnet_login_ticket=$1,bnet_login_ticket_expiry=$2 WHERE id=$3",
         )
         .bind(ticket)
-        .bind(expiry_unix)
-        .bind(account_id)
+        .bind(expiry)
+        .bind(i64::from(id))
         .execute(&*self.pool)
-        .await
-        .context("Failed to store bnet login ticket")?;
-
+        .await?;
         Ok(())
     }
-
-    /// Set the gmlevel column on an account.
-    pub async fn set_gmlevel(&self, account_id: u32, gmlevel: u8) -> Result<()> {
-        sqlx::query("UPDATE `account` SET `gmlevel` = ? WHERE `id` = ?")
-            .bind(gmlevel)
-            .bind(account_id)
+    pub async fn set_gmlevel(&self, id: u32, level: u8) -> Result<()> {
+        self.account_i16("gmlevel", id, i16::from(level)).await
+    }
+    pub async fn upsert_account_access(&self, id: u32, level: u8, realm: i32) -> Result<()> {
+        sqlx::query("INSERT INTO auth.account_access (id,gmlevel,\"RealmID\") VALUES ($1,$2,$3) ON CONFLICT (id,\"RealmID\") DO UPDATE SET gmlevel=EXCLUDED.gmlevel").bind(i64::from(id)).bind(i16::from(level)).bind(realm).execute(&*self.pool).await?;
+        Ok(())
+    }
+    async fn account_i16(&self, column: &str, id: u32, value: i16) -> Result<()> {
+        sqlx::query(&format!("UPDATE auth.account SET {column}=$1 WHERE id=$2"))
+            .bind(value)
+            .bind(i64::from(id))
             .execute(&*self.pool)
-            .await
-            .context("Failed to set account gmlevel")?;
+            .await?;
         Ok(())
     }
-
-    /// Set per-realm GM access (-1 = all realms).
-    pub async fn upsert_account_access(
-        &self,
-        account_id: u32,
-        gmlevel: u8,
-        realm_id: i32,
-    ) -> Result<()> {
-        sqlx::query(
-            r#"INSERT INTO `account_access` (`id`, `gmlevel`, `RealmID`)
-               VALUES (?, ?, ?)
-               ON DUPLICATE KEY UPDATE `gmlevel` = ?"#,
-        )
-        .bind(account_id)
-        .bind(gmlevel)
-        .bind(realm_id)
-        .bind(gmlevel)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to set account access")?;
-        Ok(())
-    }
-
-    /// Update session key after successful login
-    pub async fn update_session_key(&self, account_id: u32, session_key: &str) -> Result<()> {
-        sqlx::query("UPDATE `account` SET `sessionkey` = ? WHERE `id` = ?")
-            .bind(session_key)
-            .bind(account_id)
+    pub async fn update_session_key(&self, id: u32, key: &str) -> Result<()> {
+        sqlx::query("UPDATE auth.account SET sessionkey=$1 WHERE id=$2")
+            .bind(key)
+            .bind(i64::from(id))
             .execute(&*self.pool)
-            .await
-            .context("Failed to update session key")?;
+            .await?;
         Ok(())
     }
-
-    /// Increment failed login counter
-    pub async fn increment_failed_logins(&self, account_id: u32) -> Result<()> {
-        sqlx::query("UPDATE `account` SET `failed_logins` = `failed_logins` + 1 WHERE `id` = ?")
-            .bind(account_id)
+    pub async fn increment_failed_logins(&self, id: u32) -> Result<()> {
+        sqlx::query("UPDATE auth.account SET failed_logins=failed_logins+1 WHERE id=$1")
+            .bind(i64::from(id))
             .execute(&*self.pool)
-            .await
-            .context("Failed to increment failed logins")?;
+            .await?;
         Ok(())
     }
-
-    /// Increment failed login counter by username (before account_id is known)
-    pub async fn increment_failed_logins_by_username(&self, username: &str) -> Result<()> {
-        sqlx::query(
-            "UPDATE `account` SET `failed_logins` = `failed_logins` + 1 WHERE `username` = ?",
-        )
-        .bind(username)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to increment failed logins by username")?;
-        Ok(())
-    }
-
-    /// Reset failed logins counter (on successful authentication)
-    pub async fn reset_failed_logins(&self, account_id: u32) -> Result<()> {
-        sqlx::query("UPDATE `account` SET `failed_logins` = 0 WHERE `id` = ?")
-            .bind(account_id)
+    pub async fn increment_failed_logins_by_username(&self, name: &str) -> Result<()> {
+        sqlx::query("UPDATE auth.account SET failed_logins=failed_logins+1 WHERE username=$1")
+            .bind(name)
             .execute(&*self.pool)
-            .await
-            .context("Failed to reset failed logins")?;
+            .await?;
         Ok(())
     }
-
-    /// Update geolock PIN
-    pub async fn update_geolock_pin(&self, account_id: u32, pin: Option<i32>) -> Result<()> {
-        sqlx::query("UPDATE `account` SET `geolock_pin` = ? WHERE `id` = ?")
+    pub async fn reset_failed_logins(&self, id: u32) -> Result<()> {
+        sqlx::query("UPDATE auth.account SET failed_logins=0 WHERE id=$1")
+            .bind(i64::from(id))
+            .execute(&*self.pool)
+            .await?;
+        Ok(())
+    }
+    pub async fn update_geolock_pin(&self, id: u32, pin: Option<i32>) -> Result<()> {
+        sqlx::query("UPDATE auth.account SET geolock_pin=$1 WHERE id=$2")
             .bind(pin)
-            .bind(account_id)
+            .bind(i64::from(id))
             .execute(&*self.pool)
-            .await
-            .context("Failed to update geolock PIN")?;
+            .await?;
         Ok(())
     }
-
-    /// Update online status
-    pub async fn update_online_status(&self, account_id: u32, online: u8) -> Result<()> {
-        sqlx::query("UPDATE `account` SET `online` = ? WHERE `id` = ?")
-            .bind(online)
-            .bind(account_id)
-            .execute(&*self.pool)
-            .await
-            .context("Failed to update online status")?;
-        Ok(())
+    pub async fn update_online_status(&self, id: u32, online: u8) -> Result<()> {
+        self.account_i16("online", id, i16::from(online)).await
     }
-
-    /// Update last IP address
-    pub async fn update_last_ip(&self, account_id: u32, ip: &str) -> Result<()> {
-        sqlx::query("UPDATE `account` SET `last_ip` = ? WHERE `id` = ?")
+    pub async fn update_last_ip(&self, id: u32, ip: &str) -> Result<()> {
+        sqlx::query("UPDATE auth.account SET last_ip=$1 WHERE id=$2")
             .bind(ip)
-            .bind(account_id)
+            .bind(i64::from(id))
             .execute(&*self.pool)
-            .await
-            .context("Failed to update last IP")?;
+            .await?;
         Ok(())
     }
-
-    /// Update OS and platform information
-    pub async fn update_os_platform(
-        &self,
-        account_id: u32,
-        os: &str,
-        platform: &str,
-    ) -> Result<()> {
-        sqlx::query("UPDATE `account` SET `os` = ?, `platform` = ? WHERE `id` = ?")
+    pub async fn update_os_platform(&self, id: u32, os: &str, platform: &str) -> Result<()> {
+        sqlx::query("UPDATE auth.account SET os=$1,platform=$2 WHERE id=$3")
             .bind(os)
             .bind(platform)
-            .bind(account_id)
+            .bind(i64::from(id))
             .execute(&*self.pool)
-            .await
-            .context("Failed to update OS/platform")?;
+            .await?;
         Ok(())
     }
-
-    /// Update session key and login metadata after successful authentication
     pub async fn update_login_info(
         &self,
-        username: &str,
-        session_key: &str,
-        last_ip: &str,
+        name: &str,
+        key: &str,
+        ip: &str,
         locale: u8,
         os: &str,
         platform: &str,
     ) -> Result<()> {
-        sqlx::query(
-            r#"UPDATE `account`
-               SET `sessionkey` = ?, `last_ip` = ?, `last_login` = NOW(),
-                   `locale` = ?, `failed_logins` = 0, `os` = ?, `platform` = ?
-               WHERE `username` = ?"#,
-        )
-        .bind(session_key)
-        .bind(last_ip)
-        .bind(locale)
-        .bind(os)
-        .bind(platform)
-        .bind(username)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to update login info")?;
+        sqlx::query("UPDATE auth.account SET sessionkey=$1,last_ip=$2,last_login=CURRENT_TIMESTAMP,locale=$3,failed_logins=0,os=$4,platform=$5 WHERE username=$6").bind(key).bind(ip).bind(i16::from(locale)).bind(os).bind(platform).bind(name).execute(&*self.pool).await?;
         Ok(())
     }
-
-    /// Auto-ban account for too many failed logins
-    pub async fn auto_ban_account(&self, account_id: u32, ban_duration_seconds: i64) -> Result<()> {
-        let unban_timestamp = chrono::Utc::now().timestamp() + ban_duration_seconds;
-
-        sqlx::query(
-            r#"INSERT INTO `account_banned` (`id`, `bandate`, `unbandate`, `bannedby`, `banreason`, `active`)
-               VALUES (?, UNIX_TIMESTAMP(), ?, 'auth', 'Too many failed login attempts', 1)
-               ON DUPLICATE KEY UPDATE `unbandate` = ?, `active` = 1"#,
-        )
-        .bind(account_id as i64)
-        .bind(unban_timestamp)
-        .bind(unban_timestamp)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to auto-ban account")?;
-
+    pub async fn auto_ban_account(&self, id: u32, duration: i64) -> Result<()> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query("INSERT INTO auth.account_banned (id,bandate,unbandate,bannedby,banreason,active) VALUES ($1,$2,$3,'auth','Too many failed login attempts',1) ON CONFLICT (id,bandate) DO UPDATE SET unbandate=EXCLUDED.unbandate,active=1").bind(i64::from(id)).bind(now).bind(now+duration).execute(&*self.pool).await?;
         Ok(())
     }
-
-    /// Deactivate expired account bans
     pub async fn deactivate_expired_bans(&self) -> Result<u64> {
-        let result = sqlx::query(
-            "UPDATE `account_banned` SET `active` = 0 WHERE `active` = 1 AND `unbandate` <= UNIX_TIMESTAMP() AND `unbandate` <> `bandate`",
-        )
-        .execute(&*self.pool)
-        .await
-        .context("Failed to deactivate expired bans")?;
-
-        Ok(result.rows_affected())
+        Ok(sqlx::query("UPDATE auth.account_banned SET active=0 WHERE active=1 AND unbandate <= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT AND unbandate <> bandate").execute(&*self.pool).await?.rows_affected())
     }
 }

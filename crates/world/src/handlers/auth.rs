@@ -91,7 +91,11 @@ pub async fn handle_auth_session(
     }
 
     // ========== 4. CHECK FOR ACTIVE BANS ==========
-    if let Some(ban_info) = auth_repo.is_account_banned(account_info.id).await? {
+    let account_id: u32 = account_info
+        .id
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("account id outside u32 range"))?;
+    if let Some(ban_info) = auth_repo.is_account_banned(account_id).await? {
         warn!(
             "Account '{}' has active ban: {}",
             account_name, ban_info.banreason
@@ -184,17 +188,14 @@ pub async fn handle_auth_session(
 
     // ========== 10. UPDATE LAST IP ==========
     let remote_ip = remote_addr.ip().to_string();
-    let _ = auth_repo.update_last_ip(account_info.id, &remote_ip);
+    let _ = auth_repo.update_last_ip(account_id, &remote_ip);
 
     // ========== 11. CHECK FOR DUPLICATE LOGIN ==========
     debug!(
         "[AUTH] Checking for duplicate session for account {}",
         account_info.id
     );
-    if !session_mgr
-        .remove_session_for_account(account_info.id)
-        .await
-    {
+    if !session_mgr.remove_session_for_account(account_id).await {
         // Existing session is still loading - reject new connection
         warn!(
             "Rejecting login for account {} - existing session still loading",
@@ -213,7 +214,7 @@ pub async fn handle_auth_session(
     // }
 
     // ========== 13. RESET FAILED LOGINS ==========
-    let _ = auth_repo.reset_failed_logins(account_info.id);
+    let _ = auth_repo.reset_failed_logins(account_id);
 
     // ========== 14. CLAMP SECURITY LEVEL ==========
     let security = if account_info.gmlevel > 7 {
@@ -229,9 +230,11 @@ pub async fn handle_auth_session(
     );
 
     Ok(AuthResult::Success {
-        account_id: account_info.id,
+        account_id,
         account_name,
-        security,
+        security: security
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("GM level outside u8 range"))?,
         session_key,
     })
 }

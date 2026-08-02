@@ -6,7 +6,6 @@ use crate::db;
 
 const DATABASES: &[(&str, fn(&Config) -> &str)] = &[
     ("world", |c| &c.world_url),
-    ("auth", |c| &c.auth_url),
     ("characters", |c| &c.character_url),
 ];
 

@@ -53,6 +53,15 @@ pub struct Config {
     pub log_file_level: u8,
 }
 
+impl Config {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if !self.login_database_url.starts_with("postgres://") {
+            anyhow::bail!("auth.login_database_url must be a PostgreSQL connection URL");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct WrongPassConfig {
     #[serde(default)]

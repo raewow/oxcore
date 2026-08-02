@@ -24,9 +24,9 @@ pub struct BnetTicketAccount {
 /// Contains all account authentication and metadata.
 #[derive(FromRow, Debug, Clone)]
 pub struct AccountRow {
-    pub id: u32,
+    pub id: i64,
     pub username: String,
-    pub gmlevel: u8,
+    pub gmlevel: i16,
     pub sessionkey: Option<String>,
     pub v: Option<String>, // SRP6 verifier
     pub s: Option<String>, // SRP6 salt
@@ -37,25 +37,25 @@ pub struct AccountRow {
     pub last_ip: String,
     pub last_attempt_ip: String,
     pub last_local_ip: String,
-    pub failed_logins: u32,
-    pub locked: u8,
+    pub failed_logins: i64,
+    pub locked: i16,
     pub lock_country: String,
     pub last_login: DateTime<Utc>,
     pub last_pwd_reset: DateTime<Utc>,
-    pub online: u8,
-    pub expansion: u8,
+    pub online: i16,
+    pub expansion: i16,
     pub mutetime: i64,
     pub mutereason: String,
     pub muteby: String,
-    pub locale: u8,
+    pub locale: i16,
     pub os: String,
     pub platform: String,
     pub recruiter: i32,
-    pub current_realm: u8,
-    pub banned: u8,
-    pub mail_verif: u8,
+    pub current_realm: i16,
+    pub banned: i16,
+    pub mail_verif: i16,
     pub remember_token: String,
-    pub flags: u32,
+    pub flags: i64,
     pub security: Option<String>,
     pub pass_verif: Option<String>,
     pub email_verif: bool,
@@ -80,7 +80,7 @@ pub struct AccountBannedRow {
     pub banreason: String,
     pub active: i8,
     pub realm: i8,
-    pub gmlevel: u8,
+    pub gmlevel: i16,
 }
 
 /// Represents a row from the `ip_banned` table in auth database.
@@ -98,8 +98,8 @@ pub struct IpBannedRow {
 /// Defines per-realm security levels (GM levels) for accounts.
 #[derive(FromRow, Debug, Clone)]
 pub struct AccountAccessRow {
-    pub id: u32,     // Account ID
-    pub gmlevel: u8, // GM level for this realm
+    pub id: i64,      // Account ID
+    pub gmlevel: i16, // GM level for this realm
     #[sqlx(rename = "RealmID")]
     pub realm_id: i32, // -1 for all realms, or specific realm ID
 }
@@ -108,8 +108,8 @@ pub struct AccountAccessRow {
 /// Used during authentication flow to avoid loading full AccountRow.
 #[derive(FromRow, Debug, Clone)]
 pub struct AccountLoginInfo {
-    pub id: u32,
-    pub locked: u8, // tinyint unsigned in SQL
+    pub id: i64,
+    pub locked: i16,
     pub last_ip: Option<String>,
     pub v: Option<String>,
     pub s: Option<String>,
@@ -118,20 +118,20 @@ pub struct AccountLoginInfo {
     pub geolock_pin: Option<i32>,
     pub email: Option<String>,
     pub joindate_ts: Option<i64>,
-    pub online: u8,
+    pub online: i16,
 }
 
 /// Session authentication info for world server login.
 /// Contains minimal account data needed for CMSG_AUTH_SESSION handling.
 #[derive(FromRow, Debug, Clone)]
 pub struct SessionAuthInfo {
-    pub id: u32,
+    pub id: i64,
     pub username: String,
-    pub gmlevel: u8,
+    pub gmlevel: i16,
     pub sessionkey: Option<String>,
     pub last_ip: Option<String>,
-    pub locked: u8,
-    pub expansion: u8,
+    pub locked: i16,
+    pub expansion: i16,
     pub mutetime: i64,
-    pub locale: u8,
+    pub locale: i16,
 }

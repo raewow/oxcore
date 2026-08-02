@@ -614,11 +614,15 @@ impl Config {
         for (name, url) in [
             ("world_database_url", &self.world_database_url),
             ("character_database_url", &self.character_database_url),
-            ("login_database_url", &self.login_database_url),
+            ("world_database_url", &self.world_database_url),
+            ("character_database_url", &self.character_database_url),
         ] {
             if !url.starts_with("mysql://") {
                 anyhow::bail!("world.{name} must be a MySQL connection URL");
             }
+        }
+        if !self.login_database_url.starts_with("postgres://") {
+            anyhow::bail!("world.login_database_url must be a PostgreSQL connection URL");
         }
         if !self.logs_database_url.starts_with("postgres://") {
             anyhow::bail!("world.logs_database_url must be a PostgreSQL connection URL");

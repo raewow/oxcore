@@ -14,5 +14,5 @@ MIGRATION FILES:
     Created in sql/migrations/ with format: YYYYMMDDHHMMSS_<db>_<name>.sql
 
 CONFIG:
-    Reads MySQL URLs from config.toml and PostgreSQL from [postgres].
+    Reads world and character MySQL URLs from config.toml and PostgreSQL from [postgres].
     Use -c <path> to specify a different config file.";
