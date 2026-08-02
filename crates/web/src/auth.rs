@@ -6,12 +6,12 @@ use axum::Extension;
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use oxcore_db::database::AccountRepository;
+use oxcore_db::database::{web::repositories::WebRepository, AccountRepository};
 use oxcore_shared::crypto::srp6v2;
 use rand::RngCore;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use sqlx::MySqlPool;
+use sqlx::{MySqlPool, PgPool};
 
 use crate::state::AppState;
 
@@ -302,17 +302,13 @@ pub async fn revoke_session(
     };
 
     let current_session_id = session_token_hash_hex(cookie.value());
-    let result = sqlx::query(
-        "DELETE FROM `web_sessions` WHERE `account_id` = ? AND `token_hash` = UNHEX(?)",
-    )
-    .bind(session.account_id)
-    .bind(&form.session_id)
-    .execute(&*state.web)
-    .await;
+    let result = WebRepository::new(std::sync::Arc::clone(&state.web))
+        .delete_account_session_by_hex(session.account_id, &form.session_id)
+        .await;
     let Ok(result) = result else {
         return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    if result.rows_affected() != 1 {
+    if result != 1 {
         return axum::http::StatusCode::NOT_FOUND.into_response();
     }
     let _ = record_audit(&state.web, session.account_id, "session.revoked", "session").await;
@@ -348,14 +344,9 @@ pub async fn create_support_ticket(
         return Redirect::to("/login").into_response();
     };
 
-    let result = sqlx::query(
-        "INSERT INTO `web_support_tickets` (`account_id`, `subject`, `message`) VALUES (?, ?, ?)",
-    )
-    .bind(session.account_id)
-    .bind(subject)
-    .bind(message)
-    .execute(&*state.web)
-    .await;
+    let result = WebRepository::new(std::sync::Arc::clone(&state.web))
+        .create_support_ticket(session.account_id, subject, message)
+        .await;
     if let Err(error) = result {
         tracing::error!(target: "oxcore_web", %error, account_id = session.account_id, "support ticket creation failed");
         return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -578,14 +569,10 @@ pub async fn revoke_admin_session(
     {
         return axum::http::StatusCode::FORBIDDEN.into_response();
     }
-    let result = sqlx::query(
-        "DELETE FROM `web_sessions` WHERE `account_id` = ? AND `token_hash` = UNHEX(?)",
-    )
-    .bind(account_id)
-    .bind(&form.session_id)
-    .execute(&*state.web)
-    .await;
-    if !matches!(result, Ok(result) if result.rows_affected() == 1) {
+    let result = WebRepository::new(std::sync::Arc::clone(&state.web))
+        .delete_account_session_by_hex(account_id, &form.session_id)
+        .await;
+    if !matches!(result, Ok(1)) {
         return axum::http::StatusCode::NOT_FOUND.into_response();
     }
     let _ = record_audit_for(
@@ -667,46 +654,39 @@ pub async fn admin(Extension(state): Extension<AppState>, jar: CookieJar) -> Res
     }
 }
 
-async fn create_session(pool: &MySqlPool, account_id: u32) -> Result<String> {
+async fn create_session(pool: &PgPool, account_id: u32) -> Result<String> {
     let mut bytes = [0_u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     let token = URL_SAFE_NO_PAD.encode(bytes);
     let hash = token_hash(&token);
 
-    sqlx::query(
-        "INSERT INTO `web_sessions` (`token_hash`, `account_id`, `expires_at`) \
-         VALUES (?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 DAY))",
-    )
-    .bind(hash.as_slice())
-    .bind(account_id)
-    .execute(pool)
-    .await
-    .context("failed to store web session")?;
+    WebRepository::new(std::sync::Arc::new(pool.clone()))
+        .create_session(hash.as_slice(), account_id)
+        .await
+        .context("failed to store web session")?;
 
     Ok(token)
 }
 
-async fn delete_session(pool: &MySqlPool, token: &str) -> Result<()> {
+async fn delete_session(pool: &PgPool, token: &str) -> Result<()> {
     let hash = token_hash(token);
-    sqlx::query("DELETE FROM `web_sessions` WHERE `token_hash` = ?")
-        .bind(hash.as_slice())
-        .execute(pool)
+    WebRepository::new(std::sync::Arc::new(pool.clone()))
+        .delete_session(hash.as_slice())
         .await
         .context("failed to delete web session")?;
     Ok(())
 }
 
-async fn delete_account_sessions(pool: &MySqlPool, account_id: u32) -> Result<()> {
-    sqlx::query("DELETE FROM `web_sessions` WHERE `account_id` = ?")
-        .bind(account_id)
-        .execute(pool)
+async fn delete_account_sessions(pool: &PgPool, account_id: u32) -> Result<()> {
+    WebRepository::new(std::sync::Arc::new(pool.clone()))
+        .delete_account_sessions(account_id)
         .await
         .context("failed to revoke account web sessions")?;
     Ok(())
 }
 
 async fn record_audit(
-    pool: &MySqlPool,
+    pool: &PgPool,
     account_id: u32,
     action: &str,
     target_type: &str,
@@ -715,24 +695,17 @@ async fn record_audit(
 }
 
 async fn record_audit_for(
-    pool: &MySqlPool,
+    pool: &PgPool,
     account_id: u32,
     action: &str,
     target_type: &str,
     target_id: Option<&str>,
     reason: Option<&str>,
 ) -> Result<()> {
-    sqlx::query(
-        "INSERT INTO `web_audit_log` (`actor_account_id`, `action`, `target_type`, `target_id`, `reason`) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(account_id)
-    .bind(action)
-    .bind(target_type)
-    .bind(target_id)
-    .bind(reason)
-    .execute(pool)
-    .await
-    .context("failed to write web audit event")?;
+    WebRepository::new(std::sync::Arc::new(pool.clone()))
+        .record_audit(account_id, action, target_type, target_id, reason)
+        .await
+        .context("failed to write web audit event")?;
     Ok(())
 }
 
@@ -788,30 +761,23 @@ fn has_same_origin(headers: &HeaderMap, state: &AppState) -> bool {
     allowed
 }
 
-async fn current_session(pool: &MySqlPool, jar: &CookieJar) -> Option<Session> {
+async fn current_session(pool: &PgPool, jar: &CookieJar) -> Option<Session> {
     let token = jar.get(SESSION_COOKIE)?.value();
     session_from_token(pool, token).await
 }
 
-pub async fn session_from_token(pool: &MySqlPool, token: &str) -> Option<Session> {
+pub async fn session_from_token(pool: &PgPool, token: &str) -> Option<Session> {
     let hash = token_hash(token);
-    let account_id = sqlx::query_scalar::<_, u32>(
-        "SELECT `account_id` FROM `web_sessions` \
-         WHERE `token_hash` = ? AND `expires_at` > UTC_TIMESTAMP()",
-    )
-    .bind(hash.as_slice())
-    .fetch_optional(pool)
-    .await
-    .ok()??;
+    let account_id = WebRepository::new(std::sync::Arc::new(pool.clone()))
+        .session_account(hash.as_slice())
+        .await
+        .ok()??;
 
     // Session activity is advisory metadata; an update failure must not turn a valid session into
     // an authentication failure.
-    let _ = sqlx::query(
-        "UPDATE `web_sessions` SET `last_seen_at` = UTC_TIMESTAMP() WHERE `token_hash` = ?",
-    )
-    .bind(hash.as_slice())
-    .execute(pool)
-    .await;
+    let _ = WebRepository::new(std::sync::Arc::new(pool.clone()))
+        .touch_session(hash.as_slice())
+        .await;
 
     Some(Session { account_id })
 }

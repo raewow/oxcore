@@ -6,6 +6,8 @@ use oxcore_db::database::logs::{
     models::{ChatLogRow, ChatOutboxInsert},
     repositories::ChatLogRepository,
 };
+#[cfg(feature = "ssr")]
+use oxcore_db::database::web::repositories::WebRepository;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortalOverview {
@@ -421,24 +423,19 @@ pub async fn get_account_activity() -> Result<Vec<ActivityEvent>, ServerFnError>
     #[cfg(feature = "ssr")]
     {
         let (state, account_id, _) = authenticated_request().await?;
-        return sqlx::query_as::<_, (String, String, i64)>(
-            "SELECT `action`, `target_type`, UNIX_TIMESTAMP(`occurred_at`) \
-             FROM `web_audit_log` WHERE `actor_account_id` = ? \
-             ORDER BY `occurred_at` DESC LIMIT 50",
-        )
-        .bind(account_id)
-        .fetch_all(&*state.web)
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(|(action, target_type, occurred_at)| ActivityEvent {
-                    action,
-                    target_type,
-                    occurred_at,
-                })
-                .collect()
-        })
-        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+        return WebRepository::new(std::sync::Arc::clone(&state.web))
+            .activity(account_id)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| ActivityEvent {
+                        action: row.action,
+                        target_type: row.target_type,
+                        occurred_at: row.occurred_at,
+                    })
+                    .collect()
+            })
+            .map_err(|error| ServerFnError::ServerError(error.to_string()));
     }
 
     #[cfg(not(feature = "ssr"))]
@@ -487,28 +484,21 @@ pub async fn get_support_tickets() -> Result<Vec<SupportTicket>, ServerFnError> 
     #[cfg(feature = "ssr")]
     {
         let (state, account_id, _) = authenticated_request().await?;
-        return sqlx::query_as::<_, (u64, String, String, i64, i64)>(
-            "SELECT id, `subject`, `status`, UNIX_TIMESTAMP(`created_at`), \
-             UNIX_TIMESTAMP(`updated_at`) FROM `web_support_tickets` \
-             WHERE `account_id` = ? ORDER BY `updated_at` DESC",
-        )
-        .bind(account_id)
-        .fetch_all(&*state.web)
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(
-                    |(id, subject, status, created_at, updated_at)| SupportTicket {
-                        id,
-                        subject,
-                        status,
-                        created_at,
-                        updated_at,
-                    },
-                )
-                .collect()
-        })
-        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+        return WebRepository::new(std::sync::Arc::clone(&state.web))
+            .support_tickets(account_id)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| SupportTicket {
+                        id: row.id,
+                        subject: row.subject,
+                        status: row.status,
+                        created_at: row.created_at,
+                        updated_at: row.updated_at,
+                    })
+                    .collect()
+            })
+            .map_err(|error| ServerFnError::ServerError(error.to_string()));
     }
 
     #[cfg(not(feature = "ssr"))]
@@ -559,13 +549,11 @@ pub async fn get_admin_overview() -> Result<AdminOverview, ServerFnError> {
             return Err(ServerFnError::ServerError("Not authorized".to_string()));
         }
         let realms = get_realm_status().await?;
-        let open_support_tickets = match sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM `web_support_tickets` WHERE `status` IN ('open', 'awaiting_player')",
-        )
-        .fetch_one(&*state.web)
-        .await
+        let open_support_tickets = match WebRepository::new(std::sync::Arc::clone(&state.web))
+            .open_support_ticket_count()
+            .await
         {
-            Ok(count) => count as u64,
+            Ok(count) => count,
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
         return Ok(AdminOverview {
@@ -1127,14 +1115,21 @@ pub async fn get_admin_account_sessions(
     {
         let (state, actor_id, _) = authenticated_request().await?;
         require_gm_level(&state, actor_id, 3).await?;
-        return sqlx::query_as::<_, (String, i64, i64, i64)>(
-            "SELECT HEX(`token_hash`), UNIX_TIMESTAMP(`created_at`), UNIX_TIMESTAMP(`last_seen_at`), UNIX_TIMESTAMP(`expires_at`) FROM `web_sessions` WHERE `account_id` = ? ORDER BY `last_seen_at` DESC",
-        )
-        .bind(account_id)
-        .fetch_all(&*state.web)
-        .await
-        .map(|rows| rows.into_iter().map(|(id, created_at, last_seen_at, expires_at)| AdminSession { account_id, id, created_at, last_seen_at, expires_at }).collect())
-        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+        return WebRepository::new(std::sync::Arc::clone(&state.web))
+            .sessions(account_id, false)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| AdminSession {
+                        account_id,
+                        id: row.token_hash,
+                        created_at: row.created_at,
+                        last_seen_at: row.last_seen_at,
+                        expires_at: row.expires_at,
+                    })
+                    .collect()
+            })
+            .map_err(|error| ServerFnError::ServerError(error.to_string()));
     }
     #[cfg(not(feature = "ssr"))]
     unreachable!("server function body only runs on the server")
@@ -1148,32 +1143,37 @@ pub async fn get_admin_audit_log(
     {
         let (state, actor_id, _) = authenticated_request().await?;
         require_gm_level(&state, actor_id, if account_id.is_some() { 1 } else { 4 }).await?;
-        let rows = match if let Some(account_id) = account_id {
-            sqlx::query_as::<_, (u64, i64, Option<String>, String, String, Option<String>, Option<String>)>(
-                "SELECT l.id, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `auth`.`account` a ON a.id = l.`actor_account_id` WHERE l.`actor_account_id` = ? OR (l.`target_type` = 'account' AND l.`target_id` = CAST(? AS CHAR) COLLATE utf8mb4_unicode_ci) OR (l.`target_type` = 'realm_role' AND l.`target_id` LIKE CONCAT(CAST(? AS CHAR) COLLATE utf8mb4_unicode_ci, ':%')) ORDER BY l.`occurred_at` DESC LIMIT 100",
-            ).bind(account_id).bind(account_id).bind(account_id).fetch_all(&*state.web).await
-        } else {
-            sqlx::query_as::<_, (u64, i64, Option<String>, String, String, Option<String>, Option<String>)>(
-                "SELECT l.id, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `auth`.`account` a ON a.id = l.`actor_account_id` ORDER BY l.`occurred_at` DESC LIMIT 200",
-            ).fetch_all(&*state.web).await
-        } {
+        let rows = match WebRepository::new(std::sync::Arc::clone(&state.web))
+            .audit_log(account_id)
+            .await
+        {
             Ok(rows) => rows,
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
-        return Ok(rows
-            .into_iter()
-            .map(
-                |(id, occurred_at, actor, action, target_type, target_id, reason)| AuditEntry {
-                    id,
-                    occurred_at,
-                    actor,
-                    action,
-                    target_type,
-                    target_id,
-                    reason,
-                },
-            )
-            .collect());
+        let mut entries = Vec::with_capacity(rows.len());
+        for row in rows {
+            let actor = match row.actor_account_id {
+                Some(account_id) => {
+                    sqlx::query_scalar::<_, String>(
+                        "SELECT `username` FROM `account` WHERE `id` = ?",
+                    )
+                    .bind(account_id)
+                    .fetch_optional(&*state.auth)
+                    .await?
+                }
+                None => None,
+            };
+            entries.push(AuditEntry {
+                id: row.id,
+                occurred_at: row.occurred_at,
+                actor,
+                action: row.action,
+                target_type: row.target_type,
+                target_id: row.target_id,
+                reason: row.reason,
+            });
+        }
+        return Ok(entries);
     }
     #[cfg(not(feature = "ssr"))]
     unreachable!("server function body only runs on the server")
@@ -1381,27 +1381,20 @@ async fn load_sessions(
 ) -> anyhow::Result<Vec<SessionSummary>> {
     use anyhow::Context;
 
-    let rows = sqlx::query_as::<_, (String, i64, i64, i64)>(
-        "SELECT HEX(`token_hash`), UNIX_TIMESTAMP(`created_at`), UNIX_TIMESTAMP(`last_seen_at`), \
-         UNIX_TIMESTAMP(`expires_at`) FROM `web_sessions` WHERE `account_id` = ? \
-         AND `expires_at` > UTC_TIMESTAMP() ORDER BY `last_seen_at` DESC",
-    )
-    .bind(account_id)
-    .fetch_all(&*state.web)
-    .await
-    .context("failed to load active sessions")?;
+    let rows = WebRepository::new(std::sync::Arc::clone(&state.web))
+        .sessions(account_id, true)
+        .await
+        .context("failed to load active sessions")?;
 
     Ok(rows
         .into_iter()
-        .map(
-            |(id, created_at, last_seen_at, expires_at)| SessionSummary {
-                current: id.eq_ignore_ascii_case(current_session_id),
-                id,
-                created_at,
-                last_seen_at,
-                expires_at,
-            },
-        )
+        .map(|row| SessionSummary {
+            current: row.token_hash.eq_ignore_ascii_case(current_session_id),
+            id: row.token_hash,
+            created_at: row.created_at,
+            last_seen_at: row.last_seen_at,
+            expires_at: row.expires_at,
+        })
         .collect())
 }
 

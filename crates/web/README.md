@@ -38,7 +38,7 @@ port = 8080
 public_base_url = "http://127.0.0.1:8080"
 auth_database_url = "mysql://root:root@127.0.0.1:3306/auth"
 character_database_url = "mysql://root:root@127.0.0.1:3306/characters"
-web_database_url = "mysql://root:root@127.0.0.1:3306/web"
+web_database_url = "postgres://oxcore:oxcore@127.0.0.1:5432/oxcore"
 ```
 
 Terminate TLS at a reverse proxy in production and bind the web server to a private interface.

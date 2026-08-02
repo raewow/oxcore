@@ -11,7 +11,7 @@ use crate::config::Config;
 pub struct AppState {
     pub auth: Arc<MySqlPool>,
     pub characters: Arc<MySqlPool>,
-    pub web: Arc<MySqlPool>,
+    pub web: Arc<PgPool>,
     pub logs: Arc<PgPool>,
     pub secure_cookies: bool,
     pub public_origin: String,
@@ -25,7 +25,7 @@ impl AppState {
             .connect(&config.auth_database_url)
             .await
             .context("failed to connect to the auth database")?;
-        let web = MySqlPoolOptions::new()
+        let web = PgPoolOptions::new()
             .max_connections(10)
             .min_connections(1)
             .connect(&config.web_database_url)
