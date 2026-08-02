@@ -178,7 +178,7 @@ mod tests {
             world: lazy_pool(),
             character: lazy_pool(),
             auth: lazy_pool(),
-            logs: lazy_pool(),
+            logs: oxcore_db::database::lazy_logs_pool(),
         });
 
         World::new(

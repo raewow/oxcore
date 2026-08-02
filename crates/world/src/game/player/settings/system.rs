@@ -202,6 +202,21 @@ impl SettingsSystem {
             .as_secs() as u32;
         let timestamp = client_time.filter(|&t| t != 0).unwrap_or(server_now);
 
+        if matches!(
+            ad_type,
+            AccountDataType::GlobalBindings | AccountDataType::PerCharBindings
+        ) {
+            tracing::info!(
+                player = %player_guid,
+                account_id,
+                data_type,
+                compressed_bytes = compressed_data.len(),
+                binding_bytes = decompressed.len(),
+                timestamp,
+                "received keybinding account-data update"
+            );
+        }
+
         // Store in player state
         world
             .managers
@@ -232,6 +247,20 @@ impl SettingsSystem {
                 .await?;
         }
 
+        if matches!(
+            ad_type,
+            AccountDataType::GlobalBindings | AccountDataType::PerCharBindings
+        ) {
+            tracing::info!(
+                player = %player_guid,
+                account_id,
+                data_type,
+                binding_bytes = decompressed.len(),
+                timestamp,
+                "persisted keybinding account data"
+            );
+        }
+
         // Echo back SMSG_UPDATE_ACCOUNT_DATA to confirm receipt
         use oxcore_shared::messages::settings::SmsgUpdateAccountData;
         let response = SmsgUpdateAccountData {
@@ -260,7 +289,8 @@ impl SettingsSystem {
         data_type: u32,
         world: &World,
     ) -> Result<()> {
-        if data_type as usize >= NUM_ACCOUNT_DATA_TYPES {
+        const MODERN_ACCOUNT_DATA_TYPES: usize = 13;
+        if data_type as usize >= MODERN_ACCOUNT_DATA_TYPES {
             tracing::warn!(
                 "Invalid account data request type {} from player {}",
                 data_type,
@@ -269,16 +299,36 @@ impl SettingsSystem {
             return Ok(());
         }
 
-        let (data, time) = world
-            .managers
-            .player_mgr
-            .with_player(player_guid, |player| {
-                player.settings.account_data[data_type as usize]
-                    .as_ref()
-                    .map(|entry| (entry.data.clone(), entry.time))
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
+        let (data, time) = if data_type as usize >= NUM_ACCOUNT_DATA_TYPES {
+            // These slots were added after the vanilla account-data schema. A modern client still
+            // expects an answer for them, but there is no legacy data to restore.
+            (Vec::new(), 0)
+        } else {
+            world
+                .managers
+                .player_mgr
+                .with_player(player_guid, |player| {
+                    player.settings.account_data[data_type as usize]
+                        .as_ref()
+                        .map(|entry| (entry.data.clone(), entry.time))
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default()
+        };
+
+        if matches!(
+            AccountDataType::from_u32(data_type),
+            Some(AccountDataType::GlobalBindings | AccountDataType::PerCharBindings)
+        ) {
+            tracing::info!(
+                player = %player_guid,
+                account_id,
+                data_type,
+                binding_bytes = data.len(),
+                timestamp = time,
+                "client requested keybinding account data"
+            );
+        }
 
         use oxcore_shared::messages::settings::SmsgUpdateAccountData;
         let response = SmsgUpdateAccountData {
@@ -301,10 +351,30 @@ impl SettingsSystem {
         world: &World,
     ) {
         if let Some(realm_session) = world.session_mgr.get_realm_session_by_account(account_id) {
+            if matches!(response.data_type, 2 | 3) {
+                tracing::info!(
+                    player = %player_guid,
+                    account_id,
+                    data_type = response.data_type,
+                    binding_bytes = response.data.len(),
+                    timestamp = response.time,
+                    "sending keybinding account data on realm socket"
+                );
+            }
             if let Err(error) = realm_session.send_msg(response) {
                 tracing::warn!(%error, "failed to return account data on modern realm socket");
             }
         } else {
+            if matches!(response.data_type, 2 | 3) {
+                tracing::info!(
+                    player = %player_guid,
+                    account_id,
+                    data_type = response.data_type,
+                    binding_bytes = response.data.len(),
+                    timestamp = response.time,
+                    "sending keybinding account data on instance socket"
+                );
+            }
             self.broadcast_mgr.send_msg_to_player(player_guid, response);
         }
     }

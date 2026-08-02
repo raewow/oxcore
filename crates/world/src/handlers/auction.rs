@@ -2051,7 +2051,7 @@ mod tests {
             world: (*pool).clone(),
             character: (*pool).clone(),
             auth: (*pool).clone(),
-            logs: (*pool).clone(),
+            logs: oxcore_db::database::lazy_logs_pool(),
         });
         let config = Arc::new(crate::config::Config::default());
         let mut world = World::new(databases, config, 50, std::path::PathBuf::from("."));

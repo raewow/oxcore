@@ -6,7 +6,8 @@ pub mod world;
 
 use anyhow::{Context, Result};
 use sqlx::mysql::MySqlPoolOptions;
-use sqlx::MySqlPool;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{MySqlPool, PgPool};
 use tracing::info;
 
 #[derive(Debug, Clone)]
@@ -23,7 +24,13 @@ pub struct Databases {
     pub world: MySqlPool,
     pub character: MySqlPool,
     pub auth: MySqlPool,
-    pub logs: MySqlPool,
+    pub logs: PgPool,
+}
+
+/// Creates an unconnected PostgreSQL logs pool for fixtures that do not access logs.
+pub fn lazy_logs_pool() -> PgPool {
+    PgPool::connect_lazy("postgres://localhost/unused_logs_test")
+        .expect("lazy PostgreSQL logs pool should be constructible")
 }
 
 impl Databases {
@@ -66,7 +73,7 @@ impl Databases {
             .connect(auth_url)
             .await
             .context("Failed to connect to Auth database")?;
-        let logs = MySqlPoolOptions::new()
+        let logs = PgPoolOptions::new()
             .max_connections(10)
             .min_connections(2)
             .acquire_timeout(std::time::Duration::from_secs(30))
@@ -125,7 +132,7 @@ impl Databases {
     }
 
     /// Get a reference to the logs database pool
-    pub fn logs(&self) -> &MySqlPool {
+    pub fn logs(&self) -> &PgPool {
         &self.logs
     }
 }

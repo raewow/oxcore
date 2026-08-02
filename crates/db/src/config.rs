@@ -7,7 +7,6 @@ pub struct Config {
     pub world_url: String,
     pub character_url: String,
     pub auth_url: String,
-    pub logs_url: String,
     pub web_url: String,
     /// Optional PostgreSQL URL used only by the `db pg` migration commands.
     pub postgres_url: Option<String>,
@@ -41,7 +40,6 @@ struct WorldConfig {
     world_database_url: String,
     character_database_url: String,
     login_database_url: String,
-    logs_database_url: String,
 }
 
 impl RootConfig {
@@ -84,7 +82,6 @@ impl Config {
             world_url: w.world_database_url,
             character_url: w.character_database_url,
             auth_url: w.login_database_url,
-            logs_url: w.logs_database_url,
             web_url: web.web_database_url,
             postgres_url: root.postgres.map(|postgres| postgres.database_url),
             base_dir: sql_dir.join("base"),

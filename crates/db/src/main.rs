@@ -32,7 +32,7 @@ enum Command {
     Status,
     /// Create a new migration file
     New {
-        /// Database: world, auth, characters, logs
+        /// Database: world, auth, or characters
         db: String,
         /// Migration name (snake_case description)
         name: String,

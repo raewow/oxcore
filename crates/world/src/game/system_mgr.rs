@@ -107,7 +107,7 @@ impl SystemManager {
     pub fn new(
         character_pool: Arc<sqlx::MySqlPool>,
         world_pool: Arc<sqlx::MySqlPool>,
-        logs_pool: Arc<sqlx::MySqlPool>,
+        logs_pool: Arc<sqlx::PgPool>,
         chat_log_enabled: bool,
         broadcast_mgr: Arc<BroadcastManager>,
         item_mgr: Arc<ItemManager>,

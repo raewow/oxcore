@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use chrono::Utc;
 use std::path::Path;
 
-const VALID_DBS: &[&str] = &["world", "auth", "characters", "logs"];
+const VALID_DBS: &[&str] = &["world", "auth", "characters"];
 
 pub fn run(db: &str, name: &str, migrations_dir: &Path) -> Result<()> {
     if !VALID_DBS.contains(&db) {

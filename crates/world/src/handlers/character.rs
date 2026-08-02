@@ -687,6 +687,36 @@ pub async fn handle_player_login_with_guid(
                 }
             });
     }
+
+    // Older characters can have persisted class skills but no language entry. The modern client
+    // blocks chat locally without this skill, so restore and persist the native language.
+    world
+        .systems
+        .player
+        .manager()
+        .with_player_mut(guid, |player| {
+            let language_skill = get_language_skill_for_race(player.race);
+            if !player.skills.skills.contains_key(&language_skill) {
+                let position = player
+                    .skills
+                    .skills
+                    .values()
+                    .map(|skill| skill.position)
+                    .max()
+                    .map_or(0, |position| position + 1);
+                player.skills.skills.insert(
+                    language_skill,
+                    crate::game::player::skills::SkillData::new(
+                        language_skill,
+                        300,
+                        300,
+                        0,
+                        position,
+                    ),
+                );
+                info!(player = %guid, language_skill, "restored missing native language skill");
+            }
+        });
     info!("[LOGIN] Skills initialized");
 
     // 7.06 Initialize action buttons from loaded data
@@ -940,6 +970,13 @@ pub async fn handle_player_login_with_guid(
                 times
             })
             .unwrap_or([0u32; NUM_ACCOUNT_DATA_TYPES]);
+
+        info!(
+            player = %guid,
+            global_bindings_time = timestamps[2],
+            per_character_bindings_time = timestamps[3],
+            "advertising keybinding account-data timestamps"
+        );
 
         let msg = SmsgAccountDataTimes::new(timestamps, guid, world.get_realm_id() as u16);
         // The modern client owns bindings on its realm socket even after the instance socket has

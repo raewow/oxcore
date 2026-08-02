@@ -1,6 +1,5 @@
 -- PostgreSQL migration: logs / initial_schema
--- Canonical PostgreSQL replacement for sql/base/logs/. The MySQL runtime continues to use its
--- existing logs database until its query paths are ported.
+-- Canonical PostgreSQL logs schema used by the world and web runtimes.
 
 CREATE TABLE instance_creature_kills (
     "mapId" BIGINT NOT NULL CHECK ("mapId" >= 0),

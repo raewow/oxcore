@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sqlx::{MySql, MySqlPool, QueryBuilder};
+use sqlx::{PgPool, Postgres, QueryBuilder};
 use std::sync::Arc;
 
 use crate::database::logs::models::{
@@ -8,44 +8,44 @@ use crate::database::logs::models::{
 };
 
 type ChatLogTuple = (
-    u64,
+    i64,
     i64,
     String,
     Option<String>,
-    Option<u32>,
+    Option<i64>,
     Option<String>,
-    Option<u32>,
-    Option<u32>,
+    Option<i64>,
+    Option<i64>,
     Option<String>,
     String,
-    Option<u32>,
+    Option<i64>,
 );
 
 const CHAT_LOG_COLUMNS: &str =
-    "`id`, UNIX_TIMESTAMP(`time`), `channel_type`, `channel_name`, `sender_guid`, `sender_name`, \
-     `sender_account`, `target_guid`, `target_name`, `message`, `map`";
+    "id, EXTRACT(EPOCH FROM time)::BIGINT, channel_type, channel_name, sender_guid, sender_name, \
+     sender_account, target_guid, target_name, message, map";
 
 #[derive(Clone)]
 pub struct ChatLogRepository {
-    pool: Arc<MySqlPool>,
+    pool: Arc<PgPool>,
 }
 
 impl ChatLogRepository {
-    pub fn new(pool: Arc<MySqlPool>) -> Self {
+    pub fn new(pool: Arc<PgPool>) -> Self {
         Self { pool }
     }
 
     pub async fn insert(&self, entry: &ChatLogInsert) -> Result<()> {
-        sqlx::query("INSERT INTO `chat_log` (`channel_type`, `channel_name`, `sender_guid`, `sender_name`, `sender_account`, `target_guid`, `target_name`, `message`, `map`, `pos_x`, `pos_y`, `pos_z`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(&entry.channel_type).bind(&entry.channel_name).bind(entry.sender_guid)
-            .bind(&entry.sender_name).bind(entry.sender_account).bind(entry.target_guid)
-            .bind(&entry.target_name).bind(&entry.message).bind(entry.map).bind(entry.pos_x)
+        sqlx::query("INSERT INTO logs.chat_log (channel_type, channel_name, sender_guid, sender_name, sender_account, target_guid, target_name, message, map, pos_x, pos_y, pos_z) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)")
+            .bind(&entry.channel_type).bind(&entry.channel_name).bind(i64::from(entry.sender_guid))
+            .bind(&entry.sender_name).bind(i64::from(entry.sender_account)).bind(entry.target_guid.map(i64::from))
+            .bind(&entry.target_name).bind(&entry.message).bind(i64::from(entry.map)).bind(entry.pos_x)
             .bind(entry.pos_y).bind(entry.pos_z).execute(&*self.pool).await?;
         Ok(())
     }
 
     pub async fn message_count(&self) -> Result<i64> {
-        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM `chat_log`")
+        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM logs.chat_log")
             .fetch_one(&*self.pool)
             .await?)
     }
@@ -53,9 +53,9 @@ impl ChatLogRepository {
     pub async fn channel_summaries(&self) -> Result<Vec<ChatChannelSummaryRow>> {
         Ok(
             sqlx::query_as::<_, (String, Option<String>, i64, i64, i64)>(
-                "SELECT `channel_type`, `channel_name`, COUNT(*), COUNT(DISTINCT `sender_name`), \
-             UNIX_TIMESTAMP(MAX(`time`)) FROM `chat_log` GROUP BY `channel_type`, `channel_name` \
-             ORDER BY MAX(`id`) DESC LIMIT 150",
+                "SELECT channel_type, channel_name, COUNT(*), COUNT(DISTINCT sender_name), \
+             EXTRACT(EPOCH FROM MAX(time))::BIGINT FROM logs.chat_log GROUP BY channel_type, channel_name \
+              ORDER BY MAX(id) DESC LIMIT 150",
             )
             .fetch_all(&*self.pool)
             .await?
@@ -93,34 +93,36 @@ impl ChatLogRepository {
         }
         if before_id > 0 {
             query.push(" AND id < ");
-            query.push_bind(before_id);
+            query.push_bind(i64::try_from(before_id)?);
         }
         query.push(" ORDER BY id DESC LIMIT ");
-        query.push_bind(limit);
+        query.push_bind(i64::from(limit));
         self.fetch_messages(query).await
     }
 
     pub async fn participants(&self, pattern: &str) -> Result<Vec<ChatParticipantRow>> {
         Ok(
-            sqlx::query_as::<_, (Option<u32>, String, Option<u32>, i64, i64)>(
-                "SELECT `sender_guid`, sender_name, MAX(sender_account), COUNT(*), \
-             UNIX_TIMESTAMP(MAX(time)) FROM `chat_log` WHERE sender_name LIKE ? \
-             GROUP BY `sender_guid`, sender_name ORDER BY MAX(id) DESC LIMIT 200",
+            sqlx::query_as::<_, (Option<i64>, String, Option<i64>, i64, i64)>(
+                "SELECT sender_guid, sender_name, MAX(sender_account), COUNT(*), \
+             EXTRACT(EPOCH FROM MAX(time))::BIGINT FROM logs.chat_log WHERE sender_name LIKE $1 \
+              GROUP BY sender_guid, sender_name ORDER BY MAX(id) DESC LIMIT 200",
             )
             .bind(pattern)
             .fetch_all(&*self.pool)
             .await?
             .into_iter()
             .map(
-                |(guid, name, account, message_count, last_seen)| ChatParticipantRow {
-                    guid,
-                    name,
-                    account,
-                    message_count,
-                    last_seen,
+                |(guid, name, account, message_count, last_seen)| -> Result<ChatParticipantRow> {
+                    Ok(ChatParticipantRow {
+                        guid: guid.map(u32::try_from).transpose()?,
+                        name,
+                        account: account.map(u32::try_from).transpose()?,
+                        message_count,
+                        last_seen,
+                    })
                 },
             )
-            .collect(),
+            .collect::<Result<Vec<_>, _>>()?,
         )
     }
 
@@ -141,12 +143,12 @@ impl ChatLogRepository {
     ) -> Result<Vec<ChatLogRow>> {
         let mut query = Self::message_query();
         query.push(" WHERE sender_account = ");
-        query.push_bind(account_id);
+        query.push_bind(i64::from(account_id));
         if !character_guids.is_empty() {
             query.push(" OR target_guid IN (");
             let mut separated = query.separated(", ");
             for guid in character_guids {
-                separated.push_bind(guid);
+                separated.push_bind(i64::from(*guid));
             }
             query.push(")");
         }
@@ -166,7 +168,7 @@ impl ChatLogRepository {
         query.push(" WHERE 1=1");
         if since > 0 {
             query.push(" AND id > ");
-            query.push_bind(since);
+            query.push_bind(i64::try_from(since)?);
         }
         if let Some(channel_type) = channel_type.filter(|value| !value.is_empty()) {
             query.push(" AND channel_type = ");
@@ -188,24 +190,24 @@ impl ChatLogRepository {
         } else {
             " ORDER BY id DESC LIMIT "
         });
-        query.push_bind(limit);
+        query.push_bind(i64::from(limit));
         self.fetch_messages(query).await
     }
 
     pub async fn enqueue_outbox(&self, entry: &ChatOutboxInsert) -> Result<()> {
         let mut query = QueryBuilder::new(
-            "INSERT INTO `chat_outbox` (`sender_account`, `sender_guid`, `channel_type`",
+            "INSERT INTO logs.chat_outbox (sender_account, sender_guid, channel_type",
         );
         if entry.channel_name.is_some() {
-            query.push(", `channel_name`");
+            query.push(", channel_name");
         }
         if entry.target_name.is_some() {
-            query.push(", `target_name`");
+            query.push(", target_name");
         }
-        query.push(", `message`) VALUES (");
-        query.push_bind(entry.sender_account);
+        query.push(", message) VALUES (");
+        query.push_bind(i64::from(entry.sender_account));
         query.push(", ");
-        query.push_bind(entry.sender_guid);
+        query.push_bind(i64::from(entry.sender_guid));
         query.push(", ");
         query.push_bind(&entry.channel_type);
         if let Some(channel_name) = &entry.channel_name {
@@ -224,24 +226,27 @@ impl ChatLogRepository {
     }
 
     pub async fn pending_outbox(&self) -> Result<Vec<ChatOutboxRow>> {
-        Ok(sqlx::query_as::<_, (u64, u32, u32, String, Option<String>, String)>("SELECT `id`, `sender_account`, `sender_guid`, `channel_type`, `target_name`, `message` FROM `chat_outbox` WHERE `status` = 'pending' ORDER BY `id` ASC LIMIT 20")
-            .fetch_all(&*self.pool).await?.into_iter().map(|(id, sender_account, sender_guid, channel_type, target_name, message)| ChatOutboxRow { id, sender_account, sender_guid, channel_type, target_name, message }).collect())
+        Ok(sqlx::query_as::<_, (i64, i64, i64, String, Option<String>, String)>("SELECT id, sender_account, sender_guid, channel_type, target_name, message FROM logs.chat_outbox WHERE status = 'pending' ORDER BY id ASC LIMIT 20")
+            .fetch_all(&*self.pool).await?.into_iter().map(|(id, sender_account, sender_guid, channel_type, target_name, message)| -> Result<ChatOutboxRow> { Ok(ChatOutboxRow { id: u64::try_from(id)?, sender_account: u32::try_from(sender_account)?, sender_guid: u32::try_from(sender_guid)?, channel_type, target_name, message }) }).collect::<Result<Vec<_>>>()?)
     }
 
     pub async fn mark_outbox(&self, id: u64, status: &str, error: Option<&str>) -> Result<()> {
-        sqlx::query("UPDATE `chat_outbox` SET `status` = ?, `processed_at` = NOW(), `error` = ? WHERE `id` = ?")
-            .bind(status).bind(error).bind(id).execute(&*self.pool).await?;
+        sqlx::query("UPDATE logs.chat_outbox SET status = $1, processed_at = NOW(), error = $2 WHERE id = $3")
+            .bind(status).bind(error).bind(i64::try_from(id)?).execute(&*self.pool).await?;
         Ok(())
     }
 
-    fn message_query<'args>() -> QueryBuilder<'args, MySql> {
+    fn message_query<'args>() -> QueryBuilder<'args, Postgres> {
         let mut query = QueryBuilder::new("SELECT ");
         query.push(CHAT_LOG_COLUMNS);
-        query.push(" FROM `chat_log`");
+        query.push(" FROM logs.chat_log");
         query
     }
 
-    async fn fetch_messages(&self, mut query: QueryBuilder<'_, MySql>) -> Result<Vec<ChatLogRow>> {
+    async fn fetch_messages(
+        &self,
+        mut query: QueryBuilder<'_, Postgres>,
+    ) -> Result<Vec<ChatLogRow>> {
         Ok(query
             .build_query_as::<ChatLogTuple>()
             .fetch_all(&*self.pool)
@@ -260,22 +265,23 @@ impl ChatLogRepository {
                     target_name,
                     message,
                     map,
-                )| {
-                    ChatLogRow {
-                        id,
+                )|
+                 -> Result<ChatLogRow> {
+                    Ok(ChatLogRow {
+                        id: u64::try_from(id)?,
                         time,
                         channel_type,
                         channel_name,
-                        sender_guid,
+                        sender_guid: sender_guid.map(u32::try_from).transpose()?,
                         sender_name,
-                        sender_account,
-                        target_guid,
+                        sender_account: sender_account.map(u32::try_from).transpose()?,
+                        target_guid: target_guid.map(u32::try_from).transpose()?,
                         target_name,
                         message,
-                        map,
-                    }
+                        map: map.map(u32::try_from).transpose()?,
+                    })
                 },
             )
-            .collect())
+            .collect::<Result<Vec<_>, _>>()?)
     }
 }

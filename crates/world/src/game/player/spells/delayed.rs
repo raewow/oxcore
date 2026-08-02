@@ -831,7 +831,7 @@ mod tests {
             world: pool.clone(),
             character: pool.clone(),
             auth: pool.clone(),
-            logs: pool,
+            logs: oxcore_db::database::lazy_logs_pool(),
         });
         World::new(
             databases,
