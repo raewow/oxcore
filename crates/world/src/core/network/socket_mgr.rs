@@ -13,7 +13,7 @@ use tracing::{error, info, warn};
 use crate::core::network::socket::WorldSocket;
 use crate::core::session::SessionManager;
 use crate::World;
-use oxcore_shared::database::Databases;
+use oxcore_db::database::Databases;
 
 /// Manages the world server TCP listener and connections
 pub struct WorldSocketMgr {

@@ -152,7 +152,7 @@ mod tests {
     use crate::config::Config;
     use crate::game::creature::death::{process_corpse_decay, process_deaths, DeathState};
     use crate::game::creature::{CreatureSpawnData, CreatureTemplate};
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
 

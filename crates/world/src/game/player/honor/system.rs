@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use crate::World;
-use oxcore_shared::database::characters::models::honor::HonorCPRow;
-use oxcore_shared::database::characters::repositories::HonorRepository;
+use oxcore_db::database::characters::models::honor::HonorCPRow;
+use oxcore_db::database::characters::repositories::HonorRepository;
 use oxcore_shared::protocol::ObjectGuid;
 
 /// Stateless honor orchestrator. All per-player state lives on `Player`.

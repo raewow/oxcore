@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::shared::database::auth::repositories::RealmRepository;
+use oxcore_db::database::auth::repositories::RealmRepository;
 
 /// Information about a client build
 #[derive(Debug, Clone)]

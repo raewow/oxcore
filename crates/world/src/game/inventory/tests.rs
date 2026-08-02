@@ -647,7 +647,7 @@ mod integration_tests {
     use crate::game::broadcast_mgr::MockBroadcastManagerTrait;
     use crate::game::ItemManager;
     use mockall::predicate::*;
-    use oxcore_shared::database::characters::repositories::inventory_repository_trait::MockInventoryRepositoryTrait;
+    use oxcore_db::database::characters::repositories::inventory_repository_trait::MockInventoryRepositoryTrait;
     use oxcore_shared::protocol::Opcode;
     use oxcore_shared::protocol::WorldPacket;
     use std::sync::Arc;

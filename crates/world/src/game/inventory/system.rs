@@ -13,8 +13,8 @@ use std::time::Duration;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::ItemManager;
-use oxcore_shared::database::characters::models::item::ItemInstanceRow;
-use oxcore_shared::database::characters::repositories::inventory_repository_trait::{
+use oxcore_db::database::characters::models::item::ItemInstanceRow;
+use oxcore_db::database::characters::repositories::inventory_repository_trait::{
     InventoryRepositoryTrait, InventorySlotRow,
 };
 use oxcore_shared::game::inventory::{
@@ -3195,7 +3195,7 @@ impl InventorySystem {
         let mut final_counts: HashMap<u32, u32> = HashMap::new(); // item_guid -> count
         let mut final_durations: HashMap<u32, u32> = HashMap::new(); // item_guid -> duration
         let mut deletes: Vec<u32> = Vec::new(); // item_guids to delete
-        let mut creates: Vec<(oxcore_shared::database::characters::models::item::ItemInstanceRow, oxcore_shared::database::characters::repositories::inventory_repository_trait::InventorySlotRow)> = Vec::new();
+        let mut creates: Vec<(oxcore_db::database::characters::models::item::ItemInstanceRow, oxcore_db::database::characters::repositories::inventory_repository_trait::InventorySlotRow)> = Vec::new();
         let mut moves: HashMap<u32, (u32, u8, u8)> = HashMap::new(); // item_guid -> (player_guid, bag, slot)
         let mut swaps: Vec<(u32, u32, u8, u8, Option<u32>, u8, u8)> = Vec::new();
 

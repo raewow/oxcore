@@ -4513,7 +4513,7 @@ mod tests {
 
     fn launch_test_world() -> World {
         use crate::config::Config;
-        use oxcore_shared::database::Databases;
+        use oxcore_db::database::Databases;
         use std::path::PathBuf;
         let databases = Arc::new(Databases {
             world: lazy_pool(),

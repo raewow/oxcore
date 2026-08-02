@@ -6,8 +6,8 @@ use crate::game::broadcast_mgr::BroadcastManager;
 use crate::game::player::PlayerManager;
 use mockall::mock;
 use mockall::predicate::*;
-use oxcore_shared::database::characters::models::social::CharacterSocialRow;
-use oxcore_shared::database::characters::repositories::SocialRepositoryTrait;
+use oxcore_db::database::characters::models::social::CharacterSocialRow;
+use oxcore_db::database::characters::repositories::SocialRepositoryTrait;
 use oxcore_shared::game::social::{
     FriendInfo, FriendStatus, FriendsResult, SocialFlag, SOCIALMGR_FRIEND_LIMIT,
     SOCIALMGR_IGNORE_LIMIT,

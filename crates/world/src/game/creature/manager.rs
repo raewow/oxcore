@@ -13,7 +13,7 @@ use super::{Creature, CreatureSpawnData};
 use crate::core::common::compress_update_packet_if_needed;
 use crate::game::common::spawn_index::{build_grid_index, SpawnGridIndex};
 use crate::map::grid_coords::world_to_grid;
-use oxcore_shared::database::world::repositories::CreatureRepository;
+use oxcore_db::database::world::repositories::CreatureRepository;
 use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Dynamic flags for a real corpse. The client identifies real death from zero

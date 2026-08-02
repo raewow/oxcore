@@ -350,7 +350,7 @@ mod tests {
     use crate::game::creature::creature::Creature;
     use crate::game::creature::manager::CreatureTemplate;
     use crate::game::player::player::Player;
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use oxcore_shared::protocol::Position;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;

@@ -1,7 +1,7 @@
 // Instance manager - handles all instance operations
 
 use anyhow::{Context, Result};
-use oxcore_shared::database::Databases;
+use oxcore_db::database::Databases;
 use oxcore_shared::game::instance::{
     InstanceBinding, InstanceResetMethod, InstanceResetWarningType, InstanceState,
 };

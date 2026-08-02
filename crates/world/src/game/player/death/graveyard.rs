@@ -6,7 +6,7 @@
 
 use crate::dbc::DbcManager;
 use anyhow::Result;
-use oxcore_shared::database::world::repositories::GraveyardRepository;
+use oxcore_db::database::world::repositories::GraveyardRepository;
 use oxcore_shared::protocol::Position;
 use sqlx::MySqlPool;
 use std::collections::HashMap;

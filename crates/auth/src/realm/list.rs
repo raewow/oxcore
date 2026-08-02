@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
-use crate::shared::database::auth::repositories::RealmRepository;
+use oxcore_db::database::auth::repositories::RealmRepository;
 
 // Realm flag constants
 const REALM_FLAG_OFFLINE: u8 = 0x02;

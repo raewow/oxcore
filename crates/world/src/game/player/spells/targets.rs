@@ -2314,7 +2314,7 @@ mod tests {
     use crate::game::player::spells::state::TARGET_FLAG_DEST_LOCATION;
     use crate::game::spell::manager::SpellTargetEntry;
     use crate::World;
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
     use std::sync::Arc;

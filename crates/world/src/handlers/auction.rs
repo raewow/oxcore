@@ -1473,11 +1473,11 @@ mod tests {
     use crate::game::player::auras::aura::{Aura, AuraFlags};
     use crate::game::player::player::Player;
     use crate::game::player::PlayerManager;
-    use oxcore_shared::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
-    use oxcore_shared::database::characters::repositories::character_repository::CharacterRepository;
-    use oxcore_shared::database::characters::repositories::item_repository::ItemRepository;
-    use oxcore_shared::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
-    use oxcore_shared::database::characters::repositories::mail_repository::MailRepository;
+    use oxcore_db::database::characters::repositories::auction_repository_trait::MockAuctionRepositoryTrait;
+    use oxcore_db::database::characters::repositories::character_repository::CharacterRepository;
+    use oxcore_db::database::characters::repositories::item_repository::ItemRepository;
+    use oxcore_db::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
+    use oxcore_db::database::characters::repositories::mail_repository::MailRepository;
     use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
     use parking_lot::RwLock;
     use sqlx::mysql::MySqlPoolOptions;
@@ -2047,7 +2047,7 @@ mod tests {
                 .connect_lazy("mysql://test:test@localhost/test")
                 .expect("lazy pool"),
         );
-        let databases = Arc::new(oxcore_shared::database::Databases {
+        let databases = Arc::new(oxcore_db::database::Databases {
             world: (*pool).clone(),
             character: (*pool).clone(),
             auth: (*pool).clone(),

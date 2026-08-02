@@ -333,7 +333,7 @@ mod tests {
 
     fn build_dummy_world() -> World {
         use crate::config::Config;
-        use oxcore_shared::database::Databases;
+        use oxcore_db::database::Databases;
         use sqlx::mysql::MySqlPoolOptions;
         use std::path::PathBuf;
         use std::sync::Arc;

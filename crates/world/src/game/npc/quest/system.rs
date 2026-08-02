@@ -19,8 +19,8 @@ use crate::game::player::experience::ExperienceSystem;
 use crate::game::player::player::QuestShareInfo;
 use crate::game::player::PlayerManager;
 use crate::World;
-use oxcore_shared::database::characters::models::quest::{QuestStatusRewardedRow, QuestStatusRow};
-use oxcore_shared::database::characters::repositories::QuestRepositoryTrait;
+use oxcore_db::database::characters::models::quest::{QuestStatusRewardedRow, QuestStatusRow};
+use oxcore_db::database::characters::repositories::QuestRepositoryTrait;
 use oxcore_shared::messages::gossip::SmsgGossipComplete;
 use oxcore_shared::messages::quest::{
     MsgQuestPushResult, QuestListItem, RequestItemInfo, RewardItemInfo, SmsgQuestConfirmAccept,
@@ -2974,7 +2974,7 @@ impl QuestSystem {
     ///
     /// Called during logout to persist quest progress.
     pub async fn save_player_quests(&self, player_guid: ObjectGuid) -> Result<()> {
-        use oxcore_shared::database::characters::models::quest::{
+        use oxcore_db::database::characters::models::quest::{
             QuestStatusRewardedRow, QuestStatusRow,
         };
 
@@ -3151,7 +3151,7 @@ mod tests {
     use crate::game::creature::{Creature, CreatureTemplate};
     use crate::game::gameobject::{GameObject, GameObjectTemplate};
     use crate::game::player::Player;
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use oxcore_shared::protocol::{ObjectGuid, Position};
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;

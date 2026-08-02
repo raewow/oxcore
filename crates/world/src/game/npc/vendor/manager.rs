@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::info;
 
 use super::types::{ItemExtendedCost, VendorItem, VendorItemCount};
-use oxcore_shared::database::world::repositories::VendorRepository;
+use oxcore_db::database::world::repositories::VendorRepository;
 use oxcore_shared::protocol::ObjectGuid;
 
 /// Manages vendor data (state storage + database loading)

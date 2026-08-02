@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tracing::info;
 
 use crate::config::Config;
-use crate::shared::database::auth::repositories::*;
+use oxcore_db::database::auth::repositories::*;
 
 #[derive(Clone)]
 pub struct Database {

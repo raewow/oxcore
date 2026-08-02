@@ -16,7 +16,7 @@ use crate::game::common::player_constants::{get_faction_for_race, get_player_dis
 use crate::game::common::unit_flags as unit_flags_mod;
 use crate::game::common::update_fields::*;
 use crate::World;
-use oxcore_shared::database::CharacterRepository;
+use oxcore_db::database::CharacterRepository;
 use oxcore_shared::messages::update::{
     CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
 };
@@ -707,8 +707,8 @@ impl PlayerManager {
         player_guid: ObjectGuid,
         character_db: &sqlx::MySqlPool,
     ) -> anyhow::Result<()> {
-        use oxcore_shared::database::characters::models::reputation::ReputationRow;
-        use oxcore_shared::database::characters::repositories::ReputationRepository;
+        use oxcore_db::database::characters::models::reputation::ReputationRow;
+        use oxcore_db::database::characters::repositories::ReputationRepository;
 
         let factions = self.collect_reputation_for_save(player_guid);
 
@@ -766,7 +766,7 @@ impl PlayerManager {
         account_id: u32,
         character_db: &sqlx::MySqlPool,
     ) -> anyhow::Result<()> {
-        use oxcore_shared::database::CharacterRepository;
+        use oxcore_db::database::CharacterRepository;
         use oxcore_shared::game::account_data::AccountDataType;
 
         let entries: Vec<(u32, u32, Vec<u8>)> = {

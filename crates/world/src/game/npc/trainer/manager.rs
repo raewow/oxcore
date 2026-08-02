@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tracing::info;
 
 use super::types::TrainerSpell;
-use oxcore_shared::database::world::repositories::TrainerRepository;
+use oxcore_db::database::world::repositories::TrainerRepository;
 
 /// Manages trainer spell data loaded from the database
 pub struct TrainerManager {

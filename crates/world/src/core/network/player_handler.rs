@@ -9,7 +9,7 @@ use tracing::{debug, error, warn};
 use crate::core::session::WorldSession;
 use crate::handlers::dispatch_packet;
 use crate::world::World;
-use oxcore_shared::database::Databases;
+use oxcore_db::database::Databases;
 use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
 
 /// Per-player packet handler with ordering guarantees

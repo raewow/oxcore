@@ -10,7 +10,7 @@ use tracing::{debug, info, warn};
 
 use crate::core::session::{SessionManager, WorldSession};
 use crate::World;
-use oxcore_shared::database::{AccountRepository, Databases};
+use oxcore_db::database::{AccountRepository, Databases};
 use oxcore_shared::messages::login::AuthErrorCode;
 use oxcore_shared::protocol::WorldPacket;
 

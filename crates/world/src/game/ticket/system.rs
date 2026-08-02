@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::game::player::PlayerManager;
-use oxcore_shared::database::characters::repositories::TicketRepository;
+use oxcore_db::database::characters::repositories::TicketRepository;
 use oxcore_shared::game::ticket::{
     GmTicketEscalationStatus, GmTicketResponse, GmTicketStatus, GmTicketSystemStatus, GmTicketType,
 };
@@ -65,7 +65,7 @@ impl TicketSystem {
 
     pub async fn shutdown(&self) -> Result<()> {
         // Save all tickets to database
-        use oxcore_shared::database::characters::models::ticket::GmTicketRow;
+        use oxcore_db::database::characters::models::ticket::GmTicketRow;
         for entry in self.tickets.iter() {
             let ticket = entry.value();
             let row = GmTicketRow {
@@ -103,7 +103,7 @@ impl TicketSystem {
     pub async fn on_player_logout(&self, guid: ObjectGuid) -> Result<()> {
         // Save ticket if exists and remove from cache
         if let Some((_guid, ticket)) = self.tickets.remove(&guid) {
-            use oxcore_shared::database::characters::models::ticket::GmTicketRow;
+            use oxcore_db::database::characters::models::ticket::GmTicketRow;
             let row = GmTicketRow {
                 ticket_id: ticket.ticket_id,
                 guid: ticket.player_guid.counter(),
@@ -169,7 +169,7 @@ impl TicketSystem {
         };
 
         // Save to database (INSERT)
-        use oxcore_shared::database::characters::models::ticket::GmTicketRow;
+        use oxcore_db::database::characters::models::ticket::GmTicketRow;
         let row = GmTicketRow {
             ticket_id,
             guid: player_guid.counter(),
@@ -211,7 +211,7 @@ impl TicketSystem {
             entry.last_modified_time = now;
 
             // Update database
-            use oxcore_shared::database::characters::models::ticket::GmTicketRow;
+            use oxcore_db::database::characters::models::ticket::GmTicketRow;
             let row = GmTicketRow {
                 ticket_id: entry.ticket_id,
                 guid: entry.player_guid.counter(),

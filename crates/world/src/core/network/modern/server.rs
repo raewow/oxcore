@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use oxcore_shared::database::AccountRepository;
+use oxcore_db::database::AccountRepository;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};

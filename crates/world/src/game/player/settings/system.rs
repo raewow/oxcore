@@ -167,7 +167,7 @@ impl SettingsSystem {
         client_time: Option<u32>,
         world: &World,
     ) -> Result<()> {
-        use oxcore_shared::database::CharacterRepository;
+        use oxcore_db::database::CharacterRepository;
 
         let ad_type = match AccountDataType::from_u32(data_type) {
             Some(t) => t,

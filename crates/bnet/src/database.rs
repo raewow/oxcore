@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use oxcore_shared::database::auth::repositories::{AccountRepository, RealmRepository};
+use oxcore_db::database::auth::repositories::{AccountRepository, RealmRepository};
 use sqlx::MySqlPool;
 
 #[derive(Clone)]

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::player::PlayerManager;
 use crate::game::ItemManager;
-use oxcore_shared::database::characters::repositories::GuildRepositoryTrait;
+use oxcore_db::database::characters::repositories::GuildRepositoryTrait;
 use oxcore_shared::messages::guild::{
     smsg_guild_event_from_params, smsg_guild_query_response_from_cached,
     smsg_guild_roster_from_cached, SmsgGuildCommandResult, SmsgGuildDecline, SmsgGuildEvent,
@@ -204,7 +204,7 @@ impl GuildSystem {
             .insert(leader_guid, leader_member.clone());
 
         // 9. Convert to database types
-        use oxcore_shared::database::characters::models::guild::{
+        use oxcore_db::database::characters::models::guild::{
             GuildBankTabRow, GuildMemberRow, GuildRankRow, GuildRow,
         };
 
@@ -351,7 +351,7 @@ impl GuildSystem {
             .ok_or_else(|| anyhow!("Guild not found"))?;
 
         // Add to database (rank 5 is default lowest rank)
-        let member_row = oxcore_shared::database::characters::models::guild::GuildMemberRow {
+        let member_row = oxcore_db::database::characters::models::guild::GuildMemberRow {
             guild_id,
             guid: player_guid.counter(),
             rank: 5, // Default rank (lowest)
@@ -956,7 +956,7 @@ impl GuildSystem {
         }
 
         // Add rank to database
-        use oxcore_shared::database::characters::models::guild::GuildRankRow;
+        use oxcore_db::database::characters::models::guild::GuildRankRow;
         let rank_row = GuildRankRow {
             guild_id,
             id: current_rank_count as u32,
@@ -1201,7 +1201,7 @@ impl GuildSystem {
         }
 
         // Add to database
-        let member_row = oxcore_shared::database::characters::models::guild::GuildMemberRow {
+        let member_row = oxcore_db::database::characters::models::guild::GuildMemberRow {
             guild_id,
             guid: player_guid.counter(),
             rank: rank_id,

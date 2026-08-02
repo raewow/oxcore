@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::game::npc::quest::{
     QuestFlags, QuestManager, QuestMethod, QuestSpecialFlags, QuestTemplate, QuestType,
 };
-use oxcore_shared::database::world::models::quest::*;
+use oxcore_db::database::world::models::quest::*;
 
 /// Repository for loading quest data from world database
 pub struct QuestTemplateRepository;

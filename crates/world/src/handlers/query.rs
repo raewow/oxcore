@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::core::session::WorldSession;
 use crate::game::items::manager::ItemTemplate;
 use crate::World;
-use oxcore_shared::database::{CharacterRepository, Databases};
+use oxcore_db::database::{CharacterRepository, Databases};
 use oxcore_shared::messages::query::{GameObjectTemplateInfo, SmsgGameObjectQueryResponse};
 use oxcore_shared::protocol::bitbuf::BitReader;
 use oxcore_shared::protocol::{Protocol, WorldPacket};

@@ -276,8 +276,8 @@ pub enum PendingInventoryOp {
         item_guid: u32,
     },
     CreateItem {
-        item: oxcore_shared::database::characters::models::item::ItemInstanceRow,
-        slot: oxcore_shared::database::characters::repositories::inventory_repository_trait::InventorySlotRow,
+        item: oxcore_db::database::characters::models::item::ItemInstanceRow,
+        slot: oxcore_db::database::characters::repositories::inventory_repository_trait::InventorySlotRow,
     },
     UpdateMoney {
         player_guid: u32,

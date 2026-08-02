@@ -827,7 +827,7 @@ mod tests {
         let pool = sqlx::mysql::MySqlPoolOptions::new()
             .connect_lazy("mysql://test:test@localhost/test")
             .expect("lazy pool should be constructible");
-        let databases = Arc::new(oxcore_shared::database::Databases {
+        let databases = Arc::new(oxcore_db::database::Databases {
             world: pool.clone(),
             character: pool.clone(),
             auth: pool.clone(),

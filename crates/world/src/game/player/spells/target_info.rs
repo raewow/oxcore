@@ -1274,7 +1274,7 @@ mod tests {
     use crate::config::Config;
     use crate::game::player::auras::{Aura, AuraFlags};
     use crate::game::player::Player;
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
     use std::sync::Arc;

@@ -173,10 +173,10 @@ mod tests {
     use crate::game::npc::quest::types::QuestTemplate;
     use crate::game::player::broadcaster::PlayerBroadcaster;
     use crate::game::player::Player;
-    use oxcore_shared::database::characters::repositories::quest_repository::{
+    use oxcore_db::database::characters::repositories::quest_repository::{
         MockQuestRepositoryTrait, QuestRepositoryTrait,
     };
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use oxcore_shared::protocol::bitbuf::BitWriter;
     use oxcore_shared::protocol::{HighGuid, Opcode, Position};
     use sqlx::mysql::MySqlPoolOptions;

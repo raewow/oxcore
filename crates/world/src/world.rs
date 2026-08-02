@@ -24,12 +24,12 @@ use crate::map::manager::MapManager;
 use crate::map::pathfinding::vmap::{VMapConfig, VMapManager};
 use crate::map::pathfinding::{MMapManager, PathFinder};
 use crate::map::terrain::TerrainManager;
-use oxcore_shared::console::{CommandRegistry, ConsoleCommand};
-use oxcore_shared::database::characters::repositories::{
+use oxcore_db::database::characters::repositories::{
     AuctionRepository, AuctionRepositoryTrait, CharacterRepository, ItemRepository,
     ItemRepositoryTrait, MailRepository, MailRepositoryTrait,
 };
-use oxcore_shared::database::Databases;
+use oxcore_db::database::Databases;
+use oxcore_shared::console::{CommandRegistry, ConsoleCommand};
 use oxcore_shared::protocol::ObjectGuid;
 use parking_lot::RwLock;
 use tokio::sync::RwLock as TokioRwLock;

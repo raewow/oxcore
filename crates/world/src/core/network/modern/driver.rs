@@ -68,7 +68,7 @@ pub trait SessionKeyProvider {
 /// account repository. The realm-join ticket is the account's game-account name, which is the
 /// `username` the bnet realm-join stored the session key under.
 pub struct AccountSessionKeys<'a> {
-    pub accounts: &'a oxcore_shared::database::AccountRepository,
+    pub accounts: &'a oxcore_db::database::AccountRepository,
 }
 
 impl SessionKeyProvider for AccountSessionKeys<'_> {

@@ -22,7 +22,7 @@ use crate::core::network::protocol::{
 use crate::core::session::{SessionManager, WorldSession};
 use crate::handlers::auth as auth_handler;
 use crate::World;
-use oxcore_shared::database::Databases;
+use oxcore_db::database::Databases;
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 

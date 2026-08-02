@@ -161,7 +161,7 @@ fn snapshot_first_player(zone_id: u32, world: &World) -> ObjectGuid {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use oxcore_shared::protocol::HighGuid;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;

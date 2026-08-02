@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::info;
 
 use super::types::{BroadcastText, GossipMenu, GossipMenuItem, NpcText, NpcTextOption};
-use oxcore_shared::database::world::repositories::GossipRepository;
+use oxcore_db::database::world::repositories::GossipRepository;
 
 /// Manages gossip menu data (state storage + database loading)
 pub struct GossipManager {

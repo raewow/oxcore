@@ -627,7 +627,7 @@ mod integration_tests {
     use crate::game::items::ItemManager;
     use crate::game::player::PlayerManager;
     use mockall::predicate::*;
-    use oxcore_shared::database::characters::guild_repository::MockGuildRepositoryTrait;
+    use oxcore_db::database::characters::guild_repository::MockGuildRepositoryTrait;
     use oxcore_shared::protocol::Opcode;
     use oxcore_shared::protocol::WorldPacket;
     use std::sync::Arc;

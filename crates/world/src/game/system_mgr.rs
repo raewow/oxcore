@@ -40,8 +40,8 @@ use crate::game::visibility::VisibilitySystem;
 use crate::game::weather::{WeatherManager, WeatherSystem};
 use crate::game::{BroadcastManager, ItemManager};
 use crate::World;
-use oxcore_shared::database::characters::repositories::InventoryRepository;
-use oxcore_shared::database::characters::repositories::{
+use oxcore_db::database::characters::repositories::InventoryRepository;
+use oxcore_db::database::characters::repositories::{
     GroupRepository, GuildRepository, QuestRepository, SocialRepository, TicketRepository,
 };
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -210,7 +210,7 @@ impl SystemManager {
         // Create quest manager and system
         let quest_manager = Arc::new(QuestManager::new(world_pool.clone()));
         let quest_repo: Arc<
-            dyn oxcore_shared::database::characters::repositories::QuestRepositoryTrait,
+            dyn oxcore_db::database::characters::repositories::QuestRepositoryTrait,
         > = Arc::new(QuestRepository::new(character_pool.clone()));
         let quest = Arc::new(QuestSystem::new(
             quest_manager.clone(),

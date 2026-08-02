@@ -62,10 +62,8 @@ pub fn is_player_in_battleground(world: &World, player_guid: ObjectGuid) -> bool
 const MOVEMENT_FLAG_WATERWALKING: u32 = 0x10000000;
 
 /// Bridge: Corpse struct → CorpseRow DB model.
-fn corpse_to_row(
-    corpse: &Corpse,
-) -> oxcore_shared::database::characters::models::corpse::CorpseRow {
-    use oxcore_shared::database::characters::models::corpse::CorpseRow;
+fn corpse_to_row(corpse: &Corpse) -> oxcore_db::database::characters::models::corpse::CorpseRow {
+    use oxcore_db::database::characters::models::corpse::CorpseRow;
     CorpseRow {
         guid: corpse.guid.counter(),
         player_guid: corpse.owner_guid.counter(),
@@ -632,7 +630,7 @@ impl DeathSystem {
                     let pool = Arc::new(world.databases.character.clone());
                     let counter = guid.counter();
                     tokio::spawn(async move {
-                        use oxcore_shared::database::characters::repositories::CorpseRepository;
+                        use oxcore_db::database::characters::repositories::CorpseRepository;
                         let repo = CorpseRepository::new(pool);
                         // Load + rewrite with corpse_type=0. We do it via save()
                         // with ON DUPLICATE KEY UPDATE so this is a single
@@ -1241,7 +1239,7 @@ impl DeathSystem {
         let pool = Arc::new(world.databases.character.clone());
         let row = corpse_to_row(&corpse);
         tokio::spawn(async move {
-            use oxcore_shared::database::characters::repositories::CorpseRepository;
+            use oxcore_db::database::characters::repositories::CorpseRepository;
             let repo = CorpseRepository::new(pool);
             if let Err(e) = repo.save(&row).await {
                 warn!("Failed to persist corpse {:?}: {}", row.guid, e);
@@ -1280,7 +1278,7 @@ impl DeathSystem {
         let pool = Arc::new(world.databases.character.clone());
         let counter = corpse_guid.counter();
         tokio::spawn(async move {
-            use oxcore_shared::database::characters::repositories::CorpseRepository;
+            use oxcore_db::database::characters::repositories::CorpseRepository;
             let repo = CorpseRepository::new(pool);
             if let Err(e) = repo.delete(counter).await {
                 warn!("Failed to delete persisted corpse {}: {}", counter, e);
@@ -1295,7 +1293,7 @@ impl DeathSystem {
     /// loaded from disk is a placeholder body — enough for visibility + reclaim.
     pub async fn load_corpses(&self, world: &World) -> Result<()> {
         use crate::game::player::death::corpse::{Corpse, CorpseType};
-        use oxcore_shared::database::characters::repositories::CorpseRepository;
+        use oxcore_db::database::characters::repositories::CorpseRepository;
 
         let pool = Arc::new(world.databases.character.clone());
         let repo = CorpseRepository::new(pool);

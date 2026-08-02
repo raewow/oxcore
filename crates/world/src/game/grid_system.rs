@@ -692,7 +692,7 @@ mod tests {
     use crate::config::Config;
     use crate::game::creature::{CreatureSpawnData, CreatureTemplate};
     use crate::map::grid_coords::{world_to_grid, GRID_SIZE, MAP_HALF_SIZE};
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
 

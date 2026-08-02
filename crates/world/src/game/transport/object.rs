@@ -296,7 +296,7 @@ mod tests {
         use crate::core::common::movement::MoveFlags;
         use crate::game::creature::{Creature, CreatureTemplate};
         use crate::World;
-        use oxcore_shared::database::Databases;
+        use oxcore_db::database::Databases;
         use oxcore_shared::protocol::{ObjectGuid, Position};
         use sqlx::mysql::MySqlPoolOptions;
         use std::path::PathBuf;

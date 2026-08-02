@@ -465,7 +465,7 @@ mod tests {
     use crate::config::Config;
     use crate::game::player::player::Player;
     use crate::World;
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use oxcore_shared::protocol::ObjectGuid;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;

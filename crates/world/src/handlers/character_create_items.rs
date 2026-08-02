@@ -6,7 +6,7 @@
 
 use crate::game::items::manager::ItemManager;
 use anyhow::{Context, Result};
-use oxcore_shared::database::world::repositories::player_create_info_repository::{
+use oxcore_db::database::world::repositories::player_create_info_repository::{
     PlayerCreateInfoActionRow, PlayerCreateInfoItemRow,
 };
 use sqlx::MySqlPool;

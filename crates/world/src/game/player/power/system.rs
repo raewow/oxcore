@@ -447,7 +447,7 @@ mod tests {
     use crate::game::broadcast_mgr::MockBroadcastManagerTrait;
     use crate::game::player::auras::{Aura, AuraFlags};
     use crate::game::player::power::regen::MAX_RAGE;
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
 

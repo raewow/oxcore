@@ -7,9 +7,10 @@ description = "World/game server library for oxcore (managers, systems, handlers
 
 [features]
 default = []
-testing = ["oxcore-shared/testing"]
+testing = ["oxcore-db/testing", "oxcore-shared/testing"]
 
 [dependencies]
+oxcore-db.workspace = true
 oxcore-shared.workspace = true
 oxcore-dbc.workspace = true
 oxcore-map.workspace = true

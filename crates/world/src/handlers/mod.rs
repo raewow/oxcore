@@ -43,7 +43,7 @@ use tracing::{debug, info, warn};
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::{SessionState, WorldSession};
 use crate::World;
-use oxcore_shared::database::Databases;
+use oxcore_db::database::Databases;
 use oxcore_shared::messages::SmsgPong;
 use oxcore_shared::protocol::{Opcode, WorldPacket};
 

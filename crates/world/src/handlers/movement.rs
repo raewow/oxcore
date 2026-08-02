@@ -1175,7 +1175,7 @@ mod tests {
     use crate::config::Config;
     use crate::game::creature::movement::MoveType;
     use crate::game::player::movement::MovementControllerSender;
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use oxcore_shared::protocol::{HighGuid, ObjectGuid};
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;

@@ -9,6 +9,7 @@ name = "auth"
 path = "src/main.rs"
 
 [dependencies]
+oxcore-db.workspace = true
 oxcore-shared.workspace = true
 oxcore-tui.workspace = true
 

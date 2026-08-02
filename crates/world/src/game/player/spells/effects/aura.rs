@@ -402,7 +402,7 @@ pub async fn handle_add_target_trigger_auras(
 mod tests {
     use super::*;
     use crate::config::Config;
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
     use std::sync::Arc;

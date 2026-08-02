@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::player::PlayerManager;
-use oxcore_shared::database::characters::models::group::{GroupMemberRow, GroupRow};
-use oxcore_shared::database::characters::repositories::GroupRepositoryTrait;
+use oxcore_db::database::characters::models::group::{GroupMemberRow, GroupRow};
+use oxcore_db::database::characters::repositories::GroupRepositoryTrait;
 use oxcore_shared::protocol::ObjectGuid;
 
 use oxcore_shared::game::group::{

@@ -22,8 +22,8 @@ use crate::game::common::update_fields::{
 use crate::game::player::reputation::FactionEntry;
 use crate::game::player::{Player, PlayerBroadcaster};
 use crate::World;
-use oxcore_shared::database::characters::CharacterDeleteMode;
-use oxcore_shared::database::{CharacterRepository, Databases, ReputationRepository};
+use oxcore_db::database::characters::CharacterDeleteMode;
+use oxcore_db::database::{CharacterRepository, Databases, ReputationRepository};
 use oxcore_shared::messages::character::{
     SmsgLogoutCancelAck, SmsgLogoutComplete, SmsgLogoutResponse,
 };
@@ -416,7 +416,7 @@ pub async fn handle_player_login_with_guid(
             });
 
             // Link any persisted corpse (best-effort; a missing row is non-fatal).
-            use oxcore_shared::database::characters::repositories::CorpseRepository;
+            use oxcore_db::database::characters::repositories::CorpseRepository;
             let char_db = Arc::new(databases.character.clone());
             let corpse_repo = CorpseRepository::new(char_db);
             if let Ok(Some(row)) = corpse_repo.find_for_player(guid.counter()).await {
@@ -549,7 +549,7 @@ pub async fn handle_player_login_with_guid(
             },
             // Quest statuses from DB
             async {
-                use oxcore_shared::database::characters::repositories::{
+                use oxcore_db::database::characters::repositories::{
                     QuestRepository, QuestRepositoryTrait,
                 };
                 let quest_repo = QuestRepository::new(char_db.clone());
@@ -557,7 +557,7 @@ pub async fn handle_player_login_with_guid(
             },
             // Rewarded quests from DB
             async {
-                use oxcore_shared::database::characters::repositories::{
+                use oxcore_db::database::characters::repositories::{
                     QuestRepository, QuestRepositoryTrait,
                 };
                 let quest_repo = QuestRepository::new(char_db.clone());
@@ -708,7 +708,7 @@ pub async fn handle_player_login_with_guid(
         );
     } else {
         // No saved action buttons - load defaults from playercreateinfo_action
-        use oxcore_shared::database::world::repositories::PlayerCreateInfoRepository;
+        use oxcore_db::database::world::repositories::PlayerCreateInfoRepository;
         let create_repo = PlayerCreateInfoRepository::new(Arc::new(databases.world.clone()));
         match create_repo
             .get_create_info_actions(character.race, character.class)
@@ -751,7 +751,7 @@ pub async fn handle_player_login_with_guid(
 
     // 7.07 Load spells - default race/class spells + saved spells from database (in parallel)
     {
-        use oxcore_shared::database::world::repositories::PlayerCreateInfoRepository;
+        use oxcore_db::database::world::repositories::PlayerCreateInfoRepository;
 
         const ATTACK_SPELL_ID: u32 = 6603;
 
@@ -2106,7 +2106,7 @@ pub async fn handle_char_create(
     use crate::game::player::name_validation::{
         normalize_character_name, validate_character_name, NameValidationResult,
     };
-    use oxcore_shared::database::world::repositories::PlayerCreateInfoRepository;
+    use oxcore_db::database::world::repositories::PlayerCreateInfoRepository;
     use oxcore_shared::game::chat::Team;
     use oxcore_shared::messages::character::SmsgCharCreate;
 

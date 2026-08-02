@@ -13,12 +13,12 @@ use crate::game::auction::parsing::{parse_enchantments, parse_spell_charges};
 use crate::game::items::manager::ItemTemplate;
 use crate::game::items::Item;
 use crate::game::ItemManager;
-use oxcore_shared::database::characters::models::auction::{AuctionItemLoadRow, AuctionRow};
-use oxcore_shared::database::characters::models::mail::MailRow;
-use oxcore_shared::database::characters::repositories::auction_repository_trait::AuctionRepositoryTrait;
-use oxcore_shared::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
-use oxcore_shared::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
-use oxcore_shared::database::characters::repositories::CharacterRepository;
+use oxcore_db::database::characters::models::auction::{AuctionItemLoadRow, AuctionRow};
+use oxcore_db::database::characters::models::mail::MailRow;
+use oxcore_db::database::characters::repositories::auction_repository_trait::AuctionRepositoryTrait;
+use oxcore_db::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
+use oxcore_db::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
+use oxcore_db::database::characters::repositories::CharacterRepository;
 use oxcore_shared::game::auction::AuctionEntry;
 use oxcore_shared::game::chat::Team;
 use oxcore_shared::game::mail::{MailCheckMask, MailMessageType, MailStationery};
@@ -654,7 +654,7 @@ impl AuctionHouseManager {
     }
 
     pub async fn save_auction_to_db(&self, auction: &AuctionEntry) -> Result<()> {
-        use oxcore_shared::database::characters::models::auction::AuctionRow;
+        use oxcore_db::database::characters::models::auction::AuctionRow;
         let row = AuctionRow {
             id: auction.id,
             house_id: auction.house_id,

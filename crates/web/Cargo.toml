@@ -27,6 +27,7 @@ ssr = [
     "dep:base64",
     "dep:hex",
     "dep:leptos_axum",
+    "dep:oxcore-db",
     "dep:oxcore-shared",
     "dep:rand",
     "dep:sha2",
@@ -53,6 +54,7 @@ leptos = { version = "0.8", default-features = false }
 leptos_axum = { version = "0.8", optional = true }
 leptos_meta = { version = "0.8", default-features = false }
 leptos_router = { version = "0.8", default-features = false }
+oxcore-db = { workspace = true, optional = true }
 oxcore-shared = { workspace = true, optional = true }
 rand = { version = "0.8", optional = true }
 serde = { version = "1.0", features = ["derive"] }

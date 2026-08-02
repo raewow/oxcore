@@ -1570,7 +1570,7 @@ mod tests {
     use crate::game::creature::ai::types::AIState;
     use crate::game::creature::Creature;
     use crate::World;
-    use oxcore_shared::database::Databases;
+    use oxcore_db::database::Databases;
     use oxcore_shared::protocol::ObjectGuid;
     use sqlx::mysql::MySqlPoolOptions;
     use std::path::PathBuf;
