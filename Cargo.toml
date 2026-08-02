@@ -6,6 +6,7 @@ exclude = ["tools/extractor"]
 resolver = "2"
 
 [workspace.dependencies]
+oxcore-db = { path = "crates/db" }
 oxcore-shared = { path = "crates/shared" }
 oxcore-dbc = { path = "crates/dbc" }
 oxcore-map = { path = "crates/map" }
