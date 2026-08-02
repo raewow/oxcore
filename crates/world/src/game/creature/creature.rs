@@ -206,7 +206,7 @@ impl Creature {
             map_id,
             instance_id,
 
-            // Display
+            // Display selection is finalized by CreatureManager, which owns the full template visual data.
             display_id: template.get_display_id(),
             native_display_id: template.get_display_id(),
             scale: template.scale,

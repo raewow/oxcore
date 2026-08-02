@@ -42,6 +42,46 @@ pub struct CreatureModelInfo {
     pub speed_run: f32,
 }
 
+#[derive(Debug, Clone)]
+struct CreatureVisuals {
+    display_ids: [u32; 4],
+    display_scales: [f32; 4],
+    display_probabilities: [u16; 4],
+}
+
+fn select_visual_index(visuals: &CreatureVisuals, roll: u32) -> Option<usize> {
+    let candidates: Vec<usize> = visuals
+        .display_ids
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &display_id)| (display_id != 0).then_some(index))
+        .collect();
+    let &first = candidates.first()?;
+    let total_weight: u32 = candidates
+        .iter()
+        .map(|&index| u32::from(visuals.display_probabilities[index]))
+        .sum();
+
+    if total_weight == 0 {
+        return Some(candidates[(roll as usize) % candidates.len()]);
+    }
+
+    let mut roll = roll % total_weight;
+    candidates
+        .iter()
+        .copied()
+        .find(|&index| {
+            let weight = u32::from(visuals.display_probabilities[index]);
+            if roll < weight {
+                true
+            } else {
+                roll -= weight;
+                false
+            }
+        })
+        .or(Some(first))
+}
+
 /// Creature template from database
 #[derive(Debug, Clone)]
 pub struct CreatureTemplate {
@@ -181,6 +221,10 @@ pub struct CreatureManager {
     class_level_stats: DashMap<(u8, u8), ClassLevelStats>,
     /// Model info (bounding_radius, combat_reach) per display_id from creature_display_info_addon
     model_info: DashMap<u32, CreatureModelInfo>,
+    /// Display IDs, scales, and weights kept together for each template.
+    visuals: DashMap<u32, CreatureVisuals>,
+    /// Natural scale per display from CreatureDisplayInfo.dbc.
+    display_scales: DashMap<u32, f32>,
 }
 
 impl CreatureManager {
@@ -197,6 +241,8 @@ impl CreatureManager {
             current_patch: std::sync::RwLock::new(10),
             class_level_stats: DashMap::new(),
             model_info: DashMap::new(),
+            visuals: DashMap::new(),
+            display_scales: DashMap::new(),
         }
     }
 
@@ -451,6 +497,29 @@ impl CreatureManager {
                 trainer_type: row.trainer_type,
                 spells: [row.spell_id1, row.spell_id2, row.spell_id3, row.spell_id4],
             };
+            self.visuals.insert(
+                template.entry,
+                CreatureVisuals {
+                    display_ids: [
+                        row.display_id1,
+                        row.display_id2,
+                        row.display_id3,
+                        row.display_id4,
+                    ],
+                    display_scales: [
+                        row.display_scale1,
+                        row.display_scale2,
+                        row.display_scale3,
+                        row.display_scale4,
+                    ],
+                    display_probabilities: [
+                        row.display_probability1,
+                        row.display_probability2,
+                        row.display_probability3,
+                        row.display_probability4,
+                    ],
+                },
+            );
             self.templates.insert(template.entry, Arc::new(template));
         }
         tracing::info!("Loaded {} creature templates", self.templates.len());
@@ -517,6 +586,65 @@ impl CreatureManager {
     /// Get model info for a display_id
     pub fn get_model_info(&self, display_id: u32) -> Option<CreatureModelInfo> {
         self.model_info.get(&display_id).map(|r| r.clone())
+    }
+
+    /// Cache DBC natural display scales after both DBC and templates are loaded.
+    pub fn load_display_scales(&self, dbc: &crate::dbc::DbcManager) {
+        self.display_scales.clear();
+        for template in self.templates.iter() {
+            for display_id in [
+                template.model_id_1,
+                template.model_id_2,
+                template.model_id_3,
+                template.model_id_4,
+            ] {
+                if let Some(scale) = dbc
+                    .get_creature_display_info(display_id)
+                    .map(|display| display.creature_model_scale)
+                    .filter(|scale| scale.is_finite() && *scale > 0.0)
+                {
+                    self.display_scales.insert(display_id, scale);
+                }
+            }
+        }
+        tracing::info!(
+            "Cached {} creature DBC display scales",
+            self.display_scales.len()
+        );
+    }
+
+    fn apply_model_properties(&self, creature: &mut Creature) {
+        let native_scale = self
+            .display_scales
+            .get(&creature.display_id)
+            .map(|scale| *scale)
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        if !creature.scale.is_finite() || creature.scale <= 0.0 {
+            creature.scale = native_scale;
+        }
+
+        if let Some(model_info) = self.get_model_info(creature.display_id) {
+            // Addon radii describe the native display; only a template override changes the
+            // physical size relative to that native DBC scale.
+            let scale_ratio = creature.scale / native_scale;
+            creature.bounding_radius = model_info.bounding_radius * scale_ratio;
+            creature.combat_reach = model_info.combat_reach * scale_ratio;
+            creature.speed_walk = model_info.speed_walk;
+            creature.speed_run = model_info.speed_run;
+        }
+    }
+
+    fn apply_template_visuals(&self, creature: &mut Creature) {
+        let Some(visuals) = self.visuals.get(&creature.entry) else {
+            return;
+        };
+        let Some(selected) = select_visual_index(&visuals, rand::random()) else {
+            return;
+        };
+        creature.display_id = visuals.display_ids[selected];
+        creature.native_display_id = creature.display_id;
+        creature.scale = visuals.display_scales[selected];
     }
 
     /// Load creature spawns from database
@@ -685,13 +813,8 @@ impl CreatureManager {
             class_stats.as_ref(),
         );
 
-        // Apply model info (bounding_radius, combat_reach, speeds) from creature_display_info_addon
-        if let Some(model_info) = self.get_model_info(creature.display_id) {
-            creature.bounding_radius = model_info.bounding_radius;
-            creature.combat_reach = model_info.combat_reach;
-            creature.speed_walk = model_info.speed_walk;
-            creature.speed_run = model_info.speed_run;
-        }
+        self.apply_template_visuals(&mut creature);
+        self.apply_model_properties(&mut creature);
 
         // Store wander distance for restoring wander after combat
         creature.wander_distance = spawn.wander_distance;
@@ -742,12 +865,8 @@ impl CreatureManager {
             phase_mask,
             class_stats.as_ref(),
         );
-        if let Some(model_info) = self.get_model_info(pet.display_id) {
-            pet.bounding_radius = model_info.bounding_radius;
-            pet.combat_reach = model_info.combat_reach;
-            pet.speed_walk = model_info.speed_walk;
-            pet.speed_run = model_info.speed_run;
-        }
+        self.apply_template_visuals(&mut pet);
+        self.apply_model_properties(&mut pet);
         pet.owner_guid = Some(owner_guid);
         pet.faction = faction;
         pet.in_world = true;
@@ -1184,10 +1303,10 @@ impl CreatureManager {
             .set_guid_field(OBJECT_FIELD_GUID, world_guid)
             .set_field(OBJECT_FIELD_TYPE, 0x09) // TYPEMASK_OBJECT | TYPEMASK_UNIT
             .set_field(OBJECT_FIELD_ENTRY, creature.entry) // CRITICAL: Client needs entry!
-            // Scale: default to 1.0 if database has 0 (matches old world creature.rs:1565)
+            // Scale is validated at spawn, but retain a wire-safe fallback for test/script creatures.
             .set_float_field(
                 OBJECT_FIELD_SCALE_X,
-                if creature.scale > 0.0 {
+                if creature.scale.is_finite() && creature.scale > 0.0 {
                     creature.scale
                 } else {
                     1.0
@@ -1450,7 +1569,7 @@ impl CreatureManager {
 
 #[cfg(test)]
 mod tests {
-    use super::corpse_dynamic_flags;
+    use super::{corpse_dynamic_flags, select_visual_index, CreatureVisuals};
     use crate::game::creature::death::{UNIT_DYNFLAG_DEAD, UNIT_DYNFLAG_LOOTABLE};
 
     #[test]
@@ -1464,6 +1583,31 @@ mod tests {
     #[test]
     fn lootable_corpse_flags_include_only_lootable() {
         assert_eq!(corpse_dynamic_flags(true), UNIT_DYNFLAG_LOOTABLE);
+    }
+
+    #[test]
+    fn visual_selection_uses_the_scale_paired_with_the_weighted_display() {
+        let visuals = CreatureVisuals {
+            display_ids: [10, 20, 0, 0],
+            display_scales: [0.8, 1.3, 0.0, 0.0],
+            display_probabilities: [25, 75, 0, 0],
+        };
+
+        let selected = select_visual_index(&visuals, 25).expect("a display is configured");
+        assert_eq!(visuals.display_ids[selected], 20);
+        assert_eq!(visuals.display_scales[selected], 1.3);
+    }
+
+    #[test]
+    fn visual_selection_without_weights_rotates_between_valid_displays() {
+        let visuals = CreatureVisuals {
+            display_ids: [10, 0, 30, 0],
+            display_scales: [1.0; 4],
+            display_probabilities: [0; 4],
+        };
+
+        assert_eq!(select_visual_index(&visuals, 0), Some(0));
+        assert_eq!(select_visual_index(&visuals, 1), Some(2));
     }
 }
 

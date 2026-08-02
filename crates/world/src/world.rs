@@ -352,6 +352,9 @@ impl World {
         // Load creature templates and spawns
         step("Loading creatures");
         self.managers.creature_mgr.load_templates().await?;
+        self.managers
+            .creature_mgr
+            .load_display_scales(&self.dbc.read());
         self.managers.creature_mgr.load_model_info().await?;
 
         // Set patch from config (convert wow_patch like 112 to creature patch, cap at 10 for vanilla)
