@@ -1,2 +1,3 @@
-// Logs database repositories will go here
-// Example: LogRepository
+mod chat_log_repository;
+
+pub use chat_log_repository::ChatLogRepository;

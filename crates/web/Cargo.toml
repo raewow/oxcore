@@ -59,7 +59,7 @@ oxcore-shared = { workspace = true, optional = true }
 rand = { version = "0.8", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = { version = "0.10", optional = true }
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "mysql"], optional = true }
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "mysql", "postgres"], optional = true }
 tokio = { version = "1.35", features = ["macros", "net", "rt-multi-thread", "signal"], optional = true }
 tower-http = { version = "0.6", features = ["trace", "fs", "set-header"], optional = true }
 tower = { version = "0.5", features = ["util"], optional = true }

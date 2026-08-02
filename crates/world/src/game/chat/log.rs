@@ -7,6 +7,8 @@
 //! `Log::Player(LOG_CHAT)` path (see `reference/core/src/game/Objects/Player.cpp`).
 
 use anyhow::Result;
+use oxcore_db::database::logs::models::{ChatLogInsert, ChatOutboxRow};
+use oxcore_db::database::logs::repositories::ChatLogRepository;
 use sqlx::MySqlPool;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -50,7 +52,8 @@ impl ChatLogger {
         let (tx, mut rx) = mpsc::unbounded_channel::<ChatLogEntry>();
         tokio::spawn(async move {
             while let Some(entry) = rx.recv().await {
-                if let Err(err) = insert_entry(&pool, &entry).await {
+                let repository = ChatLogRepository::new(Arc::new(pool.clone()));
+                if let Err(err) = repository.insert(&to_insert(&entry)).await {
                     error!(target: "world_chat_log", %err, sender_name = %entry.sender_name, "failed to write chat log entry");
                 }
             }
@@ -65,27 +68,21 @@ impl ChatLogger {
     }
 }
 
-async fn insert_entry(pool: &MySqlPool, entry: &ChatLogEntry) -> Result<()> {
-    sqlx::query(
-        "INSERT INTO `chat_log` (`channel_type`, `channel_name`, `sender_guid`, `sender_name`, \
-         `sender_account`, `target_guid`, `target_name`, `message`, `map`, `pos_x`, `pos_y`, `pos_z`) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(entry.channel_type)
-    .bind(&entry.channel_name)
-    .bind(entry.sender_guid)
-    .bind(&entry.sender_name)
-    .bind(entry.sender_account)
-    .bind(entry.target_guid)
-    .bind(&entry.target_name)
-    .bind(&entry.message)
-    .bind(entry.map)
-    .bind(entry.pos_x)
-    .bind(entry.pos_y)
-    .bind(entry.pos_z)
-    .execute(pool)
-    .await?;
-    Ok(())
+fn to_insert(entry: &ChatLogEntry) -> ChatLogInsert {
+    ChatLogInsert {
+        channel_type: entry.channel_type.to_string(),
+        channel_name: entry.channel_name.clone(),
+        sender_guid: entry.sender_guid,
+        sender_name: entry.sender_name.clone(),
+        sender_account: entry.sender_account,
+        target_guid: entry.target_guid,
+        target_name: entry.target_name.clone(),
+        message: entry.message.clone(),
+        map: entry.map,
+        pos_x: entry.pos_x,
+        pos_y: entry.pos_y,
+        pos_z: entry.pos_z,
+    }
 }
 
 // ================= Outbox: GM messages from the web admin panel =================
@@ -104,17 +101,18 @@ fn outbox_sender(world: &World, sender_guid: u32, sender_account: u32) -> Option
 
 /// Deliver one pending outbox row. Returns `Ok` once the row has been marked
 /// `sent`/`failed` in the database.
-async fn process_outbox_row(world: &World, row: OutboxRow) -> Result<()> {
+async fn process_outbox_row(world: &World, row: ChatOutboxRow) -> Result<()> {
+    let repository = ChatLogRepository::new(Arc::new(world.databases.logs.clone()));
     let gm_guid = match outbox_sender(world, row.sender_guid, row.sender_account) {
         Some(guid) => guid,
         None => {
-            mark_outbox(
-                &world.databases.logs,
-                row.id,
-                "failed",
-                Some("sender character offline or not on account"),
-            )
-            .await?;
+            repository
+                .mark_outbox(
+                    row.id,
+                    "failed",
+                    Some("sender character offline or not on account"),
+                )
+                .await?;
             return Ok(());
         }
     };
@@ -134,61 +132,26 @@ async fn process_outbox_row(world: &World, row: OutboxRow) -> Result<()> {
     };
 
     match result {
-        Ok(()) => mark_outbox(&world.databases.logs, row.id, "sent", None).await?,
+        Ok(()) => repository.mark_outbox(row.id, "sent", None).await?,
         Err(err) => {
-            mark_outbox(
-                &world.databases.logs,
-                row.id,
-                "failed",
-                Some(&err.to_string()),
-            )
-            .await?
+            repository
+                .mark_outbox(row.id, "failed", Some(&err.to_string()))
+                .await?
         }
     }
-    Ok(())
-}
-
-struct OutboxRow {
-    id: u64,
-    sender_account: u32,
-    sender_guid: u32,
-    channel_type: String,
-    target_name: Option<String>,
-    message: String,
-}
-
-async fn mark_outbox(pool: &MySqlPool, id: u64, status: &str, error: Option<&str>) -> Result<()> {
-    sqlx::query(
-        "UPDATE `chat_outbox` SET `status` = ?, `processed_at` = NOW(), `error` = ? WHERE `id` = ?",
-    )
-    .bind(status)
-    .bind(error)
-    .bind(id)
-    .execute(pool)
-    .await?;
     Ok(())
 }
 
 /// Poll `chat_outbox` once for pending rows and deliver them.
 /// Returns whether work was found so the caller can back off while the queue is idle.
 async fn poll_outbox(world: Arc<World>) -> Result<bool> {
-    let rows = sqlx::query_as::<_, (u64, u32, u32, String, Option<String>, String)>(
-        "SELECT `id`, `sender_account`, `sender_guid`, `channel_type`, `target_name`, `message` \
-         FROM `chat_outbox` WHERE `status` = 'pending' ORDER BY `id` ASC LIMIT 20",
-    )
-    .fetch_all(&world.databases.logs)
-    .await?;
+    let rows = ChatLogRepository::new(Arc::new(world.databases.logs.clone()))
+        .pending_outbox()
+        .await?;
 
     let has_rows = !rows.is_empty();
-    for (id, sender_account, sender_guid, channel_type, target_name, message) in rows {
-        let row = OutboxRow {
-            id,
-            sender_account,
-            sender_guid,
-            channel_type,
-            target_name,
-            message,
-        };
+    for row in rows {
+        let id = row.id;
         if let Err(err) = process_outbox_row(&world, row).await {
             warn!(target: "world_chat_outbox", %err, outbox_id = id, "failed to process chat outbox row");
         }

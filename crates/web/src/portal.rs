@@ -516,7 +516,7 @@ pub async fn get_support_tickets() -> Result<Vec<SupportTicket>, ServerFnError> 
     {
         let (state, account_id, _) = authenticated_request().await?;
         return sqlx::query_as::<_, (u64, String, String, i64, i64)>(
-            "SELECT `id`, `subject`, `status`, UNIX_TIMESTAMP(`created_at`), \
+            "SELECT id, `subject`, `status`, UNIX_TIMESTAMP(`created_at`), \
              UNIX_TIMESTAMP(`updated_at`) FROM `web_support_tickets` \
              WHERE `account_id` = ? ORDER BY `updated_at` DESC",
         )
@@ -550,7 +550,7 @@ pub async fn get_realm_status() -> Result<Vec<RealmStatus>, ServerFnError> {
         let state = expect_context::<crate::state::AppState>();
         return sqlx::query_as::<_, (String, f32, i64)>(
             "SELECT `name`, `population`, IF(`last_seen` > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 60 SECOND), 1, 0) \
-             FROM `realmlist` ORDER BY `id`",
+             FROM `realmlist` ORDER BY id",
         )
         .fetch_all(&*state.auth)
         .await
@@ -621,8 +621,8 @@ pub async fn get_chat_overview() -> Result<ChatOverview, ServerFnError> {
             .unwrap_or(0) as u64;
         let channels = match sqlx::query_as::<_, (String, Option<String>, i64, i64, i64)>(
             "SELECT `channel_type`, `channel_name`, COUNT(*), COUNT(DISTINCT `sender_name`), \
-             UNIX_TIMESTAMP(MAX(`time`)) FROM `chat_log` GROUP BY `channel_type`, `channel_name` \
-             ORDER BY MAX(`id`) DESC LIMIT 150",
+              UNIX_TIMESTAMP(MAX(`time`)) FROM `chat_log` GROUP BY `channel_type`, `channel_name` \
+              ORDER BY MAX(`id`) DESC LIMIT 150",
         )
         .fetch_all(&*state.logs)
         .await
@@ -668,22 +668,22 @@ pub async fn get_chat_channel(
         let limit = limit.clamp(1, 500);
         let mut qb = sqlx::QueryBuilder::new("SELECT ");
         qb.push(CHAT_LOG_COLUMNS);
-        qb.push(" FROM `chat_log` WHERE `channel_type` = ");
+        qb.push(" FROM logs.chat_log WHERE channel_type = ");
         qb.push_bind(&channel_type);
         match &channel_name {
             Some(name) if !name.is_empty() => {
-                qb.push(" AND `channel_name` = ");
+                qb.push(" AND channel_name = ");
                 qb.push_bind(name);
             }
             _ => {
-                qb.push(" AND `channel_name` IS NULL");
+                qb.push(" AND channel_name IS NULL");
             }
         }
         if before_id > 0 {
-            qb.push(" AND `id` < ");
+            qb.push(" AND id < ");
             qb.push_bind(before_id);
         }
-        qb.push(" ORDER BY `id` DESC LIMIT ");
+        qb.push(" ORDER BY id DESC LIMIT ");
         qb.push_bind(limit);
         let rows = match qb
             .build_query_as::<(
@@ -723,9 +723,9 @@ pub async fn get_chat_participants(
         require_gm_level(&state, account_id, 1).await?;
         let pattern = format!("%{}%", search.unwrap_or_default().trim());
         let rows = match sqlx::query_as::<_, (Option<u32>, String, Option<u32>, i64, i64)>(
-            "SELECT `sender_guid`, `sender_name`, MAX(`sender_account`), COUNT(*), \
-             UNIX_TIMESTAMP(MAX(`time`)) FROM `chat_log` WHERE `sender_name` LIKE ? \
-             GROUP BY `sender_guid`, `sender_name` ORDER BY MAX(`id`) DESC LIMIT 200",
+            "SELECT `sender_guid`, sender_name, MAX(sender_account), COUNT(*), \
+             UNIX_TIMESTAMP(MAX(time)) FROM logs.chat_log WHERE sender_name LIKE ? \
+             GROUP BY `sender_guid`, sender_name ORDER BY MAX(id) DESC LIMIT 200",
         )
         .bind(&pattern)
         .fetch_all(&*state.logs)
@@ -767,11 +767,11 @@ pub async fn get_player_chat(name: String) -> Result<ChatPlayerDetail, ServerFnE
         }
         let mut qb = sqlx::QueryBuilder::new("SELECT ");
         qb.push(CHAT_LOG_COLUMNS);
-        qb.push(" FROM `chat_log` WHERE `sender_name` = ");
+        qb.push(" FROM logs.chat_log WHERE sender_name = ");
         qb.push_bind(name);
-        qb.push(" OR `target_name` = ");
+        qb.push(" OR target_name = ");
         qb.push_bind(name);
-        qb.push(" ORDER BY `id` DESC LIMIT 300");
+        qb.push(" ORDER BY id DESC LIMIT 300");
         let rows = match qb
             .build_query_as::<(
                 u64,
@@ -846,17 +846,17 @@ pub async fn get_account_chat(account_id: u32) -> Result<Vec<ChatMessage>, Serve
 
         let mut qb = sqlx::QueryBuilder::new("SELECT ");
         qb.push(CHAT_LOG_COLUMNS);
-        qb.push(" FROM `chat_log` WHERE `sender_account` = ");
+        qb.push(" FROM logs.chat_log WHERE sender_account = ");
         qb.push_bind(account_id);
         if !guids.is_empty() {
-            qb.push(" OR `target_guid` IN (");
+            qb.push(" OR target_guid IN (");
             let mut separated = qb.separated(", ");
             for guid in &guids {
                 separated.push_bind(guid);
             }
             qb.push(")");
         }
-        qb.push(" ORDER BY `id` DESC LIMIT 500");
+        qb.push(" ORDER BY id DESC LIMIT 500");
         let rows = match qb
             .build_query_as::<(
                 u64,
@@ -957,7 +957,7 @@ pub async fn send_chat_message(
                     });
                 }
                 if let Err(error) = sqlx::query(
-                    "INSERT INTO `chat_outbox` (`sender_account`, `sender_guid`, `channel_type`, `target_name`, `message`) \
+                    "INSERT INTO `chat_outbox` (sender_account, `sender_guid`, channel_type, target_name, `message`) \
                      VALUES (?, ?, 'Whisper', ?, ?)",
                 )
                 .bind(account_id)
@@ -979,7 +979,7 @@ pub async fn send_chat_message(
                     });
                 }
                 if let Err(error) = sqlx::query(
-                    "INSERT INTO `chat_outbox` (`sender_account`, `sender_guid`, `channel_type`, `channel_name`, `message`) \
+                    "INSERT INTO `chat_outbox` (sender_account, `sender_guid`, channel_type, channel_name, `message`) \
                      VALUES (?, ?, 'Channel', ?, ?)",
                 )
                 .bind(account_id)
@@ -994,7 +994,7 @@ pub async fn send_chat_message(
             }
             "Say" => {
                 if let Err(error) = sqlx::query(
-                    "INSERT INTO `chat_outbox` (`sender_account`, `sender_guid`, `channel_type`, `message`) \
+                    "INSERT INTO `chat_outbox` (sender_account, `sender_guid`, channel_type, `message`) \
                      VALUES (?, ?, 'Say', ?)",
                 )
                 .bind(account_id)
@@ -1043,7 +1043,7 @@ pub async fn get_admin_accounts(
         let search = search.unwrap_or_default();
         let pattern = format!("%{}%", search.trim());
         let total = match sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM `account` WHERE `username` LIKE ? OR CAST(`id` AS CHAR) LIKE ? OR `email` LIKE ?",
+            "SELECT COUNT(*) FROM `account` WHERE `username` LIKE ? OR CAST(id AS CHAR) LIKE ? OR `email` LIKE ?",
         )
         .bind(&pattern)
         .bind(&pattern)
@@ -1054,9 +1054,9 @@ pub async fn get_admin_accounts(
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
         let accounts = match sqlx::query_as::<_, (u32, String, Option<String>, u8, u8, u8, i64)>(
-            "SELECT `id`, `username`, `email`, `gmlevel`, `locked`, `banned`, UNIX_TIMESTAMP(`last_login`) \
-              FROM `account` WHERE `username` LIKE ? OR CAST(`id` AS CHAR) LIKE ? OR `email` LIKE ? \
-              ORDER BY `id` DESC LIMIT ? OFFSET ?",
+            "SELECT id, `username`, `email`, `gmlevel`, `locked`, `banned`, UNIX_TIMESTAMP(`last_login`) \
+              FROM `account` WHERE `username` LIKE ? OR CAST(id AS CHAR) LIKE ? OR `email` LIKE ? \
+              ORDER BY id DESC LIMIT ? OFFSET ?",
         )
         .bind(&pattern)
         .bind(&pattern)
@@ -1098,7 +1098,7 @@ pub async fn get_admin_account(
             return Err(ServerFnError::ServerError("Not authorized".to_string()));
         }
         return sqlx::query_as::<_, (u32, String, Option<String>, u8, u8, u8, u8, String, i64)>(
-            "SELECT `id`, `username`, `email`, `gmlevel`, `locked`, `banned`, `expansion`, `last_ip`, `mutetime` FROM `account` WHERE `id` = ?",
+            "SELECT id, `username`, `email`, `gmlevel`, `locked`, `banned`, `expansion`, `last_ip`, `mutetime` FROM `account` WHERE id = ?",
         )
         .bind(account_id)
         .fetch_optional(&*state.auth)
@@ -1220,16 +1220,15 @@ pub async fn get_admin_character_detail(
         let create_time = row.get::<u64, _>("create_time") as i64;
         let logout_time = row.get::<u64, _>("logout_time") as i64;
         let account = row.get::<u32, _>("account");
-        let account_username = match sqlx::query_scalar::<_, String>(
-            "SELECT `username` FROM `account` WHERE `id` = ?",
-        )
-        .bind(account)
-        .fetch_optional(&*state.auth)
-        .await
-        {
-            Ok(username) => username,
-            Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
-        };
+        let account_username =
+            match sqlx::query_scalar::<_, String>("SELECT `username` FROM `account` WHERE id = ?")
+                .bind(account)
+                .fetch_optional(&*state.auth)
+                .await
+            {
+                Ok(username) => username,
+                Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+            };
         return Ok(Some(AdminCharacterDetail {
             guid: row.get::<u32, _>("guid"),
             name: row.get::<String, _>("name"),
@@ -1287,11 +1286,11 @@ pub async fn get_admin_audit_log(
         require_gm_level(&state, actor_id, if account_id.is_some() { 1 } else { 4 }).await?;
         let rows = match if let Some(account_id) = account_id {
             sqlx::query_as::<_, (u64, i64, Option<String>, String, String, Option<String>, Option<String>)>(
-                "SELECT l.`id`, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `auth`.`account` a ON a.`id` = l.`actor_account_id` WHERE l.`actor_account_id` = ? OR (l.`target_type` = 'account' AND l.`target_id` = CAST(? AS CHAR) COLLATE utf8mb4_unicode_ci) OR (l.`target_type` = 'realm_role' AND l.`target_id` LIKE CONCAT(CAST(? AS CHAR) COLLATE utf8mb4_unicode_ci, ':%')) ORDER BY l.`occurred_at` DESC LIMIT 100",
+                "SELECT l.id, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `auth`.`account` a ON a.id = l.`actor_account_id` WHERE l.`actor_account_id` = ? OR (l.`target_type` = 'account' AND l.`target_id` = CAST(? AS CHAR) COLLATE utf8mb4_unicode_ci) OR (l.`target_type` = 'realm_role' AND l.`target_id` LIKE CONCAT(CAST(? AS CHAR) COLLATE utf8mb4_unicode_ci, ':%')) ORDER BY l.`occurred_at` DESC LIMIT 100",
             ).bind(account_id).bind(account_id).bind(account_id).fetch_all(&*state.web).await
         } else {
             sqlx::query_as::<_, (u64, i64, Option<String>, String, String, Option<String>, Option<String>)>(
-                "SELECT l.`id`, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `auth`.`account` a ON a.`id` = l.`actor_account_id` ORDER BY l.`occurred_at` DESC LIMIT 200",
+                "SELECT l.id, UNIX_TIMESTAMP(l.`occurred_at`), a.`username`, l.`action`, l.`target_type`, l.`target_id`, l.`reason` FROM `web_audit_log` l LEFT JOIN `auth`.`account` a ON a.id = l.`actor_account_id` ORDER BY l.`occurred_at` DESC LIMIT 200",
             ).fetch_all(&*state.web).await
         } {
             Ok(rows) => rows,
@@ -1331,7 +1330,7 @@ pub async fn get_admin_account_realm_access(
             return Err(ServerFnError::ServerError("Not authorized".to_string()));
         }
         return sqlx::query_as::<_, (i32, u8)>(
-            "SELECT `RealmID`, `gmlevel` FROM `account_access` WHERE `id` = ? ORDER BY `RealmID`",
+            "SELECT `RealmID`, `gmlevel` FROM `account_access` WHERE id = ? ORDER BY `RealmID`",
         )
         .bind(account_id)
         .fetch_all(&*state.auth)
@@ -1459,38 +1458,38 @@ pub async fn chat_live_feed(
 
     let mut qb = sqlx::QueryBuilder::new("SELECT ");
     qb.push(CHAT_LOG_COLUMNS);
-    qb.push(" FROM `chat_log` WHERE 1=1");
+    qb.push(" FROM logs.chat_log WHERE 1=1");
     let since = params.since.unwrap_or(0);
     if since > 0 {
-        qb.push(" AND `id` > ");
+        qb.push(" AND id > ");
         qb.push_bind(since);
     }
     if let Some(channel_type) = params.channel_type.as_deref() {
         if !channel_type.is_empty() {
-            qb.push(" AND `channel_type` = ");
+            qb.push(" AND channel_type = ");
             qb.push_bind(channel_type);
         }
     }
     if let Some(channel_name) = params.channel_name.as_deref() {
         if !channel_name.is_empty() {
-            qb.push(" AND `channel_name` = ");
+            qb.push(" AND channel_name = ");
             qb.push_bind(channel_name);
         }
     }
     if let Some(player) = params.player.as_deref() {
         if !player.is_empty() {
-            qb.push(" AND (`sender_name` = ");
+            qb.push(" AND (sender_name = ");
             qb.push_bind(player);
-            qb.push(" OR `target_name` = ");
+            qb.push(" OR target_name = ");
             qb.push_bind(player);
             qb.push(")");
         }
     }
     let limit = params.limit.unwrap_or(300).clamp(1, 1000);
     if since > 0 {
-        qb.push(" ORDER BY `id` ASC LIMIT ");
+        qb.push(" ORDER BY id ASC LIMIT ");
     } else {
-        qb.push(" ORDER BY `id` DESC LIMIT ");
+        qb.push(" ORDER BY id DESC LIMIT ");
     }
     qb.push_bind(limit);
 
@@ -1527,7 +1526,7 @@ async fn load_overview(
     use anyhow::Context;
 
     let (username, email, email_verified) = sqlx::query_as::<_, (String, Option<String>, bool)>(
-        "SELECT `username`, `email`, `email_verif` FROM `account` WHERE `id` = ?",
+        "SELECT `username`, `email`, `email_verif` FROM `account` WHERE id = ?",
     )
     .bind(account_id)
     .fetch_optional(&*state.auth)
