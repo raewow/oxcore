@@ -1,6 +1,12 @@
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "ssr")]
+use oxcore_db::database::logs::{
+    models::{ChatLogRow, ChatOutboxInsert},
+    repositories::ChatLogRepository,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortalOverview {
     pub username: String,
@@ -187,56 +193,22 @@ pub struct SendChatResult {
     pub note: String,
 }
 
-/// Map a `chat_log` SELECT row onto [`ChatMessage`]. Column order is shared by every
-/// chat query in this module; keep them in sync.
 #[cfg(feature = "ssr")]
-fn chat_row(
-    (
-        id,
-        time,
-        channel_type,
-        channel_name,
-        sender_guid,
-        sender_name,
-        sender_account,
-        target_guid,
-        target_name,
-        message,
-        map,
-    ): (
-        u64,
-        i64,
-        String,
-        Option<String>,
-        Option<u32>,
-        Option<String>,
-        Option<u32>,
-        Option<u32>,
-        Option<String>,
-        String,
-        Option<u32>,
-    ),
-) -> ChatMessage {
+fn chat_row(row: ChatLogRow) -> ChatMessage {
     ChatMessage {
-        id,
-        time,
-        channel_type,
-        channel_name,
-        sender_guid,
-        sender_name,
-        sender_account,
-        target_guid,
-        target_name,
-        message,
-        map,
+        id: row.id,
+        time: row.time,
+        channel_type: row.channel_type,
+        channel_name: row.channel_name,
+        sender_guid: row.sender_guid,
+        sender_name: row.sender_name,
+        sender_account: row.sender_account,
+        target_guid: row.target_guid,
+        target_name: row.target_name,
+        message: row.message,
+        map: row.map,
     }
 }
-
-/// Column list shared by every `chat_log` SELECT. Keep in sync with [`chat_row`].
-#[cfg(feature = "ssr")]
-const CHAT_LOG_COLUMNS: &str =
-    "`id`, UNIX_TIMESTAMP(`time`), `channel_type`, `channel_name`, `sender_guid`, `sender_name`, \
-     `sender_account`, `target_guid`, `target_name`, `message`, `map`";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminCharacterDetail {
@@ -615,31 +587,18 @@ pub async fn get_chat_overview() -> Result<ChatOverview, ServerFnError> {
     {
         let (state, account_id, _) = authenticated_request().await?;
         require_gm_level(&state, account_id, 1).await?;
-        let total_messages = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM `chat_log`")
-            .fetch_one(&*state.logs)
-            .await
-            .unwrap_or(0) as u64;
-        let channels = match sqlx::query_as::<_, (String, Option<String>, i64, i64, i64)>(
-            "SELECT `channel_type`, `channel_name`, COUNT(*), COUNT(DISTINCT `sender_name`), \
-              UNIX_TIMESTAMP(MAX(`time`)) FROM `chat_log` GROUP BY `channel_type`, `channel_name` \
-              ORDER BY MAX(`id`) DESC LIMIT 150",
-        )
-        .fetch_all(&*state.logs)
-        .await
-        {
+        let repository = ChatLogRepository::new(std::sync::Arc::clone(&state.logs));
+        let total_messages = repository.message_count().await.unwrap_or(0) as u64;
+        let channels = match repository.channel_summaries().await {
             Ok(rows) => rows
                 .into_iter()
-                .map(
-                    |(channel_type, channel_name, message_count, participants, last_message_at)| {
-                        ChatChannelSummary {
-                            channel_type,
-                            channel_name,
-                            message_count: message_count as u64,
-                            participants: participants as u64,
-                            last_message_at,
-                        }
-                    },
-                )
+                .map(|row| ChatChannelSummary {
+                    channel_type: row.channel_type,
+                    channel_name: row.channel_name,
+                    message_count: row.message_count as u64,
+                    participants: row.participants as u64,
+                    last_message_at: row.last_message_at,
+                })
                 .collect(),
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
@@ -666,40 +625,8 @@ pub async fn get_chat_channel(
         let (state, account_id, _) = authenticated_request().await?;
         require_gm_level(&state, account_id, 1).await?;
         let limit = limit.clamp(1, 500);
-        let mut qb = sqlx::QueryBuilder::new("SELECT ");
-        qb.push(CHAT_LOG_COLUMNS);
-        qb.push(" FROM logs.chat_log WHERE channel_type = ");
-        qb.push_bind(&channel_type);
-        match &channel_name {
-            Some(name) if !name.is_empty() => {
-                qb.push(" AND channel_name = ");
-                qb.push_bind(name);
-            }
-            _ => {
-                qb.push(" AND channel_name IS NULL");
-            }
-        }
-        if before_id > 0 {
-            qb.push(" AND id < ");
-            qb.push_bind(before_id);
-        }
-        qb.push(" ORDER BY id DESC LIMIT ");
-        qb.push_bind(limit);
-        let rows = match qb
-            .build_query_as::<(
-                u64,
-                i64,
-                String,
-                Option<String>,
-                Option<u32>,
-                Option<String>,
-                Option<u32>,
-                Option<u32>,
-                Option<String>,
-                String,
-                Option<u32>,
-            )>()
-            .fetch_all(&*state.logs)
+        let rows = match ChatLogRepository::new(std::sync::Arc::clone(&state.logs))
+            .messages_for_channel(&channel_type, channel_name.as_deref(), before_id, limit)
             .await
         {
             Ok(rows) => rows,
@@ -722,29 +649,22 @@ pub async fn get_chat_participants(
         let (state, account_id, _) = authenticated_request().await?;
         require_gm_level(&state, account_id, 1).await?;
         let pattern = format!("%{}%", search.unwrap_or_default().trim());
-        let rows = match sqlx::query_as::<_, (Option<u32>, String, Option<u32>, i64, i64)>(
-            "SELECT `sender_guid`, sender_name, MAX(sender_account), COUNT(*), \
-             UNIX_TIMESTAMP(MAX(time)) FROM logs.chat_log WHERE sender_name LIKE ? \
-             GROUP BY `sender_guid`, sender_name ORDER BY MAX(id) DESC LIMIT 200",
-        )
-        .bind(&pattern)
-        .fetch_all(&*state.logs)
-        .await
+        let rows = match ChatLogRepository::new(std::sync::Arc::clone(&state.logs))
+            .participants(&pattern)
+            .await
         {
             Ok(rows) => rows,
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
         return Ok(rows
             .into_iter()
-            .map(
-                |(guid, name, account, message_count, last_seen)| ChatParticipant {
-                    guid,
-                    name,
-                    account,
-                    message_count: message_count as u64,
-                    last_seen,
-                },
-            )
+            .map(|row| ChatParticipant {
+                guid: row.guid,
+                name: row.name,
+                account: row.account,
+                message_count: row.message_count as u64,
+                last_seen: row.last_seen,
+            })
             .collect());
     }
 
@@ -765,28 +685,8 @@ pub async fn get_player_chat(name: String) -> Result<ChatPlayerDetail, ServerFnE
                 "Enter a player name".to_string(),
             ));
         }
-        let mut qb = sqlx::QueryBuilder::new("SELECT ");
-        qb.push(CHAT_LOG_COLUMNS);
-        qb.push(" FROM logs.chat_log WHERE sender_name = ");
-        qb.push_bind(name);
-        qb.push(" OR target_name = ");
-        qb.push_bind(name);
-        qb.push(" ORDER BY id DESC LIMIT 300");
-        let rows = match qb
-            .build_query_as::<(
-                u64,
-                i64,
-                String,
-                Option<String>,
-                Option<u32>,
-                Option<String>,
-                Option<u32>,
-                Option<u32>,
-                Option<String>,
-                String,
-                Option<u32>,
-            )>()
-            .fetch_all(&*state.logs)
+        let rows = match ChatLogRepository::new(std::sync::Arc::clone(&state.logs))
+            .messages_for_player(name)
             .await
         {
             Ok(rows) => rows,
@@ -844,34 +744,8 @@ pub async fn get_account_chat(account_id: u32) -> Result<Vec<ChatMessage>, Serve
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
 
-        let mut qb = sqlx::QueryBuilder::new("SELECT ");
-        qb.push(CHAT_LOG_COLUMNS);
-        qb.push(" FROM logs.chat_log WHERE sender_account = ");
-        qb.push_bind(account_id);
-        if !guids.is_empty() {
-            qb.push(" OR target_guid IN (");
-            let mut separated = qb.separated(", ");
-            for guid in &guids {
-                separated.push_bind(guid);
-            }
-            qb.push(")");
-        }
-        qb.push(" ORDER BY id DESC LIMIT 500");
-        let rows = match qb
-            .build_query_as::<(
-                u64,
-                i64,
-                String,
-                Option<String>,
-                Option<u32>,
-                Option<String>,
-                Option<u32>,
-                Option<u32>,
-                Option<String>,
-                String,
-                Option<u32>,
-            )>()
-            .fetch_all(&*state.logs)
+        let rows = match ChatLogRepository::new(std::sync::Arc::clone(&state.logs))
+            .messages_for_account(account_id, &guids)
             .await
         {
             Ok(rows) => rows,
@@ -947,7 +821,7 @@ pub async fn send_chat_message(
             });
         }
 
-        match channel_type.as_str() {
+        let entry = match channel_type.as_str() {
             "Whisper" => {
                 let target = target_name.unwrap_or_default().trim().to_string();
                 if target.is_empty() {
@@ -956,18 +830,13 @@ pub async fn send_chat_message(
                         note: "A whisper target is required".to_string(),
                     });
                 }
-                if let Err(error) = sqlx::query(
-                    "INSERT INTO `chat_outbox` (sender_account, `sender_guid`, channel_type, target_name, `message`) \
-                     VALUES (?, ?, 'Whisper', ?, ?)",
-                )
-                .bind(account_id)
-                .bind(sender_guid)
-                .bind(&target)
-                .bind(message)
-                .execute(&*state.logs)
-                .await
-                {
-                    return Err(ServerFnError::ServerError(error.to_string()));
+                ChatOutboxInsert {
+                    sender_account: account_id,
+                    sender_guid,
+                    channel_type,
+                    channel_name: None,
+                    target_name: Some(target),
+                    message: message.to_string(),
                 }
             }
             "Channel" => {
@@ -978,40 +847,35 @@ pub async fn send_chat_message(
                         note: "A channel name is required".to_string(),
                     });
                 }
-                if let Err(error) = sqlx::query(
-                    "INSERT INTO `chat_outbox` (sender_account, `sender_guid`, channel_type, channel_name, `message`) \
-                     VALUES (?, ?, 'Channel', ?, ?)",
-                )
-                .bind(account_id)
-                .bind(sender_guid)
-                .bind(&channel)
-                .bind(message)
-                .execute(&*state.logs)
-                .await
-                {
-                    return Err(ServerFnError::ServerError(error.to_string()));
+                ChatOutboxInsert {
+                    sender_account: account_id,
+                    sender_guid,
+                    channel_type,
+                    channel_name: Some(channel),
+                    target_name: None,
+                    message: message.to_string(),
                 }
             }
-            "Say" => {
-                if let Err(error) = sqlx::query(
-                    "INSERT INTO `chat_outbox` (sender_account, `sender_guid`, channel_type, `message`) \
-                     VALUES (?, ?, 'Say', ?)",
-                )
-                .bind(account_id)
-                .bind(sender_guid)
-                .bind(message)
-                .execute(&*state.logs)
-                .await
-                {
-                    return Err(ServerFnError::ServerError(error.to_string()));
-                }
-            }
+            "Say" => ChatOutboxInsert {
+                sender_account: account_id,
+                sender_guid,
+                channel_type,
+                channel_name: None,
+                target_name: None,
+                message: message.to_string(),
+            },
             _ => {
                 return Ok(SendChatResult {
                     accepted: false,
                     note: "Unsupported chat type".to_string(),
                 });
             }
+        };
+        if let Err(error) = ChatLogRepository::new(std::sync::Arc::clone(&state.logs))
+            .enqueue_outbox(&entry)
+            .await
+        {
+            return Err(ServerFnError::ServerError(error.to_string()));
         }
         return Ok(SendChatResult {
             accepted: true,
@@ -1456,58 +1320,16 @@ pub async fn chat_live_feed(
         return axum::http::StatusCode::FORBIDDEN.into_response();
     }
 
-    let mut qb = sqlx::QueryBuilder::new("SELECT ");
-    qb.push(CHAT_LOG_COLUMNS);
-    qb.push(" FROM logs.chat_log WHERE 1=1");
     let since = params.since.unwrap_or(0);
-    if since > 0 {
-        qb.push(" AND id > ");
-        qb.push_bind(since);
-    }
-    if let Some(channel_type) = params.channel_type.as_deref() {
-        if !channel_type.is_empty() {
-            qb.push(" AND channel_type = ");
-            qb.push_bind(channel_type);
-        }
-    }
-    if let Some(channel_name) = params.channel_name.as_deref() {
-        if !channel_name.is_empty() {
-            qb.push(" AND channel_name = ");
-            qb.push_bind(channel_name);
-        }
-    }
-    if let Some(player) = params.player.as_deref() {
-        if !player.is_empty() {
-            qb.push(" AND (sender_name = ");
-            qb.push_bind(player);
-            qb.push(" OR target_name = ");
-            qb.push_bind(player);
-            qb.push(")");
-        }
-    }
     let limit = params.limit.unwrap_or(300).clamp(1, 1000);
-    if since > 0 {
-        qb.push(" ORDER BY id ASC LIMIT ");
-    } else {
-        qb.push(" ORDER BY id DESC LIMIT ");
-    }
-    qb.push_bind(limit);
-
-    match qb
-        .build_query_as::<(
-            u64,
-            i64,
-            String,
-            Option<String>,
-            Option<u32>,
-            Option<String>,
-            Option<u32>,
-            Option<u32>,
-            Option<String>,
-            String,
-            Option<u32>,
-        )>()
-        .fetch_all(&*state.logs)
+    match ChatLogRepository::new(std::sync::Arc::clone(&state.logs))
+        .live_messages(
+            since,
+            params.channel_type.as_deref(),
+            params.channel_name.as_deref(),
+            params.player.as_deref(),
+            limit,
+        )
         .await
     {
         Ok(rows) => axum::Json(rows.into_iter().map(chat_row).collect::<Vec<_>>()).into_response(),
