@@ -136,11 +136,11 @@ impl Default for SmsgAccountDataTimes {
     }
 }
 
-/// The Classic client has one timestamp for each supported account-data type.
+/// 1.14.1 has thirteen account-data slots, including five types that did not exist in vanilla.
 ///
-/// Sending timestamps for types the server does not implement changes the body length and leaves
-/// the client reading configuration data at the wrong boundary.
-const MODERN_ACCOUNT_DATA_COUNT: usize = 8;
+/// The server stores the original eight types, so the modern-only tail is zero-filled. It must
+/// still be present: the client uses this count to choose the four-bit account-data type layout.
+const MODERN_ACCOUNT_DATA_COUNT: usize = 13;
 
 impl ToWorldPacket for SmsgAccountDataTimes {
     fn to_vanilla(&self) -> WorldPacket {
@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn modern_account_data_times_has_one_timestamp_per_classic_data_type() {
+    fn modern_account_data_times_has_all_modern_account_data_slots() {
         let guid = player_guid(42);
         let timestamps = [1, 2, 3, 4, 5, 6, 7, 8];
         let packet = SmsgAccountDataTimes::new(timestamps, guid, 1)
@@ -269,9 +269,12 @@ mod tests {
         for timestamp in timestamps {
             assert_eq!(reader.read_i64(), Some(i64::from(timestamp)));
         }
+        for _ in timestamps.len()..MODERN_ACCOUNT_DATA_COUNT {
+            assert_eq!(reader.read_i64(), Some(0), "modern-only timestamp is empty");
+        }
         assert!(
             reader.read_i64().is_none(),
-            "no unsupported account-data timestamps"
+            "no timestamps beyond the modern account-data slots"
         );
     }
 }

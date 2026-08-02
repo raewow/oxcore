@@ -9,15 +9,16 @@
 //! are handled deliberately instead.
 
 use super::field_map::{
-    MODERN_OBJECT_DYNAMIC_FLAGS, MODERN_PLAYER_QUEST_LOG, MODERN_PLAYER_VISIBLE_ITEM,
-    MODERN_UNIT_FIELD_ATTACK_POWER_MOD_NEG, MODERN_UNIT_FIELD_ATTACK_POWER_MOD_POS,
-    MODERN_UNIT_FIELD_BYTES_0, MODERN_UNIT_FIELD_BYTES_1, MODERN_UNIT_FIELD_BYTES_2,
-    MODERN_UNIT_FIELD_DISPLAY_POWER, MODERN_UNIT_FIELD_RANGED_ATTACK_POWER_MOD_NEG,
-    MODERN_UNIT_FIELD_RANGED_ATTACK_POWER_MOD_POS, MODERN_UNIT_NPC_FLAGS,
+    MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID, MODERN_OBJECT_DYNAMIC_FLAGS, MODERN_PLAYER_QUEST_LOG,
+    MODERN_PLAYER_VISIBLE_ITEM, MODERN_UNIT_FIELD_ATTACK_POWER_MOD_NEG,
+    MODERN_UNIT_FIELD_ATTACK_POWER_MOD_POS, MODERN_UNIT_FIELD_BYTES_0, MODERN_UNIT_FIELD_BYTES_1,
+    MODERN_UNIT_FIELD_BYTES_2, MODERN_UNIT_FIELD_DISPLAY_POWER,
+    MODERN_UNIT_FIELD_RANGED_ATTACK_POWER_MOD_NEG, MODERN_UNIT_FIELD_RANGED_ATTACK_POWER_MOD_POS,
+    MODERN_UNIT_NPC_FLAGS,
 };
 use super::fields::ModernObjectType;
 use crate::protocol::update_fields::{
-    PLAYER_QUEST_LOG_1_1, PLAYER_VISIBLE_ITEM_1_0, UNIT_DYNAMIC_FLAGS,
+    PLAYER_QUEST_LOG_1_1, PLAYER_SKILL_INFO_1_1, PLAYER_VISIBLE_ITEM_1_0, UNIT_DYNAMIC_FLAGS,
     UNIT_FIELD_ATTACK_POWER_MODS, UNIT_FIELD_BYTES_0, UNIT_FIELD_BYTES_1, UNIT_FIELD_BYTES_2,
     UNIT_FIELD_RANGED_ATTACK_POWER_MODS, UNIT_NPC_FLAGS,
 };
@@ -83,6 +84,15 @@ const VANILLA_QUEST_LOG_STRIDE: u32 = 3;
 const MODERN_QUEST_LOG_STRIDE: u16 = 16;
 /// Offset of `EndTime` within a modern quest-log slot (`+2 + 12`).
 const MODERN_QUEST_LOG_END_TIME: u16 = 14;
+
+/// Modern stores each of the seven skill properties as a 256-entry `u16` array. Two entries share
+/// each u32 update slot, unlike vanilla's three packed u32s per skill.
+const MODERN_SKILL_ARRAY_WORDS: u16 = 128;
+const MODERN_SKILL_STEP_OFFSET: u16 = MODERN_SKILL_ARRAY_WORDS;
+const MODERN_SKILL_RANK_OFFSET: u16 = MODERN_SKILL_ARRAY_WORDS * 2;
+const MODERN_SKILL_MAX_RANK_OFFSET: u16 = MODERN_SKILL_ARRAY_WORDS * 4;
+const MODERN_SKILL_TEMP_BONUS_OFFSET: u16 = MODERN_SKILL_ARRAY_WORDS * 5;
+const MODERN_SKILL_PERM_BONUS_OFFSET: u16 = MODERN_SKILL_ARRAY_WORDS * 6;
 
 /// Vanilla visible-item geometry: 19 equipment slots of 12 named fields each (creator guid,
 /// entry+enchants, properties, pad). oxcore only ever populates the first three -- entry, perm
@@ -176,6 +186,71 @@ fn visible_item_slot(vanilla_index: u32) -> Option<(u16, u32)> {
 /// chain: `UNIT_FIELD_BYTES_0` is index 36, and index 36 on an item is inside
 /// `ITEM_FIELD_ENCHANTMENT`. Keying on the index alone would repack enchantment data as unit bytes.
 pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> Option<Writes> {
+    if object_type == ModernObjectType::ActivePlayer {
+        if let Some((skill_slot, property)) = skill_info_slot(vanilla_index) {
+            let word = (skill_slot / 2) as u16;
+            let mask = if skill_slot % 2 == 0 {
+                0x0000_FFFF
+            } else {
+                0xFFFF_0000
+            };
+            let pack = |value: u16| {
+                if skill_slot % 2 == 0 {
+                    u32::from(value)
+                } else {
+                    u32::from(value) << 16
+                }
+            };
+            let high = (value >> 16) as u16;
+            let low = value as u16;
+
+            return Some(match property {
+                0 => Writes::new_masked(&[
+                    (
+                        MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID + word,
+                        pack(high),
+                        mask,
+                    ),
+                    (
+                        MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID + MODERN_SKILL_STEP_OFFSET + word,
+                        pack(low),
+                        mask,
+                    ),
+                ]),
+                1 => Writes::new_masked(&[
+                    (
+                        MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID + MODERN_SKILL_RANK_OFFSET + word,
+                        pack(high),
+                        mask,
+                    ),
+                    (
+                        MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID
+                            + MODERN_SKILL_MAX_RANK_OFFSET
+                            + word,
+                        pack(low),
+                        mask,
+                    ),
+                ]),
+                _ => Writes::new_masked(&[
+                    (
+                        MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID
+                            + MODERN_SKILL_TEMP_BONUS_OFFSET
+                            + word,
+                        pack(high),
+                        mask,
+                    ),
+                    (
+                        MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID
+                            + MODERN_SKILL_PERM_BONUS_OFFSET
+                            + word,
+                        pack(low),
+                        mask,
+                    ),
+                ]),
+            });
+        }
+    }
+
     // Every transform so far is a Unit-chain field.
     if !object_type.is_unit() {
         return None;
@@ -314,6 +389,12 @@ pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> 
     })
 }
 
+fn skill_info_slot(vanilla_index: u32) -> Option<(u32, u32)> {
+    let relative = vanilla_index.checked_sub(PLAYER_SKILL_INFO_1_1)?;
+    let skill_slot = relative / 3;
+    (skill_slot < 256).then_some((skill_slot, relative % 3))
+}
+
 /// Split a vanilla field index into its quest-log `(slot, offset)`, or `None` if it is not one.
 ///
 /// Kept separate so the match arm above and its guard cannot disagree about the range.
@@ -436,6 +517,48 @@ mod tests {
         assert_eq!(
             writes.as_slice(),
             [(MODERN_PLAYER_QUEST_LOG + 3 * MODERN_QUEST_LOG_STRIDE, 42)]
+        );
+    }
+
+    #[test]
+    fn skill_fields_expand_into_modern_skill_arrays() {
+        // Language Common (98), step 0, rank and max rank 300 in vanilla skill slot 1.
+        let index = repack(
+            ModernObjectType::ActivePlayer,
+            PLAYER_SKILL_INFO_1_1 + 3,
+            98 << 16,
+        )
+        .expect("skill index must map");
+        assert_eq!(
+            index.as_slice(),
+            [
+                (MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID, 98 << 16),
+                (
+                    MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID + MODERN_SKILL_STEP_OFFSET,
+                    0,
+                ),
+            ]
+        );
+        assert_eq!(index.masks(), [0xFFFF_0000, 0xFFFF_0000]);
+
+        let value = repack(
+            ModernObjectType::ActivePlayer,
+            PLAYER_SKILL_INFO_1_1 + 4,
+            (300 << 16) | 300,
+        )
+        .expect("skill value must map");
+        assert_eq!(
+            value.as_slice(),
+            [
+                (
+                    MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID + MODERN_SKILL_RANK_OFFSET,
+                    300 << 16,
+                ),
+                (
+                    MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID + MODERN_SKILL_MAX_RANK_OFFSET,
+                    300 << 16,
+                ),
+            ]
         );
     }
 

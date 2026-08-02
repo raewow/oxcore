@@ -123,6 +123,8 @@ pub const MODERN_ACTIVE_PLAYER_FIELD_PVP_LAST_WEEKS_TIER_MAX_FROM_WINS: u16 = 46
 pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES: u16 = 2756;
 /// Modern `ACTIVE_PLAYER_FIELD_BYTES_6` (size 1).
 pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES_6: u16 = 2912;
+/// Modern `ACTIVE_PLAYER_FIELD_SKILL_LINEID` (size 896).
+pub const MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID: u16 = 1305;
 
 /// Total modern field slots for Item, including inherited ones.
 ///
