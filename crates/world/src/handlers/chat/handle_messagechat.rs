@@ -137,6 +137,15 @@ async fn handle_messagechat_type(
         }
     };
 
+    if msg_type == ChatMsg::Say {
+        tracing::info!(
+            player = %sender_guid,
+            protocol = ?session.protocol(),
+            message_bytes = message.len(),
+            "received and parsed /say"
+        );
+    }
+
     // Check for chat commands (starting with '.' or '!')
     if message.starts_with('.') || message.starts_with('!') {
         let command_str = &message[1..];
@@ -168,6 +177,7 @@ async fn handle_messagechat_type(
                     world.config.allow_cross_faction_chat,
                 )
                 .await?;
+            tracing::info!(player = %sender_guid, "completed /say routing");
         }
         ChatMsg::Yell => {
             world

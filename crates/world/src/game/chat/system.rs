@@ -1118,8 +1118,15 @@ impl ChatSystem {
         self.broadcast_mgr
             .send_msg_to_player(sender_guid, same_faction_packet.clone());
 
+        tracing::info!(
+            player = %sender_guid,
+            message_bytes = clean_message.len(),
+            "queued /say self echo"
+        );
+
         // Broadcast to nearby players with distance filtering (25 yards) and faction-aware packets
         let broadcaster = self.player_mgr.get_broadcaster(sender_guid);
+        let mut delivered_nearby = 0usize;
         if let Some(broadcaster) = broadcaster {
             let listeners: Vec<ObjectGuid> = {
                 let lock = broadcaster.listeners().read();
@@ -1156,11 +1163,18 @@ impl ChatSystem {
 
                             self.broadcast_mgr
                                 .send_msg_to_player(listener_guid, packet.clone());
+                            delivered_nearby += 1;
                         }
                     }
                 }
             }
         }
+
+        tracing::info!(
+            player = %sender_guid,
+            nearby_recipients = delivered_nearby,
+            "completed /say recipient routing"
+        );
 
         self.log_message("Say", None, sender_guid, None, None, &clean_message);
 

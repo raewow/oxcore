@@ -9,7 +9,7 @@
 use anyhow::Result;
 use oxcore_db::database::logs::models::{ChatLogInsert, ChatOutboxRow};
 use oxcore_db::database::logs::repositories::ChatLogRepository;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -48,7 +48,7 @@ pub struct ChatLogger {
 }
 
 impl ChatLogger {
-    pub fn new(pool: MySqlPool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<ChatLogEntry>();
         tokio::spawn(async move {
             while let Some(entry) = rx.recv().await {
