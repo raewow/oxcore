@@ -40,5 +40,5 @@ pub use handle_channel_unmute::handle_channel_unmute;
 pub use handle_emote::handle_emote;
 pub use handle_join_channel::handle_join_channel;
 pub use handle_leave_channel::handle_leave_channel;
-pub use handle_messagechat::handle_messagechat;
+pub use handle_messagechat::{handle_messagechat, handle_modern_messagechat};
 pub use handle_text_emote::handle_text_emote;

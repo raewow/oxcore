@@ -102,10 +102,7 @@ pub async fn load_auras(player_guid: ObjectGuid, timediff: u32, world: &World) -
 /// - the saved duration already ran out after debiting offline `timediff`.
 async fn load_aura(player_guid: ObjectGuid, row: &CharacterAuraRow, timediff: u32, world: &World) {
     let Some(spell_entry) = world.managers.spell_mgr.get(row.spell) else {
-        tracing::error!(
-            "Unknown spell (spellid {}), ignoring.",
-            row.spell
-        );
+        tracing::error!("Unknown spell (spellid {}), ignoring.", row.spell);
         return;
     };
 

@@ -64,21 +64,25 @@ fn GmComposer() -> impl IntoView {
     let send_error = RwSignal::new(None::<String>);
     let send_trigger = RwSignal::new(0_u64);
 
-    let send_result = Resource::new(move || send_trigger.get(), move |_| {
-        let guid = sender_guid.get();
-        let chat_type = chat_type.get();
-        let channel = channel.get();
-        let target = target.get();
-        let message = message.get();
-        async move {
-            let channel_param = if chat_type == "Channel" {
-                Some(channel)
-            } else {
-                None
-            };
-            portal::send_chat_message(guid, chat_type, channel_param, Some(target), message).await
-        }
-    });
+    let send_result = Resource::new(
+        move || send_trigger.get(),
+        move |_| {
+            let guid = sender_guid.get();
+            let chat_type = chat_type.get();
+            let channel = channel.get();
+            let target = target.get();
+            let message = message.get();
+            async move {
+                let channel_param = if chat_type == "Channel" {
+                    Some(channel)
+                } else {
+                    None
+                };
+                portal::send_chat_message(guid, chat_type, channel_param, Some(target), message)
+                    .await
+            }
+        },
+    );
 
     Effect::new(move |_| {
         if let Some(Ok(result)) = send_result.get() {
@@ -192,14 +196,17 @@ fn LiveFeed() -> impl IntoView {
 fn ChannelsBrowser() -> impl IntoView {
     let overview = Resource::new(|| (), |_| portal::get_chat_overview());
     let selected = RwSignal::new(None::<(String, Option<String>)>);
-    let messages = Resource::new(move || selected.get(), |selected| async move {
-        match selected {
-            Some((channel_type, channel_name)) => {
-                portal::get_chat_channel(channel_type, channel_name, 0, 200).await
+    let messages = Resource::new(
+        move || selected.get(),
+        |selected| async move {
+            match selected {
+                Some((channel_type, channel_name)) => {
+                    portal::get_chat_channel(channel_type, channel_name, 0, 200).await
+                }
+                None => Ok(Vec::new()),
             }
-            None => Ok(Vec::new()),
-        }
-    });
+        },
+    );
 
     view! {
         <div class="grid gap-4 xl:grid-cols-3">
@@ -267,9 +274,7 @@ fn render_channel_list(
                 </ul>
             }.into_any()
         }
-        Err(error) => {
-            view! { <p class="mt-3 text-destructive">{error.to_string()}</p> }.into_any()
-        }
+        Err(error) => view! { <p class="mt-3 text-destructive">{error.to_string()}</p> }.into_any(),
     }
 }
 
@@ -279,9 +284,7 @@ fn render_messages(result: Result<Vec<portal::ChatMessage>, ServerFnError>) -> A
             view! { <p class="mt-3 text-muted-foreground">"No messages."</p> }.into_any()
         }
         Ok(messages) => render_message_list(messages),
-        Err(error) => {
-            view! { <p class="mt-3 text-destructive">{error.to_string()}</p> }.into_any()
-        }
+        Err(error) => view! { <p class="mt-3 text-destructive">{error.to_string()}</p> }.into_any(),
     }
 }
 
@@ -289,23 +292,30 @@ fn render_messages(result: Result<Vec<portal::ChatMessage>, ServerFnError>) -> A
 #[component]
 fn PlayersBrowser() -> impl IntoView {
     let search = RwSignal::new(String::new());
-    let participants = Resource::new(move || search.get(), |search| {
-        portal::get_chat_participants(Some(search))
-    });
+    let participants = Resource::new(
+        move || search.get(),
+        |search| portal::get_chat_participants(Some(search)),
+    );
     let selected_player = RwSignal::new(None::<String>);
-    let player_detail = Resource::new(move || selected_player.get(), |name| async move {
-        match name {
-            Some(name) => portal::get_player_chat(name).await.map(Some),
-            None => Ok(None),
-        }
-    });
+    let player_detail = Resource::new(
+        move || selected_player.get(),
+        |name| async move {
+            match name {
+                Some(name) => portal::get_player_chat(name).await.map(Some),
+                None => Ok(None),
+            }
+        },
+    );
     let selected_account = RwSignal::new(None::<u32>);
-    let account_chat = Resource::new(move || selected_account.get(), |account_id| async move {
-        match account_id {
-            Some(account_id) => portal::get_account_chat(account_id).await,
-            None => Ok(Vec::new()),
-        }
-    });
+    let account_chat = Resource::new(
+        move || selected_account.get(),
+        |account_id| async move {
+            match account_id {
+                Some(account_id) => portal::get_account_chat(account_id).await,
+                None => Ok(Vec::new()),
+            }
+        },
+    );
 
     view! {
         <div class="grid gap-4 xl:grid-cols-3">
@@ -380,7 +390,8 @@ fn render_player_detail(
 ) -> AnyView {
     match result {
         Ok(None) => {
-            view! { <p class="mt-3 text-muted-foreground">"Select a player on the left."</p> }.into_any()
+            view! { <p class="mt-3 text-muted-foreground">"Select a player on the left."</p> }
+                .into_any()
         }
         Ok(Some(detail)) => {
             let name = detail.name.clone();
@@ -401,9 +412,7 @@ fn render_player_detail(
                 </div>
             }.into_any()
         }
-        Err(error) => {
-            view! { <p class="mt-3 text-destructive">{error.to_string()}</p> }.into_any()
-        }
+        Err(error) => view! { <p class="mt-3 text-destructive">{error.to_string()}</p> }.into_any(),
     }
 }
 

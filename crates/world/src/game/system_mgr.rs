@@ -139,8 +139,12 @@ impl SystemManager {
         ));
 
         let chat = if chat_log_enabled {
-            let logger = Arc::new(crate::game::chat::log::ChatLogger::new((*logs_pool).clone()));
-            Arc::new(ChatSystem::new(broadcast_mgr.clone(), player_mgr.clone()).with_chat_logger(logger))
+            let logger = Arc::new(crate::game::chat::log::ChatLogger::new(
+                (*logs_pool).clone(),
+            ));
+            Arc::new(
+                ChatSystem::new(broadcast_mgr.clone(), player_mgr.clone()).with_chat_logger(logger),
+            )
         } else {
             Arc::new(ChatSystem::new(broadcast_mgr.clone(), player_mgr.clone()))
         };

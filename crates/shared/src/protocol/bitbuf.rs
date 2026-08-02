@@ -74,6 +74,10 @@ impl<'a> BitReader<'a> {
         self.read_array().map(u32::from_le_bytes)
     }
 
+    pub fn read_i64(&mut self) -> Option<i64> {
+        self.read_array().map(i64::from_le_bytes)
+    }
+
     pub fn read_f32(&mut self) -> Option<f32> {
         self.read_array().map(f32::from_le_bytes)
     }

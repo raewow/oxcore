@@ -648,7 +648,7 @@ pub async fn handle_auction_remove_item(
     };
 
     // If there is an active bid, the owner must pay an auction cut and the bidder
-        // is refunded. If the owner cannot cover the cut, silently abort.
+    // is refunded. If the owner cannot cover the cut, silently abort.
     if auction.has_bid() {
         let cut = auction.get_auction_cut(house_entry.cut_percent as f32, 1.0);
         let player_money = world.systems.inventory.get_money(player_guid).unwrap_or(0);

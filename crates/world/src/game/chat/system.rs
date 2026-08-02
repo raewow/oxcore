@@ -13,6 +13,7 @@ use crate::game::BroadcastManager;
 use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language, Team};
 use oxcore_shared::messages::channel::{ChannelMemberInfo, *};
 use oxcore_shared::messages::chat::*;
+use oxcore_shared::messages::update::DEFAULT_REALM_ID;
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
 
@@ -174,6 +175,18 @@ impl ChatSystem {
         password: Option<&str>,
         team: Team,
     ) -> Result<(), ChatError> {
+        self.join_channel_with_id(player_guid, channel_name, password, team, None)
+            .await
+    }
+
+    pub async fn join_channel_with_id(
+        &self,
+        player_guid: ObjectGuid,
+        channel_name: &str,
+        password: Option<&str>,
+        team: Team,
+        client_channel_id: Option<u32>,
+    ) -> Result<(), ChatError> {
         validation::validate_channel_name(channel_name)?;
 
         if let Some(player_chans) = self.player_channels.get(&player_guid) {
@@ -182,14 +195,26 @@ impl ChatSystem {
             }
         }
 
-        let is_builtin = CachedChannel::is_builtin_channel(channel_name);
+        let is_builtin = CachedChannel::is_builtin_channel(channel_name)
+            || [
+                "General - ",
+                "Trade - ",
+                "LocalDefense - ",
+                "WorldDefense",
+                "GuildRecruitment",
+                "LookingForGroup",
+            ]
+            .iter()
+            .any(|prefix| channel_name.starts_with(prefix));
 
         let team_channels = self.channels.entry(team).or_insert_with(DashMap::new);
 
         let mut channel_data = team_channels
             .entry(channel_name.to_string())
             .or_insert_with(|| {
-                let id = if is_builtin {
+                let id = if let Some(id) = client_channel_id.filter(|id| *id != 0) {
+                    id
+                } else if is_builtin {
                     match channel_name.to_lowercase().as_str() {
                         "general" => ChannelId::General as u32,
                         "trade" => ChannelId::Trade as u32,
@@ -269,7 +294,29 @@ impl ChatSystem {
             .or_insert_with(HashSet::new)
             .insert(channel_name.to_string());
 
-        let notify = SmsgChannelNotify::you_joined(channel_name, channel_id);
+        let (map_id, zone_id) = self
+            .player_mgr
+            .get_player(player_guid)
+            .map(|player| (player.map_id, player.zone_id))
+            .unwrap_or_default();
+        // HighGuidType703::ChatChannel. The client retains this GUID and sends it back with every
+        // channel message, so an empty GUID makes a joined channel read-only in its UI.
+        let channel_guid_high = (26u64 << 58)
+            | (u64::from(DEFAULT_REALM_ID & 0x1FFF) << 42)
+            | (u64::from(map_id & 0x1FFF) << 29)
+            | (u64::from(zone_id & 0x7F_FFFF) << 6);
+        let modern_channel_flags = match channel_id {
+            1 => 0x01 | 0x02,                      // General: auto-join, zone-based
+            2 => 0x01 | 0x02 | 0x08 | 0x10 | 0x20, // Trade
+            22 => 0x01 | 0x02 | 0x01_0000,         // LocalDefense
+            23 => 0x04 | 0x01_0000,                // WorldDefense: read-only alerts
+            24 => 0,                               // LookingForGroup
+            25 => 0x02 | 0x10 | 0x02_0000,         // GuildRecruitment
+            _ => 0,
+        };
+        let notify = SmsgChannelNotify::you_joined(channel_name, channel_id)
+            .with_modern_channel_guid(channel_guid_high, u64::from(channel_id))
+            .with_modern_channel_flags(modern_channel_flags);
         self.broadcast_mgr.send_msg_to_player(player_guid, notify);
 
         Ok(())
@@ -900,8 +947,15 @@ impl ChatSystem {
         message: &str,
         social_system: &crate::game::social::SocialSystem,
     ) -> Result<(), ChatError> {
-        self.send_whisper_impl(sender_guid, target_name, message, social_system, false, true)
-            .await
+        self.send_whisper_impl(
+            sender_guid,
+            target_name,
+            message,
+            social_system,
+            false,
+            true,
+        )
+        .await
     }
 
     /// Whisper sent on behalf of a GM (from the admin panel). Bypasses the sender's
@@ -914,8 +968,15 @@ impl ChatSystem {
         message: &str,
         social_system: &crate::game::social::SocialSystem,
     ) -> Result<(), ChatError> {
-        self.send_whisper_impl(sender_guid, target_name, message, social_system, true, false)
-            .await
+        self.send_whisper_impl(
+            sender_guid,
+            target_name,
+            message,
+            social_system,
+            true,
+            false,
+        )
+        .await
     }
 
     async fn send_whisper_impl(
@@ -1520,11 +1581,7 @@ impl ChatSystem {
     /// Resolve the (account, map, position) context of a sender for the chat log.
     fn player_log_context(&self, guid: ObjectGuid) -> (u32, u32, Position) {
         let (account, map, position) = match self.player_mgr.get_player(guid) {
-            Some(player) => (
-                player.account_id,
-                player.map_id,
-                player.movement.position,
-            ),
+            Some(player) => (player.account_id, player.map_id, player.movement.position),
             None => (0, 0, Position::default()),
         };
         (account, map, position)

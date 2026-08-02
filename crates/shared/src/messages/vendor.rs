@@ -10,8 +10,8 @@
 //! - [`SmsgSellItem`] - Sell item result
 
 use crate::messages::update::DEFAULT_REALM_ID;
-use crate::protocol::bitbuf::BitWriter;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::ObjectGuid;
 use crate::protocol::{Opcode, WorldPacket};
@@ -64,8 +64,8 @@ impl ToWorldPacket for SmsgListInventory {
         for item in &self.items {
             writer.write_i32(item.index as i32); // Slot
             writer.write_i32(1); // Type: item, as opposed to a currency
-            // Vanilla's "max count" is the remaining stock, and -1 there means unlimited; 1.14 reads
-            // the same convention, so the value carries over.
+                                 // Vanilla's "max count" is the remaining stock, and -1 there means unlimited; 1.14 reads
+                                 // the same convention, so the value carries over.
             writer.write_i32(item.max_count as i32); // Quantity
             writer.write_u64(u64::from(item.price));
             writer.write_i32(item.max_durability as i32);

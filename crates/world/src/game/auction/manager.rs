@@ -1168,7 +1168,7 @@ impl AuctionHouseManager {
     }
 }
 
-    /// Maps auction house id to faction team.
+/// Maps auction house id to faction team.
 fn get_auction_house_team(house_id: u32) -> Team {
     match house_id {
         1 | 2 | 3 => Team::Alliance,

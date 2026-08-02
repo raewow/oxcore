@@ -159,8 +159,8 @@ fn write_modern_auction_item(writer: &mut BitWriter, auction: &AuctionEntry, now
 
     writer.write_i32(1); // Count -- 1.12 auctions are always a single item
     writer.write_i32(0); // Charges
-    // The flag set a 1.14 client expects on a plain, non-commodity item listing; zero here makes
-    // the row render as an empty entry.
+                         // The flag set a 1.14 client expects on a plain, non-commodity item listing; zero here makes
+                         // the row render as an empty entry.
     writer.write_u32(196608); // Flags
     writer.write_u32(auction.id);
 
@@ -172,8 +172,8 @@ fn write_modern_auction_item(writer: &mut BitWriter, auction: &AuctionEntry, now
     writer.write_u8(0); // DeleteReason
 
     writer.write_u64(u64::from(auction.start_bid)); // MinBid
-    // The amount a competing bid must clear the current one by. `to_vanilla` puts the absolute
-    // minimum next bid in the equivalent slot; 1.14 wants the increment itself.
+                                                    // The amount a competing bid must clear the current one by. `to_vanilla` puts the absolute
+                                                    // minimum next bid in the equivalent slot; 1.14 wants the increment itself.
     let min_increment = if has_bidder {
         auction.get_outbid_amount()
     } else {

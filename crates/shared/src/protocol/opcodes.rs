@@ -174,11 +174,11 @@ impl Opcode {
     pub const CMSG_TUTORIAL_CLEAR: Opcode = Opcode { vanilla: 0x00FF, ..Opcode::NONE }; // 255
     pub const CMSG_TUTORIAL_RESET: Opcode = Opcode { vanilla: 0x0100, ..Opcode::NONE }; // 256
     pub const CMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020B, modern: 0x3695 }; // 523
-    pub const SMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020C, modern: 0x2700 }; // 524
+    pub const SMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020C, modern: 0x26FF }; // 524
     pub const CMSG_REQUEST_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020A, modern: 0x3694 }; // 522
     pub const SMSG_UPDATE_ACCOUNT_DATA_COMPLETE: Opcode = Opcode { vanilla: 0x020D, ..Opcode::NONE }; // 525
-    pub const SMSG_ACCOUNT_DATA_MD5: Opcode = Opcode { vanilla: 0x0209, modern: 0x2701 }; // 521
-    pub const SMSG_ACCOUNT_DATA_TIMES: Opcode = Opcode { vanilla: 0x0209, modern: 0x2701 }; // 521
+    pub const SMSG_ACCOUNT_DATA_MD5: Opcode = Opcode { vanilla: 0x0209, ..Opcode::NONE }; // 521
+    pub const SMSG_ACCOUNT_DATA_TIMES: Opcode = Opcode { vanilla: 0x0209, modern: 0x2700 }; // 521
 
     // ============================================================================
     // Query Responses
@@ -623,6 +623,17 @@ impl Opcode {
     // ============================================================================
 
     pub const CMSG_MESSAGECHAT: Opcode = Opcode { vanilla: 0x0095, ..Opcode::NONE }; // 149
+    // Modern splits the legacy CMSG_MESSAGECHAT multiplex into one opcode per destination.
+    pub const CMSG_CHAT_MESSAGE_CHANNEL: Opcode = Opcode { modern: 0x37CF, ..Opcode::NONE };
+    pub const CMSG_CHAT_MESSAGE_WHISPER: Opcode = Opcode { modern: 0x37D0, ..Opcode::NONE };
+    pub const CMSG_CHAT_MESSAGE_GUILD: Opcode = Opcode { modern: 0x37D1, ..Opcode::NONE };
+    pub const CMSG_CHAT_MESSAGE_OFFICER: Opcode = Opcode { modern: 0x37D2, ..Opcode::NONE };
+    pub const CMSG_CHAT_MESSAGE_EMOTE: Opcode = Opcode { modern: 0x37E8, ..Opcode::NONE };
+    pub const CMSG_CHAT_MESSAGE_PARTY: Opcode = Opcode { modern: 0x37EA, ..Opcode::NONE };
+    pub const CMSG_CHAT_MESSAGE_RAID: Opcode = Opcode { modern: 0x37EB, ..Opcode::NONE };
+    pub const CMSG_CHAT_MESSAGE_RAID_WARNING: Opcode = Opcode { modern: 0x37ED, ..Opcode::NONE };
+    pub const CMSG_CHAT_MESSAGE_SAY: Opcode = Opcode { modern: 0x37E7, ..Opcode::NONE };
+    pub const CMSG_CHAT_MESSAGE_YELL: Opcode = Opcode { modern: 0x37E9, ..Opcode::NONE };
     pub const SMSG_MESSAGECHAT: Opcode = Opcode { vanilla: 0x0096, modern: 0x2BAD }; // 150
     pub const CMSG_CHAT_IGNORED: Opcode = Opcode { vanilla: 0x0225, modern: 0x37CB }; // 549
     pub const SMSG_CHAT_WRONG_FACTION: Opcode = Opcode { vanilla: 0x0219, ..Opcode::NONE }; // 537
@@ -1685,6 +1696,28 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::CMSG_GAMEOBJ_USE, "CMSG_GAMEOBJ_USE"),
     (Opcode::CMSG_AREATRIGGER, "CMSG_AREATRIGGER"),
     (Opcode::CMSG_MESSAGECHAT, "CMSG_MESSAGECHAT"),
+    (
+        Opcode::CMSG_CHAT_MESSAGE_CHANNEL,
+        "CMSG_CHAT_MESSAGE_CHANNEL",
+    ),
+    (
+        Opcode::CMSG_CHAT_MESSAGE_WHISPER,
+        "CMSG_CHAT_MESSAGE_WHISPER",
+    ),
+    (Opcode::CMSG_CHAT_MESSAGE_GUILD, "CMSG_CHAT_MESSAGE_GUILD"),
+    (
+        Opcode::CMSG_CHAT_MESSAGE_OFFICER,
+        "CMSG_CHAT_MESSAGE_OFFICER",
+    ),
+    (Opcode::CMSG_CHAT_MESSAGE_EMOTE, "CMSG_CHAT_MESSAGE_EMOTE"),
+    (Opcode::CMSG_CHAT_MESSAGE_PARTY, "CMSG_CHAT_MESSAGE_PARTY"),
+    (Opcode::CMSG_CHAT_MESSAGE_RAID, "CMSG_CHAT_MESSAGE_RAID"),
+    (
+        Opcode::CMSG_CHAT_MESSAGE_RAID_WARNING,
+        "CMSG_CHAT_MESSAGE_RAID_WARNING",
+    ),
+    (Opcode::CMSG_CHAT_MESSAGE_SAY, "CMSG_CHAT_MESSAGE_SAY"),
+    (Opcode::CMSG_CHAT_MESSAGE_YELL, "CMSG_CHAT_MESSAGE_YELL"),
     (Opcode::SMSG_MESSAGECHAT, "SMSG_MESSAGECHAT"),
     (Opcode::CMSG_CHAT_IGNORED, "CMSG_CHAT_IGNORED"),
     (Opcode::SMSG_CHAT_WRONG_FACTION, "SMSG_CHAT_WRONG_FACTION"),
@@ -2492,8 +2525,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            645,
-            "expected 645 opcode constants; update this count deliberately when adding opcodes"
+            656,
+            "expected 656 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

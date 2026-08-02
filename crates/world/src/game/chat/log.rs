@@ -8,10 +8,10 @@
 
 use anyhow::Result;
 use sqlx::MySqlPool;
-use tokio::sync::mpsc;
-use tokio::sync::broadcast;
-use tracing::{error, warn};
 use std::sync::Arc;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tracing::{error, warn};
 
 use crate::game::chat::ChatError;
 use crate::game::player::PlayerManager;
@@ -108,18 +108,26 @@ async fn process_outbox_row(world: &World, row: OutboxRow) -> Result<()> {
     let gm_guid = match outbox_sender(world, row.sender_guid, row.sender_account) {
         Some(guid) => guid,
         None => {
-            mark_outbox(&world.databases.logs, row.id, "failed", Some("sender character offline or not on account")).await?;
+            mark_outbox(
+                &world.databases.logs,
+                row.id,
+                "failed",
+                Some("sender character offline or not on account"),
+            )
+            .await?;
             return Ok(());
         }
     };
 
     let result = match row.channel_type.as_str() {
         "Whisper" => match row.target_name {
-            Some(target) => world
-                .systems
-                .chat
-                .send_whisper_as_gm(gm_guid, &target, &row.message, &world.systems.social)
-                .await,
+            Some(target) => {
+                world
+                    .systems
+                    .chat
+                    .send_whisper_as_gm(gm_guid, &target, &row.message, &world.systems.social)
+                    .await
+            }
             None => Err(ChatError::TargetNotFound),
         },
         other => Err(ChatError::NoPermission),
@@ -127,7 +135,15 @@ async fn process_outbox_row(world: &World, row: OutboxRow) -> Result<()> {
 
     match result {
         Ok(()) => mark_outbox(&world.databases.logs, row.id, "sent", None).await?,
-        Err(err) => mark_outbox(&world.databases.logs, row.id, "failed", Some(&err.to_string())).await?,
+        Err(err) => {
+            mark_outbox(
+                &world.databases.logs,
+                row.id,
+                "failed",
+                Some(&err.to_string()),
+            )
+            .await?
+        }
     }
     Ok(())
 }
@@ -154,7 +170,8 @@ async fn mark_outbox(pool: &MySqlPool, id: u64, status: &str, error: Option<&str
 }
 
 /// Poll `chat_outbox` once for pending rows and deliver them.
-async fn poll_outbox(world: Arc<World>) -> Result<()> {
+/// Returns whether work was found so the caller can back off while the queue is idle.
+async fn poll_outbox(world: Arc<World>) -> Result<bool> {
     let rows = sqlx::query_as::<_, (u64, u32, u32, String, Option<String>, String)>(
         "SELECT `id`, `sender_account`, `sender_guid`, `channel_type`, `target_name`, `message` \
          FROM `chat_outbox` WHERE `status` = 'pending' ORDER BY `id` ASC LIMIT 20",
@@ -162,6 +179,7 @@ async fn poll_outbox(world: Arc<World>) -> Result<()> {
     .fetch_all(&world.databases.logs)
     .await?;
 
+    let has_rows = !rows.is_empty();
     for (id, sender_account, sender_guid, channel_type, target_name, message) in rows {
         let row = OutboxRow {
             id,
@@ -175,22 +193,29 @@ async fn poll_outbox(world: Arc<World>) -> Result<()> {
             warn!(target: "world_chat_outbox", %err, outbox_id = id, "failed to process chat outbox row");
         }
     }
-    Ok(())
+    Ok(has_rows)
 }
 
-/// Spawn the background task that drains `chat_outbox` every second until the
-/// shutdown signal fires.
+/// Spawn the background task that drains `chat_outbox` until shutdown.
+///
+/// The web and world services use separate database pools, so a newly inserted outbox row has no
+/// in-process notification to wake the world. Back off exponentially while idle instead of issuing
+/// a permanent once-per-second `SELECT`; once work is found, the queue drains at a one-second cadence.
 pub fn spawn_chat_outbox_poller(world: Arc<World>, mut shutdown_rx: broadcast::Receiver<()>) {
     tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut idle_delay = std::time::Duration::from_secs(1);
         loop {
             tokio::select! {
-                _ = ticker.tick() => {
-                    if let Err(err) = poll_outbox(world.clone()).await {
-                        warn!(target: "world_chat_outbox", %err, "chat outbox poll failed");
+                _ = tokio::time::sleep(idle_delay) => {
+                    match poll_outbox(world.clone()).await {
+                        Ok(true) => idle_delay = std::time::Duration::from_secs(1),
+                        Ok(false) => idle_delay = (idle_delay * 2).min(std::time::Duration::from_secs(60)),
+                        Err(err) => {
+                            warn!(target: "world_chat_outbox", %err, "chat outbox poll failed");
+                            idle_delay = (idle_delay * 2).min(std::time::Duration::from_secs(60));
+                        }
                     }
-                }
+                },
                 _ = shutdown_rx.recv() => break,
             }
         }

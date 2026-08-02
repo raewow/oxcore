@@ -168,7 +168,9 @@ pub async fn handle_questgiver_status_multiple_query(
 ///
 /// The two are separate types with the same variants; a `From` impl would live in whichever crate
 /// owns neither, so the mapping is spelled out where it is used.
-fn to_message_status(status: crate::game::npc::quest::types::DialogStatus) -> QuestGiverDialogStatus {
+fn to_message_status(
+    status: crate::game::npc::quest::types::DialogStatus,
+) -> QuestGiverDialogStatus {
     use crate::game::npc::quest::types::DialogStatus as Local;
     match status {
         Local::None => QuestGiverDialogStatus::None,
@@ -1179,8 +1181,7 @@ mod tests {
         packet.write_bytes(&writer.into_bytes());
 
         assert_eq!(
-            read_questgiver_guid(oxcore_shared::protocol::Protocol::Modern, &mut packet)
-                .unwrap(),
+            read_questgiver_guid(oxcore_shared::protocol::Protocol::Modern, &mut packet).unwrap(),
             expected
         );
     }

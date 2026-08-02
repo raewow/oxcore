@@ -28,10 +28,10 @@ use oxcore_shared::messages::spells::{
     SmsgSpellStart, SmsgSpellUpdateChainTargets, SpellMissTarget, SPELL_RESULT_STATUS_FAIL,
     SPELL_RESULT_STATUS_OKAY,
 };
+use oxcore_shared::messages::update::DEFAULT_REALM_ID;
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
-use oxcore_shared::messages::update::DEFAULT_REALM_ID;
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::guid::cast_guid128;
 use oxcore_shared::protocol::ObjectGuid;
@@ -572,14 +572,13 @@ impl SpellSystem {
 
     /// Send the remaining duration for an active channel to its caster.
     pub fn send_channel_update(&self, caster_guid: ObjectGuid, remaining_ms: u32) {
-        self.broadcast_mgr
-            .send_msg_to_player(
+        self.broadcast_mgr.send_msg_to_player(
+            caster_guid,
+            MsgChannelUpdate {
+                remaining_ms,
                 caster_guid,
-                MsgChannelUpdate {
-                    remaining_ms,
-                    caster_guid,
-                },
-            );
+            },
+        );
     }
 
     /// Create a new spell system
@@ -776,8 +775,7 @@ impl SpellSystem {
         if validate_result != SpellCastError::None {
             // Send failure to client. Modern references the same cast id the handler's
             // SMSG_SPELL_PREPARE announced, so the client's pending press resolves.
-            let cast_id = cast_sequence
-                .map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
+            let cast_id = cast_sequence.map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
             self.send_cast_failure_with_cast_id(
                 caster_guid,
                 spell_id,
@@ -796,15 +794,9 @@ impl SpellSystem {
         ) {
             let error = missing_script_target_error(is_triggered);
             if error != SpellCastError::DontReport {
-                let cast_id = cast_sequence
-                    .map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
-                self.send_cast_failure_with_cast_id(
-                    caster_guid,
-                    spell_id,
-                    error,
-                    cast_id,
-                    world,
-                )?;
+                let cast_id =
+                    cast_sequence.map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
+                self.send_cast_failure_with_cast_id(caster_guid, spell_id, error, cast_id, world)?;
             }
             return Ok(SpellCastResult::Failed(error));
         }
@@ -3472,9 +3464,8 @@ impl SpellSystem {
 
         // Modern needs a real SMSG_CAST_FAILED body or the rejection is dropped and the client's
         // pending press stays unresolved. Vanilla gets the same SMSG_CAST_RESULT shape as before.
-        let cast_id = cast_id.unwrap_or_else(|| {
-            cast_guid128(DEFAULT_REALM_ID, 0, spell_id, next_cast_sequence())
-        });
+        let cast_id = cast_id
+            .unwrap_or_else(|| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, next_cast_sequence()));
         let msg = SmsgCastFailed {
             cast_id,
             spell_id,
@@ -3764,8 +3755,18 @@ impl SpellSystem {
                 .unwrap_or_default();
 
             if ok {
-                self.finish_cast(caster_guid, spell_id, &targets, false, None, None, None, None, world)
-                    .await?;
+                self.finish_cast(
+                    caster_guid,
+                    spell_id,
+                    &targets,
+                    false,
+                    None,
+                    None,
+                    None,
+                    None,
+                    world,
+                )
+                .await?;
             } else {
                 self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted, world)?;
             }

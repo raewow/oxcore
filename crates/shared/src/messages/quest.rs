@@ -826,8 +826,8 @@ impl ToWorldPacket for SmsgQuestgiverOfferRewardV2<'_> {
         writer.write_bits(0, 8); // PortraitGiverName
         writer.write_bits(0, 10); // PortraitTurnInText
         writer.write_bits(0, 8); // PortraitTurnInName
-        // No FlushBits here: the strings are written straight after, and `write_bytes`
-        // flushes the partial byte itself.
+                                 // No FlushBits here: the strings are written straight after, and `write_bytes`
+                                 // flushes the partial byte itself.
 
         writer.write_bytes(title);
         writer.write_bytes(reward_text);
@@ -884,7 +884,7 @@ fn write_modern_quest_rewards(
         writer.write_u32(0); // FactionID
         writer.write_i32(0); // FactionValue
         writer.write_i32(0); // FactionOverride
-        // Every cap is seeded at 7, so match it rather than zero.
+                             // Every cap is seeded at 7, so match it rather than zero.
         writer.write_i32(7); // FactionCapIn
     }
 
@@ -915,7 +915,7 @@ fn write_modern_quest_rewards(
 /// An absent choice still writes the whole shape with zeros — the array is fixed-width.
 fn write_modern_quest_choice_item(writer: &mut BitWriter, choice: Option<&RewardItemInfo>) {
     writer.write_bits(0, 2); // LootItemType: 0 = item
-    // ItemInstance
+                             // ItemInstance
     writer.write_u32(choice.map_or(0, |c| c.item_id));
     writer.write_u32(0); // RandomPropertiesSeed
     writer.write_u32(0); // RandomPropertiesID
@@ -1795,7 +1795,8 @@ mod modern_quest_dialog_tests {
         .unwrap();
         let long = details(&[], &[], QuestFlags(0));
 
-        let extra = "Kobold Camp Cleanup".len() + "The kobolds have been troubling us.".len()
+        let extra = "Kobold Camp Cleanup".len()
+            + "The kobolds have been troubling us.".len()
             + "Slay 10 kobolds.".len()
             - 3;
         // The long case also carries one emote (two u32s) that the short case does not.

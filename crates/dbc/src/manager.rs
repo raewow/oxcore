@@ -1,11 +1,11 @@
 use crate::store::{load_dbc_store, DbcEntry, DbcStore};
 use crate::structures::{
     AreaTableEntry, AreaTriggerEntry, AuctionHouseEntry, BankBagSlotPricesEntry, ChrClassesEntry,
-    ChrRacesEntry, CreatureDisplayInfoEntry, FactionDbcEntry, FactionTemplateDbcEntry,
-    GameObjectDisplayInfoEntry, ItemEntry, LockEntry, MapEntry, SkillLineAbilityEntry,
-    SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry, SpellCastTimeEntry,
-    SpellDurationEntry, SpellFocusObjectEntry, SpellRadiusEntry, SpellRangeEntry, TalentEntry,
-    TalentTabEntry, WorldSafeLocsEntry,
+    ChrRacesEntry, CreatureDisplayInfoEntry, CreatureModelDataEntry, FactionDbcEntry,
+    FactionTemplateDbcEntry, GameObjectDisplayInfoEntry, ItemEntry, LockEntry, MapEntry,
+    SkillLineAbilityEntry, SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry,
+    SpellCastTimeEntry, SpellDurationEntry, SpellFocusObjectEntry, SpellRadiusEntry,
+    SpellRangeEntry, TalentEntry, TalentTabEntry, WorldSafeLocsEntry,
 };
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -19,6 +19,7 @@ pub struct DbcManager {
     pub chr_classes: DbcStore<ChrClassesEntry>,
     pub chr_races: DbcStore<ChrRacesEntry>,
     pub creature_display_info: DbcStore<CreatureDisplayInfoEntry>,
+    pub creature_model_data: DbcStore<CreatureModelDataEntry>,
     pub faction: DbcStore<FactionDbcEntry>,
     pub faction_template: DbcStore<FactionTemplateDbcEntry>,
     pub gameobject_display_info: DbcStore<GameObjectDisplayInfoEntry>,
@@ -63,6 +64,7 @@ impl DbcManager {
             chr_classes: DbcStore::new(&chr_classes_format),
             chr_races: DbcStore::new(&chr_races_format),
             creature_display_info: DbcStore::new("nixifxxxxxxx"),
+            creature_model_data: DbcStore::new("nisxfxxxxxxxxxxf"),
             faction: DbcStore::new(&faction_format),
             faction_template: DbcStore::new("iiiiiiiiiiiiii"),
             gameobject_display_info: DbcStore::new("nsxxxxxxxxxx"),
@@ -203,6 +205,11 @@ impl DbcManager {
             dbc_path,
             "CreatureDisplayInfo.dbc",
         )?;
+        Self::load_dbc(
+            &mut self.creature_model_data,
+            dbc_path,
+            "CreatureModelData.dbc",
+        )?;
         Self::load_dbc_optional(&mut self.item, dbc_path, "Item.dbc")?;
         Self::load_dbc(&mut self.skill_line, dbc_path, "SkillLine.dbc")?;
         Self::load_dbc(
@@ -323,6 +330,11 @@ impl DbcManager {
     /// Get creature display info entry by ID
     pub fn get_creature_display_info(&self, display_id: u32) -> Option<&CreatureDisplayInfoEntry> {
         self.creature_display_info.lookup(display_id)
+    }
+
+    /// Get the native model record used to complete a creature display's scale.
+    pub fn get_creature_model_data(&self, model_id: u32) -> Option<&CreatureModelDataEntry> {
+        self.creature_model_data.lookup(model_id)
     }
 
     /// Check if CreatureDisplayInfo.dbc is loaded

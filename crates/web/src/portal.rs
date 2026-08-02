@@ -191,7 +191,19 @@ pub struct SendChatResult {
 /// chat query in this module; keep them in sync.
 #[cfg(feature = "ssr")]
 fn chat_row(
-    (id, time, channel_type, channel_name, sender_guid, sender_name, sender_account, target_guid, target_name, message, map): (
+    (
+        id,
+        time,
+        channel_type,
+        channel_name,
+        sender_guid,
+        sender_name,
+        sender_account,
+        target_guid,
+        target_name,
+        message,
+        map,
+    ): (
         u64,
         i64,
         String,
@@ -724,13 +736,15 @@ pub async fn get_chat_participants(
         };
         return Ok(rows
             .into_iter()
-            .map(|(guid, name, account, message_count, last_seen)| ChatParticipant {
-                guid,
-                name,
-                account,
-                message_count: message_count as u64,
-                last_seen,
-            })
+            .map(
+                |(guid, name, account, message_count, last_seen)| ChatParticipant {
+                    guid,
+                    name,
+                    account,
+                    message_count: message_count as u64,
+                    last_seen,
+                },
+            )
             .collect());
     }
 
@@ -780,15 +794,14 @@ pub async fn get_player_chat(name: String) -> Result<ChatPlayerDetail, ServerFnE
         };
         let messages: Vec<ChatMessage> = rows.into_iter().map(chat_row).collect();
 
-        let account_from_characters = sqlx::query_scalar::<_, i64>(
-            "SELECT `account` FROM `characters` WHERE `name` = ?",
-        )
-        .bind(name)
-        .fetch_optional(&*state.characters)
-        .await
-        .ok()
-        .flatten()
-        .map(|account| account as u32);
+        let account_from_characters =
+            sqlx::query_scalar::<_, i64>("SELECT `account` FROM `characters` WHERE `name` = ?")
+                .bind(name)
+                .fetch_optional(&*state.characters)
+                .await
+                .ok()
+                .flatten()
+                .map(|account| account as u32);
         let account_id = messages
             .iter()
             .find_map(|message| message.sender_account)

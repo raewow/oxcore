@@ -122,8 +122,10 @@ fn to_modern_npc_flags(vanilla: u32) -> u32 {
         (0x0000_2000, 0x0040_0000), // StableMaster
         (0x0000_4000, 0x0000_1000), // Repair
     ];
-    BITS.iter()
-        .fold(0, |acc, &(v, m)| if vanilla & v != 0 { acc | m } else { acc })
+    BITS.iter().fold(
+        0,
+        |acc, &(v, m)| if vanilla & v != 0 { acc | m } else { acc },
+    )
 }
 
 /// Translate vanilla unit dynamic-flag bits to their modern positions.
@@ -142,8 +144,10 @@ fn to_modern_dynamic_flags(vanilla: u32) -> u32 {
         (0x20, 0x40), // AppearDead
         (0x40, 0x80), // ReferAFriendLinked
     ];
-    BITS.iter()
-        .fold(0, |acc, &(v, m)| if vanilla & v != 0 { acc | m } else { acc })
+    BITS.iter().fold(
+        0,
+        |acc, &(v, m)| if vanilla & v != 0 { acc | m } else { acc },
+    )
 }
 
 /// Split a vanilla field index into its visible-item `(slot, offset)`, or `None` if it is not one
@@ -209,7 +213,11 @@ pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> 
             let shapeshift_form = (value >> 16) & 0xFF;
             Writes::new_masked(&[
                 (MODERN_UNIT_FIELD_BYTES_1, stand_state, 0x0000_00FF),
-                (MODERN_UNIT_FIELD_BYTES_2, shapeshift_form << 24, 0xFF00_0000),
+                (
+                    MODERN_UNIT_FIELD_BYTES_2,
+                    shapeshift_form << 24,
+                    0xFF00_0000,
+                ),
             ])
         }
 
@@ -229,10 +237,9 @@ pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> 
 
         // Same hazard as NPC flags: the bits renumber as well as the field moving to the shared
         // Object block. See `to_modern_dynamic_flags` for why this broke loot visibility.
-        UNIT_DYNAMIC_FLAGS => Writes::new(&[(
-            MODERN_OBJECT_DYNAMIC_FLAGS,
-            to_modern_dynamic_flags(value),
-        )]),
+        UNIT_DYNAMIC_FLAGS => {
+            Writes::new(&[(MODERN_OBJECT_DYNAMIC_FLAGS, to_modern_dynamic_flags(value))])
+        }
 
         // Vanilla names 19 x 12 individual fields; 1.14 has one 19 x 2 array. Restricted to the
         // player chain the same way the quest log is: these indices are past a creature's field
@@ -245,7 +252,8 @@ pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> 
             ) && visible_item_slot(index).is_some() =>
         {
             let (slot, offset) = visible_item_slot(index)?;
-            let target = MODERN_PLAYER_VISIBLE_ITEM + slot * MODERN_VISIBLE_ITEM_STRIDE + offset as u16;
+            let target =
+                MODERN_PLAYER_VISIBLE_ITEM + slot * MODERN_VISIBLE_ITEM_STRIDE + offset as u16;
             Writes::new(&[(target, value)])
         }
 
@@ -353,10 +361,7 @@ mod tests {
             repack(ModernObjectType::Player, UNIT_FIELD_BYTES_0, vanilla).expect("transformed");
 
         assert_eq!(writes.as_slice()[0].1 >> 24, 0, "sex, not the power type");
-        assert_eq!(
-            writes.as_slice()[1],
-            (MODERN_UNIT_FIELD_DISPLAY_POWER, 1)
-        );
+        assert_eq!(writes.as_slice()[1], (MODERN_UNIT_FIELD_DISPLAY_POWER, 1));
     }
 
     #[test]
@@ -497,16 +502,14 @@ mod tests {
     /// cue even though the server marked the corpse lootable.
     #[test]
     fn dynamic_flags_move_the_lootable_bit() {
-        let writes =
-            repack(ModernObjectType::Unit, UNIT_DYNAMIC_FLAGS, 0x1).expect("transformed");
+        let writes = repack(ModernObjectType::Unit, UNIT_DYNAMIC_FLAGS, 0x1).expect("transformed");
         assert_eq!(writes.as_slice(), [(MODERN_OBJECT_DYNAMIC_FLAGS, 0x4)]);
     }
 
     /// `TappedByPlayer` (vanilla `0x8`) has no modern counterpart and must be dropped, not guessed.
     #[test]
     fn dynamic_flags_drop_tapped_by_player() {
-        let writes =
-            repack(ModernObjectType::Unit, UNIT_DYNAMIC_FLAGS, 0x8).expect("transformed");
+        let writes = repack(ModernObjectType::Unit, UNIT_DYNAMIC_FLAGS, 0x8).expect("transformed");
         assert_eq!(writes.as_slice(), [(MODERN_OBJECT_DYNAMIC_FLAGS, 0)]);
     }
 
@@ -518,8 +521,8 @@ mod tests {
         let stand_state = 0u32;
         let shapeshift_form = 17u32; // Battle Stance
         let vanilla = stand_state | (shapeshift_form << 16);
-        let writes = repack(ModernObjectType::Player, UNIT_FIELD_BYTES_1, vanilla)
-            .expect("transformed");
+        let writes =
+            repack(ModernObjectType::Player, UNIT_FIELD_BYTES_1, vanilla).expect("transformed");
         assert_eq!(
             writes.as_slice(),
             [
@@ -533,8 +536,8 @@ mod tests {
     #[test]
     fn bytes_2_sends_only_sheathe_state_masked_to_byte_0() {
         let vanilla = 1 | (0x10 << 8); // sheathed, plus vanilla's misc aura-icon byte
-        let writes = repack(ModernObjectType::Player, UNIT_FIELD_BYTES_2, vanilla)
-            .expect("transformed");
+        let writes =
+            repack(ModernObjectType::Player, UNIT_FIELD_BYTES_2, vanilla).expect("transformed");
         assert_eq!(writes.as_slice(), [(MODERN_UNIT_FIELD_BYTES_2, 1)]);
         assert_eq!(writes.masks(), [0x0000_00FF]);
     }
@@ -575,8 +578,12 @@ mod tests {
     /// no equipped items rendered on other players.
     #[test]
     fn visible_item_entry_maps_into_the_modern_array() {
-        let writes = repack(ModernObjectType::ActivePlayer, PLAYER_VISIBLE_ITEM_1_0, 12345)
-            .expect("slot 0 entry must map");
+        let writes = repack(
+            ModernObjectType::ActivePlayer,
+            PLAYER_VISIBLE_ITEM_1_0,
+            12345,
+        )
+        .expect("slot 0 entry must map");
         assert_eq!(writes.as_slice(), [(MODERN_PLAYER_VISIBLE_ITEM, 12345)]);
     }
 
@@ -595,11 +602,14 @@ mod tests {
     #[test]
     fn visible_item_slots_use_the_modern_stride() {
         let slot_3_entry = PLAYER_VISIBLE_ITEM_1_0 + 3 * VANILLA_VISIBLE_ITEM_STRIDE;
-        let writes = repack(ModernObjectType::ActivePlayer, slot_3_entry, 42)
-            .expect("slot 3 must map");
+        let writes =
+            repack(ModernObjectType::ActivePlayer, slot_3_entry, 42).expect("slot 3 must map");
         assert_eq!(
             writes.as_slice(),
-            [(MODERN_PLAYER_VISIBLE_ITEM + 3 * MODERN_VISIBLE_ITEM_STRIDE, 42)]
+            [(
+                MODERN_PLAYER_VISIBLE_ITEM + 3 * MODERN_VISIBLE_ITEM_STRIDE,
+                42
+            )]
         );
     }
 

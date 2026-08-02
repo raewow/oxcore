@@ -39,12 +39,14 @@ use super::crypt::WorldCrypt;
 use super::framing::{
     self, ModernPacket, CONNECTION_INITIALIZE_CLIENT, CONNECTION_INITIALIZE_SERVER,
 };
-use super::handshake::{auth_response_frame, feature_system_status_glue_screen_frame, HandshakeServer};
-use super::packet_log;
+use super::handshake::{
+    auth_response_frame, feature_system_status_glue_screen_frame, HandshakeServer,
+};
 use super::opcodes::{
     CMSG_AUTH_CONTINUED_SESSION, CMSG_AUTH_SESSION, CMSG_ENTER_ENCRYPTED_MODE_ACK, CMSG_PING,
     SMSG_PONG,
 };
+use super::packet_log;
 use super::packets::{
     classic_available_classes, pong_body, AuthContinuedSession, AuthResponseSuccess, AuthSession,
     EnterEncryptedModeSigner, FeatureSystemStatusGlueScreen, Ping,
@@ -456,6 +458,28 @@ impl ConnectionRole {
     }
 }
 
+/// The modern client keeps its social/chat connection on the realm socket after entering the
+/// world. Its player and outbound packet queue belong to the instance session, so these must be
+/// dispatched there rather than to the realm session, which stays `Authenticated`.
+fn is_realm_chat_opcode(opcode: Opcode) -> bool {
+    matches!(
+        opcode,
+        Opcode::CMSG_CHAT_MESSAGE_CHANNEL
+            | Opcode::CMSG_CHAT_MESSAGE_WHISPER
+            | Opcode::CMSG_CHAT_MESSAGE_GUILD
+            | Opcode::CMSG_CHAT_MESSAGE_OFFICER
+            | Opcode::CMSG_CHAT_MESSAGE_EMOTE
+            | Opcode::CMSG_CHAT_MESSAGE_PARTY
+            | Opcode::CMSG_CHAT_MESSAGE_RAID
+            | Opcode::CMSG_CHAT_MESSAGE_RAID_WARNING
+            | Opcode::CMSG_CHAT_MESSAGE_SAY
+            | Opcode::CMSG_CHAT_MESSAGE_YELL
+            | Opcode::CMSG_JOIN_CHANNEL
+            | Opcode::CMSG_LEAVE_CHANNEL
+            | Opcode::CMSG_CHANNEL_LIST
+    )
+}
+
 pub enum ConnectionRole {
     /// Glue screen and character list. Answers `CMSG_PLAYER_LOGIN` with `SMSG_CONNECT_TO` and runs
     /// none of the login sequence itself.
@@ -608,8 +632,18 @@ where
 
             let mut world_packet = WorldPacket::new(opcode);
             world_packet.write_bytes(&packet.body);
+            let dispatch_session =
+                if matches!(role, ConnectionRole::Realm { .. }) && is_realm_chat_opcode(opcode) {
+                    world
+                        .session_mgr
+                        .get_session_by_account(conn.account_id)
+                        .filter(|active| active.player_guid().is_some())
+                        .unwrap_or_else(|| Arc::clone(&session))
+                } else {
+                    Arc::clone(&session)
+                };
             if let Err(e) = route_packet(
-                Arc::clone(&session),
+                dispatch_session,
                 world_packet,
                 Arc::clone(&world.databases),
                 Arc::clone(&world),

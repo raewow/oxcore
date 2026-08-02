@@ -166,21 +166,59 @@ pub async fn handle_set_action_button(
 ///   u32 data_type (0-7)
 ///   u32 decompressed_size
 ///   u8[] compressed_data (rest of packet)
+///
+/// The 1.14 client names its owner and modification time up front and bit-packs the type, so the
+/// two bodies only share the compressed tail:
+///   PackedGuid128 owner
+///   i64  time
+///   u32  decompressed_size
+///   bits data_type (4)
+///   u32  compressed_size
+///   u8[] compressed_data
 pub async fn handle_update_account_data(
     session: &WorldSession,
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let data_type = packet
-        .read_u32()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read data_type"))?;
-    let decompressed_size = packet
-        .read_u32()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read decompressed_size"))?;
+    let (data_type, decompressed_size, compressed_data, client_time) =
+        if session.protocol() == Protocol::Modern {
+            use oxcore_shared::protocol::bitbuf::BitReader;
 
-    // Read remaining bytes as compressed data
-    use bytes::Buf;
-    let compressed_data = packet.data().chunk().to_vec();
+            let mut reader = BitReader::new(packet.contents());
+            let _owner = reader
+                .read_packed_guid_128()
+                .ok_or_else(|| anyhow::anyhow!("Failed to read owner guid"))?;
+            let time = reader
+                .read_i64()
+                .ok_or_else(|| anyhow::anyhow!("Failed to read update time"))?;
+            let size = reader
+                .read_u32()
+                .ok_or_else(|| anyhow::anyhow!("Failed to read decompressed size"))?;
+            let data_type = reader
+                .read_bits(4)
+                .ok_or_else(|| anyhow::anyhow!("Failed to read data type"))?;
+            let compressed_size = reader
+                .read_u32()
+                .ok_or_else(|| anyhow::anyhow!("Failed to read compressed size"))?
+                as usize;
+            let compressed = reader
+                .read_bytes(compressed_size)
+                .ok_or_else(|| anyhow::anyhow!("Failed to read compressed data"))?
+                .to_vec();
+            (data_type, size, compressed, Some(time as u32))
+        } else {
+            let data_type = packet
+                .read_u32()
+                .ok_or_else(|| anyhow::anyhow!("Failed to read data_type"))?;
+            let decompressed_size = packet
+                .read_u32()
+                .ok_or_else(|| anyhow::anyhow!("Failed to read decompressed_size"))?;
+
+            // Read remaining bytes as compressed data
+            use bytes::Buf;
+            let compressed_data = packet.data().chunk().to_vec();
+            (data_type, decompressed_size, compressed_data, None)
+        };
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
@@ -204,6 +242,7 @@ pub async fn handle_update_account_data(
             data_type,
             decompressed_size,
             &compressed_data,
+            client_time,
             world,
         )
         .await?;
@@ -217,15 +256,28 @@ pub async fn handle_update_account_data(
 /// when it detects its cache is stale based on timestamps).
 ///
 /// Wire format:
-///   u32 data_type (0-7)
+///   u32 data_type (0-7)                    -- 1.12
+///   PackedGuid128 owner, bits data_type(4) -- 1.14
 pub async fn handle_request_account_data(
     session: &WorldSession,
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let data_type = packet
-        .read_u32()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read data_type"))?;
+    let data_type = if session.protocol() == Protocol::Modern {
+        use oxcore_shared::protocol::bitbuf::BitReader;
+
+        let mut reader = BitReader::new(packet.contents());
+        let _owner = reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read owner guid"))?;
+        reader
+            .read_bits(4)
+            .ok_or_else(|| anyhow::anyhow!("Failed to read data type"))?
+    } else {
+        packet
+            .read_u32()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read data_type"))?
+    };
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,

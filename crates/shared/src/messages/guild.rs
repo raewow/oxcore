@@ -267,7 +267,7 @@ impl ToWorldPacket for SmsgGuildQueryResponse<'_> {
 
         for rank in &ranks {
             writer.write_u32(u32::from(rank.id)); // RankID
-            // 1.12 rank ids are already the display order, highest authority first.
+                                                  // 1.12 rank ids are already the display order, highest authority first.
             writer.write_u32(u32::from(rank.id)); // RankOrder
             let name = rank.name.as_bytes();
             writer.write_bits(name.len() as u32, 7);

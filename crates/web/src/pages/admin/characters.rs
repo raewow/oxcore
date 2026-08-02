@@ -92,7 +92,11 @@ fn render_admin_character_detail(
 ) -> AnyView {
     match result {
         Ok(Some(character)) => {
-            let state = if character.online != 0 { "Online" } else { "Offline" };
+            let state = if character.online != 0 {
+                "Online"
+            } else {
+                "Offline"
+            };
             let account_username = character
                 .account_username
                 .clone()
@@ -123,7 +127,12 @@ fn render_admin_character_detail(
             }
             .into_any()
         }
-        Ok(None) => view! { <p class="mt-8 text-xs text-muted-foreground">"Character not found."</p> }.into_any(),
-        Err(error) => view! { <p class="mt-8 text-xs text-destructive">{error.to_string()}</p> }.into_any(),
+        Ok(None) => {
+            view! { <p class="mt-8 text-xs text-muted-foreground">"Character not found."</p> }
+                .into_any()
+        }
+        Err(error) => {
+            view! { <p class="mt-8 text-xs text-destructive">{error.to_string()}</p> }.into_any()
+        }
     }
 }

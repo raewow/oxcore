@@ -147,7 +147,7 @@ fn write_modern_party_member(writer: &mut BitWriter, group: &CachedGroup, member
     writer.write_bits(1, 6);
     writer.write_bit(false); // FromSocialQueue
     writer.write_bit(false); // VoiceChatSilenced
-    // Byte-sized writes flush the 14 bits above; the name bytes land after every fixed field.
+                             // Byte-sized writes flush the 14 bits above; the name bytes land after every fixed field.
 
     let (high, low) = member.guid.to_guid128(DEFAULT_REALM_ID);
     writer.write_packed_guid_128(high, low);
@@ -171,9 +171,9 @@ fn write_modern_party_member(writer: &mut BitWriter, group: &CachedGroup, member
     writer.write_u8(flags);
 
     writer.write_u8(0); // RolesAssigned -- tank/healer/dps roles arrive with LFG, after Classic Era
-    // ClassId: 1.12's group list carries no class, and the client fills it from the name query it
-    // already sends for each member. Sending a guess here paints the wrong class icon and, worse,
-    // conflicts with the name-query answer that follows.
+                        // ClassId: 1.12's group list carries no class, and the client fills it from the name query it
+                        // already sends for each member. Sending a guess here paints the wrong class icon and, worse,
+                        // conflicts with the name-query answer that follows.
     writer.write_u8(0);
 
     writer.write_bytes(name);
@@ -1273,9 +1273,9 @@ impl ToWorldPacket for MsgRaidReadyCheck {
                 writer.write_u8(0); // PartyIndex -- see `SmsgGroupList::to_modern`
                 writer.write_packed_guid_128(party_high, party_low);
                 writer.write_packed_guid_128(high, low); // InitiatorGUID
-                // Duration drives the countdown on the ready-check frame and has no vanilla source.
-                // 35s is the client's own default window, so this matches what a native server
-                // would put here rather than inventing a timeout of our own.
+                                                         // Duration drives the countdown on the ready-check frame and has no vanilla source.
+                                                         // 35s is the client's own default window, so this matches what a native server
+                                                         // would put here rather than inventing a timeout of our own.
                 writer.write_u64(35_000);
                 Some(writer.finish(Opcode::MSG_RAID_READY_CHECK))
             }

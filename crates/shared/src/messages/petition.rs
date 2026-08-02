@@ -201,7 +201,7 @@ impl ToWorldPacket for SmsgPetitionShowSignatures<'_> {
         for signature in self.signatures {
             let (high, low) = signature.player_guid.to_guid128(DEFAULT_REALM_ID);
             writer.write_packed_guid_128(high, low); // Signer
-            // Which of the petition's choices was signed for. Guild charters have none.
+                                                     // Which of the petition's choices was signed for. Guild charters have none.
             writer.write_i32(0); // Choice
         }
 

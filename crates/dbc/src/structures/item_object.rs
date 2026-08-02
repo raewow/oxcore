@@ -109,6 +109,35 @@ impl DbcEntry for CreatureDisplayInfoEntry {
     }
 }
 
+/// CreatureModelData DBC entry. Together with CreatureDisplayInfo's per-display
+/// scale, `model_scale` is the native size used by the classic client.
+#[derive(Debug, Clone)]
+pub struct CreatureModelDataEntry {
+    pub id: u32,
+    pub model_scale: f32,
+}
+
+impl DbcEntry for CreatureModelDataEntry {
+    fn from_record(record: &DbcRecord) -> Result<Option<(u32, Self)>> {
+        let id = record
+            .get_u32(0)
+            .context("Failed to read CreatureModelData ID")?;
+        if id == 0 {
+            return Ok(None);
+        }
+
+        Ok(Some((
+            id,
+            Self {
+                id,
+                model_scale: record
+                    .get_f32(4)
+                    .context("Failed to read CreatureModelData modelScale")?,
+            },
+        )))
+    }
+}
+
 /// Lock DBC entry
 /// Format: "niiiiiiiiiiiiiiiiiiiiiiiixxxxxxxx" (from DBCfmt.h)
 /// Contains lock information for gameobjects

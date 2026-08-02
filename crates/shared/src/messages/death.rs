@@ -3,8 +3,8 @@
 //! All packets involved in the death and resurrection cycle.
 
 use crate::messages::update::DEFAULT_REALM_ID;
-use crate::protocol::bitbuf::BitWriter;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// SMSG_CORPSE_RECLAIM_DELAY (0x0269)

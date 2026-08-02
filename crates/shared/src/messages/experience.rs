@@ -8,8 +8,8 @@
 //! - [`SmsgLevelupInfo`] - Level up notification with stat gains
 
 use crate::messages::update::DEFAULT_REALM_ID;
-use crate::protocol::bitbuf::BitWriter;
 use crate::messages::ToWorldPacket;
+use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 
 /// SMSG_LOG_XPGAIN - XP gain notification
@@ -53,7 +53,6 @@ impl ToWorldPacket for SmsgLogXpGain {
         writer.write_u8(0); // RAFBonus
         Some(writer.finish(Opcode::SMSG_LOG_XPGAIN))
     }
-
 
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOG_XPGAIN);
@@ -128,7 +127,6 @@ impl ToWorldPacket for SmsgLevelupInfo {
         writer.write_i32(0); // NumNewPvpTalentSlots
         Some(writer.finish(Opcode::SMSG_LEVELUP_INFO))
     }
-
 
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LEVELUP_INFO);

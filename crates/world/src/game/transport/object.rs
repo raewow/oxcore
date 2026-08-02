@@ -35,7 +35,7 @@ pub struct Transport {
     /// Progress along the path; full time since start for MO transports, or time within the
     /// cycle for looping ones.
     path_progress: u32,
-/// The path progress the transport started at, added to `time_since_creation` each tick.
+    /// The path progress the transport started at, added to `time_since_creation` each tick.
     start_progress: u32,
     /// The keyframe the transport is currently on, carried across ticks.
     frame_cursor: usize,

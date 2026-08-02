@@ -347,9 +347,9 @@ pub fn feature_system_status_glue_screen_body(info: &FeatureSystemStatusGlueScre
     // Present from 1.14.1; our build (1.14.2/42597) always satisfies this.
     w.write_i32(0); // ActiveSeason
     w.write_i32(0); // GameRuleValues.Count
-    // Present from 1.14.2, which our build is.
+                    // Present from 1.14.2, which our build is.
     w.write_i16(50); // MaxPlayerNameQueriesPerPacket
-    // PlayerNameQueryTelemetryInterval is gated to 1.14.4+; our build is 1.14.2, so it is omitted.
+                     // PlayerNameQueryTelemetryInterval is gated to 1.14.4+; our build is 1.14.2, so it is omitted.
 
     w.into_bytes()
 }

@@ -369,7 +369,10 @@ mod tests {
         let mut packet = WorldPacket::new(Opcode::CMSG_ATTACKSWING);
         packet.write_bytes(&writer.into_bytes());
 
-        assert_eq!(read_attack_swing_target(Protocol::Modern, &mut packet).unwrap(), expected);
+        assert_eq!(
+            read_attack_swing_target(Protocol::Modern, &mut packet).unwrap(),
+            expected
+        );
     }
 
     #[test]

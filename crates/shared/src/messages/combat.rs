@@ -170,8 +170,8 @@ impl ToWorldPacket for SmsgAttackerStateUpdate {
         round.write_packed_guid_128(high, low);
         round.write_i32(self.total_damage as i32); // Damage
         round.write_i32(self.total_damage as i32); // OriginalDamage -- vanilla sends only one
-        // -1 means "the victim survived". Vanilla has no overkill field, and claiming zero overkill
-        // is not the same statement.
+                                                   // -1 means "the victim survived". Vanilla has no overkill field, and claiming zero overkill
+                                                   // is not the same statement.
         round.write_i32(-1); // OverDamage
 
         // One sub-damage entry, matching the vanilla body above.

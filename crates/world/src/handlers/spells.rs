@@ -80,7 +80,8 @@ fn parse_spell_cast_targets_modern_reader(
         .ok_or_else(|| anyhow::anyhow!("Failed to read HasMapID"))?;
     let name_length = reader
         .read_bits(7)
-        .ok_or_else(|| anyhow::anyhow!("Failed to read target name length"))? as usize;
+        .ok_or_else(|| anyhow::anyhow!("Failed to read target name length"))?
+        as usize;
 
     let unit = reader
         .read_packed_guid_128()
@@ -436,7 +437,10 @@ pub async fn handle_cast_spell(
     let server_cast_id =
         server_sequence.map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
     if let (Some(client_id), Some(server_id)) = (client_cast_id, server_cast_id) {
-        world.systems.spells.send_spell_prepare(player_guid, client_id, server_id);
+        world
+            .systems
+            .spells
+            .send_spell_prepare(player_guid, client_id, server_id);
     }
 
     // Unknown spell id: drop the cast, but loudly — a missing

@@ -11,8 +11,8 @@
 //! - [`SmsgChatPlayerAmbiguous`] - Multiple players match whisper target
 
 use crate::game::chat::{to_modern_chat_type, ChatMsg, ChatTag, Language};
-use crate::messages::ToWorldPacket;
 use crate::messages::update::DEFAULT_REALM_ID;
+use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::ObjectGuid;

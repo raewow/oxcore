@@ -19,12 +19,12 @@ pub mod game_object_handler;
 pub mod gossip_handler;
 pub mod group;
 pub mod guild;
+pub mod hotfix;
 pub mod item;
 pub mod loot;
 pub mod mail;
 pub mod movement;
 pub mod player_handler;
-pub mod hotfix;
 pub mod query;
 pub mod quest_handler;
 pub mod reputation;
@@ -208,6 +208,36 @@ pub async fn dispatch_packet(
                 // Chat handlers
                 Opcode::CMSG_MESSAGECHAT => {
                     chat::handle_messagechat(session, packet, world).await?;
+                }
+                Opcode::CMSG_CHAT_MESSAGE_SAY => {
+                    chat::handle_modern_messagechat(session, packet, world, oxcore_shared::game::chat::ChatMsg::Say).await?;
+                }
+                Opcode::CMSG_CHAT_MESSAGE_YELL => {
+                    chat::handle_modern_messagechat(session, packet, world, oxcore_shared::game::chat::ChatMsg::Yell).await?;
+                }
+                Opcode::CMSG_CHAT_MESSAGE_WHISPER => {
+                    chat::handle_modern_messagechat(session, packet, world, oxcore_shared::game::chat::ChatMsg::Whisper).await?;
+                }
+                Opcode::CMSG_CHAT_MESSAGE_CHANNEL => {
+                    chat::handle_modern_messagechat(session, packet, world, oxcore_shared::game::chat::ChatMsg::Channel).await?;
+                }
+                Opcode::CMSG_CHAT_MESSAGE_EMOTE => {
+                    chat::handle_modern_messagechat(session, packet, world, oxcore_shared::game::chat::ChatMsg::Emote).await?;
+                }
+                Opcode::CMSG_CHAT_MESSAGE_GUILD => {
+                    chat::handle_modern_messagechat(session, packet, world, oxcore_shared::game::chat::ChatMsg::Guild).await?;
+                }
+                Opcode::CMSG_CHAT_MESSAGE_OFFICER => {
+                    chat::handle_modern_messagechat(session, packet, world, oxcore_shared::game::chat::ChatMsg::Officer).await?;
+                }
+                Opcode::CMSG_CHAT_MESSAGE_PARTY => {
+                    chat::handle_modern_messagechat(session, packet, world, oxcore_shared::game::chat::ChatMsg::Party).await?;
+                }
+                Opcode::CMSG_CHAT_MESSAGE_RAID => {
+                    chat::handle_modern_messagechat(session, packet, world, oxcore_shared::game::chat::ChatMsg::Raid).await?;
+                }
+                Opcode::CMSG_CHAT_MESSAGE_RAID_WARNING => {
+                    chat::handle_modern_messagechat(session, packet, world, oxcore_shared::game::chat::ChatMsg::RaidWarning).await?;
                 }
                 Opcode::CMSG_JOIN_CHANNEL => {
                     chat::handle_join_channel(session, packet, world).await?;

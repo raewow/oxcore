@@ -152,6 +152,11 @@ impl SettingsSystem {
     ///
     /// The client sends compressed data for one of 8 account data types.
     /// We decompress, store in memory, persist to DB immediately, and echo confirmation back.
+    ///
+    /// `client_time` is the modification time a 1.14 client attaches to its save; a 1.12 client
+    /// sends none, so the server mints its own. Using the client's own time keeps the timestamp
+    /// stable across the round trip, so the client's next `SMSG_ACCOUNT_DATA_TIMES` comparison sees
+    /// an equal time and does not re-download its own blob.
     pub async fn handle_account_data_update(
         &self,
         player_guid: ObjectGuid,
@@ -159,6 +164,7 @@ impl SettingsSystem {
         data_type: u32,
         decompressed_size: u32,
         compressed_data: &[u8],
+        client_time: Option<u32>,
         world: &World,
     ) -> Result<()> {
         use oxcore_shared::database::CharacterRepository;
@@ -188,11 +194,13 @@ impl SettingsSystem {
             );
         }
 
-        // Generate server-side timestamp
-        let timestamp = std::time::SystemTime::now()
+        // Prefer the client's own modification time when it sent one; otherwise mint one. A zero
+        // time means "never cached", so it is treated the same as an absent client time.
+        let server_now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as u32;
+        let timestamp = client_time.filter(|&t| t != 0).unwrap_or(server_now);
 
         // Store in player state
         world
@@ -229,6 +237,9 @@ impl SettingsSystem {
         let response = SmsgUpdateAccountData {
             data_type,
             data: decompressed,
+            player_guid,
+            realm_id: world.get_realm_id() as u16,
+            time: timestamp,
         };
         self.broadcast_mgr.send_msg_to_player(player_guid, response);
 
@@ -257,19 +268,25 @@ impl SettingsSystem {
             return Ok(());
         }
 
-        let data = world
+        let (data, time) = world
             .managers
             .player_mgr
             .with_player(player_guid, |player| {
                 player.settings.account_data[data_type as usize]
                     .as_ref()
-                    .map(|entry| entry.data.clone())
+                    .map(|entry| (entry.data.clone(), entry.time))
                     .unwrap_or_default()
             })
             .unwrap_or_default();
 
         use oxcore_shared::messages::settings::SmsgUpdateAccountData;
-        let response = SmsgUpdateAccountData { data_type, data };
+        let response = SmsgUpdateAccountData {
+            data_type,
+            data,
+            player_guid,
+            realm_id: world.get_realm_id() as u16,
+            time,
+        };
         self.broadcast_mgr.send_msg_to_player(player_guid, response);
 
         Ok(())

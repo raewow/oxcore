@@ -244,7 +244,7 @@ impl ToWorldPacket for SmsgCharEnum<'_> {
             writer.write_packed_guid_128(0, 0); // GuildGuid
             writer.write_u32(character.character_flags); // Flags
                                                          // Flags2/Flags3 sit immediately after Flags, *before* the pet triple. These two
-                                                          // constants are placeholder values for Classic; they are opaque to us.
+                                                         // constants are placeholder values for Classic; they are opaque to us.
             writer.write_u32(402_685_956); // Flags2
             writer.write_u32(855_688_192); // Flags3
             writer.write_u32(character.pet_info.map_or(0, |pet| pet.0));

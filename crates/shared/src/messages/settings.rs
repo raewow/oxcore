@@ -23,18 +23,15 @@ pub struct SmsgUpdateAccountData {
     pub data_type: u32,
     /// Decompressed data blob
     pub data: Vec<u8>,
+    /// Owning player. Only the modern body names it — the 1.14 client keys its cache on this GUID.
+    pub player_guid: ObjectGuid,
+    /// Realm qualifying `player_guid`'s 128-bit form; must match what the character list used.
+    pub realm_id: u16,
+    /// Modification time. Only the modern body carries it; the client compares it against what
+    /// `SMSG_ACCOUNT_DATA_TIMES` promised.
+    pub time: u32,
 }
 
-/// Not ported to 1.14: the modern body names an owner and a modification time that this struct
-/// does not carry.
-///
-/// 1.14 reads a packed player GUID and an `i64` timestamp before the size word, then the data type
-/// as bits — 4 of them, since this build tracks more than 8 account data types. Both leading fields
-/// are load-bearing: the client keys its cache on the GUID and compares the timestamp against what
-/// `SMSG_ACCOUNT_DATA_TIMES` promised, so a zero there makes it re-request the blob forever.
-///
-/// [`SmsgAccountDataTimes`] below solves the same problem by carrying the GUID and realm on the
-/// struct; this message needs the same treatment plus a timestamp before it can be encoded.
 impl ToWorldPacket for SmsgUpdateAccountData {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_ACCOUNT_DATA);
@@ -58,6 +55,43 @@ impl ToWorldPacket for SmsgUpdateAccountData {
             }
         }
         packet
+    }
+
+    /// The 1.14 body is a different message from the vanilla one (this is why the shared opcode is
+    /// used): it names the owner, carries a modification time, and moves the data type into the
+    /// bit tail. Layout from `ClientConfigPackets.cs` `UpdateAccountData`:
+    ///
+    /// ```text
+    /// PackedGuid128 Player
+    /// i64  Time
+    /// u32  Size        // decompressed size
+    /// bits DataType    // 4 bits — this build tracks 13 account data types
+    /// u32  length      // 0 when there is no blob, else compressed length
+    /// u8[] data        // zlib
+    /// ```
+    ///
+    /// Both leading fields are load-bearing: the client keys its cache on the GUID and refuses to
+    /// take the blob unless the timestamp matches what `SMSG_ACCOUNT_DATA_TIMES` promised. A zero
+    /// `Time` makes it re-request forever; a wrong owner makes it drop the data as foreign.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.player_guid.to_guid128(self.realm_id);
+        writer.write_packed_guid_128(high, low);
+        writer.write_i64(self.time as i64);
+        writer.write_u32(self.data.len() as u32);
+        // 4 bits for a 13-type client (3 would do for the original 8).
+        writer.write_bits(self.data_type, 4);
+
+        if self.data.is_empty() {
+            writer.write_u32(0);
+        } else {
+            // The compressor already prefixes the decompressed size; the modern body wants the
+            // zlib payload and its length separately.
+            let compressed = compress_account_data(&self.data).ok()?;
+            writer.write_u32((compressed.len() - 4) as u32);
+            writer.write_bytes(&compressed[4..]);
+        }
+        Some(writer.finish(Opcode::SMSG_UPDATE_ACCOUNT_DATA))
     }
 }
 
@@ -154,5 +188,70 @@ impl ToWorldPacket for SmsgUpdateAccountDataComplete {
         packet.write_u32(self.data_type);
         packet.write_u32(self.status);
         packet
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::account_data::decompress_account_data;
+    use crate::protocol::bitbuf::BitReader;
+    use crate::protocol::HighGuid;
+
+    fn player_guid(counter: u32) -> ObjectGuid {
+        ObjectGuid::new_without_entry(HighGuid::Player, counter)
+    }
+
+    #[test]
+    fn modern_account_data_body_round_trips() {
+        let guid = player_guid(1);
+        let payload = b"keybindings\0and macros in here".to_vec();
+        let msg = SmsgUpdateAccountData {
+            data_type: 2, // GlobalBindings
+            data: payload.clone(),
+            player_guid: guid,
+            realm_id: 1,
+            time: 1_700_000_000,
+        };
+
+        let packet = msg.to_modern().expect("modern body exists");
+        assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_ACCOUNT_DATA);
+        assert_eq!(packet.opcode().modern(), 0x26FF);
+
+        let mut reader = BitReader::new(packet.contents());
+        let (high, low) = reader.read_packed_guid_128().expect("owner guid present");
+        assert_eq!((high, low), guid.to_guid128(1));
+        assert_eq!(reader.read_i64(), Some(1_700_000_000));
+        assert_eq!(reader.read_u32(), Some(payload.len() as u32));
+        assert_eq!(reader.read_bits(4), Some(2));
+        let compressed_len = reader.read_u32().expect("compressed length") as usize;
+        let compressed = reader
+            .read_bytes(compressed_len)
+            .expect("compressed payload");
+        assert_eq!(
+            decompress_account_data(compressed, payload.len() as u32).expect("inflates"),
+            payload
+        );
+    }
+
+    #[test]
+    fn modern_account_data_body_with_empty_blob_has_zero_length() {
+        let msg = SmsgUpdateAccountData {
+            data_type: 6,
+            data: Vec::new(),
+            player_guid: player_guid(42),
+            realm_id: 1,
+            time: 0,
+        };
+
+        let packet = msg.to_modern().expect("modern body exists");
+        let mut reader = BitReader::new(packet.contents());
+        let (high, low) = reader.read_packed_guid_128().expect("owner guid present");
+        assert_eq!((high, low), player_guid(42).to_guid128(1));
+        assert_eq!(reader.read_i64(), Some(0));
+        assert_eq!(reader.read_u32(), Some(0));
+        assert_eq!(reader.read_bits(4), Some(6));
+        assert_eq!(reader.read_u32(), Some(0));
+        assert!(reader.read_bytes(1).is_none(), "nothing left over");
     }
 }

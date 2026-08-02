@@ -972,8 +972,8 @@ pub struct EnchantItemData {
     pub target_exists: bool,
     pub item_level_ok: bool, // item's item level >= spell base level
     pub owner_is_caster: bool,
-    pub own_item_only_attr: bool,      // own-item-only enchant attribute
-    pub enchant_can_soulbound: bool,   // enchantment slot allows soulbound items
+    pub own_item_only_attr: bool,    // own-item-only enchant attribute
+    pub enchant_can_soulbound: bool, // enchantment slot allows soulbound items
     pub enchant_entry_exists: bool,
 }
 
@@ -1524,12 +1524,12 @@ pub struct CheckCastInput {
 
     // Unit target: creature type and targeting mode
     pub target_creature_type_ok: bool, // Whether the target passes the creature-type check
-    pub target_is_valid_help: bool,    // Whether the target is a valid help target (explicit positive effects)
-    pub target_is_valid_attack: bool,  // Whether the target is a valid attack target (explicit negative effects)
+    pub target_is_valid_help: bool, // Whether the target is a valid help target (explicit positive effects)
+    pub target_is_valid_attack: bool, // Whether the target is a valid attack target (explicit negative effects)
     pub has_explicit_positive_effect: bool, // whether any effect explicitly targets something positive
     pub has_explicit_negative_effect: bool,
     pub caster_is_creature_with_owner: bool, // for pet/charmed extra check
-    pub spell_is_positive_simple: bool,      // Whether the spell is positive, with no target context
+    pub spell_is_positive_simple: bool, // Whether the spell is positive, with no target context
     pub spell_has_dispel: bool,
 
     // Unit target: immune, facing, positive context
@@ -1546,7 +1546,7 @@ pub struct CheckCastInput {
     pub pet_is_alive: bool,
     pub pet_in_los: bool,
     pub is_triggered_by_aura_spell: bool, // whether the spell is triggered by an aura
-    pub target_alive_state_ok: bool,      // whether explicit non-pet effects accept the target's alive state
+    pub target_alive_state_ok: bool, // whether explicit non-pet effects accept the target's alive state
 
     // GO target
     pub go_immune_under_immunity: bool,
@@ -2020,11 +2020,11 @@ pub struct CheckPetCastInput {
 
     // Pet / charmed caster block (only evaluated when caster is pet/charmed creature)
     pub caster_is_pet_or_charmed: bool,
-    pub owner_is_alive: bool,            // owner alive; true when there is no owner
-    pub target_resolved: bool,           // whether a unit target resolved (after fallback)
-    pub effects_need_unit_target: bool,  // any implicit-target field in target-requiring set
+    pub owner_is_alive: bool,  // owner alive; true when there is no owner
+    pub target_resolved: bool, // whether a unit target resolved (after fallback)
+    pub effects_need_unit_target: bool, // any implicit-target field in target-requiring set
     pub target_is_explicitly_selected: bool, // whether the unit target was explicitly selected
-    pub target_is_targetable: bool,      // whether the target is targetable by the caster
+    pub target_is_targetable: bool, // whether the target is targetable by the caster
     pub caster_is_hostile_to_target: bool,
     pub spell_is_positive_for_target: bool,
     pub check_valid_attack_target: bool, // true unless any effect uses a unit/cone/source implicit-target form
@@ -2248,7 +2248,7 @@ pub struct LockEntrySlot {
     pub key_type: u8,
     pub index: u32, // item entry (LOCK_KEY_ITEM) or LockType index (LOCK_KEY_SKILL)
     pub required_skill: i32,
-    pub skill_id: u32,          // result of the lock type's associated skill; 0 = SKILL_NONE
+    pub skill_id: u32, // result of the lock type's associated skill; 0 = SKILL_NONE
     pub is_blasting_type: bool, // LockType(index) == LOCKTYPE_BLASTING
 }
 

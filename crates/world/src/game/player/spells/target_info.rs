@@ -145,8 +145,8 @@ impl TargetInfo {
 ///
 /// 2. **Per-effect mechanic resistance** — each effect bit whose mechanic the
 ///    target resists is cleared.  When the mask becomes zero the hit is aborted.
-    ///    *Approximated:* the per-effect mechanic-resist check is not yet ported;
-    ///    this step is omitted until that helper exists — see TODO.
+///    *Approximated:* the per-effect mechanic-resist check is not yet ported;
+///    this step is omitted until that helper exists — see TODO.
 ///
 /// 3. **Delayed-spell immunity/evasion** — if the caster is not the target and
 ///    the spell has `speed > 0`, and the target is immune to the spell or its
@@ -174,8 +174,8 @@ impl TargetInfo {
 ///    *Approximated:* uses `enter_combat_on_miss`-style `apply_damage(0)`
 ///    and `add_threat` / `set_in_combat` for creatures when the gate passes.
 ///    The whole hostile/friendly block is skipped when caster and target are the
-    ///    same unit — a reflected cast lands back on its caster and must not put it
-    ///    in combat with itself.
+///    same unit — a reflected cast lands back on its caster and must not put it
+///    in combat with itself.
 ///
 /// 7. **Friendly-target assist/PvP** — when a friendly target is in combat and
 ///    the spell would generate threat, the caster enters assisted combat and
@@ -505,7 +505,7 @@ fn is_friendly_target(target_a: u32) -> bool {
             | 45  // friendly-area
             | 52  // friendly-area
             | 53  // friendly-area
-            | 54  // friendly-area
+            | 54 // friendly-area
     )
 }
 

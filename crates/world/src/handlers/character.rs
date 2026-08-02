@@ -31,8 +31,8 @@ use oxcore_shared::messages::create::SmsgOutOfRange;
 use oxcore_shared::messages::login::{
     CharacterEnumEntry, EquipmentSlot, SmsgBindPointUpdate, SmsgCharEnum, SmsgInitWorldStates,
     SmsgInitialSetup, SmsgInitializeFactionsEmpty, SmsgLoadCufProfiles, SmsgLoginSetTimeSpeed,
-    SmsgTimeSyncRequest,
-    SmsgLoginVerifyWorld, SmsgSetAllTaskProgress, SmsgSetRestStart, SmsgWorldServerInfo,
+    SmsgLoginVerifyWorld, SmsgSetAllTaskProgress, SmsgSetRestStart, SmsgTimeSyncRequest,
+    SmsgWorldServerInfo,
 };
 use oxcore_shared::messages::movement::{SmsgForceMoveRoot, SmsgForceMoveUnroot};
 use oxcore_shared::messages::social::SmsgStandstateUpdate;

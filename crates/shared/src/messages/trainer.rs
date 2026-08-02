@@ -134,8 +134,8 @@ impl ToWorldPacket for SmsgTrainerList {
             writer.write_u32(spell.cost); // MoneyCost
             writer.write_u32(spell.req_skill); // ReqSkillLine
             writer.write_u32(spell.req_skill_value); // ReqSkillRank
-            // ReqAbility[3]: vanilla's two prerequisite spells plus its always-zero third slot,
-            // which is the same fixed-width triple 1.14 expects.
+                                                     // ReqAbility[3]: vanilla's two prerequisite spells plus its always-zero third slot,
+                                                     // which is the same fixed-width triple 1.14 expects.
             writer.write_u32(spell.req_spell_1);
             writer.write_u32(spell.req_spell_2);
             writer.write_u32(spell.unknown);

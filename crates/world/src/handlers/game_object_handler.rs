@@ -319,7 +319,10 @@ mod tests {
         let mut packet = WorldPacket::new(Opcode::CMSG_GAMEOBJ_USE);
         packet.write_bytes(&writer.into_bytes());
 
-        assert_eq!(read_gameobject_use_guid(Protocol::Modern, &mut packet).unwrap(), expected);
+        assert_eq!(
+            read_gameobject_use_guid(Protocol::Modern, &mut packet).unwrap(),
+            expected
+        );
     }
 
     #[tokio::test]

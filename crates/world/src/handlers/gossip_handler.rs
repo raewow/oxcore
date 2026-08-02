@@ -649,7 +649,10 @@ mod tests {
         let mut packet = WorldPacket::new(Opcode::CMSG_GOSSIP_HELLO);
         packet.write_bytes(&writer.into_bytes());
 
-        assert_eq!(read_gossip_hello_guid(Protocol::Modern, &mut packet).unwrap(), expected);
+        assert_eq!(
+            read_gossip_hello_guid(Protocol::Modern, &mut packet).unwrap(),
+            expected
+        );
     }
 
     #[test]

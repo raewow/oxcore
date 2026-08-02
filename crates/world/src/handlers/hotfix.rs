@@ -62,7 +62,11 @@ pub async fn handle_db_query_bulk(
     // no `Db2Hash` to name it there is nothing well-formed to send, so the batch is dropped whole —
     // this is the case worth seeing in a log if a frame ever hangs.
     let Some(table) = table else {
-        debug!("Unserved DB2 table 0x{:08X}; {} id(s) unanswered", raw_hash, record_ids.len());
+        debug!(
+            "Unserved DB2 table 0x{:08X}; {} id(s) unanswered",
+            raw_hash,
+            record_ids.len()
+        );
         return Ok(());
     };
 

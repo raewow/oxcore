@@ -324,8 +324,8 @@ pub fn write_item_sparse_record(item: &ItemHotfixRecord) -> Vec<u8> {
         buf.i16(resistance);
     }
     buf.u16(0); // ScalingStatDistribution
-    // ExpansionID. 254 is "classic", which is what makes the client apply Era item rules rather
-    // than treating the row as a modern-expansion item.
+                // ExpansionID. 254 is "classic", which is what makes the client apply Era item rules rather
+                // than treating the row as a modern-expansion item.
     buf.u8(254);
     buf.u8(0); // ArtifactID
     buf.u8(0); // SpellWeight

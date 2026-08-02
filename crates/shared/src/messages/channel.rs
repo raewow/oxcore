@@ -64,6 +64,10 @@ pub struct ChannelNotifyData {
     pub old_flags: Option<u8>,
     /// New member flags (for MODE_CHANGE)
     pub new_flags: Option<u8>,
+    /// Modern channel object's GUID, used by the client when sending to the channel.
+    pub modern_channel_guid: Option<(u64, u64)>,
+    /// Modern channel behavior flags, distinct from the legacy join flags.
+    pub modern_channel_flags: Option<u32>,
 }
 
 impl ChannelNotifyData {
@@ -96,6 +100,16 @@ impl ChannelNotifyData {
         self.new_flags = Some(new_flags);
         self
     }
+
+    pub fn with_modern_channel_guid(mut self, high: u64, low: u64) -> Self {
+        self.modern_channel_guid = Some((high, low));
+        self
+    }
+
+    pub fn with_modern_channel_flags(mut self, flags: u32) -> Self {
+        self.modern_channel_flags = Some(flags);
+        self
+    }
 }
 
 impl<'a> SmsgChannelNotify<'a> {
@@ -106,6 +120,16 @@ impl<'a> SmsgChannelNotify<'a> {
             channel_name,
             data: ChannelNotifyData::new().with_flags(channel_flags),
         }
+    }
+
+    pub fn with_modern_channel_guid(mut self, high: u64, low: u64) -> Self {
+        self.data = self.data.with_modern_channel_guid(high, low);
+        self
+    }
+
+    pub fn with_modern_channel_flags(mut self, flags: u32) -> Self {
+        self.data = self.data.with_modern_channel_flags(flags);
+        self
     }
 
     /// Create a "you left" notification
@@ -527,7 +551,7 @@ impl ToWorldPacket for SmsgChannelNotify<'_> {
                 // of one bit run that the u32 below flushes.
                 writer.write_bits(0, 11);
 
-                writer.write_u32(CHANNEL_FLAGS_NONE);
+                writer.write_u32(self.data.modern_channel_flags.unwrap_or(CHANNEL_FLAGS_NONE));
 
                 // 1.14 splits vanilla's single trailing word into a flags word and a channel id.
                 // `data.flags` is what the join path fills with the channel's id -- see
@@ -538,11 +562,8 @@ impl ToWorldPacket for SmsgChannelNotify<'_> {
                 writer.write_i32(self.data.flags.unwrap_or(0) as i32);
 
                 writer.write_u64(0); // InstanceID -- channels are not instanced in Classic Era
-                // ChannelGUID: 1.14 names the channel object with a GUID built from the map, zone
-                // and channel id. Vanilla has no channel object and this message carries neither
-                // map nor zone, so it is sent empty rather than assembled from values we would be
-                // making up.
-                writer.write_packed_guid_128(0, 0);
+                let (high, low) = self.data.modern_channel_guid.unwrap_or((0, 0));
+                writer.write_packed_guid_128(high, low);
 
                 writer.write_bytes(name);
                 // Welcome message omitted: its length was written as zero above.

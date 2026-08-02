@@ -121,8 +121,8 @@ impl ToWorldPacket for SmsgGossipMessage {
             // still means "prompt for text", so the value carries over.
             writer.write_u8(u8::from(option.coded));
             writer.write_i32(option.money as i32); // OptionCost
-            // Added in 1.14.1; build 42597 is 1.14.2, so the field is present. Zero is the
-            // client's "use the option text as written" default.
+                                                   // Added in 1.14.1; build 42597 is 1.14.2, so the field is present. Zero is the
+                                                   // client's "use the option text as written" default.
             writer.write_u32(0); // Language
 
             let text = option.text.as_bytes();
@@ -152,8 +152,8 @@ impl ToWorldPacket for SmsgGossipMessage {
 pub(crate) fn write_modern_gossip_quest(writer: &mut BitWriter, quest: &GossipQuestData) {
     writer.write_u32(quest.quest_id);
     writer.write_u32(0); // ContentTuningID -- a retail scaling concept with no Classic source
-    // Vanilla's `icon` is the dialog status the client draws, and 1.14 reads the same values in
-    // `QuestType`: 2 = available, 4 = already taken.
+                         // Vanilla's `icon` is the dialog status the client draws, and 1.14 reads the same values in
+                         // `QuestType`: 2 = available, 4 = already taken.
     writer.write_i32(quest.icon as i32);
     writer.write_i32(quest.level as i32);
     writer.write_i32(255); // QuestMaxLevel
@@ -162,7 +162,7 @@ pub(crate) fn write_modern_gossip_quest(writer: &mut BitWriter, quest: &GossipQu
 
     let title = quest.title.as_bytes();
     writer.write_bit(false); // Repeatable
-    // 9 bits, not 12: quest titles have their own narrower length field.
+                             // 9 bits, not 12: quest titles have their own narrower length field.
     writer.write_bits(title.len() as u32, 9);
     writer.flush_bits();
     writer.write_bytes(title);
@@ -263,7 +263,7 @@ impl ToWorldPacket for SmsgGossipPoi {
         writer.write_f32(0.0); // Z -- vanilla POIs are flat map pins
         writer.write_u32(self.icon);
         writer.write_u32(self.data); // Importance
-        // A later addition with no vanilla source; the client accepts zero.
+                                     // A later addition with no vanilla source; the client accepts zero.
         writer.write_u32(0);
 
         // Clamped rather than masked: a length that disagrees with the bytes that follow would

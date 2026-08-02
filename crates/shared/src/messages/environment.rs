@@ -6,9 +6,9 @@
 //! - Exploration experience
 
 use crate::messages::update::DEFAULT_REALM_ID;
+use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::ObjectGuid;
-use crate::messages::ToWorldPacket;
 use crate::protocol::{Opcode, WorldPacket};
 
 /// SMSG_START_MIRROR_TIMER - Start or update a client-visible timer bar

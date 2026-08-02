@@ -192,7 +192,7 @@ pub async fn handle_use_item(
     );
 
     // Item use breaks auras such as stealth that explicitly opt into the USE
-        // interrupt flag.
+    // interrupt flag.
     world
         .systems
         .auras

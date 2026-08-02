@@ -600,7 +600,10 @@ impl CreatureManager {
             ] {
                 if let Some(scale) = dbc
                     .get_creature_display_info(display_id)
-                    .map(|display| display.creature_model_scale)
+                    .and_then(|display| {
+                        dbc.get_creature_model_data(display.model_id)
+                            .map(|model| display.creature_model_scale * model.model_scale)
+                    })
                     .filter(|scale| scale.is_finite() && *scale > 0.0)
                 {
                     self.display_scales.insert(display_id, scale);

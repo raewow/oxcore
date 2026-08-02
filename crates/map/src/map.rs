@@ -15,7 +15,7 @@ pub const DEFAULT_VISIBILITY_DISTANCE: f32 = 100.0;
 pub const DEFAULT_VISIBILITY_INSTANCE: f32 = 170.0;
 /// Visible distance in battlegrounds.
 pub const DEFAULT_VISIBILITY_BG: f32 = 533.0;
-    /// Hard ceiling on any visibility distance — one grid.
+/// Hard ceiling on any visibility distance — one grid.
 pub const MAX_VISIBILITY_DISTANCE: f32 = 533.33333;
 
 /// What kind of map this is, which sets its visibility defaults.

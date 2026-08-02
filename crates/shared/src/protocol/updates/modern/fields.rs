@@ -349,11 +349,11 @@ mod tests {
         /// A 1.14 GUID occupies four u32 slots where a vanilla one occupies two.
         const STRIDE: u16 = 4;
 
-        let start_of = |vanilla_index: u32| match field_map::ACTIVE_PLAYER_MAP[vanilla_index as usize]
-        {
-            ModernSlot::GuidLow(base) => base,
-            other => panic!("expected a GUID low half, got {other:?}"),
-        };
+        let start_of =
+            |vanilla_index: u32| match field_map::ACTIVE_PLAYER_MAP[vanilla_index as usize] {
+                ModernSlot::GuidLow(base) => base,
+                other => panic!("expected a GUID low half, got {other:?}"),
+            };
 
         for (vanilla, section_start) in [
             (PLAYER_FIELD_INV_SLOT_HEAD, 0),

@@ -13,13 +13,79 @@ use oxcore_shared::common::AccountType;
 use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language, Team};
 use oxcore_shared::messages::chat::SmsgMessageChat;
 use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
+use oxcore_shared::protocol::bitbuf::BitReader;
+use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
+
+fn read_modern_message(
+    packet: &WorldPacket,
+    msg_type: ChatMsg,
+) -> Result<(Option<String>, Option<String>, String)> {
+    let mut reader = BitReader::new(packet.contents());
+    let has_language = !matches!(msg_type, ChatMsg::Emote);
+    if has_language {
+        reader
+            .read_u32()
+            .ok_or_else(|| anyhow!("Missing language in modern chat packet"))?;
+    }
+
+    if msg_type == ChatMsg::Channel {
+        reader
+            .read_packed_guid_128()
+            .ok_or_else(|| anyhow!("Missing channel GUID in modern chat packet"))?;
+    }
+
+    let first_len = reader
+        .read_bits(9)
+        .ok_or_else(|| anyhow!("Missing first string length in modern chat packet"))?
+        as usize;
+    if matches!(msg_type, ChatMsg::Whisper | ChatMsg::Channel) {
+        let second_len = reader
+            .read_bits(9)
+            .ok_or_else(|| anyhow!("Missing message length in modern chat packet"))?
+            as usize;
+        let first = reader
+            .read_string(first_len)
+            .ok_or_else(|| anyhow!("Invalid first string in modern chat packet"))?;
+        let message = reader
+            .read_string(second_len)
+            .ok_or_else(|| anyhow!("Invalid message in modern chat packet"))?;
+        return Ok(match msg_type {
+            ChatMsg::Channel => (Some(first), None, message),
+            ChatMsg::Whisper => (None, Some(first), message),
+            _ => unreachable!("only channel and whisper have two strings"),
+        });
+    }
+
+    let first = reader
+        .read_string(first_len)
+        .ok_or_else(|| anyhow!("Invalid message in modern chat packet"))?;
+    Ok((None, None, first))
+}
 
 /// Handle CMSG_MESSAGECHAT - player sends a chat message
 pub async fn handle_messagechat(
     session: &WorldSession,
     packet: &mut WorldPacket,
     world: &World,
+) -> Result<()> {
+    handle_messagechat_type(session, packet, world, None).await
+}
+
+/// Handle one of the modern, destination-specific chat opcodes.
+pub async fn handle_modern_messagechat(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+    msg_type: ChatMsg,
+) -> Result<()> {
+    handle_messagechat_type(session, packet, world, Some(msg_type)).await
+}
+
+async fn handle_messagechat_type(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+    modern_msg_type: Option<ChatMsg>,
 ) -> Result<()> {
     // Get sender context
     let sender_guid = session
@@ -34,33 +100,40 @@ pub async fn handle_messagechat(
     let sender_team = Team::from_race(player.race);
     drop(player);
 
-    // Parse packet - CMSG_MESSAGECHAT format:
-    // - type: u32 (NOT u8!)
-    // - language: u32 (ignored - system determines language)
-    // - For Whisper: target_name (cstring), message (cstring)
-    // - For Channel: channel_name (cstring), message (cstring)
-    // - For Say/Yell/Party/etc: message (cstring)
-    let msg_type_u32 = packet.read_u32().unwrap_or(0);
-    let _language = packet.read_u32().unwrap_or(0); // Ignored - system determines language
-
-    let msg_type = ChatMsg::from_u32(msg_type_u32).unwrap_or(ChatMsg::Say);
-
-    // Read type-specific fields
-    let (channel_name_opt, target_name_opt, message) = match msg_type {
-        ChatMsg::Channel => {
-            let channel = packet.read_string().unwrap_or_default();
-            let msg = packet.read_string().unwrap_or_default();
-            (Some(channel), None, msg)
+    let (msg_type, channel_name_opt, target_name_opt, message) = match modern_msg_type {
+        Some(msg_type) => {
+            let (channel, target, message) = read_modern_message(packet, msg_type)?;
+            (msg_type, channel, target, message)
         }
-        ChatMsg::Whisper => {
-            let target = packet.read_string().unwrap_or_default();
-            let msg = packet.read_string().unwrap_or_default();
-            (None, Some(target), msg)
-        }
-        _ => {
-            // Say, Yell, Party, Guild, etc - just message
-            let msg = packet.read_string().unwrap_or_default();
-            (None, None, msg)
+        None => {
+            if session.protocol() == Protocol::Modern {
+                return Err(anyhow!(
+                    "Modern chat must use a destination-specific opcode"
+                ));
+            }
+            let msg_type =
+                ChatMsg::from_u32(packet.read_u32().unwrap_or(0)).unwrap_or(ChatMsg::Say);
+            let _language = packet.read_u32().unwrap_or(0);
+            match msg_type {
+                ChatMsg::Channel => (
+                    msg_type,
+                    Some(packet.read_string().unwrap_or_default()),
+                    None,
+                    packet.read_string().unwrap_or_default(),
+                ),
+                ChatMsg::Whisper => (
+                    msg_type,
+                    None,
+                    Some(packet.read_string().unwrap_or_default()),
+                    packet.read_string().unwrap_or_default(),
+                ),
+                _ => (
+                    msg_type,
+                    None,
+                    None,
+                    packet.read_string().unwrap_or_default(),
+                ),
+            }
         }
     };
 
@@ -227,4 +300,75 @@ async fn handle_command(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxcore_shared::protocol::bitbuf::BitWriter;
+    use oxcore_shared::protocol::Opcode;
+
+    fn packet(writer: BitWriter) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::CMSG_CHAT_MESSAGE_SAY);
+        packet.write_bytes(&writer.into_bytes());
+        packet
+    }
+
+    #[test]
+    fn parses_modern_say() {
+        let mut writer = BitWriter::new();
+        writer.write_u32(Language::Common as u32);
+        writer.write_bits(5, 9);
+        writer.write_string_raw("hello");
+
+        assert_eq!(
+            read_modern_message(&packet(writer), ChatMsg::Say).unwrap(),
+            (None, None, "hello".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_modern_whisper_lengths_before_strings() {
+        let mut writer = BitWriter::new();
+        writer.write_u32(Language::Common as u32);
+        writer.write_bits(4, 9);
+        writer.write_bits(2, 9);
+        writer.write_string_raw("Mary");
+        writer.write_string_raw("hi");
+
+        assert_eq!(
+            read_modern_message(&packet(writer), ChatMsg::Whisper).unwrap(),
+            (None, Some("Mary".to_string()), "hi".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_modern_channel_after_packed_guid() {
+        let channel_guid = ObjectGuid::new_player(42);
+        let (high, low) = channel_guid.to_guid128(1);
+        let mut writer = BitWriter::new();
+        writer.write_u32(Language::Common as u32);
+        writer.write_packed_guid_128(high, low);
+        writer.write_bits(7, 9);
+        writer.write_bits(2, 9);
+        writer.write_string_raw("General");
+        writer.write_string_raw("hi");
+
+        assert_eq!(
+            read_modern_message(&packet(writer), ChatMsg::Channel).unwrap(),
+            (Some("General".to_string()), None, "hi".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_modern_emote_without_language() {
+        let mut writer = BitWriter::new();
+        writer.write_bits(5, 9);
+        writer.write_string_raw("waves");
+
+        assert_eq!(
+            read_modern_message(&packet(writer), ChatMsg::Emote).unwrap(),
+            (None, None, "waves".to_string())
+        );
+    }
 }
