@@ -5,6 +5,11 @@
 # Default URLs match docker-compose.yml (MySQL on localhost:3306, root password "root").
 # Start MySQL with: podman compose up -d
 
+# PostgreSQL migration tooling only. The running servers still use the MySQL URLs below until
+# their repositories have been ported in later migration batches.
+[postgres]
+database_url = "postgres://oxcore:oxcore@127.0.0.1:5432/oxcore"
+
 [auth]
 # Database connection URL (MySQL format)
 login_database_url = "mysql://root:root@127.0.0.1:3306/auth"

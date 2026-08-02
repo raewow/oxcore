@@ -5,6 +5,7 @@ use std::path::PathBuf;
 mod commands;
 mod config;
 mod db;
+mod postgres;
 
 use config::Config;
 
@@ -42,6 +43,11 @@ enum Command {
         #[arg(short = 'y', long)]
         yes: bool,
     },
+    /// PostgreSQL foundation migrations (does not affect the MySQL runtime databases)
+    Pg {
+        #[command(subcommand)]
+        command: commands::postgres::Command,
+    },
 }
 
 #[tokio::main]
@@ -54,6 +60,7 @@ async fn main() -> Result<()> {
         Command::Status => commands::status::run(&config).await?,
         Command::New { db, name } => commands::new::run(&db, &name, &config.migrations_dir)?,
         Command::Fresh { yes } => commands::fresh::run(&config, yes).await?,
+        Command::Pg { command } => commands::postgres::run(&config, command).await?,
     }
 
     Ok(())

@@ -1,6 +1,25 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: docker.io/library/postgres:16
+    container_name: oxcore-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: oxcore
+      POSTGRES_PASSWORD: oxcore
+      POSTGRES_DB: oxcore
+      TZ: 'UTC'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oxcore -d oxcore"]
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   mysql:
     image: docker.io/library/mysql:8.0
     container_name: oxcore-mysql
@@ -23,3 +42,4 @@ services:
 
 volumes:
   mysql_data:
+  postgres_data:

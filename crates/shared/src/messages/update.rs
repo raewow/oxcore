@@ -368,6 +368,9 @@ pub struct CreateObjectBlock {
     pub fields: Vec<(u32, u32)>,
     pub required_fields: Vec<(u32, u32)>, // Fields that must be sent even when value is 0
     pub bytes_fields: Vec<(u32, [u8; 4])>,
+    /// Modern-only field overrides for cases where the two clients interpret a shared field
+    /// differently. Ignored by the vanilla encoder.
+    pub modern_fields: Vec<(u16, u32)>,
     /// The recipient's action bar, vanilla-packed. Only read when this block describes the
     /// recipient's own player: 1.14 carries the bar in the `ActivePlayer` create tail instead of a
     /// separate `SMSG_ACTION_BUTTONS`, so there is nowhere else to put it. Ignored by `to_vanilla`,
@@ -387,6 +390,7 @@ impl CreateObjectBlock {
             fields: Vec::new(),
             required_fields: Vec::new(),
             bytes_fields: Vec::new(),
+            modern_fields: Vec::new(),
             action_buttons: None,
         }
     }
@@ -394,6 +398,12 @@ impl CreateObjectBlock {
     /// Attach the player's action bar, for the create block the player receives about itself.
     pub fn with_action_buttons(mut self, buttons: Vec<u32>) -> Self {
         self.action_buttons = Some(buttons);
+        self
+    }
+
+    /// Override a single modern update-field slot while retaining the normal vanilla field data.
+    pub fn set_modern_field(mut self, index: u16, value: u32) -> Self {
+        self.modern_fields.push((index, value));
         self
     }
 
@@ -590,6 +600,9 @@ impl CreateObjectBlock {
         }
         for &(index, bytes) in &self.bytes_fields {
             block.fields.set_vanilla(index, u32::from_le_bytes(bytes));
+        }
+        for &(index, value) in &self.modern_fields {
+            block.fields.set_modern(index, value);
         }
 
         if object_type == ModernObjectType::GameObject {

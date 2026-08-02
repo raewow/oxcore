@@ -79,6 +79,29 @@ web_database_url = "mysql://root:root@127.0.0.1:3306/web"
 
 The `web` database currently has no base dump; its schema is created entirely through migrations.
 
+### PostgreSQL Foundation
+
+PostgreSQL is being introduced independently of the still-MySQL server runtime. The `db pg`
+commands initialize one `oxcore` database with separate `auth`, `world`, `characters`, `logs`, and
+`web` schemas. They do not translate the MySQL base dumps or switch any running server connection.
+
+```bash
+# Start the PostgreSQL development service, then initialize migration metadata and schemas.
+podman compose up -d postgres
+cargo run -p oxcore-db --bin db -- pg migrate
+
+# Inspect PostgreSQL migration status or reset only application schemas in development.
+cargo run -p oxcore-db --bin db -- pg status
+cargo run -p oxcore-db --bin db -- pg fresh --yes
+
+# Create a PostgreSQL migration in sql/postgres/migrations/auth/.
+cargo run -p oxcore-db --bin db -- pg new auth create_accounts
+```
+
+PostgreSQL migrations are schema-specific files named
+`sql/postgres/migrations/<schema>/YYYYMMDDHHMMSS_<name>.sql`. Each migration and its ledger entry
+are committed in one transaction.
+
 ### Build Commands
 
 ```bash

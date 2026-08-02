@@ -9,16 +9,26 @@ pub struct Config {
     pub auth_url: String,
     pub logs_url: String,
     pub web_url: String,
+    /// Optional PostgreSQL URL used only by the `db pg` migration commands.
+    pub postgres_url: Option<String>,
     /// Absolute path to sql/base/
     pub base_dir: PathBuf,
     /// Absolute path to sql/migrations/
     pub migrations_dir: PathBuf,
+    /// Absolute path to sql/postgres/migrations/
+    pub postgres_migrations_dir: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 struct RootConfig {
     world: WorldConfig,
     web: WebConfig,
+    postgres: Option<PostgresConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PostgresConfig {
+    database_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,8 +86,18 @@ impl Config {
             auth_url: w.login_database_url,
             logs_url: w.logs_database_url,
             web_url: web.web_database_url,
+            postgres_url: root.postgres.map(|postgres| postgres.database_url),
             base_dir: sql_dir.join("base"),
             migrations_dir: sql_dir.join("migrations"),
+            postgres_migrations_dir: sql_dir.join("postgres/migrations"),
+        })
+    }
+
+    pub fn postgres_url(&self) -> Result<&str> {
+        self.postgres_url.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "PostgreSQL is not configured. Add [postgres] database_url to config.toml."
+            )
         })
     }
 }
