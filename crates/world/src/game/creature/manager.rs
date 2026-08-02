@@ -1352,6 +1352,18 @@ impl CreatureManager {
             // NPC interaction flags (cleared on death so dead creatures aren't interactable)
             .set_required(UNIT_NPC_FLAGS, if is_dead { 0 } else { creature.npc_flags });
 
+        let native_scale = self
+            .display_scales
+            .get(&creature.display_id)
+            .map(|scale| *scale)
+            .filter(|scale| scale.is_finite() && *scale > 0.0);
+        if native_scale.is_some_and(|native| (creature.scale - native).abs() < 0.001) {
+            // MaNGOS's DBC fallback is already baked into OBJECT_FIELD_SCALE_X. Modern clients
+            // apply their own display scale too, making small models (wolves, kobolds) tiny.
+            // JimsProxy strips that pre-scaled value; do the same only for the native fallback.
+            block = block.set_modern_field(6, 1.0f32.to_bits());
+        }
+
         // Calculate dynamic flags for dead creatures. Real death is conveyed by
         // health=0 and stand state Dead, not UNIT_DYNFLAG_DEAD.
         let dynamic_flags = if is_dead {
