@@ -7,7 +7,7 @@ description = "World/game server library for oxcore (managers, systems, handlers
 
 [features]
 default = []
-testing = ["oxcore-db/testing", "oxcore-shared/testing"]
+testing = ["oxcore-db/testing"]
 
 [dependencies]
 oxcore-db.workspace = true
@@ -93,7 +93,7 @@ mlua = { version = "0.10", features = ["lua54", "serialize", "send", "vendored"]
 async-trait = "0.1.89"
 
 [dev-dependencies]
-oxcore-shared = { path = "../shared", features = ["testing"] }
+oxcore-shared = { path = "../shared" }
 tokio-test = "0.4"
 mockall = "0.13"
 

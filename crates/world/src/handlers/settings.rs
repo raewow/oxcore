@@ -295,7 +295,7 @@ pub async fn handle_request_account_data(
     world
         .systems
         .settings
-        .handle_account_data_request(player_guid, data_type, world)
+        .handle_account_data_request(player_guid, session.account_id(), data_type, world)
         .await?;
 
     Ok(())

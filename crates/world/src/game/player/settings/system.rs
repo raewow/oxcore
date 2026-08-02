@@ -241,7 +241,7 @@ impl SettingsSystem {
             realm_id: world.get_realm_id() as u16,
             time: timestamp,
         };
-        self.broadcast_mgr.send_msg_to_player(player_guid, response);
+        self.send_account_data_response(player_guid, account_id, response, world);
 
         tracing::debug!(
             "Account data updated: player={}, type={:?}, timestamp={}",
@@ -256,6 +256,7 @@ impl SettingsSystem {
     pub async fn handle_account_data_request(
         &self,
         player_guid: ObjectGuid,
+        account_id: u32,
         data_type: u32,
         world: &World,
     ) -> Result<()> {
@@ -287,9 +288,25 @@ impl SettingsSystem {
             realm_id: world.get_realm_id() as u16,
             time,
         };
-        self.broadcast_mgr.send_msg_to_player(player_guid, response);
+        self.send_account_data_response(player_guid, account_id, response, world);
 
         Ok(())
+    }
+
+    fn send_account_data_response(
+        &self,
+        player_guid: ObjectGuid,
+        account_id: u32,
+        response: oxcore_shared::messages::settings::SmsgUpdateAccountData,
+        world: &World,
+    ) {
+        if let Some(realm_session) = world.session_mgr.get_realm_session_by_account(account_id) {
+            if let Err(error) = realm_session.send_msg(response) {
+                tracing::warn!(%error, "failed to return account data on modern realm socket");
+            }
+        } else {
+            self.broadcast_mgr.send_msg_to_player(player_guid, response);
+        }
     }
 
     /// Send account data times during login (SMSG_ACCOUNT_DATA_TIMES).

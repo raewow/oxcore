@@ -14,6 +14,9 @@ pub struct SessionManager {
     sessions: DashMap<u32, Arc<WorldSession>>,
     /// Sessions by account ID (for duplicate detection)
     by_account: DashMap<u32, u32>,
+    /// Modern realm sockets remain connected after the instance socket owns the player.
+    /// Account-data messages must still travel through this connection.
+    realm_by_account: DashMap<u32, u32>,
     /// Sessions by player GUID (when logged in)
     by_player: DashMap<ObjectGuid, u32>,
     /// Next session ID
@@ -26,6 +29,7 @@ impl SessionManager {
         Self {
             sessions: DashMap::new(),
             by_account: DashMap::new(),
+            realm_by_account: DashMap::new(),
             by_player: DashMap::new(),
             next_id: AtomicU32::new(1),
         }
@@ -48,9 +52,28 @@ impl SessionManager {
     /// Remove a session
     pub fn remove_session(&self, id: u32) -> Option<Arc<WorldSession>> {
         if let Some((_, session)) = self.sessions.remove(&id) {
-            self.by_account.remove(&session.account_id());
+            if self
+                .by_account
+                .get(&session.account_id())
+                .is_some_and(|current| *current == id)
+            {
+                self.by_account.remove(&session.account_id());
+            }
+            if self
+                .realm_by_account
+                .get(&session.account_id())
+                .is_some_and(|current| *current == id)
+            {
+                self.realm_by_account.remove(&session.account_id());
+            }
             if let Some(guid) = session.player_guid() {
-                self.by_player.remove(&guid);
+                if self
+                    .by_player
+                    .get(&guid)
+                    .is_some_and(|current| *current == id)
+                {
+                    self.by_player.remove(&guid);
+                }
             }
             Some(session)
         } else {
@@ -68,6 +91,18 @@ impl SessionManager {
         self.by_account
             .get(&account_id)
             .and_then(|id| self.sessions.get(&id).map(|r| Arc::clone(&r)))
+    }
+
+    /// Register the persistent realm socket for a modern account.
+    pub fn register_realm_session(&self, account_id: u32, session_id: u32) {
+        self.realm_by_account.insert(account_id, session_id);
+    }
+
+    /// The realm socket is distinct from the instance session that owns the player.
+    pub fn get_realm_session_by_account(&self, account_id: u32) -> Option<Arc<WorldSession>> {
+        self.realm_by_account
+            .get(&account_id)
+            .and_then(|id| self.sessions.get(&id).map(|session| Arc::clone(&session)))
     }
 
     /// Get session by player GUID
@@ -288,5 +323,39 @@ impl SessionManager {
 impl Default for SessionManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SessionManager;
+    use crate::core::session::WorldSession;
+    use oxcore_shared::protocol::{Protocol, WorldPacket};
+    use std::sync::Arc;
+
+    fn session(id: u32, account_id: u32) -> Arc<WorldSession> {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<WorldPacket>();
+        Arc::new(WorldSession::new_with_protocol(
+            id,
+            account_id,
+            "account".to_string(),
+            0,
+            Protocol::Modern,
+            tx,
+        ))
+    }
+
+    #[test]
+    fn realm_session_survives_instance_session_cleanup() {
+        let sessions = SessionManager::new();
+        let realm = session(1, 7);
+        let instance = session(2, 7);
+
+        sessions.add_session(realm);
+        sessions.register_realm_session(7, 1);
+        sessions.add_session(instance);
+
+        sessions.remove_session(2);
+        assert_eq!(sessions.get_realm_session_by_account(7).unwrap().id(), 1);
     }
 }

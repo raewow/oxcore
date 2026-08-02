@@ -480,6 +480,15 @@ fn is_realm_chat_opcode(opcode: Opcode) -> bool {
     )
 }
 
+/// Client configuration remains on the realm socket, but the loaded account data belongs to the
+/// instance player state. Route these requests to that state; responses use the realm session.
+fn is_realm_account_data_opcode(opcode: Opcode) -> bool {
+    matches!(
+        opcode,
+        Opcode::CMSG_REQUEST_ACCOUNT_DATA | Opcode::CMSG_UPDATE_ACCOUNT_DATA
+    )
+}
+
 pub enum ConnectionRole {
     /// Glue screen and character list. Answers `CMSG_PLAYER_LOGIN` with `SMSG_CONNECT_TO` and runs
     /// none of the login sequence itself.
@@ -525,6 +534,11 @@ where
         packet_tx,
     ));
     world.session_mgr.add_session(session.clone());
+    if matches!(role, ConnectionRole::Realm { .. }) {
+        world
+            .session_mgr
+            .register_realm_session(conn.account_id, session_id);
+    }
 
     // The realm connection deferred the login until the world socket existed; run it now.
     //
@@ -632,16 +646,17 @@ where
 
             let mut world_packet = WorldPacket::new(opcode);
             world_packet.write_bytes(&packet.body);
-            let dispatch_session =
-                if matches!(role, ConnectionRole::Realm { .. }) && is_realm_chat_opcode(opcode) {
-                    world
-                        .session_mgr
-                        .get_session_by_account(conn.account_id)
-                        .filter(|active| active.player_guid().is_some())
-                        .unwrap_or_else(|| Arc::clone(&session))
-                } else {
-                    Arc::clone(&session)
-                };
+            let dispatch_session = if matches!(role, ConnectionRole::Realm { .. })
+                && (is_realm_chat_opcode(opcode) || is_realm_account_data_opcode(opcode))
+            {
+                world
+                    .session_mgr
+                    .get_session_by_account(conn.account_id)
+                    .filter(|active| active.player_guid().is_some())
+                    .unwrap_or_else(|| Arc::clone(&session))
+            } else {
+                Arc::clone(&session)
+            };
             if let Err(e) = route_packet(
                 dispatch_session,
                 world_packet,
