@@ -136,11 +136,11 @@ impl Default for SmsgAccountDataTimes {
     }
 }
 
-/// How many per-type timestamps the modern client expects.
+/// The Classic client has one timestamp for each supported account-data type.
 ///
-/// Grew past vanilla's 8 as newer data types were added; 1.14.1 and later use 13. We only track
-/// the original 8, so the tail is sent as zeros — "never cached", which makes the client ask.
-const MODERN_ACCOUNT_DATA_COUNT: usize = 13;
+/// Sending timestamps for types the server does not implement changes the body length and leaves
+/// the client reading configuration data at the wrong boundary.
+const MODERN_ACCOUNT_DATA_COUNT: usize = 8;
 
 impl ToWorldPacket for SmsgAccountDataTimes {
     fn to_vanilla(&self) -> WorldPacket {
@@ -253,5 +253,25 @@ mod tests {
         assert_eq!(reader.read_bits(4), Some(6));
         assert_eq!(reader.read_u32(), Some(0));
         assert!(reader.read_bytes(1).is_none(), "nothing left over");
+    }
+
+    #[test]
+    fn modern_account_data_times_has_one_timestamp_per_classic_data_type() {
+        let guid = player_guid(42);
+        let timestamps = [1, 2, 3, 4, 5, 6, 7, 8];
+        let packet = SmsgAccountDataTimes::new(timestamps, guid, 1)
+            .to_modern()
+            .expect("modern body exists");
+        let mut reader = BitReader::new(packet.contents());
+
+        assert_eq!(reader.read_packed_guid_128(), Some(guid.to_guid128(1)));
+        assert!(reader.read_i64().is_some(), "server time");
+        for timestamp in timestamps {
+            assert_eq!(reader.read_i64(), Some(i64::from(timestamp)));
+        }
+        assert!(
+            reader.read_i64().is_none(),
+            "no unsupported account-data timestamps"
+        );
     }
 }

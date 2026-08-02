@@ -28,7 +28,10 @@ use oxcore_shared::messages::inventory_update::{
 };
 use oxcore_shared::messages::login::EquipmentSlot;
 use oxcore_shared::messages::player::SmsgPlayerMoneyUpdate;
-use oxcore_shared::messages::update::{CreateObjectBlock, SmsgUpdateObject, UpdateBlockData};
+use oxcore_shared::messages::update::{
+    CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+};
+use oxcore_shared::protocol::update_fields::ITEM_FIELD_STACK_COUNT;
 use oxcore_shared::protocol::Opcode;
 use oxcore_shared::protocol::WorldPacket;
 use oxcore_shared::protocol::{HighGuid, ObjectGuid};
@@ -262,6 +265,14 @@ impl InventorySystem {
 
         let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::CreateObject2(update_block));
 
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+    }
+
+    fn send_item_count_update(&self, player_guid: ObjectGuid, item_guid: ObjectGuid, count: u32) {
+        let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+            ValuesUpdateBlock::new(item_guid, ObjectType::Item)
+                .set_field(ITEM_FIELD_STACK_COUNT, count),
+        ));
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 
@@ -678,8 +689,9 @@ impl InventorySystem {
                 self.cache
                     .update_item_count(player_guid, item_obj_guid, new_count);
 
-                // Send item update to client so stack count is visible
-                self.send_item_update(player_guid, item_obj_guid);
+                // Existing items must receive a values update. Sending another create packet is
+                // ignored by modern clients, leaving their bag count stale after looting a stack.
+                self.send_item_count_update(player_guid, item_obj_guid, new_count);
 
                 items_modified.push((item_obj_guid, new_count));
                 remaining_count -= add_count;

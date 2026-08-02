@@ -152,9 +152,9 @@ impl ToWorldPacket for SmsgGossipMessage {
 pub(crate) fn write_modern_gossip_quest(writer: &mut BitWriter, quest: &GossipQuestData) {
     writer.write_u32(quest.quest_id);
     writer.write_u32(0); // ContentTuningID -- a retail scaling concept with no Classic source
-                         // Vanilla's `icon` is the dialog status the client draws, and 1.14 reads the same values in
-                         // `QuestType`: 2 = available, 4 = already taken.
-    writer.write_i32(quest.icon as i32);
+                         // Vanilla uses dialog-status values here (5 = available, 3/4 = current quest), whereas
+                         // 1.14's ClientGossipQuest::QuestType uses 2 for an offer and 4 for a current quest.
+    writer.write_i32(modern_quest_type(quest.icon));
     writer.write_i32(quest.level as i32);
     writer.write_i32(255); // QuestMaxLevel
     writer.write_u32(8); // QuestFlags
@@ -166,6 +166,14 @@ pub(crate) fn write_modern_gossip_quest(writer: &mut BitWriter, quest: &GossipQu
     writer.write_bits(title.len() as u32, 9);
     writer.flush_bits();
     writer.write_bytes(title);
+}
+
+fn modern_quest_type(vanilla_icon: u32) -> i32 {
+    match vanilla_icon {
+        5 => 2,         // DIALOG_STATUS_AVAILABLE
+        3 | 4 | 7 => 4, // incomplete or ready to turn in
+        icon => icon as i32,
+    }
 }
 
 /// SMSG_GOSSIP_COMPLETE (0x17E) - Close gossip window
@@ -431,6 +439,14 @@ mod tests {
         let end = data[offset..].iter().position(|&b| b == 0).unwrap() + offset;
         let s = std::str::from_utf8(&data[offset..end]).unwrap().to_string();
         (s, end + 1)
+    }
+
+    #[test]
+    fn modern_quest_type_distinguishes_offers_from_current_quests() {
+        assert_eq!(modern_quest_type(5), 2, "available quest");
+        assert_eq!(modern_quest_type(3), 4, "incomplete quest");
+        assert_eq!(modern_quest_type(4), 4, "rewardable quest");
+        assert_eq!(modern_quest_type(7), 4, "completed quest");
     }
 
     // ---- SMSG_GOSSIP_MESSAGE ----
