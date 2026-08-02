@@ -7,7 +7,6 @@ pub struct Config {
     pub world_url: String,
     pub character_url: String,
     pub auth_url: String,
-    pub web_url: String,
     /// Optional PostgreSQL URL used only by the `db pg` migration commands.
     pub postgres_url: Option<String>,
     /// Absolute path to sql/base/
@@ -21,18 +20,12 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 struct RootConfig {
     world: WorldConfig,
-    web: WebConfig,
     postgres: Option<PostgresConfig>,
 }
 
 #[derive(Debug, Deserialize)]
 struct PostgresConfig {
     database_url: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct WebConfig {
-    web_database_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,7 +67,6 @@ impl Config {
         let root = RootConfig::load(&path)
             .with_context(|| format!("Failed to load config: {}", path.display()))?;
         let w = root.world;
-        let web = root.web;
 
         let sql_dir = find_sql_dir();
 
@@ -82,7 +74,6 @@ impl Config {
             world_url: w.world_database_url,
             character_url: w.character_database_url,
             auth_url: w.login_database_url,
-            web_url: web.web_database_url,
             postgres_url: root.postgres.map(|postgres| postgres.database_url),
             base_dir: sql_dir.join("base"),
             migrations_dir: sql_dir.join("migrations"),

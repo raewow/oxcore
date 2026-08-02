@@ -1,6 +1,6 @@
 pub const AFTER_HELP: &str = "\
 MYSQL DATABASES:
-    world, auth, characters, web
+    world, auth, characters
 
 EXAMPLES:
     cargo run --bin db -- migrate

@@ -8,7 +8,6 @@ const DATABASES: &[(&str, fn(&Config) -> &str)] = &[
     ("world", |c| &c.world_url),
     ("auth", |c| &c.auth_url),
     ("characters", |c| &c.character_url),
-    ("web", |c| &c.web_url),
 ];
 
 pub async fn run(config: &Config) -> Result<()> {

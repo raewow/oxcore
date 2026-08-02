@@ -60,7 +60,7 @@ cargo run --bin db -- status
 # Create a new migration file
 cargo run --bin db -- new world add_creature_gossip_option
 cargo run --bin db -- new characters add_character_pet
-cargo run --bin db -- new web add_web_notification
+cargo run --bin db -- pg new web add_web_notification
 
 # Show help
 cargo run --bin db -- help
@@ -69,15 +69,16 @@ cargo run --bin db -- help
 Migration files are created in `sql/migrations/` with the format `YYYYMMDDHHMMSS_<db>_<name>.sql`.
 
 The tool reads database connection URLs from the same `config.toml` used by the servers. The web
-portal requires both its existing auth database and its dedicated web database:
+portal requires its MySQL auth database and PostgreSQL web schema:
 
 ```toml
 [web]
 auth_database_url = "mysql://root:root@127.0.0.1:3306/auth"
-web_database_url = "mysql://root:root@127.0.0.1:3306/web"
+web_database_url = "postgres://oxcore:oxcore@127.0.0.1:5432/oxcore"
 ```
 
-The `web` database currently has no base dump; its schema is created entirely through migrations.
+The `web` schema has no base dump; its PostgreSQL schema is created entirely through `db pg`
+migrations.
 
 ### PostgreSQL Foundation
 

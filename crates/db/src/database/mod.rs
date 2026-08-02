@@ -2,6 +2,7 @@
 pub mod auth;
 pub mod characters;
 pub mod logs;
+pub mod web;
 pub mod world;
 
 use anyhow::{Context, Result};

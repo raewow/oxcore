@@ -11,5 +11,5 @@ The directories are created automatically by `db pg new <schema> <name>`. Postgr
 are intentionally separate from the MySQL dumps and migrations under `sql/base/` and
 `sql/migrations/`; do not run MySQL SQL through the PostgreSQL command lane.
 
-Current coverage: the `logs` schema has its initial PostgreSQL migration. Runtime log pools and
-queries still target MySQL until their dedicated query-port batch is complete.
+Current coverage: the `logs` and `web` schemas have initial PostgreSQL migrations. Their runtime
+pools and persistence queries use PostgreSQL; auth, world, and characters remain MySQL.
