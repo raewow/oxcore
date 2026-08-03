@@ -60,7 +60,7 @@ impl PlayerCreateInfoRepository {
         race: u8,
         class: u8,
     ) -> Result<Option<PlayerCreateInfoRow>> {
-        sqlx::query_as::<_, (i16, i16, i64, i64, f32, f32, f32, f32)>(
+        sqlx::query_as::<_, (i16, i16, i32, i64, f32, f32, f32, f32)>(
             r#"SELECT race, class, map, zone, position_x, position_y, position_z, orientation
                FROM world.playercreateinfo
                WHERE race = $1 AND class = $2"#,
@@ -123,7 +123,7 @@ impl PlayerCreateInfoRepository {
         race: u8,
         class: u8,
     ) -> Result<Vec<PlayerCreateInfoSpellRow>> {
-        let rows = sqlx::query_as::<_, (i16, i16, i64)>(
+        let rows = sqlx::query_as::<_, (i16, i16, i32)>(
             r#"SELECT race, class, spell
                FROM world.playercreateinfo_spell
                WHERE race = $1 AND class = $2"#,
@@ -151,7 +151,7 @@ impl PlayerCreateInfoRepository {
         race: u8,
         class: u8,
     ) -> Result<Vec<PlayerCreateInfoActionRow>> {
-        let rows = sqlx::query_as::<_, (i16, i16, i16, i64, i16)>(
+        let rows = sqlx::query_as::<_, (i16, i16, i32, i64, i32)>(
             r#"SELECT race, class, button, action, type
                FROM world.playercreateinfo_action
                WHERE race = $1 AND class = $2"#,

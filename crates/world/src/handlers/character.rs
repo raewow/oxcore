@@ -2473,7 +2473,7 @@ pub async fn handle_char_create(
     let guid = player_guid.counter();
 
     // 10. Get base health and mana from player_classlevelstats (class/level 1)
-    let class_stats: Option<(i16, i16)> = sqlx::query_as::<_, (i16, i16)>(
+    let class_stats: Option<(i32, i32)> = sqlx::query_as::<_, (i32, i32)>(
         "SELECT basehp, basemana FROM world.player_classlevelstats WHERE class = $1 AND level = 1",
     )
     .bind(i16::from(class))

@@ -43,7 +43,7 @@ pub struct AllowedClientRow {
     pub minor_version: i16,
     pub bugfix_version: i16,
     pub hotfix_version: String, // CHAR(1) in SQL
-    pub build: i32,
+    pub build: i64,
     pub os: String,
     pub platform: String,
     pub integrity_hash: String,
