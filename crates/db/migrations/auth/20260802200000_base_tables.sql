@@ -64,7 +64,7 @@ CREATE INDEX idx_realmcharacters_acctid ON realmcharacters (acctid);
 CREATE TABLE allowed_clients (
     major_version SMALLINT NOT NULL CHECK (major_version >= 0), minor_version SMALLINT NOT NULL CHECK (minor_version >= 0),
     bugfix_version SMALLINT NOT NULL CHECK (bugfix_version >= 0), hotfix_version CHAR(1) NOT NULL,
-    build INTEGER NOT NULL CHECK (build >= 0), os CHAR(50) NOT NULL, platform CHAR(50) NOT NULL,
+    build BIGINT NOT NULL CHECK (build >= 0), os CHAR(50) NOT NULL, platform CHAR(50) NOT NULL,
     integrity_hash VARCHAR(40) NOT NULL DEFAULT ''
 );
 CREATE TABLE uptime (realmid BIGINT NOT NULL CHECK (realmid >= 0), starttime BIGINT NOT NULL CHECK (starttime >= 0), startstring VARCHAR(64) NOT NULL DEFAULT '', uptime BIGINT NOT NULL DEFAULT 0 CHECK (uptime >= 0), onlineplayers INTEGER NOT NULL DEFAULT 0 CHECK (onlineplayers >= 0), maxplayers INTEGER NOT NULL DEFAULT 0 CHECK (maxplayers >= 0), revision VARCHAR(255) NOT NULL DEFAULT 'VMangos', PRIMARY KEY (realmid, starttime));
@@ -286,15 +286,15 @@ CREATE INDEX IF NOT EXISTS idx_ip2nationcountries_code ON "ip2nationcountries" (
 
 CREATE TABLE IF NOT EXISTS "ip_banned" (
     "ip" VARCHAR(32) NOT NULL DEFAULT '0.0.0.0',
-    "bandate" INTEGER NOT NULL,
-    "unbandate" INTEGER NOT NULL,
+    "bandate" BIGINT NOT NULL,
+    "unbandate" BIGINT NOT NULL,
     "bannedby" VARCHAR(50) NOT NULL DEFAULT '[Console]',
     "banreason" VARCHAR(50) NOT NULL DEFAULT 'no reason',
     PRIMARY KEY ("ip")
 );
 ALTER TABLE IF EXISTS "ip_banned" ADD COLUMN IF NOT EXISTS "ip" VARCHAR(32) NOT NULL DEFAULT '0.0.0.0';
-ALTER TABLE IF EXISTS "ip_banned" ADD COLUMN IF NOT EXISTS "bandate" INTEGER NOT NULL;
-ALTER TABLE IF EXISTS "ip_banned" ADD COLUMN IF NOT EXISTS "unbandate" INTEGER NOT NULL;
+ALTER TABLE IF EXISTS "ip_banned" ADD COLUMN IF NOT EXISTS "bandate" BIGINT NOT NULL;
+ALTER TABLE IF EXISTS "ip_banned" ADD COLUMN IF NOT EXISTS "unbandate" BIGINT NOT NULL;
 ALTER TABLE IF EXISTS "ip_banned" ADD COLUMN IF NOT EXISTS "bannedby" VARCHAR(50) NOT NULL DEFAULT '[Console]';
 ALTER TABLE IF EXISTS "ip_banned" ADD COLUMN IF NOT EXISTS "banreason" VARCHAR(50) NOT NULL DEFAULT 'no reason';
 
@@ -326,12 +326,12 @@ ALTER TABLE IF EXISTS "rbac_permissions" ADD COLUMN IF NOT EXISTS "name" VARCHAR
 
 CREATE TABLE IF NOT EXISTS "realmcharacters" (
     "realmid" BIGINT NOT NULL DEFAULT '0' CHECK ("realmid" >= 0),
-    "acctid" NUMERIC(20,0) NOT NULL CHECK ("acctid" >= 0),
+    "acctid" BIGINT NOT NULL CHECK ("acctid" >= 0),
     "numchars" SMALLINT NOT NULL DEFAULT '0' CHECK ("numchars" >= 0),
     PRIMARY KEY ("realmid", "acctid")
 );
 ALTER TABLE IF EXISTS "realmcharacters" ADD COLUMN IF NOT EXISTS "realmid" BIGINT NOT NULL DEFAULT '0' CHECK ("realmid" >= 0);
-ALTER TABLE IF EXISTS "realmcharacters" ADD COLUMN IF NOT EXISTS "acctid" NUMERIC(20,0) NOT NULL CHECK ("acctid" >= 0);
+ALTER TABLE IF EXISTS "realmcharacters" ADD COLUMN IF NOT EXISTS "acctid" BIGINT NOT NULL CHECK ("acctid" >= 0);
 ALTER TABLE IF EXISTS "realmcharacters" ADD COLUMN IF NOT EXISTS "numchars" SMALLINT NOT NULL DEFAULT '0' CHECK ("numchars" >= 0);
 CREATE INDEX IF NOT EXISTS idx_realmcharacters_acctid ON "realmcharacters" ("acctid");
 
@@ -375,18 +375,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_realmlist_idx_name ON "realmlist" ("name")
 
 CREATE TABLE IF NOT EXISTS "uptime" (
     "realmid" BIGINT NOT NULL CHECK ("realmid" >= 0),
-    "starttime" NUMERIC(20,0) NOT NULL DEFAULT '0' CHECK ("starttime" >= 0),
+    "starttime" BIGINT NOT NULL DEFAULT '0' CHECK ("starttime" >= 0),
     "startstring" VARCHAR(64) NOT NULL DEFAULT '',
-    "uptime" NUMERIC(20,0) NOT NULL DEFAULT '0' CHECK ("uptime" >= 0),
+    "uptime" BIGINT NOT NULL DEFAULT '0' CHECK ("uptime" >= 0),
     "onlineplayers" INTEGER NOT NULL DEFAULT '0' CHECK ("onlineplayers" >= 0),
     "maxplayers" INTEGER NOT NULL DEFAULT '0' CHECK ("maxplayers" >= 0),
     "revision" VARCHAR(255) NOT NULL DEFAULT 'VMangos',
     PRIMARY KEY ("realmid", "starttime")
 );
 ALTER TABLE IF EXISTS "uptime" ADD COLUMN IF NOT EXISTS "realmid" BIGINT NOT NULL CHECK ("realmid" >= 0);
-ALTER TABLE IF EXISTS "uptime" ADD COLUMN IF NOT EXISTS "starttime" NUMERIC(20,0) NOT NULL DEFAULT '0' CHECK ("starttime" >= 0);
+ALTER TABLE IF EXISTS "uptime" ADD COLUMN IF NOT EXISTS "starttime" BIGINT NOT NULL DEFAULT '0' CHECK ("starttime" >= 0);
 ALTER TABLE IF EXISTS "uptime" ADD COLUMN IF NOT EXISTS "startstring" VARCHAR(64) NOT NULL DEFAULT '';
-ALTER TABLE IF EXISTS "uptime" ADD COLUMN IF NOT EXISTS "uptime" NUMERIC(20,0) NOT NULL DEFAULT '0' CHECK ("uptime" >= 0);
+ALTER TABLE IF EXISTS "uptime" ADD COLUMN IF NOT EXISTS "uptime" BIGINT NOT NULL DEFAULT '0' CHECK ("uptime" >= 0);
 ALTER TABLE IF EXISTS "uptime" ADD COLUMN IF NOT EXISTS "onlineplayers" INTEGER NOT NULL DEFAULT '0' CHECK ("onlineplayers" >= 0);
 ALTER TABLE IF EXISTS "uptime" ADD COLUMN IF NOT EXISTS "maxplayers" INTEGER NOT NULL DEFAULT '0' CHECK ("maxplayers" >= 0);
 ALTER TABLE IF EXISTS "uptime" ADD COLUMN IF NOT EXISTS "revision" VARCHAR(255) NOT NULL DEFAULT 'VMangos';

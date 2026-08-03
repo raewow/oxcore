@@ -78,8 +78,8 @@ pub struct AccountBannedRow {
     pub unbandate: i64,
     pub bannedby: String,
     pub banreason: String,
-    pub active: i8,
-    pub realm: i8,
+    pub active: i16,
+    pub realm: i16,
     pub gmlevel: i16,
 }
 
@@ -88,8 +88,8 @@ pub struct AccountBannedRow {
 #[derive(FromRow, Debug, Clone)]
 pub struct IpBannedRow {
     pub ip: String,
-    pub bandate: i32,
-    pub unbandate: i32,
+    pub bandate: i64,
+    pub unbandate: i64,
     pub bannedby: String,
     pub banreason: String,
 }

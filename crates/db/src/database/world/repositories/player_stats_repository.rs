@@ -8,11 +8,11 @@ pub struct PgPlayerLevelStatRow {
     pub race: i16,
     pub class: i16,
     pub level: i16,
-    pub str: i32,
-    pub agi: i32,
-    pub sta: i32,
-    pub inte: i32,
-    pub spi: i32,
+    pub str: i16,
+    pub agi: i16,
+    pub sta: i16,
+    pub inte: i16,
+    pub spi: i16,
 }
 
 #[derive(Debug, FromRow)]

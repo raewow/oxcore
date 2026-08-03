@@ -420,7 +420,7 @@ impl PgCharacterRepository {
     }
 
     pub async fn find_auras(&self, guid: i64) -> Result<Vec<PgCharacterAuraRow>> {
-        sqlx::query_as("SELECT guid,caster_guid,item_guid,spell,stacks,charges,base_points0,base_points1,base_points2,periodic_time0,periodic_time1,periodic_time2,max_duration,duration,effect_index_mask FROM characters.character_aura WHERE guid=$1")
+        sqlx::query_as("SELECT guid,caster_guid::BIGINT,item_guid,spell,stacks,charges,base_points0,base_points1,base_points2,periodic_time0,periodic_time1,periodic_time2,max_duration,duration,effect_index_mask FROM characters.character_aura WHERE guid=$1")
             .bind(guid).fetch_all(&*self.pool).await.context("Failed to load PostgreSQL character auras")
     }
 
@@ -1593,11 +1593,11 @@ pub struct PgHonorStoredRow {
     pub guid: i64,
     pub honor_rank_points: f32,
     pub honor_standing: i64,
-    pub honor_highest_rank: i16,
+    pub honor_highest_rank: i64,
     pub honor_last_week_hk: i64,
     pub honor_last_week_cp: f32,
-    pub honor_stored_hk: i64,
-    pub honor_stored_dk: i64,
+    pub honor_stored_hk: i32,
+    pub honor_stored_dk: i32,
 }
 #[derive(Debug, Clone, FromRow, PartialEq)]
 pub struct PgInstanceRow {

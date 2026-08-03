@@ -1352,6 +1352,12 @@ impl CreatureManager {
         // Working old implementation uses 0x00001001
         let bytes_2: u32 = 0x00001001;
 
+        let effective_scale = if creature.scale.is_finite() && creature.scale > 0.0 {
+            creature.scale
+        } else {
+            1.0
+        };
+
         // Build CREATE_OBJECT block with all required fields
         // This matches the old world's Creature::populate_create_fields()
         let mut block = CreateObjectBlock::new(world_guid, ObjectTypeId::Unit, ObjectType::Unit)
@@ -1361,14 +1367,7 @@ impl CreatureManager {
             .set_field(OBJECT_FIELD_TYPE, 0x09) // TYPEMASK_OBJECT | TYPEMASK_UNIT
             .set_field(OBJECT_FIELD_ENTRY, creature.entry) // CRITICAL: Client needs entry!
             // Scale is validated at spawn, but retain a wire-safe fallback for test/script creatures.
-            .set_float_field(
-                OBJECT_FIELD_SCALE_X,
-                if creature.scale.is_finite() && creature.scale > 0.0 {
-                    creature.scale
-                } else {
-                    1.0
-                },
-            )
+            .set_float_field(OBJECT_FIELD_SCALE_X, effective_scale)
             // Unit stats
             .set_field(UNIT_FIELD_HEALTH, creature.current_health)
             .set_field(UNIT_FIELD_MAXHEALTH, creature.max_health)
@@ -1411,11 +1410,15 @@ impl CreatureManager {
             .get(&creature.display_id)
             .map(|scale| *scale)
             .filter(|scale| scale.is_finite() && *scale > 0.0);
-        if native_scale.is_some_and(|native| (creature.scale - native).abs() < 0.001) {
-            // MaNGOS's DBC fallback is already baked into OBJECT_FIELD_SCALE_X. Modern clients
-            // apply their own display scale too, making small models (wolves, kobolds) tiny.
-            // JimsProxy strips that pre-scaled value; do the same only for the native fallback.
-            block = block.set_modern_field(6, 1.0f32.to_bits());
+        if let Some(native) = native_scale {
+            // Modern clients independently reapply the display's own native DBC scale on top
+            // of whatever OBJECT_FIELD_SCALE_X we send. Send the ratio needed to cancel that
+            // back out (creature.scale / native) so the effective size matches on both
+            // clients, whether creature.scale came from the native DBC fallback (ratio 1.0)
+            // or an explicit creature_template override that diverges from it (e.g. Timber
+            // Wolf's display_scale1=0.7 vs display 604's native 0.55).
+            let modern_scale = effective_scale / native;
+            block = block.set_modern_field(6, modern_scale.to_bits());
         }
 
         // Calculate dynamic flags for dead creatures. Real death is conveyed by

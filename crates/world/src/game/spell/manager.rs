@@ -342,10 +342,10 @@ impl SpellManager {
     /// PPM / cooldown) keyed by spell id. Tolerant: a missing table is logged, not fatal.
     async fn load_spell_proc_events(&self, world_db: &PgPool) -> Result<()> {
         let query = sqlx::query(
-            "SELECT entry, SchoolMask AS school_mask, SpellFamilyName AS spell_family, \
-                     SpellFamilyMask0 AS family_mask, procFlags AS proc_flags, procEx AS proc_ex, \
-                    ppmRate, CustomChance, \
-                     Cooldown AS cooldown \
+            "SELECT entry::BIGINT AS entry, \"SchoolMask\"::BIGINT AS school_mask, \"SpellFamilyName\"::BIGINT AS spell_family, \
+                     \"SpellFamilyMask0\"::BIGINT AS family_mask, \"procFlags\" AS proc_flags, \"procEx\" AS proc_ex, \
+                    \"ppmRate\", \"CustomChance\", \
+                     \"Cooldown\" AS cooldown \
               FROM world.spell_proc_event",
         )
         .fetch_all(world_db)
