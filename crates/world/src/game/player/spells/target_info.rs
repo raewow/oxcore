@@ -1275,13 +1275,13 @@ mod tests {
     use crate::game::player::auras::{Aura, AuraFlags};
     use crate::game::player::Player;
     use oxcore_db::database::Databases;
-    use sqlx::mysql::MySqlPoolOptions;
+    use sqlx::postgres::PgPoolOptions;
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    fn lazy_pool() -> sqlx::MySqlPool {
-        MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
+    fn lazy_pool() -> sqlx::PgPool {
+        PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy pool should be constructible")
     }
 

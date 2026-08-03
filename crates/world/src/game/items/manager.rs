@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
-use sqlx::{MySqlPool, Row};
+use sqlx::Row;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tracing::info;
@@ -457,10 +457,10 @@ impl ItemManager {
     }
 
     /// Load all item templates from database
-    pub async fn load_item_templates(&self, pool: &sqlx::MySqlPool) -> Result<()> {
+    pub async fn load_item_templates(&self, pool: &sqlx::PgPool) -> Result<()> {
         let rows = sqlx::query(
             "SELECT entry, name, display_id, quality, item_level, required_level,
-                       inventory_type, `class`, subclass, max_count, stackable, max_durability,
+                       inventory_type, class, subclass, max_count, stackable, max_durability,
                      buy_count, buy_price, sell_price, container_slots, bag_family, start_quest,
                      stat_type1, stat_type2, stat_type3, stat_type4, stat_type5,
                      stat_type6, stat_type7, stat_type8, stat_type9, stat_type10,
@@ -482,7 +482,7 @@ impl ItemManager {
                      required_city_rank, required_reputation_faction, required_reputation_rank,
                      range_mod, bonding, page_text, page_language, page_material, lock_id,
                      material, sheath, random_property, set_id, area_bound, map_bound, duration
-               FROM item_template WHERE patch = 0",
+                FROM world.item_template WHERE patch = 0",
         )
         .fetch_all(pool)
         .await
@@ -492,51 +492,98 @@ impl ItemManager {
         let mut invalid_stackable_count = 0;
 
         for row in rows {
-            let entry: u32 = row.try_get("entry")?;
+            let integer = |column: &str| -> Result<i64> {
+                if let Ok(value) = row.try_get::<i64, _>(column) {
+                    return Ok(value);
+                }
+                if let Ok(value) = row.try_get::<i32, _>(column) {
+                    return Ok(i64::from(value));
+                }
+                if let Ok(value) = row.try_get::<i16, _>(column) {
+                    return Ok(i64::from(value));
+                }
+                row.try_get::<i64, _>(column)
+                    .context("item_template column is not an integer")
+            };
+            macro_rules! u32_field {
+                ($column:literal) => {
+                    u32::try_from(integer($column)?).with_context(|| {
+                        format!("item_template.{} is outside u32 range", $column)
+                    })?
+                };
+            }
+            macro_rules! u16_field {
+                ($column:literal) => {
+                    u16::try_from(integer($column)?).with_context(|| {
+                        format!("item_template.{} is outside u16 range", $column)
+                    })?
+                };
+            }
+            macro_rules! u8_field {
+                ($column:literal) => {
+                    u8::try_from(integer($column)?)
+                        .with_context(|| format!("item_template.{} is outside u8 range", $column))?
+                };
+            }
+            macro_rules! i16_field {
+                ($column:literal) => {
+                    i16::try_from(integer($column)?).with_context(|| {
+                        format!("item_template.{} is outside i16 range", $column)
+                    })?
+                };
+            }
+            macro_rules! i8_field {
+                ($column:literal) => {
+                    i8::try_from(integer($column)?)
+                        .with_context(|| format!("item_template.{} is outside i8 range", $column))?
+                };
+            }
+
+            let entry = u32_field!("entry");
             let name: String = row.try_get("name")?;
-            let display_id: u32 = row.try_get("display_id")?;
-            let quality: u8 = row.try_get("quality")?;
-            let item_level: u32 = row.try_get("item_level")?;
-            let required_level: u32 = row.try_get("required_level")?;
-            let inventory_type: u8 = row.try_get("inventory_type")?;
-            let item_class: u32 = row.try_get("class")?;
-            let item_subclass: u32 = row.try_get("subclass")?;
-            let max_count: u32 = row.try_get("max_count")?;
-            let mut stackable: u32 = row.try_get("stackable")?;
-            let max_durability: u32 = row.try_get("max_durability")?;
-            let buy_count: u32 = row.try_get("buy_count")?;
-            let buy_price: u32 = row.try_get("buy_price")?;
-            let sell_price: u32 = row.try_get("sell_price")?;
+            let display_id = u32_field!("display_id");
+            let quality = u8_field!("quality");
+            let item_level = u32_field!("item_level");
+            let required_level = u32_field!("required_level");
+            let inventory_type = u8_field!("inventory_type");
+            let item_class = u32_field!("class");
+            let item_subclass = u32_field!("subclass");
+            let max_count = u32_field!("max_count");
+            let mut stackable = u32_field!("stackable");
+            let max_durability = u32_field!("max_durability");
+            let buy_count = u32_field!("buy_count");
+            let buy_price = u32_field!("buy_price");
+            let sell_price = u32_field!("sell_price");
             let bag_family = u32::try_from(row.try_get::<i32, _>("bag_family")?)
                 .context("item_template.bag_family must not be negative")?;
-            let container_slots: u8 = row.try_get("container_slots")?;
-            let start_quest: u32 = row.try_get("start_quest")?;
+            let container_slots = u8_field!("container_slots");
+            let start_quest = u32_field!("start_quest");
             let stat_type = [
-                row.try_get("stat_type1")?,
-                row.try_get("stat_type2")?,
-                row.try_get("stat_type3")?,
-                row.try_get("stat_type4")?,
-                row.try_get("stat_type5")?,
-                row.try_get("stat_type6")?,
-                row.try_get("stat_type7")?,
-                row.try_get("stat_type8")?,
-                row.try_get("stat_type9")?,
-                row.try_get("stat_type10")?,
+                u8_field!("stat_type1"),
+                u8_field!("stat_type2"),
+                u8_field!("stat_type3"),
+                u8_field!("stat_type4"),
+                u8_field!("stat_type5"),
+                u8_field!("stat_type6"),
+                u8_field!("stat_type7"),
+                u8_field!("stat_type8"),
+                u8_field!("stat_type9"),
+                u8_field!("stat_type10"),
             ];
             let stat_value = [
-                row.try_get("stat_value1")?,
-                row.try_get("stat_value2")?,
-                row.try_get("stat_value3")?,
-                row.try_get("stat_value4")?,
-                row.try_get("stat_value5")?,
-                row.try_get("stat_value6")?,
-                row.try_get("stat_value7")?,
-                row.try_get("stat_value8")?,
-                row.try_get("stat_value9")?,
-                row.try_get("stat_value10")?,
+                i16_field!("stat_value1"),
+                i16_field!("stat_value2"),
+                i16_field!("stat_value3"),
+                i16_field!("stat_value4"),
+                i16_field!("stat_value5"),
+                i16_field!("stat_value6"),
+                i16_field!("stat_value7"),
+                i16_field!("stat_value8"),
+                i16_field!("stat_value9"),
+                i16_field!("stat_value10"),
             ];
-            let delay: u16 = row.try_get("delay")?;
-            let ammo_type: u8 = row.try_get("ammo_type")?;
+            let delay = u16_field!("delay");
+            let ammo_type = u8_field!("ammo_type");
             let dmg_min = [
                 row.try_get("dmg_min1")?,
                 row.try_get("dmg_min2")?,
@@ -552,60 +599,60 @@ impl ItemManager {
                 row.try_get("dmg_max5")?,
             ];
             let dmg_type = [
-                row.try_get("dmg_type1")?,
-                row.try_get("dmg_type2")?,
-                row.try_get("dmg_type3")?,
-                row.try_get("dmg_type4")?,
-                row.try_get("dmg_type5")?,
+                u8_field!("dmg_type1"),
+                u8_field!("dmg_type2"),
+                u8_field!("dmg_type3"),
+                u8_field!("dmg_type4"),
+                u8_field!("dmg_type5"),
             ];
-            let block: u32 = row.try_get("block")?;
-            let armor: i16 = row.try_get("armor")?;
-            let holy_res: i16 = row.try_get("holy_res")?;
-            let fire_res: i16 = row.try_get("fire_res")?;
-            let nature_res: i16 = row.try_get("nature_res")?;
-            let frost_res: i16 = row.try_get("frost_res")?;
-            let shadow_res: i16 = row.try_get("shadow_res")?;
-            let arcane_res: i16 = row.try_get("arcane_res")?;
+            let block = u32_field!("block");
+            let armor = i16_field!("armor");
+            let holy_res = i16_field!("holy_res");
+            let fire_res = i16_field!("fire_res");
+            let nature_res = i16_field!("nature_res");
+            let frost_res = i16_field!("frost_res");
+            let shadow_res = i16_field!("shadow_res");
+            let arcane_res = i16_field!("arcane_res");
             let description: String = row.try_get("description")?;
-            let flags: u32 = row.try_get("flags")?;
-            let extra_flags: u32 = u32::from(row.try_get::<u8, _>("extra_flags")?);
+            let flags = u32_field!("flags");
+            let extra_flags = u32::from(u8_field!("extra_flags"));
             let allowable_class: i32 = row.try_get("allowable_class")?;
             let allowable_race: i32 = row.try_get("allowable_race")?;
-            let required_skill: u16 = row.try_get("required_skill")?;
-            let required_skill_rank: u16 = row.try_get("required_skill_rank")?;
-            let required_spell: u32 = u32::from(row.try_get::<u16, _>("required_spell")?);
-            let required_honor_rank: u32 = row.try_get("required_honor_rank")?;
-            let required_city_rank: u32 = row.try_get("required_city_rank")?;
-            let required_reputation_faction: u16 = row.try_get("required_reputation_faction")?;
-            let required_reputation_rank: u16 = row.try_get("required_reputation_rank")?;
+            let required_skill = u16_field!("required_skill");
+            let required_skill_rank = u16_field!("required_skill_rank");
+            let required_spell = u32::from(u16_field!("required_spell"));
+            let required_honor_rank = u32_field!("required_honor_rank");
+            let required_city_rank = u32_field!("required_city_rank");
+            let required_reputation_faction = u16_field!("required_reputation_faction");
+            let required_reputation_rank = u16_field!("required_reputation_rank");
             let range_mod: f32 = row.try_get("range_mod")?;
-            let bonding: u8 = row.try_get("bonding")?;
-            let page_text: u32 = row.try_get("page_text")?;
-            let page_language: u8 = row.try_get("page_language")?;
-            let page_material: u8 = row.try_get("page_material")?;
-            let lock_id: u32 = row.try_get("lock_id")?;
-            let material: i8 = row.try_get("material")?;
-            let sheath: u8 = row.try_get("sheath")?;
-            let random_property: u32 = row.try_get("random_property")?;
-            let set_id: u32 = row.try_get("set_id")?;
-            let area_bound: u32 = row.try_get("area_bound")?;
-            let map_bound: i16 = row.try_get("map_bound")?;
-            let duration: u32 = row.try_get("duration")?;
+            let bonding = u8_field!("bonding");
+            let page_text = u32_field!("page_text");
+            let page_language = u8_field!("page_language");
+            let page_material = u8_field!("page_material");
+            let lock_id = u32_field!("lock_id");
+            let material = i8_field!("material");
+            let sheath = u8_field!("sheath");
+            let random_property = u32_field!("random_property");
+            let set_id = u32_field!("set_id");
+            let area_bound = u32_field!("area_bound");
+            let map_bound = i16_field!("map_bound");
+            let duration = u32_field!("duration");
 
             // Read spell data (default to 0 for all fields)
             let spell_id = [
-                row.try_get("spellid_1").unwrap_or(0),
-                row.try_get("spellid_2").unwrap_or(0),
-                row.try_get("spellid_3").unwrap_or(0),
-                row.try_get("spellid_4").unwrap_or(0),
-                row.try_get("spellid_5").unwrap_or(0),
+                u32_field!("spellid_1"),
+                u32_field!("spellid_2"),
+                u32_field!("spellid_3"),
+                u32_field!("spellid_4"),
+                u32_field!("spellid_5"),
             ];
             let spell_trigger = [
-                row.try_get("spelltrigger_1").unwrap_or(0),
-                row.try_get("spelltrigger_2").unwrap_or(0),
-                row.try_get("spelltrigger_3").unwrap_or(0),
-                row.try_get("spelltrigger_4").unwrap_or(0),
-                row.try_get("spelltrigger_5").unwrap_or(0),
+                u32_field!("spelltrigger_1"),
+                u32_field!("spelltrigger_2"),
+                u32_field!("spelltrigger_3"),
+                u32_field!("spelltrigger_4"),
+                u32_field!("spelltrigger_5"),
             ];
             let spell_charges = [
                 row.try_get("spellcharges_1").unwrap_or(0),
@@ -622,11 +669,11 @@ impl ItemManager {
                 row.try_get("spellcooldown_5").unwrap_or(-1),
             ];
             let spell_category = [
-                row.try_get("spellcategory_1").unwrap_or(0),
-                row.try_get("spellcategory_2").unwrap_or(0),
-                row.try_get("spellcategory_3").unwrap_or(0),
-                row.try_get("spellcategory_4").unwrap_or(0),
-                row.try_get("spellcategory_5").unwrap_or(0),
+                u32_field!("spellcategory_1"),
+                u32_field!("spellcategory_2"),
+                u32_field!("spellcategory_3"),
+                u32_field!("spellcategory_4"),
+                u32_field!("spellcategory_5"),
             ];
             let spell_category_cooldown = [
                 row.try_get("spellcategorycooldown_1").unwrap_or(-1),
@@ -745,8 +792,8 @@ impl ItemManager {
     }
 
     /// Load all item required-target rules from the `item_required_target` table.
-    pub async fn load_item_required_targets(&self, pool: &sqlx::MySqlPool) -> Result<()> {
-        let rows = sqlx::query("SELECT entry, `type`, target_entry FROM item_required_target")
+    pub async fn load_item_required_targets(&self, pool: &sqlx::PgPool) -> Result<()> {
+        let rows = sqlx::query("SELECT entry, type, target_entry FROM world.item_required_target")
             .fetch_all(pool)
             .await
             .context("Failed to load item_required_target")?;
@@ -755,9 +802,12 @@ impl ItemManager {
         let mut skipped = 0;
 
         for row in rows {
-            let entry: u32 = row.try_get("entry")?;
-            let raw_type: u8 = row.try_get("type")?;
-            let target_entry: u32 = row.try_get("target_entry")?;
+            let entry = u32::try_from(row.try_get::<i64, _>("entry")?)
+                .context("item_required_target.entry is outside u32 range")?;
+            let raw_type = u8::try_from(row.try_get::<i16, _>("type")?)
+                .context("item_required_target.type is outside u8 range")?;
+            let target_entry = u32::try_from(row.try_get::<i64, _>("target_entry")?)
+                .context("item_required_target.target_entry is outside u32 range")?;
 
             let Some(target_type) = ItemTargetType::from_db(raw_type) else {
                 tracing::warn!(
@@ -807,18 +857,17 @@ impl ItemManager {
     ///
     /// Queries the maximum existing item GUID from both item_instance and character_inventory
     /// tables to ensure we don't generate duplicate GUIDs. Sets the next GUID to max + 1.
-    pub async fn init_guid_generator(&self, pool: &sqlx::MySqlPool) -> Result<()> {
+    pub async fn init_guid_generator(&self, pool: &sqlx::PgPool) -> Result<()> {
         // Get max item GUID from both item_instance and character_inventory tables
         // We need to check both because items might exist in character_inventory without item_instance entries
-        // GREATEST returns BIGINT, so we need to cast it to UNSIGNED INT
-        let max_item_guid: Option<u32> = match sqlx::query_scalar::<_, Option<u64>>(
-            "SELECT CAST(GREATEST(COALESCE((SELECT MAX(guid) FROM item_instance), 0), COALESCE((SELECT MAX(item_guid) FROM character_inventory), 0)) AS UNSIGNED) as max_guid"
+        let max_item_guid: Option<u32> = match sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT GREATEST(COALESCE((SELECT MAX(guid) FROM characters.item_instance), 0), COALESCE((SELECT MAX(item_guid) FROM characters.character_inventory), 0))"
         )
         .fetch_optional(pool)
         .await
         {
             Ok(Some(Some(guid))) => {
-                if guid > u32::MAX as u64 {
+                if guid > i64::from(u32::MAX) {
                     tracing::warn!("GUID value {} exceeds u32::MAX, clamping to {}", guid, u32::MAX);
                     Some(u32::MAX)
                 } else {
@@ -829,14 +878,14 @@ impl ItemManager {
             Err(e) => {
                 // Fallback: try just item_instance
                 tracing::warn!("Could not query max item GUID with GREATEST, trying simpler query: {}", e);
-                match sqlx::query_scalar::<_, Option<u64>>(
-                    "SELECT CAST(MAX(guid) AS UNSIGNED) FROM item_instance"
+                match sqlx::query_scalar::<_, Option<i64>>(
+                    "SELECT MAX(guid) FROM characters.item_instance"
                 )
                 .fetch_optional(pool)
                 .await
                 {
                     Ok(Some(Some(guid))) => {
-                        if guid > u32::MAX as u64 {
+                        if guid > i64::from(u32::MAX) {
                             Some(u32::MAX)
                         } else {
                             Some(guid as u32)

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use dashmap::DashMap;
-use sqlx::{MySqlPool, Row};
+use sqlx::{PgPool, Row};
 use std::collections::HashSet;
 
 use crate::World;
@@ -30,9 +30,9 @@ impl ConditionManager {
         }
     }
 
-    pub async fn load(&self, world_db: &MySqlPool) -> Result<()> {
+    pub async fn load(&self, world_db: &PgPool) -> Result<()> {
         let rows = sqlx::query(
-            "SELECT condition_entry, type, value1, value2, value3, value4, flags FROM conditions",
+            "SELECT condition_entry, type, value1, value2, value3, value4, flags FROM world.conditions",
         )
         .fetch_all(world_db)
         .await
@@ -41,16 +41,16 @@ impl ConditionManager {
         self.entries.clear();
         for row in rows {
             self.entries.insert(
-                row.try_get::<u64, _>("condition_entry")? as u32,
+                u32::try_from(row.try_get::<i64, _>("condition_entry")?)?,
                 ConditionEntry {
-                    kind: row.try_get("type")?,
+                    kind: i8::try_from(row.try_get::<i16, _>("type")?)?,
                     values: [
                         row.try_get("value1")?,
                         row.try_get("value2")?,
                         row.try_get("value3")?,
                         row.try_get("value4")?,
                     ],
-                    flags: row.try_get::<u8, _>("flags")?,
+                    flags: u8::try_from(row.try_get::<i16, _>("flags")?)?,
                 },
             );
         }

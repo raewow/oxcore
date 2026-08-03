@@ -1,13 +1,13 @@
 use super::addon::CreatureAddon;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 
 /// Repository for loading creature addon data from database
 pub struct AddonRepository {
-    pool: MySqlPool,
+    pool: PgPool,
 }
 
 impl AddonRepository {
-    pub fn new(pool: MySqlPool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
@@ -33,7 +33,7 @@ impl AddonRepository {
         let rows = sqlx::query_as::<_, AddonRow>(
             "SELECT guid, mount_display_id, stand_state, sheath_state, emote_state, \
              COALESCE(auras, '') AS auras \
-             FROM creature_addon",
+              FROM world.creature_addon",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -42,7 +42,7 @@ impl AddonRepository {
             .into_iter()
             .map(|row| {
                 (
-                    row.guid,
+                    row.guid as u32,
                     CreatureAddon {
                         mount: row.mount_display_id as u32,
                         bytes1: row.stand_state as u32,
@@ -61,7 +61,7 @@ impl AddonRepository {
         let result = sqlx::query_as::<_, TemplateAddonRow>(
             "SELECT entry, mount_display_id, stand_state, sheath_state, emote_state, \
              COALESCE(auras, '') AS auras \
-             FROM creature_template_addon",
+              FROM world.creature_template_addon",
         )
         .fetch_all(&self.pool)
         .await;
@@ -71,7 +71,7 @@ impl AddonRepository {
                 .into_iter()
                 .map(|row| {
                     (
-                        row.entry,
+                        row.entry as u32,
                         CreatureAddon {
                             mount: row.mount_display_id as u32,
                             bytes1: row.stand_state as u32,
@@ -110,20 +110,20 @@ fn parse_auras(auras_str: &str) -> Vec<u32> {
 
 #[derive(sqlx::FromRow)]
 struct AddonRow {
-    guid: u32,
+    guid: i64,
     mount_display_id: i16,
-    stand_state: u8,
-    sheath_state: u8,
-    emote_state: u16,
+    stand_state: i16,
+    sheath_state: i16,
+    emote_state: i16,
     auras: String,
 }
 
 #[derive(sqlx::FromRow)]
 struct TemplateAddonRow {
-    entry: u32,
+    entry: i64,
     mount_display_id: i16,
-    stand_state: u8,
-    sheath_state: u8,
-    emote_state: u16,
+    stand_state: i16,
+    sheath_state: i16,
+    emote_state: i16,
     auras: String,
 }

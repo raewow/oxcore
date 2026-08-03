@@ -255,6 +255,80 @@ pub struct LiveMapPlayer {
     pub zone: u32,
 }
 
+#[cfg(feature = "ssr")]
+#[derive(sqlx::FromRow)]
+struct AdminCharacterDetailDbRow {
+    guid: i64,
+    name: String,
+    account: i64,
+    race: i16,
+    class: i16,
+    gender: i16,
+    level: i16,
+    online: i16,
+    zone: i64,
+    map: i64,
+    position_x: f32,
+    position_y: f32,
+    position_z: f32,
+    money: i64,
+    played_time_total: i64,
+    create_time: i64,
+    logout_time: i64,
+}
+
+#[cfg(feature = "ssr")]
+fn portal_character_from_row(
+    row: (i64, String, i16, i16, i16, i16),
+) -> anyhow::Result<PortalCharacter> {
+    let (guid, name, race, class, level, online) = row;
+    Ok(PortalCharacter {
+        guid: u32::try_from(guid)?,
+        name,
+        race: u8::try_from(race)?,
+        class: u8::try_from(class)?,
+        level: u8::try_from(level)?,
+        online: u8::try_from(online)?,
+    })
+}
+
+#[cfg(feature = "ssr")]
+fn admin_character_from_row(
+    row: (i64, String, i16, i16, i16, i16),
+) -> anyhow::Result<AdminCharacter> {
+    let (guid, name, race, class, level, online) = row;
+    Ok(AdminCharacter {
+        guid: u32::try_from(guid)?,
+        name,
+        race: u8::try_from(race)?,
+        class: u8::try_from(class)?,
+        level: u8::try_from(level)?,
+        online: u8::try_from(online)?,
+    })
+}
+
+#[cfg(feature = "ssr")]
+fn live_map_player_from_row(
+    row: (i64, String, i16, i16, i64, f32, f32, i64),
+) -> anyhow::Result<LiveMapPlayer> {
+    let (guid, name, level, class, map, position_x, position_y, zone) = row;
+    Ok(LiveMapPlayer {
+        guid: u32::try_from(guid)?,
+        name,
+        level: u8::try_from(level)?,
+        class: u8::try_from(class)?,
+        map: u32::try_from(map)?,
+        position_x,
+        position_y,
+        zone: u32::try_from(zone)?,
+    })
+}
+
+#[cfg(feature = "ssr")]
+fn conversion_error(error: impl std::fmt::Display) -> ServerFnError {
+    ServerFnError::ServerError(error.to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEntry {
     pub id: u64,
@@ -447,32 +521,33 @@ pub async fn get_character_detail(guid: u32) -> Result<Option<CharacterDetail>, 
     #[cfg(feature = "ssr")]
     {
         let (state, account_id, _) = authenticated_request().await?;
-        return sqlx::query_as::<_, (u32, String, u8, u8, u8, u8, u32, u32, u32)>(
-            "SELECT `guid`, `name`, `race`, `class`, `level`, `online`, `zone`, `money`, \
-             `played_time_total` FROM `characters` WHERE `guid` = ? AND `account` = ?",
+        let row = sqlx::query_as::<_, (i64, String, i16, i16, i16, i16, i64, i64, i64)>(
+            "SELECT guid, name, race, class, level, online, zone, money, \
+             played_time_total FROM characters.characters WHERE guid = $1 AND account = $2",
         )
-        .bind(guid)
-        .bind(account_id)
+        .bind(i64::from(guid))
+        .bind(i64::from(account_id))
         .fetch_optional(&*state.characters)
         .await
-        .map(|row| {
-            row.map(
+        .map_err(conversion_error)?;
+        return row
+            .map(
                 |(guid, name, race, class, level, online, zone, money, played_time_total)| {
-                    CharacterDetail {
-                        guid,
+                    Ok(CharacterDetail {
+                        guid: u32::try_from(guid)?,
                         name,
-                        race,
-                        class,
-                        level,
-                        online,
-                        zone,
-                        money,
-                        played_time_total,
-                    }
+                        race: u8::try_from(race)?,
+                        class: u8::try_from(class)?,
+                        level: u8::try_from(level)?,
+                        online: u8::try_from(online)?,
+                        zone: u32::try_from(zone)?,
+                        money: u32::try_from(money)?,
+                        played_time_total: u32::try_from(played_time_total)?,
+                    })
                 },
             )
-        })
-        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+            .transpose()
+            .map_err(|error: anyhow::Error| ServerFnError::ServerError(error.to_string()));
     }
 
     #[cfg(not(feature = "ssr"))]
@@ -682,14 +757,17 @@ pub async fn get_player_chat(name: String) -> Result<ChatPlayerDetail, ServerFnE
         };
         let messages: Vec<ChatMessage> = rows.into_iter().map(chat_row).collect();
 
-        let account_from_characters =
-            sqlx::query_scalar::<_, i64>("SELECT `account` FROM `characters` WHERE `name` = ?")
-                .bind(name)
-                .fetch_optional(&*state.characters)
-                .await
-                .ok()
-                .flatten()
-                .map(|account| account as u32);
+        let account_from_characters = sqlx::query_scalar::<_, i64>(
+            "SELECT account FROM characters.characters WHERE name = $1",
+        )
+        .bind(name)
+        .fetch_optional(&*state.characters)
+        .await
+        .ok()
+        .flatten()
+        .map(u32::try_from)
+        .transpose()
+        .map_err(conversion_error)?;
         let account_id = messages
             .iter()
             .find_map(|message| message.sender_account)
@@ -721,14 +799,21 @@ pub async fn get_account_chat(account_id: u32) -> Result<Vec<ChatMessage>, Serve
     {
         let (state, actor_id, _) = authenticated_request().await?;
         require_gm_level(&state, actor_id, 1).await?;
-        let guids = match sqlx::query_scalar::<_, u32>(
-            "SELECT `guid` FROM `characters` WHERE `account` = ?",
+        let guids = match sqlx::query_scalar::<_, i64>(
+            "SELECT guid FROM characters.characters WHERE account = $1",
         )
-        .bind(account_id)
+        .bind(i64::from(account_id))
         .fetch_all(&*state.characters)
         .await
         {
-            Ok(guids) => guids,
+            Ok(guids) => match guids
+                .into_iter()
+                .map(u32::try_from)
+                .collect::<Result<Vec<_>, _>>()
+            {
+                Ok(guids) => guids,
+                Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+            },
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
 
@@ -753,15 +838,18 @@ pub async fn get_gm_characters() -> Result<Vec<PortalCharacter>, ServerFnError> 
     {
         let (state, account_id, _) = authenticated_request().await?;
         require_gm_level(&state, account_id, 1).await?;
-        let rows = match sqlx::query_as::<_, PortalCharacter>(
-            "SELECT `guid`, `name`, `race`, `class`, `level`, `online` FROM `characters` \
-             WHERE `account` = ? AND `online` <> 0 ORDER BY `guid`",
+        let rows = match sqlx::query_as::<_, (i64, String, i16, i16, i16, i16)>(
+            "SELECT guid, name, race, class, level, online FROM characters.characters \
+             WHERE account = $1 AND online <> 0 ORDER BY guid",
         )
-        .bind(account_id)
+        .bind(i64::from(account_id))
         .fetch_all(&*state.characters)
         .await
         {
-            Ok(rows) => rows,
+            Ok(rows) => match rows.into_iter().map(portal_character_from_row).collect() {
+                Ok(rows) => rows,
+                Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
+            },
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
         return Ok(rows);
@@ -793,10 +881,10 @@ pub async fn send_chat_message(
         }
 
         let sender_online = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM `characters` WHERE `guid` = ? AND `account` = ? AND `online` <> 0",
+            "SELECT COUNT(*) FROM characters.characters WHERE guid = $1 AND account = $2 AND online <> 0",
         )
-        .bind(sender_guid)
-        .bind(account_id)
+        .bind(i64::from(sender_guid))
+        .bind(i64::from(account_id))
         .fetch_one(&*state.characters)
         .await
         .unwrap_or(0)
@@ -971,14 +1059,18 @@ pub async fn get_admin_account_characters(
     {
         let (state, actor_id, _) = authenticated_request().await?;
         require_gm_level(&state, actor_id, 1).await?;
-        return sqlx::query_as::<_, (u32, String, u8, u8, u8, u8)>(
-            "SELECT `guid`, `name`, `race`, `class`, `level`, `online` FROM `characters` WHERE `account` = ? ORDER BY `guid`",
+        let rows = sqlx::query_as::<_, (i64, String, i16, i16, i16, i16)>(
+            "SELECT guid, name, race, class, level, online FROM characters.characters WHERE account = $1 ORDER BY guid",
         )
-        .bind(account_id)
+        .bind(i64::from(account_id))
         .fetch_all(&*state.characters)
         .await
-        .map(|rows| rows.into_iter().map(|(guid, name, race, class, level, online)| AdminCharacter { guid, name, race, class, level, online }).collect())
-        .map_err(|error| ServerFnError::ServerError(error.to_string()));
+        .map_err(conversion_error)?;
+        return rows
+            .into_iter()
+            .map(admin_character_from_row)
+            .collect::<anyhow::Result<Vec<_>>>()
+            .map_err(conversion_error);
     }
     #[cfg(not(feature = "ssr"))]
     unreachable!("server function body only runs on the server")
@@ -998,7 +1090,7 @@ pub async fn get_admin_characters(
         let search = search.unwrap_or_default();
         let pattern = format!("%{}%", search.trim());
         let total = match sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM `characters` WHERE `name` LIKE ? OR CAST(`guid` AS CHAR) LIKE ?",
+            "SELECT COUNT(*) FROM characters.characters WHERE name LIKE $1 OR CAST(guid AS TEXT) LIKE $2",
         )
         .bind(&pattern)
         .bind(&pattern)
@@ -1008,14 +1100,14 @@ pub async fn get_admin_characters(
             Ok(total) => total as u64,
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
-        let characters = match sqlx::query_as::<_, (u32, String, u8, u8, u8, u8)>(
-            "SELECT `guid`, `name`, `race`, `class`, `level`, `online` FROM `characters` \
-             WHERE `name` LIKE ? OR CAST(`guid` AS CHAR) LIKE ? ORDER BY `guid` LIMIT ? OFFSET ?",
+        let characters = match sqlx::query_as::<_, (i64, String, i16, i16, i16, i16)>(
+            "SELECT guid, name, race, class, level, online FROM characters.characters \
+             WHERE name LIKE $1 OR CAST(guid AS TEXT) LIKE $2 ORDER BY guid LIMIT $3 OFFSET $4",
         )
         .bind(&pattern)
         .bind(&pattern)
-        .bind(PAGE_SIZE)
-        .bind((page - 1) * PAGE_SIZE)
+        .bind(i64::from(PAGE_SIZE))
+        .bind(i64::from((page - 1) * PAGE_SIZE))
         .fetch_all(&*state.characters)
         .await
         {
@@ -1023,15 +1115,9 @@ pub async fn get_admin_characters(
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         }
         .into_iter()
-        .map(|(guid, name, race, class, level, online)| AdminCharacter {
-            guid,
-            name,
-            race,
-            class,
-            level,
-            online,
-        })
-        .collect();
+        .map(admin_character_from_row)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(conversion_error)?;
         return Ok(AdminCharacterPage {
             characters,
             total,
@@ -1050,16 +1136,14 @@ pub async fn get_admin_character_detail(
 ) -> Result<Option<AdminCharacterDetail>, ServerFnError> {
     #[cfg(feature = "ssr")]
     {
-        use sqlx::Row;
-
         let (state, actor_id, _) = authenticated_request().await?;
         require_gm_level(&state, actor_id, 1).await?;
-        let row = match sqlx::query(
-            "SELECT `guid`, `name`, `account`, `race`, `class`, `gender`, `level`, `online`, \
-             `zone`, `map`, `position_x`, `position_y`, `position_z`, `money`, `played_time_total`, \
-             `create_time`, `logout_time` FROM `characters` WHERE `guid` = ?",
+        let row = match sqlx::query_as::<_, AdminCharacterDetailDbRow>(
+            "SELECT guid, name, account, race, class, gender, level, online, \
+             zone, map, position_x, position_y, position_z, money, played_time_total, \
+             create_time, logout_time FROM characters.characters WHERE guid = $1",
         )
-        .bind(guid)
+        .bind(i64::from(guid))
         .fetch_optional(&*state.characters)
         .await
         {
@@ -1069,9 +1153,26 @@ pub async fn get_admin_character_detail(
         let Some(row) = row else {
             return Ok(None);
         };
-        let create_time = row.get::<u64, _>("create_time") as i64;
-        let logout_time = row.get::<u64, _>("logout_time") as i64;
-        let account = row.get::<u32, _>("account");
+        let AdminCharacterDetailDbRow {
+            guid,
+            name,
+            account,
+            race,
+            class,
+            gender,
+            level,
+            online,
+            zone,
+            map,
+            position_x,
+            position_y,
+            position_z,
+            money,
+            played_time_total,
+            create_time,
+            logout_time,
+        } = row;
+        let account = u32::try_from(account).map_err(conversion_error)?;
         let account_username = match sqlx::query_scalar::<_, String>(
             "SELECT username FROM auth.account WHERE id = $1",
         )
@@ -1083,22 +1184,22 @@ pub async fn get_admin_character_detail(
             Err(error) => return Err(ServerFnError::ServerError(error.to_string())),
         };
         return Ok(Some(AdminCharacterDetail {
-            guid: row.get::<u32, _>("guid"),
-            name: row.get::<String, _>("name"),
+            guid: u32::try_from(guid).map_err(conversion_error)?,
+            name,
             account,
             account_username,
-            race: row.get::<u8, _>("race"),
-            class: row.get::<u8, _>("class"),
-            gender: row.get::<u8, _>("gender"),
-            level: row.get::<u8, _>("level"),
-            online: row.get::<u8, _>("online"),
-            zone: row.get::<u32, _>("zone"),
-            map: row.get::<u32, _>("map"),
-            position_x: row.get::<f32, _>("position_x"),
-            position_y: row.get::<f32, _>("position_y"),
-            position_z: row.get::<f32, _>("position_z"),
-            money: row.get::<u32, _>("money"),
-            played_time_total: row.get::<u32, _>("played_time_total"),
+            race: u8::try_from(race).map_err(conversion_error)?,
+            class: u8::try_from(class).map_err(conversion_error)?,
+            gender: u8::try_from(gender).map_err(conversion_error)?,
+            level: u8::try_from(level).map_err(conversion_error)?,
+            online: u8::try_from(online).map_err(conversion_error)?,
+            zone: u32::try_from(zone).map_err(conversion_error)?,
+            map: u32::try_from(map).map_err(conversion_error)?,
+            position_x,
+            position_y,
+            position_z,
+            money: u32::try_from(money).map_err(conversion_error)?,
+            played_time_total: u32::try_from(played_time_total).map_err(conversion_error)?,
             create_time,
             logout_time,
         }));
@@ -1255,30 +1356,24 @@ pub async fn live_map_players(
         return axum::http::StatusCode::FORBIDDEN.into_response();
     }
 
-    match sqlx::query_as::<_, (u32, String, u8, u8, u32, f32, f32, u32)>(
-        "SELECT `guid`, `name`, `level`, `class`, `map`, `position_x`, `position_y`, `zone` \
-         FROM `characters` WHERE `online` <> 0 ORDER BY `name`",
+    match sqlx::query_as::<_, (i64, String, i16, i16, i64, f32, f32, i64)>(
+        "SELECT guid, name, level, class, map, position_x, position_y, zone \
+         FROM characters.characters WHERE online <> 0 ORDER BY name",
     )
     .fetch_all(&*state.characters)
     .await
     {
-        Ok(rows) => axum::Json(
-            rows.into_iter()
-                .map(
-                    |(guid, name, level, class, map, position_x, position_y, zone)| LiveMapPlayer {
-                        guid,
-                        name,
-                        level,
-                        class,
-                        map,
-                        position_x,
-                        position_y,
-                        zone,
-                    },
-                )
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+        Ok(rows) => match rows
+            .into_iter()
+            .map(live_map_player_from_row)
+            .collect::<anyhow::Result<Vec<_>>>()
+        {
+            Ok(players) => axum::Json(players).into_response(),
+            Err(error) => {
+                tracing::error!(target: "oxcore_web", %error, "live map row conversion failed");
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        },
         Err(error) => {
             tracing::error!(target: "oxcore_web", %error, "live map player query failed");
             axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -1357,14 +1452,18 @@ async fn load_overview(
     .context("failed to load portal account")?
     .context("portal account no longer exists")?;
 
-    let characters = sqlx::query_as::<_, PortalCharacter>(
-        "SELECT `guid`, `name`, `race`, `class`, `level`, `online` \
-         FROM `characters` WHERE `account` = ? ORDER BY `guid`",
+    let characters = sqlx::query_as::<_, (i64, String, i16, i16, i16, i16)>(
+        "SELECT guid, name, race, class, level, online \
+         FROM characters.characters WHERE account = $1 ORDER BY guid",
     )
-    .bind(account_id)
+    .bind(i64::from(account_id))
     .fetch_all(&*state.characters)
     .await
-    .context("failed to load portal characters")?;
+    .context("failed to load portal characters")?
+    .into_iter()
+    .map(portal_character_from_row)
+    .collect::<Result<Vec<_>, _>>()
+    .context("portal character value is outside its public range")?;
 
     Ok(PortalOverview {
         username,

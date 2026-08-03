@@ -7,7 +7,8 @@ use std::sync::Arc;
 use crate::core::session::WorldSession;
 use crate::game::items::manager::ItemTemplate;
 use crate::World;
-use oxcore_db::database::{CharacterRepository, Databases};
+use oxcore_db::database::characters::PgCharacterRepository;
+use oxcore_db::database::Databases;
 use oxcore_shared::messages::query::{GameObjectTemplateInfo, SmsgGameObjectQueryResponse};
 use oxcore_shared::protocol::bitbuf::BitReader;
 use oxcore_shared::protocol::{Protocol, WorldPacket};
@@ -608,14 +609,14 @@ pub async fn handle_name_query(
     }
 
     // 3. Fall back to database for offline players
-    let char_repo = CharacterRepository::new(Arc::new(databases.character.clone()));
-    if let Some(character) = char_repo.find_by_guid(guid.counter()).await? {
+    let char_repo = PgCharacterRepository::new(Arc::new(databases.character.clone()));
+    if let Some(character) = char_repo.find_by_guid(i64::from(guid.counter())).await? {
         let response = SmsgNameQueryResponse::new(
             guid,
             &character.name,
-            character.race,
-            character.gender,
-            character.class,
+            u8::try_from(character.race)?,
+            u8::try_from(character.gender)?,
+            u8::try_from(character.class)?,
         );
 
         tracing::debug!(

@@ -164,15 +164,15 @@ struct TestQuestSetup {
 fn create_test_setup() -> TestQuestSetup {
     // QuestManager needs a DB pool for load() but we add templates manually
     let manager = Arc::new(QuestManager::new(Arc::new(
-        sqlx::mysql::MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
+        sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy connect"),
     )));
 
     let player_mgr = Arc::new(PlayerManager::new());
     let creature_mgr = Arc::new(CreatureManager::new(Arc::new(
-        sqlx::mysql::MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
+        sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy connect"),
     )));
     let item_mgr = Arc::new(ItemManager::new());

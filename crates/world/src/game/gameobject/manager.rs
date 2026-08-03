@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ struct SpawnState {
 /// Manages all gameobjects and their templates
 pub struct GameObjectManager {
     /// Database pool for loading data
-    world_db: Arc<MySqlPool>,
+    world_db: Arc<PgPool>,
     /// Templates by entry ID
     templates: DashMap<u32, Arc<GameObjectTemplate>>,
     /// Active gameobjects by GUID
@@ -46,7 +46,7 @@ pub struct GameObjectManager {
 }
 
 impl GameObjectManager {
-    pub fn new(world_db: Arc<MySqlPool>) -> Self {
+    pub fn new(world_db: Arc<PgPool>) -> Self {
         Self {
             world_db,
             templates: DashMap::new(),
@@ -252,11 +252,12 @@ impl GameObjectManager {
     /// Load gameobject templates from database
     pub async fn load_templates(&self) -> Result<()> {
         let rows = sqlx::query_as::<_, GameObjectTemplateRow>(
-            r#"SELECT entry, `type`, displayId, name, icon, faction, flags, size,
+            r#"SELECT entry, type::BIGINT AS type, "displayId", name, icon,
+                       faction::BIGINT AS faction, flags, size,
                       data0, data1, data2, data3, data4, data5, data6, data7,
                       data8, data9, data10, data11, data12, data13, data14, data15,
                       data16, data17, data18, data19, data20, data21, data22, data23
-               FROM gameobject_template
+               FROM world.gameobject_template
                WHERE patch = 0"#,
         )
         .fetch_all(&*self.world_db)
@@ -265,14 +266,14 @@ impl GameObjectManager {
 
         for row in rows {
             let template = GameObjectTemplate {
-                entry: row.entry,
-                go_type: row.go_type,
-                display_id: row.display_id,
+                entry: checked_u32(row.entry, "gameobject_template.entry")?,
+                go_type: checked_u32(row.go_type, "gameobject_template.type")?,
+                display_id: checked_u32(row.display_id, "gameobject_template.displayId")?,
                 name: row.name,
                 icon_name: row.icon,
                 cast_bar_caption: String::new(),
-                faction: row.faction,
-                flags: row.flags,
+                faction: checked_u32(row.faction, "gameobject_template.faction")?,
+                flags: checked_u32(row.flags, "gameobject_template.flags")?,
                 size: row.size,
                 data: [
                     row.data0, row.data1, row.data2, row.data3, row.data4, row.data5, row.data6,
@@ -291,11 +292,12 @@ impl GameObjectManager {
     /// Load gameobject spawns from database
     pub async fn load_spawns(&self) -> Result<()> {
         let rows = sqlx::query_as::<_, GameObjectSpawnRow>(
-            r#"SELECT guid, id, map, position_x, position_y, position_z, orientation,
+            r#"SELECT guid, id, map::BIGINT AS map, position_x, position_y, position_z, orientation,
                       rotation0, rotation1, rotation2, rotation3,
-                      spawntimesecsmin, animprogress, state,
-                      patch_min, patch_max
-               FROM gameobject"#,
+                      spawntimesecsmin::BIGINT AS spawntimesecsmin,
+                      animprogress::BIGINT AS animprogress, state::BIGINT AS state,
+                      patch_min::BIGINT AS patch_min, patch_max::BIGINT AS patch_max
+               FROM world.gameobject"#,
         )
         .fetch_all(&*self.world_db)
         .await
@@ -303,18 +305,28 @@ impl GameObjectManager {
 
         let current_patch = self.get_patch();
         let mut skipped_patch = 0;
+        let mut normalized_negative_respawn = 0;
 
         for row in rows {
             // Check patch compatibility
-            if row.patch_min > current_patch || current_patch > row.patch_max {
+            let patch_min = checked_u8(row.patch_min, "gameobject.patch_min")?;
+            let patch_max = checked_u8(row.patch_max, "gameobject.patch_max")?;
+            if patch_min > current_patch || current_patch > patch_max {
                 skipped_patch += 1;
                 continue;
             }
 
+            let spawntimesecs = if row.spawntimesecsmin < 0 {
+                normalized_negative_respawn += 1;
+                0
+            } else {
+                checked_u32(row.spawntimesecsmin, "gameobject.spawntimesecsmin")?
+            };
+
             let spawn = GameObjectSpawnData {
-                spawn_id: row.guid,
-                entry: row.id,
-                map_id: row.map,
+                spawn_id: checked_u32(row.guid, "gameobject.guid")?,
+                entry: checked_u32(row.id, "gameobject.id")?,
+                map_id: checked_u32(row.map, "gameobject.map")?,
                 position: Position {
                     x: row.position_x,
                     y: row.position_y,
@@ -325,9 +337,9 @@ impl GameObjectManager {
                 rotation1: row.rotation1,
                 rotation2: row.rotation2,
                 rotation3: row.rotation3,
-                spawntimesecs: row.spawntimesecsmin as u32,
-                animprogress: row.animprogress,
-                state: row.state,
+                spawntimesecs,
+                animprogress: checked_u8(row.animprogress, "gameobject.animprogress")?,
+                state: checked_u8(row.state, "gameobject.state")?,
             };
 
             self.spawns_by_map
@@ -345,6 +357,12 @@ impl GameObjectManager {
             self.spawns_by_map.len(),
             skipped_patch
         );
+        if normalized_negative_respawn > 0 {
+            tracing::warn!(
+                count = normalized_negative_respawn,
+                "Normalized negative gameobject respawn delays to zero"
+            );
+        }
 
         Ok(())
     }
@@ -629,15 +647,15 @@ impl GameObjectManager {
 
 #[derive(sqlx::FromRow, Debug)]
 struct GameObjectTemplateRow {
-    pub entry: u32,
+    pub entry: i64,
     #[sqlx(rename = "type")]
-    pub go_type: u32,
+    pub go_type: i64,
     #[sqlx(rename = "displayId")]
-    pub display_id: u32,
+    pub display_id: i64,
     pub name: String,
     pub icon: String,
-    pub faction: u32,
-    pub flags: u32,
+    pub faction: i64,
+    pub flags: i64,
     pub size: f32,
     pub data0: i32,
     pub data1: i32,
@@ -667,9 +685,9 @@ struct GameObjectTemplateRow {
 
 #[derive(sqlx::FromRow, Debug)]
 struct GameObjectSpawnRow {
-    pub guid: u32,
-    pub id: u32,
-    pub map: u32,
+    pub guid: i64,
+    pub id: i64,
+    pub map: i64,
     pub position_x: f32,
     pub position_y: f32,
     pub position_z: f32,
@@ -678,11 +696,19 @@ struct GameObjectSpawnRow {
     pub rotation1: f32,
     pub rotation2: f32,
     pub rotation3: f32,
-    pub spawntimesecsmin: i32,
-    pub animprogress: u8,
-    pub state: u8,
-    pub patch_min: u8,
-    pub patch_max: u8,
+    pub spawntimesecsmin: i64,
+    pub animprogress: i64,
+    pub state: i64,
+    pub patch_min: i64,
+    pub patch_max: i64,
+}
+
+fn checked_u32(value: i64, field: &str) -> Result<u32> {
+    u32::try_from(value).with_context(|| format!("{field} must fit u32"))
+}
+
+fn checked_u8(value: i64, field: &str) -> Result<u8> {
+    u8::try_from(value).with_context(|| format!("{field} must fit u8"))
 }
 
 /// Send one object update to a single player, letting their broadcaster pick the encoding.

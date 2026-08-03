@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use sqlx::mysql::MySqlPoolOptions;
+use sqlx::postgres::PgPoolOptions;
 use tokio::sync::mpsc;
 
 use crate::core::session::SessionManager;
@@ -116,8 +116,8 @@ async fn setup_with_option(
     let broadcast_mgr = Arc::new(BroadcastManager::new(session_mgr, Arc::clone(&player_mgr)));
 
     // Fake pool — only used for load(), which we don't call in tests
-    let pool = MySqlPoolOptions::new()
-        .connect_lazy("mysql://test:test@localhost/test")
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://test:test@localhost/test")
         .expect("lazy connect should not fail");
     let pool = Arc::new(pool);
 

@@ -6,9 +6,8 @@ pub mod web;
 pub mod world;
 
 use anyhow::{Context, Result};
-use sqlx::mysql::MySqlPoolOptions;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{MySqlPool, PgPool};
+use sqlx::PgPool;
 use tracing::info;
 
 #[derive(Debug, Clone)]
@@ -22,8 +21,8 @@ pub struct DatabaseUrls {
 /// Container for all database connection pools
 #[derive(Clone)]
 pub struct Databases {
-    pub world: MySqlPool,
-    pub character: MySqlPool,
+    pub world: PgPool,
+    pub character: PgPool,
     pub auth: PgPool,
     pub logs: PgPool,
 }
@@ -53,14 +52,14 @@ impl Databases {
         info!("  Auth: {}", mask_database_url(auth_url));
         info!("  Logs: {}", mask_database_url(logs_url));
 
-        let world = MySqlPoolOptions::new()
+        let world = PgPoolOptions::new()
             .max_connections(20)
             .min_connections(5)
             .acquire_timeout(std::time::Duration::from_secs(30))
             .connect(world_url)
             .await
             .context("Failed to connect to World database")?;
-        let character = MySqlPoolOptions::new()
+        let character = PgPoolOptions::new()
             .max_connections(20)
             .min_connections(5)
             .acquire_timeout(std::time::Duration::from_secs(30))
@@ -118,12 +117,12 @@ impl Databases {
     }
 
     /// Get a reference to the world database pool
-    pub fn world(&self) -> &MySqlPool {
+    pub fn world(&self) -> &PgPool {
         &self.world
     }
 
     /// Get a reference to the character database pool
-    pub fn character(&self) -> &MySqlPool {
+    pub fn character(&self) -> &PgPool {
         &self.character
     }
 
@@ -165,5 +164,5 @@ pub use auth::{
 pub use characters::{
     CharacterDeleteMode, CharacterRepository, CharacterRow, GroupRepository, GroupRow,
     GuildRepository, GuildRow, ItemInstanceRow, ItemRepository, MailRepository, MailRow,
-    ReputationRepository, SocialRepository,
+    SocialRepository,
 };

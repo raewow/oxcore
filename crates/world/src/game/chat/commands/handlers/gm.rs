@@ -276,7 +276,7 @@ async fn list_teleports(ctx: &ChatCommandContext<'_>, page: u32) -> Result<Strin
     let pool = &ctx.world.databases.world;
     const ITEMS_PER_PAGE: u32 = 50;
 
-    let total_count: i64 = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM game_tele")
+    let total_count: i64 = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM world.game_tele")
         .fetch_one(pool)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to query teleports: {}", e))?;
@@ -291,7 +291,7 @@ async fn list_teleports(ctx: &ChatCommandContext<'_>, page: u32) -> Result<Strin
 
     let rows = sqlx::query(
         "SELECT id, name, map, position_x, position_y, position_z \
-         FROM game_tele ORDER BY name LIMIT ? OFFSET ?",
+         FROM world.game_tele ORDER BY name LIMIT $1 OFFSET $2",
     )
     .bind(ITEMS_PER_PAGE as i64)
     .bind(offset as i64)
@@ -305,9 +305,9 @@ async fn list_teleports(ctx: &ChatCommandContext<'_>, page: u32) -> Result<Strin
     );
 
     for row in &rows {
-        let id: u32 = row.get(0);
+        let id = row.get::<i64, _>(0) as u32;
         let name: String = row.get(1);
-        let map_id: u32 = row.get(2);
+        let map_id = row.get::<i64, _>(2) as u32;
         let x: f32 = row.get(3);
         let y: f32 = row.get(4);
         let z: f32 = row.get(5);
@@ -340,9 +340,9 @@ async fn teleport_by_id(ctx: &ChatCommandContext<'_>, teleport_id: u32) -> Resul
 
     let row = sqlx::query(
         "SELECT id, name, map, position_x, position_y, position_z, orientation \
-         FROM game_tele WHERE id = ?",
+         FROM world.game_tele WHERE id = $1",
     )
-    .bind(teleport_id)
+    .bind(i64::from(teleport_id))
     .fetch_optional(pool)
     .await
     .map_err(|e| anyhow::anyhow!("Failed to query teleport: {}", e))?;
@@ -353,7 +353,7 @@ async fn teleport_by_id(ctx: &ChatCommandContext<'_>, teleport_id: u32) -> Resul
     };
 
     let name: String = row.get(1);
-    let map_id: u32 = row.get(2);
+    let map_id = row.get::<i64, _>(2) as u32;
     let x: f32 = row.get(3);
     let y: f32 = row.get(4);
     let z: f32 = row.get(5);
@@ -369,7 +369,7 @@ async fn teleport_by_name(ctx: &ChatCommandContext<'_>, search_name: &str) -> Re
 
     let row = sqlx::query(
         "SELECT id, name, map, position_x, position_y, position_z, orientation \
-         FROM game_tele WHERE name LIKE ? ORDER BY name LIMIT 1",
+         FROM world.game_tele WHERE name ILIKE $1 ORDER BY name LIMIT 1",
     )
     .bind(&pattern)
     .fetch_optional(pool)
@@ -387,7 +387,7 @@ async fn teleport_by_name(ctx: &ChatCommandContext<'_>, search_name: &str) -> Re
     };
 
     let name: String = row.get(1);
-    let map_id: u32 = row.get(2);
+    let map_id = row.get::<i64, _>(2) as u32;
     let x: f32 = row.get(3);
     let y: f32 = row.get(4);
     let z: f32 = row.get(5);

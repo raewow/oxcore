@@ -42,25 +42,39 @@ impl BaseStatsData {
     }
 
     /// Load base stats from the world database
-    pub async fn load(world_pool: &sqlx::MySqlPool) -> Result<Self> {
+    pub async fn load(world_pool: &sqlx::PgPool) -> Result<Self> {
         let mut data = Self::new();
 
-        // Load race/class/level -> stats from player_levelstats
-        let query = r#"SELECT race, class, level, str, agi, sta, inte, spi
-                        FROM player_levelstats ORDER BY race, class, level"#;
-
-        match sqlx::query(query).fetch_all(world_pool).await {
+        let repository = oxcore_db::database::world::PlayerStatsRepository::new(
+            std::sync::Arc::new(world_pool.clone()),
+        );
+        match repository.load_level_stats().await {
             Ok(rows) => {
-                for row in &rows {
-                    use sqlx::Row;
-                    let race: u32 = row.get(0);
-                    let class: u32 = row.get(1);
-                    let level: u32 = row.get(2);
-                    let str_val: u32 = row.get(3);
-                    let agi: u32 = row.get(4);
-                    let sta: u32 = row.get(5);
-                    let inte: u32 = row.get(6);
-                    let spi: u32 = row.get(7);
+                for row in rows {
+                    let Ok(race) = u32::try_from(row.race) else {
+                        continue;
+                    };
+                    let Ok(class) = u32::try_from(row.class) else {
+                        continue;
+                    };
+                    let Ok(level) = u32::try_from(row.level) else {
+                        continue;
+                    };
+                    let Ok(str_val) = u32::try_from(row.str) else {
+                        continue;
+                    };
+                    let Ok(agi) = u32::try_from(row.agi) else {
+                        continue;
+                    };
+                    let Ok(sta) = u32::try_from(row.sta) else {
+                        continue;
+                    };
+                    let Ok(inte) = u32::try_from(row.inte) else {
+                        continue;
+                    };
+                    let Ok(spi) = u32::try_from(row.spi) else {
+                        continue;
+                    };
 
                     if race == 0
                         || race > 11
@@ -96,18 +110,21 @@ impl BaseStatsData {
             }
         }
 
-        // Load class/level -> base health/mana from player_classlevelstats
-        let class_query = r#"SELECT class, level, basehp, basemana
-                              FROM player_classlevelstats ORDER BY class, level"#;
-
-        match sqlx::query(class_query).fetch_all(world_pool).await {
+        match repository.load_class_level_stats().await {
             Ok(rows) => {
-                for row in &rows {
-                    use sqlx::Row;
-                    let class: u32 = row.get(0);
-                    let level: u32 = row.get(1);
-                    let basehp: u32 = row.get::<u16, _>(2) as u32;
-                    let basemana: u32 = row.get::<u16, _>(3) as u32;
+                for row in rows {
+                    let Ok(class) = u32::try_from(row.class) else {
+                        continue;
+                    };
+                    let Ok(level) = u32::try_from(row.level) else {
+                        continue;
+                    };
+                    let Ok(basehp) = u32::try_from(row.basehp) else {
+                        continue;
+                    };
+                    let Ok(basemana) = u32::try_from(row.basemana) else {
+                        continue;
+                    };
 
                     if class == 0 || class > 11 || level == 0 || level > 60 {
                         continue;

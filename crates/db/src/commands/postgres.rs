@@ -11,7 +11,7 @@ pub enum Command {
     Migrate,
     /// Show PostgreSQL migration status for every application schema
     Status,
-    /// Create a PostgreSQL migration in sql/postgres/migrations/<schema>/
+    /// Create a PostgreSQL migration in crates/db/migrations/<schema>/
     New { schema: String, name: String },
     /// Drop and recreate application schemas, then re-run PostgreSQL migrations
     Fresh {

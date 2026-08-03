@@ -153,12 +153,12 @@ mod tests {
     use crate::game::creature::death::{process_corpse_decay, process_deaths, DeathState};
     use crate::game::creature::{CreatureSpawnData, CreatureTemplate};
     use oxcore_db::database::Databases;
-    use sqlx::mysql::MySqlPoolOptions;
+    use sqlx::postgres::PgPoolOptions;
     use std::path::PathBuf;
 
-    fn lazy_pool() -> sqlx::MySqlPool {
-        MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
+    fn lazy_pool() -> sqlx::PgPool {
+        PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy pool should be constructible")
     }
 

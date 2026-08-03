@@ -1,172 +1,126 @@
 use super::super::models::ticket::*;
+use super::super::{PgSurveyRow, PgTicketRepository, PgTicketRow};
 use anyhow::{Context, Result};
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::Arc;
 
 pub struct TicketRepository {
-    pool: Arc<MySqlPool>,
+    pool: Arc<PgPool>,
 }
-
 impl TicketRepository {
-    pub fn new(pool: Arc<MySqlPool>) -> Self {
+    pub fn new(pool: Arc<PgPool>) -> Self {
         Self { pool }
     }
-
-    // ========== QUERY METHODS (Read Operations) ==========
-
-    /// Get the maximum ticket ID from the database (for generating next ID).
+    fn pg(&self) -> PgTicketRepository {
+        PgTicketRepository::new(Arc::clone(&self.pool))
+    }
+    fn row(row: PgTicketRow) -> Result<GmTicketRow> {
+        Ok(GmTicketRow {
+            ticket_id: row.ticket_id.try_into()?,
+            guid: row.guid.try_into()?,
+            name: row.name,
+            message: row.message,
+            create_time: row.create_time.try_into()?,
+            map: row.map.try_into()?,
+            position_x: row.position_x,
+            position_y: row.position_y,
+            position_z: row.position_z,
+            last_modified_time: row.last_modified_time.try_into()?,
+            closed_by: row.closed_by.try_into()?,
+            assigned_to: row.assigned_to.try_into()?,
+            comment: row.comment,
+            response: row.response,
+            completed: row.completed,
+            escalated: row.escalated.try_into()?,
+            viewed: row.viewed,
+            have_ticket: row.have_ticket,
+            ticket_type: row.ticket_type.try_into()?,
+            security_needed: row.security_needed.try_into()?,
+        })
+    }
+    fn dto(row: &GmTicketRow) -> Result<PgTicketRow> {
+        Ok(PgTicketRow {
+            ticket_id: row.ticket_id.into(),
+            guid: row.guid.into(),
+            name: row.name.clone(),
+            message: row.message.clone(),
+            create_time: row.create_time.try_into()?,
+            map: row.map.into(),
+            position_x: row.position_x,
+            position_y: row.position_y,
+            position_z: row.position_z,
+            last_modified_time: row.last_modified_time.try_into()?,
+            closed_by: row.closed_by.into(),
+            assigned_to: row.assigned_to.into(),
+            comment: row.comment.clone(),
+            response: row.response.clone(),
+            completed: row.completed,
+            escalated: row.escalated.into(),
+            viewed: row.viewed,
+            have_ticket: row.have_ticket,
+            ticket_type: row.ticket_type.into(),
+            security_needed: row.security_needed.into(),
+        })
+    }
     pub async fn get_max_ticket_id(&self) -> Result<Option<u32>> {
-        sqlx::query_scalar::<_, Option<u32>>("SELECT MAX(ticket_id) FROM gm_tickets")
-            .fetch_one(&*self.pool)
-            .await
-            .context("Failed to query max ticket_id")
+        self.pg()
+            .get_max_ticket_id()
+            .await?
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
     }
-
-    /// Get the maximum survey ID from the database (for generating next ID).
     pub async fn get_max_survey_id(&self) -> Result<Option<u32>> {
-        sqlx::query_scalar::<_, Option<u32>>("SELECT MAX(survey_id) FROM gm_surveys")
-            .fetch_one(&*self.pool)
-            .await
-            .context("Failed to query max survey_id")
+        self.pg()
+            .get_max_survey_id()
+            .await?
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
     }
-
-    /// Find a ticket by ID.
-    pub async fn find_by_id(&self, ticket_id: u32) -> Result<Option<GmTicketRow>> {
-        sqlx::query_as::<_, GmTicketRow>(
-            r#"SELECT ticket_id, guid, name, message, create_time, map, position_x, position_y, position_z, 
-                      last_modified_time, closed_by, assigned_to, comment, response, completed, escalated, viewed, 
-                      have_ticket, ticket_type, security_needed 
-               FROM gm_tickets WHERE ticket_id = ?"#,
-        )
-        .bind(ticket_id)
-        .fetch_optional(&*self.pool)
-        .await
-        .context("Failed to fetch ticket by ID")
+    pub async fn find_by_id(&self, id: u32) -> Result<Option<GmTicketRow>> {
+        self.pg()
+            .find_by_id(id.into())
+            .await?
+            .map(Self::row)
+            .transpose()
     }
-
-    /// Find all open tickets.
     pub async fn find_open_tickets(&self) -> Result<Vec<GmTicketRow>> {
-        sqlx::query_as::<_, GmTicketRow>(
-            r#"SELECT ticket_id, guid, name, message, create_time, map, position_x, position_y, position_z, 
-                      last_modified_time, closed_by, assigned_to, comment, response, completed, escalated, viewed, 
-                      have_ticket, ticket_type, security_needed 
-               FROM gm_tickets WHERE closed_by IS NULL OR closed_by = ''"#,
-        )
-        .fetch_all(&*self.pool)
-        .await
-        .context("Failed to fetch open tickets")
+        self.pg()
+            .find_open_tickets()
+            .await?
+            .into_iter()
+            .map(Self::row)
+            .collect()
     }
-
-    // ========== COMMAND METHODS (Write Operations) ==========
-
-    /// Create a new ticket.
-    pub async fn create_ticket(&self, ticket: &GmTicketRow) -> Result<()> {
-        sqlx::query(
-            r#"INSERT INTO gm_tickets (ticket_id, guid, name, message, create_time, map, position_x, position_y, position_z, 
-                                       last_modified_time, closed_by, assigned_to, comment, response, completed, escalated, viewed, 
-                                       have_ticket, ticket_type, security_needed) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-        )
-        .bind(ticket.ticket_id)
-        .bind(ticket.guid)
-        .bind(&ticket.name)
-        .bind(&ticket.message)
-        .bind(ticket.create_time)
-        .bind(ticket.map)
-        .bind(ticket.position_x)
-        .bind(ticket.position_y)
-        .bind(ticket.position_z)
-        .bind(ticket.last_modified_time)
-        .bind(&ticket.closed_by)
-        .bind(ticket.assigned_to)
-        .bind(&ticket.comment)
-        .bind(&ticket.response)
-        .bind(ticket.completed)
-        .bind(ticket.escalated)
-        .bind(ticket.viewed)
-        .bind(ticket.have_ticket)
-        .bind(ticket.ticket_type)
-        .bind(ticket.security_needed)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to create ticket")?;
-
-        Ok(())
+    pub async fn create_ticket(&self, row: &GmTicketRow) -> Result<()> {
+        self.pg().save_ticket(&Self::dto(row)?).await
     }
-
-    /// Update a ticket.
-    pub async fn update_ticket(&self, ticket: &GmTicketRow) -> Result<()> {
-        sqlx::query(
-            r#"UPDATE gm_tickets SET guid = ?, name = ?, message = ?, create_time = ?, map = ?, position_x = ?, position_y = ?, position_z = ?, 
-                                       last_modified_time = ?, closed_by = ?, assigned_to = ?, comment = ?, response = ?, completed = ?, escalated = ?, viewed = ?, 
-                                       have_ticket = ?, ticket_type = ?, security_needed = ? 
-               WHERE ticket_id = ?"#,
-        )
-        .bind(ticket.guid)
-        .bind(&ticket.name)
-        .bind(&ticket.message)
-        .bind(ticket.create_time)
-        .bind(ticket.map)
-        .bind(ticket.position_x)
-        .bind(ticket.position_y)
-        .bind(ticket.position_z)
-        .bind(ticket.last_modified_time)
-        .bind(&ticket.closed_by)
-        .bind(ticket.assigned_to)
-        .bind(&ticket.comment)
-        .bind(&ticket.response)
-        .bind(ticket.completed)
-        .bind(ticket.escalated)
-        .bind(ticket.viewed)
-        .bind(ticket.have_ticket)
-        .bind(ticket.ticket_type)
-        .bind(ticket.security_needed)
-        .bind(ticket.ticket_id)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to update ticket")?;
-
-        Ok(())
+    pub async fn update_ticket(&self, row: &GmTicketRow) -> Result<()> {
+        self.pg().save_ticket(&Self::dto(row)?).await
     }
-
-    /// Close a ticket.
-    pub async fn close_ticket(&self, ticket_id: u32, closed_by: &str) -> Result<()> {
-        sqlx::query(r#"UPDATE gm_tickets SET closed_by = ? WHERE ticket_id = ?"#)
-            .bind(closed_by)
-            .bind(ticket_id)
-            .execute(&*self.pool)
+    pub async fn close_ticket(&self, id: u32, closed_by: &str) -> Result<()> {
+        self.pg()
+            .close_ticket(
+                id.into(),
+                closed_by
+                    .parse()
+                    .context("ticket closer must be a numeric GUID")?,
+            )
             .await
-            .context("Failed to close ticket")?;
-
-        Ok(())
     }
-
-    /// Delete a ticket.
-    pub async fn delete_ticket(&self, ticket_id: u32) -> Result<()> {
-        sqlx::query("DELETE FROM gm_tickets WHERE ticket_id = ?")
-            .bind(ticket_id)
-            .execute(&*self.pool)
+    pub async fn delete_ticket(&self, id: u32) -> Result<()> {
+        self.pg().delete_ticket(id.into()).await
+    }
+    pub async fn create_survey(&self, row: &GmTicketSurveyRow) -> Result<()> {
+        self.pg()
+            .create_survey(&PgSurveyRow {
+                survey_id: row.survey_id.into(),
+                ticket_id: row.ticket_id.into(),
+                main_survey: row.main_survey.into(),
+                overall_comment: row.overall_comment.clone(),
+                response_time: row.response_time.into(),
+            })
             .await
-            .context("Failed to delete ticket")?;
-
-        Ok(())
-    }
-
-    /// Create a new survey.
-    pub async fn create_survey(&self, survey: &GmTicketSurveyRow) -> Result<()> {
-        sqlx::query(
-            r#"INSERT INTO gm_surveys (survey_id, ticket_id, main_survey, overall_comment, response_time) 
-               VALUES (?, ?, ?, ?, ?)"#,
-        )
-        .bind(survey.survey_id)
-        .bind(survey.ticket_id)
-        .bind(survey.main_survey)
-        .bind(&survey.overall_comment)
-        .bind(survey.response_time)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to create survey")?;
-
-        Ok(())
     }
 }

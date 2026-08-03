@@ -334,12 +334,12 @@ mod tests {
     fn build_dummy_world() -> World {
         use crate::config::Config;
         use oxcore_db::database::Databases;
-        use sqlx::mysql::MySqlPoolOptions;
+        use sqlx::postgres::PgPoolOptions;
         use std::path::PathBuf;
         use std::sync::Arc;
 
-        let pool = MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy pool");
         let databases = Arc::new(Databases {
             world: pool.clone(),

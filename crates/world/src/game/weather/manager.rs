@@ -3,7 +3,7 @@
 use super::repository::WeatherRepository;
 use super::types::WeatherZoneChances;
 use dashmap::DashMap;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 
 /// Holds the `game_weather` chances for every zone that has them.
 ///
@@ -20,7 +20,7 @@ impl WeatherManager {
     }
 
     /// Load (or reload) the zone chances from the world database.
-    pub async fn load(&self, pool: &MySqlPool) -> anyhow::Result<()> {
+    pub async fn load(&self, pool: &PgPool) -> anyhow::Result<()> {
         let repo = WeatherRepository::new(pool.clone());
         let zones = repo.load_zone_chances().await?;
 

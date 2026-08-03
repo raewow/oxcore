@@ -7,7 +7,7 @@ use crate::game::npc::quest::manager::QuestManager;
 use anyhow::Result;
 use dashmap::DashMap;
 use parking_lot::RwLock;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -254,7 +254,7 @@ impl SpellManager {
     /// Load all spells from the spell_template SQL table
     pub async fn load(
         &self,
-        world_db: &MySqlPool,
+        world_db: &PgPool,
         dbc: &DbcManager,
         quest_manager: &QuestManager,
     ) -> Result<()> {
@@ -303,12 +303,11 @@ impl SpellManager {
     }
 
     /// Load spell_target_position table (coordinates for teleport spells)
-    async fn load_target_positions(&self, world_db: &MySqlPool) -> Result<()> {
+    async fn load_target_positions(&self, world_db: &PgPool) -> Result<()> {
         let rows = sqlx::query(
-            "SELECT CAST(id AS UNSIGNED) AS id, \
-                    CAST(target_map AS UNSIGNED) AS target_map, \
+            "SELECT id, target_map, \
                     target_position_x, target_position_y, target_position_z, target_orientation \
-             FROM spell_target_position",
+              FROM world.spell_target_position",
         )
         .fetch_all(world_db)
         .await?;
@@ -316,8 +315,8 @@ impl SpellManager {
         let count = rows.len();
         for row in rows {
             use sqlx::Row;
-            let id: u32 = row.try_get::<u64, _>("id").unwrap_or(0) as u32;
-            let map_id: u32 = row.try_get::<u64, _>("target_map").unwrap_or(0) as u32;
+            let id: u32 = row.try_get::<i64, _>("id").unwrap_or(0) as u32;
+            let map_id: u32 = row.try_get::<i64, _>("target_map").unwrap_or(0) as u32;
             let x: f32 = row.try_get("target_position_x").unwrap_or(0.0);
             let y: f32 = row.try_get("target_position_y").unwrap_or(0.0);
             let z: f32 = row.try_get("target_position_z").unwrap_or(0.0);
@@ -341,17 +340,13 @@ impl SpellManager {
 
     /// Load the `spell_proc_event` table — custom proc gating (procEx / school / family /
     /// PPM / cooldown) keyed by spell id. Tolerant: a missing table is logged, not fatal.
-    async fn load_spell_proc_events(&self, world_db: &MySqlPool) -> Result<()> {
+    async fn load_spell_proc_events(&self, world_db: &PgPool) -> Result<()> {
         let query = sqlx::query(
-            "SELECT CAST(entry AS UNSIGNED) AS entry, \
-                    CAST(SchoolMask AS UNSIGNED) AS school_mask, \
-                    CAST(SpellFamilyName AS UNSIGNED) AS spell_family, \
-                    CAST(SpellFamilyMask0 AS UNSIGNED) AS family_mask, \
-                    CAST(procFlags AS UNSIGNED) AS proc_flags, \
-                    CAST(procEx AS UNSIGNED) AS proc_ex, \
+            "SELECT entry, SchoolMask AS school_mask, SpellFamilyName AS spell_family, \
+                     SpellFamilyMask0 AS family_mask, procFlags AS proc_flags, procEx AS proc_ex, \
                     ppmRate, CustomChance, \
-                    CAST(Cooldown AS UNSIGNED) AS cooldown \
-             FROM spell_proc_event",
+                     Cooldown AS cooldown \
+              FROM world.spell_proc_event",
         )
         .fetch_all(world_db)
         .await;
@@ -367,21 +362,21 @@ impl SpellManager {
         use sqlx::Row;
         let mut count = 0u32;
         for row in rows {
-            let entry: u32 = row.try_get::<u64, _>("entry").unwrap_or(0) as u32;
+            let entry: u32 = row.try_get::<i64, _>("entry").unwrap_or(0) as u32;
             if entry == 0 {
                 continue;
             }
             self.spell_proc_events.insert(
                 entry,
                 SpellProcEventEntry {
-                    school_mask: row.try_get::<u64, _>("school_mask").unwrap_or(0) as u32,
-                    spell_family: row.try_get::<u64, _>("spell_family").unwrap_or(0) as u32,
-                    spell_family_mask: row.try_get::<u64, _>("family_mask").unwrap_or(0),
-                    proc_flags: row.try_get::<u64, _>("proc_flags").unwrap_or(0) as u32,
-                    proc_ex: row.try_get::<u64, _>("proc_ex").unwrap_or(0) as u32,
+                    school_mask: row.try_get::<i64, _>("school_mask").unwrap_or(0) as u32,
+                    spell_family: row.try_get::<i64, _>("spell_family").unwrap_or(0) as u32,
+                    spell_family_mask: row.try_get::<i64, _>("family_mask").unwrap_or(0) as u64,
+                    proc_flags: row.try_get::<i64, _>("proc_flags").unwrap_or(0) as u32,
+                    proc_ex: row.try_get::<i64, _>("proc_ex").unwrap_or(0) as u32,
                     ppm_rate: row.try_get("ppmRate").unwrap_or(0.0),
                     custom_chance: row.try_get("CustomChance").unwrap_or(0.0),
-                    cooldown: row.try_get::<u64, _>("cooldown").unwrap_or(0) as u32,
+                    cooldown: row.try_get::<i64, _>("cooldown").unwrap_or(0) as u32,
                 },
             );
             count += 1;
@@ -394,7 +389,7 @@ impl SpellManager {
     /// Load spell rank chains: talent ranks + skill-ability forward-rank chains (both derived
     /// from DBC data), merged/overridden by the `spell_chain` SQL table (custom cases).
     /// Faithful port of the chain-loading logic (validation logging trimmed to warnings).
-    pub async fn load_spell_chains(&self, world_db: &MySqlPool, dbc: &DbcManager) -> Result<()> {
+    pub async fn load_spell_chains(&self, world_db: &PgPool, dbc: &DbcManager) -> Result<()> {
         self.load_skill_line_ability_maps(dbc);
         self.load_skill_race_class_info_map(dbc);
         let mut chains: HashMap<u32, SpellChainNode> = HashMap::new();
@@ -501,12 +496,7 @@ impl SpellManager {
 
         // 3. `spell_chain` SQL table: authoritative custom cases + `req` field updates.
         let rows = sqlx::query(
-            "SELECT CAST(spell_id AS UNSIGNED) AS spell_id, \
-                    CAST(prev_spell AS UNSIGNED) AS prev_spell, \
-                    CAST(first_spell AS UNSIGNED) AS first_spell, \
-                    CAST(`rank` AS UNSIGNED) AS `rank`, \
-                    CAST(req_spell AS UNSIGNED) AS req_spell \
-             FROM spell_chain",
+            "SELECT spell_id, prev_spell, first_spell, rank, req_spell FROM world.spell_chain",
         )
         .fetch_all(world_db)
         .await;
@@ -527,12 +517,12 @@ impl SpellManager {
 
         use sqlx::Row;
         for row in rows {
-            let spell_id: u32 = row.try_get::<u64, _>("spell_id").unwrap_or(0) as u32;
+            let spell_id: u32 = row.try_get::<i64, _>("spell_id").unwrap_or(0) as u32;
             let node = SpellChainNode {
-                prev: row.try_get::<u64, _>("prev_spell").unwrap_or(0) as u32,
-                first: row.try_get::<u64, _>("first_spell").unwrap_or(0) as u32,
-                rank: row.try_get::<u64, _>("rank").unwrap_or(0) as u8,
-                req: row.try_get::<u64, _>("req_spell").unwrap_or(0) as u32,
+                prev: row.try_get::<i64, _>("prev_spell").unwrap_or(0) as u32,
+                first: row.try_get::<i64, _>("first_spell").unwrap_or(0) as u32,
+                rank: row.try_get::<i64, _>("rank").unwrap_or(0) as u8,
+                req: row.try_get::<i64, _>("req_spell").unwrap_or(0) as u32,
             };
 
             if self.spells.get(&spell_id).is_none() {
@@ -871,17 +861,13 @@ impl SpellManager {
 
     /// Loads `spell_enchant_charges` from the SQL table, validating each spell
     /// exists in the loaded spell list. Missing spells are logged but not fatal.
-    async fn load_spell_enchant_charges(&self, world_db: &MySqlPool) -> Result<()> {
+    async fn load_spell_enchant_charges(&self, world_db: &PgPool) -> Result<()> {
         let mut map = HashMap::new();
         let mut count = 0u32;
 
-        let rows = sqlx::query(
-            "SELECT CAST(`entry` AS UNSIGNED) AS entry, \
-                    CAST(`charges` AS UNSIGNED) AS charges \
-             FROM `spell_enchant_charges`",
-        )
-        .fetch_all(world_db)
-        .await;
+        let rows = sqlx::query("SELECT entry, charges FROM world.spell_enchant_charges")
+            .fetch_all(world_db)
+            .await;
 
         let rows = match rows {
             Ok(rows) => rows,
@@ -895,8 +881,8 @@ impl SpellManager {
 
         for row in &rows {
             use sqlx::Row;
-            let entry: u32 = row.try_get::<u64, _>("entry").unwrap_or(0) as u32;
-            let charges: u32 = row.try_get::<u64, _>("charges").unwrap_or(0) as u32;
+            let entry: u32 = row.try_get::<i64, _>("entry").unwrap_or(0) as u32;
+            let charges: u32 = row.try_get::<i64, _>("charges").unwrap_or(0) as u32;
 
             if self.spells.get(&entry).is_none() {
                 if !self.existing_spell_ids.read().contains(&entry) {
@@ -916,18 +902,13 @@ impl SpellManager {
 
     /// Loads `spell_pet_auras` SQL table, validating each spell exists and has
     /// a dummy aura/effect. Creates `PetAura` entries keyed by spell ID.
-    async fn load_spell_pet_auras(&self, world_db: &MySqlPool) -> Result<()> {
+    async fn load_spell_pet_auras(&self, world_db: &PgPool) -> Result<()> {
         let mut map: HashMap<u16, PetAura> = HashMap::new();
         let mut count = 0u32;
 
-        let rows = match sqlx::query(
-            "SELECT CAST(`spell` AS UNSIGNED) AS spell, \
-                    CAST(`pet` AS UNSIGNED) AS pet, \
-                    CAST(`aura` AS UNSIGNED) AS aura \
-             FROM `spell_pet_auras`",
-        )
-        .fetch_all(world_db)
-        .await
+        let rows = match sqlx::query("SELECT spell, pet, aura FROM world.spell_pet_auras")
+            .fetch_all(world_db)
+            .await
         {
             Ok(rows) => rows,
             Err(e) => {
@@ -939,9 +920,9 @@ impl SpellManager {
 
         for row in &rows {
             use sqlx::Row;
-            let spell: u32 = row.try_get::<u64, _>("spell").unwrap_or(0) as u32;
-            let pet: u32 = row.try_get::<u64, _>("pet").unwrap_or(0) as u32;
-            let aura: u32 = row.try_get::<u64, _>("aura").unwrap_or(0) as u32;
+            let spell: u32 = row.try_get::<i64, _>("spell").unwrap_or(0) as u32;
+            let pet: u32 = row.try_get::<i64, _>("pet").unwrap_or(0) as u32;
+            let aura: u32 = row.try_get::<i64, _>("aura").unwrap_or(0) as u32;
 
             let Some(spell_entry) = self.get(spell) else {
                 warn!("Spell {spell} in spell_pet_auras does not exist");
@@ -989,17 +970,13 @@ impl SpellManager {
     // Remaining loader & query functions
     // ═════════════════════════════════════════════════════════════════
 
-    async fn load_spell_cones(&self, world_db: &MySqlPool) -> Result<()> {
+    async fn load_spell_cones(&self, world_db: &PgPool) -> Result<()> {
         let mut cones = HashMap::new();
         let mut count = 0u32;
 
-        let rows = sqlx::query(
-            "SELECT CAST(`entry` AS UNSIGNED) AS entry, \
-                    `cone_degrees` \
-             FROM `spell_cone`",
-        )
-        .fetch_all(world_db)
-        .await;
+        let rows = sqlx::query("SELECT entry, cone_degrees FROM world.spell_cone")
+            .fetch_all(world_db)
+            .await;
 
         let rows = match rows {
             Ok(rows) => rows,
@@ -1013,7 +990,7 @@ impl SpellManager {
 
         for row in &rows {
             use sqlx::Row;
-            let entry: u32 = row.try_get::<u64, _>("entry").unwrap_or(0) as u32;
+            let entry: u32 = row.try_get::<i64, _>("entry").unwrap_or(0) as u32;
             let degrees: i16 = row.try_get("cone_degrees").unwrap_or(0);
 
             if self.spells.get(&entry).is_none() {
@@ -1038,21 +1015,12 @@ impl SpellManager {
 
     async fn load_spell_areas(
         &self,
-        world_db: &MySqlPool,
+        world_db: &PgPool,
         dbc: &DbcManager,
         quest_manager: &QuestManager,
     ) -> Result<()> {
         let rows = sqlx::query(
-            "SELECT CAST(`spell` AS UNSIGNED) AS spell, \
-                    CAST(`area` AS UNSIGNED) AS area, \
-                    CAST(`quest_start` AS UNSIGNED) AS quest_start, \
-                    `quest_start_active`, \
-                    CAST(`quest_end` AS UNSIGNED) AS quest_end, \
-                    CAST(`aura_spell` AS SIGNED) AS aura_spell, \
-                    CAST(`racemask` AS UNSIGNED) AS racemask, \
-                    CAST(`gender` AS UNSIGNED) AS gender, \
-                    `autocast` \
-             FROM `spell_area`",
+            "SELECT spell, area, quest_start, quest_start_active, quest_end, aura_spell, racemask, gender, autocast FROM world.spell_area",
         )
         .fetch_all(world_db)
         .await;
@@ -1071,7 +1039,7 @@ impl SpellManager {
 
         for row in &rows {
             use sqlx::Row;
-            let spell: u32 = row.try_get::<u64, _>("spell").unwrap_or(0) as u32;
+            let spell: u32 = row.try_get::<i64, _>("spell").unwrap_or(0) as u32;
 
             if self.spells.get(&spell).is_none() {
                 if !self.existing_spell_ids.read().contains(&spell) {
@@ -1082,12 +1050,12 @@ impl SpellManager {
 
             let sa = SpellArea {
                 spell,
-                area_id: row.try_get::<u64, _>("area").unwrap_or(0) as u32,
-                quest_start: row.try_get::<u64, _>("quest_start").unwrap_or(0) as u32,
-                quest_end: row.try_get::<u64, _>("quest_end").unwrap_or(0) as u32,
+                area_id: row.try_get::<i64, _>("area").unwrap_or(0) as u32,
+                quest_start: row.try_get::<i64, _>("quest_start").unwrap_or(0) as u32,
+                quest_end: row.try_get::<i64, _>("quest_end").unwrap_or(0) as u32,
                 aura_spell: row.try_get::<i64, _>("aura_spell").unwrap_or(0) as i32,
-                racemask: row.try_get::<u64, _>("racemask").unwrap_or(0) as u32,
-                gender: row.try_get::<u64, _>("gender").unwrap_or(2) as u8, // default GENDER_NONE
+                racemask: row.try_get::<i64, _>("racemask").unwrap_or(0) as u32,
+                gender: row.try_get::<i64, _>("gender").unwrap_or(2) as u8, // default GENDER_NONE
                 quest_start_can_active: row.try_get("quest_start_active").unwrap_or(false),
                 autocast: row.try_get("autocast").unwrap_or(false),
             };
@@ -1173,16 +1141,15 @@ impl SpellManager {
     }
 
     /// Populates `existing_spell_ids` with all spell IDs from `spell_template`.
-    async fn load_existing_spell_ids(&self, world_db: &MySqlPool) -> Result<()> {
+    async fn load_existing_spell_ids(&self, world_db: &PgPool) -> Result<()> {
         let mut ids = Vec::new();
-        if let Ok(rows) =
-            sqlx::query("SELECT DISTINCT CAST(`entry` AS UNSIGNED) AS entry FROM `spell_template`")
-                .fetch_all(world_db)
-                .await
+        if let Ok(rows) = sqlx::query("SELECT DISTINCT entry FROM world.spell_template")
+            .fetch_all(world_db)
+            .await
         {
             for row in &rows {
                 use sqlx::Row;
-                let id: u32 = row.try_get::<u64, _>("entry").unwrap_or(0) as u32;
+                let id: u32 = row.try_get::<i64, _>("entry").unwrap_or(0) as u32;
                 ids.push(id);
             }
         }
@@ -1349,19 +1316,15 @@ impl SpellManager {
     }
 
     /// Validates that spells referenced in a given table exist.
-    pub async fn check_used_spells(&self, world_db: &MySqlPool, table: &str) -> Result<()> {
-        let query = format!(
-            "SELECT CAST(`spellid` AS UNSIGNED) AS spellid, `Code` \
-             FROM `{table}` LIMIT 1"
-        );
+    pub async fn check_used_spells(&self, world_db: &PgPool, table: &str) -> Result<()> {
+        let query = format!("SELECT spellid, code FROM world.{table} LIMIT 1");
         let test = sqlx::query(&query).fetch_all(world_db).await;
         if test.is_err() {
             warn!("Table `{table}` is empty or does not exist");
             return Ok(());
         }
 
-        let full_query =
-            format!("SELECT CAST(`spellid` AS UNSIGNED) AS spellid, `Code` FROM `{table}`");
+        let full_query = format!("SELECT spellid, code FROM world.{table}");
         let rows = match sqlx::query(&full_query).fetch_all(world_db).await {
             Ok(rows) => rows,
             Err(e) => {
@@ -1373,9 +1336,9 @@ impl SpellManager {
         let mut count = 0u32;
         for row in &rows {
             use sqlx::Row;
-            let spell_id: u32 = row.try_get::<u64, _>("spellid").unwrap_or(0) as u32;
+            let spell_id: u32 = row.try_get::<i64, _>("spellid").unwrap_or(0) as u32;
             if spell_id != 0 && self.spells.get(&spell_id).is_none() {
-                let code: String = row.try_get("Code").unwrap_or_default();
+                let code: String = row.try_get("code").unwrap_or_default();
                 warn!("Spell {spell_id} referenced in `{table}` ({code}) does not exist");
                 count += 1;
             }
@@ -1397,29 +1360,25 @@ impl SpellManager {
 
     /// Loads `spell_learn_spell` SQL table and also scans DBC for
     /// `SPELL_EFFECT_LEARN_SPELL` auto-learn entries.
-    async fn load_spell_learn_spells(&self, world_db: &MySqlPool) -> Result<()> {
+    async fn load_spell_learn_spells(&self, world_db: &PgPool) -> Result<()> {
         let mut map: HashMap<u32, Vec<SpellLearnSpellNode>> = HashMap::new();
         let mut count = 0u32;
 
         // Load from SQL table
         let rows = sqlx::query(
-            "SELECT CAST(`entry` AS UNSIGNED) AS entry, \
-                    CAST(`SpellID` AS UNSIGNED) AS spell_id, \
-                    `Active` \
-             FROM `spell_learn_spell` \
-             WHERE `build_min` <= ? AND `build_max` >= ?",
+            "SELECT entry, spellid AS spell_id, active FROM world.spell_learn_spell WHERE build_min <= $1 AND build_max >= $2",
         )
-        .bind(CLASSIC_CLIENT_BUILD)
-        .bind(CLASSIC_CLIENT_BUILD)
+        .bind(i64::from(CLASSIC_CLIENT_BUILD))
+        .bind(i64::from(CLASSIC_CLIENT_BUILD))
         .fetch_all(world_db)
         .await;
 
         if let Ok(rows) = &rows {
             for row in rows {
                 use sqlx::Row;
-                let spell_id: u32 = row.try_get::<u64, _>("entry").unwrap_or(0) as u32;
-                let learned: u32 = row.try_get::<u64, _>("spell_id").unwrap_or(0) as u32;
-                let active: bool = row.try_get("Active").unwrap_or(false);
+                let spell_id: u32 = row.try_get::<i64, _>("entry").unwrap_or(0) as u32;
+                let learned: u32 = row.try_get::<i64, _>("spell_id").unwrap_or(0) as u32;
+                let active: bool = row.try_get("active").unwrap_or(false);
 
                 if self.spells.get(&spell_id).is_none() {
                     if !self.existing_spell_ids.read().contains(&spell_id) {
@@ -1475,17 +1434,12 @@ impl SpellManager {
 
     /// Loads `spell_script_target` SQL table — validates targets exist and
     /// spell has a script-referencing target mode.
-    async fn load_spell_script_targets(&self, world_db: &MySqlPool) -> Result<()> {
+    async fn load_spell_script_targets(&self, world_db: &PgPool) -> Result<()> {
         let mut map: HashMap<u32, Vec<SpellTargetEntry>> = HashMap::new();
         let mut count = 0u32;
 
         let rows = sqlx::query(
-            "SELECT CAST(`entry` AS UNSIGNED) AS entry, \
-                    CAST(`type` AS UNSIGNED) AS type, \
-                    CAST(`targetEntry` AS UNSIGNED) AS target_entry, \
-                    CAST(`conditionId` AS UNSIGNED) AS condition_id, \
-                    CAST(`inverseEffectMask` AS UNSIGNED) AS effect_mask \
-             FROM `spell_script_target`",
+            "SELECT entry, type, targetentry AS target_entry, conditionid AS condition_id, inverseeffectmask AS effect_mask FROM world.spell_script_target",
         )
         .fetch_all(world_db)
         .await;
@@ -1502,9 +1456,9 @@ impl SpellManager {
 
         for row in &rows {
             use sqlx::Row;
-            let spell_id: u32 = row.try_get::<u64, _>("entry").unwrap_or(0) as u32;
-            let type_: u32 = row.try_get::<u64, _>("type").unwrap_or(0) as u32;
-            let target_entry: u32 = row.try_get::<u64, _>("target_entry").unwrap_or(0) as u32;
+            let spell_id: u32 = row.try_get::<i64, _>("entry").unwrap_or(0) as u32;
+            let type_: u32 = row.try_get::<i64, _>("type").unwrap_or(0) as u32;
+            let target_entry: u32 = row.try_get::<i64, _>("target_entry").unwrap_or(0) as u32;
 
             if self.spells.get(&spell_id).is_none() {
                 if !self.existing_spell_ids.read().contains(&spell_id) {
@@ -1534,9 +1488,9 @@ impl SpellManager {
             map.entry(spell_id).or_default().push(SpellTargetEntry {
                 type_,
                 target_id: target_entry,
-                condition_id: row.try_get::<u64, _>("condition_id").unwrap_or(0) as u32,
+                condition_id: row.try_get::<i64, _>("condition_id").unwrap_or(0) as u32,
                 can_focus: false,
-                inverse_effect_mask: row.try_get::<u64, _>("effect_mask").unwrap_or(0) as u32,
+                inverse_effect_mask: row.try_get::<i64, _>("effect_mask").unwrap_or(0) as u32,
             });
             count += 1;
         }
@@ -1550,11 +1504,11 @@ impl SpellManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::mysql::MySqlPoolOptions;
+    use sqlx::postgres::PgPoolOptions;
 
-    fn lazy_pool() -> MySqlPool {
-        MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
+    fn lazy_pool() -> PgPool {
+        PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy pool should be constructible")
     }
 

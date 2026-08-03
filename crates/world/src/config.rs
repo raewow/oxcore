@@ -617,8 +617,8 @@ impl Config {
             ("world_database_url", &self.world_database_url),
             ("character_database_url", &self.character_database_url),
         ] {
-            if !url.starts_with("mysql://") {
-                anyhow::bail!("world.{name} must be a MySQL connection URL");
+            if !url.starts_with("postgres://") {
+                anyhow::bail!("world.{name} must be a PostgreSQL connection URL");
             }
         }
         if !self.login_database_url.starts_with("postgres://") {

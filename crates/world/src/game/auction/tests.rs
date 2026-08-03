@@ -126,7 +126,7 @@ fn create_test_manager_with_mail(
     // Character repo requires a real pool; load_auctions only calls it for seller account lookup.
     // Use a disconnected pool — find_by_guid will fail gracefully and return account 0.
     let pool = Arc::new(
-        sqlx::MySqlPool::connect_lazy("mysql://localhost/unused_auction_test").expect("lazy pool"),
+        sqlx::PgPool::connect_lazy("postgres://localhost/unused_auction_test").expect("lazy pool"),
     );
     AuctionHouseManager::new(
         Arc::new(mock_repo),

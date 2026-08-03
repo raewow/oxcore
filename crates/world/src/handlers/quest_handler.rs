@@ -1113,14 +1113,14 @@ mod tests {
     use oxcore_db::database::Databases;
     use oxcore_shared::protocol::bitbuf::BitWriter;
     use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
-    use sqlx::mysql::MySqlPoolOptions;
+    use sqlx::postgres::PgPoolOptions;
     use std::path::PathBuf;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
-    fn lazy_pool() -> sqlx::MySqlPool {
-        MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
+    fn lazy_pool() -> sqlx::PgPool {
+        PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy pool should be constructible")
     }
 

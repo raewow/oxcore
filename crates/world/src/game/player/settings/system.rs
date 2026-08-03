@@ -167,7 +167,7 @@ impl SettingsSystem {
         client_time: Option<u32>,
         world: &World,
     ) -> Result<()> {
-        use oxcore_db::database::CharacterRepository;
+        use oxcore_db::database::characters::PgCharacterRepository;
 
         let ad_type = match AccountDataType::from_u32(data_type) {
             Some(t) => t,
@@ -230,18 +230,23 @@ impl SettingsSystem {
             });
 
         // Persist to DB immediately
-        let char_repo = CharacterRepository::new(Arc::new(world.databases.character.clone()));
-        let time_u64 = timestamp as u64;
+        let char_repo = PgCharacterRepository::new(Arc::new(world.databases.character.clone()));
+        let time = i64::from(timestamp);
         if ad_type.is_global() {
             char_repo
-                .upsert_account_data(account_id, data_type, time_u64, &decompressed)
+                .upsert_account_data(
+                    i64::from(account_id),
+                    i64::from(data_type),
+                    time,
+                    &decompressed,
+                )
                 .await?;
         } else {
             char_repo
                 .upsert_character_account_data(
-                    player_guid.counter(),
-                    data_type,
-                    time_u64,
+                    i64::from(player_guid.counter()),
+                    i64::from(data_type),
+                    time,
                     &decompressed,
                 )
                 .await?;

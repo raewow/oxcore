@@ -824,8 +824,8 @@ mod tests {
 
     fn build_dummy_world() -> World {
         use std::sync::Arc;
-        let pool = sqlx::mysql::MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy pool should be constructible");
         let databases = Arc::new(oxcore_db::database::Databases {
             world: pool.clone(),

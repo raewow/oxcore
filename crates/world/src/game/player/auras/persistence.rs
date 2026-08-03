@@ -15,7 +15,7 @@ use crate::game::player::spells::diminishing::DiminishSnapshot;
 use crate::World;
 use anyhow::Result;
 use oxcore_db::database::characters::models::character::CharacterAuraRow;
-use oxcore_db::database::characters::repositories::CharacterRepository;
+use oxcore_db::database::characters::{PgCharacterAuraRow, PgCharacterRepository};
 use oxcore_shared::protocol::ObjectGuid;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -52,11 +52,20 @@ const SPELL_AURA_MOD_SHAPESHIFT: u32 = 36;
 /// `timediff` is the number of seconds the character was offline (used to debit remaining
 /// duration for auras with `HasRealTimeDuration()`).
 pub async fn load_auras(player_guid: ObjectGuid, timediff: u32, world: &World) -> Result<()> {
-    let char_repo = CharacterRepository::new(Arc::new(world.databases.character.clone()));
-    let rows = char_repo.find_auras(player_guid.counter()).await?;
+    let char_repo = PgCharacterRepository::new(Arc::new(world.databases.character.clone()));
+    let rows = char_repo
+        .find_auras(i64::from(player_guid.counter()))
+        .await?;
 
-    for row in &rows {
-        load_aura(player_guid, row, timediff, world).await;
+    for row in rows {
+        let Some(row) = aura_row_from_pg(row) else {
+            tracing::warn!(
+                "Ignoring invalid signed PostgreSQL aura row for {}",
+                player_guid
+            );
+            continue;
+        };
+        load_aura(player_guid, &row, timediff, world).await;
     }
 
     // Warriors without a shapeshift aura get their passive battle stance cast.
@@ -243,22 +252,57 @@ async fn load_aura(player_guid: ObjectGuid, row: &CharacterAuraRow, timediff: u3
 /// Deletes all existing rows for the character then re-inserts one row per (spell, caster, item)
 /// holder built from the still-active per-effect auras.
 pub async fn save_auras(player_guid: ObjectGuid, world: &World) -> Result<()> {
-    let char_repo = CharacterRepository::new(Arc::new(world.databases.character.clone()));
-    char_repo.delete_auras(player_guid.counter()).await?;
-
     let holders = collect_holders_for_save(player_guid, world);
-    if holders.is_empty() {
-        return Ok(());
-    }
-
-    for holder in holders {
-        let Some(row) = save_aura(player_guid, &holder, world) else {
-            continue;
-        };
-        char_repo.insert_aura(&row).await?;
-    }
+    let rows = holders
+        .into_iter()
+        .filter_map(|holder| save_aura(player_guid, &holder, world))
+        .map(aura_row_to_pg)
+        .collect::<Vec<_>>();
+    PgCharacterRepository::new(Arc::new(world.databases.character.clone()))
+        .replace_auras(i64::from(player_guid.counter()), &rows)
+        .await?;
 
     Ok(())
+}
+
+fn aura_row_from_pg(row: PgCharacterAuraRow) -> Option<CharacterAuraRow> {
+    Some(CharacterAuraRow {
+        guid: u32::try_from(row.guid).ok()?,
+        caster_guid: u64::try_from(row.caster_guid).ok()?,
+        item_guid: u32::try_from(row.item_guid).ok()?,
+        spell: u32::try_from(row.spell).ok()?,
+        stacks: u32::try_from(row.stacks).ok()?,
+        charges: u32::try_from(row.charges).ok()?,
+        base_points0: row.base_points0,
+        base_points1: row.base_points1,
+        base_points2: row.base_points2,
+        periodic_time0: u32::try_from(row.periodic_time0).ok()?,
+        periodic_time1: u32::try_from(row.periodic_time1).ok()?,
+        periodic_time2: u32::try_from(row.periodic_time2).ok()?,
+        max_duration: row.max_duration,
+        duration: row.duration,
+        effect_index_mask: u8::try_from(row.effect_index_mask).ok()?,
+    })
+}
+
+fn aura_row_to_pg(row: CharacterAuraRow) -> PgCharacterAuraRow {
+    PgCharacterAuraRow {
+        guid: i64::from(row.guid),
+        caster_guid: i64::try_from(row.caster_guid).unwrap_or(i64::MAX),
+        item_guid: i64::from(row.item_guid),
+        spell: i64::from(row.spell),
+        stacks: i64::from(row.stacks),
+        charges: i64::from(row.charges),
+        base_points0: row.base_points0,
+        base_points1: row.base_points1,
+        base_points2: row.base_points2,
+        periodic_time0: i64::from(row.periodic_time0),
+        periodic_time1: i64::from(row.periodic_time1),
+        periodic_time2: i64::from(row.periodic_time2),
+        max_duration: row.max_duration,
+        duration: row.duration,
+        effect_index_mask: i16::from(row.effect_index_mask),
+    }
 }
 
 /// One (spell, caster, item) holder's worth of per-effect aura snapshots.

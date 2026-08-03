@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use dashmap::DashMap;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::info;
 
@@ -11,7 +11,7 @@ use oxcore_db::database::world::repositories::TrainerRepository;
 
 /// Manages trainer spell data loaded from the database
 pub struct TrainerManager {
-    world_db: Arc<MySqlPool>,
+    world_db: Arc<PgPool>,
     /// Direct spells per creature entry (from npc_trainer)
     direct_spells: DashMap<u32, Vec<TrainerSpell>>,
     /// Template spells per template ID (from npc_trainer_template)
@@ -21,7 +21,7 @@ pub struct TrainerManager {
 }
 
 impl TrainerManager {
-    pub fn new(world_db: Arc<MySqlPool>) -> Self {
+    pub fn new(world_db: Arc<PgPool>) -> Self {
         Self {
             world_db,
             direct_spells: DashMap::new(),

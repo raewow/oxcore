@@ -19,72 +19,57 @@ The server requires extracted game data files from the WoW client. You can use v
 
 ## Database Setup
 
-The server requires **five separate MySQL databases**:
-
-1. **auth** - Authentication and realm information
-2. **world** - Game content (NPCs, items, quests, etc.)
-3. **characters** - Player characters and account data
-4. **logs** - Server logs and statistics
-5. **web** - Player-portal sessions, identity tokens, and web-admin audit records
-
-> Note: This database was copied from vmangos, and currently is largely the same however the project will eventually deviate, include all 3 expansions data and I'm thinking of moving to postgres too.
-
-
 ### Setting Up the Database
 
-Create the five databases in MySQL first:
-
-```sql
-CREATE DATABASE world CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE auth CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE characters CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE logs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE web CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-
-Then run the `db` tool to apply the base schema and any pending migrations:
+Oxcore uses one PostgreSQL database with `auth`, `world`, `characters`, `logs`, and `web`
+schemas. Start PostgreSQL and apply the schema and checked-in base-data migrations:
 
 ```bash
-# From repo root
-cargo run --bin db -- migrate
+podman compose up -d postgres
+cargo run -p oxcore-db --bin db -- pg migrate
 ```
 
-This will apply base tables from `sql/base/<db>/` and then run any pending migrations from `sql/migrations/`.
+The historical MySQL migrations in `sql/migrations/` and MySQL base dumps in `sql/base/` are
+source reference only. To reset a development database, apply the PostgreSQL schema and base-data
+migrations in one command:
+
+```bash
+podman compose up -d postgres
+cargo run -p oxcore-db --bin db -- pg fresh --yes
+```
 
 #### Other db commands
 
 ```bash
-# Check status of all databases
-cargo run --bin db -- status
-
-# Create a new migration file
-cargo run --bin db -- new world add_creature_gossip_option
-cargo run --bin db -- new characters add_character_pet
-cargo run --bin db -- pg new web add_web_notification
+# Check migration status, recreate development schemas, or create a migration
+cargo run -p oxcore-db --bin db -- pg status
+cargo run -p oxcore-db --bin db -- pg fresh --yes
+cargo run -p oxcore-db --bin db -- pg new web add_web_notification
 
 # Show help
-cargo run --bin db -- help
+cargo run -p oxcore-db --bin db -- --help
 ```
 
-Migration files are created in `sql/migrations/` with the format `YYYYMMDDHHMMSS_<db>_<name>.sql`.
+Migration files are created in `crates/db/migrations/<schema>/` with the format
+`YYYYMMDDHHMMSS_<name>.sql`. Each schema has one `base_tables` migration; checked-in reference
+data follows as ordered `base_data_1`, `base_data_2`, and so on. World data is split at complete
+SQL statement boundaries to keep each migration manageable.
 
-The tool reads database connection URLs from the same `config.toml` used by the servers. The web
-portal requires its MySQL auth database and PostgreSQL web schema:
+The tool and all services read PostgreSQL URLs from the same `config.toml` used by the servers:
 
 ```toml
 [web]
-auth_database_url = "postgres://postgres:postgres@127.0.0.1:5432/oxcore"
+auth_database_url = "postgres://oxcore:oxcore@127.0.0.1:5432/oxcore"
 web_database_url = "postgres://oxcore:oxcore@127.0.0.1:5432/oxcore"
 ```
 
 The `web` schema has no base dump; its PostgreSQL schema is created entirely through `db pg`
 migrations.
 
-### PostgreSQL Foundation
+### PostgreSQL Migrations
 
-PostgreSQL is being introduced independently of the still-MySQL server runtime. The `db pg`
-commands initialize one `oxcore` database with separate `auth`, `world`, `characters`, `logs`, and
-`web` schemas. They do not translate the MySQL base dumps or switch any running server connection.
+The `db pg` commands initialize one `oxcore` database with separate `auth`, `world`,
+`characters`, `logs`, and `web` schemas.
 
 ```bash
 # Start the PostgreSQL development service, then initialize migration metadata and schemas.
@@ -95,12 +80,12 @@ cargo run -p oxcore-db --bin db -- pg migrate
 cargo run -p oxcore-db --bin db -- pg status
 cargo run -p oxcore-db --bin db -- pg fresh --yes
 
-# Create a PostgreSQL migration in sql/postgres/migrations/auth/.
+# Create a PostgreSQL migration in crates/db/migrations/auth/.
 cargo run -p oxcore-db --bin db -- pg new auth create_accounts
 ```
 
 PostgreSQL migrations are schema-specific files named
-`sql/postgres/migrations/<schema>/YYYYMMDDHHMMSS_<name>.sql`. Each migration and its ledger entry
+`crates/db/migrations/<schema>/YYYYMMDDHHMMSS_<name>.sql`. Each migration and its ledger entry
 are committed in one transaction.
 
 ### Build Commands

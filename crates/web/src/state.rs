@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use sqlx::mysql::MySqlPoolOptions;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{MySqlPool, PgPool};
+use sqlx::PgPool;
 
 use crate::config::Config;
 
 #[derive(Clone)]
 pub struct AppState {
     pub auth: Arc<PgPool>,
-    pub characters: Arc<MySqlPool>,
+    pub characters: Arc<PgPool>,
     pub web: Arc<PgPool>,
     pub logs: Arc<PgPool>,
     pub secure_cookies: bool,
@@ -31,7 +30,7 @@ impl AppState {
             .connect(&config.web_database_url)
             .await
             .context("failed to connect to the web database")?;
-        let characters = MySqlPoolOptions::new()
+        let characters = PgPoolOptions::new()
             .max_connections(10)
             .min_connections(1)
             .connect(&config.character_database_url)

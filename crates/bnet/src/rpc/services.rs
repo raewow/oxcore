@@ -837,7 +837,7 @@ mod tests {
     /// A `Services` with a lazily-connected pool: fine for handlers that never touch the DB.
     fn services() -> Services {
         let db =
-            Database::connect_lazy("mysql://user:pass@127.0.0.1/oxcore_auth").expect("lazy pool");
+            Database::connect_lazy("postgres://user:pass@127.0.0.1/oxcore").expect("lazy pool");
         Services::new(
             db,
             "https://localhost:8081/bnetserver/login/".to_string(),

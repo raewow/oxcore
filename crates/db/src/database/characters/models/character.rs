@@ -4,7 +4,7 @@ use sqlx::FromRow;
 ///
 /// Maps to the `characters` table in the characters database.
 /// Contains all core character data including position, stats, customization, and flags.
-#[derive(FromRow, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct CharacterRow {
     pub guid: u32,
     pub account: u32,
@@ -70,6 +70,85 @@ pub struct CharacterRow {
     pub deleted_name: Option<String>,
     pub deleted_time: Option<i64>,
     pub world_phase_mask: Option<i32>,
+}
+
+impl TryFrom<crate::database::characters::PgCharacterRow> for CharacterRow {
+    type Error = anyhow::Error;
+
+    fn try_from(row: crate::database::characters::PgCharacterRow) -> Result<Self, Self::Error> {
+        let timestamp = |value: chrono::DateTime<chrono::Utc>| -> Result<u64, anyhow::Error> {
+            value.timestamp().try_into().map_err(Into::into)
+        };
+        Ok(Self {
+            guid: row.guid.try_into()?,
+            account: row.account.try_into()?,
+            name: row.name,
+            race: row.race.try_into()?,
+            class: row.class.try_into()?,
+            gender: row.gender.try_into()?,
+            skin: row.skin.try_into()?,
+            face: row.face.try_into()?,
+            hair_style: row.hair_style.try_into()?,
+            hair_color: row.hair_color.try_into()?,
+            facial_hair: row.facial_hair.try_into()?,
+            level: row.level.try_into()?,
+            xp: row.xp.try_into()?,
+            money: row.money.try_into()?,
+            character_flags: row.character_flags.try_into()?,
+            zone: row.zone.try_into()?,
+            map: row.map.try_into()?,
+            instance: row.instance.try_into()?,
+            position_x: row.position_x,
+            position_y: row.position_y,
+            position_z: row.position_z,
+            orientation: row.orientation,
+            transport_guid: row.transport_guid.try_into()?,
+            transport_x: row.transport_x,
+            transport_y: row.transport_y,
+            transport_z: row.transport_z,
+            transport_o: row.transport_o,
+            known_taxi_mask: row.known_taxi_mask,
+            current_taxi_path: row.current_taxi_path,
+            online: row.online.into(),
+            played_time_total: row.played_time_total.try_into()?,
+            played_time_level: row.played_time_level.try_into()?,
+            create_time: timestamp(row.create_time)?,
+            logout_time: match row.logout_time {
+                Some(value) => timestamp(value)?,
+                None => 0,
+            },
+            rest_bonus: row.rest_bonus,
+            reset_talents_multiplier: row.reset_talents_multiplier.try_into()?,
+            reset_talents_time: row.reset_talents_time.try_into()?,
+            death_expire_time: row.death_expire_time.try_into()?,
+            stable_slots: row.stable_slots.try_into()?,
+            bank_bag_slots: row.bank_bag_slots.try_into()?,
+            extra_flags: row.extra_flags.try_into()?,
+            honor_rank_points: row.honor_rank_points,
+            honor_highest_rank: row.honor_highest_rank.try_into()?,
+            honor_standing: row.honor_standing.try_into()?,
+            honor_last_week_hk: row.honor_last_week_hk.try_into()?,
+            honor_last_week_cp: row.honor_last_week_cp,
+            honor_stored_hk: row.honor_stored_hk,
+            honor_stored_dk: row.honor_stored_dk,
+            watched_faction: row.watched_faction,
+            drunk: row.drunk.try_into()?,
+            health: row.health.try_into()?,
+            power1: row.power1.try_into()?,
+            power2: row.power2.try_into()?,
+            power3: row.power3.try_into()?,
+            power4: row.power4.try_into()?,
+            power5: row.power5.try_into()?,
+            explored_zones: row.explored_zones,
+            equipment_cache: row.equipment_cache,
+            ammo_id: row.ammo_id.try_into()?,
+            action_bars: row.action_bars.try_into()?,
+            deleted_account: row.deleted_account.map(TryInto::try_into).transpose()?,
+            deleted_name: row.deleted_name,
+            deleted_time: row.deleted_time,
+            world_phase_mask: row.world_phase_mask,
+        })
+    }
 }
 
 /// Character spell table row

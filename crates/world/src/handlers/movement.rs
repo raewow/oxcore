@@ -1177,15 +1177,15 @@ mod tests {
     use crate::game::player::movement::MovementControllerSender;
     use oxcore_db::database::Databases;
     use oxcore_shared::protocol::{HighGuid, ObjectGuid};
-    use sqlx::mysql::MySqlPoolOptions;
+    use sqlx::postgres::PgPoolOptions;
     use std::path::PathBuf;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
     fn test_world() -> World {
         let pool = || {
-            MySqlPoolOptions::new()
-                .connect_lazy("mysql://test:test@localhost/test")
+            PgPoolOptions::new()
+                .connect_lazy("postgres://test:test@localhost/test")
                 .expect("lazy pool should be constructible")
         };
         let databases = Arc::new(Databases {

@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use dashmap::DashMap;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::info;
 
@@ -16,7 +16,7 @@ use oxcore_shared::protocol::ObjectGuid;
 /// Manages vendor data (state storage + database loading)
 pub struct VendorManager {
     /// Database pool for loading
-    world_db: Arc<MySqlPool>,
+    world_db: Arc<PgPool>,
     /// Direct vendor items (from npc_vendor table): entry -> items
     vendor_items: DashMap<u32, Vec<VendorItem>>,
     /// Template vendor items (from npc_vendor_template table): template_id -> items
@@ -31,7 +31,7 @@ pub struct VendorManager {
 
 impl VendorManager {
     /// Create a new vendor manager with database pool
-    pub fn new(world_db: Arc<MySqlPool>) -> Self {
+    pub fn new(world_db: Arc<PgPool>) -> Self {
         Self {
             world_db,
             vendor_items: DashMap::new(),

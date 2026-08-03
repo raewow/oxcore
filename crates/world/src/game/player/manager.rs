@@ -16,7 +16,7 @@ use crate::game::common::player_constants::{get_faction_for_race, get_player_dis
 use crate::game::common::unit_flags as unit_flags_mod;
 use crate::game::common::update_fields::*;
 use crate::World;
-use oxcore_db::database::CharacterRepository;
+use oxcore_db::database::characters::PgCharacterRepository;
 use oxcore_shared::messages::update::{
     CreateObjectBlock, ObjectType, SmsgUpdateObject, UpdateBlockData,
 };
@@ -43,13 +43,13 @@ impl PlayerManager {
     }
 
     /// Initialize GUID generator from database MAX query
-    pub async fn init_guid_generator(&self, character_db: &sqlx::MySqlPool) -> anyhow::Result<()> {
-        let max_guid: Option<u32> =
-            sqlx::query_scalar::<_, Option<u32>>("SELECT MAX(guid) FROM characters")
+    pub async fn init_guid_generator(&self, character_db: &sqlx::PgPool) -> anyhow::Result<()> {
+        let max_guid: Option<i64> =
+            sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(guid) FROM characters.characters")
                 .fetch_one(character_db)
                 .await?;
 
-        let next_guid = max_guid.map(|g| g + 1).unwrap_or(1);
+        let next_guid = u32::try_from(max_guid.map(|g| g + 1).unwrap_or(1))?;
         *self.guid_generator.write() = ObjectGuidGenerator::new(next_guid);
 
         tracing::debug!(
@@ -240,7 +240,7 @@ impl PlayerManager {
         &self,
         guid: ObjectGuid,
         account_id: u32,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
         world: &World,
     ) -> anyhow::Result<Option<Player>> {
         // Get player data before removal
@@ -253,8 +253,10 @@ impl PlayerManager {
         drop(player); // Release DashMap guard before async DB call
 
         // Set online status to false
-        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
-        char_repo.update_online(guid.counter(), false).await?;
+        let char_repo = PgCharacterRepository::new(Arc::new(character_db.clone()));
+        char_repo
+            .update_online(i64::from(guid.counter()), false)
+            .await?;
 
         // Remove from indices
         self.by_account.remove(&account_id);
@@ -491,20 +493,20 @@ impl PlayerManager {
     pub async fn save_position(
         &self,
         player_guid: ObjectGuid,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
         let (position, map_id, instance_id, zone_id) = self
             .get_player(player_guid)
             .map(|p| (p.movement.position, p.map_id, p.instance_id, p.zone_id))
             .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
 
-        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
+        let char_repo = PgCharacterRepository::new(Arc::new(character_db.clone()));
         char_repo
             .update_position(
-                player_guid.counter(),
-                map_id,
-                instance_id,
-                zone_id,
+                i64::from(player_guid.counter()),
+                i64::from(map_id),
+                i64::from(instance_id),
+                i64::from(zone_id),
                 position.x,
                 position.y,
                 position.z,
@@ -519,16 +521,20 @@ impl PlayerManager {
     pub async fn save_experience(
         &self,
         player_guid: ObjectGuid,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
         let (xp, level) = self
             .get_player(player_guid)
             .map(|p| (p.xp, p.level))
             .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
 
-        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
+        let char_repo = PgCharacterRepository::new(Arc::new(character_db.clone()));
         char_repo
-            .update_experience(player_guid.counter(), xp, level)
+            .update_experience(
+                i64::from(player_guid.counter()),
+                i64::from(xp),
+                i16::from(level),
+            )
             .await?;
 
         Ok(())
@@ -538,7 +544,7 @@ impl PlayerManager {
     pub async fn save_health_and_power(
         &self,
         player_guid: ObjectGuid,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
         let (health, power1, power2, power3, power4, power5) = self
             .get_player(player_guid)
@@ -554,16 +560,18 @@ impl PlayerManager {
             })
             .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
 
-        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
+        let char_repo = PgCharacterRepository::new(Arc::new(character_db.clone()));
         char_repo
             .update_health_and_power(
-                player_guid.counter(),
-                health,
-                power1,
-                power2,
-                power3,
-                power4,
-                power5,
+                i64::from(player_guid.counter()),
+                i64::from(health),
+                [
+                    i64::from(power1),
+                    i64::from(power2),
+                    i64::from(power3),
+                    i64::from(power4),
+                    i64::from(power5),
+                ],
             )
             .await?;
 
@@ -574,7 +582,7 @@ impl PlayerManager {
     pub async fn save_rest_state(
         &self,
         player_guid: ObjectGuid,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
         let (rest_bonus, character_flags) = self
             .get_player(player_guid)
@@ -582,18 +590,12 @@ impl PlayerManager {
             .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
 
         // Get current timestamp for logout_time
-        let logout_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
+        let char_repo = PgCharacterRepository::new(Arc::new(character_db.clone()));
         char_repo
             .update_rest_data(
-                player_guid.counter(),
+                i64::from(player_guid.counter()),
                 rest_bonus,
-                logout_time,
-                character_flags,
+                i64::from(character_flags),
             )
             .await?;
 
@@ -668,20 +670,18 @@ impl PlayerManager {
     pub async fn save_spells(
         &self,
         player_guid: ObjectGuid,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
         let spellbook = self.collect_spells_for_save(player_guid);
 
-        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
-        // Delete all saved spells then re-insert.
-        sqlx::query("DELETE FROM character_spell WHERE guid = ?")
-            .bind(player_guid.counter())
+        let char_repo = PgCharacterRepository::new(Arc::new(character_db.clone()));
+        sqlx::query("DELETE FROM characters.character_spell WHERE guid = $1")
+            .bind(i64::from(player_guid.counter()))
             .execute(character_db)
             .await?;
         for spell_id in spellbook {
-            char_repo
-                .add_spell(player_guid.counter(), spell_id, 1, 0)
-                .await?;
+            sqlx::query("INSERT INTO characters.character_spell (guid, spell, active, disabled) VALUES ($1,$2,$3,$4)")
+                .bind(i64::from(player_guid.counter())).bind(i64::from(spell_id)).bind(1i16).bind(0i16).execute(character_db).await?;
         }
 
         Ok(())
@@ -691,12 +691,16 @@ impl PlayerManager {
     pub async fn save_action_buttons(
         &self,
         player_guid: ObjectGuid,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
         let buttons = self.collect_action_buttons_for_save(player_guid);
-        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
+        let char_repo = PgCharacterRepository::new(Arc::new(character_db.clone()));
+        let buttons: Vec<_> = buttons
+            .into_iter()
+            .map(|(slot, action, kind)| (i16::from(slot), i64::from(action), i16::from(kind)))
+            .collect();
         char_repo
-            .save_actions(player_guid.counter(), &buttons)
+            .save_actions(i64::from(player_guid.counter()), &buttons)
             .await?;
         Ok(())
     }
@@ -705,19 +709,20 @@ impl PlayerManager {
     pub async fn save_reputation(
         &self,
         player_guid: ObjectGuid,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
-        use oxcore_db::database::characters::models::reputation::ReputationRow;
-        use oxcore_db::database::characters::repositories::ReputationRepository;
+        use oxcore_db::database::characters::{
+            PgCharacterRepository, PgReputationRepository, PgReputationRow,
+        };
 
         let factions = self.collect_reputation_for_save(player_guid);
 
-        let rep_repo = ReputationRepository::new(Arc::new(character_db.clone()));
+        let rep_repo = PgReputationRepository::new(Arc::new(character_db.clone()));
         for (faction_id, standing, flags) in factions {
             rep_repo
-                .save_reputation(&ReputationRow {
-                    guid: player_guid.counter(),
-                    faction: faction_id,
+                .save(&PgReputationRow {
+                    guid: i64::from(player_guid.counter()),
+                    faction: i64::from(faction_id),
                     standing,
                     flags,
                 })
@@ -731,12 +736,16 @@ impl PlayerManager {
     pub async fn save_skills(
         &self,
         player_guid: ObjectGuid,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
         let skills = self.collect_skills_for_save(player_guid);
-        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
+        let char_repo = PgCharacterRepository::new(Arc::new(character_db.clone()));
+        let skills: Vec<_> = skills
+            .into_iter()
+            .map(|(skill, value, max)| (i64::from(skill), i64::from(value), i64::from(max)))
+            .collect();
         char_repo
-            .save_skills(player_guid.counter(), &skills)
+            .save_skills(i64::from(player_guid.counter()), &skills)
             .await?;
         Ok(())
     }
@@ -745,14 +754,16 @@ impl PlayerManager {
     pub async fn save_tutorials(
         &self,
         player_guid: ObjectGuid,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
         let (account_id, flags) = match self.get_player(player_guid) {
             Some(p) => (p.account_id as u64, p.settings.tutorial_flags),
             None => return Ok(()),
         };
-        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
-        char_repo.save_tutorials(account_id, &flags).await?;
+        let char_repo = PgCharacterRepository::new(Arc::new(character_db.clone()));
+        char_repo
+            .save_tutorials(i64::try_from(account_id)?, flags.map(i64::from))
+            .await?;
         Ok(())
     }
 
@@ -764,9 +775,8 @@ impl PlayerManager {
         &self,
         player_guid: ObjectGuid,
         account_id: u32,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
-        use oxcore_db::database::CharacterRepository;
         use oxcore_shared::game::account_data::AccountDataType;
 
         let entries: Vec<(u32, u32, Vec<u8>)> = {
@@ -784,7 +794,7 @@ impl PlayerManager {
             }
         };
 
-        let char_repo = CharacterRepository::new(Arc::new(character_db.clone()));
+        let char_repo = PgCharacterRepository::new(Arc::new(character_db.clone()));
         let guid = player_guid.counter();
 
         for (data_type, time, data) in entries {
@@ -792,12 +802,22 @@ impl PlayerManager {
             match AccountDataType::from_u32(data_type) {
                 Some(t) if t.is_global() => {
                     char_repo
-                        .upsert_account_data(account_id, data_type, time_u64, &data)
+                        .upsert_account_data(
+                            i64::from(account_id),
+                            i64::from(data_type),
+                            i64::try_from(time_u64)?,
+                            &data,
+                        )
                         .await?;
                 }
                 Some(_) => {
                     char_repo
-                        .upsert_character_account_data(guid, data_type, time_u64, &data)
+                        .upsert_character_account_data(
+                            i64::from(guid),
+                            i64::from(data_type),
+                            i64::try_from(time_u64)?,
+                            &data,
+                        )
                         .await?;
                 }
                 None => {}
@@ -823,7 +843,7 @@ impl PlayerManager {
         &self,
         player_guid: ObjectGuid,
         account_id: u32,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
     ) -> anyhow::Result<()> {
         self.save_all_player_data_with_context(player_guid, account_id, character_db, "SAVE")
             .await
@@ -834,7 +854,7 @@ impl PlayerManager {
         &self,
         player_guid: ObjectGuid,
         account_id: u32,
-        character_db: &sqlx::MySqlPool,
+        character_db: &sqlx::PgPool,
         context: &str,
     ) -> anyhow::Result<()> {
         if let Some(player) = self.get_player(player_guid) {

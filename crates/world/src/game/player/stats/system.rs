@@ -123,7 +123,7 @@ pub struct StatsSystem {
     player_mgr: Arc<PlayerManager>,
     inventory: Arc<InventorySystem>,
     item_mgr: Arc<ItemManager>,
-    world_pool: Arc<sqlx::MySqlPool>,
+    world_pool: Arc<sqlx::PgPool>,
     base_stats: OnceLock<BaseStatsData>,
 }
 
@@ -182,7 +182,7 @@ impl StatsSystem {
         player_mgr: Arc<PlayerManager>,
         inventory: Arc<InventorySystem>,
         item_mgr: Arc<ItemManager>,
-        world_pool: Arc<sqlx::MySqlPool>,
+        world_pool: Arc<sqlx::PgPool>,
     ) -> Self {
         Self {
             broadcast_mgr,

@@ -5,8 +5,7 @@ use tracing::{debug, warn};
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
 use crate::World;
-use oxcore_db::database::characters::repositories::mail_repository::MailRepository;
-use oxcore_db::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
+use oxcore_db::database::characters::PgMailRepository;
 use oxcore_shared::game::mail::MailMessageType;
 use oxcore_shared::protocol::guid::{HighGuid, ObjectGuid};
 use oxcore_shared::protocol::{Opcode, WorldPacket};
@@ -27,14 +26,14 @@ pub async fn handle_query_next_mail_time(
     };
 
     let player_low = player_guid.low();
-    let mail_repo = MailRepository::new(Arc::new(world.databases.character.clone()));
+    let mail_repo = PgMailRepository::new(Arc::new(world.databases.character.clone()));
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
 
-    let has_unread = match mail_repo.find_by_receiver(player_low).await {
+    let has_unread = match mail_repo.find_by_receiver(i64::from(player_low)).await {
         Ok(mails) => mails.iter().any(|m| {
             let is_read = m.checked & 1 != 0;
             let is_delivered = m.deliver_time <= now;
@@ -80,14 +79,14 @@ pub async fn handle_get_mail_list(
     let _mailbox_guid = packet.read_packed_guid_for(session.protocol());
 
     let player_low = player_guid.low();
-    let mail_repo = MailRepository::new(Arc::new(world.databases.character.clone()));
+    let mail_repo = PgMailRepository::new(Arc::new(world.databases.character.clone()));
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
 
-    let mails = match mail_repo.find_by_receiver(player_low).await {
+    let mails = match mail_repo.find_by_receiver(i64::from(player_low)).await {
         Ok(m) => m,
         Err(e) => {
             warn!("CMSG_GET_MAIL_LIST: Failed to query mail: {}", e);
@@ -114,18 +113,21 @@ pub async fn handle_get_mail_list(
     response.write_u8(delivered.len() as u8);
 
     for mail in &delivered {
-        response.write_u32(mail.id);
-        let msg_type = MailMessageType::from(mail.message_type);
-        response.write_u8(mail.message_type);
+        response.write_u32(u32::try_from(mail.id)?);
+        let msg_type = MailMessageType::from(u8::try_from(mail.message_type)?);
+        response.write_u8(u8::try_from(mail.message_type)?);
 
         // Sender info depends on message type
         match msg_type {
             MailMessageType::Normal => {
-                let sender_guid = ObjectGuid::new_without_entry(HighGuid::Player, mail.sender_guid);
+                let sender_guid = ObjectGuid::new_without_entry(
+                    HighGuid::Player,
+                    u32::try_from(mail.sender_guid)?,
+                );
                 response.write_u64(sender_guid.raw());
             }
             _ => {
-                response.write_u32(mail.sender_guid);
+                response.write_u32(u32::try_from(mail.sender_guid)?);
             }
         }
 
@@ -133,7 +135,7 @@ pub async fn handle_get_mail_list(
         response.write_string(mail.subject.as_deref().unwrap_or(""));
 
         // Item text ID
-        response.write_u32(mail.item_text_id);
+        response.write_u32(u32::try_from(mail.item_text_id)?);
 
         // Package ID (always 0 in vanilla)
         response.write_u32(0);
@@ -154,8 +156,8 @@ pub async fn handle_get_mail_list(
         response.write_u32(0); // durability
 
         // Money and COD
-        response.write_u32(mail.money);
-        response.write_u32(mail.cod);
+        response.write_u32(u32::try_from(mail.money)?);
+        response.write_u32(u32::try_from(mail.cod)?);
 
         // Read flag (checked field)
         response.write_u32(mail.checked as u32);
@@ -169,7 +171,7 @@ pub async fn handle_get_mail_list(
         response.write_f32(days_until_expire);
 
         // Mail template ID
-        response.write_u32(mail.mail_template_id);
+        response.write_u32(u32::try_from(mail.mail_template_id)?);
     }
 
     debug!(
@@ -208,8 +210,8 @@ pub async fn handle_item_text_query(
         return Ok(());
     }
 
-    let mail_repo = MailRepository::new(Arc::new(world.databases.character.clone()));
-    let text = match mail_repo.find_item_text(item_text_id).await {
+    let mail_repo = PgMailRepository::new(Arc::new(world.databases.character.clone()));
+    let text = match mail_repo.find_item_text(i64::from(item_text_id)).await {
         Ok(Some(row)) => row.text.unwrap_or_default(),
         Ok(None) => {
             warn!("CMSG_ITEM_TEXT_QUERY: Item text {} not found", item_text_id);

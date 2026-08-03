@@ -107,7 +107,7 @@ mod tests {
         let (mut client, server) = duplex(8192);
 
         // Connect never touches the database, so a lazy pool is enough.
-        let db = Database::connect_lazy("mysql://user:pass@127.0.0.1/oxcore_auth").unwrap();
+        let db = Database::connect_lazy("postgres://user:pass@127.0.0.1/oxcore").unwrap();
         let svc = Services::new(
             db,
             "https://localhost:8081/bnetserver/login/".to_string(),

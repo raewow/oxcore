@@ -6,17 +6,18 @@
 
 use super::generators::Waypoint;
 use super::waypoint_manager;
+use anyhow::Context;
 use oxcore_shared::protocol::Position;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::collections::HashMap;
 
 /// Repository for loading waypoint data from database
 pub struct WaypointRepository {
-    pool: MySqlPool,
+    pool: PgPool,
 }
 
 impl WaypointRepository {
-    pub fn new(pool: MySqlPool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
@@ -41,44 +42,44 @@ impl WaypointRepository {
     async fn load_guid_waypoints(&self) -> anyhow::Result<HashMap<u32, Vec<Waypoint>>> {
         let rows = sqlx::query_as::<_, WaypointRow>(
             r#"SELECT id, point, position_x, position_y, position_z, orientation, waittime, wander_distance, script_id
-                FROM creature_movement
+                FROM world.creature_movement
                 ORDER BY id, point"#,
         )
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(Self::group_waypoints(rows))
+        Ok(Self::group_waypoints(rows)?)
     }
 
     /// Load per-entry waypoints (creature_movement_template table)
     async fn load_template_waypoints(&self) -> anyhow::Result<HashMap<u32, Vec<Waypoint>>> {
         let rows = sqlx::query_as::<_, WaypointRow>(
             r#"SELECT entry as id, point, position_x, position_y, position_z, orientation, waittime, wander_distance, script_id
-                FROM creature_movement_template
+                FROM world.creature_movement_template
                 ORDER BY entry, point"#,
         )
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(Self::group_waypoints(rows))
+        Ok(Self::group_waypoints(rows)?)
     }
 
     /// Group waypoint rows by ID
-    fn group_waypoints(rows: Vec<WaypointRow>) -> HashMap<u32, Vec<Waypoint>> {
+    fn group_waypoints(rows: Vec<WaypointRow>) -> anyhow::Result<HashMap<u32, Vec<Waypoint>>> {
         let mut grouped: HashMap<u32, Vec<Waypoint>> = HashMap::new();
 
         for row in rows {
             grouped
-                .entry(row.id)
+                .entry(u32::try_from(row.id).context("waypoint id is outside u32 range")?)
                 .or_default()
-                .push(Self::build_waypoint(row));
+                .push(Self::build_waypoint(row)?);
         }
 
-        grouped
+        Ok(grouped)
     }
 
     /// Convert one DB row into a waypoint, normalizing bad data.
-    fn build_waypoint(row: WaypointRow) -> Waypoint {
+    fn build_waypoint(row: WaypointRow) -> anyhow::Result<Waypoint> {
         // The DB stores 100 to mean "no orientation override at this node".
         let orientation = row
             .orientation
@@ -100,19 +101,29 @@ impl WaypointRepository {
             y = waypoint_manager::normalize_map_coord(y);
         }
 
-        Waypoint {
-            point_id: row.point,
+        Ok(Waypoint {
+            point_id: u32::try_from(row.point).context("waypoint point is outside u32 range")?,
             position: Position {
                 x,
                 y,
                 z,
                 o: orientation.unwrap_or(0.0),
             },
-            wait_time: row.waittime.unwrap_or(0),
+            wait_time: row
+                .waittime
+                .map(|value| u32::try_from(value).context("waypoint waittime is outside u32 range"))
+                .transpose()?
+                .unwrap_or(0),
             wander_distance: row.wander_distance.unwrap_or(0.0),
-            script_id: row.script_id.unwrap_or(0),
+            script_id: row
+                .script_id
+                .map(|value| {
+                    u32::try_from(value).context("waypoint script_id is outside u32 range")
+                })
+                .transpose()?
+                .unwrap_or(0),
             orientation,
-        }
+        })
     }
 }
 
@@ -124,13 +135,13 @@ pub struct WaypointData {
 
 #[derive(sqlx::FromRow)]
 struct WaypointRow {
-    id: u32,
-    point: u32,
+    id: i64,
+    point: i64,
     position_x: f32,
     position_y: f32,
     position_z: f32,
     orientation: Option<f32>,
-    waittime: Option<u32>,
+    waittime: Option<i64>,
     wander_distance: Option<f32>,
-    script_id: Option<u32>,
+    script_id: Option<i64>,
 }

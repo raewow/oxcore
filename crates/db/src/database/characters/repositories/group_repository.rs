@@ -1,260 +1,145 @@
 use super::super::models::group::*;
 use super::group_repository_trait::GroupRepositoryTrait;
-use anyhow::{Context, Result};
+use crate::database::characters::{PgGroupMemberRow, PgGroupRepository, PgGroupRow};
+use anyhow::Result;
 use async_trait::async_trait;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::Arc;
 
 pub struct GroupRepository {
-    pool: Arc<MySqlPool>,
+    pool: Arc<PgPool>,
 }
 
 impl GroupRepository {
-    pub fn new(pool: Arc<MySqlPool>) -> Self {
+    pub fn new(pool: Arc<PgPool>) -> Self {
         Self { pool }
     }
 
-    // ========== QUERY METHODS (Read Operations) ==========
-
-    /// Get the maximum group ID from the database (for generating next ID).
-    pub async fn get_max_group_id(&self) -> Result<Option<u32>> {
-        sqlx::query_scalar::<_, Option<u32>>("SELECT MAX(group_id) FROM `groups`")
-            .fetch_one(&*self.pool)
-            .await
-            .context("Failed to query max group_id")
+    fn pg(&self) -> PgGroupRepository {
+        PgGroupRepository::new(Arc::clone(&self.pool))
     }
 
-    /// Find a group by ID.
-    pub async fn find_by_id(&self, group_id: u32) -> Result<Option<GroupRow>> {
-        sqlx::query_as::<_, GroupRow>(
-            r#"SELECT group_id, leader_guid, main_tank_guid, main_assistant_guid,
-                      loot_method, loot_threshold, looter_guid,
-                      icon1, icon2, icon3, icon4, icon5, icon6, icon7, icon8, is_raid
-               FROM `groups`
-               WHERE group_id = ?"#,
-        )
-        .bind(group_id)
-        .fetch_optional(&*self.pool)
-        .await
-        .context("Failed to fetch group by ID")
+    fn group(row: PgGroupRow) -> Result<GroupRow> {
+        Ok(GroupRow {
+            group_id: row.group_id.try_into()?,
+            leader_guid: row.leader_guid.try_into()?,
+            main_tank_guid: row.main_tank_guid.try_into()?,
+            main_assistant_guid: row.main_assistant_guid.try_into()?,
+            loot_method: row.loot_method.try_into()?,
+            loot_threshold: row.loot_threshold.try_into()?,
+            looter_guid: row.looter_guid.try_into()?,
+            icon1: row.icon1.try_into()?,
+            icon2: row.icon2.try_into()?,
+            icon3: row.icon3.try_into()?,
+            icon4: row.icon4.try_into()?,
+            icon5: row.icon5.try_into()?,
+            icon6: row.icon6.try_into()?,
+            icon7: row.icon7.try_into()?,
+            icon8: row.icon8.try_into()?,
+            is_raid: row.is_raid.try_into()?,
+        })
     }
 
-    /// Load all groups from the database.
-    pub async fn find_all(&self) -> Result<Vec<GroupRow>> {
-        sqlx::query_as::<_, GroupRow>(
-            r#"SELECT group_id, leader_guid, main_tank_guid, main_assistant_guid,
-                      loot_method, loot_threshold, looter_guid,
-                      icon1, icon2, icon3, icon4, icon5, icon6, icon7, icon8, is_raid
-               FROM `groups`"#,
-        )
-        .fetch_all(&*self.pool)
-        .await
-        .context("Failed to fetch all groups")
-    }
-
-    /// Find all members for a group.
-    pub async fn find_members(&self, group_id: u32) -> Result<Vec<GroupMemberRow>> {
-        sqlx::query_as::<_, GroupMemberRow>(
-            r#"SELECT group_id, member_guid, assistant, subgroup
-               FROM group_member
-               WHERE group_id = ?"#,
-        )
-        .bind(group_id)
-        .fetch_all(&*self.pool)
-        .await
-        .context("Failed to fetch group members")
-    }
-
-    /// Load all group members (for all groups).
-    pub async fn find_all_members(&self) -> Result<Vec<GroupMemberRow>> {
-        sqlx::query_as::<_, GroupMemberRow>(
-            r#"SELECT group_id, member_guid, assistant, subgroup
-               FROM group_member"#,
-        )
-        .fetch_all(&*self.pool)
-        .await
-        .context("Failed to fetch all group members")
-    }
-
-    /// Find group ID for a member.
-    pub async fn find_group_for_member(&self, member_guid: u32) -> Result<Option<u32>> {
-        sqlx::query_scalar::<_, u32>("SELECT group_id FROM group_member WHERE member_guid = ?")
-            .bind(member_guid)
-            .fetch_optional(&*self.pool)
-            .await
-            .context("Failed to find group for member")
-    }
-
-    /// Find members with character data (LEFT JOIN).
-    pub async fn find_members_with_character_data(
-        &self,
-        group_id: u32,
-    ) -> Result<Vec<GroupMemberWithCharacterDataRow>> {
-        sqlx::query_as::<_, GroupMemberWithCharacterDataRow>(
-            r#"SELECT gm.member_guid, gm.assistant, gm.subgroup,
-                      c.name, c.level, c.class, c.zone, c.online
-               FROM group_member gm
-               LEFT JOIN characters c ON gm.member_guid = c.guid
-               WHERE gm.group_id = ?"#,
-        )
-        .bind(group_id)
-        .fetch_all(&*self.pool)
-        .await
-        .context("Failed to fetch group members with character data")
-    }
-
-    // ========== COMMAND METHODS (Write Operations) ==========
-
-    /// Create or update a group (uses REPLACE INTO).
-    pub async fn save(&self, group: &GroupRow) -> Result<()> {
-        sqlx::query(
-            r#"REPLACE INTO `groups`
-               (group_id, leader_guid, main_tank_guid, main_assistant_guid,
-                loot_method, loot_threshold, looter_guid,
-                icon1, icon2, icon3, icon4, icon5, icon6, icon7, icon8, is_raid)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-        )
-        .bind(group.group_id)
-        .bind(group.leader_guid)
-        .bind(group.main_tank_guid)
-        .bind(group.main_assistant_guid)
-        .bind(group.loot_method)
-        .bind(group.loot_threshold)
-        .bind(group.looter_guid)
-        .bind(group.icon1)
-        .bind(group.icon2)
-        .bind(group.icon3)
-        .bind(group.icon4)
-        .bind(group.icon5)
-        .bind(group.icon6)
-        .bind(group.icon7)
-        .bind(group.icon8)
-        .bind(group.is_raid)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to save group")?;
-
-        Ok(())
-    }
-
-    /// Add a member to a group.
-    pub async fn add_member(&self, group_id: u32, member_guid: u32, subgroup: u16) -> Result<()> {
-        sqlx::query(
-            r#"INSERT INTO group_member (group_id, member_guid, assistant, subgroup)
-               VALUES (?, ?, 0, ?)"#,
-        )
-        .bind(group_id)
-        .bind(member_guid)
-        .bind(subgroup)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to add group member")?;
-
-        Ok(())
-    }
-
-    /// Update member subgroup or assistant status.
-    pub async fn update_member(
-        &self,
-        group_id: u32,
-        member_guid: u32,
-        assistant: bool,
-        subgroup: u16,
-    ) -> Result<()> {
-        sqlx::query(
-            r#"UPDATE group_member
-               SET assistant = ?, subgroup = ?
-               WHERE group_id = ? AND member_guid = ?"#,
-        )
-        .bind(if assistant { 1u8 } else { 0u8 })
-        .bind(subgroup)
-        .bind(group_id)
-        .bind(member_guid)
-        .execute(&*self.pool)
-        .await
-        .context("Failed to update group member")?;
-
-        Ok(())
-    }
-
-    /// Remove a member from a group.
-    pub async fn remove_member(&self, group_id: u32, member_guid: u32) -> Result<()> {
-        sqlx::query("DELETE FROM group_member WHERE group_id = ? AND member_guid = ?")
-            .bind(group_id)
-            .bind(member_guid)
-            .execute(&*self.pool)
-            .await
-            .context("Failed to remove group member")?;
-
-        Ok(())
-    }
-
-    // ========== DELETE OPERATIONS ==========
-
-    /// Delete a group and all its members (transactional).
-    pub async fn delete(&self, group_id: u32) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-
-        // Delete members first
-        sqlx::query("DELETE FROM group_member WHERE group_id = ?")
-            .bind(group_id)
-            .execute(&mut *tx)
-            .await
-            .context("Failed to delete group members")?;
-
-        // Delete group
-        sqlx::query("DELETE FROM `groups` WHERE group_id = ?")
-            .bind(group_id)
-            .execute(&mut *tx)
-            .await
-            .context("Failed to commit group deletion")?;
-
-        tx.commit()
-            .await
-            .context("Failed to commit group deletion")?;
-        Ok(())
+    fn member(row: PgGroupMemberRow) -> Result<GroupMemberRow> {
+        Ok(GroupMemberRow {
+            group_id: row.group_id.try_into()?,
+            member_guid: row.member_guid.try_into()?,
+            assistant: row.assistant.try_into()?,
+            subgroup: row.subgroup.try_into()?,
+        })
     }
 }
 
-/// Trait implementation for GroupRepository.
-/// Delegates all methods to the concrete implementation.
 #[async_trait]
 impl GroupRepositoryTrait for GroupRepository {
     async fn get_max_group_id(&self) -> Result<Option<u32>> {
-        self.get_max_group_id().await
+        self.pg()
+            .get_max_group_id()
+            .await?
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
     }
-
-    async fn find_by_id(&self, group_id: u32) -> Result<Option<GroupRow>> {
-        self.find_by_id(group_id).await
+    async fn find_by_id(&self, id: u32) -> Result<Option<GroupRow>> {
+        self.pg()
+            .find_by_id(id.into())
+            .await?
+            .map(Self::group)
+            .transpose()
     }
-
     async fn find_all(&self) -> Result<Vec<GroupRow>> {
-        self.find_all().await
+        self.pg()
+            .find_all()
+            .await?
+            .into_iter()
+            .map(Self::group)
+            .collect()
     }
-
-    async fn find_members(&self, group_id: u32) -> Result<Vec<GroupMemberRow>> {
-        self.find_members(group_id).await
+    async fn find_members(&self, id: u32) -> Result<Vec<GroupMemberRow>> {
+        self.pg()
+            .find_members(id.into())
+            .await?
+            .into_iter()
+            .map(Self::member)
+            .collect()
     }
-
-    async fn find_group_for_member(&self, member_guid: u32) -> Result<Option<u32>> {
-        self.find_group_for_member(member_guid).await
+    async fn find_group_for_member(&self, guid: u32) -> Result<Option<u32>> {
+        self.pg()
+            .find_group_for_member(guid.into())
+            .await?
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
     }
-
     async fn find_members_with_character_data(
         &self,
-        group_id: u32,
+        id: u32,
     ) -> Result<Vec<GroupMemberWithCharacterDataRow>> {
-        self.find_members_with_character_data(group_id).await
+        self.pg()
+            .find_members_with_character_data(id.into())
+            .await?
+            .into_iter()
+            .map(|row| {
+                Ok(GroupMemberWithCharacterDataRow {
+                    member_guid: row.member_guid.try_into()?,
+                    assistant: row.assistant.try_into()?,
+                    subgroup: row.subgroup.try_into()?,
+                    name: row.name,
+                    level: row.level.map(TryInto::try_into).transpose()?,
+                    class: row.class.map(TryInto::try_into).transpose()?,
+                    zone: row.zone.map(TryInto::try_into).transpose()?,
+                    online: row.online.map(|value| u8::from(value)).into(),
+                })
+            })
+            .collect()
     }
-
-    async fn save_group(&self, group: &GroupRow) -> Result<()> {
-        self.save(group).await
+    async fn save_group(&self, row: &GroupRow) -> Result<()> {
+        self.pg()
+            .save_group(&PgGroupRow {
+                group_id: row.group_id.into(),
+                leader_guid: row.leader_guid.into(),
+                main_tank_guid: row.main_tank_guid.into(),
+                main_assistant_guid: row.main_assistant_guid.into(),
+                loot_method: row.loot_method.into(),
+                loot_threshold: row.loot_threshold.into(),
+                looter_guid: row.looter_guid.into(),
+                icon1: row.icon1.into(),
+                icon2: row.icon2.into(),
+                icon3: row.icon3.into(),
+                icon4: row.icon4.into(),
+                icon5: row.icon5.into(),
+                icon6: row.icon6.into(),
+                icon7: row.icon7.into(),
+                icon8: row.icon8.into(),
+                is_raid: row.is_raid.into(),
+            })
+            .await
     }
-
     async fn add_member(&self, group_id: u32, member_guid: u32, subgroup: u16) -> Result<()> {
-        self.add_member(group_id, member_guid, subgroup).await
+        self.pg()
+            .add_member(group_id.into(), member_guid.into(), subgroup.try_into()?)
+            .await
     }
-
     async fn update_member(
         &self,
         group_id: u32,
@@ -262,15 +147,21 @@ impl GroupRepositoryTrait for GroupRepository {
         assistant: bool,
         subgroup: u16,
     ) -> Result<()> {
-        self.update_member(group_id, member_guid, assistant, subgroup)
+        self.pg()
+            .update_member(
+                group_id.into(),
+                member_guid.into(),
+                i16::from(assistant),
+                subgroup.try_into()?,
+            )
             .await
     }
-
     async fn remove_member(&self, group_id: u32, member_guid: u32) -> Result<()> {
-        self.remove_member(group_id, member_guid).await
+        self.pg()
+            .remove_member(group_id.into(), member_guid.into())
+            .await
     }
-
     async fn delete_group(&self, group_id: u32) -> Result<()> {
-        self.delete(group_id).await
+        self.pg().delete_group(group_id.into()).await
     }
 }

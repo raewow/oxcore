@@ -2,17 +2,18 @@
 //! (`pool_template`, `pool_creature`, `pool_gameobject`, `pool_pool`).
 
 use super::pool_types::PoolTemplate;
-use sqlx::MySqlPool;
+use anyhow::Context;
+use sqlx::PgPool;
 
 /// Repository for loading pool data from database
 pub struct PoolRepository {
-    pool: MySqlPool,
+    pool: PgPool,
     /// Content patch used to filter `patch_min`/`patch_max` rows.
     patch: u8,
 }
 
 impl PoolRepository {
-    pub fn new(pool: MySqlPool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool, patch: 10 }
     }
 
@@ -47,68 +48,54 @@ impl PoolRepository {
 
     /// Load pool templates
     async fn load_templates(&self) -> anyhow::Result<Vec<PoolTemplate>> {
-        let rows = sqlx::query_as::<_, PoolTemplateRow>(
-            "SELECT `entry`, `max_limit`, `flags`, `description` FROM `pool_template` \
-             WHERE ? BETWEEN `patch_min` AND `patch_max`",
+        let rows = sqlx::query_as::<sqlx::Postgres, PoolTemplateRow>(
+            "SELECT entry, max_limit, flags, description FROM world.pool_template \
+             WHERE $1 BETWEEN patch_min AND patch_max",
         )
-        .bind(self.patch)
+        .bind(i16::from(self.patch))
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| PoolTemplate {
-                pool_id: row.entry,
-                max_limit: row.max_limit,
-                flags: row.flags,
-                description: row.description,
-            })
-            .collect())
+        rows.into_iter()
+            .map(PoolTemplateRow::into_template)
+            .collect()
     }
 
     /// Load creature members for all pools
     async fn load_creature_members(&self) -> anyhow::Result<Vec<PoolObjectMember>> {
-        let rows = sqlx::query_as::<_, PoolObjectRow>(
-            "SELECT `pool_entry`, `guid`, `chance`, `description` FROM `pool_creature` \
-             WHERE ? BETWEEN `patch_min` AND `patch_max`",
+        let rows = sqlx::query_as::<sqlx::Postgres, PoolObjectRow>(
+            "SELECT pool_entry, guid, chance, description FROM world.pool_creature \
+             WHERE $1 BETWEEN patch_min AND patch_max",
         )
-        .bind(self.patch)
+        .bind(i16::from(self.patch))
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.into_iter().map(PoolObjectRow::into_member).collect())
+        rows.into_iter().map(PoolObjectRow::into_member).collect()
     }
 
     /// Load gameobject members for all pools
     async fn load_gameobject_members(&self) -> anyhow::Result<Vec<PoolObjectMember>> {
-        let rows = sqlx::query_as::<_, PoolObjectRow>(
-            "SELECT `pool_entry`, `guid`, `chance`, `description` FROM `pool_gameobject` \
-             WHERE ? BETWEEN `patch_min` AND `patch_max`",
+        let rows = sqlx::query_as::<sqlx::Postgres, PoolObjectRow>(
+            "SELECT pool_entry, guid, chance, description FROM world.pool_gameobject \
+             WHERE $1 BETWEEN patch_min AND patch_max",
         )
-        .bind(self.patch)
+        .bind(i16::from(self.patch))
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.into_iter().map(PoolObjectRow::into_member).collect())
+        rows.into_iter().map(PoolObjectRow::into_member).collect()
     }
 
     /// Load nested pool members
     async fn load_pool_members(&self) -> anyhow::Result<Vec<PoolPoolMember>> {
-        let rows = sqlx::query_as::<_, PoolPoolRow>(
-            "SELECT `pool_id`, `mother_pool`, `chance`, `description` FROM `pool_pool`",
+        let rows = sqlx::query_as::<sqlx::Postgres, PoolPoolRow>(
+            "SELECT pool_id, mother_pool, chance, description FROM world.pool_pool",
         )
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| PoolPoolMember {
-                child_pool_id: row.pool_id,
-                parent_pool_id: row.mother_pool,
-                chance: row.chance,
-                description: row.description,
-            })
-            .collect())
+        rows.into_iter().map(PoolPoolRow::into_member).collect()
     }
 }
 
@@ -138,35 +125,62 @@ pub struct PoolPoolMember {
 
 #[derive(sqlx::FromRow)]
 struct PoolTemplateRow {
-    entry: u32,
-    max_limit: u32,
-    flags: u32,
+    entry: i64,
+    max_limit: i64,
+    flags: i64,
     description: String,
+}
+
+impl PoolTemplateRow {
+    fn into_template(self) -> anyhow::Result<PoolTemplate> {
+        Ok(PoolTemplate {
+            pool_id: u32::try_from(self.entry)
+                .context("pool_template.entry is outside u32 range")?,
+            max_limit: u32::try_from(self.max_limit)
+                .context("pool_template.max_limit is outside u32 range")?,
+            flags: u32::try_from(self.flags).context("pool_template.flags is outside u32 range")?,
+            description: self.description,
+        })
+    }
 }
 
 #[derive(sqlx::FromRow)]
 struct PoolObjectRow {
-    pool_entry: u32,
-    guid: u32,
+    pool_entry: i64,
+    guid: i64,
     chance: f32,
     description: String,
 }
 
 impl PoolObjectRow {
-    fn into_member(self) -> PoolObjectMember {
-        PoolObjectMember {
-            pool_id: self.pool_entry,
-            spawn_id: self.guid,
+    fn into_member(self) -> anyhow::Result<PoolObjectMember> {
+        Ok(PoolObjectMember {
+            pool_id: u32::try_from(self.pool_entry)
+                .context("pool member pool_entry is outside u32 range")?,
+            spawn_id: u32::try_from(self.guid).context("pool member guid is outside u32 range")?,
             chance: self.chance,
             description: self.description,
-        }
+        })
     }
 }
 
 #[derive(sqlx::FromRow)]
 struct PoolPoolRow {
-    pool_id: u32,
-    mother_pool: u32,
+    pool_id: i64,
+    mother_pool: i64,
     chance: f32,
     description: String,
+}
+
+impl PoolPoolRow {
+    fn into_member(self) -> anyhow::Result<PoolPoolMember> {
+        Ok(PoolPoolMember {
+            child_pool_id: u32::try_from(self.pool_id)
+                .context("pool_pool.pool_id is outside u32 range")?,
+            parent_pool_id: u32::try_from(self.mother_pool)
+                .context("pool_pool.mother_pool is outside u32 range")?,
+            chance: self.chance,
+            description: self.description,
+        })
+    }
 }

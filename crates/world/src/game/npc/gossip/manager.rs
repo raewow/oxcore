@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use dashmap::DashMap;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::info;
 
@@ -15,7 +15,7 @@ use oxcore_db::database::world::repositories::GossipRepository;
 /// Manages gossip menu data (state storage + database loading)
 pub struct GossipManager {
     /// Database pool for loading
-    world_db: Arc<MySqlPool>,
+    world_db: Arc<PgPool>,
     /// Menus by entry ID (can have multiple menus with same entry for conditions)
     menus: DashMap<u32, Vec<Arc<GossipMenu>>>,
     /// Menu items by menu entry ID
@@ -32,7 +32,7 @@ pub struct GossipManager {
 
 impl GossipManager {
     /// Create a new gossip manager with database pool
-    pub fn new(world_db: Arc<MySqlPool>) -> Self {
+    pub fn new(world_db: Arc<PgPool>) -> Self {
         Self {
             world_db,
             menus: DashMap::new(),
@@ -52,68 +52,68 @@ impl GossipManager {
         // Load menus
         for row in &data.menus {
             self.add_menu(GossipMenu {
-                entry: row.entry,
-                text_id: row.text_id,
+                entry: row.entry.try_into()?,
+                text_id: row.text_id.try_into()?,
                 script_id: 0,
-                condition_id: row.condition_id,
+                condition_id: row.condition_id.try_into()?,
             });
         }
 
         // Load menu items
         for row in &data.options {
             self.add_menu_item(GossipMenuItem {
-                menu_id: row.menu_id,
-                id: row.id,
-                option_icon: row.option_icon,
+                menu_id: row.menu_id.try_into()?,
+                id: row.id.try_into()?,
+                option_icon: row.option_icon.try_into()?,
                 option_text: row.option_text.clone().unwrap_or_default(),
-                option_broadcast_text: row.option_broadcast_text,
-                option_id: row.option_id,
-                npc_option_npcflag: row.npc_option_npcflag,
+                option_broadcast_text: row.option_broadcast_text.try_into()?,
+                option_id: row.option_id.try_into()?,
+                npc_option_npcflag: row.npc_option_npcflag.try_into()?,
                 action_menu_id: row.action_menu_id,
-                action_poi_id: row.action_poi_id,
-                action_script_id: row.action_script_id,
+                action_poi_id: row.action_poi_id.try_into()?,
+                action_script_id: row.action_script_id.try_into()?,
                 box_coded: row.box_coded,
-                box_money: row.box_money,
+                box_money: row.box_money.try_into()?,
                 box_text: row.box_text.clone().unwrap_or_default(),
-                box_broadcast_text: row.box_broadcast_text,
-                condition_id: row.condition_id,
+                box_broadcast_text: row.box_broadcast_text.try_into()?,
+                condition_id: row.condition_id.try_into()?,
             });
         }
 
         // Load NPC texts
         for row in &data.npc_texts {
-            let mut text = NpcText::new(row.id);
+            let mut text = NpcText::new(row.id.try_into()?);
             text.options[0] = NpcTextOption {
                 probability: row.probability0,
-                broadcast_text_id: row.broadcast_text_id0,
+                broadcast_text_id: row.broadcast_text_id0.try_into()?,
             };
             text.options[1] = NpcTextOption {
                 probability: row.probability1,
-                broadcast_text_id: row.broadcast_text_id1,
+                broadcast_text_id: row.broadcast_text_id1.try_into()?,
             };
             text.options[2] = NpcTextOption {
                 probability: row.probability2,
-                broadcast_text_id: row.broadcast_text_id2,
+                broadcast_text_id: row.broadcast_text_id2.try_into()?,
             };
             text.options[3] = NpcTextOption {
                 probability: row.probability3,
-                broadcast_text_id: row.broadcast_text_id3,
+                broadcast_text_id: row.broadcast_text_id3.try_into()?,
             };
             text.options[4] = NpcTextOption {
                 probability: row.probability4,
-                broadcast_text_id: row.broadcast_text_id4,
+                broadcast_text_id: row.broadcast_text_id4.try_into()?,
             };
             text.options[5] = NpcTextOption {
                 probability: row.probability5,
-                broadcast_text_id: row.broadcast_text_id5,
+                broadcast_text_id: row.broadcast_text_id5.try_into()?,
             };
             text.options[6] = NpcTextOption {
                 probability: row.probability6,
-                broadcast_text_id: row.broadcast_text_id6,
+                broadcast_text_id: row.broadcast_text_id6.try_into()?,
             };
             text.options[7] = NpcTextOption {
                 probability: row.probability7,
-                broadcast_text_id: row.broadcast_text_id7,
+                broadcast_text_id: row.broadcast_text_id7.try_into()?,
             };
             self.add_npc_text(text);
         }
@@ -121,28 +121,32 @@ impl GossipManager {
         // Load broadcast texts
         for row in &data.broadcast_texts {
             self.add_broadcast_text(BroadcastText {
-                entry: row.entry,
+                entry: row.entry.try_into()?,
                 male_text: row.male_text.clone().unwrap_or_default(),
                 female_text: row.female_text.clone().unwrap_or_default(),
-                chat_type: row.chat_type,
-                language_id: row.language_id as u32,
-                sound_id: row.sound_id as u32,
+                chat_type: row.chat_type.try_into()?,
+                language_id: row.language_id.try_into()?,
+                sound_id: row.sound_id.try_into()?,
                 emote_ids: [
-                    row.emote_id1 as u32,
-                    row.emote_id2 as u32,
-                    row.emote_id3 as u32,
+                    row.emote_id1.try_into()?,
+                    row.emote_id2.try_into()?,
+                    row.emote_id3.try_into()?,
                 ],
-                emote_delays: [row.emote_delay1, row.emote_delay2, row.emote_delay3],
+                emote_delays: [
+                    row.emote_delay1.try_into()?,
+                    row.emote_delay2.try_into()?,
+                    row.emote_delay3.try_into()?,
+                ],
             });
         }
 
         // Load creature default menus
         for row in &data.creature_menus {
-            self.set_creature_menu(row.entry, row.gossip_menu_id);
+            self.set_creature_menu(row.entry.try_into()?, row.gossip_menu_id.try_into()?);
         }
 
         for row in &data.npc_gossip {
-            self.set_npc_gossip_text(row.npc_guid, row.textid);
+            self.set_npc_gossip_text(row.npc_guid.try_into()?, row.textid.try_into()?);
         }
 
         info!(

@@ -6,9 +6,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 use crate::game::chat::commands::context::{ChatCommandContext, ChatCommandInfo};
-use oxcore_db::database::characters::models::mail::MailRow;
-use oxcore_db::database::characters::repositories::mail_repository::MailRepository;
-use oxcore_db::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
+use oxcore_db::database::characters::{PgMailRepository, PgMailRow};
 use oxcore_shared::common::AccountType;
 use oxcore_shared::game::mail::{MailMessageType, MailStationery};
 use oxcore_shared::messages::mail::SmsgReceivedMail;
@@ -63,7 +61,7 @@ pub async fn cmd_sendmail(ctx: &ChatCommandContext<'_>, args: &str) -> Result<St
             subject
         );
 
-        let mail_repo = MailRepository::new(character_pool);
+        let mail_repo = PgMailRepository::new(character_pool);
 
         // Find recipient by name
         let receiver_guid = match mail_repo.find_player_guid_by_name(&player_name).await {
@@ -114,12 +112,12 @@ pub async fn cmd_sendmail(ctx: &ChatCommandContext<'_>, args: &str) -> Result<St
         let expire_time = now + (EXPIRE_DAYS * 24 * 60 * 60);
 
         // Create mail row
-        let mail_row = MailRow {
+        let mail_row = PgMailRow {
             id: 0,
-            message_type: MailMessageType::Normal as u8,
-            stationery: MailStationery::Gm as i8,
+            message_type: i16::from(MailMessageType::Normal as u8),
+            stationery: i16::from(MailStationery::Gm as i8),
             mail_template_id: 0,
-            sender_guid,
+            sender_guid: i64::from(sender_guid),
             receiver_guid,
             subject: Some(subject.clone()),
             item_text_id,

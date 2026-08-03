@@ -30,7 +30,6 @@ use oxcore_shared::protocol::update_fields::{
 use oxcore_shared::protocol::ObjectGuid;
 use oxcore_shared::protocol::Position;
 use oxcore_shared::protocol::{Opcode, WorldPacket};
-use sqlx::MySqlPool;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tracing::{debug, info, warn};
@@ -114,7 +113,7 @@ impl DeathSystem {
     /// Load graveyard data from database and DBC. Called after DBC is loaded.
     pub async fn load_graveyards(
         &self,
-        world_pool: Arc<MySqlPool>,
+        world_pool: Arc<sqlx::PgPool>,
         dbc_mgr: &DbcManager,
     ) -> Result<()> {
         // Load into a fresh manager first so we don't hold the (non-Send) write guard

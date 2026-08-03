@@ -1480,7 +1480,7 @@ mod tests {
     use oxcore_db::database::characters::repositories::mail_repository::MailRepository;
     use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
     use parking_lot::RwLock;
-    use sqlx::mysql::MySqlPoolOptions;
+    use sqlx::postgres::PgPoolOptions;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -1562,8 +1562,8 @@ mod tests {
 
     fn make_creature_mgr(entry: u32, npc_flags: u32, faction: u32) -> Arc<CreatureManager> {
         let pool = Arc::new(
-            MySqlPoolOptions::new()
-                .connect_lazy("mysql://test:test@localhost/test")
+            PgPoolOptions::new()
+                .connect_lazy("postgres://test:test@localhost/test")
                 .expect("lazy pool"),
         );
         let creature_mgr = Arc::new(CreatureManager::new(pool));
@@ -1587,8 +1587,8 @@ mod tests {
 
     fn make_auction_mgr() -> Arc<AuctionHouseManager> {
         let pool = Arc::new(
-            MySqlPoolOptions::new()
-                .connect_lazy("mysql://test:test@localhost/test")
+            PgPoolOptions::new()
+                .connect_lazy("postgres://test:test@localhost/test")
                 .expect("lazy pool"),
         );
         let character_repo = Arc::new(CharacterRepository::new(Arc::clone(&pool)));
@@ -1679,8 +1679,8 @@ mod tests {
         let (session, mut rx) = make_session();
         let player_mgr = make_player_mgr(false, 0);
         let creature_mgr = Arc::new(CreatureManager::new(Arc::new(
-            MySqlPoolOptions::new()
-                .connect_lazy("mysql://test:test@localhost/test")
+            PgPoolOptions::new()
+                .connect_lazy("postgres://test:test@localhost/test")
                 .expect("lazy pool"),
         )));
         let auction_mgr = make_auction_mgr();
@@ -1726,8 +1726,8 @@ mod tests {
         // Use an auction manager with only house 1, so faction 99_999 -> house 7 is missing
         let auction_mgr = {
             let pool = Arc::new(
-                MySqlPoolOptions::new()
-                    .connect_lazy("mysql://test:test@localhost/test")
+                PgPoolOptions::new()
+                    .connect_lazy("postgres://test:test@localhost/test")
                     .expect("lazy pool"),
             );
             let character_repo = Arc::new(CharacterRepository::new(Arc::clone(&pool)));
@@ -2043,8 +2043,8 @@ mod tests {
 
     fn make_world_fixture() -> World {
         let pool = Arc::new(
-            MySqlPoolOptions::new()
-                .connect_lazy("mysql://test:test@localhost/test")
+            PgPoolOptions::new()
+                .connect_lazy("postgres://test:test@localhost/test")
                 .expect("lazy pool"),
         );
         let databases = Arc::new(oxcore_db::database::Databases {

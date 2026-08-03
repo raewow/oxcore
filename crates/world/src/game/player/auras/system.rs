@@ -4483,8 +4483,8 @@ mod tests {
         let broadcast_mgr = Arc::new(BroadcastManager::new(session_mgr, player_mgr));
 
         // connect_lazy builds a pool object without actually connecting — safe for unit tests
-        let pool = sqlx::mysql::MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy pool");
         let creature_mgr = Arc::new(CreatureManager::new(Arc::new(pool)));
 

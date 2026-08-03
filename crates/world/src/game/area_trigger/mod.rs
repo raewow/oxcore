@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use dashmap::DashMap;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, warn};
@@ -41,7 +41,7 @@ pub struct AreaTriggerTeleport {
 
 /// Manages area trigger data loaded from the database at startup.
 pub struct AreaTriggerManager {
-    world_db: Arc<MySqlPool>,
+    world_db: Arc<PgPool>,
     /// Trigger ID -> AreaTriggerEntry (from areatrigger_template)
     templates: DashMap<u32, AreaTriggerEntry>,
     /// Trigger ID -> teleport destination (from areatrigger_teleport)
@@ -53,7 +53,7 @@ pub struct AreaTriggerManager {
 }
 
 impl AreaTriggerManager {
-    pub fn new(world_db: Arc<MySqlPool>) -> Self {
+    pub fn new(world_db: Arc<PgPool>) -> Self {
         Self {
             world_db,
             templates: DashMap::new(),
@@ -73,13 +73,11 @@ impl AreaTriggerManager {
     }
 
     async fn load_templates(&self) -> Result<()> {
-        use sqlx::Row;
-
         let query_str = r#"SELECT id, name, map_id, x, y, z, radius,
                            box_x, box_y, box_z, box_orientation
-                           FROM areatrigger_template"#;
+                            FROM world.areatrigger_template"#;
 
-        let rows = match sqlx::query(query_str)
+        let rows = match sqlx::query_as::<_, AreaTriggerTemplateRow>(query_str)
             .fetch_all(self.world_db.as_ref())
             .await
         {
@@ -97,31 +95,8 @@ impl AreaTriggerManager {
         let mut count = 0u32;
 
         for row in rows {
-            let trigger_id: u32 = row.get(0);
-            let name: String = row.get(1);
-            let map_id: u32 = row.get(2);
-            let x: f32 = row.get(3);
-            let y: f32 = row.get(4);
-            let z: f32 = row.get(5);
-            let radius: f32 = row.get(6);
-            let box_x: f32 = row.get(7);
-            let box_y: f32 = row.get(8);
-            let box_z: f32 = row.get(9);
-            let box_orientation: f32 = row.get(10);
-
-            let entry = AreaTriggerEntry {
-                id: trigger_id,
-                map_id,
-                name,
-                x,
-                y,
-                z,
-                radius,
-                box_x,
-                box_y,
-                box_z,
-                box_orientation,
-            };
+            let entry = row.into_entry()?;
+            let trigger_id = entry.id;
 
             self.templates.insert(trigger_id, entry);
             count += 1;
@@ -132,14 +107,12 @@ impl AreaTriggerManager {
     }
 
     async fn load_teleports(&self) -> Result<()> {
-        use sqlx::Row;
-
         let query_str = r#"SELECT id, required_level, required_condition, message,
                            target_map, target_position_x, target_position_y,
                            target_position_z, target_orientation
-                           FROM areatrigger_teleport"#;
+                            FROM world.areatrigger_teleport"#;
 
-        let rows = match sqlx::query(query_str)
+        let rows = match sqlx::query_as::<_, AreaTriggerTeleportRow>(query_str)
             .fetch_all(self.world_db.as_ref())
             .await
         {
@@ -157,15 +130,10 @@ impl AreaTriggerManager {
         let mut count = 0u32;
 
         for row in rows {
-            let trigger_id: u32 = row.get(0);
-            let required_level: u8 = row.get(1);
-            let required_condition: u32 = row.get(2);
-            let message: String = row.get(3);
-            let target_map: u32 = row.get(4);
-            let target_x: f32 = row.get(5);
-            let target_y: f32 = row.get(6);
-            let target_z: f32 = row.get(7);
-            let target_orientation: f32 = row.get(8);
+            let (trigger_id, teleport) = row.into_teleport()?;
+            let target_x = teleport.destination.x;
+            let target_y = teleport.destination.y;
+            let target_z = teleport.destination.z;
 
             if target_x == 0.0 && target_y == 0.0 && target_z == 0.0 {
                 warn!(
@@ -174,14 +142,6 @@ impl AreaTriggerManager {
                 );
                 continue;
             }
-
-            let teleport = AreaTriggerTeleport {
-                message,
-                required_level,
-                required_condition,
-                destination_map: target_map,
-                destination: Position::new(target_x, target_y, target_z, target_orientation),
-            };
 
             self.teleports.insert(trigger_id, teleport);
             count += 1;
@@ -192,12 +152,10 @@ impl AreaTriggerManager {
     }
 
     async fn load_taverns(&self) -> Result<()> {
-        use sqlx::Row;
+        let current_patch: i16 = 10; // WOW_PATCH_112
+        let query_str = r#"SELECT id FROM world.areatrigger_tavern WHERE patch_min <= $1"#;
 
-        let current_patch: u8 = 10; // WOW_PATCH_112
-        let query_str = r#"SELECT id FROM areatrigger_tavern WHERE patch_min <= ?"#;
-
-        let rows = match sqlx::query(query_str)
+        let rows = match sqlx::query_scalar::<sqlx::Postgres, i64>(query_str)
             .bind(current_patch)
             .fetch_all(self.world_db.as_ref())
             .await
@@ -217,7 +175,7 @@ impl AreaTriggerManager {
         let mut count = 0u32;
 
         for row in rows {
-            let trigger_id: u32 = row.get(0);
+            let trigger_id = checked_u32(row, "areatrigger_tavern.id")?;
             taverns.insert(trigger_id);
             count += 1;
         }
@@ -227,11 +185,9 @@ impl AreaTriggerManager {
     }
 
     async fn load_quest_triggers(&self) -> Result<()> {
-        use sqlx::Row;
+        let query_str = r#"SELECT id, quest FROM world.areatrigger_involvedrelation"#;
 
-        let query_str = r#"SELECT id, quest FROM areatrigger_involvedrelation"#;
-
-        let rows = match sqlx::query(query_str)
+        let rows = match sqlx::query_as::<_, AreaTriggerQuestRow>(query_str)
             .fetch_all(self.world_db.as_ref())
             .await
         {
@@ -246,8 +202,8 @@ impl AreaTriggerManager {
         let mut count = 0u32;
 
         for row in rows {
-            let trigger_id: u32 = row.get(0);
-            let quest_id: u32 = row.get(1);
+            let trigger_id = checked_u32(row.id, "areatrigger_involvedrelation.id")?;
+            let quest_id = checked_u32(row.quest, "areatrigger_involvedrelation.quest")?;
             self.quest_triggers.insert(trigger_id, quest_id);
             count += 1;
         }
@@ -287,6 +243,87 @@ impl AreaTriggerManager {
         }
         None
     }
+}
+
+#[derive(sqlx::FromRow)]
+struct AreaTriggerTemplateRow {
+    id: i64,
+    name: String,
+    map_id: i64,
+    x: f32,
+    y: f32,
+    z: f32,
+    radius: f32,
+    box_x: f32,
+    box_y: f32,
+    box_z: f32,
+    box_orientation: f32,
+}
+
+impl AreaTriggerTemplateRow {
+    fn into_entry(self) -> Result<AreaTriggerEntry> {
+        Ok(AreaTriggerEntry {
+            id: checked_u32(self.id, "areatrigger_template.id")?,
+            map_id: checked_u32(self.map_id, "areatrigger_template.map_id")?,
+            name: self.name,
+            x: self.x,
+            y: self.y,
+            z: self.z,
+            radius: self.radius,
+            box_x: self.box_x,
+            box_y: self.box_y,
+            box_z: self.box_z,
+            box_orientation: self.box_orientation,
+        })
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct AreaTriggerTeleportRow {
+    id: i64,
+    required_level: i64,
+    required_condition: i64,
+    message: String,
+    target_map: i64,
+    target_position_x: f32,
+    target_position_y: f32,
+    target_position_z: f32,
+    target_orientation: f32,
+}
+
+impl AreaTriggerTeleportRow {
+    fn into_teleport(self) -> Result<(u32, AreaTriggerTeleport)> {
+        Ok((
+            checked_u32(self.id, "areatrigger_teleport.id")?,
+            AreaTriggerTeleport {
+                message: self.message,
+                required_level: u8::try_from(self.required_level).map_err(|_| {
+                    anyhow::anyhow!("areatrigger_teleport.required_level must fit u8")
+                })?,
+                required_condition: checked_u32(
+                    self.required_condition,
+                    "areatrigger_teleport.required_condition",
+                )?,
+                destination_map: checked_u32(self.target_map, "areatrigger_teleport.target_map")?,
+                destination: Position::new(
+                    self.target_position_x,
+                    self.target_position_y,
+                    self.target_position_z,
+                    self.target_orientation,
+                ),
+            },
+        ))
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct AreaTriggerQuestRow {
+    id: i64,
+    quest: i64,
+}
+
+fn checked_u32(value: i64, field: &str) -> Result<u32> {
+    u32::try_from(value).map_err(|_| anyhow::anyhow!("{field} must fit u32"))
 }
 
 /// Check if a point is within an area trigger zone.

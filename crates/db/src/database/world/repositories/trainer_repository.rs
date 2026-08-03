@@ -3,7 +3,7 @@
 //! Handles loading of trainer spells from npc_trainer and npc_trainer_template tables.
 
 use anyhow::{Context, Result};
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::Arc;
 
 /// Row from npc_trainer table (direct per-creature spells)
@@ -27,19 +27,20 @@ pub struct TrainerTemplateSpellRow {
 }
 
 pub struct TrainerRepository {
-    pool: Arc<MySqlPool>,
+    pool: Arc<PgPool>,
 }
 
 impl TrainerRepository {
-    pub fn new(pool: Arc<MySqlPool>) -> Self {
+    pub fn new(pool: Arc<PgPool>) -> Self {
         Self { pool }
     }
 
     /// Load all spells from npc_trainer (direct per-creature)
     pub async fn load_trainer_spells(&self) -> Result<Vec<TrainerSpellRow>> {
         let rows = sqlx::query(
-            r#"SELECT entry, spell, spellcost, reqskill, reqskillvalue, reqlevel
-               FROM npc_trainer
+            r#"SELECT entry, spell::BIGINT AS spell, spellcost,
+               reqskill::SMALLINT AS reqskill, reqskillvalue::SMALLINT AS reqskillvalue, reqlevel
+               FROM world.npc_trainer
                WHERE build_min <= 5875 AND build_max >= 5875
                ORDER BY entry, spell"#,
         )
@@ -51,12 +52,12 @@ impl TrainerRepository {
         for row in rows {
             use sqlx::Row;
             result.push(TrainerSpellRow {
-                entry: row.get("entry"),
-                spell: row.get::<u16, _>("spell") as u32,
-                spellcost: row.get("spellcost"),
-                reqskill: row.get("reqskill"),
-                reqskillvalue: row.get("reqskillvalue"),
-                reqlevel: row.get("reqlevel"),
+                entry: row.get::<i64, _>("entry").try_into()?,
+                spell: row.get::<i64, _>("spell").try_into()?,
+                spellcost: row.get::<i64, _>("spellcost").try_into()?,
+                reqskill: row.get::<i16, _>("reqskill").try_into()?,
+                reqskillvalue: row.get::<i16, _>("reqskillvalue").try_into()?,
+                reqlevel: row.get::<i16, _>("reqlevel").try_into()?,
             });
         }
         Ok(result)
@@ -65,8 +66,9 @@ impl TrainerRepository {
     /// Load all spells from npc_trainer_template (shared lists)
     pub async fn load_trainer_template_spells(&self) -> Result<Vec<TrainerTemplateSpellRow>> {
         let rows = sqlx::query(
-            r#"SELECT entry, spell, spellcost, reqskill, reqskillvalue, reqlevel
-               FROM npc_trainer_template
+            r#"SELECT entry, spell::BIGINT AS spell, spellcost,
+               reqskill::SMALLINT AS reqskill, reqskillvalue::SMALLINT AS reqskillvalue, reqlevel
+               FROM world.npc_trainer_template
                WHERE build_min <= 5875 AND build_max >= 5875
                ORDER BY entry, spell"#,
         )
@@ -78,12 +80,12 @@ impl TrainerRepository {
         for row in rows {
             use sqlx::Row;
             result.push(TrainerTemplateSpellRow {
-                entry: row.get("entry"),
-                spell: row.get::<u16, _>("spell") as u32,
-                spellcost: row.get("spellcost"),
-                reqskill: row.get("reqskill"),
-                reqskillvalue: row.get("reqskillvalue"),
-                reqlevel: row.get("reqlevel"),
+                entry: row.get::<i64, _>("entry").try_into()?,
+                spell: row.get::<i64, _>("spell").try_into()?,
+                spellcost: row.get::<i64, _>("spellcost").try_into()?,
+                reqskill: row.get::<i16, _>("reqskill").try_into()?,
+                reqskillvalue: row.get::<i16, _>("reqskillvalue").try_into()?,
+                reqlevel: row.get::<i16, _>("reqlevel").try_into()?,
             });
         }
         Ok(result)

@@ -4505,9 +4505,9 @@ mod tests {
         assert_eq!(charge_attack_timer_delay(-5.0), 200); // clamped at 0 distance
     }
 
-    fn lazy_pool() -> sqlx::MySqlPool {
-        sqlx::mysql::MySqlPoolOptions::new()
-            .connect_lazy("mysql://test:test@localhost/test")
+    fn lazy_pool() -> sqlx::PgPool {
+        sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
             .expect("lazy pool should be constructible")
     }
 

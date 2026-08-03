@@ -22,8 +22,12 @@ use crate::game::common::update_fields::{
 use crate::game::player::reputation::FactionEntry;
 use crate::game::player::{Player, PlayerBroadcaster};
 use crate::World;
-use oxcore_db::database::characters::CharacterDeleteMode;
-use oxcore_db::database::{CharacterRepository, Databases, ReputationRepository};
+use oxcore_db::database::characters::models::{QuestStatusRewardedRow, QuestStatusRow};
+use oxcore_db::database::characters::{
+    PgCharacterCreate, PgCharacterRepository, PgQuestRepository, PgQuestStatusRow,
+    PgReputationRepository,
+};
+use oxcore_db::database::Databases;
 use oxcore_shared::messages::character::{
     SmsgLogoutCancelAck, SmsgLogoutComplete, SmsgLogoutResponse,
 };
@@ -43,6 +47,26 @@ use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::bitbuf::BitReader;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, Protocol, WorldPacket};
 
+fn pg_quest_status(row: PgQuestStatusRow) -> Result<QuestStatusRow> {
+    Ok(QuestStatusRow {
+        guid: u32::try_from(row.guid)?,
+        quest: u32::try_from(row.quest)?,
+        status: u8::try_from(row.status)?,
+        rewarded: row.rewarded,
+        explored: row.explored,
+        timer: u32::try_from(row.timer)?,
+        mob_count1: u32::try_from(row.mob_count1)?,
+        mob_count2: u32::try_from(row.mob_count2)?,
+        mob_count3: u32::try_from(row.mob_count3)?,
+        mob_count4: u32::try_from(row.mob_count4)?,
+        item_count1: u32::try_from(row.item_count1)?,
+        item_count2: u32::try_from(row.item_count2)?,
+        item_count3: u32::try_from(row.item_count3)?,
+        item_count4: u32::try_from(row.item_count4)?,
+        reward_choice: u32::try_from(row.reward_choice)?,
+    })
+}
+
 /// Handle CMSG_CHAR_ENUM - list characters for this account
 pub async fn handle_char_enum(
     session: &WorldSession,
@@ -51,17 +75,15 @@ pub async fn handle_char_enum(
 ) -> Result<()> {
     let account_id = session.account_id();
 
-    // Use CharacterRepository to fetch characters
-    let char_repo = CharacterRepository::new(Arc::new(databases.character.clone()));
-    let characters = char_repo.find_by_account(account_id).await?;
+    let char_repo = PgCharacterRepository::new(Arc::new(databases.character.clone()));
+    let characters = char_repo.find_by_account(i64::from(account_id)).await?;
 
     // Query equipped items for all characters at once
     // Load equipped items for all characters in a single batch query
-    let character_guids: Vec<u32> = characters.iter().map(|c| c.guid).collect();
+    let character_guids: Vec<i64> = characters.iter().map(|c| c.guid).collect();
     let equipped_items = char_repo
         .find_equipped_items_batch(&character_guids)
-        .await
-        .unwrap_or_default();
+        .await?;
 
     // Convert to CharacterEnumEntry
     let char_entries: Vec<CharacterEnumEntry> = characters
@@ -74,13 +96,13 @@ pub async fn handle_char_enum(
             const PLAYER_FLAGS_HIDE_CLOAK: u32 = 0x00000800;
 
             let mut char_flags: u32 = 0;
-            if row.character_flags & PLAYER_FLAGS_GHOST != 0 {
+            if row.character_flags & i64::from(PLAYER_FLAGS_GHOST) != 0 {
                 char_flags |= CHARACTER_FLAG_GHOST;
             }
-            if row.character_flags & PLAYER_FLAGS_HIDE_HELM != 0 {
+            if row.character_flags & i64::from(PLAYER_FLAGS_HIDE_HELM) != 0 {
                 char_flags |= PLAYER_FLAGS_HIDE_HELM;
             }
-            if row.character_flags & PLAYER_FLAGS_HIDE_CLOAK != 0 {
+            if row.character_flags & i64::from(PLAYER_FLAGS_HIDE_CLOAK) != 0 {
                 char_flags |= PLAYER_FLAGS_HIDE_CLOAK;
             }
 
@@ -89,11 +111,13 @@ pub async fn handle_char_enum(
                 display_id: 0,
                 inventory_type: 0,
             }; 19];
-            if let Some(equipped) = equipped_items.get(&row.guid) {
-                for (slot, item_id) in equipped {
-                    if *slot < 19 && *item_id != 0 {
-                        if let Some(template) = world.managers.item_mgr.get_template(*item_id) {
-                            equipment[*slot as usize] = EquipmentSlot {
+            for equipped in equipped_items.iter().filter(|item| item.guid == row.guid) {
+                let slot = u8::try_from(equipped.slot).ok();
+                let item_id = u32::try_from(equipped.item_id).ok();
+                if let (Some(slot), Some(item_id)) = (slot, item_id) {
+                    if slot < 19 && item_id != 0 {
+                        if let Some(template) = world.managers.item_mgr.get_template(item_id) {
+                            equipment[slot as usize] = EquipmentSlot {
                                 display_id: template.display_id,
                                 inventory_type: template.inventory_type,
                             };
@@ -102,20 +126,20 @@ pub async fn handle_char_enum(
                 }
             }
 
-            CharacterEnumEntry {
-                guid: row.guid,
+            Ok(CharacterEnumEntry {
+                guid: u32::try_from(row.guid)?,
                 name: row.name.clone(),
-                race: row.race,
-                class: row.class,
-                gender: row.gender,
-                skin: row.skin,
-                face: row.face,
-                hair_style: row.hair_style,
-                hair_color: row.hair_color,
-                facial_hair: row.facial_hair,
-                level: row.level,
-                zone: row.zone,
-                map: row.map,
+                race: u8::try_from(row.race)?,
+                class: u8::try_from(row.class)?,
+                gender: u8::try_from(row.gender)?,
+                skin: u8::try_from(row.skin)?,
+                face: u8::try_from(row.face)?,
+                hair_style: u8::try_from(row.hair_style)?,
+                hair_color: u8::try_from(row.hair_color)?,
+                facial_hair: u8::try_from(row.facial_hair)?,
+                level: u8::try_from(row.level)?,
+                zone: u32::try_from(row.zone)?,
+                map: u32::try_from(row.map)?,
                 position_x: row.position_x,
                 position_y: row.position_y,
                 position_z: row.position_z,
@@ -124,9 +148,9 @@ pub async fn handle_char_enum(
                 first_login: false, // TODO: Implement first login detection
                 pet_info: None,     // TODO: Implement pet lookup
                 equipment,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_>>()?;
 
     // Build and send the packet using SmsgCharEnum
     let message = SmsgCharEnum {
@@ -185,9 +209,9 @@ pub async fn handle_player_login_with_guid(
 
     // 2. Load character from database using repository and validate ownership
     info!("[LOGIN] Loading character from database");
-    let char_repo = CharacterRepository::new(Arc::new(databases.character.clone()));
+    let char_repo = PgCharacterRepository::new(Arc::new(databases.character.clone()));
     let character = char_repo
-        .find_by_guid(guid.counter())
+        .find_by_guid(i64::from(guid.counter()))
         .await?
         .ok_or_else(|| anyhow!("Character {} not found", guid))?;
     info!(
@@ -207,7 +231,7 @@ pub async fn handle_player_login_with_guid(
         character.orientation
     );
 
-    if character.account != session.account_id() {
+    if character.account != i64::from(session.account_id()) {
         warn!(
             "Character {} does not belong to account {} (belongs to {})",
             guid,
@@ -216,6 +240,18 @@ pub async fn handle_player_login_with_guid(
         );
         return Err(anyhow!("Character does not belong to this account"));
     }
+
+    let character_map = u32::try_from(character.map)?;
+    let character_instance = u32::try_from(character.instance)?;
+    let character_zone = u32::try_from(character.zone)?;
+    let character_race = u8::try_from(character.race)?;
+    let character_class = u8::try_from(character.class)?;
+    let character_death_expire_time = u64::try_from(character.death_expire_time)?;
+    let character_logout_time = character
+        .logout_time
+        .map(|time| u64::try_from(time.timestamp()))
+        .transpose()?
+        .unwrap_or_default();
 
     info!(
         "[LOGIN] Loading character '{}' (level {}) at map {} zone {}",
@@ -227,31 +263,31 @@ pub async fn handle_player_login_with_guid(
     let mut player = Player::new(
         guid,
         character.name.clone(),
-        character.map,
-        character.instance,
-        character.zone,
-        character.level,
-        character.race,
-        character.class,
-        character.gender,
+        character_map,
+        character_instance,
+        character_zone,
+        u8::try_from(character.level)?,
+        character_race,
+        character_class,
+        u8::try_from(character.gender)?,
     );
     player.set_appearance(
-        character.skin,
-        character.face,
-        character.hair_style,
-        character.hair_color,
-        character.facial_hair,
+        u8::try_from(character.skin)?,
+        u8::try_from(character.face)?,
+        u8::try_from(character.hair_style)?,
+        u8::try_from(character.hair_color)?,
+        u8::try_from(character.facial_hair)?,
     );
     player.rest_bonus = character.rest_bonus;
-    player.player_flags = character.character_flags;
-    player.xp = character.xp;
-    player.ammo_id = character.ammo_id;
+    player.player_flags = u32::try_from(character.character_flags)?;
+    player.xp = u32::try_from(character.xp)?;
+    player.ammo_id = u32::try_from(character.ammo_id)?;
 
     // Load homebind from database
-    let homebind = char_repo.find_homebind(guid.counter()).await?;
+    let homebind = char_repo.find_homebind(i64::from(guid.counter())).await?;
     if let Some(hb) = &homebind {
-        player.homebind_map = hb.map;
-        player.homebind_zone = hb.zone;
+        player.homebind_map = u32::try_from(hb.map)?;
+        player.homebind_zone = u32::try_from(hb.zone)?;
         player.homebind_x = hb.position_x;
         player.homebind_y = hb.position_y;
         player.homebind_z = hb.position_z;
@@ -261,8 +297,8 @@ pub async fn handle_player_login_with_guid(
         );
     } else {
         // No homebind in DB — use current character position as fallback
-        player.homebind_map = character.map;
-        player.homebind_zone = character.zone;
+        player.homebind_map = u32::try_from(character.map)?;
+        player.homebind_zone = u32::try_from(character.zone)?;
         player.homebind_x = character.position_x;
         player.homebind_y = character.position_y;
         player.homebind_z = character.position_z;
@@ -334,8 +370,8 @@ pub async fn handle_player_login_with_guid(
     info!("[LOGIN] Triggering async grid loading for player");
     world.systems.grid.async_load_grids_for_player(
         guid,
-        character.map,
-        character.instance,
+        character_map,
+        character_instance,
         Arc::new(world.clone()),
     );
     info!(
@@ -377,12 +413,12 @@ pub async fn handle_player_login_with_guid(
     // run-speed bonus so the client renders the ghost correctly.
     {
         const PLAYER_FLAGS_GHOST_RAW: u32 = 0x00000010;
-        if character.character_flags & PLAYER_FLAGS_GHOST_RAW != 0 {
+        if character.character_flags & i64::from(PLAYER_FLAGS_GHOST_RAW) != 0 {
             use crate::game::player::death::state::DeathState;
 
             world.managers.player_mgr.with_player_mut(guid, |player| {
                 player.death.death_state = DeathState::Dead;
-                player.death.death_expire_time = character.death_expire_time;
+                player.death.death_expire_time = character_death_expire_time;
                 player.player_flags |= PLAYER_FLAGS_GHOST_RAW;
                 player.movement.water_walking = true;
                 player.movement.run_speed = 7.0 * 1.5; // ghost speed
@@ -436,7 +472,7 @@ pub async fn handle_player_login_with_guid(
         } else {
             // Even for alive players, restore the reclaim-streak clock.
             world.managers.player_mgr.with_player_mut(guid, |player| {
-                player.death.death_expire_time = character.death_expire_time;
+                player.death.death_expire_time = character_death_expire_time;
             });
         }
     }
@@ -446,7 +482,7 @@ pub async fn handle_player_login_with_guid(
         use crate::game::player::environment::{RestType, PLAYER_FLAGS_RESTING};
 
         // Determine saved rest type from character flags
-        let saved_rest_type = if character.character_flags & PLAYER_FLAGS_RESTING != 0 {
+        let saved_rest_type = if character.character_flags & i64::from(PLAYER_FLAGS_RESTING) != 0 {
             // Was resting when logged out — we don't know if tavern or city,
             // but InCity is safe since the zone check below will correct it
             RestType::InCity
@@ -459,7 +495,7 @@ pub async fn handle_player_login_with_guid(
             guid,
             character.rest_bonus,
             saved_rest_type,
-            character.logout_time,
+            character_logout_time,
             world,
             &world.managers.player_mgr,
         )?;
@@ -476,7 +512,7 @@ pub async fn handle_player_login_with_guid(
         }
 
         // Zone scripts: entering the world counts as entering the login zone.
-        if let Err(e) = crate::core::lua::on_player_enter_zone(guid, character.zone, world).await {
+        if let Err(e) = crate::core::lua::on_player_enter_zone(guid, character_zone, world).await {
             warn!(
                 "Zone script OnPlayerEnter failed for {:?} in zone {}: {}",
                 guid, character.zone, e
@@ -487,7 +523,7 @@ pub async fn handle_player_login_with_guid(
         const AREA_FLAG_CAPITAL: u32 = 0x100;
         let is_capital = {
             let dbc = world.dbc.read();
-            if let Some(area) = dbc.get_area(character.zone) {
+            if let Some(area) = dbc.get_area(character_zone) {
                 if area.flags & AREA_FLAG_CAPITAL != 0 {
                     true
                 } else if area.zone != 0 {
@@ -527,49 +563,79 @@ pub async fn handle_player_login_with_guid(
         rewarded_quests,
         tutorial_flags_opt,
     ) = {
-        let char_guid = guid.counter();
-        let account_id_u64 = session.account_id() as u64;
+        let char_guid = i64::from(guid.counter());
+        let account_id = i64::from(session.account_id());
         let char_db = Arc::new(databases.character.clone());
 
         tokio::try_join!(
             // Reputation from DB
             async {
-                let rep_repo = ReputationRepository::new(char_db.clone());
-                rep_repo.find_reputations(char_guid).await
+                let rep_repo = PgReputationRepository::new(char_db.clone());
+                rep_repo.load(char_guid).await
             },
             // Skills from DB
             async {
-                let char_repo = CharacterRepository::new(char_db.clone());
+                let char_repo = PgCharacterRepository::new(char_db.clone());
                 char_repo.find_skills(char_guid).await
             },
             // Actions from DB
             async {
-                let char_repo = CharacterRepository::new(char_db.clone());
+                let char_repo = PgCharacterRepository::new(char_db.clone());
                 char_repo.find_actions(char_guid).await
             },
             // Quest statuses from DB
             async {
-                use oxcore_db::database::characters::repositories::{
-                    QuestRepository, QuestRepositoryTrait,
-                };
-                let quest_repo = QuestRepository::new(char_db.clone());
-                quest_repo.find_quest_statuses(char_guid).await
+                let quest_repo = PgQuestRepository::new(char_db.clone());
+                quest_repo.load(char_guid).await
             },
             // Rewarded quests from DB
             async {
-                use oxcore_db::database::characters::repositories::{
-                    QuestRepository, QuestRepositoryTrait,
-                };
-                let quest_repo = QuestRepository::new(char_db.clone());
-                quest_repo.find_rewarded_quests(char_guid).await
+                let quest_repo = PgQuestRepository::new(char_db.clone());
+                quest_repo.load(char_guid).await
             },
             // Tutorial flags from DB (per-account)
             async {
-                let char_repo = CharacterRepository::new(char_db.clone());
-                char_repo.find_tutorials(account_id_u64).await
+                let char_repo = PgCharacterRepository::new(char_db.clone());
+                char_repo.find_tutorials(account_id).await
             }
         )?
     };
+
+    let active_quests = active_quests
+        .into_iter()
+        .map(pg_quest_status)
+        .collect::<Result<Vec<_>>>()?;
+    let rewarded_quests = rewarded_quests
+        .into_iter()
+        .filter(|row| row.rewarded)
+        .map(|row| {
+            Ok(QuestStatusRewardedRow {
+                guid: u32::try_from(row.guid)?,
+                quest: u32::try_from(row.quest)?,
+                reward_choice: u32::try_from(row.reward_choice)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let skill_rows = skill_rows
+        .into_iter()
+        .map(|row| {
+            Ok((
+                u16::try_from(row.skill)?,
+                u16::try_from(row.value)?,
+                u16::try_from(row.max)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let action_rows = action_rows
+        .into_iter()
+        .map(|row| {
+            Ok((
+                u8::try_from(row.button)?,
+                u32::try_from(row.action)?,
+                u8::try_from(row.r#type)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     info!(
         "[LOGIN TIMING] Parallel data loaded (rep/skills/actions/quests): {}ms",
@@ -589,39 +655,47 @@ pub async fn handle_player_login_with_guid(
         use crate::game::player::settings::state::AccountDataEntry;
         use oxcore_shared::game::account_data::AccountDataType;
 
-        let char_guid = guid.counter();
-        let account_id = session.account_id();
+        let char_guid = i64::from(guid.counter());
+        let account_id = i64::from(session.account_id());
         let char_db = Arc::new(databases.character.clone());
 
         let (global_rows, char_rows) = tokio::try_join!(
             async {
-                let repo = CharacterRepository::new(char_db.clone());
+                let repo = PgCharacterRepository::new(char_db.clone());
                 repo.find_account_data(account_id).await
             },
             async {
-                let repo = CharacterRepository::new(char_db.clone());
+                let repo = PgCharacterRepository::new(char_db.clone());
                 repo.find_character_account_data(char_guid).await
             }
         )?;
+        let global_rows = global_rows
+            .into_iter()
+            .map(|(data_type, time, data)| {
+                Ok((u32::try_from(data_type)?, u32::try_from(time)?, data))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let char_rows = char_rows
+            .into_iter()
+            .map(|(data_type, time, data)| {
+                Ok((u32::try_from(data_type)?, u32::try_from(time)?, data))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         world.managers.player_mgr.with_player_mut(guid, |player| {
             for (data_type, time, data) in global_rows {
                 if let Some(t) = AccountDataType::from_u32(data_type) {
                     if t.is_global() && (data_type as usize) < player.settings.account_data.len() {
-                        player.settings.account_data[data_type as usize] = Some(AccountDataEntry {
-                            time: time as u32,
-                            data,
-                        });
+                        player.settings.account_data[data_type as usize] =
+                            Some(AccountDataEntry { time, data });
                     }
                 }
             }
             for (data_type, time, data) in char_rows {
                 if let Some(t) = AccountDataType::from_u32(data_type) {
                     if !t.is_global() && (data_type as usize) < player.settings.account_data.len() {
-                        player.settings.account_data[data_type as usize] = Some(AccountDataEntry {
-                            time: time as u32,
-                            data,
-                        });
+                        player.settings.account_data[data_type as usize] =
+                            Some(AccountDataEntry { time, data });
                     }
                 }
             }
@@ -644,8 +718,8 @@ pub async fn handle_player_login_with_guid(
     // Load saved reputation from database
     let rep_data: Vec<(u32, i32, i32)> = reputation_rows
         .into_iter()
-        .map(|r| (r.faction, r.standing, r.flags))
-        .collect();
+        .map(|r| Ok((u32::try_from(r.faction)?, r.standing, r.flags)))
+        .collect::<Result<_>>()?;
     world
         .systems
         .reputation
@@ -674,16 +748,16 @@ pub async fn handle_player_login_with_guid(
             .player
             .manager()
             .with_player_mut(guid, |player| {
-                for (position, row) in skill_rows.iter().enumerate() {
+                for (position, &(skill, value, max)) in skill_rows.iter().enumerate() {
                     let skill_data = crate::game::player::skills::SkillData {
-                        skill_id: row.skill as u16,
-                        current_value: row.value as u16,
-                        max_value: row.max as u16,
+                        skill_id: skill,
+                        current_value: value,
+                        max_value: max,
                         step: 0,
                         position,
                         state: crate::game::player::skills::SkillSaveState::Unchanged,
                     };
-                    player.skills.skills.insert(row.skill as u16, skill_data);
+                    player.skills.skills.insert(skill, skill_data);
                 }
             });
     }
@@ -722,14 +796,14 @@ pub async fn handle_player_login_with_guid(
     // 7.06 Initialize action buttons from loaded data
     if !action_rows.is_empty() {
         world.managers.player_mgr.with_player_mut(guid, |player| {
-            for row in &action_rows {
+            for &(button, action, button_type) in &action_rows {
                 info!(
                     "[LOGIN] Setting action button: slot={}, action={}, type={}",
-                    row.button, row.action, row.r#type
+                    button, action, button_type
                 );
                 player
                     .settings
-                    .set_action_button(row.button, row.action, row.r#type);
+                    .set_action_button(button, action, button_type);
             }
         });
         info!(
@@ -741,7 +815,7 @@ pub async fn handle_player_login_with_guid(
         use oxcore_db::database::world::repositories::PlayerCreateInfoRepository;
         let create_repo = PlayerCreateInfoRepository::new(Arc::new(databases.world.clone()));
         match create_repo
-            .get_create_info_actions(character.race, character.class)
+            .get_create_info_actions(character_race, character_class)
             .await
         {
             Ok(default_actions) if !default_actions.is_empty() => {
@@ -770,6 +844,16 @@ pub async fn handle_player_login_with_guid(
 
     // 7.06.5 Apply tutorial flags loaded from database
     if let Some(flags) = tutorial_flags_opt {
+        let flags = [
+            u32::try_from(flags[0])?,
+            u32::try_from(flags[1])?,
+            u32::try_from(flags[2])?,
+            u32::try_from(flags[3])?,
+            u32::try_from(flags[4])?,
+            u32::try_from(flags[5])?,
+            u32::try_from(flags[6])?,
+            u32::try_from(flags[7])?,
+        ];
         world.managers.player_mgr.with_player_mut(guid, |player| {
             player.settings.tutorial_flags = flags;
             player.settings.need_save = false;
@@ -787,9 +871,9 @@ pub async fn handle_player_login_with_guid(
 
         // Load default and saved spells in parallel (non-fatal if tables missing)
         let (default_spells, saved_spells) = {
-            let char_guid = guid.counter();
-            let race = character.race;
-            let class = character.class;
+            let char_guid = i64::from(guid.counter());
+            let race = character_race;
+            let class = character_class;
             let world_db = Arc::new(databases.world.clone());
             let char_db = Arc::new(databases.character.clone());
 
@@ -805,7 +889,7 @@ pub async fn handle_player_login_with_guid(
                         })
                 },
                 async {
-                    let char_repo = CharacterRepository::new(char_db);
+                    let char_repo = PgCharacterRepository::new(char_db);
                     char_repo.find_spells(char_guid).await.unwrap_or_else(|e| {
                         warn!("[LOGIN] Failed to load saved spells: {}", e);
                         Vec::new()
@@ -826,7 +910,9 @@ pub async fn handle_player_login_with_guid(
             // Learn saved spells from database
             for row in &saved_spells {
                 if row.active != 0 && row.disabled == 0 {
-                    player.spells.learn_spell(row.spell);
+                    if let Ok(spell) = u32::try_from(row.spell) {
+                        player.spells.learn_spell(spell);
+                    }
                 }
             }
         });
@@ -869,7 +955,7 @@ pub async fn handle_player_login_with_guid(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let offline_secs = aura_offline_seconds(now_secs, character.logout_time);
+    let offline_secs = aura_offline_seconds(now_secs, character_logout_time);
     world
         .systems
         .auras
@@ -902,7 +988,7 @@ pub async fn handle_player_login_with_guid(
 
     // 1/11. SMSG_LOGIN_VERIFY_WORLD - tells client where they are
     let verify_world = SmsgLoginVerifyWorld {
-        map_id: character.map,
+        map_id: character_map,
         position: Position::new(
             character.position_x,
             character.position_y,
@@ -941,9 +1027,9 @@ pub async fn handle_player_login_with_guid(
     let name_response = oxcore_shared::messages::query::SmsgNameQueryResponse::new(
         guid,
         &character.name,
-        character.race,
-        character.gender,
-        character.class,
+        character_race,
+        u8::try_from(character.gender)?,
+        character_class,
     );
     session.send_msg(name_response)?;
     info!(
@@ -1014,8 +1100,8 @@ pub async fn handle_player_login_with_guid(
             )
         })
         .unwrap_or((
-            character.map,
-            character.zone,
+            character_map,
+            character_zone,
             character.position_x,
             character.position_y,
             character.position_z,
@@ -1234,7 +1320,7 @@ pub async fn handle_player_login_with_guid(
     }
     info!("[LOGIN] 10/11 SMSG_UPDATE_OBJECT: 1 player block");
     // 11/11. SMSG_INIT_WORLD_STATES
-    let init_world_states = SmsgInitWorldStates::new(character.map, character.zone);
+    let init_world_states = SmsgInitWorldStates::new(character_map, character_zone);
     session.send_msg(init_world_states)?;
     info!(
         "[LOGIN] 11/11 SMSG_INIT_WORLD_STATES: map={}, zone={}",
@@ -2291,7 +2377,7 @@ pub async fn handle_char_create(
     }
 
     // 3. Check name availability
-    let char_repo = CharacterRepository::new(Arc::new(databases.character.clone()));
+    let char_repo = PgCharacterRepository::new(Arc::new(databases.character.clone()));
     if char_repo.exists_by_name(&normalized_name).await? {
         session.send_msg(SmsgCharCreate {
             result: char_create::NAME_IN_USE,
@@ -2312,7 +2398,9 @@ pub async fn handle_char_create(
     };
 
     // 5. Check character limit
-    let existing_chars = char_repo.find_by_account(session.account_id()).await?;
+    let existing_chars = char_repo
+        .find_by_account(i64::from(session.account_id()))
+        .await?;
     if existing_chars.len() >= characters_per_realm as usize {
         session.send_msg(SmsgCharCreate {
             result: char_create::SERVER_LIMIT,
@@ -2341,7 +2429,7 @@ pub async fn handle_char_create(
 
     // 7. Check PvP realm cross-faction restriction
     if is_pvp_realm && !allow_two_side_accounts && !existing_chars.is_empty() {
-        let first_char_team = Team::from_race(existing_chars[0].race);
+        let first_char_team = Team::from_race(u8::try_from(existing_chars[0].race)?);
         if team != first_char_team && team != Team::None && first_char_team != Team::None {
             session.send_msg(SmsgCharCreate {
                 result: char_create::PVP_TEAMS_VIOLATION,
@@ -2385,23 +2473,27 @@ pub async fn handle_char_create(
     let guid = player_guid.counter();
 
     // 10. Get base health and mana from player_classlevelstats (class/level 1)
-    let class_stats: Option<(u16, u16)> = sqlx::query_as::<_, (u16, u16)>(
-        "SELECT basehp, basemana FROM player_classlevelstats WHERE class = ? AND level = 1",
+    let class_stats: Option<(i16, i16)> = sqlx::query_as::<_, (i16, i16)>(
+        "SELECT basehp, basemana FROM world.player_classlevelstats WHERE class = $1 AND level = 1",
     )
-    .bind(class)
+    .bind(i16::from(class))
     .fetch_optional(&databases.world)
     .await?;
-    let (base_hp, base_mana) = class_stats.unwrap_or((20, 0));
+    let (base_hp, base_mana) = class_stats
+        .map(|(health, mana)| (health.max(0) as u16, mana.max(0) as u16))
+        .unwrap_or((20, 0));
 
     // 11. Get stamina and intellect from player_levelstats (race/class/level 1)
-    let level_stats: Option<(u8, u8)> = sqlx::query_as::<_, (u8, u8)>(
-        "SELECT sta, inte FROM player_levelstats WHERE race = ? AND class = ? AND level = 1",
+    let level_stats: Option<(i16, i16)> = sqlx::query_as::<_, (i16, i16)>(
+        "SELECT sta, inte FROM world.player_levelstats WHERE race = $1 AND class = $2 AND level = 1",
     )
-    .bind(race)
-    .bind(class)
+    .bind(i16::from(race))
+    .bind(i16::from(class))
     .fetch_optional(&databases.world)
     .await?;
-    let (stamina, intellect) = level_stats.unwrap_or((20, 20));
+    let (stamina, intellect) = level_stats
+        .map(|(stamina, intellect)| (stamina.max(0) as u8, intellect.max(0) as u8))
+        .unwrap_or((20, 20));
 
     // 12. Calculate health bonus from stamina
     // First 20 stamina: 1 HP each, above 20: 10 HP each
@@ -2427,28 +2519,28 @@ pub async fn handle_char_create(
 
     // 14. Create character using simplified method
     char_repo
-        .create_simple(
-            guid,
-            session.account_id(),
-            &normalized_name,
-            race,
-            class,
-            gender,
-            skin,
-            face,
-            hair_style,
-            hair_color,
-            facial_hair,
-            map_id,
-            zone_id,
+        .create(&PgCharacterCreate {
+            guid: i64::from(guid),
+            account: i64::from(session.account_id()),
+            name: &normalized_name,
+            race: i16::from(race),
+            class: i16::from(class),
+            gender: i16::from(gender),
+            skin: i16::from(skin),
+            face: i16::from(face),
+            hair_style: i16::from(hair_style),
+            hair_color: i16::from(hair_color),
+            facial_hair: i16::from(facial_hair),
+            map: i64::from(map_id),
+            zone: i64::from(zone_id),
             position_x,
             position_y,
             position_z,
             orientation,
-            max_health,
-            max_mana,
-            starting_money,
-        )
+            health: i64::from(max_health),
+            power1: i64::from(max_mana),
+            money: i64::from(starting_money),
+        })
         .await?;
 
     debug!(
@@ -2586,8 +2678,8 @@ pub async fn handle_char_delete(
     );
 
     // 2. Load and verify character
-    let char_repo = CharacterRepository::new(Arc::new(databases.character.clone()));
-    let character = char_repo.find_by_guid(guid).await?;
+    let char_repo = PgCharacterRepository::new(Arc::new(databases.character.clone()));
+    let character = char_repo.find_by_guid(i64::from(guid)).await?;
 
     let character = match character {
         None => {
@@ -2597,7 +2689,7 @@ pub async fn handle_char_delete(
             })?;
             return Ok(());
         }
-        Some(char_data) if char_data.account != session.account_id() => {
+        Some(char_data) if char_data.account != i64::from(session.account_id()) => {
             warn!(
                 "Character {} does not belong to account {}",
                 guid,
@@ -2614,13 +2706,8 @@ pub async fn handle_char_delete(
     // 3. Delete character (repository handles transaction and cascades)
     let configured_method = world.config.char_delete_method.unwrap_or(0);
     let min_level = world.config.char_delete_min_level.unwrap_or(0) as u8;
-    let mode = if configured_method == 1 && character.level >= min_level {
-        CharacterDeleteMode::Soft
-    } else {
-        CharacterDeleteMode::Hard
-    };
-
-    char_repo.delete(guid, mode).await?;
+    let soft_delete = configured_method == 1 && u8::try_from(character.level)? >= min_level;
+    char_repo.delete(i64::from(guid), soft_delete).await?;
 
     debug!("Character {} deleted successfully", guid);
 
@@ -2706,7 +2793,7 @@ pub async fn handle_char_rename(
     }
 
     // 3. Check name availability
-    let char_repo = CharacterRepository::new(Arc::new(databases.character.clone()));
+    let char_repo = PgCharacterRepository::new(Arc::new(databases.character.clone()));
     if char_repo.exists_by_name(&normalized_name).await? {
         session.send_msg(SmsgCharRename {
             result: char_name::FAILURE,
@@ -2718,7 +2805,7 @@ pub async fn handle_char_rename(
     }
 
     // 4. Load and verify character
-    let character = char_repo.find_by_guid(guid.counter()).await?;
+    let character = char_repo.find_by_guid(i64::from(guid.counter())).await?;
 
     let char_data = match character {
         None => {
@@ -2731,7 +2818,7 @@ pub async fn handle_char_rename(
             })?;
             return Ok(());
         }
-        Some(char_data) if char_data.account != session.account_id() => {
+        Some(char_data) if char_data.account != i64::from(session.account_id()) => {
             warn!(
                 "Character {} does not belong to account {}",
                 guid,
@@ -2749,7 +2836,7 @@ pub async fn handle_char_rename(
     };
 
     // 5. Check rename flag
-    if char_data.character_flags & CHARACTER_FLAG_RENAME == 0 {
+    if char_data.character_flags & i64::from(CHARACTER_FLAG_RENAME) == 0 {
         warn!("Character {} does not have RENAME flag", guid);
         session.send_msg(SmsgCharRename {
             result: response::FAILURE,
@@ -2774,10 +2861,10 @@ pub async fn handle_char_rename(
     }
 
     // 7. Update name and flags
-    let new_flags = (char_data.character_flags & !CHARACTER_FLAG_RENAME)
-        | CHARACTER_FLAG_RENAME_NEEDS_GM_REVIEW;
+    let new_flags = (char_data.character_flags & !i64::from(CHARACTER_FLAG_RENAME))
+        | i64::from(CHARACTER_FLAG_RENAME_NEEDS_GM_REVIEW);
     char_repo
-        .update_name_and_flags(guid.counter(), &normalized_name, new_flags)
+        .rename(i64::from(guid.counter()), &normalized_name, new_flags)
         .await?;
 
     debug!("Character {} renamed to {}", guid, normalized_name);

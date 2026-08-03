@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use dashmap::DashMap;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::info;
 
@@ -16,7 +16,7 @@ use crate::database::repositories::QuestTemplateRepository;
 #[derive(Debug)]
 pub struct QuestManager {
     /// Database pool for loading
-    world_db: Arc<MySqlPool>,
+    world_db: Arc<PgPool>,
     /// Quest templates by ID
     quest_templates: DashMap<u32, Arc<QuestTemplate>>,
     /// Quest starters by creature entry
@@ -31,7 +31,7 @@ pub struct QuestManager {
 
 impl QuestManager {
     /// Create a new quest manager with database pool
-    pub fn new(world_db: Arc<MySqlPool>) -> Self {
+    pub fn new(world_db: Arc<PgPool>) -> Self {
         Self {
             world_db,
             quest_templates: DashMap::new(),

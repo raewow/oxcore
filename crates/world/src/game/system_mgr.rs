@@ -105,8 +105,8 @@ pub struct SystemManager {
 
 impl SystemManager {
     pub fn new(
-        character_pool: Arc<sqlx::MySqlPool>,
-        world_pool: Arc<sqlx::MySqlPool>,
+        character_pool: Arc<sqlx::PgPool>,
+        world_pool: Arc<sqlx::PgPool>,
         logs_pool: Arc<sqlx::PgPool>,
         chat_log_enabled: bool,
         broadcast_mgr: Arc<BroadcastManager>,

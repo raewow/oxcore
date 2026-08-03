@@ -3,7 +3,7 @@
 //! Handles loading of vendor items from npc_vendor and npc_vendor_template tables.
 
 use anyhow::{Context, Result};
-use sqlx::{MySqlPool, Row};
+use sqlx::{PgPool, Row};
 use std::sync::Arc;
 
 /// Row structure for npc_vendor table (per-creature vendor items)
@@ -28,12 +28,12 @@ pub struct VendorTemplateItemRow {
 
 /// Repository for vendor-related database operations
 pub struct VendorRepository {
-    pool: Arc<MySqlPool>,
+    pool: Arc<PgPool>,
 }
 
 impl VendorRepository {
     /// Create a new vendor repository
-    pub fn new(pool: Arc<MySqlPool>) -> Self {
+    pub fn new(pool: Arc<PgPool>) -> Self {
         Self { pool }
     }
 
@@ -60,7 +60,7 @@ impl VendorRepository {
             SELECT entry, item, maxcount, incrtime,
                    COALESCE(condition_id, 0) AS condition_id,
                    COALESCE(itemflags, 0) AS itemflags
-            FROM npc_vendor
+             FROM world.npc_vendor
             ORDER BY entry, item
         "#;
 
@@ -72,10 +72,10 @@ impl VendorRepository {
         let mut items = Vec::new();
         for row in rows {
             items.push(VendorItemRow {
-                entry: row.get("entry"),
-                item_entry: row.get("item"),
-                max_count: row.get("maxcount"),
-                incr_time: row.get("incrtime"),
+                entry: row.get::<i64, _>("entry").try_into()?,
+                item_entry: row.get::<i64, _>("item").try_into()?,
+                max_count: row.get::<i16, _>("maxcount").try_into()?,
+                incr_time: row.get::<i64, _>("incrtime").try_into()?,
                 itemflags: row.get("itemflags"),
                 condition_id: row.get("condition_id"),
             });
@@ -90,7 +90,7 @@ impl VendorRepository {
             SELECT entry, item, maxcount, incrtime,
                    COALESCE(condition_id, 0) AS condition_id,
                    COALESCE(itemflags, 0) AS itemflags
-            FROM npc_vendor_template
+             FROM world.npc_vendor_template
             ORDER BY entry, item
         "#;
 
@@ -102,10 +102,10 @@ impl VendorRepository {
         let mut items = Vec::new();
         for row in rows {
             items.push(VendorTemplateItemRow {
-                entry: row.get("entry"),
-                item_entry: row.get("item"),
-                max_count: row.get("maxcount"),
-                incr_time: row.get("incrtime"),
+                entry: row.get::<i64, _>("entry").try_into()?,
+                item_entry: row.get::<i64, _>("item").try_into()?,
+                max_count: row.get::<i16, _>("maxcount").try_into()?,
+                incr_time: row.get::<i64, _>("incrtime").try_into()?,
                 itemflags: row.get("itemflags"),
                 condition_id: row.get("condition_id"),
             });

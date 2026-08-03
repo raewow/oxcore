@@ -1,4 +1,5 @@
 use super::types::{Loot, LootItem, LootTableEntry};
+use anyhow::Context;
 use dashmap::DashMap;
 use oxcore_shared::protocol::ObjectGuid;
 use rand::Rng;
@@ -17,12 +18,34 @@ pub struct LootManager {
 /// Database row for creature_loot_template
 #[derive(sqlx::FromRow, Debug, Clone)]
 struct LootTableRow {
-    pub entry: u32,
-    pub item: u32,
+    pub entry: i64,
+    pub item: i64,
     pub chance: f32,
     pub min_count: i32,
-    pub max_count: u8,
-    pub group_id: u8,
+    pub max_count: i16,
+    pub group_id: i16,
+}
+
+impl LootTableRow {
+    fn into_entry(self) -> anyhow::Result<LootTableEntry> {
+        let entry = u32::try_from(self.entry).context("loot entry is outside u32 range")?;
+        let item = u32::try_from(self.item).context("loot item is outside u32 range")?;
+        let max_count = u32::try_from(self.max_count)
+            .context("loot max_count must not be negative")?
+            .max(1);
+        let group_id = u8::try_from(self.group_id).context("loot group_id is outside u8 range")?;
+
+        Ok(LootTableEntry {
+            entry,
+            item,
+            chance: self.chance.abs(),
+            min_count: self.min_count.max(1) as u32,
+            max_count,
+            group_id,
+            is_reference: self.min_count < 0,
+            is_quest_drop: self.chance < 0.0,
+        })
+    }
 }
 
 impl LootManager {
@@ -35,27 +58,17 @@ impl LootManager {
     }
 
     /// Load loot tables from database
-    pub async fn load_loot_tables(&self, world_db: &sqlx::MySqlPool) -> anyhow::Result<()> {
+    pub async fn load_loot_tables(&self, world_db: &sqlx::PgPool) -> anyhow::Result<()> {
         let rows = sqlx::query_as::<_, LootTableRow>(
-            r#"SELECT entry, item, ChanceOrQuestChance as chance,
-               CAST(mincountOrRef AS SIGNED) as min_count, maxcount as max_count, groupid as group_id
-               FROM creature_loot_template"#
+            r#"SELECT entry, item, "ChanceOrQuestChance" AS chance,
+                "mincountOrRef" AS min_count, maxcount AS max_count, groupid AS group_id
+                FROM world.creature_loot_template"#,
         )
         .fetch_all(world_db)
         .await?;
 
         for row in rows {
-            let entry = LootTableEntry {
-                entry: row.entry,
-                item: row.item,
-                // Negative ChanceOrQuestChance means quest-only drop; store the magnitude as chance
-                chance: row.chance.abs(),
-                min_count: row.min_count.max(1) as u32,
-                max_count: (row.max_count as u32).max(1),
-                group_id: row.group_id,
-                is_reference: row.min_count < 0, // Negative min_count indicates reference
-                is_quest_drop: row.chance < 0.0,
-            };
+            let entry = row.into_entry()?;
 
             self.creature_loot_tables
                 .entry(entry.entry)
@@ -71,29 +84,17 @@ impl LootManager {
     }
 
     /// Load gameobject loot tables from the world database.
-    pub async fn load_gameobject_loot_tables(
-        &self,
-        world_db: &sqlx::MySqlPool,
-    ) -> anyhow::Result<()> {
+    pub async fn load_gameobject_loot_tables(&self, world_db: &sqlx::PgPool) -> anyhow::Result<()> {
         let rows = sqlx::query_as::<_, LootTableRow>(
-            r#"SELECT entry, item, ChanceOrQuestChance as chance,
-               CAST(mincountOrRef AS SIGNED) as min_count, maxcount as max_count, groupid as group_id
-               FROM gameobject_loot_template"#,
+            r#"SELECT entry, item, "ChanceOrQuestChance" AS chance,
+                "mincountOrRef" AS min_count, maxcount AS max_count, groupid AS group_id
+                FROM world.gameobject_loot_template"#,
         )
         .fetch_all(world_db)
         .await?;
 
         for row in rows {
-            let entry = LootTableEntry {
-                entry: row.entry,
-                item: row.item,
-                chance: row.chance.abs(),
-                min_count: row.min_count.max(1) as u32,
-                max_count: (row.max_count as u32).max(1),
-                group_id: row.group_id,
-                is_reference: row.min_count < 0,
-                is_quest_drop: row.chance < 0.0,
-            };
+            let entry = row.into_entry()?;
             self.gameobject_loot_tables
                 .entry(entry.entry)
                 .or_insert_with(Vec::new)

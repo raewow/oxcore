@@ -38,8 +38,8 @@ impl Config {
         if !self.web_database_url.starts_with("postgres://") {
             anyhow::bail!("web.web_database_url must be a PostgreSQL connection URL");
         }
-        if !self.character_database_url.starts_with("mysql://") {
-            anyhow::bail!("web.character_database_url must be a MySQL connection URL");
+        if !self.character_database_url.starts_with("postgres://") {
+            anyhow::bail!("web.character_database_url must be a PostgreSQL connection URL");
         }
         if !self.logs_database_url.starts_with("postgres://") {
             anyhow::bail!("web.logs_database_url must be a PostgreSQL connection URL");

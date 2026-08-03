@@ -13,7 +13,8 @@ use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
 use crate::World;
 use anyhow::Result;
-use oxcore_db::database::{CharacterRepository, Databases};
+use oxcore_db::database::characters::PgCharacterRepository;
+use oxcore_db::database::Databases;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 use std::sync::Arc;
 use tracing::{debug, warn};
@@ -300,8 +301,18 @@ pub async fn handle_setdeathbindpoint(
     };
 
     // Persist to DB.
-    let repo = CharacterRepository::new(Arc::new(databases.character.clone()));
-    if let Err(e) = repo.save_homebind(char_guid, map, zone, x, y, z).await {
+    let repo = PgCharacterRepository::new(Arc::new(databases.character.clone()));
+    if let Err(e) = repo
+        .save_homebind(
+            i64::from(char_guid),
+            i64::from(map),
+            i64::from(zone),
+            x,
+            y,
+            z,
+        )
+        .await
+    {
         warn!("Failed to save homebind for {:?}: {}", player_guid, e);
     }
 

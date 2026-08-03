@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -28,6 +28,18 @@ fn corpse_dynamic_flags(has_loot: bool) -> u32 {
     } else {
         0
     }
+}
+
+fn checked_u32(value: i64, field: &str) -> Result<u32> {
+    u32::try_from(value).with_context(|| format!("{field} must fit u32"))
+}
+
+fn checked_u16(value: i64, field: &str) -> Result<u16> {
+    u16::try_from(value).with_context(|| format!("{field} must fit u16"))
+}
+
+fn checked_u8(value: i64, field: &str) -> Result<u8> {
+    u8::try_from(value).with_context(|| format!("{field} must fit u8"))
 }
 
 /// Creature model info from creature_display_info_addon table
@@ -199,7 +211,7 @@ struct SpawnState {
 /// Manages all creatures and their templates
 pub struct CreatureManager {
     /// Database pool for loading data
-    world_db: Arc<MySqlPool>,
+    world_db: Arc<PgPool>,
     /// Templates by entry ID
     templates: DashMap<u32, Arc<CreatureTemplate>>,
     /// Active creatures by GUID
@@ -228,7 +240,7 @@ pub struct CreatureManager {
 }
 
 impl CreatureManager {
-    pub fn new(world_db: Arc<MySqlPool>) -> Self {
+    pub fn new(world_db: Arc<PgPool>) -> Self {
         Self {
             world_db,
             templates: DashMap::new(),
@@ -437,7 +449,10 @@ impl CreatureManager {
 
         for row in &cls_rows {
             self.class_level_stats.insert(
-                (row.class, row.level),
+                (
+                    checked_u8(i64::from(row.class), "creature_classlevelstats.class")?,
+                    checked_u8(i64::from(row.level), "creature_classlevelstats.level")?,
+                ),
                 ClassLevelStats {
                     melee_damage: row.melee_damage,
                     health: row.health,
@@ -459,52 +474,77 @@ impl CreatureManager {
             .context("Failed to load creature templates from database")?;
 
         for row in rows {
+            let entry = checked_u32(row.entry, "creature_template.entry")?;
+            let min_level = checked_u8(row.level_min, "creature_template.level_min")?;
+            let max_level = checked_u8(row.level_max, "creature_template.level_max")?;
+            let faction = checked_u32(row.faction, "creature_template.faction")?;
+            let npc_flags = checked_u32(row.npc_flags, "creature_template.npc_flags")?;
+            let display_ids = [
+                checked_u32(row.display_id1, "creature_template.display_id1")?,
+                checked_u32(row.display_id2, "creature_template.display_id2")?,
+                checked_u32(row.display_id3, "creature_template.display_id3")?,
+                checked_u32(row.display_id4, "creature_template.display_id4")?,
+            ];
+            let static_flags1 = checked_u32(row.static_flags1, "creature_template.static_flags1")?;
+            let flags_extra = checked_u32(row.flags_extra, "creature_template.flags_extra")?;
+            let creature_type = checked_u8(row.creature_type, "creature_template.type")?;
             let unit_flags = Self::compute_unit_flags_from_static(
-                row.static_flags1,
-                row.creature_type,
-                row.npc_flags,
-                row.flags_extra,
+                static_flags1,
+                creature_type,
+                npc_flags,
+                flags_extra,
             );
 
             let template = CreatureTemplate {
-                entry: row.entry,
+                entry,
                 name: row.name,
                 subname: row.subname,
-                min_level: row.level_min,
-                max_level: row.level_max,
-                faction: row.faction as u32,
-                model_id_1: row.display_id1,
-                model_id_2: row.display_id2,
-                model_id_3: row.display_id3,
-                model_id_4: row.display_id4,
+                min_level,
+                max_level,
+                faction,
+                model_id_1: display_ids[0],
+                model_id_2: display_ids[1],
+                model_id_3: display_ids[2],
+                model_id_4: display_ids[3],
                 scale: row.display_scale1,
-                npc_flags: row.npc_flags,
+                npc_flags,
                 unit_flags,
-                static_flags1: row.static_flags1,
-                flags_extra: row.flags_extra,
-                creature_type: row.creature_type,
-                unit_class: row.unit_class,
+                static_flags1,
+                flags_extra,
+                creature_type,
+                unit_class: checked_u8(row.unit_class, "creature_template.unit_class")?,
                 health_multiplier: row.health_multiplier,
                 power_multiplier: row.mana_multiplier,
                 armor_multiplier: row.armor_multiplier,
                 damage_multiplier: row.damage_multiplier,
                 damage_variance: row.damage_variance,
-                attack_time: row.base_attack_time,
-                rank: row.rank,
-                gossip_menu_id: row.gossip_menu_id,
-                vendor_id: row.vendor_id,
-                trainer_id: row.trainer_id,
-                trainer_type: row.trainer_type,
-                spells: [row.spell_id1, row.spell_id2, row.spell_id3, row.spell_id4],
+                attack_time: checked_u32(
+                    row.base_attack_time,
+                    "creature_template.base_attack_time",
+                )?,
+                rank: checked_u8(row.rank, "creature_template.rank")?,
+                gossip_menu_id: checked_u32(
+                    row.gossip_menu_id,
+                    "creature_template.gossip_menu_id",
+                )?,
+                vendor_id: checked_u32(row.vendor_id, "creature_template.vendor_id")?,
+                trainer_id: checked_u32(row.trainer_id, "creature_template.trainer_id")?,
+                trainer_type: checked_u8(row.trainer_type, "creature_template.trainer_type")?,
+                spells: [
+                    checked_u32(row.spell_id1, "creature_template.spell_id1")?,
+                    checked_u32(row.spell_id2, "creature_template.spell_id2")?,
+                    checked_u32(row.spell_id3, "creature_template.spell_id3")?,
+                    checked_u32(row.spell_id4, "creature_template.spell_id4")?,
+                ],
             };
             self.visuals.insert(
                 template.entry,
                 CreatureVisuals {
                     display_ids: [
-                        row.display_id1,
-                        row.display_id2,
-                        row.display_id3,
-                        row.display_id4,
+                        display_ids[0],
+                        display_ids[1],
+                        display_ids[2],
+                        display_ids[3],
                     ],
                     display_scales: [
                         row.display_scale1,
@@ -513,10 +553,22 @@ impl CreatureManager {
                         row.display_scale4,
                     ],
                     display_probabilities: [
-                        row.display_probability1,
-                        row.display_probability2,
-                        row.display_probability3,
-                        row.display_probability4,
+                        checked_u16(
+                            row.display_probability1,
+                            "creature_template.display_probability1",
+                        )?,
+                        checked_u16(
+                            row.display_probability2,
+                            "creature_template.display_probability2",
+                        )?,
+                        checked_u16(
+                            row.display_probability3,
+                            "creature_template.display_probability3",
+                        )?,
+                        checked_u16(
+                            row.display_probability4,
+                            "creature_template.display_probability4",
+                        )?,
                     ],
                 },
             );
@@ -536,7 +588,7 @@ impl CreatureManager {
 
     /// Load creature_display_info_addon from database (bounding_radius, combat_reach, speeds per display_id)
     pub async fn load_model_info(&self) -> Result<()> {
-        let rows: Result<Vec<(u32, f32, f32, f32, f32)>, _> = sqlx::query_as(
+        let rows: Result<Vec<(i64, f32, f32, f32, f32)>, _> = sqlx::query_as(
             "SELECT display_id, bounding_radius, combat_reach, speed_walk, speed_run FROM creature_display_info_addon"
         )
         .fetch_all(self.world_db.as_ref())
@@ -546,7 +598,7 @@ impl CreatureManager {
             Ok(rows) => {
                 for (display_id, bounding_radius, combat_reach, speed_walk, speed_run) in &rows {
                     self.model_info.insert(
-                        *display_id,
+                        checked_u32(*display_id, "creature_display_info_addon.display_id")?,
                         CreatureModelInfo {
                             bounding_radius: if *bounding_radius > 0.0 {
                                 *bounding_radius
@@ -662,8 +714,10 @@ impl CreatureManager {
         let mut skipped_patch = 0;
 
         for row in rows {
+            let patch_min = checked_u8(row.patch_min, "creature.patch_min")?;
+            let patch_max = checked_u8(row.patch_max, "creature.patch_max")?;
             // Check patch compatibility
-            let exists_in_patch = row.patch_min <= current_patch && current_patch <= row.patch_max;
+            let exists_in_patch = patch_min <= current_patch && current_patch <= patch_max;
 
             // Skip creatures not in current patch
             if !exists_in_patch {
@@ -675,18 +729,18 @@ impl CreatureManager {
             // so we spawn ALL creatures regardless of event/pool membership
 
             let spawn = CreatureSpawnData {
-                spawn_id: row.guid,
-                entry: row.id,
-                map_id: row.map,
+                spawn_id: checked_u32(row.guid, "creature.guid")?,
+                entry: checked_u32(row.id, "creature.id")?,
+                map_id: checked_u32(row.map, "creature.map")?,
                 position: Position {
                     x: row.position_x,
                     y: row.position_y,
                     z: row.position_z,
                     o: row.orientation,
                 },
-                spawntimesecs: row.spawntimesecsmin,
+                spawntimesecs: checked_u32(row.spawntimesecsmin, "creature.spawntimesecsmin")?,
                 wander_distance: row.wander_distance,
-                movement_type: row.movement_type,
+                movement_type: checked_u8(row.movement_type, "creature.movement_type")?,
                 phase_mask: 1,
                 spawn_flags: super::spawn::spawn_flags::RANDOM_RESPAWN_TIME, // Default to random variance
             };

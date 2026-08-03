@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use oxcore_db::database::world::repositories::player_create_info_repository::{
     PlayerCreateInfoActionRow, PlayerCreateInfoItemRow,
 };
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 use std::collections::HashSet;
 use tracing::{debug, info, warn};
 
@@ -25,7 +25,7 @@ const INVENTORY_SLOT_ITEM_END: u8 = 39;
 ///
 /// Returns the number of items successfully created.
 pub async fn give_starting_items(
-    character_db: &MySqlPool,
+    character_db: &PgPool,
     item_mgr: &ItemManager,
     character_guid: u32,
     starting_items: &[PlayerCreateInfoItemRow],
@@ -76,16 +76,16 @@ pub async fn give_starting_items(
 
         // Insert item_instance
         sqlx::query(
-            r#"INSERT INTO item_instance
+            r#"INSERT INTO characters.item_instance
                (guid, item_id, owner_guid, creator_guid, gift_creator_guid, count, duration,
                 charges, flags, enchantments, random_property_id, durability, text, generated_loot)
-               VALUES (?, ?, ?, 0, 0, ?, 0, '0 0 0 0 0 ', 0, '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ', 0, ?, 0, 0)"#,
+                VALUES ($1, $2, $3, 0, 0, $4, 0, '0 0 0 0 0 ', 0, '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ', 0, $5, 0, FALSE)"#,
         )
-        .bind(item_guid)
-        .bind(item_info.itemid)
-        .bind(character_guid)
-        .bind(count)
-        .bind(durability)
+        .bind(i64::from(item_guid))
+        .bind(i64::from(item_info.itemid))
+        .bind(i64::from(character_guid))
+        .bind(i64::from(count))
+        .bind(i32::from(durability))
         .execute(&mut *tx).await
         .with_context(|| {
             format!(
@@ -96,13 +96,13 @@ pub async fn give_starting_items(
 
         // Insert character_inventory
         sqlx::query(
-            r#"INSERT INTO character_inventory (guid, bag, slot, item_guid, item_id)
-               VALUES (?, 0, ?, ?, ?)"#,
+            r#"INSERT INTO characters.character_inventory (guid, bag, slot, item_guid, item_id)
+                VALUES ($1, 0, $2, $3, $4)"#,
         )
-        .bind(character_guid)
-        .bind(target_slot)
-        .bind(item_guid)
-        .bind(item_info.itemid)
+        .bind(i64::from(character_guid))
+        .bind(i16::from(target_slot))
+        .bind(i64::from(item_guid))
+        .bind(i64::from(item_info.itemid))
         .execute(&mut *tx)
         .await
         .with_context(|| {
@@ -135,7 +135,7 @@ pub async fn give_starting_items(
 ///
 /// Inserts rows into character_action in a single transaction.
 pub async fn give_starting_actions(
-    character_db: &MySqlPool,
+    character_db: &PgPool,
     character_guid: u32,
     starting_actions: &[PlayerCreateInfoActionRow],
 ) -> Result<()> {
@@ -150,13 +150,13 @@ pub async fn give_starting_actions(
             action.button, action.action, action.action_type, character_guid
         );
         sqlx::query(
-            r#"INSERT INTO character_action (guid, button, action, type)
-               VALUES (?, ?, ?, ?)"#,
+            r#"INSERT INTO characters.character_action (guid, button, action, type)
+                VALUES ($1, $2, $3, $4)"#,
         )
-        .bind(character_guid)
-        .bind(action.button as u8)
-        .bind(action.action)
-        .bind(action.action_type as u8)
+        .bind(i64::from(character_guid))
+        .bind(i16::try_from(action.button).context("starting action button exceeds SMALLINT")?)
+        .bind(i64::from(action.action))
+        .bind(i16::try_from(action.action_type).context("starting action type exceeds SMALLINT")?)
         .execute(&mut *tx)
         .await
         .with_context(|| {

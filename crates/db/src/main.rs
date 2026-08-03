@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 mod commands;
 mod config;
-mod db;
 mod postgres;
 
 use config::Config;
@@ -26,24 +25,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run pending migrations on all databases
-    Migrate,
-    /// Show migration status for all databases
-    Status,
-    /// Create a new migration file
-    New {
-        /// Database: world or characters (PostgreSQL schemas use `db pg new`)
-        db: String,
-        /// Migration name (snake_case description)
-        name: String,
-    },
-    /// Drop and recreate all databases, then re-run migrate
-    Fresh {
-        /// Skip the confirmation prompt
-        #[arg(short = 'y', long)]
-        yes: bool,
-    },
-    /// PostgreSQL foundation migrations (does not affect the MySQL runtime databases)
+    /// Manage PostgreSQL application schemas and migrations
     Pg {
         #[command(subcommand)]
         command: commands::postgres::Command,
@@ -56,10 +38,6 @@ async fn main() -> Result<()> {
     let config = Config::load(cli.config)?;
 
     match cli.command {
-        Command::Migrate => commands::migrate::run(&config).await?,
-        Command::Status => commands::status::run(&config).await?,
-        Command::New { db, name } => commands::new::run(&db, &name, &config.migrations_dir)?,
-        Command::Fresh { yes } => commands::fresh::run(&config, yes).await?,
         Command::Pg { command } => commands::postgres::run(&config, command).await?,
     }
 

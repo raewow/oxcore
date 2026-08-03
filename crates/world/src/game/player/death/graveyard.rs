@@ -8,7 +8,6 @@ use crate::dbc::DbcManager;
 use anyhow::Result;
 use oxcore_db::database::world::repositories::GraveyardRepository;
 use oxcore_shared::protocol::Position;
-use sqlx::MySqlPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -150,7 +149,11 @@ impl GraveyardManager {
 
     /// Load graveyard data from the `game_graveyard_zone` DB table,
     /// cross-referencing coordinates from WorldSafeLocs.dbc.
-    pub async fn load(&mut self, world_pool: Arc<MySqlPool>, dbc_mgr: &DbcManager) -> Result<()> {
+    pub async fn load(
+        &mut self,
+        world_pool: Arc<sqlx::PgPool>,
+        dbc_mgr: &DbcManager,
+    ) -> Result<()> {
         let repo = GraveyardRepository::new(world_pool);
         let rows = repo.load_graveyard_zones().await?;
 
@@ -159,7 +162,10 @@ impl GraveyardManager {
 
         for row in &rows {
             // Look up coordinates from WorldSafeLocs.dbc
-            let safe_loc = match dbc_mgr.get_world_safe_locs(row.id) {
+            let safe_loc_id = u32::try_from(row.id)?;
+            let zone_id = u32::try_from(row.ghost_zone)?;
+            let faction = u16::try_from(row.faction)?;
+            let safe_loc = match dbc_mgr.get_world_safe_locs(safe_loc_id) {
                 Some(loc) => loc,
                 None => {
                     skipped += 1;
@@ -168,9 +174,9 @@ impl GraveyardManager {
             };
 
             let data = GraveyardData {
-                safe_loc_id: row.id,
-                zone_id: row.ghost_zone,
-                team: faction_to_team(row.faction),
+                safe_loc_id,
+                zone_id,
+                team: faction_to_team(faction),
                 position: Position {
                     x: safe_loc.x,
                     y: safe_loc.y,
@@ -181,7 +187,7 @@ impl GraveyardManager {
             };
 
             self.graveyards_by_zone
-                .entry(row.ghost_zone)
+                .entry(zone_id)
                 .or_default()
                 .push(data);
             loaded += 1;

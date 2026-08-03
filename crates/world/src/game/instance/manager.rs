@@ -43,8 +43,8 @@ impl InstanceMgr {
     /// Initialize instance manager (load next instance IDs from database)
     pub async fn initialize(&self, databases: &Databases) -> Result<()> {
         // Load next instance IDs per map
-        let rows = sqlx::query(
-            r#"SELECT CAST(map AS UNSIGNED), CAST(MAX(id) AS UNSIGNED) FROM instance GROUP BY map"#,
+        let rows = sqlx::query::<sqlx::Postgres>(
+            r#"SELECT map, MAX(id) FROM characters.instance GROUP BY map"#,
         )
         .fetch_all(&databases.character)
         .await
@@ -52,8 +52,8 @@ impl InstanceMgr {
 
         let mut next_ids = self.next_instance_ids.write();
         for row in rows {
-            let map_id: u32 = row.try_get::<u64, _>(0).unwrap_or(0) as u32;
-            let max_id: Option<u64> = row.try_get(1).ok();
+            let map_id = row.try_get::<i64, _>(0).unwrap_or(0) as u32;
+            let max_id = row.try_get::<Option<i64>, _>(1).unwrap_or(None);
             if let Some(max) = max_id {
                 next_ids.insert(map_id, (max + 1) as u32);
             } else {
@@ -106,9 +106,9 @@ impl InstanceMgr {
         };
 
         // Save to database (note: difficulty column doesn't exist in vanilla schema)
-        sqlx::query(r#"INSERT INTO instance (id, map, reset_time, data) VALUES (?, ?, ?, '')"#)
-            .bind(instance_id)
-            .bind(map_id)
+        sqlx::query::<sqlx::Postgres>(r#"INSERT INTO characters.instance (id, map, reset_time, data) VALUES ($1, $2, $3, '')"#)
+            .bind(i64::from(instance_id))
+            .bind(i64::from(map_id))
             .bind(reset_time as i64)
             .execute(&databases.character)
             .await
@@ -139,11 +139,11 @@ impl InstanceMgr {
         }
 
         // Load from database (including data field for encounter state)
-        let row = sqlx::query(
-            r#"SELECT id, map, reset_time, data FROM instance WHERE id = ? AND map = ?"#,
+        let row = sqlx::query::<sqlx::Postgres>(
+            r#"SELECT id, map, reset_time, data FROM characters.instance WHERE id = $1 AND map = $2"#,
         )
-        .bind(instance_id)
-        .bind(map_id)
+        .bind(i64::from(instance_id))
+        .bind(i64::from(map_id))
         .fetch_optional(&databases.character)
         .await
         .context("Failed to query instance")?;
@@ -225,13 +225,15 @@ impl InstanceMgr {
             }
         };
 
-        sqlx::query(r#"UPDATE instance SET data = ? WHERE id = ? AND map = ?"#)
-            .bind(&data)
-            .bind(instance_id)
-            .bind(map_id)
-            .execute(&databases.character)
-            .await
-            .context("Failed to save instance data")?;
+        sqlx::query::<sqlx::Postgres>(
+            r#"UPDATE characters.instance SET data = $1 WHERE id = $2 AND map = $3"#,
+        )
+        .bind(&data)
+        .bind(i64::from(instance_id))
+        .bind(i64::from(map_id))
+        .execute(&databases.character)
+        .await
+        .context("Failed to save instance data")?;
 
         Ok(())
     }
@@ -269,12 +271,12 @@ impl InstanceMgr {
         reset_time: u64,
     ) -> Result<()> {
         // Save to database
-        sqlx::query(
-            r#"REPLACE INTO character_instance (guid, instance, permanent, extend) VALUES (?, ?, ?, 0)"#
+        sqlx::query::<sqlx::Postgres>(
+            r#"INSERT INTO characters.character_instance (guid, instance, permanent, extend) VALUES ($1, $2, $3, 0) ON CONFLICT (guid, instance) DO UPDATE SET permanent = EXCLUDED.permanent, extend = EXCLUDED.extend"#
         )
-        .bind(player_guid.low())
-        .bind(instance_id)
-        .bind(if permanent { 1u8 } else { 0u8 })
+        .bind(i64::from(player_guid.low()))
+        .bind(i64::from(instance_id))
+        .bind(if permanent { 1i16 } else { 0i16 })
         .execute(&databases.character)
         .await
         .context("Failed to bind player to instance")?;
@@ -308,12 +310,12 @@ impl InstanceMgr {
         _reset_time: u64,
     ) -> Result<()> {
         // Save to database (uses leader_guid as per vanilla schema)
-        sqlx::query(
-            r#"REPLACE INTO group_instance (leader_guid, instance, permanent) VALUES (?, ?, ?)"#,
+        sqlx::query::<sqlx::Postgres>(
+            r#"INSERT INTO characters.group_instance (leader_guid, instance, permanent) VALUES ($1, $2, $3) ON CONFLICT (leader_guid, instance) DO UPDATE SET permanent = EXCLUDED.permanent"#,
         )
-        .bind(leader_guid.low())
-        .bind(instance_id)
-        .bind(if permanent { 1u8 } else { 0u8 })
+        .bind(i64::from(leader_guid.low()))
+        .bind(i64::from(instance_id))
+        .bind(if permanent { 1i16 } else { 0i16 })
         .execute(&databases.character)
         .await
         .context("Failed to bind group to instance")?;
@@ -353,12 +355,14 @@ impl InstanceMgr {
         _method: InstanceResetMethod,
     ) -> Result<()> {
         // Delete instance from database
-        sqlx::query(r#"DELETE FROM instance WHERE id = ? AND map = ?"#)
-            .bind(instance_id)
-            .bind(map_id)
-            .execute(&databases.character)
-            .await
-            .context("Failed to delete instance")?;
+        sqlx::query::<sqlx::Postgres>(
+            r#"DELETE FROM characters.instance WHERE id = $1 AND map = $2"#,
+        )
+        .bind(i64::from(instance_id))
+        .bind(i64::from(map_id))
+        .execute(&databases.character)
+        .await
+        .context("Failed to delete instance")?;
 
         // Remove from cache
         {
@@ -418,31 +422,32 @@ impl InstanceMgr {
         databases: &Databases,
         player_guid: ObjectGuid,
     ) -> Result<HashMap<u32, InstanceBinding>> {
-        let rows =
-            sqlx::query(r#"SELECT instance, permanent FROM character_instance WHERE guid = ?"#)
-                .bind(player_guid.low())
-                .fetch_all(&databases.character)
-                .await
-                .context("Failed to query player instance bindings")?;
+        let rows = sqlx::query::<sqlx::Postgres>(
+            r#"SELECT instance, permanent FROM characters.character_instance WHERE guid = $1"#,
+        )
+        .bind(i64::from(player_guid.low()))
+        .fetch_all(&databases.character)
+        .await
+        .context("Failed to query player instance bindings")?;
 
         let mut bindings = HashMap::new();
         for row in rows {
-            let instance_id: u32 = row.get(0);
-            let permanent: u8 = row.get(1);
+            let instance_id = row.get::<i64, _>(0) as u32;
+            let permanent = row.get::<i16, _>(1);
 
             // Load instance to get map_id and reset_time
             // TODO: This is inefficient, should join with instance table
             // For now, we'll need to query instance table separately
-            let instance_row = sqlx::query(
-                r#"SELECT map, UNIX_TIMESTAMP(resettime) as resettime FROM instance WHERE id = ?"#,
+            let instance_row = sqlx::query::<sqlx::Postgres>(
+                r#"SELECT map, reset_time FROM characters.instance WHERE id = $1"#,
             )
-            .bind(instance_id)
+            .bind(i64::from(instance_id))
             .fetch_optional(&databases.character)
             .await
             .context("Failed to query instance")?;
 
             if let Some(inst_row) = instance_row {
-                let map_id: u32 = inst_row.get(0);
+                let map_id = inst_row.get::<i64, _>(0) as u32;
                 let reset_time: i64 = inst_row.get(1);
 
                 bindings.insert(
@@ -473,27 +478,30 @@ impl InstanceMgr {
         leader_guid: ObjectGuid,
     ) -> Result<HashMap<u32, InstanceBinding>> {
         // Group bindings use leader_guid in vanilla schema
-        let rows =
-            sqlx::query(r#"SELECT instance, permanent FROM group_instance WHERE leader_guid = ?"#)
-                .bind(leader_guid.low())
-                .fetch_all(&databases.character)
-                .await
-                .context("Failed to query group instance bindings")?;
+        let rows = sqlx::query::<sqlx::Postgres>(
+            r#"SELECT instance, permanent FROM characters.group_instance WHERE leader_guid = $1"#,
+        )
+        .bind(i64::from(leader_guid.low()))
+        .fetch_all(&databases.character)
+        .await
+        .context("Failed to query group instance bindings")?;
 
         let mut bindings = HashMap::new();
         for row in rows {
-            let instance_id: u32 = row.get(0);
-            let permanent: u8 = row.get(1);
+            let instance_id = row.get::<i64, _>(0) as u32;
+            let permanent = row.get::<i16, _>(1);
 
             // Load instance to get map_id and reset_time
-            let instance_row = sqlx::query(r#"SELECT map, reset_time FROM instance WHERE id = ?"#)
-                .bind(instance_id)
-                .fetch_optional(&databases.character)
-                .await
-                .context("Failed to query instance")?;
+            let instance_row = sqlx::query::<sqlx::Postgres>(
+                r#"SELECT map, reset_time FROM characters.instance WHERE id = $1"#,
+            )
+            .bind(i64::from(instance_id))
+            .fetch_optional(&databases.character)
+            .await
+            .context("Failed to query instance")?;
 
             if let Some(inst_row) = instance_row {
-                let map_id: u32 = inst_row.get(0);
+                let map_id = inst_row.get::<i64, _>(0) as u32;
                 let reset_time: i64 = inst_row.get(1);
 
                 bindings.insert(
@@ -827,18 +835,22 @@ impl InstanceMgr {
         instance_id: u32,
     ) -> Result<()> {
         // Remove all player bindings for this instance
-        sqlx::query(r#"DELETE FROM character_instance WHERE instance = ?"#)
-            .bind(instance_id)
-            .execute(&databases.character)
-            .await
-            .context("Failed to unbind players from instance")?;
+        sqlx::query::<sqlx::Postgres>(
+            r#"DELETE FROM characters.character_instance WHERE instance = $1"#,
+        )
+        .bind(i64::from(instance_id))
+        .execute(&databases.character)
+        .await
+        .context("Failed to unbind players from instance")?;
 
         // Remove all group bindings for this instance
-        sqlx::query(r#"DELETE FROM group_instance WHERE instance = ?"#)
-            .bind(instance_id)
-            .execute(&databases.character)
-            .await
-            .context("Failed to unbind groups from instance")?;
+        sqlx::query::<sqlx::Postgres>(
+            r#"DELETE FROM characters.group_instance WHERE instance = $1"#,
+        )
+        .bind(i64::from(instance_id))
+        .execute(&databases.character)
+        .await
+        .context("Failed to unbind groups from instance")?;
 
         // Clear from cache
         {
