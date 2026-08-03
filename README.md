@@ -29,8 +29,7 @@ podman compose up -d postgres
 cargo run -p oxcore-db --bin db -- pg migrate
 ```
 
-The historical MySQL migrations in `sql/migrations/` and MySQL base dumps in `sql/base/` are
-source reference only. To reset a development database, apply the PostgreSQL schema and base-data
+To reset a development database, apply the PostgreSQL schema and base-data
 migrations in one command:
 
 ```bash
