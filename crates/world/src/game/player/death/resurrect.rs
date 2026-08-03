@@ -23,7 +23,7 @@ pub enum ResurrectionMethod {
     PlayerSpell,
     /// Self-resurrection via Warlock Soulstone or Shaman Reincarnation.
     /// Result: Ability-defined HP/mana, no sickness.
-    SelfResurrection,
+    SelfResurrection { health_pct: u8 },
     /// Battleground auto-resurrection on the 30-second wave timer.
     /// Result: Full HP/mana, no sickness, no durability loss.
     Battleground,
@@ -40,6 +40,29 @@ impl ResurrectionMethod {
     pub fn applies_extra_durability_loss(&self) -> bool {
         matches!(self, ResurrectionMethod::SpiritHealer)
     }
+}
+
+/// Execute a self-resurrection (Soulstone, Reincarnation, Twisting Nether).
+///
+/// Called when the caster's own resurrection spell resolves
+/// (SPELL_EFFECT_SELF_RESURRECT). Restores health/mana to the
+/// spell-defined percentage. No sickness, no extra durability loss.
+pub fn resurrect_self(
+    state: &mut DeathSystemState,
+    max_health: u32,
+    max_mana: u32,
+    health_pct: u8,
+) -> (u32, u32) {
+    state.death_state = DeathState::JustAlived;
+    state.death_timer_ms = 0;
+    state.corpse_guid = None;
+    state.resurrection_data = None;
+
+    let pct = health_pct.min(100) as f32 / 100.0;
+    let health = (max_health as f32 * pct) as u32;
+    let mana = (max_mana as f32 * pct) as u32;
+
+    (health.max(1), mana)
 }
 
 /// Execute a corpse-run resurrection.

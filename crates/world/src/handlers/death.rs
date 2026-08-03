@@ -15,7 +15,7 @@ use crate::World;
 use anyhow::Result;
 use oxcore_db::database::characters::PgCharacterRepository;
 use oxcore_db::database::Databases;
-use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 use std::sync::Arc;
 use tracing::{debug, warn};
 
@@ -71,8 +71,10 @@ pub async fn handle_reclaim_corpse(
 /// Sent when the player accepts or declines a resurrection offer.
 ///
 /// Packet structure:
-///   resurrector_guid: u64
-///   accept:           u8 (0 = decline, 1 = accept)
+///   resurrector_guid: u64 (vanilla) / packed guid128 (modern)
+///   accept:           u8 on vanilla (0 = decline, 1 = accept); the modern
+///                     client sends this as a full u32 `Response` field
+///                     (`SpellPackets.cs` in the real client) rather than u8.
 pub async fn handle_resurrect_response(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -85,7 +87,11 @@ pub async fn handle_resurrect_response(
 
     let resurrector_guid = packet.read_guid_for(session.protocol());
 
-    let accept = packet.read_u8().unwrap_or(0) != 0;
+    let accept = if session.protocol() == oxcore_shared::protocol::Protocol::Modern {
+        packet.read_u32().unwrap_or(0) != 0
+    } else {
+        packet.read_u8().unwrap_or(0) != 0
+    };
 
     if let Some(resurrector) = resurrector_guid {
         world
@@ -223,10 +229,10 @@ pub async fn handle_area_spirit_healer_query(
     // this from the battleground's wave timer. For now, return a fixed 30s.
     const WAVE_INTERVAL_MS: u32 = 30_000;
 
-    let mut reply = WorldPacket::new(Opcode::SMSG_AREA_SPIRIT_HEALER_TIME);
-    reply.write_u64(healer_guid.raw());
-    reply.write_u32(WAVE_INTERVAL_MS);
-    session.send_packet(reply)?;
+    session.send_msg(oxcore_shared::messages::death::SmsgAreaSpiritHealerTime {
+        healer_guid,
+        time_left_ms: WAVE_INTERVAL_MS,
+    })?;
     Ok(())
 }
 
@@ -252,6 +258,100 @@ pub async fn handle_area_spirit_healer_queue(
     // Delegate to DeathSystem. The real BG wave system (Phase 8) will consume
     // this queue on its 30s timer. For now we just mark the player queued.
     world.systems.death.queue_for_spirit_healer(player_guid);
+    Ok(())
+}
+
+/// Handle MSG_CORPSE_QUERY (0x0216, vanilla only)
+///
+/// The client asks "where's my corpse" (e.g. for the death-screen map arrow
+/// when the corpse is off-screen or on another continent). Bidirectional
+/// opcode with an empty request body; hand-built directly since it predates
+/// the shared-message system and the modern client uses an entirely
+/// different opcode pair (see `handle_query_corpse_location_from_client`).
+///
+/// Reply structure:
+///   found: u8
+///   if found: map_id: i32, x/y/z: f32, corpse_map_id: i32
+pub async fn handle_corpse_query(
+    session: &WorldSession,
+    _packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = match session.player_guid() {
+        Some(guid) => guid,
+        None => return Ok(()),
+    };
+
+    let corpse = world
+        .systems
+        .player
+        .manager()
+        .with_player(player_guid, |player| {
+            player.death.corpse_position.zip(player.death.corpse_map_id)
+        })
+        .flatten();
+
+    let mut reply = WorldPacket::new(Opcode::MSG_CORPSE_QUERY);
+    match corpse {
+        Some((pos, map_id)) => {
+            reply.write_u8(1);
+            reply.write_i32(map_id as i32);
+            reply.write_f32(pos.x);
+            reply.write_f32(pos.y);
+            reply.write_f32(pos.z);
+            reply.write_i32(map_id as i32);
+        }
+        None => {
+            reply.write_u8(0);
+        }
+    }
+    session.send_packet(reply)?;
+    Ok(())
+}
+
+/// Handle CMSG_QUERY_CORPSE_LOCATION_FROM_CLIENT (modern only)
+///
+/// Modern equivalent of MSG_CORPSE_QUERY — a dedicated request/reply pair
+/// instead of vanilla's parameterless bidirectional opcode.
+///
+/// Packet structure: player_guid (packed guid128) — always the caller's own
+/// corpse in this implementation, so the field is read and discarded.
+pub async fn handle_query_corpse_location_from_client(
+    session: &WorldSession,
+    _packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = match session.player_guid() {
+        Some(guid) => guid,
+        None => return Ok(()),
+    };
+
+    let corpse = world
+        .systems
+        .player
+        .manager()
+        .with_player(player_guid, |player| {
+            player.death.corpse_position.zip(player.death.corpse_map_id)
+        })
+        .flatten();
+
+    let reply = match corpse {
+        Some((pos, map_id)) => oxcore_shared::messages::death::SmsgCorpseLocation {
+            valid: true,
+            player_guid,
+            map_id: map_id as i32,
+            position: pos,
+            transport_guid: ObjectGuid::empty(),
+        },
+        None => oxcore_shared::messages::death::SmsgCorpseLocation {
+            valid: false,
+            player_guid,
+            map_id: 0,
+            position: Position::new(0.0, 0.0, 0.0, 0.0),
+            transport_guid: ObjectGuid::empty(),
+        },
+    };
+    session.send_msg(reply)?;
     Ok(())
 }
 

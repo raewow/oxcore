@@ -29,7 +29,6 @@ use oxcore_shared::protocol::update_fields::{
 };
 use oxcore_shared::protocol::ObjectGuid;
 use oxcore_shared::protocol::Position;
-use oxcore_shared::protocol::{Opcode, WorldPacket};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tracing::{debug, info, warn};
@@ -522,6 +521,39 @@ impl DeathSystem {
         Ok(())
     }
 
+    /// Handle a self-resurrection (Soulstone, Reincarnation, Twisting Nether).
+    ///
+    /// Called by `effect_self_resurrect` when the resolving spell targets a
+    /// dead caster. Routes through the same `resurrect_player` funnel as
+    /// every other resurrection method so the ghost flag/aura, mana, run
+    /// speed, water walking, and corpse are all cleared consistently.
+    pub fn handle_self_resurrect(
+        &self,
+        player_guid: ObjectGuid,
+        health_pct: u8,
+        world: &World,
+    ) -> Result<()> {
+        let is_dead = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| player.stats.health == 0)
+            .unwrap_or(false);
+
+        if !is_dead {
+            return Ok(());
+        }
+
+        self.resurrect_player(
+            player_guid,
+            ResurrectionMethod::SelfResurrection { health_pct },
+            world,
+        )?;
+
+        info!("Player {:?} self-resurrected at {}% health", player_guid, health_pct);
+        Ok(())
+    }
+
     /// Offer a resurrection to a dead player (called by spell system).
     ///
     /// `causes_sickness` warns the client that accepting will apply
@@ -786,19 +818,14 @@ impl DeathSystem {
             }
         };
 
-        // SMSG_TRANSFER_PENDING
-        let mut transfer = WorldPacket::new(Opcode::SMSG_TRANSFER_PENDING);
-        transfer.write_u32(dest_map);
-        session.send_packet(transfer)?;
+        let old_position = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| player.movement.position)
+            .unwrap_or(dest_pos);
 
-        // SMSG_NEW_WORLD
-        let mut new_world = WorldPacket::new(Opcode::SMSG_NEW_WORLD);
-        new_world.write_u32(dest_map);
-        new_world.write_f32(dest_pos.x);
-        new_world.write_f32(dest_pos.y);
-        new_world.write_f32(dest_pos.z);
-        new_world.write_f32(dest_pos.o);
-        session.send_packet(new_world)?;
+        session.send_far_teleport(old_position, dest_map, dest_pos)?;
 
         // Store pending teleport so worldport_ack handler completes it
         session.set_pending_teleport(Some((dest_map, 0, dest_pos)));
@@ -811,12 +838,26 @@ impl DeathSystem {
         &self,
         player_guid: ObjectGuid,
         is_pvp_death: bool,
-        _death_position: Position,
-        _map_id: u32,
+        death_position: Position,
+        map_id: u32,
         _zone_id: u32,
         _race: u8,
         world: &World,
     ) -> Result<()> {
+        // SMSG_DEATH_RELEASE_LOC — modern-only. Lets the client render a
+        // corpse pointer immediately instead of waiting for a
+        // CMSG_QUERY_CORPSE_LOCATION_FROM_CLIENT round trip. Vanilla has no
+        // equivalent opcode, so this must only go to modern sessions —
+        // `to_vanilla` on this message is a stub, never a real body.
+        if let Some(session) = world.session_mgr.get_session_by_player(player_guid) {
+            if session.protocol() == oxcore_shared::protocol::Protocol::Modern {
+                session.send_msg(oxcore_shared::messages::death::SmsgDeathReleaseLoc {
+                    map_id: map_id as i32,
+                    position: death_position,
+                })?;
+            }
+        }
+
         // SMSG_CORPSE_RECLAIM_DELAY — greys out "Resurrect" button.
         // Use the escalating-delay ladder based on the player's recent-death
         // window: 30s / 60s / 120s depending on how recently
@@ -894,8 +935,17 @@ impl DeathSystem {
                             (max_health / 2, max_mana / 2, None, None)
                         }
                     }
-                    _ => {
-                        // Other methods not yet implemented
+                    ResurrectionMethod::SelfResurrection { health_pct } => {
+                        let (h, m) = resurrect::resurrect_self(
+                            &mut player.death,
+                            max_health,
+                            max_mana,
+                            health_pct,
+                        );
+                        (h, m, None, None)
+                    }
+                    ResurrectionMethod::Battleground => {
+                        // Not yet implemented (mass-resurrect wave, Phase 8).
                         (max_health / 2, max_mana / 2, None, None)
                     }
                 };

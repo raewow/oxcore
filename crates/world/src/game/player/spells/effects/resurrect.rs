@@ -110,41 +110,22 @@ pub async fn effect_resurrect(input: &EffectInput, world: &World) -> Result<Effe
 
 /// SPELL_EFFECT_SELF_RESURRECT (94)
 ///
-/// Self-resurrection (Soulstone, Reincarnation, etc.).
+/// Self-resurrection (Soulstone, Reincarnation, etc.). Routes through
+/// `DeathSystem::handle_self_resurrect` so the ghost flag/aura, mana, run
+/// speed, water walking, and corpse are cleared the same way every other
+/// resurrection method clears them — a caster resurrected only by setting
+/// `stats.health` directly would be left stuck flagged as a ghost.
 pub async fn effect_self_resurrect(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = input.caster_guid;
-
-    // Check if caster is dead
-    let is_dead = world
-        .systems
-        .player
-        .manager()
-        .with_player(target_guid, |player| player.stats.health == 0)
-        .unwrap_or(false);
-
-    if !is_dead {
-        return Ok(EffectResult::empty());
-    }
-
-    // Resurrect at percentage of max health
     let health_pct = input.base_value.max(1).min(100) as u8;
 
-    world
+    if let Err(e) = world
         .systems
-        .player
-        .manager()
-        .with_player_mut(target_guid, |player| {
-            let new_health = (player.stats.max_health as f32 * health_pct as f32 / 100.0) as u32;
-            player.stats.health = new_health.max(1);
-
-            tracing::debug!(
-                "Self-resurrect: {} self-resurrected at {}% health ({}/{})",
-                player.name,
-                health_pct,
-                player.stats.health,
-                player.stats.max_health
-            );
-        });
+        .death
+        .handle_self_resurrect(target_guid, health_pct, world)
+    {
+        tracing::warn!("handle_self_resurrect failed: {}", e);
+    }
 
     Ok(EffectResult::empty())
 }

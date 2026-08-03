@@ -225,10 +225,10 @@ pub async fn handle_gossip_hello(
     // Spirit guides send the battleground resurrection-wave timer when greeted.
     const NPC_FLAG_SPIRITGUIDE: u32 = 0x00000040;
     if (npc_flags & NPC_FLAG_SPIRITGUIDE) != 0 {
-        let mut reply = WorldPacket::new(Opcode::SMSG_AREA_SPIRIT_HEALER_TIME);
-        reply.write_u64(npc_guid.raw());
-        reply.write_u32(0);
-        session.send_packet(reply)?;
+        session.send_msg(oxcore_shared::messages::death::SmsgAreaSpiritHealerTime {
+            healer_guid: npc_guid,
+            time_left_ms: 0,
+        })?;
     }
 
     // Spirit healer: NPC_FLAG_SPIRITHEALER = 0x20. When a dead ghost player
@@ -251,10 +251,9 @@ pub async fn handle_gossip_hello(
                 "Spirit healer interaction: player {:?} (ghost) -> NPC {:?}, sending SMSG_SPIRIT_HEALER_CONFIRM",
                 player_guid, npc_guid
             );
-            let mut confirm = WorldPacket::new(Opcode::SMSG_SPIRIT_HEALER_CONFIRM);
-            // Payload: the spirit healer's full GUID (8 bytes)
-            confirm.write_u64(npc_guid.raw());
-            session.send_packet(confirm)?;
+            session.send_msg(oxcore_shared::messages::death::SmsgSpiritHealerConfirm {
+                healer_guid: npc_guid,
+            })?;
             return Ok(());
         }
     }

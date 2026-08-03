@@ -381,6 +381,30 @@ impl WorldSession {
         *self.pending_teleport.write() = None;
     }
 
+    /// Send the two-packet cross-map teleport handshake (SMSG_TRANSFER_PENDING +
+    /// SMSG_NEW_WORLD). The client answers with MSG_MOVE_WORLDPORT_ACK once the
+    /// destination map has loaded.
+    ///
+    /// Every far-teleport call site (area triggers, GM `.tele`, portal/hearthstone
+    /// spells, graveyard release) needs this same handshake correctly encoded for
+    /// both protocols — hand-building these two packets per call site left every
+    /// one of them silently dropped for modern (1.14) sessions, since their vanilla-only
+    /// bodies went through the plain [`Self::send_packet`] guard. Use this instead of
+    /// constructing the packets directly.
+    pub fn send_far_teleport(
+        &self,
+        old_position: Position,
+        dest_map: u32,
+        dest_pos: Position,
+    ) -> anyhow::Result<()> {
+        self.send_msg(oxcore_shared::messages::movement::SmsgTransferPending {
+            dest_map,
+            old_position,
+        })?;
+        self.send_msg(oxcore_shared::messages::movement::SmsgNewWorld { dest_map, dest_pos })?;
+        Ok(())
+    }
+
     /// Set the destination for a same-map teleport awaiting MSG_MOVE_TELEPORT_ACK.
     pub fn set_pending_near_teleport(&self, position: Option<Position>) {
         *self.pending_near_teleport.write() = position;

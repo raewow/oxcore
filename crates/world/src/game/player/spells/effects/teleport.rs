@@ -103,11 +103,13 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
         }
     };
 
-    let (current_map, current_instance_id) = world
+    let (current_map, current_instance_id, current_position) = world
         .systems
         .player
         .manager()
-        .with_player(target_guid, |player| (player.map_id, player.instance_id))
+        .with_player(target_guid, |player| {
+            (player.map_id, player.instance_id, player.movement.position)
+        })
         .ok_or_else(|| anyhow::anyhow!("Player not found for teleport"))?;
 
     if current_map == dest_map && current_instance_id == 0 {
@@ -133,18 +135,7 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
     }
 
     // Cross-map teleports use the far-transfer handshake.
-    let mut transfer_packet = WorldPacket::new(Opcode::SMSG_TRANSFER_PENDING);
-    transfer_packet.write_u32(dest_map);
-    session.send_packet(transfer_packet)?;
-
-    // Send SMSG_NEW_WORLD with destination
-    let mut new_world_packet = WorldPacket::new(Opcode::SMSG_NEW_WORLD);
-    new_world_packet.write_u32(dest_map);
-    new_world_packet.write_f32(dest_pos.x);
-    new_world_packet.write_f32(dest_pos.y);
-    new_world_packet.write_f32(dest_pos.z);
-    new_world_packet.write_f32(dest_pos.o);
-    session.send_packet(new_world_packet)?;
+    session.send_far_teleport(current_position, dest_map, dest_pos)?;
 
     // Store pending teleport for worldport ACK handler (instance_id 0 for all portal teleports)
     session.set_pending_teleport(Some((dest_map, 0, dest_pos)));

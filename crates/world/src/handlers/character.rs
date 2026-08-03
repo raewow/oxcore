@@ -469,6 +469,41 @@ pub async fn handle_player_login_with_guid(
                     player.death.corpse_map_id = Some(row.map);
                 });
             }
+        } else if character.health == 0 {
+            // Died but never released spirit (still on the death screen,
+            // corpse not yet reclaimed) — PLAYER_FLAGS_GHOST isn't set for
+            // this state, so it isn't caught by the branch above. Without
+            // this, a player who disconnects mid-death-screen would reload
+            // as Alive with 0 health, an inconsistent state the reference
+            // core never produces since it persists death state directly.
+            // `StatsSystem::on_player_login` (called above, before saved health
+            // is known) unconditionally heals every login to full — undo that
+            // here so a dead player doesn't reload standing at max health
+            // while still flagged Corpse.
+            use crate::game::player::death::state::DeathState;
+            world.managers.player_mgr.with_player_mut(guid, |player| {
+                player.death.death_state = DeathState::Corpse;
+                player.death.death_expire_time = character_death_expire_time;
+                player.stats.health = 0;
+            });
+
+            use oxcore_db::database::characters::repositories::CorpseRepository;
+            let char_db = Arc::new(databases.character.clone());
+            let corpse_repo = CorpseRepository::new(char_db);
+            if let Ok(Some(row)) = corpse_repo.find_for_player(guid.counter()).await {
+                let corpse_guid = oxcore_shared::protocol::ObjectGuid::new_corpse(row.guid);
+                let corpse_pos = oxcore_shared::protocol::Position::new(
+                    row.position_x,
+                    row.position_y,
+                    row.position_z,
+                    row.orientation,
+                );
+                world.managers.player_mgr.with_player_mut(guid, |player| {
+                    player.death.corpse_guid = Some(corpse_guid);
+                    player.death.corpse_position = Some(corpse_pos);
+                    player.death.corpse_map_id = Some(row.map);
+                });
+            }
         } else {
             // Even for alive players, restore the reclaim-streak clock.
             world.managers.player_mgr.with_player_mut(guid, |player| {

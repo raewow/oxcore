@@ -801,6 +801,13 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_GETDEATHBINDZONE => {
                     death::handle_getdeathbindzone(session, packet, world).await?;
                 }
+                Opcode::MSG_CORPSE_QUERY => {
+                    death::handle_corpse_query(session, packet, world).await?;
+                }
+                Opcode::CMSG_QUERY_CORPSE_LOCATION_FROM_CLIENT => {
+                    death::handle_query_corpse_location_from_client(session, packet, world)
+                        .await?;
+                }
 
                 // Creature combat handlers (Phase 2)
                 Opcode::CMSG_ATTACKSWING => {

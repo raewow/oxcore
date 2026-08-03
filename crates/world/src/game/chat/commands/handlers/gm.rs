@@ -10,7 +10,7 @@ use crate::game::creature::movement::MoveType;
 use crate::game::player::movement::MovementControllerSender;
 use oxcore_shared::common::AccountType;
 use oxcore_shared::protocol::ObjectGuid;
-use oxcore_shared::protocol::{Opcode, Position, WorldPacket};
+use oxcore_shared::protocol::Position;
 
 /// Base movement speeds
 const BASE_RUN_SPEED: f32 = 7.0;
@@ -407,27 +407,16 @@ fn perform_teleport(
     dest: Position,
     location_name: &str,
 ) -> Result<String> {
-    let player_map = ctx
+    let old_position = ctx
         .world
         .managers
         .player_mgr
-        .with_player(ctx.player_guid, |p| p.map_id)
-        .unwrap_or(0);
+        .with_player(ctx.player_guid, |p| p.movement.position)
+        .unwrap_or(dest);
 
-    // SMSG_TRANSFER_PENDING (only when changing maps, but send always for GM
-    // teleport to guarantee the client enters the loading screen)
-    let mut transfer = WorldPacket::new(Opcode::SMSG_TRANSFER_PENDING);
-    transfer.write_u32(map_id);
-    ctx.session.send_packet(transfer)?;
-
-    // SMSG_NEW_WORLD
-    let mut new_world = WorldPacket::new(Opcode::SMSG_NEW_WORLD);
-    new_world.write_u32(map_id);
-    new_world.write_f32(dest.x);
-    new_world.write_f32(dest.y);
-    new_world.write_f32(dest.z);
-    new_world.write_f32(dest.o);
-    ctx.session.send_packet(new_world)?;
+    // SMSG_TRANSFER_PENDING + SMSG_NEW_WORLD (sent always for GM teleport,
+    // even same-map, to guarantee the client enters the loading screen)
+    ctx.session.send_far_teleport(old_position, map_id, dest)?;
 
     // Instance id 0 for GM teleport (continents)
     ctx.session.set_pending_teleport(Some((map_id, 0, dest)));

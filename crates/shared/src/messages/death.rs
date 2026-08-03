@@ -5,7 +5,7 @@
 use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
-use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
+use crate::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// SMSG_CORPSE_RECLAIM_DELAY (0x0269)
 ///
@@ -104,6 +104,105 @@ impl ToWorldPacket for SmsgSpiritHealerConfirm {
         let mut packet = WorldPacket::new(Opcode::SMSG_SPIRIT_HEALER_CONFIRM);
         packet.write_u64(self.healer_guid.raw());
         packet
+    }
+}
+
+/// SMSG_AREA_SPIRIT_HEALER_TIME
+///
+/// Reply to CMSG_AREA_SPIRIT_HEALER_QUERY: tells a ghost in a battleground
+/// how long until the spirit healer's next mass-resurrection wave.
+#[derive(Debug, Clone)]
+pub struct SmsgAreaSpiritHealerTime {
+    pub healer_guid: ObjectGuid,
+    pub time_left_ms: u32,
+}
+
+impl ToWorldPacket for SmsgAreaSpiritHealerTime {
+    /// `AreaSpiritHealerTime::Write` for build 42597: same two fields,
+    /// guid packed as guid128.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.healer_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(self.time_left_ms);
+        Some(writer.finish(Opcode::SMSG_AREA_SPIRIT_HEALER_TIME))
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_AREA_SPIRIT_HEALER_TIME);
+        packet.write_u64(self.healer_guid.raw());
+        packet.write_u32(self.time_left_ms);
+        packet
+    }
+}
+
+/// SMSG_CORPSE_LOCATION
+///
+/// Modern-only reply to `CMSG_QUERY_CORPSE_LOCATION_FROM_CLIENT` (the client
+/// asking "where's my corpse", e.g. for the minimap arrow when it's off
+/// render range). Vanilla answers the equivalent bidirectional
+/// `MSG_CORPSE_QUERY` with its own hand-built body instead of going through
+/// this shared-message path, since that opcode predates it.
+#[derive(Debug, Clone)]
+pub struct SmsgCorpseLocation {
+    pub valid: bool,
+    pub player_guid: ObjectGuid,
+    pub map_id: i32,
+    pub position: Position,
+    pub transport_guid: ObjectGuid,
+}
+
+impl ToWorldPacket for SmsgCorpseLocation {
+    /// `CorpseLocation::Write` for build 42597. `ActualMapID` and `MapID`
+    /// are both the corpse's map — we don't yet support corpses relocating
+    /// to a pseudo-map on instance conversion the way vmangos does.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_bit(self.valid);
+        writer.flush_bits();
+        let (p_high, p_low) = self.player_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(p_high, p_low);
+        writer.write_i32(self.map_id);
+        writer.write_f32(self.position.x);
+        writer.write_f32(self.position.y);
+        writer.write_f32(self.position.z);
+        writer.write_i32(self.map_id);
+        let (t_high, t_low) = self.transport_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(t_high, t_low);
+        Some(writer.finish(Opcode::SMSG_CORPSE_LOCATION))
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_CORPSE_LOCATION)
+    }
+}
+
+/// SMSG_DEATH_RELEASE_LOC
+///
+/// Modern-only: sent right after death so the client can render a corpse
+/// pointer immediately, without waiting for a `CMSG_QUERY_CORPSE_LOCATION_FROM_CLIENT`
+/// round trip. Vanilla has no equivalent — the corpse is simply a visible
+/// world object there. Callers must only send this to modern sessions;
+/// unlike most messages here, `to_vanilla` is a stub that is never meant to
+/// go on the wire (see `ToWorldPacket::to_vanilla` doc comment).
+#[derive(Debug, Clone)]
+pub struct SmsgDeathReleaseLoc {
+    pub map_id: i32,
+    pub position: Position,
+}
+
+impl ToWorldPacket for SmsgDeathReleaseLoc {
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_i32(self.map_id);
+        writer.write_f32(self.position.x);
+        writer.write_f32(self.position.y);
+        writer.write_f32(self.position.z);
+        Some(writer.finish(Opcode::SMSG_DEATH_RELEASE_LOC))
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_DEATH_RELEASE_LOC)
     }
 }
 

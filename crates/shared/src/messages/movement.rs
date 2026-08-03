@@ -6,6 +6,83 @@ use crate::protocol::guid::ObjectGuid as WorldObjectGuid;
 use crate::protocol::packet::WorldPacketGuidExt;
 use crate::protocol::{MovementInfo, ObjectGuid, Opcode, Position, WorldPacket};
 
+/// SMSG_TRANSFER_PENDING
+///
+/// First half of the cross-map teleport handshake: tells the client a
+/// teleport to `dest_map` is starting so it can show the loading screen.
+/// Followed by [`SmsgNewWorld`].
+#[derive(Debug, Clone)]
+pub struct SmsgTransferPending {
+    pub dest_map: u32,
+    /// Position on the map the player is leaving. Modern-only field.
+    pub old_position: Position,
+}
+
+impl ToWorldPacket for SmsgTransferPending {
+    /// `TransferPending::Write` for build 42597: adds the pre-teleport
+    /// position and two "has ship" / "has transfer spell" bits, both false
+    /// for every teleport path this server initiates (no transport-borne or
+    /// spell-triggered transfers yet).
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.dest_map);
+        writer.write_f32(self.old_position.x);
+        writer.write_f32(self.old_position.y);
+        writer.write_f32(self.old_position.z);
+        writer.write_bit(false); // Ship
+        writer.write_bit(false); // TransferSpellID
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_TRANSFER_PENDING))
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_TRANSFER_PENDING);
+        packet.write_u32(self.dest_map);
+        packet
+    }
+}
+
+/// SMSG_NEW_WORLD
+///
+/// Second half of the cross-map teleport handshake: gives the client the
+/// destination map/position. The client responds with
+/// MSG_MOVE_WORLDPORT_ACK once it has loaded the new map.
+#[derive(Debug, Clone)]
+pub struct SmsgNewWorld {
+    pub dest_map: u32,
+    pub dest_pos: Position,
+}
+
+impl ToWorldPacket for SmsgNewWorld {
+    /// `NewWorld::Write` for build 42597: adds a `Reason` field (always 0 —
+    /// none of our teleport paths need the client-side transition variants
+    /// Blizzard uses it for) and a `MovementOffset` Vector3 (always zero —
+    /// nothing in-flight needs adjusting across the port).
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.dest_map);
+        writer.write_f32(self.dest_pos.x);
+        writer.write_f32(self.dest_pos.y);
+        writer.write_f32(self.dest_pos.z);
+        writer.write_f32(self.dest_pos.o);
+        writer.write_u32(0); // Reason
+        writer.write_f32(0.0); // MovementOffset.x
+        writer.write_f32(0.0); // MovementOffset.y
+        writer.write_f32(0.0); // MovementOffset.z
+        Some(writer.finish(Opcode::SMSG_NEW_WORLD))
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_NEW_WORLD);
+        packet.write_u32(self.dest_map);
+        packet.write_f32(self.dest_pos.x);
+        packet.write_f32(self.dest_pos.y);
+        packet.write_f32(self.dest_pos.z);
+        packet.write_f32(self.dest_pos.o);
+        packet
+    }
+}
+
 /// SMSG_PONG - response to CMSG_PING
 pub struct SmsgPong {
     pub sequence: u32,

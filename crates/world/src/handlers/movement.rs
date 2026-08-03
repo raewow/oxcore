@@ -26,7 +26,7 @@ fn teleport_to_homebind(
     player_guid: ObjectGuid,
     world: &World,
 ) -> Result<()> {
-    let Some((map_id, position)) = world
+    let Some((map_id, position, old_position)) = world
         .managers
         .player_mgr
         .with_player(player_guid, |player| {
@@ -38,23 +38,14 @@ fn teleport_to_homebind(
                     z: player.homebind_z,
                     o: 0.0,
                 },
+                player.movement.position,
             )
         })
     else {
         return Ok(());
     };
 
-    let mut transfer = WorldPacket::new(Opcode::SMSG_TRANSFER_PENDING);
-    transfer.write_u32(map_id);
-    session.send_packet(transfer)?;
-
-    let mut new_world = WorldPacket::new(Opcode::SMSG_NEW_WORLD);
-    new_world.write_u32(map_id);
-    new_world.write_f32(position.x);
-    new_world.write_f32(position.y);
-    new_world.write_f32(position.z);
-    new_world.write_f32(position.o);
-    session.send_packet(new_world)?;
+    session.send_far_teleport(old_position, map_id, position)?;
 
     session.set_pending_teleport(Some((map_id, 0, position)));
     Ok(())

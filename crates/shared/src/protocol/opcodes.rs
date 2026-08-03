@@ -442,6 +442,14 @@ impl Opcode {
     pub const SMSG_SPIRIT_HEALER_CONFIRM: Opcode = Opcode { vanilla: 0x0222, modern: 0x270C }; // 546
     pub const CMSG_SPIRIT_HEALER_ACTIVATE: Opcode = Opcode { vanilla: 0x021C, modern: 0x34AF }; // 540
     pub const CMSG_SELF_RES: Opcode = Opcode { vanilla: 0x02B3, modern: 0x3530 }; // 691
+    // Corpse-location query. Vanilla uses the bidirectional MSG_CORPSE_QUERY
+    // above; the modern client instead splits it into a request/reply pair
+    // and additionally announces the corpse location unprompted right after
+    // death via SMSG_DEATH_RELEASE_LOC (no vanilla equivalent — vanilla
+    // relies on the corpse simply being visible in the world).
+    pub const CMSG_QUERY_CORPSE_LOCATION_FROM_CLIENT: Opcode = Opcode { modern: 0x3662, ..Opcode::NONE };
+    pub const SMSG_CORPSE_LOCATION: Opcode = Opcode { modern: 0x2648, ..Opcode::NONE };
+    pub const SMSG_DEATH_RELEASE_LOC: Opcode = Opcode { modern: 0x26CB, ..Opcode::NONE };
 
     // ============================================================================
     // NPC Interaction - Gossip
@@ -1554,6 +1562,12 @@ pub const ALL: &[(Opcode, &str)] = &[
         "CMSG_SPIRIT_HEALER_ACTIVATE",
     ),
     (Opcode::CMSG_SELF_RES, "CMSG_SELF_RES"),
+    (
+        Opcode::CMSG_QUERY_CORPSE_LOCATION_FROM_CLIENT,
+        "CMSG_QUERY_CORPSE_LOCATION_FROM_CLIENT",
+    ),
+    (Opcode::SMSG_CORPSE_LOCATION, "SMSG_CORPSE_LOCATION"),
+    (Opcode::SMSG_DEATH_RELEASE_LOC, "SMSG_DEATH_RELEASE_LOC"),
     (Opcode::CMSG_GOSSIP_HELLO, "CMSG_GOSSIP_HELLO"),
     (
         Opcode::CMSG_GOSSIP_SELECT_OPTION,
@@ -2525,8 +2539,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            656,
-            "expected 656 opcode constants; update this count deliberately when adding opcodes"
+            659,
+            "expected 659 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

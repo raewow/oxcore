@@ -18,7 +18,7 @@ use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
 use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
 
 /// Handle CMSG_AREATRIGGER — player enters an area trigger zone.
 ///
@@ -262,13 +262,20 @@ pub async fn handle_area_trigger(
         player_guid, dest_map, dest_instance_id
     );
 
-    // Send SMSG_TRANSFER_PENDING + SMSG_NEW_WORLD to initiate teleport
-    // Client will respond with MSG_MOVE_WORLDPORT_ACK when ready
+    // Send SMSG_TRANSFER_PENDING (cross-map only) + SMSG_NEW_WORLD to initiate
+    // teleport. Client will respond with MSG_MOVE_WORLDPORT_ACK when ready.
+    let old_position = Position {
+        x: player_x,
+        y: player_y,
+        z: player_z,
+        o: 0.0,
+    };
     if dest_map != player_map_id {
         info!("[AREATRIGGER] Sending SMSG_TRANSFER_PENDING (different map)");
-        let mut transfer_packet = WorldPacket::new(Opcode::SMSG_TRANSFER_PENDING);
-        transfer_packet.write_u32(dest_map);
-        session.send_packet(transfer_packet)?;
+        session.send_msg(oxcore_shared::messages::movement::SmsgTransferPending {
+            dest_map,
+            old_position,
+        })?;
         info!("[AREATRIGGER] SMSG_TRANSFER_PENDING sent successfully");
     } else {
         info!("[AREATRIGGER] Skipping SMSG_TRANSFER_PENDING (same map)");
@@ -278,13 +285,7 @@ pub async fn handle_area_trigger(
         "[AREATRIGGER] Sending SMSG_NEW_WORLD (map={}, pos={},{},{},{})",
         dest_map, dest_pos.x, dest_pos.y, dest_pos.z, dest_pos.o
     );
-    let mut new_world_packet = WorldPacket::new(Opcode::SMSG_NEW_WORLD);
-    new_world_packet.write_u32(dest_map);
-    new_world_packet.write_f32(dest_pos.x);
-    new_world_packet.write_f32(dest_pos.y);
-    new_world_packet.write_f32(dest_pos.z);
-    new_world_packet.write_f32(dest_pos.o);
-    session.send_packet(new_world_packet)?;
+    session.send_msg(oxcore_shared::messages::movement::SmsgNewWorld { dest_map, dest_pos })?;
     info!("[AREATRIGGER] SMSG_NEW_WORLD sent successfully");
 
     // Store teleport destination for worldport ACK handler to complete
