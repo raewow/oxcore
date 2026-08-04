@@ -716,6 +716,25 @@ impl InventorySystem {
                 // ignored by modern clients, leaving their bag count stale after looting a stack.
                 self.send_item_count_update(player_guid, existing_guid, new_count);
 
+                // A merge is just as much a "you received an item" event as creating a new stack,
+                // but this send used to only happen in the create-new-stack branch below. That left
+                // the loot chat message ("You receive item: X") and the client's toast/sound
+                // appearing only when the pickup didn't stack onto something already carried —
+                // functionally correct inventory, but random-looking feedback.
+                let push_result = SmsgItemPushResult {
+                    player_guid,
+                    received: 0,
+                    created: 0,
+                    show_in_chat: 1,
+                    bagslot: bag,
+                    item_entry: item_id,
+                    suffix_factor: 0,
+                    random_property_id: 0,
+                    count: add_count,
+                };
+                self.broadcast_mgr
+                    .send_msg_to_player(player_guid, push_result);
+
                 items_modified.push((existing_guid, new_count));
                 continue;
             }
