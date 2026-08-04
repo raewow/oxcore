@@ -171,7 +171,7 @@ pub struct CombatState {
     pub is_auto_attacking: bool,
     pub is_auto_shooting: bool,
 
-    /// Last swing error (0=OK, 1=not in range) - prevents packet spam
+    /// Last swing error (0=OK, 1=not in range, 2=bad facing) - prevents packet spam
     pub last_swing_error: u8,
 
     /// Diminishing returns state — tracks DR levels per group when CC is applied to this player

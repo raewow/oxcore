@@ -32,7 +32,7 @@ impl ToWorldPacket for SmsgSpellPrepare {
         WorldPacket::new(Opcode::SMSG_SPELL_PREPARE)
     }
 
-    /// Two packed GUID128s: `ClientCastID` then `ServerCastID`, per JimsProxy's `SpellPrepare`.
+    /// Two packed GUID128s: `ClientCastID` then `ServerCastID`.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
         let (high, low) = self.client_cast_id;
@@ -122,6 +122,7 @@ fn write_modern_spell_cast_data(
     cast_item_guid: Option<ObjectGuid>,
     spell_id: u32,
     spell_visual_id: u32,
+    cast_flags: u32,
     cast_time_ms: u32,
     target_guid: Option<ObjectGuid>,
     hit_targets: &[ObjectGuid],
@@ -142,7 +143,12 @@ fn write_modern_spell_cast_data(
 
     writer.write_i32(spell_id as i32);
     writer.write_u32(spell_visual_id); // SpellXSpellVisualID -- see above
-    writer.write_u32(0); // CastFlags
+    // CastFlags: forwarded straight from the vanilla flags word. Real modern servers always
+    // set CAST_FLAG_HAS_TRAJECTORY (0x02, the same bit vanilla calls CAST_FLAG_UNKNOWN2 and
+    // sets unconditionally too) on both SPELL_START and SPELL_GO; sending 0 here left the
+    // client with no cast flags at all, so it rendered the precast glow (driven by
+    // SpellXSpellVisualID) but never animated the ongoing cast.
+    writer.write_u32(cast_flags);
     writer.write_u32(0); // CastFlagsEx
     writer.write_u32(cast_time_ms);
 
@@ -267,13 +273,20 @@ impl ToWorldPacket for SmsgSpellStart {
             self.cast_item_guid,
             self.spell_id,
             self.spell_visual_id,
+            self.cast_flags as u32,
             self.cast_time_ms,
             self.target_guid,
             &[],
             &[],
             self.cast_sequence,
         );
-        Some(writer.finish(Opcode::SMSG_SPELL_START))
+        let packet = writer.finish(Opcode::SMSG_SPELL_START);
+        tracing::info!(
+            "[SMSG_SPELL_START modern] spell={} spell_visual_id={} caster={:?} target={:?} cast_flags=0x{:08X} cast_time={} packet_len={}",
+            self.spell_id, self.spell_visual_id, self.caster_guid, self.target_guid,
+            self.cast_flags, self.cast_time_ms, packet.data().as_ref().len()
+        );
+        Some(packet)
     }
 }
 
@@ -377,12 +390,18 @@ impl ToWorldPacket for SmsgSpellGo {
     /// short.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
+        let cast_flags = if self.cast_item_guid.is_some() {
+            self.cast_flags | CAST_FLAG_ITEM_CAST
+        } else {
+            self.cast_flags
+        };
         write_modern_spell_cast_data(
             &mut writer,
             self.caster_guid,
             self.cast_item_guid,
             self.spell_id,
             self.spell_visual_id,
+            cast_flags as u32,
             0, // SPELL_GO carries no cast time; the cast has already completed
             self.target_guid,
             &self.hit_targets,
@@ -391,7 +410,13 @@ impl ToWorldPacket for SmsgSpellGo {
         );
         writer.write_bit(false); // HasLogData
         writer.flush_bits();
-        Some(writer.finish(Opcode::SMSG_SPELL_GO))
+        let packet = writer.finish(Opcode::SMSG_SPELL_GO);
+        tracing::info!(
+            "[SMSG_SPELL_GO modern] spell={} spell_visual_id={} caster={:?} target={:?} cast_flags=0x{:08X} hits={} misses={} packet_len={}",
+            self.spell_id, self.spell_visual_id, self.caster_guid, self.target_guid,
+            cast_flags, self.hit_targets.len(), self.miss_targets.len(), packet.data().as_ref().len()
+        );
+        Some(packet)
     }
 }
 
@@ -1001,7 +1026,7 @@ impl SmsgCastResult {
 pub struct SmsgCastFailed {
     /// The cast identity this failure resolves. Must be the id the client's pending press was
     /// linked to: the server's own cast id if `SMSG_SPELL_PREPARE` was sent, or the client's own
-    /// cast id when rejecting before any PREPARE (see JimsProxy's `SendCastFailedWithoutPrepare`).
+    /// cast id when rejecting before any PREPARE was sent.
     pub cast_id: (u64, u64),
     pub spell_id: u32,
     pub failure_reason: u8,
@@ -1022,8 +1047,7 @@ impl ToWorldPacket for SmsgCastFailed {
     }
 
     /// `CastID(guid128) + SpellID(u32) + SpellXSpellVisualID(u32) + Reason(u32) + FailedArg1(i32) +
-    /// FailedArg2(i32)`, per JimsProxy's `CastFailed`. Both args are always written; absent ones are
-    /// `-1`.
+    /// FailedArg2(i32)`. Both args are always written; absent ones are `-1`.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
         let (high, low) = self.cast_id;
@@ -1969,7 +1993,7 @@ mod modern_spell_tests {
         use crate::protocol::bitbuf::BitReader;
 
         let sequence = next_cast_sequence();
-        let visual_id = 236_677u32; // Fireball 133's SpellXSpellVisualID, per JimsProxy's CSV
+        let visual_id = 236_677u32; // Fireball 133's real SpellXSpellVisualID
 
         let read_visual = |packet: &crate::protocol::WorldPacket| {
             let mut reader = BitReader::new(packet.contents());
@@ -2019,6 +2043,64 @@ mod modern_spell_tests {
 
         assert_eq!(read_visual(&start), visual_id);
         assert_eq!(read_visual(&go), visual_id);
+    }
+
+    /// `CastFlags` must reach the wire, not be zeroed. Real modern servers always set
+    /// `CAST_FLAG_HAS_TRAJECTORY` (0x02) on both messages -- the same bit vanilla calls
+    /// `CAST_FLAG_UNKNOWN2` and also sets unconditionally, so a real cast's flags word is never 0.
+    /// Sending 0 here left the client with no cast flags at all: it rendered the precast glow
+    /// (driven by `SpellXSpellVisualID`) but never animated the ongoing cast.
+    #[test]
+    fn the_cast_flags_are_forwarded_into_start_and_go() {
+        use crate::protocol::bitbuf::BitReader;
+
+        let sequence = next_cast_sequence();
+        const CAST_FLAG_HAS_TRAJECTORY: u16 = 0x0002;
+
+        let read_cast_flags = |packet: &crate::protocol::WorldPacket| {
+            let mut reader = BitReader::new(packet.contents());
+            for _ in 0..4 {
+                reader.read_packed_guid_128().expect("a leading GUID");
+            }
+            reader.read_u32().expect("SpellID");
+            reader.read_u32().expect("SpellXSpellVisualID");
+            reader.read_u32().expect("CastFlags")
+        };
+
+        let start = SmsgSpellStart {
+            caster_guid: caster(),
+            caster_guid_pack: caster(),
+            spell_id: 133,
+            spell_visual_id: 0,
+            cast_flags: CAST_FLAG_HAS_TRAJECTORY,
+            cast_time_ms: 0,
+            target_guid: None,
+            cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
+            cast_sequence: sequence,
+        }
+        .to_modern()
+        .expect("spell start must encode for modern");
+        let go = SmsgSpellGo {
+            caster_guid: caster(),
+            caster_guid_pack: caster(),
+            spell_id: 133,
+            spell_visual_id: 0,
+            cast_flags: CAST_FLAG_HAS_TRAJECTORY,
+            hit_targets: vec![],
+            miss_targets: vec![],
+            target_guid: None,
+            cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
+            cast_sequence: sequence,
+        }
+        .to_modern()
+        .expect("spell go must encode for modern");
+
+        assert_eq!(read_cast_flags(&start), CAST_FLAG_HAS_TRAJECTORY as u32);
+        assert_eq!(read_cast_flags(&go), CAST_FLAG_HAS_TRAJECTORY as u32);
     }
 
     /// A reflected miss carries an extra 4-bit result; every other reason does not. Both are inside

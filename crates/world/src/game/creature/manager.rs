@@ -127,6 +127,8 @@ pub struct CreatureTemplate {
     pub trainer_id: u32,     // Maps to npc_trainer_template.entry
     pub trainer_type: u8,    // 0=class, 1=mount, 2=tradeskill, 3=pet
     pub spells: [u32; 4],    // Spell IDs from creature_template spell1-4
+    pub gold_min: u32,       // Copper drop range; both 0 means no money drop
+    pub gold_max: u32,
 }
 
 /// Base stats from creature_classlevelstats table
@@ -536,6 +538,8 @@ impl CreatureManager {
                     checked_u32(row.spell_id3, "creature_template.spell_id3")?,
                     checked_u32(row.spell_id4, "creature_template.spell_id4")?,
                 ],
+                gold_min: checked_u32(row.gold_min, "creature_template.gold_min")?,
+                gold_max: checked_u32(row.gold_max, "creature_template.gold_max")?,
             };
             self.visuals.insert(
                 template.entry,

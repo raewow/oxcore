@@ -11,15 +11,6 @@ pub struct InventorySlotRow {
     pub item_guid: u32, // Item instance GUID
 }
 
-/// Information about a stackable slot for merging
-#[derive(Debug, Clone)]
-pub struct StackableSlotInfo {
-    pub item_guid: u32,
-    pub bag: u8,
-    pub slot: u8,
-    pub current_count: u32,
-}
-
 /// Trait abstraction for inventory repository operations.
 /// Enables dependency injection and mocking for tests.
 #[cfg_attr(any(test, feature = "testing"), mockall::automock)]
@@ -30,15 +21,6 @@ pub trait InventoryRepositoryTrait: Send + Sync {
     /// Load all inventory slots for a player
     /// Returns list of (bag, slot, item_guid) entries
     async fn load_player_inventory(&self, player_guid: u32) -> Result<Vec<InventorySlotRow>>;
-
-    /// Find stackable slots for an item (same item_id with count < max_stack)
-    /// Used for auto-stacking when adding items
-    async fn find_stackable_slots(
-        &self,
-        player_guid: u32,
-        item_id: u32,
-        max_stack: u32,
-    ) -> Result<Vec<StackableSlotInfo>>;
 
     /// Get player's current money
     async fn get_player_money(&self, player_guid: u32) -> Result<u32>;

@@ -45,6 +45,23 @@ impl Position {
         dy.atan2(dx)
     }
 
+    /// Is `other` within the frontal arc of width `arc` (radians, full width)
+    /// centered on this position's facing (`o`)? Mirrors TrinityCore's
+    /// `Position::HasInArc`, used to gate melee attacks on facing the target.
+    pub fn has_in_arc(&self, arc: f32, other: &Position) -> bool {
+        if self.x == other.x && self.y == other.y {
+            return true;
+        }
+        let mut diff = self.angle_to(other) - self.o;
+        while diff > std::f32::consts::PI {
+            diff -= 2.0 * std::f32::consts::PI;
+        }
+        while diff < -std::f32::consts::PI {
+            diff += 2.0 * std::f32::consts::PI;
+        }
+        diff.abs() <= arc / 2.0
+    }
+
     pub fn relocate(&mut self, x: f32, y: f32, z: f32, o: f32) {
         self.x = x;
         self.y = y;

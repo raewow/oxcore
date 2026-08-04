@@ -256,16 +256,6 @@ pub enum ChargeResult {
     DatabaseError(String),
 }
 
-/// Information about a stackable item slot for merging
-#[derive(Debug, Clone)]
-pub struct StackSlotInfo {
-    pub item_guid: ObjectGuid,
-    pub bag: u8,
-    pub slot: u8,
-    pub current_count: u32,
-    pub available_space: u32,
-}
-
 /// Item position for add operations
 #[derive(Debug, Clone, Copy)]
 pub struct ItemPosition {

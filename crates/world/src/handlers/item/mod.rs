@@ -11,6 +11,7 @@ use oxcore_shared::game::inventory::{
 };
 use oxcore_shared::messages::spells::next_cast_sequence;
 use oxcore_shared::messages::SmsgReadItemOk;
+use oxcore_shared::protocol::bitbuf::BitReader;
 use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
 
 const NPC_FLAG_BANKER: u32 = 0x0000_0100;
@@ -332,23 +333,73 @@ pub async fn handle_read_item(
     Ok(())
 }
 
+/// Parse CMSG_SWAP_ITEM's body, returning `(src_bag, src_slot, dst_bag, dst_slot)`.
+///
+/// Vanilla sends four plain bytes: dst_bag, dst_slot, src_bag, src_slot. The modern client's
+/// `SwapItem::Read` is a completely different shape (`ItemPackets.cpp` in the TrinityCore
+/// reference): an `InvUpdate` preamble (a 2-bit item count, byte-aligned, then that many
+/// `(ContainerSlot, Slot)` byte pairs the handler never actually uses beyond the count check),
+/// followed by `ContainerSlotB, ContainerSlotA, SlotB, SlotA` -- note B before A, and containers
+/// before slots, not paired. `HandleSwapItem` then treats A as the source and B as the
+/// destination. Reading this as four raw bytes (the vanilla layout) silently misaligns every
+/// field for a modern client, which is why moves looked broken rather than merely erroring.
+fn read_swap_item_slots(protocol: Protocol, packet: &mut WorldPacket) -> Result<(u8, u8, u8, u8)> {
+    match protocol {
+        Protocol::Vanilla => {
+            let dst_bag = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read dst bag"))?;
+            let dst_slot = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read dst slot"))?;
+            let src_bag = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read src bag"))?;
+            let src_slot = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read src slot"))?;
+            Ok((src_bag, src_slot, dst_bag, dst_slot))
+        }
+        Protocol::Modern => {
+            let mut reader = BitReader::new(packet.contents());
+            let item_count = reader
+                .read_bits(2)
+                .ok_or_else(|| anyhow!("Failed to read InvUpdate item count"))?;
+            reader.align();
+            for _ in 0..item_count {
+                reader
+                    .read_u8()
+                    .ok_or_else(|| anyhow!("Failed to read InvUpdate item"))?;
+                reader
+                    .read_u8()
+                    .ok_or_else(|| anyhow!("Failed to read InvUpdate item"))?;
+            }
+            let container_slot_b = reader
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read ContainerSlotB"))?;
+            let container_slot_a = reader
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read ContainerSlotA"))?;
+            let slot_b = reader
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read SlotB"))?;
+            let slot_a = reader
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read SlotA"))?;
+            let consumed = reader.consumed();
+            packet.advance(consumed);
+            Ok((container_slot_a, slot_a, container_slot_b, slot_b))
+        }
+    }
+}
+
 pub async fn handle_swap_item(
     session: &crate::core::session::WorldSession,
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let dst_bag = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read dst bag"))?;
-    let dst_slot = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read dst slot"))?;
-    let src_bag = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read src bag"))?;
-    let src_slot = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read src slot"))?;
+    let (src_bag, src_slot, dst_bag, dst_slot) =
+        read_swap_item_slots(session.protocol(), packet)?;
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
@@ -416,17 +467,55 @@ pub async fn handle_swap_item(
     Ok(())
 }
 
+/// Parse CMSG_SWAP_INV_ITEM's body, returning `(src_slot, dst_slot)`.
+///
+/// Same `InvUpdate` preamble as [`read_swap_item_slots`], but the modern client's
+/// `SwapInvItem::Read` follows it with just `Slot2` (destination) then `Slot1` (source) --
+/// destination before source, unlike vanilla's plain two-byte src-then-dst body.
+fn read_swap_inv_item_slots(protocol: Protocol, packet: &mut WorldPacket) -> Result<(u8, u8)> {
+    match protocol {
+        Protocol::Vanilla => {
+            let src_slot = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read src slot"))?;
+            let dst_slot = packet
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read dst slot"))?;
+            Ok((src_slot, dst_slot))
+        }
+        Protocol::Modern => {
+            let mut reader = BitReader::new(packet.contents());
+            let item_count = reader
+                .read_bits(2)
+                .ok_or_else(|| anyhow!("Failed to read InvUpdate item count"))?;
+            reader.align();
+            for _ in 0..item_count {
+                reader
+                    .read_u8()
+                    .ok_or_else(|| anyhow!("Failed to read InvUpdate item"))?;
+                reader
+                    .read_u8()
+                    .ok_or_else(|| anyhow!("Failed to read InvUpdate item"))?;
+            }
+            let slot2 = reader
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read Slot2"))?;
+            let slot1 = reader
+                .read_u8()
+                .ok_or_else(|| anyhow!("Failed to read Slot1"))?;
+            let consumed = reader.consumed();
+            packet.advance(consumed);
+            Ok((slot1, slot2))
+        }
+    }
+}
+
 pub async fn handle_swap_inv_item(
     session: &crate::core::session::WorldSession,
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let src_slot = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read src slot"))?;
-    let dst_slot = packet
-        .read_u8()
-        .ok_or_else(|| anyhow!("Failed to read dst slot"))?;
+    let (src_slot, dst_slot) = read_swap_inv_item_slots(session.protocol(), packet)?;
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,

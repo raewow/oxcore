@@ -2530,6 +2530,13 @@ impl QuestSystem {
             .map(|p| p.active_quests.iter().map(|q| q.quest_id).collect())
             .unwrap_or_default();
 
+        info!(
+            "[QUEST] handle_item_added: player={:?} item_id={} count={} active_quests={:?}",
+            player_guid, item_id, count, active_quests
+        );
+
+        let mut credited_any = false;
+
         for quest_id in active_quests {
             let Some(quest) = self.manager.get_quest_template(quest_id) else {
                 continue;
@@ -2574,6 +2581,8 @@ impl QuestSystem {
                     continue;
                 };
 
+                credited_any = true;
+
                 // Send SMSG_QUESTUPDATE_ADD_ITEM
                 let msg = SmsgQuestupdateAddItem {
                     item_id,
@@ -2598,6 +2607,13 @@ impl QuestSystem {
 
                 break; // Only one slot per quest per item
             }
+        }
+
+        if !credited_any {
+            info!(
+                "[QUEST] handle_item_added: player={:?} item_id={} count={} matched no active quest objective (no quest needs this item, already at max, or no item objectives)",
+                player_guid, item_id, count
+            );
         }
     }
 
@@ -3218,6 +3234,8 @@ mod tests {
             trainer_id: 0,
             trainer_type: 0,
             spells: [0; 4],
+            gold_min: 0,
+            gold_max: 0,
         }
     }
 

@@ -2,6 +2,7 @@ use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
 use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::Protocol;
 use oxcore_shared::protocol::WorldPacket;
 
 /// Handle CMSG_LOOT (0x015D)
@@ -59,9 +60,18 @@ pub async fn handle_loot_item(
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
-    let slot = packet
+    let wire_slot = packet
         .read_u8()
         .ok_or_else(|| anyhow::anyhow!("Failed to read slot"))?;
+
+    // The modern client sends a 1-based LootListID (see SmsgLootResponse::to_modern); our
+    // internal loot slots are 0-based. Vanilla's wire slot is genuinely 0-based already.
+    let slot = match session.protocol() {
+        Protocol::Modern => wire_slot
+            .checked_sub(1)
+            .ok_or_else(|| anyhow::anyhow!("Invalid loot slot 0 from modern client"))?,
+        Protocol::Vanilla => wire_slot,
+    };
 
     // Get what the player is looting
     let target_guid = world

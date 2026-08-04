@@ -113,13 +113,14 @@ impl LootManager {
         &self,
         source_guid: ObjectGuid,
         creature_entry: u32,
-        creature_level: u8,
+        gold_min: u32,
+        gold_max: u32,
         allowed_looters: Vec<ObjectGuid>,
     ) -> bool {
         let Some(table) = self.creature_loot_tables.get(&creature_entry) else {
             // No loot table - still create empty loot for gold
             let mut loot = Loot::new();
-            loot.gold = calculate_gold_drop(creature_level);
+            loot.gold = calculate_gold_drop(gold_min, gold_max);
             loot.allowed_looters = allowed_looters;
             loot.generated = true;
             self.active_loot.insert(source_guid, loot);
@@ -175,7 +176,7 @@ impl LootManager {
         }
 
         // Generate gold
-        loot.gold = calculate_gold_drop(creature_level);
+        loot.gold = calculate_gold_drop(gold_min, gold_max);
         loot.allowed_looters = allowed_looters;
         loot.generated = true;
 
@@ -314,60 +315,61 @@ impl LootManager {
             .unwrap_or_default()
     }
 
-    /// Look up an item by the slot the client sees, without marking it looted.
+    /// Resolve a client-visible slot to the underlying item's real (stable) slot.
     ///
-    /// Quest items are presented to the client with a slot offset equal to the number of
-    /// normal items, so we first check normal items. If not found, we subtract the offset
-    /// and check quest items — but only those already made visible to this player.
+    /// The client renumbers its loot list densely (0..N) over whatever is still unlooted and
+    /// visible to it, compacting locally each time an item is picked — it does not echo back a
+    /// slot that stays valid for the item's whole lifetime in the loot table. So the incoming
+    /// `display_slot` must be reinterpreted as "the Nth still-unlooted item, in the same order
+    /// [`crate::game::loot::system::LootSystem::send_loot_window`] listed them" (normal items
+    /// first in storage order, then visible quest items in storage order) rather than used as a
+    /// direct index into `items`/`quest_items`. Returns `(is_quest, real_slot)`.
+    fn resolve_display_slot(loot: &Loot, display_slot: u8, player: ObjectGuid) -> Option<(bool, u8)> {
+        let mut ordinal = display_slot as usize;
+
+        let unlooted_normal_count = loot.items.iter().filter(|i| !i.is_looted).count();
+        if ordinal < unlooted_normal_count {
+            let real_slot = loot
+                .items
+                .iter()
+                .filter(|i| !i.is_looted)
+                .nth(ordinal)
+                .map(|i| i.slot)?;
+            return Some((false, real_slot));
+        }
+        ordinal -= unlooted_normal_count;
+
+        let visible = loot.visible_quest_slots(player)?;
+        let real_slot = loot
+            .quest_items
+            .iter()
+            .filter(|i| !i.is_looted && visible.contains(&i.slot))
+            .nth(ordinal)
+            .map(|i| i.slot)?;
+        Some((true, real_slot))
+    }
+
+    /// Look up an item by the slot the client sees, without marking it looted.
     pub fn peek_item(&self, source: ObjectGuid, slot: u8, player: ObjectGuid) -> Option<LootItem> {
         let loot = self.active_loot.get(&source)?;
-
-        if let Some(item) = loot.get_item(slot) {
-            return Some(item.clone());
+        let (is_quest, real_slot) = Self::resolve_display_slot(&loot, slot, player)?;
+        if is_quest {
+            loot.get_quest_item(real_slot).cloned()
+        } else {
+            loot.get_item(real_slot).cloned()
         }
-
-        let normal_count = loot.items.len() as u8;
-        if slot < normal_count {
-            return None;
-        }
-
-        let quest_slot = slot - normal_count;
-        // Don't hand out a quest item the player was never shown
-        if !loot
-            .visible_quest_slots(player)
-            .is_some_and(|slots| slots.contains(&quest_slot))
-        {
-            return None;
-        }
-
-        loot.get_quest_item(quest_slot).cloned()
     }
 
     /// Mark the item at the client-visible slot as looted, using the same slot mapping
     /// as [`Self::peek_item`].
     pub fn loot_item(&self, source: ObjectGuid, slot: u8, player: ObjectGuid) -> Option<LootItem> {
         let mut loot = self.active_loot.get_mut(&source)?;
-
-        // Try normal items first
-        if let Some(item) = loot.loot_item(slot) {
-            return Some(item);
+        let (is_quest, real_slot) = Self::resolve_display_slot(&loot, slot, player)?;
+        if is_quest {
+            loot.loot_quest_item(real_slot)
+        } else {
+            loot.loot_item(real_slot)
         }
-
-        // Try quest items using offset slot
-        let normal_count = loot.items.len() as u8;
-        if slot < normal_count {
-            return None;
-        }
-
-        let quest_slot = slot - normal_count;
-        if !loot
-            .visible_quest_slots(player)
-            .is_some_and(|slots| slots.contains(&quest_slot))
-        {
-            return None;
-        }
-
-        loot.loot_quest_item(quest_slot)
     }
 
     /// Check if loot is empty
@@ -390,14 +392,20 @@ impl LootManager {
     }
 }
 
-/// Calculate gold drop based on creature level
-fn calculate_gold_drop(level: u8) -> u32 {
-    // Simple formula: base + level * multiplier + random variance
-    let base = 5u32;
-    let multiplier = 3u32;
-    let variance = rand::thread_rng().gen_range(0..=level as u32);
-
-    base + (level as u32 * multiplier) + variance
+/// Roll a gold drop from the creature's own `gold_min`/`gold_max` (creature_template).
+/// Many creatures (critters, most beasts) have both at 0 and drop no money at all —
+/// this used to be a flat level-based formula that ignored the template entirely, so
+/// every kill dropped copper regardless of what the source data said.
+fn calculate_gold_drop(gold_min: u32, gold_max: u32) -> u32 {
+    if gold_max == 0 {
+        return 0;
+    }
+    let (lo, hi) = if gold_min <= gold_max {
+        (gold_min, gold_max)
+    } else {
+        (gold_max, gold_min)
+    };
+    rand::thread_rng().gen_range(lo..=hi)
 }
 
 impl Default for LootManager {

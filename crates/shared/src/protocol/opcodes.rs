@@ -174,11 +174,11 @@ impl Opcode {
     pub const CMSG_TUTORIAL_CLEAR: Opcode = Opcode { vanilla: 0x00FF, ..Opcode::NONE }; // 255
     pub const CMSG_TUTORIAL_RESET: Opcode = Opcode { vanilla: 0x0100, ..Opcode::NONE }; // 256
     pub const CMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020B, modern: 0x3695 }; // 523
-    pub const SMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020C, modern: 0x26FF }; // 524
+    pub const SMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020C, modern: 0x2700 }; // 524
     pub const CMSG_REQUEST_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020A, modern: 0x3694 }; // 522
     pub const SMSG_UPDATE_ACCOUNT_DATA_COMPLETE: Opcode = Opcode { vanilla: 0x020D, ..Opcode::NONE }; // 525
     pub const SMSG_ACCOUNT_DATA_MD5: Opcode = Opcode { vanilla: 0x0209, ..Opcode::NONE }; // 521
-    pub const SMSG_ACCOUNT_DATA_TIMES: Opcode = Opcode { vanilla: 0x0209, modern: 0x2700 }; // 521
+    pub const SMSG_ACCOUNT_DATA_TIMES: Opcode = Opcode { vanilla: 0x0209, modern: 0x2701 }; // 521
 
     // ============================================================================
     // Query Responses
@@ -2628,10 +2628,10 @@ mod tests {
 
     /// Modern values shared by more than one constant.
     ///
-    /// All three are the modern-side shadow of a vanilla duplicate already listed above — the
+    /// Both are the modern-side shadow of a vanilla duplicate already listed above — the
     /// generator resolved both spellings to the same modern opcode, which is correct. There is no
     /// modern-only collision, and there should never be one: the modern column is generated.
-    const KNOWN_DUPLICATE_MODERN_VALUES: &[u16] = &[0x2701, 0x3265, 0x3A1A];
+    const KNOWN_DUPLICATE_MODERN_VALUES: &[u16] = &[0x3265, 0x3A1A];
 
     #[test]
     fn no_unexpected_duplicate_modern_values() {

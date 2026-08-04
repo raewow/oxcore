@@ -354,6 +354,8 @@ mod tests {
                 trainer_id: 0,
                 trainer_type: 0,
                 spells: [0; 4],
+                gold_min: 0,
+                gold_max: 0,
             }
         }
 

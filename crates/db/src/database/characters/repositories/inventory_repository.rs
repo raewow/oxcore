@@ -1,8 +1,6 @@
 use super::super::models::item::*;
 use super::super::{PgInventoryRepository, PgInventoryRow, PgItemInstanceRow};
-use super::inventory_repository_trait::{
-    InventoryRepositoryTrait, InventorySlotRow, StackableSlotInfo,
-};
+use super::inventory_repository_trait::{InventoryRepositoryTrait, InventorySlotRow};
 use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::PgPool;
@@ -68,21 +66,6 @@ impl InventoryRepositoryTrait for InventoryRepository {
                     bag: r.bag.try_into()?,
                     slot: r.slot.try_into()?,
                     item_guid: r.item_guid.try_into()?,
-                })
-            })
-            .collect()
-    }
-    async fn find_stackable_slots(&self, g: u32, i: u32, m: u32) -> Result<Vec<StackableSlotInfo>> {
-        self.pg()
-            .find_stackable_slots(g.into(), i.into(), m.into())
-            .await?
-            .into_iter()
-            .map(|(item_guid, bag, slot, current_count)| {
-                Ok(StackableSlotInfo {
-                    item_guid: item_guid.try_into()?,
-                    bag: bag.try_into()?,
-                    slot: slot.try_into()?,
-                    current_count: current_count.try_into()?,
                 })
             })
             .collect()

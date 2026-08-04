@@ -47,6 +47,38 @@ impl PlayerSystem {
         Ok(())
     }
 
+    /// Set (or clear) the player's persistent looping emote (UNIT_NPC_EMOTESTATE) and broadcast
+    /// the change. Used for state-style text emotes (Dance/Read/Lean) and cleared on movement.
+    /// A no-op if the state isn't actually changing, so the movement handler can call this
+    /// unconditionally without spamming updates for players who aren't emoting.
+    pub fn set_emote_state(&self, player_guid: ObjectGuid, emote_state: u32, world: &World) {
+        use crate::game::common::update_fields::UNIT_NPC_EMOTESTATE;
+        use oxcore_shared::messages::update::{
+            ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+        };
+
+        let changed = self
+            .manager
+            .with_player_mut(player_guid, |player| {
+                let changed = player.emote_state != emote_state;
+                player.emote_state = emote_state;
+                changed
+            })
+            .unwrap_or(false);
+
+        if !changed {
+            return;
+        }
+
+        let block = ValuesUpdateBlock::new(player_guid, ObjectType::Player)
+            .set_field(UNIT_NPC_EMOTESTATE, emote_state);
+        let update_msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block));
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_msg_nearby(player_guid, &update_msg, true);
+    }
+
     /// Update system (global player updates)
     pub fn update(&self, _diff: Duration) -> Result<()> {
         // Global player updates (if any) - currently none
@@ -182,7 +214,39 @@ impl PlayerSystem {
                     continue;
                 }
 
-                // In range - clear last error and execute attack
+                // Facing check: melee swings require facing the target within a
+                // 180-degree frontal arc (matches HasInArc(PI, target) in the
+                // original combat model) - turning away stops auto-attack.
+                if !player_pos.has_in_arc(std::f32::consts::PI, &target_pos) {
+                    // Out of facing: check and update error state, determine if packet should be sent
+                    // DO NOT send packet while holding player lock to avoid deadlock!
+                    let should_send_badfacing = world
+                        .managers
+                        .player_mgr
+                        .with_player_mut(player_guid, |p| {
+                            let should_send = p.combat.last_swing_error != 2;
+                            if should_send {
+                                p.combat.last_swing_error = 2;
+                            }
+                            // Delay auto-attacks by 100ms.
+                            p.combat.main_hand_timer = 100;
+                            should_send
+                        })
+                        .unwrap_or(false);
+
+                    // Send packet OUTSIDE the player lock to avoid deadlock
+                    if should_send_badfacing {
+                        let badfacing_packet =
+                            WorldPacket::new(Opcode::SMSG_ATTACKSWING_BADFACING);
+                        world
+                            .managers
+                            .broadcast_mgr
+                            .send_to_player(player_guid, badfacing_packet);
+                    }
+                    continue;
+                }
+
+                // In range and facing - clear last error and execute attack
                 // Keep this quick - just update state, no packet sending while holding lock
                 world.managers.player_mgr.with_player_mut(player_guid, |p| {
                     p.combat.last_swing_error = 0;

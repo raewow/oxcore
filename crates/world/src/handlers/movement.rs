@@ -1110,6 +1110,10 @@ pub async fn handle_movement(
         })?;
     }
 
+    // Stop looping emotes (Dance/Read/Lean) at player move -- set_emote_state no-ops if the
+    // player wasn't emoting, so this is cheap on the hot path.
+    world.systems.player.set_emote_state(player_guid, 0, world);
+
     // Continue with normal movement processing
     let mut movement_info = MovementInfo::read_for(session.protocol(), packet)?;
     movement_info.mover_guid = player_guid;

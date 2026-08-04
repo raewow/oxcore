@@ -717,16 +717,6 @@ impl PgInventoryRepository {
             .context("Failed to load PostgreSQL owner items")
     }
 
-    pub async fn find_stackable_slots(
-        &self,
-        guid: i64,
-        item_id: i64,
-        max_stack: i64,
-    ) -> Result<Vec<(i64, i64, i16, i64)>> {
-        sqlx::query_as("SELECT ci.item_guid, ci.bag, ci.slot, ii.count FROM characters.character_inventory ci JOIN characters.item_instance ii ON ci.item_guid = ii.guid WHERE ci.guid = $1 AND ii.item_id = $2 AND ii.count < $3 ORDER BY ii.count DESC")
-            .bind(guid).bind(item_id).bind(max_stack).fetch_all(&*self.pool).await.context("Failed to load PostgreSQL stackable slots")
-    }
-
     pub async fn player_money(&self, guid: i64) -> Result<i64> {
         sqlx::query_scalar("SELECT money FROM characters.characters WHERE guid = $1")
             .bind(guid)

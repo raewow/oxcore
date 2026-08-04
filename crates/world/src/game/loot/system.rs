@@ -170,8 +170,23 @@ impl LootSystem {
         let loot_item = self.manager.peek_item(target_guid, slot, player_guid);
 
         let Some(item) = loot_item else {
+            tracing::info!(
+                "[LOOT] handle_loot_item: player={:?} target={:?} requested slot={} but peek_item found nothing (already looted, wrong slot, or not visible to this player)",
+                player_guid,
+                target_guid,
+                slot
+            );
             return Ok(()); // Item not found, already looted, or not visible to this player
         };
+
+        tracing::info!(
+            "[LOOT] handle_loot_item: player={:?} target={:?} slot={} item_id={} count={} -> add_item",
+            player_guid,
+            target_guid,
+            slot,
+            item.item_id,
+            item.count
+        );
 
         // Add to player inventory
         let result = world
@@ -181,7 +196,19 @@ impl LootSystem {
             .await;
 
         match result {
-            AddItemResult::Success { .. } => {
+            AddItemResult::Success {
+                ref items_modified,
+                ref items_created,
+            } => {
+                tracing::info!(
+                    "[LOOT] handle_loot_item: add_item Success for player={:?} item_id={} requested_count={} modified={:?} created={:?} -> marking loot slot looted + quest credit",
+                    player_guid,
+                    item.item_id,
+                    item.count,
+                    items_modified,
+                    items_created
+                );
+
                 // Stored — now remove it from the loot
                 self.manager.loot_item(target_guid, slot, player_guid);
 
@@ -201,9 +228,11 @@ impl LootSystem {
             _ => {
                 // Item stays in the loot so the player can retry after making room
                 tracing::warn!(
-                    "Failed to add loot item {} to inventory for {:?}: {:?}",
+                    "[LOOT] handle_loot_item: add_item FAILED for item {} count {} player {:?} (loot slot {} left intact): {:?}",
                     item.item_id,
+                    item.count,
                     player_guid,
+                    slot,
                     result
                 );
             }
@@ -297,6 +326,15 @@ impl LootSystem {
         let mut items = Vec::new();
         let gold = loot_ref.gold;
 
+        // The client renumbers its own loot list densely (1..N) over whatever is still
+        // unlooted, and keeps compacting locally as items are picked — it does not echo back
+        // a stable per-item ID across the lifetime of the loot window. So `slot` here must be
+        // the item's position in *this* unlooted+visible listing, not the item's fixed storage
+        // index, or a second click after the first item is gone targets the wrong item (or
+        // nothing at all). `LootManager::peek_item`/`loot_item` resolve incoming slots the same
+        // way, over the same ordering, so the two stay in sync.
+        let mut display_slot: u8 = 0;
+
         // Build normal item list
         for item in &loot_ref.items {
             if item.is_looted {
@@ -310,7 +348,7 @@ impl LootSystem {
                 .unwrap_or(0);
 
             items.push(LootResponseItem {
-                slot: item.slot,
+                slot: display_slot,
                 item_id: item.item_id,
                 count: item.count,
                 display_id,
@@ -318,11 +356,10 @@ impl LootSystem {
                 random_property: 0,
                 slot_type: 0, // Normal
             });
+            display_slot += 1;
         }
 
         // Add quest items only for players who have the required quest active.
-        // Quest item slots start after normal items to avoid slot collisions.
-        let quest_slot_offset = loot_ref.items.len() as u8;
         for item in &loot_ref.quest_items {
             if item.is_looted || !visible_quest_slots.contains(&item.slot) {
                 continue;
@@ -335,7 +372,7 @@ impl LootSystem {
                 .unwrap_or(0);
 
             items.push(LootResponseItem {
-                slot: quest_slot_offset + item.slot,
+                slot: display_slot,
                 item_id: item.item_id,
                 count: item.count,
                 display_id,
@@ -343,9 +380,21 @@ impl LootSystem {
                 random_property: 0,
                 slot_type: 0,
             });
+            display_slot += 1;
         }
 
         drop(loot_ref); // Release lock
+
+        tracing::info!(
+            "[LOOT] send_loot_window: player={:?} target={:?} gold={} items={:?}",
+            player_guid,
+            target_guid,
+            gold,
+            items
+                .iter()
+                .map(|i| (i.slot, i.item_id, i.count))
+                .collect::<Vec<_>>()
+        );
 
         // Build and send message
         let msg = SmsgLootResponse {
@@ -367,16 +416,23 @@ impl LootSystem {
             .managers
             .creature_mgr
             .with_creature_mut(target_guid, |creature| {
-                (creature.entry, creature.level, creature.loot_recipient)
+                (creature.entry, creature.loot_recipient)
             });
 
-        let Some((entry, level, recipient)) = creature_info else {
+        let Some((entry, recipient)) = creature_info else {
             return Err(anyhow::anyhow!("Creature not found for loot generation"));
         };
 
+        let (gold_min, gold_max) = world
+            .managers
+            .creature_mgr
+            .get_template(entry)
+            .map(|t| (t.gold_min, t.gold_max))
+            .unwrap_or((0, 0));
+
         let allowed = recipient.map(|r| vec![r]).unwrap_or_default();
         self.manager
-            .generate_creature_loot(target_guid, entry, level, allowed);
+            .generate_creature_loot(target_guid, entry, gold_min, gold_max, allowed);
 
         Ok(())
     }

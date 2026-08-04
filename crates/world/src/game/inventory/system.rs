@@ -629,14 +629,20 @@ impl InventorySystem {
             None => return AddItemResult::InvalidItem,
         };
 
-        let max_stack = proto.stackable;
         let initial_charges = proto
             .spell_charges
             .iter()
             .any(|&charges| charges != 0)
             .then(|| Self::format_spell_charges(&proto.spell_charges));
 
-        // Validate space BEFORE any DB queries
+        // Plan the full placement (existing-stack merges + new-slot creations) in a single
+        // cache-consistent pass, then execute exactly that plan below. Previously this function
+        // re-derived "where do items go" twice — once here, once via a separate DB query for
+        // merges and a separate cache-only free-slot search for new stacks — and the two could
+        // disagree (e.g. can_store_item finds space in an equipped bag that the free-slot search
+        // never looked inside), causing loot to be silently dropped after already being reported
+        // to the client as picked up, and quest credit to be skipped even though the item landed
+        // in the bag. Reusing the same plan for both the check and the write closes that gap.
         let can_store = self.can_store_item(
             player_guid,
             oxcore_shared::game::inventory::NULL_BAG,
@@ -646,72 +652,86 @@ impl InventorySystem {
             None,
             false,
         );
-        if let Some(err) = can_store.error {
+        tracing::info!(
+            "[INVENTORY] add_item: player={:?} item_id={} count={} plan_error={:?} plan_dest={:?}",
+            player_guid,
+            item_id,
+            count,
+            can_store.error,
+            can_store
+                .dest
+                .iter()
+                .map(|d| (d.bag(), d.slot(), d.count))
+                .collect::<Vec<_>>()
+        );
+
+        if can_store.error.is_some() {
             return AddItemResult::InventoryFull;
         }
 
-        let mut remaining_count = count;
         let mut items_modified = Vec::new();
         let mut items_created = Vec::new();
 
-        // Step 1: Try to fill existing stacks
-        if max_stack > 1 {
-            let stackable_slots = match self
-                .repository
-                .find_stackable_slots(player_guid.low(), item_id, max_stack)
-                .await
-            {
-                Ok(slots) => slots,
-                Err(e) => return AddItemResult::DatabaseError(e.to_string()),
-            };
+        for dest in &can_store.dest {
+            let bag = dest.bag();
+            let slot = dest.slot();
+            let add_count = dest.count as u32;
+            if add_count == 0 {
+                continue;
+            }
 
-            for slot_info in stackable_slots {
-                if remaining_count == 0 {
-                    break;
-                }
+            if let Some(existing_guid) = self.cache.get_item_at(player_guid, bag, slot) {
+                // Merge into an existing stack. The cache is the live source of truth for
+                // both "is there an item here" and "how many does it have" — no DB read
+                // needed, and the write goes through the same deferred pending-op queue as
+                // every other inventory mutator so it can't race a not-yet-flushed update.
+                let current_count = self
+                    .cache
+                    .get_item(player_guid, existing_guid)
+                    .map(|item| item.read().count)
+                    .unwrap_or(0);
+                let new_count = current_count + add_count;
 
-                let available_space = max_stack - slot_info.current_count;
-                let add_count = remaining_count.min(available_space);
-                let new_count = slot_info.current_count + add_count;
+                tracing::info!(
+                    "[INVENTORY] add_item: merging into existing stack player={:?} bag={} slot={} item_guid={:?} {} -> {}",
+                    player_guid,
+                    bag,
+                    slot,
+                    existing_guid,
+                    current_count,
+                    new_count
+                );
 
-                // Update database
-                if let Err(e) = self
-                    .repository
-                    .update_item_count(slot_info.item_guid, new_count)
-                    .await
-                {
-                    return AddItemResult::DatabaseError(e.to_string());
-                }
-
-                // Update cache
-                let item_obj_guid =
-                    ObjectGuid::new_without_entry(HighGuid::Item, slot_info.item_guid);
                 self.cache
-                    .update_item_count(player_guid, item_obj_guid, new_count);
+                    .update_item_count(player_guid, existing_guid, new_count);
+                self.cache.push_pending_op(
+                    player_guid,
+                    super::cache::PendingInventoryOp::UpdateCount {
+                        item_guid: existing_guid.low(),
+                        count: new_count,
+                    },
+                );
 
                 // Existing items must receive a values update. Sending another create packet is
                 // ignored by modern clients, leaving their bag count stale after looting a stack.
-                self.send_item_count_update(player_guid, item_obj_guid, new_count);
+                self.send_item_count_update(player_guid, existing_guid, new_count);
 
-                items_modified.push((item_obj_guid, new_count));
-                remaining_count -= add_count;
+                items_modified.push((existing_guid, new_count));
+                continue;
             }
-        }
 
-        // Step 2: Create new stacks for remaining items
-        while remaining_count > 0 {
-            // Find free slot
-            let (bag, slot) = match self.cache.find_free_inventory_slot(player_guid) {
-                Some(pos) => pos,
-                None => return AddItemResult::InventoryFull,
-            };
-
-            let stack_count = remaining_count.min(max_stack);
-
-            // Get next item GUID
+            // New stack. Only a hard DB failure can stop this once can_store_item has already
+            // confirmed the slot is free; if that happens after earlier dest entries already
+            // succeeded, report what actually landed instead of discarding it as a whole failure.
             let item_guid_raw = match self.repository.get_next_item_guid().await {
                 Ok(g) => g,
-                Err(e) => return AddItemResult::DatabaseError(e.to_string()),
+                Err(e) => {
+                    if items_modified.is_empty() && items_created.is_empty() {
+                        return AddItemResult::DatabaseError(e.to_string());
+                    }
+                    warn!("add_item: failed to allocate item guid mid-add for {:?}: {}", player_guid, e);
+                    break;
+                }
             };
 
             let item_obj_guid = ObjectGuid::new_without_entry(HighGuid::Item, item_guid_raw);
@@ -723,7 +743,7 @@ impl InventorySystem {
                 owner_guid: player_guid.low(),
                 creator_guid: 0,
                 gift_creator_guid: 0,
-                count: stack_count,
+                count: add_count,
                 duration: 0,
                 charges: initial_charges.clone(),
                 flags: 0,
@@ -743,7 +763,11 @@ impl InventorySystem {
 
             // Save to database
             if let Err(e) = self.repository.create_item(&item_row, &slot_row).await {
-                return AddItemResult::DatabaseError(e.to_string());
+                if items_modified.is_empty() && items_created.is_empty() {
+                    return AddItemResult::DatabaseError(e.to_string());
+                }
+                warn!("add_item: failed to create item row mid-add for {:?}: {}", player_guid, e);
+                break;
             }
 
             // Update cache
@@ -768,16 +792,12 @@ impl InventorySystem {
             };
             let enchantments = Self::parse_enchantments(&item_row.enchantments);
 
-            let max_durability = self
-                .item_mgr
-                .get_template(item_id)
-                .map(|t| t.max_durability)
-                .unwrap_or(0);
+            let max_durability = proto.max_durability;
 
             let new_item = Item::from_db_row(
                 item_obj_guid,
                 item_id,
-                stack_count,
+                add_count,
                 player_guid,
                 slot,
                 bag,
@@ -801,7 +821,15 @@ impl InventorySystem {
             self.send_slot_update(player_guid, bag, slot, Some(item_obj_guid));
 
             items_created.push(item_obj_guid);
-            remaining_count -= stack_count;
+
+            tracing::info!(
+                "[INVENTORY] add_item: created new stack player={:?} bag={} slot={} item_guid={:?} count={}",
+                player_guid,
+                bag,
+                slot,
+                item_obj_guid,
+                add_count
+            );
 
             let push_result = SmsgItemPushResult {
                 player_guid,
@@ -812,11 +840,30 @@ impl InventorySystem {
                 item_entry: item_id,
                 suffix_factor: 0,
                 random_property_id: 0,
-                count: stack_count,
+                count: add_count,
             };
             self.broadcast_mgr
                 .send_msg_to_player(player_guid, push_result);
         }
+
+        if items_modified.is_empty() && items_created.is_empty() {
+            tracing::warn!(
+                "[INVENTORY] add_item: player={:?} item_id={} count={} produced no modifications despite a passing precheck (dest was empty or all zero-count)",
+                player_guid,
+                item_id,
+                count
+            );
+            return AddItemResult::InventoryFull;
+        }
+
+        tracing::info!(
+            "[INVENTORY] add_item: player={:?} item_id={} requested_count={} -> Success modified={:?} created={:?}",
+            player_guid,
+            item_id,
+            count,
+            items_modified,
+            items_created
+        );
 
         AddItemResult::Success {
             items_modified,

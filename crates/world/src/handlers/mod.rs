@@ -110,6 +110,16 @@ pub async fn dispatch_packet(
                     let reason = packet.read_u32().unwrap_or(0);
                     tracing::info!(reason, "modern client reported disconnect");
                 }
+                // The modern client keeps a persistent second connection ("realm") that never
+                // leaves Authenticated state, and sends DB2 hotfix bulk queries (item/text
+                // lookups) over it independently of the main gameplay ("instance") connection.
+                // Without a reply here every such request hung forever, which meant items whose
+                // template the client hadn't already cached could never resolve a name/icon --
+                // they were fully present server-side (inventory, quest credit) but never
+                // rendered, since the client was still waiting on data it would never receive.
+                Opcode::CMSG_DB_QUERY_BULK => {
+                    hotfix::handle_db_query_bulk(session, packet, world).await?;
+                }
                 _ => {
                     debug!("Unhandled opcode {:?} in Authenticated state", opcode);
                 }

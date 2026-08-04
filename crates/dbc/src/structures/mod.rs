@@ -4,6 +4,7 @@
 //! They are used to parse and store DBC data loaded from files.
 
 pub mod character;
+pub mod emote;
 pub mod faction;
 pub mod item_object;
 pub mod skill;
@@ -12,6 +13,7 @@ pub mod talent;
 pub mod world;
 
 pub use character::{ChrClassesEntry, ChrRacesEntry};
+pub use emote::EmotesTextEntry;
 pub use faction::{FactionDbcEntry, FactionTemplateDbcEntry};
 pub use item_object::{
     AuctionHouseEntry, BankBagSlotPricesEntry, CreatureDisplayInfoEntry, CreatureModelDataEntry,

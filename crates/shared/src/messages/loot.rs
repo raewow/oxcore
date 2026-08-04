@@ -71,7 +71,10 @@ impl ToWorldPacket for SmsgLootResponse {
             write_modern_item_instance(&mut writer, item.item_id, item.random_property);
             writer.write_u32(item.count); // Quantity
             writer.write_u8(0); // LootItemType
-            writer.write_u8(item.slot); // LootListID
+            // LootListID is 1-based on the modern wire (the client's own loot UI reserves 0),
+            // while our internal `slot` is a 0-based index into the loot item vector. Vanilla's
+            // wire slot is genuinely 0-based, so only the modern encoding offsets it.
+            writer.write_u8(item.slot + 1); // LootListID
         }
 
         Some(writer.finish(Opcode::SMSG_LOOT_RESPONSE))
@@ -138,7 +141,7 @@ impl ToWorldPacket for SmsgLootRemoved {
         let mut writer = BitWriter::new();
         writer.write_packed_guid_128(0, 0); // Owner
         writer.write_packed_guid_128(0, 0); // LootObj
-        writer.write_u8(self.slot); // LootListID
+        writer.write_u8(self.slot + 1); // LootListID -- see SmsgLootResponse::to_modern
         Some(writer.finish(Opcode::SMSG_LOOT_REMOVED))
     }
 

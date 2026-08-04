@@ -420,6 +420,12 @@ pub async fn handle_cast_spell(
         }
         Protocol::Modern => {
             let request = parse_modern_spell_cast_request(packet, player_guid)?;
+            tracing::info!(
+                "[CMSG_CAST_SPELL] spell={} spell_visual_id={} caster={:?}",
+                request.spell_id,
+                request.spell_visual_id,
+                player_guid
+            );
             (
                 request.spell_id,
                 request.targets,

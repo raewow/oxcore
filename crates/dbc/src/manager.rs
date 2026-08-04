@@ -1,9 +1,9 @@
 use crate::store::{load_dbc_store, DbcEntry, DbcStore};
 use crate::structures::{
     AreaTableEntry, AreaTriggerEntry, AuctionHouseEntry, BankBagSlotPricesEntry, ChrClassesEntry,
-    ChrRacesEntry, CreatureDisplayInfoEntry, CreatureModelDataEntry, FactionDbcEntry,
-    FactionTemplateDbcEntry, GameObjectDisplayInfoEntry, ItemEntry, LockEntry, MapEntry,
-    SkillLineAbilityEntry, SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry,
+    ChrRacesEntry, CreatureDisplayInfoEntry, CreatureModelDataEntry, EmotesTextEntry,
+    FactionDbcEntry, FactionTemplateDbcEntry, GameObjectDisplayInfoEntry, ItemEntry, LockEntry,
+    MapEntry, SkillLineAbilityEntry, SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry,
     SpellCastTimeEntry, SpellDurationEntry, SpellFocusObjectEntry, SpellRadiusEntry,
     SpellRangeEntry, TalentEntry, TalentTabEntry, WorldSafeLocsEntry,
 };
@@ -20,6 +20,7 @@ pub struct DbcManager {
     pub chr_races: DbcStore<ChrRacesEntry>,
     pub creature_display_info: DbcStore<CreatureDisplayInfoEntry>,
     pub creature_model_data: DbcStore<CreatureModelDataEntry>,
+    pub emotes_text: DbcStore<EmotesTextEntry>,
     pub faction: DbcStore<FactionDbcEntry>,
     pub faction_template: DbcStore<FactionTemplateDbcEntry>,
     pub gameobject_display_info: DbcStore<GameObjectDisplayInfoEntry>,
@@ -65,6 +66,9 @@ impl DbcManager {
             chr_races: DbcStore::new(&chr_races_format),
             creature_display_info: DbcStore::new("nixifxxxxxxx"),
             creature_model_data: DbcStore::new("nisxfxxxxxxxxxxf"),
+            // Field 0: id, field 1: name (skipped), field 2: textid (the Emote enum/animation id).
+            // Fields 3-18: per-locale EmoteText string refs, irrelevant here.
+            emotes_text: DbcStore::new("nxixxxxxxxxxxxxxxxx"),
             faction: DbcStore::new(&faction_format),
             faction_template: DbcStore::new("iiiiiiiiiiiiii"),
             gameobject_display_info: DbcStore::new("nsxxxxxxxxxx"),
@@ -210,6 +214,7 @@ impl DbcManager {
             dbc_path,
             "CreatureModelData.dbc",
         )?;
+        Self::load_dbc(&mut self.emotes_text, dbc_path, "EmotesText.dbc")?;
         Self::load_dbc_optional(&mut self.item, dbc_path, "Item.dbc")?;
         Self::load_dbc(&mut self.skill_line, dbc_path, "SkillLine.dbc")?;
         Self::load_dbc(
@@ -340,6 +345,12 @@ impl DbcManager {
     /// Check if CreatureDisplayInfo.dbc is loaded
     pub fn has_creature_display_info(&self) -> bool {
         !self.creature_display_info.is_empty()
+    }
+
+    /// Resolve a client's `CMSG_TEXT_EMOTE` `EmoteID` (a row in `EmotesText.dbc`) to the actual
+    /// `Emote` enum value that drives the animation, for `SMSG_EMOTE`.
+    pub fn get_emotes_text(&self, text_emote_id: u32) -> Option<&EmotesTextEntry> {
+        self.emotes_text.lookup(text_emote_id)
     }
 
     /// Get gameobject display info entry by ID

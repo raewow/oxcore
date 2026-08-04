@@ -98,6 +98,9 @@ pub struct Player {
     pub player_flags: u32,
     /// Visual animation state
     pub stand_state: u8,
+    /// UNIT_NPC_EMOTESTATE: persistent looping emote (Dance/Read/Lean). 0 = none. Cleared on the
+    /// player's next movement, matching WorldSession::HandleMovementOpcode in the reference core.
+    pub emote_state: u32,
     /// Shapeshift form (0 = none)
     pub shapeshift_form: u8,
     /// Unit flags (UNIT_FLAG_DISABLE_MOVE, etc.)
@@ -240,6 +243,7 @@ impl Player {
             rest_bonus: 0.0,
             player_flags: 0,
             stand_state: 0,
+            emote_state: 0,
             shapeshift_form: 0,
             unit_flags: 0,
             dynamic_flags: 0,

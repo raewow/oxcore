@@ -534,6 +534,30 @@ impl GameObjectManager {
                 .set_field(GAMEOBJECT_ARTKIT, go.art_kit)
                 .set_field(GAMEOBJECT_ANIMPROGRESS, go.anim_progress);
 
+        if go.entry == 1619 {
+            tracing::info!(
+                "[DEBUG-CREATE-DUMP] gameobject entry={} guid={:?} world_guid={:?} display_id={} flags={} scale={} rotation={:?} go_state={:?} faction={} go_type={:?} level={} art_kit={} anim_progress={} quest_activate={} fields={:?} required_fields={:?} bytes_fields={:?} modern_fields={:?}",
+                go.entry,
+                guid,
+                world_guid,
+                go.display_id,
+                go.flags,
+                go.scale,
+                go.rotation,
+                go.go_state,
+                go.faction,
+                go.go_type,
+                go.level,
+                go.art_kit,
+                go.anim_progress,
+                quest_activate,
+                block.fields,
+                block.required_fields,
+                block.bytes_fields,
+                block.modern_fields,
+            );
+        }
+
         Some(SmsgUpdateObject::new().add_block(UpdateBlockData::CreateObject(block)))
     }
 

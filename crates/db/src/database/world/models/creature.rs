@@ -43,6 +43,8 @@ pub struct CreatureTemplateRow {
     pub spell_id2: i64,
     pub spell_id3: i64,
     pub spell_id4: i64,
+    pub gold_min: i64,
+    pub gold_max: i64,
 }
 
 /// Row from creature_classlevelstats table - base stats per class and level

@@ -2532,6 +2532,8 @@ mod tests {
             trainer_id: 0,
             trainer_type: 0,
             spells: [0; 4],
+            gold_min: 0,
+            gold_max: 0,
         };
         world.managers.creature_mgr.add_creature(Creature::new(
             guid, entry, 1, position, 0, 0, &template, 1, None,

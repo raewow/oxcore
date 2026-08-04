@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
 use crate::World;
-use oxcore_shared::messages::chat::SmsgTextEmote;
+use oxcore_shared::messages::chat::{SmsgEmote, SmsgTextEmote};
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::bitbuf::BitReader;
 use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
@@ -61,6 +61,49 @@ pub async fn handle_text_emote(
     } else {
         None
     };
+
+    // `text_emote` is a row in EmotesText.dbc, not the animation id itself -- resolve it to the
+    // real `Emote` enum value first, then branch on it:
+    //   - SLEEP/SIT/KNEEL/ONESHOT_NONE: no animation packet at all (sit/sleep/kneel go through
+    //     CMSG_STANDSTATECHANGE instead, so this handler no-ops for them).
+    //   - DANCE/READ/LEAN: a *looping* pose, not a one-shot -- these set the persistent
+    //     UNIT_NPC_EMOTESTATE field instead of firing SMSG_EMOTE, so the loop keeps playing until
+    //     something clears the field (the movement handler does, on the player's next move).
+    //   - everything else (wave, cheer, ...): a one-shot SMSG_EMOTE, the packet that actually
+    //     plays the animation -- SMSG_TEXT_EMOTE below only drives the chat-log line.
+    const EMOTE_STATE_DANCE: u32 = 10;
+    const EMOTE_STATE_SLEEP: u32 = 12;
+    const EMOTE_STATE_SIT: u32 = 13;
+    const EMOTE_STATE_KNEEL: u32 = 68;
+    const EMOTE_STATE_READ: u32 = 483;
+    const EMOTE_STATE_LEAN: u32 = 1084;
+
+    let resolved_emote_id = world
+        .dbc
+        .read()
+        .get_emotes_text(text_emote)
+        .map(|entry| entry.emote_id);
+
+    match resolved_emote_id {
+        Some(0) | Some(EMOTE_STATE_SLEEP) | Some(EMOTE_STATE_SIT) | Some(EMOTE_STATE_KNEEL)
+        | None => {}
+        Some(id @ (EMOTE_STATE_DANCE | EMOTE_STATE_READ | EMOTE_STATE_LEAN)) => {
+            world
+                .systems
+                .player
+                .set_emote_state(player_guid, id, world);
+        }
+        Some(id) => {
+            let emote_msg = SmsgEmote {
+                emote_id: id,
+                guid: player_guid,
+            };
+            world
+                .managers
+                .broadcast_mgr
+                .broadcast_msg_nearby(player_guid, &emote_msg, true);
+        }
+    }
 
     // Build SMSG_TEXT_EMOTE packet using message struct
     let text_emote_msg = SmsgTextEmote {
