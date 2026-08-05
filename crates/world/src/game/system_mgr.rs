@@ -36,7 +36,6 @@ use crate::game::player::PlayerSystem;
 use crate::game::social::SocialSystem;
 use crate::game::ticket::TicketSystem;
 use crate::game::trade::TradeSystem;
-use crate::game::visibility::VisibilitySystem;
 use crate::game::weather::{WeatherManager, WeatherSystem};
 use crate::game::{BroadcastManager, ItemManager};
 use crate::World;
@@ -49,8 +48,6 @@ use oxcore_shared::protocol::{ObjectGuid, Position};
 pub struct SystemManager {
     pub player: Arc<PlayerSystem>,
     pub combat: Arc<CombatSystem>,
-    // TODO visibility should live on player
-    pub visibility: Arc<VisibilitySystem>,
     pub inventory: Arc<InventorySystem>,
     pub social: Arc<SocialSystem>,
     pub guild: Arc<GuildSystem>,
@@ -292,7 +289,6 @@ impl SystemManager {
         Self {
             player: player_system,
             combat,
-            visibility: Arc::new(VisibilitySystem::new()),
             social,
             guild,
             chat,
@@ -340,7 +336,6 @@ impl SystemManager {
         self.stats.init().await?; // Load base stats from DB (before other systems)
         self.player.init().await?; // Initializes movement subsystem
         self.combat.init().await?;
-        self.visibility.init().await?;
         self.inventory.init().await?;
         self.social.init().await?;
         self.guild.init().await?;
@@ -405,7 +400,6 @@ impl SystemManager {
         self.group.shutdown().await?;
         self.trade.shutdown().await?;
         self.combat.shutdown().await?;
-        self.visibility.shutdown().await?;
         self.inventory.shutdown().await?;
         self.chat.shutdown().await?;
         self.guild.shutdown().await?;
@@ -440,7 +434,6 @@ impl SystemManager {
         self.stats.on_player_login(guid)?; // Calculate stats before combat/experience
         self.power.on_login(guid, world)?; // Initialize power after stats (reads stats.max_mana)
         self.combat.on_player_login(guid)?;
-        self.visibility.on_player_login(guid, position)?;
         self.inventory.on_player_login(guid)?;
         self.social.on_player_login(guid)?;
         self.guild.on_player_login(guid)?;
@@ -470,7 +463,6 @@ impl SystemManager {
         self.player.on_player_logout(guid, world).await?;
         self.pet.on_player_logout(guid, world);
         self.trade.on_player_logout(guid)?;
-        self.visibility.on_player_logout(guid)?;
         self.combat.on_player_logout(guid, &player_mgr)?;
         self.inventory.on_player_logout(guid).await?;
         self.social.on_player_logout(guid).await?;

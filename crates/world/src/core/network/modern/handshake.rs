@@ -9,9 +9,8 @@
 //! 3. derive the AES key, send `SMSG_ENTER_ENCRYPTED_MODE` (RSA-signed), and hand back the key so
 //!    the socket can switch [`super::crypt::WorldCrypt`] on.
 //!
-//! This type produces and consumes bytes; the actual TCP socket + the plaintext connection-init
-//! exchange + `SMSG_AUTH_RESPONSE` are wired in a later milestone (C4). **Unverified against a live
-//! client.**
+//! This type produces and consumes bytes; the actual TCP socket, the plaintext connection-init
+//! exchange, and `SMSG_AUTH_RESPONSE` are driven by the accept loop in [`super::driver`].
 
 use super::auth_crypto::{derive_keys, verify_digest, DerivedKeys};
 use super::crypt::WorldCrypt;

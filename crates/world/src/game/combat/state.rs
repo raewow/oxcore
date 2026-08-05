@@ -38,6 +38,21 @@ impl AttackOutcome {
         }
     }
 
+    /// Convert outcome to victim state for SMSG_ATTACKERSTATEUPDATE
+    pub fn to_victim_state(&self) -> u32 {
+        use oxcore_shared::messages::combat::VictimState;
+        match self {
+            AttackOutcome::Miss => VictimState::Intact as u32,
+            AttackOutcome::Dodge => VictimState::Dodge as u32,
+            AttackOutcome::Parry => VictimState::Parry as u32,
+            AttackOutcome::Block => VictimState::Block as u32,
+            AttackOutcome::Glancing
+            | AttackOutcome::CriticalHit
+            | AttackOutcome::CrushingBlow
+            | AttackOutcome::NormalHit => VictimState::Hit as u32,
+        }
+    }
+
     /// Check if this outcome deals damage
     pub fn deals_damage(&self) -> bool {
         matches!(

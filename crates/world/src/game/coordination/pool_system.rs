@@ -304,10 +304,6 @@ impl PoolSystem {
             return;
         };
 
-        for player_guid in world.session_mgr.get_all_sessions() {
-            world.systems.visibility.remove_visible(player_guid, guid);
-        }
-
         let map = world
             .managers
             .map_mgr
@@ -329,10 +325,6 @@ impl PoolSystem {
             .gameobject_mgr
             .with_gameobject(guid, |go| go.map_id)
             .unwrap_or(0);
-
-        for player_guid in world.session_mgr.get_all_sessions() {
-            world.systems.visibility.remove_visible(player_guid, guid);
-        }
 
         let map = world
             .managers

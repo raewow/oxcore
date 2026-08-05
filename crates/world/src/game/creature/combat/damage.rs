@@ -1,7 +1,10 @@
 //! Damage Calculation for Creature Combat
 //!
-//! Implements the full Vanilla WoW 8-outcome melee hit table
-//! and damage formulas including armor reduction.
+//! Hit-table and damage formulas for a creature auto-attacking a player
+//! (the reverse direction — a player attacking a creature — goes through the
+//! shared skill-based hit table in `game::combat::hit_table` instead, since
+//! the outcome roll is a single method for any attacker/defender pair, not
+//! one formula for players and another for creatures).
 
 use rand::Rng;
 
@@ -50,91 +53,6 @@ fn creature_melee_chances_vs_player(
         crit: (5.0 + skill_diff as f32 * 0.04).max(0.0),
         crushing,
     }
-}
-
-/// Roll hit outcome using the single-roll combat table
-///
-/// Roll order:
-///   1. Miss (5% base + level_diff * 1%)
-///   2. Dodge (5% base, reduced by level_diff)
-///   3. Parry (5% base, only if target can parry)
-///   4. Block (5% base, only if target can block)
-///   5. Glancing (10% if attacker >= 4 levels higher)
-///   6. Crushing (15% if attacker >= 4 levels higher)
-///   7. Crit (5% base + 2% per level_diff)
-///   8. Normal Hit (remainder)
-pub fn roll_melee_hit_outcome(
-    attacker_level: u8,
-    target_level: u8,
-    target_can_parry: bool,
-    target_can_block: bool,
-) -> MeleeHitOutcome {
-    let level_diff = attacker_level as i32 - target_level as i32;
-    let mut rng = rand::thread_rng();
-    let roll: f32 = rng.gen();
-    let mut cumulative = 0.0;
-
-    // Miss
-    let miss_chance = (0.05 + level_diff as f32 * 0.01).clamp(0.0, 0.60);
-    cumulative += miss_chance;
-    if roll < cumulative {
-        return MeleeHitOutcome::Miss;
-    }
-
-    // Dodge
-    let dodge_chance = (0.05 - level_diff as f32 * 0.001).clamp(0.0, 0.20);
-    cumulative += dodge_chance;
-    if roll < cumulative {
-        return MeleeHitOutcome::Dodge;
-    }
-
-    // Parry (only if target can parry — requires weapon/skill)
-    if target_can_parry {
-        let parry_chance = (0.05 - level_diff as f32 * 0.001).clamp(0.0, 0.15);
-        cumulative += parry_chance;
-        if roll < cumulative {
-            return MeleeHitOutcome::Parry;
-        }
-    }
-
-    // Block (only if target has shield equipped)
-    if target_can_block {
-        let block_chance: f32 = 0.05;
-        cumulative += block_chance;
-        if roll < cumulative {
-            let blocked = rng.gen_range(20..=40);
-            return MeleeHitOutcome::Block {
-                blocked_amount: blocked,
-            };
-        }
-    }
-
-    // Glancing (attacker >= 4 levels higher)
-    if level_diff >= 4 {
-        cumulative += 0.10;
-        if roll < cumulative {
-            let reduction = rng.gen_range(0.10_f32..=0.40);
-            return MeleeHitOutcome::Glancing { reduction };
-        }
-    }
-
-    // Crushing (attacker >= 4 levels higher)
-    if level_diff >= 4 {
-        cumulative += 0.15;
-        if roll < cumulative {
-            return MeleeHitOutcome::Crushing;
-        }
-    }
-
-    // Crit
-    let crit_chance = (0.05 + level_diff as f32 * 0.02).clamp(0.0, 0.30);
-    cumulative += crit_chance;
-    if roll < cumulative {
-        return MeleeHitOutcome::Crit;
-    }
-
-    // Normal hit
-    MeleeHitOutcome::Hit
 }
 
 /// Roll creature auto-attack outcome against a player target.
@@ -336,20 +254,6 @@ mod tests {
     fn test_apply_hit_outcome_glancing() {
         let dmg = apply_hit_outcome(100, &MeleeHitOutcome::Glancing { reduction: 0.25 });
         assert_eq!(dmg, 75);
-    }
-
-    #[test]
-    fn test_roll_outcome_returns_valid() {
-        let outcome = roll_melee_hit_outcome(10, 15, false, false);
-        assert!(matches!(
-            outcome,
-            MeleeHitOutcome::Miss
-                | MeleeHitOutcome::Dodge
-                | MeleeHitOutcome::Hit
-                | MeleeHitOutcome::Crit
-                | MeleeHitOutcome::Glancing { .. }
-                | MeleeHitOutcome::Crushing
-        ));
     }
 
     #[test]

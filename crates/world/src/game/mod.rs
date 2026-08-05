@@ -26,7 +26,6 @@ pub mod system_mgr;
 pub mod ticket;
 pub mod trade;
 pub mod transport;
-pub mod visibility;
 pub mod weather;
 
 pub use auction::{AuctionHouseManager, AuctionHouseObject};

@@ -61,7 +61,6 @@ pub fn despawn_looted_gameobject(player_guid: ObjectGuid, guid: ObjectGuid, worl
     let mut destroy = WorldPacket::new(Opcode::SMSG_DESTROY_OBJECT);
     destroy.write_guid_raw(guid.raw());
     for viewer_guid in nearby_players(world, map_id, position) {
-        world.systems.visibility.remove_visible(viewer_guid, guid);
         world
             .managers
             .broadcast_mgr

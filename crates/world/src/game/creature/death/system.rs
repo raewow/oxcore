@@ -252,27 +252,20 @@ async fn remove_corpse(world: &World, guid: ObjectGuid) -> anyhow::Result<()> {
         .with_creature_mut(guid, |c| (c.position, c.map_id, c.instance_id))
         .ok_or_else(|| anyhow::anyhow!("Creature not found"))?;
 
-    // 2. Remove from visibility system - remove from all players' visible sets
-    // Get all online players
-    let all_players = world.session_mgr.get_all_sessions();
-    for player_guid in all_players {
-        world.systems.visibility.remove_visible(player_guid, guid);
-    }
-
-    // 3. Remove from map grid
+    // 2. Remove from map grid
     let map = world
         .managers
         .map_mgr
         .get_or_create_map(map_id, instance_id);
     map.remove_creature(guid, position);
 
-    // 4. Send SMSG_DESTROYOBJECT to nearby players
+    // 3. Send SMSG_DESTROYOBJECT to nearby players
     send_destroy_object(world, guid, position);
 
-    // 5. Clean up loot data
+    // 4. Clean up loot data
     world.systems.loot.remove_loot(guid);
 
-    // 6. Transition to Dead state + mark not in world
+    // 5. Transition to Dead state + mark not in world
     world
         .managers
         .creature_mgr

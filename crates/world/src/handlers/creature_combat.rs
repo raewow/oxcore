@@ -3,11 +3,10 @@
 use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::broadcast_mgr::broadcast_around_creature;
-use crate::game::common::update_fields::*;
-use crate::game::creature::combat::{
-    apply_hit_outcome, calculate_melee_damage, hit_outcome_to_hit_info,
-    hit_outcome_to_victim_state, roll_melee_hit_outcome, MeleeHitOutcome,
+use crate::game::combat::{
+    calculate_hit_table, calculate_melee_damage, AttackHand, AttackOutcome, CombatSnapshot,
 };
+use crate::game::common::update_fields::*;
 use crate::World;
 use oxcore_shared::messages::combat::{SmsgAttackStart, SmsgAttackStop, SmsgAttackerStateUpdate};
 use oxcore_shared::messages::update::{
@@ -126,27 +125,44 @@ pub async fn execute_pending_attack_vs_creature(
         .combat
         .enter_combat(attacker_guid, target_guid, &world.managers.player_mgr);
 
-    // Get attacker weapon damage from combat state (with level-based fallback)
-    let (attacker_level, weapon_min, weapon_max) = world
+    // Get attacker weapon damage and combat stats (with level-based fallback for weapon dmg)
+    let attacker_data = world
         .managers
         .player_mgr
         .with_player_mut(attacker_guid, |player| {
-            let base_min = player.combat.main_hand_min_dmg as u32;
-            let base_max = player.combat.main_hand_max_dmg as u32;
+            let base_min = player.combat.main_hand_min_dmg;
+            let base_max = player.combat.main_hand_max_dmg;
             // Fallback to level-based defaults if weapon damage is trivially low
-            let min = if base_min <= 1 {
-                5 + (player.level as u32 * 2)
+            let min = if base_min <= 1.0 {
+                5.0 + (player.level as f32 * 2.0)
             } else {
                 base_min
             };
-            let max = if base_max <= 2 {
-                10 + (player.level as u32 * 3)
+            let max = if base_max <= 2.0 {
+                10.0 + (player.level as f32 * 3.0)
             } else {
                 base_max
             };
-            (player.level, min, max)
+            (
+                player.level,
+                min,
+                max,
+                player.combat.main_hand_speed,
+                player.stats.melee_crit_pct,
+                player.stats.melee_attack_power,
+                player.combat.can_dual_wield,
+            )
         })
-        .unwrap_or((1, 10, 20));
+        .unwrap_or((1, 10.0, 20.0, 2000, 5.0, 0, false));
+    let (
+        attacker_level,
+        weapon_min,
+        weapon_max,
+        weapon_speed,
+        attacker_crit_chance,
+        attacker_ap,
+        is_dual_wielding,
+    ) = attacker_data;
 
     // Get target armor and level
     let (target_armor, target_level) = world
@@ -155,12 +171,37 @@ pub async fn execute_pending_attack_vs_creature(
         .with_creature_mut(target_guid, |creature| (creature.armor, creature.level))
         .unwrap_or((0, 1));
 
-    // Roll hit outcome (creatures don't parry or block player attacks)
-    let hit_outcome = roll_melee_hit_outcome(attacker_level, target_level, false, false);
+    // Same skill-based hit table used for PvP (RollMeleeOutcomeAgainst is a single Unit
+    // method in vanilla, not one formula for players and another for creatures). Creatures
+    // don't track exact dodge/parry/block percentages, so use the vanilla base rate (5%) and
+    // approximate defense skill as level*5, matching the convention used for creature attackers
+    // in `game::combat::creature_attacks`.
+    let snapshot = CombatSnapshot {
+        attacker_level,
+        attacker_weapon_skill: attacker_level as u16 * 5,
+        attacker_hit_bonus: 0.0,
+        attacker_crit_chance,
+        attacker_ap,
+        is_dual_wielding,
+        defender_level: target_level,
+        defender_defense_skill: target_level as u16 * 5,
+        defender_dodge_chance: 5.0,
+        defender_parry_chance: 5.0,
+        defender_block_chance: 5.0,
+        defender_block_value: 0,
+        defender_armor: target_armor,
+        defender_is_player: false,
+        // Creatures don't parry or block player attacks in this model.
+        defender_can_parry: false,
+        defender_can_block: false,
+        hand: AttackHand::MainHand,
+        is_ranged: false,
+    };
 
-    // Calculate base damage with armor reduction, then apply hit outcome modifier
-    let base_damage = calculate_melee_damage(attacker_level, weapon_min, weapon_max, target_armor);
-    let damage = apply_hit_outcome(base_damage, &hit_outcome);
+    let hit_outcome = calculate_hit_table(&snapshot);
+    let damage_result =
+        calculate_melee_damage(&snapshot, hit_outcome, weapon_min, weapon_max, weapon_speed);
+    let damage = damage_result.damage;
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -210,7 +251,8 @@ pub async fn execute_pending_attack_vs_creature(
             attacker_guid,
             target_guid,
             actual_damage,
-            &hit_outcome,
+            hit_outcome,
+            damage_result.blocked,
             is_dead,
         )?;
 
@@ -282,7 +324,7 @@ pub async fn execute_pending_attack_vs_creature(
             .check_procs(
                 attacker_guid,
                 proc_flags::DEAL_MELEE_SWING | proc_flags::MAIN_HAND_WEAPON_SWING,
-                melee_swing_proc_ex(&hit_outcome),
+                melee_swing_proc_ex(hit_outcome),
                 None, // melee swing — no triggering spell
                 damage,
                 world,
@@ -304,16 +346,18 @@ where
 }
 
 /// Map a melee swing outcome to the proc extra-flag (ProcFlagsEx) describing it.
-fn melee_swing_proc_ex(outcome: &MeleeHitOutcome) -> u32 {
+fn melee_swing_proc_ex(outcome: AttackOutcome) -> u32 {
     use crate::game::player::auras::proc::proc_flags_ex;
     match outcome {
-        MeleeHitOutcome::Crit => proc_flags_ex::CRITICAL_HIT,
-        MeleeHitOutcome::Miss => proc_flags_ex::MISS,
-        MeleeHitOutcome::Dodge => proc_flags_ex::DODGE,
-        MeleeHitOutcome::Parry => proc_flags_ex::PARRY,
-        MeleeHitOutcome::Block { .. } => proc_flags_ex::BLOCK,
+        AttackOutcome::CriticalHit => proc_flags_ex::CRITICAL_HIT,
+        AttackOutcome::Miss => proc_flags_ex::MISS,
+        AttackOutcome::Dodge => proc_flags_ex::DODGE,
+        AttackOutcome::Parry => proc_flags_ex::PARRY,
+        AttackOutcome::Block => proc_flags_ex::BLOCK,
         // Hit, Glancing and Crushing all connect as a normal hit for proc purposes.
-        _ => proc_flags_ex::NORMAL_HIT,
+        AttackOutcome::NormalHit | AttackOutcome::Glancing | AttackOutcome::CrushingBlow => {
+            proc_flags_ex::NORMAL_HIT
+        }
     }
 }
 
@@ -326,36 +370,36 @@ mod tests {
     #[test]
     fn swing_outcome_maps_to_proc_ex() {
         assert_eq!(
-            melee_swing_proc_ex(&MeleeHitOutcome::Crit),
+            melee_swing_proc_ex(AttackOutcome::CriticalHit),
             proc_flags_ex::CRITICAL_HIT
         );
         assert_eq!(
-            melee_swing_proc_ex(&MeleeHitOutcome::Hit),
+            melee_swing_proc_ex(AttackOutcome::NormalHit),
             proc_flags_ex::NORMAL_HIT
         );
         assert_eq!(
-            melee_swing_proc_ex(&MeleeHitOutcome::Miss),
+            melee_swing_proc_ex(AttackOutcome::Miss),
             proc_flags_ex::MISS
         );
         assert_eq!(
-            melee_swing_proc_ex(&MeleeHitOutcome::Dodge),
+            melee_swing_proc_ex(AttackOutcome::Dodge),
             proc_flags_ex::DODGE
         );
         assert_eq!(
-            melee_swing_proc_ex(&MeleeHitOutcome::Parry),
+            melee_swing_proc_ex(AttackOutcome::Parry),
             proc_flags_ex::PARRY
         );
         assert_eq!(
-            melee_swing_proc_ex(&MeleeHitOutcome::Block { blocked_amount: 5 }),
+            melee_swing_proc_ex(AttackOutcome::Block),
             proc_flags_ex::BLOCK
         );
         // Glancing/Crushing connect as normal hits for proc purposes.
         assert_eq!(
-            melee_swing_proc_ex(&MeleeHitOutcome::Glancing { reduction: 0.3 }),
+            melee_swing_proc_ex(AttackOutcome::Glancing),
             proc_flags_ex::NORMAL_HIT
         );
         assert_eq!(
-            melee_swing_proc_ex(&MeleeHitOutcome::Crushing),
+            melee_swing_proc_ex(AttackOutcome::CrushingBlow),
             proc_flags_ex::NORMAL_HIT
         );
     }
@@ -430,15 +474,12 @@ fn send_attacker_state_update(
     attacker: ObjectGuid,
     target: ObjectGuid,
     damage: u32,
-    outcome: &MeleeHitOutcome,
+    outcome: AttackOutcome,
+    blocked: u32,
     is_dead: bool,
 ) -> anyhow::Result<()> {
-    let hit_info = hit_outcome_to_hit_info(outcome);
-    let victim_state = hit_outcome_to_victim_state(outcome);
-    let blocked = match outcome {
-        MeleeHitOutcome::Block { blocked_amount } => *blocked_amount,
-        _ => 0,
-    };
+    let hit_info = outcome.to_hit_info();
+    let victim_state = outcome.to_victim_state();
 
     let packet = SmsgAttackerStateUpdate {
         hit_info,
