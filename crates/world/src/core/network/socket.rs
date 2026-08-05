@@ -20,6 +20,7 @@ use crate::core::network::protocol::{
     CLIENT_HEADER_SIZE, MAX_PACKET_SIZE, SERVER_HEADER_SIZE,
 };
 use crate::core::session::{SessionManager, WorldSession};
+use crate::handlers::addon as addon_handler;
 use crate::handlers::auth as auth_handler;
 use crate::World;
 use oxcore_db::database::Databases;
@@ -417,7 +418,7 @@ impl WorldSocket {
         // Call auth handler with all security checks
         let auth_result = auth_handler::handle_auth_session(
             self.remote_addr,
-            packet,
+            &mut packet,
             self.server_seed,
             &self.databases,
             &self.session_mgr,
@@ -458,6 +459,13 @@ impl WorldSocket {
 
                 // Register in SessionManager
                 self.session_mgr.add_session(Arc::new(session));
+
+                // Build and send SMSG_ADDON_INFO from the addon block appended to
+                // CMSG_AUTH_SESSION, if the client sent one. Encryption is already live
+                // (init_crypt ran above). A missing/malformed block is not fatal to login.
+                if let Some(addon_info) = addon_handler::build_addon_info_response(&mut packet) {
+                    self.send_packet(&addon_info).await?;
+                }
 
                 // Send success response
                 self.send_auth_response_success().await?;

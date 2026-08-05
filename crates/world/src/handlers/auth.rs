@@ -30,7 +30,7 @@ pub enum AuthResult {
 /// Handle CMSG_AUTH_SESSION with full security checks
 pub async fn handle_auth_session(
     remote_addr: std::net::SocketAddr,
-    mut packet: WorldPacket,
+    packet: &mut WorldPacket,
     server_seed: u32,
     databases: &Databases,
     session_mgr: &SessionManager,

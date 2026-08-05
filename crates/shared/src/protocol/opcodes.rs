@@ -107,6 +107,9 @@ impl Opcode {
     pub const CMSG_AUTH_SESSION: Opcode = Opcode { vanilla: 0x01ED, modern: 0x3765 };
     pub const SMSG_AUTH_CHALLENGE: Opcode = Opcode { vanilla: 0x01EC, modern: 0x3048 };
     pub const SMSG_AUTH_RESPONSE: Opcode = Opcode { vanilla: 0x01EE, modern: 0x256D };
+    /// Reply to the addon-CRC block the vanilla client appends to the end of `CMSG_AUTH_SESSION`.
+    /// Vanilla-only: the modern client never sends that block.
+    pub const SMSG_ADDON_INFO: Opcode = Opcode { vanilla: 0x02EF, ..Opcode::NONE }; // 751
     pub const SMSG_PONG: Opcode = Opcode { vanilla: 0x001D, modern: 0x304E };
     /// Sent once, right after the auth response and before the client requests the character
     /// list. Carries `MaxCharactersOnThisRealm` and the expansion-level bounds; without it the
@@ -1178,6 +1181,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::CMSG_AUTH_SESSION, "CMSG_AUTH_SESSION"),
     (Opcode::SMSG_AUTH_CHALLENGE, "SMSG_AUTH_CHALLENGE"),
     (Opcode::SMSG_AUTH_RESPONSE, "SMSG_AUTH_RESPONSE"),
+    (Opcode::SMSG_ADDON_INFO, "SMSG_ADDON_INFO"),
     (
         Opcode::SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN,
         "SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN",
@@ -2539,8 +2543,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            659,
-            "expected 659 opcode constants; update this count deliberately when adding opcodes"
+            660,
+            "expected 660 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

@@ -7,6 +7,7 @@
 //! 4. Call appropriate system/manager
 //! 5. Handler sends response via session
 
+pub mod addon;
 pub mod area_trigger;
 pub mod auction;
 pub mod auth;

@@ -91,6 +91,7 @@ impl ToWorldPacket for WorldPacket {
 }
 
 // Module declarations
+pub mod addon;
 pub mod auction;
 pub mod auras;
 pub mod battleground;
