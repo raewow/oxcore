@@ -18,9 +18,9 @@ use super::field_map::{
 };
 use super::fields::ModernObjectType;
 use crate::protocol::update_fields::{
-    PLAYER_QUEST_LOG_1_1, PLAYER_SKILL_INFO_1_1, PLAYER_VISIBLE_ITEM_1_0, UNIT_DYNAMIC_FLAGS,
-    UNIT_FIELD_ATTACK_POWER_MODS, UNIT_FIELD_BYTES_0, UNIT_FIELD_BYTES_1, UNIT_FIELD_BYTES_2,
-    UNIT_FIELD_RANGED_ATTACK_POWER_MODS, UNIT_NPC_FLAGS,
+    GAMEOBJECT_DYN_FLAGS, PLAYER_QUEST_LOG_1_1, PLAYER_SKILL_INFO_1_1, PLAYER_VISIBLE_ITEM_1_0,
+    UNIT_DYNAMIC_FLAGS, UNIT_FIELD_ATTACK_POWER_MODS, UNIT_FIELD_BYTES_0, UNIT_FIELD_BYTES_1,
+    UNIT_FIELD_BYTES_2, UNIT_FIELD_RANGED_ATTACK_POWER_MODS, UNIT_NPC_FLAGS,
 };
 
 /// Modern slot writes produced from one vanilla field write.
@@ -160,6 +160,30 @@ fn to_modern_dynamic_flags(vanilla: u32) -> u32 {
     )
 }
 
+/// Translate vanilla gameobject dynamic-flag bits to their modern positions.
+///
+/// Same hazard as the unit flags, and the same fix: 1.14 renumbers the whole word, so `Activate`
+/// moves from `0x1` to `0x4`. It also moves house -- vanilla keeps these in the gameobject's own
+/// `GAMEOBJECT_DYN_FLAGS`, 1.14 in the shared `OBJECT_DYNAMIC_FLAGS` -- which is why the generated
+/// map (a join on field *names*) found no counterpart and dropped the write entirely.
+///
+/// Dropping it is what stops a conditional-interaction object from being clickable: an object
+/// carrying `GO_FLAG_INTERACT_COND` is inert on the client until `Activate` says otherwise, so a
+/// quest chest like Milly's Harvest renders and queries fine yet never sends `CMSG_GAMEOBJ_USE`.
+fn to_modern_gameobject_dynamic_flags(vanilla: u32) -> u32 {
+    const BITS: &[(u32, u32)] = &[
+        (0x01, 0x04), // Activate
+        (0x02, 0x08), // Animate
+        (0x04, 0x80), // NoInteract
+        (0x08, 0x20), // Sparkle
+        (0x10, 0x40), // Stopped
+    ];
+    BITS.iter().fold(
+        0,
+        |acc, &(v, m)| if vanilla & v != 0 { acc | m } else { acc },
+    )
+}
+
 /// Split a vanilla field index into its visible-item `(slot, offset)`, or `None` if it is not one
 /// with a modern counterpart. Modern has room for two fields per slot (ItemID, one enchant), so
 /// only vanilla offset 0 (entry) and offset 1 (perm enchant) map; offset 2 (temp enchant) falls
@@ -251,7 +275,17 @@ pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> 
         }
     }
 
-    // Every transform so far is a Unit-chain field.
+    if object_type == ModernObjectType::GameObject && vanilla_index == GAMEOBJECT_DYN_FLAGS {
+        // Masked to the low half: the flags occupy a u16 there, and the high half carries the
+        // path progress that the gameobject create path writes separately.
+        return Some(Writes::new_masked(&[(
+            MODERN_OBJECT_DYNAMIC_FLAGS,
+            to_modern_gameobject_dynamic_flags(value),
+            0x0000_FFFF,
+        )]));
+    }
+
+    // Every transform below this point is a Unit-chain field.
     if !object_type.is_unit() {
         return None;
     }
@@ -627,6 +661,40 @@ mod tests {
     fn dynamic_flags_move_the_lootable_bit() {
         let writes = repack(ModernObjectType::Unit, UNIT_DYNAMIC_FLAGS, 0x1).expect("transformed");
         assert_eq!(writes.as_slice(), [(MODERN_OBJECT_DYNAMIC_FLAGS, 0x4)]);
+    }
+
+    /// The bug this fixes: a quest chest carrying `GO_FLAG_INTERACT_COND` is inert on the client
+    /// until `Activate` says otherwise, and vanilla's `Activate` (`0x1`) both renumbers to `0x4`
+    /// and moves out of the gameobject's own field into the shared object one. The generated map
+    /// joins on field names, found no `GAMEOBJECT_DYN_FLAGS` in 1.14, and dropped the write -- so
+    /// Milly's Harvest rendered and answered queries but never became clickable.
+    #[test]
+    fn gameobject_dynamic_flags_move_the_activate_bit() {
+        let writes =
+            repack(ModernObjectType::GameObject, GAMEOBJECT_DYN_FLAGS, 0x1).expect("transformed");
+        assert_eq!(writes.as_slice(), [(MODERN_OBJECT_DYNAMIC_FLAGS, 0x4)]);
+        assert_eq!(
+            writes.masks(),
+            [0x0000_FFFF],
+            "the high half belongs to the transport path progress"
+        );
+    }
+
+    /// Deactivating has to reach the client too: an empty word is a write of zero, not a dropped
+    /// field, or a chest stays clickable after its quest is turned in.
+    #[test]
+    fn gameobject_dynamic_flags_send_a_cleared_word() {
+        let writes =
+            repack(ModernObjectType::GameObject, GAMEOBJECT_DYN_FLAGS, 0x0).expect("transformed");
+        assert_eq!(writes.as_slice(), [(MODERN_OBJECT_DYNAMIC_FLAGS, 0)]);
+    }
+
+    /// Vanilla field numbers repeat across inheritance chains: index 19 on a unit is the high half
+    /// of a guid, not dynamic flags. The object type decides, as it does for every transform here.
+    #[test]
+    fn gameobject_dynamic_flags_do_not_apply_to_units() {
+        let writes = repack(ModernObjectType::Unit, GAMEOBJECT_DYN_FLAGS, 0x1);
+        assert!(writes.is_none());
     }
 
     /// `TappedByPlayer` (vanilla `0x8`) has no modern counterpart and must be dropped, not guessed.

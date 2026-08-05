@@ -30,7 +30,7 @@ use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::guid::ObjectGuid;
 use crate::protocol::position::Position;
 use crate::protocol::updates::modern::field_map::{
-    MODERN_GAMEOBJECT_BYTES_1, MODERN_GAMEOBJECT_PARENTROTATION,
+    MODERN_GAMEOBJECT_BYTES_1, MODERN_GAMEOBJECT_PARENTROTATION, MODERN_OBJECT_DYNAMIC_FLAGS,
 };
 use crate::protocol::updates::modern::{
     ModernCreateData, ModernObjectType, ModernUpdateBlock, ModernUpdateType,
@@ -628,6 +628,14 @@ impl CreateObjectBlock {
                 | (field_value(GAMEOBJECT_ARTKIT).unwrap_or(0) & 0xFF) << 16
                 | 255 << 24;
             block.fields.set_modern(MODERN_GAMEOBJECT_BYTES_1, bytes_1);
+
+            // High half of the shared dynamic-flags word is the transport path progress; a
+            // stationary object is "all the way through" its path. The low half holds the
+            // gameobject dynamic flags, written from the vanilla field by `repack`, so this write
+            // is masked to leave them alone whichever order the two land in.
+            block
+                .fields
+                .set_modern_masked(MODERN_OBJECT_DYNAMIC_FLAGS, 0xFFFF_0000, 0xFFFF_0000);
         }
 
         block
@@ -1203,6 +1211,45 @@ mod tests {
 
         // PauseTimesCount follows immediately; a stray position would push it 16 bytes later.
         assert_eq!(&block[bits_at + 3..bits_at + 7], &0i32.to_le_bytes());
+    }
+
+    /// A quest chest the player is eligible for must reach the client with `Activate` set in the
+    /// shared dynamic-flags word, or an object flagged `GO_FLAG_INTERACT_COND` -- Milly's Harvest,
+    /// for one -- stays unclickable and the client never sends `CMSG_GAMEOBJ_USE`.
+    #[test]
+    fn a_quest_gameobject_create_carries_the_activate_flag() {
+        use crate::protocol::update_fields::GAMEOBJECT_DYN_FLAGS;
+        use crate::protocol::updates::modern::field_map::MODERN_OBJECT_DYNAMIC_FLAGS;
+
+        let guid = ObjectGuid::new_gameobject(161557, 26752);
+        let block = CreateObjectBlock::new(guid, ObjectTypeId::GameObject, ObjectType::GameObject)
+            .with_position(Position::new(-9105.75, -323.82, 73.27, 0.0))
+            .set_field(GAMEOBJECT_DYN_FLAGS, 0x1) // GO_DYNFLAG_LO_ACTIVATE
+            .to_modern(ModernUpdateType::CreateObject1, None, 1);
+
+        assert_eq!(
+            block.fields.modern_value(MODERN_OBJECT_DYNAMIC_FLAGS),
+            // Activate in the low half; the high half is the path progress a stationary object
+            // has already run to the end of.
+            Some(0xFFFF_0004),
+        );
+    }
+
+    /// The path-progress half is a default, not an override: a gameobject that sent no dynamic
+    /// flags at all still gets it, and still reads as "no flags set" on the client.
+    #[test]
+    fn a_gameobject_create_without_dynamic_flags_still_fills_the_path_progress() {
+        use crate::protocol::updates::modern::field_map::MODERN_OBJECT_DYNAMIC_FLAGS;
+
+        let guid = ObjectGuid::new_gameobject(1619, 1);
+        let block = CreateObjectBlock::new(guid, ObjectTypeId::GameObject, ObjectType::GameObject)
+            .with_position(Position::default())
+            .to_modern(ModernUpdateType::CreateObject1, None, 1);
+
+        assert_eq!(
+            block.fields.modern_value(MODERN_OBJECT_DYNAMIC_FLAGS),
+            Some(0xFFFF_0000),
+        );
     }
 
     /// A unit *with* movement still gets its movement block, so the guard above cannot silently
