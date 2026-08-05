@@ -58,19 +58,18 @@ pub async fn handle_db_query_bulk(
         record_ids.len()
     );
 
-    // A table we do not serve still needs an answer per id, and the reply echoes the hash back. With
-    // no `Db2Hash` to name it there is nothing well-formed to send, so the batch is dropped whole —
-    // this is the case worth seeing in a log if a frame ever hangs.
+    let timestamp = world.hotfix_timestamp();
+
+    // A table `Db2Hash` does not name still gets an `Invalid` reply per id, echoing the raw hash
+    // back -- dropping the batch whole (the original bug here) left the client's query waiting on
+    // an answer that would never come, and whatever the query gated (a tooltip, a cast's resolved
+    // visual kit, ...) never resolved.
     let Some(table) = table else {
-        debug!(
-            "Unserved DB2 table 0x{:08X}; {} id(s) unanswered",
-            raw_hash,
-            record_ids.len()
-        );
+        for record_id in record_ids {
+            session.send_msg(SmsgDbReply::unknown(raw_hash, record_id, timestamp))?;
+        }
         return Ok(());
     };
-
-    let timestamp = world.hotfix_timestamp();
 
     for record_id in record_ids {
         let data = match table {
@@ -111,13 +110,13 @@ pub async fn handle_db_query_bulk(
 
         let reply = match data {
             Some(data) => SmsgDbReply {
-                table_hash: table,
+                table_hash: table.raw(),
                 record_id,
                 timestamp,
                 status: HotfixStatus::Valid,
                 data,
             },
-            None => SmsgDbReply::unknown(table, record_id, timestamp),
+            None => SmsgDbReply::unknown(table.raw(), record_id, timestamp),
         };
         session.send_msg(reply)?;
     }

@@ -113,12 +113,16 @@ pub const MODERN_ACTIVE_PLAYER_FIELD_MOD_SPELL_POWER_PCT: u16 = 2749;
 pub const MODERN_ACTIVE_PLAYER_FIELD_MAX_LEVEL: u16 = 2898;
 /// Modern `ACTIVE_PLAYER_FIELD_MOD_PET_HASTE` (size 1).
 pub const MODERN_ACTIVE_PLAYER_FIELD_MOD_PET_HASTE: u16 = 2911;
+// The tail of the ActivePlayer table is the one place 2.5.3 and 1.14.x disagree: 2.5.3 inserts an
+// extra slot ahead of `QUEST_COMPLETED`, so everything above it sits one higher there. These are the
+// 1.14.1 positions, which is the table build 42597 uses -- taking the 2.5.3 numbers left the real
+// `HONOR_NEXT_LEVEL` at zero, and the client divides by it.
 /// Modern `ACTIVE_PLAYER_FIELD_HONOR_NEXT_LEVEL` (size 1).
-pub const MODERN_ACTIVE_PLAYER_FIELD_HONOR_NEXT_LEVEL: u16 = 4679;
+pub const MODERN_ACTIVE_PLAYER_FIELD_HONOR_NEXT_LEVEL: u16 = 4678;
 /// Modern `ACTIVE_PLAYER_FIELD_PVP_TIER_MAX_FROM_WINS` (size 1).
-pub const MODERN_ACTIVE_PLAYER_FIELD_PVP_TIER_MAX_FROM_WINS: u16 = 4680;
+pub const MODERN_ACTIVE_PLAYER_FIELD_PVP_TIER_MAX_FROM_WINS: u16 = 4679;
 /// Modern `ACTIVE_PLAYER_FIELD_PVP_LAST_WEEKS_TIER_MAX_FROM_WINS` (size 1).
-pub const MODERN_ACTIVE_PLAYER_FIELD_PVP_LAST_WEEKS_TIER_MAX_FROM_WINS: u16 = 4681;
+pub const MODERN_ACTIVE_PLAYER_FIELD_PVP_LAST_WEEKS_TIER_MAX_FROM_WINS: u16 = 4680;
 /// Modern `ACTIVE_PLAYER_FIELD_BYTES` (size 1).
 pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES: u16 = 2756;
 /// Modern `ACTIVE_PLAYER_FIELD_BYTES_6` (size 1).
@@ -1834,10 +1838,10 @@ pub const PLAYER_MAP: [ModernSlot; 1282] = [
 ///
 /// The mask is always sent at full width for the object type, so this drives
 /// its block count even when only one field changed.
-pub const ACTIVE_PLAYER_FIELD_COUNT: u16 = 4683;
+pub const ACTIVE_PLAYER_FIELD_COUNT: u16 = 4682;
 
 /// Total modern *dynamic* field slots for ActivePlayer.
-pub const ACTIVE_PLAYER_DYNAMIC_FIELD_COUNT: u16 = 19;
+pub const ACTIVE_PLAYER_DYNAMIC_FIELD_COUNT: u16 = 18;
 
 /// Vanilla slot -> modern slot for ActivePlayer objects.
 ///

@@ -4,6 +4,7 @@ use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::guid::ObjectGuid as WorldObjectGuid;
 use crate::protocol::packet::WorldPacketGuidExt;
+use crate::protocol::updates::modern::block::normalize_orientation;
 use crate::protocol::{MovementInfo, ObjectGuid, Opcode, Position, WorldPacket};
 
 /// SMSG_TRANSFER_PENDING
@@ -453,7 +454,7 @@ impl ToWorldPacket for SmsgMonsterMove {
         // Facing data trails the counts here, where vanilla puts it right after the move type.
         match spline_type {
             MODERN_SPLINE_TYPE_FACING_TARGET => {
-                writer.write_f32(self.facing_angle.unwrap_or(0.0));
+                writer.write_f32(normalize_orientation(self.facing_angle.unwrap_or(0.0)));
                 let (high, low) = self
                     .facing_target
                     .unwrap_or_default()
@@ -461,7 +462,7 @@ impl ToWorldPacket for SmsgMonsterMove {
                 writer.write_packed_guid_128(high, low);
             }
             MODERN_SPLINE_TYPE_FACING_ANGLE => {
-                writer.write_f32(self.facing_angle.unwrap_or(0.0));
+                writer.write_f32(normalize_orientation(self.facing_angle.unwrap_or(0.0)));
             }
             MODERN_SPLINE_TYPE_FACING_SPOT => {
                 // The spot is written as a Vector3 here. The vanilla body carries one

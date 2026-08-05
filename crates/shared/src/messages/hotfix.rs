@@ -15,7 +15,11 @@
 //!   than carrying strings, which is why [`crate::messages::gossip::SmsgNpcTextUpdate`] sends ids.
 //!
 //! A row the server cannot supply is answered with [`HotfixStatus::Invalid`] and an empty body rather
-//! than left unanswered — the client blocks the frame that asked until *some* reply arrives.
+//! than left unanswered — the client blocks the frame that asked until *some* reply arrives. This
+//! holds for a whole *table* the server has never heard of too, not just a missing row in a known
+//! one: every id in the batch gets an `Invalid` reply, echoing the table hash straight off the wire
+//! rather than requiring [`Db2Hash`] to name it first. Dropping the batch silently — the original
+//! bug here — left the client waiting on a query it would never see answered.
 
 use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
@@ -65,7 +69,10 @@ pub enum HotfixStatus {
 /// SMSG_DB_REPLY - one DB2 record, or a negative answer for one record id.
 #[derive(Debug, Clone)]
 pub struct SmsgDbReply {
-    pub table_hash: Db2Hash,
+    /// The table hash straight off the client's query. A raw `u32` rather than [`Db2Hash`] so a
+    /// table we cannot name can still be echoed back verbatim -- the client only needs its own hash
+    /// reflected at it to stop waiting, not a name we recognise.
+    pub table_hash: u32,
     pub record_id: u32,
     /// The hotfix generation the client caches this under. Any stable value works for a server that
     /// never revises a row mid-session; the world uses its start time.
@@ -77,8 +84,9 @@ pub struct SmsgDbReply {
 }
 
 impl SmsgDbReply {
-    /// A negative answer: the client stops waiting on this id and shows its own fallback.
-    pub fn unknown(table_hash: Db2Hash, record_id: u32, timestamp: u32) -> Self {
+    /// A negative answer: the client stops waiting on this id and shows its own fallback. Takes the
+    /// raw table hash so this covers a table [`Db2Hash`] does not name too.
+    pub fn unknown(table_hash: u32, record_id: u32, timestamp: u32) -> Self {
         Self {
             table_hash,
             record_id,
@@ -97,7 +105,7 @@ impl ToWorldPacket for SmsgDbReply {
     /// accident of our writer.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
-        writer.write_u32(self.table_hash.raw());
+        writer.write_u32(self.table_hash);
         writer.write_u32(self.record_id);
         writer.write_u32(self.timestamp);
         writer.write_bits(self.status as u32, 3);
@@ -421,6 +429,27 @@ mod tests {
         assert_eq!(Db2Hash::from_raw(0), None);
     }
 
+    /// `SmsgDbReply::unknown` must accept a table hash `Db2Hash` has never heard of (e.g.
+    /// `SpellVisual`, which the client queries but we do not yet serve) and echo it back verbatim.
+    /// The bug this guards: `table_hash` used to be typed `Db2Hash`, so a reply could only be built
+    /// for a table we recognised -- an unrecognised one had nothing well-formed to send and the
+    /// whole query batch got dropped, leaving the client's query permanently unanswered.
+    #[test]
+    fn an_unrecognised_table_hash_still_produces_a_wire_reply() {
+        let spell_visual_hash = 0xF724_96D9; // SpellVisual -- not a Db2Hash variant
+        assert_eq!(Db2Hash::from_raw(spell_visual_hash), None);
+
+        let reply = SmsgDbReply::unknown(spell_visual_hash, 67, 7);
+        let packet = reply.to_modern().unwrap();
+        let body = packet.contents();
+        assert_eq!(
+            u32::from_le_bytes(body[0..4].try_into().unwrap()),
+            spell_visual_hash,
+            "the raw hash must round-trip even with no Db2Hash name for it"
+        );
+        assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 67);
+    }
+
     /// The status is three bits, but the length word that follows flushes them, so it costs a whole
     /// byte and the header is a fixed 17 bytes. Reading the length one byte early is the failure this
     /// pins down, and it would make every record body land at the wrong offset.
@@ -429,7 +458,7 @@ mod tests {
         let reply = SmsgDbReply {
             data: vec![0xAB, 0xCD],
             status: HotfixStatus::Valid,
-            ..SmsgDbReply::unknown(Db2Hash::ItemSparse, 25, 7)
+            ..SmsgDbReply::unknown(Db2Hash::ItemSparse.raw(), 25, 7)
         };
         let packet = reply.to_modern().unwrap();
         assert_eq!(packet.size(), 17 + 2);

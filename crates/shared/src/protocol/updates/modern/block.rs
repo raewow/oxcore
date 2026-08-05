@@ -224,7 +224,7 @@ impl ModernUpdateBlock {
             writer.write_f32(create.position.x);
             writer.write_f32(create.position.y);
             writer.write_f32(create.position.z);
-            writer.write_f32(create.position.o);
+            writer.write_f32(normalize_orientation(create.position.o));
         }
 
         if let Some(victim) = create.combat_victim {
@@ -295,7 +295,7 @@ impl ModernUpdateBlock {
         writer.write_f32(create.position.x);
         writer.write_f32(create.position.y);
         writer.write_f32(create.position.z);
-        writer.write_f32(create.position.o);
+        writer.write_f32(normalize_orientation(create.position.o));
 
         writer.write_f32(0.0); // Pitch
         writer.write_f32(0.0); // StepUpStartElevation
@@ -313,6 +313,27 @@ impl ModernUpdateBlock {
     }
 }
 
+/// Fold an orientation into `[0, 2π)`, the range 1.14 requires.
+///
+/// Vanilla is content with any angle, so nothing upstream normalises: a creature facing computed
+/// from `atan2` lands in `[-π, π]` and a negative value goes out on the wire unchanged. The 1.12
+/// client renders that correctly. The 1.14 client validates the field and closes the connection --
+/// a well-formed create with a negative orientation is enough on its own to end the session.
+///
+/// A non-finite angle has no meaningful fold, so it becomes zero rather than propagating a NaN into
+/// a packet the client would reject just as hard.
+pub fn normalize_orientation(orientation: f32) -> f32 {
+    if !orientation.is_finite() {
+        return 0.0;
+    }
+    let wrapped = orientation % std::f32::consts::TAU;
+    if wrapped < 0.0 {
+        wrapped + std::f32::consts::TAU
+    } else {
+        wrapped
+    }
+}
+
 /// Pack a gameobject rotation quaternion.
 fn pack_gameobject_rotation(rotation: [f32; 4]) -> i64 {
     const PACK_YZ: i64 = 1 << 20;
@@ -325,6 +346,46 @@ fn pack_gameobject_rotation(rotation: [f32; 4]) -> i64 {
     let y = ((rotation[1] * PACK_YZ as f32) as i64 * sign) & PACK_YZ_MASK;
     let z = ((rotation[2] * PACK_YZ as f32) as i64 * sign) & PACK_YZ_MASK;
     z | (y << 21) | (x << 42)
+}
+
+#[cfg(test)]
+mod orientation_tests {
+    use super::normalize_orientation;
+    use std::f32::consts::{FRAC_PI_2, PI, TAU};
+
+    /// A negative orientation on a creature create is enough on its own to make the 1.14 client
+    /// close the connection, and `atan2`-derived facings are negative half the time. Every angle
+    /// that reaches the wire has to come out in `[0, 2π)`.
+    #[test]
+    fn negative_angles_fold_into_the_positive_turn() {
+        assert!((normalize_orientation(-0.005) - (TAU - 0.005)).abs() < 1e-4);
+        assert!((normalize_orientation(-1.393) - (TAU - 1.393)).abs() < 1e-4);
+        assert!((normalize_orientation(-PI) - PI).abs() < 1e-4);
+    }
+
+    #[test]
+    fn angles_already_in_range_are_untouched() {
+        for angle in [0.0, 0.003, FRAC_PI_2, PI, 5.695] {
+            assert_eq!(normalize_orientation(angle), angle);
+        }
+    }
+
+    #[test]
+    fn every_result_lies_in_the_expected_range() {
+        for step in -100..100 {
+            let angle = step as f32 * 0.37;
+            let out = normalize_orientation(angle);
+            assert!((0.0..TAU).contains(&out), "{angle} -> {out}");
+        }
+    }
+
+    /// A NaN would be rejected just as hard as a negative angle, and `%` propagates it.
+    #[test]
+    fn non_finite_angles_become_zero() {
+        assert_eq!(normalize_orientation(f32::NAN), 0.0);
+        assert_eq!(normalize_orientation(f32::INFINITY), 0.0);
+        assert_eq!(normalize_orientation(f32::NEG_INFINITY), 0.0);
+    }
 }
 
 #[cfg(test)]

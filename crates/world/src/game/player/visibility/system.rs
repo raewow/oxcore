@@ -389,26 +389,6 @@ impl VisibilitySubsystem {
             return Ok(());
         };
 
-        // Initial modern visibility is stable, but a standalone create after that bootstrap still
-        // crashes the client. Do not claim these deferred objects were delivered: each later
-        // visibility pass can retry them once the late-create body is fixed.
-        let defer_modern_appearances = broadcaster.protocol() == Protocol::Modern
-            && world
-                .managers
-                .player_mgr
-                .with_player_mut(viewer_guid, |player| {
-                    !player.visibility.objects_created.is_empty()
-                })
-                .unwrap_or(false);
-        if defer_modern_appearances {
-            tracing::debug!(
-                "[VISIBILITY] Deferring {} modern post-bootstrap CREATE_OBJECT2 target(s) for {:?}",
-                targets.len(),
-                viewer_guid
-            );
-            return Ok(());
-        }
-
         // Filter out objects that have already had CREATE_OBJECT2 sent (deduplication guard)
         let targets_to_send: Vec<ObjectGuid> = targets
             .iter()
@@ -666,18 +646,6 @@ impl VisibilitySubsystem {
         let Some(broadcaster) = viewer_broadcaster else {
             return Ok(());
         };
-
-        // Recreating an object after a modern out-of-range notification crashes the 1.14 client.
-        // Keep it client-side until the removal/recreate transition is fully validated; the server
-        // still tracks the visibility delta, while the client may briefly retain a stale object.
-        if broadcaster.protocol() == Protocol::Modern {
-            tracing::debug!(
-                "[VISIBILITY] Deferring modern OUT_OF_RANGE for {:?}: {} targets",
-                viewer_guid,
-                targets.len()
-            );
-            return Ok(());
-        }
 
         // Remove disappeared objects from objects_created (so they can be re-created later)
         world
