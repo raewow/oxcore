@@ -854,6 +854,12 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_LOOT_RELEASE => {
                     loot::handle_loot_release(session, packet, world).await?;
                 }
+                Opcode::CMSG_LOOT_ROLL => {
+                    loot::handle_loot_roll(session, packet, world).await?;
+                }
+                Opcode::CMSG_LOOT_MASTER_GIVE => {
+                    loot::handle_loot_master_give(session, packet, world).await?;
+                }
 
                 // Mail handlers
                 Opcode::MSG_QUERY_NEXT_MAIL_TIME => {

@@ -8,7 +8,7 @@ use crate::protocol::{ObjectGuid, Opcode, WorldPacket};
 ///
 /// A bare item id with no bonuses or modifications, which is all a 1.12 item has. Shared by the loot
 /// and item-push bodies, both of which embed one.
-fn write_modern_item_instance(writer: &mut BitWriter, item_id: u32, random_property: u32) {
+pub fn write_modern_item_instance(writer: &mut BitWriter, item_id: u32, random_property: u32) {
     writer.write_u32(item_id);
     writer.write_u32(0); // RandomPropertiesSeed
     writer.write_u32(random_property); // RandomPropertiesID
@@ -24,6 +24,8 @@ pub struct SmsgLootResponse {
     pub loot_guid: ObjectGuid,
     pub loot_type: u8,
     pub gold: u32,
+    pub loot_method: u8,
+    pub threshold: u8,
     pub items: Vec<LootResponseItem>,
 }
 
@@ -54,8 +56,8 @@ impl ToWorldPacket for SmsgLootResponse {
 
         writer.write_u8(0); // FailureReason -- success
         writer.write_u8(self.loot_type); // AcquireReason
-        writer.write_u8(0); // LootMethod: free-for-all
-        writer.write_u8(2); // Threshold: uncommon, vanilla's default group threshold
+        writer.write_u8(self.loot_method); // LootMethod
+        writer.write_u8(self.threshold); // Threshold
         writer.write_u32(self.gold); // Coins
         writer.write_i32(self.items.len() as i32);
         writer.write_i32(0); // Currencies count -- none in Classic Era

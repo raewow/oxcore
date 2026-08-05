@@ -158,6 +158,9 @@ impl LootManager {
                         is_blocked: false,
                         is_counted: false,
                         roll_winner: None,
+                        is_underthreshold: false,
+                        freeforall: false,
+                        loot_owner: None,
                     });
                     quest_slot += 1;
                 } else {
@@ -169,6 +172,9 @@ impl LootManager {
                         is_blocked: false,
                         is_counted: false,
                         roll_winner: None,
+                        is_underthreshold: false,
+                        freeforall: false,
+                        loot_owner: None,
                     });
                     slot += 1;
                 }
@@ -223,6 +229,9 @@ impl LootManager {
                 is_blocked: false,
                 is_counted: false,
                 roll_winner: None,
+                is_underthreshold: false,
+                freeforall: false,
+                loot_owner: None,
             };
             if entry.is_quest_drop {
                 loot.add_quest_item(item);
@@ -275,6 +284,37 @@ impl LootManager {
     /// Remove loot when corpse despawns
     pub fn remove_loot(&self, source: ObjectGuid) {
         self.active_loot.remove(&source);
+    }
+
+    /// Set the loot's allowed-looter set (e.g. the whole tap group).
+    pub fn set_allowed_looters(&self, source: ObjectGuid, looters: Vec<ObjectGuid>) {
+        if let Some(mut loot) = self.active_loot.get_mut(&source) {
+            loot.allowed_looters = looters;
+        }
+    }
+
+    /// Insert loot directly into the active store (test-only; production populates it via
+    /// `generate_creature_loot` and the spawn paths).
+    #[cfg(test)]
+    pub fn insert_loot(&self, source: ObjectGuid, loot: Loot) {
+        self.active_loot.insert(source, loot);
+    }
+
+    /// Whether a player is on this loot's allowed-looter set.
+    pub fn is_allowed_looter(&self, source: ObjectGuid, player: ObjectGuid) -> Option<bool> {
+        self.active_loot
+            .get(&source)
+            .map(|loot| loot.allowed_looters.contains(&player))
+    }
+
+    /// Add the group's active-loot checks for rolls.
+    /// Mark an item as blocked (a roll is in progress / finished) in the shared loot.
+    pub fn set_item_blocked(&self, source: ObjectGuid, slot: u8, blocked: bool) {
+        if let Some(mut loot) = self.active_loot.get_mut(&source) {
+            if let Some(item) = loot.items.iter_mut().find(|i| i.slot == slot) {
+                item.is_blocked = blocked;
+            }
+        }
     }
 
     /// Set looting state

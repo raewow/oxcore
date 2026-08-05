@@ -49,6 +49,12 @@ pub struct LootItem {
     pub is_counted: bool,
     /// Roll in progress
     pub roll_winner: Option<ObjectGuid>,
+    /// Below the group's loot threshold (never offered to roll on; free to the round-robin looter)
+    pub is_underthreshold: bool,
+    /// Claimable by anyone (not gated to the round-robin looter)
+    pub freeforall: bool,
+    /// Looter this item is reserved for (e.g. the round-robin turn), if any
+    pub loot_owner: Option<ObjectGuid>,
 }
 
 /// Loot table entry from database
@@ -213,6 +219,9 @@ mod tests {
             is_blocked: false,
             is_counted: false,
             roll_winner: None,
+            is_underthreshold: false,
+            freeforall: false,
+            loot_owner: None,
         }
     }
 

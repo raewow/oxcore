@@ -45,7 +45,7 @@ const MEMBER_STATS_FULL: u32 = group_update_flags::STATUS
 /// Group System - manages player parties and raids
 pub struct GroupSystem {
     /// Group data indexed by group ID
-    groups: DashMap<u32, GroupData>,
+    pub(super) groups: DashMap<u32, GroupData>,
 
     /// Player group membership (player_guid -> group_id)
     player_groups: DashMap<ObjectGuid, u32>,
@@ -60,10 +60,10 @@ pub struct GroupSystem {
     repository: Arc<dyn GroupRepositoryTrait>,
 
     /// Broadcast manager for sending packets
-    broadcast_mgr: Arc<dyn BroadcastManagerTrait>,
+    pub(super) broadcast_mgr: Arc<dyn BroadcastManagerTrait>,
 
     /// Player manager for player lookups
-    player_mgr: Arc<PlayerManager>,
+    pub(super) player_mgr: Arc<PlayerManager>,
 
     /// Social system for ignore-list checks on invites
     social_system: Arc<SocialSystem>,
@@ -75,9 +75,15 @@ pub struct GroupSystem {
     /// when a grouped stat changes; drained each tick in `update`.
     member_update_flags: DashMap<ObjectGuid, u32>,
 
+    /// Per-group in-flight loot rolls (`roll.rs`), keyed by group ID.
+    pub(super) loot_rolls: DashMap<u32, Vec<crate::game::loot::Roll>>,
+
+    /// Per-group round-robin looter (`group_id -> current looter`), for non-FFA/master methods.
+    pub(super) round_robin_looters: DashMap<u32, ObjectGuid>,
+
     /// Arc to self, set once after construction, so periodic ticks can spawn
     /// long-running tasks (leader reassignment) that need `&GroupSystem`.
-    self_arc: std::sync::OnceLock<Arc<GroupSystem>>,
+    pub(super) self_arc: std::sync::OnceLock<Arc<GroupSystem>>,
 }
 
 impl GroupSystem {
@@ -100,6 +106,8 @@ impl GroupSystem {
             social_system,
             allow_cross_faction_group,
             member_update_flags: DashMap::new(),
+            loot_rolls: DashMap::new(),
+            round_robin_looters: DashMap::new(),
             self_arc: std::sync::OnceLock::new(),
         }
     }
@@ -493,6 +501,20 @@ impl GroupSystem {
         for member in &group.members {
             self.player_groups.remove(&member.guid);
         }
+
+        // Phase 5: resolve any in-flight loot rolls so rolled items are not stranded.
+        if let Some((_, rolls)) = self.loot_rolls.remove(&group_id) {
+            if let Some(self_arc) = self.self_arc.get().cloned() {
+                for roll in rolls {
+                    let world = world.clone();
+                    let arc = Arc::clone(&self_arc);
+                    tokio::spawn(async move {
+                        arc.resolve_roll(group_id, roll, &world).await;
+                    });
+                }
+            }
+        }
+        self.round_robin_looters.remove(&group_id);
 
         // Delete from database
         self.repository
@@ -1610,7 +1632,7 @@ impl GroupSystem {
     // ========== BROADCASTING ==========
 
     /// Broadcast SMSG_GROUP_LIST to all group members
-    fn broadcast_group_list(&self, group_id: u32) {
+    pub(super) fn broadcast_group_list(&self, group_id: u32) {
         let Some(group) = self.get_group(group_id) else {
             return;
         };
@@ -1839,13 +1861,15 @@ impl GroupSystem {
         Ok(())
     }
 
-    pub fn update(&self, _diff: std::time::Duration, world: &World) -> Result<()> {
+    pub fn update(&self, diff: std::time::Duration, world: &World) -> Result<()> {
         // Phase 2g: reassign leadership from leaders who have been offline too long.
         if let Some(self_arc) = self.self_arc.get().cloned() {
             self.check_offline_leaders(world, self_arc);
         }
         // Phase 3c: push queued party-member stat updates to out-of-range group members.
         self.push_party_member_stats();
+        // Phase 5: advance loot-roll timers; resolve any that expired.
+        self.update_roll_timers(diff, world);
         Ok(())
     }
 

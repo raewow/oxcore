@@ -24,6 +24,7 @@
 
 pub mod reward;
 pub mod rewards;
+pub mod rolls;
 pub mod system;
 
 #[cfg(test)]

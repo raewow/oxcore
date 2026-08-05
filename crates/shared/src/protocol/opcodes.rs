@@ -763,6 +763,7 @@ impl Opcode {
     pub const SMSG_LOOT_MASTER_LIST: Opcode = Opcode { vanilla: 0x02A4, modern: 0x2618 }; // 676
     pub const SMSG_LOOT_ROLL_WON: Opcode = Opcode { vanilla: 0x029F, modern: 0x261B }; // 671
     pub const SMSG_LOOT_ALL_PASSED: Opcode = Opcode { vanilla: 0x029E, modern: 0x261A }; // 670
+    pub const SMSG_LOOT_ROLLS_COMPLETE: Opcode = Opcode { modern: 0x2619, ..Opcode::NONE }; // modern-only
 
     // ============================================================================
     // Trade
@@ -1859,6 +1860,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::SMSG_LOOT_MASTER_LIST, "SMSG_LOOT_MASTER_LIST"),
     (Opcode::SMSG_LOOT_ROLL_WON, "SMSG_LOOT_ROLL_WON"),
     (Opcode::SMSG_LOOT_ALL_PASSED, "SMSG_LOOT_ALL_PASSED"),
+    (Opcode::SMSG_LOOT_ROLLS_COMPLETE, "SMSG_LOOT_ROLLS_COMPLETE"),
     (Opcode::CMSG_INITIATE_TRADE, "CMSG_INITIATE_TRADE"),
     (Opcode::CMSG_BEGIN_TRADE, "CMSG_BEGIN_TRADE"),
     (Opcode::CMSG_BUSY_TRADE, "CMSG_BUSY_TRADE"),
@@ -2543,8 +2545,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            660,
-            "expected 660 opcode constants; update this count deliberately when adding opcodes"
+            661,
+            "expected 661 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

@@ -228,7 +228,76 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
         tracing::info!("[DEATH] process_creature_death {:?}: sending lootable update, dynflags=0x{:04X} (LOOTABLE)", guid, flags);
         send_complete_loot_update(world, guid, flags);
 
-        // Phase 7 TODO: Check if recipient is in group
+        // Phase 5: group loot dispatch. Open the corpse to the whole tap group, advance the
+        // round-robin looter, and start rolls / master-loot assignment by the group's method.
+        if let Some(group_id) = world.systems.group.get_player_group_id(recipient_guid) {
+            let group = world.systems.group.get_player_group(recipient_guid);
+            let loot_method = group.clone().map(|g| g.loot_method).unwrap_or_default();
+            let master_guid = group.map(|g| g.leader_guid).unwrap_or(recipient_guid);
+
+            // Everyone in the tap group may open the corpse.
+            let allowed: Vec<ObjectGuid> = world
+                .systems
+                .group
+                .get_group(group_id)
+                .map(|g| g.members.iter().map(|m| m.guid).collect())
+                .unwrap_or_default();
+            world
+                .systems
+                .loot_manager
+                .set_allowed_looters(guid, allowed);
+
+            let context = crate::game::group::rolls::LootContext {
+                position,
+                map_id,
+                instance_id,
+                rank: world
+                    .managers
+                    .creature_mgr
+                    .get_template(entry)
+                    .map(|t| t.rank)
+                    .unwrap_or(0),
+            };
+            use crate::game::group::LootMethod;
+            match loot_method {
+                LootMethod::FreeForAll => {}
+                LootMethod::RoundRobin => {
+                    world
+                        .systems
+                        .group
+                        .update_looter_guid(world, group_id, guid, &context, false);
+                }
+                LootMethod::GroupLoot => {
+                    world
+                        .systems
+                        .group
+                        .update_looter_guid(world, group_id, guid, &context, false);
+                    world
+                        .systems
+                        .group
+                        .group_loot(world, group_id, guid, context)
+                        .await;
+                }
+                LootMethod::NeedBeforeGreed => {
+                    world
+                        .systems
+                        .group
+                        .update_looter_guid(world, group_id, guid, &context, false);
+                    world
+                        .systems
+                        .group
+                        .need_before_greed(world, group_id, guid, context)
+                        .await;
+                }
+                LootMethod::MasterLooter => {
+                    world
+                        .systems
+                        .group
+                        .master_loot(world, group_id, guid, master_guid, context)
+                        .await;
+                }
+            }
+        }
     } else {
         // No loot recipient — just clear dynamic flags (no DYNFLAG_DEAD, no LOOTABLE)
         tracing::info!(
@@ -259,6 +328,9 @@ pub async fn process_corpse_decay(world: &World, diff_ms: u32) -> anyhow::Result
 /// Remove corpse from world
 async fn remove_corpse(world: &World, guid: ObjectGuid) -> anyhow::Result<()> {
     tracing::debug!("[DEATH] Removing corpse for {:?}", guid);
+
+    // Resolve any in-flight loot rolls on this corpse before the loot is deleted.
+    world.systems.group.end_roll(world, guid);
 
     // 1. Get position, map_id, and instance_id before state change
     let (position, map_id, instance_id) = world

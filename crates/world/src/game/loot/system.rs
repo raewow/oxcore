@@ -188,6 +188,30 @@ impl LootSystem {
             item.count
         );
 
+        // Group loot: an item locked by an in-progress roll is untouchable, and
+        // under-threshold items belong to the round-robin looter.
+        if item.is_blocked {
+            tracing::info!(
+                "[LOOT] handle_loot_item: slot {} is blocked (roll in progress)",
+                slot
+            );
+            return Ok(());
+        }
+        if item.is_underthreshold {
+            if let Some(group_id) = world.systems.group.get_player_group_id(player_guid) {
+                let looter = world.systems.group.current_looter(group_id);
+                if let Some(looter) = looter {
+                    if !looter.is_empty() && looter != player_guid {
+                        tracing::info!(
+                            "[LOOT] handle_loot_item: under-threshold item reserved for looter {:?}",
+                            looter
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         // Add to player inventory
         let result = world
             .systems
@@ -302,6 +326,12 @@ impl LootSystem {
         loot_type: u8,
         world: &World,
     ) {
+        let (loot_method, threshold) = world
+            .systems
+            .group
+            .get_player_group(player_guid)
+            .map(|g| (Into::<u8>::into(g.loot_method), g.loot_threshold))
+            .unwrap_or((0, 0));
         // Decide (once per player) which quest drops this player may see. This also makes
         // them count as unlooted loot — quest items nobody needs never do.
         let visible_quest_slots =
@@ -401,6 +431,8 @@ impl LootSystem {
             loot_guid: target_guid,
             loot_type,
             gold,
+            loot_method,
+            threshold,
             items,
         };
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
@@ -543,7 +575,7 @@ impl LootSystem {
                 .unwrap_or(false);
         }
 
-        // Check if target is a lootable corpse
+// Check if target is a lootable corpse
         let result = world
             .managers
             .creature_mgr
@@ -554,10 +586,16 @@ impl LootSystem {
                     creature.death_state,
                     DeathState::JustDied | DeathState::Corpse
                 );
+                // Any member of the loot's allowed set can open a group corpse; the tapper's
+                // wholesale loot_recipient check would lock group members out otherwise.
                 let is_recipient = creature
                     .loot_recipient
                     .map(|r| r == player_guid)
-                    .unwrap_or(true);
+                    .unwrap_or(true)
+                    || self
+                        .manager
+                        .is_allowed_looter(target_guid, player_guid)
+                        .unwrap_or(false);
                 let has_loot = creature.has_loot;
                 if !is_corpse {
                     tracing::info!(
@@ -579,6 +617,7 @@ impl LootSystem {
                         target_guid
                     );
                 }
+
                 is_corpse && is_recipient && has_loot
             });
 
