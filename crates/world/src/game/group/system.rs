@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::player::PlayerManager;
+use crate::World;
 use oxcore_db::database::characters::models::group::{GroupMemberRow, GroupRow};
 use oxcore_db::database::characters::repositories::GroupRepositoryTrait;
 use oxcore_shared::protocol::ObjectGuid;
@@ -19,6 +20,14 @@ use oxcore_shared::game::group::{
     ERR_TARGET_NOT_IN_GROUP_S, MAX_GROUP_SIZE, MAX_RAID_SIZE, MAX_RAID_SUBGROUPS, PARTY_OP_INVITE,
     PARTY_OP_LEAVE,
 };
+
+/// Current Unix time in seconds.
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 /// Group System - manages player parties and raids
 pub struct GroupSystem {
@@ -45,6 +54,10 @@ pub struct GroupSystem {
 
     /// Whether cross-faction grouping is allowed
     allow_cross_faction_group: bool,
+
+    /// Arc to self, set once after construction, so periodic ticks can spawn
+    /// long-running tasks (leader reassignment) that need `&GroupSystem`.
+    self_arc: std::sync::OnceLock<Arc<GroupSystem>>,
 }
 
 impl GroupSystem {
@@ -64,7 +77,13 @@ impl GroupSystem {
             broadcast_mgr,
             player_mgr,
             allow_cross_faction_group,
+            self_arc: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Store the `Arc<Self>` held by the system manager so spawned tasks can use it.
+    pub fn set_self_arc(&self, arc: Arc<GroupSystem>) {
+        let _ = self.self_arc.set(arc);
     }
 
     /// Initialize system (load next group ID from database)
@@ -228,6 +247,7 @@ impl GroupSystem {
                 main_assistant_guid: ObjectGuid::new_player(group_row.main_assistant_guid),
                 target_icons,
                 subgroup_counts,
+                leader_last_online: 0,
             };
 
             // Save group if leader was changed
@@ -354,13 +374,87 @@ impl GroupSystem {
         Ok(group_id)
     }
 
-    /// Disband a group
-    pub async fn disband_group(&self, group_id: u32) -> Result<(), GroupError> {
+    /// Disband a group.
+    ///
+    /// `initiator` is the player who left by choice; the remaining player still inside a dungeon
+    /// inherits the group's non-permanent instance save (2f), then the group's instances are reset.
+    pub async fn disband_group(
+        &self,
+        world: &World,
+        group_id: u32,
+        initiator: ObjectGuid,
+    ) -> Result<(), GroupError> {
         let group = self
             .groups
             .remove(&group_id)
             .map(|(_, g)| g)
             .ok_or(GroupError::NotInGroup)?;
+
+        // 2f: give the group's non-permanent save on the remaining player's current map to them
+        // personally, and drop that group_instance row.
+        if let Some(remaining) = group.members.iter().find(|m| m.guid != initiator) {
+            if let Some(player) = world.managers.player_mgr.get_player(remaining.guid) {
+                let map_id = player.map_id;
+                if let Some(binding) = world
+                    .managers
+                    .instance_mgr
+                    .get_group_binding(group.leader_guid, map_id)
+                {
+                    let has_personal = world
+                        .managers
+                        .instance_mgr
+                        .get_player_binding(remaining.guid, map_id)
+                        .is_some();
+                    if !binding.permanent && !has_personal {
+                        if let Err(e) = world
+                            .managers
+                            .instance_mgr
+                            .bind_player_to_instance(
+                                &world.databases,
+                                remaining.guid,
+                                map_id,
+                                binding.instance_id,
+                                false,
+                                binding.reset_time,
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                "Failed to inherit instance {} to {:?} on group {} disband: {}",
+                                binding.instance_id,
+                                remaining.guid,
+                                group_id,
+                                e
+                            );
+                        }
+
+                        let _ = sqlx::query::<sqlx::Postgres>(
+                            r#"DELETE FROM characters.group_instance
+                               WHERE leader_guid = $1 AND instance = $2"#,
+                        )
+                        .bind(i64::from(group.leader_guid.low()))
+                        .bind(i64::from(binding.instance_id))
+                        .execute(&world.databases.character)
+                        .await;
+                    }
+                }
+            }
+        }
+
+        // Reset the group's (non-permanent) instances.
+        let players_in_instance = |map_id: u32, instance_id: u32| {
+            world
+                .managers
+                .map_mgr
+                .get_map(map_id, instance_id)
+                .map(|map| map.player_guids())
+                .unwrap_or_default()
+        };
+        let _ = world
+            .managers
+            .instance_mgr
+            .reset_group_instances(&world.databases, group.leader_guid, players_in_instance)
+            .await;
 
         // Remove all player mappings
         for member in &group.members {
@@ -459,7 +553,11 @@ impl GroupSystem {
     }
 
     /// Accept a group invite (CMSG_GROUP_ACCEPT)
-    pub async fn accept_invite(&self, player_guid: ObjectGuid) -> Result<(), GroupError> {
+    pub async fn accept_invite(
+        &self,
+        world: &World,
+        player_guid: ObjectGuid,
+    ) -> Result<(), GroupError> {
         // Get and remove pending invite
         let invite = self
             .pending_invites
@@ -482,7 +580,7 @@ impl GroupSystem {
         };
 
         // Add player to group
-        self.add_member_to_group(group_id, player_guid, player_name.clone())
+        self.add_member_to_group(world, group_id, player_guid, player_name.clone())
             .await?;
 
         // Broadcast updated group list to all members
@@ -525,18 +623,23 @@ impl GroupSystem {
     }
 
     /// Leave the current group (MSG_PARTY_LEAVE or CMSG_GROUP_DISBAND for leader)
-    pub async fn leave_group(&self, player_guid: ObjectGuid) -> Result<(), GroupError> {
+    pub async fn leave_group(
+        &self,
+        world: &World,
+        player_guid: ObjectGuid,
+    ) -> Result<(), GroupError> {
         let group_id = self
             .get_player_group_id(player_guid)
             .ok_or(GroupError::NotInGroup)?;
 
         // Remove player from group
-        self.remove_member_from_group(group_id, player_guid).await?;
+        self.remove_member_from_group(world, group_id, player_guid)
+            .await?;
 
         // Check if group should be disbanded (less than 2 members)
         if let Some(group) = self.get_group(group_id) {
             if group.member_count() < 2 {
-                self.disband_group(group_id).await?;
+                self.disband_group(world, group_id, player_guid).await?;
             } else {
                 // Broadcast updated group list
                 self.broadcast_group_list(group_id);
@@ -554,6 +657,7 @@ impl GroupSystem {
     /// Uninvite (kick) a player from the group
     pub async fn uninvite_player(
         &self,
+        world: &World,
         remover_guid: ObjectGuid,
         target_name: String,
     ) -> Result<(), GroupError> {
@@ -586,12 +690,13 @@ impl GroupSystem {
         }
 
         // Remove from group
-        self.remove_member_from_group(group_id, target_guid).await?;
+        self.remove_member_from_group(world, group_id, target_guid)
+            .await?;
 
         // Check if group should be disbanded
         if let Some(group) = self.get_group(group_id) {
             if group.member_count() < 2 {
-                self.disband_group(group_id).await?;
+                self.disband_group(world, group_id, remover_guid).await?;
             } else {
                 self.broadcast_group_list(group_id);
             }
@@ -615,17 +720,51 @@ impl GroupSystem {
     /// Add a member to an existing group
     async fn add_member_to_group(
         &self,
+        world: &World,
         group_id: u32,
         player_guid: ObjectGuid,
         player_name: String,
     ) -> Result<(), GroupError> {
         // Update in-memory cache
-        {
+        let is_leader = {
             let mut group = self
                 .groups
                 .get_mut(&group_id)
                 .ok_or(GroupError::NotInGroup)?;
             group.add_member(player_guid, player_name)?;
+            group.is_leader(player_guid)
+        };
+
+        // 2e: reset the joining member's non-permanent instances unless they are currently
+        // inside one (reference `Group::AddMember`, `Group.cpp:346-351`).
+        if !is_leader {
+            let inside_one = world
+                .managers
+                .player_mgr
+                .get_player(player_guid)
+                .map(|p| {
+                    !world
+                        .managers
+                        .instance_mgr
+                        .can_player_reset_instances(player_guid, p.map_id)
+                })
+                .unwrap_or(false);
+
+            if !inside_one {
+                let players_in_instance = |map_id: u32, instance_id: u32| {
+                    world
+                        .managers
+                        .map_mgr
+                        .get_map(map_id, instance_id)
+                        .map(|map| map.player_guids())
+                        .unwrap_or_default()
+                };
+                let _ = world
+                    .managers
+                    .instance_mgr
+                    .reset_player_instances(&world.databases, player_guid, players_in_instance)
+                    .await;
+            }
         }
 
         // Get subgroup for database
@@ -649,39 +788,30 @@ impl GroupSystem {
     /// Remove a member from a group
     async fn remove_member_from_group(
         &self,
+        world: &World,
         group_id: u32,
         player_guid: ObjectGuid,
     ) -> Result<(), GroupError> {
-        let was_leader;
-
         // Update in-memory cache
-        {
+        let auto_promote = {
             let mut group = self
                 .groups
                 .get_mut(&group_id)
                 .ok_or(GroupError::NotInGroup)?;
 
-            was_leader = group.is_leader(player_guid);
+            let was_leader = group.is_leader(player_guid);
             group
                 .remove_member(player_guid)
                 .ok_or(GroupError::MemberNotFound)?;
 
-            // If leader left, promote new leader and persist
+            // If the leader left and members remain, pick a replacement online member.
             if was_leader && group.member_count() > 0 {
                 let player_mgr = Arc::clone(&self.player_mgr);
-                group.select_new_leader(
-                    |guid| player_mgr.get_player(guid).is_some(),
-                    false,
-                );
-
-                let group_row = self.group_to_row(&group);
-                drop(group);
-                self.repository
-                    .save_group(&group_row)
-                    .await
-                    .map_err(|e| GroupError::Internal(e.to_string()))?;
+                group.select_new_leader(|guid| player_mgr.get_player(guid).is_some(), false)
+            } else {
+                None
             }
-        }
+        };
 
         // Remove from player mappings
         self.player_groups.remove(&player_guid);
@@ -692,6 +822,12 @@ impl GroupSystem {
             .await
             .map_err(|e| GroupError::Internal(e.to_string()))?;
 
+        // Announce and persist the promoted leader (single leader-change path, 2c).
+        if let Some(new_leader) = auto_promote {
+            self.apply_new_leader(world, group_id, new_leader, true)
+                .await?;
+        }
+
         Ok(())
     }
 
@@ -700,6 +836,7 @@ impl GroupSystem {
     /// Set the group leader (CMSG_GROUP_SET_LEADER)
     pub async fn set_leader(
         &self,
+        world: &World,
         player_guid: ObjectGuid,
         new_leader_guid: ObjectGuid,
     ) -> Result<(), GroupError> {
@@ -708,51 +845,83 @@ impl GroupSystem {
             .ok_or(GroupError::NotInGroup)?;
 
         // Verify current player is leader
-        {
-            let group = self.get_group(group_id).ok_or(GroupError::NotInGroup)?;
+        let group = self.get_group(group_id).ok_or(GroupError::NotInGroup)?;
 
-            if !group.is_leader(player_guid) {
-                return Err(GroupError::NotLeader);
-            }
-
-            if !group.has_member(new_leader_guid) {
-                return Err(GroupError::MemberNotFound);
-            }
+        if !group.is_leader(player_guid) {
+            return Err(GroupError::NotLeader);
         }
 
-        // Update group
+        if !group.has_member(new_leader_guid) {
+            return Err(GroupError::MemberNotFound);
+        }
+        drop(group);
+
+        self.apply_new_leader(world, group_id, new_leader_guid, true)
+            .await
+    }
+
+    /// Apply a leader change: update the cache, transfer instance bindings (2d), persist the new
+    /// leader, and optionally announce. Single path shared by `set_leader`, the auto-promote on
+    /// member removal, and the offline-leader sweep (2c).
+    async fn apply_new_leader(
+        &self,
+        world: &World,
+        group_id: u32,
+        new_leader: ObjectGuid,
+        announce: bool,
+    ) -> Result<(), GroupError> {
+        let old_leader;
         {
             let mut group = self
                 .groups
                 .get_mut(&group_id)
                 .ok_or(GroupError::NotInGroup)?;
 
-            group.promote_new_leader(new_leader_guid)?;
+            old_leader = group.leader_guid;
+            group.promote_new_leader(new_leader)?;
+            group.leader_last_online = now_secs();
 
-            // Save to database
             let group_row = self.group_to_row(&group);
             drop(group);
+
+            // Transfer the group's instance bindings to the new leader (2d), before persisting.
+            if let Err(e) = world
+                .managers
+                .instance_mgr
+                .transfer_group_bindings(&world.databases, old_leader, new_leader)
+                .await
+            {
+                tracing::warn!(
+                    "Failed to transfer group {} instance bindings {:?} -> {:?}: {}",
+                    group_id,
+                    old_leader,
+                    new_leader,
+                    e
+                );
+            }
+
             self.repository
                 .save_group(&group_row)
                 .await
                 .map_err(|e| GroupError::Internal(e.to_string()))?;
         }
 
-        // Broadcast SMSG_GROUP_SET_LEADER and updated group list
-        let new_leader_name = self
-            .player_mgr
-            .get_player_name(new_leader_guid)
-            .unwrap_or_else(|| "Unknown".to_string());
+        if announce {
+            let new_leader_name = self
+                .player_mgr
+                .get_player_name(new_leader)
+                .unwrap_or_else(|| "Unknown".to_string());
 
-        use oxcore_shared::messages::group::SmsgGroupSetLeader;
-        let msg = SmsgGroupSetLeader {
-            leader_name: &new_leader_name,
-        };
-        self.broadcast_to_group(group_id, msg);
+            use oxcore_shared::messages::group::SmsgGroupSetLeader;
+            let msg = SmsgGroupSetLeader {
+                leader_name: &new_leader_name,
+            };
+            self.broadcast_to_group(group_id, msg);
+        }
 
         self.broadcast_group_list(group_id);
 
-        tracing::info!("Group {} leader changed to {:?}", group_id, new_leader_guid);
+        tracing::info!("Group {} leader changed to {:?}", group_id, new_leader);
 
         Ok(())
     }
@@ -1490,9 +1659,79 @@ impl GroupSystem {
         Ok(())
     }
 
-    pub fn update(&self, _diff: std::time::Duration, _world: &crate::World) -> Result<()> {
-        // No periodic updates needed
+    pub fn update(&self, _diff: std::time::Duration, world: &World) -> Result<()> {
+        // Phase 2g: reassign leadership from leaders who have been offline too long.
+        if let Some(self_arc) = self.self_arc.get().cloned() {
+            self.check_offline_leaders(world, self_arc);
+        }
         Ok(())
+    }
+
+    /// Sweep groups whose leader has been offline longer than `group_offline_leader_delay`
+    /// and reassign leadership to an online member. DB writes and the instance-binding
+    /// transfer run in a spawned task because they cannot be awaited from the sync tick.
+    fn check_offline_leaders(&self, world: &World, self_arc: Arc<GroupSystem>) {
+        let delay = world.config.group_offline_leader_delay;
+        if delay == 0 {
+            return;
+        }
+
+        let now = now_secs();
+        let overdue: Vec<u32> = self
+            .groups
+            .iter()
+            .filter(|entry| {
+                let group = entry.value();
+                group.leader_last_online != 0
+                    && group.leader_last_online.saturating_add(delay) < now
+                    && world
+                        .managers
+                        .player_mgr
+                        .get_player(group.leader_guid)
+                        .is_none()
+            })
+            .map(|entry| entry.id)
+            .collect();
+
+        for group_id in overdue {
+            let world = world.clone();
+            let self_arc = Arc::clone(&self_arc);
+            tokio::spawn(async move {
+                if let Err(e) = Self::reassign_offline_leader(&self_arc, &world, group_id).await {
+                    tracing::warn!(
+                        "Failed to reassign leader for group {}: {:?}",
+                        group_id,
+                        e
+                    );
+                }
+            });
+        }
+    }
+
+    /// Pick an online replacement for a group whose leader has been offline too long and apply
+    /// the change. Uses the `offline` variant of `select_new_leader`, so when nobody online is
+    /// available the leadership is left with the absentee.
+    async fn reassign_offline_leader(
+        self_arc: &Arc<GroupSystem>,
+        world: &World,
+        group_id: u32,
+    ) -> Result<(), GroupError> {
+        let new_leader = {
+            let mut group = self_arc
+                .groups
+                .get_mut(&group_id)
+                .ok_or(GroupError::NotInGroup)?;
+            if group.leader_guid.is_empty() || group.member_count() == 0 {
+                return Err(GroupError::NotInGroup);
+            }
+            let player_mgr = Arc::clone(&self_arc.player_mgr);
+            match group.select_new_leader(|guid| player_mgr.get_player(guid).is_some(), true) {
+                Some(guid) => guid,
+                None => return Ok(()),
+            }
+        };
+
+        self_arc.apply_new_leader(world, group_id, new_leader, true).await
     }
 
     pub async fn shutdown(&self) -> Result<()> {
@@ -1506,6 +1745,15 @@ impl GroupSystem {
     pub async fn on_player_login(&self, guid: ObjectGuid) -> Result<()> {
         // Update member status to online
         self.update_member_online(guid);
+
+        // The leader is back online: clear the offline-leader timer (2g).
+        if let Some(group_id) = self.get_player_group_id(guid) {
+            if let Some(mut group) = self.groups.get_mut(&group_id) {
+                if group.is_leader(guid) {
+                    group.leader_last_online = 0;
+                }
+            }
+        }
 
         // Send group list to player on login if in group
         if let Some(group_id) = self.get_player_group_id(guid) {
@@ -1532,6 +1780,15 @@ impl GroupSystem {
 
         // Update member status to offline
         self.update_member_offline(guid);
+
+        // Stamp the leader's last-online time so the offline-leader sweep can fire (2g).
+        if let Some(group_id) = group_id {
+            if let Some(mut group) = self.groups.get_mut(&group_id) {
+                if group.is_leader(guid) {
+                    group.leader_last_online = now_secs();
+                }
+            }
+        }
 
         // Broadcast updated group list to remaining members
         if let Some(group_id) = group_id {

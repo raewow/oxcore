@@ -215,6 +215,9 @@ pub struct GroupData {
     pub main_assistant_guid: ObjectGuid,
     pub target_icons: [ObjectGuid; TARGET_ICON_COUNT],
     pub subgroup_counts: [u8; MAX_RAID_SUBGROUPS as usize],
+    /// Unix seconds the leader was last seen online. Zero when never stamped; used to
+    /// auto-reassign leadership when the leader has been absent too long.
+    pub leader_last_online: u64,
 }
 
 impl GroupData {
@@ -234,6 +237,7 @@ impl GroupData {
             main_assistant_guid: ObjectGuid::empty(),
             target_icons: [ObjectGuid::empty(); TARGET_ICON_COUNT],
             subgroup_counts: [0; MAX_RAID_SUBGROUPS as usize],
+            leader_last_online: 0,
         };
 
         group.subgroup_counts[0] = 1;

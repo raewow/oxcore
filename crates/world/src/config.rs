@@ -188,6 +188,10 @@ pub struct Config {
     /// Yards within which group members earn kill XP and may roll on loot.
     #[serde(default = "default_group_xp_distance")]
     pub group_xp_distance: f32,
+    /// Seconds a group leader may stay offline before leadership is reassigned
+    /// to an online member (reference `Group.OfflineLeaderDelay`, default 300).
+    #[serde(default = "default_group_offline_leader_delay")]
+    pub group_offline_leader_delay: u64,
 
     // VMap Settings
     #[serde(default = "default_true")]
@@ -449,6 +453,10 @@ fn default_true() -> bool {
 
 fn default_group_xp_distance() -> f32 {
     74.0
+}
+
+fn default_group_offline_leader_delay() -> u64 {
+    300
 }
 
 fn default_visibility_continents() -> f32 {
@@ -717,6 +725,7 @@ impl Default for Config {
             visibility_distance_min: default_visibility_min(),
             grid_unload_delay_secs: default_grid_unload_delay_secs(),
             group_xp_distance: default_group_xp_distance(),
+            group_offline_leader_delay: default_group_offline_leader_delay(),
             vmap_enable_los: default_true(),
             vmap_enable_height: default_true(),
             vmap_enable_indoor_check: default_true(),

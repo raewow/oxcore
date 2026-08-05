@@ -79,7 +79,7 @@ pub async fn handle_group_accept(session: &WorldSession, world: &World) -> Resul
 
     debug!("CMSG_GROUP_ACCEPT: player={:?}", player_guid);
 
-    world.systems.group.accept_invite(player_guid).await?;
+    world.systems.group.accept_invite(world, player_guid).await?;
 
     Ok(())
 }
@@ -119,7 +119,7 @@ pub async fn handle_group_uninvite(
     world
         .systems
         .group
-        .uninvite_player(player_guid, member_name)
+        .uninvite_player(world, player_guid, member_name)
         .await?;
 
     Ok(())
@@ -135,7 +135,7 @@ pub async fn handle_party_leave(session: &WorldSession, world: &World) -> Result
     debug!("MSG_PARTY_LEAVE: player={:?}", player_guid);
 
     // Handle errors gracefully - if not in group, just ignore
-    match world.systems.group.leave_group(player_guid).await {
+    match world.systems.group.leave_group(world, player_guid).await {
         Ok(()) => {
             info!("Player {:?} left group successfully", player_guid);
         }
@@ -170,7 +170,7 @@ pub async fn handle_group_set_leader(
     world
         .systems
         .group
-        .set_leader(player_guid, new_leader_guid)
+        .set_leader(world, player_guid, new_leader_guid)
         .await?;
 
     Ok(())
@@ -186,7 +186,7 @@ pub async fn handle_group_disband(session: &WorldSession, world: &World) -> Resu
     info!("CMSG_GROUP_DISBAND: player={:?}", player_guid);
 
     // For disband, we just have the leader leave - this will trigger disbanding if they're the last member
-    world.systems.group.leave_group(player_guid).await?;
+    world.systems.group.leave_group(world, player_guid).await?;
 
     Ok(())
 }

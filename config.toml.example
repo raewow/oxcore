@@ -101,6 +101,9 @@ grid_unload_delay_secs = 300
 # Yards within which group members earn kill XP and may roll on loot
 # (MaxGroupXPDistance in the reference server).
 group_xp_distance = 74
+# Seconds a group leader may stay offline before leadership is reassigned to an
+# online member (Group.OfflineLeaderDelay in the reference server).
+group_offline_leader_delay = 300
 
 # Logging
 # Log levels: 0=Error, 1=Warning, 2=Info, 3=Debug, 4=Trace

@@ -346,6 +346,131 @@ impl InstanceMgr {
         self.get_player_binding(leader_guid, map_id)
     }
 
+    /// Transfer a group's instance bindings from the old leader to the new one,
+    /// mirroring `Group::_setLeader` (reference `Group.cpp:1710-1786`).
+    ///
+    /// Group bindings are keyed by leader GUID in the vanilla schema, and the in-memory
+    /// `player_bindings` cache stores them under that same key, so the cache entry is
+    /// re-keyed here too.
+    pub async fn transfer_group_bindings(
+        &self,
+        databases: &Databases,
+        old_leader: ObjectGuid,
+        new_leader: ObjectGuid,
+    ) -> Result<()> {
+        let old_low = i64::from(old_leader.low());
+        let new_low = i64::from(new_leader.low());
+
+        // 1. Delete the group's permanent binds and any bind the new leader already holds
+        //    personally (those get replaced by the new leader's permanent binds below).
+        sqlx::query::<sqlx::Postgres>(
+            r#"DELETE FROM characters.group_instance
+               WHERE leader_guid = $1 AND (permanent = 1 OR instance IN
+                 (SELECT instance FROM characters.character_instance WHERE guid = $2))"#,
+        )
+        .bind(old_low)
+        .bind(new_low)
+        .execute(&databases.character)
+        .await
+        .context("Failed to delete group bindings on leader change")?;
+
+        // 2. For each remaining non-permanent group bind the new leader already holds
+        //    personally, give the group's save to the old leader if they have none, then
+        //    drop the group row.
+        let rows = sqlx::query::<sqlx::Postgres>(
+            r#"SELECT instance FROM characters.group_instance WHERE leader_guid = $1"#,
+        )
+        .bind(old_low)
+        .fetch_all(&databases.character)
+        .await
+        .context("Failed to query remaining group bindings")?;
+
+        for row in rows {
+            let instance_id: i64 = row.get(0);
+
+            let new_has_personal = sqlx::query::<sqlx::Postgres>(
+                r#"SELECT 1 FROM characters.character_instance WHERE guid = $1 AND instance = $2"#,
+            )
+            .bind(new_low)
+            .bind(instance_id)
+            .fetch_optional(&databases.character)
+            .await
+            .context("Failed to check new leader personal bind")?;
+
+            if new_has_personal.is_none() {
+                continue;
+            }
+
+            let old_has_personal = sqlx::query::<sqlx::Postgres>(
+                r#"SELECT 1 FROM characters.character_instance WHERE guid = $1 AND instance = $2"#,
+            )
+            .bind(old_low)
+            .bind(instance_id)
+            .fetch_optional(&databases.character)
+            .await
+            .context("Failed to check old leader personal bind")?;
+
+            if old_has_personal.is_none() {
+                sqlx::query::<sqlx::Postgres>(
+                    r#"INSERT INTO characters.character_instance (guid, instance, permanent, extend)
+                       SELECT $1, instance, permanent, 0 FROM characters.group_instance
+                       WHERE leader_guid = $2 AND instance = $3"#,
+                )
+                .bind(old_low)
+                .bind(old_low)
+                .bind(instance_id)
+                .execute(&databases.character)
+                .await
+                .context("Failed to hand group save to old leader")?;
+            }
+
+            sqlx::query::<sqlx::Postgres>(
+                r#"DELETE FROM characters.group_instance WHERE leader_guid = $1 AND instance = $2"#,
+            )
+            .bind(old_low)
+            .bind(instance_id)
+            .execute(&databases.character)
+            .await
+            .context("Failed to delete replaced group bind")?;
+        }
+
+        // 3. Move the remaining group binds to the new leader.
+        sqlx::query::<sqlx::Postgres>(
+            r#"UPDATE characters.group_instance SET leader_guid = $1 WHERE leader_guid = $2"#,
+        )
+        .bind(new_low)
+        .bind(old_low)
+        .execute(&databases.character)
+        .await
+        .context("Failed to transfer group bindings to new leader")?;
+
+        // 4. Copy the new leader's permanent personal binds into the group.
+        sqlx::query::<sqlx::Postgres>(
+            r#"INSERT INTO characters.group_instance (leader_guid, instance, permanent)
+               SELECT $1, instance, permanent FROM characters.character_instance
+               WHERE guid = $1 AND permanent = 1
+               ON CONFLICT (leader_guid, instance) DO UPDATE SET permanent = EXCLUDED.permanent"#,
+        )
+        .bind(new_low)
+        .execute(&databases.character)
+        .await
+        .context("Failed to copy new leader permanent binds to group")?;
+
+        // Cache detail: group binds live in player_bindings keyed by the leader GUID.
+        // Re-key (merge, so a cached personal entry for the new leader is preserved).
+        {
+            let mut player_bindings = self.player_bindings.write();
+            if let Some(bindings) = player_bindings.remove(&old_leader) {
+                let entry = player_bindings.entry(new_leader).or_insert_with(HashMap::new);
+                for (map_id, binding) in bindings {
+                    entry.insert(map_id, binding);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Reset instance
     pub async fn reset_instance(
         &self,

@@ -167,6 +167,7 @@ impl SystemManager {
             player_mgr.clone(),
             false, // allow_cross_faction_group - TODO: make configurable
         ));
+        group.set_self_arc(Arc::clone(&group));
 
         let ticket = Arc::new(TicketSystem::new(
             ticket_repo,
