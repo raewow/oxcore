@@ -22,6 +22,7 @@
 //! 4. On accept, group is created (if needed) and SMSG_GROUP_LIST sent to all members
 //! 5. Members can leave, leader can promote/demote, convert to raid, etc.
 
+pub mod reward;
 pub mod system;
 
 #[cfg(test)]
@@ -35,3 +36,4 @@ pub use oxcore_shared::game::group::{
     PARTY_OP_LEAVE,
 };
 pub use system::GroupSystem;
+pub use reward::{is_at_group_reward_distance, CREATURE_ELITE_WORLDBOSS, DEFAULT_GROUP_XP_DISTANCE};

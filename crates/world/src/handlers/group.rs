@@ -93,7 +93,7 @@ pub async fn handle_group_decline(session: &WorldSession, world: &World) -> Resu
 
     debug!("CMSG_GROUP_DECLINE: player={:?}", player_guid);
 
-    world.systems.group.decline_invite(player_guid);
+    world.systems.group.decline_invite(player_guid).await?;
 
     Ok(())
 }

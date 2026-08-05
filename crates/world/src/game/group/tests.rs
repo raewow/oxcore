@@ -235,7 +235,7 @@ fn test_group_select_new_leader() {
     group.remove_member(leader_guid);
 
     // Select new leader
-    let new_leader = group.select_new_leader();
+    let new_leader = group.select_new_leader(|_| true, false);
     assert!(new_leader.is_some());
     assert!(group.is_leader(new_leader.unwrap()));
 }

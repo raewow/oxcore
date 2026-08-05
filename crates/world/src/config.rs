@@ -179,9 +179,15 @@ pub struct Config {
     /// Floor the continent ramp will not shrink past when ticks run long.
     #[serde(default = "default_visibility_min")]
     pub visibility_distance_min: f32,
-    /// Seconds a grid stays idle before it may be unloaded.
+    /// Seconds a grid must sit idle (no players in or near it) before it unloads
+    /// and despawns its creatures.
     #[serde(default = "default_grid_unload_delay_secs")]
     pub grid_unload_delay_secs: u64,
+
+    // Group Settings
+    /// Yards within which group members earn kill XP and may roll on loot.
+    #[serde(default = "default_group_xp_distance")]
+    pub group_xp_distance: f32,
 
     // VMap Settings
     #[serde(default = "default_true")]
@@ -439,6 +445,10 @@ fn default_chat_flood_mute_time() -> u32 {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_group_xp_distance() -> f32 {
+    74.0
 }
 
 fn default_visibility_continents() -> f32 {
@@ -706,6 +716,7 @@ impl Default for Config {
             visibility_distance_bg: default_visibility_bg(),
             visibility_distance_min: default_visibility_min(),
             grid_unload_delay_secs: default_grid_unload_delay_secs(),
+            group_xp_distance: default_group_xp_distance(),
             vmap_enable_los: default_true(),
             vmap_enable_height: default_true(),
             vmap_enable_indoor_check: default_true(),

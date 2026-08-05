@@ -374,7 +374,7 @@ impl SystemManager {
         self.guild.update(diff)?;
         self.chat.update(diff)?;
         self.trade.update(diff)?;
-        self.group.update(diff)?;
+        self.group.update(diff, world)?;
         self.ticket.update(diff)?;
         self.experience.update(diff)?;
         self.grid.update(diff)?;

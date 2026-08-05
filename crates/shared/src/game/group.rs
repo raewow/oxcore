@@ -486,30 +486,62 @@ impl GroupData {
         };
         self.leader_guid = guid;
         self.leader_name = name;
-        if let Some(member) = self.get_member_mut(new_leader_guid) {
-            member.assistant = false;
-        }
         Ok(())
     }
 
-    pub fn select_new_leader(&mut self) -> Option<ObjectGuid> {
-        let new_leader_guid = self
-            .members
-            .iter()
-            .filter(|m| m.guid != self.leader_guid && m.status.is_online())
-            .map(|m| m.guid)
-            .next()
-            .or_else(|| {
-                self.members
-                    .iter()
-                    .filter(|m| m.guid != self.leader_guid)
-                    .map(|m| m.guid)
-                    .next()
-            });
-        if let Some(guid) = new_leader_guid {
+    /// Choose a new leader, mirroring the reference `Group::_chooseLeader`.
+    ///
+    /// `is_online` tells whether a member currently has a live player; it is supplied by the
+    /// caller so this crate keeps no player-manager dependency. When `offline` is set (the old
+    /// leader went AFK/offline for too long) a new leader is only chosen if someone online exists —
+    /// leadership is never reassigned to another absentee.
+    pub fn select_new_leader(
+        &mut self,
+        is_online: impl Fn(ObjectGuid) -> bool,
+        offline: bool,
+    ) -> Option<ObjectGuid> {
+        // First online non-assistant, used as a fallback when a raid has no online assistant.
+        let mut first_non_assistant: Option<ObjectGuid> = None;
+        // Player matching the priority criteria (online assistant, or any online member in a party).
+        let mut chosen: Option<ObjectGuid> = None;
+
+        for member in &self.members {
+            if member.guid == self.leader_guid {
+                continue;
+            }
+            // Skip members with no live player.
+            if !is_online(member.guid) {
+                continue;
+            }
+            // In raids, prefer assistants; remember the first online non-assistant as a fallback.
+            if self.is_raid && !member.assistant {
+                if first_non_assistant.is_none() {
+                    first_non_assistant = Some(member.guid);
+                }
+                continue;
+            }
+            chosen = Some(member.guid);
+            break;
+        }
+
+        if chosen.is_none() {
+            chosen = first_non_assistant;
+        }
+
+        // Choosing due to inactivity: never reassign to another absentee.
+        if offline && chosen.is_none() {
+            return None;
+        }
+
+        if chosen.is_none() {
+            // Fall back to the first member slot, as the reference does when nobody online.
+            chosen = self.members.first().map(|m| m.guid);
+        }
+
+        if let Some(guid) = chosen {
             let _ = self.promote_new_leader(guid);
         }
-        new_leader_guid
+        chosen
     }
 }
 

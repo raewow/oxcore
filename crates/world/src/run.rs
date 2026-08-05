@@ -58,6 +58,7 @@ fn build_world_config(config: &Config) -> Config {
     world_config.realm_id = config.realm_id;
     world_config.realm_name = config.realm_name.clone();
     world_config.chat_log_enabled = config.chat_log_enabled;
+    world_config.group_xp_distance = config.group_xp_distance;
     world_config
 }
 

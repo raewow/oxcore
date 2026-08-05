@@ -666,14 +666,20 @@ impl GroupSystem {
                 .remove_member(player_guid)
                 .ok_or(GroupError::MemberNotFound)?;
 
-            // If leader left, promote new leader
+            // If leader left, promote new leader and persist
             if was_leader && group.member_count() > 0 {
-                group.select_new_leader();
+                let player_mgr = Arc::clone(&self.player_mgr);
+                group.select_new_leader(
+                    |guid| player_mgr.get_player(guid).is_some(),
+                    false,
+                );
 
-                // Update database with new leader
                 let group_row = self.group_to_row(&group);
-                drop(group); // Release lock before async
-                let _ = self.repository.save_group(&group_row);
+                drop(group);
+                self.repository
+                    .save_group(&group_row)
+                    .await
+                    .map_err(|e| GroupError::Internal(e.to_string()))?;
             }
         }
 
@@ -1051,22 +1057,27 @@ impl GroupSystem {
         }
 
         // Update database for both members
-        if let Some(group) = self.get_group(group_id) {
-            if let Some(m1) = group.get_member(guid1) {
-                let _ = self.repository.update_member(
-                    group_id,
-                    guid1.counter(),
-                    m1.assistant,
-                    subgroup2 as u16,
-                );
+        {
+            let m1 = self
+                .get_group(group_id)
+                .and_then(|g| g.get_member(guid1).cloned())
+                .map(|m| (m.assistant, subgroup2 as u16));
+            let m2 = self
+                .get_group(group_id)
+                .and_then(|g| g.get_member(guid2).cloned())
+                .map(|m| (m.assistant, subgroup1 as u16));
+
+            if let Some((assistant, subgroup)) = m1 {
+                self.repository
+                    .update_member(group_id, guid1.counter(), assistant, subgroup)
+                    .await
+                    .map_err(|e| GroupError::Internal(e.to_string()))?;
             }
-            if let Some(m2) = group.get_member(guid2) {
-                let _ = self.repository.update_member(
-                    group_id,
-                    guid2.counter(),
-                    m2.assistant,
-                    subgroup1 as u16,
-                );
+            if let Some((assistant, subgroup)) = m2 {
+                self.repository
+                    .update_member(group_id, guid2.counter(), assistant, subgroup)
+                    .await
+                    .map_err(|e| GroupError::Internal(e.to_string()))?;
             }
         }
 
@@ -1479,7 +1490,7 @@ impl GroupSystem {
         Ok(())
     }
 
-    pub fn update(&self, _diff: std::time::Duration) -> Result<()> {
+    pub fn update(&self, _diff: std::time::Duration, _world: &crate::World) -> Result<()> {
         // No periodic updates needed
         Ok(())
     }
