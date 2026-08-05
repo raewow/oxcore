@@ -10,16 +10,22 @@ use tracing::{error, info};
 use crate::dbc::structures::AuctionHouseEntry;
 use crate::dbc::DbcManager;
 use crate::game::auction::parsing::{parse_enchantments, parse_spell_charges};
+use crate::game::auction::{
+    get_checked_auction_house_for_auctioneer, send_auction_bidder_notification,
+    send_auction_owner_notification,
+};
 use crate::game::items::manager::ItemTemplate;
 use crate::game::items::Item;
+use crate::game::player::auras::effects::AURA_FEIGN_DEATH;
 use crate::game::ItemManager;
+use crate::World;
 use oxcore_db::database::characters::models::auction::{AuctionItemLoadRow, AuctionRow};
 use oxcore_db::database::characters::models::mail::MailRow;
 use oxcore_db::database::characters::repositories::auction_repository_trait::AuctionRepositoryTrait;
 use oxcore_db::database::characters::repositories::item_repository_trait::ItemRepositoryTrait;
 use oxcore_db::database::characters::repositories::mail_repository_trait::MailRepositoryTrait;
 use oxcore_db::database::characters::repositories::CharacterRepository;
-use oxcore_shared::game::auction::AuctionEntry;
+use oxcore_shared::game::auction::{AuctionEntry, AuctionError};
 use oxcore_shared::game::chat::Team;
 use oxcore_shared::game::mail::{MailCheckMask, MailMessageType, MailStationery};
 use oxcore_shared::protocol::{HighGuid, ObjectGuid};
@@ -131,6 +137,29 @@ impl BarGoLink {
         self.current = self.current.saturating_add(1);
         let _ = (self.current, self.total);
     }
+}
+
+/// Outcome of a successful [`AuctionHouseManager::place_bid`], carrying enough of the settled
+/// auction state for the handler to send the final `SMSG_AUCTION_COMMAND_RESULT` to the
+/// bidder's own session.
+pub struct PlaceBidOutcome {
+    pub auction: AuctionEntry,
+}
+
+/// Result of an [`AuctionHouseManager::place_bid`] attempt: the handler maps this straight onto
+/// the `SMSG_AUCTION_COMMAND_RESULT` it sends back to the bidder.
+pub enum PlaceBidResult {
+    Success(PlaceBidOutcome),
+    /// A rejected bid the client should be told about. `auction` carries the current auction
+    /// snapshot for `HigherBid`/`BidIncrement` so the client can refresh its bid window; `None`
+    /// for every other rejection, matching the wire format's existing contract.
+    Rejected {
+        error: AuctionError,
+        auction: Option<AuctionEntry>,
+    },
+    /// The bid is silently dropped (the player can't afford it) -- no packet is sent, matching
+    /// the original handler's behavior for this case.
+    Silent,
 }
 
 pub struct AuctionHouseManager {
@@ -779,6 +808,254 @@ impl AuctionHouseManager {
             .update_bid(auction_id, bidder_guid, new_bid as i32)
             .await
             .context("Failed to update bid in database")
+    }
+
+    /// Validate and apply a `CMSG_AUCTION_PLACE_BID`.
+    ///
+    /// Enforces every game rule around placing a bid (GM-trade restriction, self-bid,
+    /// cross-account ownership, bid-amount/increment checks, affordability) and performs the
+    /// resulting mutation (gold deduction, DB persistence, outbid/won mail, live notifications
+    /// to the seller and any displaced bidder, plus the live won notification to the buyer on a
+    /// buyout). Callers only need to send the final `SMSG_AUCTION_COMMAND_RESULT` to the
+    /// bidder's own session based on the returned [`PlaceBidResult`] -- everything else that
+    /// makes a bid a bid happens here, so any future caller gets these rules for free instead
+    /// of having to reimplement them the way the handler used to.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn place_bid(
+        &self,
+        player_guid: ObjectGuid,
+        account_id: u32,
+        security: u8,
+        auctioneer_guid: ObjectGuid,
+        auction_id: u32,
+        price: u32,
+        world: &World,
+    ) -> Result<PlaceBidResult> {
+        // GM trade restriction.
+        let gm_allow_trades = world.config.gm_allow_trades.unwrap_or(false);
+        if !gm_allow_trades && security > 0 {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::RestrictedAccount,
+                auction: None,
+            });
+        }
+
+        // auction_id or price of zero is a cheater signal.
+        if auction_id == 0 || price == 0 {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::ItemNotFound,
+                auction: None,
+            });
+        }
+
+        // Auctioneer validation.
+        let Some(player) = world.managers.player_mgr.get_player(player_guid) else {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::DatabaseError,
+                auction: None,
+            });
+        };
+
+        let house_entry =
+            get_checked_auction_house_for_auctioneer(&player, auctioneer_guid, self, None);
+        let Some(house_entry) = house_entry else {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::ItemNotFound,
+                auction: None,
+            });
+        };
+
+        drop(player);
+
+        // Remove feign death.
+        let _ = world.managers.player_mgr.with_player_mut(player_guid, |p| {
+            let removed = p.auras.container.remove_spell_auras(AURA_FEIGN_DEATH);
+            if !removed.is_empty() {
+                p.auras.needs_client_update = true;
+                p.auras.needs_stat_recalc = true;
+            }
+        });
+
+        let Some(auction_house_map) = self.get_auctions_map_by_house_id(house_entry.house_id)
+        else {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::DatabaseError,
+                auction: None,
+            });
+        };
+
+        // Auction must exist.
+        let Some(auction) = auction_house_map.get_auction(auction_id) else {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::ItemNotFound,
+                auction: None,
+            });
+        };
+
+        // Can't bid on your own auction.
+        if auction.seller_guid == player_guid {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::BidOwn,
+                auction: None,
+            });
+        }
+
+        // Cross-account ownership check: same account even if seller is offline.
+        if auction.seller_account != 0 && auction.seller_account == account_id {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::BidOwn,
+                auction: None,
+            });
+        }
+
+        // Bid must meet the starting price.
+        if price < auction.start_bid {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::BidIncrement,
+                auction: None,
+            });
+        }
+
+        // Bid must exceed the current bid.
+        if price <= auction.current_bid {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::HigherBid,
+                auction: Some(auction),
+            });
+        }
+
+        let buyout = auction.buyout_price;
+
+        // Bid must meet the minimum increment when not buying out.
+        if (buyout == 0 || price < buyout)
+            && price < auction.current_bid + auction.get_outbid_amount()
+        {
+            return Ok(PlaceBidResult::Rejected {
+                error: AuctionError::BidIncrement,
+                auction: Some(auction),
+            });
+        }
+
+        let player_money = world.systems.inventory.get_money(player_guid).unwrap_or(0);
+        // Silently drop when the player can't afford it -- matches the original handler, which
+        // sends no packet at all for this case.
+        if price > player_money {
+            return Ok(PlaceBidResult::Silent);
+        }
+
+        let is_rebid = auction.has_bid() && auction.bidder_guid == player_guid;
+
+        // Displace existing bidder (if any and it's not a re-bid by the same player).
+        if !is_rebid && auction.has_bid() {
+            self.notify_bidder_outbid_or_won(&auction).await?;
+            if let Some(old_session) = world.session_mgr.get_session_by_player(auction.bidder_guid)
+            {
+                let random_prop = self
+                    .get_a_item(auction.item_guid.low())
+                    .map(|i| i.random_property_id as u32)
+                    .unwrap_or(0);
+                let _ = send_auction_bidder_notification(
+                    &old_session,
+                    &auction,
+                    house_entry.house_id,
+                    false,
+                    random_prop,
+                );
+            }
+        }
+
+        let settled = if buyout != 0 && price >= buyout {
+            // --- BUYOUT PATH ---
+            let deduct = if is_rebid {
+                buyout - auction.current_bid
+            } else {
+                buyout
+            };
+            world.systems.inventory.remove_gold(player_guid, deduct);
+
+            let mut settled_auction = auction.clone();
+            settled_auction.bidder_guid = player_guid;
+            settled_auction.current_bid = buyout;
+
+            // Snapshot random property before send_auction_won_mail removes the item.
+            let random_prop = self
+                .get_a_item(settled_auction.item_guid.low())
+                .map(|i| i.random_property_id as u32)
+                .unwrap_or(0);
+
+            let cut_percent = house_entry.cut_percent as f32;
+            self.send_auction_successful_mail(&settled_auction, cut_percent, 1.0)
+                .await?;
+
+            if let Some(seller_session) = world
+                .session_mgr
+                .get_session_by_player(settled_auction.seller_guid)
+            {
+                let _ = send_auction_owner_notification(
+                    &seller_session,
+                    &settled_auction,
+                    true,
+                    random_prop as i32,
+                );
+            }
+
+            self.send_auction_won_mail(&settled_auction).await?;
+
+            // Live won notification to the buyer.
+            if let Some(buyer_session) = world.session_mgr.get_session_by_player(player_guid) {
+                let _ = send_auction_bidder_notification(
+                    &buyer_session,
+                    &settled_auction,
+                    house_entry.house_id,
+                    true,
+                    random_prop,
+                );
+            }
+
+            auction_house_map.remove_auction(auction_id);
+            self.delete_auction_from_db(auction_id).await?;
+            // TODO: persist player gold deduction to DB (no character_repo.update_money yet)
+
+            settled_auction
+        } else {
+            // --- BID PATH ---
+            let deduct = if is_rebid {
+                price - auction.current_bid
+            } else {
+                price
+            };
+            world.systems.inventory.remove_gold(player_guid, deduct);
+
+            auction_house_map.update_bid(auction_id, player_guid, price);
+
+            let mut updated_auction = auction.clone();
+            updated_auction.bidder_guid = player_guid;
+            updated_auction.current_bid = price;
+
+            if let Some(seller_session) = world
+                .session_mgr
+                .get_session_by_player(updated_auction.seller_guid)
+            {
+                let random_prop = self
+                    .get_a_item(updated_auction.item_guid.low())
+                    .map(|i| i.random_property_id as u32)
+                    .unwrap_or(0);
+                let _ = send_auction_owner_notification(
+                    &seller_session,
+                    &updated_auction,
+                    false,
+                    random_prop as i32,
+                );
+            }
+
+            self.update_bid_in_db(auction_id, player_guid.low(), price)
+                .await?;
+            // TODO: persist player gold deduction to DB (no character_repo.update_money yet)
+
+            updated_auction
+        };
+
+        Ok(PlaceBidResult::Success(PlaceBidOutcome { auction: settled }))
     }
 
     pub async fn lookup_player_account_id(&self, guid_low: u32) -> u32 {

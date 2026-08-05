@@ -3,11 +3,15 @@
 use anyhow::{anyhow, Result};
 use std::time::Duration;
 
+use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::core::common::{MoveFlags, MovementInfo};
+use crate::game::player::{STAND_STATE_STAND, UNIT_FLAG_DISABLE_MOVE};
 use crate::World;
+use oxcore_shared::messages::character::SmsgLogoutCancelAck;
 use oxcore_shared::messages::movement::{
-    spline_flags, KnockbackVector, MsgMovementBroadcast, SmsgMonsterMove,
+    spline_flags, KnockbackVector, MsgMovementBroadcast, SmsgForceMoveUnroot, SmsgMonsterMove,
 };
+use oxcore_shared::messages::social::SmsgStandstateUpdate;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 use super::state::PendingKnockback;
@@ -165,6 +169,51 @@ impl MovementSystem {
         mut movement_info: MovementInfo,
         world: &World,
     ) -> Result<()> {
+        // A rooted (logging-out) player who moves auto-cancels their logout and stands back
+        // up. This runs for every caller of `handle_move` -- plain MSG_MOVE_*, but also
+        // CMSG_MOVE_NOT_ACTIVE_MOVER, knockback acks, and spline-done acks -- so the behavior
+        // is consistent regardless of which opcode triggered the move, rather than only firing
+        // when the movement happened to arrive as a plain movement packet.
+        let is_rooted = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| {
+                (player.unit_flags & UNIT_FLAG_DISABLE_MOVE) != 0
+            })
+            .unwrap_or(false);
+
+        if is_rooted {
+            if let Some(session) = world.session_mgr.get_session_by_player(player_guid) {
+                tracing::info!(
+                    "[LOGOUT_TIMER] Movement detected during logout, cancelling logout for session {} (player: {})",
+                    session.id(),
+                    player_guid
+                );
+
+                session.cancel_logout_timer();
+                session.send_msg(SmsgLogoutCancelAck)?;
+
+                let world_guid = WorldObjectGuid::from_low(player_guid.counter());
+                session.send_msg(SmsgForceMoveUnroot { guid: world_guid })?;
+
+                world
+                    .managers
+                    .player_mgr
+                    .with_player_mut(player_guid, |player| {
+                        player.stand_state = STAND_STATE_STAND;
+                        player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
+                    });
+
+                session.send_msg(SmsgStandstateUpdate {
+                    stand_state: STAND_STATE_STAND,
+                })?;
+            }
+        }
+
+        // Stop looping emotes (Dance/Read/Lean) at any move -- set_emote_state no-ops if the
+        // player wasn't emoting, so this is cheap on the hot path.
+        world.systems.player.set_emote_state(player_guid, 0, world);
+
         // Batch all player state access into a single DashMap lookup for performance
         // This reduces overhead from ~600ns (3 lookups) to ~200ns (1 lookup)
         let (old_pos, map_id, instance_id) = world

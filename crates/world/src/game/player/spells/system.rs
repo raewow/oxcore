@@ -258,6 +258,24 @@ fn missing_script_target_error(is_triggered: bool) -> SpellCastError {
     }
 }
 
+/// Whether an implicit-target id is a client-chosen explicit unit target.
+///
+/// The set of implicit targets where the client picks the unit, used to reject
+/// negative spells the player explicitly aimed at themselves.
+fn is_explicitly_selected_unit_target(target: u32) -> bool {
+    matches!(
+        target,
+        6   // TARGET_UNIT_ENEMY
+        | 21  // TARGET_UNIT_FRIEND
+        | 25  // TARGET_UNIT
+        | 35  // TARGET_UNIT_PARTY
+        | 45  // TARGET_UNIT_FRIEND_CHAIN_HEAL
+        | 53  // TARGET_LOCATION_CASTER_TARGET_POSITION
+        | 57  // TARGET_UNIT_RAID
+        | 61 // TARGET_UNIT_RAID_AND_CLASS
+    )
+}
+
 // --- OnSpellLaunch: launch-time special-case handling ---------------------------
 
 const SPELL_EFFECT_OPEN_LOCK: u32 = 33;
@@ -630,35 +648,131 @@ impl SpellSystem {
     }
 
     /// Cast a spell with the full client-provided targets (unit/GO/item/corpse + source/dest
-    /// positions). Used by the CMSG_CAST_SPELL handler so ground-targeted AoE keeps its
-    /// destination position through the pipeline.
-    /// `cast_sequence` should be the client's own cast identity turned into a server sequence
-    /// (see `handlers/spells.rs`'s `SMSG_SPELL_PREPARE` send), so `SMSG_SPELL_START`/`SMSG_SPELL_GO`
-    /// carry the same `CastID` this cast was already acknowledged under. `None` for calls with no
-    /// originating client request (item procs, triggers), which mint their own on first use.
+    /// positions). This is the entry point for an explicit client cast (`CMSG_CAST_SPELL`):
+    /// unlike `cast_spell`/`cast_spell_from_item`, it also enforces the guards specific to a
+    /// player-initiated button press -- spell existence, knowledge/passive, the
+    /// can't-explicitly-self-cast-a-negative-spell rule, and interrupting an active loot window
+    /// -- so any caller of this entry point gets them structurally instead of having to
+    /// re-implement them the way the handler used to.
+    ///
+    /// `client_cast_id` is the client's own cast identity (modern only); it is turned into a
+    /// server cast id and echoed via `SMSG_SPELL_PREPARE` before validation runs, so a rejection
+    /// can reference the same id and the client's pending press always resolves. `None` on
+    /// vanilla, which has no such handshake.
     /// `spell_visual_id` is the modern `SpellXSpellVisualID` the client echoed in its cast request,
     /// without which the client plays no animations for this cast; `None` (no modern origin) sends 0.
-    pub fn cast_spell_with_targets<'a>(
-        &'a self,
+    pub async fn cast_spell_with_targets(
+        &self,
         caster_guid: ObjectGuid,
         spell_id: u32,
         cast_targets: SpellCastTargets,
         is_triggered: bool,
-        cast_sequence: Option<u64>,
+        client_cast_id: Option<(u64, u64)>,
         spell_visual_id: Option<u32>,
-        world: &'a World,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SpellCastResult>> + Send + 'a>>
-    {
-        Box::pin(self.cast_spell_inner(
+        world: &World,
+    ) -> Result<()> {
+        // Mint the server-side cast identity up front and echo SMSG_SPELL_PREPARE right away
+        // (modern only) -- this must happen before any rejection below, so the rejection can
+        // reference the same id and the client's cast bar never hangs.
+        let server_sequence = client_cast_id.map(|_| next_cast_sequence());
+        let server_cast_id =
+            server_sequence.map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
+        if let (Some(client_id), Some(server_id)) = (client_cast_id, server_cast_id) {
+            self.send_spell_prepare(caster_guid, client_id, server_id);
+        }
+
+        // Unknown spell id: drop the cast, but loudly -- a missing spell_template row leaves
+        // the client waiting on a cast that never starts.
+        let spell_entry = match world.managers.spell_mgr.get(spell_id) {
+            Some(entry) => entry,
+            None => {
+                tracing::warn!(
+                    "cast_spell_with_targets: spell {} not in spell_template, cast by {:?} dropped",
+                    spell_id,
+                    caster_guid
+                );
+                self.send_cast_result_with_cast_id(
+                    caster_guid,
+                    spell_id,
+                    SpellCastError::SpellNotKnown,
+                    server_cast_id,
+                    world,
+                );
+                return Ok(());
+            }
+        };
+
+        // The guards below (knowledge/passive, explicit-negative-self-target, loot-interrupt)
+        // are specific to a real client button press; triggered/proc casts that reuse this
+        // entry point in the future skip them the same way `validate_cast` already skips
+        // `knows_spell` for triggered casts.
+        if !is_triggered {
+            // Guard: the player must actually know the spell and it must not be passive.
+            // Treat a violation as a cheat attempt -- log and drop, no client response.
+            let knows_spell = world
+                .systems
+                .player
+                .manager()
+                .with_player(caster_guid, |p| p.spells.knows_spell(spell_id))
+                .unwrap_or(false);
+            if !knows_spell || spell_entry.is_passive_spell() {
+                tracing::warn!(
+                    "Player {:?} tried to cast spell {} they shouldn't have (known={}, passive={})",
+                    caster_guid,
+                    spell_id,
+                    knows_spell,
+                    spell_entry.is_passive_spell()
+                );
+                return Ok(());
+            }
+
+            let target_guid = cast_targets.unit_target();
+
+            // Cannot explicitly cast a negative spell on yourself (SPELL_FAILED_BAD_TARGETS).
+            // The core itself casts negative spells on the caster for some mechanics, so this
+            // only applies when the client explicitly selected the caster as the unit target.
+            if target_guid == Some(caster_guid)
+                && is_explicitly_selected_unit_target(spell_entry.effect_implicit_target_a[0])
+                && !spell_entry.is_positive_spell()
+            {
+                self.send_cast_result_with_cast_id(
+                    caster_guid,
+                    spell_id,
+                    SpellCastError::InvalidTarget,
+                    server_cast_id,
+                    world,
+                );
+                return Ok(());
+            }
+
+            // Casting a spell interrupts looting.
+            if let Some(loot_guid) = world
+                .systems
+                .player
+                .manager()
+                .get_looting_target(caster_guid)
+            {
+                world
+                    .systems
+                    .loot
+                    .handle_loot_release(caster_guid, loot_guid, world)
+                    .await?;
+            }
+        }
+
+        self.cast_spell_inner(
             caster_guid,
             spell_id,
             cast_targets,
             is_triggered,
             None,
-            cast_sequence,
+            server_sequence,
             spell_visual_id,
             world,
-        ))
+        )
+        .await?;
+
+        Ok(())
     }
 
     pub fn cast_spell_from_item<'a>(
@@ -4091,6 +4205,30 @@ mod tests {
             missing_script_target_error(true),
             SpellCastError::DontReport
         );
+    }
+
+    #[test]
+    fn explicit_unit_targets() {
+        // Client-chosen unit targets (TARGET_UNIT_ENEMY/FRIEND/UNIT/PARTY/CHAIN_HEAL/
+        // CASTER_TARGET_POSITION/RAID/RAID_AND_CLASS).
+        for t in [6, 21, 25, 35, 45, 53, 57, 61] {
+            assert!(
+                is_explicitly_selected_unit_target(t),
+                "target {t} should be explicit"
+            );
+        }
+    }
+
+    #[test]
+    fn non_explicit_targets_are_rejected() {
+        // Self (1), area/AoE (15, 16, 22, 24), pet (27), nearby-enemy (2), and none (0)
+        // are NOT client-selected explicit unit targets.
+        for t in [0, 1, 2, 15, 16, 22, 24, 27] {
+            assert!(
+                !is_explicitly_selected_unit_target(t),
+                "target {t} should not be explicit"
+            );
+        }
     }
 
     #[test]

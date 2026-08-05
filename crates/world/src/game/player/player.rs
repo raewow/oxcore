@@ -23,6 +23,9 @@ use oxcore_shared::protocol::ObjectGuid;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// `stand_state` value for standing upright (UNIT_STAND_STATE_STAND).
+pub const STAND_STATE_STAND: u8 = 0;
+
 /// Slim player object
 #[derive(Debug)]
 pub struct Player {

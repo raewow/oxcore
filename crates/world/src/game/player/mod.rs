@@ -64,7 +64,7 @@ pub use environment::{
 pub use experience::ExperienceSystem;
 pub use manager::PlayerManager;
 pub use movement::{MovementState, MovementSystem};
-pub use player::Player;
+pub use player::{Player, STAND_STATE_STAND};
 pub use power::{PowerState, PowerSystem, PowerType};
 pub use reputation::{FactionEntry, FactionStanding, ReputationState, ReputationSystem};
 pub use settings::{

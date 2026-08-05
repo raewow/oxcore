@@ -1,9 +1,8 @@
 //! Movement handlers
 
 use anyhow::{anyhow, Result};
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 
-use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::common::{is_valid_map_coord, MovementInfo};
 use crate::core::session::WorldSession;
@@ -12,9 +11,6 @@ use crate::game::creature::movement::packet_sender::{
 };
 use crate::game::creature::movement::MoveType;
 use crate::World;
-use oxcore_shared::messages::character::SmsgLogoutCancelAck;
-use oxcore_shared::messages::movement::SmsgForceMoveUnroot;
-use oxcore_shared::messages::social::SmsgStandstateUpdate;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Restart a far teleport towards the player's homebind.
@@ -1060,61 +1056,11 @@ pub async fn handle_movement(
         .player_guid()
         .ok_or_else(|| anyhow!("Not logged in"))?;
 
-    // Check if player is rooted (logging out)
-    const UNIT_FLAG_DISABLE_MOVE: u32 = 0x00000004;
-    const STAND_STATE_STAND: u8 = 0;
+    // The rooted/logout-cancel/unroot/stand-state dance and emote clearing now live in
+    // `MovementSystem::handle_move` itself, so they apply uniformly to every caller of it
+    // (this handler, but also CMSG_MOVE_NOT_ACTIVE_MOVER, knockback acks, and spline-done
+    // acks) instead of only firing for a plain MSG_MOVE_* packet.
 
-    let (is_rooted, unit_flags) = world
-        .managers
-        .player_mgr
-        .with_player(player_guid, |player| {
-            let rooted = (player.unit_flags & UNIT_FLAG_DISABLE_MOVE) != 0;
-            (rooted, player.unit_flags)
-        })
-        .unwrap_or((false, 0));
-
-    trace!(
-        "[MOVEMENT] handle_movement for {}: opcode={:?}, is_rooted={}, unit_flags=0x{:08X}",
-        player_guid,
-        opcode,
-        is_rooted,
-        unit_flags
-    );
-
-    if is_rooted {
-        // Movement during logout - auto-cancel logout
-        info!(
-            "[LOGOUT_TIMER] Movement detected during logout, cancelling logout for session {} (player: {})",
-            session.id(),
-            player_guid
-        );
-
-        // Cancel the logout
-        session.cancel_logout_timer();
-        session.send_msg(SmsgLogoutCancelAck)?;
-
-        // Unroot and stand up
-        let world_guid = WorldObjectGuid::from_low(player_guid.counter());
-        session.send_msg(SmsgForceMoveUnroot { guid: world_guid })?;
-
-        world
-            .managers
-            .player_mgr
-            .with_player_mut(player_guid, |player| {
-                player.stand_state = STAND_STATE_STAND;
-                player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
-            });
-
-        session.send_msg(SmsgStandstateUpdate {
-            stand_state: STAND_STATE_STAND,
-        })?;
-    }
-
-    // Stop looping emotes (Dance/Read/Lean) at player move -- set_emote_state no-ops if the
-    // player wasn't emoting, so this is cheap on the hot path.
-    world.systems.player.set_emote_state(player_guid, 0, world);
-
-    // Continue with normal movement processing
     let mut movement_info = MovementInfo::read_for(session.protocol(), packet)?;
     movement_info.mover_guid = player_guid;
 
@@ -1299,6 +1245,52 @@ mod tests {
         write_client_movement_info(&mut packet);
         packet.write_f32(speed);
         packet
+    }
+
+    #[tokio::test]
+    async fn not_active_mover_unroots_a_logging_out_player() {
+        use crate::game::player::{STAND_STATE_STAND, UNIT_FLAG_DISABLE_MOVE};
+
+        let mut world = test_world();
+        let (session, _rx) = add_test_player(&mut world);
+        let player_guid = session.player_guid().expect("player guid");
+
+        // Simulate a player mid-logout: rooted, sitting, with a live logout timer.
+        session.start_logout_timer();
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.unit_flags |= UNIT_FLAG_DISABLE_MOVE;
+                player.stand_state = 1; // sitting
+            });
+
+        // CMSG_MOVE_NOT_ACTIVE_MOVER never went through `handle_movement`, so before this
+        // move it never got the rooted/logout-cancel/unroot treatment -- only plain
+        // MSG_MOVE_* packets did.
+        let mut packet = WorldPacket::new(Opcode::CMSG_MOVE_NOT_ACTIVE_MOVER);
+        packet.write_packed_guid_raw(player_guid.raw());
+        write_client_movement_info(&mut packet);
+
+        handle_move_not_active_mover(&session, &mut packet, &world)
+            .await
+            .unwrap();
+
+        assert!(
+            session.logout_time_remaining(600).is_none(),
+            "logout should have been cancelled by the move"
+        );
+        let (unit_flags, stand_state) = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |p| (p.unit_flags, p.stand_state))
+            .expect("player");
+        assert_eq!(
+            unit_flags & UNIT_FLAG_DISABLE_MOVE,
+            0,
+            "player should have been unrooted"
+        );
+        assert_eq!(stand_state, STAND_STATE_STAND);
     }
 
     #[tokio::test]
