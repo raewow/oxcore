@@ -23,6 +23,7 @@
 //! 5. Members can leave, leader can promote/demote, convert to raid, etc.
 
 pub mod reward;
+pub mod rewards;
 pub mod system;
 
 #[cfg(test)]

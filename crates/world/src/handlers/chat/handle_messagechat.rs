@@ -8,6 +8,7 @@ use anyhow::{anyhow, Result};
 
 use crate::core::session::WorldSession;
 use crate::game::chat::commands::ChatCommandContext;
+use crate::game::player::{PLAYER_FLAGS_AFK, PLAYER_FLAGS_DND};
 use crate::World;
 use oxcore_shared::common::AccountType;
 use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language, Team};
@@ -238,12 +239,25 @@ async fn handle_messagechat_type(
                 .chat
                 .send_officer(sender_guid, &message, &world.systems.guild)?;
         }
+        ChatMsg::Afk => toggle_player_flag(world, sender_guid, PLAYER_FLAGS_AFK),
+        ChatMsg::Dnd => toggle_player_flag(world, sender_guid, PLAYER_FLAGS_DND),
         _ => {
             // Unsupported message type
         }
     }
 
     Ok(())
+}
+
+/// Toggle a `PLAYER_FLAGS_*` bit on the sender and push the new status to their group.
+fn toggle_player_flag(world: &World, player_guid: ObjectGuid, flag: u32) {
+    if let Some(mut player) = world.managers.player_mgr.get_player_mut(player_guid) {
+        player.player_flags ^= flag;
+    }
+    world
+        .systems
+        .group
+        .set_member_update(player_guid, oxcore_shared::game::group::group_update_flags::STATUS);
 }
 
 /// Handle chat command execution

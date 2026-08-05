@@ -7,12 +7,16 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
-use crate::game::player::PlayerManager;
+use crate::game::player::death::DeathState;
+use crate::game::player::{PlayerManager, PLAYER_FLAGS_AFK, PLAYER_FLAGS_DND, PLAYER_FLAGS_GHOST};
+use crate::game::social::SocialSystem;
 use crate::World;
+use oxcore_shared::game::chat::Team;
 use oxcore_db::database::characters::models::group::{GroupMemberRow, GroupRow};
 use oxcore_db::database::characters::repositories::GroupRepositoryTrait;
 use oxcore_shared::protocol::ObjectGuid;
 
+use oxcore_shared::messages::group::SmsgPartyMemberStats;
 use oxcore_shared::game::group::{
     group_update_flags, CachedGroup, GroupData, GroupError, GroupInvite, GroupMember, LootMethod,
     MemberStatus, ERR_ALREADY_IN_GROUP_S, ERR_BAD_PLAYER_NAME_S, ERR_GROUP_FULL,
@@ -20,7 +24,6 @@ use oxcore_shared::game::group::{
     ERR_TARGET_NOT_IN_GROUP_S, MAX_GROUP_SIZE, MAX_RAID_SIZE, MAX_RAID_SUBGROUPS, PARTY_OP_INVITE,
     PARTY_OP_LEAVE,
 };
-
 /// Current Unix time in seconds.
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -28,6 +31,16 @@ fn now_secs() -> u64 {
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
+
+/// Non-pet subset of `group_update_flags::FULL` pushed to a member on join and login.
+const MEMBER_STATS_FULL: u32 = group_update_flags::STATUS
+    | group_update_flags::CUR_HP
+    | group_update_flags::MAX_HP
+    | group_update_flags::POWER_TYPE
+    | group_update_flags::CUR_POWER
+    | group_update_flags::MAX_POWER
+    | group_update_flags::LEVEL
+    | group_update_flags::ZONE;
 
 /// Group System - manages player parties and raids
 pub struct GroupSystem {
@@ -52,8 +65,15 @@ pub struct GroupSystem {
     /// Player manager for player lookups
     player_mgr: Arc<PlayerManager>,
 
+    /// Social system for ignore-list checks on invites
+    social_system: Arc<SocialSystem>,
+
     /// Whether cross-faction grouping is allowed
     allow_cross_faction_group: bool,
+
+    /// Pending SMSG_PARTY_MEMBER_STATS update masks, keyed by member GUID. Set by systems
+    /// when a grouped stat changes; drained each tick in `update`.
+    member_update_flags: DashMap<ObjectGuid, u32>,
 
     /// Arc to self, set once after construction, so periodic ticks can spawn
     /// long-running tasks (leader reassignment) that need `&GroupSystem`.
@@ -66,6 +86,7 @@ impl GroupSystem {
         repository: Arc<dyn GroupRepositoryTrait>,
         broadcast_mgr: Arc<dyn BroadcastManagerTrait>,
         player_mgr: Arc<PlayerManager>,
+        social_system: Arc<SocialSystem>,
         allow_cross_faction_group: bool,
     ) -> Self {
         Self {
@@ -76,7 +97,9 @@ impl GroupSystem {
             repository,
             broadcast_mgr,
             player_mgr,
+            social_system,
             allow_cross_faction_group,
+            member_update_flags: DashMap::new(),
             self_arc: std::sync::OnceLock::new(),
         }
     }
@@ -84,6 +107,16 @@ impl GroupSystem {
     /// Store the `Arc<Self>` held by the system manager so spawned tasks can use it.
     pub fn set_self_arc(&self, arc: Arc<GroupSystem>) {
         let _ = self.self_arc.set(arc);
+    }
+
+    /// Flags pushed to out-of-range group members when the player levels up.
+    pub fn level_update_flags() -> u32 {
+        group_update_flags::STATUS
+            | group_update_flags::CUR_HP
+            | group_update_flags::MAX_HP
+            | group_update_flags::CUR_POWER
+            | group_update_flags::MAX_POWER
+            | group_update_flags::LEVEL
     }
 
     /// Initialize system (load next group ID from database)
@@ -527,8 +560,27 @@ impl GroupSystem {
             }
         }
 
-        // TODO: Check faction if cross-faction disabled
-        // TODO: Check ignore list
+        // Check faction if cross-faction disabled
+        if !self.allow_cross_faction_group {
+            let inviter_team = self
+                .player_mgr
+                .get_player(inviter_guid)
+                .map(|p| p.get_team())
+                .unwrap_or(Team::None);
+            let target_team = self
+                .player_mgr
+                .get_player(target_guid)
+                .map(|p| p.get_team())
+                .unwrap_or(Team::None);
+            if inviter_team != target_team {
+                return Err(GroupError::WrongFaction);
+            }
+        }
+
+        // Check target is not ignoring the inviter
+        if self.social_system.has_ignore(target_guid, inviter_guid) {
+            return Err(GroupError::TargetIgnoresPlayer);
+        }
 
         // Get inviter name
         let inviter_name = self
@@ -775,6 +827,9 @@ impl GroupSystem {
 
         // Add to player mappings
         self.player_groups.insert(player_guid, group_id);
+
+        // Queue a full stat push for the new member (3c).
+        self.set_member_update(player_guid, MEMBER_STATS_FULL);
 
         // Save to database
         self.repository
@@ -1543,7 +1598,11 @@ impl GroupSystem {
             return Err(GroupError::MemberNotFound);
         }
 
-        // TODO: Build and send SMSG_PARTY_MEMBER_STATS_FULL
+        // Build full stats from the target's live player state and reply to requester.
+        let Some(msg) = self.build_party_member_stats(target_guid) else {
+            return Err(GroupError::PlayerNotFound);
+        };
+        self.broadcast_mgr.send_msg_to_player(requester_guid, msg);
 
         Ok(())
     }
@@ -1563,9 +1622,10 @@ impl GroupSystem {
             group.members.len()
         );
 
-        // Convert to CachedGroup for packet building
+        // Convert to CachedGroup for packet building, recomputing each member's status live.
         use oxcore_shared::game::group::CachedGroup;
-        let cached_group = CachedGroup::from_group_data(&group);
+        let cached_group =
+            CachedGroup::from_group_data_with_status(&group, |guid| self.member_status(guid));
 
         // Send SMSG_GROUP_LIST to each member (each needs different own_flags)
         use oxcore_shared::messages::group::SmsgGroupList;
@@ -1648,6 +1708,126 @@ impl GroupSystem {
             }
         }
     }
+
+    // ========== LIVE MEMBER STATUS ==========
+
+    /// Live member status for `guid` (reference `GetGroupMemberStatus`, Group.cpp:45).
+    ///
+    /// Offline when there is no live player. Omitted by caller request: the PvP and FFA-PvP
+    /// bits (`MEMBER_STATUS_PVP`, `MEMBER_STATUS_PVP_FFA`) depend on a PvP-flag port that does
+    /// not yet exist; the remaining bits are computed from the live player state.
+    fn member_status(&self, guid: ObjectGuid) -> MemberStatus {
+        let Some(player) = self.player_mgr.get_player(guid) else {
+            return MemberStatus::OFFLINE;
+        };
+
+        let mut status = MemberStatus::ONLINE;
+        if !matches!(player.death.death_state, DeathState::Alive) {
+            status = status.with_flag(MemberStatus::DEAD);
+        }
+        if player.player_flags & PLAYER_FLAGS_GHOST != 0 {
+            status = status.with_flag(MemberStatus::GHOST);
+        }
+        if player.player_flags & PLAYER_FLAGS_AFK != 0 {
+            status = status.with_flag(MemberStatus::AFK);
+        }
+        if player.player_flags & PLAYER_FLAGS_DND != 0 {
+            status = status.with_flag(MemberStatus::DND);
+        }
+        status
+    }
+
+    /// Queue an SMSG_PARTY_MEMBER_STATS push for a grouped member.
+    ///
+    /// `flags` is a mask of [`group_update_flags`]; the system drains it on the next tick.
+    pub fn set_member_update(&self, player_guid: ObjectGuid, flags: u32) {
+        use oxcore_shared::game::group::group_update_flags;
+        if flags == group_update_flags::NONE {
+            return;
+        }
+        if !self.is_in_group(player_guid) {
+            return;
+        }
+        self.member_update_flags
+            .entry(player_guid)
+            .and_modify(|f| *f |= flags)
+            .or_insert(flags);
+    }
+
+    /// Build a full non-pet SMSG_PARTY_MEMBER_STATS message for a live player.
+    fn build_party_member_stats(&self, guid: ObjectGuid) -> Option<SmsgPartyMemberStats<'static>> {
+        use oxcore_shared::game::group::group_update_flags::*;
+
+        let player = self.player_mgr.get_player(guid)?;
+        let power = player.power.power_type.as_u8() as usize;
+
+        let status = self.member_status(guid);
+        Some(SmsgPartyMemberStats {
+            player_guid: guid,
+            update_mask: STATUS | CUR_HP | MAX_HP | POWER_TYPE | CUR_POWER | MAX_POWER | LEVEL
+                | ZONE,
+            status: Some(status.as_u8()),
+            health: Some(player.stats.health),
+            max_health: Some(player.stats.max_health),
+            power_type: Some(player.power.power_type.as_u8()),
+            cur_power: Some(player.power.current[power]),
+            max_power: Some(player.power.max[power]),
+            level: Some(player.level),
+            zone_id: Some(player.zone_id),
+            position_x: None,
+            position_y: None,
+            auras: None,
+            negative_auras: None,
+            pet_guid: None,
+            pet_name: None,
+            pet_model_id: None,
+            pet_cur_hp: None,
+            pet_max_hp: None,
+            pet_power_type: None,
+            pet_cur_power: None,
+            pet_max_power: None,
+            pet_auras: None,
+            pet_negative_auras: None,
+        })
+    }
+
+    /// Drain queued member stat updates, sending each to group members who cannot see the
+    /// target (reference `UpdatePlayerOutOfRange`, Group.cpp:1423).
+    fn push_party_member_stats(&self) {
+        let dirty: Vec<ObjectGuid> = self
+            .member_update_flags
+            .iter()
+            .filter_map(|entry| (*entry.value() != 0).then_some(*entry.key()))
+            .collect();
+        if dirty.is_empty() {
+            return;
+        }
+
+        for guid in dirty {
+            self.member_update_flags.remove(&guid);
+            let Some(group) = self.get_player_group(guid) else {
+                continue;
+            };
+            let Some(msg) = self.build_party_member_stats(guid) else {
+                continue;
+            };
+            for member in &group.members {
+                if member.guid == guid {
+                    continue;
+                }
+                // Members who can already see the player get the values through the normal
+                // object-update path.
+                let visible = self
+                    .player_mgr
+                    .get_player(member.guid)
+                    .map(|p| p.visibility.visible_objects.contains(&guid))
+                    .unwrap_or(false);
+                if !visible {
+                    self.broadcast_mgr.send_msg_to_player(member.guid, msg.clone());
+                }
+            }
+        }
+    }
 }
 
 // ========== SYSTEM TRAIT IMPLEMENTATION ==========
@@ -1664,6 +1844,8 @@ impl GroupSystem {
         if let Some(self_arc) = self.self_arc.get().cloned() {
             self.check_offline_leaders(world, self_arc);
         }
+        // Phase 3c: push queued party-member stat updates to out-of-range group members.
+        self.push_party_member_stats();
         Ok(())
     }
 
@@ -1764,6 +1946,9 @@ impl GroupSystem {
             );
             // Broadcast updated group list to all members
             self.broadcast_group_list(group_id);
+
+            // Queue a full stat push for the just-logged-in member (3c).
+            self.set_member_update(guid, MEMBER_STATS_FULL);
         } else {
             tracing::debug!("[GROUP] Player {:?} logged in, not in any group", guid);
         }

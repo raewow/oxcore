@@ -139,46 +139,61 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
         .creature_mgr
         .set_corpse_state(guid, decay_time);
 
-    // Give quest kill credit to the killer
+    // Distribute kill rewards (quest credit + XP) to the tapper and, when grouped, all
+    // in-range members. Solo players keep the single-recipient path.
     if let Some(recipient_guid) = loot_recipient {
-        world
-            .systems
-            .quest
-            .handle_kill_credit(recipient_guid, entry, guid);
-    }
+        let template = world.managers.creature_mgr.get_template(entry);
+        let creature_level = template.as_ref().map(|t| t.max_level).unwrap_or(0);
+        let creature_rank = template.as_ref().map(|t| t.rank).unwrap_or(0);
 
-    // Grant XP to the loot recipient
-    if let Some(recipient_guid) = loot_recipient {
-        // Get creature level from template (use max_level as representative level)
-        if let Some(creature_level) = world
-            .managers
-            .creature_mgr
-            .get_template(entry)
-            .map(|t| t.max_level)
-        {
-            let player_level = world
-                .managers
-                .player_mgr
-                .get_player(recipient_guid)
-                .map(|p| p.level)
-                .unwrap_or(1);
+        match world.systems.group.get_player_group_id(recipient_guid) {
+            Some(group_id) => {
+                use crate::game::group::rewards::reward_group_at_kill;
+                let _ = reward_group_at_kill(
+                    world,
+                    group_id,
+                    guid,
+                    entry,
+                    creature_level,
+                    creature_rank,
+                    &position,
+                    map_id,
+                    instance_id,
+                    recipient_guid,
+                )
+                .await;
+            }
+            None => {
+                // Give quest kill credit to the killer
+                world.systems.quest.handle_kill_credit(recipient_guid, entry, guid);
 
-            // Elite status not stored on creature instance; use false for now
-            let is_elite = false;
+                // Grant XP to the loot recipient
+                if creature_level > 0 {
+                    let player_level = world
+                        .managers
+                        .player_mgr
+                        .get_player(recipient_guid)
+                        .map(|p| p.level)
+                        .unwrap_or(1);
 
-            let xp = crate::game::player::experience::calculate_creature_xp(
-                creature_level,
-                player_level,
-                is_elite,
-            );
+                    // Elite/rare-elite/worldboss ranks multiply XP; rare (rank 4) does not.
+                    let is_elite = creature_rank != 0 && creature_rank != 4;
 
-            if xp > 0 {
-                use oxcore_shared::game::experience::XpSource;
-                let _ = world
-                    .systems
-                    .experience
-                    .add_xp(recipient_guid, xp, XpSource::Kill, Some(guid), 0.0)
-                    .await;
+                    let xp = crate::game::player::experience::calculate_creature_xp(
+                        creature_level,
+                        player_level,
+                        is_elite,
+                    );
+
+                    if xp > 0 {
+                        use oxcore_shared::game::experience::XpSource;
+                        let _ = world
+                            .systems
+                            .experience
+                            .add_xp(recipient_guid, xp, XpSource::Kill, Some(guid), 1.0)
+                            .await;
+                    }
+                }
             }
         }
     }

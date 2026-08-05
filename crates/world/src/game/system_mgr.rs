@@ -113,6 +113,7 @@ impl SystemManager {
         pool_mgr: Arc<PoolManager>,
         linking_mgr: Arc<LinkingManager>,
         addon_mgr: Arc<AddonManager>,
+        allow_cross_faction_group: bool,
     ) -> Self {
         let player_mgr = player_system.manager();
         let pet = Arc::new(PetSystem::new(player_mgr.clone(), creature_mgr.clone()));
@@ -165,7 +166,8 @@ impl SystemManager {
             group_repo,
             broadcast_mgr.clone(),
             player_mgr.clone(),
-            false, // allow_cross_faction_group - TODO: make configurable
+            social.clone(),
+            allow_cross_faction_group,
         ));
         group.set_self_arc(Arc::clone(&group));
 
@@ -239,6 +241,7 @@ impl SystemManager {
 
         let combat = Arc::new(CombatSystem::new(broadcast_mgr.clone()));
         experience.set_stats_system(Arc::clone(&stats));
+        experience.set_group_system(Arc::clone(&group));
 
         let spells = Arc::new(SpellSystem::new(broadcast_mgr.clone()));
 

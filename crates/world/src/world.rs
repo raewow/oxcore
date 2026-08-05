@@ -201,6 +201,7 @@ impl World {
             Arc::clone(&pool_mgr),
             Arc::clone(&linking_mgr),
             Arc::clone(&addon_mgr),
+            config.allow_cross_faction_group,
         ));
 
         use crate::console::commands::register_all_commands;

@@ -130,6 +130,7 @@ pub struct ExperienceSystem {
     broadcast_mgr: Arc<BroadcastManager>,
     player_mgr: Arc<PlayerManager>,
     stats: OnceLock<Arc<StatsSystem>>,
+    group: OnceLock<Arc<crate::game::group::GroupSystem>>,
 }
 
 impl ExperienceSystem {
@@ -139,12 +140,18 @@ impl ExperienceSystem {
             broadcast_mgr,
             player_mgr,
             stats: OnceLock::new(),
+            group: OnceLock::new(),
         }
     }
 
     /// Set the stats system reference (called after SystemManager construction)
     pub fn set_stats_system(&self, stats: Arc<StatsSystem>) {
         let _ = self.stats.set(stats);
+    }
+
+    /// Set the group system reference (called after SystemManager construction)
+    pub fn set_group_system(&self, group: Arc<crate::game::group::GroupSystem>) {
+        let _ = self.group.set(group);
     }
 
     // ========== Lifecycle Methods ==========
@@ -257,6 +264,14 @@ impl ExperienceSystem {
             }
 
             self.send_levelup_info(player_guid, current_level, new_level)?;
+
+            // Push the new level to out-of-range group members (3c).
+            if let Some(group) = self.group.get() {
+                group.set_member_update(
+                    player_guid,
+                    crate::game::group::GroupSystem::level_update_flags(),
+                );
+            }
 
             // Broadcast updated stats (health, mana, attributes) to client
             if let Some(stats) = self.stats.get() {

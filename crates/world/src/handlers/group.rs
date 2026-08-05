@@ -50,6 +50,8 @@ pub async fn handle_group_invite(
                 GroupError::TargetAlreadyInGroup => ERR_ALREADY_IN_GROUP_S,
                 GroupError::GroupFull => ERR_GROUP_FULL,
                 GroupError::NotLeaderOrAssistant => ERR_NOT_LEADER,
+                GroupError::WrongFaction => ERR_PLAYER_WRONG_FACTION,
+                GroupError::TargetIgnoresPlayer => ERR_IGNORING_YOU_S,
                 _ => ERR_PARTY_RESULT_OK, // Generic error
             };
 
@@ -427,9 +429,6 @@ pub async fn handle_request_party_member_stats(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    use oxcore_shared::game::group::group_update_flags;
-    use oxcore_shared::protocol::Opcode;
-
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
@@ -441,77 +440,12 @@ pub async fn handle_request_party_member_stats(
         player_guid, target_guid
     );
 
-    // Check if target is in the same group and online
-    let target_player = world.managers.player_mgr.get_player(target_guid);
-
-    let mut response =
-        oxcore_shared::protocol::WorldPacket::new(Opcode::SMSG_PARTY_MEMBER_STATS_FULL);
-
-    // Write packed GUID (for 1.12.1)
-    response.write_packed_guid_raw(target_guid.raw());
-
-    if let Some(player) = target_player {
-        // Player is online - send full stats
-        // For now, use hardcoded values since stats system isn't integrated
-        let update_flags = group_update_flags::STATUS
-            | group_update_flags::CUR_HP
-            | group_update_flags::MAX_HP
-            | group_update_flags::POWER_TYPE
-            | group_update_flags::CUR_POWER
-            | group_update_flags::MAX_POWER
-            | group_update_flags::LEVEL
-            | group_update_flags::ZONE;
-
-        response.write_u32(update_flags);
-
-        // STATUS - online
-        response.write_u8(0x01); // MEMBER_STATUS_ONLINE
-
-        // Use placeholder health values (level * 50 as rough estimate)
-        let max_health: u16 = (player.level as u16) * 50;
-        let cur_health: u16 = max_health; // Full health
-
-        // CUR_HP
-        response.write_u16(cur_health);
-
-        // MAX_HP
-        response.write_u16(max_health);
-
-        // POWER_TYPE based on class (0=mana, 1=rage, 3=energy)
-        // Vanilla class IDs: 1=Warrior, 2=Paladin, 3=Hunter, 4=Rogue, 5=Priest,
-        //                    7=Shaman, 8=Mage, 9=Warlock, 11=Druid
-        let power_type: u8 = match player.class {
-            1 => 1, // Warrior - Rage
-            4 => 3, // Rogue - Energy
-            _ => 0, // Everyone else - Mana
-        };
-        response.write_u8(power_type);
-
-        // Use placeholder power values
-        let (max_power, cur_power): (u16, u16) = match power_type {
-            1 => (100, 0),   // Rage: max 100, starts at 0
-            3 => (100, 100), // Energy: max 100, full
-            _ => ((player.level as u16) * 50, (player.level as u16) * 50), // Mana: scales with level
-        };
-
-        // CUR_POWER
-        response.write_u16(cur_power);
-
-        // MAX_POWER
-        response.write_u16(max_power);
-
-        // LEVEL
-        response.write_u16(player.level as u16);
-
-        // ZONE
-        response.write_u16(player.zone_id.min(65535) as u16);
-    } else {
-        // Player is offline - send just status flag
-        response.write_u32(group_update_flags::STATUS);
-        response.write_u8(0x00); // MEMBER_STATUS_OFFLINE
-    }
-
-    session.send_packet(response);
+    // The system validates the group membership and sends the full stats reply.
+    world
+        .systems
+        .group
+        .request_member_stats(player_guid, target_guid)
+        .await?;
 
     Ok(())
 }

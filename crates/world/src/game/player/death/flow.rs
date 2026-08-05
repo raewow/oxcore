@@ -18,6 +18,10 @@ pub const CORPSE_RES_MANA_PCT: f32 = 0.50; // 50% mana on corpse run
 
 /// Player flags
 pub const PLAYER_FLAGS_GHOST: u32 = 0x0000_0010;
+/// Player is away from keyboard (toggled by `/afk`)
+pub const PLAYER_FLAGS_AFK: u32 = 0x0000_0002;
+/// Player does not want to be disturbed (toggled by `/dnd`)
+pub const PLAYER_FLAGS_DND: u32 = 0x0000_0004;
 
 /// Unit flags
 pub const UNIT_FLAG_DISABLE_MOVE: u32 = 0x0000_0004;

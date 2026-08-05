@@ -584,6 +584,19 @@ impl CachedGroup {
         }
     }
 
+    /// Build a [`CachedGroup`] whose member statuses are recomputed live via `status`
+    /// instead of the cached `member.status` value.
+    pub fn from_group_data_with_status(
+        group: &GroupData,
+        status: impl Fn(ObjectGuid) -> MemberStatus,
+    ) -> Self {
+        let mut cached = Self::from_group_data(group);
+        for member in &mut cached.members {
+            member.status = status(member.guid);
+        }
+        cached
+    }
+
     pub fn get_member(&self, guid: ObjectGuid) -> Option<&GroupMember> {
         self.members.iter().find(|m| m.guid == guid)
     }

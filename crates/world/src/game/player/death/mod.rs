@@ -29,8 +29,8 @@ pub use flow::{
     can_reclaim_corpse, can_release_spirit, get_corpse_reclaim_delay, get_release_timer_ms,
     is_within_corpse_reclaim_range, tick_death_timer, CORPSE_RECLAIM_DELAY_NORMAL,
     CORPSE_RECLAIM_DELAY_PVP, CORPSE_REPOP_TIME_MS, GHOST_SPEED_MULTIPLIER,
-    GHOST_SPEED_MULTIPLIER_BG, PLAYER_FLAGS_GHOST, SPELL_AURA_GHOST, SPELL_WISP_FORM,
-    UNIT_FLAG_DISABLE_MOVE,
+    GHOST_SPEED_MULTIPLIER_BG, PLAYER_FLAGS_AFK, PLAYER_FLAGS_DND, PLAYER_FLAGS_GHOST,
+    SPELL_AURA_GHOST, SPELL_WISP_FORM, UNIT_FLAG_DISABLE_MOVE,
 };
 pub use ghost::{build_player_repop, get_ghost_speed_multiplier, remove_ghost_form};
 pub use graveyard::{
