@@ -1743,6 +1743,73 @@ mod tests {
         assert!(block.fields.contains(&(UNIT_FIELD_MAXPOWER1 + 1, 1000)));
     }
 
+    /// Build a world backed by lazy pools. Nothing here connects; the logout path tolerates a
+    /// failed save and resets the session regardless, which is the part under test.
+    fn test_world() -> World {
+        use crate::config::Config;
+        use sqlx::postgres::PgPoolOptions;
+        use std::path::PathBuf;
+
+        let pool = || {
+            PgPoolOptions::new()
+                .connect_lazy("postgres://test:test@localhost/test")
+                .expect("lazy pool should be constructible")
+        };
+        World::new(
+            Arc::new(Databases {
+                world: pool(),
+                character: pool(),
+                auth: pool(),
+                logs: oxcore_db::database::lazy_logs_pool(),
+            }),
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    fn logged_in_session(world: &World, protocol: Protocol) -> Arc<WorldSession> {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = Arc::new(WorldSession::new_with_protocol(
+            1,
+            1,
+            "Tester".to_string(),
+            0,
+            protocol,
+            tx,
+        ));
+        session.set_player_guid(Some(ObjectGuid::new_player(1)));
+        session.set_state(SessionState::LoggedIn);
+        world.session_mgr.add_session(Arc::clone(&session));
+        session
+    }
+
+    #[tokio::test]
+    async fn logging_out_hands_back_a_modern_clients_world_connection() {
+        // The client opens a new world socket per login and refuses the new one while the old is
+        // still up, leaving the next login stuck on the loading screen.
+        let world = test_world();
+        let session = logged_in_session(&world, Protocol::Modern);
+
+        perform_logout_cleanup(&session, &world).await.unwrap();
+
+        assert!(session.close_requested());
+        assert_eq!(session.state(), SessionState::Authenticated);
+    }
+
+    #[tokio::test]
+    async fn logging_out_keeps_a_vanilla_clients_only_socket() {
+        // 1.12 runs the character screen over the same socket as the world, so closing it here
+        // would drop the client to the login screen instead of the character list.
+        let world = test_world();
+        let session = logged_in_session(&world, Protocol::Vanilla);
+
+        perform_logout_cleanup(&session, &world).await.unwrap();
+
+        assert!(!session.close_requested());
+        assert_eq!(session.state(), SessionState::Authenticated);
+    }
+
     #[test]
     fn aura_offline_seconds_matches_persisted_logout_duration() {
         assert_eq!(aura_offline_seconds(1_000, 700), 300);
@@ -2188,6 +2255,15 @@ pub async fn perform_logout_cleanup(session: &WorldSession, world: &World) -> Re
             "[LOGOUT] Could not send logout completion to disconnected player {}: {}",
             player_guid, error
         );
+    }
+
+    // The modern client's world socket is per-character, not per-session: it opens a fresh one for
+    // every login, and refuses the new one while the old is still up -- it drops that socket
+    // immediately and sits on the loading screen. So hand the world connection back at character
+    // select. The realm socket carries the glue screen and stays; it never reaches here, having no
+    // player to log out. A 1.12 client has one socket for everything and must keep it.
+    if session.protocol() == Protocol::Modern {
+        session.request_close();
     }
 
     info!("Logout cleanup complete for player {}", player_guid);

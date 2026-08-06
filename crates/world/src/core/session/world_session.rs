@@ -46,6 +46,11 @@ pub struct WorldSession {
     pending_root_ack: AtomicBool,
     /// Sequence index for the next `SMSG_TIME_SYNC_REQUEST`. Modern-only; a 1.12 client never sees a time sync.
     time_sync_next_index: AtomicU32,
+    /// The connection serving this session should shut down once its queued packets are out.
+    ///
+    /// Only the modern driver acts on this, and only the world ("instance") socket ever gets it
+    /// set: a 1.12 client has a single socket that has to survive a return to character select.
+    close_requested: AtomicBool,
 }
 
 impl WorldSession {
@@ -94,7 +99,23 @@ impl WorldSession {
             client_mover_guid: RwLock::new(None),
             move_reject_time: AtomicU32::new(0),
             pending_root_ack: AtomicBool::new(false),
+            close_requested: AtomicBool::new(false),
         }
+    }
+
+    /// Ask the connection serving this session to close once everything queued has been written.
+    ///
+    /// The modern client keeps its world socket open after a logout to character select, and then
+    /// refuses the *next* login's world connection — it drops the new socket with a disconnect
+    /// report before the server can write to it, so the client sits on the loading screen forever.
+    /// Closing this end at logout is what lets the next `SMSG_CONNECT_TO` be accepted.
+    pub fn request_close(&self) {
+        self.close_requested.store(true, Ordering::Release);
+    }
+
+    /// Whether [`Self::request_close`] has been called.
+    pub fn close_requested(&self) -> bool {
+        self.close_requested.load(Ordering::Acquire)
     }
 
     /// GUID the client currently controls. Returns the player's own GUID when no

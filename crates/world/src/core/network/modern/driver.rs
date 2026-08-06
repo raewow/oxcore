@@ -504,6 +504,44 @@ pub enum ConnectionRole {
     },
 }
 
+/// Encrypt one queued packet onto the wire, tracing it first.
+///
+/// A packet with no modern opcode is dropped rather than sent: its body is a 1.12 one, and there is
+/// no number to send it under.
+async fn write_outbound<S>(
+    stream: &mut S,
+    crypt: &mut WorldCrypt,
+    connection: &'static str,
+    packet: &WorldPacket,
+) -> Result<()>
+where
+    S: AsyncReadExt + AsyncWriteExt + Unpin,
+{
+    if !packet.opcode().has_modern() {
+        debug!(?packet, "dropping packet without a modern opcode");
+        return Ok(());
+    }
+    // Traced *before* encryption: the ciphertext is useless for checking a body, and this is the
+    // only point that still has the plaintext together with the opcode it will be sent under.
+    packet_log::packet(
+        "packet.tx",
+        connection,
+        packet.opcode().name().unwrap_or("?"),
+        packet.opcode().modern(),
+        packet.contents(),
+    );
+    let frame = framing::encode(crypt, packet.opcode().modern(), packet.contents());
+    tracing::trace!(
+        connection,
+        opcode = ?packet.opcode(),
+        bytes = frame.len(),
+        "sent"
+    );
+    stream.write_all(&frame).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
 /// Run a modern gameplay connection through the shared `WorldSession` dispatcher.
 pub async fn run_world_connection<S>(
     mut stream: S,
@@ -679,33 +717,25 @@ where
             }
             packet = packet_rx.recv() => match packet {
                 Some(packet) => {
-                    if !packet.opcode().has_modern() {
-                        debug!(?packet, "dropping packet without a modern opcode");
-                        continue;
-                    }
-                    // Traced *before* encryption: the ciphertext is useless for checking a body,
-                    // and this is the only point that still has the plaintext together with the
-                    // opcode it will be sent under.
-                    packet_log::packet(
-                        "packet.tx",
-                        role.label(),
-                        packet.opcode().name().unwrap_or("?"),
-                        packet.opcode().modern(),
-                        packet.contents(),
-                    );
-                    let frame =
-                        framing::encode(&mut conn.crypt, packet.opcode().modern(), packet.contents());
-                    tracing::trace!(
-                        connection = role.label(),
-                        opcode = ?packet.opcode(),
-                        bytes = frame.len(),
-                        "sent"
-                    );
-                    stream.write_all(&frame).await?;
-                    stream.flush().await?;
+                    write_outbound(&mut stream, &mut conn.crypt, role.label(), &packet).await?;
                 }
                 None => break Ok(()),
             },
+        }
+
+        // A logout back to character select asks this connection to end. Everything already queued
+        // still has to reach the client -- SMSG_LOGOUT_COMPLETE is the packet that releases it to
+        // the character list -- so drain the queue before hanging up.
+        if session.close_requested() {
+            while let Ok(packet) = packet_rx.try_recv() {
+                write_outbound(&mut stream, &mut conn.crypt, role.label(), &packet).await?;
+            }
+            debug!(
+                account = %conn.account,
+                connection = role.label(),
+                "closing connection at the session's request"
+            );
+            break Ok(());
         }
     };
 
