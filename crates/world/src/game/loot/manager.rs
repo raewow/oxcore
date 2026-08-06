@@ -260,6 +260,17 @@ impl LootManager {
             })
     }
 
+    /// Whether a gameobject loot table has any quest-only item at all.
+    ///
+    /// Player-independent, unlike [`Self::player_needs_gameobject_quest_loot`]: this answers
+    /// "could this object ever matter to a quest", which is what decides whether an object is
+    /// eligible for quest activation before any particular player is considered.
+    pub fn gameobject_loot_has_quest_drop(&self, loot_id: u32) -> bool {
+        self.gameobject_loot_tables
+            .get(&loot_id)
+            .is_some_and(|table| table.iter().any(|entry| entry.is_quest_drop))
+    }
+
     /// Check if loot exists for a source
     pub fn has_loot(&self, source: ObjectGuid) -> bool {
         self.active_loot.contains_key(&source)
@@ -364,7 +375,11 @@ impl LootManager {
     /// [`crate::game::loot::system::LootSystem::send_loot_window`] listed them" (normal items
     /// first in storage order, then visible quest items in storage order) rather than used as a
     /// direct index into `items`/`quest_items`. Returns `(is_quest, real_slot)`.
-    fn resolve_display_slot(loot: &Loot, display_slot: u8, player: ObjectGuid) -> Option<(bool, u8)> {
+    fn resolve_display_slot(
+        loot: &Loot,
+        display_slot: u8,
+        player: ObjectGuid,
+    ) -> Option<(bool, u8)> {
         let mut ordinal = display_slot as usize;
 
         let unlooted_normal_count = loot.items.iter().filter(|i| !i.is_looted).count();

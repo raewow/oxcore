@@ -1516,6 +1516,9 @@ impl QuestSystem {
             }
         }
 
+        // Objects the new quest makes clickable may already be on screen.
+        crate::game::gameobject::quest_activation::refresh_quest_gameobjects(player_guid, world);
+
         info!(
             "Player {:?} accepted quest {} from {:?}",
             player_guid, quest_id, quest_giver_guid
@@ -2246,6 +2249,9 @@ impl QuestSystem {
             }
         }
 
+        // The quest is off the log, so anything it was lighting up goes inert again.
+        crate::game::gameobject::quest_activation::refresh_quest_gameobjects(player_guid, world);
+
         Ok(())
     }
 
@@ -2510,6 +2516,42 @@ impl QuestSystem {
             };
             for i in 0..QUEST_ITEM_OBJECTIVES_COUNT {
                 if quest.req_item_id[i] == item_id {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Check if a player has an unfinished objective naming the given gameobject entry.
+    ///
+    /// Quest objectives store creatures and gameobjects in one column, gameobjects as the
+    /// negated entry, so a "click five of these" objective is found by looking for `-entry`.
+    /// An objective already at its required count no longer activates the object.
+    pub fn player_has_quest_for_gameobject(&self, player_guid: ObjectGuid, go_entry: u32) -> bool {
+        use super::types::QUEST_OBJECTIVES_COUNT;
+
+        let progress: Vec<(u32, [u32; QUEST_OBJECTIVES_COUNT])> = self
+            .player_mgr
+            .get_player(player_guid)
+            .map(|p| {
+                p.active_quests
+                    .iter()
+                    .map(|q| (q.quest_id, q.creature_or_go_count))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let wanted = -(go_entry as i32);
+        for (quest_id, counts) in progress {
+            let Some(quest) = self.manager.get_quest_template(quest_id) else {
+                continue;
+            };
+            for i in 0..QUEST_OBJECTIVES_COUNT {
+                if quest.req_creature_or_go_id[i] == wanted
+                    && counts[i] < quest.req_creature_or_go_count[i]
+                {
                     return true;
                 }
             }

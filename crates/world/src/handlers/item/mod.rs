@@ -398,8 +398,7 @@ pub async fn handle_swap_item(
     packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let (src_bag, src_slot, dst_bag, dst_slot) =
-        read_swap_item_slots(session.protocol(), packet)?;
+    let (src_bag, src_slot, dst_bag, dst_slot) = read_swap_item_slots(session.protocol(), packet)?;
 
     let player_guid = match session.player_guid() {
         Some(guid) => guid,
@@ -1038,6 +1037,12 @@ pub async fn handle_destroy_item(
                 .systems
                 .inventory
                 .remove_item(player_guid, item_guid, destroy_count);
+
+            // Throwing away a quest item puts its source objects back in play.
+            crate::game::gameobject::quest_activation::refresh_quest_gameobjects(
+                player_guid,
+                world,
+            );
         }
     } else {
         session.send_msg(oxcore_shared::messages::SmsgInventoryChangeFailure::new(

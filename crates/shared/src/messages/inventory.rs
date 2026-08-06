@@ -1,5 +1,5 @@
 use crate::messages::update::{SmsgUpdateObject, DEFAULT_REALM_ID};
-use crate::messages::ToWorldPacket;
+use crate::messages::{Recipient, ToWorldPacket};
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::{ObjectGuid as SharedObjectGuid, Opcode, WorldPacket};
 
@@ -42,6 +42,13 @@ pub struct SmsgItemPushResult {
     pub item_entry: u32,
     pub suffix_factor: u32,
     pub random_property_id: u32,
+    /// How many of this item the player holds *after* the pickup, across every stack.
+    ///
+    /// Modern-only, and not derivable from the rest of the message: the 1.14 over-head toast
+    /// ("Milly's Harvest 3/8") reads this, not `count`. Vanilla's body has no such field — its
+    /// client counts the bags itself — so `to_vanilla` ignores it. Left at zero it falls back to
+    /// `count`, which makes every pickup announce itself as the first one.
+    pub quantity_in_inventory: u32,
     pub count: u32,
 }
 
@@ -68,14 +75,13 @@ impl ToWorldPacket for SmsgItemPushResult {
     /// anything with the chat flag clear is silently hidden, and everything else renders as loot.
     /// Get it wrong and quest rewards either announce themselves twice or not at all.
     ///
-    /// Two fields have no source in the 1.12 body and are sent as documented blanks:
+    /// One field has no source in the 1.12 body and is sent as a documented blank: `SlotInBag` is
+    /// `-1`. Vanilla carries a slot-within-bag alongside the bag slot, but this struct never
+    /// captured it, and `-1` is the value 1.14 reads as "no particular slot" — a real-looking `0`
+    /// would make the client animate the wrong bag square.
     ///
-    /// * `SlotInBag` is `-1`. Vanilla carries a slot-within-bag alongside the bag slot, but this
-    ///   struct never captured it, and `-1` is the value 1.14 reads as "no particular slot" — a
-    ///   real-looking `0` would make the client animate the wrong bag square.
-    /// * `QuantityInInventory` repeats `Quantity`. 1.12 sends only the per-pickup delta, so the
-    ///   over-head quest toast reads `n/N` with `n` counting this pickup alone rather than the
-    ///   running total.
+    /// `QuantityInInventory` is the running total and must be supplied by the sender; see the
+    /// field's own doc for why repeating `Quantity` there is wrong.
     ///
     /// `ItemGUID` is empty for the same reason: the 1.12 body identifies the item by entry only, and
     /// the client falls back to the entry when the GUID is absent.
@@ -88,7 +94,13 @@ impl ToWorldPacket for SmsgItemPushResult {
         writer.write_i32(-1); // SlotInBag -- see above
         writer.write_i32(0); // QuestLogItemID -- 1.12 never overrides the quest-credit item
         writer.write_u32(self.count); // Quantity
-        writer.write_u32(self.count); // QuantityInInventory -- see above
+                                      // A sender that does not know the total falls back to the delta rather than claiming zero,
+                                      // which the client renders as "0/8" on a pickup that plainly just happened.
+        writer.write_u32(if self.quantity_in_inventory > 0 {
+            self.quantity_in_inventory
+        } else {
+            self.count
+        }); // QuantityInInventory
         writer.write_i32(0); // DungeonEncounterID
         writer.write_i32(0); // BattlePetSpeciesID
         writer.write_i32(0); // BattlePetBreedID
@@ -140,6 +152,44 @@ impl ToWorldPacket for SmsgDestroyItem {
     /// 1.14 has no `SMSG_DESTROY_OBJECT`; destruction is a list inside `SMSG_UPDATE_OBJECT`.
     fn to_modern(&self) -> Option<WorldPacket> {
         SmsgUpdateObject::new().destroy(self.item_guid).to_modern()
+    }
+
+    fn to_modern_for(&self, recipient: Recipient) -> Option<WorldPacket> {
+        SmsgUpdateObject::new()
+            .destroy(self.item_guid)
+            .to_modern_for(recipient)
+    }
+}
+
+/// Tell one client an object no longer exists.
+///
+/// The world objects — a looted chest, a despawned creature, a pooled spawn rotating out — need
+/// the same thing [`SmsgDestroyItem`] does for items, and it cannot be a hand-built packet: the
+/// 1.12 body is a bare GUID while 1.14 has no such opcode at all and carries destruction as a list
+/// inside `SMSG_UPDATE_OBJECT`. A pre-encoded vanilla body sent to a modern client is refused by
+/// the send path, which is why looted gameobjects stayed on screen for 1.14 clients.
+#[derive(Debug, Clone)]
+pub struct SmsgDestroyObject {
+    pub guid: SharedObjectGuid,
+}
+
+impl ToWorldPacket for SmsgDestroyObject {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_DESTROY_OBJECT);
+        packet.write_guid_raw(self.guid.raw());
+        packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        SmsgUpdateObject::new().destroy(self.guid).to_modern()
+    }
+
+    /// Preferred when the send path knows the recipient: the removal list is a packed 128-bit
+    /// GUID, and widening one needs the recipient's realm.
+    fn to_modern_for(&self, recipient: Recipient) -> Option<WorldPacket> {
+        SmsgUpdateObject::new()
+            .destroy(self.guid)
+            .to_modern_for(recipient)
     }
 }
 
@@ -643,5 +693,100 @@ impl ToWorldPacket for SmsgReadItemFailed {
         let mut packet = WorldPacket::new(Opcode::SMSG_READ_ITEM_FAILED);
         packet.write_guid_raw(self.item_guid.raw());
         packet
+    }
+}
+
+#[cfg(test)]
+mod push_result_tests {
+    use super::*;
+    use crate::protocol::HighGuid;
+
+    fn push(count: u32, quantity_in_inventory: u32) -> Vec<u8> {
+        SmsgItemPushResult {
+            player_guid: SharedObjectGuid::new_without_entry(HighGuid::Player, 2),
+            received: 0,
+            created: 0,
+            show_in_chat: 1,
+            bagslot: 255,
+            item_entry: 11119,
+            suffix_factor: 0,
+            random_property_id: 0,
+            count,
+            quantity_in_inventory,
+        }
+        .to_modern()
+        .expect("ported")
+        .contents()
+        .to_vec()
+    }
+
+    /// The bug this fixes: the 1.14 over-head toast reads `QuantityInInventory`, and sending the
+    /// per-pickup delta there made every pickup of a quest item announce "1/8" no matter how many
+    /// the player already held. The bag and quest log were right the whole time -- only the toast
+    /// was counting the wrong thing.
+    #[test]
+    fn the_toast_carries_the_running_total_not_the_pickup() {
+        let body = push(1, 3);
+        let quantities = [1u32.to_le_bytes(), 3u32.to_le_bytes()].concat();
+        assert!(
+            body.windows(quantities.len()).any(|w| w == quantities),
+            "Quantity then QuantityInInventory must read 1 then 3"
+        );
+    }
+
+    /// A sender that has no total falls back to the delta. Zero would render as "0/8" on a pickup
+    /// that just happened, which is worse than the old behaviour rather than better.
+    #[test]
+    fn an_unknown_total_falls_back_to_the_pickup_count() {
+        assert_eq!(push(2, 0), push(2, 2));
+    }
+}
+
+#[cfg(test)]
+mod destroy_tests {
+    use super::*;
+    use crate::protocol::HighGuid;
+
+    /// The bug this fixes: every world-object despawn built a vanilla `SMSG_DESTROY_OBJECT` by
+    /// hand and broadcast it pre-encoded, so the send path refused it for 1.14 clients and a
+    /// looted chest, a despawning corpse or a rotated-out pool spawn stayed on their screen
+    /// forever -- unclickable, because the server had already dropped the object.
+    #[test]
+    fn destroy_object_encodes_for_both_protocols() {
+        let guid = SharedObjectGuid::new_gameobject(161557, 26752);
+        let msg = SmsgDestroyObject { guid };
+
+        let vanilla = msg.to_vanilla();
+        assert_eq!(vanilla.opcode(), Opcode::SMSG_DESTROY_OBJECT);
+        assert_eq!(&vanilla.data()[..], &guid.raw().to_le_bytes()[..]);
+
+        // 1.14 has no destroy opcode at all: the guid rides in the removal list of an otherwise
+        // empty SMSG_UPDATE_OBJECT.
+        let modern = msg.to_modern().expect("ported");
+        assert_eq!(modern.opcode(), Opcode::SMSG_UPDATE_OBJECT);
+        assert_eq!(
+            &modern.contents()[0..7],
+            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80],
+            "no object blocks, and the removal bit set (it flushes to the top of its byte)"
+        );
+    }
+
+    /// The removal list carries a packed 128-bit guid, and widening one needs the recipient's
+    /// realm -- so the recipient-aware path must not fall back to the default realm.
+    #[test]
+    fn destroy_object_uses_the_recipients_realm() {
+        let guid = SharedObjectGuid::new_without_entry(HighGuid::Unit, 42);
+        let msg = SmsgDestroyObject { guid };
+
+        let default_realm = msg.to_modern().expect("ported");
+        let other_realm = msg
+            .to_modern_for(Recipient {
+                guid: SharedObjectGuid::new_without_entry(HighGuid::Player, 1),
+                map_id: 0,
+                realm_id: DEFAULT_REALM_ID + 1,
+            })
+            .expect("ported");
+
+        assert_ne!(default_realm.contents(), other_realm.contents());
     }
 }

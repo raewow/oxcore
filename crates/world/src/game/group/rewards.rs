@@ -69,8 +69,14 @@ pub async fn reward_group_at_kill(
             continue;
         }
         accumulate_xp_data(
-            world, &mut data, member.guid, victim_level, victim_pos, victim_map,
-            victim_instance, victim_rank,
+            world,
+            &mut data,
+            member.guid,
+            victim_level,
+            victim_pos,
+            victim_map,
+            victim_instance,
+            victim_rank,
         );
     }
     accumulate_xp_data(
@@ -220,7 +226,12 @@ async fn reward_group_member(
     // Quest objectives are met by alive members and by dead members whose body is still at
     // the corpse (spirit not yet released — i.e. not `DeathState::Dead`).
     if is_alive || !matches!(player.death.death_state, DeathState::Dead) {
-        world.systems.quest.handle_kill_credit(member_guid, victim_entry, victim_guid);
+        world
+            .systems
+            .quest
+            .handle_kill_credit(member_guid, victim_entry, victim_guid);
+        // Filling an objective can take the quest's objects out of play.
+        crate::game::gameobject::quest_activation::refresh_quest_gameobjects(member_guid, world);
     }
 
     // XP only for alive members.
@@ -233,7 +244,13 @@ async fn reward_group_member(
         let _ = world
             .systems
             .experience
-            .add_xp(member_guid, itr_xp, XpSource::Kill, Some(victim_guid), group_rate)
+            .add_xp(
+                member_guid,
+                itr_xp,
+                XpSource::Kill,
+                Some(victim_guid),
+                group_rate,
+            )
             .await;
     }
 }

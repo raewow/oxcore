@@ -1,6 +1,7 @@
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::game::gameobject::{GOState, LootState};
 use crate::World;
+use oxcore_shared::messages::inventory::SmsgDestroyObject;
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, WorldPacket};
 
@@ -58,14 +59,14 @@ pub fn despawn_looted_gameobject(player_guid: ObjectGuid, guid: ObjectGuid, worl
         .get_or_create_map(map_id, 0)
         .remove_gameobject(guid, position);
 
-    let mut destroy = WorldPacket::new(Opcode::SMSG_DESTROY_OBJECT);
-    destroy.write_guid_raw(guid.raw());
-    for viewer_guid in nearby_players(world, map_id, position) {
-        world
-            .managers
-            .broadcast_mgr
-            .send_to_player(viewer_guid, destroy.clone());
-    }
+    // A message, not a pre-encoded packet: 1.14 has no `SMSG_DESTROY_OBJECT` opcode, so a vanilla
+    // body is refused for modern clients and the looted object stays standing on their screen.
+    let destroy = SmsgDestroyObject { guid };
+    let viewers = nearby_players(world, map_id, position);
+    world
+        .managers
+        .broadcast_mgr
+        .broadcast_msg_to_players(&viewers, &destroy);
     tracing::debug!(
         "Despawned looted gameobject {:?} for {}s (looter {:?})",
         guid,

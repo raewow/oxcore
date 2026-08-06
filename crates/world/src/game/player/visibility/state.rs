@@ -41,6 +41,13 @@ pub struct VisibilityState {
     /// True while a visibility update is in progress
     /// Prevents concurrent updates from login + map loop
     pub update_in_progress: bool,
+
+    /// Gameobjects this player was last told are quest-activated.
+    ///
+    /// Activation is per viewer and changes with quest state, not with the object, so the answer
+    /// the client currently holds has to be remembered to know when it needs a new one. Membership
+    /// means activated; anything absent is either inert or not visible.
+    pub gameobjects_activated: HashSet<ObjectGuid>,
 }
 
 impl VisibilityState {
@@ -56,6 +63,7 @@ impl VisibilityState {
             force_immediate: true, // Force immediate on creation (login)
             objects_created: HashSet::with_capacity(64),
             update_in_progress: false,
+            gameobjects_activated: HashSet::new(),
         }
     }
 

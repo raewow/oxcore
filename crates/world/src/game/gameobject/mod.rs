@@ -1,5 +1,6 @@
 pub mod gameobject;
 pub mod manager;
+pub mod quest_activation;
 pub mod spawn;
 pub mod system;
 pub mod types;

@@ -242,6 +242,13 @@ impl LootSystem {
                     .quest
                     .handle_item_added(player_guid, item.item_id, item.count);
 
+                // Collecting the last of a quest item takes its chests back out of play, and the
+                // first of one can bring a follow-up objective's objects in.
+                crate::game::gameobject::quest_activation::refresh_quest_gameobjects(
+                    player_guid,
+                    world,
+                );
+
                 // Send loot removed to player
                 let msg = SmsgLootRemoved { slot };
                 self.broadcast_mgr.send_msg_to_player(player_guid, msg);
@@ -575,7 +582,7 @@ impl LootSystem {
                 .unwrap_or(false);
         }
 
-// Check if target is a lootable corpse
+        // Check if target is a lootable corpse
         let result = world
             .managers
             .creature_mgr

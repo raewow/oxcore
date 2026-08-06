@@ -716,6 +716,13 @@ impl InventorySystem {
                 // ignored by modern clients, leaving their bag count stale after looting a stack.
                 self.send_item_count_update(player_guid, existing_guid, new_count);
 
+                // Then re-point the owning slot at the same item. The values update above is
+                // correct on the wire -- decoded from a live capture it reads "item X,
+                // StackCount = n" with the right mask -- but a 1.14 client that already has the
+                // item does not repaint the bag square from it. Rewriting the slot field is what
+                // makes it re-read the stack, and it is a no-op field write for 1.12.
+                self.send_slot_update(player_guid, bag, slot, Some(existing_guid));
+
                 // A merge is just as much a "you received an item" event as creating a new stack,
                 // but this send used to only happen in the create-new-stack branch below. That left
                 // the loot chat message ("You receive item: X") and the client's toast/sound
@@ -731,6 +738,9 @@ impl InventorySystem {
                     suffix_factor: 0,
                     random_property_id: 0,
                     count: add_count,
+                    // Read after the merge landed in the cache: the modern over-head toast counts
+                    // what the player now holds, not what this pickup added.
+                    quantity_in_inventory: self.cache.count_items_by_entry(player_guid, item_id),
                 };
                 self.broadcast_mgr
                     .send_msg_to_player(player_guid, push_result);
@@ -748,7 +758,10 @@ impl InventorySystem {
                     if items_modified.is_empty() && items_created.is_empty() {
                         return AddItemResult::DatabaseError(e.to_string());
                     }
-                    warn!("add_item: failed to allocate item guid mid-add for {:?}: {}", player_guid, e);
+                    warn!(
+                        "add_item: failed to allocate item guid mid-add for {:?}: {}",
+                        player_guid, e
+                    );
                     break;
                 }
             };
@@ -785,7 +798,10 @@ impl InventorySystem {
                 if items_modified.is_empty() && items_created.is_empty() {
                     return AddItemResult::DatabaseError(e.to_string());
                 }
-                warn!("add_item: failed to create item row mid-add for {:?}: {}", player_guid, e);
+                warn!(
+                    "add_item: failed to create item row mid-add for {:?}: {}",
+                    player_guid, e
+                );
                 break;
             }
 
@@ -860,6 +876,7 @@ impl InventorySystem {
                 suffix_factor: 0,
                 random_property_id: 0,
                 count: add_count,
+                quantity_in_inventory: self.cache.count_items_by_entry(player_guid, item_id),
             };
             self.broadcast_mgr
                 .send_msg_to_player(player_guid, push_result);

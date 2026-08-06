@@ -10,6 +10,7 @@ use super::pool_manager::{PoolDespawn, PoolManager, PoolRoll};
 use super::pool_types::{PoolMemberKey, PoolMemberType};
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::World;
+use oxcore_shared::messages::inventory::SmsgDestroyObject;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 use std::sync::Arc;
 
@@ -351,11 +352,11 @@ impl PoolSystem {
         position: Position,
         world: &World,
     ) {
-        let mut packet = WorldPacket::new(Opcode::SMSG_DESTROY_OBJECT);
-        packet.write_guid_raw(guid.raw());
-
+        // See `SmsgDestroyObject`: a pre-encoded vanilla body never reaches a modern client.
+        let destroy = SmsgDestroyObject { guid };
         let players = players_near(world, map_id, instance_id, position);
-        self.broadcast_mgr.broadcast_to_players(&players, &packet);
+        self.broadcast_mgr
+            .broadcast_msg_to_players(&players, &destroy);
     }
 }
 

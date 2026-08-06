@@ -470,20 +470,34 @@ impl GameObjectManager {
         use crate::game::common::update_fields::*;
         use oxcore_shared::messages::update::*;
 
-        let go = self.gameobjects.get(&guid)?;
-        let quest_activate = go.go_type == GameObjectType::Chest
-            && self.get_template(go.entry).is_some_and(|template| {
-                world
-                    .systems
-                    .loot_manager
-                    .player_needs_gameobject_quest_loot(template.data[1].max(0) as u32, |item_id| {
-                        world
-                            .systems
-                            .quest
-                            .player_has_quest_for_item(viewer_guid, item_id)
-                    })
+        // Answered before the object is borrowed below: deciding this reaches across the quest,
+        // loot and player managers, and none of that should run while a read guard on the
+        // gameobject map is held.
+        let (entry, go_type) = self.with_gameobject(guid, |go| (go.entry, go.go_type))?;
+        let quest_activate = self.get_template(entry).is_some_and(|template| {
+            super::quest_activation::activates_to_quest(
+                entry,
+                go_type,
+                &template,
+                viewer_guid,
+                world,
+            )
+        });
+
+        // Remember what this player was told, so the refresh pass can tell a real change from a
+        // repeat. Ported from the same bookkeeping vanilla does while building the block.
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(viewer_guid, |player| {
+                if quest_activate {
+                    player.visibility.gameobjects_activated.insert(guid);
+                } else {
+                    player.visibility.gameobjects_activated.remove(&guid);
+                }
             });
 
+        let go = self.gameobjects.get(&guid)?;
         let world_guid = WorldObjectGuid::new_gameobject(go.entry, guid.counter());
         let world_position =
             WorldPosition::new(go.position.x, go.position.y, go.position.z, go.position.o);

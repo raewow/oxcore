@@ -2,6 +2,7 @@ use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
 use crate::game::broadcast_mgr::broadcast_around_creature;
 use crate::game::common::update_fields::*;
 use crate::World;
+use oxcore_shared::messages::inventory::SmsgDestroyObject;
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
@@ -165,7 +166,15 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
             }
             None => {
                 // Give quest kill credit to the killer
-                world.systems.quest.handle_kill_credit(recipient_guid, entry, guid);
+                world
+                    .systems
+                    .quest
+                    .handle_kill_credit(recipient_guid, entry, guid);
+                // Filling an objective can take the quest's objects out of play.
+                crate::game::gameobject::quest_activation::refresh_quest_gameobjects(
+                    recipient_guid,
+                    world,
+                );
 
                 // Grant XP to the loot recipient
                 if creature_level > 0 {
@@ -413,8 +422,10 @@ fn send_destroy_object(
     _position: oxcore_shared::protocol::Position,
 ) {
     let world_guid = WorldObjectGuid::new_creature(guid.entry(), guid.counter());
-    let mut packet = WorldPacket::new(Opcode::SMSG_DESTROY_OBJECT);
-    packet.write_guid_raw(world_guid.raw());
+    // See `SmsgDestroyObject`: a pre-encoded vanilla body never reaches a modern client.
+    let destroy = SmsgDestroyObject {
+        guid: ObjectGuid::from_raw(world_guid.raw()),
+    };
 
-    crate::game::broadcast_mgr::broadcast_around_creature_packet(world, guid, &packet);
+    crate::game::broadcast_mgr::broadcast_around_creature(world, guid, &destroy);
 }

@@ -675,6 +675,9 @@ pub async fn handle_questlog_remove_quest(
             .quest
             .abandon_quest(player_guid, quest_id)
             .await?;
+
+        // Whatever the quest was lighting up goes inert again.
+        crate::game::gameobject::quest_activation::refresh_quest_gameobjects(player_guid, world);
     } else {
         warn!(
             "Player {:?} tried to abandon quest at invalid slot {}",
