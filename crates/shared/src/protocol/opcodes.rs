@@ -148,6 +148,7 @@ impl Opcode {
 
     pub const SMSG_NEW_WORLD: Opcode = Opcode { vanilla: 0x003E, modern: 0x2599 }; // 62
     pub const SMSG_TRANSFER_PENDING: Opcode = Opcode { vanilla: 0x003F, modern: 0x25C9 }; // 63
+    pub const SMSG_TRANSFER_ABORTED: Opcode = Opcode { vanilla: 0x0040, modern: 0x26FA }; // 64
     pub const SMSG_LOGIN_SETTIMESPEED: Opcode = Opcode { vanilla: 0x0042, modern: 0x2704 }; // 66
     pub const SMSG_LOGIN_VERIFY_WORLD: Opcode = Opcode { vanilla: 0x0236, modern: 0x259A }; // 566
     pub const CMSG_QUERY_TIME: Opcode = Opcode { vanilla: 0x01CE, modern: 0x34D5 }; // 462
@@ -1208,6 +1209,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::SMSG_LOGOUT_CANCEL_ACK, "SMSG_LOGOUT_CANCEL_ACK"),
     (Opcode::SMSG_NEW_WORLD, "SMSG_NEW_WORLD"),
     (Opcode::SMSG_TRANSFER_PENDING, "SMSG_TRANSFER_PENDING"),
+    (Opcode::SMSG_TRANSFER_ABORTED, "SMSG_TRANSFER_ABORTED"),
     (Opcode::SMSG_LOGIN_SETTIMESPEED, "SMSG_LOGIN_SETTIMESPEED"),
     (Opcode::SMSG_LOGIN_VERIFY_WORLD, "SMSG_LOGIN_VERIFY_WORLD"),
     (Opcode::CMSG_QUERY_TIME, "CMSG_QUERY_TIME"),
@@ -2545,8 +2547,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            661,
-            "expected 661 opcode constants; update this count deliberately when adding opcodes"
+            662,
+            "expected 662 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

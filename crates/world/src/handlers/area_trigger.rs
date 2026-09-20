@@ -15,6 +15,7 @@ use crate::game::player::environment::RestType;
 use crate::World;
 use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language};
 use oxcore_shared::messages::chat::SmsgMessageChat;
+use oxcore_shared::messages::movement::{SmsgTransferAborted, TransferAbortReason};
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
@@ -269,8 +270,11 @@ pub async fn handle_area_trigger(
                         dest_map,
                         e
                     );
-                    // Fall back to continent instance (should not happen for instance maps)
-                    0
+                    session.send_msg(SmsgTransferAborted {
+                        map_id: dest_map,
+                        reason: TransferAbortReason::NotFound,
+                    })?;
+                    return Ok(());
                 }
             }
         } else {

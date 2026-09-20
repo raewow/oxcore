@@ -43,6 +43,53 @@ impl ToWorldPacket for SmsgTransferPending {
     }
 }
 
+/// Reference `Player.h::TransferAbortReason` values for the vanilla client.
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum TransferAbortReason {
+    MaxPlayers = 1,
+    NotFound = 2,
+    TooManyInstances = 3,
+    Silently = 4,
+    ZoneInCombat = 5,
+}
+
+/// SMSG_TRANSFER_ABORTED - the requested destination cannot be entered.
+#[derive(Debug, Clone)]
+pub struct SmsgTransferAborted {
+    /// Only modern clients include the destination map in this response.
+    pub map_id: u32,
+    pub reason: TransferAbortReason,
+}
+
+impl ToWorldPacket for SmsgTransferAborted {
+    fn to_vanilla(&self) -> WorldPacket {
+        // Reference core Misc::TransferAborted sends only the reason byte.
+        let mut packet = WorldPacket::new(Opcode::SMSG_TRANSFER_ABORTED);
+        packet.write_u8(self.reason as u8);
+        packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        // JimsProxy MovementPackets::TransferAborted: reason values are
+        // translated by name, then encoded in a six-bit field.
+        let reason = match self.reason {
+            TransferAbortReason::MaxPlayers => 2,
+            TransferAbortReason::NotFound => 3,
+            TransferAbortReason::TooManyInstances => 4,
+            TransferAbortReason::Silently => 1, // Error
+            TransferAbortReason::ZoneInCombat => 6,
+        };
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.map_id);
+        writer.write_u8(0); // Arg
+        writer.write_i32(-6); // MapDifficultyXConditionID (proxy default)
+        writer.write_bits(reason, 6);
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_TRANSFER_ABORTED))
+    }
+}
+
 /// SMSG_NEW_WORLD
 ///
 /// Second half of the cross-map teleport handshake: gives the client the
@@ -592,6 +639,30 @@ fn pack_xyz(x: f32, y: f32, z: f32) -> u32 {
 #[cfg(test)]
 mod modern_tests {
     use super::*;
+
+    #[test]
+    fn transfer_aborted_matches_reference_bodies_and_reason_values() {
+        // core Misc::TransferAborted and JimsProxy MovementPackets::TransferAborted.
+        // Modern build 42597 uses JimsProxy's V2_5_3_41750 opcode table.
+        for (reason, vanilla, modern_bits) in [
+            (TransferAbortReason::MaxPlayers, 1, 0x08),
+            (TransferAbortReason::NotFound, 2, 0x0c),
+            (TransferAbortReason::TooManyInstances, 3, 0x10),
+            (TransferAbortReason::Silently, 4, 0x04),
+            (TransferAbortReason::ZoneInCombat, 5, 0x18),
+        ] {
+            let message = SmsgTransferAborted { map_id: 36, reason };
+            let packet = message.to_vanilla();
+            assert_eq!(packet.opcode().vanilla(), 0x0040);
+            assert_eq!(packet.contents(), &[vanilla]);
+            let packet = message.to_modern().unwrap();
+            assert_eq!(packet.opcode().modern(), 0x26fa);
+            assert_eq!(
+                packet.contents(),
+                &[36, 0, 0, 0, 0, 0xfa, 0xff, 0xff, 0xff, modern_bits]
+            );
+        }
+    }
 
     fn guid() -> ObjectGuid {
         ObjectGuid::new_without_entry(crate::protocol::HighGuid::Unit, 42)

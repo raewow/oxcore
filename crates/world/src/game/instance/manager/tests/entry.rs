@@ -2,7 +2,8 @@ use super::*;
 use crate::core::session::WorldSession;
 use crate::game::player::Player;
 use crate::handlers::area_trigger::handle_area_trigger;
-use oxcore_shared::protocol::{Opcode, Position, WorldPacket};
+use crate::handlers::movement::handle_worldport_ack;
+use oxcore_shared::protocol::{Opcode, Position, Protocol, WorldPacket};
 use tokio::sync::mpsc;
 
 async fn entrance_world(pool: PgPool, map_id: u32, map_type: u32) -> World {
@@ -72,8 +73,17 @@ fn session(
     id: u32,
     map_id: u32,
 ) -> (WorldSession, mpsc::UnboundedReceiver<WorldPacket>) {
+    session_for_protocol(world, id, map_id, Protocol::Vanilla)
+}
+
+fn session_for_protocol(
+    world: &World,
+    id: u32,
+    map_id: u32,
+    protocol: Protocol,
+) -> (WorldSession, mpsc::UnboundedReceiver<WorldPacket>) {
     let (tx, rx) = mpsc::unbounded_channel();
-    let session = WorldSession::new(id, id, format!("player{id}"), 0, tx);
+    let session = WorldSession::new_with_protocol(id, id, format!("player{id}"), 0, protocol, tx);
     session.set_player_guid(Some(guid(id)));
     let mut player = Player::new(guid(id), format!("player{id}"), map_id, 0, 1, 60, 1, 1, 0);
     player.movement.position = Position::new(0.0, 0.0, 0.0, 0.0);
@@ -312,18 +322,12 @@ async fn permanent_group_entry_binds_an_unbound_member(pool: PgPool) {
 #[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
 async fn failed_solo_conversion_does_not_publish_a_group_binding(pool: PgPool) {
     let world = entrance_world(pool, 36, 1).await;
+    let (member, mut packets) = session(&world, 2, 0);
     personal(&world, 2, 36, 301, false).await;
     // Force the personal-save deletion to fail after the group row is inserted.
     world.databases.character.execute("CREATE TABLE retained_save (guid BIGINT, instance BIGINT, FOREIGN KEY (guid, instance) REFERENCES characters.character_instance(guid, instance)); INSERT INTO retained_save VALUES (2, 301)").await.unwrap();
     let manager = &world.managers.instance_mgr;
-    let context = InstanceEntryGroup {
-        leader_guid: guid(1),
-        members_outside: Vec::new(),
-    };
-    assert!(manager
-        .enter_instance(&world.databases, 36, guid(2), Some(&context), false)
-        .await
-        .is_err());
+    assert_entry_rejected(&world, &member, &mut packets).await;
     assert!(manager.get_group_binding(guid(1), 36).is_none());
     assert_eq!(
         saved(manager.get_player_binding(guid(2), 36)),
@@ -343,4 +347,164 @@ async fn failed_solo_conversion_does_not_publish_a_group_binding(pool: PgPool) {
         saved(reloaded.get_player_binding(guid(2), 36)),
         Some((301, false))
     );
+}
+
+async fn assert_entry_rejected(
+    world: &World,
+    session: &WorldSession,
+    packets: &mut mpsc::UnboundedReceiver<WorldPacket>,
+) {
+    let player_guid = session.player_guid().unwrap();
+    let location = || {
+        world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| {
+                (player.map_id, player.instance_id, player.movement.position)
+            })
+            .unwrap()
+    };
+    let original = location();
+    let source = world
+        .managers
+        .map_mgr
+        .get_or_create_map(original.0, original.1);
+    source.add_player(player_guid, original.2);
+    let mut map_keys = world.managers.map_mgr.get_active_map_keys();
+    map_keys.sort_unstable();
+    assert!(session.get_pending_teleport().is_none());
+    let mut packet = WorldPacket::new(Opcode::CMSG_AREATRIGGER);
+    packet.write_u32(100);
+    handle_area_trigger(session, &mut packet, world)
+        .await
+        .unwrap();
+
+    let response = packets
+        .try_recv()
+        .expect("entry failure notifies the client");
+    assert_eq!(response.opcode(), Opcode::SMSG_TRANSFER_ABORTED);
+    match session.protocol() {
+        Protocol::Vanilla => assert_eq!(response.contents(), &[2]),
+        Protocol::Modern => assert_eq!(
+            response.contents(),
+            &[36, 0, 0, 0, 0, 0xfa, 0xff, 0xff, 0xff, 0x0c]
+        ),
+    }
+    assert!(
+        packets.try_recv().is_err(),
+        "no transfer or new-world packets may follow an abort"
+    );
+    assert!(session.get_pending_teleport().is_none());
+    assert_eq!(location(), original);
+    assert_eq!(source.get_player_position(player_guid), Some(original.2));
+
+    // An unsolicited ACK must not finish the rejected transfer or create map 36:0.
+    let mut ack = WorldPacket::new(Opcode::MSG_MOVE_WORLDPORT_ACK);
+    handle_worldport_ack(session, &mut ack, world)
+        .await
+        .unwrap();
+    assert!(session.get_pending_teleport().is_none());
+    assert!(packets.try_recv().is_err());
+    assert_eq!(location(), original);
+    assert_eq!(source.get_player_position(player_guid), Some(original.2));
+    let mut after = world.managers.map_mgr.get_active_map_keys();
+    after.sort_unstable();
+    assert_eq!(
+        after, map_keys,
+        "failed entry must not create a destination map"
+    );
+    assert!(world.managers.map_mgr.get_map(36, 0).is_none());
+}
+
+async fn failed_creation(pool: PgPool, protocol: Protocol) {
+    let world = entrance_world(pool, 36, 1).await;
+    let (solo, mut packets) = session_for_protocol(&world, 4, 0, protocol);
+    sqlx::query(
+        "ALTER TABLE characters.instance ADD CONSTRAINT reject_new_instances CHECK (id <= 501)",
+    )
+    .execute(&world.databases.character)
+    .await
+    .unwrap();
+    assert_entry_rejected(&world, &solo, &mut packets).await;
+    assert!(world
+        .managers
+        .instance_mgr
+        .get_player_binding(guid(4), 36)
+        .is_none());
+
+    // The same session can retry normally once instance creation is available.
+    sqlx::query("ALTER TABLE characters.instance DROP CONSTRAINT reject_new_instances")
+        .execute(&world.databases.character)
+        .await
+        .unwrap();
+    let instance = enter(&world, &solo).await;
+    assert_eq!(
+        packets.try_recv().unwrap().opcode(),
+        Opcode::SMSG_TRANSFER_PENDING
+    );
+    assert_eq!(packets.try_recv().unwrap().opcode(), Opcode::SMSG_NEW_WORLD);
+    assert_eq!(
+        saved(world.managers.instance_mgr.get_player_binding(guid(4), 36)),
+        Some((instance, false))
+    );
+}
+
+#[sqlx::test]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn failed_creation_aborts_vanilla_entry_and_allows_retry(pool: PgPool) {
+    failed_creation(pool, Protocol::Vanilla).await;
+}
+
+#[sqlx::test]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn failed_creation_aborts_modern_entry_and_allows_retry(pool: PgPool) {
+    failed_creation(pool, Protocol::Modern).await;
+}
+
+#[sqlx::test]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn failed_saved_instance_load_aborts_entry_without_losing_the_binding(pool: PgPool) {
+    let world = entrance_world(pool, 36, 1).await;
+    let (solo, mut packets) = session(&world, 4, 0);
+    personal(&world, 4, 36, 301, false).await;
+    // Keep the binding cached, but make its instance metadata query fail.
+    sqlx::query("ALTER TABLE characters.instance RENAME TO unavailable_instance")
+        .execute(&world.databases.character)
+        .await
+        .unwrap();
+    assert_entry_rejected(&world, &solo, &mut packets).await;
+    assert_eq!(
+        saved(world.managers.instance_mgr.get_player_binding(guid(4), 36)),
+        Some((301, false))
+    );
+    sqlx::query("ALTER TABLE characters.unavailable_instance RENAME TO instance")
+        .execute(&world.databases.character)
+        .await
+        .unwrap();
+    assert_eq!(enter(&world, &solo).await, 301);
+}
+
+#[sqlx::test]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn continent_transfers_still_use_instance_zero(pool: PgPool) {
+    let world = entrance_world(pool, 1, 0).await;
+    let (solo, mut packets) = session(&world, 4, 0);
+    // Continent admission must not depend on the instance database at all.
+    world.databases.character.close().await;
+    let mut packet = WorldPacket::new(Opcode::CMSG_AREATRIGGER);
+    packet.write_u32(100);
+    handle_area_trigger(&solo, &mut packet, &world)
+        .await
+        .unwrap();
+    let destination = world.managers.area_trigger_mgr.get_teleport(100).unwrap();
+    assert_eq!(
+        solo.get_pending_teleport(),
+        Some((1, 0, destination.destination))
+    );
+    assert_eq!(
+        packets.try_recv().unwrap().opcode(),
+        Opcode::SMSG_TRANSFER_PENDING
+    );
+    assert_eq!(packets.try_recv().unwrap().opcode(), Opcode::SMSG_NEW_WORLD);
+    assert!(packets.try_recv().is_err());
 }
