@@ -3,6 +3,8 @@ use crate::{config::Config, World};
 use oxcore_shared::game::group::GroupData;
 use sqlx::{Executor, PgPool};
 
+mod entry;
+
 fn guid(id: u32) -> ObjectGuid {
     ObjectGuid::new_player(id)
 }

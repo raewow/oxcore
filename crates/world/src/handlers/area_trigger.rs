@@ -10,6 +10,7 @@ use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
 use crate::game::area_trigger::{self, AreaTriggerEntry};
 use crate::game::common::update_fields::PLAYER_FLAGS;
+use crate::game::instance::manager::InstanceEntryGroup;
 use crate::game::player::environment::RestType;
 use crate::World;
 use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language};
@@ -219,9 +220,29 @@ pub async fn handle_area_trigger(
         drop(dbc);
 
         if is_instance_map {
-            // Get or create instance for this player
-            // TODO: Get group_leader_guid from player's group when group system is ready
-            let group_leader_guid = None;
+            let group = world
+                .systems
+                .group
+                .get_player_group(player_guid)
+                .map(|group| InstanceEntryGroup {
+                    leader_guid: group.leader_guid,
+                    members_outside: group
+                        .members
+                        .iter()
+                        .filter_map(|member| {
+                            if member.guid == player_guid {
+                                return None;
+                            }
+                            world
+                                .managers
+                                .player_mgr
+                                .with_player(member.guid, |player| {
+                                    (player.map_id != dest_map).then_some(member.guid)
+                                })
+                                .flatten()
+                        })
+                        .collect(),
+                });
 
             match world
                 .managers
@@ -230,7 +251,7 @@ pub async fn handle_area_trigger(
                     &world.databases,
                     dest_map,
                     player_guid,
-                    group_leader_guid,
+                    group.as_ref(),
                     is_raid,
                 )
                 .await

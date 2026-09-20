@@ -6,10 +6,10 @@ use oxcore_shared::game::instance::{
     InstanceBinding, InstanceResetMethod, InstanceResetWarningType, InstanceState,
 };
 use oxcore_shared::protocol::ObjectGuid;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use sqlx::{PgConnection, Row};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const PLAYER_BINDINGS_QUERY: &str = "SELECT i.map, b.instance, b.permanent, i.reset_time
@@ -18,6 +18,20 @@ const PLAYER_BINDINGS_QUERY: &str = "SELECT i.map, b.instance, b.permanent, i.re
 const GROUP_BINDINGS_QUERY: &str = "SELECT i.map, b.instance, b.permanent, i.reset_time
      FROM characters.group_instance b JOIN characters.instance i ON i.id = b.instance
      WHERE b.leader_guid = $1";
+
+/// Group context captured by the entrance handler for reference binding cleanup.
+pub struct InstanceEntryGroup {
+    pub leader_guid: ObjectGuid,
+    /// Other online members outside the destination map. Their temporary solo
+    /// saves are released when the group's first save for this map is created.
+    pub members_outside: Vec<ObjectGuid>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum EntryOwner {
+    Player(ObjectGuid),
+    Group(ObjectGuid),
+}
 
 /// Instance manager - handles all instance operations
 pub struct InstanceMgr {
@@ -33,6 +47,8 @@ pub struct InstanceMgr {
     reset_warnings: Arc<RwLock<HashMap<(u32, u32), InstanceResetWarningType>>>,
     /// Instances pending reset (empty instances that should be reset after delay)
     pending_resets: Arc<RwLock<HashMap<(u32, u32), u64>>>, // (map_id, instance_id) -> reset time
+    /// Serialize selection and binding so simultaneous party arrivals share a copy.
+    entry_locks: Mutex<HashMap<EntryOwner, Weak<tokio::sync::Mutex<()>>>>,
 }
 
 impl InstanceMgr {
@@ -44,6 +60,7 @@ impl InstanceMgr {
             next_instance_ids: Arc::new(RwLock::new(HashMap::new())),
             reset_warnings: Arc::new(RwLock::new(HashMap::new())),
             pending_resets: Arc::new(RwLock::new(HashMap::new())),
+            entry_locks: Mutex::new(HashMap::new()),
         }
     }
 
@@ -652,11 +669,11 @@ impl InstanceMgr {
         if let Some(guid) = player_guid {
             if let Some(binding) = self.get_player_binding(guid, map_id) {
                 // Check if instance still exists and is valid
-                if let Some(instance) = self
+                if self
                     .load_instance(databases, map_id, binding.instance_id)
                     .await?
+                    .is_some()
                 {
-                    let _instance_guard = instance.read();
                     if !self.is_instance_expired(map_id, binding.instance_id) {
                         return Ok(binding.instance_id);
                     }
@@ -668,11 +685,11 @@ impl InstanceMgr {
         if let Some(leader_guid) = group_leader_guid {
             if let Some(binding) = self.get_group_binding(leader_guid, map_id) {
                 // Check if instance still exists and is valid
-                if let Some(instance) = self
+                if self
                     .load_instance(databases, map_id, binding.instance_id)
                     .await?
+                    .is_some()
                 {
-                    let _instance_guard = instance.read();
                     if !self.is_instance_expired(map_id, binding.instance_id) {
                         return Ok(binding.instance_id);
                     }
@@ -869,26 +886,82 @@ impl InstanceMgr {
         warnings.remove(&(map_id, instance_id));
     }
 
-    /// Enter instance - validates and binds player/group to instance
+    fn entry_lock(&self, owner: EntryOwner) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.entry_locks.lock();
+        if let Some(lock) = locks.get(&owner).and_then(Weak::upgrade) {
+            return lock;
+        }
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        locks.insert(owner, Arc::downgrade(&lock));
+        lock
+    }
+
+    async fn valid_binding(
+        &self,
+        databases: &Databases,
+        binding: Option<InstanceBinding>,
+    ) -> Result<Option<InstanceBinding>> {
+        if let Some(binding) = binding {
+            if self
+                .load_instance(databases, binding.map_id, binding.instance_id)
+                .await?
+                .is_some()
+                && !self.is_instance_expired(binding.map_id, binding.instance_id)
+            {
+                return Ok(Some(binding));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Enter an instance using the personal/group ownership rules from
+    /// `Player::GetBoundInstanceSaveForSelfOrGroup` and `BindPlayerOrGroupOnEnter`.
     /// Returns the instance ID to use
     pub async fn enter_instance(
         &self,
         databases: &Databases,
         map_id: u32,
         player_guid: ObjectGuid,
-        group_leader_guid: Option<ObjectGuid>,
+        group: Option<&InstanceEntryGroup>,
         is_raid: bool,
     ) -> Result<u32> {
-        // Get or create instance
-        let instance_id = self
-            .get_or_create_instance(
+        let owner = group.map_or(EntryOwner::Player(player_guid), |group| {
+            EntryOwner::Group(group.leader_guid)
+        });
+        let lock = self.entry_lock(owner);
+        let _entry_guard = lock.lock().await;
+
+        if let Some(group) = group {
+            let loaded = self.group_bindings.read().contains_key(&group.leader_guid);
+            if !loaded {
+                self.load_group_bindings(databases, group.leader_guid)
+                    .await?;
+            }
+        }
+        let player_binding = self
+            .valid_binding(databases, self.get_player_binding(player_guid, map_id))
+            .await?;
+        let group_binding = self
+            .valid_binding(
                 databases,
-                map_id,
-                Some(player_guid),
-                group_leader_guid,
-                is_raid,
+                group.and_then(|group| self.get_group_binding(group.leader_guid, map_id)),
             )
             .await?;
+        // The reference prefers any valid personal save. Group transitions, not
+        // selection, handle temporary personal saves.
+        let instance_id = match player_binding.as_ref().or(group_binding.as_ref()) {
+            Some(binding) => binding.instance_id,
+            None => self.create_instance(databases, map_id, 0, is_raid).await?,
+        };
+
+        // Visiting a permanently saved personal copy never changes the group's save.
+        if player_binding
+            .as_ref()
+            .is_some_and(|binding| binding.permanent)
+        {
+            return Ok(instance_id);
+        }
 
         // Load instance to get reset time
         let instance = self
@@ -901,32 +974,97 @@ impl InstanceMgr {
             instance_guard.reset_time
         };
 
-        // Bind player to instance
-        let permanent = is_raid;
-        self.bind_player_to_instance(
-            databases,
-            player_guid,
-            map_id,
-            instance_id,
-            permanent,
-            reset_time,
-        )
-        .await?;
-
-        // Bind group to instance if in group
-        if let Some(leader_guid) = group_leader_guid {
-            self.bind_group_to_instance(
+        if let Some(group) = group {
+            if let Some(binding) = group_binding {
+                if player_binding.is_none() && binding.permanent {
+                    self.bind_player_to_instance(
+                        databases,
+                        player_guid,
+                        map_id,
+                        instance_id,
+                        true,
+                        reset_time,
+                    )
+                    .await?;
+                }
+            } else {
+                let mut released_players = group.members_outside.clone();
+                if player_binding.is_some() {
+                    released_players.push(player_guid);
+                }
+                self.bind_new_group_on_entry(
+                    databases,
+                    group.leader_guid,
+                    InstanceBinding {
+                        map_id,
+                        instance_id,
+                        permanent: false,
+                        reset_time,
+                    },
+                    &released_players,
+                )
+                .await?;
+            }
+        } else if player_binding.is_none() {
+            self.bind_player_to_instance(
                 databases,
-                leader_guid,
+                player_guid,
                 map_id,
                 instance_id,
-                permanent,
+                false,
                 reset_time,
             )
             .await?;
         }
 
         Ok(instance_id)
+    }
+
+    async fn bind_new_group_on_entry(
+        &self,
+        databases: &Databases,
+        leader_guid: ObjectGuid,
+        binding: InstanceBinding,
+        released_players: &[ObjectGuid],
+    ) -> Result<()> {
+        let mut transaction = databases.character.begin().await?;
+        // Replace any expired save for this map and convert temporary solo
+        // bindings in one transaction; keep the instance data itself intact.
+        sqlx::query("DELETE FROM characters.group_instance b USING characters.instance i WHERE b.instance = i.id AND b.leader_guid = $1 AND i.map = $2")
+            .bind(i64::from(leader_guid.low()))
+            .bind(i64::from(binding.map_id))
+            .execute(&mut *transaction).await?;
+        sqlx::query("INSERT INTO characters.group_instance (leader_guid, instance, permanent) VALUES ($1, $2, 0)")
+            .bind(i64::from(leader_guid.low()))
+            .bind(i64::from(binding.instance_id))
+            .execute(&mut *transaction).await?;
+        let player_ids: Vec<i64> = released_players
+            .iter()
+            .map(|guid| i64::from(guid.low()))
+            .collect();
+        sqlx::query("DELETE FROM characters.character_instance b USING characters.instance i WHERE b.instance = i.id AND b.guid = ANY($1) AND i.map = $2 AND b.permanent = 0")
+            .bind(&player_ids)
+            .bind(i64::from(binding.map_id))
+            .execute(&mut *transaction).await?;
+        transaction.commit().await?;
+
+        let mut groups = self.group_bindings.write();
+        let mut players = self.player_bindings.write();
+        for guid in released_players {
+            if let Some(bindings) = players.get_mut(guid) {
+                if bindings
+                    .get(&binding.map_id)
+                    .is_some_and(|binding| !binding.permanent)
+                {
+                    bindings.remove(&binding.map_id);
+                }
+            }
+        }
+        groups
+            .entry(leader_guid)
+            .or_default()
+            .insert(binding.map_id, binding);
+        Ok(())
     }
 
     /// Check if instance is empty (no players)
