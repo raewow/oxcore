@@ -9,6 +9,7 @@ use oxcore_shared::protocol::ObjectGuid;
 use parking_lot::{Mutex, RwLock};
 use sqlx::{PgConnection, Row};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -41,8 +42,8 @@ pub struct InstanceMgr {
     player_bindings: Arc<RwLock<HashMap<ObjectGuid, HashMap<u32, InstanceBinding>>>>,
     /// Group bindings (leader_guid -> map_id -> binding), separate from personal saves.
     group_bindings: Arc<RwLock<HashMap<ObjectGuid, HashMap<u32, InstanceBinding>>>>,
-    /// Next instance ID per map
-    next_instance_ids: Arc<RwLock<HashMap<u32, u32>>>,
+    /// Highest allocated ID across all maps; zero is reserved for continents.
+    last_instance_id: AtomicU32,
     /// Instances that need reset warnings (map_id, instance_id) -> last warning sent
     reset_warnings: Arc<RwLock<HashMap<(u32, u32), InstanceResetWarningType>>>,
     /// Instances pending reset (empty instances that should be reset after delay)
@@ -57,33 +58,24 @@ impl InstanceMgr {
             instances: Arc::new(RwLock::new(HashMap::new())),
             player_bindings: Arc::new(RwLock::new(HashMap::new())),
             group_bindings: Arc::new(RwLock::new(HashMap::new())),
-            next_instance_ids: Arc::new(RwLock::new(HashMap::new())),
+            last_instance_id: AtomicU32::new(0),
             reset_warnings: Arc::new(RwLock::new(HashMap::new())),
             pending_resets: Arc::new(RwLock::new(HashMap::new())),
             entry_locks: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Initialize instance manager (load next instance IDs from database)
+    /// Initialize the global instance ID counter from persisted saves before entry.
     pub async fn initialize(&self, databases: &Databases) -> Result<()> {
-        // Load next instance IDs per map
-        let rows = sqlx::query::<sqlx::Postgres>(
-            r#"SELECT map, MAX(id) FROM characters.instance GROUP BY map"#,
-        )
-        .fetch_all(&databases.character)
-        .await
-        .context("Failed to query max instance IDs")?;
+        let max_id: Option<i64> = sqlx::query_scalar("SELECT MAX(id) FROM characters.instance")
+            .fetch_one(&databases.character)
+            .await
+            .context("Failed to query maximum instance ID")?;
+        let max_id = u32::try_from(max_id.unwrap_or(0))
+            .context("Persisted instance ID is outside the supported u32 range")?;
 
-        let mut next_ids = self.next_instance_ids.write();
-        for row in rows {
-            let map_id = row.try_get::<i64, _>(0).unwrap_or(0) as u32;
-            let max_id = row.try_get::<Option<i64>, _>(1).unwrap_or(None);
-            if let Some(max) = max_id {
-                next_ids.insert(map_id, (max + 1) as u32);
-            } else {
-                next_ids.insert(map_id, 1);
-            }
-        }
+        // Reinitialization must not reuse IDs already reserved by pending inserts.
+        self.last_instance_id.fetch_max(max_id, Ordering::Relaxed);
 
         Ok(())
     }
@@ -96,13 +88,13 @@ impl InstanceMgr {
         difficulty: u8,
         permanent: bool,
     ) -> Result<u32> {
-        // Generate instance ID
-        let instance_id = {
-            let mut next_ids = self.next_instance_ids.write();
-            let id = next_ids.get(&map_id).copied().unwrap_or(1);
-            next_ids.insert(map_id, id + 1);
-            id
-        };
+        // The database primary key is the instance ID alone, regardless of map.
+        // Reserve it before awaiting the insert so concurrent entries stay unique.
+        let instance_id = self
+            .last_instance_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map(|id| id + 1)
+            .map_err(|_| anyhow::anyhow!("Instance ID space exhausted"))?;
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
