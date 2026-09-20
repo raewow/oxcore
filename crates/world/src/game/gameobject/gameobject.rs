@@ -21,6 +21,8 @@ pub struct GameObject {
     pub position: Position,
     /// Current map ID
     pub map_id: u32,
+    /// Copy of the map that owns this object (zero for continents).
+    pub instance_id: u32,
 
     // ========== Display (cached from template) ==========
     /// Display model ID
@@ -77,6 +79,7 @@ impl GameObject {
         spawn_id: u32,
         position: Position,
         map_id: u32,
+        instance_id: u32,
         template: &GameObjectTemplate,
         rotation: [f32; 4],
         state: u8,
@@ -88,6 +91,7 @@ impl GameObject {
             spawn_id,
             position,
             map_id,
+            instance_id,
             display_id: template.display_id,
             scale: if template.size > 0.0 {
                 template.size

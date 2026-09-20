@@ -466,6 +466,7 @@ mod tests {
                 o: 0.0,
             },
             map_id,
+            0,
             &template,
             [0.0; 4],
             0,

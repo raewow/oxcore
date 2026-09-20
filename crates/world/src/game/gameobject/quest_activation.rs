@@ -364,6 +364,7 @@ mod tests {
                 1,
                 Position::default(),
                 0,
+                0,
                 &template,
                 [0.0; 4],
                 1,

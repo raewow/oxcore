@@ -3335,6 +3335,7 @@ mod tests {
                 counter,
                 Position::default(),
                 0,
+                0,
                 &template,
                 [0.0; 4],
                 1,

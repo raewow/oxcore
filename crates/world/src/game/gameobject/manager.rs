@@ -442,6 +442,7 @@ impl GameObjectManager {
             spawn.spawn_id,
             spawn.position,
             spawn.map_id,
+            instance_id,
             &template,
             [
                 spawn.rotation0,
