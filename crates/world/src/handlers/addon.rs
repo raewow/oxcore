@@ -39,7 +39,10 @@ pub fn build_addon_info_response(packet: &mut WorldPacket) -> Option<WorldPacket
     let mut decoder = ZlibDecoder::new(compressed).take(real_size as u64);
     let mut decompressed = Vec::with_capacity(real_size as usize);
     if let Err(e) = decoder.read_to_end(&mut decompressed) {
-        warn!("CMSG_AUTH_SESSION: addon block zlib decompress failed: {}", e);
+        warn!(
+            "CMSG_AUTH_SESSION: addon block zlib decompress failed: {}",
+            e
+        );
         return None;
     }
 

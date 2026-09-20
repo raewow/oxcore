@@ -81,7 +81,11 @@ pub async fn handle_group_accept(session: &WorldSession, world: &World) -> Resul
 
     debug!("CMSG_GROUP_ACCEPT: player={:?}", player_guid);
 
-    world.systems.group.accept_invite(world, player_guid).await?;
+    world
+        .systems
+        .group
+        .accept_invite(world, player_guid)
+        .await?;
 
     Ok(())
 }

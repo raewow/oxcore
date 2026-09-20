@@ -225,14 +225,60 @@ pub struct SmsgBuybackSlotUpdate {
     pub timestamp: u32,
 }
 
-/// No `to_modern`: none of the three fields this writes has a 1.14 slot to write into.
+impl SmsgBuybackSlotUpdate {
+    /// The equivalent `SMSG_UPDATE_OBJECT`: one values block over the three fields a buyback entry
+    /// occupies -- the item guid, its price and the time it was sold.
+    ///
+    /// Typed `Player` so the recipient, who is always the owner, is promoted to `ActivePlayer`;
+    /// 1.14 keeps the price and timestamp arrays in that table only.
+    fn as_update_object(&self) -> SmsgUpdateObject {
+        let offset = (self.slot - BUYBACK_SLOT_START) as u32;
+        let field_low = PLAYER_FIELD_VENDORBUYBACK_SLOT_1 + (offset * 2);
+        let price_field = PLAYER_FIELD_BUYBACK_PRICE_1 + offset;
+        let timestamp_field = PLAYER_FIELD_BUYBACK_TIMESTAMP_1 + offset;
+
+        let mut block = ValuesUpdateBlock::new(self.player_guid, ObjectType::Player);
+        match self.item_guid {
+            // A cleared slot has to be written as zeros rather than omitted, or the tab keeps
+            // showing an entry that is no longer buyable.
+            Some(guid) => {
+                block = block
+                    .set_guid_field(field_low, guid)
+                    .set_required(price_field, self.price)
+                    .set_required(timestamp_field, self.timestamp);
+            }
+            None => {
+                block = block
+                    .set_guid_field(field_low, ObjectGuid::from_raw(0))
+                    .set_required(price_field, 0)
+                    .set_required(timestamp_field, 0);
+            }
+        }
+
+        SmsgUpdateObject::new()
+            .for_recipient(self.player_guid, 0)
+            .add_block(UpdateBlockData::Values(block))
+    }
+}
+
+/// Ported through [`SmsgUpdateObject`] rather than hand-rolled, for the reason
+/// [`crate::messages::player::SmsgPlayerMoneyUpdate`] is: it *is* a values update on the player.
 ///
-/// The buyback item, price and expiry live in vanilla-only player fields; the generated 1.12 ->
-/// 1.14 slot map has no counterpart for any of them, so encoding this would produce an update block
-/// with an empty field mask -- a packet that costs bandwidth and changes nothing. Restoring the
-/// buyback tab for a 1.14 client is a slot-map question, not a message-encoding one, so this is
-/// left unported rather than shipped as a no-op.
+/// This was previously left unported on the grounds that none of its three fields had a 1.14
+/// counterpart. That was wrong: the item guids live in 1.14's one contiguous inventory array (the
+/// generated map resolves them), and the price and expiry arrays exist too -- they were dropped
+/// only because 1.12 and 1.14 spell their names differently, so `repack` now places them by hand.
+/// The consequence of the gap was a permanently empty buyback tab on 1.14, since nothing at all
+/// was sent.
 impl ToWorldPacket for SmsgBuybackSlotUpdate {
+    fn to_modern(&self) -> Option<WorldPacket> {
+        self.as_update_object().to_modern()
+    }
+
+    fn to_modern_for(&self, recipient: Recipient) -> Option<WorldPacket> {
+        self.as_update_object().to_modern_for(recipient)
+    }
+
     fn to_vanilla(&self) -> WorldPacket {
         debug_assert!(
             self.slot >= BUYBACK_SLOT_START && self.slot < BUYBACK_SLOT_END,

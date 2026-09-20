@@ -316,18 +316,14 @@ impl Creature {
             return;
         }
 
-        // Only random and waypoint movement carries a pause timer; the flag below still
-        // applies to any generator, since the interaction flows depend on it.
-        self.motion_master.add_pause_time(pause_time_ms);
-
         self.movement_paused = true;
-        self.motion_master.flags.insert(2); // 0x02 = movement paused flag
+        self.motion_master.pause_for(pause_time_ms);
     }
 
     /// Resume out-of-combat movement after interaction ends
     pub fn resume_out_of_combat_movement(&mut self) {
         self.movement_paused = false;
-        self.motion_master.flags.remove(2); // 0x02 = movement paused flag
+        self.motion_master.resume();
     }
 
     /// Register a follower that is tracking this creature.

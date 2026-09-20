@@ -395,7 +395,12 @@ fn loot_with_quality_item(
 
 fn roll_context() -> LootContext {
     LootContext {
-        position: Position { x: 0.0, y: 0.0, z: 0.0, o: 0.0 },
+        position: Position {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            o: 0.0,
+        },
         map_id: 1,
         instance_id: 0,
         rank: 0,
@@ -470,7 +475,18 @@ async fn test_group_loot_below_threshold_is_underthreshold_and_not_rolled() {
     let loot_guid = ObjectGuid::new_creature(500, 1);
     let a = ObjectGuid::new_player(1);
 
-    add_group_player(&world, a, 1, Position { x: 0.0, y: 0.0, z: 0.0, o: 0.0 }, LootMethod::GroupLoot);
+    add_group_player(
+        &world,
+        a,
+        1,
+        Position {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            o: 0.0,
+        },
+        LootMethod::GroupLoot,
+    );
     loot_with_quality_item(&world, loot_guid, 9000, 0, vec![a]); // quality 0 < threshold 2
 
     world
@@ -480,7 +496,10 @@ async fn test_group_loot_below_threshold_is_underthreshold_and_not_rolled() {
         .await;
 
     let item = item_state(&world, loot_guid, 0).expect("item present");
-    assert!(item.is_underthreshold, "below-threshold items are never rolled");
+    assert!(
+        item.is_underthreshold,
+        "below-threshold items are never rolled"
+    );
     assert!(!item.is_blocked, "no roll was opened");
     assert!(!has_open_roll(&world, 1), "no roll queued");
 }
@@ -491,7 +510,18 @@ async fn test_single_looter_auto_award() {
     let loot_guid = ObjectGuid::new_creature(500, 2);
     let solo = ObjectGuid::new_player(1);
 
-    add_group_player(&world, solo, 1, Position { x: 0.0, y: 0.0, z: 0.0, o: 0.0 }, LootMethod::GroupLoot);
+    add_group_player(
+        &world,
+        solo,
+        1,
+        Position {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            o: 0.0,
+        },
+        LootMethod::GroupLoot,
+    );
     loot_with_quality_item(&world, loot_guid, 9001, 3, vec![solo]);
 
     world
@@ -500,7 +530,10 @@ async fn test_single_looter_auto_award() {
         .group_loot(&world, 1, loot_guid, roll_context())
         .await;
 
-    assert!(!has_open_roll(&world, 1), "single looter is never asked to roll");
+    assert!(
+        !has_open_roll(&world, 1),
+        "single looter is never asked to roll"
+    );
     let item = item_state(&world, loot_guid, 0).expect("item present");
     assert!(!item.is_blocked, "item unblocked after auto-award");
     // The test world has no bags, so `add_item` cannot store it; the item stays in the
@@ -515,8 +548,30 @@ async fn test_need_beats_greed_and_all_pass_unblocks() {
     let needer = ObjectGuid::new_player(1);
     let greeder = ObjectGuid::new_player(2);
 
-    add_group_player(&world, needer, 1, Position { x: 0.0, y: 0.0, z: 0.0, o: 0.0 }, LootMethod::GroupLoot);
-    add_group_player(&world, greeder, 4, Position { x: 5.0, y: 0.0, z: 0.0, o: 0.0 }, LootMethod::GroupLoot);
+    add_group_player(
+        &world,
+        needer,
+        1,
+        Position {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            o: 0.0,
+        },
+        LootMethod::GroupLoot,
+    );
+    add_group_player(
+        &world,
+        greeder,
+        4,
+        Position {
+            x: 5.0,
+            y: 0.0,
+            z: 0.0,
+            o: 0.0,
+        },
+        LootMethod::GroupLoot,
+    );
     loot_with_quality_item(&world, loot_guid, 9002, 3, vec![needer, greeder]);
 
     world
@@ -530,7 +585,14 @@ async fn test_need_beats_greed_and_all_pass_unblocks() {
     world
         .systems
         .group
-        .count_roll_vote(&world, 1, needer, loot_guid, 0, crate::game::loot::RollVote::Need)
+        .count_roll_vote(
+            &world,
+            1,
+            needer,
+            loot_guid,
+            0,
+            crate::game::loot::RollVote::Need,
+        )
         .await;
     // Second voter outstanding; the roll must still be pending.
     assert!(has_open_roll(&world, 1));
@@ -538,7 +600,14 @@ async fn test_need_beats_greed_and_all_pass_unblocks() {
     world
         .systems
         .group
-        .count_roll_vote(&world, 1, greeder, loot_guid, 0, crate::game::loot::RollVote::Greed)
+        .count_roll_vote(
+            &world,
+            1,
+            greeder,
+            loot_guid,
+            0,
+            crate::game::loot::RollVote::Greed,
+        )
         .await;
 
     assert!(!has_open_roll(&world, 1), "roll resolved after all votes");
@@ -554,8 +623,30 @@ async fn test_all_pass_unblocks_item_without_winner() {
     let a = ObjectGuid::new_player(1);
     let b = ObjectGuid::new_player(2);
 
-    add_group_player(&world, a, 1, Position { x: 0.0, y: 0.0, z: 0.0, o: 0.0 }, LootMethod::GroupLoot);
-    add_group_player(&world, b, 4, Position { x: 5.0, y: 0.0, z: 0.0, o: 0.0 }, LootMethod::GroupLoot);
+    add_group_player(
+        &world,
+        a,
+        1,
+        Position {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            o: 0.0,
+        },
+        LootMethod::GroupLoot,
+    );
+    add_group_player(
+        &world,
+        b,
+        4,
+        Position {
+            x: 5.0,
+            y: 0.0,
+            z: 0.0,
+            o: 0.0,
+        },
+        LootMethod::GroupLoot,
+    );
     loot_with_quality_item(&world, loot_guid, 9003, 3, vec![a, b]);
 
     world
@@ -567,17 +658,34 @@ async fn test_all_pass_unblocks_item_without_winner() {
     world
         .systems
         .group
-        .count_roll_vote(&world, 1, a, loot_guid, 0, crate::game::loot::RollVote::Pass)
+        .count_roll_vote(
+            &world,
+            1,
+            a,
+            loot_guid,
+            0,
+            crate::game::loot::RollVote::Pass,
+        )
         .await;
     world
         .systems
         .group
-        .count_roll_vote(&world, 1, b, loot_guid, 0, crate::game::loot::RollVote::Pass)
+        .count_roll_vote(
+            &world,
+            1,
+            b,
+            loot_guid,
+            0,
+            crate::game::loot::RollVote::Pass,
+        )
         .await;
 
     assert!(!has_open_roll(&world, 1));
     let item = item_state(&world, loot_guid, 0).expect("item present");
-    assert!(!item.is_blocked, "all-pass frees the item for manual looting");
+    assert!(
+        !item.is_blocked,
+        "all-pass frees the item for manual looting"
+    );
     assert!(!item.is_looted, "no winner was awarded");
     assert_eq!(item.loot_owner, None);
 }
@@ -591,9 +699,42 @@ async fn test_round_robin_looter_skips_out_of_range_members() {
     let near = ObjectGuid::new_player(3);
 
     // Default group_xp_distance is 74 yards. "far" is 100 yards out, "near" 30.
-    add_group_player(&world, leader, 1, Position { x: 0.0, y: 0.0, z: 0.0, o: 0.0 }, LootMethod::RoundRobin);
-    add_group_player(&world, far, 4, Position { x: 100.0, y: 0.0, z: 0.0, o: 0.0 }, LootMethod::RoundRobin);
-    add_group_player(&world, near, 4, Position { x: 30.0, y: 0.0, z: 0.0, o: 0.0 }, LootMethod::RoundRobin);
+    add_group_player(
+        &world,
+        leader,
+        1,
+        Position {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            o: 0.0,
+        },
+        LootMethod::RoundRobin,
+    );
+    add_group_player(
+        &world,
+        far,
+        4,
+        Position {
+            x: 100.0,
+            y: 0.0,
+            z: 0.0,
+            o: 0.0,
+        },
+        LootMethod::RoundRobin,
+    );
+    add_group_player(
+        &world,
+        near,
+        4,
+        Position {
+            x: 30.0,
+            y: 0.0,
+            z: 0.0,
+            o: 0.0,
+        },
+        LootMethod::RoundRobin,
+    );
 
     let context = roll_context();
     let group = &world.systems.group;

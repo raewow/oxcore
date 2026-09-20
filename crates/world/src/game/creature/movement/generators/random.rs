@@ -223,6 +223,11 @@ impl MovementGenerator for RandomMovementGenerator {
         self.stop_roaming();
     }
 
+    fn movement_failed(&mut self, _creature_guid: ObjectGuid) {
+        self.destination = None;
+        self.next_wander_time = 0;
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -412,6 +417,22 @@ mod tests {
 
         gen.add_pause_time(3_000);
         assert_eq!(gen.next_wander_time, 3_000);
+    }
+
+    #[test]
+    fn rejected_destination_is_retried() {
+        let creature = ObjectGuid::from_raw(1);
+        let mut gen = generator();
+        gen.initialize(creature, pos(100.0, 100.0, 10.0));
+        let _ = gen.update(creature, INITIAL_MOVE_DELAY_MS);
+
+        gen.movement_failed(creature);
+
+        assert!(gen.destination.is_none());
+        assert!(matches!(
+            gen.update(creature, 0),
+            MovementUpdate::NewDestination { .. }
+        ));
     }
 
     #[test]

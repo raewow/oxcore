@@ -5,6 +5,7 @@
 
 use super::types::{AIAction, AIState, AIType};
 use crate::game::broadcast_mgr::broadcast_around_creature;
+use crate::game::creature::movement::MovementGeneratorType;
 use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
 use rand::Rng;
@@ -127,7 +128,6 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
-                    creature.motion_master.stop(creature_guid);
                     creature.move_spline.stop();
                     let home = creature.home_position;
                     let run_speed = creature.run_speed();
@@ -154,43 +154,22 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
         }
 
         AIAction::LeaveCombat => {
-            // Restore wander movement if creature had wander_distance
-            let restore_wander =
-                world
-                    .managers
-                    .creature_mgr
-                    .with_creature_mut(creature_guid, |creature| {
-                        creature.ai_state = AIState::Idle;
-                        creature.combat.leave_combat();
-                        creature.threat_manager.clear(); // Clear threat when leaving combat (Phase 5)
-                                                         // Clear combat flags
-                        creature.unit_flags &= !crate::game::common::unit_flags::IN_COMBAT;
-
-                        // Return info needed to restore wander
-                        (
-                            creature.wander_distance,
-                            creature.home_position,
-                            creature.position,
-                        )
-                    });
-
-            if let Some((wander_dist, home_pos, current_pos)) = restore_wander {
-                if wander_dist > 0.0 {
-                    world
-                        .managers
-                        .creature_mgr
-                        .with_creature_mut(creature_guid, |creature| {
-                            let walk_speed = creature.walk_speed();
-                            creature.motion_master.random_wander(
-                                home_pos,
-                                wander_dist,
-                                creature_guid,
-                                current_pos,
-                                walk_speed,
-                            );
-                        });
-                }
-            }
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(creature_guid, |creature| {
+                    creature.ai_state = AIState::Idle;
+                    creature.combat.leave_combat();
+                    // Clear threat and combat flags when leaving combat.
+                    creature.threat_manager.clear();
+                    creature.unit_flags &= !crate::game::common::unit_flags::IN_COMBAT;
+                    creature
+                        .motion_master
+                        .clear_type(MovementGeneratorType::Chase, creature_guid);
+                    creature
+                        .motion_master
+                        .reinitialize_patrol_movement(creature_guid);
+                });
 
             // Send VALUES update clearing combat flags and target
             send_combat_exit_update(world, creature_guid);
@@ -224,8 +203,6 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
 
                     // Stop any active movement (wander spline, etc.) immediately
                     creature.move_spline.stop();
-                    // Clear all generators (removes Random/Waypoint) before starting chase
-                    creature.motion_master.clear(creature_guid);
                     // Start chase right away instead of waiting for next AI tick
                     let combat_reach = creature.combat_reach;
                     let run_speed = creature.run_speed();

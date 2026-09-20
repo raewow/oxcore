@@ -85,13 +85,13 @@ pub async fn handle_text_emote(
         .map(|entry| entry.emote_id);
 
     match resolved_emote_id {
-        Some(0) | Some(EMOTE_STATE_SLEEP) | Some(EMOTE_STATE_SIT) | Some(EMOTE_STATE_KNEEL)
+        Some(0)
+        | Some(EMOTE_STATE_SLEEP)
+        | Some(EMOTE_STATE_SIT)
+        | Some(EMOTE_STATE_KNEEL)
         | None => {}
         Some(id @ (EMOTE_STATE_DANCE | EMOTE_STATE_READ | EMOTE_STATE_LEAN)) => {
-            world
-                .systems
-                .player
-                .set_emote_state(player_guid, id, world);
+            world.systems.player.set_emote_state(player_guid, id, world);
         }
         Some(id) => {
             let emote_msg = SmsgEmote {

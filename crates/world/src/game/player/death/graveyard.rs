@@ -84,11 +84,24 @@ pub fn find_closest_graveyard(
         return None;
     }
 
-    // Find closest by distance
+    pick_closest(filtered, x, y, z, map_id)
+}
+
+/// Pick the nearest graveyard from a candidate list.
+///
+/// For same-map graveyards the full 3D distance is used; for cross-map graveyards
+/// the Z coordinate is unreliable, so only 2D distance is compared.
+fn pick_closest(
+    candidates: Vec<GraveyardData>,
+    x: f32,
+    y: f32,
+    z: f32,
+    map_id: u32,
+) -> Option<GraveyardData> {
     let mut closest: Option<GraveyardData> = None;
     let mut closest_dist_sq = f32::INFINITY;
 
-    for gy in filtered {
+    for gy in candidates {
         let dx = gy.position.x - x;
         let dy = gy.position.y - y;
         let dist_sq = if gy.map_id == map_id {
@@ -208,6 +221,11 @@ impl GraveyardManager {
     }
 
     /// Find the closest graveyard for a player at the given position.
+    ///
+    /// The zone/area-scoped lookup runs first. When the player's zone has no graveyard
+    /// mapping (custom areas, missing DBC, ...) it falls back to the nearest graveyard
+    /// anywhere — preferring the same map — rather than reporting no result and letting
+    /// the caller dump the ghost at its homebind (which is usually the death spot).
     pub fn get_closest_graveyard(
         &self,
         x: f32,
@@ -218,7 +236,7 @@ impl GraveyardManager {
         area_id: u32,
         team: u8,
     ) -> Option<GraveyardData> {
-        find_closest_graveyard(
+        if let Some(gy) = find_closest_graveyard(
             &self.graveyards_by_zone,
             x,
             y,
@@ -227,11 +245,100 @@ impl GraveyardManager {
             zone_id,
             area_id,
             team,
-        )
+        ) {
+            return Some(gy);
+        }
+
+        let all_candidates: Vec<GraveyardData> = self
+            .graveyards_by_zone
+            .values()
+            .flatten()
+            .filter(|gy| gy.team == TEAM_BOTH || gy.team == team)
+            .cloned()
+            .collect();
+
+        pick_closest(all_candidates, x, y, z, map_id)
     }
 
     /// Check if any graveyard data has been loaded
     pub fn is_loaded(&self) -> bool {
         !self.graveyards_by_zone.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gy(safe_loc_id: u32, zone_id: u32, team: u8, x: f32, y: f32, z: f32) -> GraveyardData {
+        GraveyardData {
+            safe_loc_id,
+            zone_id,
+            team,
+            position: Position { x, y, z, o: 0.0 },
+            map_id: 0,
+        }
+    }
+
+    fn manager_with(mut zones: HashMap<u32, Vec<GraveyardData>>) -> GraveyardManager {
+        GraveyardManager {
+            graveyards_by_zone: zones,
+        }
+    }
+
+    #[test]
+    fn zone_scoped_lookup_picks_nearest_in_zone() {
+        let mut mapping = HashMap::new();
+        mapping.insert(
+            85, // Orgrimmar
+            vec![
+                gy(1, 85, TEAM_BOTH, 1600.0, -4400.0, 30.0),
+                gy(2, 85, TEAM_BOTH, 0.0, -4700.0, 40.0),
+            ],
+        );
+        let mgr = manager_with(mapping);
+
+        let found = mgr
+            .get_closest_graveyard(1700.0, -4450.0, 25.0, 0, 85, 85, TEAM_HORDE)
+            .unwrap();
+        assert_eq!(found.safe_loc_id, 1, "nearest in-zone graveyard wins");
+    }
+
+    #[test]
+    fn unmapped_zone_falls_back_to_any_graveyard() {
+        let mut mapping = HashMap::new();
+        mapping.insert(85, vec![gy(1, 85, TEAM_BOTH, 1600.0, -4400.0, 30.0)]);
+        let mgr = manager_with(mapping);
+
+        // Death in zone 999, no mapping — must not return None, must return the
+        // only loaded graveyard rather than dumping the ghost at homebind.
+        let found = mgr
+            .get_closest_graveyard(2000.0, -4000.0, 0.0, 0, 999, 999, TEAM_HORDE)
+            .unwrap();
+        assert_eq!(found.safe_loc_id, 1);
+    }
+
+    #[test]
+    fn team_filtering_excludes_opposing_faction_graveyards() {
+        let mut mapping = HashMap::new();
+        mapping.insert(85, vec![gy(1, 85, TEAM_ALLIANCE, 1600.0, -4400.0, 30.0)]);
+        let mgr = manager_with(mapping);
+
+        // A horde player must not be sent to an alliance-only graveyard, even alone.
+        assert!(mgr
+            .get_closest_graveyard(2000.0, -4000.0, 10.0, 0, 85, 85, TEAM_HORDE)
+            .is_none());
+    }
+
+    #[test]
+    fn team_both_passes_through_any_faction_filter() {
+        let mut mapping = HashMap::new();
+        mapping.insert(85, vec![gy(1, 85, TEAM_BOTH, 1600.0, -4400.0, 30.0)]);
+        let mgr = manager_with(mapping);
+
+        let found = mgr
+            .get_closest_graveyard(2000.0, -4000.0, 10.0, 0, 85, 85, TEAM_HORDE)
+            .unwrap();
+        assert_eq!(found.safe_loc_id, 1);
     }
 }

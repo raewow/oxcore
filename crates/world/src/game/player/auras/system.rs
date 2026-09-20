@@ -2135,7 +2135,7 @@ impl AuraSystem {
     /// - UNIT_FIELD_AURAFLAGS (6 u32s, 8 nibbles each = 48 slot flags)
     /// - UNIT_FIELD_AURALEVELS (12 u32s, 4 bytes each = 48 slot levels)
     /// - UNIT_FIELD_AURAAPPLICATIONS (12 u32s, 4 bytes each = 48 slot stacks)
-    fn send_aura_update(&self, target_guid: ObjectGuid, slot: u8, world: &World) -> Result<()> {
+    pub fn send_aura_update(&self, target_guid: ObjectGuid, slot: u8, world: &World) -> Result<()> {
         if slot >= 48 {
             return Ok(()); // Only 48 visible aura slots
         }
@@ -2288,7 +2288,7 @@ impl AuraSystem {
     /// Send SMSG_UPDATE_AURA_DURATION to the player for a specific aura slot.
     /// This tells the client how long the buff timer should display.
     /// Only sent to the aura owner (not nearby players).
-    fn send_aura_duration(&self, player_guid: ObjectGuid, slot: u8, world: &World) {
+    pub fn send_aura_duration(&self, player_guid: ObjectGuid, slot: u8, world: &World) {
         if slot >= 48 {
             return;
         }

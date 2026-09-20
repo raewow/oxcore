@@ -550,7 +550,10 @@ impl DeathSystem {
             world,
         )?;
 
-        info!("Player {:?} self-resurrected at {}% health", player_guid, health_pct);
+        info!(
+            "Player {:?} self-resurrected at {}% health",
+            player_guid, health_pct
+        );
         Ok(())
     }
 
@@ -1404,7 +1407,7 @@ impl DeathSystem {
         use crate::game::player::auras::aura::{Aura, AuraFlags};
         use crate::game::player::auras::effects;
 
-        world
+        let assigned_slot = world
             .systems
             .player
             .manager()
@@ -1432,15 +1435,31 @@ impl DeathSystem {
                     flags,
                 );
 
-                player.auras.container.add_aura(aura);
+                let slot = player.auras.container.add_aura(aura);
                 player.auras.needs_client_update = true;
-            });
+                slot
+            })
+            .flatten();
+
+        if let Some(slot) = assigned_slot {
+            // 1.14 removed the aura fields from the Unit descriptor — SMSG_AURA_UPDATE is the
+            // only channel a modern client has for aura state. PLAYER_FLAGS_GHOST alone does not
+            // put a 1.14 client into ghost form, so stream the aura explicitly.
+            let _ = world
+                .systems
+                .auras
+                .send_aura_update(player_guid, slot, world);
+            world
+                .systems
+                .auras
+                .send_aura_duration(player_guid, slot, world);
+        }
     }
 
     /// Remove a ghost aura from the player's container. Mirrors
     /// `apply_ghost_aura` — used during resurrection to clear the ghost state.
     fn remove_ghost_aura(&self, player_guid: ObjectGuid, spell_id: u32, world: &World) {
-        world
+        let removed_slot = world
             .systems
             .player
             .manager()
@@ -1449,7 +1468,22 @@ impl DeathSystem {
                 if removed.is_some() {
                     player.auras.needs_client_update = true;
                 }
-            });
+                removed.map(|(_, slot)| slot)
+            })
+            .flatten();
+
+        if let Some(slot) = removed_slot {
+            // Clear the aura on a modern client the same way we set it: via SMSG_AURA_UPDATE
+            // (empty slot), since the descriptor-based aura fields no longer exist in 1.14.
+            let _ = world
+                .systems
+                .auras
+                .send_aura_update(player_guid, slot, world);
+            world
+                .systems
+                .auras
+                .send_aura_duration(player_guid, slot, world);
+        }
     }
 
     fn send_player_death_state_update(&self, player_guid: ObjectGuid, world: &World) {
@@ -1595,5 +1629,82 @@ impl DeathSystem {
                 player.visibility.dirty = true;
                 player.visibility.force_immediate = true;
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::game::player::Player;
+    use oxcore_db::database::Databases;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    const GHOST_SPELL: u32 = 8326;
+
+    fn lazy_pool() -> sqlx::PgPool {
+        sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
+            .expect("lazy pool should be constructible")
+    }
+
+    fn test_world() -> World {
+        let databases = Arc::new(Databases {
+            world: lazy_pool(),
+            character: lazy_pool(),
+            auth: lazy_pool(),
+            logs: oxcore_db::database::lazy_logs_pool(),
+        });
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    fn add_ghost_player(world: &World) -> ObjectGuid {
+        let guid = ObjectGuid::new_player(9000);
+        world.systems.player.manager().add_player(
+            Player::new(guid, "GhostTester".into(), 0, 0, 0, 60, 1, 1, 0),
+            1,
+        );
+        guid
+    }
+
+    fn has_ghost_aura(world: &World, guid: ObjectGuid) -> bool {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(guid, |p| {
+                p.auras.container.get_aura(GHOST_SPELL, 0).is_some()
+            })
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn ghost_aura_is_added_and_removed() {
+        let world = test_world();
+        let guid = add_ghost_player(&world);
+
+        world
+            .systems
+            .death
+            .apply_ghost_aura(guid, GHOST_SPELL, &world);
+        assert!(
+            has_ghost_aura(&world, guid),
+            "ghost aura must be in the container"
+        );
+
+        world
+            .systems
+            .death
+            .remove_ghost_aura(guid, GHOST_SPELL, &world);
+        assert!(
+            !has_ghost_aura(&world, guid),
+            "ghost aura must be cleared on resurrect"
+        );
     }
 }

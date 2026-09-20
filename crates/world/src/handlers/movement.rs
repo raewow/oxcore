@@ -22,21 +22,22 @@ fn teleport_to_homebind(
     player_guid: ObjectGuid,
     world: &World,
 ) -> Result<()> {
-    let Some((map_id, position, old_position)) = world
-        .managers
-        .player_mgr
-        .with_player(player_guid, |player| {
-            (
-                player.homebind_map,
-                Position {
-                    x: player.homebind_x,
-                    y: player.homebind_y,
-                    z: player.homebind_z,
-                    o: 0.0,
-                },
-                player.movement.position,
-            )
-        })
+    let Some((map_id, position, old_position)) =
+        world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| {
+                (
+                    player.homebind_map,
+                    Position {
+                        x: player.homebind_x,
+                        y: player.homebind_y,
+                        z: player.homebind_z,
+                        o: 0.0,
+                    },
+                    player.movement.position,
+                )
+            })
     else {
         return Ok(());
     };

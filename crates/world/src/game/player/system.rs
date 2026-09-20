@@ -236,8 +236,7 @@ impl PlayerSystem {
 
                     // Send packet OUTSIDE the player lock to avoid deadlock
                     if should_send_badfacing {
-                        let badfacing_packet =
-                            WorldPacket::new(Opcode::SMSG_ATTACKSWING_BADFACING);
+                        let badfacing_packet = WorldPacket::new(Opcode::SMSG_ATTACKSWING_BADFACING);
                         world
                             .managers
                             .broadcast_mgr

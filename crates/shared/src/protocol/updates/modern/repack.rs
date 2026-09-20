@@ -9,6 +9,7 @@
 //! are handled deliberately instead.
 
 use super::field_map::{
+    MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_PRICE, MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_TIMESTAMP,
     MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID, MODERN_OBJECT_DYNAMIC_FLAGS, MODERN_PLAYER_QUEST_LOG,
     MODERN_PLAYER_VISIBLE_ITEM, MODERN_UNIT_FIELD_ATTACK_POWER_MOD_NEG,
     MODERN_UNIT_FIELD_ATTACK_POWER_MOD_POS, MODERN_UNIT_FIELD_BYTES_0, MODERN_UNIT_FIELD_BYTES_1,
@@ -18,7 +19,8 @@ use super::field_map::{
 };
 use super::fields::ModernObjectType;
 use crate::protocol::update_fields::{
-    GAMEOBJECT_DYN_FLAGS, PLAYER_QUEST_LOG_1_1, PLAYER_SKILL_INFO_1_1, PLAYER_VISIBLE_ITEM_1_0,
+    GAMEOBJECT_DYN_FLAGS, PLAYER_FIELD_BUYBACK_PRICE_1, PLAYER_FIELD_BUYBACK_TIMESTAMP_1,
+    PLAYER_QUEST_LOG_1_1, PLAYER_SKILL_INFO_1_1, PLAYER_VISIBLE_ITEM_1_0,
     UNIT_DYNAMIC_FLAGS, UNIT_FIELD_ATTACK_POWER_MODS, UNIT_FIELD_BYTES_0, UNIT_FIELD_BYTES_1,
     UNIT_FIELD_BYTES_2, UNIT_FIELD_RANGED_ATTACK_POWER_MODS, UNIT_NPC_FLAGS,
 };
@@ -211,6 +213,21 @@ fn visible_item_slot(vanilla_index: u32) -> Option<(u16, u32)> {
 /// `ITEM_FIELD_ENCHANTMENT`. Keying on the index alone would repack enchantment data as unit bytes.
 pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> Option<Writes> {
     if object_type == ModernObjectType::ActivePlayer {
+        // Both arrays keep one u32 per buyback slot in either protocol, so only the array's start
+        // moves. Restricted to ActivePlayer because that is the only table 1.14 has them in.
+        if let Some(offset) = buyback_slot(vanilla_index, PLAYER_FIELD_BUYBACK_PRICE_1) {
+            return Some(Writes::new(&[(
+                MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_PRICE + offset,
+                value,
+            )]));
+        }
+        if let Some(offset) = buyback_slot(vanilla_index, PLAYER_FIELD_BUYBACK_TIMESTAMP_1) {
+            return Some(Writes::new(&[(
+                MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_TIMESTAMP + offset,
+                value,
+            )]));
+        }
+
         if let Some((skill_slot, property)) = skill_info_slot(vanilla_index) {
             let word = (skill_slot / 2) as u16;
             let mask = if skill_slot % 2 == 0 {
@@ -423,10 +440,31 @@ pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> 
     })
 }
 
+/// Split a vanilla buyback field index into its slot offset, or `None` if it is not one.
+///
+/// Twelve slots in both protocols; a stray index past the end must fall through to the ordinary
+/// map rather than landing on whatever 1.14 keeps after the array.
+fn buyback_slot(vanilla_index: u32, base: u32) -> Option<u16> {
+    const BUYBACK_SLOTS: u32 = 12;
+    let relative = vanilla_index.checked_sub(base)?;
+    (relative < BUYBACK_SLOTS).then_some(relative as u16)
+}
+
+/// Split a vanilla field index into its skill `(slot, property)`, or `None` if it is not one.
+///
+/// Bounded by **vanilla's** 128 skills, not 1.14's 256. The two counts are easy to confuse because
+/// the destination array holds 256, but the index being split here is a 1.12 one: `PLAYER_SKILL_INFO_1_1`
+/// is 384 slots long (128 skills x 3), and everything past it belongs to another field entirely.
+/// Reading 256 skills' worth claimed 768 indices — 384 too many — so every player field sitting
+/// after the skill array was diverted into the modern skill arrays instead of its own slot.
+/// `PLAYER_FIELD_COINAGE` is one of them, which is why a 1.14 client's money never changed: the
+/// new balance was written into a skill rank.
 fn skill_info_slot(vanilla_index: u32) -> Option<(u32, u32)> {
+    const VANILLA_SKILL_SLOTS: u32 = 128;
+
     let relative = vanilla_index.checked_sub(PLAYER_SKILL_INFO_1_1)?;
     let skill_slot = relative / 3;
-    (skill_slot < 256).then_some((skill_slot, relative % 3))
+    (skill_slot < VANILLA_SKILL_SLOTS).then_some((skill_slot, relative % 3))
 }
 
 /// Split a vanilla field index into its quest-log `(slot, offset)`, or `None` if it is not one.
@@ -695,6 +733,97 @@ mod tests {
     fn gameobject_dynamic_flags_do_not_apply_to_units() {
         let writes = repack(ModernObjectType::Unit, GAMEOBJECT_DYN_FLAGS, 0x1);
         assert!(writes.is_none());
+    }
+
+    /// The bug this fixes: the skill arm was bounded by 1.14's 256 skills while splitting a *1.12*
+    /// index, so it claimed 768 vanilla slots where the vanilla array is only 384 long. Every
+    /// player field after the skill array was rewritten as skill data -- including coinage, which
+    /// is why selling to a vendor moved the server's balance and never the client's.
+    #[test]
+    fn the_skill_arm_stops_at_the_end_of_the_vanilla_skill_array() {
+        use crate::protocol::update_fields::{PLAYER_CHARACTER_POINTS1, PLAYER_FIELD_COINAGE};
+
+        // The last real skill slot still repacks.
+        assert!(repack(
+            ModernObjectType::ActivePlayer,
+            PLAYER_SKILL_INFO_1_1 + 127 * 3,
+            1
+        )
+        .is_some());
+
+        // The field immediately after the array does not.
+        assert_eq!(
+            PLAYER_SKILL_INFO_1_1 + 128 * 3,
+            PLAYER_CHARACTER_POINTS1,
+            "the vanilla skill array ends exactly where character points begin"
+        );
+        assert!(repack(ModernObjectType::ActivePlayer, PLAYER_CHARACTER_POINTS1, 1).is_none());
+
+        // And neither does coinage, which sits well past it and has its own slot in the map.
+        assert!(repack(ModernObjectType::ActivePlayer, PLAYER_FIELD_COINAGE, 5000).is_none());
+    }
+
+    /// The bug this fixes: 1.12 spells them `PLAYER_FIELD_BUYBACK_PRICE_1` / `_TIMESTAMP_1` and
+    /// 1.14 spells them `BUYBACK_PRICE` / `BUYBACK_TIMESTAMP`, so the generator's name join found
+    /// no counterpart and dropped both arrays. Together with the message that carries them never
+    /// being ported at all, a 1.14 client's buyback tab stayed empty no matter what was sold.
+    #[test]
+    fn buyback_price_and_timestamp_arrays_are_placed_by_hand() {
+        let price = repack(
+            ModernObjectType::ActivePlayer,
+            PLAYER_FIELD_BUYBACK_PRICE_1 + 3,
+            250,
+        )
+        .expect("transformed");
+        assert_eq!(
+            price.as_slice(),
+            [(MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_PRICE + 3, 250)]
+        );
+
+        let timestamp = repack(
+            ModernObjectType::ActivePlayer,
+            PLAYER_FIELD_BUYBACK_TIMESTAMP_1 + 11,
+            1_700_000_000,
+        )
+        .expect("transformed");
+        assert_eq!(
+            timestamp.as_slice(),
+            [(
+                MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_TIMESTAMP + 11,
+                1_700_000_000
+            )]
+        );
+    }
+
+    /// The two arrays sit back to back in 1.12 and apart in 1.14, so the price arm must stop at
+    /// twelve: one slot further is the timestamp array's head, which belongs to the other arm.
+    #[test]
+    fn the_two_buyback_arrays_do_not_overlap() {
+        assert_eq!(
+            PLAYER_FIELD_BUYBACK_PRICE_1 + 12,
+            PLAYER_FIELD_BUYBACK_TIMESTAMP_1,
+            "adjacent in 1.12, which is what makes the bound matter"
+        );
+
+        let handover = repack(
+            ModernObjectType::ActivePlayer,
+            PLAYER_FIELD_BUYBACK_TIMESTAMP_1,
+            7,
+        )
+        .expect("transformed");
+        assert_eq!(
+            handover.as_slice(),
+            [(MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_TIMESTAMP, 7)],
+            "the price arm must not swallow the first timestamp slot"
+        );
+
+        // Past both arrays, neither arm may claim the index.
+        assert!(repack(
+            ModernObjectType::ActivePlayer,
+            PLAYER_FIELD_BUYBACK_TIMESTAMP_1 + 12,
+            7
+        )
+        .is_none());
     }
 
     /// `TappedByPlayer` (vanilla `0x8`) has no modern counterpart and must be dropped, not guessed.

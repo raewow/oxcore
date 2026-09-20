@@ -254,10 +254,10 @@ fn toggle_player_flag(world: &World, player_guid: ObjectGuid, flag: u32) {
     if let Some(mut player) = world.managers.player_mgr.get_player_mut(player_guid) {
         player.player_flags ^= flag;
     }
-    world
-        .systems
-        .group
-        .set_member_update(player_guid, oxcore_shared::game::group::group_update_flags::STATUS);
+    world.systems.group.set_member_update(
+        player_guid,
+        oxcore_shared::game::group::group_update_flags::STATUS,
+    );
 }
 
 /// Handle chat command execution

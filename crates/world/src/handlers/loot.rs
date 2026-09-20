@@ -176,8 +176,8 @@ pub async fn handle_loot_master_give(
     packet: &mut WorldPacket,
     world: &World,
 ) -> anyhow::Result<()> {
-    use crate::game::group::LootMethod;
     use crate::game::group::rolls::LootContext;
+    use crate::game::group::LootMethod;
 
     let master_guid = session
         .player_guid()
@@ -267,7 +267,12 @@ pub async fn handle_loot_master_give(
             .systems
             .loot_manager
             .get_loot(loot_guid)
-            .and_then(|loot| loot.items.iter().find(|i| i.slot == slot && !i.is_looted).cloned())
+            .and_then(|loot| {
+                loot.items
+                    .iter()
+                    .find(|i| i.slot == slot && !i.is_looted)
+                    .cloned()
+            })
         else {
             continue;
         };
@@ -277,15 +282,12 @@ pub async fn handle_loot_master_give(
             .add_item(target_guid, item.item_id, item.count)
             .await;
         if let crate::game::inventory::types::AddItemResult::Success { .. } = stored {
-            world
-                .systems
-                .loot_manager
-                .with_loot_mut(loot_guid, |loot| {
-                    if let Some(it) = loot.items.iter_mut().find(|i| i.slot == slot) {
-                        it.is_looted = true;
-                        loot.unlooted_count = loot.unlooted_count.saturating_sub(1);
-                    }
-                });
+            world.systems.loot_manager.with_loot_mut(loot_guid, |loot| {
+                if let Some(it) = loot.items.iter_mut().find(|i| i.slot == slot) {
+                    it.is_looted = true;
+                    loot.unlooted_count = loot.unlooted_count.saturating_sub(1);
+                }
+            });
             use oxcore_shared::messages::loot::SmsgLootRemoved;
             world
                 .managers

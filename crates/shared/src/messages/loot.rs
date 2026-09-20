@@ -73,9 +73,9 @@ impl ToWorldPacket for SmsgLootResponse {
             write_modern_item_instance(&mut writer, item.item_id, item.random_property);
             writer.write_u32(item.count); // Quantity
             writer.write_u8(0); // LootItemType
-            // LootListID is 1-based on the modern wire (the client's own loot UI reserves 0),
-            // while our internal `slot` is a 0-based index into the loot item vector. Vanilla's
-            // wire slot is genuinely 0-based, so only the modern encoding offsets it.
+                                // LootListID is 1-based on the modern wire (the client's own loot UI reserves 0),
+                                // while our internal `slot` is a 0-based index into the loot item vector. Vanilla's
+                                // wire slot is genuinely 0-based, so only the modern encoding offsets it.
             writer.write_u8(item.slot + 1); // LootListID
         }
 

@@ -61,6 +61,8 @@ pub struct MotionMaster {
     pending_reset: bool,
     /// State flags (updating, paused, etc.)
     pub flags: MotionMasterFlags,
+    /// Remaining duration of a timed movement pause.
+    pause_time_ms: u32,
 }
 
 impl std::fmt::Debug for MotionMaster {
@@ -186,6 +188,21 @@ impl MotionMaster {
         }
     }
 
+    /// Pause movement for a bounded duration.
+    pub fn pause_for(&mut self, pause_time_ms: u32) {
+        self.pause_time_ms = self.pause_time_ms.max(pause_time_ms);
+        self.flags.insert(MotionMasterFlags::PAUSED);
+    }
+
+    pub fn resume(&mut self) {
+        self.pause_time_ms = 0;
+        self.flags.remove(MotionMasterFlags::PAUSED);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.flags.contains(MotionMasterFlags::PAUSED)
+    }
+
     pub fn new() -> Self {
         let mut mm = Self {
             generators: BTreeMap::new(),
@@ -196,6 +213,7 @@ impl MotionMaster {
             expire_list: None,
             pending_reset: false,
             flags: MotionMasterFlags::new(), // Initialize flags
+            pause_time_ms: 0,
         };
 
         // Always have idle generator
@@ -266,6 +284,7 @@ impl MotionMaster {
         self.expire_list = None;
         self.pending_reset = false;
         self.flags = MotionMasterFlags::new();
+        self.pause_time_ms = 0;
     }
 
     /// Swap in a new default movement generator without interrupting the active one.
@@ -464,8 +483,23 @@ impl MotionMaster {
         current_pos: Position,
         run_speed: f32,
     ) {
-        // Clear(false): drop the stack down to the default generator
-        self.clear(creature_guid);
+        // Drop temporary behavior while preserving the spawn's ambient movement.
+        let transient: Vec<_> = self
+            .generators
+            .keys()
+            .filter(|movement_type| {
+                !matches!(
+                    movement_type,
+                    MovementGeneratorType::Idle
+                        | MovementGeneratorType::Random
+                        | MovementGeneratorType::Waypoint
+                )
+            })
+            .copied()
+            .collect();
+        for movement_type in transient {
+            self.remove_generator(movement_type, creature_guid);
+        }
         let generator = HomeMovementGenerator::new(home_pos, run_speed);
         self.mutate(Box::new(generator), creature_guid, current_pos);
     }
@@ -1037,9 +1071,13 @@ impl MotionMaster {
             return None;
         }
 
-        // Check if movement is paused
+        // Count down before returning; otherwise a timed pause can never expire.
         if self.flags.contains(MotionMasterFlags::PAUSED) {
-            return None;
+            self.pause_time_ms = self.pause_time_ms.saturating_sub(diff_ms);
+            if self.pause_time_ms > 0 {
+                return None;
+            }
+            self.resume();
         }
 
         // Set updating flag
@@ -1213,6 +1251,15 @@ impl MotionMaster {
         }
 
         None
+    }
+
+    /// Notify the active generator that path validation rejected its destination.
+    pub fn movement_failed(&mut self, creature_guid: ObjectGuid) {
+        self.moving = false;
+        self.current_destination = None;
+        if let Some(generator) = self.generators.get_mut(&self.active_type) {
+            generator.movement_failed(creature_guid);
+        }
     }
 
     /// Update the active generator to highest priority
@@ -1601,6 +1648,30 @@ mod tests {
     }
 
     #[test]
+    fn return_home_preserves_ambient_random_movement() {
+        let guid = creature();
+        let mut motion_master = MotionMaster::new();
+        motion_master.random_wander(Position::default(), 5.0, guid, Position::default(), 2.5);
+        motion_master.chase(ObjectGuid::from_raw(2), guid, Position::default(), 1.0, 7.0);
+
+        motion_master.return_home(Position::default(), guid, Position::default(), 7.0);
+
+        assert_eq!(
+            motion_master.get_used_movement_generators_list(),
+            vec![
+                MovementGeneratorType::Idle,
+                MovementGeneratorType::Random,
+                MovementGeneratorType::Home,
+            ]
+        );
+        motion_master.movement_complete(guid);
+        assert_eq!(
+            motion_master.get_current_movement_generator_type(),
+            MovementGeneratorType::Random
+        );
+    }
+
+    #[test]
     fn mutate_drops_a_distract_generator_instead_of_parking_it() {
         let mut motion_master = MotionMaster::new();
         let guid = creature();
@@ -1813,6 +1884,23 @@ mod tests {
             motion_master.update_motion(guid, Position::default(), 1_000),
             Some(MovementUpdate::Continue)
         ));
+    }
+
+    #[test]
+    fn timed_pause_expires_and_updates_movement_again() {
+        let guid = creature();
+        let mut motion_master = MotionMaster::new();
+        motion_master.random_wander(Position::default(), 5.0, guid, Position::default(), 2.5);
+        motion_master.pause_for(2_000);
+
+        assert!(motion_master
+            .update_motion(guid, Position::default(), 1_999)
+            .is_none());
+        assert!(motion_master.is_paused());
+        assert!(motion_master
+            .update_motion(guid, Position::default(), 1)
+            .is_some());
+        assert!(!motion_master.is_paused());
     }
 
     #[test]

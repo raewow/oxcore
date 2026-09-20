@@ -740,9 +740,12 @@ pub struct ActiveCast {
     /// resolves later (cast-time / channel / delayed projectile).
     pub cast_targets: SpellCastTargets,
 
-    /// The identity `send_spell_start` used for this cast's `SMSG_SPELL_START`, so the
-    /// eventual `SMSG_SPELL_GO` (fired on the next main-hand swing, for on-swing spells parked
-    /// here) can share it. `None` for triggered casts, which sent no START to match.
+    /// The identity `send_spell_start` used for this cast's `SMSG_SPELL_START`, so every later
+    /// message about the same cast can quote it: the `SMSG_SPELL_GO` that completes it (fired on
+    /// the next main-hand swing, for on-swing spells parked here) and the `SMSG_SPELL_FAILURE` /
+    /// `SMSG_CAST_FAILED` that cancel or interrupt it. The modern client keys its live cast on
+    /// `CastID`; a terminating packet naming a different one neither closes the cast nor is
+    /// recognised at all. `None` for triggered casts, which sent no START to match.
     pub cast_sequence: Option<u64>,
 
     /// The modern `SpellXSpellVisualID` for this cast, echoed from the client's cast request so

@@ -252,6 +252,11 @@ impl MovementGenerator for WaypointMovementGenerator {
         self.last_reached_waypoint = 0;
     }
 
+    fn movement_failed(&mut self, _creature_guid: ObjectGuid) {
+        self.is_moving = false;
+        self.is_wandering = false;
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }

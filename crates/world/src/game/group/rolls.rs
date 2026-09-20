@@ -4,8 +4,8 @@
 //! `CountRollVote`, `CountTheRoll`, `CountSingleLooterRoll`, `EndRoll`, and
 //! `UpdateLooterGuid` (reference `game/Group/Group.cpp:868-1255` and `:2485-2555`).
 
-use crate::game::group::reward::is_at_group_reward_distance;
 use crate::game::broadcast_mgr::BroadcastManagerExt;
+use crate::game::group::reward::is_at_group_reward_distance;
 use crate::game::items::manager::ItemTemplate;
 use crate::game::loot::{Roll, RollVote};
 use crate::World;
@@ -60,7 +60,8 @@ impl crate::game::group::GroupSystem {
         looted_target: ObjectGuid,
         context: LootContext,
     ) {
-        self.classify_and_start_rolls(world, group_id, looted_target, &context, false).await;
+        self.classify_and_start_rolls(world, group_id, looted_target, &context, false)
+            .await;
     }
 
     /// `Group::NeedBeforeGreed`: like group loot, but only classes that can use the
@@ -72,7 +73,8 @@ impl crate::game::group::GroupSystem {
         looted_target: ObjectGuid,
         context: LootContext,
     ) {
-        self.classify_and_start_rolls(world, group_id, looted_target, &context, true).await;
+        self.classify_and_start_rolls(world, group_id, looted_target, &context, true)
+            .await;
     }
 
     /// `Group::MasterLoot`: mark under-threshold items and send the eligible-looter list
@@ -181,11 +183,14 @@ impl crate::game::group::GroupSystem {
                 self.start_loot_roll(world, group_id, looted_target, context, method, slot)
                     .await;
             } else {
-                world.systems.loot_manager.with_loot_mut(looted_target, |loot| {
-                    if let Some(it) = loot.items.iter_mut().find(|i| i.slot == slot) {
-                        it.is_underthreshold = true;
-                    }
-                });
+                world
+                    .systems
+                    .loot_manager
+                    .with_loot_mut(looted_target, |loot| {
+                        if let Some(it) = loot.items.iter_mut().find(|i| i.slot == slot) {
+                            it.is_underthreshold = true;
+                        }
+                    });
             }
         }
     }
@@ -219,13 +224,7 @@ impl crate::game::group::GroupSystem {
         let members: Vec<ObjectGuid> = group.members.iter().map(|m| m.guid).collect();
         drop(group);
 
-        let mut roll = Roll::new(
-            looted_target,
-            item_slot,
-            item_id,
-            count,
-            random_property_id,
-        );
+        let mut roll = Roll::new(looted_target, item_slot, item_id, count, random_property_id);
         for guid in members {
             let Some(player) = self.player_mgr.get_player(guid) else {
                 continue;
@@ -280,7 +279,8 @@ impl crate::game::group::GroupSystem {
             roll_type: u8::from(method),
         };
         for guid in roll.votes.keys() {
-            self.broadcast_mgr.send_msg_to_player(*guid, start_msg.clone());
+            self.broadcast_mgr
+                .send_msg_to_player(*guid, start_msg.clone());
         }
         world
             .systems
@@ -413,10 +413,7 @@ impl crate::game::group::GroupSystem {
 
         if let Some(old_guid) = old {
             if ifneed
-                && self
-                    .player_mgr
-                    .get_player(old_guid)
-                    .is_some()
+                && self.player_mgr.get_player(old_guid).is_some()
                 && is_at_group_reward_distance(
                     world,
                     old_guid,
@@ -472,7 +469,8 @@ impl crate::game::group::GroupSystem {
                 self.broadcast_group_list(group_id);
             }
             None => {
-                self.round_robin_looters.insert(group_id, ObjectGuid::empty());
+                self.round_robin_looters
+                    .insert(group_id, ObjectGuid::empty());
                 self.broadcast_group_list(group_id);
             }
         }
@@ -484,7 +482,12 @@ impl crate::game::group::GroupSystem {
     }
 
     /// Whether a player is on the loot's allowed-looter set (or it is open to all).
-    pub fn is_allowed_looter(&self, world: &World, looted_target: ObjectGuid, player: ObjectGuid) -> bool {
+    pub fn is_allowed_looter(
+        &self,
+        world: &World,
+        looted_target: ObjectGuid,
+        player: ObjectGuid,
+    ) -> bool {
         world
             .systems
             .loot_manager
@@ -563,8 +566,7 @@ impl crate::game::group::GroupSystem {
                 item_id: roll.item_id,
             };
             let voters: Vec<ObjectGuid> = roll.votes.keys().cloned().collect();
-            self.broadcast_mgr
-                .broadcast_msg_to_players(&voters, &msg);
+            self.broadcast_mgr.broadcast_msg_to_players(&voters, &msg);
             world
                 .systems
                 .loot_manager
@@ -640,11 +642,7 @@ impl crate::game::group::GroupSystem {
                 .systems
                 .loot_manager
                 .set_item_blocked(roll.looted_target, roll.item_slot, false);
-            if let Some(mut loot) = world
-                .systems
-                .loot_manager
-                .get_loot_mut(roll.looted_target)
-            {
+            if let Some(mut loot) = world.systems.loot_manager.get_loot_mut(roll.looted_target) {
                 if let Some(item) = loot.items.iter_mut().find(|i| i.slot == roll.item_slot) {
                     item.loot_owner = Some(winner);
                 }
@@ -712,10 +710,10 @@ pub fn can_use_item(player_class: u8, player_level: u32, item: &ItemTemplate) ->
     }
     if item.item_class == 4 {
         let proficient = match item.item_subclass {
-            1 => true, // cloth: all classes
-            2 => !matches!(player_class, 1 | 2),       // leather: not warrior/paladin
+            1 => true,                                  // cloth: all classes
+            2 => !matches!(player_class, 1 | 2),        // leather: not warrior/paladin
             3 => matches!(player_class, 1 | 2 | 3 | 7), // mail: warrior/paladin/hunter/shaman
-            4 => matches!(player_class, 1 | 2),        // plate: warrior/paladin
+            4 => matches!(player_class, 1 | 2),         // plate: warrior/paladin
             _ => true,
         };
         if !proficient {

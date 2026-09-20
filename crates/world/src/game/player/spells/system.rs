@@ -503,6 +503,21 @@ fn on_spell_launch(
     // ... player MotionMaster charge displacement is not modelled yet.
 }
 
+/// What a cancelled or interrupted cast was, taken from the `ActiveCast` as it is cleared.
+///
+/// The identity fields are the reason this is a struct rather than the tuple it used to be: the
+/// packets that terminate a cast must quote the cast's own `CastID` and visual, so they have to be
+/// read out of the `ActiveCast` before it is dropped.
+#[derive(Clone, Copy)]
+struct CancelledCast {
+    spell_id: u32,
+    was_channeling: bool,
+    was_preparing: bool,
+    was_triggered: bool,
+    cast_sequence: Option<u64>,
+    spell_visual_id: Option<u32>,
+}
+
 /// Stateless spell system - operates on player.spells via PlayerManager.
 ///
 /// Architecture:
@@ -1171,7 +1186,16 @@ impl SpellSystem {
             world,
         )?;
         if recheck != SpellCastError::None {
-            self.send_cast_failure(caster_guid, cast.spell_id, recheck, world)?;
+            let cast_id = cast
+                .cast_sequence
+                .map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, cast.spell_id, seq));
+            self.send_cast_failure_with_cast_id(
+                caster_guid,
+                cast.spell_id,
+                recheck,
+                cast_id,
+                world,
+            )?;
             // A failed cast clears the melee slot and returns without a white swing,
             // so a failed queued ability still eats the swing.
             return Ok(true);
@@ -1246,6 +1270,7 @@ impl SpellSystem {
                     z,
                 );
                 active.cast_targets = cast_targets.clone();
+                active.cast_sequence = cast_sequence;
                 active.spell_visual_id = spell_visual_id;
                 player.spells.set_current_spell(slot, active);
             });
@@ -1399,6 +1424,8 @@ impl SpellSystem {
                     z,
                 );
                 active.cast_targets = cast_targets.clone();
+                active.cast_sequence = cast_sequence;
+                active.spell_visual_id = spell_visual_id;
                 player
                     .spells
                     .set_current_spell(CurrentSpellType::Channeled, active);
@@ -1667,7 +1694,15 @@ impl SpellSystem {
                         .unwrap_or(SpellCastError::InvalidTarget);
 
                         if revalidate != SpellCastError::None {
-                            self.send_cast_failure(caster_guid, spell_id, revalidate, world)?;
+                            let cast_id = cast_sequence
+                                .map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
+                            self.send_cast_failure_with_cast_id(
+                                caster_guid,
+                                spell_id,
+                                revalidate,
+                                cast_id,
+                                world,
+                            )?;
                             continue;
                         }
 
@@ -2715,32 +2750,41 @@ impl SpellSystem {
         slot: CurrentSpellType,
         world: &World,
     ) -> Result<bool> {
-        // Capture: spell_id, was_channeling, was_preparing, was_triggered
-        let cancelled_info: Option<(u32, bool, bool, bool)> = world
+        let cancelled_info: Option<CancelledCast> = world
             .systems
             .player
             .manager()
             .with_player_mut(caster_guid, |player| {
-                player.spells.clear_current_spell(slot).map(|active| {
-                    let was_preparing = active.state == SpellState::Preparing;
-                    (
-                        active.spell_id,
-                        active.is_channeling,
-                        was_preparing,
-                        active.is_triggered,
-                    )
-                })
+                player
+                    .spells
+                    .clear_current_spell(slot)
+                    .map(|active| CancelledCast {
+                        spell_id: active.spell_id,
+                        was_channeling: active.is_channeling,
+                        was_preparing: active.state == SpellState::Preparing,
+                        was_triggered: active.is_triggered,
+                        cast_sequence: active.cast_sequence,
+                        spell_visual_id: active.spell_visual_id,
+                    })
             })
             .flatten();
 
         // Remove any pending events for this spell
-        if let Some((spell_id, _, _, _)) = cancelled_info {
+        if let Some(cancelled) = cancelled_info {
             if let Ok(mut queue) = self.event_queue.lock() {
-                queue.cancel_events_for(caster_guid, spell_id);
+                queue.cancel_events_for(caster_guid, cancelled.spell_id);
             }
         }
 
-        if let Some((spell_id, was_channeling, was_preparing, was_triggered)) = cancelled_info {
+        if let Some(CancelledCast {
+            spell_id,
+            was_channeling,
+            was_preparing,
+            was_triggered,
+            cast_sequence,
+            spell_visual_id,
+        }) = cancelled_info
+        {
             // The PREPARING cancel branch: reset GCD so the player isn't locked out
             // after cancelling a cast that hasn't fired yet.
             if was_preparing && !was_triggered {
@@ -2763,17 +2807,27 @@ impl SpellSystem {
                 );
             }
 
-            // Notify nearby clients that the cast was interrupted.
+            // Notify nearby clients that the cast was interrupted. Both packets name the cast
+            // being cancelled, not a fresh identity -- see `SmsgSpellFailure::cast_sequence`.
             let msg = SmsgSpellFailure {
                 caster_guid,
                 spell_id,
                 result: validation::spell_cast_error_to_u8(SpellCastError::Interrupted),
+                cast_sequence: cast_sequence.unwrap_or(0),
+                spell_visual_id: spell_visual_id.unwrap_or(0),
             };
             self.broadcast_mgr
                 .broadcast_msg_nearby(caster_guid, &msg, true);
 
             // Also send SMSG_CAST_RESULT(SPELL_FAILED_INTERRUPTED) so the client cast bar clears.
-            self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted, world)?;
+            let cast_id = cast_sequence.map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
+            self.send_cast_failure_with_cast_id(
+                caster_guid,
+                spell_id,
+                SpellCastError::Interrupted,
+                cast_id,
+                world,
+            )?;
 
             // If cancelling a channel, send SMSG_CHANNEL_UPDATE with 0 remaining
             // and remove auras applied by the cancelled channel.
@@ -2806,7 +2860,7 @@ impl SpellSystem {
         world: &World,
     ) -> Result<()> {
         // Interrupt Generic first, then Channeled
-        let interrupted_info: Option<(u32, u32, bool)> = world
+        let interrupted_info: Option<CancelledCast> = world
             .systems
             .player
             .manager()
@@ -2822,17 +2876,29 @@ impl SpellSystem {
                             .clear_current_spell(CurrentSpellType::Channeled)
                             .map(|active| (active, true))
                     });
-                cast.map(|(active, was_channeling)| {
-                    (active.spell_id, active.spell_id, was_channeling)
+                cast.map(|(active, was_channeling)| CancelledCast {
+                    spell_id: active.spell_id,
+                    was_channeling,
+                    was_preparing: active.state == SpellState::Preparing,
+                    was_triggered: active.is_triggered,
+                    cast_sequence: active.cast_sequence,
+                    spell_visual_id: active.spell_visual_id,
                 })
             })
             .flatten();
 
-        if let Some((spell_id, interrupted_spell_id, was_channeling)) = interrupted_info {
+        if let Some(CancelledCast {
+            spell_id,
+            was_channeling,
+            cast_sequence,
+            spell_visual_id,
+            ..
+        }) = interrupted_info
+        {
             // Apply school lockout if specified
             if lockout_duration_ms > 0 {
                 // Get spell school from spell entry
-                if let Some(spell_entry) = world.managers.spell_mgr.get(interrupted_spell_id) {
+                if let Some(spell_entry) = world.managers.spell_mgr.get(spell_id) {
                     let school = spell_entry.school as u8;
                     if school > 0 {
                         // Don't lock Physical school
@@ -2852,11 +2918,14 @@ impl SpellSystem {
                 }
             }
 
-            // Notify nearby clients that the cast was interrupted.
+            // Notify nearby clients that the cast was interrupted, naming the cast that was
+            // running -- see `SmsgSpellFailure::cast_sequence`.
             let msg = SmsgSpellFailure {
                 caster_guid: target_guid,
                 spell_id,
                 result: validation::spell_cast_error_to_u8(SpellCastError::Interrupted),
+                cast_sequence: cast_sequence.unwrap_or(0),
+                spell_visual_id: spell_visual_id.unwrap_or(0),
             };
             self.broadcast_mgr
                 .broadcast_msg_nearby(target_guid, &msg, true);
@@ -3837,19 +3906,25 @@ impl SpellSystem {
         ok: bool,
         world: &World,
     ) -> Result<()> {
-        let spell_info: Option<(u32, bool)> = world
+        // The cast's identity comes along: whichever way this ends, the packet that says so must
+        // name the cast the client already has open.
+        let spell_info: Option<(u32, bool, Option<u64>, Option<u32>)> = world
             .systems
             .player
             .manager()
             .with_player(caster_guid, |player| {
-                player
-                    .spells
-                    .get_current_spell(slot)
-                    .map(|cast| (cast.spell_id, cast.is_channeling))
+                player.spells.get_current_spell(slot).map(|cast| {
+                    (
+                        cast.spell_id,
+                        cast.is_channeling,
+                        cast.cast_sequence,
+                        cast.spell_visual_id,
+                    )
+                })
             })
             .flatten();
 
-        if let Some((spell_id, is_channeled)) = spell_info {
+        if let Some((spell_id, is_channeled, cast_sequence, spell_visual_id)) = spell_info {
             if is_channeled || slot == CurrentSpellType::Channeled {
                 self.send_channel_update(caster_guid, 0);
             }
@@ -3876,13 +3951,21 @@ impl SpellSystem {
                     false,
                     None,
                     None,
-                    None,
-                    None,
+                    cast_sequence,
+                    spell_visual_id,
                     world,
                 )
                 .await?;
             } else {
-                self.send_cast_failure(caster_guid, spell_id, SpellCastError::Interrupted, world)?;
+                let cast_id =
+                    cast_sequence.map(|seq| cast_guid128(DEFAULT_REALM_ID, 0, spell_id, seq));
+                self.send_cast_failure_with_cast_id(
+                    caster_guid,
+                    spell_id,
+                    SpellCastError::Interrupted,
+                    cast_id,
+                    world,
+                )?;
             }
         }
 

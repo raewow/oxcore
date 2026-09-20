@@ -1055,7 +1055,9 @@ impl AuctionHouseManager {
             updated_auction
         };
 
-        Ok(PlaceBidResult::Success(PlaceBidOutcome { auction: settled }))
+        Ok(PlaceBidResult::Success(PlaceBidOutcome {
+            auction: settled,
+        }))
     }
 
     pub async fn lookup_player_account_id(&self, guid_low: u32) -> u32 {

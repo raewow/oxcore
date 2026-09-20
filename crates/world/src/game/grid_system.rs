@@ -349,6 +349,14 @@ impl GridSystem {
         });
         map.add_creature(guid, home);
 
+        if let Some(spawn) = world.managers.creature_mgr.get_spawn_data(guid) {
+            world.managers.creature_mgr.initialize_creature_movement(
+                guid,
+                &spawn,
+                Some(&world.managers.waypoint_mgr),
+            );
+        }
+
         tracing::debug!(
             "[GRID] Creature {:?} moved to its spawn grid ({}, {}) instead of despawning",
             guid,

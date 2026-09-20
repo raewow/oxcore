@@ -68,6 +68,14 @@ impl MovementSystem {
         map.remove_creature(guid, current_pos);
         map.add_creature(guid, home);
 
+        if let Some(spawn) = world.managers.creature_mgr.get_spawn_data(guid) {
+            world.managers.creature_mgr.initialize_creature_movement(
+                guid,
+                &spawn,
+                Some(&world.managers.waypoint_mgr),
+            );
+        }
+
         tracing::debug!(
             "[MOVEMENT] Creature {:?} tried to enter an unloaded grid; returned to spawn at ({:.1}, {:.1})",
             guid,
@@ -406,7 +414,9 @@ impl MovementSystem {
             .managers
             .creature_mgr
             .with_creature_mut(guid, |creature| {
-                creature.motion_master.update(guid, current_pos, diff_ms)
+                let update = creature.motion_master.update(guid, current_pos, diff_ms);
+                creature.movement_paused = creature.motion_master.is_paused();
+                update
             })
             .flatten();
 
@@ -487,6 +497,12 @@ impl MovementSystem {
 
                 if !path_result.is_complete() && path_waypoints.len() <= 1 {
                     // No usable path was found. Don't fake a straight-line chase through walls.
+                    world
+                        .managers
+                        .creature_mgr
+                        .with_creature_mut(guid, |creature| {
+                            creature.motion_master.movement_failed(guid);
+                        });
                     self.send_stop_packet(guid, current_pos, world);
                     return;
                 }

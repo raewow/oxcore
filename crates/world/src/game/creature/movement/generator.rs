@@ -27,6 +27,9 @@ pub trait MovementGenerator: Send + Sync {
     /// Interrupt the generator without fully finalizing it.
     fn interrupt(&mut self, _creature_guid: ObjectGuid) {}
 
+    /// Notify the generator that its requested destination could not be launched.
+    fn movement_failed(&mut self, _creature_guid: ObjectGuid) {}
+
     /// Get as Any for downcasting (needed for ChaseMovementGenerator updates)
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 

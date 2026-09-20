@@ -37,5 +37,7 @@ pub use oxcore_shared::game::group::{
     ERR_TARGET_NOT_IN_GROUP_S, MAX_GROUP_SIZE, MAX_RAID_SIZE, MAX_RAID_SUBGROUPS, PARTY_OP_INVITE,
     PARTY_OP_LEAVE,
 };
+pub use reward::{
+    is_at_group_reward_distance, CREATURE_ELITE_WORLDBOSS, DEFAULT_GROUP_XP_DISTANCE,
+};
 pub use system::GroupSystem;
-pub use reward::{is_at_group_reward_distance, CREATURE_ELITE_WORLDBOSS, DEFAULT_GROUP_XP_DISTANCE};

@@ -143,11 +143,11 @@ fn write_modern_spell_cast_data(
 
     writer.write_i32(spell_id as i32);
     writer.write_u32(spell_visual_id); // SpellXSpellVisualID -- see above
-    // CastFlags: forwarded straight from the vanilla flags word. Real modern servers always
-    // set CAST_FLAG_HAS_TRAJECTORY (0x02, the same bit vanilla calls CAST_FLAG_UNKNOWN2 and
-    // sets unconditionally too) on both SPELL_START and SPELL_GO; sending 0 here left the
-    // client with no cast flags at all, so it rendered the precast glow (driven by
-    // SpellXSpellVisualID) but never animated the ongoing cast.
+                                       // CastFlags: forwarded straight from the vanilla flags word. Real modern servers always
+                                       // set CAST_FLAG_HAS_TRAJECTORY (0x02, the same bit vanilla calls CAST_FLAG_UNKNOWN2 and
+                                       // sets unconditionally too) on both SPELL_START and SPELL_GO; sending 0 here left the
+                                       // client with no cast flags at all, so it rendered the precast glow (driven by
+                                       // SpellXSpellVisualID) but never animated the ongoing cast.
     writer.write_u32(cast_flags);
     writer.write_u32(0); // CastFlagsEx
     writer.write_u32(cast_time_ms);
@@ -794,6 +794,8 @@ mod spell_packet_tests {
         let packet = SmsgSpellFailedOther {
             caster_guid: caster,
             spell_id: 8690,
+            cast_sequence: 0,
+            spell_visual_id: 0,
         }
         .to_vanilla();
 
@@ -811,6 +813,8 @@ mod spell_packet_tests {
             caster_guid: caster,
             spell_id: 8690,
             result: 0x23,
+            cast_sequence: 0,
+            spell_visual_id: 0,
         }
         .to_vanilla();
 
@@ -857,6 +861,15 @@ pub struct SmsgSpellFailure {
     pub caster_guid: ObjectGuid,
     pub spell_id: u32,
     pub result: u8,
+    /// The cast identity this failure terminates — the `cast_sequence` the cast's
+    /// `SMSG_SPELL_START` carried. The 1.14 client keys the live cast on `CastID`, so a failure
+    /// quoting anything else leaves that cast running forever *and* feeds the client a cast packet
+    /// for an id it never saw, which stops it playing the casting pose for every later cast until
+    /// the UI is reloaded. Minting one here (which this message used to do) guarantees both.
+    pub cast_sequence: u64,
+    /// The cast's `SpellXSpellVisualID`, matching its START. See
+    /// [`SmsgSpellStart::spell_visual_id`]; zero for a cast with no modern origin.
+    pub spell_visual_id: u32,
 }
 
 impl ToWorldPacket for SmsgSpellFailure {
@@ -882,10 +895,10 @@ impl SmsgSpellFailure {
     fn write_modern_prefix(&self, writer: &mut BitWriter) {
         let (high, low) = self.caster_guid.to_guid128(DEFAULT_REALM_ID);
         writer.write_packed_guid_128(high, low); // CasterUnit
-        let (high, low) = cast_guid128(DEFAULT_REALM_ID, 0, self.spell_id, next_cast_sequence());
+        let (high, low) = cast_guid128(DEFAULT_REALM_ID, 0, self.spell_id, self.cast_sequence);
         writer.write_packed_guid_128(high, low); // CastID
         writer.write_u32(self.spell_id);
-        writer.write_u32(0); // SpellXSpellVisualID -- no 1.12 source
+        writer.write_u32(self.spell_visual_id);
     }
 }
 
@@ -894,6 +907,11 @@ impl SmsgSpellFailure {
 pub struct SmsgSpellFailedOther {
     pub caster_guid: ObjectGuid,
     pub spell_id: u32,
+    /// Same rule as [`SmsgSpellFailure::cast_sequence`]: the identity of the cast being stopped,
+    /// not a new one.
+    pub cast_sequence: u64,
+    /// The cast's `SpellXSpellVisualID`, matching its START.
+    pub spell_visual_id: u32,
 }
 
 /// MSG_CHANNEL_UPDATE (opcode 0x013A)
@@ -950,10 +968,10 @@ impl ToWorldPacket for SmsgSpellFailedOther {
         let mut writer = BitWriter::new();
         let (high, low) = self.caster_guid.to_guid128(DEFAULT_REALM_ID);
         writer.write_packed_guid_128(high, low); // CasterUnit
-        let (high, low) = cast_guid128(DEFAULT_REALM_ID, 0, self.spell_id, next_cast_sequence());
+        let (high, low) = cast_guid128(DEFAULT_REALM_ID, 0, self.spell_id, self.cast_sequence);
         writer.write_packed_guid_128(high, low); // CastID
         writer.write_u32(self.spell_id);
-        writer.write_u32(0); // SpellXSpellVisualID
+        writer.write_u32(self.spell_visual_id);
         writer.write_u8(0); // Reason -- vanilla sends none
         Some(writer.finish(Opcode::SMSG_SPELL_FAILED_OTHER))
     }
@@ -1971,6 +1989,100 @@ mod modern_spell_tests {
             cast_id(&start),
             cast_id(&go),
             "SPELL_START and SPELL_GO for the same cast must carry the same CastID"
+        );
+    }
+
+    /// The bug this fixes: `SmsgSpellFailure::to_modern` and `SmsgSpellFailedOther::to_modern` used
+    /// to mint a fresh cast sequence and write `SpellXSpellVisualID = 0`, so cancelling or
+    /// interrupting a cast told the client about a cast that had never existed. The real cast --
+    /// the one the client opened under START's `CastID` -- was never closed, and the client stopped
+    /// playing the casting pose for every cast-time spell afterwards until the UI was reloaded.
+    /// Both messages must quote the identity of the cast they end.
+    #[test]
+    fn a_failure_terminates_the_cast_it_names() {
+        use crate::protocol::bitbuf::BitReader;
+
+        let sequence = next_cast_sequence();
+        let visual_id = 236_677u32;
+        let start = SmsgSpellStart {
+            caster_guid: caster(),
+            caster_guid_pack: caster(),
+            spell_id: 133,
+            spell_visual_id: visual_id,
+            cast_flags: 0,
+            cast_time_ms: 1500,
+            target_guid: None,
+            cast_item_guid: None,
+            ammo_display_id: 0,
+            ammo_inventory_type: 0,
+            cast_sequence: sequence,
+        }
+        .to_modern()
+        .expect("spell start must encode for modern");
+
+        // START leads with CasterGUID and CasterUnit before its CastID and follows it with an
+        // OriginalCastID; the failures carry CasterUnit and CastID alone. Each needs its own skip
+        // counts to reach the same two fields.
+        let read_ids = |packet: &crate::protocol::WorldPacket, before: usize, after: usize| {
+            let mut reader = BitReader::new(packet.contents());
+            for _ in 0..before {
+                reader.read_packed_guid_128().expect("a leading GUID");
+            }
+            let cast_id = reader.read_packed_guid_128().expect("CastID");
+            for _ in 0..after {
+                reader.read_packed_guid_128().expect("a trailing GUID");
+            }
+            reader.read_u32().expect("SpellID");
+            (cast_id, reader.read_u32().expect("SpellXSpellVisualID"))
+        };
+
+        let failure = SmsgSpellFailure {
+            caster_guid: caster(),
+            spell_id: 133,
+            result: 0x23,
+            cast_sequence: sequence,
+            spell_visual_id: visual_id,
+        }
+        .to_modern()
+        .expect("spell failure must encode for modern");
+        let failed_other = SmsgSpellFailedOther {
+            caster_guid: caster(),
+            spell_id: 133,
+            cast_sequence: sequence,
+            spell_visual_id: visual_id,
+        }
+        .to_modern()
+        .expect("spell failed other must encode for modern");
+
+        let (started_cast, started_visual) = read_ids(&start, 2, 1);
+        assert_eq!(started_visual, visual_id, "START carries the cast's visual");
+        assert_eq!(
+            read_ids(&failure, 1, 0),
+            (started_cast, started_visual),
+            "SMSG_SPELL_FAILURE must name the cast SMSG_SPELL_START opened"
+        );
+        assert_eq!(
+            read_ids(&failed_other, 1, 0),
+            (started_cast, started_visual),
+            "SMSG_SPELL_FAILED_OTHER must name the cast SMSG_SPELL_START opened"
+        );
+    }
+
+    /// Encoding must be a pure function of the message: `broadcast_msg_nearby` encodes once to
+    /// categorise the opcode and again for every recipient, so a body that mints identity while
+    /// writing gives each recipient -- and the categorisation pass -- a different cast.
+    #[test]
+    fn encoding_a_failure_twice_produces_the_same_bytes() {
+        let msg = SmsgSpellFailure {
+            caster_guid: caster(),
+            spell_id: 133,
+            result: 0x23,
+            cast_sequence: next_cast_sequence(),
+            spell_visual_id: 236_677,
+        };
+        assert_eq!(
+            msg.to_modern().expect("first encode").contents(),
+            msg.to_modern().expect("second encode").contents(),
         );
     }
 

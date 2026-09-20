@@ -95,6 +95,14 @@ pub const MODERN_PLAYER_FIELD_HONOR_LEVEL: u16 = 689;
 pub const MODERN_PLAYER_FIELD_AVG_ITEM_LEVEL: u16 = 682;
 /// Modern `ACTIVE_PLAYER_FIELD_REST_INFO` (size 4).
 pub const MODERN_ACTIVE_PLAYER_FIELD_REST_INFO: u16 = 2714;
+// Vanilla names these `PLAYER_FIELD_BUYBACK_PRICE_1` / `_TIMESTAMP_1` and 1.14 names them
+// `BUYBACK_PRICE` / `BUYBACK_TIMESTAMP`, so the generator's name join found neither and both were
+// dropped -- the buyback tab had nothing to draw. The item guids themselves *did* map, into the
+// contiguous inventory array, which is why only two of the three needed hand-writing.
+/// Modern `ACTIVE_PLAYER_FIELD_BUYBACK_PRICE` (size 12).
+pub const MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_PRICE: u16 = 2759;
+/// Modern `ACTIVE_PLAYER_FIELD_BUYBACK_TIMESTAMP` (size 12).
+pub const MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_TIMESTAMP: u16 = 2771;
 /// Modern `ACTIVE_PLAYER_FIELD_MOD_DAMAGE_DONE_PCT` (size 7).
 pub const MODERN_ACTIVE_PLAYER_FIELD_MOD_DAMAGE_DONE_PCT: u16 = 2732;
 /// Modern `ACTIVE_PLAYER_FIELD_MOD_HEALING_PCT` (size 1).

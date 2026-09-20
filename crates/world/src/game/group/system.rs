@@ -11,12 +11,11 @@ use crate::game::player::death::DeathState;
 use crate::game::player::{PlayerManager, PLAYER_FLAGS_AFK, PLAYER_FLAGS_DND, PLAYER_FLAGS_GHOST};
 use crate::game::social::SocialSystem;
 use crate::World;
-use oxcore_shared::game::chat::Team;
 use oxcore_db::database::characters::models::group::{GroupMemberRow, GroupRow};
 use oxcore_db::database::characters::repositories::GroupRepositoryTrait;
+use oxcore_shared::game::chat::Team;
 use oxcore_shared::protocol::ObjectGuid;
 
-use oxcore_shared::messages::group::SmsgPartyMemberStats;
 use oxcore_shared::game::group::{
     group_update_flags, CachedGroup, GroupData, GroupError, GroupInvite, GroupMember, LootMethod,
     MemberStatus, ERR_ALREADY_IN_GROUP_S, ERR_BAD_PLAYER_NAME_S, ERR_GROUP_FULL,
@@ -24,6 +23,7 @@ use oxcore_shared::game::group::{
     ERR_TARGET_NOT_IN_GROUP_S, MAX_GROUP_SIZE, MAX_RAID_SIZE, MAX_RAID_SUBGROUPS, PARTY_OP_INVITE,
     PARTY_OP_LEAVE,
 };
+use oxcore_shared::messages::group::SmsgPartyMemberStats;
 /// Current Unix time in seconds.
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -1786,7 +1786,13 @@ impl GroupSystem {
         let status = self.member_status(guid);
         Some(SmsgPartyMemberStats {
             player_guid: guid,
-            update_mask: STATUS | CUR_HP | MAX_HP | POWER_TYPE | CUR_POWER | MAX_POWER | LEVEL
+            update_mask: STATUS
+                | CUR_HP
+                | MAX_HP
+                | POWER_TYPE
+                | CUR_POWER
+                | MAX_POWER
+                | LEVEL
                 | ZONE,
             status: Some(status.as_u8()),
             health: Some(player.stats.health),
@@ -1845,7 +1851,8 @@ impl GroupSystem {
                     .map(|p| p.visibility.visible_objects.contains(&guid))
                     .unwrap_or(false);
                 if !visible {
-                    self.broadcast_mgr.send_msg_to_player(member.guid, msg.clone());
+                    self.broadcast_mgr
+                        .send_msg_to_player(member.guid, msg.clone());
                 }
             }
         }
@@ -1904,11 +1911,7 @@ impl GroupSystem {
             let self_arc = Arc::clone(&self_arc);
             tokio::spawn(async move {
                 if let Err(e) = Self::reassign_offline_leader(&self_arc, &world, group_id).await {
-                    tracing::warn!(
-                        "Failed to reassign leader for group {}: {:?}",
-                        group_id,
-                        e
-                    );
+                    tracing::warn!("Failed to reassign leader for group {}: {:?}", group_id, e);
                 }
             });
         }
@@ -1937,7 +1940,9 @@ impl GroupSystem {
             }
         };
 
-        self_arc.apply_new_leader(world, group_id, new_leader, true).await
+        self_arc
+            .apply_new_leader(world, group_id, new_leader, true)
+            .await
     }
 
     pub async fn shutdown(&self) -> Result<()> {

@@ -461,7 +461,9 @@ impl InstanceMgr {
         {
             let mut player_bindings = self.player_bindings.write();
             if let Some(bindings) = player_bindings.remove(&old_leader) {
-                let entry = player_bindings.entry(new_leader).or_insert_with(HashMap::new);
+                let entry = player_bindings
+                    .entry(new_leader)
+                    .or_insert_with(HashMap::new);
                 for (map_id, binding) in bindings {
                     entry.insert(map_id, binding);
                 }

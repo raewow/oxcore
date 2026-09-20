@@ -128,7 +128,10 @@ mod tests {
         assert!(!roll.all_voted());
         assert!(roll.has_need());
 
-        assert!(!roll.add_vote(guid(1), RollVote::Pass), "double vote rejected");
+        assert!(
+            !roll.add_vote(guid(1), RollVote::Pass),
+            "double vote rejected"
+        );
         assert!(roll.add_vote(guid(3), RollVote::Pass));
         assert!(roll.all_voted());
 
