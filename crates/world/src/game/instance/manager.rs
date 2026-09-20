@@ -7,10 +7,17 @@ use oxcore_shared::game::instance::{
 };
 use oxcore_shared::protocol::ObjectGuid;
 use parking_lot::RwLock;
-use sqlx::Row;
+use sqlx::{PgConnection, Row};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const PLAYER_BINDINGS_QUERY: &str = "SELECT i.map, b.instance, b.permanent, i.reset_time
+     FROM characters.character_instance b JOIN characters.instance i ON i.id = b.instance
+     WHERE b.guid = $1";
+const GROUP_BINDINGS_QUERY: &str = "SELECT i.map, b.instance, b.permanent, i.reset_time
+     FROM characters.group_instance b JOIN characters.instance i ON i.id = b.instance
+     WHERE b.leader_guid = $1";
 
 /// Instance manager - handles all instance operations
 pub struct InstanceMgr {
@@ -18,8 +25,8 @@ pub struct InstanceMgr {
     instances: Arc<RwLock<HashMap<(u32, u32), Arc<RwLock<InstanceState>>>>>,
     /// Player bindings (player_guid -> map_id -> binding)
     player_bindings: Arc<RwLock<HashMap<ObjectGuid, HashMap<u32, InstanceBinding>>>>,
-    /// Group bindings (group_id -> map_id -> binding)
-    group_bindings: Arc<RwLock<HashMap<u32, HashMap<u32, InstanceBinding>>>>,
+    /// Group bindings (leader_guid -> map_id -> binding), separate from personal saves.
+    group_bindings: Arc<RwLock<HashMap<ObjectGuid, HashMap<u32, InstanceBinding>>>>,
     /// Next instance ID per map
     next_instance_ids: Arc<RwLock<HashMap<u32, u32>>>,
     /// Instances that need reset warnings (map_id, instance_id) -> last warning sent
@@ -304,10 +311,10 @@ impl InstanceMgr {
         &self,
         databases: &Databases,
         leader_guid: ObjectGuid,
-        _map_id: u32,
+        map_id: u32,
         instance_id: u32,
         permanent: bool,
-        _reset_time: u64,
+        reset_time: u64,
     ) -> Result<()> {
         // Save to database (uses leader_guid as per vanilla schema)
         sqlx::query::<sqlx::Postgres>(
@@ -320,8 +327,19 @@ impl InstanceMgr {
         .await
         .context("Failed to bind group to instance")?;
 
-        // Note: We don't cache group bindings by group_id since schema uses leader_guid
-        // Groups will load bindings from their leader's bindings
+        self.group_bindings
+            .write()
+            .entry(leader_guid)
+            .or_default()
+            .insert(
+                map_id,
+                InstanceBinding {
+                    map_id,
+                    instance_id,
+                    permanent,
+                    reset_time,
+                },
+            );
 
         Ok(())
     }
@@ -342,133 +360,148 @@ impl InstanceMgr {
         leader_guid: ObjectGuid,
         map_id: u32,
     ) -> Option<InstanceBinding> {
-        // Group bindings are stored by leader GUID in vanilla schema
-        self.get_player_binding(leader_guid, map_id)
+        self.group_bindings
+            .read()
+            .get(&leader_guid)?
+            .get(&map_id)
+            .cloned()
+    }
+
+    /// Remove a group save without touching any member's personal binding.
+    pub async fn unbind_group_from_instance(
+        &self,
+        databases: &Databases,
+        leader_guid: ObjectGuid,
+        map_id: u32,
+        instance_id: u32,
+    ) -> Result<()> {
+        sqlx::query(
+            "DELETE FROM characters.group_instance WHERE leader_guid = $1 AND instance = $2",
+        )
+        .bind(i64::from(leader_guid.low()))
+        .bind(i64::from(instance_id))
+        .execute(&databases.character)
+        .await
+        .context("Failed to unbind group from instance")?;
+        if let Some(bindings) = self.group_bindings.write().get_mut(&leader_guid) {
+            if bindings
+                .get(&map_id)
+                .is_some_and(|binding| binding.instance_id == instance_id)
+            {
+                bindings.remove(&map_id);
+            }
+        }
+        Ok(())
+    }
+
+    /// Forget a disbanded group's cache after its database rows have been removed.
+    pub fn unload_group_bindings(&self, leader_guid: ObjectGuid) {
+        self.group_bindings.write().remove(&leader_guid);
     }
 
     /// Transfer a group's instance bindings from the old leader to the new one,
     /// mirroring `Group::_setLeader` (reference `Group.cpp:1710-1786`).
     ///
-    /// Group bindings are keyed by leader GUID in the vanilla schema, and the in-memory
-    /// `player_bindings` cache stores them under that same key, so the cache entry is
-    /// re-keyed here too.
+    /// Publish the new group cache only after the database transfer commits. Personal
+    /// saves remain with their owners, except for the reference's explicit handoff
+    /// of a replaced group save and conversion of the new leader's temporary saves.
     pub async fn transfer_group_bindings(
         &self,
         databases: &Databases,
         old_leader: ObjectGuid,
         new_leader: ObjectGuid,
     ) -> Result<()> {
+        if old_leader == new_leader {
+            return Ok(());
+        }
         let old_low = i64::from(old_leader.low());
         let new_low = i64::from(new_leader.low());
-
-        // 1. Delete the group's permanent binds and any bind the new leader already holds
-        //    personally (those get replaced by the new leader's permanent binds below).
-        sqlx::query::<sqlx::Postgres>(
-            r#"DELETE FROM characters.group_instance
-               WHERE leader_guid = $1 AND (permanent = 1 OR instance IN
-                 (SELECT instance FROM characters.character_instance WHERE guid = $2))"#,
+        let mut transaction = databases.character.begin().await?;
+        let group_id: i64 = sqlx::query_scalar(
+            "SELECT group_id FROM characters.groups WHERE leader_guid = $1 FOR UPDATE",
         )
         .bind(old_low)
-        .bind(new_low)
-        .execute(&databases.character)
+        .fetch_one(&mut *transaction)
         .await
-        .context("Failed to delete group bindings on leader change")?;
+        .context("Failed to find group for instance binding transfer")?;
+        let old_group =
+            Self::read_bindings(&mut transaction, GROUP_BINDINGS_QUERY, old_leader).await?;
+        let mut old_personal =
+            Self::read_bindings(&mut transaction, PLAYER_BINDINGS_QUERY, old_leader).await?;
+        let new_personal =
+            Self::read_bindings(&mut transaction, PLAYER_BINDINGS_QUERY, new_leader).await?;
+        let mut new_group = HashMap::new();
 
-        // 2. For each remaining non-permanent group bind the new leader already holds
-        //    personally, give the group's save to the old leader if they have none, then
-        //    drop the group row.
-        let rows = sqlx::query::<sqlx::Postgres>(
-            r#"SELECT instance FROM characters.group_instance WHERE leader_guid = $1"#,
-        )
-        .bind(old_low)
-        .fetch_all(&databases.character)
-        .await
-        .context("Failed to query remaining group bindings")?;
-
-        for row in rows {
-            let instance_id: i64 = row.get(0);
-
-            let new_has_personal = sqlx::query::<sqlx::Postgres>(
-                r#"SELECT 1 FROM characters.character_instance WHERE guid = $1 AND instance = $2"#,
-            )
-            .bind(new_low)
-            .bind(instance_id)
-            .fetch_optional(&databases.character)
-            .await
-            .context("Failed to check new leader personal bind")?;
-
-            if new_has_personal.is_none() {
+        for (map_id, binding) in old_group {
+            // The new leader supplies permanent group saves. Uncontested
+            // temporary group saves follow the group to its new leader.
+            if binding.permanent {
                 continue;
             }
-
-            let old_has_personal = sqlx::query::<sqlx::Postgres>(
-                r#"SELECT 1 FROM characters.character_instance WHERE guid = $1 AND instance = $2"#,
-            )
-            .bind(old_low)
-            .bind(instance_id)
-            .fetch_optional(&databases.character)
-            .await
-            .context("Failed to check old leader personal bind")?;
-
-            if old_has_personal.is_none() {
-                sqlx::query::<sqlx::Postgres>(
-                    r#"INSERT INTO characters.character_instance (guid, instance, permanent, extend)
-                       SELECT $1, instance, permanent, 0 FROM characters.group_instance
-                       WHERE leader_guid = $2 AND instance = $3"#,
+            if !new_personal.contains_key(&map_id) {
+                new_group.insert(map_id, binding);
+            } else if !old_personal.contains_key(&map_id) {
+                // A personal save for this map replaces the group copy, even
+                // when it refers to a different instance of the same map.
+                sqlx::query(
+                    "INSERT INTO characters.character_instance (guid, instance, permanent, extend) VALUES ($1, $2, 0, 0)",
                 )
                 .bind(old_low)
-                .bind(old_low)
-                .bind(instance_id)
-                .execute(&databases.character)
+                .bind(i64::from(binding.instance_id))
+                .execute(&mut *transaction)
                 .await
                 .context("Failed to hand group save to old leader")?;
+                old_personal.insert(map_id, binding);
             }
+        }
+        new_group.extend(new_personal.clone());
 
-            sqlx::query::<sqlx::Postgres>(
-                r#"DELETE FROM characters.group_instance WHERE leader_guid = $1 AND instance = $2"#,
-            )
+        // group_instance references groups.leader_guid without ON UPDATE CASCADE.
+        // Remove the old rows, change the leader, then restore the group's saves
+        // in the same transaction so the foreign key is valid throughout.
+        sqlx::query("DELETE FROM characters.group_instance WHERE leader_guid = $1")
             .bind(old_low)
-            .bind(instance_id)
-            .execute(&databases.character)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("UPDATE characters.groups SET leader_guid = $1 WHERE group_id = $2")
+            .bind(new_low)
+            .bind(group_id)
+            .execute(&mut *transaction)
             .await
-            .context("Failed to delete replaced group bind")?;
+            .context("Failed to change instance binding owner")?;
+        for binding in new_group.values() {
+            sqlx::query(
+                "INSERT INTO characters.group_instance (leader_guid, instance, permanent) VALUES ($1, $2, $3)",
+            )
+            .bind(new_low)
+            .bind(i64::from(binding.instance_id))
+            .bind(i16::from(binding.permanent))
+            .execute(&mut *transaction)
+            .await?;
         }
+        // ConvertInstancesToGroup preserves permanent personal locks, while
+        // temporary personal saves become group-owned.
+        sqlx::query("DELETE FROM characters.character_instance WHERE guid = $1 AND permanent = 0")
+            .bind(new_low)
+            .execute(&mut *transaction)
+            .await?;
+        transaction
+            .commit()
+            .await
+            .context("Failed to commit group binding transfer")?;
 
-        // 3. Move the remaining group binds to the new leader.
-        sqlx::query::<sqlx::Postgres>(
-            r#"UPDATE characters.group_instance SET leader_guid = $1 WHERE leader_guid = $2"#,
-        )
-        .bind(new_low)
-        .bind(old_low)
-        .execute(&databases.character)
-        .await
-        .context("Failed to transfer group bindings to new leader")?;
-
-        // 4. Copy the new leader's permanent personal binds into the group.
-        sqlx::query::<sqlx::Postgres>(
-            r#"INSERT INTO characters.group_instance (leader_guid, instance, permanent)
-               SELECT $1, instance, permanent FROM characters.character_instance
-               WHERE guid = $1 AND permanent = 1
-               ON CONFLICT (leader_guid, instance) DO UPDATE SET permanent = EXCLUDED.permanent"#,
-        )
-        .bind(new_low)
-        .execute(&databases.character)
-        .await
-        .context("Failed to copy new leader permanent binds to group")?;
-
-        // Cache detail: group binds live in player_bindings keyed by the leader GUID.
-        // Re-key (merge, so a cached personal entry for the new leader is preserved).
-        {
-            let mut player_bindings = self.player_bindings.write();
-            if let Some(bindings) = player_bindings.remove(&old_leader) {
-                let entry = player_bindings
-                    .entry(new_leader)
-                    .or_insert_with(HashMap::new);
-                for (map_id, binding) in bindings {
-                    entry.insert(map_id, binding);
-                }
-            }
-        }
+        let mut groups = self.group_bindings.write();
+        let mut players = self.player_bindings.write();
+        groups.remove(&old_leader);
+        groups.insert(new_leader, new_group);
+        players.insert(old_leader, old_personal);
+        players.insert(
+            new_leader,
+            new_personal
+                .into_iter()
+                .filter(|(_, binding)| binding.permanent)
+                .collect(),
+        );
 
         Ok(())
     }
@@ -549,45 +582,9 @@ impl InstanceMgr {
         databases: &Databases,
         player_guid: ObjectGuid,
     ) -> Result<HashMap<u32, InstanceBinding>> {
-        let rows = sqlx::query::<sqlx::Postgres>(
-            r#"SELECT instance, permanent FROM characters.character_instance WHERE guid = $1"#,
-        )
-        .bind(i64::from(player_guid.low()))
-        .fetch_all(&databases.character)
-        .await
-        .context("Failed to query player instance bindings")?;
-
-        let mut bindings = HashMap::new();
-        for row in rows {
-            let instance_id = row.get::<i64, _>(0) as u32;
-            let permanent = row.get::<i16, _>(1);
-
-            // Load instance to get map_id and reset_time
-            // TODO: This is inefficient, should join with instance table
-            // For now, we'll need to query instance table separately
-            let instance_row = sqlx::query::<sqlx::Postgres>(
-                r#"SELECT map, reset_time FROM characters.instance WHERE id = $1"#,
-            )
-            .bind(i64::from(instance_id))
-            .fetch_optional(&databases.character)
-            .await
-            .context("Failed to query instance")?;
-
-            if let Some(inst_row) = instance_row {
-                let map_id = inst_row.get::<i64, _>(0) as u32;
-                let reset_time: i64 = inst_row.get(1);
-
-                bindings.insert(
-                    map_id,
-                    InstanceBinding {
-                        map_id,
-                        instance_id,
-                        permanent: permanent != 0,
-                        reset_time: reset_time as u64,
-                    },
-                );
-            }
-        }
+        let mut connection = databases.character.acquire().await?;
+        let bindings =
+            Self::read_bindings(&mut connection, PLAYER_BINDINGS_QUERY, player_guid).await?;
 
         // Update cache
         {
@@ -604,52 +601,41 @@ impl InstanceMgr {
         databases: &Databases,
         leader_guid: ObjectGuid,
     ) -> Result<HashMap<u32, InstanceBinding>> {
-        // Group bindings use leader_guid in vanilla schema
-        let rows = sqlx::query::<sqlx::Postgres>(
-            r#"SELECT instance, permanent FROM characters.group_instance WHERE leader_guid = $1"#,
-        )
-        .bind(i64::from(leader_guid.low()))
-        .fetch_all(&databases.character)
-        .await
-        .context("Failed to query group instance bindings")?;
+        let mut connection = databases.character.acquire().await?;
+        let bindings =
+            Self::read_bindings(&mut connection, GROUP_BINDINGS_QUERY, leader_guid).await?;
 
-        let mut bindings = HashMap::new();
-        for row in rows {
-            let instance_id = row.get::<i64, _>(0) as u32;
-            let permanent = row.get::<i16, _>(1);
+        self.group_bindings
+            .write()
+            .insert(leader_guid, bindings.clone());
 
-            // Load instance to get map_id and reset_time
-            let instance_row = sqlx::query::<sqlx::Postgres>(
-                r#"SELECT map, reset_time FROM characters.instance WHERE id = $1"#,
-            )
-            .bind(i64::from(instance_id))
-            .fetch_optional(&databases.character)
+        Ok(bindings)
+    }
+
+    async fn read_bindings(
+        connection: &mut PgConnection,
+        query: &str,
+        owner: ObjectGuid,
+    ) -> Result<HashMap<u32, InstanceBinding>> {
+        let rows = sqlx::query_as::<_, (i64, i64, i16, i64)>(query)
+            .bind(i64::from(owner.low()))
+            .fetch_all(connection)
             .await
-            .context("Failed to query instance")?;
-
-            if let Some(inst_row) = instance_row {
-                let map_id = inst_row.get::<i64, _>(0) as u32;
-                let reset_time: i64 = inst_row.get(1);
-
-                bindings.insert(
+            .context("Failed to query instance bindings")?;
+        rows.into_iter()
+            .map(|(map_id, instance_id, permanent, reset_time)| {
+                let map_id = u32::try_from(map_id)?;
+                Ok((
                     map_id,
                     InstanceBinding {
                         map_id,
-                        instance_id,
+                        instance_id: u32::try_from(instance_id)?,
                         permanent: permanent != 0,
                         reset_time: reset_time as u64,
                     },
-                );
-            }
-        }
-
-        // Update cache (store by leader GUID)
-        {
-            let mut player_bindings = self.player_bindings.write();
-            player_bindings.insert(leader_guid, bindings.clone());
-        }
-
-        Ok(bindings)
+                ))
+            })
+            .collect()
     }
 
     /// Get or create instance for a player/group
@@ -1008,11 +994,6 @@ impl InstanceMgr {
         player_guid: ObjectGuid,
         get_players_in_instance: impl Fn(u32, u32) -> Vec<ObjectGuid>,
     ) -> (Vec<u32>, Vec<(u32, super::InstanceResetFailReason)>) {
-        use super::InstanceResetFailReason;
-
-        let mut success_map_ids = Vec::new();
-        let mut failed_map_ids = Vec::new();
-
         // Get all player bindings
         let bindings = {
             let player_bindings = self.player_bindings.read();
@@ -1021,6 +1002,22 @@ impl InstanceMgr {
                 .cloned()
                 .unwrap_or_default()
         };
+
+        self.reset_bound_instances(databases, player_guid, bindings, get_players_in_instance)
+            .await
+    }
+
+    async fn reset_bound_instances(
+        &self,
+        databases: &Databases,
+        requester_guid: ObjectGuid,
+        bindings: HashMap<u32, InstanceBinding>,
+        get_players_in_instance: impl Fn(u32, u32) -> Vec<ObjectGuid>,
+    ) -> (Vec<u32>, Vec<(u32, super::InstanceResetFailReason)>) {
+        use super::InstanceResetFailReason;
+
+        let mut success_map_ids = Vec::new();
+        let mut failed_map_ids = Vec::new();
 
         for (map_id, binding) in bindings {
             // Skip permanent instances (raids)
@@ -1032,7 +1029,7 @@ impl InstanceMgr {
             let players = get_players_in_instance(map_id, binding.instance_id);
             if !players.is_empty() {
                 // Check if it's the player themselves zoning
-                if players.len() == 1 && players[0] == player_guid {
+                if players.len() == 1 && players[0] == requester_guid {
                     failed_map_ids.push((map_id, InstanceResetFailReason::Zoning));
                 } else {
                     failed_map_ids.push((map_id, InstanceResetFailReason::Offline));
@@ -1051,9 +1048,9 @@ impl InstanceMgr {
                 .await
             {
                 tracing::warn!(
-                    "Failed to reset instance {} for player {}: {}",
+                    "Failed to reset instance {} for requester {}: {}",
                     binding.instance_id,
-                    player_guid,
+                    requester_guid,
                     e
                 );
                 failed_map_ids.push((map_id, InstanceResetFailReason::General));
@@ -1074,9 +1071,13 @@ impl InstanceMgr {
         leader_guid: ObjectGuid,
         get_players_in_instance: impl Fn(u32, u32) -> Vec<ObjectGuid>,
     ) -> (Vec<u32>, Vec<(u32, super::InstanceResetFailReason)>) {
-        // In vanilla schema, group bindings are stored by leader GUID
-        // So we can reuse the player instance reset logic
-        self.reset_player_instances(databases, leader_guid, get_players_in_instance)
+        let bindings = self
+            .group_bindings
+            .read()
+            .get(&leader_guid)
+            .cloned()
+            .unwrap_or_default();
+        self.reset_bound_instances(databases, leader_guid, bindings, get_players_in_instance)
             .await
     }
 
@@ -1108,3 +1109,6 @@ impl Default for InstanceMgr {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests;

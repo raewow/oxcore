@@ -447,7 +447,7 @@ impl GroupSystem {
                         .get_player_binding(remaining.guid, map_id)
                         .is_some();
                     if !binding.permanent && !has_personal {
-                        if let Err(e) = world
+                        match world
                             .managers
                             .instance_mgr
                             .bind_player_to_instance(
@@ -460,23 +460,32 @@ impl GroupSystem {
                             )
                             .await
                         {
-                            tracing::warn!(
+                            Err(e) => tracing::warn!(
                                 "Failed to inherit instance {} to {:?} on group {} disband: {}",
                                 binding.instance_id,
                                 remaining.guid,
                                 group_id,
                                 e
-                            );
+                            ),
+                            Ok(()) => {
+                                if let Err(e) = world
+                                    .managers
+                                    .instance_mgr
+                                    .unbind_group_from_instance(
+                                        &world.databases,
+                                        group.leader_guid,
+                                        map_id,
+                                        binding.instance_id,
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        "Failed to release inherited group instance binding: {}",
+                                        e
+                                    );
+                                }
+                            }
                         }
-
-                        let _ = sqlx::query::<sqlx::Postgres>(
-                            r#"DELETE FROM characters.group_instance
-                               WHERE leader_guid = $1 AND instance = $2"#,
-                        )
-                        .bind(i64::from(group.leader_guid.low()))
-                        .bind(i64::from(binding.instance_id))
-                        .execute(&world.databases.character)
-                        .await;
                     }
                 }
             }
@@ -521,6 +530,10 @@ impl GroupSystem {
             .delete_group(group_id)
             .await
             .map_err(|e| GroupError::Internal(e.to_string()))?;
+        world
+            .managers
+            .instance_mgr
+            .unload_group_bindings(group.leader_guid);
 
         // Notify all members
         use oxcore_shared::messages::group::SmsgGroupDestroyed;
@@ -884,7 +897,9 @@ impl GroupSystem {
             // If the leader left and members remain, pick a replacement online member.
             if was_leader && group.member_count() > 0 {
                 let player_mgr = Arc::clone(&self.player_mgr);
-                group.select_new_leader(|guid| player_mgr.get_player(guid).is_some(), false)
+                group
+                    .clone()
+                    .select_new_leader(|guid| player_mgr.get_player(guid).is_some(), false)
             } else {
                 None
             }
@@ -947,40 +962,29 @@ impl GroupSystem {
         new_leader: ObjectGuid,
         announce: bool,
     ) -> Result<(), GroupError> {
-        let old_leader;
+        let old_leader = {
+            let group = self.groups.get(&group_id).ok_or(GroupError::NotInGroup)?;
+            if !group.has_member(new_leader) {
+                return Err(GroupError::MemberNotFound);
+            }
+            group.leader_guid
+        };
+        // The manager transfers bindings and their leader foreign key together.
+        // Keep the live group on its old leader if that transaction fails.
+        world
+            .managers
+            .instance_mgr
+            .transfer_group_bindings(&world.databases, old_leader, new_leader)
+            .await
+            .map_err(|e| GroupError::Internal(e.to_string()))?;
         {
             let mut group = self
                 .groups
                 .get_mut(&group_id)
                 .ok_or(GroupError::NotInGroup)?;
 
-            old_leader = group.leader_guid;
             group.promote_new_leader(new_leader)?;
             group.leader_last_online = now_secs();
-
-            let group_row = self.group_to_row(&group);
-            drop(group);
-
-            // Transfer the group's instance bindings to the new leader (2d), before persisting.
-            if let Err(e) = world
-                .managers
-                .instance_mgr
-                .transfer_group_bindings(&world.databases, old_leader, new_leader)
-                .await
-            {
-                tracing::warn!(
-                    "Failed to transfer group {} instance bindings {:?} -> {:?}: {}",
-                    group_id,
-                    old_leader,
-                    new_leader,
-                    e
-                );
-            }
-
-            self.repository
-                .save_group(&group_row)
-                .await
-                .map_err(|e| GroupError::Internal(e.to_string()))?;
         }
 
         if announce {
@@ -1934,7 +1938,10 @@ impl GroupSystem {
                 return Err(GroupError::NotInGroup);
             }
             let player_mgr = Arc::clone(&self_arc.player_mgr);
-            match group.select_new_leader(|guid| player_mgr.get_player(guid).is_some(), true) {
+            match group
+                .clone()
+                .select_new_leader(|guid| player_mgr.get_player(guid).is_some(), true)
+            {
                 Some(guid) => guid,
                 None => return Ok(()),
             }
