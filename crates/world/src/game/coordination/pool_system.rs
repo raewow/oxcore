@@ -177,10 +177,6 @@ impl PoolSystem {
         instance_id: u32,
         world: &World,
     ) -> Option<ObjectGuid> {
-        if world.managers.creature_mgr.has_spawn(spawn_id) {
-            return None; // Already in the world
-        }
-
         let spawn = world.managers.creature_mgr.get_spawn_data_by_id(spawn_id)?;
 
         // Not loaded yet: the grid system spawns it when players come near.
@@ -228,10 +224,6 @@ impl PoolSystem {
         instance_id: u32,
         world: &World,
     ) -> Option<ObjectGuid> {
-        if world.managers.gameobject_mgr.has_spawn(spawn_id) {
-            return None;
-        }
-
         let spawn = world
             .managers
             .gameobject_mgr
@@ -245,7 +237,10 @@ impl PoolSystem {
             .managers
             .map_mgr
             .get_or_create_map(spawn.map_id, instance_id);
-        let guid = world.managers.gameobject_mgr.spawn_gameobject(&spawn)?;
+        let guid = world
+            .managers
+            .gameobject_mgr
+            .spawn_gameobject(&spawn, instance_id)?;
 
         map.add_gameobject(guid, spawn.position);
 

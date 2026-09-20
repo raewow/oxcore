@@ -14,9 +14,9 @@ const MAX_GRIDS_PER_TICK: usize = 3;
 /// GridSystem coordinates grid loading/unloading across maps
 #[derive(Clone)]
 pub struct GridSystem {
-    /// Track grids currently being loaded asynchronously (map_id, grid_x, grid_y) -> task handle
+    /// Track grids currently being loaded asynchronously (map_id, instance_id, grid_x, grid_y) -> task handle
     /// This prevents duplicate load requests and allows checking load status
-    loading_grids: Arc<DashMap<(u32, u8, u8), tokio::task::JoinHandle<()>>>,
+    loading_grids: Arc<DashMap<(u32, u32, u8, u8), tokio::task::JoinHandle<()>>>,
 }
 
 impl GridSystem {
@@ -200,7 +200,11 @@ impl GridSystem {
         // Spawn creatures
         for spawn in spawns {
             // Skip if already spawned (respawn case)
-            if world.managers.creature_mgr.has_spawn(spawn.spawn_id) {
+            if world
+                .managers
+                .creature_mgr
+                .has_spawn(map_id, map.instance_id(), spawn.spawn_id)
+            {
                 continue;
             }
 
@@ -235,7 +239,11 @@ impl GridSystem {
             .get_spawns_for_grid(map_id, grid_x, grid_y);
 
         for go_spawn in go_spawns {
-            if world.managers.gameobject_mgr.has_spawn(go_spawn.spawn_id) {
+            if world
+                .managers
+                .gameobject_mgr
+                .has_spawn(map_id, map.instance_id(), go_spawn.spawn_id)
+            {
                 continue;
             }
 
@@ -247,7 +255,11 @@ impl GridSystem {
                 continue;
             }
 
-            if let Some(guid) = world.managers.gameobject_mgr.spawn_gameobject(&go_spawn) {
+            if let Some(guid) = world
+                .managers
+                .gameobject_mgr
+                .spawn_gameobject(&go_spawn, map.instance_id())
+            {
                 world.systems.pool.on_gameobject_spawned(
                     go_spawn.spawn_id,
                     map.instance_id(),
@@ -594,7 +606,7 @@ impl GridSystem {
 
         // Spawn background task for each grid
         for (grid_x, grid_y) in grids_to_load {
-            let key = (map_id, grid_x, grid_y);
+            let key = (map_id, instance_id, grid_x, grid_y);
 
             // Skip if already loading
             if self.loading_grids.contains_key(&key) {
@@ -775,6 +787,82 @@ mod tests {
         g as f32 * GRID_SIZE - MAP_HALF_SIZE
     }
 
+    #[tokio::test]
+    async fn db_creature_spawns_are_isolated_between_instances() {
+        let world = test_world();
+        let manager = &world.managers.creature_mgr;
+        manager.add_template(template(70));
+        let spawn = CreatureSpawnData::new(1, 70, 36, pos(100.0, 100.0), 300);
+        let a = world.managers.map_mgr.get_or_create_map(36, 1);
+        let b = world.managers.map_mgr.get_or_create_map(36, 2);
+        let first = manager.spawn_into_map(&spawn, &a, None).unwrap();
+        let second = manager.spawn_into_map(&spawn, &b, None).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(manager.with_creature(first, |c| c.instance_id), Some(1));
+        assert_eq!(manager.with_creature(second, |c| c.instance_id), Some(2));
+        assert!(manager.spawn_into_map(&spawn, &a, None).is_none());
+        assert!(manager.spawn_into_map(&spawn, &b, None).is_none());
+
+        a.remove_creature(first, spawn.position);
+        manager.remove_creature(first);
+        assert!(!manager.has_spawn(36, 1, 1));
+        assert!(manager.has_spawn(36, 2, 1));
+        assert!(manager.spawn_into_map(&spawn, &a, None).is_some());
+        assert!(manager.spawn_into_map(&spawn, &b, None).is_none());
+        assert!(b
+            .get_objects_in_range(spawn.position, 5.0)
+            .contains(&second));
+
+        let summon = CreatureSpawnData::new(0, 70, 36, spawn.position, 0);
+        assert!(manager.spawn_into_map(&summon, &a, None).is_some());
+        assert!(manager.spawn_into_map(&summon, &a, None).is_some());
+    }
+
+    #[tokio::test]
+    async fn db_gameobject_spawns_are_isolated_between_instances() {
+        use crate::game::gameobject::{GameObjectSpawnData, GameObjectTemplate};
+
+        let world = test_world();
+        let manager = &world.managers.gameobject_mgr;
+        manager.add_template_for_test(GameObjectTemplate {
+            entry: 70,
+            go_type: 3,
+            display_id: 1,
+            name: "chest".into(),
+            icon_name: String::new(),
+            cast_bar_caption: String::new(),
+            faction: 0,
+            flags: 0,
+            size: 1.0,
+            data: [0; 24],
+        });
+        let spawn = GameObjectSpawnData {
+            spawn_id: 1,
+            entry: 70,
+            map_id: 36,
+            position: pos(100.0, 100.0),
+            rotation0: 0.0,
+            rotation1: 0.0,
+            rotation2: 0.0,
+            rotation3: 1.0,
+            spawntimesecs: 300,
+            animprogress: 0,
+            state: 1,
+        };
+        let first = manager.spawn_gameobject(&spawn, 1).unwrap();
+        let second = manager.spawn_gameobject(&spawn, 2).unwrap();
+        assert_ne!(first, second);
+        assert!(manager.spawn_gameobject(&spawn, 1).is_none());
+        assert!(manager.spawn_gameobject(&spawn, 2).is_none());
+
+        manager.remove_gameobject(first);
+        assert!(!manager.has_spawn(36, 1, 1));
+        assert!(manager.has_spawn(36, 2, 1));
+        assert!(manager.spawn_gameobject(&spawn, 1).is_some());
+        assert!(manager.spawn_gameobject(&spawn, 2).is_none());
+        assert!(manager.get_gameobject(second).is_some());
+    }
+
     /// A player standing near a grid boundary must get the creatures on the other
     /// side of it, not just the ones in the grid they are standing in.
     #[tokio::test]
@@ -807,11 +895,11 @@ mod tests {
             .expect("grid processing");
 
         assert!(
-            world.managers.creature_mgr.has_spawn(1),
+            world.managers.creature_mgr.has_spawn(0, 0, 1),
             "spawn in the player's own grid was not loaded"
         );
         assert!(
-            world.managers.creature_mgr.has_spawn(2),
+            world.managers.creature_mgr.has_spawn(0, 0, 2),
             "spawn in the neighbouring grid was not loaded"
         );
     }

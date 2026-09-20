@@ -11,7 +11,7 @@ use super::movement::generators::{RandomMovementGenerator, WaypointMovementGener
 use super::movement::WaypointManager;
 use super::{Creature, CreatureSpawnData};
 use crate::core::common::compress_update_packet_if_needed;
-use crate::game::common::spawn_index::{build_grid_index, SpawnGridIndex};
+use crate::game::common::spawn_index::{build_grid_index, SpawnGridIndex, SpawnKey};
 use crate::map::grid_coords::world_to_grid;
 use oxcore_db::database::world::repositories::CreatureRepository;
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -223,10 +223,10 @@ pub struct CreatureManager {
     /// map_id -> grid -> indices into `spawns_by_map[map_id]`. Built once by
     /// `load_spawns`; `spawns_by_map` is append-only afterwards.
     spawn_grid_index: DashMap<u32, SpawnGridIndex>,
-    /// Track spawn states by spawn_id
-    spawn_states: DashMap<u32, SpawnState>,
-    /// Track which creature GUID belongs to which spawn_id
-    guid_to_spawn: DashMap<ObjectGuid, u32>,
+    /// Track occupancy independently for each map instance.
+    spawn_states: DashMap<SpawnKey, SpawnState>,
+    /// Track the owning spawn and instance for each creature GUID
+    guid_to_spawn: DashMap<ObjectGuid, SpawnKey>,
     /// GUID counter
     next_guid: AtomicU64,
     /// Current game patch for filtering spawns (e.g., 10 for patch 1.10)
@@ -427,9 +427,9 @@ impl CreatureManager {
     }
 
     /// Check if a spawn is already active
-    pub fn has_spawn(&self, spawn_id: u32) -> bool {
+    pub fn has_spawn(&self, map_id: u32, instance_id: u32, spawn_id: u32) -> bool {
         self.spawn_states
-            .get(&spawn_id)
+            .get(&SpawnKey::new(map_id, instance_id, spawn_id))
             .map(|s| s.spawned)
             .unwrap_or(false)
     }
@@ -850,13 +850,21 @@ impl CreatureManager {
     /// Private on purpose: a creature that is not also placed on a `Map` is
     /// invisible to range queries. Go through [`Self::spawn_into_map`].
     fn spawn_creature(&self, spawn: &CreatureSpawnData, instance_id: u32) -> Option<ObjectGuid> {
-        // spawn_id == 0 means a transient script-created summon — no dedup check.
-        // For DB spawns (spawn_id > 0) skip if already spawned.
-        if spawn.spawn_id != 0 && self.has_spawn(spawn.spawn_id) {
-            return None;
-        }
-
         let template = self.get_template(spawn.entry)?;
+        let spawn_key = SpawnKey::new(spawn.map_id, instance_id, spawn.spawn_id);
+        // Reserve the DB spawn atomically within this instance. Transient
+        // summons have no DB identity and may coexist in the same map.
+        if spawn.spawn_id != 0 {
+            let mut state = self.spawn_states.entry(spawn_key).or_insert(SpawnState {
+                spawned: false,
+                respawn_time: None,
+            });
+            if state.spawned {
+                return None;
+            }
+            state.spawned = true;
+            state.respawn_time = None;
+        }
         let class_stats = self.get_class_level_stats(template.unit_class, template.min_level);
 
         let counter = self.next_guid.fetch_add(1, Ordering::Relaxed);
@@ -886,14 +894,7 @@ impl CreatureManager {
         // Only track spawn state for DB-backed spawns (spawn_id > 0).
         // Transient script summons (spawn_id == 0) are not tracked for respawn.
         if spawn.spawn_id != 0 {
-            self.spawn_states.insert(
-                spawn.spawn_id,
-                SpawnState {
-                    spawned: true,
-                    respawn_time: None,
-                },
-            );
-            self.guid_to_spawn.insert(guid, spawn.spawn_id);
+            self.guid_to_spawn.insert(guid, spawn_key);
         }
 
         Some(guid)

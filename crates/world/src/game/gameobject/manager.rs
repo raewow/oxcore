@@ -10,7 +10,7 @@ use super::gameobject::{GameObject, GameObjectTemplate};
 use super::spawn::GameObjectSpawnData;
 use super::types::{GOState, GameObjectType, LootState};
 use crate::core::common::compress_update_packet_if_needed;
-use crate::game::common::spawn_index::{build_grid_index, SpawnGridIndex};
+use crate::game::common::spawn_index::{build_grid_index, SpawnGridIndex, SpawnKey};
 use crate::map::grid_coords::world_to_grid;
 use crate::map::pathfinding::vmap::{GameObjectModelSpawn, VMapManager};
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -35,10 +35,10 @@ pub struct GameObjectManager {
     /// map_id -> grid -> indices into `spawns_by_map[map_id]`. Built once by
     /// `load_spawns`; `spawns_by_map` is append-only afterwards.
     spawn_grid_index: DashMap<u32, SpawnGridIndex>,
-    /// Track spawn states by spawn_id
-    spawn_states: DashMap<u32, SpawnState>,
-    /// Track which gameobject GUID belongs to which spawn_id
-    guid_to_spawn: DashMap<ObjectGuid, u32>,
+    /// Track occupancy independently for each map instance.
+    spawn_states: DashMap<SpawnKey, SpawnState>,
+    /// Track the owning spawn and instance for each gameobject GUID
+    guid_to_spawn: DashMap<ObjectGuid, SpawnKey>,
     /// GUID counter
     next_guid: AtomicU64,
     /// Current game patch for filtering spawns
@@ -127,9 +127,9 @@ impl GameObjectManager {
     }
 
     /// Check if a spawn is already active
-    pub fn has_spawn(&self, spawn_id: u32) -> bool {
+    pub fn has_spawn(&self, map_id: u32, instance_id: u32, spawn_id: u32) -> bool {
         self.spawn_states
-            .get(&spawn_id)
+            .get(&SpawnKey::new(map_id, instance_id, spawn_id))
             .map(|s| s.spawned)
             .unwrap_or(false)
     }
@@ -415,13 +415,23 @@ impl GameObjectManager {
 
     /// Spawn a single gameobject from spawn data
     /// Returns the GUID of the spawned gameobject, or None if failed
-    pub fn spawn_gameobject(&self, spawn: &GameObjectSpawnData) -> Option<ObjectGuid> {
-        // Check if already spawned
-        if self.has_spawn(spawn.spawn_id) {
-            return None;
-        }
-
+    pub fn spawn_gameobject(
+        &self,
+        spawn: &GameObjectSpawnData,
+        instance_id: u32,
+    ) -> Option<ObjectGuid> {
         let template = self.get_template(spawn.entry)?;
+        let spawn_key = SpawnKey::new(spawn.map_id, instance_id, spawn.spawn_id);
+        if spawn.spawn_id != 0 {
+            let mut state = self
+                .spawn_states
+                .entry(spawn_key)
+                .or_insert(SpawnState { spawned: false });
+            if state.spawned {
+                return None;
+            }
+            state.spawned = true;
+        }
 
         let counter = self.next_guid.fetch_add(1, Ordering::Relaxed);
         let guid = ObjectGuid::new_gameobject(spawn.entry, counter as u32);
@@ -448,9 +458,9 @@ impl GameObjectManager {
         self.gameobjects.insert(guid, gameobject);
 
         // Track spawn state
-        self.spawn_states
-            .insert(spawn.spawn_id, SpawnState { spawned: true });
-        self.guid_to_spawn.insert(guid, spawn.spawn_id);
+        if spawn.spawn_id != 0 {
+            self.guid_to_spawn.insert(guid, spawn_key);
+        }
 
         Some(guid)
     }

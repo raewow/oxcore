@@ -13,6 +13,24 @@ use std::collections::HashMap;
 use crate::map::grid_coords::world_to_grid;
 use oxcore_shared::protocol::Position;
 
+/// Identity of one database spawn in a particular copy of a map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SpawnKey {
+    pub map_id: u32,
+    pub instance_id: u32,
+    pub spawn_id: u32,
+}
+
+impl SpawnKey {
+    pub fn new(map_id: u32, instance_id: u32, spawn_id: u32) -> Self {
+        Self {
+            map_id,
+            instance_id,
+            spawn_id,
+        }
+    }
+}
+
 /// Spawn list indices bucketed by spatial grid.
 pub type SpawnGridIndex = HashMap<(u8, u8), Vec<u32>>;
 
