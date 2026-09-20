@@ -139,11 +139,12 @@ async fn check_creature_aggro(
 
         if dist_sq <= aggro_range * aggro_range {
             // Check line of sight via VMap (walls, buildings, terrain block aggro)
-            if !world
-                .managers
-                .vmap_mgr
-                .is_in_line_of_sight(map_id, creature_pos, player_pos)
-            {
+            if !world.managers.vmap_mgr.is_in_line_of_sight(
+                map_id,
+                instance_id,
+                creature_pos,
+                player_pos,
+            ) {
                 continue;
             }
 

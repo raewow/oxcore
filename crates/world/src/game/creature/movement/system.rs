@@ -144,12 +144,12 @@ impl MovementSystem {
         }
 
         // Snap Z to terrain height during spline movement to prevent floating/sinking
-        if let Some((map_id, pos)) = world
+        if let Some((map_id, instance_id, pos)) = world
             .managers
             .creature_mgr
             .with_creature_mut(guid, |c| {
                 if c.move_spline.is_active() {
-                    Some((c.map_id, c.position))
+                    Some((c.map_id, c.instance_id, c.position))
                 } else {
                     None
                 }
@@ -160,7 +160,7 @@ impl MovementSystem {
                 world
                     .managers
                     .vmap_mgr
-                    .get_height(map_id, pos.x, pos.y, pos.z + 5.0)
+                    .get_height(map_id, instance_id, pos.x, pos.y, pos.z + 5.0)
             {
                 if (ground_z - pos.z).abs() < 3.0 {
                     world.managers.creature_mgr.with_creature_mut(guid, |c| {
@@ -452,9 +452,9 @@ impl MovementSystem {
                 speed,
                 is_walking,
             } => {
-                // Get creature map_id and compute real start position from active spline
+                // Get the owning map instance and compute real start position from active spline
                 // (the launch computes position from a running spline)
-                let (map_id, real_start) = world
+                let (map_id, instance_id, real_start) = world
                     .managers
                     .creature_mgr
                     .with_creature_mut(guid, |c| {
@@ -465,16 +465,17 @@ impl MovementSystem {
                         } else {
                             c.position
                         };
-                        (c.map_id, start)
+                        (c.map_id, c.instance_id, start)
                     })
-                    .unwrap_or((0, current_pos));
+                    .unwrap_or((0, 0, current_pos));
 
                 // Query pathfinder for a path (VMap LOS -> NavMesh A* -> obstacle avoidance)
-                let path_result =
-                    world
-                        .managers
-                        .pathfinder
-                        .calculate_path(map_id, real_start, destination);
+                let path_result = world.managers.pathfinder.calculate_path(
+                    map_id,
+                    instance_id,
+                    real_start,
+                    destination,
+                );
                 let path_waypoints = path_result.waypoints();
 
                 let final_dest = path_waypoints.last().copied().unwrap_or(destination);

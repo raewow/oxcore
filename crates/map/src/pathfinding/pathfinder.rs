@@ -24,9 +24,15 @@ impl PathFinder {
     /// 1. Try straight line (fastest) - checks LOS and height
     /// 2. Try NavMesh A* pathfinding
     /// 3. Fallback: multi-waypoint obstacle avoidance
-    pub fn calculate_path(&self, map_id: u32, start: Position, end: Position) -> PathResult {
+    pub fn calculate_path(
+        &self,
+        map_id: u32,
+        instance_id: u32,
+        start: Position,
+        end: Position,
+    ) -> PathResult {
         // 1. Try straight line first (fastest)
-        if self.is_clear_path(map_id, start, end) {
+        if self.is_clear_path(map_id, instance_id, start, end) {
             return PathResult::StraightLine(start, end);
         }
 
@@ -35,11 +41,11 @@ impl PathFinder {
 
         match navmesh_result {
             PathResult::Complete(mut waypoints) => {
-                self.smooth_path(map_id, &mut waypoints);
+                self.smooth_path(map_id, instance_id, &mut waypoints);
                 return PathResult::Complete(waypoints);
             }
             PathResult::Partial(mut waypoints) => {
-                self.smooth_path(map_id, &mut waypoints);
+                self.smooth_path(map_id, instance_id, &mut waypoints);
                 return PathResult::Partial(waypoints);
             }
             PathResult::NoPath | PathResult::StraightLine(_, _) => {
@@ -48,15 +54,15 @@ impl PathFinder {
         }
 
         // 3. Fallback: Multi-waypoint obstacle avoidance
-        self.calculate_obstacle_avoidance(map_id, start, end)
+        self.calculate_obstacle_avoidance(map_id, instance_id, start, end)
     }
 
     /// Check if straight line path is clear
-    fn is_clear_path(&self, map_id: u32, start: Position, end: Position) -> bool {
+    fn is_clear_path(&self, map_id: u32, instance_id: u32, start: Position, end: Position) -> bool {
         let vmap = self.mmap_mgr.vmap();
 
         // Line of sight check
-        if !vmap.is_in_line_of_sight(map_id, start, end) {
+        if !vmap.is_in_line_of_sight(map_id, instance_id, start, end) {
             return false;
         }
 
@@ -74,7 +80,9 @@ impl PathFinder {
             let check_y = start.y + (end.y - start.y) * t;
             let expected_z = start.z + (end.z - start.z) * t;
 
-            if let Some(ground_z) = vmap.get_height(map_id, check_x, check_y, expected_z + 10.0) {
+            if let Some(ground_z) =
+                vmap.get_height(map_id, instance_id, check_x, check_y, expected_z + 10.0)
+            {
                 let height_diff = (ground_z - expected_z).abs();
                 if height_diff > 3.0 {
                     return false; // Too steep or gap
@@ -92,6 +100,7 @@ impl PathFinder {
     fn calculate_obstacle_avoidance(
         &self,
         map_id: u32,
+        instance_id: u32,
         start: Position,
         end: Position,
     ) -> PathResult {
@@ -121,14 +130,14 @@ impl PathFinder {
                 x: mid.x + ox,
                 y: mid.y + oy,
                 z: vmap
-                    .get_height(map_id, mid.x + ox, mid.y + oy, mid.z + 10.0)
+                    .get_height(map_id, instance_id, mid.x + ox, mid.y + oy, mid.z + 10.0)
                     .unwrap_or(mid.z),
                 o: 0.0,
             };
 
             // Test if this waypoint creates valid 2-segment path
-            if self.is_clear_path(map_id, start, waypoint)
-                && self.is_clear_path(map_id, waypoint, end)
+            if self.is_clear_path(map_id, instance_id, start, waypoint)
+                && self.is_clear_path(map_id, instance_id, waypoint, end)
             {
                 tracing::debug!(
                     "[PATHFIND] Found obstacle avoidance path via waypoint ({:.1}, {:.1})",
@@ -137,7 +146,7 @@ impl PathFinder {
                 );
 
                 let mut path = vec![start, waypoint, end];
-                self.smooth_path(map_id, &mut path);
+                self.smooth_path(map_id, instance_id, &mut path);
                 return PathResult::Complete(path);
             }
         }
@@ -155,7 +164,7 @@ impl PathFinder {
     }
 
     /// Path smoothing - remove redundant waypoints
-    pub fn smooth_path(&self, map_id: u32, path: &mut Vec<Position>) {
+    pub fn smooth_path(&self, map_id: u32, instance_id: u32, path: &mut Vec<Position>) {
         if path.len() <= 2 {
             return;
         }
@@ -163,7 +172,7 @@ impl PathFinder {
         let mut i = 0;
         while i < path.len().saturating_sub(2) {
             // Can we skip the middle waypoint?
-            if self.is_clear_path(map_id, path[i], path[i + 2]) {
+            if self.is_clear_path(map_id, instance_id, path[i], path[i + 2]) {
                 path.remove(i + 1);
                 // Don't increment i - check again from same position
             } else {

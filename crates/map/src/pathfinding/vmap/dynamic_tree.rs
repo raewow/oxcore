@@ -1,7 +1,7 @@
 //! Collision tree for models that appear and disappear at runtime.
 //!
 //! Spawned gameobjects with collision (doors, bridges, gates) are not part of
-//! the static `.vmtile` geometry, so they live in a per-map dynamic tree that is
+//! the static `.vmtile` geometry, so they live in a per-instance dynamic tree that is
 //! queried alongside the static one.
 
 use parking_lot::RwLock;
@@ -20,7 +20,7 @@ struct DynamicModel {
     enabled: bool,
 }
 
-/// Per-map tree of runtime collision models, keyed by owner id (a GUID).
+/// Per-instance tree of runtime collision models, keyed by owner id (a GUID).
 ///
 /// The tree is rebuilt lazily: mutations only mark it dirty, so a burst of
 /// spawns during grid load costs one rebuild rather than one per model.

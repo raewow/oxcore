@@ -164,9 +164,10 @@ impl GameObjectManager {
     ///
     /// Ported from `GameObject::AddToWorld` → `Map::InsertGameObjectModel`.
     pub fn add_collision_model(&self, guid: ObjectGuid, vmap_mgr: &VMapManager) -> bool {
-        let Some((map_id, spawn, collides)) = self.with_gameobject(guid, |go| {
+        let Some((map_id, instance_id, spawn, collides)) = self.with_gameobject(guid, |go| {
             (
                 go.map_id,
+                go.instance_id,
                 self.collision_model_spawn(go),
                 Self::collision_enabled(go),
             )
@@ -178,19 +179,19 @@ impl GameObjectManager {
             return false;
         };
 
-        vmap_mgr.insert_gameobject_model(map_id, guid.raw(), spawn, collides)
+        vmap_mgr.insert_gameobject_model(map_id, instance_id, guid.raw(), spawn, collides)
     }
 
     /// Remove a gameobject's collision model from the dynamic VMap tree.
     ///
     /// Ported from `GameObject::RemoveFromWorld` → `Map::RemoveGameObjectModel`.
     pub fn remove_collision_model(&self, guid: ObjectGuid, vmap_mgr: &VMapManager) -> bool {
-        // The object may already be gone from the map, so fall back to its GUID's
-        // map id via the tracked entry when available.
-        let map_id = self.with_gameobject(guid, |go| go.map_id);
+        let owner = self.with_gameobject(guid, |go| (go.map_id, go.instance_id));
 
-        match map_id {
-            Some(map_id) => vmap_mgr.remove_gameobject_model(map_id, guid.raw()),
+        match owner {
+            Some((map_id, instance_id)) => {
+                vmap_mgr.remove_gameobject_model(map_id, instance_id, guid.raw())
+            }
             None => false,
         }
     }
@@ -202,13 +203,13 @@ impl GameObjectManager {
     ///
     /// Ported from `GameObject::UpdateCollisionState`.
     pub fn update_collision_state(&self, guid: ObjectGuid, vmap_mgr: &VMapManager) -> bool {
-        let Some((map_id, enabled)) =
-            self.with_gameobject(guid, |go| (go.map_id, Self::collision_enabled(go)))
-        else {
+        let Some((map_id, instance_id, enabled)) = self.with_gameobject(guid, |go| {
+            (go.map_id, go.instance_id, Self::collision_enabled(go))
+        }) else {
             return false;
         };
 
-        vmap_mgr.set_gameobject_model_enabled(map_id, guid.raw(), enabled)
+        vmap_mgr.set_gameobject_model_enabled(map_id, instance_id, guid.raw(), enabled)
     }
 
     /// Rebuild a gameobject's collision model after its display id changed.

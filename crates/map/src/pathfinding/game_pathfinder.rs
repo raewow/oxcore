@@ -29,9 +29,15 @@ impl GamePathFinder {
     }
 
     /// Calculate path (delegates to MMap PathFinder)
-    pub fn calculate_path(&self, map_id: u32, start: Position, end: Position) -> PathResult {
+    pub fn calculate_path(
+        &self,
+        map_id: u32,
+        instance_id: u32,
+        start: Position,
+        end: Position,
+    ) -> PathResult {
         if let Some(ref pathfinder) = self.mmap_pathfinder {
-            pathfinder.calculate_path(map_id, start, end)
+            pathfinder.calculate_path(map_id, instance_id, start, end)
         } else {
             // No MMap - only straight line
             PathResult::StraightLine(start, end)

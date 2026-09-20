@@ -1,5 +1,5 @@
 //! VMapManager - manages VMap loading and spatial queries for world
-//! Simplified from the old world/ VMapManager (no instance_id, Position-based API)
+//! Static geometry is shared; runtime collision belongs to a map instance.
 
 use super::bsp_tree::{BSPModelInstance, BSPTree};
 use super::dynamic_tree::DynamicMapTree;
@@ -53,8 +53,8 @@ pub struct VMapManager {
     loaded_tiles: RwLock<HashMap<u32, HashMap<(u32, u32), MapTileData>>>,
     /// BSP trees per map (map_id -> tree)
     bsp_trees: RwLock<HashMap<u32, Arc<BSPTree>>>,
-    /// Runtime gameobject collision, per map (map_id -> tree)
-    dynamic_trees: RwLock<HashMap<u32, Arc<DynamicMapTree>>>,
+    /// Runtime gameobject collision, keyed by (map_id, instance_id).
+    dynamic_trees: RwLock<HashMap<(u32, u32), Arc<DynamicMapTree>>>,
     /// Collision model file + bounds per GameObjectDisplayInfo display id
     gameobject_models: HashMap<u32, GameObjectModelData>,
 }
@@ -209,8 +209,14 @@ impl VMapManager {
 
     /// Check line of sight between two points.
     /// Returns true if there is a clear line of sight.
-    pub fn is_in_line_of_sight(&self, map_id: u32, from: Position, to: Position) -> bool {
-        self.is_in_line_of_sight_filtered(map_id, from, to, false)
+    pub fn is_in_line_of_sight(
+        &self,
+        map_id: u32,
+        instance_id: u32,
+        from: Position,
+        to: Position,
+    ) -> bool {
+        self.is_in_line_of_sight_filtered(map_id, instance_id, from, to, false)
     }
 
     /// Check line of sight, optionally ignoring M2 doodad geometry.
@@ -219,6 +225,7 @@ impl VMapManager {
     pub fn is_in_line_of_sight_filtered(
         &self,
         map_id: u32,
+        instance_id: u32,
         from: Position,
         to: Position,
         ignore_m2: bool,
@@ -235,7 +242,7 @@ impl VMapManager {
         }
 
         // Spawned gameobjects (closed doors, drawbridges, ...).
-        if let Some(dyn_tree) = self.dynamic_tree(map_id) {
+        if let Some(dyn_tree) = self.dynamic_tree(map_id, instance_id) {
             if dyn_tree.raycast(&from, &to, ignore_m2) {
                 return false;
             }
@@ -246,8 +253,27 @@ impl VMapManager {
 
     /// Get ground height at a position.
     /// Returns None if no valid height found.
-    pub fn get_height(&self, map_id: u32, x: f32, y: f32, z: f32) -> Option<f32> {
-        self.get_height_within(map_id, x, y, z, 50.0)
+    pub fn get_height(&self, map_id: u32, instance_id: u32, x: f32, y: f32, z: f32) -> Option<f32> {
+        self.get_height_within(map_id, instance_id, x, y, z, 50.0)
+    }
+
+    /// Query shared static geometry without consulting any instance's gameobjects.
+    pub fn get_static_height_within(
+        &self,
+        map_id: u32,
+        x: f32,
+        y: f32,
+        z: f32,
+        max_search_dist: f32,
+    ) -> Option<f32> {
+        if !self.config.enable_height {
+            return None;
+        }
+        let pos = Position::new(x, y, z, 0.0);
+        self.bsp_trees
+            .read()
+            .get(&map_id)
+            .and_then(|tree| tree.get_height(&pos, max_search_dist))
     }
 
     /// Get ground height at a position, searching at most `max_search_dist`.
@@ -257,6 +283,7 @@ impl VMapManager {
     pub fn get_height_within(
         &self,
         map_id: u32,
+        instance_id: u32,
         x: f32,
         y: f32,
         z: f32,
@@ -268,14 +295,10 @@ impl VMapManager {
 
         let pos = Position::new(x, y, z, 0.0);
 
-        let static_height = self
-            .bsp_trees
-            .read()
-            .get(&map_id)
-            .and_then(|tree| tree.get_height(&pos, max_search_dist));
+        let static_height = self.get_static_height_within(map_id, x, y, z, max_search_dist);
 
         let dynamic_height = self
-            .dynamic_tree(map_id)
+            .dynamic_tree(map_id, instance_id)
             .and_then(|tree| tree.get_height(&pos, max_search_dist));
 
         match (static_height, dynamic_height) {
@@ -341,7 +364,7 @@ impl VMapManager {
         self.gameobject_models.len()
     }
 
-    /// Add a spawned gameobject's collision model to a map's dynamic tree.
+    /// Add a spawned gameobject's collision model to its map instance's dynamic tree.
     ///
     /// `id` identifies the owner (its GUID) for later removal. `enabled`
     /// controls whether the model collides immediately — a door spawned open
@@ -352,6 +375,7 @@ impl VMapManager {
     pub fn insert_gameobject_model(
         &self,
         map_id: u32,
+        instance_id: u32,
         id: u64,
         spawn: GameObjectModelSpawn,
         enabled: bool,
@@ -405,28 +429,28 @@ impl VMapManager {
             return false;
         }
 
-        self.dynamic_tree_or_create(map_id)
+        self.dynamic_tree_or_create(map_id, instance_id)
             .insert(id, groups, enabled);
 
         debug!(
-            "VMap: inserted gameobject model '{}' (display {}) on map {}",
-            model_data.name, spawn.display_id, map_id
+            "VMap: inserted gameobject model '{}' (display {}) on map {} instance {}",
+            model_data.name, spawn.display_id, map_id, instance_id
         );
 
         true
     }
 
     /// Remove a gameobject's collision model. Returns whether one was present.
-    pub fn remove_gameobject_model(&self, map_id: u32, id: u64) -> bool {
-        match self.dynamic_tree(map_id) {
+    pub fn remove_gameobject_model(&self, map_id: u32, instance_id: u32, id: u64) -> bool {
+        match self.dynamic_tree(map_id, instance_id) {
             Some(tree) => tree.remove(id),
             None => false,
         }
     }
 
-    /// Whether a gameobject's collision model is tracked for a map.
-    pub fn contains_gameobject_model(&self, map_id: u32, id: u64) -> bool {
-        self.dynamic_tree(map_id)
+    /// Whether a gameobject's collision model is tracked for a map instance.
+    pub fn contains_gameobject_model(&self, map_id: u32, instance_id: u32, id: u64) -> bool {
+        self.dynamic_tree(map_id, instance_id)
             .map(|tree| tree.contains(id))
             .unwrap_or(false)
     }
@@ -434,31 +458,42 @@ impl VMapManager {
     /// Enable or disable a gameobject's collision, e.g. when a door opens.
     ///
     /// Returns whether a model with that id exists.
-    pub fn set_gameobject_model_enabled(&self, map_id: u32, id: u64, enabled: bool) -> bool {
-        match self.dynamic_tree(map_id) {
+    pub fn set_gameobject_model_enabled(
+        &self,
+        map_id: u32,
+        instance_id: u32,
+        id: u64,
+        enabled: bool,
+    ) -> bool {
+        match self.dynamic_tree(map_id, instance_id) {
             Some(tree) => tree.set_enabled(id, enabled),
             None => false,
         }
     }
 
-    /// Number of dynamic models tracked for a map.
-    pub fn dynamic_model_count(&self, map_id: u32) -> usize {
-        self.dynamic_tree(map_id).map(|t| t.len()).unwrap_or(0)
+    /// Number of dynamic models tracked for a map instance.
+    pub fn dynamic_model_count(&self, map_id: u32, instance_id: u32) -> usize {
+        self.dynamic_tree(map_id, instance_id)
+            .map(|t| t.len())
+            .unwrap_or(0)
     }
 
-    fn dynamic_tree(&self, map_id: u32) -> Option<Arc<DynamicMapTree>> {
-        self.dynamic_trees.read().get(&map_id).cloned()
+    fn dynamic_tree(&self, map_id: u32, instance_id: u32) -> Option<Arc<DynamicMapTree>> {
+        self.dynamic_trees
+            .read()
+            .get(&(map_id, instance_id))
+            .cloned()
     }
 
-    fn dynamic_tree_or_create(&self, map_id: u32) -> Arc<DynamicMapTree> {
-        if let Some(tree) = self.dynamic_tree(map_id) {
+    fn dynamic_tree_or_create(&self, map_id: u32, instance_id: u32) -> Arc<DynamicMapTree> {
+        if let Some(tree) = self.dynamic_tree(map_id, instance_id) {
             return tree;
         }
 
         let mut trees = self.dynamic_trees.write();
         Arc::clone(
             trees
-                .entry(map_id)
+                .entry((map_id, instance_id))
                 .or_insert_with(|| Arc::new(DynamicMapTree::new(map_bounds()))),
         )
     }
@@ -473,14 +508,26 @@ impl VMapManager {
         &self.base_path
     }
 
-    /// Unload VMap data for a map
+    /// Remove one instance's runtime collision without unloading shared geometry.
+    pub fn unload_instance(&self, map_id: u32, instance_id: u32) {
+        if let Some(tree) = self.dynamic_trees.write().remove(&(map_id, instance_id)) {
+            tree.clear();
+        }
+    }
+
+    /// Unload shared VMap data and every instance's collision for this map.
     pub fn unload_map(&self, map_id: u32) {
         self.bsp_trees.write().remove(&map_id);
         self.loaded_tiles.write().remove(&map_id);
         self.loaded_trees.write().remove(&map_id);
-        if let Some(tree) = self.dynamic_trees.write().remove(&map_id) {
-            tree.clear();
-        }
+        self.dynamic_trees.write().retain(|&(owner_map, _), tree| {
+            if owner_map == map_id {
+                tree.clear();
+                false
+            } else {
+                true
+            }
+        });
         info!("Unloaded VMap for map {}", map_id);
     }
 }
@@ -488,10 +535,150 @@ impl VMapManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pathfinding::vmap::file_loader::Triangle;
+    use crate::pathfinding::{
+        game_pathfinder::GamePathFinder, mmap_manager::MMapManager, pathfinder::PathFinder,
+        types::PathResult,
+    };
     use crate::terrain::defines::MAP_ALL_LIQUIDS;
+    use crate::terrain::TerrainInfo;
 
     fn manager() -> VMapManager {
         VMapManager::new("/nonexistent-data-dir", VMapConfig::default())
+    }
+
+    fn floor(z: f32) -> Vec<Arc<BSPModelInstance>> {
+        vec![Arc::new(BSPModelInstance {
+            model_id: 1,
+            model_type: ModelType::WMO,
+            // Keep the query origin inside the bounds to isolate ownership
+            // from the separate floor-query origin/bounds defect.
+            bounding_box: BoundingBox {
+                min: Position::new(-5.0, -5.0, 0.0, 0.0),
+                max: Position::new(5.0, 5.0, 10.0, 0.0),
+            },
+            triangles: vec![Triangle {
+                v0: Position::new(-5.0, -5.0, z, 0.0),
+                v1: Position::new(5.0, -5.0, z, 0.0),
+                v2: Position::new(0.0, 5.0, z, 0.0),
+            }],
+            liquid_data: None,
+        })]
+    }
+
+    fn add_static_floor(mgr: &VMapManager, map_id: u32) {
+        let mut tree = BSPTree::new(map_bounds());
+        tree.build(floor(0.0));
+        mgr.bsp_trees.write().insert(map_id, Arc::new(tree));
+    }
+
+    #[test]
+    fn dynamic_heights_and_los_are_isolated_from_shared_terrain() {
+        let mgr = manager();
+        add_static_floor(&mgr, 36);
+        mgr.dynamic_tree_or_create(36, 1)
+            .insert(7, floor(3.0), true);
+        mgr.dynamic_tree_or_create(36, 2)
+            .insert(7, floor(6.0), true);
+        assert_eq!(mgr.get_height(36, 1, 0.0, 0.0, 7.0), Some(3.0));
+        assert_eq!(mgr.get_height(36, 2, 0.0, 0.0, 7.0), Some(6.0));
+        assert_eq!(mgr.get_height(36, 0, 0.0, 0.0, 7.0), Some(0.0));
+
+        let terrain = TerrainInfo::new(36, PathBuf::from("/nonexistent/maps"));
+        assert_eq!(
+            terrain.get_height_static(0.0, 0.0, 7.0, Some(&mgr), 50.0),
+            0.0
+        );
+        let from = Position::new(0.0, 0.0, 1.0, 0.0);
+        let to = Position::new(0.0, 0.0, 8.0, 0.0);
+        assert!(!mgr.is_in_line_of_sight(36, 1, from, to));
+        assert!(!mgr.is_in_line_of_sight(36, 2, from, to));
+        assert!(mgr.is_in_line_of_sight(36, 0, from, to));
+
+        assert!(mgr.set_gameobject_model_enabled(36, 1, 7, false));
+        assert!(mgr.is_in_line_of_sight_filtered(36, 1, from, to, true));
+        assert!(!mgr.is_in_line_of_sight_filtered(36, 2, from, to, true));
+        assert_eq!(mgr.get_height(36, 1, 0.0, 0.0, 7.0), Some(0.0));
+        assert!(mgr.contains_gameobject_model(36, 1, 7));
+        assert!(!mgr.contains_gameobject_model(36, 0, 7));
+        assert!(mgr.remove_gameobject_model(36, 1, 7));
+        assert!(!mgr.remove_gameobject_model(36, 1, 7));
+        assert!(mgr.contains_gameobject_model(36, 2, 7));
+        assert_eq!(mgr.get_height(36, 2, 0.0, 0.0, 7.0), Some(6.0));
+    }
+
+    #[test]
+    fn unloading_collision_respects_map_and_instance_boundaries() {
+        let mgr = manager();
+        add_static_floor(&mgr, 36);
+        for (map_id, instance_id, height) in [(36, 1, 3.0), (36, 2, 6.0), (37, 1, 9.0)] {
+            mgr.dynamic_tree_or_create(map_id, instance_id)
+                .insert(7, floor(height), true);
+        }
+        mgr.unload_instance(36, 1);
+        assert_eq!(mgr.dynamic_model_count(36, 1), 0);
+        assert_eq!(mgr.dynamic_model_count(36, 2), 1);
+        assert_eq!(mgr.get_height(36, 1, 0.0, 0.0, 7.0), Some(0.0));
+        assert_eq!(mgr.get_height(36, 2, 0.0, 0.0, 7.0), Some(6.0));
+        let from = Position::new(0.0, 0.0, -1.0, 0.0);
+        let to = Position::new(0.0, 0.0, 1.0, 0.0);
+        assert!(
+            !mgr.is_in_line_of_sight(36, 1, from, to),
+            "shared static floor survives instance unload"
+        );
+
+        mgr.unload_map(36);
+        assert_eq!(mgr.dynamic_model_count(36, 2), 0);
+        assert_eq!(mgr.get_height(36, 2, 0.0, 0.0, 7.0), None);
+        assert!(mgr.is_in_line_of_sight(36, 1, from, to));
+        assert_eq!(mgr.dynamic_model_count(37, 1), 1);
+        assert_eq!(mgr.get_height(37, 1, 0.0, 0.0, 10.0), Some(9.0));
+    }
+
+    #[test]
+    fn paths_and_shortcuts_use_only_the_requested_instances_collision() {
+        let mgr = Arc::new(manager());
+        let wall = Arc::new(BSPModelInstance {
+            model_id: 1,
+            model_type: ModelType::WMO,
+            bounding_box: BoundingBox {
+                min: Position::new(-5.0, -0.5, 0.0, 0.0),
+                max: Position::new(5.0, 0.5, 10.0, 0.0),
+            },
+            triangles: vec![Triangle {
+                v0: Position::new(-5.0, 0.0, 0.0, 0.0),
+                v1: Position::new(5.0, 0.0, 0.0, 0.0),
+                v2: Position::new(0.0, 0.0, 10.0, 0.0),
+            }],
+            liquid_data: None,
+        });
+        mgr.dynamic_tree_or_create(36, 1)
+            .insert(7, vec![wall.clone()], true);
+        mgr.dynamic_tree_or_create(36, 2)
+            .insert(7, vec![wall], false);
+        let mmap = Arc::new(MMapManager::new("/nonexistent-data-dir", mgr.clone()));
+        let pathfinder = Arc::new(PathFinder::new(mmap));
+        let game_pathfinder = GamePathFinder::with_mmap(pathfinder.clone());
+        let from = Position::new(0.0, -5.0, 5.0, 0.0);
+        let to = Position::new(0.0, 5.0, 5.0, 0.0);
+        assert!(!matches!(
+            game_pathfinder.calculate_path(36, 1, from, to),
+            PathResult::StraightLine(_, _)
+        ));
+        assert!(matches!(
+            game_pathfinder.calculate_path(36, 2, from, to),
+            PathResult::StraightLine(_, _)
+        ));
+        assert!(matches!(
+            game_pathfinder.calculate_path(36, 0, from, to),
+            PathResult::StraightLine(_, _)
+        ));
+        let mut closed = vec![from, Position::new(10.0, 0.0, 5.0, 0.0), to];
+        let mut open = closed.clone();
+        pathfinder.smooth_path(36, 1, &mut closed);
+        pathfinder.smooth_path(36, 2, &mut open);
+        assert_eq!(closed.len(), 3);
+        assert_eq!(open, vec![from, to]);
     }
 
     #[test]
@@ -505,11 +692,11 @@ mod tests {
         };
 
         assert_eq!(mgr.gameobject_model_count(), 0);
-        assert!(!mgr.insert_gameobject_model(0, 42, spawn, true));
-        assert!(!mgr.contains_gameobject_model(0, 42));
-        assert!(!mgr.remove_gameobject_model(0, 42));
-        assert!(!mgr.set_gameobject_model_enabled(0, 42, false));
-        assert_eq!(mgr.dynamic_model_count(0), 0);
+        assert!(!mgr.insert_gameobject_model(0, 0, 42, spawn, true));
+        assert!(!mgr.contains_gameobject_model(0, 0, 42));
+        assert!(!mgr.remove_gameobject_model(0, 0, 42));
+        assert!(!mgr.set_gameobject_model_enabled(0, 0, 42, false));
+        assert_eq!(mgr.dynamic_model_count(0, 0), 0);
     }
 
     #[test]
@@ -518,16 +705,16 @@ mod tests {
         let from = Position::new(0.0, 0.0, 0.0, 0.0);
         let to = Position::new(10.0, 10.0, 0.0, 0.0);
 
-        assert!(mgr.is_in_line_of_sight(0, from, to));
-        assert!(mgr.is_in_line_of_sight_filtered(0, from, to, true));
+        assert!(mgr.is_in_line_of_sight(0, 0, from, to));
+        assert!(mgr.is_in_line_of_sight_filtered(0, 0, from, to, true));
     }
 
     #[test]
     fn height_and_liquid_queries_return_none_without_data() {
         let mgr = manager();
 
-        assert_eq!(mgr.get_height(0, 0.0, 0.0, 0.0), None);
-        assert_eq!(mgr.get_height_within(0, 0.0, 0.0, 0.0, 10.0), None);
+        assert_eq!(mgr.get_height(0, 0, 0.0, 0.0, 0.0), None);
+        assert_eq!(mgr.get_height_within(0, 0, 0.0, 0.0, 0.0, 10.0), None);
         assert_eq!(
             mgr.get_liquid_level(0, 0.0, 0.0, 0.0, MAP_ALL_LIQUIDS),
             None
@@ -538,6 +725,6 @@ mod tests {
     fn unload_map_is_safe_when_nothing_loaded() {
         let mgr = manager();
         mgr.unload_map(0);
-        assert_eq!(mgr.dynamic_model_count(0), 0);
+        assert_eq!(mgr.dynamic_model_count(0, 0), 0);
     }
 }

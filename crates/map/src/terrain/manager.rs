@@ -83,7 +83,7 @@ impl TerrainInfo {
             .unwrap_or(0)
     }
 
-    /// Ground height combining the ADT height mesh with VMap model surfaces.
+    /// Ground height combining the ADT height mesh with static VMap model surfaces.
     ///
     /// Returns `INVALID_HEIGHT_VALUE` when neither source yields a height.
     ///
@@ -116,21 +116,27 @@ impl TerrainInfo {
             }
 
             vmap_height = vmap
-                .get_height_within(self.map_id, x, y, z2, search_dist)
+                .get_static_height_within(self.map_id, x, y, z2, search_dist)
                 .unwrap_or(INVALID_HEIGHT_VALUE);
 
             // Not found nearby: retry unbounded for the case of standing far
             // above a model floor but still below the terrain surface.
             if vmap_height <= INVALID_HEIGHT {
                 vmap_height = vmap
-                    .get_height_within(self.map_id, x, y, z2, 10000.0)
+                    .get_static_height_within(self.map_id, x, y, z2, 10000.0)
                     .unwrap_or(INVALID_HEIGHT_VALUE);
             }
 
             // Still nothing: try again from just above the terrain surface.
             if vmap_height <= INVALID_HEIGHT && map_height > INVALID_HEIGHT && z2 < map_height {
                 vmap_height = vmap
-                    .get_height_within(self.map_id, x, y, map_height + 2.0, DEFAULT_HEIGHT_SEARCH)
+                    .get_static_height_within(
+                        self.map_id,
+                        x,
+                        y,
+                        map_height + 2.0,
+                        DEFAULT_HEIGHT_SEARCH,
+                    )
                     .unwrap_or(INVALID_HEIGHT_VALUE);
             }
         }

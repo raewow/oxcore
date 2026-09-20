@@ -134,6 +134,7 @@ mod tests {
     use crate::config::Config;
     use crate::game::gameobject::{GameObjectSpawnData, GameObjectTemplate};
     use crate::game::player::{Player, PlayerBroadcaster};
+    use bytes::{BufMut, BytesMut};
     use oxcore_db::database::Databases;
     use oxcore_shared::protocol::{Opcode, Protocol, WorldPacket};
     use std::{path::PathBuf, sync::Arc};
@@ -142,6 +143,10 @@ mod tests {
     const MAP_ID: u32 = 36;
 
     fn test_world() -> World {
+        test_world_at(PathBuf::from("."))
+    }
+
+    fn test_world_at(data_dir: PathBuf) -> World {
         let pool = || {
             sqlx::postgres::PgPoolOptions::new()
                 .connect_lazy("postgres://test:test@localhost/test")
@@ -156,7 +161,7 @@ mod tests {
             }),
             Arc::new(Config::default()),
             50,
-            PathBuf::from("."),
+            data_dir,
         );
         world
             .managers
@@ -174,6 +179,124 @@ mod tests {
                 data: [0; 24],
             });
         world
+    }
+
+    struct CollisionFixture(PathBuf);
+
+    impl CollisionFixture {
+        fn new() -> Self {
+            let fixture = Self(std::env::temp_dir().join(format!(
+                "oxcore-instance-collision-{}",
+                uuid::Uuid::new_v4()
+            )));
+            let vmaps = fixture.0.join("vmaps");
+            std::fs::create_dir_all(&vmaps).unwrap();
+            let bounds = [-5.0_f32, -0.5, 0.0, 5.0, 0.5, 10.0];
+            let name = b"test-door.wmo";
+            let mut list = BytesMut::new();
+            list.put_u32_le(1);
+            list.put_u32_le(name.len() as u32);
+            list.extend_from_slice(name);
+            for value in bounds {
+                list.put_f32_le(value);
+            }
+            std::fs::write(vmaps.join("temp_gameobject_models"), list).unwrap();
+
+            // A synthetic vertical square exercises the actual model-loading path.
+            let mut model = BytesMut::from(&b"VMAP_7.0WMOD"[..]);
+            model.put_u32_le(4);
+            model.put_u32_le(0);
+            model.extend_from_slice(b"GMOD");
+            model.put_u32_le(1);
+            for value in bounds {
+                model.put_f32_le(value);
+            }
+            model.put_u32_le(0); // group flags
+            model.put_u32_le(0); // group id
+            model.extend_from_slice(b"VERT");
+            model.put_u32_le(4 + 4 * 12);
+            model.put_u32_le(4);
+            for vertex in [
+                [-5.0, 0.0, 0.0],
+                [5.0, 0.0, 0.0],
+                [5.0, 0.0, 10.0],
+                [-5.0, 0.0, 10.0],
+            ] {
+                for value in vertex {
+                    model.put_f32_le(value);
+                }
+            }
+            model.extend_from_slice(b"TRIM");
+            model.put_u32_le(4 + 2 * 12);
+            model.put_u32_le(2);
+            for index in [0, 1, 2, 0, 2, 3] {
+                model.put_u32_le(index);
+            }
+            // The loader rebuilds its own spatial tree from these triangles.
+            model.extend_from_slice(b"MBIH");
+            for value in bounds {
+                model.put_f32_le(value);
+            }
+            model.put_u32_le(0);
+            model.put_u32_le(0);
+            model.extend_from_slice(b"LIQU");
+            model.put_u32_le(0);
+            model.extend_from_slice(b"GBIH");
+            std::fs::write(vmaps.join("test-door.wmo.vmo"), model).unwrap();
+            fixture
+        }
+    }
+
+    impl Drop for CollisionFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn door_los(world: &World, instance_id: u32) -> bool {
+        world.managers.vmap_mgr.is_in_line_of_sight(
+            MAP_ID,
+            instance_id,
+            Position::new(100.0, 95.0, 5.0, 0.0),
+            Position::new(100.0, 105.0, 5.0, 0.0),
+        )
+    }
+
+    #[tokio::test]
+    async fn opening_rebuilding_and_removing_a_door_only_changes_its_instance() {
+        let fixture = CollisionFixture::new();
+        let world = test_world_at(fixture.0.clone());
+        let manager = &world.managers.gameobject_mgr;
+        let vmap = &world.managers.vmap_mgr;
+        let mut template = (*manager.get_template(70).unwrap()).clone();
+        template.go_type = super::super::GameObjectType::Door as u32;
+        manager.add_template_for_test(template);
+        let spawn = spawn();
+        let mut copies = Vec::new();
+        for instance_id in [1, 2, 0] {
+            let guid = manager.spawn_gameobject(&spawn, instance_id).unwrap();
+            assert!(manager.add_collision_model(guid, vmap));
+            assert!(vmap.contains_gameobject_model(MAP_ID, instance_id, guid.raw()));
+            assert!(!door_los(&world, instance_id));
+            copies.push(guid);
+        }
+        assert!(door_los(&world, 3));
+        assert!(!vmap.contains_gameobject_model(MAP_ID, 2, copies[0].raw()));
+        manager.with_gameobject_mut(copies[0], |go| go.go_state = GOState::Active);
+        assert!(manager.update_collision_state(copies[0], vmap));
+        assert!(door_los(&world, 1));
+        assert!(!door_los(&world, 2));
+        assert!(!door_los(&world, 0));
+
+        manager.with_gameobject_mut(copies[0], |go| go.go_state = GOState::Ready);
+        assert!(manager.update_collision_model(copies[0], vmap));
+        assert!(!door_los(&world, 1));
+        assert_eq!(vmap.dynamic_model_count(MAP_ID, 1), 1);
+        assert!(manager.remove_collision_model(copies[0], vmap));
+        assert_eq!(vmap.dynamic_model_count(MAP_ID, 1), 0);
+        assert!(door_los(&world, 1));
+        assert!(!door_los(&world, 2));
+        assert!(!door_los(&world, 0));
     }
 
     fn spawn() -> GameObjectSpawnData {
@@ -219,7 +342,8 @@ mod tests {
     #[tokio::test]
     async fn looted_chest_respawns_and_notifies_only_its_own_instance() {
         for protocol in [Protocol::Vanilla, Protocol::Modern] {
-            let world = test_world();
+            let fixture = CollisionFixture::new();
+            let world = test_world_at(fixture.0.clone());
             let spawn = spawn();
             let mut copies = Vec::new();
             for instance_id in [1, 2, 0] {
@@ -233,6 +357,11 @@ mod tests {
                     .spawn_gameobject(&spawn, instance_id)
                     .unwrap();
                 map.add_gameobject(guid, spawn.position);
+                assert!(world
+                    .managers
+                    .gameobject_mgr
+                    .add_collision_model(guid, &world.managers.vmap_mgr,));
+                assert!(!door_los(&world, instance_id));
                 assert_eq!(
                     world
                         .managers
@@ -255,6 +384,9 @@ mod tests {
             }
 
             despawn_looted_gameobject(observers[0].0, chest, &world);
+            assert!(door_los(&world, 1));
+            assert!(!door_los(&world, 2));
+            assert!(!door_los(&world, 0));
             assert!(!copies[0]
                 .0
                 .get_objects_in_range(spawn.position, 5.0)
@@ -315,6 +447,9 @@ mod tests {
                 .with_gameobject_mut(chest, |go| go.respawn_time = 1);
             update_respawns(&world);
 
+            assert!(!door_los(&world, 1));
+            assert!(!door_los(&world, 2));
+            assert!(!door_los(&world, 0));
             assert!(copies[0]
                 .0
                 .get_objects_in_range(spawn.position, 5.0)
