@@ -1272,18 +1272,30 @@ impl InstanceMgr {
         .await
         .context("Failed to unbind groups from instance")?;
 
-        // Clear from cache
+        // Clear from cache. The database delete above is keyed by the instance,
+        // so only drop cache entries that point at this same copy: a player or
+        // group may still be bound to a different copy of the same map.
         {
             let mut player_bindings = self.player_bindings.write();
             for bindings in player_bindings.values_mut() {
-                bindings.remove(&map_id);
+                if bindings
+                    .get(&map_id)
+                    .is_some_and(|binding| binding.instance_id == instance_id)
+                {
+                    bindings.remove(&map_id);
+                }
             }
         }
 
         {
             let mut group_bindings = self.group_bindings.write();
             for bindings in group_bindings.values_mut() {
-                bindings.remove(&map_id);
+                if bindings
+                    .get(&map_id)
+                    .is_some_and(|binding| binding.instance_id == instance_id)
+                {
+                    bindings.remove(&map_id);
+                }
             }
         }
 

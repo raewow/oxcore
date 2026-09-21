@@ -491,3 +491,74 @@ async fn group_reset_does_not_select_the_leaders_personal_dungeons(pool: PgPool)
         .unwrap()
         .is_some());
 }
+
+#[sqlx::test]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn resetting_one_copy_leaves_bindings_to_other_copies_of_the_same_map(pool: PgPool) {
+    let databases = fixture(pool).await;
+    let manager = InstanceMgr::new();
+    // Two players and two groups, each bound to a different copy of map 36.
+    for (owner, instance) in [(1, 301), (2, 302)] {
+        manager
+            .bind_player_to_instance(&databases, guid(owner), 36, instance, false, 4_000_000_000)
+            .await
+            .unwrap();
+    }
+    for (owner, instance) in [(1, 301), (4, 302)] {
+        manager
+            .bind_group_to_instance(&databases, guid(owner), 36, instance, false, 4_000_000_000)
+            .await
+            .unwrap();
+    }
+
+    manager
+        .reset_instance(&databases, 36, 301, InstanceResetMethod::Manual)
+        .await
+        .unwrap();
+
+    // Cache: only bindings to the reset copy are gone.
+    assert!(manager.get_player_binding(guid(1), 36).is_none());
+    assert_eq!(
+        saved(manager.get_player_binding(guid(2), 36)),
+        Some((302, false))
+    );
+    assert!(manager.get_group_binding(guid(1), 36).is_none());
+    assert_eq!(
+        saved(manager.get_group_binding(guid(4), 36)),
+        Some((302, false))
+    );
+
+    // Database: the same rows survive, so cache and storage agree.
+    let players: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT guid, instance FROM characters.character_instance ORDER BY guid")
+            .fetch_all(&databases.character)
+            .await
+            .unwrap();
+    assert_eq!(players, vec![(2, 302)]);
+    let groups: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT leader_guid, instance FROM characters.group_instance ORDER BY leader_guid",
+    )
+    .fetch_all(&databases.character)
+    .await
+    .unwrap();
+    assert_eq!(groups, vec![(4, 302)]);
+
+    // A fresh manager rebuilding from storage sees the surviving copies.
+    let reloaded = InstanceMgr::new();
+    reloaded
+        .load_player_bindings(&databases, guid(2))
+        .await
+        .unwrap();
+    reloaded
+        .load_group_bindings(&databases, guid(4))
+        .await
+        .unwrap();
+    assert_eq!(
+        saved(reloaded.get_player_binding(guid(2), 36)),
+        Some((302, false))
+    );
+    assert_eq!(
+        saved(reloaded.get_group_binding(guid(4), 36)),
+        Some((302, false))
+    );
+}
