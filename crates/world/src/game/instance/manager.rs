@@ -20,12 +20,100 @@ const GROUP_BINDINGS_QUERY: &str = "SELECT i.map, b.instance, b.permanent, i.res
      FROM characters.group_instance b JOIN characters.instance i ON i.id = b.instance
      WHERE b.leader_guid = $1";
 
+/// Reference `MAX_INSTANCE_PER_ACCOUNT_PER_HOUR` (`Player.h`). The vanilla core
+/// counts recent entries per account; the account id is not modelled here, so the
+/// player guid is the closest available owner of the limit.
+const INSTANCE_ENTRIES_PER_HOUR: usize = 5;
+/// Reference `AccountMgr::CheckInstanceCount` expires an entry after one hour.
+const INSTANCE_ENTRY_WINDOW_SECS: u64 = 3600;
+
 /// Group context captured by the entrance handler for reference binding cleanup.
 pub struct InstanceEntryGroup {
     pub leader_guid: ObjectGuid,
     /// Other online members outside the destination map. Their temporary solo
     /// saves are released when the group's first save for this map is created.
     pub members_outside: Vec<ObjectGuid>,
+    /// The group is in raid mode. Reference `MapManager::CanPlayerEnter` requires
+    /// it before entering a raid map.
+    pub is_raid: bool,
+}
+
+/// Why an instance entry was denied. Mirrors the reference's transfer-abort reasons
+/// (`MapManager::CanPlayerEnter` and `DungeonMap::CanEnter`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstanceAdmissionDenied {
+    /// Raid map entered without a raid group (`ERR_RAID_GROUP_REQUIRED`).
+    RaidGroupRequired,
+    /// Too many distinct instances entered in the last hour.
+    TooManyInstances,
+    /// The copy is at its player cap.
+    MaxPlayers,
+    /// The copy is being torn down by a scheduled reset.
+    ResetInProgress,
+}
+
+/// Live-world inputs the admission rules need but the instance manager cannot see.
+pub struct InstanceAdmission<'a> {
+    /// Destination map is a raid (map type 2).
+    pub is_raid: bool,
+    /// The entering player's group is in raid mode.
+    pub is_raid_group: bool,
+    /// Destination map's player cap (`MapEntry::max_players`).
+    pub max_players: u32,
+    /// Players currently inside a given instance, excluding game masters (none
+    /// modelled yet). `None` treats every copy as empty.
+    pub players_inside: Option<&'a (dyn Fn(u32, u32) -> usize + Send + Sync)>,
+}
+
+impl InstanceAdmission<'_> {
+    /// Admission with no live-world restrictions, for callers that only need
+    /// selection/binding (tests and non-map callers).
+    pub fn open() -> Self {
+        Self {
+            is_raid: false,
+            is_raid_group: false,
+            max_players: u32::MAX,
+            players_inside: None,
+        }
+    }
+
+    fn players_inside(&self, map_id: u32, instance_id: u32) -> usize {
+        self.players_inside
+            .map(|count| count(map_id, instance_id))
+            .unwrap_or(0)
+    }
+}
+
+/// Failure to select, admit or bind a player for instance entry.
+#[derive(Debug)]
+pub enum InstanceEntryError {
+    /// Entry is refused by an admission rule; the client gets the matching abort.
+    Denied(InstanceAdmissionDenied),
+    /// Infrastructure failure (database, cache). Entry must not proceed.
+    Internal(anyhow::Error),
+}
+
+impl std::fmt::Display for InstanceEntryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Denied(reason) => write!(f, "instance entry denied: {reason:?}"),
+            Self::Internal(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for InstanceEntryError {}
+
+impl From<anyhow::Error> for InstanceEntryError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Internal(error)
+    }
+}
+
+impl From<InstanceAdmissionDenied> for InstanceEntryError {
+    fn from(denied: InstanceAdmissionDenied) -> Self {
+        Self::Denied(denied)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,6 +136,9 @@ pub struct InstanceMgr {
     reset_warnings: Arc<RwLock<HashMap<(u32, u32), InstanceResetWarningType>>>,
     /// Instances pending reset (empty instances that should be reset after delay)
     pending_resets: Arc<RwLock<HashMap<(u32, u32), u64>>>, // (map_id, instance_id) -> reset time
+    /// Recent distinct instance entries per player (player_guid -> instance_id -> enter time).
+    /// Backs the reference's per-hour instance entry limit.
+    instance_enter_times: Arc<RwLock<HashMap<ObjectGuid, HashMap<u32, u64>>>>,
     /// Serialize selection and binding so simultaneous party arrivals share a copy.
     entry_locks: Mutex<HashMap<EntryOwner, Weak<tokio::sync::Mutex<()>>>>,
 }
@@ -61,6 +152,7 @@ impl InstanceMgr {
             last_instance_id: AtomicU32::new(0),
             reset_warnings: Arc::new(RwLock::new(HashMap::new())),
             pending_resets: Arc::new(RwLock::new(HashMap::new())),
+            instance_enter_times: Arc::new(RwLock::new(HashMap::new())),
             entry_locks: Mutex::new(HashMap::new()),
         }
     }
@@ -697,34 +789,92 @@ impl InstanceMgr {
         self.create_instance(databases, map_id, 0, permanent).await
     }
 
-    /// Check if player can enter instance
-    pub fn can_enter_instance(
+    /// Reference `MapManager::CanPlayerEnter`: the rules that need no chosen copy.
+    /// Runs before any instance is created so a denied entry leaves no row behind.
+    /// `bound_instance_id` is the player's already-bound copy for this map, if any,
+    /// so re-entering a copy the player is already counted against is not limited.
+    fn admit_entry(
         &self,
         player_guid: ObjectGuid,
+        bound_instance_id: Option<u32>,
+        admission: &InstanceAdmission<'_>,
+    ) -> Result<(), InstanceAdmissionDenied> {
+        // GMs can bypass raid limits in the reference; no GM level is modelled
+        // yet, so the requirement applies to everyone.
+        if admission.is_raid && !admission.is_raid_group {
+            return Err(InstanceAdmissionDenied::RaidGroupRequired);
+        }
+        if !self.check_instance_count(player_guid, bound_instance_id) {
+            return Err(InstanceAdmissionDenied::TooManyInstances);
+        }
+        Ok(())
+    }
+
+    /// Copy-local rules from `DungeonMap::CanEnter`, checked once the copy is chosen.
+    fn admit_copy(
+        &self,
         map_id: u32,
         instance_id: u32,
-        group_leader_guid: Option<ObjectGuid>,
-    ) -> bool {
-        // Check player binding
-        if let Some(binding) = self.get_player_binding(player_guid, map_id) {
-            if binding.instance_id == instance_id {
-                return true;
-            }
-            // Player is bound to different instance
-            return false;
+        admission: &InstanceAdmission<'_>,
+    ) -> Result<(), InstanceAdmissionDenied> {
+        if self.is_reset_pending(map_id, instance_id) {
+            return Err(InstanceAdmissionDenied::ResetInProgress);
         }
-
-        // Check group binding
-        if let Some(leader_guid) = group_leader_guid {
-            if let Some(binding) = self.get_group_binding(leader_guid, map_id) {
-                if binding.instance_id == instance_id {
-                    return true;
-                }
-            }
+        if admission.players_inside(map_id, instance_id) >= admission.max_players as usize {
+            return Err(InstanceAdmissionDenied::MaxPlayers);
         }
+        // The reference also refuses zoning into a raid whose encounter is engaged
+        // (`TRANSFER_ABORT_ZONE_IN_COMBAT`). Encounter-in-progress state is not
+        // modelled yet (see MP14), so that rule has no input here.
+        Ok(())
+    }
 
-        // No binding, can enter new instance
-        true
+    /// Reference `AccountMgr::CheckInstanceCount`: allow if the copy was already
+    /// entered (it does not consume a new slot), if fewer than the limit of
+    /// distinct copies are recent, or if an old entry has aged out.
+    fn check_instance_count(&self, player_guid: ObjectGuid, instance_id: Option<u32>) -> bool {
+        let mut enter_times = self.instance_enter_times.write();
+        let Some(entries) = enter_times.get_mut(&player_guid) else {
+            return true;
+        };
+        if instance_id.is_some_and(|id| entries.contains_key(&id))
+            || entries.len() < INSTANCE_ENTRIES_PER_HOUR
+        {
+            return true;
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        if let Some((&expired, _)) = entries
+            .iter()
+            .find(|(_, entered)| **entered + INSTANCE_ENTRY_WINDOW_SECS < now)
+        {
+            entries.remove(&expired);
+            return true;
+        }
+        false
+    }
+
+    /// Record a successful entry into a copy. Reference `Player::AddInstanceEnterTime`
+    /// runs when the player is actually added to the dungeon map.
+    pub fn record_instance_enter(&self, player_guid: ObjectGuid, instance_id: u32) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        self.instance_enter_times
+            .write()
+            .entry(player_guid)
+            .or_default()
+            .insert(instance_id, now);
+    }
+
+    /// True while a copy is scheduled for reset (reference `m_resetAfterUnload`).
+    pub fn is_reset_pending(&self, map_id: u32, instance_id: u32) -> bool {
+        self.pending_resets
+            .read()
+            .contains_key(&(map_id, instance_id))
     }
 
     /// Update instance system (check for resets, warnings, etc.)
@@ -911,8 +1061,10 @@ impl InstanceMgr {
     }
 
     /// Enter an instance using the personal/group ownership rules from
-    /// `Player::GetBoundInstanceSaveForSelfOrGroup` and `BindPlayerOrGroupOnEnter`.
-    /// Returns the instance ID to use
+    /// `Player::GetBoundInstanceSaveForSelfOrGroup` and `BindPlayerOrGroupOnEnter`,
+    /// then run the admission rules from `MapManager::CanPlayerEnter` and
+    /// `DungeonMap::CanEnter` before anything is bound.
+    /// Returns the instance ID to use.
     pub async fn enter_instance(
         &self,
         databases: &Databases,
@@ -920,7 +1072,8 @@ impl InstanceMgr {
         player_guid: ObjectGuid,
         group: Option<&InstanceEntryGroup>,
         is_raid: bool,
-    ) -> Result<u32> {
+        admission: &InstanceAdmission<'_>,
+    ) -> Result<u32, InstanceEntryError> {
         let owner = group.map_or(EntryOwner::Player(player_guid), |group| {
             EntryOwner::Group(group.leader_guid)
         });
@@ -948,12 +1101,28 @@ impl InstanceMgr {
                 group.and_then(|group| self.get_group_binding(group.leader_guid, map_id)),
             )
             .await?;
+
+        // `CanPlayerEnter` runs before any copy is created or bound, so a denied
+        // raid/limit check cannot leave an instance row behind.
+        self.admit_entry(
+            player_guid,
+            player_binding
+                .as_ref()
+                .or(group_binding.as_ref())
+                .map(|binding| binding.instance_id),
+            admission,
+        )?;
+
         // The reference prefers any valid personal save. Group transitions, not
         // selection, handle temporary personal saves.
         let instance_id = match player_binding.as_ref().or(group_binding.as_ref()) {
             Some(binding) => binding.instance_id,
             None => self.create_instance(databases, map_id, 0, is_raid).await?,
         };
+
+        // `DungeonMap::CanEnter` inspects the chosen copy, so it runs after selection
+        // but still before any binding or transfer is committed.
+        self.admit_copy(map_id, instance_id, admission)?;
 
         // Visiting a permanently saved personal copy never changes the group's save.
         if player_binding

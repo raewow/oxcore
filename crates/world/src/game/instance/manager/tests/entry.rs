@@ -3,12 +3,22 @@ use crate::core::session::WorldSession;
 use crate::game::player::Player;
 use crate::handlers::area_trigger::handle_area_trigger;
 use crate::handlers::movement::handle_worldport_ack;
+use oxcore_shared::messages::movement::TransferAbortReason;
 use oxcore_shared::protocol::{Opcode, Position, Protocol, WorldPacket};
 use tokio::sync::mpsc;
 
 mod persistence;
 
 async fn entrance_world(pool: PgPool, map_id: u32, map_type: u32) -> World {
+    entrance_world_with_capacity(pool, map_id, map_type, 5).await
+}
+
+async fn entrance_world_with_capacity(
+    pool: PgPool,
+    map_id: u32,
+    map_type: u32,
+    max_players: u32,
+) -> World {
     let world = world(fixture(pool).await);
     world
         .databases
@@ -41,7 +51,7 @@ async fn entrance_world(pool: PgPool, map_id: u32, map_type: u32) -> World {
             crate::dbc::structures::MapEntry {
                 id: map_id,
                 map_type,
-                max_players: 5,
+                max_players,
                 reset_delay: 86400,
             },
         );
@@ -253,10 +263,18 @@ async fn first_group_entry_converts_only_eligible_temporary_saves(pool: PgPool) 
     let context = InstanceEntryGroup {
         leader_guid: guid(1),
         members_outside: Vec::new(),
+        is_raid: false,
     };
     assert_eq!(
         manager
-            .enter_instance(&world.databases, 36, guid(3), Some(&context), false)
+            .enter_instance(
+                &world.databases,
+                36,
+                guid(3),
+                Some(&context),
+                false,
+                &InstanceAdmission::open(),
+            )
             .await
             .unwrap(),
         302
@@ -509,4 +527,160 @@ async fn continent_transfers_still_use_instance_zero(pool: PgPool) {
     );
     assert_eq!(packets.try_recv().unwrap().opcode(), Opcode::SMSG_NEW_WORLD);
     assert!(packets.try_recv().is_err());
+}
+
+/// Send the entrance trigger and assert the client is refused with `reason`.
+async fn assert_denied(
+    world: &World,
+    session: &WorldSession,
+    packets: &mut mpsc::UnboundedReceiver<WorldPacket>,
+    reason: TransferAbortReason,
+) {
+    let mut packet = WorldPacket::new(Opcode::CMSG_AREATRIGGER);
+    packet.write_u32(100);
+    handle_area_trigger(session, &mut packet, world)
+        .await
+        .unwrap();
+    let response = packets
+        .try_recv()
+        .expect("a denied entry notifies the client");
+    assert_eq!(response.opcode(), Opcode::SMSG_TRANSFER_ABORTED);
+    assert_eq!(response.contents(), &[reason as u8]);
+    assert!(
+        session.get_pending_teleport().is_none(),
+        "a denied entry must not queue a transfer"
+    );
+    assert!(packets.try_recv().is_err());
+}
+
+async fn copies_of(world: &World, map_id: u32) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM characters.instance WHERE map = $1")
+        .bind(i64::from(map_id))
+        .fetch_one(&world.databases.character)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn a_raid_map_requires_a_raid_group(pool: PgPool) {
+    let world = entrance_world(pool, 409, 2).await;
+
+    // Player 4 is in no group at all.
+    let (solo, mut packets) = session(&world, 4, 0);
+    assert_denied(&world, &solo, &mut packets, TransferAbortReason::NotFound).await;
+    assert!(world
+        .managers
+        .instance_mgr
+        .get_player_binding(guid(4), 409)
+        .is_none());
+
+    // Group 1 exists but is an ordinary party, not a raid.
+    let (member, mut packets) = session(&world, 2, 0);
+    assert_denied(&world, &member, &mut packets, TransferAbortReason::NotFound).await;
+    assert!(world
+        .managers
+        .instance_mgr
+        .get_player_binding(guid(2), 409)
+        .is_none());
+    assert_eq!(
+        copies_of(&world, 409).await,
+        2,
+        "a denied raid entry must not create a copy"
+    );
+
+    // The same party may enter once it is converted to a raid.
+    let mut group = world.systems.group.get_group(1).unwrap();
+    group.convert_to_raid();
+    world.systems.group.add_group_test(group);
+    let instance = enter(&world, &member).await;
+    assert!(instance > 102);
+    assert_eq!(copies_of(&world, 409).await, 3);
+}
+
+#[sqlx::test]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn a_full_copy_rejects_entry(pool: PgPool) {
+    let world = entrance_world_with_capacity(pool, 36, 1, 1).await;
+
+    // A resident occupies the only slot in the copy.
+    let (resident, _rx) = session(&world, 4, 0);
+    let instance = enter(&world, &resident).await;
+    world
+        .managers
+        .map_mgr
+        .get_or_create_map(36, instance)
+        .add_player(guid(4), Position::new(0.0, 0.0, 0.0, 0.0));
+    personal(&world, 2, 36, instance, false).await;
+
+    let (arriving, mut packets) = session(&world, 2, 0);
+    assert_denied(
+        &world,
+        &arriving,
+        &mut packets,
+        TransferAbortReason::MaxPlayers,
+    )
+    .await;
+    // The resident's copy and the arriving player's binding are untouched.
+    assert_eq!(
+        saved(world.managers.instance_mgr.get_player_binding(guid(2), 36)),
+        Some((instance, false))
+    );
+    assert_eq!(
+        world
+            .managers
+            .map_mgr
+            .get_map(36, instance)
+            .unwrap()
+            .player_count(),
+        1
+    );
+}
+
+#[sqlx::test]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn a_copy_being_reset_rejects_entry(pool: PgPool) {
+    let world = entrance_world(pool, 36, 1).await;
+    let (solo, _rx) = session(&world, 4, 0);
+    let instance = enter(&world, &solo).await;
+    world
+        .managers
+        .instance_mgr
+        .schedule_instance_reset(36, instance, 3600);
+
+    let (solo, mut packets) = session(&world, 4, 0);
+    assert_denied(&world, &solo, &mut packets, TransferAbortReason::NotFound).await;
+    assert_eq!(
+        saved(world.managers.instance_mgr.get_player_binding(guid(4), 36)),
+        Some((instance, false))
+    );
+}
+
+#[sqlx::test]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn entering_too_many_distinct_copies_is_rejected(pool: PgPool) {
+    let world = entrance_world(pool, 36, 1).await;
+    let manager = &world.managers.instance_mgr;
+    // Five recent distinct copies fill the per-hour allowance.
+    for instance in 301..306 {
+        manager.record_instance_enter(guid(4), instance);
+    }
+
+    let (solo, mut packets) = session(&world, 4, 0);
+    assert_denied(
+        &world,
+        &solo,
+        &mut packets,
+        TransferAbortReason::TooManyInstances,
+    )
+    .await;
+    assert_eq!(
+        copies_of(&world, 36).await,
+        2,
+        "a denied entry must not create a copy"
+    );
+
+    // Re-entering a copy already counted against the limit is still allowed.
+    personal(&world, 4, 36, 301, false).await;
+    assert_eq!(enter(&world, &solo).await, 301);
 }

@@ -11,7 +11,52 @@ use crate::game::creature::movement::packet_sender::{
 };
 use crate::game::creature::movement::MoveType;
 use crate::World;
+use oxcore_shared::messages::movement::{SmsgTransferAborted, TransferAbortReason};
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
+
+/// Copy-local admission rules that must still hold when the client finishes loading
+/// (reference `DungeonMap::CanEnter`): a copy scheduled for reset, or one that has
+/// reached its player cap, cannot be entered. Continents (`instance_id == 0`) are
+/// unrestricted.
+fn instance_arrival_denied(
+    world: &World,
+    map_id: u32,
+    instance_id: u32,
+) -> Option<TransferAbortReason> {
+    if instance_id == 0 {
+        return None;
+    }
+    if world
+        .managers
+        .instance_mgr
+        .is_reset_pending(map_id, instance_id)
+    {
+        return Some(TransferAbortReason::NotFound);
+    }
+    let (is_instance_map, max_players) = {
+        let dbc = world.dbc.read();
+        dbc.get_map(map_id)
+            .map(|entry| {
+                (
+                    entry.map_type == 1 || entry.map_type == 2,
+                    entry.max_players,
+                )
+            })
+            .unwrap_or((false, 0))
+    };
+    if is_instance_map && max_players > 0 {
+        let inside = world
+            .managers
+            .map_mgr
+            .get_map(map_id, instance_id)
+            .map(|map| map.player_count())
+            .unwrap_or(0);
+        if inside >= max_players as usize {
+            return Some(TransferAbortReason::MaxPlayers);
+        }
+    }
+    None
+}
 
 /// Restart a far teleport towards the player's homebind.
 ///
@@ -100,6 +145,25 @@ pub async fn handle_worldport_ack(
         dest_map, dest_instance_id, dest_pos.x, dest_pos.y, dest_pos.z, dest_pos.o
     );
 
+    // Revalidate the copy-local admission rules at arrival: the destination may
+    // have filled up or started a reset since the transfer was scheduled.
+    if let Some(reason) = instance_arrival_denied(world, dest_map, dest_instance_id) {
+        tracing::warn!(
+            "[WORLDPORT-ACK] Player {:?} denied entry to map {} instance {} at arrival: {:?}",
+            player_guid,
+            dest_map,
+            dest_instance_id,
+            reason
+        );
+        session.clear_pending_teleport();
+        session.send_msg(SmsgTransferAborted {
+            map_id: dest_map,
+            reason,
+        })?;
+        teleport_to_homebind(session, player_guid, world)?;
+        return Ok(());
+    }
+
     session.clear_pending_teleport();
     info!("[WORLDPORT-ACK] Cleared pending teleport from session");
 
@@ -156,6 +220,15 @@ pub async fn handle_worldport_ack(
         .get_or_create_map(dest_map, dest_instance_id);
     new_map.add_player(player_guid, dest_pos);
     info!("[WORLDPORT-ACK] ✓ Player added to new map");
+
+    // Count this entry against the per-hour instance limit now that the player is
+    // actually inside (reference `Player::AddInstanceEnterTime`).
+    if dest_instance_id != 0 {
+        world
+            .managers
+            .instance_mgr
+            .record_instance_enter(player_guid, dest_instance_id);
+    }
 
     // Send initialization packets (critical for client to exit loading screen)
     use oxcore_shared::messages::login::{
@@ -1432,6 +1505,55 @@ mod tests {
         assert_eq!(pending.2.x, -8_900.0);
         assert_eq!(pending.2.y, -200.0);
         assert_eq!(pending.2.z, 80.0);
+    }
+
+    #[tokio::test]
+    async fn worldport_ack_revalidates_a_full_instance_and_redirects_home() {
+        let mut world = test_world();
+        let (session, mut rx) = add_test_player(&mut world);
+        let player_guid = session.player_guid().expect("player guid");
+
+        {
+            let mut dbc = world.dbc.write();
+            dbc.map.insert(
+                36,
+                crate::dbc::structures::MapEntry {
+                    id: 36,
+                    map_type: 1,
+                    max_players: 1,
+                    reset_delay: 86400,
+                },
+            );
+        }
+        // The copy filled up between the transfer being scheduled and this ack.
+        world
+            .managers
+            .map_mgr
+            .get_or_create_map(36, 700)
+            .add_player(ObjectGuid::new_player(7), Position::new(0.0, 0.0, 0.0, 0.0));
+
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.homebind_map = 0;
+                player.homebind_x = -8_900.0;
+                player.homebind_y = -200.0;
+                player.homebind_z = 80.0;
+            });
+        session.set_pending_teleport(Some((36, 700, Position::new(0.0, 0.0, 0.0, 0.0))));
+
+        let mut packet = WorldPacket::new(Opcode::MSG_MOVE_WORLDPORT_ACK);
+        handle_worldport_ack(&session, &mut packet, &world)
+            .await
+            .unwrap();
+
+        let abort = rx.try_recv().expect("arrival denial notifies the client");
+        assert_eq!(abort.opcode(), Opcode::SMSG_TRANSFER_ABORTED);
+        assert_eq!(abort.contents(), &[TransferAbortReason::MaxPlayers as u8]);
+        let pending = session.get_pending_teleport().expect("homebind teleport");
+        assert_eq!(pending.0, 0);
+        assert_eq!(pending.2.x, -8_900.0);
     }
 
     #[tokio::test]

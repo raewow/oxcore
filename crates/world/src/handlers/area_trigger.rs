@@ -10,7 +10,9 @@ use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
 use crate::game::area_trigger::{self, AreaTriggerEntry};
 use crate::game::common::update_fields::PLAYER_FLAGS;
-use crate::game::instance::manager::InstanceEntryGroup;
+use crate::game::instance::manager::{
+    InstanceAdmission, InstanceAdmissionDenied, InstanceEntryError, InstanceEntryGroup,
+};
 use crate::game::player::environment::RestType;
 use crate::World;
 use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language};
@@ -21,6 +23,20 @@ use oxcore_shared::messages::update::{
 };
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
+
+impl From<InstanceAdmissionDenied> for TransferAbortReason {
+    fn from(denied: InstanceAdmissionDenied) -> Self {
+        match denied {
+            // Reference `SendRaidGroupOnlyError` uses SMSG_RAID_GROUP_ONLY, which
+            // has no modern opcode mapped yet; a not-found abort is the closest
+            // response both protocols can carry.
+            InstanceAdmissionDenied::RaidGroupRequired => TransferAbortReason::NotFound,
+            InstanceAdmissionDenied::TooManyInstances => TransferAbortReason::TooManyInstances,
+            InstanceAdmissionDenied::MaxPlayers => TransferAbortReason::MaxPlayers,
+            InstanceAdmissionDenied::ResetInProgress => TransferAbortReason::NotFound,
+        }
+    }
+}
 
 /// Handle CMSG_AREATRIGGER — player enters an area trigger zone.
 ///
@@ -210,14 +226,12 @@ pub async fn handle_area_trigger(
     // Check if destination is an instance map and get/create instance
     let dest_instance_id = {
         let dbc = world.dbc.read();
-        let is_instance_map = dbc
-            .get_map(dest_map)
+        let map_entry = dbc.get_map(dest_map);
+        let is_instance_map = map_entry
             .map(|m| m.map_type == 1 || m.map_type == 2) // 1=Instance, 2=Raid
             .unwrap_or(false);
-        let is_raid = dbc
-            .get_map(dest_map)
-            .map(|m| m.map_type == 2)
-            .unwrap_or(false);
+        let is_raid = map_entry.map(|m| m.map_type == 2).unwrap_or(false);
+        let max_players = map_entry.map(|m| m.max_players).unwrap_or(0);
         drop(dbc);
 
         if is_instance_map {
@@ -227,6 +241,7 @@ pub async fn handle_area_trigger(
                 .get_player_group(player_guid)
                 .map(|group| InstanceEntryGroup {
                     leader_guid: group.leader_guid,
+                    is_raid: group.is_raid,
                     members_outside: group
                         .members
                         .iter()
@@ -245,6 +260,21 @@ pub async fn handle_area_trigger(
                         .collect(),
                 });
 
+            let players_inside = |map_id: u32, instance_id: u32| -> usize {
+                world
+                    .managers
+                    .map_mgr
+                    .get_map(map_id, instance_id)
+                    .map(|map| map.player_count())
+                    .unwrap_or(0)
+            };
+            let admission = InstanceAdmission {
+                is_raid,
+                is_raid_group: group.as_ref().is_some_and(|group| group.is_raid),
+                max_players,
+                players_inside: Some(&players_inside),
+            };
+
             match world
                 .managers
                 .instance_mgr
@@ -254,6 +284,7 @@ pub async fn handle_area_trigger(
                     player_guid,
                     group.as_ref(),
                     is_raid,
+                    &admission,
                 )
                 .await
             {
@@ -264,7 +295,18 @@ pub async fn handle_area_trigger(
                     );
                     instance_id
                 }
-                Err(e) => {
+                Err(InstanceEntryError::Denied(denied)) => {
+                    debug!(
+                        "Player {} denied entry to map {}: {:?}",
+                        player_guid, dest_map, denied
+                    );
+                    session.send_msg(SmsgTransferAborted {
+                        map_id: dest_map,
+                        reason: denied.into(),
+                    })?;
+                    return Ok(());
+                }
+                Err(InstanceEntryError::Internal(e)) => {
                     tracing::error!(
                         "Failed to create/enter instance for map {}: {}",
                         dest_map,
