@@ -94,10 +94,6 @@ async fn concurrent_allocations_and_restart_preserve_global_ids_and_existing_sav
         assert!(i64::from(id) > *created.last_key_value().unwrap().0);
         assert!(created.insert(i64::from(id), i64::from(map_id)).is_none());
     }
-    restarted
-        .load_player_bindings(&databases, guid(1))
-        .await
-        .unwrap();
     assert_eq!(
         restarted
             .get_or_create_instance(&databases, 329, Some(guid(1)), None, false)

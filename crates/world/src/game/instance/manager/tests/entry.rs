@@ -6,6 +6,8 @@ use crate::handlers::movement::handle_worldport_ack;
 use oxcore_shared::protocol::{Opcode, Position, Protocol, WorldPacket};
 use tokio::sync::mpsc;
 
+mod persistence;
+
 async fn entrance_world(pool: PgPool, map_id: u32, map_type: u32) -> World {
     let world = world(fixture(pool).await);
     world

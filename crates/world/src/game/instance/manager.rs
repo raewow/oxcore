@@ -659,6 +659,9 @@ impl InstanceMgr {
     ) -> Result<u32> {
         // Check player binding first
         if let Some(guid) = player_guid {
+            // Cache entries may contain only saves written during this session.
+            // Restore all persisted personal saves before treating a miss as unbound.
+            self.load_player_bindings(databases, guid).await?;
             if let Some(binding) = self.get_player_binding(guid, map_id) {
                 // Check if instance still exists and is valid
                 if self
@@ -923,6 +926,11 @@ impl InstanceMgr {
         });
         let lock = self.entry_lock(owner);
         let _entry_guard = lock.lock().await;
+
+        // A missing cache entry is not proof that this player has no saved copy.
+        // Read before selection (and before any binding changes), including when
+        // another map's save has already populated part of the player's cache.
+        self.load_player_bindings(databases, player_guid).await?;
 
         if let Some(group) = group {
             let loaded = self.group_bindings.read().contains_key(&group.leader_guid);
