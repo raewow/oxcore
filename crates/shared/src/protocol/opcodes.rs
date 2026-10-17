@@ -110,7 +110,7 @@ impl Opcode {
     /// Reply to the addon-CRC block the vanilla client appends to the end of `CMSG_AUTH_SESSION`.
     /// Vanilla-only: the modern client never sends that block.
     pub const SMSG_ADDON_INFO: Opcode = Opcode { vanilla: 0x02EF, ..Opcode::NONE }; // 751
-    pub const SMSG_PONG: Opcode = Opcode { vanilla: 0x001D, modern: 0x304E };
+    pub const SMSG_PONG: Opcode = Opcode { vanilla: 0x01DD, modern: 0x304E }; // 477
     /// Sent once, right after the auth response and before the client requests the character
     /// list. Carries `MaxCharactersOnThisRealm` and the expansion-level bounds; without it the
     /// client has no signal for whether character creation is available and hides the Create
@@ -181,7 +181,9 @@ impl Opcode {
     pub const SMSG_UPDATE_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020C, modern: 0x2700 }; // 524
     pub const CMSG_REQUEST_ACCOUNT_DATA: Opcode = Opcode { vanilla: 0x020A, modern: 0x3694 }; // 522
     pub const SMSG_UPDATE_ACCOUNT_DATA_COMPLETE: Opcode = Opcode { vanilla: 0x020D, ..Opcode::NONE }; // 525
-    pub const SMSG_ACCOUNT_DATA_MD5: Opcode = Opcode { vanilla: 0x0209, ..Opcode::NONE }; // 521
+    /// 1.12 has no MD5-account-data packet; `0x0209` is [`Opcode::SMSG_ACCOUNT_DATA_TIMES`]. Kept
+    /// as an absent opcode so the (unused) message struct still encodes to a named constant.
+    pub const SMSG_ACCOUNT_DATA_MD5: Opcode = Opcode { ..Opcode::NONE };
     pub const SMSG_ACCOUNT_DATA_TIMES: Opcode = Opcode { vanilla: 0x0209, modern: 0x2701 }; // 521
 
     // ============================================================================
@@ -195,7 +197,7 @@ impl Opcode {
     pub const CMSG_ITEM_QUERY_SINGLE: Opcode = Opcode { vanilla: 0x056, ..Opcode::NONE };
     pub const CMSG_ITEM_QUERY_MULTIPLE: Opcode = Opcode { vanilla: 0x057, ..Opcode::NONE };
     pub const SMSG_ITEM_QUERY_SINGLE_RESPONSE: Opcode = Opcode { vanilla: 0x058, ..Opcode::NONE }; // 88
-    pub const SMSG_ITEM_QUERY_MULTIPLE_RESPONSE: Opcode = Opcode { vanilla: 0x057, ..Opcode::NONE };
+    pub const SMSG_ITEM_QUERY_MULTIPLE_RESPONSE: Opcode = Opcode { vanilla: 0x059, ..Opcode::NONE };
     pub const CMSG_GAMEOBJECT_QUERY: Opcode = Opcode { vanilla: 0x005E, modern: 0x326C }; // 94
     pub const SMSG_GAMEOBJECT_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x005F, modern: 0x2915 }; // 95
     pub const CMSG_PAGE_TEXT_QUERY: Opcode = Opcode { vanilla: 0x005A, modern: 0x326F }; // 90
@@ -212,7 +214,7 @@ impl Opcode {
 
     pub const SMSG_UPDATE_OBJECT: Opcode = Opcode { vanilla: 0x00A9, modern: 0x27C4 }; // 169
     pub const SMSG_COMPRESSED_UPDATE_OBJECT: Opcode = Opcode { vanilla: 0x01F6, ..Opcode::NONE }; // 502
-    pub const SMSG_COMPRESSED_MOVES: Opcode = Opcode { vanilla: 0x02B3, ..Opcode::NONE }; // 691
+    pub const SMSG_COMPRESSED_MOVES: Opcode = Opcode { vanilla: 0x02FB, ..Opcode::NONE }; // 763
     pub const SMSG_DESTROY_OBJECT: Opcode = Opcode { vanilla: 0x00AA, ..Opcode::NONE }; // 170
 
     // ============================================================================
@@ -249,7 +251,7 @@ impl Opcode {
     pub const MSG_MOVE_TELEPORT_ACK: Opcode = Opcode { vanilla: 0x00C7, ..Opcode::NONE }; // 199
     pub const MSG_MOVE_TELEPORT: Opcode = Opcode { vanilla: 0x00C5, ..Opcode::NONE }; // 197
     pub const MSG_MOVE_KNOCK_BACK: Opcode = Opcode { vanilla: 0x00F1, ..Opcode::NONE }; // 241
-    pub const MSG_MOVE_TIME_SKIPPED: Opcode = Opcode { vanilla: 0x02CE, modern: 0x3A1A }; // 718 (same wire value as CMSG, used for observer rebroadcast)
+    pub const MSG_MOVE_TIME_SKIPPED: Opcode = Opcode { vanilla: 0x0319, modern: 0x3A1A }; // 793 (vanilla MSG form; the modern client folds it into CMSG's 0x3A1A)
     pub const CMSG_MOUNTSPECIAL_ANIM: Opcode = Opcode { vanilla: 0x0171, modern: 0x327B }; // 369
     pub const SMSG_MOUNTSPECIAL_ANIM: Opcode = Opcode { vanilla: 0x0172, modern: 0x2698 }; // 370
 
@@ -380,8 +382,7 @@ impl Opcode {
     pub const CMSG_CANCEL_GROWTH_AURA: Opcode = Opcode { vanilla: 0x029B, modern: 0x326A }; // 667
     pub const CMSG_CANCEL_AUTO_REPEAT_SPELL: Opcode = Opcode { vanilla: 0x026D, modern: 0x34E7 }; // 621
     pub const SMSG_CANCEL_AUTO_REPEAT: Opcode = Opcode { vanilla: 0x029C, modern: 0x26D6 }; // 668
-    pub const CMSG_CANCEL_CHANNELING: Opcode = Opcode { vanilla: 0x013B, modern: 0x3265 }; // 315
-    pub const CMSG_CANCEL_CHANNELLING: Opcode = Opcode { vanilla: 0x013B, modern: 0x3265 }; // 315 (alias)
+    pub const CMSG_CANCEL_CHANNELLING: Opcode = Opcode { vanilla: 0x013B, modern: 0x3265 }; // 315
     pub const CMSG_USE_ITEM: Opcode = Opcode { vanilla: 0x00AB, modern: 0x3290 }; // 171
     pub const CMSG_NEW_SPELL_SLOT: Opcode = Opcode { vanilla: 0x012D, ..Opcode::NONE }; // 301
     pub const SMSG_SPELL_PREPARE: Opcode = Opcode { modern: 0x2C38, ..Opcode::NONE }; // 1.14 only
@@ -420,7 +421,7 @@ impl Opcode {
     pub const SMSG_SPELLHEALLOG: Opcode = Opcode { vanilla: 0x0150, modern: 0x2C1D }; // 336
     pub const SMSG_SPELLLOGMISS: Opcode = Opcode { vanilla: 0x014C, ..Opcode::NONE }; // 332
     pub const SMSG_SPELLENERGIZELOG: Opcode = Opcode { vanilla: 0x0151, modern: 0x2C1C }; // 337
-    pub const SMSG_SPELLNONMELEEDAMAGELOG: Opcode = Opcode { vanilla: 0x0148, ..Opcode::NONE }; // 328
+    pub const SMSG_SPELLNONMELEEDAMAGELOG: Opcode = Opcode { vanilla: 0x0250, ..Opcode::NONE }; // 592
     pub const SMSG_SPELLLOGEXECUTE: Opcode = Opcode { vanilla: 0x024C, modern: 0x2C40 }; // 588
     pub const SMSG_SPELLINSTAKILLLOG: Opcode = Opcode { vanilla: 0x033F, ..Opcode::NONE }; // 815
     pub const SMSG_PROCRESIST: Opcode = Opcode { vanilla: 0x0260, modern: 0x2752 }; // 608
@@ -496,10 +497,10 @@ impl Opcode {
     // NPC Interaction - Banker
     // ============================================================================
 
-    pub const CMSG_BANKER_ACTIVATE: Opcode = Opcode { vanilla: 0x01B5, modern: 0x34B3 }; // 439
+    pub const CMSG_BANKER_ACTIVATE: Opcode = Opcode { vanilla: 0x01B7, modern: 0x34B3 }; // 439
     pub const SMSG_SHOW_BANK: Opcode = Opcode { vanilla: 0x01B8, modern: 0x2678 }; // 440
     pub const CMSG_BUY_BANK_SLOT: Opcode = Opcode { vanilla: 0x01B9, modern: 0x34B4 }; // 441
-    pub const SMSG_BUY_BANK_SLOT_RESULT: Opcode = Opcode { vanilla: 0x0216, ..Opcode::NONE }; // 534
+    pub const SMSG_BUY_BANK_SLOT_RESULT: Opcode = Opcode { vanilla: 0x01BA, ..Opcode::NONE }; // 442
     pub const CMSG_AUTOBANK_ITEM: Opcode = Opcode { vanilla: 0x0283, modern: 0x3997 }; // 643
     pub const CMSG_AUTOSTORE_BANK_ITEM: Opcode = Opcode { vanilla: 0x0282, modern: 0x3996 }; // 642
 
@@ -555,7 +556,7 @@ impl Opcode {
 
     pub const SMSG_START_MIRROR_TIMER: Opcode = Opcode { vanilla: 0x0C1D, modern: 0x2706 }; // 3101
     pub const SMSG_STOP_MIRROR_TIMER: Opcode = Opcode { vanilla: 0x0C1E, modern: 0x2708 }; // 3102
-    pub const SMSG_ENVIRONMENTALDAMAGELOG: Opcode = Opcode { vanilla: 0x0C1F, ..Opcode::NONE }; // 3103
+    pub const SMSG_ENVIRONMENTALDAMAGELOG: Opcode = Opcode { vanilla: 0x01FC, ..Opcode::NONE }; // 508
     pub const SMSG_EXPLORATION_EXPERIENCE: Opcode = Opcode { vanilla: 0x01F8, modern: 0x2756 }; // 504
 
     // ============================================================================
@@ -613,8 +614,8 @@ impl Opcode {
     pub const SMSG_INSPECT: Opcode = Opcode { vanilla: 0x0115, modern: 0x262A }; // 277
     pub const MSG_INSPECT_HONOR_STATS: Opcode = Opcode { vanilla: 0x02D6, ..Opcode::NONE }; // 726
     pub const CMSG_REPAIR_ITEM: Opcode = Opcode { vanilla: 0x02A8, modern: 0x34EC }; // 680
-    pub const SMSG_ITEM_TIME_UPDATE: Opcode = Opcode { vanilla: 0x01EB, modern: 0x274B }; // 491
-    pub const SMSG_ITEM_ENCHANT_TIME_UPDATE: Opcode = Opcode { vanilla: 0x01EC, modern: 0x274C }; // 492
+    pub const SMSG_ITEM_TIME_UPDATE: Opcode = Opcode { vanilla: 0x01EA, modern: 0x274B }; // 490
+    pub const SMSG_ITEM_ENCHANT_TIME_UPDATE: Opcode = Opcode { vanilla: 0x01EB, modern: 0x274C }; // 491
     pub const CMSG_SET_AMMO: Opcode = Opcode { vanilla: 0x0268, modern: 0x3559 }; // 619
     pub const CMSG_WRAP_ITEM: Opcode = Opcode { vanilla: 0x01D3, modern: 0x3994 }; // 467
 
@@ -938,16 +939,19 @@ impl Opcode {
 
     pub const CMSG_BATTLEFIELD_STATUS: Opcode = Opcode { vanilla: 0x02D3, ..Opcode::NONE }; // 723
     pub const SMSG_BATTLEFIELD_STATUS: Opcode = Opcode { vanilla: 0x02D4, ..Opcode::NONE }; // 724
-    pub const CMSG_BATTLEFIELD_LIST: Opcode = Opcode { vanilla: 0x023B, modern: 0x3182 }; // 571
-    pub const SMSG_BATTLEFIELD_LIST: Opcode = Opcode { vanilla: 0x023C, modern: 0x2927 }; // 572
+    pub const CMSG_BATTLEFIELD_LIST: Opcode = Opcode { vanilla: 0x023C, modern: 0x3182 }; // 572
+    pub const SMSG_BATTLEFIELD_LIST: Opcode = Opcode { vanilla: 0x023D, modern: 0x2927 }; // 573
     pub const CMSG_BATTLEFIELD_JOIN: Opcode = Opcode { vanilla: 0x023E, ..Opcode::NONE }; // 574
     pub const SMSG_BATTLEFIELD_JOINED: Opcode = Opcode { vanilla: 0x02E1, ..Opcode::NONE }; // 737
-    pub const SMSG_BATTLEFIELD_LEFT: Opcode = Opcode { vanilla: 0x02E2, ..Opcode::NONE }; // 738
+    /// No such 1.12 opcode: `0x02E2` is [`Opcode::CMSG_AREA_SPIRIT_HEALER_QUERY`].
+    pub const SMSG_BATTLEFIELD_LEFT: Opcode = Opcode { ..Opcode::NONE };
     pub const CMSG_LEAVE_BATTLEFIELD: Opcode = Opcode { vanilla: 0x02E5, ..Opcode::NONE }; // 741
     pub const CMSG_BATTLEFIELD_PORT: Opcode = Opcode { vanilla: 0x02D5, modern: 0x3524 }; // 725
     pub const CMSG_BATTLEMASTER_HELLO: Opcode = Opcode { vanilla: 0x02D7, modern: 0x32A9 }; // 727
-    pub const SMSG_BATTLEMASTER_JOINED: Opcode = Opcode { vanilla: 0x02E3, ..Opcode::NONE }; // 739
-    pub const CMSG_BATTLEFIELD_QUEUE: Opcode = Opcode { vanilla: 0x023D, ..Opcode::NONE }; // 573
+    /// No such 1.12 opcode: `0x02E3` is [`Opcode::CMSG_AREA_SPIRIT_HEALER_QUEUE`].
+    pub const SMSG_BATTLEMASTER_JOINED: Opcode = Opcode { ..Opcode::NONE };
+    /// No such 1.12 opcode: `0x023D` is [`Opcode::SMSG_BATTLEFIELD_LIST`].
+    pub const CMSG_BATTLEFIELD_QUEUE: Opcode = Opcode { ..Opcode::NONE };
     pub const CMSG_BATTLEFIELD_UN_QUEUE: Opcode = Opcode { vanilla: 0x023F, ..Opcode::NONE }; // 575
     pub const CMSG_AREA_SPIRIT_HEALER_QUERY: Opcode = Opcode { vanilla: 0x02E2, modern: 0x34B0 }; // 738
     pub const CMSG_AREA_SPIRIT_HEALER_QUEUE: Opcode = Opcode { vanilla: 0x02E3, modern: 0x34B1 }; // 739
@@ -1007,7 +1011,7 @@ impl Opcode {
     pub const SMSG_PET_CAST_FAILED: Opcode = Opcode { vanilla: 0x0138, modern: 0x2C58 }; // 312
     pub const CMSG_PET_CANCEL_AURA: Opcode = Opcode { vanilla: 0x026B, modern: 0x348E }; // 619
     pub const SMSG_PET_ACTION_FEEDBACK: Opcode = Opcode { vanilla: 0x02C6, modern: 0x2740 }; // 710
-    pub const SMSG_PET_BROKEN: Opcode = Opcode { vanilla: 0x02B3, ..Opcode::NONE }; // 691
+    pub const SMSG_PET_BROKEN: Opcode = Opcode { vanilla: 0x02AF, ..Opcode::NONE }; // 687
     pub const CMSG_PET_UNLEARN: Opcode = Opcode { vanilla: 0x02F0, ..Opcode::NONE }; // 752
     pub const SMSG_PET_UNLEARN_CONFIRM: Opcode = Opcode { vanilla: 0x02F1, ..Opcode::NONE }; // 753
     pub const CMSG_PET_SPELL_AUTOCAST: Opcode = Opcode { vanilla: 0x02F3, modern: 0x348F }; // 755
@@ -1515,7 +1519,6 @@ pub const ALL: &[(Opcode, &str)] = &[
         "CMSG_CANCEL_AUTO_REPEAT_SPELL",
     ),
     (Opcode::SMSG_CANCEL_AUTO_REPEAT, "SMSG_CANCEL_AUTO_REPEAT"),
-    (Opcode::CMSG_CANCEL_CHANNELING, "CMSG_CANCEL_CHANNELING"),
     (Opcode::CMSG_CANCEL_CHANNELLING, "CMSG_CANCEL_CHANNELLING"),
     (Opcode::CMSG_USE_ITEM, "CMSG_USE_ITEM"),
     (Opcode::CMSG_NEW_SPELL_SLOT, "CMSG_NEW_SPELL_SLOT"),
@@ -2553,35 +2556,16 @@ mod tests {
 
     /// Opcode values shared by more than one constant.
     ///
-    /// Two of these are harmless aliases; the rest are **wrong values** that happen not to have
-    /// caused a visible failure yet. They are allow-listed so this guard can go in without a
-    /// behaviour change, and each is individually testable against a live 1.12 client — fix them
-    /// one per commit, deleting the entry as you go. Correct values are from
-    /// `V1_12_1_5875`.
-    ///
-    /// | value | constants | verdict |
-    /// |---|---|---|
-    /// | `0x013B` | `CMSG_CANCEL_CHANNELING`, `CMSG_CANCEL_CHANNELLING` | alias — one spelling should go |
-    /// | `0x02CE` | `CMSG_MOVE_TIME_SKIPPED`, `MSG_MOVE_TIME_SKIPPED` | alias — same opcode, two names |
-    /// | `0x0057` | `SMSG_ITEM_QUERY_MULTIPLE_RESPONSE` | wrong, should be `0x0059` |
-    /// | `0x0148` | `SMSG_SPELLNONMELEEDAMAGELOG` | wrong, absent from the 1.12 table |
-    /// | `0x01B5` | `CMSG_BANKER_ACTIVATE` | wrong; `0x01B5` belongs to `CMSG_BINDER_ACTIVATE` |
-    /// | `0x01EC` | `SMSG_ITEM_ENCHANT_TIME_UPDATE` | wrong, should be `0x01EB` (collides with `SMSG_AUTH_CHALLENGE`) |
-    /// | `0x0209` | `SMSG_ACCOUNT_DATA_MD5` | not a 1.12 opcode; `0x0209` is `SMSG_ACCOUNT_DATA_TIMES` |
-    /// | `0x0216` | `SMSG_BUY_BANK_SLOT_RESULT` | wrong, should be `0x01BA` |
-    /// | `0x023B` | `CMSG_BATTLEFIELD_LIST` | wrong, should be `0x023C` |
-    /// | `0x02B3` | `SMSG_COMPRESSED_MOVES` | wrong, should be `0x02FB` — **live**, used by `updates/movement_data.rs` |
-    /// | `0x02B3` | `SMSG_PET_BROKEN` | wrong, should be `0x02AF` |
-    /// | `0x02E2` | `SMSG_BATTLEFIELD_LEFT` | not a 1.12 opcode; `0x02E2` is `CMSG_AREA_SPIRIT_HEALER_QUERY` |
-    /// | `0x02E3` | `SMSG_BATTLEMASTER_JOINED` | not a 1.12 opcode; `0x02E3` is `CMSG_AREA_SPIRIT_HEALER_QUEUE` |
-    ///
-    /// Separately wrong but *not* duplicated, so not caught here: `SMSG_PONG` is `0x01D` and should
-    /// be `0x01DD` (**live**, used by `messages/movement.rs`), and `SMSG_ENVIRONMENTALDAMAGELOG` is
-    /// `0x0C1F`, far outside the 1.12 range.
-    const KNOWN_DUPLICATE_VALUES: &[u32] = &[
-        0x0057, 0x013B, 0x0148, 0x01B5, 0x01EC, 0x0209, 0x0216, 0x023B, 0x02B3, 0x02CE, 0x02E2,
-        0x02E3,
-    ];
+    /// This allow-list is **empty**, and should stay that way. It once held twelve vanilla
+    /// collisions, each a wrong value that shadowed another constant in the first-declaration-wins
+    /// wire index (so the shadowed one was unreachable inbound). All twelve were resolved against
+    /// `V1_12_1_5875`: the misspelled `CMSG_CANCEL_CHANNELING` was deleted, the two `*_TIME_SKIPPED`
+    /// aliases were split (`MSG_MOVE_TIME_SKIPPED` is `0x319`), the rest were given their real
+    /// values, and constants with no 1.12 opcode at all (`SMSG_ACCOUNT_DATA_MD5`,
+    /// `SMSG_BATTLEFIELD_LEFT`, `SMSG_BATTLEMASTER_JOINED`, `CMSG_BATTLEFIELD_QUEUE`) were made
+    /// absent. If a genuine alias is ever needed, add it here with a note saying why — do not widen
+    /// it to silence a wrong value.
+    const KNOWN_DUPLICATE_VALUES: &[u32] = &[];
 
     #[test]
     fn every_opcode_constant_is_parsed() {
@@ -2589,8 +2573,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            676,
-            "expected 676 opcode constants; update this count deliberately when adding opcodes"
+            675,
+            "expected 675 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 
@@ -2615,6 +2599,73 @@ mod tests {
             unexpected.is_empty(),
             "new duplicate opcode values introduced:\n  {}",
             unexpected.join("\n  ")
+        );
+    }
+
+    /// The direction of a constant, derived from its name prefix.
+    ///
+    /// The wire index is direction-agnostic — [`Opcode::from_vanilla_wire`] resolves any number to
+    /// whichever constant claimed it first — so a client opcode and a server opcode sharing a value
+    /// would resolve the *wrong way round* for one of them. `MSG_` opcodes travel both ways and so
+    /// conflict with either family.
+    fn direction(name: &str) -> Direction {
+        if name.starts_with("CMSG_") {
+            Direction::Client
+        } else if name.starts_with("SMSG_") {
+            Direction::Server
+        } else if name.starts_with("MSG_") {
+            Direction::Both
+        } else {
+            Direction::Other
+        }
+    }
+
+    #[derive(PartialEq, Eq, Hash, Debug)]
+    enum Direction {
+        Client,
+        Server,
+        Both,
+        Other,
+    }
+
+    #[test]
+    fn no_vanilla_value_is_shared_across_directions() {
+        let mut by_value: HashMap<u32, Vec<(&str, Direction)>> = HashMap::new();
+        for (name, value) in declared_opcodes() {
+            if value != 0 {
+                by_value
+                    .entry(value)
+                    .or_default()
+                    .push((name, direction(name)));
+            }
+        }
+
+        let mut clashes: Vec<String> = by_value
+            .iter()
+            .filter(|(_, entries)| {
+                entries
+                    .iter()
+                    .map(|(_, dir)| dir)
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    > 1
+            })
+            .map(|(value, entries)| {
+                let who = entries
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("0x{value:04X}: {who}")
+            })
+            .collect();
+        clashes.sort();
+
+        assert!(
+            clashes.is_empty(),
+            "vanilla wire values shared by only-one-direction opcodes — the direction-agnostic \
+             lookup will resolve one of them wrongly:\n  {}",
+            clashes.join("\n  ")
         );
     }
 
@@ -2678,10 +2729,12 @@ mod tests {
 
     /// Modern values shared by more than one constant.
     ///
-    /// Both are the modern-side shadow of a vanilla duplicate already listed above — the
-    /// generator resolved both spellings to the same modern opcode, which is correct. There is no
-    /// modern-only collision, and there should never be one: the modern column is generated.
-    const KNOWN_DUPLICATE_MODERN_VALUES: &[u16] = &[0x3265, 0x3A1A];
+    /// `0x3A1A` is the one remaining alias: the 1.14 table has only `CMSG_MOVE_TIME_SKIPPED`
+    /// (`0x3A1A`), so both our `CMSG_` and `MSG_` spellings resolve to it. That is intentional —
+    /// the modern client uses the single opcode in both directions. (`0x3265` was here too until
+    /// the misspelled `CMSG_CANCEL_CHANNELING` was deleted.) There is no other modern-only
+    /// collision, and there should never be one: the modern column is generated.
+    const KNOWN_DUPLICATE_MODERN_VALUES: &[u16] = &[0x3A1A];
 
     #[test]
     fn no_unexpected_duplicate_modern_values() {

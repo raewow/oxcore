@@ -216,7 +216,7 @@ mod tests {
 
         let packet = msg.to_modern().expect("modern body exists");
         assert_eq!(packet.opcode(), Opcode::SMSG_UPDATE_ACCOUNT_DATA);
-        assert_eq!(packet.opcode().modern(), 0x26FF);
+        assert_eq!(packet.opcode().modern(), 0x2700);
 
         let mut reader = BitReader::new(packet.contents());
         let (high, low) = reader.read_packed_guid_128().expect("owner guid present");
