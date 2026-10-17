@@ -237,25 +237,9 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
         tracing::info!("[DEATH] process_creature_death {:?}: sending lootable update, dynflags=0x{:04X} (LOOTABLE)", guid, flags);
         send_complete_loot_update(world, guid, flags);
 
-        // Phase 5: group loot dispatch. Open the corpse to the whole tap group, advance the
-        // round-robin looter, and start rolls / master-loot assignment by the group's method.
+        // Group rights: who may open the corpse and whose turn the under-threshold items are.
+        // Rolls and the master-loot list wait until a group member first opens the corpse.
         if let Some(group_id) = world.systems.group.get_player_group_id(recipient_guid) {
-            let group = world.systems.group.get_player_group(recipient_guid);
-            let loot_method = group.clone().map(|g| g.loot_method).unwrap_or_default();
-            let master_guid = group.map(|g| g.leader_guid).unwrap_or(recipient_guid);
-
-            // Everyone in the tap group may open the corpse.
-            let allowed: Vec<ObjectGuid> = world
-                .systems
-                .group
-                .get_group(group_id)
-                .map(|g| g.members.iter().map(|m| m.guid).collect())
-                .unwrap_or_default();
-            world
-                .systems
-                .loot_manager
-                .set_allowed_looters(guid, allowed);
-
             let context = crate::game::group::rolls::LootContext {
                 position,
                 map_id,
@@ -267,45 +251,7 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
                     .map(|t| t.rank)
                     .unwrap_or(0),
             };
-            use crate::game::group::LootMethod;
-            match loot_method {
-                LootMethod::FreeForAll => {}
-                LootMethod::RoundRobin => {
-                    world
-                        .systems
-                        .group
-                        .update_looter_guid(world, group_id, guid, &context, false);
-                }
-                LootMethod::GroupLoot => {
-                    world
-                        .systems
-                        .group
-                        .update_looter_guid(world, group_id, guid, &context, false);
-                    world
-                        .systems
-                        .group
-                        .group_loot(world, group_id, guid, context)
-                        .await;
-                }
-                LootMethod::NeedBeforeGreed => {
-                    world
-                        .systems
-                        .group
-                        .update_looter_guid(world, group_id, guid, &context, false);
-                    world
-                        .systems
-                        .group
-                        .need_before_greed(world, group_id, guid, context)
-                        .await;
-                }
-                LootMethod::MasterLooter => {
-                    world
-                        .systems
-                        .group
-                        .master_loot(world, group_id, guid, master_guid, context)
-                        .await;
-                }
-            }
+            assign_group_loot_rights(world, guid, recipient_guid, group_id, &context);
         }
     } else {
         // No loot recipient — just clear dynamic flags (no DYNFLAG_DEAD, no LOOTABLE)
@@ -337,6 +283,99 @@ pub async fn process_corpse_decay(world: &World, diff_ms: u32) -> anyhow::Result
 /// Remove corpse from world
 async fn remove_corpse(world: &World, guid: ObjectGuid) -> anyhow::Result<()> {
     tracing::debug!("[DEATH] Removing corpse for {:?}", guid);
+
+/// Open a grouped kill's corpse to the tap group.
+///
+/// Looters are the members in the world and within reward distance now; the corpse remembers
+/// its own round-robin owner (the group's current turn, kept if they are still in range), and
+/// the group's turn then passes on for the next kill. Under master loot an offline master is
+/// replaced first (see `GroupSystem::resolve_master_looter`).
+fn assign_group_loot_rights(
+    world: &World,
+    guid: ObjectGuid,
+    tapper: ObjectGuid,
+    group_id: u32,
+    context: &crate::game::group::rolls::LootContext,
+) {
+    use crate::game::group::{is_at_group_reward_distance, LootMethod};
+
+    let group_sys = &world.systems.group;
+    if group_sys
+        .get_group(group_id)
+        .is_some_and(|g| g.loot_method == LootMethod::MasterLooter)
+    {
+        group_sys.resolve_master_looter(world, group_id, guid, context);
+    }
+    let Some(group) = group_sys.get_group(group_id) else {
+        return;
+    };
+
+    let round_robin_player = match group.loot_method {
+        LootMethod::FreeForAll | LootMethod::MasterLooter => None,
+        _ => group_sys.update_looter_guid(world, group_id, guid, context, true),
+    };
+
+    let mut allowed: Vec<ObjectGuid> = group
+        .members
+        .iter()
+        .map(|m| m.guid)
+        .filter(|member| {
+            is_at_group_reward_distance(
+                world,
+                *member,
+                &context.position,
+                context.map_id,
+                context.instance_id,
+                context.rank,
+            )
+        })
+        .collect();
+    if !allowed.contains(&tapper) {
+        allowed.push(tapper);
+    }
+    world.systems.loot_manager.set_group_rights(
+        guid,
+        tapper,
+        Some(group_id),
+        round_robin_player,
+        allowed,
+    );
+
+    // Everything below the group's threshold is round-robin loot under every method.
+    let threshold = group.loot_threshold;
+    let under: Vec<u8> = world
+        .systems
+        .loot_manager
+        .get_loot(guid)
+        .map(|loot| {
+            loot.items
+                .iter()
+                .filter(|item| {
+                    world
+                        .managers
+                        .item_mgr
+                        .get_template(item.item_id)
+                        .map(|t| t.quality)
+                        .unwrap_or(0)
+                        < threshold
+                })
+                .map(|item| item.slot)
+                .collect()
+        })
+        .unwrap_or_default();
+    world.systems.loot_manager.with_loot_mut(guid, |loot| {
+        for item in loot.items.iter_mut() {
+            if under.contains(&item.slot) {
+                item.is_underthreshold = true;
+            }
+        }
+    });
+
+    // The next kill is someone else's turn.
+    if round_robin_player.is_some() {
+        group_sys.update_looter_guid(world, group_id, guid, context, false);
+    }
+}
 
     // Resolve any in-flight loot rolls on this corpse before the loot is deleted.
     world.systems.group.end_roll(world, guid);

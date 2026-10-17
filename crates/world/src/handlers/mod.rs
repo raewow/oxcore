@@ -557,7 +557,7 @@ pub async fn dispatch_packet(
                     group::handle_group_disband(session, world).await?;
                 }
                 Opcode::CMSG_GROUP_RAID_CONVERT => {
-                    group::handle_group_raid_convert(session, world).await?;
+                    group::handle_group_raid_convert(session, packet, world).await?;
                 }
                 Opcode::CMSG_GROUP_CHANGE_SUB_GROUP => {
                     group::handle_group_change_sub_group(session, packet, world).await?;
@@ -586,6 +586,12 @@ pub async fn dispatch_packet(
 
                 // GM Ticket handlers
                 Opcode::CMSG_GMTICKET_GETTICKET => {
+                Opcode::MSG_RANDOM_ROLL => {
+                    group::handle_random_roll(session, packet, world).await?;
+                }
+                Opcode::MSG_MINIMAP_PING => {
+                    group::handle_minimap_ping(session, packet, world).await?;
+                }
                     ticket::handle_gmticket_getticket(session, packet, world).await?;
                 }
                 Opcode::CMSG_GMTICKET_CREATE => {

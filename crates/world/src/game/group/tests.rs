@@ -426,31 +426,40 @@ fn has_open_roll(world: &World, group_id: u32) -> bool {
 fn test_can_use_item_armor_proficiency() {
     // Cloth: every class.
     let cloth = armor(1, 1, 1);
-    assert!(can_use_item(1, 60, &cloth)); // warrior
-    assert!(can_use_item(8, 60, &cloth)); // mage
+    assert!(can_use_item(1, 1, 60, &cloth)); // warrior
+    assert!(can_use_item(8, 1, 60, &cloth)); // mage
 
-    // Leather: not warriors or paladins.
+    // Leather: everyone but priests, mages and warlocks.
     let leather = armor(2, 2, 1);
-    assert!(!can_use_item(1, 60, &leather)); // warrior
-    assert!(!can_use_item(2, 60, &leather)); // paladin
-    assert!(can_use_item(4, 60, &leather)); // rogue
-    assert!(can_use_item(8, 60, &leather)); // mage
+    assert!(can_use_item(1, 1, 60, &leather)); // warrior
+    assert!(can_use_item(2, 1, 60, &leather)); // paladin
+    assert!(can_use_item(4, 1, 60, &leather)); // rogue
+    assert!(can_use_item(11, 4, 60, &leather)); // druid
+    assert!(!can_use_item(5, 1, 60, &leather)); // priest
+    assert!(!can_use_item(8, 1, 60, &leather)); // mage
+    assert!(!can_use_item(9, 1, 60, &leather)); // warlock
 
-    // Mail: warrior/paladin/hunter/shaman only.
+    // Mail: warriors and paladins always; hunters and shamans from 40.
     let mail = armor(3, 3, 1);
-    assert!(can_use_item(1, 60, &mail)); // warrior
-    assert!(can_use_item(2, 60, &mail)); // paladin
-    assert!(can_use_item(3, 60, &mail)); // hunter
-    assert!(can_use_item(7, 60, &mail)); // shaman
-    assert!(!can_use_item(8, 60, &mail)); // mage
-    assert!(!can_use_item(4, 60, &mail)); // rogue
+    assert!(can_use_item(1, 1, 60, &mail)); // warrior
+    assert!(can_use_item(2, 1, 60, &mail)); // paladin
+    assert!(can_use_item(3, 2, 60, &mail)); // hunter
+    assert!(can_use_item(7, 2, 60, &mail)); // shaman
+    assert!(!can_use_item(3, 2, 39, &mail)); // hunter before 40
+    assert!(!can_use_item(8, 1, 60, &mail)); // mage
+    assert!(!can_use_item(4, 1, 60, &mail)); // rogue
 
     // Plate: warrior/paladin only.
     let plate = armor(4, 4, 1);
-    assert!(can_use_item(1, 60, &plate));
-    assert!(can_use_item(2, 60, &plate));
-    assert!(!can_use_item(7, 60, &plate)); // shaman
-    assert!(!can_use_item(5, 60, &plate)); // priest
+    assert!(can_use_item(1, 1, 60, &plate));
+    assert!(can_use_item(2, 1, 60, &plate));
+    assert!(!can_use_item(7, 2, 60, &plate)); // shaman
+    assert!(!can_use_item(5, 1, 60, &plate)); // priest
+
+    // Shields: warrior/paladin/shaman.
+    let shield = armor(6, 6, 1);
+    assert!(can_use_item(7, 2, 60, &shield));
+    assert!(!can_use_item(4, 1, 60, &shield)); // rogue
 
     // Weapons (item_class != 4) are never proficiency-gated.
     let weapon = ItemTemplate {
@@ -458,15 +467,38 @@ fn test_can_use_item_armor_proficiency() {
         item_class: 2,
         ..Default::default()
     };
-    assert!(can_use_item(8, 60, &weapon));
+    assert!(can_use_item(8, 1, 60, &weapon));
+}
+
+#[test]
+fn test_can_use_item_class_and_race_masks() {
+    // Warrior-only item (class bit 1).
+    let warrior_only = ItemTemplate {
+        entry: 20,
+        allowable_class: 1,
+        allowable_race: -1,
+        ..Default::default()
+    };
+    assert!(can_use_item(1, 1, 60, &warrior_only));
+    assert!(!can_use_item(8, 1, 60, &warrior_only));
+
+    // Human-only item (race bit 1).
+    let human_only = ItemTemplate {
+        entry: 21,
+        allowable_class: -1,
+        allowable_race: 1,
+        ..Default::default()
+    };
+    assert!(can_use_item(1, 1, 60, &human_only));
+    assert!(!can_use_item(1, 2, 60, &human_only)); // orc
 }
 
 #[test]
 fn test_can_use_item_required_level_gate() {
     let plate = armor(10, 4, 40);
-    assert!(!can_use_item(1, 39, &plate));
-    assert!(can_use_item(1, 40, &plate));
-    assert!(can_use_item(1, 60, &plate));
+    assert!(!can_use_item(1, 1, 39, &plate));
+    assert!(can_use_item(1, 1, 40, &plate));
+    assert!(can_use_item(1, 1, 60, &plate));
 }
 
 #[tokio::test]
@@ -739,15 +771,22 @@ async fn test_round_robin_looter_skips_out_of_range_members() {
     let context = roll_context();
     let group = &world.systems.group;
 
-    // First pick starts at the leader and lands on the first in-range member (skips "far").
+    // An unset cursor starts at the first member: the leader.
+    assert_eq!(
+        group.update_looter_guid(&world, 1, loot_guid, &context, false),
+        Some(leader)
+    );
+    assert_eq!(group.current_looter(1), Some(leader));
+
+    // Next pick advances past the leader and skips "far" (out of range).
     group.update_looter_guid(&world, 1, loot_guid, &context, false);
     assert_eq!(group.current_looter(1), Some(near));
 
-    // Next pick advances past "near" and wraps around to the leader (also in range).
+    // And wraps back around to the leader.
     group.update_looter_guid(&world, 1, loot_guid, &context, false);
     assert_eq!(group.current_looter(1), Some(leader));
 
-    // And so on: full cycle of the two in-range members.
-    group.update_looter_guid(&world, 1, loot_guid, &context, false);
-    assert_eq!(group.current_looter(1), Some(near));
+    // `ifneed` keeps the turn with a current looter who is still in range.
+    group.update_looter_guid(&world, 1, loot_guid, &context, true);
+    assert_eq!(group.current_looter(1), Some(leader));
 }

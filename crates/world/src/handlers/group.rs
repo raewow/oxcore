@@ -11,8 +11,21 @@ use crate::game::group::{
     ERR_ALREADY_IN_GROUP_S, ERR_BAD_PLAYER_NAME_S, ERR_GROUP_FULL, ERR_IGNORING_YOU_S,
     ERR_NOT_LEADER, ERR_PARTY_RESULT_OK, ERR_PLAYER_WRONG_FACTION, PARTY_OP_INVITE, PARTY_OP_LEAVE,
 };
+use crate::core::common::packet::WorldPacketGuidExt;
 use crate::World;
-use oxcore_shared::protocol::{ObjectGuid, WorldPacket};
+use oxcore_shared::protocol::bitbuf::BitReader;
+use oxcore_shared::protocol::{ObjectGuid, Protocol, WorldPacket};
+
+/// The name of a member of `player_guid`'s group, for the 1.14 bodies that name members by GUID
+/// where 1.12 sends names.
+fn member_name(world: &World, player_guid: ObjectGuid, member: ObjectGuid) -> Option<String> {
+    world
+        .systems
+        .group
+        .get_player_group(player_guid)?
+        .get_member(member)
+        .map(|m| m.name.clone())
+}
 
 /// Handle CMSG_GROUP_INVITE - player invites someone to group
 /// Packet format: playerName (cstring)
@@ -25,7 +38,20 @@ pub async fn handle_group_invite(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let target_name = packet.read_string().unwrap_or_default();
+    // 1.14: u8 party index, 9-bit name and realm lengths, u32 virtual realm, guid128 target,
+    // then the two strings. The target is resolved by name on both protocols.
+    let target_name = match session.protocol() {
+        Protocol::Vanilla => packet.read_string().unwrap_or_default(),
+        Protocol::Modern => {
+            let mut reader = BitReader::new(packet.contents());
+            let _party_index = reader.read_u8();
+            let name_len = reader.read_bits(9).unwrap_or(0) as usize;
+            let _realm_len = reader.read_bits(9);
+            let _virtual_realm = reader.read_u32();
+            let _target = reader.read_packed_guid_128();
+            reader.read_string(name_len).unwrap_or_default()
+        }
+    };
 
     info!(
         "CMSG_GROUP_INVITE: player={:?}, target_name={}",
@@ -39,7 +65,18 @@ pub async fn handle_group_invite(
         .invite_player(player_guid, target_name.clone())
         .await
     {
-        Ok(()) => {}
+        Ok(()) => {
+            // "You have invited X to join your group."
+            use oxcore_shared::messages::group::SmsgPartyCommandResult;
+            world.managers.broadcast_mgr.send_msg_to_player(
+                player_guid,
+                SmsgPartyCommandResult {
+                    operation: PARTY_OP_INVITE,
+                    member_name: &target_name,
+                    result: ERR_PARTY_RESULT_OK,
+                },
+            );
+        }
         Err(e) => {
             // Send error message to player
             use crate::game::group::GroupError;
@@ -47,7 +84,9 @@ pub async fn handle_group_invite(
 
             let result_code = match e {
                 GroupError::TargetNotFound => ERR_BAD_PLAYER_NAME_S,
-                GroupError::TargetAlreadyInGroup => ERR_ALREADY_IN_GROUP_S,
+                GroupError::TargetAlreadyInGroup | GroupError::TargetHasPendingInvite => {
+                    ERR_ALREADY_IN_GROUP_S
+                }
                 GroupError::GroupFull => ERR_GROUP_FULL,
                 GroupError::NotLeaderOrAssistant => ERR_NOT_LEADER,
                 GroupError::WrongFaction => ERR_PLAYER_WRONG_FACTION,
@@ -166,7 +205,13 @@ pub async fn handle_group_set_leader(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let new_leader_guid = ObjectGuid::from_raw(packet.read_u64().unwrap_or(0));
+    // 1.14 leads with a party index byte, then a guid128.
+    if session.protocol() == Protocol::Modern {
+        let _party_index = packet.read_i8();
+    }
+    let new_leader_guid = packet
+        .read_guid_for(session.protocol())
+        .unwrap_or_else(ObjectGuid::empty);
 
     info!(
         "CMSG_GROUP_SET_LEADER: player={:?}, new_leader={:?}",
@@ -199,12 +244,24 @@ pub async fn handle_group_disband(session: &WorldSession, world: &World) -> Resu
 
 /// Handle CMSG_GROUP_RAID_CONVERT - convert party to raid
 /// Packet format: empty
-pub async fn handle_group_raid_convert(session: &WorldSession, world: &World) -> Result<()> {
+pub async fn handle_group_raid_convert(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     info!("CMSG_GROUP_RAID_CONVERT: player={:?}", player_guid);
+
+    // 1.14 carries one bit: raid (convert) or party (convert back, which is not supported).
+    if session.protocol() == Protocol::Modern {
+        let to_raid = BitReader::new(packet.contents()).read_bit().unwrap_or(true);
+        if !to_raid {
+            return Ok(());
+        }
+    }
 
     world.systems.group.convert_to_raid(player_guid).await?;
 
@@ -222,8 +279,24 @@ pub async fn handle_group_change_sub_group(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let member_name = packet.read_string().unwrap_or_default();
-    let subgroup = packet.read_u8().unwrap_or(0);
+    // 1.14 names the member by guid128, then a party index and the subgroup.
+    let (member_name, subgroup) = match session.protocol() {
+        Protocol::Vanilla => (
+            packet.read_string().unwrap_or_default(),
+            packet.read_u8().unwrap_or(0),
+        ),
+        Protocol::Modern => {
+            let member = packet
+                .read_guid_for(session.protocol())
+                .unwrap_or_else(ObjectGuid::empty);
+            let _party_index = packet.read_i8();
+            let subgroup = packet.read_u8().unwrap_or(0);
+            (
+                member_name(world, player_guid, member).unwrap_or_default(),
+                subgroup,
+            )
+        }
+    };
 
     info!(
         "CMSG_GROUP_CHANGE_SUB_GROUP: player={:?}, member={}, subgroup={}",
@@ -250,8 +323,26 @@ pub async fn handle_group_swap_sub_group(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let member1_name = packet.read_string().unwrap_or_default();
-    let member2_name = packet.read_string().unwrap_or_default();
+    // 1.14: party index, then both members as guid128.
+    let (member1_name, member2_name) = match session.protocol() {
+        Protocol::Vanilla => (
+            packet.read_string().unwrap_or_default(),
+            packet.read_string().unwrap_or_default(),
+        ),
+        Protocol::Modern => {
+            let _party_index = packet.read_i8();
+            let first = packet
+                .read_guid_for(session.protocol())
+                .unwrap_or_else(ObjectGuid::empty);
+            let second = packet
+                .read_guid_for(session.protocol())
+                .unwrap_or_else(ObjectGuid::empty);
+            (
+                member_name(world, player_guid, first).unwrap_or_default(),
+                member_name(world, player_guid, second).unwrap_or_default(),
+            )
+        }
+    };
 
     info!(
         "CMSG_GROUP_SWAP_SUB_GROUP: player={:?}, member1={}, member2={}",
@@ -278,8 +369,22 @@ pub async fn handle_group_assistant_leader(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let member_guid = ObjectGuid::from_raw(packet.read_u64().unwrap_or(0));
-    let enable = packet.read_u8().unwrap_or(0) != 0;
+    // 1.14: party index, guid128, then the flag as a single bit.
+    let (member_guid, enable) = match session.protocol() {
+        Protocol::Vanilla => (
+            ObjectGuid::from_raw(packet.read_u64().unwrap_or(0)),
+            packet.read_u8().unwrap_or(0) != 0,
+        ),
+        Protocol::Modern => {
+            let mut reader = BitReader::new(packet.contents());
+            let _party_index = reader.read_u8();
+            let member = reader
+                .read_packed_guid_128()
+                .map(|(high, low)| ObjectGuid::from_guid128(high, low))
+                .unwrap_or_else(ObjectGuid::empty);
+            (member, reader.read_bit().unwrap_or(false))
+        }
+    };
 
     info!(
         "CMSG_GROUP_ASSISTANT_LEADER: player={:?}, member={:?}, enable={}",
@@ -306,11 +411,28 @@ pub async fn handle_set_loot_method(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    // Client sends: u32 lootMethod, u64 masterLooterGuid, u32 lootThreshold
-    let loot_method_u32 = packet.read_u32().unwrap_or(0);
-    let loot_method = crate::game::group::LootMethod::from(loot_method_u32 as u8);
-    let master_looter_guid = ObjectGuid::from_raw(packet.read_u64().unwrap_or(0));
-    let loot_threshold_u32 = packet.read_u32().unwrap_or(2);
+    // 1.12: u32 lootMethod, u64 masterLooterGuid, u32 lootThreshold.
+    // 1.14: i8 party index, u8 lootMethod, guid128 master looter, u32 lootThreshold.
+    let (loot_method_raw, master_looter_guid, loot_threshold_u32) = match session.protocol() {
+        Protocol::Vanilla => (
+            packet.read_u32().unwrap_or(0),
+            ObjectGuid::from_raw(packet.read_u64().unwrap_or(0)),
+            packet.read_u32().unwrap_or(2),
+        ),
+        Protocol::Modern => {
+            let _party_index = packet.read_i8();
+            let method = u32::from(packet.read_u8().unwrap_or(0));
+            let master = packet
+                .read_guid_for(session.protocol())
+                .unwrap_or_else(ObjectGuid::empty);
+            (method, master, packet.read_u32().unwrap_or(2))
+        }
+    };
+    // Methods run 0-4; anything else is not a loot method.
+    if loot_method_raw > 4 {
+        return Ok(());
+    }
+    let loot_method = crate::game::group::LootMethod::from(loot_method_raw as u8);
     let loot_threshold = loot_threshold_u32 as u8;
 
     info!(
@@ -376,12 +498,12 @@ pub async fn handle_raid_target_update(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let mode = packet.read_u8().unwrap_or(0);
+    // u8 icon, then the target guid — unless the icon is 0xFF, which asks for the full list.
+    let icon = packet.read_u8().unwrap_or(0xFF);
 
-    if mode == 0 {
+    if icon != 0xFF {
         // Set target icon
         let target_guid = ObjectGuid::from_raw(packet.read_u64().unwrap_or(0));
-        let icon = packet.read_u8().unwrap_or(0);
 
         debug!(
             "MSG_RAID_TARGET_UPDATE (set): player={:?}, target={:?}, icon={}",
@@ -437,7 +559,13 @@ pub async fn handle_request_party_member_stats(
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    let target_guid = ObjectGuid::from_raw(packet.read_u64().unwrap_or(0));
+    // 1.14 leads with a party index byte, then a guid128.
+    if session.protocol() == Protocol::Modern {
+        let _party_index = packet.read_u8();
+    }
+    let target_guid = packet
+        .read_guid_for(session.protocol())
+        .unwrap_or_else(ObjectGuid::empty);
 
     debug!(
         "CMSG_REQUEST_PARTY_MEMBER_STATS: player={:?}, target={:?}",
@@ -451,5 +579,44 @@ pub async fn handle_request_party_member_stats(
         .request_member_stats(player_guid, target_guid)
         .await?;
 
+    Ok(())
+}
+
+/// Handle MSG_RANDOM_ROLL - `/random`
+/// Packet format: min (u32), max (u32)
+pub async fn handle_random_roll(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let min = packet.read_u32().unwrap_or(0);
+    let max = packet.read_u32().unwrap_or(0);
+
+    world
+        .systems
+        .group
+        .random_roll(player_guid, min, max)
+        .await?;
+    Ok(())
+}
+
+/// Handle MSG_MINIMAP_PING - ping the minimap for the rest of the group
+/// Packet format: x (f32), y (f32)
+pub async fn handle_minimap_ping(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let x = packet.read_f32().unwrap_or(0.0);
+    let y = packet.read_f32().unwrap_or(0.0);
+
+    // Not being in a group is not an error for a ping; there is simply nobody to tell.
+    let _ = world.systems.group.send_minimap_ping(player_guid, x, y);
     Ok(())
 }

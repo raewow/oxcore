@@ -24,7 +24,7 @@
 
 use crate::game::group::group_update_flags;
 use crate::game::group::{CachedGroup, GroupMember, LootMethod};
-use crate::messages::loot::write_modern_item_instance;
+use crate::messages::loot::write_modern_loot_item_data;
 use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
@@ -193,26 +193,28 @@ pub struct SmsgLootRollStarted {
     pub item_id: u32,
     pub item_random_prop_id: i32,
     pub item_suffix_factor: u32,
-    pub item_count: u8,
+    pub item_count: u32,
     pub roll_timeout: u32,
+    /// Loot method the roll belongs to (1.14 only).
     pub roll_type: u8,
 }
 
 impl ToWorldPacket for SmsgLootRollStarted {
+    /// 1.12: loot guid, slot, item, random suffix, random property, countdown. No count, no
+    /// valid-roll mask — those arrived later.
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_START_ROLL);
         packet.write_u64(self.loot_guid.raw());
         packet.write_u32(self.item_slot);
         packet.write_u32(self.item_id);
-        packet.write_u32(self.item_random_prop_id as u32);
         packet.write_u32(self.item_suffix_factor);
-        packet.write_u8(self.item_count);
+        packet.write_u32(self.item_random_prop_id as u32);
         packet.write_u32(self.roll_timeout);
-        packet.write_u8(self.roll_type);
         packet
     }
 
-    /// `StartLootRoll.Write`: the loot object guid128, then map id, then the roll method and item.
+    /// `StartLootRoll.Write`: the loot object guid128, map id, timer, roll mask and method, then
+    /// the full loot-item block whose LootListID ties the roll to the loot window slot.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
         let (high, low) = loot_guid128(&self.loot_guid);
@@ -221,49 +223,108 @@ impl ToWorldPacket for SmsgLootRollStarted {
         writer.write_u32(self.roll_timeout); // RollTime
         writer.write_u8(0x07); // ValidRolls: need|greed|pass
         writer.write_u8(self.roll_type); // Method
-        write_modern_item_instance(
+        write_modern_loot_item_data(
             &mut writer,
             self.item_id,
             self.item_random_prop_id.max(0) as u32,
+            self.item_count,
+            0,
+            modern_loot_list_id(self.item_slot),
         );
         Some(writer.finish(Opcode::SMSG_LOOT_START_ROLL))
     }
 }
 
+/// 1-based LootListID for a 0-based wire slot.
+fn modern_loot_list_id(item_slot: u32) -> u8 {
+    (item_slot as u8).wrapping_add(1)
+}
+
+/// 1.12 roll-number / roll-type pairs for SMSG_LOOT_ROLL.
+///
+/// A vote is announced before anything is rolled — pass as (128, 128), need as (0, 0), greed as
+/// (128, 2) — and the rolled number follows with type 1 (need) or 2 (greed).
+pub mod roll_bytes {
+    pub const PASS_NUMBER: u8 = 128;
+    pub const PASS_TYPE: u8 = 128;
+    pub const NEED_SELECTED_NUMBER: u8 = 0;
+    pub const NEED_SELECTED_TYPE: u8 = 0;
+    pub const GREED_SELECTED_NUMBER: u8 = 128;
+    pub const NEED_ROLL_TYPE: u8 = 1;
+    pub const GREED_ROLL_TYPE: u8 = 2;
+}
+
+/// 1.14 `RollType`: pass 0, need 1, greed 2.
+const MODERN_ROLL_PASS: u8 = 0;
+const MODERN_ROLL_NEED: u8 = 1;
+
 /// SMSG_LOOT_ROLL - Player's roll result
 ///
-/// Sent when a player rolls on an item (need, greed, or pass).
-/// Broadcast to all group members.
+/// Sent to every player in the roll when someone votes, and again with the rolled number when
+/// the roll resolves.
 #[derive(Debug, Clone)]
 pub struct SmsgLootRoll {
     pub loot_guid: ObjectGuid,
     pub player_guid: ObjectGuid,
     pub item_slot: u32,
     pub item_id: u32,
+    pub item_random_prop_id: i32,
+    pub item_count: u32,
+    /// 1.12 roll number (see [`roll_bytes`]).
     pub roll_number: u8,
+    /// 1.12 roll type (see [`roll_bytes`]).
     pub roll_type: u8,
 }
 
 impl ToWorldPacket for SmsgLootRoll {
+    /// 1.12: loot guid, slot, roller guid, item, random suffix, random property, roll, type.
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_ROLL);
-        packet.write_u64(self.player_guid.raw());
+        packet.write_u64(self.loot_guid.raw());
         packet.write_u32(self.item_slot);
+        packet.write_u64(self.player_guid.raw());
+        packet.write_u32(self.item_id);
+        packet.write_u32(0); // random suffix
+        packet.write_u32(self.item_random_prop_id as u32);
         packet.write_u8(self.roll_number);
         packet.write_u8(self.roll_type);
         packet
     }
 
-    /// `LootRollBroadcast.Write`.
+    /// `LootRollBroadcast.Write`. 1.14 has a proper roll-type enum, so the 1.12 sentinel pairs
+    /// are translated: (128, 128) is a pass and (0, 0) a need vote, and a vote's placeholder
+    /// number 128 becomes 0.
     fn to_modern(&self) -> Option<WorldPacket> {
+        use roll_bytes::*;
+        let roll_type = if self.roll_number == PASS_NUMBER && self.roll_type == PASS_TYPE {
+            MODERN_ROLL_PASS
+        } else if self.roll_number == NEED_SELECTED_NUMBER && self.roll_type == NEED_SELECTED_TYPE
+        {
+            MODERN_ROLL_NEED
+        } else {
+            self.roll_type
+        };
+        let roll = if self.roll_number == PASS_NUMBER {
+            0
+        } else {
+            i32::from(self.roll_number)
+        };
+
         let mut writer = BitWriter::new();
         let (loot_high, loot_low) = loot_guid128(&self.loot_guid);
         writer.write_packed_guid_128(loot_high, loot_low); // LootObj
         let (high, low) = self.player_guid.to_guid128(DEFAULT_REALM_ID);
         writer.write_packed_guid_128(high, low); // Player
-        writer.write_i32(i32::from(self.roll_number)); // Roll
-        writer.write_u8(self.roll_type); // RollType
-        write_modern_item_instance(&mut writer, self.item_id, 0);
+        writer.write_i32(roll); // Roll
+        writer.write_u8(roll_type); // RollType
+        write_modern_loot_item_data(
+            &mut writer,
+            self.item_id,
+            self.item_random_prop_id.max(0) as u32,
+            self.item_count,
+            0,
+            modern_loot_list_id(self.item_slot),
+        );
         writer.write_bit(false); // Autopassed
         writer.flush_bits();
         Some(writer.finish(Opcode::SMSG_LOOT_ROLL))
@@ -272,23 +333,30 @@ impl ToWorldPacket for SmsgLootRoll {
 
 /// SMSG_LOOT_ROLL_WON - Winner of a loot roll
 ///
-/// Sent when the roll period ends and a winner is determined.
-/// Broadcast to all group members.
+/// Sent to every player in the roll when it resolves.
 #[derive(Debug, Clone)]
 pub struct SmsgLootRollWon {
     pub loot_guid: ObjectGuid,
     pub player_guid: ObjectGuid,
     pub item_slot: u32,
     pub item_id: u32,
+    pub item_random_prop_id: i32,
+    pub item_count: u32,
     pub roll_number: u8,
+    /// 1 need, 2 greed — the same values on both wires.
     pub roll_type: u8,
 }
 
 impl ToWorldPacket for SmsgLootRollWon {
+    /// 1.12: loot guid, slot, item, random suffix, random property, winner guid, roll, type.
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_ROLL_WON);
-        packet.write_u64(self.player_guid.raw());
+        packet.write_u64(self.loot_guid.raw());
         packet.write_u32(self.item_slot);
+        packet.write_u32(self.item_id);
+        packet.write_u32(0); // random suffix
+        packet.write_u32(self.item_random_prop_id as u32);
+        packet.write_u64(self.player_guid.raw());
         packet.write_u8(self.roll_number);
         packet.write_u8(self.roll_type);
         packet
@@ -303,7 +371,14 @@ impl ToWorldPacket for SmsgLootRollWon {
         writer.write_packed_guid_128(high, low); // Winner
         writer.write_i32(i32::from(self.roll_number)); // Roll
         writer.write_u8(self.roll_type); // RollType
-        write_modern_item_instance(&mut writer, self.item_id, 0);
+        write_modern_loot_item_data(
+            &mut writer,
+            self.item_id,
+            self.item_random_prop_id.max(0) as u32,
+            self.item_count,
+            0,
+            modern_loot_list_id(self.item_slot),
+        );
         writer.write_u8(0); // MainSpec
         Some(writer.finish(Opcode::SMSG_LOOT_ROLL_WON))
     }
@@ -311,20 +386,25 @@ impl ToWorldPacket for SmsgLootRollWon {
 
 /// SMSG_LOOT_ALL_PASSED - All players passed on an item
 ///
-/// Sent when all eligible players passed on an item roll.
-/// Broadcast to all group members.
+/// Sent to every player in the roll when everyone passed.
 #[derive(Debug, Clone)]
 pub struct SmsgLootAllPassed {
     pub loot_guid: ObjectGuid,
     pub item_slot: u32,
     pub item_id: u32,
+    pub item_random_prop_id: i32,
+    pub item_count: u32,
 }
 
 impl ToWorldPacket for SmsgLootAllPassed {
+    /// 1.12: loot guid, slot, item, random property, random suffix.
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_ALL_PASSED);
         packet.write_u64(self.loot_guid.raw());
         packet.write_u32(self.item_slot);
+        packet.write_u32(self.item_id);
+        packet.write_u32(self.item_random_prop_id as u32);
+        packet.write_u32(0); // random suffix
         packet
     }
 
@@ -333,7 +413,14 @@ impl ToWorldPacket for SmsgLootAllPassed {
         let mut writer = BitWriter::new();
         let (high, low) = loot_guid128(&self.loot_guid);
         writer.write_packed_guid_128(high, low); // LootObj
-        write_modern_item_instance(&mut writer, self.item_id, 0);
+        write_modern_loot_item_data(
+            &mut writer,
+            self.item_id,
+            self.item_random_prop_id.max(0) as u32,
+            self.item_count,
+            0,
+            modern_loot_list_id(self.item_slot),
+        );
         Some(writer.finish(Opcode::SMSG_LOOT_ALL_PASSED))
     }
 }
@@ -385,15 +472,12 @@ impl ToWorldPacket for SmsgLootMasterList {
         Some(writer.finish(Opcode::SMSG_LOOT_MASTER_LIST))
     }
 
-    /// Vanilla master-loot list carries one `{ slot, looter, item_id }` triple per pending item.
-    /// The candidate list alone cannot fill the item id, so it is sent as a best-effort slot list.
+    /// 1.12: a count byte, then one plain guid per eligible looter.
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_MASTER_LIST);
         packet.write_u8(self.candidates.len() as u8);
-        for (i, guid) in self.candidates.iter().enumerate() {
-            packet.write_u8(i as u8);
+        for guid in &self.candidates {
             packet.write_u64(guid.raw());
-            packet.write_u32(0);
         }
         packet
     }
@@ -669,6 +753,33 @@ impl ToWorldPacket for SmsgGroupSetLeader<'_> {
         writer.write_bits(name.len() as u32, 9);
         writer.write_bytes(name);
         Some(writer.finish(Opcode::SMSG_GROUP_SET_LEADER))
+    }
+}
+
+/// SMSG_GROUP_DECLINE - "X declines your group invitation."
+///
+/// Sent to the inviting group's leader when an invite is declined.
+#[derive(Debug, Clone)]
+pub struct SmsgGroupDecline<'a> {
+    /// Name of the player who declined
+    pub name: &'a str,
+}
+
+impl ToWorldPacket for SmsgGroupDecline<'_> {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_GROUP_DECLINE);
+        packet.write_string(self.name);
+        packet
+    }
+
+    /// The name loses its null terminator and gains a 9-bit length.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let name = self.name.as_bytes();
+        writer.write_bits(name.len() as u32, 9);
+        writer.flush_bits();
+        writer.write_bytes(name);
+        Some(writer.finish(Opcode::SMSG_GROUP_DECLINE))
     }
 }
 
@@ -1283,12 +1394,24 @@ pub struct MsgRaidTargetUpdate {
     pub mode: u8,
     /// Target icons (8 icons) - only non-empty icons are sent
     pub target_icons: [ObjectGuid; 8],
+    /// The one icon a mode-0 update changes: `(icon, target)`, an empty target clearing it.
+    pub changed: Option<(u8, ObjectGuid)>,
 }
 
 impl ToWorldPacket for MsgRaidTargetUpdate {
+    /// Mode 0 carries exactly one `(icon, guid)` pair — the 1.12 client reads only one, and an
+    /// empty guid is how an icon is cleared. Mode 1 lists every set icon.
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::MSG_RAID_TARGET_UPDATE);
-        packet.write_u8(self.mode);
+        if self.mode == 0 {
+            if let Some((icon, target)) = self.changed {
+                packet.write_u8(0);
+                packet.write_u8(icon);
+                packet.write_u64(target.raw());
+                return packet;
+            }
+        }
+        packet.write_u8(1);
 
         // Only write icons that are set (non-empty GUIDs)
         // Format per icon: icon_index (u8) + target_guid (u64)
@@ -1592,6 +1715,7 @@ mod tests {
         };
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOOT_START_ROLL);
+        assert_eq!(packet.data().len(), 8 + 4 * 5, "1.12 start-roll body is 28 bytes");
         let modern = msg.to_modern().expect("roll started must encode modern");
         assert_eq!(modern.opcode(), Opcode::SMSG_LOOT_START_ROLL);
         assert!(!modern.data().is_empty());
@@ -1604,11 +1728,14 @@ mod tests {
             player_guid: ObjectGuid::from_low(789),
             item_slot: 0,
             item_id: 12345,
+            item_random_prop_id: 0,
+            item_count: 1,
             roll_number: 42,
-            roll_type: 0,
+            roll_type: roll_bytes::NEED_ROLL_TYPE,
         };
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOOT_ROLL);
+        assert_eq!(packet.data().len(), 8 + 4 + 8 + 4 * 3 + 2);
         let modern = msg.to_modern().expect("roll broadcast must encode modern");
         assert_eq!(modern.opcode(), Opcode::SMSG_LOOT_ROLL);
         assert!(!modern.data().is_empty());
@@ -1621,11 +1748,14 @@ mod tests {
             player_guid: ObjectGuid::from_low(789),
             item_slot: 0,
             item_id: 12345,
+            item_random_prop_id: 0,
+            item_count: 1,
             roll_number: 95,
-            roll_type: 0,
+            roll_type: roll_bytes::NEED_ROLL_TYPE,
         };
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOOT_ROLL_WON);
+        assert_eq!(packet.data().len(), 8 + 4 * 4 + 8 + 2);
         let modern = msg.to_modern().expect("roll won must encode modern");
         assert_eq!(modern.opcode(), Opcode::SMSG_LOOT_ROLL_WON);
         assert!(!modern.data().is_empty());
@@ -1637,9 +1767,12 @@ mod tests {
             loot_guid: ObjectGuid::from_low(456),
             item_slot: 0,
             item_id: 12345,
+            item_random_prop_id: 0,
+            item_count: 1,
         };
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOOT_ALL_PASSED);
+        assert_eq!(packet.data().len(), 8 + 4 * 4);
         let modern = msg.to_modern().expect("all-passed must encode modern");
         assert_eq!(modern.opcode(), Opcode::SMSG_LOOT_ALL_PASSED);
         assert!(!modern.data().is_empty());
@@ -1665,6 +1798,7 @@ mod tests {
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_LOOT_MASTER_LIST);
         assert_eq!(packet.data()[0], 2);
+        assert_eq!(packet.data().len(), 1 + 2 * 8);
         let modern = msg.to_modern().expect("master list must encode modern");
         assert_eq!(modern.opcode(), Opcode::SMSG_LOOT_MASTER_LIST);
         assert!(!modern.data().is_empty());

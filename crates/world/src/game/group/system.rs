@@ -42,6 +42,56 @@ const MEMBER_STATS_FULL: u32 = group_update_flags::STATUS
     | group_update_flags::LEVEL
     | group_update_flags::ZONE;
 
+/// How often grouped players' party-frame values are diffed for stat pushes.
+const MEMBER_SNAPSHOT_INTERVAL_MS: u64 = 1_000;
+
+/// The party-frame values tracked for out-of-range stat pushes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MemberSnapshot {
+    status: u8,
+    health: u32,
+    max_health: u32,
+    power_type: u8,
+    power: u32,
+    max_power: u32,
+    level: u8,
+    zone: u32,
+}
+
+impl MemberSnapshot {
+    /// Update flags for every field that differs from `previous`.
+    fn changed_flags(&self, previous: &MemberSnapshot) -> u32 {
+        let mut flags = group_update_flags::NONE;
+        if self.status != previous.status {
+            flags |= group_update_flags::STATUS;
+        }
+        if self.health != previous.health {
+            flags |= group_update_flags::CUR_HP;
+        }
+        if self.max_health != previous.max_health {
+            flags |= group_update_flags::MAX_HP;
+        }
+        if self.power_type != previous.power_type {
+            flags |= group_update_flags::POWER_TYPE
+                | group_update_flags::CUR_POWER
+                | group_update_flags::MAX_POWER;
+        }
+        if self.power != previous.power {
+            flags |= group_update_flags::CUR_POWER;
+        }
+        if self.max_power != previous.max_power {
+            flags |= group_update_flags::MAX_POWER;
+        }
+        if self.level != previous.level {
+            flags |= group_update_flags::LEVEL;
+        }
+        if self.zone != previous.zone {
+            flags |= group_update_flags::ZONE;
+        }
+        flags
+    }
+}
+
 /// Group System - manages player parties and raids
 pub struct GroupSystem {
     /// Group data indexed by group ID
@@ -78,8 +128,19 @@ pub struct GroupSystem {
     /// Per-group in-flight loot rolls (`roll.rs`), keyed by group ID.
     pub(super) loot_rolls: DashMap<u32, Vec<crate::game::loot::Roll>>,
 
-    /// Per-group round-robin looter (`group_id -> current looter`), for non-FFA/master methods.
+    /// Per-group round-robin cursor (`group_id -> last looter`), for non-FFA/master methods.
+    /// Each corpse records its own looter; this only decides who gets the next one.
     pub(super) round_robin_looters: DashMap<u32, ObjectGuid>,
+
+    /// Groups with an offline-leader reassignment task in flight.
+    leader_reassignments: dashmap::DashSet<u32>,
+
+    /// Last party-frame values seen per grouped player, diffed once a second to queue
+    /// SMSG_PARTY_MEMBER_STATS updates for whatever changed.
+    member_snapshots: DashMap<ObjectGuid, MemberSnapshot>,
+
+    /// Milliseconds accumulated towards the next snapshot diff.
+    snapshot_elapsed_ms: std::sync::atomic::AtomicU64,
 
     /// Arc to self, set once after construction, so periodic ticks can spawn
     /// long-running tasks (leader reassignment) that need `&GroupSystem`.
@@ -108,6 +169,9 @@ impl GroupSystem {
             member_update_flags: DashMap::new(),
             loot_rolls: DashMap::new(),
             round_robin_looters: DashMap::new(),
+            leader_reassignments: dashmap::DashSet::new(),
+            member_snapshots: DashMap::new(),
+            snapshot_elapsed_ms: std::sync::atomic::AtomicU64::new(0),
             self_arc: std::sync::OnceLock::new(),
         }
     }
@@ -518,7 +582,7 @@ impl GroupSystem {
                     let world = world.clone();
                     let arc = Arc::clone(&self_arc);
                     tokio::spawn(async move {
-                        arc.resolve_roll(group_id, roll, &world).await;
+                        arc.resolve_roll(roll, &world).await;
                     });
                 }
             }
@@ -657,13 +721,37 @@ impl GroupSystem {
             .get_player_name(player_guid)
             .unwrap_or_else(|| "Unknown".to_string());
 
-        // Create group if inviter wasn't in one
-        let group_id = if invite.group_id == 0 {
-            // Create new group with inviter as leader
-            self.create_group(invite.inviter_guid, invite.inviter_name.clone())
-                .await?
-        } else {
-            invite.group_id
+        // Join whatever group the inviter leads *now*. Two invites sent before either was
+        // accepted both carry no group; the first accept creates it and the second must join it
+        // rather than create another one led by the same player.
+        let current_group = self
+            .get_player_group_id(invite.inviter_guid)
+            .filter(|id| self.groups.contains_key(id));
+        let group_id = match current_group {
+            Some(group_id) => {
+                let group = self.get_group(group_id).ok_or(GroupError::NotInGroup)?;
+                if !group.is_leader_or_assistant(invite.inviter_guid) {
+                    return Err(GroupError::NotLeaderOrAssistant);
+                }
+                if group.is_full() {
+                    use oxcore_shared::messages::group::SmsgPartyCommandResult;
+                    self.broadcast_mgr.send_msg_to_player(
+                        player_guid,
+                        SmsgPartyCommandResult {
+                            operation: PARTY_OP_INVITE,
+                            member_name: "",
+                            result: ERR_GROUP_FULL,
+                        },
+                    );
+                    return Err(GroupError::GroupFull);
+                }
+                group_id
+            }
+            None => {
+                // The inviter's group is gone (or never existed): start a new one.
+                self.create_group(invite.inviter_guid, invite.inviter_name.clone())
+                    .await?
+            }
         };
 
         // Add player to group
@@ -684,20 +772,23 @@ impl GroupSystem {
         let invite = self.pending_invites.remove(&player_guid).map(|(_, v)| v);
 
         if let Some(invite) = invite {
-            // Send notification to inviter that player declined
-            use oxcore_shared::messages::group::SmsgPartyCommandResult;
+            // "X declines your group invitation." goes to the inviting group's leader.
+            use oxcore_shared::messages::group::SmsgGroupDecline;
             let player_name = self
                 .player_mgr
                 .get_player_name(player_guid)
                 .unwrap_or_else(|| "Unknown".to_string());
 
-            let msg = SmsgPartyCommandResult {
-                operation: PARTY_OP_INVITE,
-                member_name: &player_name,
-                result: ERR_PARTY_RESULT_OK, // Declined is not an error
-            };
-            self.broadcast_mgr
-                .send_msg_to_player(invite.inviter_guid, msg);
+            let leader = self
+                .get_group(invite.group_id)
+                .map(|g| g.leader_guid)
+                .unwrap_or(invite.inviter_guid);
+            self.broadcast_mgr.send_msg_to_player(
+                leader,
+                SmsgGroupDecline {
+                    name: &player_name,
+                },
+            );
 
             tracing::info!(
                 "{:?} declined invite from {:?}",
@@ -894,8 +985,10 @@ impl GroupSystem {
                 .remove_member(player_guid)
                 .ok_or(GroupError::MemberNotFound)?;
 
-            // If the leader left and members remain, pick a replacement online member.
-            if was_leader && group.member_count() > 0 {
+            // If the leader left and the group survives, pick a replacement online member. A
+            // group left with a single member is disbanded by the caller, so it gets no new
+            // leader (and no leader announcement) first.
+            if was_leader && group.member_count() > 1 {
                 let player_mgr = Arc::clone(&self.player_mgr);
                 group
                     .clone()
@@ -907,6 +1000,9 @@ impl GroupSystem {
 
         // Remove from player mappings
         self.player_groups.remove(&player_guid);
+
+        // Their votes no longer count; a roll they were the last holdout on resolves now.
+        self.remove_member_rolls(world, group_id, player_guid);
 
         // Remove from database
         self.repository
@@ -1413,31 +1509,37 @@ impl GroupSystem {
                 .get_mut(&group_id)
                 .ok_or(GroupError::NotInGroup)?;
 
+            // The target loses any other icon it carried; each change is announced singly.
+            let mut changes: Vec<(u8, ObjectGuid)> = Vec::new();
+            if !target_guid.is_empty() {
+                for (index, icon) in group.target_icons.iter().enumerate() {
+                    if *icon == target_guid && index != icon_id as usize {
+                        changes.push((index as u8, ObjectGuid::empty()));
+                    }
+                }
+            }
             group.set_target_icon(icon_id, target_guid)?;
+            changes.push((icon_id, target_guid));
 
             // Save to database
             let group_row = self.group_to_row(&group);
+            let target_icons = group.target_icons;
+            let members = group.get_member_guids();
             drop(group);
             self.repository
                 .save_group(&group_row)
                 .await
                 .map_err(|e| GroupError::Internal(e.to_string()))?;
-        }
 
-        // Broadcast target icon update to group
-        use oxcore_shared::messages::group::MsgRaidTargetUpdate;
-        let Some(group) = self.get_group(group_id) else {
-            return Ok(());
-        };
-
-        let msg = MsgRaidTargetUpdate {
-            mode: 0, // set icons
-            target_icons: group.target_icons,
-        };
-
-        for member in &group.members {
-            self.broadcast_mgr
-                .send_msg_to_player(member.guid, msg.clone());
+            use oxcore_shared::messages::group::MsgRaidTargetUpdate;
+            for changed in changes {
+                let msg = MsgRaidTargetUpdate {
+                    mode: 0,
+                    target_icons,
+                    changed: Some(changed),
+                };
+                self.broadcast_mgr.broadcast_msg_to_players(&members, &msg);
+            }
         }
 
         Ok(())
@@ -1463,8 +1565,9 @@ impl GroupSystem {
 
         use oxcore_shared::messages::group::MsgRaidTargetUpdate;
         let msg = MsgRaidTargetUpdate {
-            mode: 0, // set icons
+            mode: 1, // full icon list
             target_icons: group.target_icons,
+            changed: None,
         };
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
@@ -1515,17 +1618,14 @@ impl GroupSystem {
             .get_player_group(player_guid)
             .ok_or(GroupError::NotInGroup)?;
 
-        // Send response to all group members
+        // Answers go to the group leader, whose UI tallies them.
         use oxcore_shared::messages::group::MsgRaidReadyCheck;
         let msg = MsgRaidReadyCheck {
             player_guid,
             ready: Some(ready),
         };
-
-        for member in &group.members {
-            self.broadcast_mgr
-                .send_msg_to_player(member.guid, msg.clone());
-        }
+        self.broadcast_mgr
+            .send_msg_to_player(group.leader_guid, msg);
 
         tracing::debug!("{:?} responded to ready check: {}", player_guid, ready);
 
@@ -1581,25 +1681,19 @@ impl GroupSystem {
 
         // Broadcast to group (or just player if not in group)
         use oxcore_shared::messages::group::MsgRandomRoll;
-        if let Some(group) = self.get_player_group(player_guid) {
-            let msg = MsgRandomRoll {
-                min,
-                max,
-                roll,
-                player_guid,
-            };
-
-            for member in &group.members {
-                self.broadcast_mgr.send_msg_to_player(member.guid, msg);
-
-                tracing::debug!(
-                    "Sent RANDOM_ROLL to {:?}: {} ({}-{})",
-                    member.guid,
-                    roll,
-                    min,
-                    max
-                );
+        let msg = MsgRandomRoll {
+            min,
+            max,
+            roll,
+            player_guid,
+        };
+        match self.get_player_group(player_guid) {
+            Some(group) => {
+                for member in &group.members {
+                    self.broadcast_mgr.send_msg_to_player(member.guid, msg);
+                }
             }
+            None => self.broadcast_mgr.send_msg_to_player(player_guid, msg),
         }
 
         tracing::debug!("{:?} rolled {} ({}-{})", player_guid, roll, min, max);
@@ -1615,19 +1709,23 @@ impl GroupSystem {
         requester_guid: ObjectGuid,
         target_guid: ObjectGuid,
     ) -> Result<(), GroupError> {
-        // Verify both in same group
-        let group = self
+        // Only a member of the requester's group, online, gets real stats; anyone else is
+        // answered as offline so the client's frame stops waiting.
+        let same_group = self
             .get_player_group(requester_guid)
-            .ok_or(GroupError::NotInGroup)?;
-
-        if !group.has_member(target_guid) {
-            return Err(GroupError::MemberNotFound);
-        }
-
-        // Build full stats from the target's live player state and reply to requester.
-        let Some(msg) = self.build_party_member_stats(target_guid) else {
-            return Err(GroupError::PlayerNotFound);
+            .is_some_and(|group| group.has_member(target_guid));
+        let stats = if same_group {
+            self.build_party_member_stats(target_guid)
+        } else {
+            None
         };
+
+        let msg = stats.unwrap_or_else(|| {
+            let mut offline = Self::empty_party_member_stats(target_guid);
+            offline.update_mask = group_update_flags::STATUS;
+            offline.status = Some(MemberStatus::OFFLINE.as_u8());
+            offline
+        });
         self.broadcast_mgr.send_msg_to_player(requester_guid, msg);
 
         Ok(())
@@ -1671,6 +1769,7 @@ impl GroupSystem {
         let raid_target_msg = MsgRaidTargetUpdate {
             mode: 1, // Full icon list
             target_icons: group.target_icons,
+            changed: None,
         };
         for member in &group.members {
             self.broadcast_mgr
@@ -1780,6 +1879,36 @@ impl GroupSystem {
             .or_insert(flags);
     }
 
+    /// An SMSG_PARTY_MEMBER_STATS for `guid` carrying no fields.
+    fn empty_party_member_stats(guid: ObjectGuid) -> SmsgPartyMemberStats<'static> {
+        SmsgPartyMemberStats {
+            player_guid: guid,
+            update_mask: group_update_flags::NONE,
+            status: None,
+            health: None,
+            max_health: None,
+            power_type: None,
+            cur_power: None,
+            max_power: None,
+            level: None,
+            zone_id: None,
+            position_x: None,
+            position_y: None,
+            auras: None,
+            negative_auras: None,
+            pet_guid: None,
+            pet_name: None,
+            pet_model_id: None,
+            pet_cur_hp: None,
+            pet_max_hp: None,
+            pet_power_type: None,
+            pet_cur_power: None,
+            pet_max_power: None,
+            pet_auras: None,
+            pet_negative_auras: None,
+        }
+    }
+
     /// Build a full non-pet SMSG_PARTY_MEMBER_STATS message for a live player.
     fn build_party_member_stats(&self, guid: ObjectGuid) -> Option<SmsgPartyMemberStats<'static>> {
         use oxcore_shared::game::group::group_update_flags::*;
@@ -1821,6 +1950,40 @@ impl GroupSystem {
             pet_auras: None,
             pet_negative_auras: None,
         })
+    }
+
+    /// Current party-frame values for a live player.
+    fn member_snapshot(&self, guid: ObjectGuid) -> Option<MemberSnapshot> {
+        let status = self.member_status(guid).as_u8();
+        let player = self.player_mgr.get_player(guid)?;
+        let power = player.power.power_type.as_u8() as usize;
+        Some(MemberSnapshot {
+            status,
+            health: player.stats.health,
+            max_health: player.stats.max_health,
+            power_type: player.power.power_type.as_u8(),
+            power: player.power.current[power],
+            max_power: player.power.max[power],
+            level: player.level,
+            zone: player.zone_id,
+        })
+    }
+
+    /// Diff every online grouped player's party-frame values against the last snapshot and queue
+    /// an update for the fields that changed (health, power, level, zone, death and AFK status).
+    fn queue_changed_member_stats(&self) {
+        let grouped: Vec<ObjectGuid> = self.player_groups.iter().map(|e| *e.key()).collect();
+        for guid in grouped {
+            let Some(current) = self.member_snapshot(guid) else {
+                self.member_snapshots.remove(&guid);
+                continue;
+            };
+            let flags = match self.member_snapshots.insert(guid, current) {
+                Some(previous) => current.changed_flags(&previous),
+                None => group_update_flags::NONE,
+            };
+            self.set_member_update(guid, flags);
+        }
     }
 
     /// Drain queued member stat updates, sending each to group members who cannot see the
@@ -1877,7 +2040,16 @@ impl GroupSystem {
         if let Some(self_arc) = self.self_arc.get().cloned() {
             self.check_offline_leaders(world, self_arc);
         }
-        // Phase 3c: push queued party-member stat updates to out-of-range group members.
+        // Queue stat pushes for party-frame values that changed since the last diff, then push
+        // queued updates to out-of-range group members.
+        let elapsed = self
+            .snapshot_elapsed_ms
+            .fetch_add(diff.as_millis() as u64, Ordering::Relaxed)
+            + diff.as_millis() as u64;
+        if elapsed >= MEMBER_SNAPSHOT_INTERVAL_MS {
+            self.snapshot_elapsed_ms.store(0, Ordering::Relaxed);
+            self.queue_changed_member_stats();
+        }
         self.push_party_member_stats();
         // Phase 5: advance loot-roll timers; resolve any that expired.
         self.update_roll_timers(diff, world);
@@ -1894,29 +2066,41 @@ impl GroupSystem {
         }
 
         let now = now_secs();
+        // A last-online stamp of 0 means "not seen since startup", which is as overdue as it
+        // gets. Groups with nobody online to promote are skipped rather than retried as tasks.
         let overdue: Vec<u32> = self
             .groups
             .iter()
             .filter(|entry| {
                 let group = entry.value();
-                group.leader_last_online != 0
-                    && group.leader_last_online.saturating_add(delay) < now
+                group.leader_last_online.saturating_add(delay) < now
+                    && !self.leader_reassignments.contains(&group.id)
                     && world
                         .managers
                         .player_mgr
                         .get_player(group.leader_guid)
                         .is_none()
+                    && group.members.iter().any(|m| {
+                        m.guid != group.leader_guid
+                            && world.managers.player_mgr.get_player(m.guid).is_some()
+                    })
             })
             .map(|entry| entry.id)
             .collect();
 
         for group_id in overdue {
+            // One reassignment per group at a time: the binding transfer awaits the database,
+            // and the tick must not queue another while it runs.
+            if !self.leader_reassignments.insert(group_id) {
+                continue;
+            }
             let world = world.clone();
             let self_arc = Arc::clone(&self_arc);
             tokio::spawn(async move {
                 if let Err(e) = Self::reassign_offline_leader(&self_arc, &world, group_id).await {
                     tracing::warn!("Failed to reassign leader for group {}: {:?}", group_id, e);
                 }
+                self_arc.leader_reassignments.remove(&group_id);
             });
         }
     }

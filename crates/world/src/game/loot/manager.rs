@@ -11,6 +11,8 @@ pub struct LootManager {
     creature_loot_tables: DashMap<u32, Vec<LootTableEntry>>,
     /// Loot tables by gameobject loot ID
     gameobject_loot_tables: DashMap<u32, Vec<LootTableEntry>>,
+    /// Shared templates that creature and gameobject tables pull in by reference
+    reference_loot_tables: DashMap<u32, Vec<LootTableEntry>>,
     /// Active loot instances by source GUID
     active_loot: DashMap<ObjectGuid, Loot>,
 }
@@ -43,6 +45,11 @@ impl LootTableRow {
             max_count,
             group_id,
             is_reference: self.min_count < 0,
+            reference_id: if self.min_count < 0 {
+                self.min_count.unsigned_abs()
+            } else {
+                0
+            },
             is_quest_drop: self.chance < 0.0,
         })
     }
@@ -53,6 +60,7 @@ impl LootManager {
         Self {
             creature_loot_tables: DashMap::new(),
             gameobject_loot_tables: DashMap::new(),
+            reference_loot_tables: DashMap::new(),
             active_loot: DashMap::new(),
         }
     }
@@ -62,7 +70,8 @@ impl LootManager {
         let rows = sqlx::query_as::<_, LootTableRow>(
             r#"SELECT entry, item, "ChanceOrQuestChance" AS chance,
                 "mincountOrRef" AS min_count, maxcount AS max_count, groupid AS group_id
-                FROM world.creature_loot_template"#,
+                FROM world.creature_loot_template
+                WHERE patch_min <= 10 AND patch_max >= 10"#,
         )
         .fetch_all(world_db)
         .await?;
@@ -80,6 +89,27 @@ impl LootManager {
             "Loaded loot tables for {} creature entries",
             self.creature_loot_tables.len()
         );
+
+        // Rows are kept per patch range; only the ranges covering 1.12 (patch 10) apply.
+        let rows = sqlx::query_as::<_, LootTableRow>(
+            r#"SELECT entry, item, "ChanceOrQuestChance" AS chance,
+                "mincountOrRef" AS min_count, maxcount AS max_count, groupid AS group_id
+                FROM world.reference_loot_template
+                WHERE patch_min <= 10 AND patch_max >= 10"#,
+        )
+        .fetch_all(world_db)
+        .await?;
+        for row in rows {
+            let entry = row.into_entry()?;
+            self.reference_loot_tables
+                .entry(entry.entry)
+                .or_insert_with(Vec::new)
+                .push(entry);
+        }
+        tracing::info!(
+            "Loaded {} reference loot templates",
+            self.reference_loot_tables.len()
+        );
         Ok(())
     }
 
@@ -88,7 +118,8 @@ impl LootManager {
         let rows = sqlx::query_as::<_, LootTableRow>(
             r#"SELECT entry, item, "ChanceOrQuestChance" AS chance,
                 "mincountOrRef" AS min_count, maxcount AS max_count, groupid AS group_id
-                FROM world.gameobject_loot_template"#,
+                FROM world.gameobject_loot_template
+                WHERE patch_min <= 10 AND patch_max >= 10"#,
         )
         .fetch_all(world_db)
         .await?;
@@ -117,71 +148,13 @@ impl LootManager {
         gold_max: u32,
         allowed_looters: Vec<ObjectGuid>,
     ) -> bool {
-        let Some(table) = self.creature_loot_tables.get(&creature_entry) else {
-            // No loot table - still create empty loot for gold
-            let mut loot = Loot::new();
-            loot.gold = calculate_gold_drop(gold_min, gold_max);
-            loot.allowed_looters = allowed_looters;
-            loot.generated = true;
-            self.active_loot.insert(source_guid, loot);
-            return true;
-        };
+        let drops = self
+            .creature_loot_tables
+            .get(&creature_entry)
+            .map(|table| self.roll_template(&table))
+            .unwrap_or_default();
 
-        let mut loot = Loot::new();
-        let mut slot: u8 = 0;
-        let mut quest_slot: u8 = 0;
-
-        // Process loot table entries
-        for entry in table.iter() {
-            // Skip reference entries for now (Phase 7 basic implementation)
-            if entry.is_reference {
-                continue;
-            }
-
-            // Roll for item
-            let roll: f32 = rand::random::<f32>() * 100.0;
-            if roll <= entry.chance {
-                // Won the roll
-                let count = if entry.min_count == entry.max_count {
-                    entry.min_count
-                } else {
-                    rand::thread_rng().gen_range(entry.min_count..=entry.max_count)
-                };
-
-                if entry.is_quest_drop {
-                    // Quest drops go into a separate list; filtered per-player when showing loot
-                    loot.add_quest_item(LootItem {
-                        slot: quest_slot,
-                        item_id: entry.item,
-                        count,
-                        is_looted: false,
-                        is_blocked: false,
-                        is_counted: false,
-                        roll_winner: None,
-                        is_underthreshold: false,
-                        freeforall: false,
-                        loot_owner: None,
-                    });
-                    quest_slot += 1;
-                } else {
-                    loot.add_item(LootItem {
-                        slot,
-                        item_id: entry.item,
-                        count,
-                        is_looted: false,
-                        is_blocked: false,
-                        is_counted: false,
-                        roll_winner: None,
-                        is_underthreshold: false,
-                        freeforall: false,
-                        loot_owner: None,
-                    });
-                    slot += 1;
-                }
-            }
-        }
-
-        // Generate gold
+        let mut loot = Self::loot_from_drops(drops);
         loot.gold = calculate_gold_drop(gold_min, gold_max);
         loot.allowed_looters = allowed_looters;
         loot.generated = true;
@@ -193,38 +166,94 @@ impl LootManager {
     /// Generate loot for a gameobject chest. Unlike creatures, chests do not
     /// generate a level-based gold drop.
     pub fn generate_gameobject_loot(&self, source_guid: ObjectGuid, loot_id: u32) -> bool {
-        let Some(table) = self.gameobject_loot_tables.get(&loot_id) else {
-            self.active_loot.insert(
-                source_guid,
-                Loot {
-                    generated: true,
-                    ..Loot::new()
-                },
-            );
-            return true;
-        };
+        let drops = self
+            .gameobject_loot_tables
+            .get(&loot_id)
+            .map(|table| self.roll_template(&table))
+            .unwrap_or_default();
 
+        let mut loot = Self::loot_from_drops(drops);
+        loot.generated = true;
+        self.active_loot.insert(source_guid, loot);
+        true
+    }
+
+    /// Roll a whole template: every ungrouped entry on its own chance (references expand into
+    /// their template, `max_count` times), then one pick from each group.
+    fn roll_template(&self, table: &[LootTableEntry]) -> Vec<RolledDrop> {
+        let mut drops = Vec::new();
+        self.roll_template_into(table, 0, 0, &mut drops);
+        drops
+    }
+
+    fn roll_template_into(
+        &self,
+        table: &[LootTableEntry],
+        only_group: u8,
+        depth: u8,
+        drops: &mut Vec<RolledDrop>,
+    ) {
+        // Reference chains are shallow in practice; the cap only stops a cyclic table.
+        const MAX_REFERENCE_DEPTH: u8 = 8;
+
+        if only_group > 0 {
+            if let Some(drop) = roll_group(table, only_group) {
+                drops.push(drop);
+            }
+            return;
+        }
+
+        for entry in table
+            .iter()
+            .filter(|e| e.group_id == 0 || e.is_reference)
+        {
+            if !roll_chance(entry.chance) {
+                continue;
+            }
+            if entry.is_reference {
+                if depth >= MAX_REFERENCE_DEPTH {
+                    continue;
+                }
+                // Cloned so no map guard is held across the recursion.
+                let Some(referenced) = self
+                    .reference_loot_tables
+                    .get(&entry.reference_id)
+                    .map(|table| table.clone())
+                else {
+                    continue;
+                };
+                for _ in 0..entry.max_count {
+                    self.roll_template_into(&referenced, entry.group_id, depth + 1, drops);
+                }
+            } else {
+                drops.push(RolledDrop::from_entry(entry));
+            }
+        }
+
+        let mut groups: Vec<u8> = table
+            .iter()
+            .filter(|e| e.group_id > 0 && !e.is_reference)
+            .map(|e| e.group_id)
+            .collect();
+        groups.sort_unstable();
+        groups.dedup();
+        for group_id in groups {
+            if let Some(drop) = roll_group(table, group_id) {
+                drops.push(drop);
+            }
+        }
+    }
+
+    /// Lay rolled drops out as a loot: normal items and quest items each numbered from 0.
+    fn loot_from_drops(drops: Vec<RolledDrop>) -> Loot {
         let mut loot = Loot::new();
         let mut slot: u8 = 0;
         let mut quest_slot: u8 = 0;
-        for entry in table.iter() {
-            if entry.is_reference || rand::random::<f32>() * 100.0 > entry.chance {
-                continue;
-            }
-
-            let count = if entry.min_count == entry.max_count {
-                entry.min_count
-            } else {
-                rand::thread_rng().gen_range(entry.min_count..=entry.max_count)
-            };
+        for drop in drops {
             let item = LootItem {
-                slot: if entry.is_quest_drop {
-                    quest_slot
-                } else {
-                    slot
-                },
-                item_id: entry.item,
-                count,
+                slot: if drop.is_quest { quest_slot } else { slot },
+                item_id: drop.item_id,
+                count: drop.count,
                 is_looted: false,
                 is_blocked: false,
                 is_counted: false,
@@ -233,17 +262,15 @@ impl LootManager {
                 freeforall: false,
                 loot_owner: None,
             };
-            if entry.is_quest_drop {
+            if drop.is_quest {
                 loot.add_quest_item(item);
-                quest_slot += 1;
+                quest_slot = quest_slot.saturating_add(1);
             } else {
                 loot.add_item(item);
-                slot += 1;
+                slot = slot.saturating_add(1);
             }
         }
-        loot.generated = true;
-        self.active_loot.insert(source_guid, loot);
-        true
+        loot
     }
 
     /// Whether a gameobject loot table has a quest-only item needed by a player.
@@ -328,19 +355,43 @@ impl LootManager {
         }
     }
 
-    /// Set looting state
-    pub fn set_looting(&self, source: ObjectGuid, player: ObjectGuid) {
+    /// Register `player` as having this loot window open.
+    pub fn add_viewer(&self, source: ObjectGuid, player: ObjectGuid) {
         if let Some(mut loot) = self.active_loot.get_mut(&source) {
-            loot.being_looted = true;
-            loot.looting_player = Some(player);
+            loot.viewers.insert(player);
         }
     }
 
-    /// Clear looting state
-    pub fn clear_looting(&self, source: ObjectGuid) {
+    /// `player` closed the loot window.
+    pub fn remove_viewer(&self, source: ObjectGuid, player: ObjectGuid) {
         if let Some(mut loot) = self.active_loot.get_mut(&source) {
-            loot.being_looted = false;
-            loot.looting_player = None;
+            loot.viewers.remove(&player);
+        }
+    }
+
+    /// Players currently looking at this loot.
+    pub fn viewers(&self, source: ObjectGuid) -> Vec<ObjectGuid> {
+        self.active_loot
+            .get(&source)
+            .map(|loot| loot.viewers.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Record who may loot a corpse: the tapper, their group, the looters within reach at kill
+    /// time, and this corpse's round-robin owner.
+    pub fn set_group_rights(
+        &self,
+        source: ObjectGuid,
+        recipient: ObjectGuid,
+        group_id: Option<u32>,
+        round_robin_player: Option<ObjectGuid>,
+        allowed_looters: Vec<ObjectGuid>,
+    ) {
+        if let Some(mut loot) = self.active_loot.get_mut(&source) {
+            loot.recipient = Some(recipient);
+            loot.group_id = group_id;
+            loot.round_robin_player = round_robin_player;
+            loot.allowed_looters = allowed_looters;
         }
     }
 
@@ -366,60 +417,29 @@ impl LootManager {
             .unwrap_or_default()
     }
 
-    /// Resolve a client-visible slot to the underlying item's real (stable) slot.
-    ///
-    /// The client renumbers its loot list densely (0..N) over whatever is still unlooted and
-    /// visible to it, compacting locally each time an item is picked — it does not echo back a
-    /// slot that stays valid for the item's whole lifetime in the loot table. So the incoming
-    /// `display_slot` must be reinterpreted as "the Nth still-unlooted item, in the same order
-    /// [`crate::game::loot::system::LootSystem::send_loot_window`] listed them" (normal items
-    /// first in storage order, then visible quest items in storage order) rather than used as a
-    /// direct index into `items`/`quest_items`. Returns `(is_quest, real_slot)`.
-    fn resolve_display_slot(
-        loot: &Loot,
-        display_slot: u8,
+    /// Look up an item by the wire slot `player` sent, without marking it looted.
+    /// Returns `(is_quest, item)`.
+    pub fn peek_item(
+        &self,
+        source: ObjectGuid,
+        slot: u8,
         player: ObjectGuid,
-    ) -> Option<(bool, u8)> {
-        let mut ordinal = display_slot as usize;
-
-        let unlooted_normal_count = loot.items.iter().filter(|i| !i.is_looted).count();
-        if ordinal < unlooted_normal_count {
-            let real_slot = loot
-                .items
-                .iter()
-                .filter(|i| !i.is_looted)
-                .nth(ordinal)
-                .map(|i| i.slot)?;
-            return Some((false, real_slot));
-        }
-        ordinal -= unlooted_normal_count;
-
-        let visible = loot.visible_quest_slots(player)?;
-        let real_slot = loot
-            .quest_items
-            .iter()
-            .filter(|i| !i.is_looted && visible.contains(&i.slot))
-            .nth(ordinal)
-            .map(|i| i.slot)?;
-        Some((true, real_slot))
-    }
-
-    /// Look up an item by the slot the client sees, without marking it looted.
-    pub fn peek_item(&self, source: ObjectGuid, slot: u8, player: ObjectGuid) -> Option<LootItem> {
+    ) -> Option<(bool, LootItem)> {
         let loot = self.active_loot.get(&source)?;
-        let (is_quest, real_slot) = Self::resolve_display_slot(&loot, slot, player)?;
-        if is_quest {
+        let (is_quest, real_slot) = loot.resolve_wire_slot(slot, player)?;
+        let item = if is_quest {
             loot.get_quest_item(real_slot).cloned()
         } else {
             loot.get_item(real_slot).cloned()
-        }
+        }?;
+        Some((is_quest, item))
     }
 
-    /// Mark the item at the client-visible slot as looted, using the same slot mapping
-    /// as [`Self::peek_item`].
+    /// Mark the item at `player`'s wire slot as looted, using the same mapping as
+    /// [`Self::peek_item`].
     pub fn loot_item(&self, source: ObjectGuid, slot: u8, player: ObjectGuid) -> Option<LootItem> {
         let mut loot = self.active_loot.get_mut(&source)?;
-        let (is_quest, real_slot) = Self::resolve_display_slot(&loot, slot, player)?;
+        let (is_quest, real_slot) = loot.resolve_wire_slot(slot, player)?;
         if is_quest {
             loot.loot_quest_item(real_slot)
         } else {
@@ -445,6 +465,64 @@ impl LootManager {
             .get_mut(&source)
             .map(|mut loot| f(&mut *loot))
     }
+}
+
+/// One item a template roll produced.
+#[derive(Debug, Clone)]
+struct RolledDrop {
+    item_id: u32,
+    count: u32,
+    is_quest: bool,
+}
+
+impl RolledDrop {
+    fn from_entry(entry: &LootTableEntry) -> Self {
+        let count = if entry.min_count >= entry.max_count {
+            entry.min_count
+        } else {
+            rand::thread_rng().gen_range(entry.min_count..=entry.max_count)
+        };
+        Self {
+            item_id: entry.item,
+            count,
+            is_quest: entry.is_quest_drop,
+        }
+    }
+}
+
+/// Whether an entry with this percent chance drops.
+fn roll_chance(chance: f32) -> bool {
+    chance >= 100.0 || rand::random::<f32>() * 100.0 < chance
+}
+
+/// Pick at most one item from a loot group.
+///
+/// Entries with an explicit chance are tried first, each claiming its share of a single
+/// 0-100 roll. If none hits, one of the zero-chance ("equal chanced") entries is picked
+/// uniformly. A group of only explicit entries whose chances sum below 100 can drop nothing.
+fn roll_group(table: &[LootTableEntry], group_id: u8) -> Option<RolledDrop> {
+    let members: Vec<&LootTableEntry> = table
+        .iter()
+        .filter(|e| e.group_id == group_id && !e.is_reference)
+        .collect();
+
+    let mut roll = rand::random::<f32>() * 100.0;
+    for entry in members.iter().filter(|e| e.chance != 0.0) {
+        if entry.chance >= 100.0 {
+            return Some(RolledDrop::from_entry(entry));
+        }
+        roll -= entry.chance;
+        if roll < 0.0 {
+            return Some(RolledDrop::from_entry(entry));
+        }
+    }
+
+    let equal: Vec<&&LootTableEntry> = members.iter().filter(|e| e.chance == 0.0).collect();
+    if equal.is_empty() {
+        return None;
+    }
+    let pick = rand::thread_rng().gen_range(0..equal.len());
+    Some(RolledDrop::from_entry(equal[pick]))
 }
 
 /// Roll a gold drop from the creature's own `gold_min`/`gold_max` (creature_template).
@@ -473,6 +551,58 @@ impl Default for LootManager {
 mod tests {
     use super::*;
 
+    fn entry(item: u32, chance: f32, group_id: u8) -> LootTableEntry {
+        LootTableEntry {
+            entry: 1,
+            item,
+            chance,
+            min_count: 1,
+            max_count: 1,
+            group_id,
+            is_reference: false,
+            reference_id: 0,
+            is_quest_drop: false,
+        }
+    }
+
+    #[test]
+    fn a_group_drops_exactly_one_of_its_items() {
+        let manager = LootManager::new();
+        // Three equal-chanced (0%) entries in group 1, plus a guaranteed ungrouped drop.
+        manager.creature_loot_tables.insert(
+            7,
+            vec![entry(100, 100.0, 0), entry(1, 0.0, 1), entry(2, 0.0, 1), entry(3, 0.0, 1)],
+        );
+        for counter in 0..50 {
+            let source = ObjectGuid::new_creature(7, counter);
+            manager.generate_creature_loot(source, 7, 0, 0, vec![]);
+            let loot = manager.get_loot(source).unwrap();
+            let grouped = loot.items.iter().filter(|i| i.item_id != 100).count();
+            assert_eq!(grouped, 1, "one pick per group, and equal-chanced entries do drop");
+            assert!(loot.items.iter().any(|i| i.item_id == 100));
+        }
+    }
+
+    #[test]
+    fn references_expand_their_template_max_count_times() {
+        let manager = LootManager::new();
+        manager
+            .reference_loot_tables
+            .insert(9000, vec![entry(555, 100.0, 0)]);
+        let mut reference = entry(0, 100.0, 0);
+        reference.is_reference = true;
+        reference.reference_id = 9000;
+        reference.max_count = 2;
+        manager.creature_loot_tables.insert(8, vec![reference]);
+
+        let source = ObjectGuid::new_creature(8, 1);
+        manager.generate_creature_loot(source, 8, 0, 0, vec![]);
+        let loot = manager.get_loot(source).unwrap();
+        assert_eq!(loot.items.iter().filter(|i| i.item_id == 555).count(), 2);
+        let slots: Vec<u8> = loot.items.iter().map(|i| i.slot).collect();
+        assert_eq!(slots, vec![0, 1], "slots are the storage indices");
+    }
+
     #[test]
     fn gameobject_quest_loot_is_generated_as_quest_only() {
         let manager = LootManager::new();
@@ -488,6 +618,7 @@ mod tests {
                 max_count: 1,
                 group_id: 0,
                 is_reference: false,
+                reference_id: 0,
                 is_quest_drop: true,
             }],
         );

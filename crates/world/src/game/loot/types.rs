@@ -1,5 +1,5 @@
 use oxcore_shared::protocol::ObjectGuid;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Loot instance for a creature corpse
 #[derive(Debug, Clone)]
@@ -14,10 +14,18 @@ pub struct Loot {
     pub allowed_looters: Vec<ObjectGuid>,
     /// Has loot been generated?
     pub generated: bool,
-    /// Is this loot currently being viewed?
-    pub being_looted: bool,
-    /// Player currently looting
-    pub looting_player: Option<ObjectGuid>,
+    /// Players with this loot window open. Item and money removals are announced to all of
+    /// them, so several group members can loot one corpse without their windows going stale.
+    pub viewers: HashSet<ObjectGuid>,
+    /// Player who tapped the source (the owner when looting solo).
+    pub recipient: Option<ObjectGuid>,
+    /// Group that tapped the source, if the tapper was grouped.
+    pub group_id: Option<u32>,
+    /// Round-robin owner of this corpse's under-threshold items. Cleared when that player
+    /// closes the window with loot left, which opens the remainder to the whole group.
+    pub round_robin_player: Option<ObjectGuid>,
+    /// Group rolls / master-loot setup already ran (it happens on the first open).
+    pub group_loot_started: bool,
     /// Items still lootable by someone.
     ///
     /// Normal items count as soon as they are added. Quest items count only once an
@@ -66,7 +74,11 @@ pub struct LootTableEntry {
     pub min_count: u32,
     pub max_count: u32,
     pub group_id: u8,
-    pub is_reference: bool, // If true, item ID points to another loot template
+    /// A reference entry rolls another template (`reference_id`) `max_count` times instead of
+    /// dropping an item. With a `group_id`, only that group of the referenced template rolls.
+    pub is_reference: bool,
+    /// Referenced template id (`-mincountOrRef`), for reference entries only.
+    pub reference_id: u32,
     pub is_quest_drop: bool, // If true, only shown to players who have the quest
 }
 
@@ -86,8 +98,11 @@ impl Loot {
             gold: 0,
             allowed_looters: Vec::new(),
             generated: false,
-            being_looted: false,
-            looting_player: None,
+            viewers: HashSet::new(),
+            recipient: None,
+            group_id: None,
+            round_robin_player: None,
+            group_loot_started: false,
             unlooted_count: 0,
             player_quest_items: HashMap::new(),
             player_ffa_items: HashMap::new(),
@@ -141,6 +156,40 @@ impl Loot {
     /// Quest item slots already made visible to a player, if any
     pub fn visible_quest_slots(&self, player: ObjectGuid) -> Option<&Vec<u8>> {
         self.player_quest_items.get(&player)
+    }
+
+    /// Wire slot a player sees for a quest item.
+    ///
+    /// Normal items keep their storage index on the wire; quest items follow them, numbered by
+    /// their position in that player's own quest list. The list never shrinks, so the slot stays
+    /// valid for the life of the window even as items are taken.
+    pub fn quest_wire_slot(&self, player: ObjectGuid, quest_slot: u8) -> Option<u8> {
+        let position = self
+            .player_quest_items
+            .get(&player)?
+            .iter()
+            .position(|s| *s == quest_slot)?;
+        u8::try_from(self.items.len() + position).ok()
+    }
+
+    /// Resolve a wire slot from `player` to `(is_quest, storage slot)`.
+    pub fn resolve_wire_slot(&self, wire_slot: u8, player: ObjectGuid) -> Option<(bool, u8)> {
+        let wire = wire_slot as usize;
+        if wire < self.items.len() {
+            return self
+                .items
+                .iter()
+                .find(|i| i.slot == wire_slot)
+                .map(|i| (false, i.slot));
+        }
+        let quest_slot = *self.player_quest_items.get(&player)?.get(wire - self.items.len())?;
+        Some((true, quest_slot))
+    }
+
+    /// Whether `player` may take this item at all: an item left behind by a failed roll award
+    /// belongs to its winner only.
+    pub fn item_allowed_for(item: &LootItem, player: ObjectGuid) -> bool {
+        item.loot_owner.map_or(true, |owner| owner == player)
     }
 
     /// Check if loot is empty
@@ -270,6 +319,40 @@ mod tests {
         loot.loot_item(0);
         loot.loot_quest_item(0);
         assert!(loot.is_empty());
+    }
+
+    #[test]
+    fn wire_slots_stay_stable_as_items_are_taken() {
+        let player = ObjectGuid::new_player(1);
+        let mut loot = Loot::new();
+        loot.add_item(item(0, 1000));
+        loot.add_item(item(1, 1001));
+        loot.add_item(item(2, 1002));
+        loot.add_quest_item(item(0, 2000));
+        loot.add_quest_item(item(1, 2001));
+        loot.fill_quest_loot(player, |id| id == 2001);
+
+        // Quest items follow the normal items, numbered by the player's own quest list.
+        assert_eq!(loot.quest_wire_slot(player, 1), Some(3));
+        assert_eq!(loot.resolve_wire_slot(3, player), Some((true, 1)));
+
+        // Taking the first item must not shift what the other slots name.
+        loot.loot_item(0);
+        assert_eq!(loot.resolve_wire_slot(1, player), Some((false, 1)));
+        assert_eq!(loot.resolve_wire_slot(2, player), Some((false, 2)));
+        assert_eq!(loot.resolve_wire_slot(3, player), Some((true, 1)));
+        assert!(loot.get_item(0).is_none());
+    }
+
+    #[test]
+    fn failed_roll_award_reserves_the_item_for_its_winner() {
+        let winner = ObjectGuid::new_player(1);
+        let other = ObjectGuid::new_player(2);
+        let mut reserved = item(0, 1000);
+        reserved.loot_owner = Some(winner);
+        assert!(Loot::item_allowed_for(&reserved, winner));
+        assert!(!Loot::item_allowed_for(&reserved, other));
+        assert!(Loot::item_allowed_for(&item(1, 1001), other));
     }
 
     #[test]

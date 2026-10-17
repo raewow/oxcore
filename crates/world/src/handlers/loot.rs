@@ -52,6 +52,9 @@ pub async fn handle_loot_money(
 }
 
 /// Handle CMSG_AUTOSTORE_LOOT_ITEM (0x0108)
+///
+/// 1.12 sends one wire slot. 1.14 (`CMSG_LOOT_ITEM`) sends a list: `u32 count`, then per item a
+/// guid128 loot object and a 1-based LootListID. Both act on the window the player has open.
 pub async fn handle_loot_item(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -60,17 +63,26 @@ pub async fn handle_loot_item(
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
-    let wire_slot = packet
-        .read_u8()
-        .ok_or_else(|| anyhow::anyhow!("Failed to read slot"))?;
 
-    // The modern client sends a 1-based LootListID (see SmsgLootResponse::to_modern); our
-    // internal loot slots are 0-based. Vanilla's wire slot is genuinely 0-based already.
-    let slot = match session.protocol() {
-        Protocol::Modern => wire_slot
-            .checked_sub(1)
-            .ok_or_else(|| anyhow::anyhow!("Invalid loot slot 0 from modern client"))?,
-        Protocol::Vanilla => wire_slot,
+    let slots: Vec<u8> = match session.protocol() {
+        Protocol::Vanilla => vec![packet
+            .read_u8()
+            .ok_or_else(|| anyhow::anyhow!("Failed to read slot"))?],
+        Protocol::Modern => {
+            let count = packet.read_u32().unwrap_or(0).min(u32::from(u8::MAX));
+            let mut slots = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                let _loot_obj = packet.read_guid_for(session.protocol());
+                let Some(list_id) = packet.read_u8() else {
+                    break;
+                };
+                // LootListID 0 is reserved by the 1.14 client and never names an item.
+                if let Some(slot) = list_id.checked_sub(1) {
+                    slots.push(slot);
+                }
+            }
+            slots
+        }
     };
 
     // Get what the player is looting
@@ -80,12 +92,14 @@ pub async fn handle_loot_item(
         .get_looting_target(player_guid)
         .ok_or_else(|| anyhow::anyhow!("Not looting anything"))?;
 
-    // Delegate to LootSystem
-    world
-        .systems
-        .loot
-        .handle_loot_item(player_guid, target_guid, slot, world)
-        .await
+    for slot in slots {
+        world
+            .systems
+            .loot
+            .handle_loot_item(player_guid, target_guid, slot, world)
+            .await?;
+    }
+    Ok(())
 }
 
 /// Handle CMSG_LOOT_RELEASE (0x015F)
@@ -169,32 +183,30 @@ pub async fn handle_loot_roll(
 
 /// Handle CMSG_LOOT_MASTER_GIVE (0x02A3)
 ///
-/// The master looter assigns loot to a raid member. Validates method, looter identity,
-/// same group/map, and reward distance before moving the item (LootHandler.cpp:619-748).
+/// The master looter assigns loot to a group member. Requires master loot, the sender to be the
+/// master looter with that loot open and within reward distance, and the target to be an
+/// allowed looter in the same group on the same map.
 pub async fn handle_loot_master_give(
     session: &WorldSession,
     packet: &mut WorldPacket,
     world: &World,
 ) -> anyhow::Result<()> {
-    use crate::game::group::rolls::LootContext;
     use crate::game::group::LootMethod;
 
     let master_guid = session
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
 
-    // Must be the group's master looter, under master-loot, and the group's looter.
+    // Must be the group's master looter, under master loot.
     let group = world
         .systems
         .group
         .get_player_group(master_guid)
         .ok_or_else(|| anyhow::anyhow!("Not in a group"))?;
-    if group.loot_method != LootMethod::MasterLooter {
+    if group.loot_method != LootMethod::MasterLooter || group.looter_guid != master_guid {
         return Ok(());
     }
-    let Some(group_id) = world.systems.group.get_player_group_id(master_guid) else {
-        return Ok(());
-    };
+    let group_id = group.id;
 
     // Modern: u32 count, guid128 target, then per-request { guid128 loot, u8 slot(1-based) }.
     // Vanilla: u64 loot guid, u8 slot, u64 target guid.
@@ -210,43 +222,59 @@ pub async fn handle_loot_master_give(
             requests.push((ObjectGuid::from_raw(loot_guid), slot));
         }
         Protocol::Modern => {
-            let count = packet.read_u32().unwrap_or(0);
+            let count = packet.read_u32().unwrap_or(0).min(u32::from(u8::MAX));
             target_guid = packet
                 .read_guid_for(session.protocol())
                 .ok_or_else(|| anyhow::anyhow!("Failed to read target guid"))?;
+            // The 1.14 loot object is a derived GUID; the master's open window names the corpse.
+            let open = world
+                .managers
+                .player_mgr
+                .get_looting_target(master_guid)
+                .unwrap_or_else(ObjectGuid::empty);
             for _ in 0..count {
-                let loot = packet
-                    .read_guid_for(session.protocol())
-                    .ok_or_else(|| anyhow::anyhow!("Failed to read loot guid"))?;
+                let _loot_obj = packet.read_guid_for(session.protocol());
                 let wire_slot = packet.read_u8().unwrap_or(0);
-                requests.push((loot, wire_slot.saturating_sub(1)));
+                if let Some(slot) = wire_slot.checked_sub(1) {
+                    requests.push((open, slot));
+                }
             }
         }
     }
 
-    // Target must exist, be in the same group, on the same map, and within reward distance.
-    let Some(target) = world.managers.player_mgr.get_player(target_guid) else {
+    // Target must exist, be in the same group, and on the same map.
+    let Some((target_map, target_instance)) = world
+        .managers
+        .player_mgr
+        .get_player(target_guid)
+        .map(|t| (t.map_id, t.instance_id))
+    else {
         return Ok(());
     };
-    let target_in_group = world.systems.group.is_in_group(target_guid);
     let same_group = world
         .systems
         .group
         .get_player_group_id(target_guid)
-        .map(|g| g == group_id)
-        .unwrap_or(false);
-    let Some(master) = world.managers.player_mgr.get_player(master_guid) else {
+        .is_some_and(|g| g == group_id);
+    let Some((master_map, master_instance)) = world
+        .managers
+        .player_mgr
+        .get_player(master_guid)
+        .map(|m| (m.map_id, m.instance_id))
+    else {
         return Ok(());
     };
-    if !target_in_group
-        || !same_group
-        || target.map_id != master.map_id
-        || target.instance_id != master.instance_id
-    {
+    if !same_group || target_map != master_map || target_instance != master_instance {
         return Ok(());
     }
 
+    let open_loot = world.managers.player_mgr.get_looting_target(master_guid);
+
     for (loot_guid, slot) in requests {
+        // Only from the window the master has open, within reach, to someone allowed to loot.
+        if open_loot != Some(loot_guid) {
+            continue;
+        }
         let Some(context) = crate::game::group::GroupSystem::loot_context_for(world, loot_guid)
         else {
             continue;
@@ -259,6 +287,14 @@ pub async fn handle_loot_master_give(
             context.instance_id,
             context.rank,
         ) {
+            continue;
+        }
+        if world
+            .systems
+            .loot_manager
+            .is_allowed_looter(loot_guid, target_guid)
+            == Some(false)
+        {
             continue;
         }
 
@@ -284,15 +320,25 @@ pub async fn handle_loot_master_give(
         if let crate::game::inventory::types::AddItemResult::Success { .. } = stored {
             world.systems.loot_manager.with_loot_mut(loot_guid, |loot| {
                 if let Some(it) = loot.items.iter_mut().find(|i| i.slot == slot) {
-                    it.is_looted = true;
-                    loot.unlooted_count = loot.unlooted_count.saturating_sub(1);
+                    if !it.is_looted {
+                        it.is_looted = true;
+                        loot.unlooted_count = loot.unlooted_count.saturating_sub(1);
+                    }
                 }
             });
-            use oxcore_shared::messages::loot::SmsgLootRemoved;
             world
-                .managers
-                .broadcast_mgr
-                .send_msg_to_player(target_guid, SmsgLootRemoved { slot });
+                .systems
+                .loot
+                .notify_item_removed(loot_guid, false, slot, master_guid);
+            world
+                .systems
+                .quest
+                .handle_item_added(target_guid, item.item_id, item.count);
+            crate::game::gameobject::quest_activation::refresh_quest_gameobjects(
+                target_guid,
+                world,
+            );
+            world.systems.loot.clear_if_empty(loot_guid, world);
         }
     }
 

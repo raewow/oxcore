@@ -385,13 +385,26 @@ impl Creature {
         self.move_spline.stop();
         self.motion_master.clear(self.guid);
 
-        // Set loot recipient to first attacker or killer (tapping)
-        self.loot_recipient = killer.or_else(|| self.combat.attackers.iter().next().copied());
+        // The tap belongs to whoever damaged the creature first; a kill only fills it in when
+        // nothing tapped it (e.g. a kill command), never steals it.
+        if self.loot_recipient.is_none() {
+            self.loot_recipient = killer
+                .filter(|guid| guid.is_player())
+                .or_else(|| {
+                    self.combat
+                        .attackers
+                        .iter()
+                        .copied()
+                        .find(|guid| guid.is_player())
+                })
+                .or(killer);
+        }
     }
 
-    /// Set loot recipient (tapping mechanics)
+    /// Set loot recipient (tapping mechanics). The first player to damage the creature taps it;
+    /// later damage does not change the tap.
     pub fn set_loot_recipient(&mut self, recipient: ObjectGuid) {
-        if self.loot_recipient.is_none() {
+        if self.loot_recipient.is_none() && recipient.is_player() {
             self.loot_recipient = Some(recipient);
         }
     }

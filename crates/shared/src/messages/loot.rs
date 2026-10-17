@@ -18,6 +18,36 @@ pub fn write_modern_item_instance(writer: &mut BitWriter, item_id: u32, random_p
     writer.flush_bits();
 }
 
+/// Loot slot types on the 1.12 wire: 0 lootable, 1 roll ongoing, 2 master loot, 3 locked,
+/// 4 owner. 1.14 keeps the values but swaps master and locked.
+pub fn modern_loot_ui_type(vanilla_slot_type: u8) -> u32 {
+    match vanilla_slot_type {
+        2 => 3, // master
+        3 => 2, // locked
+        other => u32::from(other),
+    }
+}
+
+/// `LootItemData` for the 1.14 wire: the per-item block shared by the loot window and the roll
+/// packets. `loot_list_id` is already 1-based.
+pub fn write_modern_loot_item_data(
+    writer: &mut BitWriter,
+    item_id: u32,
+    random_property: u32,
+    quantity: u32,
+    vanilla_slot_type: u8,
+    loot_list_id: u8,
+) {
+    writer.write_bits(0, 2); // Type: item
+    writer.write_bits(modern_loot_ui_type(vanilla_slot_type), 3); // UIType
+    writer.write_bit(false); // CanTradeToTapList
+    writer.flush_bits();
+    write_modern_item_instance(writer, item_id, random_property);
+    writer.write_u32(quantity); // Quantity
+    writer.write_u8(0); // LootItemType
+    writer.write_u8(loot_list_id); // LootListID
+}
+
 /// SMSG_LOOT_RESPONSE (0x0160)
 #[derive(Debug, Clone)]
 pub struct SmsgLootResponse {
@@ -37,7 +67,7 @@ pub struct LootResponseItem {
     pub display_id: u32,
     pub random_suffix: u32,
     pub random_property: u32,
-    pub slot_type: u8, // 0 = normal, 1 = quest, 2 = group needed
+    pub slot_type: u8, // 1.12 slot type: 0 lootable, 1 roll ongoing, 2 master, 3 locked, 4 owner
 }
 
 impl ToWorldPacket for SmsgLootResponse {
@@ -66,17 +96,17 @@ impl ToWorldPacket for SmsgLootResponse {
         writer.flush_bits();
 
         for item in &self.items {
-            writer.write_bits(0, 2); // Type: item
-            writer.write_bits(u32::from(item.slot_type), 3); // UIType
-            writer.write_bit(false); // CanTradeToTapList
-            writer.flush_bits();
-            write_modern_item_instance(&mut writer, item.item_id, item.random_property);
-            writer.write_u32(item.count); // Quantity
-            writer.write_u8(0); // LootItemType
-                                // LootListID is 1-based on the modern wire (the client's own loot UI reserves 0),
-                                // while our internal `slot` is a 0-based index into the loot item vector. Vanilla's
-                                // wire slot is genuinely 0-based, so only the modern encoding offsets it.
-            writer.write_u8(item.slot + 1); // LootListID
+            // LootListID is 1-based on the modern wire (the client's own loot UI reserves 0),
+            // while our internal `slot` is the 0-based wire slot. Vanilla's wire slot is
+            // genuinely 0-based, so only the modern encoding offsets it.
+            write_modern_loot_item_data(
+                &mut writer,
+                item.item_id,
+                item.random_property,
+                item.count,
+                item.slot_type,
+                item.slot + 1,
+            );
         }
 
         Some(writer.finish(Opcode::SMSG_LOOT_RESPONSE))
@@ -132,17 +162,19 @@ impl ToWorldPacket for SmsgLootReleaseResponse {
 /// SMSG_LOOT_REMOVED (0x0162)
 #[derive(Debug, Clone)]
 pub struct SmsgLootRemoved {
+    pub loot_guid: ObjectGuid,
     pub slot: u8,
 }
 
 impl ToWorldPacket for SmsgLootRemoved {
     /// 1.14 names the owner and loot object ahead of the slot, where vanilla sends the slot alone.
-    /// The struct carries no GUID, so both are sent empty -- the client matches the removal by slot,
-    /// and the window it applies to is the one currently open.
+    /// Both GUIDs match the ones the loot window was opened with.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
-        writer.write_packed_guid_128(0, 0); // Owner
-        writer.write_packed_guid_128(0, 0); // LootObj
+        let (high, low) = self.loot_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // Owner
+        let (loot_high, loot_low) = loot_guid128(&self.loot_guid);
+        writer.write_packed_guid_128(loot_high, loot_low); // LootObj
         writer.write_u8(self.slot + 1); // LootListID -- see SmsgLootResponse::to_modern
         Some(writer.finish(Opcode::SMSG_LOOT_REMOVED))
     }
@@ -158,6 +190,8 @@ impl ToWorldPacket for SmsgLootRemoved {
 #[derive(Debug, Clone)]
 pub struct SmsgLootMoneyNotify {
     pub gold: u32,
+    /// The looter kept the whole drop (no group split). 1.14 only.
+    pub sole_looter: bool,
 }
 
 impl ToWorldPacket for SmsgLootMoneyNotify {
@@ -167,7 +201,7 @@ impl ToWorldPacket for SmsgLootMoneyNotify {
         let mut writer = BitWriter::new();
         writer.write_u64(u64::from(self.gold)); // Money
         writer.write_u64(0); // MoneyMod
-        writer.write_bit(true); // SoleLooter -- free-for-all looting has no split
+        writer.write_bit(self.sole_looter); // SoleLooter
         writer.flush_bits();
         Some(writer.finish(Opcode::SMSG_LOOT_MONEY_NOTIFY))
     }

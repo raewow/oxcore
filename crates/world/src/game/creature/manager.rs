@@ -1172,6 +1172,11 @@ impl CreatureManager {
     pub fn clear_lootable_flag(&self, guid: ObjectGuid, world: &crate::World) {
         // Match DoLootRelease: remove LOOTABLE and leave the corpse with no
         // broadcast dynamic flags. Tapped state is per-viewer state.
+            // The first player to actually hurt a living creature taps it.
+            if damage > 0 && creature.is_alive() {
+                creature.set_loot_recipient(attacker);
+            }
+
         let new_flags = corpse_dynamic_flags(false);
 
         tracing::debug!(

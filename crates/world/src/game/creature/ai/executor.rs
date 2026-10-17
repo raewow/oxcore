@@ -137,6 +137,8 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                     creature.ai_state = AIState::Evading;
                     creature.combat.leave_combat();
                     creature.threat_manager.clear();
+                    // An evading creature is untapped again.
+                    creature.loot_recipient = None;
                     // Heal to full on evade
                     creature.current_health = creature.max_health;
                     creature.current_mana = creature.max_mana;

@@ -77,8 +77,11 @@ pub async fn reward_group_at_kill(
             victim_map,
             victim_instance,
             victim_rank,
+            true,
         );
     }
+    // The tapper counts towards the split even when dead (their share of the levels still
+    // dilutes everyone else's); only the XP itself requires being alive.
     accumulate_xp_data(
         world,
         &mut data,
@@ -88,6 +91,7 @@ pub async fn reward_group_at_kill(
         victim_map,
         victim_instance,
         victim_rank,
+        false,
     );
 
     // No in-range member — nothing to reward.
@@ -142,8 +146,8 @@ pub async fn reward_group_at_kill(
     Ok(())
 }
 
-/// Count a member into `data` if they are alive, in the world, and within reward distance
-/// (`Group::GetDataForXPAtKill`).
+/// Count a member into `data` if they are in the world, within reward distance, and (when
+/// `require_alive`) alive.
 fn accumulate_xp_data(
     world: &World,
     data: &mut XpKillData,
@@ -153,11 +157,12 @@ fn accumulate_xp_data(
     victim_map: u32,
     victim_instance: u32,
     victim_rank: u8,
+    require_alive: bool,
 ) {
     let Some(player) = world.managers.player_mgr.get_player(member_guid) else {
         return; // not in the world
     };
-    if !matches!(player.death.death_state, DeathState::Alive) {
+    if require_alive && !matches!(player.death.death_state, DeathState::Alive) {
         return;
     }
     if !is_at_group_reward_distance(
