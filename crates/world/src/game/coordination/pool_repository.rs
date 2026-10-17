@@ -1,5 +1,6 @@
 //! Loads spawn pool definitions from the world database
-//! (`pool_template`, `pool_creature`, `pool_gameobject`, `pool_pool`).
+//! (`pool_template`, `pool_creature`, `pool_gameobject`, `pool_pool`, and the
+//! entry-based `pool_creature_template` / `pool_gameobject_template`).
 
 use super::pool_types::PoolTemplate;
 use anyhow::Context;
@@ -49,7 +50,7 @@ impl PoolRepository {
     /// Load pool templates
     async fn load_templates(&self) -> anyhow::Result<Vec<PoolTemplate>> {
         let rows = sqlx::query_as::<sqlx::Postgres, PoolTemplateRow>(
-            "SELECT entry, max_limit, flags, description FROM world.pool_template \
+            "SELECT entry::BIGINT AS entry, max_limit, flags, description FROM world.pool_template \
              WHERE $1 BETWEEN patch_min AND patch_max",
         )
         .bind(i16::from(self.patch))
@@ -61,42 +62,95 @@ impl PoolRepository {
             .collect()
     }
 
-    /// Load creature members for all pools
+    /// Load creature members for all pools: explicit spawns, plus every spawn of
+    /// each entry listed in `pool_creature_template`.
     async fn load_creature_members(&self) -> anyhow::Result<Vec<PoolObjectMember>> {
-        let rows = sqlx::query_as::<sqlx::Postgres, PoolObjectRow>(
-            "SELECT pool_entry, guid, chance, description FROM world.pool_creature \
+        let explicit = sqlx::query_as::<sqlx::Postgres, PoolObjectRow>(
+            "SELECT pool_entry::BIGINT AS pool_entry, guid, chance, description FROM world.pool_creature \
              WHERE $1 BETWEEN patch_min AND patch_max",
         )
         .bind(i16::from(self.patch))
         .fetch_all(&self.pool)
         .await?;
+        let by_entry = sqlx::query_as::<sqlx::Postgres, PoolObjectRow>(
+            "SELECT t.pool_entry::BIGINT AS pool_entry, c.guid, t.chance, t.description \
+             FROM world.pool_creature_template t JOIN world.creature c ON c.id = t.id \
+             WHERE $1 BETWEEN t.patch_min AND t.patch_max \
+               AND $1 BETWEEN c.patch_min AND c.patch_max",
+        )
+        .bind(i16::from(self.patch))
+        .fetch_all(&self.pool)
+        .await?;
 
-        rows.into_iter().map(PoolObjectRow::into_member).collect()
+        merge_members(explicit, by_entry, "pool_creature_template")
     }
 
-    /// Load gameobject members for all pools
+    /// Load gameobject members for all pools: explicit spawns, plus every spawn
+    /// of each entry listed in `pool_gameobject_template`.
     async fn load_gameobject_members(&self) -> anyhow::Result<Vec<PoolObjectMember>> {
-        let rows = sqlx::query_as::<sqlx::Postgres, PoolObjectRow>(
-            "SELECT pool_entry, guid, chance, description FROM world.pool_gameobject \
+        let explicit = sqlx::query_as::<sqlx::Postgres, PoolObjectRow>(
+            "SELECT pool_entry::BIGINT AS pool_entry, guid, chance, description FROM world.pool_gameobject \
              WHERE $1 BETWEEN patch_min AND patch_max",
         )
         .bind(i16::from(self.patch))
         .fetch_all(&self.pool)
         .await?;
+        let by_entry = sqlx::query_as::<sqlx::Postgres, PoolObjectRow>(
+            "SELECT t.pool_entry::BIGINT AS pool_entry, g.guid, t.chance, t.description \
+             FROM world.pool_gameobject_template t JOIN world.gameobject g ON g.id = t.id \
+             WHERE $1 BETWEEN t.patch_min AND t.patch_max \
+               AND $1 BETWEEN g.patch_min AND g.patch_max",
+        )
+        .bind(i16::from(self.patch))
+        .fetch_all(&self.pool)
+        .await?;
 
-        rows.into_iter().map(PoolObjectRow::into_member).collect()
+        merge_members(explicit, by_entry, "pool_gameobject_template")
     }
 
     /// Load nested pool members
     async fn load_pool_members(&self) -> anyhow::Result<Vec<PoolPoolMember>> {
         let rows = sqlx::query_as::<sqlx::Postgres, PoolPoolRow>(
-            "SELECT pool_id, mother_pool, chance, description FROM world.pool_pool",
+            "SELECT pool_id::BIGINT AS pool_id, mother_pool::BIGINT AS mother_pool, chance, description FROM world.pool_pool",
         )
         .fetch_all(&self.pool)
         .await?;
 
         rows.into_iter().map(PoolPoolRow::into_member).collect()
     }
+}
+
+/// Combine explicit pool members with entry-expanded ones. A spawn may belong to
+/// only one pool; an expanded spawn already listed explicitly is skipped.
+fn merge_members(
+    explicit: Vec<PoolObjectRow>,
+    by_entry: Vec<PoolObjectRow>,
+    table: &str,
+) -> anyhow::Result<Vec<PoolObjectMember>> {
+    let mut members: Vec<PoolObjectMember> = explicit
+        .into_iter()
+        .map(PoolObjectRow::into_member)
+        .collect::<anyhow::Result<_>>()?;
+    let mut seen: std::collections::HashMap<u32, u32> = members
+        .iter()
+        .map(|member| (member.spawn_id, member.pool_id))
+        .collect();
+    for row in by_entry {
+        let member = row.into_member()?;
+        if let Some(&pool) = seen.get(&member.spawn_id) {
+            tracing::warn!(
+                "`{}` spawn {} for pool {} is already in pool {}, skipped",
+                table,
+                member.spawn_id,
+                member.pool_id,
+                pool
+            );
+            continue;
+        }
+        seen.insert(member.spawn_id, member.pool_id);
+        members.push(member);
+    }
+    Ok(members)
 }
 
 /// All pool data loaded from database

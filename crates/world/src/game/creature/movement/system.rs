@@ -469,13 +469,39 @@ impl MovementSystem {
                     })
                     .unwrap_or((0, 0, current_pos));
 
-                // Query pathfinder for a path (VMap LOS -> NavMesh A* -> obstacle avoidance)
-                let path_result = world.managers.pathfinder.calculate_path(
-                    map_id,
-                    instance_id,
-                    real_start,
-                    destination,
-                );
+                // Path over the terrain this creature can cross: walkers stay on
+                // ground, swimmers may also cross water, magma and slime, and
+                // flyers go straight.
+                let inhabit = world
+                    .managers
+                    .creature_mgr
+                    .with_creature(guid, |c| c.entry)
+                    .map(|entry| world.managers.creature_mgr.inhabit_type(entry))
+                    .unwrap_or(0);
+                let path_result = {
+                    use crate::game::creature::manager::{
+                        INHABIT_AIR, INHABIT_GROUND, INHABIT_WATER,
+                    };
+                    use crate::map::pathfinding::nav_terrain;
+                    let mut include = 0u16;
+                    if inhabit & INHABIT_GROUND != 0 {
+                        include |= nav_terrain::GROUND;
+                    }
+                    if inhabit & INHABIT_WATER != 0 {
+                        include |= nav_terrain::WATER | nav_terrain::MAGMA | nav_terrain::SLIME;
+                    }
+                    if inhabit & INHABIT_AIR != 0 || include == 0 {
+                        crate::map::pathfinding::PathResult::StraightLine(real_start, destination)
+                    } else {
+                        world.managers.pathfinder.calculate_path_for(
+                            map_id,
+                            instance_id,
+                            real_start,
+                            destination,
+                            include,
+                        )
+                    }
+                };
                 let path_waypoints = path_result.waypoints();
 
                 let final_dest = path_waypoints.last().copied().unwrap_or(destination);

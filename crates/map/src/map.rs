@@ -199,7 +199,8 @@ pub struct Map {
     corpses: DashMap<ObjectGuid, Position>,
     /// Objects that keep themselves and their surroundings loaded regardless of
     /// player proximity.
-    active_objects: DashMap<ObjectGuid, Position>,
+    /// Active objects: (spawn point that pins its grid, current position).
+    active_objects: DashMap<ObjectGuid, (Position, Position)>,
     /// Immutable per-map tuning, including the ramp bounds.
     config: MapConfig,
     /// Live visibility distance, as `f32::to_bits`. Atomic because it is read
@@ -476,9 +477,10 @@ impl Map {
     pub fn add_to_active(&self, guid: ObjectGuid, spawn_pos: Position) {
         use crate::grid_coords::world_to_grid;
 
-        if self.active_objects.insert(guid, spawn_pos).is_some() {
+        if self.active_objects.contains_key(&guid) {
             return; // already active
         }
+        self.active_objects.insert(guid, (spawn_pos, spawn_pos));
 
         let (gx, gy) = world_to_grid(spawn_pos.x, spawn_pos.y);
         let mut grid_mgr = self.grid_manager.write();
@@ -489,7 +491,7 @@ impl Map {
     pub fn remove_from_active(&self, guid: ObjectGuid) {
         use crate::grid_coords::world_to_grid;
 
-        let Some((_, spawn_pos)) = self.active_objects.remove(&guid) else {
+        let Some((_, (spawn_pos, _))) = self.active_objects.remove(&guid) else {
             return;
         };
 
@@ -528,7 +530,7 @@ impl Map {
         };
 
         self.players.iter().any(|e| in_box(e.value()))
-            || self.active_objects.iter().any(|e| in_box(e.value()))
+            || self.active_objects.iter().any(|e| in_box(&e.value().1))
     }
 
     /// Restart a grid's idle countdown so it survives while someone is using it.
@@ -629,7 +631,23 @@ impl Map {
         old_pos: Position,
         new_pos: Position,
     ) -> RelocateResult {
+        // An active creature keeps the grids around where it is now, not where
+        // it spawned, alive.
+        if let Some(mut active) = self.active_objects.get_mut(&guid) {
+            active.1 = new_pos;
+        }
         self.relocate_object(ObjectKind::Creature, guid, old_pos, new_pos)
+    }
+
+    /// Whether an object is active on this map.
+    pub fn is_active_object(&self, guid: ObjectGuid) -> bool {
+        self.active_objects.contains_key(&guid)
+    }
+
+    /// Activate (create and queue for loading) the grids within the activation
+    /// radius of a position, e.g. around an active spawn before anyone is near.
+    pub fn activate_grids_around(&self, pos: Position) {
+        self.activate_grids_around_position(pos);
     }
 
     /// Add a creature to the map
@@ -692,11 +710,17 @@ impl Map {
     /// Re-derives the area from the current position of every
     /// player on every tick, under a single write lock for the whole map.
     pub fn activate_grids_around_players(&self) {
-        if self.players.is_empty() {
+        if self.players.is_empty() && self.active_objects.is_empty() {
             return;
         }
 
-        let positions: Vec<Position> = self.players.iter().map(|e| *e.value()).collect();
+        // Active objects keep the grids around them running like players do.
+        let positions: Vec<Position> = self
+            .players
+            .iter()
+            .map(|e| *e.value())
+            .chain(self.active_objects.iter().map(|e| e.value().1))
+            .collect();
 
         let mut grid_mgr = self.grid_manager.write();
         for pos in positions {

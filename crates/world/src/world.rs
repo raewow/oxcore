@@ -69,6 +69,7 @@ pub struct Managers {
     pub area_trigger_mgr: Arc<AreaTriggerManager>,
     pub condition_mgr: Arc<ConditionManager>,
     pub instance_mgr: Arc<crate::game::instance::InstanceMgr>,
+    pub game_event_mgr: Arc<crate::game::game_event::GameEventManager>,
     pub spell_mgr: Arc<SpellManager>,
     pub lua_mgr: Arc<LuaScriptManager>,
     pub auction_mgr: Arc<AuctionHouseManager>,
@@ -151,7 +152,10 @@ impl World {
         let mmap_mgr = Arc::new(MMapManager::new(&data_dir, Arc::clone(&vmap_mgr)));
 
         // Create PathFinder (integrates VMap LOS + NavMesh A* + obstacle avoidance)
-        let pathfinder = Arc::new(PathFinder::new(Arc::clone(&mmap_mgr)));
+        let pathfinder = Arc::new(PathFinder::with_terrain(
+            Arc::clone(&mmap_mgr),
+            Arc::clone(&terrain_mgr),
+        ));
 
         let broadcast_mgr = Arc::new(BroadcastManager::new(
             Arc::clone(&session_mgr),
@@ -229,6 +233,7 @@ impl World {
                 area_trigger_mgr,
                 condition_mgr,
                 instance_mgr,
+                game_event_mgr: Arc::new(crate::game::game_event::GameEventManager::new()),
                 spell_mgr: Arc::new(SpellManager::new()),
                 lua_mgr,
                 auction_mgr,
@@ -373,6 +378,13 @@ impl World {
         self.managers.gameobject_mgr.set_patch(creature_patch);
         self.managers.gameobject_mgr.load_templates().await?;
         self.managers.gameobject_mgr.load_spawns().await?;
+
+        // World events decide which event-linked spawns exist.
+        self.managers
+            .game_event_mgr
+            .load(&self.databases.world, creature_patch)
+            .await
+            .context("Failed to load game events")?;
 
         // Load waypoint data
         step("Loading waypoints & loot");
@@ -662,6 +674,8 @@ impl World {
             if let Err(e) = crate::game::instance::lifecycle::update(self).await {
                 tracing::error!("Instance lifecycle update failed: {}", e);
             }
+            // World events starting or stopping add or remove their spawns.
+            crate::game::game_event::update(self);
         }
 
         self.session_mgr.update_logout_timers(self).await?;
@@ -1034,6 +1048,7 @@ impl Clone for World {
                 area_trigger_mgr: Arc::clone(&self.managers.area_trigger_mgr),
                 condition_mgr: Arc::clone(&self.managers.condition_mgr),
                 instance_mgr: Arc::clone(&self.managers.instance_mgr),
+                game_event_mgr: Arc::clone(&self.managers.game_event_mgr),
                 spell_mgr: Arc::clone(&self.managers.spell_mgr),
                 lua_mgr: Arc::clone(&self.managers.lua_mgr),
                 auction_mgr: Arc::clone(&self.managers.auction_mgr),

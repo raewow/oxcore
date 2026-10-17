@@ -104,6 +104,22 @@ pub fn update_respawns(world: &World) {
         let Some(map) = world.managers.map_mgr.get_map(map_id, instance_id) else {
             continue;
         };
+
+        // A pooled object re-rolls its pool first; the pool may move the spawn
+        // to another member, in which case this one is gone.
+        let spawn_id = world
+            .managers
+            .gameobject_mgr
+            .with_gameobject(guid, |go| go.spawn_id)
+            .unwrap_or(0);
+        if !world.systems.pool.on_gameobject_respawn(guid, world) {
+            crate::game::common::respawn_persistence::clear_gameobject_respawn(
+                world,
+                spawn_id,
+                instance_id,
+            );
+            continue;
+        }
         let Some(position) = world
             .managers
             .gameobject_mgr

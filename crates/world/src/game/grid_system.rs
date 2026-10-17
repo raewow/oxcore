@@ -17,6 +17,8 @@ pub struct GridSystem {
     /// Track grids currently being loaded asynchronously (map_id, instance_id, grid_x, grid_y) -> task handle
     /// This prevents duplicate load requests and allows checking load status
     loading_grids: Arc<DashMap<(u32, u32, u8, u8), tokio::task::JoinHandle<()>>>,
+    /// Map copies whose active spawns have had their grids queued for loading.
+    primed_maps: Arc<dashmap::DashSet<(u32, u32)>>,
 }
 
 impl GridSystem {
@@ -24,6 +26,7 @@ impl GridSystem {
     pub fn new() -> Self {
         Self {
             loading_grids: Arc::new(DashMap::new()),
+            primed_maps: Arc::new(dashmap::DashSet::new()),
         }
     }
 
@@ -78,6 +81,14 @@ impl GridSystem {
             .managers
             .map_mgr
             .get_or_create_map(map_id, instance_id);
+
+        // Active spawns keep their grids loaded whenever the map exists, so queue
+        // them the first time the map is processed.
+        if self.primed_maps.insert((map_id, instance_id)) {
+            for position in world.managers.creature_mgr.active_spawn_positions(map_id) {
+                map.activate_grids_around(position);
+            }
+        }
 
         // Re-derive the activation area from where the players actually are.
         // Relocation only does this when a player crosses a grid boundary, which
@@ -203,12 +214,24 @@ impl GridSystem {
                 continue;
             }
 
+            if spawn.spawn_flags & crate::game::creature::spawn::spawn_flags::DISABLED != 0 {
+                continue;
+            }
+
             // Pooled spawns only exist while their pool has them on its roster
             if !world
                 .systems
                 .pool
                 .can_creature_spawn(spawn.spawn_id, map.instance_id())
             {
+                continue;
+            }
+
+            // Event-linked spawns only exist while their event allows them.
+            if !world.managers.game_event_mgr.is_spawn_eligible(
+                crate::game::game_event::EventSpawnKind::Creature,
+                spawn.spawn_id,
+            ) {
                 continue;
             }
 
@@ -219,6 +242,9 @@ impl GridSystem {
             );
 
             if let Some(guid) = spawned {
+                if spawn.spawn_flags & crate::game::creature::spawn::spawn_flags::ACTIVE != 0 {
+                    map.add_to_active(guid, spawn.position);
+                }
                 // Let the pool track the object it just got in this instance
                 world
                     .systems
@@ -255,6 +281,13 @@ impl GridSystem {
                 .pool
                 .can_gameobject_spawn(go_spawn.spawn_id, map.instance_id())
             {
+                continue;
+            }
+
+            if !world.managers.game_event_mgr.is_spawn_eligible(
+                crate::game::game_event::EventSpawnKind::GameObject,
+                go_spawn.spawn_id,
+            ) {
                 continue;
             }
 

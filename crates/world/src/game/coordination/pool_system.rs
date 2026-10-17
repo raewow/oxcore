@@ -82,11 +82,11 @@ impl PoolSystem {
         self.manager.mark_despawned(guid);
     }
 
-    /// A pooled creature is ready to respawn: re-roll its pool.
+    /// A pooled object is ready to respawn: re-roll its pool.
     ///
-    /// Returns true when this very creature was rolled again and should
+    /// Returns true when this very object was rolled again and should
     /// respawn normally; false when the pool replaced it with another member
-    /// (this creature is despawned instead).
+    /// (this object is despawned instead).
     pub fn on_creature_respawn(&self, guid: ObjectGuid, world: &World) -> bool {
         let Some((pool_id, instance_id, key)) = self.manager.get_pool_membership(guid) else {
             return true; // Not in a pool: normal respawn
@@ -108,6 +108,14 @@ impl PoolSystem {
 
         self.apply_roll(&roll, instance_id, world);
         false
+    }
+
+    /// A pooled gameobject (resource node, chest) is ready to respawn: re-roll
+    /// its pool. Returns true when this object should respawn where it was;
+    /// false when the pool picked another member instead (this one is removed
+    /// and the replacement spawned if its grid is loaded).
+    pub fn on_gameobject_respawn(&self, guid: ObjectGuid, world: &World) -> bool {
+        self.on_creature_respawn(guid, world)
     }
 
     /// Roll a pool's roster back to full and spawn every member whose grid is
@@ -305,6 +313,7 @@ impl PoolSystem {
             .map_mgr
             .get_or_create_map(map_id, instance_id);
         map.remove_creature(guid, position);
+        map.remove_from_active(guid);
 
         self.send_destroy(guid, map_id, instance_id, position, world);
 

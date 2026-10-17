@@ -20,6 +20,12 @@ use oxcore_shared::protocol::{ObjectGuid, Position};
 /// health and the dead stand state; UNIT_DYNFLAG_DEAD is for feign death only.
 /// Tapped flags are viewer-specific, so they cannot be
 /// included in a broadcast update.
+/// `inhabit_type` bits.
+pub const INHABIT_GROUND: u8 = 0x1;
+pub const INHABIT_WATER: u8 = 0x2;
+pub const INHABIT_AIR: u8 = 0x4;
+const INHABIT_GROUND_AND_WATER: u8 = INHABIT_GROUND | INHABIT_WATER;
+
 /// `static_flags2`: killing the creature binds the killing raid to the instance.
 const CREATURE_STATIC_FLAG_2_LOCK_TAPPERS_TO_RAID_ON_DEATH: u32 = 0x0000_0004;
 
@@ -254,6 +260,9 @@ pub struct CreatureManager {
     display_scales: DashMap<u32, f32>,
     /// Template entries whose death permanently saves the raid to its tappers.
     raid_lock_entries: dashmap::DashSet<u32>,
+    /// Where each template may move (`inhabit_type`), when not the usual
+    /// ground-and-water.
+    inhabit_types: DashMap<u32, u8>,
 }
 
 impl CreatureManager {
@@ -273,7 +282,16 @@ impl CreatureManager {
             visuals: DashMap::new(),
             display_scales: DashMap::new(),
             raid_lock_entries: dashmap::DashSet::new(),
+            inhabit_types: DashMap::new(),
         }
+    }
+
+    /// Where a template may move: `INHABIT_*` bits (ground 1, water 2, air 4).
+    pub fn inhabit_type(&self, entry: u32) -> u8 {
+        self.inhabit_types
+            .get(&entry)
+            .map(|v| *v)
+            .unwrap_or(INHABIT_GROUND_AND_WATER)
     }
 
     /// Whether killing this creature permanently saves its raid to the killers.
@@ -517,6 +535,10 @@ impl CreatureManager {
             let static_flags2 = checked_u32(row.static_flags2, "creature_template.static_flags2")?;
             if static_flags2 & CREATURE_STATIC_FLAG_2_LOCK_TAPPERS_TO_RAID_ON_DEATH != 0 {
                 self.raid_lock_entries.insert(entry);
+            }
+            let inhabit = checked_u8(row.inhabit_type, "creature_template.inhabit_type")?;
+            if inhabit != INHABIT_GROUND_AND_WATER {
+                self.inhabit_types.insert(entry, inhabit);
             }
             let flags_extra = checked_u32(row.flags_extra, "creature_template.flags_extra")?;
             let creature_type = checked_u8(row.creature_type, "creature_template.type")?;
@@ -768,8 +790,8 @@ impl CreatureManager {
                 continue;
             }
 
-            // NOTE: Not filtering by game_event or pool - world doesn't have these systems yet
-            // so we spawn ALL creatures regardless of event/pool membership
+            // Every spawn of the patch is indexed; pool rosters and running game
+            // events decide at grid load which of them actually appear.
 
             let spawn = CreatureSpawnData {
                 spawn_id: checked_u32(row.guid, "creature.guid")?,
@@ -785,7 +807,7 @@ impl CreatureManager {
                 wander_distance: row.wander_distance,
                 movement_type: checked_u8(row.movement_type, "creature.movement_type")?,
                 phase_mask: 1,
-                spawn_flags: super::spawn::spawn_flags::RANDOM_RESPAWN_TIME, // Default to random variance
+                spawn_flags: checked_u32(row.spawn_flags, "creature.spawn_flags")?,
             };
 
             self.spawns_by_map
@@ -814,6 +836,25 @@ impl CreatureManager {
             let index = build_grid_index(entry.value(), |s| s.position);
             self.spawn_grid_index.insert(*entry.key(), index);
         }
+    }
+
+    /// Spawn points of a map's spawns flagged active, which keep their grids
+    /// loaded whenever the map exists.
+    pub fn active_spawn_positions(&self, map_id: u32) -> Vec<Position> {
+        use super::spawn::spawn_flags;
+        self.spawns_by_map
+            .get(&map_id)
+            .map(|spawns| {
+                spawns
+                    .iter()
+                    .filter(|s| {
+                        s.spawn_flags & spawn_flags::ACTIVE != 0
+                            && s.spawn_flags & spawn_flags::DISABLED == 0
+                    })
+                    .map(|s| s.position)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Get spawns for a specific grid on a map

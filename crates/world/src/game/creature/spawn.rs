@@ -4,12 +4,17 @@ use oxcore_shared::protocol::Position;
 
 /// Spawn flags for creature behavior
 pub mod spawn_flags {
+    //! `creature.spawn_flags` / `gameobject.spawn_flags` bits, as stored.
     /// No special behavior
     pub const NONE: u32 = 0x00000000;
+    /// Keeps itself and the grids around it loaded without players nearby.
+    pub const ACTIVE: u32 = 0x00000001;
+    /// Never spawned.
+    pub const DISABLED: u32 = 0x00000002;
     /// Apply random respawn time variance (90-110%)
-    pub const RANDOM_RESPAWN_TIME: u32 = 0x00000001;
+    pub const RANDOM_RESPAWN_TIME: u32 = 0x00000004;
     /// Apply dynamic respawn time based on nearby player population
-    pub const DYNAMIC_RESPAWN_TIME: u32 = 0x00000002;
+    pub const DYNAMIC_RESPAWN_TIME: u32 = 0x00000008;
 }
 
 /// Represents a creature spawn point from the database
