@@ -557,16 +557,41 @@ impl BSPTree {
             }
             BSPNode::Leaf { models } => {
                 for model in models {
-                    if model.bounding_box.contains(pos) {
-                        if let Some(ref liquid) = model.liquid_data {
-                            // The stored type is a WMO liquid *index*, so map it
-                            // to a MAP_LIQUID_TYPE_* flag before comparing.
-                            let mask = super::types::wmo_liquid_type_mask(liquid.liquid_type);
-                            if req_liquid_type_mask == 0 || (mask & req_liquid_type_mask) != 0 {
-                                return Some(liquid.clone());
-                            }
-                        }
+                    let Some(ref liquid) = model.liquid_data else {
+                        continue;
+                    };
+                    let bounds = &model.bounding_box;
+                    if !bounds.contains(pos) {
+                        continue;
                     }
+                    // The stored type is a WMO liquid *index*, so map it
+                    // to a MAP_LIQUID_TYPE_* flag before comparing.
+                    let mask = super::types::wmo_liquid_type_mask(liquid.liquid_type);
+                    if req_liquid_type_mask != 0 && (mask & req_liquid_type_mask) == 0 {
+                        continue;
+                    }
+                    let Some(ref grid) = liquid.grid else {
+                        return Some(liquid.clone());
+                    };
+                    // Surface of the cell under the point; cells without liquid
+                    // (and points outside the grid) do not count.
+                    let Some(level) = grid.surface_height(pos) else {
+                        continue;
+                    };
+                    // The floor is the group's own geometry beneath the point.
+                    let floor = model
+                        .triangles
+                        .iter()
+                        .filter_map(|t| self.get_height_from_triangle(pos, t, 10_000.0))
+                        .filter(|&h| h <= pos.z + 0.5)
+                        .fold(None, |best: Option<f32>, h| Some(best.map_or(h, |b| b.max(h))))
+                        .unwrap_or(liquid.floor);
+                    return Some(LiquidLevel {
+                        level,
+                        floor,
+                        liquid_type: liquid.liquid_type,
+                        grid: None,
+                    });
                 }
                 None
             }

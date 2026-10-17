@@ -5,10 +5,10 @@ use super::bsp_tree::{BSPModelInstance, BSPTree};
 use super::dynamic_tree::DynamicMapTree;
 use super::file_loader::{MapTileData, VMapFileLoader};
 use super::go_model_list::{load_gameobject_model_list, GameObjectModelData};
-use super::model_transform::place_world_model;
+use super::model_transform::{place_static_model, place_world_model};
 use super::types::{
-    wmo_liquid_type_mask, BoundingBox, ModelType, VMapConfig, VMapLoadResult, WmoLiquidInfo,
-    VMAP_INVALID_HEIGHT_VALUE,
+    wmo_liquid_type_mask, BoundingBox, ModelInstance, ModelType, VMapConfig, VMapLoadResult,
+    WmoLiquidInfo, VMAP_INVALID_HEIGHT_VALUE,
 };
 use oxcore_shared::protocol::Position;
 use parking_lot::RwLock;
@@ -48,7 +48,8 @@ pub struct VMapManager {
     /// Whether vmaps directory exists
     loaded: bool,
     /// Loaded map trees (map_id -> loaded flag)
-    loaded_trees: RwLock<HashMap<u32, bool>>,
+    /// Loaded `.vmtree` files: the map's global model when it is not tiled.
+    loaded_trees: RwLock<HashMap<u32, Option<ModelInstance>>>,
     /// Loaded tiles (map_id -> (tile_x, tile_y) -> tile data)
     loaded_tiles: RwLock<HashMap<u32, HashMap<(u32, u32), MapTileData>>>,
     /// BSP trees per map (map_id -> tree)
@@ -109,8 +110,10 @@ impl VMapManager {
         // Load map tree if not loaded
         if !self.loaded_trees.read().contains_key(&map_id) {
             match self.file_loader.load_map_tree(map_id) {
-                Ok(_tree_data) => {
-                    self.loaded_trees.write().insert(map_id, true);
+                Ok(tree_data) => {
+                    self.loaded_trees
+                        .write()
+                        .insert(map_id, tree_data.global_model);
                 }
                 Err(e) => {
                     warn!("Failed to load VMap tree for map {}: {}", map_id, e);
@@ -165,35 +168,37 @@ impl VMapManager {
     fn rebuild_bsp_tree(&self, map_id: u32) {
         let mut tree = BSPTree::new(map_bounds());
 
+        // A non-tiled map's single global model plus every loaded tile's spawns.
+        let mut spawns: Vec<ModelInstance> = self
+            .loaded_trees
+            .read()
+            .get(&map_id)
+            .and_then(|global| global.clone())
+            .into_iter()
+            .collect();
+        if let Some(map_tiles) = self.loaded_tiles.read().get(&map_id) {
+            for tile_data in map_tiles.values() {
+                spawns.extend(tile_data.model_instances.iter().cloned());
+            }
+        }
+
         let mut bsp_models = Vec::new();
-        let tiles = self.loaded_tiles.read();
-        if let Some(map_tiles) = tiles.get(&map_id) {
-            for (_tile_key, tile_data) in map_tiles.iter() {
-                for model_instance in &tile_data.model_instances {
-                    match self
-                        .file_loader
-                        .load_world_model(&model_instance.model_name)
-                    {
-                        Ok(world_model) => {
-                            bsp_models.extend(place_world_model(
-                                &world_model,
-                                model_instance.position,
-                                model_instance.scale,
-                                model_instance.model_id,
-                                model_instance.model_type,
-                            ));
-                        }
-                        Err(e) => {
-                            debug!(
-                                "Failed to load world model '{}': {}",
-                                model_instance.model_name, e
-                            );
-                        }
-                    }
+        for model_instance in &spawns {
+            match self
+                .file_loader
+                .load_world_model(&model_instance.model_name)
+            {
+                Ok(world_model) => {
+                    bsp_models.extend(place_static_model(&world_model, model_instance));
+                }
+                Err(e) => {
+                    debug!(
+                        "Failed to load world model '{}': {}",
+                        model_instance.model_name, e
+                    );
                 }
             }
         }
-        drop(tiles);
 
         if !bsp_models.is_empty() {
             debug!(

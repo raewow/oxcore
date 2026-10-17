@@ -14,6 +14,7 @@ const VMAP_MAGIC: &[u8] = b"VMAP_7.0";
 const VMAP_VERSION: u32 = 7;
 
 /// Model flags
+const MOD_M2: u32 = 1;
 const MOD_HAS_BOUND: u32 = 1 << 2;
 
 /// VMap file loader
@@ -130,37 +131,24 @@ impl VMapFileLoader {
         let tiles = Vec::new();
         let tile_count = 0u32;
 
-        if !is_tiled {
-            let max_spawns = 10000;
-            let mut spawn_count = 0;
-            loop {
-                if spawn_count >= max_spawns {
+        // A non-tiled map (most instances) carries exactly one model spawn in the
+        // tree file itself: the whole map's WMO, with no per-tile spawns.
+        let global_model = if is_tiled {
+            None
+        } else {
+            match self.read_model_spawn(&mut file) {
+                Ok(Some(spawn)) => Some(spawn.into_instance()),
+                Ok(None) => None,
+                Err(e) => {
                     warn!(
-                        "VMap tree file {} has too many ModelSpawns (>{}) - stopping",
+                        "Failed to read the global model of {}: {}",
                         path.display(),
-                        max_spawns
+                        e
                     );
-                    break;
-                }
-
-                match self.read_model_spawn(&mut file) {
-                    Ok(Some(_spawn)) => {
-                        spawn_count += 1;
-                        match file.read_u32::<LittleEndian>() {
-                            Ok(_referenced_val) => {}
-                            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                            Err(_) => break,
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(_) => break,
+                    None
                 }
             }
-
-            if spawn_count > 0 {
-                debug!("Loaded {} ModelSpawns from VMap tree file", spawn_count);
-            }
-        }
+        };
 
         info!(
             "Loaded VMap tree: map {} (tiled: {}, tree_size: {}, objects: {})",
@@ -174,6 +162,7 @@ impl VMapFileLoader {
             is_tiled,
             tree_size,
             object_count: count,
+            global_model,
         })
     }
 
@@ -277,23 +266,7 @@ impl VMapFileLoader {
 
             let _referenced_val = file.read_u32::<LittleEndian>()?;
 
-            let position = Position::new(spawn.pos.0, spawn.pos.1, spawn.pos.2, 0.0);
-            let rotation = [spawn.rot.0, spawn.rot.1, spawn.rot.2];
-
-            let model_type = if spawn.name.contains(".wmo") || spawn.name.contains("buildings/") {
-                ModelType::WMO
-            } else {
-                ModelType::M2
-            };
-
-            model_instances.push(ModelInstance {
-                model_id: spawn.id,
-                model_type,
-                position,
-                scale: spawn.scale,
-                rotation,
-                model_name: spawn.name.clone(),
-            });
+            model_instances.push(spawn.into_instance());
         }
 
         debug!(
@@ -492,30 +465,40 @@ impl VMapFileLoader {
                 // Read WmoLiquid: tilesX(u32), tilesY(u32), corner(3f), type(u32), heights, flags
                 let tiles_x = file.read_u32::<LittleEndian>()?;
                 let tiles_y = file.read_u32::<LittleEndian>()?;
-                let _corner_x = file.read_f32::<LittleEndian>()?;
-                let _corner_y = file.read_f32::<LittleEndian>()?;
+                if tiles_x > 4096 || tiles_y > 4096 {
+                    return Err(anyhow::anyhow!(
+                        "WMO liquid grid too large: {}x{}",
+                        tiles_x,
+                        tiles_y
+                    ));
+                }
+                let corner_x = file.read_f32::<LittleEndian>()?;
+                let corner_y = file.read_f32::<LittleEndian>()?;
                 let corner_z = file.read_f32::<LittleEndian>()?;
                 let liquid_type = file.read_u32::<LittleEndian>()?;
 
-                // Read height array
+                // Surface heights at the (tiles_x+1) x (tiles_y+1) cell corners.
                 let height_count = ((tiles_x + 1) * (tiles_y + 1)) as usize;
-                let mut max_level = f32::NEG_INFINITY;
+                let mut heights = Vec::with_capacity(height_count);
                 for _ in 0..height_count {
-                    let h = file.read_f32::<LittleEndian>()?;
-                    if h > max_level {
-                        max_level = h;
-                    }
+                    heights.push(file.read_f32::<LittleEndian>()?);
                 }
+                let max_level = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
 
-                // Read flags array
+                // Per-cell flags; a low nibble of 0xF marks a cell without liquid.
                 let flag_count = (tiles_x * tiles_y) as usize;
-                let mut flags_buf = vec![0u8; flag_count];
-                file.read_exact(&mut flags_buf)?;
+                let mut flags = vec![0u8; flag_count];
+                file.read_exact(&mut flags)?;
 
                 Some(LiquidData {
                     liquid_type,
                     level: max_level,
                     floor: corner_z,
+                    tiles_x,
+                    tiles_y,
+                    corner: [corner_x, corner_y, corner_z],
+                    heights,
+                    flags,
                 })
             } else {
                 None
@@ -544,6 +527,25 @@ struct ModelSpawn {
     name: String,
 }
 
+impl ModelSpawn {
+    /// The spawn as a placeable instance. Position stays in the extractor's
+    /// internal frame and rotation in degrees; placement converts both.
+    fn into_instance(self) -> ModelInstance {
+        ModelInstance {
+            model_id: self.id,
+            model_type: if self.flags & MOD_M2 != 0 {
+                ModelType::M2
+            } else {
+                ModelType::WMO
+            },
+            position: Position::new(self.pos.0, self.pos.1, self.pos.2, 0.0),
+            scale: self.scale,
+            rotation: [self.rot.0, self.rot.1, self.rot.2],
+            model_name: self.name,
+        }
+    }
+}
+
 /// Map tree data (from .vmtree file)
 #[derive(Debug, Clone)]
 pub struct MapTreeData {
@@ -553,6 +555,8 @@ pub struct MapTreeData {
     pub is_tiled: bool,
     pub tree_size: u32,
     pub object_count: u32,
+    /// The single model of a non-tiled map.
+    pub global_model: Option<ModelInstance>,
 }
 
 /// Map tile data (from .vmtile file)
@@ -587,10 +591,20 @@ pub struct Triangle {
     pub v2: Position,
 }
 
-/// Liquid data
+/// WMO group liquid, in model space.
 #[derive(Debug, Clone)]
 pub struct LiquidData {
     pub liquid_type: u32,
+    /// Highest surface height in the grid.
     pub level: f32,
+    /// Corner height (lowest reference point of the grid).
     pub floor: f32,
+    pub tiles_x: u32,
+    pub tiles_y: u32,
+    /// Model-space corner of cell (0, 0).
+    pub corner: [f32; 3],
+    /// Surface heights at cell corners, row-major by y.
+    pub heights: Vec<f32>,
+    /// Per-cell flags; low nibble 0xF disables the cell.
+    pub flags: Vec<u8>,
 }

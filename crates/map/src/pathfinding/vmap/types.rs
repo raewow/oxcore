@@ -47,6 +47,9 @@ pub struct LiquidLevel {
     pub level: f32,
     pub floor: f32,
     pub liquid_type: u32,
+    /// The placed per-cell grid, when the liquid came from a WMO group. Queries
+    /// use it for the surface at a point and for disabled cells.
+    pub grid: Option<std::sync::Arc<super::model_transform::PlacedLiquidGrid>>,
 }
 
 /// Liquid found inside a WMO volume.
