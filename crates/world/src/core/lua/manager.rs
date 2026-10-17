@@ -188,6 +188,16 @@ impl LuaScriptManager {
     }
 
     /// Update instance state.
+    /// Whether a dungeon copy's script state has been created.
+    pub fn has_instance_state(&self, map_id: u32, instance_id: u32) -> bool {
+        self.instance_states.contains_key(&(map_id, instance_id))
+    }
+
+    /// Drop a dungeon copy's script state when the copy is torn down.
+    pub fn clear_instance_state(&self, map_id: u32, instance_id: u32) {
+        self.instance_states.remove(&(map_id, instance_id));
+    }
+
     pub fn set_instance_state(&self, map_id: u32, instance_id: u32, state: InstanceScriptState) {
         self.instance_states.insert((map_id, instance_id), state);
     }

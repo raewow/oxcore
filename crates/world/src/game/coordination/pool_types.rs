@@ -147,6 +147,11 @@ impl PoolState {
         self.instances.contains_key(&instance_id)
     }
 
+    /// Forget an instance's roster so a fresh copy rolls its own.
+    pub fn forget_instance(&mut self, instance_id: u32) {
+        self.instances.remove(&instance_id);
+    }
+
     /// Instances that have rolled a roster.
     pub fn instance_ids(&self) -> Vec<u32> {
         self.instances.keys().copied().collect()

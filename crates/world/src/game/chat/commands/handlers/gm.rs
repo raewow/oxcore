@@ -359,7 +359,7 @@ async fn teleport_by_id(ctx: &ChatCommandContext<'_>, teleport_id: u32) -> Resul
     let z: f32 = row.get(5);
     let o: f32 = row.get(6);
 
-    perform_teleport(ctx, map_id, Position { x, y, z, o }, &name)
+    perform_teleport(ctx, map_id, Position { x, y, z, o }, &name).await
 }
 
 /// Teleport by name (partial match)
@@ -393,7 +393,7 @@ async fn teleport_by_name(ctx: &ChatCommandContext<'_>, search_name: &str) -> Re
     let z: f32 = row.get(5);
     let o: f32 = row.get(6);
 
-    perform_teleport(ctx, map_id, Position { x, y, z, o }, &name)
+    perform_teleport(ctx, map_id, Position { x, y, z, o }, &name).await
 }
 
 /// Send the teleport packets and store pending teleport in the session.
@@ -401,25 +401,26 @@ async fn teleport_by_name(ctx: &ChatCommandContext<'_>, search_name: &str) -> Re
 /// Uses the same two-step flow as area triggers:
 ///   1. SMSG_TRANSFER_PENDING + SMSG_NEW_WORLD  →  client loads new map
 ///   2. Client sends MSG_MOVE_WORLDPORT_ACK      →  handle_worldport_ack completes it
-fn perform_teleport(
+async fn perform_teleport(
     ctx: &ChatCommandContext<'_>,
     map_id: u32,
     dest: Position,
     location_name: &str,
 ) -> Result<String> {
-    let old_position = ctx
-        .world
-        .managers
-        .player_mgr
-        .with_player(ctx.player_guid, |p| p.movement.position)
-        .unwrap_or(dest);
-
-    // SMSG_TRANSFER_PENDING + SMSG_NEW_WORLD (sent always for GM teleport,
-    // even same-map, to guarantee the client enters the loading screen)
-    ctx.session.send_far_teleport(old_position, map_id, dest)?;
-
-    // Instance id 0 for GM teleport (continents)
-    ctx.session.set_pending_teleport(Some((map_id, 0, dest)));
+    // SMSG_TRANSFER_PENDING + SMSG_NEW_WORLD (sent always for GM teleport, even
+    // same-map, to guarantee the client enters the loading screen). A dungeon
+    // destination picks the player's own copy, or a new one, like any entrance.
+    let started = crate::game::instance::lifecycle::start_far_teleport(
+        ctx.world,
+        ctx.session,
+        ctx.player_guid,
+        map_id,
+        dest,
+    )
+    .await?;
+    if !started {
+        return Ok(format!("Cannot teleport to {}: entry refused", location_name));
+    }
 
     Ok(format!("Teleporting to: {}", location_name))
 }

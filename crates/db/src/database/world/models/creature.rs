@@ -32,6 +32,7 @@ pub struct CreatureTemplateRow {
     pub unit_class: i64,
     pub base_attack_time: i64,
     pub static_flags1: i64,
+    pub static_flags2: i64,
     pub flags_extra: i64,
     pub creature_type: i64, // Maps to 'type' column - needed for critter detection
     pub gossip_menu_id: i64, // Default gossip menu ID

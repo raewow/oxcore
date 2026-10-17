@@ -14,10 +14,9 @@ use crate::World;
 use oxcore_shared::messages::movement::{SmsgTransferAborted, TransferAbortReason};
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
-/// Copy-local admission rules that must still hold when the client finishes loading
-/// (reference `DungeonMap::CanEnter`): a copy scheduled for reset, or one that has
-/// reached its player cap, cannot be entered. Continents (`instance_id == 0`) are
-/// unrestricted.
+/// Copy-local admission rules that must still hold when the client finishes loading:
+/// a copy whose save is being reset, or one that has reached its player cap, cannot
+/// be entered. Continents (`instance_id == 0`) are unrestricted.
 fn instance_arrival_denied(
     world: &World,
     map_id: u32,
@@ -37,10 +36,7 @@ fn instance_arrival_denied(
         let dbc = world.dbc.read();
         dbc.get_map(map_id)
             .map(|entry| {
-                (
-                    entry.map_type == 1 || entry.map_type == 2,
-                    entry.max_players,
-                )
+                (entry.is_dungeon(), entry.max_players)
             })
             .unwrap_or((false, 0))
     };
@@ -221,14 +217,17 @@ pub async fn handle_worldport_ack(
     new_map.add_player(player_guid, dest_pos);
     info!("[WORLDPORT-ACK] ✓ Player added to new map");
 
-    // Count this entry against the per-hour instance limit now that the player is
-    // actually inside (reference `Player::AddInstanceEnterTime`).
-    if dest_instance_id != 0 {
-        world
-            .managers
-            .instance_mgr
-            .record_instance_enter(player_guid, dest_instance_id);
-    }
+    // Count the entry against the hourly limit, send a raid's welcome, and let a
+    // solo save the group's save replaces go now that the player has left it.
+    crate::game::instance::lifecycle::on_player_changed_map(
+        world,
+        player_guid,
+        old_map_id,
+        old_instance_id,
+        dest_map,
+        dest_instance_id,
+    )
+    .await;
 
     // Send initialization packets (critical for client to exit loading screen)
     use oxcore_shared::messages::login::{
@@ -393,6 +392,14 @@ pub async fn handle_worldport_ack(
             world,
         )
         .await?;
+
+    // A ghost entering the dungeon that holds their corpse comes back to life.
+    if dest_instance_id != 0 {
+        world
+            .systems
+            .death
+            .revive_ghost_entering_dungeon(player_guid, dest_map, world)?;
+    }
 
     info!("========================================");
     info!(
@@ -1521,7 +1528,7 @@ mod tests {
                     id: 36,
                     map_type: 1,
                     max_players: 1,
-                    reset_delay: 86400,
+                    ..Default::default()
                 },
             );
         }

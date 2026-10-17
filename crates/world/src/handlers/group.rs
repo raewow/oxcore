@@ -712,8 +712,8 @@ pub async fn handle_raid_target_update(
 /// Handle CMSG_REQUEST_RAID_INFO - client requests raid lockout info
 /// Sent when player opens character screen or joins a raid group
 /// Packet format: empty
-pub async fn handle_request_raid_info(session: &WorldSession, _world: &World) -> Result<()> {
-    use oxcore_shared::protocol::Opcode;
+pub async fn handle_request_raid_info(session: &WorldSession, world: &World) -> Result<()> {
+    use oxcore_shared::messages::instance::{RaidLock, SmsgRaidInstanceInfo};
 
     let player_guid = session
         .player_guid()
@@ -721,13 +721,92 @@ pub async fn handle_request_raid_info(session: &WorldSession, _world: &World) ->
 
     debug!("CMSG_REQUEST_RAID_INFO: player={:?}", player_guid);
 
-    // Send empty raid instance info (no lockouts)
-    // Packet format: u32 count, then for each: map_id (u32), reset_time (u32), instance_id (u32)
-    let mut packet = oxcore_shared::protocol::WorldPacket::new(Opcode::SMSG_RAID_INSTANCE_INFO);
-    packet.write_u32(0); // No raid lockouts
+    let instance_mgr = &world.managers.instance_mgr;
+    instance_mgr
+        .ensure_player_bindings(&world.databases, player_guid)
+        .await?;
+    let locks = instance_mgr
+        .raid_info(player_guid)
+        .into_iter()
+        .map(|(map_id, time_left, instance_id)| RaidLock {
+            map_id,
+            instance_id,
+            time_left: time_left.min(u64::from(u32::MAX)) as u32,
+        })
+        .collect();
+    session.send_msg(SmsgRaidInstanceInfo { locks })?;
 
-    session.send_packet(packet);
+    Ok(())
+}
 
+/// Handle CMSG_RESET_INSTANCES - the "Reset all instances" button.
+///
+/// A group leader resets the group's normal dungeon saves; a player outside a
+/// group resets their own. Raids and permanently saved copies are never reset,
+/// and a copy with players inside reports a failure.
+pub async fn handle_reset_instances(session: &WorldSession, world: &World) -> Result<()> {
+    use crate::game::instance::lifecycle;
+    use crate::game::instance::manager::ResetScope;
+
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    debug!("CMSG_RESET_INSTANCES: player={:?}", player_guid);
+
+    let players_in_instance = |map_id: u32, instance_id: u32| {
+        world
+            .managers
+            .map_mgr
+            .get_map(map_id, instance_id)
+            .map(|map| map.player_guids())
+            .unwrap_or_default()
+    };
+    let is_raid_map =
+        |map_id: u32| lifecycle::map_entry(world, map_id).is_some_and(|entry| entry.is_raid());
+    let instance_mgr = &world.managers.instance_mgr;
+
+    let outcome = match world.systems.group.get_player_group(player_guid) {
+        Some(group) => {
+            if group.leader_guid != player_guid {
+                return Ok(());
+            }
+            let members_offline = group.members.iter().any(|member| {
+                world
+                    .session_mgr
+                    .get_session_by_player(member.guid)
+                    .is_none()
+            });
+            instance_mgr
+                .reset_group_instances(
+                    &world.databases,
+                    group.leader_guid,
+                    ResetScope::All,
+                    members_offline,
+                    is_raid_map,
+                    players_in_instance,
+                )
+                .await
+        }
+        None => {
+            let current_map = world
+                .managers
+                .player_mgr
+                .with_player(player_guid, |player| player.map_id);
+            instance_mgr
+                .reset_player_instances(
+                    &world.databases,
+                    player_guid,
+                    current_map,
+                    ResetScope::All,
+                    is_raid_map,
+                    players_in_instance,
+                )
+                .await
+        }
+    };
+
+    lifecycle::apply_reset_outcome(world, &outcome);
+    lifecycle::send_reset_replies(world, player_guid, &outcome);
     Ok(())
 }
 

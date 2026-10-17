@@ -514,25 +514,34 @@ impl GroupSystem {
             .map(|(_, g)| g)
             .ok_or(GroupError::NotInGroup)?;
 
-        // 2f: give the group's non-permanent save on the remaining player's current map to them
-        // personally, and drop that group_instance row.
+        // A player still inside a dungeon the group is saved to inherits that
+        // temporary save personally, so disbanding does not strand them.
         if let Some(remaining) = group.members.iter().find(|m| m.guid != initiator) {
-            if let Some(player) = world.managers.player_mgr.get_player(remaining.guid) {
-                let map_id = player.map_id;
-                if let Some(binding) = world
-                    .managers
-                    .instance_mgr
-                    .get_group_binding(group.leader_guid, map_id)
+            let map_id = world
+                .managers
+                .player_mgr
+                .get_player(remaining.guid)
+                .map(|player| player.map_id);
+            if let Some(map_id) = map_id {
+                let instance_mgr = &world.managers.instance_mgr;
+                if let Err(e) = instance_mgr
+                    .ensure_group_bindings(&world.databases, group.leader_guid)
+                    .await
                 {
-                    let has_personal = world
-                        .managers
-                        .instance_mgr
+                    tracing::warn!("Failed to load saves of group {}: {}", group_id, e);
+                }
+                if let Err(e) = instance_mgr
+                    .ensure_player_bindings(&world.databases, remaining.guid)
+                    .await
+                {
+                    tracing::warn!("Failed to load saves of {:?}: {}", remaining.guid, e);
+                }
+                if let Some(binding) = instance_mgr.get_group_binding(group.leader_guid, map_id) {
+                    let has_personal = instance_mgr
                         .get_player_binding(remaining.guid, map_id)
                         .is_some();
                     if !binding.permanent && !has_personal {
-                        match world
-                            .managers
-                            .instance_mgr
+                        match instance_mgr
                             .bind_player_to_instance(
                                 &world.databases,
                                 remaining.guid,
@@ -551,9 +560,7 @@ impl GroupSystem {
                                 e
                             ),
                             Ok(()) => {
-                                if let Err(e) = world
-                                    .managers
-                                    .instance_mgr
+                                if let Err(e) = instance_mgr
                                     .unbind_group_from_instance(
                                         &world.databases,
                                         group.leader_guid,
@@ -574,7 +581,8 @@ impl GroupSystem {
             }
         }
 
-        // Reset the group's (non-permanent) instances.
+        // The group's remaining saves go with it: resettable copies are reset,
+        // copies someone is permanently saved to only lose the group's binding.
         let players_in_instance = |map_id: u32, instance_id: u32| {
             world
                 .managers
@@ -583,11 +591,23 @@ impl GroupSystem {
                 .map(|map| map.player_guids())
                 .unwrap_or_default()
         };
-        let _ = world
+        let is_raid_map = |map_id: u32| {
+            crate::game::instance::lifecycle::map_entry(world, map_id)
+                .is_some_and(|entry| entry.is_raid())
+        };
+        let outcome = world
             .managers
             .instance_mgr
-            .reset_group_instances(&world.databases, group.leader_guid, players_in_instance)
+            .reset_group_instances(
+                &world.databases,
+                group.leader_guid,
+                crate::game::instance::manager::ResetScope::GroupDisband,
+                false,
+                is_raid_map,
+                players_in_instance,
+            )
             .await;
+        crate::game::instance::lifecycle::apply_reset_outcome(world, &outcome);
 
         // Remove all player mappings
         for member in &group.members {
@@ -1010,36 +1030,39 @@ impl GroupSystem {
             group.is_leader(player_guid)
         };
 
-        // 2e: reset the joining member's non-permanent instances unless they are currently
-        // inside one (reference `Group::AddMember`, `Group.cpp:346-351`).
+        // A joining member's temporary solo saves give way to the group's, except
+        // for the dungeon they are standing in, which is released when they leave.
         if !is_leader {
-            let inside_one = world
+            let current_map = world
                 .managers
                 .player_mgr
                 .get_player(player_guid)
-                .map(|p| {
-                    !world
-                        .managers
-                        .instance_mgr
-                        .can_player_reset_instances(player_guid, p.map_id)
-                })
-                .unwrap_or(false);
-
-            if !inside_one {
-                let players_in_instance = |map_id: u32, instance_id: u32| {
-                    world
-                        .managers
-                        .map_mgr
-                        .get_map(map_id, instance_id)
-                        .map(|map| map.player_guids())
-                        .unwrap_or_default()
-                };
-                let _ = world
+                .map(|p| p.map_id);
+            let players_in_instance = |map_id: u32, instance_id: u32| {
+                world
                     .managers
-                    .instance_mgr
-                    .reset_player_instances(&world.databases, player_guid, players_in_instance)
-                    .await;
-            }
+                    .map_mgr
+                    .get_map(map_id, instance_id)
+                    .map(|map| map.player_guids())
+                    .unwrap_or_default()
+            };
+            let is_raid_map = |map_id: u32| {
+                crate::game::instance::lifecycle::map_entry(world, map_id)
+                    .is_some_and(|entry| entry.is_raid())
+            };
+            let outcome = world
+                .managers
+                .instance_mgr
+                .reset_player_instances(
+                    &world.databases,
+                    player_guid,
+                    current_map,
+                    crate::game::instance::manager::ResetScope::GroupJoin,
+                    is_raid_map,
+                    players_in_instance,
+                )
+                .await;
+            crate::game::instance::lifecycle::apply_reset_outcome(world, &outcome);
         }
 
         // Get subgroup for database

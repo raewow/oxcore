@@ -58,16 +58,23 @@ impl RespawnSystem {
                 let instance_id = creature.instance_id;
                 let position = creature.home_position;
                 let entry = creature.entry;
+                let spawn_id = creature.spawn_id;
 
                 // Reset creature state
                 creature.respawn();
 
-                (map_id, instance_id, position, entry)
+                (map_id, instance_id, position, entry, spawn_id)
             });
 
-        let Some((map_id, instance_id, position, entry)) = respawn_info else {
+        let Some((map_id, instance_id, position, entry, spawn_id)) = respawn_info else {
             return Ok(());
         };
+
+        crate::game::common::respawn_persistence::clear_creature_respawn(
+            world,
+            spawn_id,
+            instance_id,
+        );
 
         // Death cleared the motion master (`MotionMaster::Clear` in
         // `SetDeathState`), so the spawn's movement type has to be applied again —

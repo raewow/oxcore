@@ -10,32 +10,33 @@ use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
 use crate::game::area_trigger::{self, AreaTriggerEntry};
 use crate::game::common::update_fields::PLAYER_FLAGS;
-use crate::game::instance::manager::{
-    InstanceAdmission, InstanceAdmissionDenied, InstanceEntryError, InstanceEntryGroup,
-};
+use crate::game::conditions::ConditionContext;
+use crate::game::instance::lifecycle;
+use crate::game::instance::manager::InstanceEntryError;
 use crate::game::player::environment::RestType;
 use crate::World;
 use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language};
 use oxcore_shared::messages::chat::SmsgMessageChat;
-use oxcore_shared::messages::movement::{SmsgTransferAborted, TransferAbortReason};
+use oxcore_shared::messages::movement::SmsgTransferAborted;
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
 
-impl From<InstanceAdmissionDenied> for TransferAbortReason {
-    fn from(denied: InstanceAdmissionDenied) -> Self {
-        match denied {
-            // Reference `SendRaidGroupOnlyError` uses SMSG_RAID_GROUP_ONLY, which
-            // has no modern opcode mapped yet; a not-found abort is the closest
-            // response both protocols can carry.
-            InstanceAdmissionDenied::RaidGroupRequired => TransferAbortReason::NotFound,
-            InstanceAdmissionDenied::TooManyInstances => TransferAbortReason::TooManyInstances,
-            InstanceAdmissionDenied::MaxPlayers => TransferAbortReason::MaxPlayers,
-            InstanceAdmissionDenied::ResetInProgress => TransferAbortReason::NotFound,
-        }
-    }
+/// Area-trigger refusals are shown to the player as a system message.
+fn send_area_trigger_text(session: &WorldSession, message: &str) -> Result<()> {
+    session.send_msg(SmsgMessageChat {
+        msgtype: ChatMsg::System,
+        language: Language::Universal,
+        sender_guid: ObjectGuid::empty(),
+        sender_name: None,
+        target_guid: None,
+        channel_name: None,
+        player_rank: None,
+        message,
+        chat_tag: ChatTag::None,
+    })
 }
 
 /// Handle CMSG_AREATRIGGER — player enters an area trigger zone.
@@ -183,38 +184,76 @@ pub async fn handle_area_trigger(
     }
 
     // --- Teleport triggers ---
-    let teleport = match area_trigger_mgr.get_teleport(trigger_id) {
+    let mut teleport = match area_trigger_mgr.get_teleport(trigger_id) {
         Some(t) => t,
         None => return Ok(()), // Not a teleport trigger
     };
+    let Some(target_map) = lifecycle::map_entry(world, teleport.destination_map) else {
+        return Ok(());
+    };
 
-    // Check level requirement
-    if teleport.required_level > 0 && player_level < teleport.required_level {
-        let msg = if !teleport.message.is_empty() {
-            teleport.message.clone()
-        } else {
-            format!(
-                "You must be at least level {} to enter this instance.",
-                teleport.required_level
-            )
+    // A ghost may only enter the dungeon holding their corpse, or one whose
+    // entrance encloses it, and is landed at the corpse's own dungeon entrance.
+    if !is_alive && target_map.is_dungeon() {
+        let corpse_map = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| player.death.corpse_map_id)
+            .flatten()
+            .unwrap_or(0);
+        let mut map = corpse_map;
+        let reachable = loop {
+            if map == target_map.id {
+                break true;
+            }
+            match lifecycle::map_entry(world, map).filter(|entry| entry.is_dungeon()) {
+                Some(entry) if entry.parent != 0 && entry.parent != map => map = entry.parent,
+                _ => break false,
+            }
         };
+        if !reachable {
+            send_area_trigger_text(session, "You cannot enter this instance while in ghost form.")?;
+            return Ok(());
+        }
+        if teleport.destination_map != corpse_map {
+            if let Some(inner) = area_trigger_mgr.get_map_entrance_trigger(corpse_map) {
+                teleport = inner;
+            }
+        }
+    }
 
-        let chat = SmsgMessageChat {
-            msgtype: ChatMsg::System,
-            language: Language::Universal,
-            sender_guid: ObjectGuid::empty(),
-            sender_name: None,
-            target_guid: None,
-            channel_name: None,
-            player_rank: None,
-            message: &msg,
-            chat_tag: ChatTag::None,
-        };
-        session.send_msg(chat)?;
-
+    // Level and condition (key, attunement, quest) requirements.
+    let level_failed = teleport.required_level > 0 && player_level < teleport.required_level;
+    let condition_failed = teleport.required_condition != 0
+        && !world.managers.condition_mgr.is_satisfied(
+            teleport.required_condition,
+            ConditionContext {
+                target: player_guid,
+                source: player_guid,
+            },
+            world,
+        );
+    if level_failed || condition_failed {
+        if !teleport.message.is_empty() {
+            send_area_trigger_text(session, &teleport.message)?;
+        } else if level_failed {
+            send_area_trigger_text(
+                session,
+                &format!(
+                    "You must be at least level {} to enter this instance.",
+                    teleport.required_level
+                ),
+            )?;
+        }
         debug!(
-            "Area trigger {}: Player {} level {} < required {}",
-            trigger_id, player_guid, player_level, teleport.required_level
+            "Area trigger {}: Player {} refused (level {} < {}: {}, condition {} failed: {})",
+            trigger_id,
+            player_guid,
+            player_level,
+            teleport.required_level,
+            level_failed,
+            teleport.required_condition,
+            condition_failed
         );
         return Ok(());
     }
@@ -223,106 +262,29 @@ pub async fn handle_area_trigger(
     let dest_map = teleport.destination_map;
     let dest_pos = teleport.destination;
 
-    // Check if destination is an instance map and get/create instance
-    let dest_instance_id = {
-        let dbc = world.dbc.read();
-        let map_entry = dbc.get_map(dest_map);
-        let is_instance_map = map_entry
-            .map(|m| m.map_type == 1 || m.map_type == 2) // 1=Instance, 2=Raid
-            .unwrap_or(false);
-        let is_raid = map_entry.map(|m| m.map_type == 2).unwrap_or(false);
-        let max_players = map_entry.map(|m| m.max_players).unwrap_or(0);
-        drop(dbc);
-
-        if is_instance_map {
-            let group = world
-                .systems
-                .group
-                .get_player_group(player_guid)
-                .map(|group| InstanceEntryGroup {
-                    leader_guid: group.leader_guid,
-                    is_raid: group.is_raid,
-                    members_outside: group
-                        .members
-                        .iter()
-                        .filter_map(|member| {
-                            if member.guid == player_guid {
-                                return None;
-                            }
-                            world
-                                .managers
-                                .player_mgr
-                                .with_player(member.guid, |player| {
-                                    (player.map_id != dest_map).then_some(member.guid)
-                                })
-                                .flatten()
-                        })
-                        .collect(),
-                });
-
-            let players_inside = |map_id: u32, instance_id: u32| -> usize {
-                world
-                    .managers
-                    .map_mgr
-                    .get_map(map_id, instance_id)
-                    .map(|map| map.player_count())
-                    .unwrap_or(0)
-            };
-            let admission = InstanceAdmission {
-                is_raid,
-                is_raid_group: group.as_ref().is_some_and(|group| group.is_raid),
-                max_players,
-                players_inside: Some(&players_inside),
-            };
-
-            match world
-                .managers
-                .instance_mgr
-                .enter_instance(
-                    &world.databases,
-                    dest_map,
-                    player_guid,
-                    group.as_ref(),
-                    is_raid,
-                    &admission,
-                )
-                .await
-            {
-                Ok(instance_id) => {
-                    debug!(
-                        "Player {} entering instance {} (map {}, raid={})",
-                        player_guid, instance_id, dest_map, is_raid
-                    );
-                    instance_id
-                }
-                Err(InstanceEntryError::Denied(denied)) => {
-                    debug!(
+    // Dungeon destinations go through copy selection, admission and binding.
+    let dest_instance_id =
+        match lifecycle::resolve_transfer_instance(world, player_guid, dest_map).await {
+            Ok(instance_id) => instance_id,
+            Err(error) => {
+                match &error {
+                    InstanceEntryError::Denied(denied) => debug!(
                         "Player {} denied entry to map {}: {:?}",
                         player_guid, dest_map, denied
-                    );
-                    session.send_msg(SmsgTransferAborted {
-                        map_id: dest_map,
-                        reason: denied.into(),
-                    })?;
-                    return Ok(());
-                }
-                Err(InstanceEntryError::Internal(e)) => {
-                    tracing::error!(
+                    ),
+                    InstanceEntryError::Internal(e) => tracing::error!(
                         "Failed to create/enter instance for map {}: {}",
                         dest_map,
                         e
-                    );
-                    session.send_msg(SmsgTransferAborted {
-                        map_id: dest_map,
-                        reason: TransferAbortReason::NotFound,
-                    })?;
-                    return Ok(());
+                    ),
                 }
+                session.send_msg(SmsgTransferAborted {
+                    map_id: dest_map,
+                    reason: lifecycle::abort_reason(&error),
+                })?;
+                return Ok(());
             }
-        } else {
-            0 // Continents use instance_id = 0
-        }
-    };
+        };
 
     info!(
         "[AREATRIGGER] Starting teleport sequence for player {:?} to map {} instance {}",
@@ -338,29 +300,18 @@ pub async fn handle_area_trigger(
         o: 0.0,
     };
     if dest_map != player_map_id {
-        info!("[AREATRIGGER] Sending SMSG_TRANSFER_PENDING (different map)");
         session.send_msg(oxcore_shared::messages::movement::SmsgTransferPending {
             dest_map,
             old_position,
         })?;
-        info!("[AREATRIGGER] SMSG_TRANSFER_PENDING sent successfully");
-    } else {
-        info!("[AREATRIGGER] Skipping SMSG_TRANSFER_PENDING (same map)");
     }
-
-    info!(
-        "[AREATRIGGER] Sending SMSG_NEW_WORLD (map={}, pos={},{},{},{})",
-        dest_map, dest_pos.x, dest_pos.y, dest_pos.z, dest_pos.o
-    );
     session.send_msg(oxcore_shared::messages::movement::SmsgNewWorld { dest_map, dest_pos })?;
-    info!("[AREATRIGGER] SMSG_NEW_WORLD sent successfully");
 
     // Store teleport destination for worldport ACK handler to complete
-    info!("[AREATRIGGER] Storing pending teleport in session");
     session.set_pending_teleport(Some((dest_map, dest_instance_id, dest_pos)));
 
     info!(
-        "[AREATRIGGER] ✓ Teleport initiated successfully - map {} instance {}, waiting for MSG_MOVE_WORLDPORT_ACK from client",
+        "[AREATRIGGER] Teleport initiated - map {} instance {}, waiting for MSG_MOVE_WORLDPORT_ACK",
         dest_map, dest_instance_id
     );
 

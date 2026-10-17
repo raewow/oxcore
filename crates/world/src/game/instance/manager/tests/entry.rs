@@ -52,7 +52,8 @@ async fn entrance_world_with_capacity(
                 id: map_id,
                 map_type,
                 max_players,
-                reset_delay: 86400,
+                reset_delay: 7,
+                ..Default::default()
             },
         );
         dbc.area_trigger.insert(
@@ -646,7 +647,7 @@ async fn a_copy_being_reset_rejects_entry(pool: PgPool) {
     world
         .managers
         .instance_mgr
-        .schedule_instance_reset(36, instance, 3600);
+        .mark_resetting(36, instance);
 
     let (solo, mut packets) = session(&world, 4, 0);
     assert_denied(&world, &solo, &mut packets, TransferAbortReason::NotFound).await;

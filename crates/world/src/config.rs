@@ -183,6 +183,13 @@ pub struct Config {
     /// and despawns its creatures.
     #[serde(default = "default_grid_unload_delay_secs")]
     pub grid_unload_delay_secs: u64,
+    /// Seconds an empty dungeon or raid copy stays loaded before it is torn down.
+    /// Its save, kills and respawn timers survive the unload.
+    #[serde(default = "default_instance_unload_delay_secs")]
+    pub instance_unload_delay_secs: u64,
+    /// Hour of day (UTC, 0-23) at which raids reset on their global schedule.
+    #[serde(default = "default_instance_reset_hour")]
+    pub instance_reset_hour: u64,
 
     // Group Settings
     /// Yards within which group members earn kill XP and may roll on loot.
@@ -479,6 +486,14 @@ fn default_grid_unload_delay_secs() -> u64 {
     300
 }
 
+fn default_instance_unload_delay_secs() -> u64 {
+    1800
+}
+
+fn default_instance_reset_hour() -> u64 {
+    4
+}
+
 fn default_motd() -> String {
     "Welcome to oxcore!".to_string()
 }
@@ -724,6 +739,8 @@ impl Default for Config {
             visibility_distance_bg: default_visibility_bg(),
             visibility_distance_min: default_visibility_min(),
             grid_unload_delay_secs: default_grid_unload_delay_secs(),
+            instance_unload_delay_secs: default_instance_unload_delay_secs(),
+            instance_reset_hour: default_instance_reset_hour(),
             group_xp_distance: default_group_xp_distance(),
             group_offline_leader_delay: default_group_offline_leader_delay(),
             vmap_enable_los: default_true(),

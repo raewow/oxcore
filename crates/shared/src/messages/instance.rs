@@ -4,11 +4,13 @@
 //! These messages implement the `ToWorldPacket` trait for serialization.
 //!
 //! ## Server Messages (SMSG)
-//! - [`SmsgInstanceResetWarning`] - Warning before an instance is reset
+//! - [`SmsgRaidInstanceInfo`] - The player's permanent raid saves
+//! - [`SmsgRaidInstanceMessage`] - Raid welcome and reset warnings
+//! - [`SmsgInstanceSaveCreated`] - A permanent raid save was just created
 //! - [`SmsgInstanceReset`] - Notification that an instance has been reset
 //! - [`SmsgInstanceResetFailed`] - Notification that an instance reset failed
 
-use crate::game::instance::{InstanceResetFailReason, InstanceResetWarningType};
+use crate::game::instance::InstanceResetFailReason;
 use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
 use crate::protocol::Opcode;
@@ -22,55 +24,136 @@ use crate::protocol::WorldPacket;
 /// difficulty, and a lock tagged with it is dropped from the raid info window rather than shown.
 const MODERN_DIFFICULTY_RAID40: u32 = 9;
 
-/// SMSG_INSTANCE_RESET_WARNING - Warning before an instance is reset
-///
-/// Sent to players in the instance to warn them that the instance is about to reset.
-#[derive(Debug, Clone)]
-pub struct SmsgInstanceResetWarning {
-    /// Map ID of the instance
+/// One permanent raid save in the raid information window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RaidLock {
     pub map_id: u32,
-    /// Instance ID
     pub instance_id: u32,
-    /// Warning type (unused in Vanilla)
-    pub warning_type: InstanceResetWarningType,
-    /// Time remaining in seconds until the instance resets
-    pub time_remaining: u64,
+    /// Seconds until the save resets.
+    pub time_left: u32,
 }
 
-impl ToWorldPacket for SmsgInstanceResetWarning {
-    /// The 1.14 raid-info lock record, which is a different shape from vanilla's.
+/// SMSG_RAID_INSTANCE_INFO - the player's permanent raid saves.
+#[derive(Debug, Clone, Default)]
+pub struct SmsgRaidInstanceInfo {
+    pub locks: Vec<RaidLock>,
+}
+
+impl ToWorldPacket for SmsgRaidInstanceInfo {
+    /// The 1.14 lock record is a different shape from vanilla's.
     ///
     /// Per lock, 1.14 reads: map id, difficulty id, a **64-bit** instance id, time remaining, a
-    /// completed-encounter mask, then two bits. Vanilla writes a 32-bit instance id and a trailing
-    /// "permanent" byte with no difficulty or encounter mask at all. The instance id is the trap:
-    /// leaving it 32 bits shifts every field after it by four bytes, and the client reads the
-    /// time remaining out of the high half of the id.
+    /// completed-encounter mask, then two bits flushed per lock. Vanilla writes map id, time left
+    /// and a 32-bit instance id. Leaving the instance id 32 bits shifts every field after it by four
+    /// bytes, and the client reads the time remaining out of the high half of the id.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
-        writer.write_i32(1); // one lock in this message
-
-        writer.write_u32(self.map_id);
-        writer.write_u32(MODERN_DIFFICULTY_RAID40);
-        writer.write_u64(self.instance_id as u64);
-        writer.write_i32(self.time_remaining as i32);
-        // Vanilla tracks no per-boss encounter state; 1 is the client's "nothing cleared" default.
-        writer.write_u32(1); // CompletedMask
-
-        // Vanilla's trailing permanent byte folds into these. Anything we warn about is a live
-        // lock, and vanilla has no lockout extension.
-        writer.write_bit(true); // Locked
-        writer.write_bit(false); // Extended
-        writer.flush_bits();
+        writer.write_i32(self.locks.len() as i32);
+        for lock in &self.locks {
+            writer.write_u32(lock.map_id);
+            writer.write_u32(MODERN_DIFFICULTY_RAID40);
+            writer.write_u64(u64::from(lock.instance_id));
+            writer.write_i32(lock.time_left as i32);
+            // Per-boss progress is not tracked; 1 is the client's "nothing cleared" default.
+            writer.write_u32(1); // CompletedMask
+            writer.write_bit(true); // Locked
+            writer.write_bit(false); // Extended: vanilla has no lockout extension
+            writer.flush_bits();
+        }
         Some(writer.finish(Opcode::SMSG_RAID_INSTANCE_INFO))
     }
 
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_RAID_INSTANCE_INFO);
-        packet.write_u32(1); // Number of instances (1)
+        packet.write_u32(self.locks.len() as u32);
+        for lock in &self.locks {
+            packet.write_u32(lock.map_id);
+            packet.write_u32(lock.time_left);
+            packet.write_u32(lock.instance_id);
+        }
+        packet
+    }
+}
+
+/// Kind of raid reset notice, chosen from the time left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum RaidInstanceMessageType {
+    /// More than an hour left: shown on entering the raid.
+    Welcome = 4,
+    /// Up to an hour left.
+    WarningHours = 1,
+    /// Up to 15 minutes left.
+    WarningMin = 2,
+    /// Up to 5 minutes left.
+    WarningMinSoon = 3,
+}
+
+impl RaidInstanceMessageType {
+    pub fn for_time_left(seconds: u64) -> Self {
+        match seconds {
+            s if s > 3600 => Self::Welcome,
+            s if s > 900 => Self::WarningHours,
+            s if s > 300 => Self::WarningMin,
+            _ => Self::WarningMinSoon,
+        }
+    }
+}
+
+/// SMSG_RAID_INSTANCE_MESSAGE - raid welcome / reset warning.
+#[derive(Debug, Clone)]
+pub struct SmsgRaidInstanceMessage {
+    pub kind: RaidInstanceMessageType,
+    pub map_id: u32,
+    /// Seconds until the raid resets.
+    pub time_left: u32,
+}
+
+impl ToWorldPacket for SmsgRaidInstanceMessage {
+    /// 1.14 shrinks the type to a byte, adds a difficulty id and the locked/extended bits, and
+    /// drops the time left: the client computes it from its own copy of the reset schedule.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        if !Opcode::SMSG_RAID_INSTANCE_MESSAGE.has_modern() {
+            return None;
+        }
+        let mut writer = BitWriter::new();
+        writer.write_u8(self.kind as u8);
+        writer.write_u32(self.map_id);
+        writer.write_u32(MODERN_DIFFICULTY_RAID40);
+        writer.write_bit(true); // Locked
+        writer.write_bit(false); // Extended
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_RAID_INSTANCE_MESSAGE))
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_RAID_INSTANCE_MESSAGE);
+        packet.write_u32(self.kind as u32);
         packet.write_u32(self.map_id);
-        packet.write_u32(self.instance_id);
-        packet.write_u32(self.time_remaining as u32); // Time left in seconds
-        packet.write_u8(0); // Permanent flag (0 = temporary)
+        packet.write_u32(self.time_left);
+        packet
+    }
+}
+
+/// SMSG_INSTANCE_SAVE_CREATED - the player was just permanently saved to a raid.
+#[derive(Debug, Clone, Copy)]
+pub struct SmsgInstanceSaveCreated;
+
+impl ToWorldPacket for SmsgInstanceSaveCreated {
+    /// 1.14 replaces vanilla's u32 with a single flushed "gm" bit.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        if !Opcode::SMSG_INSTANCE_SAVE_CREATED.has_modern() {
+            return None;
+        }
+        let mut writer = BitWriter::new();
+        writer.write_bit(false); // Gm
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_INSTANCE_SAVE_CREATED))
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_INSTANCE_SAVE_CREATED);
+        packet.write_u32(0);
         packet
     }
 }
@@ -156,19 +239,44 @@ fn modern_reset_fail_reason(reason: InstanceResetFailReason) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::instance::{InstanceResetFailReason, InstanceResetWarningType};
+    use crate::game::instance::InstanceResetFailReason;
     use crate::protocol::Opcode;
 
     #[test]
-    fn test_smsg_instance_reset_warning() {
-        let msg = SmsgInstanceResetWarning {
-            map_id: 100,
-            instance_id: 1,
-            warning_type: InstanceResetWarningType::Hours15Min,
-            time_remaining: 900,
+    fn raid_instance_info_lists_each_lock() {
+        let msg = SmsgRaidInstanceInfo {
+            locks: vec![RaidLock {
+                map_id: 409,
+                instance_id: 7,
+                time_left: 900,
+            }],
         };
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_RAID_INSTANCE_INFO);
+        assert_eq!(
+            packet.contents(),
+            &[1, 0, 0, 0, 0x99, 0x01, 0, 0, 0x84, 0x03, 0, 0, 7, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn raid_message_type_follows_time_left() {
+        assert_eq!(
+            RaidInstanceMessageType::for_time_left(7200),
+            RaidInstanceMessageType::Welcome
+        );
+        assert_eq!(
+            RaidInstanceMessageType::for_time_left(3600),
+            RaidInstanceMessageType::WarningHours
+        );
+        assert_eq!(
+            RaidInstanceMessageType::for_time_left(900),
+            RaidInstanceMessageType::WarningMin
+        );
+        assert_eq!(
+            RaidInstanceMessageType::for_time_left(60),
+            RaidInstanceMessageType::WarningMinSoon
+        );
     }
 
     #[test]

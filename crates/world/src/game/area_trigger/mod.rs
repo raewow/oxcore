@@ -234,6 +234,14 @@ impl AreaTriggerManager {
         self.quest_triggers.get(&trigger_id).map(|r| *r)
     }
 
+    /// Every teleport trigger, by trigger id.
+    pub fn teleports(&self) -> Vec<(u32, AreaTriggerTeleport)> {
+        self.teleports
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().clone()))
+            .collect()
+    }
+
     /// Get the map entrance trigger (teleports players into the given map).
     pub fn get_map_entrance_trigger(&self, map_id: u32) -> Option<AreaTriggerTeleport> {
         for entry in self.teleports.iter() {

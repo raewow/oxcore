@@ -606,18 +606,21 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_REQUEST_RAID_INFO => {
                     group::handle_request_raid_info(session, world).await?;
                 }
+                Opcode::CMSG_RESET_INSTANCES => {
+                    group::handle_reset_instances(session, world).await?;
+                }
                 Opcode::CMSG_REQUEST_PARTY_MEMBER_STATS => {
                     group::handle_request_party_member_stats(session, packet, world).await?;
                 }
-
-                // GM Ticket handlers
-                Opcode::CMSG_GMTICKET_GETTICKET => {
                 Opcode::MSG_RANDOM_ROLL => {
                     group::handle_random_roll(session, packet, world).await?;
                 }
                 Opcode::MSG_MINIMAP_PING => {
                     group::handle_minimap_ping(session, packet, world).await?;
                 }
+
+                // GM Ticket handlers
+                Opcode::CMSG_GMTICKET_GETTICKET => {
                     ticket::handle_gmticket_getticket(session, packet, world).await?;
                 }
                 Opcode::CMSG_GMTICKET_CREATE => {

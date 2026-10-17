@@ -60,6 +60,9 @@ fn build_world_config(config: &Config) -> Config {
     world_config.chat_log_enabled = config.chat_log_enabled;
     world_config.group_xp_distance = config.group_xp_distance;
     world_config.group_offline_leader_delay = config.group_offline_leader_delay;
+    world_config.grid_unload_delay_secs = config.grid_unload_delay_secs;
+    world_config.instance_unload_delay_secs = config.instance_unload_delay_secs;
+    world_config.instance_reset_hour = config.instance_reset_hour;
     world_config
 }
 

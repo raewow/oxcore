@@ -65,16 +65,37 @@ async fn group_reset_checks_the_group_copy_even_when_the_leader_has_a_solo_copy(
         auth: pool.clone(),
         logs: pool,
     };
-    let (reset, failed) = manager
-        .reset_group_instances(&databases, guid(1), |map, instance| {
-            assert_eq!((map, instance), (36, 102));
-            vec![guid(2)]
-        })
+    // The copy is cached, so the reset needs no database to judge it.
+    manager.instances.write().insert(
+        (36, 102),
+        Arc::new(RwLock::new(InstanceState {
+            map_id: 36,
+            instance_id: 102,
+            difficulty: 0,
+            permanent: false,
+            reset_time: 4_000_000_000,
+            created_time: 0,
+            completed_encounters: Vec::new(),
+        })),
+    );
+    let outcome = manager
+        .reset_group_instances(
+            &databases,
+            guid(1),
+            ResetScope::All,
+            false,
+            |_| false,
+            |map, instance| {
+                assert_eq!((map, instance), (36, 102));
+                vec![guid(2)]
+            },
+        )
         .await;
-    assert!(reset.is_empty());
+    assert!(outcome.reset_maps.is_empty());
+    // Players still inside: the general "cannot reset" reason, not offline/zoning.
     assert_eq!(
-        failed,
-        vec![(36, super::super::InstanceResetFailReason::Offline)]
+        outcome.failed,
+        vec![(36, super::super::InstanceResetFailReason::General)]
     );
     assert_eq!(
         saved(manager.get_player_binding(guid(1), 36)),
@@ -113,6 +134,15 @@ async fn fixture(pool: PgPool) -> Databases {
             instance BIGINT NOT NULL REFERENCES characters.instance(id) ON DELETE CASCADE,
             permanent SMALLINT NOT NULL DEFAULT 0,
             PRIMARY KEY (leader_guid, instance)
+        );
+        CREATE TABLE characters.instance_reset (map BIGINT PRIMARY KEY, reset_time BIGINT NOT NULL);
+        CREATE TABLE characters.creature_respawn (
+            guid BIGINT NOT NULL, respawn_time BIGINT NOT NULL, instance BIGINT NOT NULL,
+            map BIGINT, PRIMARY KEY (guid, instance)
+        );
+        CREATE TABLE characters.gameobject_respawn (
+            guid BIGINT NOT NULL, respawn_time BIGINT NOT NULL, instance BIGINT NOT NULL,
+            map BIGINT, PRIMARY KEY (guid, instance)
         );
         INSERT INTO characters.characters VALUES (1), (2), (3), (4);
         INSERT INTO characters.groups VALUES (1, 1), (2, 4);
@@ -463,14 +493,21 @@ async fn group_reset_does_not_select_the_leaders_personal_dungeons(pool: PgPool)
         .bind_group_to_instance(&databases, guid(1), 531, 201, true, 4_000_000_000)
         .await
         .unwrap();
-    let (reset, failed) = manager
-        .reset_group_instances(&databases, guid(1), |map, instance| {
-            assert_eq!((map, instance), (36, 301));
-            Vec::new()
-        })
+    let outcome = manager
+        .reset_group_instances(
+            &databases,
+            guid(1),
+            ResetScope::All,
+            false,
+            |map| map == 409 || map == 531,
+            |map, instance| {
+                assert_eq!((map, instance), (36, 301));
+                Vec::new()
+            },
+        )
         .await;
-    assert_eq!(reset, vec![36]);
-    assert!(failed.is_empty());
+    assert_eq!(outcome.reset_maps, vec![36]);
+    assert!(outcome.failed.is_empty());
     assert!(manager.get_group_binding(guid(1), 36).is_none());
     assert_eq!(
         saved(manager.get_player_binding(guid(1), 329)),

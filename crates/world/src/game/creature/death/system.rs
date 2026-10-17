@@ -134,6 +134,26 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
         nearby_players
     );
 
+    // Persist the respawn deadline and apply the dungeon rules for this kill:
+    // normal dungeons stay alive past the respawn, raid-locking kills save the raid.
+    if let Some((spawn_id, respawn_at_ms)) = world
+        .managers
+        .creature_mgr
+        .with_creature(guid, |creature| (creature.spawn_id, creature.respawn_time))
+    {
+        crate::game::instance::lifecycle::on_creature_killed(
+            world,
+            guid,
+            map_id,
+            instance_id,
+            spawn_id,
+            entry,
+            loot_recipient,
+            respawn_at_ms,
+        )
+        .await;
+    }
+
     // Transition to corpse state
     world
         .managers
@@ -265,25 +285,6 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
     Ok(())
 }
 
-/// Process corpse decay
-pub async fn process_corpse_decay(world: &World, diff_ms: u32) -> anyhow::Result<()> {
-    // Update all corpse timers
-    world.managers.creature_mgr.update_corpse_timers(diff_ms);
-
-    // Get expired corpses
-    let expired = world.managers.creature_mgr.get_expired_corpses();
-
-    for guid in expired {
-        remove_corpse(world, guid).await?;
-    }
-
-    Ok(())
-}
-
-/// Remove corpse from world
-async fn remove_corpse(world: &World, guid: ObjectGuid) -> anyhow::Result<()> {
-    tracing::debug!("[DEATH] Removing corpse for {:?}", guid);
-
 /// Open a grouped kill's corpse to the tap group.
 ///
 /// Looters are the members in the world and within reward distance now; the corpse remembers
@@ -376,6 +377,25 @@ fn assign_group_loot_rights(
         group_sys.update_looter_guid(world, group_id, guid, context, false);
     }
 }
+
+/// Process corpse decay
+pub async fn process_corpse_decay(world: &World, diff_ms: u32) -> anyhow::Result<()> {
+    // Update all corpse timers
+    world.managers.creature_mgr.update_corpse_timers(diff_ms);
+
+    // Get expired corpses
+    let expired = world.managers.creature_mgr.get_expired_corpses();
+
+    for guid in expired {
+        remove_corpse(world, guid).await?;
+    }
+
+    Ok(())
+}
+
+/// Remove corpse from world
+async fn remove_corpse(world: &World, guid: ObjectGuid) -> anyhow::Result<()> {
+    tracing::debug!("[DEATH] Removing corpse for {:?}", guid);
 
     // Resolve any in-flight loot rolls on this corpse before the loot is deleted.
     world.systems.group.end_roll(world, guid);

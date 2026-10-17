@@ -97,6 +97,10 @@ visibility_distance_min = 45
 # Seconds a grid must sit idle (no players in or near it) before it unloads
 # and despawns its creatures.
 grid_unload_delay_secs = 300
+# Seconds an empty dungeon/raid copy stays loaded before it is torn down
+instance_unload_delay_secs = 1800
+# Hour of day (UTC) at which raids reset
+instance_reset_hour = 4
 
 # Yards within which group members earn kill XP and may roll on loot
 # (MaxGroupXPDistance in the reference server).

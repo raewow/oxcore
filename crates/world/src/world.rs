@@ -275,6 +275,9 @@ impl World {
                 .context("Failed to load DBC files")?;
         }
 
+        self.load_map_templates()
+            .await
+            .context("Failed to load map templates")?;
         self.install_map_config_provider();
         // Load spells from SQL (DBC field offsets are unreliable for vanilla 1.12.1)
         self.managers
@@ -429,12 +432,34 @@ impl World {
             .await
             .context("Failed to load area triggers")?;
 
-        // Initialize instance manager
+        // Initialize instance manager: id allocation, the raid reset schedule,
+        // expired/unbound saves, then the respawn deadlines that survive.
         self.managers
             .instance_mgr
             .initialize(&self.databases)
             .await
             .context("Failed to initialize instance manager")?;
+        {
+            let raid_periods: std::collections::HashMap<u32, u32> = self
+                .dbc
+                .read()
+                .map
+                .entries()
+                .filter(|(_, entry)| entry.is_raid())
+                .map(|(id, entry)| (*id, entry.reset_delay.max(1)))
+                .collect();
+            self.managers
+                .instance_mgr
+                .configure_raids(raid_periods, self.config.instance_reset_hour);
+        }
+        self.managers
+            .instance_mgr
+            .startup(&self.databases)
+            .await
+            .context("Failed to clean up instance saves")?;
+        crate::game::common::respawn_persistence::load_respawn_times(self)
+            .await
+            .context("Failed to load respawn times")?;
 
         // Initialize Lua scripting
         step("Loading Lua scripts");
@@ -627,6 +652,18 @@ impl World {
             crate::game::creature::ai::scan_for_aggro(self).await?;
         }
 
+        // Dungeon lifecycle - about once a second: reset schedule, raid warnings,
+        // removal of unsaved players, and teardown of empty copies.
+        static INSTANCE_LIFECYCLE_COUNTER: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(0);
+        let lifecycle_count =
+            INSTANCE_LIFECYCLE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if lifecycle_count % 20 == 0 {
+            if let Err(e) = crate::game::instance::lifecycle::update(self).await {
+                tracing::error!("Instance lifecycle update failed: {}", e);
+            }
+        }
+
         self.session_mgr.update_logout_timers(self).await?;
 
         if let Ok(_) = self
@@ -698,6 +735,47 @@ impl World {
     /// config, so the kind table is snapshotted once here and moved into the
     /// resolver. Capturing the DBC handle instead would mean taking its lock
     /// during map creation — which can happen while DBC is already write-locked.
+    /// Content patch used to pick progressive-patch rows (`wow_patch` 112 -> 10).
+    fn content_patch(&self) -> u8 {
+        (self.config.wow_patch.unwrap_or(112) % 100).min(10) as u8
+    }
+
+    /// Merge `world.map_template` into the DBC map table.
+    ///
+    /// Vanilla `Map.dbc` has no player cap, reset period, parent or ghost entrance,
+    /// so instance admission, raid resets and ghost routing all depend on these
+    /// rows. Each map uses its newest row at or below the configured patch.
+    async fn load_map_templates(&self) -> Result<()> {
+        let rows = sqlx::query_as::<_, (i32, i64, i16, i16, i64, i16, f32, f32)>(
+            "SELECT DISTINCT ON (entry) entry, parent, map_type, player_limit, reset_delay,
+                    ghost_entrance_map, ghost_entrance_x, ghost_entrance_y
+             FROM world.map_template
+             WHERE patch <= $1
+             ORDER BY entry, patch DESC",
+        )
+        .bind(i16::from(self.content_patch()))
+        .fetch_all(&self.databases.world)
+        .await?;
+
+        let mut dbc = self.dbc.write();
+        let count = rows.len();
+        for (entry, parent, map_type, player_limit, reset_delay, ghost_map, ghost_x, ghost_y) in rows
+        {
+            dbc.apply_map_template(crate::dbc::structures::MapEntry {
+                id: u32::try_from(entry)?,
+                map_type: u32::try_from(map_type)?,
+                max_players: u32::try_from(player_limit)?,
+                reset_delay: u32::try_from(reset_delay)?,
+                parent: u32::try_from(parent)?,
+                ghost_entrance_map: i32::from(ghost_map),
+                ghost_entrance_x: ghost_x,
+                ghost_entrance_y: ghost_y,
+            });
+        }
+        tracing::info!("Loaded {} map templates", count);
+        Ok(())
+    }
+
     fn install_map_config_provider(&self) {
         use crate::map::{MapConfig, MapKind};
         use std::collections::HashMap;

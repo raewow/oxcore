@@ -13,6 +13,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Execute a batch of AI actions for a creature
 /// Actions are applied in order with proper locking
+/// A guid the creature's dungeon copy stored under `data_id` (doors, bosses).
+fn instance_guid(world: &World, creature_guid: ObjectGuid, data_id: u32) -> Option<ObjectGuid> {
+    let (map_id, instance_id) = world
+        .managers
+        .creature_mgr
+        .with_creature(creature_guid, |c| (c.map_id, c.instance_id))?;
+    world
+        .managers
+        .lua_mgr
+        .get_instance_state(map_id, instance_id)
+        .get_guid(data_id)
+}
+
 pub fn execute_actions(world: &World, creature_guid: ObjectGuid, actions: Vec<AIAction>) {
     for action in actions {
         execute_single_action(world, creature_guid, action);
@@ -678,6 +691,7 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                     .managers
                     .lua_mgr
                     .set_instance_data(map_id, instance_id, data_id, value);
+                crate::game::instance::scripts::queue_save(world, map_id, instance_id);
                 tracing::debug!(
                     "[AI] Set instance data: {} = {} (map={}, inst={})",
                     data_id,
@@ -714,23 +728,23 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
         }
 
         AIAction::OpenDoor { guid } => {
-            tracing::debug!("[AI] Open door {:?}", guid);
-            // TODO: Set gameobject state to open
+            crate::game::instance::scripts::set_door(world, guid, true);
         }
 
         AIAction::OpenDoorByData { data_id } => {
-            tracing::debug!("[AI] Open door by data {}", data_id);
-            // TODO: Look up GUID from instance data, then open
+            if let Some(guid) = instance_guid(world, creature_guid, data_id) {
+                crate::game::instance::scripts::set_door(world, guid, true);
+            }
         }
 
         AIAction::CloseDoor { guid } => {
-            tracing::debug!("[AI] Close door {:?}", guid);
-            // TODO: Set gameobject state to closed
+            crate::game::instance::scripts::set_door(world, guid, false);
         }
 
         AIAction::CloseDoorByData { data_id } => {
-            tracing::debug!("[AI] Close door by data {}", data_id);
-            // TODO: Look up GUID from instance data, then close
+            if let Some(guid) = instance_guid(world, creature_guid, data_id) {
+                crate::game::instance::scripts::set_door(world, guid, false);
+            }
         }
 
         // ==================== Phase 5: New Actions ====================

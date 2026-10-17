@@ -102,6 +102,12 @@ impl MapManager {
             .map(|r| Arc::clone(&r))
     }
 
+    /// Remove a map copy, returning it if it existed. Callers must have emptied it
+    /// of players and despawned its objects first.
+    pub fn remove_map(&self, map_id: u32, instance_id: u32) -> Option<Arc<Map>> {
+        self.maps.remove(&(map_id, instance_id)).map(|(_, map)| map)
+    }
+
     /// Get a continent (instance_id = 0)
     pub fn get_continent(&self, map_id: u32) -> Arc<Map> {
         self.get_or_create_map(map_id, 0)

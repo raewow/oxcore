@@ -241,6 +241,53 @@ pub async fn handle_player_login_with_guid(
         return Err(anyhow!("Character does not belong to this account"));
     }
 
+    // A character saved inside a dungeon returns to its saved copy only while
+    // that save is valid and entry is allowed; otherwise it is moved out to the
+    // dungeon's entrance (or its bind point).
+    let mut character = character;
+    {
+        let saved_map = u32::try_from(character.map)?;
+        if crate::game::instance::lifecycle::is_dungeon_map(world, saved_map) {
+            let saved_instance = u32::try_from(character.instance)?;
+            let saved_position = Position::new(
+                character.position_x,
+                character.position_y,
+                character.position_z,
+                character.orientation,
+            );
+            let homebind = match char_repo.find_homebind(i64::from(guid.counter())).await? {
+                Some(hb) => (
+                    u32::try_from(hb.map)?,
+                    Position::new(hb.position_x, hb.position_y, hb.position_z, 0.0),
+                ),
+                None => (saved_map, saved_position),
+            };
+            let (map, instance, position) =
+                crate::game::instance::lifecycle::validate_login_location(
+                    world,
+                    guid,
+                    session.account_id(),
+                    saved_map,
+                    saved_instance,
+                    saved_position,
+                    homebind,
+                )
+                .await;
+            if (map, instance) != (saved_map, saved_instance) {
+                info!(
+                    "[LOGIN] {:?} saved in {}:{} logs in at {}:{}",
+                    guid, saved_map, saved_instance, map, instance
+                );
+            }
+            character.map = i64::from(map);
+            character.instance = i64::from(instance);
+            character.position_x = position.x;
+            character.position_y = position.y;
+            character.position_z = position.z;
+            character.orientation = position.o;
+        }
+    }
+
     let character_map = u32::try_from(character.map)?;
     let character_instance = u32::try_from(character.instance)?;
     let character_zone = u32::try_from(character.zone)?;

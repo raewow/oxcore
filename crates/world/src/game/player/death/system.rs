@@ -440,6 +440,31 @@ impl DeathSystem {
         Ok(())
     }
 
+    /// A ghost who enters the dungeon holding their corpse comes back to life on
+    /// arrival, as if they had walked to the corpse. Returns whether they were revived.
+    pub fn revive_ghost_entering_dungeon(
+        &self,
+        player_guid: ObjectGuid,
+        map_id: u32,
+        world: &World,
+    ) -> Result<bool> {
+        let corpse_here = world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| {
+                player.death.death_state == DeathState::Dead
+                    && player.death.corpse_map_id == Some(map_id)
+            })
+            .unwrap_or(false);
+        if !corpse_here {
+            return Ok(false);
+        }
+        self.resurrect_player(player_guid, ResurrectionMethod::CorpseRun, world)?;
+        info!("Ghost {:?} revived entering dungeon map {}", player_guid, map_id);
+        Ok(true)
+    }
+
     /// Handle CMSG_RESURRECT_RESPONSE - player accepts or declines a res spell.
     pub fn handle_resurrect_response(
         &self,

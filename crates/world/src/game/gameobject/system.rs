@@ -24,7 +24,7 @@ fn nearby_players(
 
 /// Remove a fully looted chest and schedule it to return after its spawn delay.
 pub fn despawn_looted_gameobject(player_guid: ObjectGuid, guid: ObjectGuid, world: &World) {
-    let Some((map_id, instance_id, position, delay_secs)) = world
+    let Some((map_id, instance_id, position, delay_secs, spawn_id, respawn_at)) = world
         .managers
         .gameobject_mgr
         .with_gameobject_mut(guid, |go| {
@@ -39,12 +39,29 @@ pub fn despawn_looted_gameobject(player_guid: ObjectGuid, guid: ObjectGuid, worl
             } else {
                 0
             };
-            Some((go.map_id, go.instance_id, go.position, go.spawntimesecs))
+            Some((
+                go.map_id,
+                go.instance_id,
+                go.position,
+                go.spawntimesecs,
+                go.spawn_id,
+                go.respawn_time,
+            ))
         })
         .flatten()
     else {
         return;
     };
+
+    if respawn_at > 0 {
+        crate::game::common::respawn_persistence::save_gameobject_respawn(
+            world,
+            spawn_id,
+            map_id,
+            instance_id,
+            respawn_at,
+        );
+    }
 
     world.systems.loot.remove_loot(guid);
     world
@@ -98,12 +115,18 @@ pub fn update_respawns(world: &World) {
                 go.go_state = GOState::Ready;
                 go.loot_state = LootState::Ready;
                 go.respawn_time = 0;
-                Some(go.position)
+                Some((go.position, go.spawn_id))
             })
             .flatten()
         else {
             continue;
         };
+        let (position, spawn_id) = position;
+        crate::game::common::respawn_persistence::clear_gameobject_respawn(
+            world,
+            spawn_id,
+            instance_id,
+        );
 
         map.add_gameobject(guid, position);
         world

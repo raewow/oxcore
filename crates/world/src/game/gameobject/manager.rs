@@ -20,6 +20,15 @@ use oxcore_shared::protocol::{ObjectGuid, Position};
 struct SpawnState {
     /// Whether this spawn is currently active in the world
     spawned: bool,
+    /// Unix time (ms) before which a reload brings the object back despawned.
+    respawn_at_ms: Option<u64>,
+}
+
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 /// Manages all gameobjects and their templates
@@ -146,12 +155,56 @@ impl GameObjectManager {
 
     /// Remove a gameobject
     pub fn remove_gameobject(&self, guid: ObjectGuid) -> Option<(ObjectGuid, GameObject)> {
+        // A despawned object waiting on its respawn delay keeps that deadline, so
+        // reloading it early brings it back still despawned.
+        let deadline = self
+            .gameobjects
+            .get(&guid)
+            .filter(|go| !go.in_world)
+            .map(|go| go.respawn_time)
+            .filter(|&at| at > now_unix_ms());
         if let Some(spawn_id) = self.guid_to_spawn.remove(&guid) {
             if let Some(mut state) = self.spawn_states.get_mut(&spawn_id.1) {
                 state.spawned = false;
+                state.respawn_at_ms = deadline;
             }
         }
         self.gameobjects.remove(&guid)
+    }
+
+    /// Restore a persisted respawn deadline (unix ms) before the spawn's grid loads.
+    pub fn restore_respawn_deadline(
+        &self,
+        map_id: u32,
+        instance_id: u32,
+        spawn_id: u32,
+        respawn_at_ms: u64,
+    ) {
+        let mut state = self
+            .spawn_states
+            .entry(SpawnKey::new(map_id, instance_id, spawn_id))
+            .or_insert(SpawnState {
+                spawned: false,
+                respawn_at_ms: None,
+            });
+        if !state.spawned {
+            state.respawn_at_ms = Some(respawn_at_ms);
+        }
+    }
+
+    /// Forget every spawn slot and deadline of a dungeon copy whose save was reset.
+    pub fn clear_instance_spawn_states(&self, map_id: u32, instance_id: u32) {
+        self.spawn_states
+            .retain(|key, _| !(key.map_id == map_id && key.instance_id == instance_id));
+    }
+
+    /// Gameobjects that belong to one map copy, despawned ones included.
+    pub fn gameobjects_in_copy(&self, map_id: u32, instance_id: u32) -> Vec<ObjectGuid> {
+        self.gameobjects
+            .iter()
+            .filter(|go| go.map_id == map_id && go.instance_id == instance_id)
+            .map(|go| *go.key())
+            .collect()
     }
 
     // ==================== VMap collision ====================
@@ -423,15 +476,17 @@ impl GameObjectManager {
     ) -> Option<ObjectGuid> {
         let template = self.get_template(spawn.entry)?;
         let spawn_key = SpawnKey::new(spawn.map_id, instance_id, spawn.spawn_id);
+        let mut pending_respawn = None;
         if spawn.spawn_id != 0 {
-            let mut state = self
-                .spawn_states
-                .entry(spawn_key)
-                .or_insert(SpawnState { spawned: false });
+            let mut state = self.spawn_states.entry(spawn_key).or_insert(SpawnState {
+                spawned: false,
+                respawn_at_ms: None,
+            });
             if state.spawned {
                 return None;
             }
             state.spawned = true;
+            pending_respawn = state.respawn_at_ms.take().filter(|&at| at > now_unix_ms());
         }
 
         let counter = self.next_guid.fetch_add(1, Ordering::Relaxed);
@@ -456,6 +511,13 @@ impl GameObjectManager {
         );
         gameobject.in_world = true;
         gameobject.spawntimesecs = spawn.spawntimesecs;
+        if let Some(respawn_at) = pending_respawn {
+            // Still waiting on its respawn delay: exists for the respawn timer but
+            // is not placed in the world.
+            gameobject.in_world = false;
+            gameobject.loot_state = LootState::JustDeactivated;
+            gameobject.respawn_time = respawn_at;
+        }
 
         self.gameobjects.insert(guid, gameobject);
 

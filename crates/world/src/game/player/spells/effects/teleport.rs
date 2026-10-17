@@ -103,18 +103,17 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
         }
     };
 
-    let (current_map, current_instance_id, current_position) = world
+    let current_map = world
         .systems
         .player
         .manager()
-        .with_player(target_guid, |player| {
-            (player.map_id, player.instance_id, player.movement.position)
-        })
+        .with_player(target_guid, |player| player.map_id)
         .ok_or_else(|| anyhow::anyhow!("Player not found for teleport"))?;
 
-    if current_map == dest_map && current_instance_id == 0 {
-        // A same-map teleport must use the near-teleport handshake. Sending NEW_WORLD
-        // here leaves the client waiting for a worldport ACK it will never send.
+    if current_map == dest_map {
+        // A same-map teleport must use the near-teleport handshake, and keeps the
+        // player in their current copy of a dungeon. Sending NEW_WORLD here leaves
+        // the client waiting for a worldport ACK it will never send.
         let mut movement = MovementInfo::new();
         movement.mover_guid = target_guid;
         movement.position = dest_pos;
@@ -134,11 +133,19 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
         return Ok(EffectResult::empty());
     }
 
-    // Cross-map teleports use the far-transfer handshake.
-    session.send_far_teleport(current_position, dest_map, dest_pos)?;
-
-    // Store pending teleport for worldport ACK handler (instance_id 0 for all portal teleports)
-    session.set_pending_teleport(Some((dest_map, 0, dest_pos)));
+    // Cross-map teleports use the far-transfer handshake. A dungeon destination
+    // goes through copy selection and the entry rules like any other entrance.
+    if !crate::game::instance::lifecycle::start_far_teleport(
+        world,
+        &session,
+        target_guid,
+        dest_map,
+        dest_pos,
+    )
+    .await?
+    {
+        return Ok(EffectResult::empty());
+    }
 
     tracing::info!(
         "Teleport initiated: target={:?} to map={} pos=({:.1}, {:.1}, {:.1})",

@@ -440,6 +440,16 @@ impl PoolManager {
         removed
     }
 
+    /// Drop every pool roster of a dungeon copy whose save was reset, so the next
+    /// copy with this id (or a reload) rolls its pools from scratch.
+    pub fn forget_instance(&self, instance_id: u32) {
+        for mut pool in self.pools.iter_mut() {
+            pool.forget_instance(instance_id);
+        }
+        self.guid_to_pool
+            .retain(|_, (_, owner_instance)| *owner_instance != instance_id);
+    }
+
     /// Fill a pool's roster for an instance back up to its limit.
     pub fn fill_roster(&self, pool_id: u32, instance_id: u32) {
         self.roll_roster(pool_id, instance_id);

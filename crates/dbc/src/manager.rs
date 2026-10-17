@@ -307,6 +307,14 @@ impl DbcManager {
         self.map.lookup(map_id)
     }
 
+    /// Merge a world-database map template into the map table.
+    ///
+    /// The template is authoritative for the map's type, player cap, reset period,
+    /// parent and ghost entrance; a map that exists only in the template is added.
+    pub fn apply_map_template(&mut self, template: MapEntry) {
+        self.map.insert(template.id, template);
+    }
+
     /// Get all faction entries
     pub fn get_all_factions(&self) -> impl Iterator<Item = (&u32, &FactionDbcEntry)> {
         self.faction.entries()

@@ -39,29 +39,21 @@ impl GridSystem {
         Ok(())
     }
 
-    /// Save respawn states for all creatures in loaded grids
+    /// Release every creature's spawn slot before shutdown.
     ///
-    /// Should be called before shutdown to ensure creature respawn times are persisted
+    /// Respawn deadlines are written to the database when a creature dies (see
+    /// `respawn_persistence`), so nothing further needs saving here; this only
+    /// keeps the in-memory spawn table consistent for an orderly stop.
     pub fn save_all_creature_states(&self, world: &World) {
-        tracing::debug!("[GRID] Saving creature respawn states...");
+        let creature_guids: Vec<_> = world
+            .managers
+            .creature_mgr
+            .iter_creatures()
+            .map(|entry| *entry.key())
+            .collect();
 
-        for map_id in [0, 1] {
-            let map = world.managers.map_mgr.get_continent(map_id);
-
-            // Get all creatures from the creature manager and save their states
-            // This is a simpler approach than iterating grids
-            let creature_guids: Vec<_> = world
-                .managers
-                .creature_mgr
-                .iter_creatures()
-                .map(|entry| *entry.key())
-                .collect();
-
-            for guid in creature_guids {
-                world.managers.creature_mgr.save_respawn_state(guid);
-            }
-
-            tracing::debug!("[GRID] Saved respawn states for map {}", map_id);
+        for guid in creature_guids {
+            world.managers.creature_mgr.save_respawn_state(guid);
         }
 
         tracing::debug!("[GRID] Creature respawn states saved");
@@ -189,6 +181,9 @@ impl GridSystem {
             .mmap_mgr
             .load_map_tile(map_id, tile_x, tile_y);
 
+        // A scripted dungeon copy gets its encounter state before anything spawns.
+        crate::game::instance::scripts::ensure_loaded(world, map_id, map.instance_id()).await;
+
         // Get spawns for this grid
         let spawns = world
             .managers
@@ -229,6 +224,14 @@ impl GridSystem {
                     .systems
                     .pool
                     .on_creature_spawned(spawn.spawn_id, map.instance_id(), guid);
+                crate::game::instance::scripts::on_creature_create(
+                    world,
+                    map_id,
+                    map.instance_id(),
+                    spawn.entry,
+                    guid,
+                )
+                .await;
             }
         }
 
@@ -266,6 +269,17 @@ impl GridSystem {
                     guid,
                 );
 
+                // Still waiting on a respawn delay from before the grid unloaded or
+                // the server restarted: the respawn timer will place it later.
+                let in_world = world
+                    .managers
+                    .gameobject_mgr
+                    .with_gameobject(guid, |go| go.in_world)
+                    .unwrap_or(false);
+                if !in_world {
+                    continue;
+                }
+
                 {
                     let grid_mgr = map.grid_manager();
                     let mut grid_mgr = grid_mgr.write();
@@ -284,6 +298,29 @@ impl GridSystem {
                     .managers
                     .gameobject_mgr
                     .add_collision_model(guid, &world.managers.vmap_mgr);
+                crate::game::instance::scripts::on_gameobject_create(
+                    world,
+                    map_id,
+                    map.instance_id(),
+                    go_spawn.entry,
+                    guid,
+                )
+                .await;
+            }
+        }
+
+        // Corpses and bones outlive their grid: the corpse manager still owns any
+        // that a previous unload dropped from the map, so put them back. Their
+        // expiry is unchanged.
+        {
+            use crate::map::grid_coords::world_to_grid;
+            for (guid, corpse) in world.managers.corpse_mgr.all() {
+                if corpse.map_id == map_id
+                    && corpse.instance_id == map.instance_id()
+                    && world_to_grid(corpse.position.x, corpse.position.y) == (grid_x, grid_y)
+                {
+                    map.add_corpse(guid, corpse.position);
+                }
             }
         }
 

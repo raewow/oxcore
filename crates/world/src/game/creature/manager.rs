@@ -20,6 +20,9 @@ use oxcore_shared::protocol::{ObjectGuid, Position};
 /// health and the dead stand state; UNIT_DYNFLAG_DEAD is for feign death only.
 /// Tapped flags are viewer-specific, so they cannot be
 /// included in a broadcast update.
+/// `static_flags2`: killing the creature binds the killing raid to the instance.
+const CREATURE_STATIC_FLAG_2_LOCK_TAPPERS_TO_RAID_ON_DEATH: u32 = 0x0000_0004;
+
 fn corpse_dynamic_flags(has_loot: bool) -> u32 {
     use super::death::UNIT_DYNFLAG_LOOTABLE;
 
@@ -206,8 +209,15 @@ impl CreatureTemplate {
 struct SpawnState {
     /// Whether this spawn is currently active in the world
     spawned: bool,
-    /// When the creature should respawn (if dead)
-    respawn_time: Option<std::time::Instant>,
+    /// Unix time (ms) before which a reload brings the spawn back dead.
+    respawn_at_ms: Option<u64>,
+}
+
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 /// Manages all creatures and their templates
@@ -239,6 +249,8 @@ pub struct CreatureManager {
     visuals: DashMap<u32, CreatureVisuals>,
     /// Natural scale per display from CreatureDisplayInfo.dbc.
     display_scales: DashMap<u32, f32>,
+    /// Template entries whose death permanently saves the raid to its tappers.
+    raid_lock_entries: dashmap::DashSet<u32>,
 }
 
 impl CreatureManager {
@@ -257,7 +269,18 @@ impl CreatureManager {
             model_info: DashMap::new(),
             visuals: DashMap::new(),
             display_scales: DashMap::new(),
+            raid_lock_entries: dashmap::DashSet::new(),
         }
+    }
+
+    /// Whether killing this creature permanently saves its raid to the killers.
+    pub fn locks_raid_on_death(&self, entry: u32) -> bool {
+        self.raid_lock_entries.contains(&entry)
+    }
+
+    /// Mark a template as raid-locking (tests and data reloads).
+    pub fn set_locks_raid_on_death(&self, entry: u32) {
+        self.raid_lock_entries.insert(entry);
     }
 
     /// Set the current game patch for filtering creature spawns
@@ -488,6 +511,10 @@ impl CreatureManager {
                 checked_u32(row.display_id4, "creature_template.display_id4")?,
             ];
             let static_flags1 = checked_u32(row.static_flags1, "creature_template.static_flags1")?;
+            let static_flags2 = checked_u32(row.static_flags2, "creature_template.static_flags2")?;
+            if static_flags2 & CREATURE_STATIC_FLAG_2_LOCK_TAPPERS_TO_RAID_ON_DEATH != 0 {
+                self.raid_lock_entries.insert(entry);
+            }
             let flags_extra = checked_u32(row.flags_extra, "creature_template.flags_extra")?;
             let creature_type = checked_u8(row.creature_type, "creature_template.type")?;
             let unit_flags = Self::compute_unit_flags_from_static(
@@ -832,7 +859,13 @@ impl CreatureManager {
         map: &crate::map::Map,
         waypoints: Option<&WaypointManager>,
     ) -> Option<ObjectGuid> {
-        let guid = self.spawn_creature(spawn, map.instance_id())?;
+        let (guid, dead) = self.spawn_creature(spawn, map.instance_id())?;
+
+        // A spawn killed before its grid unloaded (or before a restart) comes
+        // back dead and waits out the rest of its respawn delay off the map.
+        if dead {
+            return Some(guid);
+        }
 
         map.add_creature(guid, spawn.position);
 
@@ -849,21 +882,26 @@ impl CreatureManager {
     ///
     /// Private on purpose: a creature that is not also placed on a `Map` is
     /// invisible to range queries. Go through [`Self::spawn_into_map`].
-    fn spawn_creature(&self, spawn: &CreatureSpawnData, instance_id: u32) -> Option<ObjectGuid> {
+    fn spawn_creature(
+        &self,
+        spawn: &CreatureSpawnData,
+        instance_id: u32,
+    ) -> Option<(ObjectGuid, bool)> {
         let template = self.get_template(spawn.entry)?;
         let spawn_key = SpawnKey::new(spawn.map_id, instance_id, spawn.spawn_id);
         // Reserve the DB spawn atomically within this instance. Transient
         // summons have no DB identity and may coexist in the same map.
+        let mut pending_respawn = None;
         if spawn.spawn_id != 0 {
             let mut state = self.spawn_states.entry(spawn_key).or_insert(SpawnState {
                 spawned: false,
-                respawn_time: None,
+                respawn_at_ms: None,
             });
             if state.spawned {
                 return None;
             }
             state.spawned = true;
-            state.respawn_time = None;
+            pending_respawn = state.respawn_at_ms.take().filter(|&at| at > now_unix_ms());
         }
         let class_stats = self.get_class_level_stats(template.unit_class, template.min_level);
 
@@ -888,6 +926,13 @@ impl CreatureManager {
         // Store wander distance for restoring wander after combat
         creature.wander_distance = spawn.wander_distance;
 
+        if let Some(respawn_at) = pending_respawn {
+            creature.death_state = DeathState::Dead;
+            creature.current_health = 0;
+            creature.in_world = false;
+            creature.respawn_time = respawn_at;
+        }
+
         self.creatures.insert(guid, creature);
 
         // Track spawn state
@@ -897,7 +942,7 @@ impl CreatureManager {
             self.guid_to_spawn.insert(guid, spawn_key);
         }
 
-        Some(guid)
+        Some((guid, pending_respawn.is_some()))
     }
 
     /// Spawn a transient player pet. Pets do not participate in DB spawn or
@@ -988,16 +1033,59 @@ impl CreatureManager {
         });
     }
 
-    /// Save respawn state for a creature
+    /// Release a creature's spawn slot, remembering its respawn deadline.
+    ///
+    /// A dead creature that is unloaded (grid unload, copy teardown) keeps its
+    /// actual deadline, so reloading it before then brings it back dead rather
+    /// than alive. A living creature leaves no deadline behind.
     pub fn save_respawn_state(&self, guid: ObjectGuid) {
+        let deadline = self
+            .creatures
+            .get(&guid)
+            .filter(|c| c.death_state != DeathState::Alive)
+            .map(|c| c.respawn_time)
+            .filter(|&at| at > now_unix_ms());
         if let Some((_, spawn_id)) = self.guid_to_spawn.remove(&guid) {
             if let Some(mut state) = self.spawn_states.get_mut(&spawn_id) {
                 state.spawned = false;
-                // TODO: Calculate proper respawn time based on template
-                state.respawn_time =
-                    Some(std::time::Instant::now() + std::time::Duration::from_secs(300));
+                state.respawn_at_ms = deadline;
             }
         }
+    }
+
+    /// Restore a persisted respawn deadline (unix ms) before the spawn's grid loads.
+    pub fn restore_respawn_deadline(
+        &self,
+        map_id: u32,
+        instance_id: u32,
+        spawn_id: u32,
+        respawn_at_ms: u64,
+    ) {
+        let mut state = self
+            .spawn_states
+            .entry(SpawnKey::new(map_id, instance_id, spawn_id))
+            .or_insert(SpawnState {
+                spawned: false,
+                respawn_at_ms: None,
+            });
+        if !state.spawned {
+            state.respawn_at_ms = Some(respawn_at_ms);
+        }
+    }
+
+    /// Forget every spawn slot and deadline of a dungeon copy whose save was reset.
+    pub fn clear_instance_spawn_states(&self, map_id: u32, instance_id: u32) {
+        self.spawn_states
+            .retain(|key, _| !(key.map_id == map_id && key.instance_id == instance_id));
+    }
+
+    /// Creatures that belong to one map copy, pets included.
+    pub fn creatures_in_copy(&self, map_id: u32, instance_id: u32) -> Vec<ObjectGuid> {
+        self.creatures
+            .iter()
+            .filter(|c| c.map_id == map_id && c.instance_id == instance_id)
+            .map(|c| *c.key())
+            .collect()
     }
 
     /// Get creature position
@@ -1083,6 +1171,11 @@ impl CreatureManager {
             creature
                 .combat
                 .add_threat(attacker, damage as f32, timestamp);
+
+            // The first player to actually hurt a living creature taps it.
+            if damage > 0 && creature.is_alive() {
+                creature.set_loot_recipient(attacker);
+            }
 
             // Apply damage
             let actual_damage = creature.take_damage(damage);
@@ -1172,11 +1265,6 @@ impl CreatureManager {
     pub fn clear_lootable_flag(&self, guid: ObjectGuid, world: &crate::World) {
         // Match DoLootRelease: remove LOOTABLE and leave the corpse with no
         // broadcast dynamic flags. Tapped state is per-viewer state.
-            // The first player to actually hurt a living creature taps it.
-            if damage > 0 && creature.is_alive() {
-                creature.set_loot_recipient(attacker);
-            }
-
         let new_flags = corpse_dynamic_flags(false);
 
         tracing::debug!(
