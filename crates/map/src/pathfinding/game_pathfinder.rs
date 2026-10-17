@@ -44,6 +44,22 @@ impl GamePathFinder {
         }
     }
 
+    /// Path over the terrain classes a unit can cross (see `nav_terrain`).
+    pub fn calculate_path_for(
+        &self,
+        map_id: u32,
+        instance_id: u32,
+        start: Position,
+        end: Position,
+        include: u16,
+    ) -> PathResult {
+        if let Some(ref pathfinder) = self.mmap_pathfinder {
+            pathfinder.calculate_path_for(map_id, instance_id, start, end, include)
+        } else {
+            PathResult::StraightLine(start, end)
+        }
+    }
+
     /// Check if MMap pathfinding is available
     pub fn has_mmap(&self) -> bool {
         self.mmap_pathfinder.is_some()

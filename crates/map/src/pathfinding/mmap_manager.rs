@@ -1,14 +1,14 @@
 //! MMap manager - loads and manages navigation meshes
 //!
-//! Loads .mmap header files and .mmtile tile files, parses Detour binary format
-//! into Rust-native NavMesh polygons, and provides A* pathfinding.
+//! Loads .mmap header files (tile grid placement) and .mmtile tile files, keeps
+//! each map's tiles in a tiled navmesh with resolved border links, and answers
+//! path queries over it.
 
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::navmesh::{parse_detour_tile, NavMesh};
-use super::types::PathResult;
+use super::navmesh::{parse_detour_tile, NavMesh, NavMeshParams, NavPath};
 use super::vmap::VMapManager;
 use oxcore_shared::protocol::Position;
 use tracing::{debug, info, warn};
@@ -24,16 +24,16 @@ fn pack_tile_id(x: i32, y: i32) -> u32 {
 
 /// Per-map MMap data: navmesh + loaded tile tracking
 struct MMapData {
-    /// Rust-native navmesh (populated by merging parsed .mmtile data)
+    /// The map's tiles, linked across borders.
     navmesh: NavMesh,
-    /// Loaded tiles: packed(x,y) -> raw tile data (for tracking what's loaded)
-    loaded_tiles: HashMap<u32, Vec<u8>>,
+    /// Loaded file tiles: packed(file x, file y) -> navmesh tile coordinates.
+    loaded_tiles: HashMap<u32, (i32, i32)>,
 }
 
 impl MMapData {
-    fn new() -> Self {
+    fn new(params: NavMeshParams) -> Self {
         Self {
-            navmesh: NavMesh::new(),
+            navmesh: NavMesh::with_params(params),
             loaded_tiles: HashMap::new(),
         }
     }
@@ -115,13 +115,25 @@ impl MMapManager {
                 let max_tiles = file.read_i32::<LittleEndian>().unwrap_or(0);
                 let max_polys = file.read_i32::<LittleEndian>().unwrap_or(0);
 
+                if tile_w <= 0.0 || tile_h <= 0.0 {
+                    warn!("MMAP: {:03}.mmap has an invalid tile size", map_id);
+                    return false;
+                }
+
                 debug!(
                     "MMAP: Loaded {:03}.mmap (origin: [{:.1}, {:.1}, {:.1}], tile: {:.0}x{:.0}, maxTiles: {}, maxPolys: {})",
                     map_id, ox, oy, oz, tile_w, tile_h, max_tiles, max_polys
                 );
 
-                // Create empty MMapData - tiles will be loaded separately
-                self.map_data.write().insert(map_id, MMapData::new());
+                // Create an empty tiled navmesh - tiles will be loaded separately
+                self.map_data.write().insert(
+                    map_id,
+                    MMapData::new(NavMeshParams {
+                        origin: [ox, oy, oz],
+                        tile_width: tile_w,
+                        tile_height: tile_h,
+                    }),
+                );
                 true
             }
             Err(e) => {
@@ -169,30 +181,28 @@ impl MMapManager {
             None => return false,
         };
 
-        // Parse Detour binary into NavMesh polygons
-        let tile_navmesh = match parse_detour_tile(&tile_data) {
-            Some(nm) => nm,
+        // Parse the Detour tile; malformed data is rejected whole.
+        let tile = match parse_detour_tile(&tile_data) {
+            Some(tile) => tile,
             None => {
                 warn!("MMAP: Failed to parse tile {}", filename);
                 return false;
             }
         };
+        let tile_key = (tile.header.x, tile.header.y);
+        let tile_polys = tile.polygon_count();
 
-        // Merge tile navmesh into map's main navmesh
         let mut data = self.map_data.write();
         if let Some(mmap) = data.get_mut(&map_id) {
-            let poly_before = mmap.navmesh.polygon_count();
-            mmap.navmesh.merge_tile(&tile_navmesh);
-            let poly_after = mmap.navmesh.polygon_count();
-
-            mmap.loaded_tiles.insert(packed, tile_data);
+            mmap.navmesh.add_tile(tile);
+            mmap.loaded_tiles.insert(packed, tile_key);
             *self.loaded_tile_count.write() += 1;
 
             debug!(
-                "MMAP: Loaded tile {} (+{} polys, total {} polys)",
+                "MMAP: Loaded tile {} (+{} polys, {} border links)",
                 filename,
-                poly_after - poly_before,
-                poly_after
+                tile_polys,
+                mmap.navmesh.external_link_count()
             );
             true
         } else {
@@ -263,11 +273,9 @@ impl MMapManager {
         let packed = pack_tile_id(x, y);
         let mut data = self.map_data.write();
         if let Some(mmap) = data.get_mut(&map_id) {
-            if mmap.loaded_tiles.remove(&packed).is_some() {
+            if let Some((tx, ty)) = mmap.loaded_tiles.remove(&packed) {
                 *self.loaded_tile_count.write() -= 1;
-                // Note: Cannot efficiently remove individual tile polygons from merged navmesh.
-                // For tile unloading, we rebuild from remaining tiles.
-                self.rebuild_navmesh_from_tiles(mmap);
+                mmap.navmesh.remove_tile(tx, ty);
                 debug!("MMAP: Unloaded tile {:03}{:02}{:02}.mmtile", map_id, y, x);
             }
         }
@@ -283,30 +291,18 @@ impl MMapManager {
         }
     }
 
-    /// Rebuild navmesh from remaining loaded tiles (after tile removal)
-    fn rebuild_navmesh_from_tiles(&self, mmap: &mut MMapData) {
-        let mut new_navmesh = NavMesh::new();
-        for tile_data in mmap.loaded_tiles.values() {
-            if let Some(tile_nm) = parse_detour_tile(tile_data) {
-                new_navmesh.merge_tile(&tile_nm);
-            }
-        }
-        mmap.navmesh = new_navmesh;
-    }
-
-    /// Calculate path using navmesh A* algorithm
-    pub fn calculate_path(&self, map_id: u32, start: Position, end: Position) -> PathResult {
+    /// Path along the map's navmesh over polygons whose terrain is in `include`.
+    /// `None` when the map has no navmesh at all.
+    pub fn calculate_path(
+        &self,
+        map_id: u32,
+        start: Position,
+        end: Position,
+        include: u16,
+    ) -> Option<NavPath> {
         let data = self.map_data.read();
-        let Some(mmap) = data.get(&map_id) else {
-            return PathResult::NoPath;
-        };
-
-        // Only use navmesh path if it has polygons loaded
-        if mmap.navmesh.polygon_count() == 0 {
-            return PathResult::NoPath;
-        }
-
-        mmap.navmesh.find_path(start, end)
+        let mmap = data.get(&map_id)?;
+        Some(mmap.navmesh.find_path(start, end, include))
     }
 
     /// Get VMap manager reference

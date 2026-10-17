@@ -2,9 +2,9 @@
 //!
 //! Architecture:
 //! - GamePathFinder: High-level API for movement generators
-//! - PathFinder: Low-level MMap PathFinder with obstacle avoidance
+//! - PathFinder: navmesh paths, or collision-based paths on maps without one
 //! - MMapManager: NavMesh loading and management
-//! - NavMesh: Rust-native A* pathfinding through polygon graph
+//! - NavMesh: tiled Detour navmesh with A* and string pulling
 //! - VMapManager: Collision detection and line-of-sight
 
 pub mod game_pathfinder;
@@ -16,7 +16,7 @@ pub mod vmap;
 
 pub use game_pathfinder::GamePathFinder;
 pub use mmap_manager::MMapManager;
-pub use navmesh::NavMesh;
+pub use navmesh::{nav_terrain, NavMesh, NavPath};
 pub use pathfinder::PathFinder;
 pub use types::{path_flags, HeightResult, PathResult};
 pub use vmap::VMapManager;
