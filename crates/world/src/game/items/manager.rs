@@ -73,6 +73,11 @@ pub struct ItemTemplate {
     pub page_language: u8,
     pub page_material: u8,
     pub lock_id: u32,
+    /// disenchant_loot_template entry; 0 = cannot be disenchanted
+    pub disenchant_id: u32,
+    /// Coins inside a lootable item (clams, lockboxes), in copper
+    pub min_money_loot: u32,
+    pub max_money_loot: u32,
     pub material: i8,
     pub sheath: u8,
     pub random_property: u32,
@@ -142,6 +147,9 @@ impl Default for ItemTemplate {
             page_language: 0,
             page_material: 0,
             lock_id: 0,
+            disenchant_id: 0,
+            min_money_loot: 0,
+            max_money_loot: 0,
             material: 0,
             sheath: 0,
             random_property: 0,
@@ -481,7 +489,7 @@ impl ItemManager {
                      required_skill, required_skill_rank, required_spell, required_honor_rank,
                      required_city_rank, required_reputation_faction, required_reputation_rank,
                      range_mod, bonding, page_text, page_language, page_material, lock_id,
-                     material, sheath, random_property, set_id, area_bound, map_bound, duration
+                     disenchant_id, min_money_loot, max_money_loot, material, sheath, random_property, set_id, area_bound, map_bound, duration
                 FROM world.item_template WHERE patch = 0",
         )
         .fetch_all(pool)
@@ -631,6 +639,9 @@ impl ItemManager {
             let page_language = u8_field!("page_language");
             let page_material = u8_field!("page_material");
             let lock_id = u32_field!("lock_id");
+            let disenchant_id = u32_field!("disenchant_id");
+            let min_money_loot = u32_field!("min_money_loot");
+            let max_money_loot = u32_field!("max_money_loot");
             let material = i8_field!("material");
             let sheath = u8_field!("sheath");
             let random_property = u32_field!("random_property");
@@ -758,6 +769,9 @@ impl ItemManager {
                 page_language,
                 page_material,
                 lock_id,
+                disenchant_id,
+                min_money_loot,
+                max_money_loot,
                 material,
                 sheath,
                 random_property,

@@ -1,9 +1,30 @@
 use oxcore_shared::protocol::ObjectGuid;
 use std::collections::{HashMap, HashSet};
 
+/// What a loot came from; decides who may open it and what happens when it empties.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LootKind {
+    /// A creature's corpse.
+    #[default]
+    Body,
+    /// A living creature's pockets (rogue pickpocketing); the thief's alone, coins not shared.
+    Pickpocket,
+    /// A looted corpse's skin; the skinner's alone, and the corpse goes once it is empty.
+    Skinning,
+    /// A chest or other gameobject.
+    Gameobject,
+    /// A lootable item in the player's bags (clam, lockbox, bag of goods); the item is used up
+    /// once its loot is empty.
+    Item,
+    /// An item being disenchanted; the item is destroyed when the window closes.
+    Disenchant,
+}
+
 /// Loot instance for a creature corpse
 #[derive(Debug, Clone)]
 pub struct Loot {
+    /// Where this loot came from.
+    pub kind: LootKind,
     /// Items in the loot (normal drops)
     pub items: Vec<LootItem>,
     /// Quest items (shown only to eligible players)
@@ -93,6 +114,7 @@ pub struct LootGroup {
 impl Loot {
     pub fn new() -> Self {
         Self {
+            kind: LootKind::Body,
             items: Vec::new(),
             quest_items: Vec::new(),
             gold: 0,

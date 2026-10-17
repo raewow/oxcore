@@ -1343,6 +1343,9 @@ mod tests {
             spells: [0; 4],
             gold_min: 0,
             gold_max: 0,
+            loot_id: 0,
+            pickpocket_loot_id: 0,
+            skinning_loot_id: 0,
         };
         world.managers.creature_mgr.add_creature(Creature::new(
             guid,

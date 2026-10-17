@@ -1725,6 +1725,7 @@ mod tests {
             respawn_time: 0,
             loot_recipient: None,
             has_loot: false,
+            pickpocketed: false,
             ai_state: AIState::Idle,
             ai_state_data: crate::game::creature::ai::AIStateData::new(),
             auras: crate::game::player::auras::AuraContainer::new(),

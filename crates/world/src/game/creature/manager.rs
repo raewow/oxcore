@@ -132,6 +132,9 @@ pub struct CreatureTemplate {
     pub spells: [u32; 4],    // Spell IDs from creature_template spell1-4
     pub gold_min: u32,       // Copper drop range; both 0 means no money drop
     pub gold_max: u32,
+    pub loot_id: u32,            // creature_loot_template entry; 0 means no item loot
+    pub pickpocket_loot_id: u32, // pickpocketing_loot_template entry
+    pub skinning_loot_id: u32,   // skinning_loot_template entry; 0 means not skinnable
 }
 
 /// Base stats from creature_classlevelstats table
@@ -567,6 +570,15 @@ impl CreatureManager {
                 ],
                 gold_min: checked_u32(row.gold_min, "creature_template.gold_min")?,
                 gold_max: checked_u32(row.gold_max, "creature_template.gold_max")?,
+                loot_id: checked_u32(row.loot_id, "creature_template.loot_id")?,
+                pickpocket_loot_id: checked_u32(
+                    row.pickpocket_loot_id,
+                    "creature_template.pickpocket_loot_id",
+                )?,
+                skinning_loot_id: checked_u32(
+                    row.skinning_loot_id,
+                    "creature_template.skinning_loot_id",
+                )?,
             };
             self.visuals.insert(
                 template.entry,

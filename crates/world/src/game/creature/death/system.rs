@@ -160,6 +160,11 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
         .creature_mgr
         .set_corpse_state(guid, decay_time);
 
+    // "X has slain Y." for the tapper's subgroup.
+    if let Some(recipient_guid) = loot_recipient.filter(|g| g.is_player()) {
+        world.systems.group.send_party_kill_log(recipient_guid, guid);
+    }
+
     // Distribute kill rewards (quest credit + XP) to the tapper and, when grouped, all
     // in-range members. Solo players keep the single-recipient path.
     if let Some(recipient_guid) = loot_recipient {
@@ -334,6 +339,9 @@ fn assign_group_loot_rights(
     if !allowed.contains(&tapper) {
         allowed.push(tapper);
     }
+    let master = (group.loot_method == LootMethod::MasterLooter && !group.looter_guid.is_empty())
+        .then_some(group.looter_guid);
+    group_sys.send_loot_list(guid, master, round_robin_player, &allowed);
     world.systems.loot_manager.set_group_rights(
         guid,
         tapper,

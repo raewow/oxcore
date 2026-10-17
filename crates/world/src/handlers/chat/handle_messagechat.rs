@@ -251,9 +251,13 @@ async fn handle_messagechat_type(
 
 /// Toggle a `PLAYER_FLAGS_*` bit on the sender and push the new status to their group.
 fn toggle_player_flag(world: &World, player_guid: ObjectGuid, flag: u32) {
-    if let Some(mut player) = world.managers.player_mgr.get_player_mut(player_guid) {
-        player.player_flags ^= flag;
-    }
+    let on = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |p| p.player_flags & flag == 0)
+        .unwrap_or(false);
+    // Shows the <AFK>/<DND> tag to everyone nearby, not just in the party frames.
+    world.systems.group.set_player_flag(player_guid, flag, on);
     world.systems.group.set_member_update(
         player_guid,
         oxcore_shared::game::group::group_update_flags::STATUS,

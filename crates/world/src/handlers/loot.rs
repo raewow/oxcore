@@ -111,9 +111,18 @@ pub async fn handle_loot_release(
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
-    let target_guid = packet
-        .read_guid_for(session.protocol())
-        .ok_or_else(|| anyhow::anyhow!("Failed to read target GUID"))?;
+    let packet_guid = packet.read_guid_for(session.protocol());
+
+    // Release the loot the server has open for this player, not whatever the packet names: a
+    // forged GUID must not release (and re-arm) someone else's loot.
+    let Some(target_guid) = world
+        .managers
+        .player_mgr
+        .get_looting_target(player_guid)
+        .or(packet_guid)
+    else {
+        return Ok(());
+    };
 
     // Delegate to LootSystem
     world

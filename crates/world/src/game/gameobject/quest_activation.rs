@@ -349,6 +349,8 @@ mod tests {
             flags: 0,
             size: 1.0,
             data,
+            min_gold: 0,
+            max_gold: 0,
         };
         let guid = ObjectGuid::new_gameobject(entry, 1);
         world

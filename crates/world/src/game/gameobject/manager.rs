@@ -310,7 +310,8 @@ impl GameObjectManager {
                        faction::BIGINT AS faction, flags, size,
                       data0, data1, data2, data3, data4, data5, data6, data7,
                       data8, data9, data10, data11, data12, data13, data14, data15,
-                      data16, data17, data18, data19, data20, data21, data22, data23
+                      data16, data17, data18, data19, data20, data21, data22, data23,
+                      mingold, maxgold
                FROM world.gameobject_template
                WHERE patch = 0"#,
         )
@@ -335,6 +336,8 @@ impl GameObjectManager {
                     row.data13, row.data14, row.data15, row.data16, row.data17, row.data18,
                     row.data19, row.data20, row.data21, row.data22, row.data23,
                 ],
+                min_gold: checked_u32(row.mingold, "gameobject_template.mingold")?,
+                max_gold: checked_u32(row.maxgold, "gameobject_template.maxgold")?,
             };
             self.templates.insert(template.entry, Arc::new(template));
         }
@@ -793,6 +796,8 @@ struct GameObjectTemplateRow {
     pub data21: i32,
     pub data22: i32,
     pub data23: i32,
+    pub mingold: i64,
+    pub maxgold: i64,
 }
 
 #[derive(sqlx::FromRow, Debug)]

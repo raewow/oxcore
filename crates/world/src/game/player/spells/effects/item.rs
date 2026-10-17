@@ -164,15 +164,18 @@ pub async fn effect_disenchant(input: &EffectInput, world: &World) -> Result<Eff
         None => return Ok(EffectResult::empty()),
     };
 
-    // TODO: Get item info and check if disenchantable
-    // Generate materials based on item level/quality
-    // Consume item and give materials
-
     tracing::debug!(
         "Disenchant: caster={:?} item={:?}",
         input.caster_guid,
         target_guid
     );
+
+    // Shows the item's disenchant materials; closing the window destroys the item.
+    world
+        .systems
+        .loot
+        .open_disenchant_loot(input.caster_guid, target_guid, world)
+        .await?;
 
     Ok(EffectResult::empty())
 }

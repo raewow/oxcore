@@ -129,6 +129,8 @@ pub struct Creature {
     pub loot_recipient: Option<ObjectGuid>,
     /// Whether this creature has loot available for players
     pub has_loot: bool,
+    /// A rogue has picked this creature's pockets since it last spawned.
+    pub pickpocketed: bool,
 
     // ========== AI ==========
     /// AI state machine state
@@ -256,6 +258,7 @@ impl Creature {
             respawn_time: 0,
             loot_recipient: None,
             has_loot: false,
+            pickpocketed: false,
 
             // AI
             ai_state: AIState::Idle,
@@ -508,6 +511,7 @@ impl Creature {
         self.respawn_time = 0;
         self.loot_recipient = None;
         self.has_loot = false;
+        self.pickpocketed = false;
     }
 
     /// Mark creature as having loot available
@@ -586,6 +590,9 @@ mod tests {
             spells: [0; 4],
             gold_min: 0,
             gold_max: 0,
+            loot_id: 0,
+            pickpocket_loot_id: 0,
+            skinning_loot_id: 0,
         }
     }
 

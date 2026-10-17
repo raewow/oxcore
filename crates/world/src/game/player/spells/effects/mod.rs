@@ -866,7 +866,8 @@ pub async fn dispatch_effect(
             );
             Ok(EffectResult::empty())
         }
-        PickPocket | AddFarsight | StealBeneficialBuff | ForceCast | Stealth | RemoveAura => {
+        PickPocket => profession::effect_pickpocket(input, world).await,
+        AddFarsight | StealBeneficialBuff | ForceCast | Stealth | RemoveAura => {
             tracing::debug!(
                 "[SPELL-EFFECT] Unimplemented effect {:?} for spell {}",
                 effect_type,

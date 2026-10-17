@@ -5,6 +5,37 @@ use oxcore_shared::protocol::ObjectGuid;
 use rand::Rng;
 use std::sync::Arc;
 
+/// The loot stores beyond creature, gameobject and reference loot. Same row layout, separate
+/// tables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LootStore {
+    Pickpocketing,
+    Skinning,
+    Item,
+    Disenchant,
+    Fishing,
+}
+
+impl LootStore {
+    const ALL: [LootStore; 5] = [
+        LootStore::Pickpocketing,
+        LootStore::Skinning,
+        LootStore::Item,
+        LootStore::Disenchant,
+        LootStore::Fishing,
+    ];
+
+    fn table(self) -> &'static str {
+        match self {
+            LootStore::Pickpocketing => "pickpocketing_loot_template",
+            LootStore::Skinning => "skinning_loot_template",
+            LootStore::Item => "item_loot_template",
+            LootStore::Disenchant => "disenchant_loot_template",
+            LootStore::Fishing => "fishing_loot_template",
+        }
+    }
+}
+
 /// Manages loot tables and active loot instances
 pub struct LootManager {
     /// Loot tables by creature entry
@@ -13,6 +44,8 @@ pub struct LootManager {
     gameobject_loot_tables: DashMap<u32, Vec<LootTableEntry>>,
     /// Shared templates that creature and gameobject tables pull in by reference
     reference_loot_tables: DashMap<u32, Vec<LootTableEntry>>,
+    /// Pickpocketing, skinning, item, disenchant and fishing tables
+    store_tables: DashMap<(LootStore, u32), Vec<LootTableEntry>>,
     /// Active loot instances by source GUID
     active_loot: DashMap<ObjectGuid, Loot>,
 }
@@ -61,6 +94,7 @@ impl LootManager {
             creature_loot_tables: DashMap::new(),
             gameobject_loot_tables: DashMap::new(),
             reference_loot_tables: DashMap::new(),
+            store_tables: DashMap::new(),
             active_loot: DashMap::new(),
         }
     }
@@ -109,6 +143,30 @@ impl LootManager {
         tracing::info!(
             "Loaded {} reference loot templates",
             self.reference_loot_tables.len()
+        );
+
+        for store in LootStore::ALL {
+            let query = format!(
+                r#"SELECT entry, item, "ChanceOrQuestChance" AS chance,
+                    "mincountOrRef" AS min_count, maxcount AS max_count, groupid AS group_id
+                    FROM world.{}
+                    WHERE patch_min <= 10 AND patch_max >= 10"#,
+                store.table()
+            );
+            let rows = sqlx::query_as::<_, LootTableRow>(&query)
+                .fetch_all(world_db)
+                .await?;
+            for row in rows {
+                let entry = row.into_entry()?;
+                self.store_tables
+                    .entry((store, entry.entry))
+                    .or_insert_with(Vec::new)
+                    .push(entry);
+            }
+        }
+        tracing::info!(
+            "Loaded {} pickpocketing/skinning/item/disenchant/fishing loot templates",
+            self.store_tables.len()
         );
         Ok(())
     }
@@ -163,9 +221,14 @@ impl LootManager {
         true
     }
 
-    /// Generate loot for a gameobject chest. Unlike creatures, chests do not
-    /// generate a level-based gold drop.
-    pub fn generate_gameobject_loot(&self, source_guid: ObjectGuid, loot_id: u32) -> bool {
+    /// Generate loot for a gameobject chest, with the chest template's own coin range.
+    pub fn generate_gameobject_loot(
+        &self,
+        source_guid: ObjectGuid,
+        loot_id: u32,
+        gold_min: u32,
+        gold_max: u32,
+    ) -> bool {
         let drops = self
             .gameobject_loot_tables
             .get(&loot_id)
@@ -173,9 +236,41 @@ impl LootManager {
             .unwrap_or_default();
 
         let mut loot = Self::loot_from_drops(drops);
+        loot.gold = calculate_gold_drop(gold_min, gold_max);
+        loot.kind = crate::game::loot::LootKind::Gameobject;
         loot.generated = true;
         self.active_loot.insert(source_guid, loot);
         true
+    }
+
+    /// Whether a store has a template for `loot_id`.
+    pub fn has_store_loot(&self, store: LootStore, loot_id: u32) -> bool {
+        loot_id != 0 && self.store_tables.contains_key(&(store, loot_id))
+    }
+
+    /// Generate loot from one of the extra stores (pickpocketing, skinning, item, disenchant,
+    /// fishing) into `source`, replacing whatever loot it held.
+    pub fn generate_store_loot(
+        &self,
+        source_guid: ObjectGuid,
+        store: LootStore,
+        loot_id: u32,
+        gold: u32,
+        kind: crate::game::loot::LootKind,
+        owner: ObjectGuid,
+    ) {
+        let drops = self
+            .store_tables
+            .get(&(store, loot_id))
+            .map(|table| self.roll_template(&table))
+            .unwrap_or_default();
+        let mut loot = Self::loot_from_drops(drops);
+        loot.gold = gold;
+        loot.kind = kind;
+        loot.recipient = Some(owner);
+        loot.allowed_looters = vec![owner];
+        loot.generated = true;
+        self.active_loot.insert(source_guid, loot);
     }
 
     /// Roll a whole template: every ungrouped entry on its own chance (references expand into
@@ -245,11 +340,22 @@ impl LootManager {
     }
 
     /// Lay rolled drops out as a loot: normal items and quest items each numbered from 0.
+    ///
+    /// A loot holds at most 16 normal and 32 quest items; further drops are discarded, as the
+    /// loot window has no room for them.
     fn loot_from_drops(drops: Vec<RolledDrop>) -> Loot {
+        const MAX_LOOT_ITEMS: u8 = 16;
+        const MAX_QUEST_ITEMS: u8 = 32;
+
         let mut loot = Loot::new();
         let mut slot: u8 = 0;
         let mut quest_slot: u8 = 0;
         for drop in drops {
+            if (drop.is_quest && quest_slot >= MAX_QUEST_ITEMS)
+                || (!drop.is_quest && slot >= MAX_LOOT_ITEMS)
+            {
+                continue;
+            }
             let item = LootItem {
                 slot: if drop.is_quest { quest_slot } else { slot },
                 item_id: drop.item_id,
@@ -525,6 +631,11 @@ fn roll_group(table: &[LootTableEntry], group_id: u8) -> Option<RolledDrop> {
     Some(RolledDrop::from_entry(equal[pick]))
 }
 
+/// Roll a coin amount in `[gold_min, gold_max]` with the same rounding as corpse money.
+pub fn roll_money(gold_min: u32, gold_max: u32) -> u32 {
+    calculate_gold_drop(gold_min, gold_max)
+}
+
 /// Roll a gold drop from the creature's own `gold_min`/`gold_max` (creature_template).
 /// Many creatures (critters, most beasts) have both at 0 and drop no money at all —
 /// this used to be a flat level-based formula that ignored the template entirely, so
@@ -533,12 +644,15 @@ fn calculate_gold_drop(gold_min: u32, gold_max: u32) -> u32 {
     if gold_max == 0 {
         return 0;
     }
-    let (lo, hi) = if gold_min <= gold_max {
-        (gold_min, gold_max)
+    if gold_max <= gold_min {
+        return gold_max;
+    }
+    // Wide ranges roll in steps of 256 copper, so a boss's purse is not a uniform copper count.
+    if gold_max - gold_min < 32_700 {
+        rand::thread_rng().gen_range(gold_min..=gold_max)
     } else {
-        (gold_max, gold_min)
-    };
-    rand::thread_rng().gen_range(lo..=hi)
+        rand::thread_rng().gen_range((gold_min >> 8)..=(gold_max >> 8)) << 8
+    }
 }
 
 impl Default for LootManager {
@@ -604,6 +718,53 @@ mod tests {
     }
 
     #[test]
+    fn a_loot_holds_at_most_sixteen_items() {
+        let manager = LootManager::new();
+        let table: Vec<LootTableEntry> = (1..=20).map(|item| entry(item, 100.0, 0)).collect();
+        manager.creature_loot_tables.insert(9, table);
+        let source = ObjectGuid::new_creature(9, 1);
+        manager.generate_creature_loot(source, 9, 0, 0, vec![]);
+        assert_eq!(manager.get_loot(source).unwrap().items.len(), 16);
+    }
+
+    #[test]
+    fn store_loot_belongs_to_its_owner() {
+        let manager = LootManager::new();
+        manager
+            .store_tables
+            .insert((LootStore::Skinning, 77), vec![entry(4304, 100.0, 0)]);
+        let corpse = ObjectGuid::new_creature(500, 3);
+        let skinner = ObjectGuid::new_player(5);
+        assert!(manager.has_store_loot(LootStore::Skinning, 77));
+        assert!(!manager.has_store_loot(LootStore::Skinning, 0));
+
+        manager.generate_store_loot(
+            corpse,
+            LootStore::Skinning,
+            77,
+            0,
+            crate::game::loot::LootKind::Skinning,
+            skinner,
+        );
+        let loot = manager.get_loot(corpse).unwrap();
+        assert_eq!(loot.kind, crate::game::loot::LootKind::Skinning);
+        assert_eq!(loot.recipient, Some(skinner));
+        assert_eq!(loot.allowed_looters, vec![skinner]);
+        assert_eq!(loot.items[0].item_id, 4304);
+    }
+
+    #[test]
+    fn wide_money_ranges_round_to_256_copper() {
+        for _ in 0..50 {
+            let gold = roll_money(100_000, 200_000);
+            assert_eq!(gold % 256, 0);
+            assert!((99_840..=200_000).contains(&gold));
+        }
+        assert_eq!(roll_money(50, 50), 50);
+        assert_eq!(roll_money(0, 0), 0);
+    }
+
+    #[test]
     fn gameobject_quest_loot_is_generated_as_quest_only() {
         let manager = LootManager::new();
         let loot_id = 10119;
@@ -623,7 +784,7 @@ mod tests {
             }],
         );
 
-        manager.generate_gameobject_loot(source, loot_id);
+        manager.generate_gameobject_loot(source, loot_id, 0, 0);
 
         let loot = manager.get_loot(source).expect("chest loot should exist");
         assert!(loot.items.is_empty());

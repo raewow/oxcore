@@ -8,7 +8,10 @@ use std::sync::Arc;
 
 use crate::game::broadcast_mgr::{BroadcastManagerExt, BroadcastManagerTrait};
 use crate::game::player::death::DeathState;
-use crate::game::player::{PlayerManager, PLAYER_FLAGS_AFK, PLAYER_FLAGS_DND, PLAYER_FLAGS_GHOST};
+use crate::game::player::{
+    PlayerManager, PLAYER_FLAGS_AFK, PLAYER_FLAGS_DND, PLAYER_FLAGS_GHOST,
+    PLAYER_FLAGS_GROUP_LEADER,
+};
 use crate::game::social::SocialSystem;
 use crate::World;
 use oxcore_db::database::characters::models::group::{GroupMemberRow, GroupRow};
@@ -492,6 +495,7 @@ impl GroupSystem {
         // Add to cache
         self.groups.insert(group_id, group);
         self.player_groups.insert(leader_guid, group_id);
+        self.set_player_flag(leader_guid, PLAYER_FLAGS_GROUP_LEADER, true);
 
         tracing::info!("Created group {} with leader {:?}", group_id, leader_guid);
 
@@ -642,13 +646,11 @@ impl GroupSystem {
             .instance_mgr
             .unload_group_bindings(group.leader_guid);
 
-        // Notify all members
-        use oxcore_shared::messages::group::SmsgGroupDestroyed;
+        // A group dissolving because it dropped below two members ends quietly: everyone gets
+        // the "not in a group" list rather than a "group disbanded" message.
+        self.set_player_flag(group.leader_guid, PLAYER_FLAGS_GROUP_LEADER, false);
         for member in &group.members {
-            self.broadcast_mgr
-                .send_msg_to_player(member.guid, SmsgGroupDestroyed);
-
-            tracing::debug!("Sent GROUP_DESTROYED to {:?}", member.guid);
+            self.send_empty_group_list(member.guid);
         }
 
         tracing::info!("Disbanded group {}", group_id);
@@ -867,10 +869,8 @@ impl GroupSystem {
             }
         }
 
-        // Send SMSG_GROUP_DESTROYED to leaving player
-        use oxcore_shared::messages::group::SmsgGroupDestroyed;
-        self.broadcast_mgr
-            .send_msg_to_player(player_guid, SmsgGroupDestroyed);
+        // The leaver's frames clear on an empty group list.
+        self.send_empty_group_list(player_guid);
 
         Ok(())
     }
@@ -923,10 +923,11 @@ impl GroupSystem {
             }
         }
 
-        // Send SMSG_GROUP_UNINVITE to kicked player
+        // "You have been removed from the group", then clear their frames.
         use oxcore_shared::messages::group::SmsgGroupUninvite;
         self.broadcast_mgr
             .send_msg_to_player(target_guid, SmsgGroupUninvite);
+        self.send_empty_group_list(target_guid);
 
         tracing::info!(
             "{:?} kicked {} from group {}",
@@ -1162,6 +1163,13 @@ impl GroupSystem {
         if !group.has_member(new_leader_guid) {
             return Err(GroupError::MemberNotFound);
         }
+        if new_leader_guid == player_guid {
+            return Err(GroupError::CannotTargetSelf);
+        }
+        // Leadership only goes to someone who is online to take it.
+        if self.player_mgr.get_player(new_leader_guid).is_none() {
+            return Err(GroupError::PlayerNotFound);
+        }
         drop(group);
 
         self.apply_new_leader(world, group_id, new_leader_guid, true)
@@ -1202,6 +1210,8 @@ impl GroupSystem {
             group.promote_new_leader(new_leader)?;
             group.leader_last_online = now_secs();
         }
+        self.set_player_flag(old_leader, PLAYER_FLAGS_GROUP_LEADER, false);
+        self.set_player_flag(new_leader, PLAYER_FLAGS_GROUP_LEADER, true);
 
         if announce {
             let new_leader_name = self
@@ -2063,6 +2073,53 @@ impl GroupSystem {
         status
     }
 
+    /// The "not in a group" list for a player who left, was kicked, or whose group dissolved.
+    fn send_empty_group_list(&self, player_guid: ObjectGuid) {
+        use oxcore_shared::messages::group::SmsgGroupList;
+        let empty = CachedGroup::empty();
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgGroupList {
+                group: &empty,
+                member_guid: player_guid,
+            },
+        );
+    }
+
+    /// Set or clear a `PLAYER_FLAGS` bit on an online player and show it to everyone nearby
+    /// (leader crown, AFK/DND tags). A no-op for an offline player or an unchanged flag.
+    pub fn set_player_flag(&self, player_guid: ObjectGuid, flag: u32, on: bool) {
+        let flags = {
+            let Some(mut player) = self.player_mgr.get_player_mut(player_guid) else {
+                return;
+            };
+            let flags = if on {
+                player.player_flags | flag
+            } else {
+                player.player_flags & !flag
+            };
+            if flags == player.player_flags {
+                return;
+            }
+            player.player_flags = flags;
+            flags
+        };
+        self.broadcast_player_flags(player_guid, flags);
+    }
+
+    /// Push a player's current `PLAYER_FLAGS` to them and everyone who can see them.
+    pub fn broadcast_player_flags(&self, player_guid: ObjectGuid, flags: u32) {
+        use crate::game::common::update_fields::PLAYER_FLAGS;
+        use oxcore_shared::messages::update::{
+            ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+        };
+        let world_guid = crate::core::common::guid::ObjectGuid::from_raw(player_guid.raw());
+        let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+            ValuesUpdateBlock::new(world_guid, ObjectType::Player).set_field(PLAYER_FLAGS, flags),
+        ));
+        self.broadcast_mgr.broadcast_msg_nearby(player_guid, &update, true);
+    }
+
     /// Queue an SMSG_PARTY_MEMBER_STATS push for a grouped member.
     ///
     /// `flags` is a mask of [`group_update_flags`]; the system drains it on the next tick.
@@ -2351,13 +2408,17 @@ impl GroupSystem {
         self.update_member_online(guid);
 
         // The leader is back online: clear the offline-leader timer (2g).
+        let mut leads = false;
         if let Some(group_id) = self.get_player_group_id(guid) {
             if let Some(mut group) = self.groups.get_mut(&group_id) {
                 if group.is_leader(guid) {
                     group.leader_last_online = 0;
+                    leads = true;
                 }
             }
         }
+        // The flag may be stale from a session where leadership changed while offline.
+        self.set_player_flag(guid, PLAYER_FLAGS_GROUP_LEADER, leads);
 
         // Send group list to player on login if in group
         if let Some(group_id) = self.get_player_group_id(guid) {

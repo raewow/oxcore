@@ -454,6 +454,8 @@ mod tests {
             flags: 0,
             size: 1.0,
             data: [0; 24],
+            min_gold: 0,
+            max_gold: 0,
         };
         let mut go = GameObject::new(
             guid,

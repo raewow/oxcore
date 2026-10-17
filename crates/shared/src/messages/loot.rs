@@ -133,6 +133,88 @@ impl ToWorldPacket for SmsgLootResponse {
     }
 }
 
+/// SMSG_LOOT_LIST - who may loot a corpse (1.14 only)
+///
+/// Lets the 1.14 client show the corpse as lootable for the right players: the master looter
+/// under master loot, or this corpse's round-robin owner. 1.12 has no such message.
+#[derive(Debug, Clone, Copy)]
+pub struct SmsgLootList {
+    pub loot_guid: ObjectGuid,
+    pub master: Option<ObjectGuid>,
+    pub round_robin_winner: Option<ObjectGuid>,
+}
+
+impl ToWorldPacket for SmsgLootList {
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_LOOT_LIST)
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.loot_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // Owner
+        let (loot_high, loot_low) = loot_guid128(&self.loot_guid);
+        writer.write_packed_guid_128(loot_high, loot_low); // LootObj
+        writer.write_bit(self.master.is_some());
+        writer.write_bit(self.round_robin_winner.is_some());
+        writer.flush_bits();
+        for guid in [self.master, self.round_robin_winner].into_iter().flatten() {
+            let (h, l) = guid.to_guid128(DEFAULT_REALM_ID);
+            writer.write_packed_guid_128(h, l);
+        }
+        Some(writer.finish(Opcode::SMSG_LOOT_LIST))
+    }
+}
+
+/// Why a loot window did not open.
+pub mod loot_error {
+    pub const DIDNT_KILL: u8 = 0;
+    pub const TOO_FAR: u8 = 4;
+    pub const NOT_STANDING: u8 = 8;
+    pub const STUNNED: u8 = 9;
+    pub const PLAYER_NOT_FOUND: u8 = 10;
+    pub const ALREADY_PICKPOCKETED: u8 = 15;
+}
+
+/// SMSG_LOOT_RESPONSE carrying a failure instead of a loot list.
+///
+/// 1.12 signals it with loot type 0 followed by the error code; 1.14 has a FailureReason field
+/// and an empty window.
+#[derive(Debug, Clone, Copy)]
+pub struct SmsgLootError {
+    pub loot_guid: ObjectGuid,
+    pub error: u8,
+}
+
+impl ToWorldPacket for SmsgLootError {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_LOOT_RESPONSE);
+        packet.write_u64(self.loot_guid.raw());
+        packet.write_u8(0); // LOOT_NONE
+        packet.write_u8(self.error);
+        packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.loot_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // Owner
+        let (loot_high, loot_low) = loot_guid128(&self.loot_guid);
+        writer.write_packed_guid_128(loot_high, loot_low); // LootObj
+        writer.write_u8(self.error); // FailureReason
+        writer.write_u8(0); // AcquireReason
+        writer.write_u8(0); // LootMethod
+        writer.write_u8(0); // Threshold
+        writer.write_u32(0); // Coins
+        writer.write_i32(0); // items
+        writer.write_i32(0); // currencies
+        writer.write_bit(false); // Acquired
+        writer.write_bit(false); // AELooting
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_LOOT_RESPONSE))
+    }
+}
+
 /// SMSG_LOOT_RELEASE_RESPONSE (0x0161)
 #[derive(Debug, Clone)]
 pub struct SmsgLootReleaseResponse {

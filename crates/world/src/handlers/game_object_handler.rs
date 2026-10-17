@@ -266,6 +266,8 @@ mod tests {
             flags: 0,
             size: 1.0,
             data,
+            min_gold: 0,
+            max_gold: 0,
         };
         world
             .managers

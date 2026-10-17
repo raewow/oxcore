@@ -4889,6 +4889,9 @@ mod tests {
             spells: [0; 4],
             gold_min: 0,
             gold_max: 0,
+            loot_id: 0,
+            pickpocket_loot_id: 0,
+            skinning_loot_id: 0,
         }
     }
 
@@ -4934,6 +4937,8 @@ mod tests {
             flags: 0,
             size: 1.0,
             data: [0; 24],
+            min_gold: 0,
+            max_gold: 0,
         };
         world
             .managers

@@ -123,17 +123,34 @@ pub async fn effect_skinning(input: &EffectInput, world: &World) -> Result<Effec
         return Err(anyhow::anyhow!("Target is not skinnable"));
     }
 
-    // TODO: Check if creature is lootable and dead
-    // TODO: Generate skinning loot based on creature entry
-    // TODO: Give loot to player
-    // TODO: Mark creature as skinned
-
     tracing::debug!(
         "Skinning: caster={:?} target={:?}",
         input.caster_guid,
         target_guid
     );
 
+    // Fills the skinning loot, clears the skinnable flag, raises skinning, opens the window.
+    world
+        .systems
+        .loot
+        .open_skinning_loot(input.caster_guid, target_guid, world)
+        .await?;
+
+    Ok(EffectResult::empty())
+}
+
+/// SPELL_EFFECT_PICKPOCKET (140)
+///
+/// Open a living creature's pockets for the caster.
+pub async fn effect_pickpocket(input: &EffectInput, world: &World) -> Result<EffectResult> {
+    let Some(target_guid) = input.target_guid.filter(|g| g.is_creature()) else {
+        return Ok(EffectResult::empty());
+    };
+    world
+        .systems
+        .loot
+        .open_pickpocket_loot(input.caster_guid, target_guid, world)
+        .await?;
     Ok(EffectResult::empty())
 }
 

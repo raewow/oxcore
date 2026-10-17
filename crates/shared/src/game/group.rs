@@ -567,6 +567,25 @@ pub struct CachedGroup {
 }
 
 impl CachedGroup {
+    /// The "not in a group" snapshot: no members, no leader. Sent as a group list to a player
+    /// who just left, which clears their party frames without a "group disbanded" message.
+    pub fn empty() -> Self {
+        Self {
+            id: 0,
+            leader_guid: ObjectGuid::empty(),
+            leader_name: String::new(),
+            is_raid: false,
+            loot_method: LootMethod::FreeForAll,
+            loot_threshold: 2,
+            looter_guid: ObjectGuid::empty(),
+            main_tank_guid: ObjectGuid::empty(),
+            main_assistant_guid: ObjectGuid::empty(),
+            target_icons: [ObjectGuid::empty(); TARGET_ICON_COUNT],
+            members: Vec::new(),
+            subgroup_counts: [0; MAX_RAID_SUBGROUPS as usize],
+        }
+    }
+
     pub fn from_group_data(group: &GroupData) -> Self {
         Self {
             id: group.id,

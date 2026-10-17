@@ -46,6 +46,9 @@ pub struct CreatureTemplateRow {
     pub spell_id4: i64,
     pub gold_min: i64,
     pub gold_max: i64,
+    pub loot_id: i64,
+    pub pickpocket_loot_id: i64,
+    pub skinning_loot_id: i64,
 }
 
 /// Row from creature_classlevelstats table - base stats per class and level

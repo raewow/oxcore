@@ -2534,6 +2534,9 @@ mod tests {
             spells: [0; 4],
             gold_min: 0,
             gold_max: 0,
+            loot_id: 0,
+            pickpocket_loot_id: 0,
+            skinning_loot_id: 0,
         };
         world.managers.creature_mgr.add_creature(Creature::new(
             guid, entry, 1, position, 0, 0, &template, 1, None,
@@ -2750,6 +2753,8 @@ mod tests {
             flags: 0,
             size: 1.0,
             data: [0; 24],
+            min_gold: 0,
+            max_gold: 0,
         };
         world
             .managers
@@ -2810,6 +2815,8 @@ mod tests {
             data: [
                 42, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             ],
+            min_gold: 0,
+            max_gold: 0,
         };
         world
             .managers

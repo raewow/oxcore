@@ -1534,6 +1534,31 @@ impl ToWorldPacket for MsgRaidReadyCheck {
     }
 }
 
+/// SMSG_PARTY_KILL_LOG - "X has slain Y." in the combat log of the killer's subgroup
+#[derive(Debug, Clone, Copy)]
+pub struct SmsgPartyKillLog {
+    pub killer_guid: ObjectGuid,
+    pub victim_guid: ObjectGuid,
+}
+
+impl ToWorldPacket for SmsgPartyKillLog {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_PARTY_KILL_LOG);
+        packet.write_u64(self.killer_guid.raw());
+        packet.write_u64(self.victim_guid.raw());
+        packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.killer_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low); // Player
+        let (victim_high, victim_low) = self.victim_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(victim_high, victim_low); // Victim
+        Some(writer.finish(Opcode::SMSG_PARTY_KILL_LOG))
+    }
+}
+
 /// SMSG_READY_CHECK_COMPLETED - The ready check is over (1.14 only)
 ///
 /// Sent once every member has answered or the check timed out; the 1.14 client closes its

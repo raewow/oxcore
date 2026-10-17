@@ -779,6 +779,8 @@ impl Opcode {
     pub const SMSG_LOOT_ALL_PASSED: Opcode = Opcode { vanilla: 0x029E, modern: 0x261A }; // 670
     pub const SMSG_LOOT_ROLLS_COMPLETE: Opcode = Opcode { modern: 0x2619, ..Opcode::NONE }; // modern-only
     pub const CMSG_OPT_OUT_OF_LOOT: Opcode = Opcode { modern: 0x34F6, ..Opcode::NONE }; // modern-only: auto-pass on rolls
+    pub const SMSG_LOOT_LIST: Opcode = Opcode { modern: 0x2738, ..Opcode::NONE }; // modern-only: who may loot a corpse
+    pub const SMSG_PARTY_KILL_LOG: Opcode = Opcode { vanilla: 0x01F5, modern: 0x2751 }; // 501
 
     // ============================================================================
     // Trade
@@ -1836,6 +1838,8 @@ pub const ALL: &[(Opcode, &str)] = &[
         "CMSG_SET_EVERYONE_IS_ASSISTANT",
     ),
     (Opcode::CMSG_OPT_OUT_OF_LOOT, "CMSG_OPT_OUT_OF_LOOT"),
+    (Opcode::SMSG_LOOT_LIST, "SMSG_LOOT_LIST"),
+    (Opcode::SMSG_PARTY_KILL_LOG, "SMSG_PARTY_KILL_LOG"),
     (Opcode::CMSG_GROUP_ACCEPT, "CMSG_GROUP_ACCEPT"),
     (Opcode::CMSG_GROUP_DECLINE, "CMSG_GROUP_DECLINE"),
     (Opcode::SMSG_GROUP_DECLINE, "SMSG_GROUP_DECLINE"),
@@ -2573,8 +2577,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            675,
-            "expected 675 opcode constants; update this count deliberately when adding opcodes"
+            677,
+            "expected 677 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

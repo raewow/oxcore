@@ -262,12 +262,12 @@ pub async fn handle_use_item(
 pub async fn handle_open_item(
     session: &crate::core::session::WorldSession,
     packet: &mut WorldPacket,
-    _world: &World,
+    world: &World,
 ) -> Result<()> {
-    let _bag = packet
+    let bag = packet
         .read_u8()
         .ok_or_else(|| anyhow!("Failed to read bag"))?;
-    let _slot = packet
+    let slot = packet
         .read_u8()
         .ok_or_else(|| anyhow!("Failed to read slot"))?;
 
@@ -276,12 +276,11 @@ pub async fn handle_open_item(
         None => return Ok(()),
     };
 
-    warn!(
-        "CMSG_OPEN_ITEM received but not fully implemented for {:?}",
-        player_guid
-    );
-
-    Ok(())
+    world
+        .systems
+        .loot
+        .open_item_loot(player_guid, bag, slot, world)
+        .await
 }
 
 pub async fn handle_read_item(

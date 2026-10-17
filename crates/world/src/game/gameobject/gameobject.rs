@@ -134,6 +134,9 @@ pub struct GameObjectTemplate {
     pub flags: u32,
     pub size: f32,
     pub data: [i32; 24],
+    /// Coins a chest holds, in copper (`mingold` / `maxgold`).
+    pub min_gold: u32,
+    pub max_gold: u32,
 }
 
 impl GameObjectTemplate {
@@ -206,6 +209,8 @@ mod tests {
             flags: 0,
             size: 1.0,
             data,
+            min_gold: 0,
+            max_gold: 0,
         }
     }
 

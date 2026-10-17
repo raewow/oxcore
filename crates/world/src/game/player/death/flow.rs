@@ -17,6 +17,8 @@ pub const CORPSE_RES_HEALTH_PCT: f32 = 0.50; // 50% health on corpse run
 pub const CORPSE_RES_MANA_PCT: f32 = 0.50; // 50% mana on corpse run
 
 /// Player flags
+/// Player leads their group (the crown on the party frame)
+pub const PLAYER_FLAGS_GROUP_LEADER: u32 = 0x0000_0001;
 pub const PLAYER_FLAGS_GHOST: u32 = 0x0000_0010;
 /// Player is away from keyboard (toggled by `/afk`)
 pub const PLAYER_FLAGS_AFK: u32 = 0x0000_0002;

@@ -243,6 +243,7 @@ impl crate::game::group::GroupSystem {
             if can_use
                 && !self.passing_on_loot.contains(&guid)
                 && Loot::item_allowed_for(&item, guid)
+                && !world.systems.loot.quest_starter_hidden(world, guid, item.item_id)
                 && is_at_group_reward_distance(
                     world,
                     guid,
@@ -534,6 +535,48 @@ impl crate::game::group::GroupSystem {
                 None
             }
         }
+    }
+
+    /// Announce a kill in the combat log of the killer and the rest of their subgroup.
+    pub fn send_party_kill_log(&self, killer: ObjectGuid, victim: ObjectGuid) {
+        use oxcore_shared::messages::group::SmsgPartyKillLog;
+        let mut recipients = vec![killer];
+        if let Some(group) = self.get_player_group(killer) {
+            let subgroup = group.get_member(killer).map(|m| m.subgroup);
+            recipients.extend(
+                group
+                    .members
+                    .iter()
+                    .filter(|m| m.guid != killer && Some(m.subgroup) == subgroup)
+                    .map(|m| m.guid),
+            );
+        }
+        let msg = SmsgPartyKillLog {
+            killer_guid: killer,
+            victim_guid: victim,
+        };
+        self.broadcast_mgr.broadcast_msg_to_players(&recipients, &msg);
+    }
+
+    /// Tell the 1.14 clients among `looters` who may loot a corpse (1.12 has no equivalent).
+    pub fn send_loot_list(
+        &self,
+        looted_object: ObjectGuid,
+        master: Option<ObjectGuid>,
+        round_robin_winner: Option<ObjectGuid>,
+        looters: &[ObjectGuid],
+    ) {
+        use oxcore_shared::messages::loot::SmsgLootList;
+        let modern = self.modern_members(looters);
+        if modern.is_empty() {
+            return;
+        }
+        let msg = SmsgLootList {
+            loot_guid: looted_object,
+            master,
+            round_robin_winner,
+        };
+        self.broadcast_mgr.broadcast_msg_to_players(&modern, &msg);
     }
 
     /// Current position of the group's round-robin cursor, if one is set.
