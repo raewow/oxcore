@@ -316,7 +316,7 @@ impl GridMap {
                 } else if fx > fy {
                     // triangle 3 (h2, h4, h5)
                     let (h2, h4) = (v9(1, 0), v9(1, 1));
-                    (h2 + h4 - h5, h4 - h2, h5 - h2)
+                    (h2 + h4 - h5, h4 - h2, h5 - h4)
                 } else {
                     // triangle 4 (h3, h4, h5)
                     let (h3, h4) = (v9(0, 1), v9(1, 1));

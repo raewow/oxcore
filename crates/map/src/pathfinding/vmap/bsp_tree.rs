@@ -94,18 +94,34 @@ impl BSPTree {
         let mut left_models = Vec::new();
         let mut right_models = Vec::new();
 
+        // Queries only descend into the child region they reach, so a model must
+        // be listed in every child its bounds overlap. A model straddling the
+        // split goes to both sides; otherwise rays into the other half miss it.
+        let model_count = models.len();
         for model in models {
-            let model_min = match axis {
-                Axis::X => model.bounding_box.min.x,
-                Axis::Y => model.bounding_box.min.y,
-                Axis::Z => model.bounding_box.min.z,
+            let (model_min, model_max) = match axis {
+                Axis::X => (model.bounding_box.min.x, model.bounding_box.max.x),
+                Axis::Y => (model.bounding_box.min.y, model.bounding_box.max.y),
+                Axis::Z => (model.bounding_box.min.z, model.bounding_box.max.z),
             };
 
             if model_min < split_value {
-                left_models.push(model);
-            } else {
+                left_models.push(Arc::clone(&model));
+            }
+            if model_max >= split_value {
                 right_models.push(model);
             }
+        }
+
+        // A split that separates nothing would recurse forever on the same set.
+        if left_models.len() == model_count || right_models.len() == model_count {
+            let mut models = left_models;
+            for model in right_models {
+                if !models.iter().any(|kept| Arc::ptr_eq(kept, &model)) {
+                    models.push(model);
+                }
+            }
+            return BSPNode::Leaf { models };
         }
 
         let mut left_bounds = *bounds;
@@ -290,7 +306,17 @@ impl BSPTree {
                 let mut best_dist = max_search_dist;
 
                 for model in models {
-                    if !model.bounding_box.contains(pos) {
+                    // Cull by the downward search segment, not by the start point:
+                    // a floor below the query point is outside the model's bounds
+                    // whenever the point stands above the model.
+                    let bounds = &model.bounding_box;
+                    if pos.x < bounds.min.x
+                        || pos.x > bounds.max.x
+                        || pos.y < bounds.min.y
+                        || pos.y > bounds.max.y
+                        || bounds.min.z > pos.z
+                        || bounds.max.z < pos.z - max_search_dist
+                    {
                         continue;
                     }
 
