@@ -155,33 +155,8 @@ fn update_lua_creature(world: &World, creature_guid: ObjectGuid, input: &AIInput
         lua_snapshot.instance_data = inst_state.data.clone();
     }
 
-    // Populate nearby creatures (within 100 yards, same map)
-    {
-        use crate::core::lua::snapshot::NearbyCreatureEntry;
-        let creature_pos = input.snapshot.position;
-        let creature_map = input.snapshot.map_id;
-        let max_dist = 100.0f32;
-        let max_dist_sq = max_dist * max_dist;
-
-        for entry in world.managers.creature_mgr.iter_creatures() {
-            let other = entry.value();
-            if other.guid == creature_guid || other.map_id != creature_map {
-                continue;
-            }
-            let dx = creature_pos.x - other.position.x;
-            let dy = creature_pos.y - other.position.y;
-            let dz = creature_pos.z - other.position.z;
-            let dist_sq = dx * dx + dy * dy + dz * dz;
-            if dist_sq <= max_dist_sq {
-                lua_snapshot.nearby_creatures.push(NearbyCreatureEntry {
-                    guid: other.guid,
-                    entry: other.entry,
-                    distance: dist_sq.sqrt(),
-                    is_alive: other.is_alive(),
-                });
-            }
-        }
-    }
+    // Populate nearby creatures (within 100 yards, same map and same copy).
+    lua_snapshot.nearby_creatures = nearby_creatures(world, &input.snapshot);
 
     let mut all_actions: Vec<AIAction> = Vec::new();
 
@@ -255,6 +230,43 @@ fn update_lua_creature(world: &World, creature_guid: ObjectGuid, input: &AIInput
     lua_script_states().insert(creature_guid, state);
 }
 
+/// Creatures within 100 yards on the same map *and* in the same dungeon copy.
+/// Matching the instance as well as the map keeps creatures in different copies
+/// of a dungeon from discovering each other at identical coordinates.
+fn nearby_creatures(
+    world: &World,
+    snapshot: &CreatureSnapshot,
+) -> Vec<crate::core::lua::snapshot::NearbyCreatureEntry> {
+    use crate::core::lua::snapshot::NearbyCreatureEntry;
+    let creature_pos = snapshot.position;
+    let max_dist_sq = 100.0f32 * 100.0f32;
+    let mut nearby = Vec::new();
+
+    for entry in world.managers.creature_mgr.iter_creatures() {
+        let other = entry.value();
+        if other.guid == snapshot.guid
+            || other.map_id != snapshot.map_id
+            || other.instance_id != snapshot.instance_id
+        {
+            continue;
+        }
+        let dx = creature_pos.x - other.position.x;
+        let dy = creature_pos.y - other.position.y;
+        let dz = creature_pos.z - other.position.z;
+        let dist_sq = dx * dx + dy * dy + dz * dz;
+        if dist_sq <= max_dist_sq {
+            nearby.push(NearbyCreatureEntry {
+                guid: other.guid,
+                entry: other.entry,
+                distance: dist_sq.sqrt(),
+                is_alive: other.is_alive(),
+            });
+        }
+    }
+
+    nearby
+}
+
 /// Capture read-only snapshot of creature state
 fn capture_snapshot(world: &World, guid: ObjectGuid) -> Option<CreatureSnapshot> {
     world
@@ -286,7 +298,7 @@ fn capture_snapshot(world: &World, guid: ObjectGuid) -> Option<CreatureSnapshot>
                 guid,
                 entry: creature.entry,
                 map_id: creature.map_id,
-                instance_id: 0, // TODO: get from instance system
+                instance_id: creature.instance_id,
                 position: creature.position,
                 home_position: creature.home_position,
                 ai_state: creature.ai_state,
@@ -373,4 +385,127 @@ pub fn process_ai_event(world: &World, creature_guid: ObjectGuid, event: AIEvent
 
     // Process immediately
     update_single_creature(world, creature_guid);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::game::creature::{Creature, CreatureTemplate};
+    use oxcore_db::database::Databases;
+    use oxcore_shared::protocol::Position;
+    use sqlx::postgres::PgPoolOptions;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn test_world() -> World {
+        let pool = || {
+            PgPoolOptions::new()
+                .connect_lazy("postgres://test:test@localhost/test")
+                .expect("lazy pool should be constructible")
+        };
+        let databases = Arc::new(Databases {
+            world: pool(),
+            character: pool(),
+            auth: pool(),
+            logs: oxcore_db::database::lazy_logs_pool(),
+        });
+        World::new(
+            databases,
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    fn test_template(entry: u32) -> CreatureTemplate {
+        CreatureTemplate {
+            entry,
+            name: "Test Creature".into(),
+            subname: None,
+            min_level: 1,
+            max_level: 1,
+            faction: 0,
+            model_id_1: 0,
+            model_id_2: 0,
+            model_id_3: 0,
+            model_id_4: 0,
+            scale: 1.0,
+            npc_flags: 0,
+            unit_flags: 0,
+            static_flags1: 0,
+            flags_extra: 0,
+            creature_type: 0,
+            unit_class: 1,
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            damage_variance: 0.0,
+            attack_time: 2000,
+            rank: 0,
+            gossip_menu_id: 0,
+            vendor_id: 0,
+            trainer_id: 0,
+            trainer_type: 0,
+            spells: [0; 4],
+            gold_min: 0,
+            gold_max: 0,
+        }
+    }
+
+    fn add_creature(
+        world: &World,
+        counter: u32,
+        map_id: u32,
+        instance_id: u32,
+        position: Position,
+    ) -> ObjectGuid {
+        const ENTRY: u32 = 1;
+        let guid = ObjectGuid::new_creature(ENTRY, counter);
+        world.managers.creature_mgr.add_creature(Creature::new(
+            guid,
+            ENTRY,
+            counter,
+            position,
+            map_id,
+            instance_id,
+            &test_template(ENTRY),
+            1,
+            None,
+        ));
+        guid
+    }
+
+    #[tokio::test]
+    async fn snapshot_keeps_the_creatures_instance_identity() {
+        let world = test_world();
+        let guid = add_creature(&world, 1, 409, 7, Position::new(1.0, 2.0, 3.0, 0.0));
+
+        let snapshot = capture_snapshot(&world, guid).expect("creature snapshot");
+        assert_eq!(snapshot.map_id, 409);
+        assert_eq!(
+            snapshot.instance_id, 7,
+            "the snapshot must carry the creature's own copy, not instance zero"
+        );
+    }
+
+    #[tokio::test]
+    async fn nearby_creatures_never_cross_dungeon_copies() {
+        let world = test_world();
+        let pos = Position::new(0.0, 0.0, 0.0, 0.0);
+        let boss = add_creature(&world, 1, 409, 7, pos);
+        // Same coordinates in another copy of the same map must stay invisible.
+        add_creature(&world, 2, 409, 8, pos);
+        // Same copy, within range: the only creature the boss may discover.
+        let add = add_creature(&world, 3, 409, 7, Position::new(1.0, 0.0, 0.0, 0.0));
+        // A different map at the same coordinates must stay invisible too.
+        add_creature(&world, 4, 530, 7, pos);
+
+        let snapshot = capture_snapshot(&world, boss).expect("creature snapshot");
+        let nearby = nearby_creatures(&world, &snapshot);
+
+        assert_eq!(nearby.len(), 1);
+        assert_eq!(nearby[0].guid, add);
+    }
 }
