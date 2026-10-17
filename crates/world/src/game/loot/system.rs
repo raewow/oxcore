@@ -175,7 +175,12 @@ impl LootSystem {
                 viewers.push(player_guid);
             }
             self.broadcast_mgr
-                .broadcast_msg_to_players(&viewers, &SmsgLootClearMoney);
+                .broadcast_msg_to_players(
+                    &viewers,
+                    &SmsgLootClearMoney {
+                        loot_guid: target_guid,
+                    },
+                );
 
             let sharers = self.money_sharers(player_guid, world);
             if sharers.len() > 1 {

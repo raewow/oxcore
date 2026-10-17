@@ -239,7 +239,9 @@ impl crate::game::group::GroupSystem {
                 true
             };
             drop(player);
+            // A player passing on all loot is never offered the roll.
             if can_use
+                && !self.passing_on_loot.contains(&guid)
                 && Loot::item_allowed_for(&item, guid)
                 && is_at_group_reward_distance(
                     world,

@@ -547,9 +547,35 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_GROUP_UNINVITE => {
                     group::handle_group_uninvite(session, packet, world).await?;
                 }
-                Opcode::MSG_PARTY_LEAVE => {
-                    group::handle_party_leave(session, world).await?;
+                Opcode::CMSG_GROUP_UNINVITE_GUID => {
+                    group::handle_group_uninvite_guid(session, packet, world).await?;
                 }
+                Opcode::CMSG_PARTY_INVITE_RESPONSE => {
+                    group::handle_party_invite_response(session, packet, world).await?;
+                }
+                Opcode::CMSG_DO_READY_CHECK => {
+                    group::handle_do_ready_check(session, world).await?;
+                }
+                Opcode::CMSG_READY_CHECK_RESPONSE => {
+                    group::handle_ready_check_response(session, packet, world).await?;
+                }
+                Opcode::CMSG_UPDATE_RAID_TARGET => {
+                    group::handle_update_raid_target(session, packet, world).await?;
+                }
+                Opcode::CMSG_MINIMAP_PING => {
+                    group::handle_modern_minimap_ping(session, packet, world).await?;
+                }
+                Opcode::CMSG_RANDOM_ROLL => {
+                    group::handle_modern_random_roll(session, packet, world).await?;
+                }
+                Opcode::CMSG_SET_EVERYONE_IS_ASSISTANT => {
+                    group::handle_set_everyone_is_assistant(session, packet, world).await?;
+                }
+                Opcode::CMSG_OPT_OUT_OF_LOOT => {
+                    loot::handle_opt_out_of_loot(session, packet, world).await?;
+                }
+                // Sent by the 1.12 client but meaningless to the game; accepted and ignored.
+                Opcode::CMSG_GROUP_CANCEL => {}
                 Opcode::CMSG_GROUP_SET_LEADER => {
                     group::handle_group_set_leader(session, packet, world).await?;
                 }

@@ -9,7 +9,8 @@ use tracing::{debug, info, warn};
 use crate::core::session::WorldSession;
 use crate::game::group::{
     ERR_ALREADY_IN_GROUP_S, ERR_BAD_PLAYER_NAME_S, ERR_GROUP_FULL, ERR_IGNORING_YOU_S,
-    ERR_NOT_LEADER, ERR_PARTY_RESULT_OK, ERR_PLAYER_WRONG_FACTION, PARTY_OP_INVITE, PARTY_OP_LEAVE,
+    ERR_NOT_LEADER, ERR_PARTY_RESULT_OK, ERR_PLAYER_WRONG_FACTION, ERR_TARGET_NOT_IN_GROUP_S,
+    PARTY_OP_INVITE, PARTY_OP_LEAVE,
 };
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::World;
@@ -161,36 +162,219 @@ pub async fn handle_group_uninvite(
         player_guid, member_name
     );
 
-    world
+    let result = world
         .systems
         .group
-        .uninvite_player(world, player_guid, member_name)
-        .await?;
+        .uninvite_player(world, player_guid, member_name.clone())
+        .await;
+    send_uninvite_result(world, player_guid, &member_name, result);
 
     Ok(())
 }
 
-/// Handle MSG_PARTY_LEAVE - player leaves group
-/// Packet format: empty
-pub async fn handle_party_leave(session: &WorldSession, world: &World) -> Result<()> {
+/// Tell a player why their kick failed ("X is not in your party", "You are not the leader").
+fn send_uninvite_result(
+    world: &World,
+    player_guid: ObjectGuid,
+    member_name: &str,
+    result: std::result::Result<(), crate::game::group::GroupError>,
+) {
+    use crate::game::group::GroupError;
+    use oxcore_shared::messages::group::SmsgPartyCommandResult;
+
+    let code = match result {
+        Ok(()) => return,
+        Err(GroupError::NotLeader | GroupError::NotLeaderOrAssistant) => ERR_NOT_LEADER,
+        Err(GroupError::NotInGroup | GroupError::MemberNotFound) => ERR_TARGET_NOT_IN_GROUP_S,
+        Err(e) => {
+            warn!("Uninvite failed for {:?}: {:?}", player_guid, e);
+            return;
+        }
+    };
+    world.managers.broadcast_mgr.send_msg_to_player(
+        player_guid,
+        SmsgPartyCommandResult {
+            operation: PARTY_OP_LEAVE,
+            member_name,
+            result: code,
+        },
+    );
+}
+
+/// Handle CMSG_GROUP_UNINVITE_GUID (1.14: CMSG_PARTY_UNINVITE) - kick a member, or withdraw an
+/// invite, by GUID.
+/// 1.12: u64 guid. 1.14: u8 party index, guid128 target, 8-bit reason length, reason.
+pub async fn handle_group_uninvite_guid(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
     let player_guid = session
         .player_guid()
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    debug!("MSG_PARTY_LEAVE: player={:?}", player_guid);
-
-    // Handle errors gracefully - if not in group, just ignore
-    match world.systems.group.leave_group(world, player_guid).await {
-        Ok(()) => {
-            info!("Player {:?} left group successfully", player_guid);
-        }
-        Err(e) => {
-            warn!("Leave group failed for player {:?}: {:?}", player_guid, e);
-            // Don't return error - just log it
-            // Player might not be in a group, which is fine
+    let target_guid = match session.protocol() {
+        Protocol::Vanilla => packet.read_guid_for(session.protocol()),
+        Protocol::Modern => {
+            let mut reader = BitReader::new(packet.contents());
+            let _party_index = reader.read_u8();
+            reader
+                .read_packed_guid_128()
+                .map(|(high, low)| ObjectGuid::from_guid128(high, low))
         }
     }
+    .unwrap_or_else(ObjectGuid::empty);
 
+    debug!(
+        "CMSG_GROUP_UNINVITE_GUID: player={:?}, target={:?}",
+        player_guid, target_guid
+    );
+
+    let result = world
+        .systems
+        .group
+        .uninvite_by_guid(world, player_guid, target_guid)
+        .await;
+    send_uninvite_result(world, player_guid, "", result);
+    Ok(())
+}
+
+/// Handle CMSG_PARTY_INVITE_RESPONSE (1.14 only) - accept or decline in one packet.
+/// u8 party index, bit accept, bit has-roles, [u32 roles].
+pub async fn handle_party_invite_response(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let mut reader = BitReader::new(packet.contents());
+    let _party_index = reader.read_u8();
+    let accept = reader.read_bit().unwrap_or(false);
+
+    if accept {
+        handle_group_accept(session, world).await
+    } else {
+        handle_group_decline(session, world).await
+    }
+}
+
+/// Handle CMSG_DO_READY_CHECK (1.14 only; 1.12 sends an empty MSG_RAID_READY_CHECK).
+/// i8 party index.
+pub async fn handle_do_ready_check(session: &WorldSession, world: &World) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    world
+        .systems
+        .group
+        .initiate_ready_check(player_guid)
+        .await?;
+    Ok(())
+}
+
+/// Handle CMSG_READY_CHECK_RESPONSE (1.14 only). u8 party index, bit ready.
+pub async fn handle_ready_check_response(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let mut reader = BitReader::new(packet.contents());
+    let _party_index = reader.read_u8();
+    let ready = reader.read_bit().unwrap_or(false);
+    world
+        .systems
+        .group
+        .respond_ready_check(player_guid, ready)
+        .await?;
+    Ok(())
+}
+
+/// Handle CMSG_UPDATE_RAID_TARGET (1.14 only). i8 party index, guid128 target, i8 symbol.
+///
+/// A negative symbol clears whatever icon the target carries.
+pub async fn handle_update_raid_target(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let _party_index = packet.read_i8();
+    let target_guid = packet
+        .read_guid_for(session.protocol())
+        .unwrap_or_else(ObjectGuid::empty);
+    let symbol = packet.read_i8().unwrap_or(-1);
+
+    let group = &world.systems.group;
+    let icon = if symbol >= 0 {
+        Some((symbol as u8, target_guid))
+    } else {
+        // Clear: find the icon this target carries and empty it.
+        group
+            .get_player_group(player_guid)
+            .and_then(|g| g.target_icons.iter().position(|t| *t == target_guid))
+            .map(|index| (index as u8, ObjectGuid::empty()))
+    };
+    if let Some((icon, target)) = icon {
+        group.set_target_icon(player_guid, icon, target).await?;
+    }
+    Ok(())
+}
+
+/// Handle CMSG_MINIMAP_PING (1.14 only). f32 x, f32 y, i8 party index.
+pub async fn handle_modern_minimap_ping(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let x = packet.read_f32().unwrap_or(0.0);
+    let y = packet.read_f32().unwrap_or(0.0);
+    let _ = world.systems.group.send_minimap_ping(player_guid, x, y);
+    Ok(())
+}
+
+/// Handle CMSG_RANDOM_ROLL (1.14 only). i32 min, i32 max, u8 party index.
+pub async fn handle_modern_random_roll(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let min = packet.read_u32().unwrap_or(0);
+    let max = packet.read_u32().unwrap_or(0);
+    world
+        .systems
+        .group
+        .random_roll(player_guid, min, max)
+        .await?;
+    Ok(())
+}
+
+/// Handle CMSG_SET_EVERYONE_IS_ASSISTANT (1.14 only). u8 party index, bit apply.
+pub async fn handle_set_everyone_is_assistant(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let mut reader = BitReader::new(packet.contents());
+    let _party_index = reader.read_u8();
+    let apply = reader.read_bit().unwrap_or(false);
+    world
+        .systems
+        .group
+        .set_everyone_assistant(player_guid, apply)
+        .await?;
     Ok(())
 }
 

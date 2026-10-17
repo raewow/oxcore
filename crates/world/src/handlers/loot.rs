@@ -344,3 +344,22 @@ pub async fn handle_loot_master_give(
 
     Ok(())
 }
+
+/// Handle CMSG_OPT_OUT_OF_LOOT (1.14 only) - "pass on all loot". One bit.
+pub async fn handle_opt_out_of_loot(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> anyhow::Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Player not logged in"))?;
+    let passing = oxcore_shared::protocol::bitbuf::BitReader::new(packet.contents())
+        .read_bit()
+        .unwrap_or(false);
+    world
+        .systems
+        .group
+        .set_passing_on_loot(player_guid, passing);
+    Ok(())
+}

@@ -718,16 +718,18 @@ impl Opcode {
 
     pub const CMSG_GROUP_INVITE: Opcode = Opcode { vanilla: 0x006E, modern: 0x3603 }; // 110
     pub const SMSG_GROUP_INVITE: Opcode = Opcode { vanilla: 0x006F, modern: 0x25BA }; // 111
-    pub const MSG_PARTY_LEAVE: Opcode = Opcode { vanilla: 0x0071, ..Opcode::NONE }; // 113
+    pub const CMSG_GROUP_CANCEL: Opcode = Opcode { vanilla: 0x0070, ..Opcode::NONE }; // 112 // sent by the client, unused by the game
+    pub const SMSG_GROUP_CANCEL: Opcode = Opcode { vanilla: 0x0071, ..Opcode::NONE }; // 113
     pub const CMSG_GROUP_ACCEPT: Opcode = Opcode { vanilla: 0x0072, ..Opcode::NONE }; // 114
     pub const CMSG_GROUP_DECLINE: Opcode = Opcode { vanilla: 0x0073, ..Opcode::NONE }; // 115
     pub const SMSG_GROUP_DECLINE: Opcode = Opcode { vanilla: 0x0074, modern: 0x278B }; // 116
     pub const CMSG_GROUP_UNINVITE: Opcode = Opcode { vanilla: 0x0075, ..Opcode::NONE }; // 117
+    pub const CMSG_GROUP_UNINVITE_GUID: Opcode = Opcode { vanilla: 0x0076, modern: 0x364A }; // 118 // 1.14 calls it CMSG_PARTY_UNINVITE
     pub const SMSG_GROUP_UNINVITE: Opcode = Opcode { vanilla: 0x0077, modern: 0x278C }; // 119
     pub const CMSG_GROUP_SET_LEADER: Opcode = Opcode { vanilla: 0x0078, modern: 0x364D }; // 120
     pub const SMSG_GROUP_SET_LEADER: Opcode = Opcode { vanilla: 0x0079, modern: 0x2626 }; // 121
     pub const CMSG_LOOT_METHOD: Opcode = Opcode { vanilla: 0x007A, modern: 0x364B }; // 122
-    pub const CMSG_GROUP_DISBAND: Opcode = Opcode { vanilla: 0x007B, ..Opcode::NONE }; // 123
+    pub const CMSG_GROUP_DISBAND: Opcode = Opcode { vanilla: 0x007B, modern: 0x364C }; // 123 // 1.14 calls it CMSG_LEAVE_GROUP; both mean "leave"
     pub const SMSG_GROUP_DESTROYED: Opcode = Opcode { vanilla: 0x007C, modern: 0x278D }; // 124
     pub const SMSG_GROUP_LIST: Opcode = Opcode { vanilla: 0x007D, modern: 0x25EE }; // 125 // 1.14 calls it SMSG_PARTY_UPDATE
     pub const SMSG_PARTY_MEMBER_STATS: Opcode = Opcode { vanilla: 0x007E, modern: 0x274F }; // 126
@@ -742,6 +744,16 @@ impl Opcode {
     pub const MSG_RAID_READY_CHECK: Opcode = Opcode { vanilla: 0x0322, modern: 0x25EF }; // 802 // 1.14 calls it SMSG_READY_CHECK_STARTED
     // 1.14 answers a ready check on its own opcode; 1.12 reuses MSG_RAID_READY_CHECK for both.
     pub const SMSG_READY_CHECK_RESPONSE: Opcode = Opcode { modern: 0x25F0, ..Opcode::NONE };
+    pub const SMSG_READY_CHECK_COMPLETED: Opcode = Opcode { modern: 0x25F1, ..Opcode::NONE };
+    // 1.14 gives the client side of these exchanges its own opcodes; 1.12 sends the MSG_ form.
+    pub const CMSG_PARTY_INVITE_RESPONSE: Opcode = Opcode { modern: 0x3605, ..Opcode::NONE }; // accept or decline in one packet
+    pub const CMSG_DO_READY_CHECK: Opcode = Opcode { modern: 0x3635, ..Opcode::NONE };
+    pub const CMSG_READY_CHECK_RESPONSE: Opcode = Opcode { modern: 0x3636, ..Opcode::NONE };
+    pub const CMSG_UPDATE_RAID_TARGET: Opcode = Opcode { modern: 0x3653, ..Opcode::NONE };
+    pub const SMSG_SEND_RAID_TARGET_UPDATE_SINGLE: Opcode = Opcode { modern: 0x2628, ..Opcode::NONE };
+    pub const CMSG_MINIMAP_PING: Opcode = Opcode { modern: 0x364E, ..Opcode::NONE };
+    pub const CMSG_RANDOM_ROLL: Opcode = Opcode { modern: 0x3657, ..Opcode::NONE };
+    pub const CMSG_SET_EVERYONE_IS_ASSISTANT: Opcode = Opcode { modern: 0x3619, ..Opcode::NONE };
     pub const MSG_MINIMAP_PING: Opcode = Opcode { vanilla: 0x01D5, modern: 0x26C6 }; // 469 // 1.14 calls it SMSG_MINIMAP_PING
     pub const MSG_RANDOM_ROLL: Opcode = Opcode { vanilla: 0x01FB, modern: 0x2629 }; // 507 // 1.14 calls it SMSG_RANDOM_ROLL
 
@@ -756,7 +768,7 @@ impl Opcode {
     pub const SMSG_LOOT_RELEASE_RESPONSE: Opcode = Opcode { vanilla: 0x0161, modern: 0x2614 }; // 353
     pub const SMSG_LOOT_REMOVED: Opcode = Opcode { vanilla: 0x0162, modern: 0x260E }; // 354
     pub const SMSG_LOOT_MONEY_NOTIFY: Opcode = Opcode { vanilla: 0x0163, modern: 0x2615 }; // 355
-    pub const SMSG_LOOT_CLEAR_MONEY: Opcode = Opcode { vanilla: 0x0165, ..Opcode::NONE }; // 357
+    pub const SMSG_LOOT_CLEAR_MONEY: Opcode = Opcode { vanilla: 0x0165, modern: 0x2610 }; // 357 // 1.14 calls it SMSG_COIN_REMOVED
     pub const CMSG_LOOT_ROLL: Opcode = Opcode { vanilla: 0x02A0, modern: 0x3211 }; // 672
     pub const SMSG_LOOT_START_ROLL: Opcode = Opcode { vanilla: 0x02A1, modern: 0x2616 }; // 673
     pub const SMSG_LOOT_ROLL: Opcode = Opcode { vanilla: 0x02A2, modern: 0x2617 }; // 674
@@ -765,6 +777,7 @@ impl Opcode {
     pub const SMSG_LOOT_ROLL_WON: Opcode = Opcode { vanilla: 0x029F, modern: 0x261B }; // 671
     pub const SMSG_LOOT_ALL_PASSED: Opcode = Opcode { vanilla: 0x029E, modern: 0x261A }; // 670
     pub const SMSG_LOOT_ROLLS_COMPLETE: Opcode = Opcode { modern: 0x2619, ..Opcode::NONE }; // modern-only
+    pub const CMSG_OPT_OUT_OF_LOOT: Opcode = Opcode { modern: 0x34F6, ..Opcode::NONE }; // modern-only: auto-pass on rolls
 
     // ============================================================================
     // Trade
@@ -1798,7 +1811,25 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::CMSG_DEL_IGNORE, "CMSG_DEL_IGNORE"),
     (Opcode::CMSG_GROUP_INVITE, "CMSG_GROUP_INVITE"),
     (Opcode::SMSG_GROUP_INVITE, "SMSG_GROUP_INVITE"),
-    (Opcode::MSG_PARTY_LEAVE, "MSG_PARTY_LEAVE"),
+    (Opcode::CMSG_GROUP_CANCEL, "CMSG_GROUP_CANCEL"),
+    (Opcode::SMSG_GROUP_CANCEL, "SMSG_GROUP_CANCEL"),
+    (Opcode::CMSG_GROUP_UNINVITE_GUID, "CMSG_GROUP_UNINVITE_GUID"),
+    (Opcode::SMSG_READY_CHECK_COMPLETED, "SMSG_READY_CHECK_COMPLETED"),
+    (Opcode::CMSG_PARTY_INVITE_RESPONSE, "CMSG_PARTY_INVITE_RESPONSE"),
+    (Opcode::CMSG_DO_READY_CHECK, "CMSG_DO_READY_CHECK"),
+    (Opcode::CMSG_READY_CHECK_RESPONSE, "CMSG_READY_CHECK_RESPONSE"),
+    (Opcode::CMSG_UPDATE_RAID_TARGET, "CMSG_UPDATE_RAID_TARGET"),
+    (
+        Opcode::SMSG_SEND_RAID_TARGET_UPDATE_SINGLE,
+        "SMSG_SEND_RAID_TARGET_UPDATE_SINGLE",
+    ),
+    (Opcode::CMSG_MINIMAP_PING, "CMSG_MINIMAP_PING"),
+    (Opcode::CMSG_RANDOM_ROLL, "CMSG_RANDOM_ROLL"),
+    (
+        Opcode::CMSG_SET_EVERYONE_IS_ASSISTANT,
+        "CMSG_SET_EVERYONE_IS_ASSISTANT",
+    ),
+    (Opcode::CMSG_OPT_OUT_OF_LOOT, "CMSG_OPT_OUT_OF_LOOT"),
     (Opcode::CMSG_GROUP_ACCEPT, "CMSG_GROUP_ACCEPT"),
     (Opcode::CMSG_GROUP_DECLINE, "CMSG_GROUP_DECLINE"),
     (Opcode::SMSG_GROUP_DECLINE, "SMSG_GROUP_DECLINE"),
@@ -2547,8 +2578,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            662,
-            "expected 662 opcode constants; update this count deliberately when adding opcodes"
+            674,
+            "expected 674 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

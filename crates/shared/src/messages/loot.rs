@@ -215,14 +215,21 @@ impl ToWorldPacket for SmsgLootMoneyNotify {
 
 /// SMSG_LOOT_CLEAR_MONEY (0x0165)
 #[derive(Debug, Clone)]
-pub struct SmsgLootClearMoney;
+pub struct SmsgLootClearMoney {
+    pub loot_guid: ObjectGuid,
+}
 
 impl ToWorldPacket for SmsgLootClearMoney {
-    /// Empty in both protocols.
+    /// `SMSG_COIN_REMOVED` on 1.14: names the loot object whose coins went, matching the GUID
+    /// the loot window was opened with.
     fn to_modern(&self) -> Option<WorldPacket> {
-        Some(self.to_vanilla())
+        let mut writer = BitWriter::new();
+        let (high, low) = loot_guid128(&self.loot_guid);
+        writer.write_packed_guid_128(high, low); // LootObj
+        Some(writer.finish(Opcode::SMSG_LOOT_CLEAR_MONEY))
     }
 
+    /// Empty on 1.12: it always refers to the open window.
     fn to_vanilla(&self) -> WorldPacket {
         WorldPacket::new(Opcode::SMSG_LOOT_CLEAR_MONEY)
     }

@@ -1396,6 +1396,8 @@ pub struct MsgRaidTargetUpdate {
     pub target_icons: [ObjectGuid; 8],
     /// The one icon a mode-0 update changes: `(icon, target)`, an empty target clearing it.
     pub changed: Option<(u8, ObjectGuid)>,
+    /// Who placed the mark (1.14 single-icon form only).
+    pub changed_by: ObjectGuid,
 }
 
 impl ToWorldPacket for MsgRaidTargetUpdate {
@@ -1438,6 +1440,20 @@ impl ToWorldPacket for MsgRaidTargetUpdate {
     /// running to the end of the packet.
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
+
+        // A single change has its own 1.14 opcode, which also names the player who set it.
+        if self.mode == 0 {
+            if let Some((icon, target)) = self.changed {
+                writer.write_u8(0); // PartyIndex -- the real party; see `SmsgGroupList::to_modern`
+                writer.write_u8(icon); // Symbol
+                let (high, low) = target.to_guid128(DEFAULT_REALM_ID);
+                writer.write_packed_guid_128(high, low); // Target
+                let (by_high, by_low) = self.changed_by.to_guid128(DEFAULT_REALM_ID);
+                writer.write_packed_guid_128(by_high, by_low); // ChangedBy
+                return Some(writer.finish(Opcode::SMSG_SEND_RAID_TARGET_UPDATE_SINGLE));
+            }
+        }
+
         writer.write_u8(0); // PartyIndex -- the real party; see `SmsgGroupList::to_modern`
 
         let count = self
@@ -1515,6 +1531,28 @@ impl ToWorldPacket for MsgRaidReadyCheck {
                 Some(writer.finish(Opcode::SMSG_READY_CHECK_RESPONSE))
             }
         }
+    }
+}
+
+/// SMSG_READY_CHECK_COMPLETED - The ready check is over (1.14 only)
+///
+/// Sent once every member has answered or the check timed out; the 1.14 client closes its
+/// ready-check frame on it. 1.12 has no such message.
+#[derive(Debug, Clone, Copy)]
+pub struct SmsgReadyCheckCompleted;
+
+impl ToWorldPacket for SmsgReadyCheckCompleted {
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_READY_CHECK_COMPLETED)
+    }
+
+    /// i8 party index, then the party GUID the party update named.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (party_high, party_low) = modern_party_guid();
+        writer.write_u8(0); // PartyIndex -- see `SmsgGroupList::to_modern`
+        writer.write_packed_guid_128(party_high, party_low);
+        Some(writer.finish(Opcode::SMSG_READY_CHECK_COMPLETED))
     }
 }
 
@@ -1786,6 +1824,65 @@ mod tests {
         };
         let modern = msg.to_modern().expect("rolls complete must encode modern");
         assert_eq!(modern.opcode(), Opcode::SMSG_LOOT_ROLLS_COMPLETE);
+        assert!(!modern.data().is_empty());
+    }
+
+    #[test]
+    fn modern_group_client_opcodes_resolve() {
+        for (wire, opcode) in [
+            (0x3605u16, Opcode::CMSG_PARTY_INVITE_RESPONSE),
+            (0x364C, Opcode::CMSG_GROUP_DISBAND),
+            (0x364A, Opcode::CMSG_GROUP_UNINVITE_GUID),
+            (0x3635, Opcode::CMSG_DO_READY_CHECK),
+            (0x3636, Opcode::CMSG_READY_CHECK_RESPONSE),
+            (0x3653, Opcode::CMSG_UPDATE_RAID_TARGET),
+            (0x364E, Opcode::CMSG_MINIMAP_PING),
+            (0x3657, Opcode::CMSG_RANDOM_ROLL),
+            (0x3619, Opcode::CMSG_SET_EVERYONE_IS_ASSISTANT),
+            (0x34F6, Opcode::CMSG_OPT_OUT_OF_LOOT),
+        ] {
+            assert_eq!(Opcode::from_modern_wire(wire), Some(opcode), "0x{wire:04X}");
+        }
+        assert_eq!(
+            Opcode::from_vanilla_wire(0x0076),
+            Some(Opcode::CMSG_GROUP_UNINVITE_GUID)
+        );
+    }
+
+    #[test]
+    fn raid_target_single_change_uses_its_own_modern_opcode() {
+        let target = ObjectGuid::new_creature(100, 7);
+        let mut icons = [ObjectGuid::empty(); 8];
+        icons[7] = target;
+        let msg = MsgRaidTargetUpdate {
+            mode: 0,
+            target_icons: icons,
+            changed: Some((7, target)),
+            changed_by: ObjectGuid::new_player(1),
+        };
+        let modern = msg.to_modern().unwrap();
+        assert_eq!(modern.opcode(), Opcode::SMSG_SEND_RAID_TARGET_UPDATE_SINGLE);
+
+        // 1.12 mode 0 is exactly one pair: mode, icon, guid.
+        let vanilla = msg.to_vanilla();
+        assert_eq!(vanilla.data().len(), 1 + 1 + 8);
+        assert_eq!(vanilla.data()[0], 0);
+        assert_eq!(vanilla.data()[1], 7);
+
+        let full = MsgRaidTargetUpdate {
+            mode: 1,
+            target_icons: icons,
+            changed: None,
+            changed_by: ObjectGuid::empty(),
+        };
+        assert_eq!(full.to_modern().unwrap().opcode(), Opcode::MSG_RAID_TARGET_UPDATE);
+        assert_eq!(full.to_vanilla().data()[0], 1);
+    }
+
+    #[test]
+    fn ready_check_completed_is_modern() {
+        let modern = SmsgReadyCheckCompleted.to_modern().unwrap();
+        assert_eq!(modern.opcode(), Opcode::SMSG_READY_CHECK_COMPLETED);
         assert!(!modern.data().is_empty());
     }
 

@@ -42,6 +42,16 @@ const MEMBER_STATS_FULL: u32 = group_update_flags::STATUS
     | group_update_flags::LEVEL
     | group_update_flags::ZONE;
 
+/// How long a ready check stays open: the client's own countdown.
+const READY_CHECK_DURATION_MS: u64 = 35_000;
+
+/// An open ready check: who has answered, and how long is left.
+#[derive(Debug, Clone)]
+struct ReadyCheck {
+    answered: std::collections::HashSet<ObjectGuid>,
+    remaining_ms: u64,
+}
+
 /// How often grouped players' party-frame values are diffed for stat pushes.
 const MEMBER_SNAPSHOT_INTERVAL_MS: u64 = 1_000;
 
@@ -142,6 +152,13 @@ pub struct GroupSystem {
     /// Milliseconds accumulated towards the next snapshot diff.
     snapshot_elapsed_ms: std::sync::atomic::AtomicU64,
 
+    /// Open ready checks by group ID.
+    ready_checks: DashMap<u32, ReadyCheck>,
+
+    /// Players who chose to pass on all loot (1.14 `CMSG_OPT_OUT_OF_LOOT`); they are left out
+    /// of new rolls.
+    pub(super) passing_on_loot: dashmap::DashSet<ObjectGuid>,
+
     /// Arc to self, set once after construction, so periodic ticks can spawn
     /// long-running tasks (leader reassignment) that need `&GroupSystem`.
     pub(super) self_arc: std::sync::OnceLock<Arc<GroupSystem>>,
@@ -172,6 +189,8 @@ impl GroupSystem {
             leader_reassignments: dashmap::DashSet::new(),
             member_snapshots: DashMap::new(),
             snapshot_elapsed_ms: std::sync::atomic::AtomicU64::new(0),
+            ready_checks: DashMap::new(),
+            passing_on_loot: dashmap::DashSet::new(),
             self_arc: std::sync::OnceLock::new(),
         }
     }
@@ -574,6 +593,10 @@ impl GroupSystem {
         for member in &group.members {
             self.player_groups.remove(&member.guid);
         }
+        // Invites into a group that no longer exists are void.
+        self.pending_invites
+            .retain(|_, invite| invite.group_id != group_id);
+        self.ready_checks.remove(&group_id);
 
         // Phase 5: resolve any in-flight loot rolls so rolled items are not stranded.
         if let Some((_, rolls)) = self.loot_rolls.remove(&group_id) {
@@ -800,7 +823,7 @@ impl GroupSystem {
         Ok(())
     }
 
-    /// Leave the current group (MSG_PARTY_LEAVE or CMSG_GROUP_DISBAND for leader)
+    /// Leave the current group (CMSG_GROUP_DISBAND; 1.14's CMSG_LEAVE_GROUP)
     pub async fn leave_group(
         &self,
         world: &World,
@@ -893,6 +916,80 @@ impl GroupSystem {
         );
 
         Ok(())
+    }
+
+    /// Uninvite by GUID (1.12 CMSG_GROUP_UNINVITE_GUID, 1.14 CMSG_PARTY_UNINVITE).
+    ///
+    /// A member is kicked as by name. A player who was only invited, not yet a member, has the
+    /// invite withdrawn instead.
+    pub async fn uninvite_by_guid(
+        &self,
+        world: &World,
+        remover_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+    ) -> Result<(), GroupError> {
+        if target_guid == remover_guid {
+            return Err(GroupError::CannotTargetSelf);
+        }
+
+        if let Some(name) = self
+            .get_player_group(remover_guid)
+            .and_then(|g| g.get_member(target_guid).map(|m| m.name.clone()))
+        {
+            return self.uninvite_player(world, remover_guid, name).await;
+        }
+
+        // Withdraw an outstanding invite sent by this player or their group.
+        let group_id = self.get_player_group_id(remover_guid).unwrap_or(0);
+        if group_id != 0 {
+            let allowed = self
+                .get_group(group_id)
+                .is_some_and(|g| g.is_leader_or_assistant(remover_guid));
+            if !allowed {
+                return Err(GroupError::NotLeaderOrAssistant);
+            }
+        }
+        let withdrawn = self
+            .pending_invites
+            .remove_if(&target_guid, |_, invite| {
+                invite.inviter_guid == remover_guid || (group_id != 0 && invite.group_id == group_id)
+            })
+            .is_some();
+        if !withdrawn {
+            return Err(GroupError::MemberNotFound);
+        }
+
+        use oxcore_shared::messages::group::SmsgGroupUninvite;
+        self.broadcast_mgr
+            .send_msg_to_player(target_guid, SmsgGroupUninvite);
+        Ok(())
+    }
+
+    /// Make every other member an assistant, or none (1.14 CMSG_SET_EVERYONE_IS_ASSISTANT).
+    pub async fn set_everyone_assistant(
+        &self,
+        player_guid: ObjectGuid,
+        apply: bool,
+    ) -> Result<(), GroupError> {
+        let group = self
+            .get_player_group(player_guid)
+            .ok_or(GroupError::NotInGroup)?;
+        for member in &group.members {
+            if member.guid == player_guid || member.assistant == apply {
+                continue;
+            }
+            self.set_assistant(player_guid, member.guid, apply).await?;
+        }
+        Ok(())
+    }
+
+    /// Record a player's choice to pass on every roll (1.14 CMSG_OPT_OUT_OF_LOOT).
+    pub fn set_passing_on_loot(&self, player_guid: ObjectGuid, passing: bool) {
+        if passing {
+            self.passing_on_loot.insert(player_guid);
+        } else {
+            self.passing_on_loot.remove(&player_guid);
+        }
     }
 
     /// Add a member to an existing group
@@ -1537,6 +1634,7 @@ impl GroupSystem {
                     mode: 0,
                     target_icons,
                     changed: Some(changed),
+                    changed_by: player_guid,
                 };
                 self.broadcast_mgr.broadcast_msg_to_players(&members, &msg);
             }
@@ -1568,6 +1666,7 @@ impl GroupSystem {
             mode: 1, // full icon list
             target_icons: group.target_icons,
             changed: None,
+            changed_by: ObjectGuid::empty(),
         };
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
@@ -1589,19 +1688,33 @@ impl GroupSystem {
 
         // Broadcast ready check to all members
         use oxcore_shared::messages::group::MsgRaidReadyCheck;
-        if let Some(group) = self.get_group(group_id) {
-            let msg = MsgRaidReadyCheck {
-                player_guid,
-                ready: None, // None = initiate
-            };
+        let Some(group) = self.get_group(group_id) else {
+            return Ok(());
+        };
+        let msg = MsgRaidReadyCheck {
+            player_guid,
+            ready: None, // None = initiate
+        };
+        let members = group.get_member_guids();
+        self.broadcast_mgr.broadcast_msg_to_players(&members, &msg);
 
-            for member in &group.members {
-                self.broadcast_mgr
-                    .send_msg_to_player(member.guid, msg.clone());
-
-                tracing::debug!("Sent READY_CHECK to {:?}", member.guid);
-            }
-        }
+        // The initiator counts as ready; 1.14 frames show that straight away.
+        let mut answered = std::collections::HashSet::new();
+        answered.insert(player_guid);
+        self.ready_checks.insert(
+            group_id,
+            ReadyCheck {
+                answered,
+                remaining_ms: READY_CHECK_DURATION_MS,
+            },
+        );
+        let initiator_ready = MsgRaidReadyCheck {
+            player_guid,
+            ready: Some(true),
+        };
+        let modern = self.modern_members(&members);
+        self.broadcast_mgr
+            .broadcast_msg_to_players(&modern, &initiator_ready);
 
         tracing::info!("Ready check initiated by {:?}", player_guid);
 
@@ -1609,6 +1722,9 @@ impl GroupSystem {
     }
 
     /// Respond to ready check (MSG_RAID_READY_CHECK with state)
+    ///
+    /// 1.12 shows answers on the leader's frame only; 1.14 shows every answer to every member,
+    /// and closes the frame on SMSG_READY_CHECK_COMPLETED once all online members answered.
     pub async fn respond_ready_check(
         &self,
         player_guid: ObjectGuid,
@@ -1618,18 +1734,79 @@ impl GroupSystem {
             .get_player_group(player_guid)
             .ok_or(GroupError::NotInGroup)?;
 
-        // Answers go to the group leader, whose UI tallies them.
         use oxcore_shared::messages::group::MsgRaidReadyCheck;
         let msg = MsgRaidReadyCheck {
             player_guid,
             ready: Some(ready),
         };
-        self.broadcast_mgr
-            .send_msg_to_player(group.leader_guid, msg);
+        let members = group.get_member_guids();
+        let mut recipients = self.modern_members(&members);
+        if !recipients.contains(&group.leader_guid) {
+            recipients.push(group.leader_guid);
+        }
+        self.broadcast_mgr.broadcast_msg_to_players(&recipients, &msg);
+
+        let all_answered = self
+            .ready_checks
+            .get_mut(&group.id)
+            .map(|mut check| {
+                check.answered.insert(player_guid);
+                members
+                    .iter()
+                    .filter(|m| self.player_mgr.get_player(**m).is_some())
+                    .all(|m| check.answered.contains(m))
+            })
+            .unwrap_or(false);
+        if all_answered {
+            self.finish_ready_check(group.id);
+        }
 
         tracing::debug!("{:?} responded to ready check: {}", player_guid, ready);
 
         Ok(())
+    }
+
+    /// Close a group's ready check: 1.14 members get SMSG_READY_CHECK_COMPLETED.
+    fn finish_ready_check(&self, group_id: u32) {
+        if self.ready_checks.remove(&group_id).is_none() {
+            return;
+        }
+        let Some(group) = self.get_group(group_id) else {
+            return;
+        };
+        let modern = self.modern_members(&group.get_member_guids());
+        use oxcore_shared::messages::group::SmsgReadyCheckCompleted;
+        self.broadcast_mgr
+            .broadcast_msg_to_players(&modern, &SmsgReadyCheckCompleted);
+    }
+
+    /// Time out ready checks nobody finished answering.
+    fn update_ready_checks(&self, diff_ms: u64) {
+        let expired: Vec<u32> = self
+            .ready_checks
+            .iter_mut()
+            .filter_map(|mut entry| {
+                entry.remaining_ms = entry.remaining_ms.saturating_sub(diff_ms);
+                (entry.remaining_ms == 0).then_some(*entry.key())
+            })
+            .collect();
+        for group_id in expired {
+            self.finish_ready_check(group_id);
+        }
+    }
+
+    /// The subset of `guids` connected with a 1.14 client.
+    pub(super) fn modern_members(&self, guids: &[ObjectGuid]) -> Vec<ObjectGuid> {
+        use oxcore_shared::protocol::Protocol;
+        guids
+            .iter()
+            .copied()
+            .filter(|guid| {
+                self.player_mgr
+                    .get_broadcaster(*guid)
+                    .is_some_and(|b| b.protocol() == Protocol::Modern)
+            })
+            .collect()
     }
 
     // ========== COMMUNICATION ==========
@@ -1770,6 +1947,7 @@ impl GroupSystem {
             mode: 1, // Full icon list
             target_icons: group.target_icons,
             changed: None,
+            changed_by: ObjectGuid::empty(),
         };
         for member in &group.members {
             self.broadcast_mgr
@@ -2053,6 +2231,7 @@ impl GroupSystem {
         self.push_party_member_stats();
         // Phase 5: advance loot-roll timers; resolve any that expired.
         self.update_roll_timers(diff, world);
+        self.update_ready_checks(diff.as_millis() as u64);
         Ok(())
     }
 
@@ -2177,8 +2356,11 @@ impl GroupSystem {
     }
 
     pub async fn on_player_logout(&self, guid: ObjectGuid) -> Result<()> {
-        // Clear pending invites
+        // Clear pending invites to this player, and the ones they sent
         self.pending_invites.remove(&guid);
+        self.pending_invites
+            .retain(|_, invite| invite.inviter_guid != guid);
+        self.passing_on_loot.remove(&guid);
 
         // Get group_id before updating status
         let group_id = self.get_player_group_id(guid);
