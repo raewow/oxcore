@@ -39,9 +39,13 @@ pub fn is_dungeon_map(world: &World, map_id: u32) -> bool {
     map_entry(world, map_id).is_some_and(|entry| entry.is_dungeon())
 }
 
-/// No game-master mode is modelled yet, so nobody bypasses the entry rules.
-fn is_game_master(_world: &World, _player_guid: ObjectGuid) -> bool {
-    false
+/// Players in game-master mode (`.gm on`) bypass the entry rules.
+fn is_game_master(world: &World, player_guid: ObjectGuid) -> bool {
+    world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| player.gm_mode)
+        .unwrap_or(false)
 }
 
 fn group_context(

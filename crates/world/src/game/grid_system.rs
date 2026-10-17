@@ -85,7 +85,9 @@ impl GridSystem {
         // Active spawns keep their grids loaded whenever the map exists, so queue
         // them the first time the map is processed.
         if self.primed_maps.insert((map_id, instance_id)) {
-            for position in world.managers.creature_mgr.active_spawn_positions(map_id) {
+            let creatures = world.managers.creature_mgr.active_spawn_positions(map_id);
+            let gameobjects = world.managers.gameobject_mgr.active_spawn_positions(map_id);
+            for position in creatures.into_iter().chain(gameobjects) {
                 map.activate_grids_around(position);
             }
         }
@@ -268,6 +270,10 @@ impl GridSystem {
             .get_spawns_for_grid(map_id, grid_x, grid_y);
 
         for go_spawn in go_spawns {
+            if world.managers.gameobject_mgr.is_spawn_disabled(go_spawn.spawn_id) {
+                continue;
+            }
+
             if world
                 .managers
                 .gameobject_mgr
@@ -323,6 +329,10 @@ impl GridSystem {
                         go_spawn.position,
                         &mut grid_mgr,
                     );
+                }
+
+                if world.managers.gameobject_mgr.is_spawn_active(go_spawn.spawn_id) {
+                    map.add_to_active(guid, go_spawn.position);
                 }
 
                 // Register collision so LoS, pathfinding, and height queries see

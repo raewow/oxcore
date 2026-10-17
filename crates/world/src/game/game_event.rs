@@ -55,6 +55,8 @@ pub struct GameEventManager {
     active: RwLock<HashSet<u16>>,
     /// Events started by scripts or commands regardless of their schedule.
     forced: RwLock<HashSet<u16>>,
+    /// Events stopped by commands regardless of their schedule.
+    suppressed: RwLock<HashSet<u16>>,
 }
 
 impl GameEventManager {
@@ -142,6 +144,8 @@ impl GameEventManager {
             .filter(|(_, event)| event.is_running(now))
             .map(|(&id, _)| id)
             .collect();
+        let suppressed = self.suppressed.read();
+        active.retain(|id| !suppressed.contains(id));
         active.extend(self.forced.read().iter().copied());
         active
     }
@@ -153,10 +157,30 @@ impl GameEventManager {
     /// Start or stop an event from a script or command, regardless of schedule.
     pub fn set_forced(&self, event: u16, running: bool) {
         if running {
+            self.suppressed.write().remove(&event);
             self.forced.write().insert(event);
         } else {
             self.forced.write().remove(&event);
+            self.suppressed.write().insert(event);
         }
+    }
+
+    /// Hand an event back to its schedule.
+    pub fn clear_forced(&self, event: u16) {
+        self.forced.write().remove(&event);
+        self.suppressed.write().remove(&event);
+    }
+
+    /// Whether an event is known (loaded for this patch).
+    pub fn is_known(&self, event: u16) -> bool {
+        self.events.read().contains_key(&event)
+    }
+
+    /// Running events, sorted.
+    pub fn active_events(&self) -> Vec<u16> {
+        let mut ids: Vec<u16> = self.active.read().iter().copied().collect();
+        ids.sort_unstable();
+        ids
     }
 
     /// Whether a spawn may exist under the events running now.
@@ -180,15 +204,16 @@ impl GameEventManager {
         !has_positive || positive_running
     }
 
-    /// Recompute running events; returns the spawns whose eligibility may have changed.
-    fn advance(&self, now: i64) -> Vec<(EventSpawnKind, u32)> {
+    /// Recompute running events; returns the spawns whose eligibility may have
+    /// changed and the spawns linked to events that just started.
+    fn advance(&self, now: i64) -> (Vec<(EventSpawnKind, u32)>, Vec<(EventSpawnKind, u32)>) {
         let next = self.compute_active(now);
         let changed: Vec<u16> = {
             let current = self.active.read();
             current.symmetric_difference(&next).copied().collect()
         };
         if changed.is_empty() {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
         for id in &changed {
             tracing::info!(
@@ -197,8 +222,23 @@ impl GameEventManager {
                 if next.contains(id) { "started" } else { "stopped" }
             );
         }
-        *self.active.write() = next;
         let spawns = self.event_spawns.read();
+        let links = self.spawn_events.read();
+        let link_map = &*links;
+        let started: Vec<(EventSpawnKind, u32)> = changed
+            .iter()
+            .filter(|id| next.contains(id))
+            .filter_map(|id| spawns.get(id).map(|list| (*id, list)))
+            .flat_map(|(id, list)| {
+                list.iter()
+                    .filter(move |spawn| {
+                        link_map
+                            .get(spawn)
+                            .is_some_and(|events| events.contains(&(id as i16)))
+                    })
+                    .copied()
+            })
+            .collect();
         let mut affected: Vec<(EventSpawnKind, u32)> = changed
             .iter()
             .filter_map(|id| spawns.get(id))
@@ -207,7 +247,10 @@ impl GameEventManager {
             .collect();
         affected.sort_by_key(|(kind, id)| (*kind as u8, *id));
         affected.dedup();
-        affected
+        drop(spawns);
+        drop(links);
+        *self.active.write() = next;
+        (affected, started)
     }
 }
 
@@ -221,7 +264,48 @@ fn now_secs() -> i64 {
 /// Apply event transitions: spawn newly eligible objects whose grid is loaded,
 /// and remove objects whose event no longer allows them.
 pub fn update(world: &World) {
-    let affected = world.managers.game_event_mgr.advance(now_secs());
+    let (affected, started) = world.managers.game_event_mgr.advance(now_secs());
+
+    // A pool whose members belong to an event is that event's pool: it rolls a
+    // fresh selection each time the event starts.
+    let mut event_pools: Vec<(u32, u32)> = Vec::new();
+    for (kind, spawn_id) in &started {
+        use crate::game::coordination::pool_types::PoolMemberType;
+        let (member_kind, map_id) = match kind {
+            EventSpawnKind::Creature => (
+                PoolMemberType::Creature,
+                world
+                    .managers
+                    .creature_mgr
+                    .get_spawn_data_by_id(*spawn_id)
+                    .map(|s| s.map_id),
+            ),
+            EventSpawnKind::GameObject => (
+                PoolMemberType::GameObject,
+                world
+                    .managers
+                    .gameobject_mgr
+                    .get_spawn_data_by_id(*spawn_id)
+                    .map(|s| s.map_id),
+            ),
+        };
+        if let (Some(pool), Some(map_id)) =
+            (world.managers.pool_mgr.top_pool_of(member_kind, *spawn_id), map_id)
+        {
+            if !event_pools.contains(&(pool, map_id)) {
+                event_pools.push((pool, map_id));
+            }
+        }
+    }
+    for (pool, map_id) in event_pools {
+        for (map, instance_id) in world.managers.map_mgr.get_active_map_keys() {
+            if map == map_id {
+                world.systems.pool.despawn_pool(pool, instance_id, world);
+                world.systems.pool.spawn_pool(pool, instance_id, world);
+            }
+        }
+    }
+
     for (kind, spawn_id) in affected {
         let eligible = world.managers.game_event_mgr.is_spawn_eligible(kind, spawn_id);
         match kind {
@@ -355,6 +439,9 @@ fn update_gameobject(world: &World, spawn_id: u32, eligible: bool) {
                 .map_mgr
                 .get_or_create_map(spawn.map_id, instance_id);
             map.add_gameobject(guid, spawn.position);
+            if gameobject_mgr.is_spawn_active(spawn_id) {
+                map.add_to_active(guid, spawn.position);
+            }
             gameobject_mgr.add_collision_model(guid, &world.managers.vmap_mgr);
             for player in players_near(world, spawn.map_id, instance_id, spawn.position) {
                 if let Some(create) = gameobject_mgr.build_create_msg(guid, player, world) {
@@ -374,6 +461,7 @@ fn update_gameobject(world: &World, spawn_id: u32, eligible: bool) {
             for guid in guids {
                 if let Some(map) = world.managers.map_mgr.get_map(spawn.map_id, instance_id) {
                     map.remove_gameobject(guid, spawn.position);
+                    map.remove_from_active(guid);
                 }
                 let viewers = players_near(world, spawn.map_id, instance_id, spawn.position);
                 world
@@ -438,10 +526,12 @@ mod tests {
             5,
             vec![(EventSpawnKind::Creature, 1), (EventSpawnKind::Creature, 2)],
         );
-        let changed = mgr.advance(0);
+        let (changed, started) = mgr.advance(0);
         assert_eq!(changed.len(), 2);
+        // Only the positively linked spawn belongs to the event that started.
+        assert_eq!(started, vec![(EventSpawnKind::Creature, 1)]);
         assert!(mgr.is_spawn_eligible(EventSpawnKind::Creature, 1));
         assert!(!mgr.is_spawn_eligible(EventSpawnKind::Creature, 2));
-        assert!(mgr.advance(0).is_empty());
+        assert!(mgr.advance(0).0.is_empty());
     }
 }

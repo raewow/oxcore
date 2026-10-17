@@ -165,6 +165,12 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
             // Send VALUES update clearing combat flags and target
             send_combat_exit_update(world, creature_guid);
 
+            crate::game::instance::scripts::queue_creature_combat_event(
+                world,
+                creature_guid,
+                crate::game::instance::scripts::CreatureCombatEvent::Evade,
+            );
+
             tracing::debug!("[AI] Creature {:?} entering evade mode", creature_guid);
         }
 
@@ -252,6 +258,11 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                     super::types::AIEvent::CombatStarted {
                         initial_aggressor: target_guid,
                     },
+                );
+                crate::game::instance::scripts::queue_creature_combat_event(
+                    world,
+                    creature_guid,
+                    crate::game::instance::scripts::CreatureCombatEvent::EnterCombat,
                 );
             }
 

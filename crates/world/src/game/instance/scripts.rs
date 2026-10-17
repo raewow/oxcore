@@ -4,8 +4,8 @@
 //! when the copy loads and written back whenever the script changes its data,
 //! so doors, boss states and progress survive leaving, unloading and restarts.
 //! Callbacks fire exactly once per event: on load, when a creature or object
-//! is created in the copy, when a creature dies, when a player enters or
-//! leaves, and on a periodic update.
+//! is created in the copy, when a creature enters combat, evades or dies,
+//! when a player enters or leaves, and on a periodic update.
 
 use crate::core::lua::{CreatureScriptState, LuaAction};
 use crate::game::common::update_fields::GAMEOBJECT_STATE;
@@ -123,6 +123,80 @@ pub async fn on_creature_death(
         .lua_mgr
         .with_lua(|lua| script.on_creature_death(lua, &snapshot, entry, guid));
     apply(world, map_id, instance_id, Some(guid), actions).await;
+}
+
+/// A creature in a scripted copy entered combat.
+pub async fn on_creature_enter_combat(
+    world: &World,
+    map_id: u32,
+    instance_id: u32,
+    entry: u32,
+    guid: ObjectGuid,
+) {
+    let Some(script) = script_for(world, map_id, instance_id) else {
+        return;
+    };
+    let snapshot = snapshot(world, map_id, instance_id);
+    let actions = world
+        .managers
+        .lua_mgr
+        .with_lua(|lua| script.on_creature_enter_combat(lua, &snapshot, entry, guid));
+    apply(world, map_id, instance_id, Some(guid), actions).await;
+}
+
+/// A creature in a scripted copy evaded (left combat and went home).
+pub async fn on_creature_evade(
+    world: &World,
+    map_id: u32,
+    instance_id: u32,
+    entry: u32,
+    guid: ObjectGuid,
+) {
+    let Some(script) = script_for(world, map_id, instance_id) else {
+        return;
+    };
+    let snapshot = snapshot(world, map_id, instance_id);
+    let actions = world
+        .managers
+        .lua_mgr
+        .with_lua(|lua| script.on_creature_evade(lua, &snapshot, entry, guid));
+    apply(world, map_id, instance_id, Some(guid), actions).await;
+}
+
+/// Combat transitions reported from synchronous creature AI.
+#[derive(Debug, Clone, Copy)]
+pub enum CreatureCombatEvent {
+    EnterCombat,
+    Evade,
+}
+
+/// Run a creature's combat callback on its copy's script without waiting, for
+/// callers inside synchronous code.
+pub fn queue_creature_combat_event(world: &World, guid: ObjectGuid, event: CreatureCombatEvent) {
+    let Some((map_id, instance_id, entry)) = world
+        .managers
+        .creature_mgr
+        .with_creature(guid, |c| (c.map_id, c.instance_id, c.entry))
+    else {
+        return;
+    };
+    if script_for(world, map_id, instance_id).is_none() {
+        return;
+    }
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let world = world.clone();
+    handle.spawn(async move {
+        match event {
+            CreatureCombatEvent::EnterCombat => {
+                on_creature_enter_combat(&world, map_id, instance_id, entry, guid).await
+            }
+            CreatureCombatEvent::Evade => {
+                on_creature_evade(&world, map_id, instance_id, entry, guid).await
+            }
+        }
+    });
 }
 
 /// A player arrived in a scripted copy.

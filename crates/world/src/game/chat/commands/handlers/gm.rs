@@ -520,3 +520,88 @@ pub fn wchange_info() -> ChatCommandInfo {
         min_security: AccountType::GameMaster,
     }
 }
+
+/// `.event start|stop|reset <id>` and `.event list` - control world events.
+pub async fn cmd_event(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {
+    let mut parts = args.split_whitespace();
+    let action = parts.next().unwrap_or("list");
+    let events = &ctx.world.managers.game_event_mgr;
+    if action == "list" {
+        let active = events.active_events();
+        return Ok(if active.is_empty() {
+            "No game events are running".to_string()
+        } else {
+            format!(
+                "Running game events: {}",
+                active
+                    .iter()
+                    .map(u16::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        });
+    }
+    let Some(id) = parts.next().and_then(|v| v.parse::<u16>().ok()) else {
+        return Ok("Usage: .event start|stop|reset <id>, or .event list".to_string());
+    };
+    if !events.is_known(id) {
+        return Ok(format!("Game event {} is not loaded", id));
+    }
+    let message = match action {
+        "start" => {
+            events.set_forced(id, true);
+            format!("Game event {} started", id)
+        }
+        "stop" => {
+            events.set_forced(id, false);
+            format!("Game event {} stopped", id)
+        }
+        "reset" => {
+            events.clear_forced(id);
+            format!("Game event {} follows its schedule again", id)
+        }
+        _ => return Ok("Usage: .event start|stop|reset <id>, or .event list".to_string()),
+    };
+    // Apply the change to loaded grids right away.
+    crate::game::game_event::update(ctx.world);
+    Ok(message)
+}
+
+pub fn event_info() -> ChatCommandInfo {
+    ChatCommandInfo {
+        name: "event",
+        help: "Control world events. Usage: .event list | .event start|stop|reset <id>",
+        min_security: AccountType::GameMaster,
+    }
+}
+
+/// `.gm on|off` - game-master mode: bypass instance entry rules.
+pub async fn cmd_gm(ctx: &ChatCommandContext<'_>, args: &str) -> Result<String> {
+    let on = match args.trim() {
+        "on" => true,
+        "off" => false,
+        "" => {
+            let current = ctx
+                .world
+                .managers
+                .player_mgr
+                .with_player(ctx.player_guid, |p| p.gm_mode)
+                .unwrap_or(false);
+            return Ok(format!("GM mode is {}", if current { "on" } else { "off" }));
+        }
+        _ => return Ok("Usage: .gm on|off".to_string()),
+    };
+    ctx.world
+        .managers
+        .player_mgr
+        .with_player_mut(ctx.player_guid, |p| p.gm_mode = on);
+    Ok(format!("GM mode {}", if on { "on" } else { "off" }))
+}
+
+pub fn gm_info() -> ChatCommandInfo {
+    ChatCommandInfo {
+        name: "gm",
+        help: "Game-master mode (bypasses instance entry rules). Usage: .gm on|off",
+        min_security: AccountType::GameMaster,
+    }
+}

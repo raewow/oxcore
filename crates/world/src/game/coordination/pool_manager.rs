@@ -241,6 +241,16 @@ impl PoolManager {
         self.roll_roster(top, instance_id);
     }
 
+    /// The outermost pool a creature or gameobject spawn belongs to, if any.
+    pub fn top_pool_of(&self, kind: PoolMemberType, spawn_id: u32) -> Option<u32> {
+        let pool = match kind {
+            PoolMemberType::Creature => self.get_pool_for_creature(spawn_id)?,
+            PoolMemberType::GameObject => self.get_pool_for_gameobject(spawn_id)?,
+            PoolMemberType::Pool => spawn_id,
+        };
+        Some(self.top_pool(pool))
+    }
+
     /// Walk up to the pool that is not a member of another pool.
     fn top_pool(&self, pool_id: u32) -> u32 {
         let mut current = pool_id;

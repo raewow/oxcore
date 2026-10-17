@@ -96,4 +96,10 @@ pub fn register_all_commands(registry: &mut CommandRegistry) {
     registry.register(gm::port_info(), |ctx, args| {
         Box::pin(gm::cmd_teleport(ctx, args))
     });
+
+    // World events and GM mode
+    registry.register(gm::event_info(), |ctx, args| {
+        Box::pin(gm::cmd_event(ctx, args))
+    });
+    registry.register(gm::gm_info(), |ctx, args| Box::pin(gm::cmd_gm(ctx, args)));
 }

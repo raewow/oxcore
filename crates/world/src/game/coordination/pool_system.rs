@@ -251,6 +251,9 @@ impl PoolSystem {
             .spawn_gameobject(&spawn, instance_id)?;
 
         map.add_gameobject(guid, spawn.position);
+        if world.managers.gameobject_mgr.is_spawn_active(spawn_id) {
+            map.add_to_active(guid, spawn.position);
+        }
 
         world
             .managers
@@ -336,6 +339,7 @@ impl PoolSystem {
             .map_mgr
             .get_or_create_map(map_id, instance_id);
         map.remove_gameobject(guid, position);
+        map.remove_from_active(guid);
 
         self.send_destroy(guid, map_id, instance_id, position, world);
 

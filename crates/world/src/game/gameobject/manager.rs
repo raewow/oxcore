@@ -46,6 +46,10 @@ pub struct GameObjectManager {
     spawn_grid_index: DashMap<u32, SpawnGridIndex>,
     /// Track occupancy independently for each map instance.
     spawn_states: DashMap<SpawnKey, SpawnState>,
+    /// Spawns flagged active: they pre-load and pin their grids.
+    active_spawns: dashmap::DashSet<u32>,
+    /// Spawns flagged disabled: never placed in the world.
+    disabled_spawns: dashmap::DashSet<u32>,
     /// Track the owning spawn and instance for each gameobject GUID
     guid_to_spawn: DashMap<ObjectGuid, SpawnKey>,
     /// GUID counter
@@ -63,6 +67,8 @@ impl GameObjectManager {
             spawns_by_map: DashMap::new(),
             spawn_grid_index: DashMap::new(),
             spawn_states: DashMap::new(),
+            active_spawns: dashmap::DashSet::new(),
+            disabled_spawns: dashmap::DashSet::new(),
             guid_to_spawn: DashMap::new(),
             next_guid: AtomicU64::new(1),
             current_patch: std::sync::RwLock::new(10),
@@ -141,6 +147,33 @@ impl GameObjectManager {
             .get(&SpawnKey::new(map_id, instance_id, spawn_id))
             .map(|s| s.spawned)
             .unwrap_or(false)
+    }
+
+    /// Whether a spawn is flagged active (keeps its grid loaded).
+    pub fn is_spawn_active(&self, spawn_id: u32) -> bool {
+        self.active_spawns.contains(&spawn_id)
+    }
+
+    /// Whether a spawn is flagged disabled (never placed).
+    pub fn is_spawn_disabled(&self, spawn_id: u32) -> bool {
+        self.disabled_spawns.contains(&spawn_id)
+    }
+
+    /// Spawn points of a map's active, enabled gameobject spawns.
+    pub fn active_spawn_positions(&self, map_id: u32) -> Vec<Position> {
+        self.spawns_by_map
+            .get(&map_id)
+            .map(|spawns| {
+                spawns
+                    .iter()
+                    .filter(|s| {
+                        self.active_spawns.contains(&s.spawn_id)
+                            && !self.disabled_spawns.contains(&s.spawn_id)
+                    })
+                    .map(|s| s.position)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Get spawn data by spawn_id (for the pool system)
@@ -353,6 +386,7 @@ impl GameObjectManager {
                       rotation0, rotation1, rotation2, rotation3,
                       spawntimesecsmin::BIGINT AS spawntimesecsmin,
                       animprogress::BIGINT AS animprogress, state::BIGINT AS state,
+                      spawn_flags::BIGINT AS spawn_flags,
                       patch_min::BIGINT AS patch_min, patch_max::BIGINT AS patch_max
                FROM world.gameobject"#,
         )
@@ -398,6 +432,14 @@ impl GameObjectManager {
                 animprogress: checked_u8(row.animprogress, "gameobject.animprogress")?,
                 state: checked_u8(row.state, "gameobject.state")?,
             };
+
+            let flags = checked_u32(row.spawn_flags, "gameobject.spawn_flags")?;
+            if flags & crate::game::creature::spawn::spawn_flags::ACTIVE != 0 {
+                self.active_spawns.insert(spawn.spawn_id);
+            }
+            if flags & crate::game::creature::spawn::spawn_flags::DISABLED != 0 {
+                self.disabled_spawns.insert(spawn.spawn_id);
+            }
 
             self.spawns_by_map
                 .entry(spawn.map_id)
@@ -816,6 +858,7 @@ struct GameObjectSpawnRow {
     pub spawntimesecsmin: i64,
     pub animprogress: i64,
     pub state: i64,
+    pub spawn_flags: i64,
     pub patch_min: i64,
     pub patch_max: i64,
 }

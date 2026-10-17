@@ -158,6 +158,9 @@ pub struct Player {
     pub auction_access_mode: i8,
     /// Account ID that owns this character (used for per-account DB tables such as tutorial flags).
     pub account_id: u32,
+    /// Game-master mode (`.gm on`): exempt from instance entry rules and the
+    /// removal timer for unsaved players.
+    pub gm_mode: bool,
     /// Homebind map ID (hearthstone destination)
     pub homebind_map: u32,
     /// Homebind zone ID
@@ -274,6 +277,7 @@ impl Player {
             selection: None,
             auction_access_mode: 0,
             account_id: 0,
+            gm_mode: false,
             homebind_map: map_id,
             homebind_zone: zone_id,
             homebind_x: 0.0,
