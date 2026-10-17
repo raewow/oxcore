@@ -35,8 +35,7 @@ use oxcore_shared::messages::create::SmsgOutOfRange;
 use oxcore_shared::messages::login::{
     CharacterEnumEntry, EquipmentSlot, SmsgBindPointUpdate, SmsgCharEnum, SmsgInitWorldStates,
     SmsgInitialSetup, SmsgInitializeFactionsEmpty, SmsgLoadCufProfiles, SmsgLoginSetTimeSpeed,
-    SmsgLoginVerifyWorld, SmsgSetAllTaskProgress, SmsgSetRestStart, SmsgTimeSyncRequest,
-    SmsgWorldServerInfo,
+    SmsgLoginVerifyWorld, SmsgSetAllTaskProgress, SmsgSetRestStart, SmsgWorldServerInfo,
 };
 use oxcore_shared::messages::movement::{SmsgForceMoveRoot, SmsgForceMoveUnroot};
 use oxcore_shared::messages::social::SmsgStandstateUpdate;
@@ -1093,9 +1092,8 @@ pub async fn handle_player_login_with_guid(
         session.send_msg(SmsgInitialSetup::default())?;
         session.send_msg(SmsgLoadCufProfiles)?;
         // The client needs a time-sync reference before it will trust its own movement clock.
-        session.send_msg(SmsgTimeSyncRequest {
-            sequence_index: session.next_time_sync_index(),
-        })?;
+        // This also arms the periodic re-send the world tick drives; see `WorldSession::send_time_sync`.
+        session.send_time_sync()?;
         info!("[LOGIN] 1.1/11 modern enter-world packets sent");
     }
 

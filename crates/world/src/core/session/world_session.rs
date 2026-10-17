@@ -3,9 +3,11 @@
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::core::session::SessionState;
+use oxcore_shared::messages::login::SmsgTimeSyncRequest;
 use oxcore_shared::messages::ToWorldPacket;
 use oxcore_shared::protocol::{ObjectGuid, Position, Protocol, WorldPacket};
 
@@ -46,6 +48,11 @@ pub struct WorldSession {
     pending_root_ack: AtomicBool,
     /// Sequence index for the next `SMSG_TIME_SYNC_REQUEST`. Modern-only; a 1.12 client never sees a time sync.
     time_sync_next_index: AtomicU32,
+    /// When the next periodic `SMSG_TIME_SYNC_REQUEST` is due. `None` until the first request is sent.
+    ///
+    /// The client answers each request with its own tick count, which is only useful as drift
+    /// correction if the requests keep arriving; a single reference at login goes stale.
+    time_sync_due: RwLock<Option<Instant>>,
     /// The connection serving this session should shut down once its queued packets are out.
     ///
     /// Only the modern driver acts on this, and only the world ("instance") socket ever gets it
@@ -93,6 +100,7 @@ impl WorldSession {
             logout_timer: RwLock::new(None),
             login_in_progress: AtomicBool::new(false),
             time_sync_next_index: AtomicU32::new(0),
+            time_sync_due: RwLock::new(None),
             auction_list_request_in_progress: AtomicBool::new(false),
             pending_teleport: Arc::new(RwLock::new(None)),
             pending_near_teleport: Arc::new(RwLock::new(None)),
@@ -305,12 +313,43 @@ impl WorldSession {
             .is_ok()
     }
 
-    /// Take the next time-sync sequence index, so a response can be matched to its request.
+    /// Send `SMSG_TIME_SYNC_REQUEST` and schedule the next one.
     ///
-    /// Increments after each send. The client echoes whatever it was given, so a
-    /// monotonic counter still matches responses uniquely.
-    pub fn next_time_sync_index(&self) -> u32 {
-        self.time_sync_next_index.fetch_add(1, Ordering::Relaxed)
+    /// Modern-only: 1.12 has no time sync, so a vanilla session never reaches here and the message
+    /// drops on its own (it has no vanilla opcode). The first request goes out at login; thereafter
+    /// the world tick calls [`Self::take_due_time_sync`] and re-sends. TrinityCore schedules the
+    /// first two requests 5 s apart and the rest every 10 s (`WorldSession::SendTimeSync`), and the
+    /// client's answer is only meaningful if the requests keep coming — one reference at login
+    /// leaves the client clock drifting against the server's.
+    pub fn send_time_sync(&self) -> anyhow::Result<()> {
+        let sequence_index = self.time_sync_next_index.fetch_add(1, Ordering::Relaxed);
+        // The first two are 5 s apart, everything after is 10 s (TrinityCore WorldSession::SendTimeSync).
+        let delay = if sequence_index == 0 {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_secs(10)
+        };
+        *self.time_sync_due.write() = Some(Instant::now() + delay);
+        self.send_msg(SmsgTimeSyncRequest { sequence_index })
+    }
+
+    /// Consume a due periodic time sync. Returns `true` at most once per scheduled interval, and
+    /// only after [`Self::send_time_sync`] has armed the timer.
+    pub fn take_due_time_sync(&self) -> bool {
+        let mut due = self.time_sync_due.write();
+        match *due {
+            Some(at) if at <= Instant::now() => {
+                *due = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Arm the periodic time sync as already due. Tests only — the real schedule is 5 s/10 s.
+    #[cfg(test)]
+    pub(crate) fn force_time_sync_due(&self) {
+        *self.time_sync_due.write() = Some(Instant::now());
     }
 
     /// Clear the login-in-progress flag

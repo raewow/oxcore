@@ -666,6 +666,9 @@ impl World {
 
         self.session_mgr.update_logout_timers(self).await?;
 
+        // Keep the 1.14 client's clock reference fresh (periodic SMSG_TIME_SYNC_REQUEST).
+        self.session_mgr.update_time_sync();
+
         if let Ok(_) = self
             .command_registry
             .read()

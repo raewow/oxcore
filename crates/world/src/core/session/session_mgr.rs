@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
-use crate::core::session::{SessionState, WorldSession};
-use oxcore_shared::protocol::ObjectGuid;
+use crate::core::session::WorldSession;
+use oxcore_shared::protocol::{ObjectGuid, Protocol};
 
 /// Manages all active world sessions
 pub struct SessionManager {
@@ -243,6 +243,29 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Re-send `SMSG_TIME_SYNC_REQUEST` to every in-world modern session whose timer has come due.
+    ///
+    /// Called once per world tick. The first request is sent at login; this keeps the client's
+    /// clock reference fresh, which only a 1.14 session uses (a 1.12 session has no time sync and
+    /// is never armed). No-op for a tick where nothing is due.
+    pub fn update_time_sync(&self) {
+        for entry in self.sessions.iter() {
+            let session = entry.value();
+            if session.protocol() != Protocol::Modern || !session.is_logged_in() {
+                continue;
+            }
+            if session.take_due_time_sync() {
+                if let Err(e) = session.send_time_sync() {
+                    debug!(
+                        "[TIME_SYNC] Failed to re-send time sync for session {}: {}",
+                        session.id(),
+                        e
+                    );
+                }
+            }
+        }
+    }
+
     /// Logout every active player during server shutdown, preserving the normal
     /// logout save path before sessions and sockets are torn down.
     pub async fn logout_all_players(&self, world: &crate::World) -> anyhow::Result<()> {
@@ -329,8 +352,8 @@ impl Default for SessionManager {
 #[cfg(test)]
 mod tests {
     use super::SessionManager;
-    use crate::core::session::WorldSession;
-    use oxcore_shared::protocol::{Protocol, WorldPacket};
+    use crate::core::session::{SessionState, WorldSession};
+    use oxcore_shared::protocol::{Opcode, Protocol, WorldPacket};
     use std::sync::Arc;
 
     fn session(id: u32, account_id: u32) -> Arc<WorldSession> {
@@ -357,5 +380,78 @@ mod tests {
 
         sessions.remove_session(2);
         assert_eq!(sessions.get_realm_session_by_account(7).unwrap().id(), 1);
+    }
+
+    #[test]
+    fn periodic_time_sync_resends_only_when_due() {
+        let sessions = SessionManager::new();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WorldPacket>();
+        let session = Arc::new(WorldSession::new_with_protocol(
+            1,
+            7,
+            "account".to_string(),
+            0,
+            Protocol::Modern,
+            tx,
+        ));
+        session.set_state(SessionState::LoggedIn);
+        sessions.add_session(session.clone());
+
+        // The login-time request arms the 5 s timer and emits its packet.
+        session.send_time_sync().unwrap();
+        let first = rx.try_recv().expect("first time sync packet");
+        assert_eq!(first.opcode(), Opcode::SMSG_TIME_SYNC_REQUEST);
+
+        // Not due yet: the tick must not send anything.
+        sessions.update_time_sync();
+        assert!(rx.try_recv().is_err(), "time sync fired before it was due");
+
+        // Once due, the tick re-sends.
+        session.force_time_sync_due();
+        sessions.update_time_sync();
+        let second = rx.try_recv().expect("periodic time sync packet");
+        assert_eq!(second.opcode(), Opcode::SMSG_TIME_SYNC_REQUEST);
+    }
+
+    #[test]
+    fn periodic_time_sync_skips_vanilla_sessions() {
+        let sessions = SessionManager::new();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WorldPacket>();
+        let session = Arc::new(WorldSession::new_with_protocol(
+            1,
+            7,
+            "account".to_string(),
+            0,
+            Protocol::Vanilla,
+            tx,
+        ));
+        session.set_state(SessionState::LoggedIn);
+        sessions.add_session(session.clone());
+
+        // Even with the timer due, a 1.12 session must never see a time sync.
+        session.force_time_sync_due();
+        sessions.update_time_sync();
+        assert!(rx.try_recv().is_err(), "vanilla session got a time sync");
+    }
+
+    #[test]
+    fn periodic_time_sync_skips_sessions_not_in_world() {
+        let sessions = SessionManager::new();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WorldPacket>();
+        let session = Arc::new(WorldSession::new_with_protocol(
+            1,
+            7,
+            "account".to_string(),
+            0,
+            Protocol::Modern,
+            tx,
+        ));
+        // Still at character select: the login-time request has not been sent yet, so nothing is due.
+        session.set_state(SessionState::Authenticated);
+        sessions.add_session(session.clone());
+
+        session.force_time_sync_due();
+        sessions.update_time_sync();
+        assert!(rx.try_recv().is_err(), "unlogged session got a time sync");
     }
 }
