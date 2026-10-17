@@ -177,12 +177,20 @@ impl VisibilitySubsystem {
                 });
         }
 
+        // Visibility is mutual: when this player loses sight of another player, that
+        // player loses sight of this one too. Queue the removal on their side as
+        // well; otherwise their own next diff no longer sees anything to remove and
+        // their client keeps a stale object.
         for &target_guid in &disappeared {
             world
                 .managers
                 .player_mgr
                 .with_player_mut(target_guid, |target| {
-                    target.visibility.visible_objects.remove(&player_guid);
+                    if target.visibility.visible_objects.remove(&player_guid)
+                        && !target.visibility.pending_disappeared.contains(&player_guid)
+                    {
+                        target.visibility.pending_disappeared.push(player_guid);
+                    }
                 });
         }
 
