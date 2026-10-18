@@ -61,6 +61,9 @@ pub struct MovementState {
     pub movement_flags: u32,
     /// Last movement packet timestamp (for anti-cheat)
     pub last_movement_time: u32,
+    /// Last spot the player stood on of their own accord (a little above
+    /// it), where a fall through the world puts them back.
+    pub safe_position: Option<Position>,
     /// Water walking enabled (ghost form, Path of Frost, etc.)
     pub water_walking: bool,
     /// Hover enabled (Levitate-like auras)
@@ -92,6 +95,7 @@ impl Default for MovementState {
             transport_time: None,
             movement_flags: 0,
             last_movement_time: 0,
+            safe_position: None,
             water_walking: false,
             hover: false,
             feather_fall: false,

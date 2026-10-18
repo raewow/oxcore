@@ -251,6 +251,9 @@ pub struct Config {
     pub accurate_pvp_rewards: Option<bool>, // Use accurate PvP reward formulas (default: false)
     #[serde(default = "default_wow_patch")]
     pub wow_patch: Option<u32>, // WoW patch version (e.g., 112 for 1.12, default: 112)
+    /// The Stuck spell returns a stuck player to their last safe spot (default: true).
+    #[serde(default = "default_true")]
+    pub cast_unstuck: bool,
 
     // Talent Reset (Respec) Settings
     #[serde(default = "default_respec_base_cost")]
@@ -763,6 +766,7 @@ impl Default for Config {
             auto_honor_restart: None,
             accurate_pvp_rewards: None,
             wow_patch: default_wow_patch(),
+            cast_unstuck: true,
             respec_base_cost: default_respec_base_cost(),
             respec_multiplicative_cost: default_respec_multiplicative_cost(),
             respec_min_multiplier: default_respec_min_multiplier(),

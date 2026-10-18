@@ -193,15 +193,34 @@ pub async fn effect_teleport_units_face_caster(
 
 /// Stuck effect (84)
 ///
-/// Teleport player to their Hearthstone location (unstuck).
-/// Emergency teleport for stuck players.
+/// Return a stuck player to the last spot they stood on of their own accord,
+/// on the same map.
 pub async fn effect_stuck(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = input.target_guid.unwrap_or(input.caster_guid);
-
-    // TODO: Get home bind location and teleport there
-
-    tracing::debug!("Stuck teleport: target={:?} to home bind", target_guid);
-
+    if !world.config.cast_unstuck {
+        return Ok(EffectResult::empty());
+    }
+    let Some((map_id, safe)) = world
+        .managers
+        .player_mgr
+        .with_player(target_guid, |player| (player.map_id, player.movement.safe_position))
+    else {
+        return Ok(EffectResult::empty());
+    };
+    let Some(safe) = safe.filter(|safe| safe.x.abs() > 0.1 && safe.y.abs() > 0.1) else {
+        return Ok(EffectResult::empty());
+    };
+    tracing::info!(
+        "Player {:?} used unstuck on map {}, back to ({:.1}, {:.1}, {:.1})",
+        target_guid,
+        map_id,
+        safe.x,
+        safe.y,
+        safe.z
+    );
+    // The saved spot is lifted for falls; land just above the ground instead.
+    let dest = Position::new(safe.x, safe.y, safe.z - 2.0 + 0.7, safe.o);
+    teleport::teleport_to(world, target_guid, map_id, dest, 0).await?;
     Ok(EffectResult::empty())
 }
 

@@ -67,11 +67,6 @@ pub async fn teleport_to(
     let Some(entry) = lifecycle::map_entry(world, map_id) else {
         return Ok(false);
     };
-    // Battlegrounds are only entered through their queue, which assigns the
-    // player to a match; nothing else may send a player there.
-    if entry.is_battleground() {
-        return Ok(false);
-    }
     let Some((current_map, looting)) = world
         .managers
         .player_mgr
@@ -79,6 +74,12 @@ pub async fn teleport_to(
     else {
         return Ok(false);
     };
+    // Battlegrounds are only entered through their queue, which assigns the
+    // player to a match; nothing else may send a player there. Moves inside
+    // the battleground they are in are fine.
+    if entry.is_battleground() && current_map != map_id {
+        return Ok(false);
+    }
 
     let near = current_map == map_id && options & options::FORCE_MAP_CHANGE == 0;
 
@@ -334,17 +335,25 @@ pub async fn bind_home(world: &World, player_guid: ObjectGuid, binder: ObjectGui
     use oxcore_db::database::characters::PgCharacterRepository;
     use oxcore_shared::messages::login::{SmsgBindPointUpdate, SmsgPlayerBound};
 
-    let Some((character, map_id, zone_id, position)) = world
+    let Some((map_id, zone_id, position)) =
+        world.managers.player_mgr.with_player(player_guid, |player| {
+            (player.map_id, player.zone_id, player.movement.position)
+        })
+    else {
+        return Ok(());
+    };
+    // The home is named after the area (sub-zone) the player stands in.
+    let area_id = area_at(world, map_id, position).unwrap_or(zone_id);
+    let Some(character) = world
         .managers
         .player_mgr
         .with_player_mut(player_guid, |player| {
-            let position = player.movement.position;
-            player.homebind_map = player.map_id;
-            player.homebind_zone = player.zone_id;
+            player.homebind_map = map_id;
+            player.homebind_zone = area_id;
             player.homebind_x = position.x;
             player.homebind_y = position.y;
             player.homebind_z = position.z;
-            (player.guid.counter(), player.map_id, player.zone_id, position)
+            player.guid.counter()
         })
     else {
         return Ok(());
@@ -356,7 +365,7 @@ pub async fn bind_home(world: &World, player_guid: ObjectGuid, binder: ObjectGui
         .save_homebind(
             i64::from(character),
             i64::from(map_id),
-            i64::from(zone_id),
+            i64::from(area_id),
             position.x,
             position.y,
             position.z,
@@ -374,15 +383,37 @@ pub async fn bind_home(world: &World, player_guid: ObjectGuid, binder: ObjectGui
             y: position.y,
             z: position.z,
             map_id,
-            zone_id,
+            zone_id: area_id,
         },
     );
     broadcast.send_msg_to_player(
         player_guid,
-        SmsgPlayerBound {
-            binder,
-            area_id: zone_id,
-        },
+        SmsgPlayerBound { binder, area_id },
     );
     Ok(())
+}
+
+/// The AreaTable area at a spot, from the terrain's area flag.
+fn area_at(world: &World, map_id: u32, position: Position) -> Option<u32> {
+    let flag = u32::from(
+        world
+            .managers
+            .terrain_mgr
+            .get(map_id)
+            .get_area_flag(position.x, position.y),
+    );
+    if flag == 0 || flag == 0xFFFF {
+        return None;
+    }
+    let dbc = world.dbc.read();
+    let mut fallback = None;
+    for (_, area) in dbc.area_table.entries() {
+        if area.explore_flag == flag {
+            if area.map_id == map_id {
+                return Some(area.id);
+            }
+            fallback.get_or_insert(area.id);
+        }
+    }
+    fallback
 }

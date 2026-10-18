@@ -283,6 +283,9 @@ impl MovementSystem {
             new_pos,
         );
 
+        // 7.2. Remember solid ground, and catch a fall through the world.
+        check_fall_through_world(player_guid, map_id, new_pos, movement_info.flags, world).await?;
+
         // 7.5. Check if movement should interrupt auras (food/drink)
         // Only check if player actually moved (not just turned)
         if (old_pos.x - new_pos.x).abs() > 0.01
@@ -482,6 +485,130 @@ impl MovementSystem {
 
         Ok(())
     }
+}
+
+/// Keep the player's last safe spot up to date while they move on their own,
+/// and rescue a player who fell through the world: one far below the ground
+/// goes back to that spot, one below the void floor takes damage (all of it
+/// in a battleground, half elsewhere) and goes to a graveyard.
+pub(crate) async fn check_fall_through_world(
+    player_guid: ObjectGuid,
+    map_id: u32,
+    pos: Position,
+    flags: MoveFlags,
+    world: &World,
+) -> Result<()> {
+    use crate::game::player::teleport;
+
+    /// How far below the ground a falling player counts as under the map.
+    const UNDERMAP_DEPTH: f32 = 100.0;
+    /// A safe spot further than this (2D) is no longer trusted.
+    const SAFE_POSITION_RANGE: f32 = 100.0;
+    /// Saved spots sit this far above where the player stood.
+    const SAFE_POSITION_LIFT: f32 = 5.0;
+    /// Below this height the player has fallen out of the world.
+    const VOID_Z: f32 = -500.0;
+    /// Warsong Gulch has no ground below this height.
+    const WARSONG_GULCH: u32 = 489;
+    const WARSONG_GULCH_FLOOR: f32 = 250.0;
+
+    if let Some(session) = world.session_mgr.get_session_by_player(player_guid) {
+        if session.get_pending_teleport().is_some() || session.get_pending_near_teleport().is_some() {
+            return Ok(());
+        }
+    }
+    let Some((controlled, game_master, alive, health)) =
+        world.managers.player_mgr.with_player(player_guid, |player| {
+            (
+                player.charmer_guid.is_some(),
+                player.gm_mode,
+                player.is_alive(),
+                player.stats.health,
+            )
+        })
+    else {
+        return Ok(());
+    };
+
+    if flags.has_flag(MoveFlags::FALLINGFAR) {
+        let ground = world.managers.terrain_mgr.get(map_id).get_height_static(
+            pos.x,
+            pos.y,
+            pos.z,
+            Some(&world.managers.vmap_mgr),
+            50.0,
+        );
+        let under_map = (ground > oxcore_map::terrain::INVALID_HEIGHT
+            && pos.z + UNDERMAP_DEPTH < ground)
+            || (map_id == WARSONG_GULCH && pos.z < WARSONG_GULCH_FLOOR);
+        if under_map {
+            let safe = world
+                .managers
+                .player_mgr
+                .with_player_mut(player_guid, |player| player.movement.safe_position.take())
+                .flatten()
+                .filter(|safe| {
+                    (safe.x - pos.x).hypot(safe.y - pos.y) <= SAFE_POSITION_RANGE
+                });
+            if let Some(safe) = safe {
+                tracing::info!(
+                    "Player {:?} fell under map {} at ({:.1}, {:.1}, {:.1}); back to a safe spot",
+                    player_guid,
+                    map_id,
+                    pos.x,
+                    pos.y,
+                    pos.z
+                );
+                teleport::teleport_to(
+                    world,
+                    player_guid,
+                    map_id,
+                    safe,
+                    teleport::options::NOT_LEAVE_COMBAT | teleport::options::NOT_UNSUMMON_PET,
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+    } else if !controlled {
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.movement.safe_position =
+                    Some(Position::new(pos.x, pos.y, pos.z + SAFE_POSITION_LIFT, 0.0));
+            });
+    }
+
+    if pos.z < VOID_Z && !game_master {
+        if alive {
+            let in_battleground = crate::game::instance::lifecycle::map_entry(world, map_id)
+                .is_some_and(|entry| entry.is_battleground());
+            let damage = if in_battleground { health } else { health / 2 };
+            world.systems.environment.environmental_damage(
+                player_guid,
+                crate::game::player::environment::EnvironmentalDamageType::FallToVoid,
+                damage,
+                world,
+            );
+            let died = world
+                .managers
+                .player_mgr
+                .with_player(player_guid, |player| !player.is_alive())
+                .unwrap_or(false);
+            if died {
+                // Releasing the spirit also carries the ghost to a graveyard.
+                return world.systems.death.handle_release_spirit(player_guid, world);
+            }
+        }
+        tracing::info!(
+            "Player {:?} fell out of map {}; sending them to a graveyard",
+            player_guid,
+            map_id
+        );
+        world.systems.death.repop_at_graveyard(player_guid, world)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -1606,9 +1606,11 @@ mod tests {
         let destination = Position::new(125.0, -75.0, 30.0, 1.5);
         session.set_pending_near_teleport(Some(destination));
 
+        // The 1.12 ack: mover, move counter, client time.
         let mut packet = WorldPacket::new(Opcode::MSG_MOVE_TELEPORT_ACK);
         packet.write_packed_guid_raw(player_guid.raw());
-        write_client_movement_info(&mut packet);
+        packet.write_u32(1);
+        packet.write_u32(100);
         handle_move_teleport_ack(&session, &mut packet, &world)
             .await
             .unwrap();
@@ -1623,6 +1625,130 @@ mod tests {
         assert_eq!(position.y, destination.y);
         assert_eq!(position.z, destination.z);
         assert_eq!(position.o, destination.o);
+    }
+
+    fn add_map(world: &World, map_id: u32) {
+        world.dbc.write().map.insert(
+            map_id,
+            crate::dbc::structures::MapEntry {
+                id: map_id,
+                ..Default::default()
+            },
+        );
+    }
+
+    fn summon_response(player_guid: ObjectGuid) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::CMSG_SUMMON_RESPONSE);
+        packet.write_guid_raw(player_guid.raw());
+        packet
+    }
+
+    #[tokio::test]
+    async fn accepted_summon_teleports_to_the_offered_spot() {
+        let mut world = test_world();
+        let (session, mut rx) = add_test_player(&mut world);
+        let player_guid = session.player_guid().expect("player guid");
+        add_map(&world, 0);
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.summon_offer = Some(crate::game::player::player::SummonOffer {
+                    map_id: 0,
+                    position: Position::new(10.0, 20.0, 30.0, 0.0),
+                    expires_at: std::time::Instant::now() + std::time::Duration::from_secs(60),
+                });
+            });
+
+        handle_summon_response(&session, &mut summon_response(player_guid), &world)
+            .await
+            .unwrap();
+
+        let pending = session.get_pending_near_teleport().expect("near teleport queued");
+        assert_eq!((pending.x, pending.y, pending.z), (10.0, 20.0, 30.0));
+        assert!(world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| player.summon_offer.is_none())
+            .unwrap());
+        let mut opcodes = Vec::new();
+        while let Ok(packet) = rx.try_recv() {
+            opcodes.push(packet.opcode());
+        }
+        assert!(opcodes.contains(&Opcode::MSG_MOVE_TELEPORT_ACK));
+    }
+
+    #[tokio::test]
+    async fn lapsed_summon_offer_is_ignored() {
+        let mut world = test_world();
+        let (session, _rx) = add_test_player(&mut world);
+        let player_guid = session.player_guid().expect("player guid");
+        add_map(&world, 0);
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| {
+                player.summon_offer = Some(crate::game::player::player::SummonOffer {
+                    map_id: 0,
+                    position: Position::new(10.0, 20.0, 30.0, 0.0),
+                    expires_at: std::time::Instant::now() - std::time::Duration::from_secs(1),
+                });
+            });
+
+        handle_summon_response(&session, &mut summon_response(player_guid), &world)
+            .await
+            .unwrap();
+
+        assert!(session.get_pending_near_teleport().is_none());
+    }
+
+    #[tokio::test]
+    async fn grounded_moves_save_a_safe_spot_and_a_fall_under_the_map_returns_to_it() {
+        use crate::core::common::MoveFlags;
+        use crate::game::player::movement::system::check_fall_through_world;
+
+        const WARSONG_GULCH: u32 = 489;
+        let mut world = test_world();
+        let (session, _rx) = add_test_player(&mut world);
+        let player_guid = session.player_guid().expect("player guid");
+        world.dbc.write().map.insert(
+            WARSONG_GULCH,
+            crate::dbc::structures::MapEntry {
+                id: WARSONG_GULCH,
+                map_type: crate::dbc::structures::MapEntry::BATTLEGROUND,
+                ..Default::default()
+            },
+        );
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| player.map_id = WARSONG_GULCH);
+
+        let ground = Position::new(1000.0, 1400.0, 340.0, 0.0);
+        check_fall_through_world(player_guid, WARSONG_GULCH, ground, MoveFlags::NONE, &world)
+            .await
+            .unwrap();
+        let safe = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |player| player.movement.safe_position)
+            .flatten()
+            .expect("safe spot saved");
+        assert_eq!((safe.x, safe.y, safe.z), (1000.0, 1400.0, 345.0));
+
+        // Falling below the battleground's floor goes back to the saved spot.
+        let fallen = Position::new(1010.0, 1405.0, 200.0, 0.0);
+        check_fall_through_world(
+            player_guid,
+            WARSONG_GULCH,
+            fallen,
+            MoveFlags::FALLINGFAR,
+            &world,
+        )
+        .await
+        .unwrap();
+        let pending = session.get_pending_near_teleport().expect("recalled");
+        assert_eq!((pending.x, pending.y, pending.z), (1000.0, 1400.0, 345.0));
     }
 
     #[tokio::test]
