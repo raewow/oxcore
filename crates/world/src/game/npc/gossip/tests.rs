@@ -4,7 +4,8 @@
 //! - TRAINER and VENDOR gossip options must NOT send SMSG_GOSSIP_COMPLETE before
 //!   their respective windows are opened (CloseGossip() is never called first).
 //! - BANKER must send SMSG_SHOW_BANK with the banker GUID.
-//! - Other options such as INNKEEPER must send SMSG_GOSSIP_COMPLETE.
+//! - Other options such as INNKEEPER must send SMSG_GOSSIP_COMPLETE; the
+//!   innkeeper then asks the player to confirm the new home.
 
 use std::sync::Arc;
 
@@ -192,7 +193,8 @@ async fn armorer_option_does_not_send_gossip_complete() {
     assert_packet_not_sent(&captured, Opcode::SMSG_GOSSIP_COMPLETE);
 }
 
-/// INNKEEPER option MUST send SMSG_GOSSIP_COMPLETE (different branch).
+/// INNKEEPER option MUST send SMSG_GOSSIP_COMPLETE (different branch), then
+/// the bind confirmation naming the innkeeper.
 #[tokio::test]
 async fn innkeeper_option_sends_gossip_complete() {
     let (system, guid, captured) = setup_with_option(gossip_option::INNKEEPER).await;
@@ -203,6 +205,12 @@ async fn innkeeper_option_sends_gossip_complete() {
     tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
 
     assert_packet_sent(&captured, Opcode::SMSG_GOSSIP_COMPLETE);
+    let packets = captured.lock();
+    let confirm = packets
+        .iter()
+        .find(|packet| packet.opcode == Opcode::SMSG_BINDER_CONFIRM)
+        .expect("innkeeper asks to confirm the bind");
+    assert_eq!(confirm.data, npc_guid.raw().to_le_bytes());
 }
 
 /// BANKER option must open the bank window.

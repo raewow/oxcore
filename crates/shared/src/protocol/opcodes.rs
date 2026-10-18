@@ -234,7 +234,7 @@ impl Opcode {
     pub const MSG_MOVE_STOP_TURN: Opcode = Opcode { vanilla: 0x00BE, modern: 0x39EE }; // 190
     pub const MSG_MOVE_SET_FACING: Opcode = Opcode { vanilla: 0x00DA, modern: 0x3A07 }; // 218
     pub const MSG_MOVE_SET_PITCH: Opcode = Opcode { vanilla: 0x00DB, modern: 0x3A08 }; // 219
-    pub const MSG_MOVE_WORLDPORT_ACK: Opcode = Opcode { vanilla: 0x00DC, ..Opcode::NONE }; // 220
+    pub const MSG_MOVE_WORLDPORT_ACK: Opcode = Opcode { vanilla: 0x00DC, modern: 0x35FA }; // 220
     pub const MSG_MOVE_FALL_LAND: Opcode = Opcode { vanilla: 0x00C9, modern: 0x39F9 }; // 201
 
     // ============================================================================
@@ -248,7 +248,7 @@ impl Opcode {
     pub const CMSG_MOVE_FEATHER_FALL_ACK: Opcode = Opcode { vanilla: 0x02CF, modern: 0x3A1B }; // 719
     pub const CMSG_MOVE_WATER_WALK_ACK: Opcode = Opcode { vanilla: 0x02D0, modern: 0x3A1C }; // 720
     pub const CMSG_MOVE_NOT_ACTIVE_MOVER: Opcode = Opcode { vanilla: 0x02D1, ..Opcode::NONE }; // 721
-    pub const MSG_MOVE_TELEPORT_ACK: Opcode = Opcode { vanilla: 0x00C7, ..Opcode::NONE }; // 199
+    pub const MSG_MOVE_TELEPORT_ACK: Opcode = Opcode { vanilla: 0x00C7, modern: 0x39F8 }; // 199
     pub const MSG_MOVE_TELEPORT: Opcode = Opcode { vanilla: 0x00C5, ..Opcode::NONE }; // 197
     pub const MSG_MOVE_KNOCK_BACK: Opcode = Opcode { vanilla: 0x00F1, ..Opcode::NONE }; // 241
     pub const MSG_MOVE_TIME_SKIPPED: Opcode = Opcode { vanilla: 0x0319, modern: 0x3A1A }; // 793 (vanilla MSG form; the modern client folds it into CMSG's 0x3A1A)
@@ -539,6 +539,7 @@ impl Opcode {
     pub const SMSG_BINDPOINTUPDATE: Opcode = Opcode { vanilla: 0x0155, modern: 0x257D }; // 341
     pub const SMSG_BINDZONEREPLY: Opcode = Opcode { vanilla: 0x0157, ..Opcode::NONE }; // 343
     pub const SMSG_PLAYERBOUND: Opcode = Opcode { vanilla: 0x0158, modern: 0x2FF8 }; // 344
+    pub const SMSG_BINDER_CONFIRM: Opcode = Opcode { vanilla: 0x02EB, modern: 0x26F4 }; // 747
     pub const CMSG_SETDEATHBINDPOINT: Opcode = Opcode { vanilla: 0x0154, ..Opcode::NONE }; // 340
     pub const CMSG_GETDEATHBINDZONE: Opcode = Opcode { vanilla: 0x0156, ..Opcode::NONE }; // 342
 
@@ -971,6 +972,10 @@ impl Opcode {
     pub const SMSG_INSTANCE_SAVE_CREATED: Opcode = Opcode { vanilla: 0x02CB, modern: 0x2777 }; // 715
     pub const SMSG_RAID_INSTANCE_MESSAGE: Opcode = Opcode { vanilla: 0x02FA, modern: 0x2BB4 }; // 762
     pub const SMSG_RAID_GROUP_ONLY: Opcode = Opcode { vanilla: 0x0286, modern: 0x27A7 }; // 646
+    pub const SMSG_AREA_TRIGGER_MESSAGE: Opcode = Opcode { vanilla: 0x02B8, modern: 0x288F }; // 696
+    pub const SMSG_UPDATE_INSTANCE_OWNERSHIP: Opcode = Opcode { vanilla: 0x032B, modern: 0x26A2 }; // 811
+    /// No 1.14 counterpart is sent: the modern raid window needs only the ownership flag.
+    pub const SMSG_UPDATE_LAST_INSTANCE: Opcode = Opcode { vanilla: 0x0320, ..Opcode::NONE }; // 800
 
     // ============================================================================
     // Meeting Stone
@@ -1119,6 +1124,8 @@ impl Opcode {
     // shared number, but the server answers observers on a dedicated SMSG. There is no vanilla
     // equivalent -- vanilla simply echoes the client's own opcode back to nearby players.
     pub const SMSG_MOVE_UPDATE: Opcode = Opcode { modern: 0x2DE0, ..Opcode::NONE };
+    /// Same-map teleport sent to the moving client; vanilla uses `MSG_MOVE_TELEPORT_ACK` for it.
+    pub const SMSG_MOVE_TELEPORT: Opcode = Opcode { modern: 0x2E04, ..Opcode::NONE };
 
     // Enter-world packets with no 1.12 counterpart. The client waits on these before it will
     // finish loading, which is why a login that looks complete server-side can still hang or die.
@@ -1658,6 +1665,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::SMSG_BINDPOINTUPDATE, "SMSG_BINDPOINTUPDATE"),
     (Opcode::SMSG_BINDZONEREPLY, "SMSG_BINDZONEREPLY"),
     (Opcode::SMSG_PLAYERBOUND, "SMSG_PLAYERBOUND"),
+    (Opcode::SMSG_BINDER_CONFIRM, "SMSG_BINDER_CONFIRM"),
     (Opcode::CMSG_SETDEATHBINDPOINT, "CMSG_SETDEATHBINDPOINT"),
     (Opcode::CMSG_GETDEATHBINDZONE, "CMSG_GETDEATHBINDZONE"),
     (Opcode::SMSG_SET_REST_START, "SMSG_SET_REST_START"),
@@ -2204,6 +2212,9 @@ pub const ALL: &[(Opcode, &str)] = &[
         "SMSG_RAID_INSTANCE_MESSAGE",
     ),
     (Opcode::SMSG_RAID_GROUP_ONLY, "SMSG_RAID_GROUP_ONLY"),
+    (Opcode::SMSG_AREA_TRIGGER_MESSAGE, "SMSG_AREA_TRIGGER_MESSAGE"),
+    (Opcode::SMSG_UPDATE_INSTANCE_OWNERSHIP, "SMSG_UPDATE_INSTANCE_OWNERSHIP"),
+    (Opcode::SMSG_UPDATE_LAST_INSTANCE, "SMSG_UPDATE_LAST_INSTANCE"),
     (Opcode::CMSG_MEETINGSTONE_INFO, "CMSG_MEETINGSTONE_INFO"),
     (Opcode::CMSG_MEETINGSTONE_JOIN, "CMSG_MEETINGSTONE_JOIN"),
     (Opcode::CMSG_MEETINGSTONE_LEAVE, "CMSG_MEETINGSTONE_LEAVE"),
@@ -2289,6 +2300,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::SMSG_WARDEN_DATA, "SMSG_WARDEN_DATA"),
     (Opcode::SMSG_WEATHER, "SMSG_WEATHER"),
     (Opcode::SMSG_MOVE_UPDATE, "SMSG_MOVE_UPDATE"),
+    (Opcode::SMSG_MOVE_TELEPORT, "SMSG_MOVE_TELEPORT"),
     (Opcode::SMSG_RESUME_COMMS, "SMSG_RESUME_COMMS"),
     (Opcode::SMSG_WORLD_SERVER_INFO, "SMSG_WORLD_SERVER_INFO"),
     (
@@ -2578,8 +2590,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            678,
-            "expected 678 opcode constants; update this count deliberately when adding opcodes"
+            683,
+            "expected 683 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

@@ -385,7 +385,12 @@ impl MovementInfo {
 
     pub fn write_to_packet(&self, packet: &mut WorldPacket) {
         packet.write_packed_guid_raw(self.mover_guid.counter() as u64);
+        self.write_body(packet);
+    }
 
+    /// The vanilla movement block without the leading mover GUID, for packets
+    /// that put other fields between the two.
+    pub fn write_body(&self, packet: &mut WorldPacket) {
         packet.write_u32(self.flags.value());
         packet.write_u32(self.time);
 

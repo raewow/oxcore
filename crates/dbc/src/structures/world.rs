@@ -72,6 +72,8 @@ pub struct MapEntry {
     pub ghost_entrance_map: i32,
     pub ghost_entrance_x: f32,
     pub ghost_entrance_y: f32,
+    /// English map name, used in player-facing refusals.
+    pub name: String,
 }
 
 impl MapEntry {
@@ -95,6 +97,12 @@ impl MapEntry {
 
     pub fn is_battleground(&self) -> bool {
         self.map_type == Self::BATTLEGROUND
+    }
+
+    /// Mounts work outdoors and in the few open-air dungeons: Zul'Farrak,
+    /// Caverns of Time, Zul'Gurub and the Ruins of Ahn'Qiraj.
+    pub fn is_mount_allowed(&self) -> bool {
+        !self.is_dungeon() || matches!(self.id, 209 | 269 | 309 | 509)
     }
 }
 

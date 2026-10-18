@@ -27,22 +27,22 @@ async fn entrance_world_with_capacity(
             r#"
         CREATE SCHEMA world;
         CREATE TABLE world.areatrigger_teleport (
-            id BIGINT, required_level BIGINT, required_condition BIGINT, message TEXT,
-            target_map BIGINT, target_position_x REAL, target_position_y REAL,
-            target_position_z REAL, target_orientation REAL
+            id BIGINT, patch SMALLINT, required_level SMALLINT, required_condition BIGINT,
+            message VARCHAR(128), target_map INTEGER, target_position_x REAL,
+            target_position_y REAL, target_position_z REAL, target_orientation REAL
         );
     "#,
         )
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO world.areatrigger_teleport VALUES (100, 0, 0, '', $1, 100, 100, 10, 0)",
+        "INSERT INTO world.areatrigger_teleport VALUES (100, 0, 0, 0, '', $1, 100, 100, 10, 0)",
     )
-    .bind(i64::from(map_id))
+    .bind(i32::try_from(map_id).unwrap())
     .execute(&world.databases.world)
     .await
     .unwrap();
-    world.managers.area_trigger_mgr.load().await.unwrap();
+    world.managers.area_trigger_mgr.load(10).await.unwrap();
     assert!(world.managers.area_trigger_mgr.get_teleport(100).is_some());
     {
         let mut dbc = world.dbc.write();

@@ -12,6 +12,9 @@ use tracing::{debug, warn};
 
 use oxcore_shared::protocol::Position;
 
+/// Client build whose area trigger shapes are used.
+const VANILLA_CLIENT_BUILD: i32 = 5875;
+
 /// Area trigger entry from the `areatrigger_template` DB table.
 /// Defines the trigger zone geometry.
 #[derive(Debug, Clone)]
@@ -63,21 +66,28 @@ impl AreaTriggerManager {
         }
     }
 
-    /// Load all area trigger data from the database.
-    pub async fn load(&self) -> Result<()> {
+    /// Load all area trigger data from the database, using for each trigger
+    /// the newest row the configured content `patch` allows.
+    pub async fn load(&self, patch: u8) -> Result<()> {
         self.load_templates().await?;
-        self.load_teleports().await?;
-        self.load_taverns().await?;
+        self.load_teleports(patch).await?;
+        self.load_taverns(patch).await?;
         self.load_quest_triggers().await?;
         Ok(())
     }
 
     async fn load_templates(&self) -> Result<()> {
-        let query_str = r#"SELECT id, name, map_id, x, y, z, radius,
-                           box_x, box_y, box_z, box_orientation
-                            FROM world.areatrigger_template"#;
+        // Trigger geometry is versioned by client build; use the newest
+        // shape the vanilla client knows.
+        let query_str = r#"SELECT DISTINCT ON (id) id::bigint AS id,
+                           COALESCE(name, '') AS name, map_id::bigint AS map_id,
+                           x, y, z, radius, box_x, box_y, box_z, box_orientation
+                            FROM world.areatrigger_template
+                            WHERE build <= $1
+                            ORDER BY id, build DESC"#;
 
         let rows = match sqlx::query_as::<_, AreaTriggerTemplateRow>(query_str)
+            .bind(VANILLA_CLIENT_BUILD)
             .fetch_all(self.world_db.as_ref())
             .await
         {
@@ -106,13 +116,18 @@ impl AreaTriggerManager {
         Ok(())
     }
 
-    async fn load_teleports(&self) -> Result<()> {
-        let query_str = r#"SELECT id, required_level, required_condition, message,
-                           target_map, target_position_x, target_position_y,
-                           target_position_z, target_orientation
-                            FROM world.areatrigger_teleport"#;
+    async fn load_teleports(&self, patch: u8) -> Result<()> {
+        let query_str = r#"SELECT DISTINCT ON (id) id::bigint AS id,
+                           required_level::bigint AS required_level,
+                           required_condition::bigint AS required_condition, message,
+                           target_map::bigint AS target_map, target_position_x,
+                           target_position_y, target_position_z, target_orientation
+                            FROM world.areatrigger_teleport
+                            WHERE patch <= $1
+                            ORDER BY id, patch DESC"#;
 
         let rows = match sqlx::query_as::<_, AreaTriggerTeleportRow>(query_str)
+            .bind(i16::from(patch))
             .fetch_all(self.world_db.as_ref())
             .await
         {
@@ -151,12 +166,11 @@ impl AreaTriggerManager {
         Ok(())
     }
 
-    async fn load_taverns(&self) -> Result<()> {
-        let current_patch: i16 = 10; // WOW_PATCH_112
-        let query_str = r#"SELECT id FROM world.areatrigger_tavern WHERE patch_min <= $1"#;
+    async fn load_taverns(&self, patch: u8) -> Result<()> {
+        let query_str = r#"SELECT id::bigint FROM world.areatrigger_tavern WHERE patch_min <= $1"#;
 
         let rows = match sqlx::query_scalar::<sqlx::Postgres, i64>(query_str)
-            .bind(current_patch)
+            .bind(i16::from(patch))
             .fetch_all(self.world_db.as_ref())
             .await
         {
@@ -185,7 +199,8 @@ impl AreaTriggerManager {
     }
 
     async fn load_quest_triggers(&self) -> Result<()> {
-        let query_str = r#"SELECT id, quest FROM world.areatrigger_involvedrelation"#;
+        let query_str = r#"SELECT id::bigint AS id, quest::bigint AS quest
+                            FROM world.areatrigger_involvedrelation"#;
 
         let rows = match sqlx::query_as::<_, AreaTriggerQuestRow>(query_str)
             .fetch_all(self.world_db.as_ref())

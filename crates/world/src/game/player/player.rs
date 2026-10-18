@@ -19,7 +19,7 @@ use super::talents::TalentState;
 use super::visibility::VisibilityState;
 use super::CombatState;
 use crate::game::npc::quest::QuestProgress;
-use oxcore_shared::protocol::ObjectGuid;
+use oxcore_shared::protocol::{ObjectGuid, Position};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -61,6 +61,10 @@ pub struct Player {
     pub controller_guid: Option<ObjectGuid>,
     /// Active controlled runtime pet.
     pub active_pet: Option<ObjectGuid>,
+    /// Creature entry of a pet put away for a teleport, summoned again on arrival.
+    pub teleport_unsummoned_pet: Option<u32>,
+    /// A pending summon offer: destination map and spot, and when it lapses.
+    pub summon_offer: Option<SummonOffer>,
     /// Aura state (buffs/debuffs, slot management)
     pub auras: AuraState,
     /// Death state (death/resurrection state machine)
@@ -184,6 +188,14 @@ pub struct Player {
     pub item_set_effects: HashMap<u32, ItemSetEffect>,
 }
 
+/// Where an accepted summon takes the player, until `expires_at`.
+#[derive(Debug, Clone, Copy)]
+pub struct SummonOffer {
+    pub map_id: u32,
+    pub position: Position,
+    pub expires_at: std::time::Instant,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ItemSetEffect {
     pub item_count: u32,
@@ -229,6 +241,8 @@ impl Player {
             faction_override: None,
             controller_guid: None,
             active_pet: None,
+            teleport_unsummoned_pet: None,
+            summon_offer: None,
             auras: AuraState::default(),
             death: DeathSystemState::default(),
             spells: SpellsState::default(),

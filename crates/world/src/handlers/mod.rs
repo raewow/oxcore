@@ -334,6 +334,9 @@ pub async fn dispatch_packet(
                 Opcode::MSG_MOVE_TELEPORT_ACK => {
                     movement::handle_move_teleport_ack(session, packet, world).await?;
                 }
+                Opcode::CMSG_SUMMON_RESPONSE => {
+                    movement::handle_summon_response(session, packet, world).await?;
+                }
 
                 // Movement packets - processed inline for immediate responsiveness
                 Opcode::MSG_MOVE_HEARTBEAT
@@ -841,8 +844,8 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_AREA_SPIRIT_HEALER_QUEUE => {
                     death::handle_area_spirit_healer_queue(session, packet, world).await?;
                 }
-                Opcode::CMSG_SETDEATHBINDPOINT => {
-                    death::handle_setdeathbindpoint(session, packet, databases, world).await?;
+                Opcode::CMSG_BINDER_ACTIVATE => {
+                    death::handle_binder_activate(session, packet, world).await?;
                 }
                 Opcode::CMSG_GETDEATHBINDZONE => {
                     death::handle_getdeathbindzone(session, packet, world).await?;

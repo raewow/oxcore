@@ -8,6 +8,8 @@
 //! - [`SmsgRaidInstanceMessage`] - Raid welcome and reset warnings
 //! - [`SmsgInstanceSaveCreated`] - A permanent raid save was just created
 //! - [`SmsgRaidGroupOnly`] - Raid-group-required notice / removal countdown
+//! - [`SmsgAreaTriggerMessage`] - Why an area trigger refused to let the player through
+//! - [`SmsgUpdateInstanceOwnership`] / [`SmsgUpdateLastInstance`] - Saved raids, after a transfer
 //! - [`SmsgInstanceReset`] - Notification that an instance has been reset
 //! - [`SmsgInstanceResetFailed`] - Notification that an instance reset failed
 
@@ -192,6 +194,72 @@ impl ToWorldPacket for SmsgRaidGroupOnly {
     }
 }
 
+/// SMSG_AREA_TRIGGER_MESSAGE - an area trigger refused the player (level,
+/// key or attunement missing, ghost form).
+///
+/// Vanilla shows `text` on screen. 1.14 carries only the trigger id and the
+/// client words the refusal itself.
+#[derive(Debug, Clone)]
+pub struct SmsgAreaTriggerMessage {
+    pub trigger_id: u32,
+    pub text: String,
+}
+
+impl ToWorldPacket for SmsgAreaTriggerMessage {
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut packet = WorldPacket::new(Opcode::SMSG_AREA_TRIGGER_MESSAGE);
+        packet.write_u32(self.trigger_id);
+        Some(packet)
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_AREA_TRIGGER_MESSAGE);
+        // Length counts the terminating NUL.
+        packet.write_u32(self.text.len() as u32 + 1);
+        packet.write_cstring(&self.text);
+        packet
+    }
+}
+
+/// SMSG_UPDATE_INSTANCE_OWNERSHIP - whether the player holds any permanent
+/// raid save; the client enables its raid information button on it.
+#[derive(Debug, Clone)]
+pub struct SmsgUpdateInstanceOwnership {
+    pub has_been_saved: bool,
+}
+
+impl ToWorldPacket for SmsgUpdateInstanceOwnership {
+    /// Identical in 1.14: one u32.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(self.to_vanilla())
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_INSTANCE_OWNERSHIP);
+        packet.write_u32(u32::from(self.has_been_saved));
+        packet
+    }
+}
+
+/// SMSG_UPDATE_LAST_INSTANCE - one of the player's saved raid maps. Vanilla
+/// only.
+#[derive(Debug, Clone)]
+pub struct SmsgUpdateLastInstance {
+    pub map_id: u32,
+}
+
+impl ToWorldPacket for SmsgUpdateLastInstance {
+    fn to_modern(&self) -> Option<WorldPacket> {
+        None
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_UPDATE_LAST_INSTANCE);
+        packet.write_u32(self.map_id);
+        packet
+    }
+}
+
 /// SMSG_INSTANCE_RESET - Notification that an instance has been reset
 ///
 /// Sent to players in the instance to confirm that the instance has been reset.
@@ -306,6 +374,20 @@ mod tests {
         let modern = msg.to_modern().unwrap();
         assert_eq!(modern.opcode().modern(), 0x27A7);
         assert_eq!(modern.contents(), &[0x60, 0xEA, 0, 0, 2, 0, 0, 0]);
+    }
+
+    #[test]
+    fn area_trigger_message_carries_text_for_vanilla_and_the_trigger_for_modern() {
+        let msg = SmsgAreaTriggerMessage {
+            trigger_id: 78,
+            text: "Hi".to_string(),
+        };
+        let vanilla = msg.to_vanilla();
+        assert_eq!(vanilla.opcode().vanilla(), 0x02B8);
+        assert_eq!(vanilla.contents(), &[3, 0, 0, 0, b'H', b'i', 0]);
+        let modern = msg.to_modern().unwrap();
+        assert_eq!(modern.opcode().modern(), 0x288F);
+        assert_eq!(modern.contents(), &[78, 0, 0, 0]);
     }
 
     #[test]

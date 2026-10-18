@@ -21,6 +21,7 @@ pub mod spells;
 pub mod stats;
 pub mod system;
 pub mod talents;
+pub mod teleport;
 pub mod visibility;
 
 // Re-export combat types from game::combat

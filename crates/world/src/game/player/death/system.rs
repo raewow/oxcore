@@ -114,12 +114,13 @@ impl DeathSystem {
         &self,
         world_pool: Arc<sqlx::PgPool>,
         dbc_mgr: &DbcManager,
+        patch: u8,
     ) -> Result<()> {
         // Load into a fresh manager first so we don't hold the (non-Send) write guard
         // across the `.await` — otherwise the whole startup future becomes !Send and
         // can't be driven from a spawned task.
         let mut new_mgr = GraveyardManager::new();
-        new_mgr.load(world_pool, dbc_mgr).await?;
+        new_mgr.load(world_pool, dbc_mgr, patch).await?;
         *self.graveyard_mgr.write().unwrap() = new_mgr;
         Ok(())
     }
@@ -846,12 +847,23 @@ impl DeathSystem {
             }
         };
 
-        let old_position = world
+        let (old_position, current_map) = world
             .systems
             .player
             .manager()
-            .with_player(player_guid, |player| player.movement.position)
-            .unwrap_or(dest_pos);
+            .with_player(player_guid, |player| (player.movement.position, player.map_id))
+            .unwrap_or((dest_pos, u32::MAX));
+
+        // Within the map (a graveyard nearby, a resurrection on the spot) this
+        // is a near teleport, which also keeps the player in their copy.
+        if current_map == dest_map {
+            return crate::game::player::teleport::send_near_teleport(
+                world,
+                &session,
+                player_guid,
+                dest_pos,
+            );
+        }
 
         session.send_far_teleport(old_position, dest_map, dest_pos)?;
 

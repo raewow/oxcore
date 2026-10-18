@@ -1,10 +1,11 @@
 //! Area trigger handler
 //!
 //! Handles CMSG_AREATRIGGER — player enters an invisible trigger zone.
-//! Checks quest triggers, tavern rest, and teleport destinations.
+//! Runs the trigger's script, credits exploration quests, starts inn rest,
+//! and sends the player through teleport triggers that let them pass.
 
 use anyhow::Result;
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
@@ -12,39 +13,27 @@ use crate::game::area_trigger::{self, AreaTriggerEntry};
 use crate::game::common::update_fields::PLAYER_FLAGS;
 use crate::game::conditions::ConditionContext;
 use crate::game::instance::lifecycle;
-use crate::game::instance::manager::InstanceEntryError;
+use crate::game::npc::quest::QuestStatus;
 use crate::game::player::environment::RestType;
+use crate::game::player::teleport::teleport_to;
 use crate::World;
-use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language};
-use oxcore_shared::messages::chat::SmsgMessageChat;
+use oxcore_shared::messages::instance::SmsgAreaTriggerMessage;
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
-use oxcore_shared::messages::ToWorldPacket;
-use oxcore_shared::protocol::{ObjectGuid, Position, WorldPacket};
+use oxcore_shared::protocol::WorldPacket;
 
-/// Area-trigger refusals are shown to the player as a system message.
-fn send_area_trigger_text(session: &WorldSession, message: &str) -> Result<()> {
-    session.send_msg(SmsgMessageChat {
-        msgtype: ChatMsg::System,
-        language: Language::Universal,
-        sender_guid: ObjectGuid::empty(),
-        sender_name: None,
-        target_guid: None,
-        channel_name: None,
-        player_rank: None,
-        message,
-        chat_tag: ChatTag::None,
-    })
+/// Content patch (1.4) from which instance entrances have minimum levels.
+const PATCH_1_4: u8 = 2;
+
+/// Tell the player why a trigger refused them.
+fn send_area_trigger_text(session: &WorldSession, trigger_id: u32, text: String) -> Result<()> {
+    session.send_msg(SmsgAreaTriggerMessage { trigger_id, text })
 }
 
 /// Handle CMSG_AREATRIGGER — player enters an area trigger zone.
 ///
-/// Priority order:
-/// 1. Position validation (anti-cheat)
-/// 2. Quest triggers
-/// 3. Tavern triggers (set rest state)
-/// 4. Teleport triggers (level check, teleport)
+/// Order: position check, script, exploration quest, inn, teleport.
 pub async fn handle_area_trigger(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -63,8 +52,7 @@ pub async fn handle_area_trigger(
         player_guid, trigger_id
     );
 
-    // Get player info
-    let (player_map_id, player_x, player_y, player_z, player_level, is_alive) = match world
+    let Some((player_map_id, player_x, player_y, player_z, player_level, is_alive, is_gm)) = world
         .managers
         .player_mgr
         .with_player(player_guid, |player| {
@@ -75,10 +63,11 @@ pub async fn handle_area_trigger(
                 player.movement.position.z,
                 player.level,
                 player.is_alive(),
+                player.gm_mode,
             )
-        }) {
-        Some(info) => info,
-        None => return Ok(()),
+        })
+    else {
+        return Ok(());
     };
 
     let area_trigger_mgr = &world.managers.area_trigger_mgr;
@@ -135,15 +124,12 @@ pub async fn handle_area_trigger(
         // Do not return — allow normal tavern/teleport logic to still run.
     }
 
-    // --- Quest triggers ---
-    if let Some(_quest_id) = area_trigger_mgr.get_quest_for_trigger(trigger_id) {
-        if is_alive {
-            // TODO: Check if player has this quest active and update exploration objective
-            // Requires quest system integration: world.systems.quest.update_exploration_objective(...)
-            debug!(
-                "Area trigger {} is a quest trigger (quest {}), TODO: update objective",
-                trigger_id, _quest_id
-            );
+    // --- Exploration quests ---
+    if let Some(quest_id) = area_trigger_mgr.get_quest_for_trigger(trigger_id) {
+        if is_alive
+            && world.systems.quest.get_quest_status(player_guid, quest_id) == QuestStatus::Incomplete
+        {
+            world.systems.quest.handle_area_explored(player_guid, quest_id);
         }
     }
 
@@ -211,7 +197,16 @@ pub async fn handle_area_trigger(
             }
         };
         if !reachable {
-            send_area_trigger_text(session, "You cannot enter this instance while in ghost form.")?;
+            let name = if target_map.name.is_empty() {
+                "this instance"
+            } else {
+                target_map.name.as_str()
+            };
+            send_area_trigger_text(
+                session,
+                trigger_id,
+                format!("You cannot enter {} while in ghost form.", name),
+            )?;
             return Ok(());
         }
         if teleport.destination_map != corpse_map {
@@ -221,95 +216,57 @@ pub async fn handle_area_trigger(
         }
     }
 
-    // Level and condition (key, attunement, quest) requirements.
-    let level_failed = teleport.required_level > 0 && player_level < teleport.required_level;
-    let condition_failed = teleport.required_condition != 0
-        && !world.managers.condition_mgr.is_satisfied(
-            teleport.required_condition,
-            ConditionContext {
-                target: player_guid,
-                source: player_guid,
-            },
-            world,
-        );
-    if level_failed || condition_failed {
-        if !teleport.message.is_empty() {
-            send_area_trigger_text(session, &teleport.message)?;
-        } else if level_failed {
-            send_area_trigger_text(
-                session,
-                &format!(
-                    "You must be at least level {} to enter this instance.",
-                    teleport.required_level
-                ),
-            )?;
-        }
-        debug!(
-            "Area trigger {}: Player {} refused (level {} < {}: {}, condition {} failed: {})",
-            trigger_id,
-            player_guid,
-            player_level,
-            teleport.required_level,
-            level_failed,
-            teleport.required_condition,
-            condition_failed
-        );
-        return Ok(());
-    }
-
-    // Perform teleport
-    let dest_map = teleport.destination_map;
-    let dest_pos = teleport.destination;
-
-    // Dungeon destinations go through copy selection, admission and binding.
-    let dest_instance_id =
-        match lifecycle::resolve_transfer_instance(world, player_guid, dest_map).await {
-            Ok(instance_id) => instance_id,
-            Err(error) => {
-                match &error {
-                    InstanceEntryError::Denied(denied) => debug!(
-                        "Player {} denied entry to map {}: {:?}",
-                        player_guid, dest_map, denied
+    // Level and condition (key, attunement, quest) requirements. Game
+    // masters pass; minimum levels arrived with patch 1.4.
+    if !is_gm {
+        let level_failed = teleport.required_level > 0
+            && player_level < teleport.required_level
+            && world.content_patch() >= PATCH_1_4;
+        let condition_failed = teleport.required_condition != 0
+            && !world.managers.condition_mgr.is_satisfied(
+                teleport.required_condition,
+                ConditionContext {
+                    target: player_guid,
+                    source: player_guid,
+                },
+                world,
+            );
+        if level_failed || condition_failed {
+            if !teleport.message.is_empty() {
+                send_area_trigger_text(session, trigger_id, teleport.message.clone())?;
+            } else if level_failed {
+                send_area_trigger_text(
+                    session,
+                    trigger_id,
+                    format!(
+                        "You must be at least level {} to enter.",
+                        teleport.required_level
                     ),
-                    InstanceEntryError::Internal(e) => tracing::error!(
-                        "Failed to create/enter instance for map {}: {}",
-                        dest_map,
-                        e
-                    ),
-                }
-                lifecycle::send_entry_refusal(session, dest_map, &error)?;
-                return Ok(());
+                )?;
             }
-        };
-
-    info!(
-        "[AREATRIGGER] Starting teleport sequence for player {:?} to map {} instance {}",
-        player_guid, dest_map, dest_instance_id
-    );
-
-    // Send SMSG_TRANSFER_PENDING (cross-map only) + SMSG_NEW_WORLD to initiate
-    // teleport. Client will respond with MSG_MOVE_WORLDPORT_ACK when ready.
-    let old_position = Position {
-        x: player_x,
-        y: player_y,
-        z: player_z,
-        o: 0.0,
-    };
-    if dest_map != player_map_id {
-        session.send_msg(oxcore_shared::messages::movement::SmsgTransferPending {
-            dest_map,
-            old_position,
-        })?;
+            debug!(
+                "Area trigger {}: player {} refused (level {} < {}: {}, condition {} failed: {})",
+                trigger_id,
+                player_guid,
+                player_level,
+                teleport.required_level,
+                level_failed,
+                teleport.required_condition,
+                condition_failed
+            );
+            return Ok(());
+        }
     }
-    session.send_msg(oxcore_shared::messages::movement::SmsgNewWorld { dest_map, dest_pos })?;
 
-    // Store teleport destination for worldport ACK handler to complete
-    session.set_pending_teleport(Some((dest_map, dest_instance_id, dest_pos)));
-
-    info!(
-        "[AREATRIGGER] Teleport initiated - map {} instance {}, waiting for MSG_MOVE_WORLDPORT_ACK",
-        dest_map, dest_instance_id
-    );
-
+    // Same-map triggers are near teleports; others choose the dungeon copy
+    // and check the entry rules on the way.
+    teleport_to(
+        world,
+        player_guid,
+        teleport.destination_map,
+        teleport.destination,
+        0,
+    )
+    .await?;
     Ok(())
 }

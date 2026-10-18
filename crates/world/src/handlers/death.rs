@@ -7,17 +7,14 @@
 //! - CMSG_SPIRIT_HEALER_ACTIVATE: Player interacts with spirit healer
 //! - CMSG_SELF_RES: Player uses self-resurrection (Reincarnation, Soulstone)
 //! - CMSG_AREA_SPIRIT_HEALER_QUERY / QUEUE: Battleground spirit healer wave
-//! - CMSG_SETDEATHBINDPOINT / CMSG_GETDEATHBINDZONE: Hearthstone bindpoint
+//! - CMSG_BINDER_ACTIVATE / CMSG_GETDEATHBINDZONE: Hearthstone bindpoint
 
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::session::WorldSession;
 use crate::World;
 use anyhow::Result;
-use oxcore_db::database::characters::PgCharacterRepository;
-use oxcore_db::database::Databases;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
-use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Handle CMSG_REPOP_REQUEST (0x015A)
 ///
@@ -355,75 +352,62 @@ pub async fn handle_query_corpse_location_from_client(
     Ok(())
 }
 
-/// Handle CMSG_SETDEATHBINDPOINT (0x0154)
-///
-/// Sent by an innkeeper's gossip flow when binding a hearthstone. The client
-/// asks the server to persist the player's homebind to the current location.
-///
-/// Packet structure: (empty — position/zone/map taken from the player's
-/// current world position)
-pub async fn handle_setdeathbindpoint(
+/// Handle CMSG_BINDER_ACTIVATE: the player confirmed making an innkeeper's
+/// inn their home. Binding is refused inside dungeons and battlegrounds, and
+/// needs a living player close to an innkeeper.
+pub async fn handle_binder_activate(
     session: &WorldSession,
-    _packet: &mut WorldPacket,
-    databases: &Databases,
+    packet: &mut WorldPacket,
     world: &World,
 ) -> Result<()> {
-    let player_guid = match session.player_guid() {
-        Some(g) => g,
-        None => return Ok(()),
+    /// `UNIT_NPC_FLAG_INNKEEPER`.
+    const NPC_FLAG_INNKEEPER: u32 = 0x80;
+    const INTERACTION_DISTANCE: f32 = 5.0;
+
+    let Some(player_guid) = session.player_guid() else {
+        return Ok(());
+    };
+    let Some(binder) = packet.read_guid_for(session.protocol()) else {
+        return Ok(());
     };
 
-    // Pull current position + zone + map from the live player.
-    let bind = world
-        .systems
-        .player
-        .manager()
-        .with_player_mut(player_guid, |player| {
-            let pos = player.movement.position;
-            player.homebind_map = player.map_id;
-            player.homebind_zone = player.zone_id;
-            player.homebind_x = pos.x;
-            player.homebind_y = pos.y;
-            player.homebind_z = pos.z;
+    let Some((alive, map_id, instance_id, position)) =
+        world.managers.player_mgr.with_player(player_guid, |player| {
             (
-                player.guid.counter(),
+                player.is_alive(),
                 player.map_id,
-                player.zone_id,
-                pos.x,
-                pos.y,
-                pos.z,
+                player.instance_id,
+                player.movement.position,
             )
-        });
-
-    let (char_guid, map, zone, x, y, z) = match bind {
-        Some(v) => v,
-        None => return Ok(()),
+        })
+    else {
+        return Ok(());
     };
-
-    // Persist to DB.
-    let repo = PgCharacterRepository::new(Arc::new(databases.character.clone()));
-    if let Err(e) = repo
-        .save_homebind(
-            i64::from(char_guid),
-            i64::from(map),
-            i64::from(zone),
-            x,
-            y,
-            z,
-        )
-        .await
-    {
-        warn!("Failed to save homebind for {:?}: {}", player_guid, e);
+    let near_innkeeper = world
+        .managers
+        .creature_mgr
+        .with_creature(binder, |creature| {
+            creature.npc_flags & NPC_FLAG_INNKEEPER != 0
+                && creature.is_alive()
+                && creature.map_id == map_id
+                && creature.instance_id == instance_id
+                && position.is_within_range(&creature.position, INTERACTION_DISTANCE)
+        })
+        .unwrap_or(false);
+    if !alive || !near_innkeeper {
+        debug!(
+            "Player {:?} cannot bind at {:?} (alive {}, innkeeper in reach {})",
+            player_guid, binder, alive, near_innkeeper
+        );
+        return Ok(());
+    }
+    let instanced = crate::game::instance::lifecycle::map_entry(world, map_id)
+        .is_some_and(|entry| entry.is_dungeon() || entry.is_battleground());
+    if instanced {
+        return Ok(());
     }
 
-    // Send confirmation packet so client updates the hearthstone UI.
-    send_bindpoint_update(session, map, zone, x, y, z)?;
-
-    debug!(
-        "Player {:?} bound home at map={} zone={}",
-        player_guid, map, zone
-    );
-    Ok(())
+    crate::game::player::teleport::bind_home(world, player_guid, binder).await
 }
 
 /// Handle CMSG_GETDEATHBINDZONE (0x0156)

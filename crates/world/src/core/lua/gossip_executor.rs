@@ -219,6 +219,28 @@ pub async fn execute_gossip_actions(
                     target, quest_id
                 );
             }
+            LuaAction::TeleportPlayer {
+                player,
+                map_id,
+                x,
+                y,
+                z,
+                o,
+            } => {
+                let target = if player.is_empty() {
+                    player_guid
+                } else {
+                    player
+                };
+                crate::game::player::teleport::teleport_to(
+                    world,
+                    target,
+                    map_id,
+                    Position::new(x, y, z, o),
+                    0,
+                )
+                .await?;
+            }
 
             // ==================== Spawning ====================
             LuaAction::SpawnCreature {

@@ -3028,6 +3028,67 @@ impl QuestSystem {
         }
     }
 
+    /// Credit the exploration objective of an active quest (an area trigger
+    /// reached or a scripted event witnessed). The quest log marks the
+    /// objective done straight away; the quest itself completes only once its
+    /// other objectives are met too.
+    pub fn handle_area_explored(&self, player_guid: ObjectGuid, quest_id: u32) {
+        const MAX_QUEST_OFFSET: u32 = 3;
+        const QUEST_COUNT_STATE_OFFSET: u32 = 1;
+        const QUEST_STATE_COMPLETE: u32 = 0x01;
+
+        let Some(quest) = self.manager.get_quest_template(quest_id) else {
+            return;
+        };
+
+        let outcome = self
+            .player_mgr
+            .with_player_mut(player_guid, |p| {
+                let slot = p.active_quests.iter().position(|q| q.quest_id == quest_id)?;
+                let progress = &mut p.active_quests[slot];
+                if progress.status == QuestStatus::Failed {
+                    return None;
+                }
+                let newly_explored = !progress.explored;
+                if newly_explored {
+                    progress.explored = true;
+                    progress.mark_changed();
+                }
+                let completed =
+                    progress.status == QuestStatus::Incomplete && progress.is_complete(&quest);
+                if completed {
+                    progress.status = QuestStatus::Complete;
+                    progress.mark_changed();
+                }
+                let packed = Self::pack_quest_count_state(progress) | (QUEST_STATE_COMPLETE << 24);
+                Some((slot as u32, newly_explored, completed, packed))
+            })
+            .flatten();
+        let Some((slot, newly_explored, completed, packed)) = outcome else {
+            return;
+        };
+
+        if newly_explored {
+            let count_state_field =
+                PLAYER_QUEST_LOG_1_1 + slot * MAX_QUEST_OFFSET + QUEST_COUNT_STATE_OFFSET;
+            let world_guid = ObjectGuid::from_low(player_guid.counter());
+            let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+                ValuesUpdateBlock::new(world_guid, ObjectType::Player)
+                    .set_field(count_state_field, packed),
+            ));
+            self.broadcast_mgr
+                .send_msg_to_player(player_guid, values_update);
+            self.broadcast_mgr
+                .send_msg_to_player(player_guid, SmsgQuestupdateComplete { quest_id });
+        }
+        if completed {
+            info!(
+                "[QUEST] Quest {} completed by exploration for player {:?}",
+                quest_id, player_guid
+            );
+        }
+    }
+
     /// Save all active and rewarded quests for a player to the database
     ///
     /// Called during logout to persist quest progress.

@@ -290,7 +290,7 @@ async fn list_teleports(ctx: &ChatCommandContext<'_>, page: u32) -> Result<Strin
     let offset = (page - 1) * ITEMS_PER_PAGE;
 
     let rows = sqlx::query(
-        "SELECT id, name, map, position_x, position_y, position_z \
+        "SELECT id, name, map::bigint AS map, position_x, position_y, position_z \
          FROM world.game_tele ORDER BY name LIMIT $1 OFFSET $2",
     )
     .bind(ITEMS_PER_PAGE as i64)
@@ -339,7 +339,7 @@ async fn teleport_by_id(ctx: &ChatCommandContext<'_>, teleport_id: u32) -> Resul
     let pool = &ctx.world.databases.world;
 
     let row = sqlx::query(
-        "SELECT id, name, map, position_x, position_y, position_z, orientation \
+        "SELECT id, name, map::bigint AS map, position_x, position_y, position_z, orientation \
          FROM world.game_tele WHERE id = $1",
     )
     .bind(i64::from(teleport_id))
@@ -368,7 +368,7 @@ async fn teleport_by_name(ctx: &ChatCommandContext<'_>, search_name: &str) -> Re
     let pattern = format!("%{}%", search_name);
 
     let row = sqlx::query(
-        "SELECT id, name, map, position_x, position_y, position_z, orientation \
+        "SELECT id, name, map::bigint AS map, position_x, position_y, position_z, orientation \
          FROM world.game_tele WHERE name ILIKE $1 ORDER BY name LIMIT 1",
     )
     .bind(&pattern)
@@ -396,28 +396,17 @@ async fn teleport_by_name(ctx: &ChatCommandContext<'_>, search_name: &str) -> Re
     perform_teleport(ctx, map_id, Position { x, y, z, o }, &name).await
 }
 
-/// Send the teleport packets and store pending teleport in the session.
-///
-/// Uses the same two-step flow as area triggers:
-///   1. SMSG_TRANSFER_PENDING + SMSG_NEW_WORLD  →  client loads new map
-///   2. Client sends MSG_MOVE_WORLDPORT_ACK      →  handle_worldport_ack completes it
+/// Teleport the GM: a same-map destination is a near teleport, anything else
+/// goes through the transfer handshake and, for a dungeon, copy selection.
 async fn perform_teleport(
     ctx: &ChatCommandContext<'_>,
     map_id: u32,
     dest: Position,
     location_name: &str,
 ) -> Result<String> {
-    // SMSG_TRANSFER_PENDING + SMSG_NEW_WORLD (sent always for GM teleport, even
-    // same-map, to guarantee the client enters the loading screen). A dungeon
-    // destination picks the player's own copy, or a new one, like any entrance.
-    let started = crate::game::instance::lifecycle::start_far_teleport(
-        ctx.world,
-        ctx.session,
-        ctx.player_guid,
-        map_id,
-        dest,
-    )
-    .await?;
+    let started =
+        crate::game::player::teleport::teleport_to(ctx.world, ctx.player_guid, map_id, dest, 0)
+            .await?;
     if !started {
         return Ok(format!("Cannot teleport to {}: entry refused", location_name));
     }

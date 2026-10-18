@@ -161,14 +161,16 @@ impl GraveyardManager {
     }
 
     /// Load graveyard data from the `game_graveyard_zone` DB table,
-    /// cross-referencing coordinates from WorldSafeLocs.dbc.
+    /// cross-referencing coordinates from WorldSafeLocs.dbc. Only links valid
+    /// at the content `patch` are used.
     pub async fn load(
         &mut self,
         world_pool: Arc<sqlx::PgPool>,
         dbc_mgr: &DbcManager,
+        patch: u8,
     ) -> Result<()> {
         let repo = GraveyardRepository::new(world_pool);
-        let rows = repo.load_graveyard_zones().await?;
+        let rows = repo.load_graveyard_zones(patch).await?;
 
         let mut loaded = 0u32;
         let mut skipped = 0u32;

@@ -212,37 +212,6 @@ pub fn send_entry_refusal(
     })
 }
 
-/// Start a far teleport, choosing the destination copy first. On refusal the
-/// client gets a transfer-abort and the player stays where they are.
-/// Returns whether the teleport was started.
-pub async fn start_far_teleport(
-    world: &World,
-    session: &WorldSession,
-    player_guid: ObjectGuid,
-    dest_map: u32,
-    dest_pos: Position,
-) -> anyhow::Result<bool> {
-    let instance_id = match resolve_transfer_instance(world, player_guid, dest_map).await {
-        Ok(instance_id) => instance_id,
-        Err(error) => {
-            if let InstanceEntryError::Internal(e) = &error {
-                tracing::error!("Failed to choose a copy of map {}: {}", dest_map, e);
-            }
-            send_entry_refusal(session, dest_map, &error)?;
-            return Ok(false);
-        }
-    };
-
-    let old_position = world
-        .managers
-        .player_mgr
-        .with_player(player_guid, |player| player.movement.position)
-        .unwrap_or(dest_pos);
-    session.send_far_teleport(old_position, dest_map, dest_pos)?;
-    session.set_pending_teleport(Some((dest_map, instance_id, dest_pos)));
-    Ok(true)
-}
-
 /// Send a player to their bind point (used when they must leave a copy).
 pub fn send_home(world: &World, player_guid: ObjectGuid) -> anyhow::Result<()> {
     let Some(session) = world.session_mgr.get_session_by_player(player_guid) else {

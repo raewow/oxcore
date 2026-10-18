@@ -316,10 +316,13 @@ impl GossipSystem {
                 info!("Spirit healer option selected");
             }
             gossip_option::INNKEEPER => {
-                // Close gossip, bind home
+                // Close gossip and ask the player to confirm the new home; the
+                // client answers with CMSG_BINDER_ACTIVATE.
                 self.send_gossip_complete(player_guid);
-                // TODO: Bind home location
-                info!("Innkeeper option selected - would bind home");
+                self.broadcast_mgr.send_msg_to_player(
+                    player_guid,
+                    oxcore_shared::messages::login::SmsgBinderConfirm { binder: npc_guid },
+                );
             }
             gossip_option::QUESTGIVER => {
                 // Handle quest interaction

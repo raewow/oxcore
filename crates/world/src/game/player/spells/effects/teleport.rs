@@ -3,10 +3,10 @@
 //! Handles all teleportation, binding, and transportation effects.
 
 use super::{EffectInput, EffectResult};
-use crate::core::common::MovementInfo;
+use crate::game::player::teleport;
 use crate::World;
 use anyhow::Result;
-use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
+use oxcore_shared::protocol::{ObjectGuid, Position};
 
 /// Caster-home-bind target id (9) — Hearthstone / recall.
 const TARGET_LOCATION_CASTER_HOME_BIND: u32 = 9;
@@ -94,135 +94,100 @@ pub async fn effect_teleport_units(input: &EffectInput, world: &World) -> Result
         return Ok(EffectResult::empty());
     };
 
-    // Get session for sending packets
-    let session = match world.session_mgr.get_session_by_player(target_guid) {
-        Some(s) => s,
-        None => {
-            tracing::warn!("No session found for player {:?}", target_guid);
-            return Ok(EffectResult::empty());
-        }
+    // Teleporting yourself is a spell teleport: it must not interrupt its own cast.
+    let mut options = if target_guid == input.caster_guid {
+        teleport::options::SPELL
+    } else {
+        0
     };
+    if implicit_target_b == TARGET_LOCATION_CASTER_HOME_BIND {
+        // The hearthstone always shows the loading screen, even within a map.
+        options |= teleport::options::FORCE_MAP_CHANGE;
+    } else {
+        // A spell's same-map teleport keeps the fight and the pet.
+        options |= teleport::options::NOT_LEAVE_COMBAT | teleport::options::NOT_UNSUMMON_PET;
+    }
 
-    let current_map = world
-        .systems
-        .player
-        .manager()
-        .with_player(target_guid, |player| player.map_id)
-        .ok_or_else(|| anyhow::anyhow!("Player not found for teleport"))?;
-
-    if current_map == dest_map {
-        // A same-map teleport must use the near-teleport handshake, and keeps the
-        // player in their current copy of a dungeon. Sending NEW_WORLD here leaves
-        // the client waiting for a worldport ACK it will never send.
-        let mut movement = MovementInfo::new();
-        movement.mover_guid = target_guid;
-        movement.position = dest_pos;
-        let mut teleport_packet = WorldPacket::new(Opcode::MSG_MOVE_TELEPORT);
-        movement.write_to_packet(&mut teleport_packet);
-        session.send_packet(teleport_packet)?;
-        session.set_pending_near_teleport(Some(dest_pos));
-
+    if teleport::teleport_to(world, target_guid, dest_map, dest_pos, options).await? {
         tracing::info!(
-            "Near teleport initiated: target={:?} to map={} pos=({:.1}, {:.1}, {:.1})",
+            "Teleport initiated: target={:?} to map={} pos=({:.1}, {:.1}, {:.1})",
             target_guid,
             dest_map,
             dest_pos.x,
             dest_pos.y,
             dest_pos.z
         );
-        return Ok(EffectResult::empty());
     }
-
-    // Cross-map teleports use the far-transfer handshake. A dungeon destination
-    // goes through copy selection and the entry rules like any other entrance.
-    if !crate::game::instance::lifecycle::start_far_teleport(
-        world,
-        &session,
-        target_guid,
-        dest_map,
-        dest_pos,
-    )
-    .await?
-    {
-        return Ok(EffectResult::empty());
-    }
-
-    tracing::info!(
-        "Teleport initiated: target={:?} to map={} pos=({:.1}, {:.1}, {:.1})",
-        target_guid,
-        dest_map,
-        dest_pos.x,
-        dest_pos.y,
-        dest_pos.z
-    );
 
     Ok(EffectResult::empty())
 }
 
 /// Bind effect (11)
 ///
-/// Bind the target to a location (Hearthstone).
-/// Sets the player's home location.
+/// Makes the target's current spot their home (the innkeeper's bind spell).
 pub async fn effect_bind(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = input.target_guid.unwrap_or(input.caster_guid);
-
-    // Get current position as bind location
-    let current_pos = world
-        .systems
-        .player
-        .manager()
-        .with_player(target_guid, |player| player.movement.position.clone())
-        .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
-
-    let zone_id = world
-        .systems
-        .player
-        .manager()
-        .with_player(target_guid, |player| player.zone_id)
-        .unwrap_or(0);
-
-    // TODO: Set home bind in player data
-
-    tracing::debug!(
-        "Bind: target={:?} to zone={} pos=({:.1}, {:.1}, {:.1})",
-        target_guid,
-        zone_id,
-        current_pos.x,
-        current_pos.y,
-        current_pos.z
-    );
-
+    if !target_guid.is_player() {
+        return Ok(EffectResult::empty());
+    }
+    teleport::bind_home(world, target_guid, input.caster_guid).await?;
     Ok(EffectResult::empty())
 }
 
 /// Teleport-units-facing-caster effect (43)
 ///
-/// Teleport target to caster and make them face the caster.
-/// Used for some special teleport effects.
+/// Pull the target to the spell's radius in front of the caster; the fight
+/// and the pet carry on. Only players are moved: creatures do not teleport.
 pub async fn effect_teleport_units_face_caster(
     input: &EffectInput,
     world: &World,
 ) -> Result<EffectResult> {
-    let target_guid = match input.target_guid {
-        Some(guid) => guid,
-        None => return Ok(EffectResult::empty()),
+    let Some(target_guid) = input.target_guid.filter(ObjectGuid::is_player) else {
+        return Ok(EffectResult::empty());
     };
-
-    let caster_pos = world
-        .systems
-        .player
-        .manager()
-        .with_player(input.caster_guid, |player| player.movement.position.clone())
-        .ok_or_else(|| anyhow::anyhow!("Caster not found"))?;
-
-    // TODO: Teleport target to caster's front and face caster
-
-    tracing::debug!(
-        "Teleport face caster: target={:?} to caster={:?}",
-        target_guid,
-        input.caster_guid
+    let caster = world
+        .managers
+        .player_mgr
+        .with_player(input.caster_guid, |player| (player.map_id, player.movement.position))
+        .or_else(|| {
+            world
+                .managers
+                .creature_mgr
+                .with_creature(input.caster_guid, |creature| {
+                    (creature.map_id, creature.position)
+                })
+        });
+    let Some((map_id, caster_pos)) = caster else {
+        return Ok(EffectResult::empty());
+    };
+    let distance = world
+        .managers
+        .spell_mgr
+        .get(input.spell_id)
+        .map(|entry| entry.effect_radius_index[input.effect_index as usize])
+        .filter(|&index| index > 0)
+        .and_then(|index| world.dbc.read().get_spell_radius(index).map(|r| r.radius))
+        .unwrap_or(0.0);
+    let dest = Position::new(
+        caster_pos.x + distance * caster_pos.o.cos(),
+        caster_pos.y + distance * caster_pos.o.sin(),
+        caster_pos.z,
+        -caster_pos.o,
     );
 
+    let mut options = teleport::options::NOT_LEAVE_COMBAT | teleport::options::NOT_UNSUMMON_PET;
+    if target_guid == input.caster_guid {
+        options |= teleport::options::SPELL;
+    }
+    // A near teleport only: a caster on another map cannot pull anyone.
+    let on_same_map = world
+        .managers
+        .player_mgr
+        .with_player(target_guid, |player| player.map_id == map_id)
+        .unwrap_or(false);
+    if on_same_map {
+        teleport::teleport_to(world, target_guid, map_id, dest, options).await?;
+    }
     Ok(EffectResult::empty())
 }
 
@@ -242,29 +207,72 @@ pub async fn effect_stuck(input: &EffectInput, world: &World) -> Result<EffectRe
 
 /// Summon-player effect (85)
 ///
-/// Summon a player to the caster's location.
-/// Used by meeting stones and summon spells.
+/// Offer the target a summon to just in front of the caster (warlock
+/// ritual, meeting stone). The target accepts with CMSG_SUMMON_RESPONSE.
 pub async fn effect_summon_player(input: &EffectInput, world: &World) -> Result<EffectResult> {
-    let target_guid = match input.target_guid {
-        Some(guid) => guid,
-        None => return Ok(EffectResult::empty()),
+    /// Evil Twin: the target ignores summons.
+    const EVIL_TWIN: u32 = 23445;
+    /// How long an offer stands.
+    const SUMMON_DELAY: std::time::Duration = std::time::Duration::from_secs(120);
+    /// Distance in front of the caster the summoned player lands.
+    const LANDING_DISTANCE: f32 = 1.0;
+
+    let Some(target_guid) = input.target_guid.filter(ObjectGuid::is_player) else {
+        return Ok(EffectResult::empty());
     };
+    let ignores_summons = world
+        .managers
+        .player_mgr
+        .with_player(target_guid, |player| {
+            player.auras.container.all_auras().any(|aura| aura.spell_id == EVIL_TWIN)
+        })
+        .unwrap_or(true);
+    if ignores_summons {
+        return Ok(EffectResult::empty());
+    }
 
-    let caster_pos = world
-        .systems
-        .player
-        .manager()
-        .with_player(input.caster_guid, |player| player.movement.position.clone())
-        .ok_or_else(|| anyhow::anyhow!("Caster not found"))?;
-
-    // TODO: Teleport target to caster
-
-    tracing::debug!(
-        "Summon player: target={:?} to caster={:?}",
-        target_guid,
-        input.caster_guid
+    let caster = world
+        .managers
+        .player_mgr
+        .with_player(input.caster_guid, |player| {
+            (player.map_id, player.zone_id, player.movement.position)
+        })
+        .or_else(|| {
+            world
+                .managers
+                .creature_mgr
+                .with_creature(input.caster_guid, |creature| {
+                    (creature.map_id, 0, creature.position)
+                })
+        });
+    let Some((map_id, zone_id, caster_pos)) = caster else {
+        return Ok(EffectResult::empty());
+    };
+    let landing = Position::new(
+        caster_pos.x + LANDING_DISTANCE * caster_pos.o.cos(),
+        caster_pos.y + LANDING_DISTANCE * caster_pos.o.sin(),
+        caster_pos.z,
+        caster_pos.o,
     );
 
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(target_guid, |player| {
+            player.summon_offer = Some(crate::game::player::player::SummonOffer {
+                map_id,
+                position: landing,
+                expires_at: std::time::Instant::now() + SUMMON_DELAY,
+            });
+        });
+    world.managers.broadcast_mgr.send_msg_to_player(
+        target_guid,
+        oxcore_shared::messages::movement::SmsgSummonRequest {
+            summoner: input.caster_guid,
+            zone_id,
+            delay_ms: SUMMON_DELAY.as_millis() as u32,
+        },
+    );
     Ok(EffectResult::empty())
 }
 

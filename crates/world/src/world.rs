@@ -366,9 +366,7 @@ impl World {
             .load_display_scales(&self.dbc.read());
         self.managers.creature_mgr.load_model_info().await?;
 
-        // Set patch from config (convert wow_patch like 112 to creature patch, cap at 10 for vanilla)
-        let patch = self.config.wow_patch.unwrap_or(112);
-        let creature_patch = (patch % 100).min(10) as u8; // 112 -> 12 -> 10 (capped)
+        let creature_patch = self.content_patch();
         self.managers.creature_mgr.set_patch(creature_patch);
 
         self.managers.creature_mgr.load_spawns().await?;
@@ -440,7 +438,7 @@ impl World {
         step("Loading area triggers & instances");
         self.managers
             .area_trigger_mgr
-            .load()
+            .load(self.content_patch())
             .await
             .context("Failed to load area triggers")?;
 
@@ -509,7 +507,11 @@ impl World {
             let dbc = self.dbc.read();
             self.systems
                 .death
-                .load_graveyards(std::sync::Arc::new(self.databases.world.clone()), &dbc)
+                .load_graveyards(
+                    std::sync::Arc::new(self.databases.world.clone()),
+                    &dbc,
+                    self.content_patch(),
+                )
                 .await?;
         }
 
@@ -752,9 +754,10 @@ impl World {
     /// config, so the kind table is snapshotted once here and moved into the
     /// resolver. Capturing the DBC handle instead would mean taking its lock
     /// during map creation — which can happen while DBC is already write-locked.
-    /// Content patch used to pick progressive-patch rows (`wow_patch` 112 -> 10).
-    fn content_patch(&self) -> u8 {
-        (self.config.wow_patch.unwrap_or(112) % 100).min(10) as u8
+    /// Content patch used to pick progressive-patch rows: `wow_patch` 102
+    /// (1.2) is patch 0, each later minor version adds one, 112 is patch 10.
+    pub(crate) fn content_patch(&self) -> u8 {
+        content_patch_for(self.config.wow_patch.unwrap_or(112))
     }
 
     /// Merge `world.map_template` into the DBC map table.
@@ -763,9 +766,9 @@ impl World {
     /// so instance admission, raid resets and ghost routing all depend on these
     /// rows. Each map uses its newest row at or below the configured patch.
     async fn load_map_templates(&self) -> Result<()> {
-        let rows = sqlx::query_as::<_, (i32, i64, i16, i16, i64, i16, f32, f32)>(
+        let rows = sqlx::query_as::<_, (i32, i64, i16, i16, i64, i16, f32, f32, String)>(
             "SELECT DISTINCT ON (entry) entry, parent, map_type, player_limit, reset_delay,
-                    ghost_entrance_map, ghost_entrance_x, ghost_entrance_y
+                    ghost_entrance_map, ghost_entrance_x, ghost_entrance_y, map_name
              FROM world.map_template
              WHERE patch <= $1
              ORDER BY entry, patch DESC",
@@ -776,7 +779,17 @@ impl World {
 
         let mut dbc = self.dbc.write();
         let count = rows.len();
-        for (entry, parent, map_type, player_limit, reset_delay, ghost_map, ghost_x, ghost_y) in rows
+        for (
+            entry,
+            parent,
+            map_type,
+            player_limit,
+            reset_delay,
+            ghost_map,
+            ghost_x,
+            ghost_y,
+            name,
+        ) in rows
         {
             dbc.apply_map_template(crate::dbc::structures::MapEntry {
                 id: u32::try_from(entry)?,
@@ -787,6 +800,7 @@ impl World {
                 ghost_entrance_map: i32::from(ghost_map),
                 ghost_entrance_x: ghost_x,
                 ghost_entrance_y: ghost_y,
+                name,
             });
         }
         tracing::info!("Loaded {} map templates", count);
@@ -1071,5 +1085,26 @@ impl Clone for World {
             movement_buffers: Arc::clone(&self.movement_buffers),
             data_dir: self.data_dir.clone(),
         }
+    }
+}
+
+/// Progressive-patch number for a `wow_patch` setting (102 = 1.2 is patch 0,
+/// 112 = 1.12 is patch 10). Settings outside that range clamp to its ends.
+fn content_patch_for(wow_patch: u32) -> u8 {
+    (wow_patch.clamp(102, 112) - 102) as u8
+}
+
+#[cfg(test)]
+mod content_patch_tests {
+    use super::content_patch_for;
+
+    #[test]
+    fn wow_patch_maps_onto_progressive_patches() {
+        assert_eq!(content_patch_for(102), 0);
+        assert_eq!(content_patch_for(104), 2);
+        assert_eq!(content_patch_for(111), 9);
+        assert_eq!(content_patch_for(112), 10);
+        assert_eq!(content_patch_for(200), 10);
+        assert_eq!(content_patch_for(0), 0);
     }
 }

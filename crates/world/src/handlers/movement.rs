@@ -11,7 +11,9 @@ use crate::game::creature::movement::packet_sender::{
 };
 use crate::game::creature::movement::MoveType;
 use crate::World;
-use oxcore_shared::messages::movement::{SmsgTransferAborted, TransferAbortReason};
+use oxcore_shared::messages::movement::{
+    MsgMovementBroadcast, SmsgTransferAborted, TransferAbortReason,
+};
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Copy-local admission rules that must still hold when the client finishes loading:
@@ -98,6 +100,34 @@ fn teleport_to_homebind(
     session.send_far_teleport(old_position, map_id, position)?;
 
     session.set_pending_teleport(Some((map_id, 0, position)));
+    Ok(())
+}
+
+/// Tell the client which raids the player is saved to, so its raid
+/// information button matches after the transfer.
+fn send_saved_instances(
+    session: &WorldSession,
+    player_guid: ObjectGuid,
+    world: &World,
+) -> Result<()> {
+    use oxcore_shared::messages::instance::{SmsgUpdateInstanceOwnership, SmsgUpdateLastInstance};
+    use oxcore_shared::protocol::Protocol;
+
+    let saved: Vec<u32> = world
+        .managers
+        .instance_mgr
+        .raid_info(player_guid)
+        .into_iter()
+        .map(|(map_id, _, _)| map_id)
+        .collect();
+    session.send_msg(SmsgUpdateInstanceOwnership {
+        has_been_saved: !saved.is_empty(),
+    })?;
+    if session.protocol() == Protocol::Vanilla {
+        for map_id in saved {
+            session.send_msg(SmsgUpdateLastInstance { map_id })?;
+        }
+    }
     Ok(())
 }
 
@@ -240,6 +270,8 @@ pub async fn handle_worldport_ack(
         dest_instance_id,
     )
     .await;
+
+    send_saved_instances(session, player_guid, world)?;
 
     // Send initialization packets (critical for client to exit loading screen)
     use oxcore_shared::messages::login::{
@@ -405,6 +437,22 @@ pub async fn handle_worldport_ack(
         )
         .await?;
 
+    // Mounts only work where the map allows them.
+    if crate::game::instance::lifecycle::map_entry(world, dest_map)
+        .is_some_and(|entry| !entry.is_mount_allowed())
+    {
+        world
+            .systems
+            .auras
+            .remove_spells_causing_aura(
+                player_guid,
+                crate::game::player::auras::effects::AURA_MOUNTED,
+                world,
+            )
+            .await?;
+    }
+    crate::game::player::teleport::resummon_pet(world, player_guid);
+
     // A ghost entering the dungeon that holds their corpse comes back to life.
     if dest_instance_id != 0 {
         world
@@ -439,9 +487,10 @@ pub async fn handle_move_teleport_ack(
         return Ok(());
     }
 
-    // The client echoes movement info after the mover GUID. Consume it to keep the
-    // packet layout in sync, but use the server-authoritative queued destination.
-    let _movement_info = MovementInfo::read_for(session.protocol(), packet)?;
+    // The ack carries only the move counter and client time after the mover;
+    // the destination is the one the server queued.
+    let _counter = packet.read_u32();
+    let _client_time = packet.read_u32();
     let Some(destination) = session.get_pending_near_teleport() else {
         return Ok(());
     };
@@ -465,6 +514,34 @@ pub async fn handle_move_teleport_ack(
         .managers
         .map_mgr
         .get_or_create_map(map_id, instance_id);
+    // Observers around the old spot see the player leave, those around the new
+    // one see them arrive.
+    let landing = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| {
+            let mut info = MovementInfo::new();
+            info.mover_guid = player_guid;
+            info.flags = crate::core::common::MoveFlags::from(player.movement.flags);
+            info.time = player.movement.timestamp;
+            info.position = destination;
+            info
+        });
+    let broadcast = |info: &MovementInfo| {
+        world.managers.broadcast_mgr.broadcast_msg_nearby(
+            player_guid,
+            &MsgMovementBroadcast {
+                opcode: Opcode::MSG_MOVE_TELEPORT,
+                mover: player_guid,
+                info: info.clone().into(),
+                knockback: None,
+            },
+            false,
+        );
+    };
+    if let Some(info) = &landing {
+        broadcast(info);
+    }
     map.relocate_player(player_guid, old_position, destination);
     world.systems.player.visibility().check_cell_crossing(
         player_guid,
@@ -472,7 +549,70 @@ pub async fn handle_move_teleport_ack(
         destination,
         world,
     );
+    if let Some(info) = &landing {
+        broadcast(info);
+    }
+    crate::game::player::teleport::resummon_pet(world, player_guid);
 
+    Ok(())
+}
+
+/// Handle CMSG_SUMMON_RESPONSE: the player answered a summon offer. 1.12
+/// only sends it to accept; 1.14 says which. Accepting needs a living player
+/// out of combat and an offer that has not lapsed.
+pub async fn handle_summon_response(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    use oxcore_shared::protocol::Protocol;
+
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow!("Not logged in"))?;
+    let _summoner = packet.read_guid_for(session.protocol());
+    let accepted = match session.protocol() {
+        Protocol::Vanilla => true,
+        Protocol::Modern => packet.read_u8().is_some_and(|bits| bits & 0x80 != 0),
+    };
+
+    let Some((offer, alive)) = world
+        .managers
+        .player_mgr
+        .with_player_mut(player_guid, |player| {
+            (player.summon_offer.take(), player.is_alive())
+        })
+    else {
+        return Ok(());
+    };
+    let Some(offer) = offer.filter(|offer| offer.expires_at > std::time::Instant::now()) else {
+        return Ok(());
+    };
+    if !accepted {
+        return Ok(());
+    }
+    if !alive
+        || world
+            .systems
+            .combat
+            .is_in_combat(player_guid, &world.managers.player_mgr)
+    {
+        // Still standing: the player may accept again once able.
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player_guid, |player| player.summon_offer = Some(offer));
+        return Ok(());
+    }
+
+    let orientation = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| player.movement.position.o)
+        .unwrap_or(0.0);
+    let mut dest = offer.position;
+    dest.o = orientation;
+    crate::game::player::teleport::teleport_to(world, player_guid, offer.map_id, dest, 0).await?;
     Ok(())
 }
 

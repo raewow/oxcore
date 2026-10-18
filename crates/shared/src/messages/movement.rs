@@ -102,10 +102,10 @@ pub struct SmsgNewWorld {
 }
 
 impl ToWorldPacket for SmsgNewWorld {
-    /// `NewWorld::Write` for build 42597: adds a `Reason` field (always 0 —
-    /// none of our teleport paths need the client-side transition variants
-    /// Blizzard uses it for) and a `MovementOffset` Vector3 (always zero —
-    /// nothing in-flight needs adjusting across the port).
+    /// `NewWorld::Write` for build 42597: adds a `Reason` field (4, the
+    /// ordinary transfer the 1.14 client loads a map for) and a
+    /// `MovementOffset` Vector3 (always zero — nothing in-flight needs
+    /// adjusting across the port).
     fn to_modern(&self) -> Option<WorldPacket> {
         let mut writer = BitWriter::new();
         writer.write_u32(self.dest_map);
@@ -113,7 +113,7 @@ impl ToWorldPacket for SmsgNewWorld {
         writer.write_f32(self.dest_pos.y);
         writer.write_f32(self.dest_pos.z);
         writer.write_f32(self.dest_pos.o);
-        writer.write_u32(0); // Reason
+        writer.write_u32(4); // Reason: ordinary transfer
         writer.write_f32(0.0); // MovementOffset.x
         writer.write_f32(0.0); // MovementOffset.y
         writer.write_f32(0.0); // MovementOffset.z
@@ -668,6 +668,38 @@ mod modern_tests {
         ObjectGuid::new_without_entry(crate::protocol::HighGuid::Unit, 42)
     }
 
+    #[test]
+    fn move_teleport_puts_the_counter_between_mover_and_movement() {
+        let mover = ObjectGuid::new_without_entry(crate::protocol::HighGuid::Player, 5);
+        let mut info = MovementInfo::new();
+        info.time = 9;
+        info.position = Position::new(1.0, 2.0, 3.0, 0.5);
+        let message = SmsgMoveTeleport {
+            mover,
+            counter: 7,
+            info,
+        };
+
+        let vanilla = message.to_vanilla();
+        assert_eq!(vanilla.opcode().vanilla(), 0x00C7);
+        let body = vanilla.contents();
+        assert_eq!(&body[..2], &[0x01, 5]); // packed guid
+        assert_eq!(&body[2..6], &7u32.to_le_bytes());
+        assert_eq!(&body[6..10], &0u32.to_le_bytes()); // flags
+        assert_eq!(&body[10..14], &9u32.to_le_bytes()); // time
+        assert_eq!(&body[14..18], &1.0f32.to_le_bytes());
+        assert_eq!(body.len(), 2 + 4 + 4 + 4 + 16 + 4);
+
+        let modern = message.to_modern().unwrap();
+        assert_eq!(modern.opcode().modern(), 0x2E04);
+        let body = modern.contents();
+        let tail = &body[body.len() - 22..];
+        assert_eq!(&tail[..4], &7u32.to_le_bytes());
+        assert_eq!(&tail[4..8], &1.0f32.to_le_bytes());
+        assert_eq!(&tail[16..20], &0.5f32.to_le_bytes());
+        assert_eq!(&tail[20..], &[0, 0]); // no preload, no transport or vehicle
+    }
+
     /// The bit run in the middle is the fragile part: a 2-bit spline type, two 16-bit counts and
     /// five loose bits, flushed together. Miscounting shifts the facing data and the path.
     #[test]
@@ -754,6 +786,81 @@ mod modern_tests {
         // packed guid128 then a u32 counter
         assert_eq!(root.contents().len(), 5 + 4);
         assert_eq!(&root.contents()[5..9], &0u32.to_le_bytes());
+    }
+}
+
+/// A same-map teleport, sent to the client that moves the unit. The client
+/// lands at the new position and answers with a teleport ack carrying the same
+/// counter.
+///
+/// Vanilla reuses `MSG_MOVE_TELEPORT_ACK` for this (mover, counter, then the
+/// full movement block at the destination); 1.14 has a dedicated
+/// `SMSG_MOVE_TELEPORT` with just the position.
+#[derive(Debug, Clone)]
+pub struct SmsgMoveTeleport {
+    pub mover: ObjectGuid,
+    pub counter: u32,
+    /// Movement at the destination, with moving flags already cleared.
+    pub info: MovementInfo,
+}
+
+impl ToWorldPacket for SmsgMoveTeleport {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::MSG_MOVE_TELEPORT_ACK);
+        packet.write_packed_guid_raw(self.mover.counter() as u64);
+        packet.write_u32(self.counter);
+        self.info.write_body(&mut packet);
+        packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.mover.to_guid128(MODERN_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(self.counter);
+        writer.write_f32(self.info.position.x);
+        writer.write_f32(self.info.position.y);
+        writer.write_f32(self.info.position.z);
+        writer.write_f32(normalize_orientation(self.info.position.o));
+        writer.write_u8(0); // PreloadWorld
+        writer.write_bit(false); // TransportGUID
+        writer.write_bit(false); // Vehicle
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_MOVE_TELEPORT))
+    }
+}
+
+/// SMSG_SUMMON_REQUEST - someone (a warlock's ritual, a meeting stone) offers
+/// to summon the player to them. The client answers with CMSG_SUMMON_RESPONSE.
+#[derive(Debug, Clone)]
+pub struct SmsgSummonRequest {
+    pub summoner: ObjectGuid,
+    pub zone_id: u32,
+    /// How long the offer stands before the client declines it by itself.
+    pub delay_ms: u32,
+}
+
+impl ToWorldPacket for SmsgSummonRequest {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_SUMMON_REQUEST);
+        packet.write_guid_raw(self.summoner.raw());
+        packet.write_u32(self.zone_id);
+        packet.write_u32(self.delay_ms);
+        packet
+    }
+
+    /// 1.14 drops the delay (the client keeps its own timer) and adds the
+    /// summoner's realm and a reason (0: a spell).
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.summoner.to_guid128(MODERN_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(0x0101_0000 | u32::from(MODERN_REALM_ID)); // virtual realm address
+        writer.write_u32(self.zone_id);
+        writer.write_u8(0); // Reason: spell
+        writer.write_bit(false); // SkipStartingArea
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_SUMMON_REQUEST))
     }
 }
 

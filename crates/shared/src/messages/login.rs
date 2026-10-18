@@ -470,6 +470,55 @@ impl ToWorldPacket for SmsgBindPointUpdate {
     }
 }
 
+/// SMSG_BINDER_CONFIRM - asks the player to confirm making this inn their
+/// home; the client answers with CMSG_BINDER_ACTIVATE.
+#[derive(Debug, Clone)]
+pub struct SmsgBinderConfirm {
+    pub binder: crate::protocol::ObjectGuid,
+}
+
+impl ToWorldPacket for SmsgBinderConfirm {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_BINDER_CONFIRM);
+        packet.write_guid_raw(self.binder.raw());
+        packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.binder.to_guid128(MODERN_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        Some(writer.finish(Opcode::SMSG_BINDER_CONFIRM))
+    }
+}
+
+/// SMSG_PLAYERBOUND - the hearthstone is now bound to `area_id`.
+#[derive(Debug, Clone)]
+pub struct SmsgPlayerBound {
+    pub binder: crate::protocol::ObjectGuid,
+    pub area_id: u32,
+}
+
+impl ToWorldPacket for SmsgPlayerBound {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_PLAYERBOUND);
+        packet.write_guid_raw(self.binder.raw());
+        packet.write_u32(self.area_id);
+        packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.binder.to_guid128(MODERN_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_u32(self.area_id);
+        Some(writer.finish(Opcode::SMSG_PLAYERBOUND))
+    }
+}
+
+/// Realm id the 1.14 client expects inside 128-bit GUIDs.
+const MODERN_REALM_ID: u16 = 1;
+
 /// SMSG_SET_REST_START - Rest state timer
 ///
 /// Sent to set when the player started resting (for rest XP calculation).

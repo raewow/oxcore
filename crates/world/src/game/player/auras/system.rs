@@ -922,6 +922,37 @@ impl AuraSystem {
         Ok(())
     }
 
+    /// Remove every spell that has an aura of `aura_type` on the target, with
+    /// all of that spell's effects (a mount loses its speed bonus too).
+    pub async fn remove_spells_causing_aura(
+        &self,
+        target_guid: ObjectGuid,
+        aura_type: u32,
+        world: &World,
+    ) -> Result<()> {
+        let spells: Vec<u32> = world
+            .systems
+            .player
+            .manager()
+            .with_player(target_guid, |player| {
+                let mut spells: Vec<u32> = player
+                    .auras
+                    .container
+                    .all_auras()
+                    .filter(|aura| aura.aura_type == aura_type)
+                    .map(|aura| aura.spell_id)
+                    .collect();
+                spells.sort_unstable();
+                spells.dedup();
+                spells
+            })
+            .unwrap_or_default();
+        for spell_id in spells {
+            self.remove_spell_auras(target_guid, spell_id, world).await?;
+        }
+        Ok(())
+    }
+
     /// Send SMSG_STANDSTATE_UPDATE packet to player
     fn send_stand_state_update(&self, player_guid: ObjectGuid, stand_state: u8, world: &World) {
         let mut packet = WorldPacket::new(Opcode::SMSG_STANDSTATE_UPDATE);
