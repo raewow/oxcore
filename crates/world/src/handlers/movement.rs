@@ -15,10 +15,12 @@ use oxcore_shared::messages::movement::{SmsgTransferAborted, TransferAbortReason
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Position, WorldPacket};
 
 /// Copy-local admission rules that must still hold when the client finishes loading:
-/// a copy whose save is being reset, or one that has reached its player cap, cannot
-/// be entered. Continents (`instance_id == 0`) are unrestricted.
+/// a copy whose save is being reset, one at its player cap, or a raid whose
+/// encounter is engaged with the player's group inside cannot be entered.
+/// Continents (`instance_id == 0`) are unrestricted.
 fn instance_arrival_denied(
     world: &World,
+    player_guid: ObjectGuid,
     map_id: u32,
     instance_id: u32,
 ) -> Option<TransferAbortReason> {
@@ -32,15 +34,25 @@ fn instance_arrival_denied(
     {
         return Some(TransferAbortReason::NotFound);
     }
-    let (is_instance_map, max_players) = {
+    let (is_instance_map, is_raid, max_players) = {
         let dbc = world.dbc.read();
         dbc.get_map(map_id)
-            .map(|entry| {
-                (entry.is_dungeon(), entry.max_players)
-            })
-            .unwrap_or((false, 0))
+            .map(|entry| (entry.is_dungeon(), entry.is_raid(), entry.max_players))
+            .unwrap_or((false, false, 0))
     };
-    if is_instance_map && max_players > 0 {
+    let game_master = crate::game::instance::lifecycle::is_game_master(world, player_guid);
+    if is_raid
+        && !game_master
+        && crate::game::instance::lifecycle::encounter_in_progress(
+            world,
+            player_guid,
+            map_id,
+            instance_id,
+        )
+    {
+        return Some(TransferAbortReason::ZoneInCombat);
+    }
+    if is_instance_map && max_players > 0 && !game_master {
         let inside = world
             .managers
             .map_mgr
@@ -143,7 +155,7 @@ pub async fn handle_worldport_ack(
 
     // Revalidate the copy-local admission rules at arrival: the destination may
     // have filled up or started a reset since the transfer was scheduled.
-    if let Some(reason) = instance_arrival_denied(world, dest_map, dest_instance_id) {
+    if let Some(reason) = instance_arrival_denied(world, player_guid, dest_map, dest_instance_id) {
         tracing::warn!(
             "[WORLDPORT-ACK] Player {:?} denied entry to map {} instance {} at arrival: {:?}",
             player_guid,

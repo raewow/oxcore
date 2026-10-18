@@ -968,9 +968,9 @@ impl Opcode {
     pub const CMSG_RESET_INSTANCES: Opcode = Opcode { vanilla: 0x031D, modern: 0x366A }; // 797
     pub const SMSG_INSTANCE_RESET: Opcode = Opcode { vanilla: 0x031E, modern: 0x267F }; // 798
     pub const SMSG_INSTANCE_RESET_FAILED: Opcode = Opcode { vanilla: 0x031F, modern: 0x2680 }; // 799
-    // Vanilla-only here: no modern wire number has been verified for these yet.
-    pub const SMSG_INSTANCE_SAVE_CREATED: Opcode = Opcode { vanilla: 0x02CB, ..Opcode::NONE }; // 715
-    pub const SMSG_RAID_INSTANCE_MESSAGE: Opcode = Opcode { vanilla: 0x02FA, ..Opcode::NONE }; // 762
+    pub const SMSG_INSTANCE_SAVE_CREATED: Opcode = Opcode { vanilla: 0x02CB, modern: 0x2777 }; // 715
+    pub const SMSG_RAID_INSTANCE_MESSAGE: Opcode = Opcode { vanilla: 0x02FA, modern: 0x2BB4 }; // 762
+    pub const SMSG_RAID_GROUP_ONLY: Opcode = Opcode { vanilla: 0x0286, modern: 0x27A7 }; // 646
 
     // ============================================================================
     // Meeting Stone
@@ -2203,6 +2203,7 @@ pub const ALL: &[(Opcode, &str)] = &[
         Opcode::SMSG_RAID_INSTANCE_MESSAGE,
         "SMSG_RAID_INSTANCE_MESSAGE",
     ),
+    (Opcode::SMSG_RAID_GROUP_ONLY, "SMSG_RAID_GROUP_ONLY"),
     (Opcode::CMSG_MEETINGSTONE_INFO, "CMSG_MEETINGSTONE_INFO"),
     (Opcode::CMSG_MEETINGSTONE_JOIN, "CMSG_MEETINGSTONE_JOIN"),
     (Opcode::CMSG_MEETINGSTONE_LEAVE, "CMSG_MEETINGSTONE_LEAVE"),
@@ -2577,8 +2578,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            677,
-            "expected 677 opcode constants; update this count deliberately when adding opcodes"
+            678,
+            "expected 678 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

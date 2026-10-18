@@ -74,6 +74,8 @@ pub enum InstanceAdmissionDenied {
     MaxPlayers,
     /// The copy's save was reset and the copy is being emptied.
     ResetInProgress,
+    /// A raid encounter is engaged with the player's group inside.
+    ZoneInCombat,
 }
 
 /// Live-world inputs the admission rules need but the instance manager cannot see.
@@ -91,6 +93,9 @@ pub struct InstanceAdmission<'a> {
     pub account_id: Option<u32>,
     /// Game masters bypass the raid-group, hourly and player-cap rules.
     pub is_game_master: bool,
+    /// Whether a raid encounter in a given copy is engaged with the entering
+    /// player's group in combat inside (and the player alive). `None` never refuses.
+    pub encounter_in_progress: Option<&'a (dyn Fn(u32, u32) -> bool + Send + Sync)>,
 }
 
 impl InstanceAdmission<'_> {
@@ -104,6 +109,7 @@ impl InstanceAdmission<'_> {
             players_inside: None,
             account_id: None,
             is_game_master: false,
+            encounter_in_progress: None,
         }
     }
 
@@ -144,6 +150,17 @@ impl From<InstanceAdmissionDenied> for InstanceEntryError {
     fn from(denied: InstanceAdmissionDenied) -> Self {
         Self::Denied(denied)
     }
+}
+
+/// Change in a player's removal timer (see [`InstanceMgr::track_unsaved_player`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsavedTimer {
+    /// The countdown started: warn the player.
+    Started,
+    /// The countdown ran out: send the player home.
+    Expired,
+    /// The player is saved again: cancel the warning.
+    Cleared,
 }
 
 /// Which saves a reset request covers.
@@ -1219,9 +1236,16 @@ impl InstanceMgr {
         {
             return Err(InstanceAdmissionDenied::MaxPlayers);
         }
-        // Zoning into a raid while one of its encounters is engaged is also refused,
-        // but encounter-in-progress state is not modelled yet, so that rule has no
-        // input here.
+        // No zoning into a raid while one of its encounters is engaged with the
+        // player's group fighting inside; resurrections are unaffected.
+        if !admission.is_game_master
+            && admission.is_raid
+            && admission
+                .encounter_in_progress
+                .is_some_and(|engaged| engaged(map_id, instance_id))
+        {
+            return Err(InstanceAdmissionDenied::ZoneInCombat);
+        }
         Ok(())
     }
 
@@ -1565,28 +1589,28 @@ impl InstanceMgr {
     }
 
     /// Start, keep or clear the removal timer of a player inside a copy they are
-    /// not saved to. Returns `Some(true)` the first time the timer starts (warn the
-    /// player), `Some(false)` once it has run out (send them home), `None` otherwise.
+    /// not saved to, and say what changed.
     pub fn track_unsaved_player(
         &self,
         player_guid: ObjectGuid,
         saved: bool,
         now: Instant,
         grace: std::time::Duration,
-    ) -> Option<bool> {
+    ) -> Option<UnsavedTimer> {
         let mut deadlines = self.removal_deadlines.lock();
         if saved {
-            deadlines.remove(&player_guid);
-            return None;
+            return deadlines
+                .remove(&player_guid)
+                .map(|_| UnsavedTimer::Cleared);
         }
         match deadlines.get(&player_guid) {
             None => {
                 deadlines.insert(player_guid, now + grace);
-                Some(true)
+                Some(UnsavedTimer::Started)
             }
             Some(&deadline) if now >= deadline => {
                 deadlines.remove(&player_guid);
-                Some(false)
+                Some(UnsavedTimer::Expired)
             }
             Some(_) => None,
         }

@@ -4,16 +4,14 @@
 
 use super::manager::{
     InstanceAdmission, InstanceAdmissionDenied, InstanceEntryError, InstanceEntryGroup,
-    ResetOutcome,
+    ResetOutcome, UnsavedTimer,
 };
 use crate::dbc::structures::MapEntry;
 use crate::core::session::WorldSession;
 use crate::World;
-use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language};
-use oxcore_shared::messages::chat::SmsgMessageChat;
 use oxcore_shared::messages::instance::{
-    RaidInstanceMessageType, SmsgInstanceReset, SmsgInstanceResetFailed, SmsgInstanceSaveCreated,
-    SmsgRaidInstanceMessage,
+    RaidGroupOnlyReason, RaidInstanceMessageType, SmsgInstanceReset, SmsgInstanceResetFailed,
+    SmsgInstanceSaveCreated, SmsgRaidGroupOnly, SmsgRaidInstanceMessage,
 };
 use oxcore_shared::messages::movement::{SmsgTransferAborted, TransferAbortReason};
 use oxcore_shared::protocol::{ObjectGuid, Position};
@@ -39,8 +37,54 @@ pub fn is_dungeon_map(world: &World, map_id: u32) -> bool {
     map_entry(world, map_id).is_some_and(|entry| entry.is_dungeon())
 }
 
+/// A raid boss of this copy is in combat while someone from the player's group
+/// fights inside it, and the player is alive. Raid bosses are the creatures
+/// whose death saves the raid.
+pub(crate) fn encounter_in_progress(
+    world: &World,
+    player_guid: ObjectGuid,
+    map_id: u32,
+    instance_id: u32,
+) -> bool {
+    let alive = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| player.is_alive())
+        .unwrap_or(false);
+    if !alive {
+        return false;
+    }
+    let Some(group) = world.systems.group.get_player_group(player_guid) else {
+        return false;
+    };
+    let group_fighting_inside = group.members.iter().any(|member| {
+        world
+            .managers
+            .player_mgr
+            .with_player(member.guid, |player| {
+                player.map_id == map_id
+                    && player.instance_id == instance_id
+                    && player.combat.in_combat
+            })
+            .unwrap_or(false)
+    });
+    if !group_fighting_inside {
+        return false;
+    }
+    let creature_mgr = &world.managers.creature_mgr;
+    creature_mgr
+        .creatures_in_copy(map_id, instance_id)
+        .into_iter()
+        .any(|guid| {
+            creature_mgr.is_in_combat(guid)
+                && creature_mgr
+                    .get_entry(guid)
+                    .is_some_and(|entry| creature_mgr.locks_raid_on_death(entry))
+        })
+}
+
 /// Players in game-master mode (`.gm on`) bypass the entry rules.
-fn is_game_master(world: &World, player_guid: ObjectGuid) -> bool {
+pub(crate) fn is_game_master(world: &World, player_guid: ObjectGuid) -> bool {
     world
         .managers
         .player_mgr
@@ -103,6 +147,9 @@ pub async fn resolve_transfer_instance(
     }
 
     let group = group_context(world, player_guid, dest_map);
+    let engaged = |map_id: u32, instance_id: u32| -> bool {
+        encounter_in_progress(world, player_guid, map_id, instance_id)
+    };
     let players_inside = |map_id: u32, instance_id: u32| -> usize {
         world
             .managers
@@ -118,6 +165,7 @@ pub async fn resolve_transfer_instance(
         players_inside: Some(&players_inside),
         account_id: (account_id != 0).then_some(account_id),
         is_game_master: is_game_master(world, player_guid),
+        encounter_in_progress: Some(&engaged),
     };
 
     world
@@ -142,6 +190,28 @@ pub fn abort_reason(error: &InstanceEntryError) -> TransferAbortReason {
     }
 }
 
+/// Tell a client why it may not enter a dungeon: the raid-group notice when it
+/// lacks a raid group, otherwise a transfer abort with the matching reason.
+pub fn send_entry_refusal(
+    session: &WorldSession,
+    dest_map: u32,
+    error: &InstanceEntryError,
+) -> anyhow::Result<()> {
+    if matches!(
+        error,
+        InstanceEntryError::Denied(InstanceAdmissionDenied::RaidGroupRequired)
+    ) {
+        return session.send_msg(SmsgRaidGroupOnly {
+            timer_ms: 0,
+            reason: RaidGroupOnlyReason::RaidGroupRequired,
+        });
+    }
+    session.send_msg(SmsgTransferAborted {
+        map_id: dest_map,
+        reason: abort_reason(error),
+    })
+}
+
 /// Start a far teleport, choosing the destination copy first. On refusal the
 /// client gets a transfer-abort and the player stays where they are.
 /// Returns whether the teleport was started.
@@ -158,10 +228,7 @@ pub async fn start_far_teleport(
             if let InstanceEntryError::Internal(e) = &error {
                 tracing::error!("Failed to choose a copy of map {}: {}", dest_map, e);
             }
-            session.send_msg(SmsgTransferAborted {
-                map_id: dest_map,
-                reason: abort_reason(&error),
-            })?;
+            send_entry_refusal(session, dest_map, &error)?;
             return Ok(false);
         }
     };
@@ -206,24 +273,6 @@ pub fn send_home(world: &World, player_guid: ObjectGuid) -> anyhow::Result<()> {
     session.send_far_teleport(old_position, map_id, position)?;
     session.set_pending_teleport(Some((map_id, 0, position)));
     Ok(())
-}
-
-fn send_system_message(world: &World, player_guid: ObjectGuid, message: &str) {
-    let Some(session) = world.session_mgr.get_session_by_player(player_guid) else {
-        return;
-    };
-    let chat = SmsgMessageChat {
-        msgtype: ChatMsg::System,
-        language: Language::Universal,
-        sender_guid: ObjectGuid::empty(),
-        sender_name: None,
-        target_guid: None,
-        channel_name: None,
-        player_rank: None,
-        message,
-        chat_tag: ChatTag::None,
-    };
-    let _ = session.send_msg(chat);
 }
 
 /// A database creature died: persist its respawn deadline, keep a normal
@@ -490,12 +539,24 @@ pub async fn update(world: &World) -> anyhow::Result<()> {
                 .map(|group| group.leader_guid);
             let saved = instance_mgr.is_saved_to_copy(player, leader, map_id, instance_id);
             match instance_mgr.track_unsaved_player(player, saved, now, UNSAVED_PLAYER_GRACE) {
-                Some(true) => send_system_message(
-                    world,
+                // The client shows its own countdown for the raid-group notice.
+                Some(UnsavedTimer::Started) => world.managers.broadcast_mgr.send_msg_to_player(
                     player,
-                    "You are not saved to this instance. You will be returned to your bind location in 60 seconds.",
+                    SmsgRaidGroupOnly {
+                        timer_ms: UNSAVED_PLAYER_GRACE.as_millis() as u32,
+                        reason: RaidGroupOnlyReason::RaidGroupRequired,
+                    },
                 ),
-                Some(false) => {
+                // Saved again: replacing the countdown with an immediate notice
+                // of zero length dismisses it.
+                Some(UnsavedTimer::Cleared) => world.managers.broadcast_mgr.send_msg_to_player(
+                    player,
+                    SmsgRaidGroupOnly {
+                        timer_ms: 0,
+                        reason: RaidGroupOnlyReason::RaidGroupRequired,
+                    },
+                ),
+                Some(UnsavedTimer::Expired) => {
                     let _ = send_home(world, player);
                 }
                 None => {}
@@ -536,6 +597,9 @@ pub async fn validate_login_location(
         .await;
     if let Ok(Some(_)) = bound {
         let group = group_context(world, player_guid, map_id);
+        let engaged = |map: u32, instance: u32| -> bool {
+            encounter_in_progress(world, player_guid, map, instance)
+        };
         let players_inside = |map: u32, instance: u32| -> usize {
             world
                 .managers
@@ -551,6 +615,7 @@ pub async fn validate_login_location(
             players_inside: Some(&players_inside),
             account_id: (account_id != 0).then_some(account_id),
             is_game_master: is_game_master(world, player_guid),
+            encounter_in_progress: Some(&engaged),
         };
         match instance_mgr
             .enter_instance(
@@ -703,12 +768,13 @@ pub async fn on_player_changed_map(
 impl From<InstanceAdmissionDenied> for TransferAbortReason {
     fn from(denied: InstanceAdmissionDenied) -> Self {
         match denied {
-            // The dedicated raid-group-only notice has no verified modern opcode,
-            // so a not-found abort is the closest response both protocols carry.
+            // Callers send SMSG_RAID_GROUP_ONLY for this one (see
+            // `send_entry_refusal`); a not-found abort is the fallback.
             InstanceAdmissionDenied::RaidGroupRequired => TransferAbortReason::NotFound,
             InstanceAdmissionDenied::TooManyInstances => TransferAbortReason::TooManyInstances,
             InstanceAdmissionDenied::MaxPlayers => TransferAbortReason::MaxPlayers,
             InstanceAdmissionDenied::ResetInProgress => TransferAbortReason::NotFound,
+            InstanceAdmissionDenied::ZoneInCombat => TransferAbortReason::ZoneInCombat,
         }
     }
 }

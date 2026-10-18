@@ -554,6 +554,27 @@ async fn assert_denied(
     assert!(packets.try_recv().is_err());
 }
 
+/// A raid entry without a raid group is answered with the raid-group notice,
+/// not a transfer abort.
+async fn assert_raid_group_required(
+    world: &World,
+    session: &WorldSession,
+    packets: &mut mpsc::UnboundedReceiver<WorldPacket>,
+) {
+    let mut packet = WorldPacket::new(Opcode::CMSG_AREATRIGGER);
+    packet.write_u32(100);
+    handle_area_trigger(session, &mut packet, world)
+        .await
+        .unwrap();
+    let response = packets
+        .try_recv()
+        .expect("a denied entry notifies the client");
+    assert_eq!(response.opcode(), Opcode::SMSG_RAID_GROUP_ONLY);
+    assert_eq!(response.contents(), &[0, 0, 0, 0, 1, 0, 0, 0]);
+    assert!(session.get_pending_teleport().is_none());
+    assert!(packets.try_recv().is_err());
+}
+
 async fn copies_of(world: &World, map_id: u32) -> i64 {
     sqlx::query_scalar("SELECT COUNT(*) FROM characters.instance WHERE map = $1")
         .bind(i64::from(map_id))
@@ -569,7 +590,7 @@ async fn a_raid_map_requires_a_raid_group(pool: PgPool) {
 
     // Player 4 is in no group at all.
     let (solo, mut packets) = session(&world, 4, 0);
-    assert_denied(&world, &solo, &mut packets, TransferAbortReason::NotFound).await;
+    assert_raid_group_required(&world, &solo, &mut packets).await;
     assert!(world
         .managers
         .instance_mgr
@@ -578,7 +599,7 @@ async fn a_raid_map_requires_a_raid_group(pool: PgPool) {
 
     // Group 1 exists but is an ordinary party, not a raid.
     let (member, mut packets) = session(&world, 2, 0);
-    assert_denied(&world, &member, &mut packets, TransferAbortReason::NotFound).await;
+    assert_raid_group_required(&world, &member, &mut packets).await;
     assert!(world
         .managers
         .instance_mgr

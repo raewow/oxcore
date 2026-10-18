@@ -7,6 +7,7 @@
 //! - [`SmsgRaidInstanceInfo`] - The player's permanent raid saves
 //! - [`SmsgRaidInstanceMessage`] - Raid welcome and reset warnings
 //! - [`SmsgInstanceSaveCreated`] - A permanent raid save was just created
+//! - [`SmsgRaidGroupOnly`] - Raid-group-required notice / removal countdown
 //! - [`SmsgInstanceReset`] - Notification that an instance has been reset
 //! - [`SmsgInstanceResetFailed`] - Notification that an instance reset failed
 
@@ -113,9 +114,6 @@ impl ToWorldPacket for SmsgRaidInstanceMessage {
     /// 1.14 shrinks the type to a byte, adds a difficulty id and the locked/extended bits, and
     /// drops the time left: the client computes it from its own copy of the reset schedule.
     fn to_modern(&self) -> Option<WorldPacket> {
-        if !Opcode::SMSG_RAID_INSTANCE_MESSAGE.has_modern() {
-            return None;
-        }
         let mut writer = BitWriter::new();
         writer.write_u8(self.kind as u8);
         writer.write_u32(self.map_id);
@@ -142,9 +140,6 @@ pub struct SmsgInstanceSaveCreated;
 impl ToWorldPacket for SmsgInstanceSaveCreated {
     /// 1.14 replaces vanilla's u32 with a single flushed "gm" bit.
     fn to_modern(&self) -> Option<WorldPacket> {
-        if !Opcode::SMSG_INSTANCE_SAVE_CREATED.has_modern() {
-            return None;
-        }
         let mut writer = BitWriter::new();
         writer.write_bit(false); // Gm
         writer.flush_bits();
@@ -154,6 +149,45 @@ impl ToWorldPacket for SmsgInstanceSaveCreated {
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_INSTANCE_SAVE_CREATED);
         packet.write_u32(0);
+        packet
+    }
+}
+
+/// Why a player is told they need a raid group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RaidGroupOnlyReason {
+    /// "You must be in a raid group to enter this instance."
+    RaidGroupRequired,
+}
+
+/// SMSG_RAID_GROUP_ONLY - the raid-group-required notice. With a non-zero
+/// `timer_ms` the client shows a countdown before the player is sent home.
+#[derive(Debug, Clone, Copy)]
+pub struct SmsgRaidGroupOnly {
+    pub timer_ms: u32,
+    pub reason: RaidGroupOnlyReason,
+}
+
+impl ToWorldPacket for SmsgRaidGroupOnly {
+    /// Same body as vanilla, but 1.14 renumbers the reason: "raid group
+    /// required" is 2 there (1 means "too low level"), so map it by name.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let reason: u32 = match self.reason {
+            RaidGroupOnlyReason::RaidGroupRequired => 2,
+        };
+        let mut packet = WorldPacket::new(Opcode::SMSG_RAID_GROUP_ONLY);
+        packet.write_u32(self.timer_ms);
+        packet.write_u32(reason);
+        Some(packet)
+    }
+
+    fn to_vanilla(&self) -> WorldPacket {
+        let reason: u32 = match self.reason {
+            RaidGroupOnlyReason::RaidGroupRequired => 1,
+        };
+        let mut packet = WorldPacket::new(Opcode::SMSG_RAID_GROUP_ONLY);
+        packet.write_u32(self.timer_ms);
+        packet.write_u32(reason);
         packet
     }
 }
@@ -257,6 +291,21 @@ mod tests {
             packet.contents(),
             &[1, 0, 0, 0, 0x99, 0x01, 0, 0, 0x84, 0x03, 0, 0, 7, 0, 0, 0]
         );
+    }
+
+    #[test]
+    fn raid_group_only_renumbers_its_reason_for_modern_clients() {
+        let msg = SmsgRaidGroupOnly {
+            timer_ms: 60_000,
+            reason: RaidGroupOnlyReason::RaidGroupRequired,
+        };
+        assert_eq!(
+            msg.to_vanilla().contents(),
+            &[0x60, 0xEA, 0, 0, 1, 0, 0, 0]
+        );
+        let modern = msg.to_modern().unwrap();
+        assert_eq!(modern.opcode().modern(), 0x27A7);
+        assert_eq!(modern.contents(), &[0x60, 0xEA, 0, 0, 2, 0, 0, 0]);
     }
 
     #[test]

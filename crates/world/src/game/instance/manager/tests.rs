@@ -103,6 +103,27 @@ async fn group_reset_checks_the_group_copy_even_when_the_leader_has_a_solo_copy(
     );
 }
 
+#[test]
+fn an_engaged_raid_refuses_zone_in_except_for_game_masters() {
+    let manager = InstanceMgr::new();
+    let engaged = |_map: u32, _instance: u32| true;
+    let mut admission = InstanceAdmission {
+        is_raid: true,
+        encounter_in_progress: Some(&engaged),
+        ..InstanceAdmission::open()
+    };
+    assert_eq!(
+        manager.admit_copy(409, 7, &admission),
+        Err(InstanceAdmissionDenied::ZoneInCombat)
+    );
+    admission.is_game_master = true;
+    assert_eq!(manager.admit_copy(409, 7, &admission), Ok(()));
+    // Dungeons never refuse for an engaged encounter.
+    admission.is_game_master = false;
+    admission.is_raid = false;
+    assert_eq!(manager.admit_copy(36, 7, &admission), Ok(()));
+}
+
 // sqlx creates a separate database per test. These minimal tables retain the
 // production ownership keys, types, and foreign keys relevant to instance saves.
 async fn fixture(pool: PgPool) -> Databases {

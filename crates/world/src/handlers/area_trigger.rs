@@ -17,7 +17,6 @@ use crate::game::player::environment::RestType;
 use crate::World;
 use oxcore_shared::game::chat::{ChatMsg, ChatTag, Language};
 use oxcore_shared::messages::chat::SmsgMessageChat;
-use oxcore_shared::messages::movement::SmsgTransferAborted;
 use oxcore_shared::messages::update::{
     ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
 };
@@ -278,10 +277,7 @@ pub async fn handle_area_trigger(
                         e
                     ),
                 }
-                session.send_msg(SmsgTransferAborted {
-                    map_id: dest_map,
-                    reason: lifecycle::abort_reason(&error),
-                })?;
+                lifecycle::send_entry_refusal(session, dest_map, &error)?;
                 return Ok(());
             }
         };
