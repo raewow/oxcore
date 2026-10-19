@@ -156,38 +156,13 @@ pub async fn effect_pickpocket(input: &EffectInput, world: &World) -> Result<Eff
 
 /// SPELL_EFFECT_SKIN_PLAYER_CORPSE (116)
 ///
-/// Skin a player corpse (remove insignia in battlegrounds).
+/// Remove Insignia: take a dead enemy's insignia in a battleground. The target
+/// is the body, or the dead player before they release.
 pub async fn effect_skin_player_corpse(input: &EffectInput, world: &World) -> Result<EffectResult> {
-    let target_guid = match input.target_guid {
-        Some(guid) => guid,
-        None => return Ok(EffectResult::empty()),
-    };
-
-    // Verify target is a player
-    if !target_guid.is_player() {
-        return Err(anyhow::anyhow!("Target is not a player"));
+    if let Some(target) = input.target_guid {
+        if input.caster_guid.is_player() && (target.is_corpse() || target.is_player()) {
+            crate::game::battleground::insignia::remove_insignia(world, input.caster_guid, target);
+        }
     }
-
-    // Check if player is dead
-    let is_dead = world
-        .systems
-        .player
-        .manager()
-        .with_player(target_guid, |player| player.stats.health == 0)
-        .unwrap_or(false);
-
-    if !is_dead {
-        return Err(anyhow::anyhow!("Target is not dead"));
-    }
-
-    // TODO: Set player as lootable (remove insignia)
-    // This allows enemy players to loot the corpse in battlegrounds
-
-    tracing::debug!(
-        "Skin player corpse: caster={:?} target={:?}",
-        input.caster_guid,
-        target_guid
-    );
-
     Ok(EffectResult::empty())
 }

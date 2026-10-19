@@ -1247,6 +1247,7 @@ impl SpellManager {
         &self,
         spell_info: &SpellEntry,
         player_in_bg: Option<bool>,
+        bg_waiting_to_start: bool,
         player_map_id: Option<u32>,
         player_gender: Option<u8>,
         player_race_mask: Option<u32>,
@@ -1259,7 +1260,7 @@ impl SpellManager {
         use crate::game::player::spells::state::{SpellCastError, SpellCastResult};
 
         // SPELL_ATTR_EX3_ONLY_BATTLEGROUNDS check
-        if (spell_info.attributes_ex3 & 0x0000_0001) != 0 {
+        if (spell_info.attributes_ex3 & 0x0000_0800) != 0 {
             if player_in_bg.map_or(true, |bg| !bg) {
                 return SpellCastResult::Failed(SpellCastError::OnlyBattlegrounds);
             }
@@ -1271,7 +1272,7 @@ impl SpellManager {
                 let (Some(bg), Some(map_id)) = (player_in_bg, player_map_id) else {
                     return SpellCastResult::Failed(SpellCastError::RequiresArea);
                 };
-                if map_id != 30 || !bg {
+                if map_id != 30 || !bg || bg_waiting_to_start {
                     return SpellCastResult::Failed(SpellCastError::RequiresArea);
                 }
             }

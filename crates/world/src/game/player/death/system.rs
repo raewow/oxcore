@@ -350,8 +350,9 @@ impl DeathSystem {
                     &mut player.death.death_state,
                 );
 
-                // Clear the disable-move flag so the ghost can walk
-                player.unit_flags &= !UNIT_FLAG_DISABLE_MOVE;
+                // Clear the disable-move flag so the ghost can walk; a ghost
+                // has no body left to skin.
+                player.unit_flags &= !(UNIT_FLAG_DISABLE_MOVE | crate::game::common::unit_flags::SKINNABLE);
 
                 // Apply ghost speed modifier (150% run speed in open world, 100% in BG).
                 let speed_mult = ghost::get_ghost_speed_multiplier(in_bg);
@@ -956,6 +957,7 @@ impl DeathSystem {
             .player
             .manager()
             .with_player_mut(player_guid, |player| {
+                player.unit_flags &= !crate::game::common::unit_flags::SKINNABLE;
                 let max_health = player.stats.max_health;
                 let max_mana = player.power.max_mana();
                 let level = player.level;
@@ -1313,7 +1315,7 @@ impl DeathSystem {
 
         // Allocate a corpse GUID and build the struct.
         let corpse_guid = world.managers.corpse_mgr.alloc_corpse_guid();
-        let corpse = create_corpse_from_player(
+        let mut corpse = create_corpse_from_player(
             corpse_guid,
             player_guid,
             pos,
@@ -1329,6 +1331,8 @@ impl DeathSystem {
             race,
             equipment_display,
         );
+        // A body left in a battleground carries an insignia for enemies to take.
+        corpse.lootable = crate::game::battleground::system::match_of(world, player_guid).is_some();
 
         // Register with manager + map.
         world.managers.corpse_mgr.add(corpse.clone());
@@ -1433,6 +1437,8 @@ impl DeathSystem {
                 gender: 0,
                 race: 1, // fallback human
                 equipment: [0; 19],
+                lootable: false,
+                insignia_taken: false,
             };
 
             world.managers.corpse_mgr.add(corpse);

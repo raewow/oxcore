@@ -266,6 +266,10 @@ fn send_status_active(world: &World, player: ObjectGuid, m: &Match) {
     } else {
         0
     };
+    // A 1.14 client wants the init packet ahead of a running match's status.
+    if shutdown_ms == 0 && is_modern(world, player) {
+        send(world, player, oxcore_shared::messages::battleground::SmsgBattlegroundInit::RUNNING);
+    }
     send_status(
         world,
         player,
@@ -620,6 +624,7 @@ pub fn request_join(
             q.add_group(team, vec![player], bracket, false, client_instance, now_ms, now)
         });
         queued(world, player, player, bg_type, group, at_portal, false, now);
+        announce_queue(world, player, bg_type, bracket);
     } else {
         let Some(group) = world.systems.group.get_player_group(player) else {
             return;
@@ -636,6 +641,21 @@ pub fn request_join(
             return;
         }
         let config = &world.config;
+        // Groups above the limit are queued one by one.
+        let limit = config.battleground_group_queue_limit;
+        if members.len() as u32 > limit {
+            let text = format!("Group queue limit is set to {limit}. You have been queued solo.");
+            for &member in &members {
+                let group_id = bgm.with_queue(bg_type, |q| {
+                    q.add_group(team, vec![member], bracket, false, client_instance, now_ms, now)
+                });
+                queued(world, member, member, bg_type, group_id, at_portal, false, now);
+                send(world, member, system_chat(&text, ChatMsg::System));
+            }
+            announce_queue(world, player, bg_type, bracket);
+            bgm.schedule(bg_type, bracket);
+            return;
+        }
         let premade = config.battleground_premade_wait_ms > 0
             && members.len() as u32 >= config.battleground_premade_min_size;
         let group_id = bgm.with_queue(bg_type, |q| {
@@ -651,8 +671,44 @@ pub fn request_join(
                 },
             );
         }
+        if !premade {
+            announce_queue(world, player, bg_type, bracket);
+        }
     }
     bgm.schedule(bg_type, bracket);
+}
+
+/// The queue announcer: how many wait on each side and how many more are
+/// needed, told to the joiner (setting 1) or to everyone (setting 2).
+fn announce_queue(world: &World, joiner: ObjectGuid, bg_type: BattleGroundTypeId, bracket: u8) {
+    let mode = world.config.battleground_queue_announcer_join;
+    if mode == 0 {
+        return;
+    }
+    let bgm = &world.managers.battleground_mgr;
+    let Some(template) = bgm.template(bg_type) else {
+        return;
+    };
+    let (min_level, max_level) = template.bracket_levels(bracket);
+    let [alliance, horde] =
+        bgm.with_queue(bg_type, |q| [q.waiting_players(bracket, 0), q.waiting_players(bracket, 1)]);
+    let need = |n: u32| template.min_players_per_team.saturating_sub(n);
+    if mode == 1 {
+        let text = format!(
+            "Queue status for {} (Lvl: {} to {})\nQueued alliances: {} (Need at least {} more)\nQueued hordes: {} (Need at least {} more)",
+            template.name, min_level, max_level, alliance, need(alliance), horde, need(horde)
+        );
+        send(world, joiner, system_chat(&text, ChatMsg::System));
+    } else {
+        let text = format!(
+            "|cffff0000[BG Queue Announcer]:|r {} -- [{}-{}] A: {} (Need: {}), H: {} (Need: {})|r",
+            template.name, min_level, max_level, alliance, need(alliance), horde, need(horde)
+        );
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_msg_to_all(&system_chat(&text, ChatMsg::System));
+    }
 }
 
 /// One player's side of joining: take a slot, remember the way back, show the status.
@@ -794,7 +850,24 @@ fn update_queue(world: &World, bg_type: BattleGroundTypeId, bracket: u8) {
     };
     let testing = bgm.is_testing();
     let min = if testing { 1 } else { template.min_players_per_team };
-    let max = template.max_players_per_team;
+    let mut max = template.max_players_per_team;
+    let config = &world.config;
+    // Alterac Valley may wait for a crowd before opening, and open smaller than it can grow.
+    let mut initial_cap = false;
+    if bg_type == BattleGroundTypeId::AlteracValley && !testing {
+        let wanted = config.alterac_min_players_in_queue;
+        if wanted > 0 {
+            let waiting = bgm.with_queue(bg_type, |q| [q.waiting_players(bracket, 0), q.waiting_players(bracket, 1)]);
+            if waiting.iter().any(|&n| n < wanted) {
+                return;
+            }
+        }
+        let cap = config.alterac_init_max_players;
+        if cap > min && cap < max {
+            max = cap;
+            initial_cap = true;
+        }
+    }
     let balance = world.config.battleground_invitation_type != 0;
     let now = bgm.now_ms();
     let premade_wait = u64::from(world.config.battleground_premade_wait_ms);
@@ -816,7 +889,10 @@ fn update_queue(world: &World, bg_type: BattleGroundTypeId, bracket: u8) {
             invite_group(world, bg_type, group, instance_id);
         }
     }
-    fill_free_slots(world, bg_type, bracket);
+    // A capped opening fills up on later passes, as more players queue.
+    if !initial_cap {
+        fill_free_slots(world, bg_type, bracket);
+    }
 }
 
 /// Offer the free places of running matches to waiting groups.
@@ -1050,6 +1126,9 @@ pub async fn on_player_arrived(world: &World, player: ObjectGuid, map_id: u32, i
         m.players.insert(player, team);
         let columns = m.score_columns;
         m.scores.entry(player).or_insert_with(|| Score::new(team, columns));
+        // Each side fights as one raid; the player's own group waits for them.
+        let side = team_index(team);
+        m.raids[side] = world.systems.group.join_battleground_raid(player, m.raids[side]);
         m.clone()
     }) else {
         return;
@@ -1164,8 +1243,10 @@ pub async fn remove_player_at_leave(
             .managers
             .player_mgr
             .with_player_mut(player, |p| clear_match(&mut p.battleground));
+        world.systems.group.leave_battleground_raid(player);
         return;
     };
+    world.systems.group.leave_battleground_raid(player);
 
     if !world.managers.player_mgr.is_player_alive(player) {
         let _ = world.systems.death.resurrect_in_battleground(player, world);
@@ -1468,6 +1549,10 @@ pub fn on_player_killed(world: &World, victim: ObjectGuid, killer: Option<Object
             }
         }
     });
+    if !spirit_of_redemption {
+        // Enemies may now take the body's insignia.
+        super::insignia::set_skinnable(world, victim, true);
+    }
 }
 
 /// Add to a scoreboard column (0-based) of a player's line.
@@ -1684,6 +1769,18 @@ async fn update_match(world: &World, instance_id: u32, diff_ms: u32) {
             let guids: Vec<ObjectGuid> = m.players.keys().copied().collect();
             play_sound(world, &guids, SOUND_BG_START);
             return_players_to_start(world, &m);
+            if world.config.battleground_queue_announcer_start {
+                if let Some(template) = world.managers.battleground_mgr.template(m.bg_type) {
+                    let text = format!(
+                        "|cffff0000[BG Queue Announcer]:|r {} -- [{}-{}] Started!|r",
+                        template.name, m.min_level, m.max_level
+                    );
+                    world
+                        .managers
+                        .broadcast_mgr
+                        .broadcast_msg_to_all(&system_chat(&text, ChatMsg::System));
+                }
+            }
         }
     }
     if despawn_doors {

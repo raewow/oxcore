@@ -36,7 +36,7 @@ fn now_secs() -> u64 {
 }
 
 /// Non-pet subset of `group_update_flags::FULL` pushed to a member on join and login.
-const MEMBER_STATS_FULL: u32 = group_update_flags::STATUS
+pub(super) const MEMBER_STATS_FULL: u32 = group_update_flags::STATUS
     | group_update_flags::CUR_HP
     | group_update_flags::MAX_HP
     | group_update_flags::POWER_TYPE
@@ -111,7 +111,13 @@ pub struct GroupSystem {
     pub(super) groups: DashMap<u32, GroupData>,
 
     /// Player group membership (player_guid -> group_id)
-    player_groups: DashMap<ObjectGuid, u32>,
+    pub(super) player_groups: DashMap<ObjectGuid, u32>,
+
+    /// The group set aside while a player fights in a battleground raid.
+    pub(super) original_groups: DashMap<ObjectGuid, u32>,
+
+    /// Next id for a battleground raid; see `battleground.rs`.
+    pub(super) next_battleground_raid_id: AtomicU32,
 
     /// Pending invites (invitee_guid -> GroupInvite)
     pending_invites: DashMap<ObjectGuid, GroupInvite>,
@@ -179,9 +185,13 @@ impl GroupSystem {
         Self {
             groups: DashMap::new(),
             player_groups: DashMap::new(),
+            original_groups: DashMap::new(),
+            next_battleground_raid_id: AtomicU32::new(
+                super::battleground::BATTLEGROUND_RAID_ID_BASE,
+            ),
             pending_invites: DashMap::new(),
             next_group_id: AtomicU32::new(1),
-            repository,
+            repository: Arc::new(super::battleground::PersistentGroupsOnly(repository)),
             broadcast_mgr,
             player_mgr,
             social_system,
@@ -429,6 +439,26 @@ impl GroupSystem {
         self.player_groups.get(&player_guid).map(|r| *r)
     }
 
+    /// The player's own group: the one they joined, even while a battleground
+    /// raid stands in for it.
+    pub fn own_group_id(&self, player_guid: ObjectGuid) -> Option<u32> {
+        match self.get_player_group_id(player_guid) {
+            Some(id) if super::battleground::is_battleground_raid(id) => {
+                self.original_groups.get(&player_guid).map(|r| *r)
+            }
+            other => other,
+        }
+    }
+
+    /// Record the player's own group, setting it aside if they are in a battleground raid.
+    fn set_own_group(&self, player_guid: ObjectGuid, group_id: u32) {
+        if self.in_battleground_raid(player_guid) {
+            self.original_groups.insert(player_guid, group_id);
+        } else {
+            self.player_groups.insert(player_guid, group_id);
+        }
+    }
+
     /// Check if player is in a group
     pub fn is_in_group(&self, player_guid: ObjectGuid) -> bool {
         self.player_groups.contains_key(&player_guid)
@@ -494,7 +524,7 @@ impl GroupSystem {
 
         // Add to cache
         self.groups.insert(group_id, group);
-        self.player_groups.insert(leader_guid, group_id);
+        self.set_own_group(leader_guid, group_id);
         self.set_player_flag(leader_guid, PLAYER_FLAGS_GROUP_LEADER, true);
 
         tracing::info!("Created group {} with leader {:?}", group_id, leader_guid);
@@ -613,9 +643,18 @@ impl GroupSystem {
             .await;
         crate::game::instance::lifecycle::apply_reset_outcome(world, &outcome);
 
-        // Remove all player mappings
+        // Remove all player mappings. A member fighting in a battleground keeps their raid;
+        // only the group they had set aside goes.
+        let mut active_members = Vec::new();
         for member in &group.members {
-            self.player_groups.remove(&member.guid);
+            if self
+                .player_groups
+                .remove_if(&member.guid, |_, id| *id == group_id)
+                .is_some()
+            {
+                active_members.push(member.guid);
+            }
+            self.original_groups.remove_if(&member.guid, |_, id| *id == group_id);
         }
         // Invites into a group that no longer exists are void.
         self.pending_invites
@@ -649,8 +688,8 @@ impl GroupSystem {
         // A group dissolving because it dropped below two members ends quietly: everyone gets
         // the "not in a group" list rather than a "group disbanded" message.
         self.set_player_flag(group.leader_guid, PLAYER_FLAGS_GROUP_LEADER, false);
-        for member in &group.members {
-            self.send_empty_group_list(member.guid);
+        for member in active_members {
+            self.send_empty_group_list(member);
         }
 
         tracing::info!("Disbanded group {}", group_id);
@@ -676,8 +715,8 @@ impl GroupSystem {
             return Err(GroupError::CannotTargetSelf);
         }
 
-        // Check target not already in group
-        if self.is_in_group(target_guid) {
+        // Check target not already in group (a battleground raid does not count)
+        if self.own_group_id(target_guid).is_some() {
             return Err(GroupError::TargetAlreadyInGroup);
         }
 
@@ -686,8 +725,9 @@ impl GroupSystem {
             return Err(GroupError::TargetHasPendingInvite);
         }
 
-        // Get inviter's group (or 0 if not in one)
-        let group_id = self.get_player_group_id(inviter_guid).unwrap_or(0);
+        // Get inviter's group (or 0 if not in one). From a battleground the invite is to the
+        // inviter's own group, not the raid.
+        let group_id = self.own_group_id(inviter_guid).unwrap_or(0);
 
         // If inviter in group, check permissions and capacity
         if group_id > 0 {
@@ -851,6 +891,10 @@ impl GroupSystem {
         world: &World,
         player_guid: ObjectGuid,
     ) -> Result<(), GroupError> {
+        // A battleground raid cannot be left except by leaving the battleground.
+        if self.in_battleground_raid(player_guid) {
+            return Ok(());
+        }
         let group_id = self
             .get_player_group_id(player_guid)
             .ok_or(GroupError::NotInGroup)?;
@@ -882,6 +926,10 @@ impl GroupSystem {
         remover_guid: ObjectGuid,
         target_name: String,
     ) -> Result<(), GroupError> {
+        // Nobody is put out of a battleground raid; they leave with the battleground.
+        if self.in_battleground_raid(remover_guid) {
+            return Ok(());
+        }
         let group_id = self
             .get_player_group_id(remover_guid)
             .ok_or(GroupError::NotInGroup)?;
@@ -1073,7 +1121,7 @@ impl GroupSystem {
             .unwrap_or(0);
 
         // Add to player mappings
-        self.player_groups.insert(player_guid, group_id);
+        self.set_own_group(player_guid, group_id);
 
         // Queue a full stat push for the new member (3c).
         self.set_member_update(player_guid, MEMBER_STATS_FULL);
@@ -1119,8 +1167,9 @@ impl GroupSystem {
             }
         };
 
-        // Remove from player mappings
-        self.player_groups.remove(&player_guid);
+        // Remove from player mappings (a member in a battleground raid keeps it)
+        self.player_groups.remove_if(&player_guid, |_, id| *id == group_id);
+        self.original_groups.remove_if(&player_guid, |_, id| *id == group_id);
 
         // Their votes no longer count; a roll they were the last holdout on resolves now.
         self.remove_member_rolls(world, group_id, player_guid);
@@ -1961,9 +2010,15 @@ impl GroupSystem {
         let cached_group =
             CachedGroup::from_group_data_with_status(&group, |guid| self.member_status(guid));
 
-        // Send SMSG_GROUP_LIST to each member (each needs different own_flags)
+        // Send SMSG_GROUP_LIST to each member (each needs different own_flags). Members away
+        // in a battleground raid see that raid instead, until they come back.
         use oxcore_shared::messages::group::SmsgGroupList;
-        for member in &group.members {
+        let active: Vec<&GroupMember> = group
+            .members
+            .iter()
+            .filter(|m| self.get_player_group_id(m.guid).map_or(true, |id| id == group_id))
+            .collect();
+        for member in &active {
             let msg = SmsgGroupList {
                 group: &cached_group,
                 member_guid: member.guid,
@@ -1982,10 +2037,28 @@ impl GroupSystem {
             changed: None,
             changed_by: ObjectGuid::empty(),
         };
-        for member in &group.members {
+        for member in &active {
             self.broadcast_mgr
                 .send_msg_to_player(member.guid, raid_target_msg.clone());
         }
+    }
+
+    /// Send one member their group's list, without telling the rest.
+    pub(super) fn send_group_list_to(&self, group_id: u32, player_guid: ObjectGuid) {
+        let Some(group) = self.get_group(group_id) else {
+            return;
+        };
+        use oxcore_shared::game::group::CachedGroup;
+        use oxcore_shared::messages::group::SmsgGroupList;
+        let cached_group =
+            CachedGroup::from_group_data_with_status(&group, |guid| self.member_status(guid));
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgGroupList {
+                group: &cached_group,
+                member_guid: player_guid,
+            },
+        );
     }
 
     /// Broadcast a message to all group members

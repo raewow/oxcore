@@ -215,6 +215,7 @@ impl PlayerSystem {
                     world,
                     attack.attacker,
                     attack.target,
+                    attack.hand,
                 )
                 .await?;
                 if finished {

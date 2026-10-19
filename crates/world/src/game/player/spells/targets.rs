@@ -436,6 +436,12 @@ fn resolve_spell_targets_inner(
         if targets.is_empty() && !target_a.is_script_target() && !target_b.is_script_target() {
             if let Some(unit_target) = effective_cast_targets.unit_target() {
                 targets.push(unit_target);
+            } else if let Some(corpse) = effective_cast_targets
+                .corpse_target_guid
+                .filter(|_| target_a == ImplicitTarget::None && target_b == ImplicitTarget::None)
+            {
+                // A spell aimed at a body (Remove Insignia) acts on the body itself.
+                targets.push(corpse);
             } else if target_a == ImplicitTarget::None && target_b == ImplicitTarget::None {
                 // No implicit targets and no explicit target = self-cast
                 targets.push(caster_guid);

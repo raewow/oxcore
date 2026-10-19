@@ -35,43 +35,38 @@ partial.
 Queues, matches and Warsong Gulch, Arathi Basin and Alterac Valley exist; the
 field logic is Lua (`scripts/battlegrounds/`).
 
-- **No battleground raid groups.** Players keep their own groups; the
-  reference puts each side in a temporary raid for the match.
+- **Battleground raids** do not show the leader crown, and an invite sent from
+  inside a battleground goes to the inviter's own group (as in the reference)
+  but the invitee only sees it on leaving theirs.
 - **Alterac Valley is the core battle only.** Missing: armour-scrap upgrades of
   defenders, the air, cavalry and world-boss assaults raised by turn-ins,
   landmines, quest completions on tower, graveyard and mine captures, the
   commanders' guards stopping on a commander's death, Snivvle, and the herald
   and captain yells (announcements go to battleground chat instead).
-- **Buffs.** Warsong Gulch relies on the static buff spawns; Arathi Basin
-  spawns one random buff per base at the start and does not rotate or respawn
-  them.
-- **Announcement text** for Arathi Basin and Alterac Valley node events is
-  English text in the scripts, not localised strings.
-- **Not implemented:** looting insignia from dead players, queue announcer
-  messages, the group-size queue limit, Alterac Valley's minimum queue size and
-  initial player cap, 1.14's `SMSG_BATTLEGROUND_INIT`, and the "only in
-  battlegrounds" / "battleground ended" spell cast checks.
-- **Event spawns and respawns.** A battleground creature that respawns on its
-  own timer ignores whether its event is still active.
+- **Buffs** are taken through each buff's area trigger. Gameobject traps never
+  fire on their own anywhere (no proximity trigger exists), so a buff touched
+  without crossing its trigger does nothing.
+- **Announcement text** for Arathi Basin and Alterac Valley node events, and the
+  queue announcer, is English text, not localised strings.
+- **Insignia:** a taken insignia leaves the body as it is (the reference turns it
+  into bones), and the side of an offline owner is unknown, so anyone may take it.
 
 ## World PvP
 
-- **Eastern Plaguelands towers are not implemented.**
+- **Eastern Plaguelands:** the towers, slider, map states, counts, Echoes of
+  Lordaeron and each tower's reward work, but the buff is not given inside the
+  Stratholme and Scholomance zones, the banners do not change art kit, the
+  Eastwall squad stands where it is summoned instead of marching, the tower
+  buffer NPCs are not spawned (their quest credit is given directly) and tower
+  states do not survive a restart.
 - **Silithus** covers zone 1377 only (not the Ahn'Qiraj zones' buff), does not
   show the dust bags, and does not keep its count over a restart.
 
 ## PvP flag and honour
 
-- **Pets are not flagged** with their owner.
-- **Helping a flagged player** (heals, buffs) does not flag the helper; the
-  hook exists but no spell path calls it.
 - **Contested and free-for-all PvP** (guards attacking flagged players,
   arenas such as Gurubashi) are not modelled.
-- **Melee between players** is new: off-hand swings at players use main-hand
-  damage, and duels are not supported.
-- **Honour:** city protector titles are not set by the weekly ranking,
-  `MSG_INSPECT_HONOR_STATS` is not handled, and the 1.14 honour tab is empty
-  (its update fields have no 1.14 mapping).
+- **Duels** are not supported.
 
 ## Vendors
 
@@ -82,5 +77,7 @@ field logic is Lua (`scripts/battlegrounds/`).
 
 - The 31 database-backed tests (ignored without a database) and live 1.12 and
   1.14 client checks of teleports, flights, the 1.12 creature waypoint packing
-  fix, battlegrounds, world PvP, the PvP flag and honour. The battleground
-  world tables have never been loaded by this code against a real database.
+  fix, battlegrounds (raids, insignia, buffs), world PvP (Eastern
+  Plaguelands), the PvP flag and honour (inspect, 1.14 honour tab, city
+  protectors). The battleground world tables have never been loaded by this
+  code against a real database.

@@ -135,6 +135,22 @@ pub const MODERN_ACTIVE_PLAYER_FIELD_PVP_LAST_WEEKS_TIER_MAX_FROM_WINS: u16 = 46
 pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES: u16 = 2756;
 /// Modern `ACTIVE_PLAYER_FIELD_BYTES_6` (size 1).
 pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES_6: u16 = 2912;
+// The honour tab. 1.12 keeps each period's kills as one `honorable | dishonorable << 16` word,
+// which 1.14 also does but in `BYTES_2..BYTES_5`; the lifetime highest rank and the rank progress
+// bar moved to other byte-packed words. `BYTES_7` sits in the tail where 2.5.3 is one higher, so it
+// is the 1.14.1 position. `PLAYER_BYTES_2` is on the shared Player table.
+/// Modern `ACTIVE_PLAYER_FIELD_BYTES_2` (size 1): today's honorable / dishonorable kills.
+pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES_2: u16 = 2783;
+/// Modern `ACTIVE_PLAYER_FIELD_BYTES_3` (size 1): yesterday's kills.
+pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES_3: u16 = 2784;
+/// Modern `ACTIVE_PLAYER_FIELD_BYTES_4` (size 1): last week's kills.
+pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES_4: u16 = 2785;
+/// Modern `ACTIVE_PLAYER_FIELD_BYTES_5` (size 1): this week's kills.
+pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES_5: u16 = 2786;
+/// Modern `ACTIVE_PLAYER_FIELD_BYTES_7` (size 1): (InsertItemsLeftToRight, PvpRankProgress).
+pub const MODERN_ACTIVE_PLAYER_FIELD_BYTES_7: u16 = 4681;
+/// Modern `PLAYER_BYTES_2` (size 1): (PvpTitle, ArenaFaction, PvpRank).
+pub const MODERN_PLAYER_BYTES_2: u16 = 236;
 /// Modern `ACTIVE_PLAYER_FIELD_SKILL_LINEID` (size 896).
 pub const MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID: u16 = 1305;
 

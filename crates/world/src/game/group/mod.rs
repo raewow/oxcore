@@ -22,6 +22,7 @@
 //! 4. On accept, group is created (if needed) and SMSG_GROUP_LIST sent to all members
 //! 5. Members can leave, leader can promote/demote, convert to raid, etc.
 
+pub mod battleground;
 pub mod reward;
 pub mod rewards;
 pub mod rolls;

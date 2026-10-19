@@ -162,6 +162,8 @@ pub enum LuaAction {
         o: f32,
         summon_type: SummonType,
         duration_ms: u32,
+        /// Faction template to give it instead of its own (objective scripts).
+        faction: Option<u32>,
     },
 
     /// Despawn a creature by GUID.
@@ -430,6 +432,12 @@ pub enum LuaAction {
     },
     /// Send a player out of their battleground.
     LeaveBattleground { player: ObjectGuid },
+    /// A world state for one player only (a capture point's slider).
+    SetPlayerWorldState { player: ObjectGuid, state_id: u32, value: i32 },
+    /// The player touched a buff: the nearest trap object within `radius`
+    /// yards casts its spell on them and goes away (a stored spawn comes back
+    /// after its own respawn time).
+    TakeBuff { player: ObjectGuid, radius: f32 },
     /// Quest kill credit for a creature entry.
     KillCredit { player: ObjectGuid, entry: u32 },
     /// Send dead players of a team (or everyone) to their graveyard again,
@@ -561,6 +569,7 @@ impl LuaAction {
                 o: table.get("o").unwrap_or(0.0),
                 summon_type: parse_summon_type(table),
                 duration_ms: table.get("duration").unwrap_or(0),
+                faction: table.get("faction").ok(),
             }),
             "DESPAWN_CREATURE" => {
                 if let Some(guid) = parse_guid_optional(table, "guid") {
@@ -879,6 +888,15 @@ impl LuaAction {
             }
             "LEAVE_BATTLEGROUND" => Some(LuaAction::LeaveBattleground {
                 player: parse_guid(table, "player")?,
+            }),
+            "SET_PLAYER_WORLD_STATE" => Some(LuaAction::SetPlayerWorldState {
+                player: parse_guid(table, "player")?,
+                state_id: table.get("state_id").ok()?,
+                value: table.get("value").ok()?,
+            }),
+            "TAKE_BUFF" => Some(LuaAction::TakeBuff {
+                player: parse_guid(table, "player")?,
+                radius: table.get("radius").unwrap_or(10.0),
             }),
             "KILL_CREDIT" => Some(LuaAction::KillCredit {
                 player: parse_guid(table, "player")?,

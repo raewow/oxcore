@@ -69,6 +69,12 @@ fn build_world_config(config: &Config) -> Config {
     world_config.battleground_premature_finish_ms = config.battleground_premature_finish_ms;
     world_config.battleground_premade_wait_ms = config.battleground_premade_wait_ms;
     world_config.battleground_premade_min_size = config.battleground_premade_min_size;
+    world_config.battleground_group_queue_limit = config.battleground_group_queue_limit;
+    world_config.battleground_queue_announcer_join = config.battleground_queue_announcer_join;
+    world_config.battleground_queue_announcer_start = config.battleground_queue_announcer_start;
+    world_config.alterac_min_players_in_queue = config.alterac_min_players_in_queue;
+    world_config.alterac_init_max_players = config.alterac_init_max_players;
+    world_config.pvp_city_protector = config.pvp_city_protector;
     world_config.honor_maintenance_day = config.honor_maintenance_day;
     world_config.honor_rp_decay = config.honor_rp_decay;
     world_config.honor_dishonorable_kills = config.honor_dishonorable_kills;

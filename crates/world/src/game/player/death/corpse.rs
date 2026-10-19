@@ -81,6 +81,10 @@ pub struct Corpse {
     /// Equipment display IDs for the 19 equipment slots.
     /// Used to render equipped items on the corpse model.
     pub equipment: [u32; 19],
+    /// Left in a battleground: enemies may take its insignia.
+    pub lootable: bool,
+    /// The insignia was taken and the body holds loot.
+    pub insignia_taken: bool,
 }
 
 /// Create a corpse from a dead player's data.
@@ -126,5 +130,7 @@ pub fn create_corpse_from_player(
         gender,
         race,
         equipment: equipment_display_ids,
+        lootable: false,
+        insignia_taken: false,
     }
 }

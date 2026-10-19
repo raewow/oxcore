@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use oxcore_shared::game::chat::Team;
-use oxcore_shared::messages::battleground::SmsgPvpCredit;
+use oxcore_shared::messages::battleground::{SmsgInspectHonorStats, SmsgPvpCredit};
 use oxcore_shared::messages::update::{ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock};
 use oxcore_shared::protocol::ObjectGuid;
 use oxcore_shared::protocol::update_fields::{
@@ -67,7 +67,12 @@ pub struct HonorState {
     pub stored_dk: u32,
     pub total_hk: u32,
     pub total_dk: u32,
+    /// Named their city's protector by the last ranking.
+    pub city_protector: bool,
 }
+
+/// `characters.extra_flags` bit for a city protector.
+const EXTRA_FLAG_CITY_PROTECTOR: i64 = 0x0400;
 
 /// Days since the epoch: the honour calendar's day.
 pub fn game_day() -> u32 {
@@ -99,6 +104,13 @@ pub struct HonorCounters {
 }
 
 impl HonorState {
+    /// How far through the current rank the rank points are, as the tab's 0-255 bar.
+    pub fn rank_progress(&self) -> u8 {
+        let rp = self.rank_points.abs();
+        let span = (self.rank.max_rp - self.rank.min_rp).max(1.0);
+        (((rp - self.rank.min_rp) / span).clamp(0.0, 1.0) * 255.0) as u8
+    }
+
     /// Recount the tab's counters for `today`, the week beginning `week_begin`.
     pub fn counters(&self, today: u32, week_begin: u32) -> HonorCounters {
         let mut c = HonorCounters {
@@ -231,21 +243,26 @@ pub fn add_honor(
 pub fn send_fields(world: &World, player: ObjectGuid) {
     let today = game_day();
     let begin = week_begin(world);
-    let Some((c, state, gender, toggles, bytes2_flags)) = world.managers.player_mgr.with_player(player, |p| {
+    let Some((c, state, gender, race, toggles, bytes2_flags)) = world.managers.player_mgr.with_player(player, |p| {
         (
             p.honor.counters(today, begin),
             p.honor.clone(),
             p.gender,
+            p.race,
             p.settings.action_bar_toggles,
             p.player_bytes2_flags,
         )
     }) else {
         return;
     };
-    let rp = state.rank_points.abs();
-    let span = (state.rank.max_rp - state.rank.min_rp).max(1.0);
-    let bar = (((rp - state.rank.min_rp) / span).clamp(0.0, 1.0) * 255.0) as u8;
-    let block = ValuesUpdateBlock::new(player, ObjectType::Player)
+    let bar = state.rank_progress();
+    // A city protector's title is their race's city.
+    let city_title = if state.city_protector && world.config.pvp_city_protector {
+        race
+    } else {
+        0
+    };
+    let mut block = ValuesUpdateBlock::new(player, ObjectType::Player)
         .set_field(PLAYER_FIELD_SESSION_KILLS, c.today_hk | (c.today_dk << 16))
         .set_field(PLAYER_FIELD_YESTERDAY_KILLS, c.yesterday_hk)
         .set_field(PLAYER_FIELD_YESTERDAY_CONTRIBUTION, c.yesterday_cp.max(0.0) as u32)
@@ -256,9 +273,16 @@ pub fn send_fields(world: &World, player: ObjectGuid) {
         .set_field(PLAYER_FIELD_LAST_WEEK_RANK, state.standing)
         .set_field(PLAYER_FIELD_LIFETIME_HONORBALE_KILLS, c.total_hk)
         .set_field(PLAYER_FIELD_LIFETIME_DISHONORBALE_KILLS, c.total_dk)
-        .set_field(PLAYER_FIELD_BYTES, u32::from_le_bytes([0, 0, toggles, state.highest_rank.rank]))
         .set_field(PLAYER_FIELD_BYTES2, u32::from_le_bytes([bar, bytes2_flags, 0, 0]))
-        .set_field(PLAYER_BYTES_3, u32::from_le_bytes([gender, 0, 0, state.rank.rank]));
+        .set_field(PLAYER_BYTES_3, u32::from_le_bytes([gender, 0, city_title, state.rank.rank]));
+    // The same word carries the action bar toggles. With neither a rank nor toggles to show, it
+    // is left alone so the client keeps the bars it was created with.
+    if toggles != 0 || state.highest_rank.rank != 0 {
+        block = block.set_field(
+            PLAYER_FIELD_BYTES,
+            u32::from_le_bytes([0, 0, toggles, state.highest_rank.rank]),
+        );
+    }
     world.managers.broadcast_mgr.send_msg_to_player(
         player,
         SmsgUpdateObject::new().add_block(UpdateBlockData::Values(block)),
@@ -267,6 +291,31 @@ pub fn send_fields(world: &World, player: ObjectGuid) {
         p.honor.total_hk = c.total_hk;
         p.honor.total_dk = c.total_dk;
     });
+}
+
+/// Another player's honour tab, for MSG_INSPECT_HONOR_STATS.
+pub fn inspect_stats(world: &World, target: ObjectGuid) -> Option<SmsgInspectHonorStats> {
+    let today = game_day();
+    let begin = week_begin(world);
+    world.managers.player_mgr.with_player(target, |p| {
+        let c = p.honor.counters(today, begin);
+        SmsgInspectHonorStats {
+            player_guid: target,
+            highest_rank: p.honor.highest_rank.rank,
+            today_hk: c.today_hk as u16,
+            today_dk: c.today_dk as u16,
+            yesterday_hk: c.yesterday_hk as u16,
+            last_week_hk: p.honor.last_week_hk as u16,
+            this_week_hk: c.this_week_hk as u16,
+            lifetime_hk: c.total_hk,
+            lifetime_dk: c.total_dk,
+            yesterday_honor: c.yesterday_cp.max(0.0) as u32,
+            last_week_honor: p.honor.last_week_cp.max(0.0) as u32,
+            this_week_honor: c.this_week_cp.max(0.0) as u32,
+            last_week_standing: p.honor.standing,
+            rank_progress: p.honor.rank_progress(),
+        }
+    })
 }
 
 /// The share of honour a group of `count` members earns together.
@@ -465,10 +514,10 @@ pub fn on_creature_killed(world: &World, killer: ObjectGuid, creature: ObjectGui
 pub async fn load(world: &World, player: ObjectGuid) {
     let pool = &world.databases.character;
     let guid = i64::from(player.counter());
-    let stored = sqlx::query_as::<_, (f32, i64, i64, i64, f32, i64, i64)>(
+    let stored = sqlx::query_as::<_, (f32, i64, i64, i64, f32, i64, i64, i64)>(
         "SELECT honor_rank_points, honor_standing::bigint, honor_highest_rank::bigint,
                 honor_last_week_hk::bigint, honor_last_week_cp, honor_stored_hk::bigint,
-                honor_stored_dk::bigint
+                honor_stored_dk::bigint, extra_flags::bigint
          FROM characters.characters WHERE guid = $1",
     )
     .bind(guid)
@@ -490,7 +539,8 @@ pub async fn load(world: &World, player: ObjectGuid) {
         }
     };
     world.managers.player_mgr.with_player_mut(player, |p| {
-        if let Some((rp, standing, highest, lw_hk, lw_cp, hk, dk)) = stored {
+        if let Some((rp, standing, highest, lw_hk, lw_cp, hk, dk, extra_flags)) = stored {
+            p.honor.city_protector = extra_flags & EXTRA_FLAG_CITY_PROTECTOR != 0;
             p.honor.rank_points = rp;
             p.honor.standing = standing as u32;
             p.honor.highest_rank = rank::rank_info(highest as u8, true);
@@ -701,6 +751,9 @@ async fn run_week(world: &World, begin: u32, end: u32) -> anyhow::Result<()> {
         }
     }
 
+    if world.config.pvp_city_protector {
+        set_city_protectors(world).await?;
+    }
     sqlx::query("UPDATE characters.characters SET honor_standing = 0 WHERE honor_standing > 0")
         .execute(pool)
         .await?;
@@ -739,6 +792,26 @@ async fn run_week(world: &World, begin: u32, end: u32) -> anyhow::Result<()> {
         end,
         scores.len()
     );
+    Ok(())
+}
+
+/// Each race's best standing from the ranking before this one is its city's
+/// protector until the next ranking.
+async fn set_city_protectors(world: &World) -> anyhow::Result<()> {
+    let mut tx = world.databases.character.begin().await?;
+    sqlx::query("UPDATE characters.characters SET extra_flags = extra_flags & ~$1::bigint")
+        .bind(EXTRA_FLAG_CITY_PROTECTOR)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "UPDATE characters.characters SET extra_flags = extra_flags | $1::bigint
+         WHERE guid IN (SELECT DISTINCT ON (race) guid FROM characters.characters
+                        WHERE honor_standing > 0 ORDER BY race, honor_standing ASC)",
+    )
+    .bind(EXTRA_FLAG_CITY_PROTECTOR)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     Ok(())
 }
 

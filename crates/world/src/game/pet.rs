@@ -25,7 +25,7 @@ impl PetSystem {
 
     /// Summon one transient pet and replace any existing active pet.
     pub fn summon(&self, owner_guid: ObjectGuid, entry: u32, world: &World) -> Result<ObjectGuid> {
-        let (position, map_id, instance_id, phase_mask, faction) = self
+        let (position, map_id, instance_id, phase_mask, faction, owner_pvp) = self
             .player_mgr
             .with_player(owner_guid, |player| {
                 (
@@ -34,6 +34,7 @@ impl PetSystem {
                     player.instance_id,
                     player.phase_mask,
                     player.faction_template(),
+                    player.unit_flags & crate::game::common::unit_flags::PVP,
                 )
             })
             .ok_or_else(|| anyhow::anyhow!("pet owner {owner_guid:?} is not online"))?;
@@ -64,6 +65,8 @@ impl PetSystem {
                 pet.walk_speed(),
             );
             pet.following_target = Some(owner_guid);
+            // A pet shares its owner's PvP flag.
+            pet.unit_flags |= owner_pvp;
         });
         self.player_mgr
             .with_player_mut(owner_guid, |player| player.active_pet = Some(pet_guid));

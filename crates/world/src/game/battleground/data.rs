@@ -29,6 +29,8 @@ pub struct BattlegroundTemplate {
     pub horde_lose_spell: u32,
     pub alliance_start: Position,
     pub horde_start: Position,
+    /// Reference loot a taken insignia drops, besides coins.
+    pub player_loot_id: u32,
     /// Display name, for messages.
     pub name: String,
 }
@@ -143,12 +145,14 @@ pub async fn load(
     .into_iter()
     .collect();
 
-    let rows = sqlx::query_as::<_, (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)>(
+    type TemplateRow = (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64);
+    let rows = sqlx::query_as::<_, TemplateRow>(
         "SELECT DISTINCT ON (id) id::bigint, min_players_per_team::bigint,
                 max_players_per_team::bigint, min_level::bigint, max_level::bigint,
                 alliance_win_spell::bigint, alliance_lose_spell::bigint,
                 horde_win_spell::bigint, horde_lose_spell::bigint,
-                alliance_start_location::bigint, horde_start_location::bigint
+                alliance_start_location::bigint, horde_start_location::bigint,
+                player_loot_id::bigint
          FROM world.battleground_template
          WHERE patch <= $1
          ORDER BY id, patch DESC",
@@ -156,7 +160,7 @@ pub async fn load(
     .bind(i16::from(patch))
     .fetch_all(pool)
     .await?;
-    for (id, min_pt, max_pt, min_lvl, max_lvl, a_win, a_lose, h_win, h_lose, a_start, h_start) in
+    for (id, min_pt, max_pt, min_lvl, max_lvl, a_win, a_lose, h_win, h_lose, a_start, h_start, loot) in
         rows
     {
         let bg_type = BattleGroundTypeId::from_u32(id as u32);
@@ -188,6 +192,7 @@ pub async fn load(
                 horde_lose_spell: h_lose as u32,
                 alliance_start,
                 horde_start,
+                player_loot_id: loot as u32,
                 name: match bg_type {
                     BattleGroundTypeId::AlteracValley => "Alterac Valley",
                     BattleGroundTypeId::WarsongGulch => "Warsong Gulch",
@@ -257,6 +262,7 @@ pub(crate) fn test_template(bg_type: BattleGroundTypeId, min_level: u32) -> Batt
         horde_lose_spell: 0,
         alliance_start: Position::new(1.0, 2.0, 3.0, 0.0),
         horde_start: Position::new(4.0, 5.0, 6.0, 0.0),
+        player_loot_id: 0,
         name: String::new(),
     }
 }

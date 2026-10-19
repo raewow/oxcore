@@ -271,6 +271,24 @@ pub struct Config {
     /// Groups at least this large count as premade.
     #[serde(default = "default_battleground_premade_min_size")]
     pub battleground_premade_min_size: u32,
+    /// Groups larger than this queue their members alone.
+    #[serde(default = "default_battleground_group_queue_limit")]
+    pub battleground_group_queue_limit: u32,
+    /// Queue announcements on joining: 0 none, 1 to the joiner, 2 to everyone.
+    #[serde(default)]
+    pub battleground_queue_announcer_join: u32,
+    /// Announce to everyone when a battleground begins.
+    #[serde(default)]
+    pub battleground_queue_announcer_start: bool,
+    /// Alterac Valley waits for this many queued per side (0: the template's minimum).
+    #[serde(default)]
+    pub alterac_min_players_in_queue: u32,
+    /// Alterac Valley's side size when it opens, before it may fill up (0: the template's).
+    #[serde(default)]
+    pub alterac_init_max_players: u32,
+    /// The weekly ranking names each race's best-standing player its city's protector.
+    #[serde(default)]
+    pub pvp_city_protector: bool,
 
     // Honor Settings
     /// Weekday of the weekly honour ranking (0 Sunday .. 6 Saturday; default Thursday).
@@ -549,6 +567,10 @@ fn default_battleground_premade_min_size() -> u32 {
     6
 }
 
+fn default_battleground_group_queue_limit() -> u32 {
+    40
+}
+
 fn default_honor_maintenance_day() -> u32 {
     4
 }
@@ -816,6 +838,12 @@ impl Default for Config {
             battleground_premature_finish_ms: default_battleground_premature_finish_ms(),
             battleground_premade_wait_ms: 0,
             battleground_premade_min_size: default_battleground_premade_min_size(),
+            battleground_group_queue_limit: default_battleground_group_queue_limit(),
+            battleground_queue_announcer_join: 0,
+            battleground_queue_announcer_start: false,
+            alterac_min_players_in_queue: 0,
+            alterac_init_max_players: 0,
+            pvp_city_protector: false,
             honor_maintenance_day: default_honor_maintenance_day(),
             honor_rp_decay: default_honor_rp_decay(),
             honor_dishonorable_kills: true,

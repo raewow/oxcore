@@ -371,11 +371,84 @@ pub fn validate_cast(
         }
     });
 
+    // 12. Battleground state and the spell's location requirements.
+    if error == SpellCastError::None {
+        error = check_battleground_and_location(caster_guid, spell_id, is_triggered, world);
+    }
+
     if error != SpellCastError::None {
         tracing::warn!("[SPELL_VALIDATE] spell={spell_id} caster={caster_guid:?} failed={error:?} (client_code=0x{:02X})", spell_cast_error_to_u8(error));
     }
 
     Ok(error)
+}
+
+/// Only triggered spells work once a battleground has ended; battleground-only
+/// spells need a match, and `spell_area` rows tie spells to areas, races,
+/// genders, quests and auras.
+fn check_battleground_and_location(
+    caster_guid: ObjectGuid,
+    spell_id: u32,
+    is_triggered: bool,
+    world: &World,
+) -> SpellCastError {
+    use crate::game::battleground::matches::MatchStatus;
+    use crate::game::player::spells::state::SpellCastResult;
+
+    let Some(spell) = world.managers.spell_mgr.get(spell_id) else {
+        return SpellCastError::None;
+    };
+    let status = crate::game::battleground::system::match_of(world, caster_guid).and_then(|id| {
+        world
+            .managers
+            .battleground_mgr
+            .with_match(id, |m| m.status)
+    });
+    if !is_triggered && status == Some(MatchStatus::WaitLeave) {
+        return SpellCastError::DontReport;
+    }
+
+    let Some((map_id, position, zone_id, gender, race, active_quests, rewarded_quests)) =
+        world.systems.player.manager().with_player(caster_guid, |p| {
+            (
+                p.map_id,
+                p.movement.position,
+                p.zone_id,
+                p.gender,
+                p.race,
+                p.active_quests.iter().map(|q| q.quest_id).collect::<Vec<_>>(),
+                p.rewarded_quests.clone(),
+            )
+        })
+    else {
+        return SpellCastError::None;
+    };
+    let area_id = crate::game::player::teleport::area_at(world, map_id, position).unwrap_or(zone_id);
+    let has_aura = |aura: u32| {
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(caster_guid, |p| p.auras.container.has_aura(aura))
+            .unwrap_or(false)
+    };
+    let race_mask = if race > 0 { 1u32 << (race - 1) } else { 0 };
+    match world.managers.spell_mgr.get_spell_allowed_in_location_error(
+        &spell,
+        Some(status.is_some()),
+        status == Some(MatchStatus::WaitJoin),
+        Some(map_id),
+        Some(gender),
+        Some(race_mask),
+        Some(&active_quests),
+        Some(&rewarded_quests),
+        Some(&has_aura),
+        zone_id,
+        area_id,
+    ) {
+        SpellCastResult::Failed(error) => error,
+        _ => SpellCastError::None,
+    }
 }
 
 pub(crate) fn has_spell_focus(

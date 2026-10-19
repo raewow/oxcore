@@ -1240,12 +1240,12 @@ async fn deal_damage_to_player(
         })
         .unwrap_or(false);
 
-    if caster_guid.is_player() {
+    if let Some(attacker) = crate::game::pvp::flag::controlling_player(world, caster_guid) {
         world
             .systems
             .honor
-            .record_damage(caster_guid, target_guid, damage_after_absorb, world);
-        crate::game::pvp::flag::on_player_damaged_player(world, caster_guid, target_guid);
+            .record_damage(attacker, target_guid, damage_after_absorb, world);
+        crate::game::pvp::flag::on_player_damaged_player(world, attacker, target_guid);
     }
 
     send_spell_damage_log(
@@ -1361,6 +1361,7 @@ async fn deal_damage_to_creature(
         );
         return 0;
     };
+    crate::game::pvp::flag::on_unit_damaged_unit(world, caster_guid, target_guid);
 
     send_spell_damage_log(
         caster_guid,

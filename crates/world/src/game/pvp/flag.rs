@@ -89,6 +89,48 @@ fn set_pvp(world: &World, guid: ObjectGuid, on: bool) {
         guid,
         oxcore_shared::game::group::group_update_flags::STATUS,
     );
+    if let Some(pet) = world.managers.player_mgr.with_player(guid, |p| p.active_pet).flatten() {
+        set_pet_pvp(world, pet, on);
+    }
+}
+
+/// Mirror the owner's flag on a pet.
+pub fn set_pet_pvp(world: &World, pet: ObjectGuid, on: bool) {
+    let Some(Some(flags)) = world.managers.creature_mgr.with_creature_mut(pet, |c| {
+        let flags = if on {
+            c.unit_flags | unit_flags::PVP
+        } else {
+            c.unit_flags & !unit_flags::PVP
+        };
+        let changed = flags != c.unit_flags;
+        c.unit_flags = flags;
+        changed.then_some(flags)
+    }) else {
+        return;
+    };
+    let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+        ValuesUpdateBlock::new(pet, ObjectType::Unit).set_field(UNIT_FIELD_FLAGS, flags),
+    ));
+    world
+        .managers
+        .broadcast_mgr
+        .broadcast_msg_nearby(pet, &update, false);
+}
+
+/// The player behind a unit: the unit itself, or a pet's owner.
+pub fn controlling_player(world: &World, guid: ObjectGuid) -> Option<ObjectGuid> {
+    if guid.is_player() {
+        Some(guid)
+    } else if guid.is_creature() || guid.is_pet() {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| c.owner_guid.or(c.charm_guid))
+            .flatten()
+            .filter(|owner| owner.is_player())
+    } else {
+        None
+    }
 }
 
 /// Flag the player (restarting the five minutes), or try to drop the flag.
@@ -222,9 +264,35 @@ pub fn on_player_damaged_player(world: &World, attacker: ObjectGuid, victim: Obj
     }
 }
 
-/// A player helped a flagged player (heal or buff): the helper is flagged too.
-pub fn on_player_assisted_player(world: &World, helper: ObjectGuid, target: ObjectGuid) {
-    if helper != target && is_pvp(world, target) {
+/// Any unit hurt another: when players stand behind both (themselves or as a
+/// pet's owner), it is a fight between players.
+pub fn on_unit_damaged_unit(world: &World, attacker: ObjectGuid, victim: ObjectGuid) {
+    if let (Some(attacker), Some(victim)) = (
+        controlling_player(world, attacker),
+        controlling_player(world, victim),
+    ) {
+        on_player_damaged_player(world, attacker, victim);
+    }
+}
+
+/// A unit helped another (heal or buff). Helping a player who is fighting
+/// other players flags the helper's player.
+pub fn on_unit_assisted_unit(world: &World, helper: ObjectGuid, target: ObjectGuid) {
+    let (Some(helper), Some(target)) = (
+        controlling_player(world, helper),
+        controlling_player(world, target),
+    ) else {
+        return;
+    };
+    if helper == target {
+        return;
+    }
+    let target_fighting = world
+        .managers
+        .player_mgr
+        .with_player(target, |p| p.pvp.in_pvp_combat && p.unit_flags & unit_flags::PVP != 0)
+        .unwrap_or(false);
+    if target_fighting {
         update_pvp(world, helper, true, false);
     }
 }

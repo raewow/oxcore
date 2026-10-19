@@ -138,6 +138,10 @@ pub fn perform_creature_melee_attack(
             if health == 0 {
                 target_died = true;
             }
+            if let Some(owner) = crate::game::pvp::flag::controlling_player(world, creature_guid) {
+                world.systems.honor.record_damage(owner, target_guid, actual_damage, world);
+                crate::game::pvp::flag::on_player_damaged_player(world, owner, target_guid);
+            }
         }
     }
 
@@ -247,6 +251,9 @@ fn perform_melee_vs_creature(world: &World, creature_guid: ObjectGuid, target_gu
         .creature_mgr
         .apply_damage(target_guid, damage, creature_guid, timestamp)
         .unwrap_or((0, false));
+    if actual_damage > 0 {
+        crate::game::pvp::flag::on_unit_damaged_unit(world, creature_guid, target_guid);
+    }
 
     let attack_packet = SmsgAttackerStateUpdate {
         hit_info: hit_outcome_to_hit_info(&hit_outcome),

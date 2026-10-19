@@ -336,8 +336,9 @@ function wsg:OnGameObjectUse(input, player, go, entry, event1, event2)
 end
 
 function wsg:OnAreaTrigger(input, player, trigger)
+    -- Each base's buffs; the object comes back on its own respawn time.
     if BUFF_TRIGGERS[trigger] then
-        return true
+        return { { action = "TAKE_BUFF", player = player } }
     end
     local team = PVP.team_of(input, player)
     if trigger == AT_HORDE_EXIT and team == TEAM_HORDE then

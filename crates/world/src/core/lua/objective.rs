@@ -173,6 +173,7 @@ mod tests {
             assert!(mgr.has_instance_script(map), "map {map}");
         }
         assert!(mgr.has_zone_script(1377));
+        assert!(mgr.has_zone_script(139));
         mgr.with_lua(|lua| {
             assert_eq!(ScopeScript::Instance(489).field::<u32>(lua, "ScoreColumns"), Some(2));
             assert_eq!(ScopeScript::Instance(30).field::<u32>(lua, "ScoreColumns"), Some(7));

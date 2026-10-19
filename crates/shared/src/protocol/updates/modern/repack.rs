@@ -10,6 +10,9 @@
 
 use super::field_map::{
     MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_PRICE, MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_TIMESTAMP,
+    MODERN_ACTIVE_PLAYER_FIELD_BYTES, MODERN_ACTIVE_PLAYER_FIELD_BYTES_2,
+    MODERN_ACTIVE_PLAYER_FIELD_BYTES_3, MODERN_ACTIVE_PLAYER_FIELD_BYTES_4,
+    MODERN_ACTIVE_PLAYER_FIELD_BYTES_5, MODERN_ACTIVE_PLAYER_FIELD_BYTES_7, MODERN_PLAYER_BYTES_2,
     MODERN_ACTIVE_PLAYER_FIELD_SKILL_LINE_ID, MODERN_OBJECT_DYNAMIC_FLAGS, MODERN_PLAYER_QUEST_LOG,
     MODERN_PLAYER_VISIBLE_ITEM, MODERN_UNIT_FIELD_ATTACK_POWER_MOD_NEG,
     MODERN_UNIT_FIELD_ATTACK_POWER_MOD_POS, MODERN_UNIT_FIELD_BYTES_0, MODERN_UNIT_FIELD_BYTES_1,
@@ -19,7 +22,10 @@ use super::field_map::{
 };
 use super::fields::ModernObjectType;
 use crate::protocol::update_fields::{
-    GAMEOBJECT_DYN_FLAGS, PLAYER_FIELD_BUYBACK_PRICE_1, PLAYER_FIELD_BUYBACK_TIMESTAMP_1,
+    GAMEOBJECT_DYN_FLAGS, PLAYER_BYTES_3, PLAYER_FIELD_BUYBACK_PRICE_1,
+    PLAYER_FIELD_BUYBACK_TIMESTAMP_1, PLAYER_FIELD_BYTES, PLAYER_FIELD_BYTES2,
+    PLAYER_FIELD_LAST_WEEK_KILLS, PLAYER_FIELD_SESSION_KILLS, PLAYER_FIELD_THIS_WEEK_KILLS,
+    PLAYER_FIELD_YESTERDAY_KILLS,
     PLAYER_QUEST_LOG_1_1, PLAYER_SKILL_INFO_1_1, PLAYER_VISIBLE_ITEM_1_0,
     UNIT_DYNAMIC_FLAGS, UNIT_FIELD_ATTACK_POWER_MODS, UNIT_FIELD_BYTES_0, UNIT_FIELD_BYTES_1,
     UNIT_FIELD_BYTES_2, UNIT_FIELD_RANGED_ATTACK_POWER_MODS, UNIT_NPC_FLAGS,
@@ -228,6 +234,55 @@ pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> 
             )]));
         }
 
+        // The honour tab's kill counters keep their `honorable | dishonorable << 16` packing and
+        // only move.
+        let kills = match vanilla_index {
+            PLAYER_FIELD_SESSION_KILLS => Some(MODERN_ACTIVE_PLAYER_FIELD_BYTES_2),
+            PLAYER_FIELD_YESTERDAY_KILLS => Some(MODERN_ACTIVE_PLAYER_FIELD_BYTES_3),
+            PLAYER_FIELD_LAST_WEEK_KILLS => Some(MODERN_ACTIVE_PLAYER_FIELD_BYTES_4),
+            PLAYER_FIELD_THIS_WEEK_KILLS => Some(MODERN_ACTIVE_PLAYER_FIELD_BYTES_5),
+            _ => None,
+        };
+        if let Some(slot) = kills {
+            return Some(Writes::new(&[(slot, value)]));
+        }
+
+        // Vanilla packs (flags, combo points, action bar toggles, lifetime highest rank); 1.14
+        // packs (GrantableLevels, MultiActionBars, LifetimeMaxRank, NumRespecs), so the last two
+        // bytes each move down one. A straight copy put the toggles in the rank and cleared the
+        // action bars.
+        if vanilla_index == PLAYER_FIELD_BYTES {
+            let toggles = (value >> 16) & 0xFF;
+            let highest_rank = (value >> 24) & 0xFF;
+            return Some(Writes::new(&[(
+                MODERN_ACTIVE_PLAYER_FIELD_BYTES,
+                (toggles << 8) | (highest_rank << 16),
+            )]));
+        }
+
+        // Vanilla packs (rank progress bar, aura vision, 0, 0). 1.14 moved the bar to byte 1 of
+        // `BYTES_7`. Aura vision moved into `BYTES_6` beside the backpack size; a values update
+        // sends whole words, so writing it would empty the client's backpack, and it is dropped.
+        if vanilla_index == PLAYER_FIELD_BYTES2 {
+            let rank_bar = value & 0xFF;
+            return Some(Writes::new(&[(MODERN_ACTIVE_PLAYER_FIELD_BYTES_7, rank_bar << 8)]));
+        }
+    }
+
+    // Vanilla packs (gender | inebriation as a u16, PvP title, PvP rank); 1.14 keeps the title
+    // and rank in `PLAYER_BYTES_2` as (PvpTitle, ArenaFaction, PvpRank). Everyone sees the rank,
+    // so this applies to other players too.
+    if matches!(
+        object_type,
+        ModernObjectType::Player | ModernObjectType::ActivePlayer
+    ) && vanilla_index == PLAYER_BYTES_3
+    {
+        let title = (value >> 16) & 0xFF;
+        let rank = (value >> 24) & 0xFF;
+        return Some(Writes::new(&[(MODERN_PLAYER_BYTES_2, title | (rank << 16))]));
+    }
+
+    if object_type == ModernObjectType::ActivePlayer {
         if let Some((skill_slot, property)) = skill_info_slot(vanilla_index) {
             let word = (skill_slot / 2) as u16;
             let mask = if skill_slot % 2 == 0 {
@@ -817,13 +872,38 @@ mod tests {
             "the price arm must not swallow the first timestamp slot"
         );
 
-        // Past both arrays, neither arm may claim the index.
-        assert!(repack(
+        // Past both arrays, neither arm may claim the index: it is the honour tab's session
+        // kills, which only move.
+        let after = repack(
             ModernObjectType::ActivePlayer,
             PLAYER_FIELD_BUYBACK_TIMESTAMP_1 + 12,
-            7
+            7,
         )
-        .is_none());
+        .expect("session kills move");
+        assert_eq!(after.as_slice(), [(MODERN_ACTIVE_PLAYER_FIELD_BYTES_2, 7)]);
+    }
+
+    /// The honour tab: kill counters keep their packing, the lifetime rank and the action bar
+    /// toggles each move down a byte, and the rank shows on every player.
+    #[test]
+    fn honour_fields_reach_their_1_14_slots() {
+        use crate::protocol::update_fields::{
+            PLAYER_BYTES_3, PLAYER_FIELD_BYTES, PLAYER_FIELD_BYTES2, PLAYER_FIELD_THIS_WEEK_KILLS,
+        };
+        let kills = repack(ModernObjectType::ActivePlayer, PLAYER_FIELD_THIS_WEEK_KILLS, 3 | (1 << 16))
+            .expect("kills move");
+        assert_eq!(kills.as_slice(), [(MODERN_ACTIVE_PLAYER_FIELD_BYTES_5, 3 | (1 << 16))]);
+
+        let bytes = repack(ModernObjectType::ActivePlayer, PLAYER_FIELD_BYTES, u32::from_le_bytes([0, 0, 0x0F, 9]))
+            .expect("bytes repack");
+        assert_eq!(bytes.as_slice(), [(MODERN_ACTIVE_PLAYER_FIELD_BYTES, (0x0F << 8) | (9 << 16))]);
+
+        let bar = repack(ModernObjectType::ActivePlayer, PLAYER_FIELD_BYTES2, 200).expect("bar moves");
+        assert_eq!(bar.as_slice(), [(MODERN_ACTIVE_PLAYER_FIELD_BYTES_7, 200 << 8)]);
+
+        let rank = repack(ModernObjectType::Player, PLAYER_BYTES_3, u32::from_le_bytes([1, 0, 4, 11]))
+            .expect("rank moves");
+        assert_eq!(rank.as_slice(), [(MODERN_PLAYER_BYTES_2, 4 | (11 << 16))]);
     }
 
     /// `TappedByPlayer` (vanilla `0x8`) has no modern counterpart and must be dropped, not guessed.

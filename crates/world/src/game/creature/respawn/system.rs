@@ -52,6 +52,26 @@ impl RespawnSystem {
         if !world.systems.pool.on_creature_respawn(guid, world) {
             return Ok(());
         }
+        // A battleground spawn whose event has been switched off stays gone
+        // until the event spawns it again.
+        if let Some((map_id, instance_id, spawn_id)) = world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| (c.map_id, c.instance_id, c.spawn_id))
+        {
+            if spawn_id != 0
+                && !crate::game::pvp::events::is_spawn_allowed(
+                    world,
+                    map_id,
+                    instance_id,
+                    crate::game::game_event::EventSpawnKind::Creature,
+                    spawn_id,
+                )
+            {
+                crate::game::game_event::despawn_creature_in_copy(world, spawn_id, instance_id);
+                return Ok(());
+            }
+        }
 
         // Get respawn info before modifying
         let respawn_info = world

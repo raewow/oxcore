@@ -140,6 +140,8 @@ pub struct Match {
     pub premature_ms: Option<u32>,
     /// Still offered to queued players.
     pub accepting: bool,
+    /// Each side's raid, once someone has arrived.
+    pub raids: [Option<u32>; 2],
 }
 
 impl Match {
@@ -180,6 +182,7 @@ impl Match {
             spirit_timer_ms: RESURRECTION_INTERVAL_MS,
             premature_ms: None,
             accepting: true,
+            raids: [None; 2],
         }
     }
 

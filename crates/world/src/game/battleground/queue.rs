@@ -306,6 +306,16 @@ impl BgQueue {
         }
     }
 
+    /// Players of one side (`team_index`) waiting in a bracket's normal queue, not yet invited.
+    pub fn waiting_players(&self, bracket: u8, side: usize) -> u32 {
+        self.list(bracket, List::normal(side))
+            .iter()
+            .filter_map(|id| self.groups.get(id))
+            .filter(|group| group.invited_to == 0)
+            .map(|group| group.players.len() as u32)
+            .sum()
+    }
+
     fn list(&self, bracket: u8, list: List) -> Vec<GroupId> {
         self.lists.get(&(bracket, list)).cloned().unwrap_or_default()
     }
@@ -490,6 +500,19 @@ mod tests {
 
     fn solo(queue: &mut BgQueue, n: u32, team: Team) -> GroupId {
         queue.add_group(team, vec![guid(n)], 0, false, 0, u64::from(n), 0)
+    }
+
+    #[test]
+    fn waiting_players_counts_each_side_of_the_normal_queue() {
+        let mut queue = BgQueue::new();
+        solo(&mut queue, 1, Team::Alliance);
+        solo(&mut queue, 2, Team::Alliance);
+        solo(&mut queue, 3, Team::Horde);
+        queue.add_group(Team::Horde, vec![guid(4), guid(5)], 0, true, 0, 4, 0);
+        assert_eq!(queue.waiting_players(0, 0), 2);
+        // Premade groups wait in their own lists.
+        assert_eq!(queue.waiting_players(0, 1), 1);
+        assert_eq!(queue.waiting_players(1, 0), 0);
     }
 
     #[test]

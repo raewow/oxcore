@@ -6,6 +6,7 @@
 //! battleground's Lua script, the same objective scripts open-world PvP uses.
 
 pub mod data;
+pub mod insignia;
 pub mod matches;
 pub mod player;
 pub mod queue;

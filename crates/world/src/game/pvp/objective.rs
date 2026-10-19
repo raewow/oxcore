@@ -219,6 +219,26 @@ pub async fn on_gameobject_use(world: &World, player: ObjectGuid, go: ObjectGuid
     let Some(entry) = world.managers.gameobject_mgr.with_gameobject(go, |g| g.entry) else {
         return false;
     };
+    if crate::game::battleground::system::match_of(world, player).is_some() {
+        // In a battleground only a player who could fight may touch flags and
+        // banners, and touching one dismounts and reveals them (casting the
+        // opening spell dismounts too).
+        if !can_use_battleground_object(world, player) {
+            return true;
+        }
+        if !scopes_of(world, player).is_empty() {
+            use crate::game::player::auras::effects::{
+                AURA_MOD_INVISIBILITY, AURA_MOD_STEALTH, AURA_MOUNTED,
+            };
+            for aura in [AURA_MOUNTED, AURA_MOD_STEALTH, AURA_MOD_INVISIBILITY] {
+                let _ = world
+                    .systems
+                    .auras
+                    .remove_spells_causing_aura(player, aura, world)
+                    .await;
+            }
+        }
+    }
     let event = crate::game::pvp::events::gameobject_event(world, go);
     for scope in scopes_of(world, player) {
         ensure_loaded(world, scope).await;
@@ -238,6 +258,91 @@ pub async fn on_gameobject_use(world: &World, player: ObjectGuid, go: ObjectGuid
         }
     }
     false
+}
+
+/// GAMEOBJECT_TYPE_TRAP data slot holding the spell it casts.
+const TRAP_DATA_SPELL: usize = 3;
+
+/// A player touched a buff: the nearest trap within `radius` casts its spell
+/// on them and is taken. A stored spawn returns after its respawn time; a
+/// summoned one is gone (its script brings the next).
+async fn take_buff(world: &World, scope: Scope, player: ObjectGuid, radius: f32) {
+    use crate::game::gameobject::types::GameObjectType;
+    let Some((map_id, instance_id)) = scope_place(world, scope, Some(player)) else {
+        return;
+    };
+    let Some(position) = world.managers.player_mgr.get_player_position(player) else {
+        return;
+    };
+    let gameobjects = &world.managers.gameobject_mgr;
+    let nearest = gameobjects
+        .gameobjects_in_copy(map_id, instance_id)
+        .into_iter()
+        .filter_map(|guid| {
+            gameobjects
+                .with_gameobject(guid, |go| {
+                    (go.in_world && go.go_type == GameObjectType::Trap)
+                        .then(|| (guid, go.entry, go.spawn_id, go.spawntimesecs, go.position.distance_to(&position)))
+                })
+                .flatten()
+        })
+        .filter(|(.., distance)| *distance <= radius)
+        .min_by(|a, b| a.4.total_cmp(&b.4));
+    let Some((guid, entry, spawn_id, respawn_secs, _)) = nearest else {
+        return;
+    };
+    let spell = gameobjects
+        .get_template(entry)
+        .map(|t| t.data[TRAP_DATA_SPELL].max(0) as u32)
+        .unwrap_or(0);
+    if spawn_id == 0 {
+        crate::game::creature::summon::delete_gameobject(world, guid);
+    } else {
+        crate::game::creature::summon::hide_gameobject(world, guid);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        gameobjects.with_gameobject_mut(guid, |go| {
+            go.respawn_time = now + u64::from(respawn_secs.max(1)) * 1000;
+        });
+    }
+    if spell != 0 {
+        let _ = world
+            .systems
+            .spells
+            .cast_spell(player, spell, Some(player), true, world)
+            .await;
+    }
+}
+
+/// Spirit of Redemption: the priest is already dead in all but form.
+const SPELL_SPIRIT_OF_REDEMPTION: u32 = 27827;
+
+/// Whether a player may click battleground flags and banners: alive, not a
+/// game master, not immune to every school, and in control of themselves.
+pub fn can_use_battleground_object(world: &World, player: ObjectGuid) -> bool {
+    use crate::game::player::auras::effects::{
+        AURA_SCHOOL_IMMUNITY, UNIT_FLAG_CONFUSED, UNIT_FLAG_FLEEING, UNIT_FLAG_STUNNED,
+    };
+    const SCHOOL_MASK_ALL: u32 = 0x7F;
+    world
+        .managers
+        .player_mgr
+        .with_player(player, |p| {
+            let immune_mask = p
+                .auras
+                .container
+                .all_auras()
+                .filter(|aura| aura.aura_type == AURA_SCHOOL_IMMUNITY)
+                .fold(0u32, |mask, aura| mask | aura.misc_value as u32);
+            p.is_alive()
+                && !p.gm_mode
+                && immune_mask & SCHOOL_MASK_ALL != SCHOOL_MASK_ALL
+                && !p.auras.container.has_aura(SPELL_SPIRIT_OF_REDEMPTION)
+                && p.unit_flags & (UNIT_FLAG_STUNNED | UNIT_FLAG_CONFUSED | UNIT_FLAG_FLEEING) == 0
+        })
+        .unwrap_or(false)
 }
 
 /// A player died in a scripted scope (`killer` may be a creature or nothing).
@@ -658,6 +763,7 @@ pub async fn apply(
                 o,
                 summon_type,
                 duration_ms,
+                faction,
             } if actor.is_none() => {
                 if let Some((map_id, instance_id)) = scope_place(world, scope, trigger) {
                     if let Some(guid) = crate::game::creature::summon::summon_creature(
@@ -670,6 +776,12 @@ pub async fn apply(
                         despawn_kind(summon_type),
                         duration_ms,
                     ) {
+                        if let Some(faction) = faction {
+                            world
+                                .managers
+                                .creature_mgr
+                                .with_creature_mut(guid, |c| c.faction = faction);
+                        }
                         if let Some(create) = world.managers.creature_mgr.build_create_msg(guid, world) {
                             if let Some(map) = world.managers.map_mgr.get_map(map_id, instance_id) {
                                 for viewer in map.get_players_in_range(
@@ -689,9 +801,38 @@ pub async fn apply(
             LuaAction::DespawnCreature { guid } if actor.is_none() => {
                 crate::game::creature::summon::despawn_creature(world, guid);
             }
+            // Only summoned creatures: a script never removes the world's own.
+            LuaAction::DespawnCreaturesByEntry { entry } if actor.is_none() => {
+                if let Some((map_id, instance_id)) = scope_place(world, scope, trigger) {
+                    let creatures = &world.managers.creature_mgr;
+                    let summoned: Vec<ObjectGuid> = creatures
+                        .creatures_in_copy(map_id, instance_id)
+                        .into_iter()
+                        .filter(|&g| {
+                            creatures
+                                .with_creature(g, |c| c.entry == entry && c.spawn_id == 0)
+                                .unwrap_or(false)
+                        })
+                        .collect();
+                    for guid in summoned {
+                        crate::game::creature::summon::despawn_creature(world, guid);
+                    }
+                }
+            }
+            LuaAction::SetPlayerWorldState {
+                player,
+                state_id,
+                value,
+            } => {
+                world.managers.broadcast_mgr.send_msg_to_player(
+                    player,
+                    oxcore_shared::messages::battleground::SmsgUpdateWorldState { state_id, value },
+                );
+            }
             LuaAction::LeaveBattleground { player } => {
                 crate::game::battleground::system::leave_battleground(world, player, true).await;
             }
+            LuaAction::TakeBuff { player, radius } => take_buff(world, scope, player, radius).await,
             LuaAction::KillCredit { player, entry } => {
                 world
                     .systems

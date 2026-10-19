@@ -362,7 +362,7 @@ async fn do_spell_hit_on_unit(
         {
             assisted_combat(caster_guid, target_guid, world);
         }
-        // TODO: PvP flagging not ported.
+        crate::game::pvp::flag::on_unit_assisted_unit(world, caster_guid, target_guid);
     }
 
     // ── Step 7.  Diminishing-returns snapshot ──────────────────────────────────

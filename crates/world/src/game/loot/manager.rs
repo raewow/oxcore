@@ -273,6 +273,29 @@ impl LootManager {
         self.active_loot.insert(source_guid, loot);
     }
 
+    /// Fill loot from a reference template (a battleground's player loot) plus coins.
+    pub fn generate_reference_loot(
+        &self,
+        source_guid: ObjectGuid,
+        reference_id: u32,
+        gold: u32,
+        kind: crate::game::loot::LootKind,
+        owner: ObjectGuid,
+    ) {
+        let drops = self
+            .reference_loot_tables
+            .get(&reference_id)
+            .map(|table| self.roll_template(&table))
+            .unwrap_or_default();
+        let mut loot = Self::loot_from_drops(drops);
+        loot.gold = gold;
+        loot.kind = kind;
+        loot.recipient = Some(owner);
+        loot.allowed_looters = vec![owner];
+        loot.generated = true;
+        self.active_loot.insert(source_guid, loot);
+    }
+
     /// Roll a whole template: every ungrouped entry on its own chance (references expand into
     /// their template, `max_count` times), then one pick from each group.
     fn roll_template(&self, table: &[LootTableEntry]) -> Vec<RolledDrop> {

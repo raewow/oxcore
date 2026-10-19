@@ -64,6 +64,11 @@ impl CorpseManager {
             .map(|entry| entry.value().read().clone())
     }
 
+    /// Change a corpse in place.
+    pub fn with_corpse_mut<R>(&self, guid: ObjectGuid, f: impl FnOnce(&mut Corpse) -> R) -> Option<R> {
+        self.corpses.get(&guid).map(|entry| f(&mut entry.value().write()))
+    }
+
     /// Iterate all known corpses as (guid, cloned Corpse). Used by the corpse
     /// expiration tick in Phase 4.
     pub fn all(&self) -> Vec<(ObjectGuid, Corpse)> {
@@ -179,7 +184,7 @@ impl CorpseManager {
     ///   CORPSE_FIELD_BYTES_1 (byte 0=skin, 1=face, 2=hair_style, 3=hair_color)
     ///   CORPSE_FIELD_BYTES_2 (byte 0=race, 1=0, 2=gender, 3=facial_style)
     ///   CORPSE_FIELD_FLAGS
-    ///   CORPSE_FIELD_DYNAMIC_FLAGS (0 — nothing lootable yet)
+    ///   CORPSE_FIELD_DYNAMIC_FLAGS (lootable once an insignia is taken)
     pub fn build_create_msg(
         &self,
         guid: ObjectGuid,
@@ -225,7 +230,7 @@ impl CorpseManager {
                 .set_field(CORPSE_FIELD_BYTES_2, bytes_2)
                 .set_required(CORPSE_FIELD_GUILD, 0)
                 .set_field(CORPSE_FIELD_FLAGS, corpse_flags)
-                .set_field(CORPSE_FIELD_DYNAMIC_FLAGS, 0)
+                .set_field(CORPSE_FIELD_DYNAMIC_FLAGS, corpse_dynamic_flags(&corpse))
                 .set_required(CORPSE_FIELD_PAD, 0);
 
         // Equipment display IDs in 19 slots starting at CORPSE_FIELD_ITEM.
@@ -314,5 +319,20 @@ fn corpse_flag_bits(corpse: &Corpse) -> u32 {
     if corpse.corpse_type == CorpseType::Bones {
         flags |= corpse_flags::BONES;
     }
+    if corpse.lootable {
+        flags |= corpse_flags::LOOTABLE;
+    }
     flags
+}
+
+/// CORPSE_DYNFLAG_LOOTABLE: the body holds loot (a taken insignia).
+pub const CORPSE_DYNFLAG_LOOTABLE: u32 = 0x1;
+
+/// The CORPSE_FIELD_DYNAMIC_FLAGS value for a corpse.
+pub fn corpse_dynamic_flags(corpse: &Corpse) -> u32 {
+    if corpse.insignia_taken {
+        CORPSE_DYNFLAG_LOOTABLE
+    } else {
+        0
+    }
 }

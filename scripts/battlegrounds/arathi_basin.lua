@@ -76,8 +76,13 @@ local GY_NODES = {
 local GY_START = { [TEAM_ALLIANCE] = 898, [TEAM_HORDE] = 899 }
 local GY_ENTRANCE = { [TEAM_ALLIANCE] = 890, [TEAM_HORDE] = 889 }
 
--- Buffs at each base.
+-- Buffs at each base: one of speed, restoration or berserking, touched
+-- through the base's area trigger, and three minutes later a new random one.
 local BUFF_ENTRIES = { 179871, 179904, 179905 }
+local BUFF_RESPAWN_MS = 180000
+local BUFF_TRIGGERS = { [3866] = 0, [3870] = 1, [3867] = 2, [3868] = 3, [3869] = 4 }
+local function D_BUFF_TAKEN(node) return 30 + node end
+local function T_BUFF(node) return 20 + node end
 local BUFF_POSITIONS = {
     { 1185.566, 1184.629, -56.36329, 2.303831 },
     { 989.939026, 1008.75, -42.60327, 0.8203033 },
@@ -203,6 +208,15 @@ function ab:OnLoad(input)
     return actions
 end
 
+-- A random buff at a base.
+local function spawn_buff(node)
+    local p = BUFF_POSITIONS[node + 1]
+    return {
+        action = "SPAWN_GAMEOBJECT", entry = BUFF_ENTRIES[math.random(1, 3)],
+        x = p[1], y = p[2], z = p[3], o = p[4], duration = 0,
+    }
+end
+
 function ab:OnMatchEvent(input, event)
     if event == "ONE_MINUTE" then
         return { PVP.announce(TEXT_ONE_MINUTE) }
@@ -214,12 +228,8 @@ function ab:OnMatchEvent(input, event)
             PVP.event(BG_EVENT_GHOST_GATE, 0, false),
             PVP.announce(TEXT_BEGUN),
         }
-        for i = 1, NODES do
-            local p = BUFF_POSITIONS[i]
-            table.insert(actions, {
-                action = "SPAWN_GAMEOBJECT", entry = BUFF_ENTRIES[math.random(1, 3)],
-                x = p[1], y = p[2], z = p[3], o = p[4], duration = 0,
-            })
+        for node = 0, NODES - 1 do
+            table.insert(actions, spawn_buff(node))
         end
         return actions
     elseif event == "DOORS_DESPAWN" then
@@ -294,6 +304,14 @@ function ab:Update(input)
     local actions = {}
     local changes = {}
     local diff = input.diff_ms or 0
+
+    -- Taken buffs come back as a new random one.
+    for node = 0, NODES - 1 do
+        if input:GetData(D_BUFF_TAKEN(node)) ~= 0 and input:IsTimerReady(T_BUFF(node)) then
+            table.insert(actions, spawn_buff(node))
+            table.insert(actions, PVP.data(D_BUFF_TAKEN(node), 0))
+        end
+    end
 
     -- A minute after a claim the base is taken.
     for node = 0, NODES - 1 do
@@ -372,6 +390,17 @@ function ab:OnAreaTrigger(input, player, trigger)
     local team = PVP.team_of(input, player)
     if (trigger == AT_ALLIANCE_EXIT and team == TEAM_ALLIANCE) or (trigger == AT_HORDE_EXIT and team == TEAM_HORDE) then
         return { { action = "LEAVE_BATTLEGROUND", player = player } }
+    end
+    local node = BUFF_TRIGGERS[trigger]
+    if node ~= nil then
+        if not PVP.in_progress(input) or input:GetData(D_BUFF_TAKEN(node)) ~= 0 then
+            return true
+        end
+        return {
+            { action = "TAKE_BUFF", player = player },
+            PVP.data(D_BUFF_TAKEN(node), 1),
+            { action = "SET_TIMER", timer_id = T_BUFF(node), duration = BUFF_RESPAWN_MS },
+        }
     end
     return false
 end

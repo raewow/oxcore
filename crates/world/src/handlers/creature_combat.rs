@@ -244,6 +244,7 @@ pub async fn execute_pending_attack_vs_creature(
             .creature_mgr
             .apply_damage(target_guid, damage, attacker_guid, timestamp)
     {
+        crate::game::pvp::flag::on_unit_damaged_unit(world, attacker_guid, target_guid);
         let health_after = world.managers.creature_mgr.get_health(target_guid);
         tracing::debug!(
             "[COMBAT] {:?} hit {:?}: damage={}, actual={}, is_dead={}, health {:?} -> {:?}",
@@ -370,6 +371,7 @@ pub async fn execute_pending_attack_vs_player(
     world: &World,
     attacker_guid: ObjectGuid,
     target_guid: ObjectGuid,
+    hand: AttackHand,
 ) -> anyhow::Result<bool> {
     use crate::game::common::unit_flags;
 
@@ -406,21 +408,25 @@ pub async fn execute_pending_attack_vs_player(
 
     let Some((attacker_level, weapon_min, weapon_max, weapon_speed, crit, ap, dual)) =
         world.managers.player_mgr.with_player(attacker_guid, |p| {
-            let min = if p.combat.main_hand_min_dmg <= 1.0 {
+            let (weapon_min, weapon_max) = p.combat.get_weapon_damage(hand);
+            // An unarmed main hand still hits for something; the off hand only swings
+            // with a weapon in it.
+            let unarmed = hand == AttackHand::MainHand;
+            let min = if unarmed && weapon_min <= 1.0 {
                 5.0 + p.level as f32 * 2.0
             } else {
-                p.combat.main_hand_min_dmg
+                weapon_min
             };
-            let max = if p.combat.main_hand_max_dmg <= 2.0 {
+            let max = if unarmed && weapon_max <= 2.0 {
                 10.0 + p.level as f32 * 3.0
             } else {
-                p.combat.main_hand_max_dmg
+                weapon_max
             };
             (
                 p.level,
                 min,
                 max,
-                p.combat.main_hand_speed,
+                p.combat.get_attack_speed(hand),
                 p.stats.melee_crit_pct,
                 p.stats.melee_attack_power,
                 p.combat.can_dual_wield,
@@ -446,7 +452,7 @@ pub async fn execute_pending_attack_vs_player(
         defender_is_player: true,
         defender_can_parry: p.combat.can_parry,
         defender_can_block: p.combat.can_block,
-        hand: AttackHand::MainHand,
+        hand,
         is_ranged: false,
     }) else {
         return Ok(true);
@@ -512,7 +518,12 @@ pub async fn execute_pending_attack_vs_player(
             .auras
             .check_procs(
                 attacker_guid,
-                proc_flags::DEAL_MELEE_SWING | proc_flags::MAIN_HAND_WEAPON_SWING,
+                proc_flags::DEAL_MELEE_SWING
+                    | if hand == AttackHand::OffHand {
+                        proc_flags::OFF_HAND_WEAPON_SWING
+                    } else {
+                        proc_flags::MAIN_HAND_WEAPON_SWING
+                    },
                 melee_swing_proc_ex(hit_outcome),
                 None,
                 damage,

@@ -614,7 +614,9 @@ impl Opcode {
     pub const CMSG_DESTROYITEM: Opcode = Opcode { vanilla: 0x0111, modern: 0x328B }; // 273
     pub const CMSG_INSPECT: Opcode = Opcode { vanilla: 0x0114, modern: 0x3528 }; // 276
     pub const SMSG_INSPECT: Opcode = Opcode { vanilla: 0x0115, modern: 0x262A }; // 277
-    pub const MSG_INSPECT_HONOR_STATS: Opcode = Opcode { vanilla: 0x02D6, ..Opcode::NONE }; // 726
+    /// The 1.14 request is `CMSG_INSPECT_HONOR_STATS`; its reply is [`Opcode::SMSG_INSPECT_HONOR_STATS`].
+    pub const MSG_INSPECT_HONOR_STATS: Opcode = Opcode { vanilla: 0x02D6, modern: 0x317E }; // 726
+    pub const SMSG_INSPECT_HONOR_STATS: Opcode = Opcode { modern: 0x2932, ..Opcode::NONE };
     pub const CMSG_REPAIR_ITEM: Opcode = Opcode { vanilla: 0x02A8, modern: 0x34EC }; // 680
     pub const SMSG_ITEM_TIME_UPDATE: Opcode = Opcode { vanilla: 0x01EA, modern: 0x274B }; // 490
     pub const SMSG_ITEM_ENCHANT_TIME_UPDATE: Opcode = Opcode { vanilla: 0x01EB, modern: 0x274C }; // 491
@@ -971,6 +973,8 @@ impl Opcode {
     pub const SMSG_BATTLEGROUND_PLAYER_JOINED: Opcode = Opcode { vanilla: 0x02EC, modern: 0x292B }; // 748
     pub const SMSG_BATTLEGROUND_PLAYER_LEFT: Opcode = Opcode { vanilla: 0x02ED, modern: 0x292C }; // 749
     pub const SMSG_PVP_CREDIT: Opcode = Opcode { vanilla: 0x028C, modern: 0x2948 }; // 652
+    pub const SMSG_PLAYER_SKINNED: Opcode = Opcode { vanilla: 0x02BC, modern: 0x3007 }; // 700
+    pub const SMSG_BATTLEGROUND_INIT: Opcode = Opcode { modern: 0x294D, ..Opcode::NONE }; // modern-only
     pub const SMSG_UPDATE_WORLD_STATE: Opcode = Opcode { vanilla: 0x02C3, modern: 0x273F }; // 707
     pub const CMSG_BATTLEFIELD_PORT: Opcode = Opcode { vanilla: 0x02D5, modern: 0x3524 }; // 725
     pub const CMSG_BATTLEMASTER_HELLO: Opcode = Opcode { vanilla: 0x02D7, modern: 0x32A9 }; // 727
@@ -1767,6 +1771,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::CMSG_INSPECT, "CMSG_INSPECT"),
     (Opcode::SMSG_INSPECT, "SMSG_INSPECT"),
     (Opcode::MSG_INSPECT_HONOR_STATS, "MSG_INSPECT_HONOR_STATS"),
+    (Opcode::SMSG_INSPECT_HONOR_STATS, "SMSG_INSPECT_HONOR_STATS"),
     (Opcode::CMSG_REPAIR_ITEM, "CMSG_REPAIR_ITEM"),
     (Opcode::SMSG_ITEM_TIME_UPDATE, "SMSG_ITEM_TIME_UPDATE"),
     (
@@ -2250,6 +2255,8 @@ pub const ALL: &[(Opcode, &str)] = &[
         "SMSG_BATTLEGROUND_PLAYER_LEFT",
     ),
     (Opcode::SMSG_PVP_CREDIT, "SMSG_PVP_CREDIT"),
+    (Opcode::SMSG_PLAYER_SKINNED, "SMSG_PLAYER_SKINNED"),
+    (Opcode::SMSG_BATTLEGROUND_INIT, "SMSG_BATTLEGROUND_INIT"),
     (Opcode::SMSG_UPDATE_WORLD_STATE, "SMSG_UPDATE_WORLD_STATE"),
     (Opcode::CMSG_BATTLEFIELD_PORT, "CMSG_BATTLEFIELD_PORT"),
     (Opcode::CMSG_BATTLEMASTER_HELLO, "CMSG_BATTLEMASTER_HELLO"),
@@ -2670,8 +2677,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            705,
-            "expected 705 opcode constants; update this count deliberately when adding opcodes"
+            708,
+            "expected 708 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

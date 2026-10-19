@@ -413,7 +413,7 @@ pub async fn bind_home(world: &World, player_guid: ObjectGuid, binder: ObjectGui
 }
 
 /// The AreaTable area at a spot, from the terrain's area flag.
-fn area_at(world: &World, map_id: u32, position: Position) -> Option<u32> {
+pub(crate) fn area_at(world: &World, map_id: u32, position: Position) -> Option<u32> {
     let flag = u32::from(
         world
             .managers

@@ -490,6 +490,125 @@ impl ToWorldPacket for SmsgPvpCredit {
     }
 }
 
+/// MSG_INSPECT_HONOR_STATS (1.14: SMSG_INSPECT_HONOR_STATS) — another player's honour tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SmsgInspectHonorStats {
+    pub player_guid: ObjectGuid,
+    pub highest_rank: u8,
+    pub today_hk: u16,
+    pub today_dk: u16,
+    pub yesterday_hk: u16,
+    pub last_week_hk: u16,
+    pub this_week_hk: u16,
+    pub lifetime_hk: u32,
+    pub lifetime_dk: u32,
+    pub yesterday_honor: u32,
+    pub last_week_honor: u32,
+    pub this_week_honor: u32,
+    pub last_week_standing: u32,
+    pub rank_progress: u8,
+}
+
+impl SmsgInspectHonorStats {
+    /// Everything after the GUID; only the GUID's encoding differs between the protocols.
+    /// The per-period dishonourable counts other than today's are always zero.
+    fn body(&self) -> Vec<u8> {
+        let mut body = vec![self.highest_rank];
+        for value in [
+            self.today_hk,
+            self.today_dk,
+            self.yesterday_hk,
+            0,
+            self.last_week_hk,
+            0,
+            self.this_week_hk,
+            0,
+        ] {
+            body.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in [
+            self.lifetime_hk,
+            self.lifetime_dk,
+            self.yesterday_honor,
+            self.last_week_honor,
+            self.this_week_honor,
+            self.last_week_standing,
+        ] {
+            body.extend_from_slice(&value.to_le_bytes());
+        }
+        body.push(self.rank_progress);
+        body
+    }
+}
+
+impl ToWorldPacket for SmsgInspectHonorStats {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::MSG_INSPECT_HONOR_STATS);
+        packet.write_u64(self.player_guid.raw());
+        packet.write_bytes(&self.body());
+        packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.player_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_bytes(&self.body());
+        Some(writer.finish(Opcode::SMSG_INSPECT_HONOR_STATS))
+    }
+}
+
+/// SMSG_PLAYER_SKINNED — an enemy took the receiver's insignia; their body is gone
+/// and they must release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SmsgPlayerSkinned {
+    pub free_repop: bool,
+}
+
+impl ToWorldPacket for SmsgPlayerSkinned {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_PLAYER_SKINNED);
+        packet.write_u8(u8::from(self.free_repop));
+        packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_bit(self.free_repop);
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_PLAYER_SKINNED))
+    }
+}
+
+/// SMSG_BATTLEGROUND_INIT (1.14 only) — sent ahead of the status of a running
+/// match. 1.12 has no such packet; its body is never sent to a 1.12 client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmsgBattlegroundInit {
+    pub milliseconds: u32,
+    pub points: u16,
+}
+
+impl SmsgBattlegroundInit {
+    /// The value the 1.14 client is given for a match in progress.
+    pub const RUNNING: Self = Self {
+        milliseconds: 1_154_756_799,
+        points: 0,
+    };
+}
+
+impl ToWorldPacket for SmsgBattlegroundInit {
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_BATTLEGROUND_INIT)
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.milliseconds);
+        writer.write_u16(self.points);
+        Some(writer.finish(Opcode::SMSG_BATTLEGROUND_INIT))
+    }
+}
+
 /// SMSG_PLAY_SOUND — play a sound for the receiving client (not positioned).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmsgPlaySound {
@@ -515,6 +634,28 @@ impl ToWorldPacket for SmsgPlaySound {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inspect_honor_stats_vanilla_layout() {
+        let stats = SmsgInspectHonorStats {
+            player_guid: ObjectGuid::from_raw(7),
+            highest_rank: 9,
+            today_hk: 3,
+            today_dk: 1,
+            lifetime_hk: 500,
+            last_week_standing: 42,
+            rank_progress: 128,
+            ..Default::default()
+        };
+        let packet = stats.to_vanilla();
+        // guid 8, rank 1, eight u16s, six u32s, progress 1.
+        assert_eq!(packet.data().len(), 8 + 1 + 16 + 24 + 1);
+        assert_eq!(packet.data()[8], 9);
+        assert_eq!(&packet.data()[9..13], &[3, 0, 1, 0]);
+        assert_eq!(&packet.data()[25..29], &500u32.to_le_bytes());
+        assert_eq!(&packet.data()[45..49], &42u32.to_le_bytes());
+        assert_eq!(packet.data()[49], 128);
+    }
 
     fn status(state: BattlefieldState) -> SmsgBattlefieldStatus {
         SmsgBattlefieldStatus {

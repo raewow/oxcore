@@ -151,6 +151,37 @@ pub fn handle_pvp_log_data(session: &WorldSession, world: &World) -> Result<()> 
     Ok(())
 }
 
+/// Inspect range for the honour tab.
+const INSPECT_DISTANCE: f32 = 10.0;
+
+/// MSG_INSPECT_HONOR_STATS / CMSG_INSPECT_HONOR_STATS: a nearby player's honour tab.
+/// Players who could fight each other right now see nothing.
+pub fn handle_inspect_honor_stats(session: &WorldSession, packet: &mut WorldPacket, world: &World) -> Result<()> {
+    let (Some(player), Some(target)) = (session.player_guid(), packet.read_guid_for(session.protocol())) else {
+        return Ok(());
+    };
+    let players = &world.managers.player_mgr;
+    let (Some((map, position, team)), Some((target_map, target_position, target_team))) = (
+        players.with_player(player, |p| (p.map_id, p.movement.position, p.get_team())),
+        players.with_player(target, |p| (p.map_id, p.movement.position, p.get_team())),
+    ) else {
+        return Ok(());
+    };
+    let dx = position.x - target_position.x;
+    let dy = position.y - target_position.y;
+    let dz = position.z - target_position.z;
+    if map != target_map || (dx * dx + dy * dy + dz * dz).sqrt() > INSPECT_DISTANCE {
+        return Ok(());
+    }
+    if team != target_team && crate::game::pvp::flag::is_pvp(world, target) {
+        return Ok(());
+    }
+    if let Some(stats) = crate::game::player::honor::system::inspect_stats(world, target) {
+        world.managers.broadcast_mgr.send_msg_to_player(player, stats);
+    }
+    Ok(())
+}
+
 /// MSG_BATTLEGROUND_PLAYER_POSITIONS: teammates and the flag carrier.
 pub fn handle_player_positions(session: &WorldSession, world: &World) -> Result<()> {
     if let Some(player) = session.player_guid() {

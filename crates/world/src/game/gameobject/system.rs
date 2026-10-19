@@ -120,6 +120,25 @@ pub fn update_respawns(world: &World) {
             );
             continue;
         }
+        // A battleground spawn whose event has been switched off stays gone
+        // until the event spawns it again.
+        if spawn_id != 0
+            && !crate::game::pvp::events::is_spawn_allowed(
+                world,
+                map_id,
+                instance_id,
+                crate::game::game_event::EventSpawnKind::GameObject,
+                spawn_id,
+            )
+        {
+            crate::game::common::respawn_persistence::clear_gameobject_respawn(
+                world,
+                spawn_id,
+                instance_id,
+            );
+            crate::game::game_event::despawn_gameobject_in_copy(world, spawn_id, instance_id);
+            continue;
+        }
         let Some(position) = world
             .managers
             .gameobject_mgr

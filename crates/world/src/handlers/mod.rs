@@ -988,6 +988,9 @@ pub async fn dispatch_packet(
                 Opcode::MSG_PVP_LOG_DATA => {
                     battleground::handle_pvp_log_data(session, world)?;
                 }
+                Opcode::MSG_INSPECT_HONOR_STATS => {
+                    battleground::handle_inspect_honor_stats(session, packet, world)?;
+                }
                 Opcode::MSG_BATTLEGROUND_PLAYER_POSITIONS => {
                     battleground::handle_player_positions(session, world)?;
                 }

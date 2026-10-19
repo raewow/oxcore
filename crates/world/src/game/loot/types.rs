@@ -18,6 +18,8 @@ pub enum LootKind {
     Item,
     /// An item being disenchanted; the item is destroyed when the window closes.
     Disenchant,
+    /// A battleground body whose insignia was taken; open to anyone who takes it.
+    Insignia,
 }
 
 /// Loot instance for a creature corpse

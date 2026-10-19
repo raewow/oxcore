@@ -141,6 +141,31 @@ impl LootSystem {
             return Ok(());
         }
 
+        // A battleground body opens only once its insignia has been taken.
+        if target_guid.is_corpse() {
+            let insignia = self
+                .manager
+                .get_loot(target_guid)
+                .is_some_and(|l| l.kind == LootKind::Insignia);
+            if insignia && self.within_loot_range(player_guid, target_guid, world) {
+                self.manager.with_loot_mut(target_guid, |loot| {
+                    if !loot.allowed_looters.contains(&player_guid) {
+                        loot.allowed_looters.push(player_guid);
+                    }
+                });
+                self.open_window(player_guid, target_guid, LOOT_TYPE_PICKPOCKETING, world);
+            } else {
+                self.broadcast_mgr.send_msg_to_player(
+                    player_guid,
+                    SmsgLootReleaseResponse {
+                        loot_guid: target_guid,
+                        unknown: 1,
+                    },
+                );
+            }
+            return Ok(());
+        }
+
         // 1. Validate access
         if !self.can_loot(player_guid, target_guid, world) {
             tracing::info!(
@@ -645,6 +670,12 @@ impl LootSystem {
                 .managers
                 .gameobject_mgr
                 .with_gameobject(target_guid, |go| (go.map_id, go.position))
+        } else if target_guid.is_corpse() {
+            world
+                .managers
+                .corpse_mgr
+                .get(target_guid)
+                .map(|corpse| (corpse.map_id, corpse.position))
         } else {
             world
                 .managers
@@ -735,7 +766,7 @@ impl LootSystem {
         target_guid: ObjectGuid,
         world: &World,
     ) -> LootPermission {
-        if target_guid.is_game_object() {
+        if target_guid.is_game_object() || loot.kind == LootKind::Insignia {
             return LootPermission::All;
         }
         // A tap group that has since disbanded falls back to the tapper alone.
@@ -962,6 +993,34 @@ impl LootSystem {
 
         self.open_window(player_guid, target_guid, LOOT_TYPE_PICKPOCKETING, world);
         Ok(())
+    }
+
+    /// Open a battleground body whose insignia `player_guid` just took: a few coins and the
+    /// battleground's player loot, filled once and shared by everyone who takes it after.
+    pub fn open_insignia_loot(
+        &self,
+        player_guid: ObjectGuid,
+        corpse_guid: ObjectGuid,
+        gold: u32,
+        reference_id: u32,
+        world: &World,
+    ) {
+        if self.manager.has_loot(corpse_guid) {
+            self.manager.with_loot_mut(corpse_guid, |loot| {
+                if !loot.allowed_looters.contains(&player_guid) {
+                    loot.allowed_looters.push(player_guid);
+                }
+            });
+        } else {
+            self.manager.generate_reference_loot(
+                corpse_guid,
+                reference_id,
+                gold,
+                LootKind::Insignia,
+                player_guid,
+            );
+        }
+        self.open_window(player_guid, corpse_guid, LOOT_TYPE_PICKPOCKETING, world);
     }
 
     /// Skin a looted corpse (SPELL_EFFECT_SKINNING): fill the skinning template, clear the
@@ -1450,6 +1509,14 @@ impl LootSystem {
                 .creature_mgr
                 .clear_lootable_flag(target_guid, world);
             self.manager.remove_loot(target_guid);
+            return;
+        }
+        // An emptied insignia leaves plain bones behind.
+        if kind == LootKind::Insignia {
+            if is_empty {
+                self.manager.remove_loot(target_guid);
+                crate::game::battleground::insignia::on_emptied(world, target_guid);
+            }
             return;
         }
 

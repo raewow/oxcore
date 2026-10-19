@@ -494,6 +494,7 @@ pub fn lua_actions_to_ai_actions(
                 o,
                 summon_type,
                 duration_ms,
+                ..
             } => {
                 let st = match summon_type {
                     super::actions::SummonType::TimedDespawn => 0,
@@ -651,6 +652,8 @@ pub fn lua_actions_to_ai_actions(
             | LuaAction::SetInCaptureArea { .. }
             | LuaAction::DespawnGameObject { .. }
             | LuaAction::LeaveBattleground { .. }
+            | LuaAction::TakeBuff { .. }
+            | LuaAction::SetPlayerWorldState { .. }
             | LuaAction::KillCredit { .. }
             | LuaAction::RepopTeam { .. } => {
                 tracing::debug!("Lua action not yet implemented: {:?}", action);
